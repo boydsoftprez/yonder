@@ -12,6 +12,7 @@ import { loadConfig } from "../config/load.js";
 import { SecretStore } from "../secrets/store.js";
 import { DEFAULT_CONFIG } from "../schema/config.js";
 import { DEFAULT_AP_PASSPHRASE } from "../net/profiles.js";
+import { NmcliError } from "../net/nmcli/client.js";
 import type { Clock, Renderer } from "../apply/types.js";
 import type { Config } from "../schema/config.js";
 import type { CommandRunner } from "../net/runner.js";
@@ -89,6 +90,41 @@ describe("router", () => {
   it("returns 404 for an unknown route", async () => {
     const res = await router()("GET", "/nope", undefined);
     expect(res.status).toBe(404);
+  });
+
+  /**
+   * A renderer failure arrives here as an NmcliError, which does not extend
+   * ConfigError, so it fell through to a 500 whose body was
+   * `(e as Error).message` — and that message embeds nmcli's stderr verbatim.
+   * The detail belongs in the journal, which needs being on the device to
+   * read; being on the device is exactly what the caller may not be.
+   */
+  it("never puts a subprocess's output in an HTTP response", async () => {
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      const psk = "hunter2hunter2";
+      const leaky: Renderer = {
+        name: "leaky",
+        async render() {
+          throw new NmcliError(
+            ["nmcli", "connection", "modify", "yonder-ap", "802-11-wireless-security.psk", psk],
+            1,
+            `Error: invalid property '${psk}'; interface wlan0 at 192.168.77.1`,
+          );
+        },
+      };
+      const engine = new ApplyEngine({ configPath, journalPath, renderers: [leaky], clock: frozenClock });
+      const res = await createRouter({ engine, configPath })("POST", "/apply", changed());
+
+      expect(res.status).toBe(500);
+      const text = JSON.stringify(res.body);
+      expect(text).not.toContain(psk);
+      expect(text).not.toContain("invalid property");
+      expect(text).not.toContain("192.168.77.1");
+      expect(text).not.toContain("nmcli");
+    } finally {
+      stderr.mockRestore();
+    }
   });
 });
 

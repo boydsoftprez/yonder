@@ -243,6 +243,7 @@ Parameter writes are vehicle commands. R-CMD applies to every requirement here.
 | R-SEC-07 | Include no credential material in a published image | 1 |
 | R-SEC-08 | Offer TLS for the web interface | 2 |
 | R-SEC-09 | **Until an administrator password has been set, the console offers no function but setting one.** No configuration read, no command, no status beyond what that step needs | 1 |
+| R-SEC-10 | **Emit no credential anywhere a credential does not belong** — a log line, an error message, a support bundle, or an API response. Redaction happens where the value is captured, not where it is printed, so a new caller cannot reintroduce the leak | 1 |
 
 ## R-UI — Interface
 

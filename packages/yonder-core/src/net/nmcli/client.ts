@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { parseTerse, parseDeviceShow } from "./parse.js";
-import { redactArgv, type CommandRunner } from "../runner.js";
+import { redactArgv, redactText, type CommandRunner } from "../runner.js";
 
 export interface DeviceInfo { device: string; type: string; state: string; connection: string }
 export interface ConnectionInfo { name: string; uuid: string; type: string; device: string }
@@ -23,14 +23,26 @@ export interface ConnectionSpec {
   settings: string[][];
 }
 
+/**
+ * A failed nmcli invocation.
+ *
+ * Both fields are redacted at construction, not at the point of use. This
+ * error is thrown from a renderer, so it travels: into the journal, into an
+ * apply's failure, and — until the router stopped echoing arbitrary error
+ * messages — into an HTTP response body. Anything that has to be scrubbed
+ * before one of those has to be scrubbed here, once, or the next place that
+ * prints it is a fresh leak. `argv` carries the pre-shared key the renderer
+ * passed; `stderr` can quote it back.
+ */
 export class NmcliError extends Error {
   readonly argv: string[];
   readonly stderr: string;
   constructor(argv: string[], code: number, stderr: string) {
-    super(`nmcli exited ${code}: ${stderr.trim() || "(no stderr)"}\n  ${redactArgv(argv).join(" ")}`);
+    const safeStderr = redactText(stderr, argv);
+    super(`nmcli exited ${code}: ${safeStderr.trim() || "(no stderr)"}\n  ${redactArgv(argv).join(" ")}`);
     this.name = "NmcliError";
     this.argv = redactArgv(argv);
-    this.stderr = stderr;
+    this.stderr = safeStderr;
   }
 }
 

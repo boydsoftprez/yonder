@@ -62,6 +62,7 @@ wrong at flash time and no way to end up locked out of your own device.
 - Configuration apply and rollback used in anger for the first time — R-CFG-03
 - Reachability and ping diagnostics — R-DIA-01, R-DIA-02
 - **No unauthenticated write path from a non-loopback interface** — R-SEC-04
+- **No credential in a log line, an error message or an API response** — R-SEC-10
 - **Flow editor gated behind the password set at setup** — R-SEC-05
 - Day and night themes, operator-selectable — R-UI-07
 

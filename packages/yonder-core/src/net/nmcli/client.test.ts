@@ -124,6 +124,34 @@ describe("NmcliClient", () => {
     await expect(client.up("yonder-ap")).rejects.toThrow(/activation failed/);
   });
 
+  /**
+   * NmcliError travels: into the journal, into an apply's failure, and into
+   * whatever the daemon does with a 500. Every field of it has to be safe on
+   * its own — inspecting only the log lines left `this.argv = redactArgv(argv)`
+   * reducible to `this.argv = argv` with the whole suite green.
+   */
+  it("carries no secret in any field of the error it throws", async () => {
+    const psk = "hunter2hunter2";
+    const { run } = fake({
+      // nmcli quotes the value it rejected back at you.
+      [`nmcli connection modify yonder-ap connection.interface-name wlan0 802-11-wireless-security.psk ${psk}`]:
+        { code: 1, stdout: "", stderr: `Error: invalid property: '${psk}' is not a valid psk.` },
+      "nmcli -t -f NAME,UUID,TYPE,DEVICE connection show": ok("yonder-ap:u-1:802-11-wireless:\n"),
+    });
+    const failure = await new NmcliClient(run).addOrModify("yonder-ap", {
+      type: "wifi",
+      ifname: "wlan0",
+      settings: [["802-11-wireless-security.psk", psk]],
+    }).then(() => null, (e: unknown) => e as NmcliError);
+
+    expect(failure).toBeInstanceOf(NmcliError);
+    expect(failure!.argv.join(" ")).not.toContain(psk);
+    expect(failure!.argv).toContain("<redacted>");
+    expect(failure!.stderr).not.toContain(psk);
+    expect(failure!.message).not.toContain(psk);
+    expect(JSON.stringify(failure)).not.toContain(psk);
+  });
+
   it("keeps secrets out of the log and out of the error", async () => {
     const lines: string[] = [];
     const { run } = fake({

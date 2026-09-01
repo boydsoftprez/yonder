@@ -24,6 +24,8 @@ const SECRET_KEYS = new Set([
   "ppp.password",
 ]);
 
+const REDACTED = "<redacted>";
+
 /**
  * The renderer logs what it ran so an operator can reproduce it by hand. That
  * log must never carry a pre-shared key.
@@ -31,8 +33,33 @@ const SECRET_KEYS = new Set([
 export function redactArgv(argv: string[]): string[] {
   const out = [...argv];
   for (let i = 0; i < out.length - 1; i++) {
-    if (SECRET_KEYS.has(out[i])) out[i + 1] = "<redacted>";
+    if (SECRET_KEYS.has(out[i])) out[i + 1] = REDACTED;
   }
+  return out;
+}
+
+/** Every value this argv passed under a secret-bearing property name. */
+function secretsIn(argv: string[]): string[] {
+  const found: string[] = [];
+  for (let i = 0; i < argv.length - 1; i++) {
+    if (SECRET_KEYS.has(argv[i]) && argv[i + 1] !== "") found.push(argv[i + 1]);
+  }
+  return found;
+}
+
+/**
+ * Strip from `text` any secret the accompanying argv carried.
+ *
+ * nmcli's diagnostics quote back what it could not accept, so the stderr of a
+ * failed `connection modify … 802-11-wireless-security.psk <key>` can contain
+ * that key — and that stderr travels inside an NmcliError, which reaches a
+ * log and, before the router was fixed, an HTTP response body. Redacting by
+ * *value* rather than by pattern is what makes this exact: the only secrets
+ * that can appear are the ones we just passed, and we know what they were.
+ */
+export function redactText(text: string, argv: string[]): string {
+  let out = text;
+  for (const secret of secretsIn(argv)) out = out.split(secret).join(REDACTED);
   return out;
 }
 

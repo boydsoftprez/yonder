@@ -2,6 +2,7 @@
 import { ApplyEngine } from "../apply/engine.js";
 import { loadConfig } from "../config/load.js";
 import { ConfigError } from "../config/errors.js";
+import { warn } from "../log.js";
 
 export interface RouterDeps {
   engine: ApplyEngine;
@@ -35,10 +36,26 @@ export function createRouter(deps: RouterDeps): Router {
       }
       return { status: 404, body: { error: `no route for ${method} ${path}` } };
     } catch (e) {
+      // A ConfigError is written for the operator: it says what is wrong with
+      // the configuration they sent, and its issues list is the whole point
+      // of the route. It never carries anything from a subprocess.
       if (e instanceof ConfigError) {
         return { status: 400, body: { error: e.message, issues: e.issues } };
       }
-      return { status: 500, body: { error: (e as Error).message } };
+      // Everything else does. A renderer failure arrives here as an
+      // NmcliError whose message embeds nmcli's stderr verbatim, and echoing
+      // an arbitrary error message into an HTTP body is how that leaves the
+      // device. NmcliError does not extend ConfigError, so it fell straight
+      // through to this branch.
+      //
+      // The detail goes to the journal, which needs being on the device to
+      // read — and being on the device is exactly what the caller of this API
+      // may not yet be. The response says only that something failed.
+      warn(`${method} ${path} failed: ${(e as Error).message}`);
+      return {
+        status: 500,
+        body: { error: "the request failed; see the device journal for the reason" },
+      };
     }
   };
 }
