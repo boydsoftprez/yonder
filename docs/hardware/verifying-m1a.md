@@ -962,3 +962,55 @@ R-NET-07"
 
 A capture that disagrees with a parser is the finding, not a problem with the board. Fix the
 code and replace the fixture; never reshape a capture to fit what is written here.
+
+
+---
+
+## Verified on hardware — 2026-09-01
+
+Raspberry Pi 4 Model B Rev 1.5 · Debian GNU/Linux 13 (trixie) · kernel 6.18.34+rpt-rpi-v8
+aarch64 · 905 MB · NetworkManager 1.52.1 · installed entirely offline from a card.
+
+All three exit criteria passed:
+
+| | Observed |
+|---|---|
+| **Flash, boot, access point** | `wlan0:wifi:connected:yonder-ap`, `192.168.77.1/24`, `iw dev wlan0: ssid yonder, type AP, channel 6`, DHCP serving, socket answering `{"state":"idle"}` |
+| **Apply without confirming reverts** | Config and the rendered file both returned to their previous values; `lastResult.outcome = "reverted"`; the access point never dropped |
+| **Fallback raises the access point** | Access point disabled *and confirmed*, Ethernet disconnected, daemon restarted. 90 s later: `fallback: nothing reachable, bringing the access point up` → `yonder-ap` active. **It came up despite configuration saying it was disabled** |
+
+### What the hardware found that the test suite could not
+
+Five defects, all fixed and gated:
+
+1. The unit hardcoded a Node path the bundled runtime did not use — the service crash-looped.
+2. On a cold boot the radio is not ready when the daemon starts; the render found no radio,
+   never retried, and the fallback had no access-point profile to raise.
+3. **Raspberry Pi OS ships the Wi-Fi radio disabled behind two independent locks** — kernel
+   rfkill *and* NetworkManager's own persistent flag (`rfkill: Wi-Fi enabled by radio
+   killswitch; disabled by state file`). Both must be cleared or no Pi ever raises an
+   access point.
+4. The configurable DHCP pool decided nothing: NetworkManager's shared mode passes its own
+   `--dhcp-range` on the dnsmasq command line, which wins over any drop-in. A client was
+   handed `.154` while the file asked for `.2`–`.50`. The setting was removed.
+5. **Removing that setting stranded the board that already had it.** Strict validation
+   rejected the whole file, so the network never came up. On an aircraft with no cable that
+   device would have needed a card reader. Retired keys are now dropped with a clear log
+   line rather than rejecting the document.
+
+Every fake command runner in the suite reports a radio that is present, unblocked and
+enabled, and a configuration written by the current version. None of them could have found
+3 or 5.
+
+### Notes for anyone repeating this
+
+- `nmcli -t -f GENERAL.DEVICE,IP4.ADDRESS device show` emits a `FIELD:value` stream, blank-line
+  separated, with indexed forms such as `IP4.ADDRESS[1]`. A device holding no address emits
+  **no** address line at all — not `--`, not `(none)`.
+- `nmcli -t -f DEVICE,TYPE,STATE,CONNECTION device status` can report a state containing a
+  space and parentheses: `connected (externally)`.
+- `network-manager`, `dnsmasq-base` and `ca-certificates` are already present on Raspberry Pi
+  OS Lite, so the installer needs no network for them.
+- Raspberry Pi OS configures cloud-init from the boot partition, and the NoCloud instance id
+  comes from `cmdline.txt` (`ds=nocloud;i=…`), **not** from `meta-data`. Editing `meta-data`
+  alone will not make first-boot steps run again.
