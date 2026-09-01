@@ -39,6 +39,9 @@ Two names are seeded differently, and deliberately so — see
   person entitled to it. Change it from the console and the daemon keeps your value.
 - **`editor_password`** is **not** seeded at all. It does not exist until the operator sets
   an administrator password, which is what makes the console's first-run step meaningful.
+  The shipped configuration says so too: `ui.editor.password` is `null` until there is a
+  password to point at. A default that named a secret nothing ever creates would break the
+  first code that resolved it eagerly, on every fresh device.
 
 ```yaml
 psk: { secret: ap_psk }         # the value lives in secrets.yaml under "ap_psk"
@@ -52,6 +55,13 @@ rather than silently treating it as a name to look up.
 The authoritative schema is in [`config/schema/`](../config/schema/), generated from the
 model in `yonder-core`. The configuration below is what the daemon accepts today; the test
 suite parses this very block through the schema, so the two cannot drift apart.
+
+One rule the generated JSON Schema cannot express, and the daemon enforces anyway: **the
+DHCP pool must be a range of host addresses inside the access point's own subnet, and must
+not contain the access point's address.** JSON Schema has no way to compare two fields, so
+an editor validating against `yonder.schema.json` will accept a pool the device rejects.
+The check exists because the failure is silent — the render succeeds, so nothing rolls
+back, and the device only stops handing out addresses at the next boot.
 
 <!-- yonder:reference-config -->
 ```yaml
@@ -76,7 +86,7 @@ ui:
   theme: day                                   # day | night
   editor:
     enabled: true
-    password: { secret: editor_password }
+    password: null                             # then { secret: editor_password }, once set
     interfaces: [ethernet, wifi_client]        # note: cellular excluded by default
 
 system:

@@ -236,7 +236,9 @@ every device, and never presented as a secret. It is
 be read from this journal, and getting to this journal means already being on the device.
 
 Nothing prints a secret. `editor_password` is **not** seeded at all — it does not exist
-until an operator sets an administrator password from the console, which is M1b.
+until an operator sets an administrator password from the console, which is M1b. The
+shipped configuration says the same thing: `ui.editor.password` is `null`, not a reference
+to a secret no device has.
 
 ```bash
 sudo cat /etc/yonder/secrets.yaml
@@ -297,7 +299,7 @@ sudo curl --unix-socket /run/yonder/core.sock -s http://localhost/config
 Expect the seeded default configuration, as one line of compact JSON:
 
 ```
-{"version":1,"network":{"ap":{"enabled":true,"ssid":"yonder","psk":{"secret":"ap_psk"},"address":"192.168.77.1/24","dhcp":{"start":"192.168.77.2","end":"192.168.77.50","lease":"12h"},"fallback":{"enabled":true,"timeout":90}},"client":{"ssid":null,"psk":null},"ethernet":{"dhcp":true},"priority":["ethernet","modem","wifi_client"]},"ui":{"port":3000,"theme":"day","editor":{"enabled":true,"password":{"secret":"editor_password"},"interfaces":["ethernet","wifi_client"]}},"system":{"hostname":"yonder","timezone":"UTC"}}
+{"version":1,"network":{"ap":{"enabled":true,"ssid":"yonder","psk":{"secret":"ap_psk"},"address":"192.168.77.1/24","dhcp":{"start":"192.168.77.2","end":"192.168.77.50","lease":"12h"},"fallback":{"enabled":true,"timeout":90}},"client":{"ssid":null,"psk":null},"ethernet":{"dhcp":true},"priority":["ethernet","modem","wifi_client"]},"ui":{"port":3000,"theme":"day","editor":{"enabled":true,"password":null,"interfaces":["ethernet","wifi_client"]}},"system":{"hostname":"yonder","timezone":"UTC"}}
 ```
 
 (Pipe any of these commands through `python3 -m json.tool` if you'd rather read it
@@ -360,7 +362,7 @@ cat > ~/yonder-apply-1.json <<'EOF'
     "theme": "day",
     "editor": {
       "enabled": true,
-      "password": { "secret": "editor_password" },
+      "password": null,
       "interfaces": ["ethernet", "wifi_client"]
     }
   },
@@ -487,7 +489,7 @@ cat > ~/yonder-apply-2.json <<'EOF'
     "theme": "day",
     "editor": {
       "enabled": true,
-      "password": { "secret": "editor_password" },
+      "password": null,
       "interfaces": ["ethernet", "wifi_client"]
     }
   },
@@ -602,7 +604,7 @@ document, this one needs one.
        "theme": "day",
        "editor": {
          "enabled": true,
-         "password": { "secret": "editor_password" },
+         "password": null,
          "interfaces": ["ethernet", "wifi_client"]
        }
      },

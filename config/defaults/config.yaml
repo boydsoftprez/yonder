@@ -37,8 +37,7 @@ ui:
   theme: day
   editor:
     enabled: true
-    password:
-      secret: editor_password
+    password: null
     interfaces:
       - ethernet
       - wifi_client

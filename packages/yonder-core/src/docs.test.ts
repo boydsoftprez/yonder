@@ -42,6 +42,9 @@ describe("the reference configuration in docs/configuration.md", () => {
     // reference must not be: it would be read as a password rather than a
     // name to look up in secrets.yaml.
     expect(parsed.network.ap.psk).toEqual({ secret: "ap_psk" });
-    expect(parsed.ui.editor.password).toEqual({ secret: "editor_password" });
+    // The administrator password is the other case: it has no reference at
+    // all until an operator sets one (R-SEC-09), and the reference page has
+    // to show that rather than naming a secret no device has.
+    expect(parsed.ui.editor.password).toBeNull();
   });
 });
