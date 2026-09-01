@@ -8,22 +8,125 @@ the test hands it. This procedure is what runs the same code against a real one.
 Nothing below can be replaced by a better unit test. It requires a Raspberry Pi, a real
 NetworkManager, a real Wi-Fi radio, a second device to observe from, and a real reboot.
 
-## Do these two first
+## What a board has already told us
 
-**There is no `nmcli` on the machine `yonder-core` was written on.** Every claim in this
-document is backed by a unit test against a fake runner — but a fake runner can only ever
-confirm that the code agrees with itself. Two pieces of `nmcli` grammar were written from
-the documentation and have never been executed, and both of them are load-bearing. Step 1
-confirms them, and nothing after Step 1 means much until it has.
+<!-- yonder:hardware-observed -->
+
+A first boot has happened. It did not get as far as Step 2 — the service could not start at
+all — but it captured `nmcli` output and it exposed two defects that no unit test had. Both
+are fixed; what the board actually printed is recorded here, and the fixtures in
+`packages/yonder-core/src/net/nmcli/` are those captures rather than hand-written guesses.
+
+| Field | Observed |
+|---|---|
+| Board | Raspberry Pi 4, aarch64, 905 MB usable RAM |
+| OS | Raspberry Pi OS Lite, Debian 13 (trixie) |
+| Kernel | `6.18.34` |
+| NetworkManager / `nmcli` | 1.52, the version Debian 13 ships. The exact `nmcli -v` string was not written down on this boot — capture it on the next one |
+| Radio at daemon start | `wlan0`, present and `unavailable` |
+| Date | 2026-09-01 |
+
+**`network-manager`, `dnsmasq-base` and `ca-certificates` are already present on Raspberry
+Pi OS Lite.** `ensure_pkgs` reports them as such and installs nothing, so `10-base.sh` needs
+no network on this image. That does not make the explicit `dnsmasq-base` line redundant — an
+installer that only works because the image happened to carry a package is an installer that
+breaks on the next image — but it does mean the base role is not where an offline install
+gets stuck.
+
+### What `device status` printed
+
+```
+lo:loopback:connected (externally):lo
+eth0:ethernet:unavailable:
+wlan0:wifi:unavailable:
+```
+
+Two shapes here that the hand-written fixture did not have, and both matter:
+
+- **A state containing a space and parentheses.** `connected (externally)` is one field, not
+  two. `parseTerse` walks the line character by character and splits only on unescaped
+  colons, so it was already right — but nothing had ever asked it, and any reader written to
+  split on whitespace, or to match a bare word, would have lost the record.
+- **Devices in state `unavailable`.** NetworkManager registers a device before it can act on
+  it. This is a cold boot caught in the act, and it is the state behind Defect 2 below.
+
+### What `device show` printed
+
+```
+GENERAL.DEVICE:lo
+IP4.ADDRESS[1]:127.0.0.1/8
+
+GENERAL.DEVICE:eth0
+
+GENERAL.DEVICE:wlan0
+
+```
+
+This settles the one question `parseDeviceShow` was written blind against. **A device
+holding no address emits no `IP4.ADDRESS` line at all** — not `--`, not `(none)`, not an
+empty value. It occupies a single `GENERAL.DEVICE` line, and a blank line separates each
+device's block. The field-stream shape the parser assumed is correct, and the indexed
+spelling `IP4.ADDRESS[1]` is what this version emits.
+
+The placeholder handling in `parseDeviceShow` stays regardless. One board on one
+NetworkManager version does not speak for the versions this has still never run against, and
+the cost of keeping it is a string comparison while the cost of being wrong is a device that
+believes it is reachable when it is not.
+
+Read the way `FallbackWatchdog.check()` reads it, that capture is a board with nothing
+reachable but loopback — so its access point must come up.
+
+### The two defects that boot exposed
+
+**1. The service could not find Node.**
+
+```
+yonder-core.service: Unable to locate executable '/usr/bin/node': No such file or directory
+yonder-core.service: Failed at step EXEC spawning /usr/bin/node
+yonder-core.service: Main process exited, code=exited, status=203/EXEC
+yonder-core.service: Scheduled restart job, restart counter is at 3.
+```
+
+The install itself was perfect: bundled Node installed, prebuilt tree used, config seeded,
+service enabled. But the unit hardcoded `/usr/bin/node`, which is true only on the route that
+installs the distro package — the offline route unpacks its runtime to `$YONDER_PREFIX/node`
+and puts it on `PATH` for the installer's own run, and systemd inherits none of that.
+`ExecStart` is an absolute path systemd resolves against nothing.
+
+Fixed by giving systemd one fixed path: the installer's `link_node` creates
+`/usr/local/bin/yonder-node` pointing at whichever Node it resolved, and the unit names that.
+`assert_unit_exec` is the post-condition that would have caught it before the board booted —
+after the unit is installed, the binary its `ExecStart` names must be the one the installer
+prepared, and must be executable.
+
+**2. A slow radio meant no access point, and no way to recover one.**
+
+The capture above is the daemon's own starting conditions: `wlan0` present and `unavailable`.
+`startServer()` rendered once and never looked again, and the start-up render is the only
+thing that writes the `yonder-ap` profile. `nmcli connection up yonder-ap` fails on a radio
+that is not ready — and fails with `unknown connection` if the render found no wifi interface
+at all — while raising that same profile is the fallback watchdog's *only* action. So a board
+whose radio was a few seconds behind came up unreachable, which is the exact failure R-NET-07
+exists to prevent.
+
+Fixed by `NetworkRenderer.waitForRadio()`: a bounded, `Clock`-driven wait for a usable Wi-Fi
+device, run in the background *after* the socket binds, followed by one more render if the
+radio appeared. The fallback's deadline is unchanged; its action waits on that bounded wait
+so it cannot fire at a profile no render has written yet.
+
+## Still to confirm on a board
+
+**`nmcli connection modify` has still never been executed.** The first boot never reached a
+render, so the one remaining piece of grammar written from the documentation is still
+unproven, and it is load-bearing.
 
 | What to confirm | Command | Why it matters |
 |---|---|---|
-| The shape of `device show` output | the four capture commands in Step 1, especially `nmcli -t -f GENERAL.DEVICE,IP4.ADDRESS device show` | It is the reachability probe behind the access-point fallback (R-NET-07), parsed by `parseDeviceShow`. Misread it and the board either raises its access point on every boot forever, or never raises it at all. |
 | That `connection modify` rejects add-only options | `nmcli connection modify yonder-ap type wifi` | `type` and `ifname` belong to `connection add`. If `modify` accepted them the code would be over-cautious; if it rejects them, as expected, every render after the first would have failed had they still been sent. |
 
-**If a real board disagrees with either, the code is wrong and the fixture is right.** Fix
-the parser or the argv, replace the fixture with what the board actually printed, and say so
-in the Results section. Do not reshape a capture to fit what is written here.
+**If a real board disagrees, the code is wrong and the fixture is right.** Fix the parser or
+the argv, replace the fixture with what the board actually printed, and say so in the Results
+section. Do not reshape a capture to fit what is written here.
 
 ## What this verifies, and why it can't be verified any other way
 
@@ -64,14 +167,23 @@ Three different timers matter below and it's easy to conflate them:
 
 - A Raspberry Pi running Raspberry Pi OS with NetworkManager as the network backend (the
   current default), and a Wi-Fi radio — built in or attached.
-- Node.js 20 or newer reachable on `PATH` before you run the installer.
+- Node.js 20 or newer, by one of two routes.
   `installer/roles/20-yonder-core.sh` calls a `require_node 20` check and deliberately
   aborts rather than build against anything older — `yonder-core` is ESM with NodeNext
   resolution and declares `engines.node >= 20` in its `package.json`. Raspberry Pi OS
   Bookworm's own `nodejs` package is major version 18, so `sudo ./installer/install.sh`
   stopping with `error: node 18 is too old; yonder-core needs node 20 or newer` is a real,
-  expected outcome on a stock image, not a broken installer — you need a Node.js 20+
-  runtime on `PATH` before re-running it.
+  expected outcome on a stock image, not a broken installer. Either put a Node.js 20+
+  runtime on `PATH` before running the installer, or vendor one at `vendor/node` and let
+  `install_bundled_node` unpack it — which is what an offline payload does.
+
+  Whichever route runs, the installer then creates **`/usr/local/bin/yonder-node`** pointing
+  at the Node it resolved, and that fixed path is what `systemd/yonder-core.service` names.
+  A unit's `ExecStart` is an absolute path systemd resolves against nothing — not against
+  `PATH`, and certainly not against the `PATH` the installer set for its own run — which is
+  how a perfect offline install produced a service that crash-looped on `203/EXEC`. If
+  `systemctl status yonder-core` reports `Unable to locate executable`, check that symlink
+  first.
 - A second device with a Wi-Fi radio (laptop or phone) to join the access point from, and
   to run `ping`/scan/SSH against the board.
 - Root on the board. The installer requires it, and the daemon runs as root with no
@@ -111,37 +223,44 @@ nmcli -t -f GENERAL.DEVICE,IP4.ADDRESS device show
 These four calls are the entire real interface between `yonder-core` and NetworkManager —
 see `NmcliClient` in `packages/yonder-core/src/net/nmcli/client.ts`, which issues exactly
 these four commands (`devices()`, `connections()`, `scan()`, `activeIpv4()`) and nowhere
-else. Each has a fixture file, all four hand-written, all four parsed in
+else. Each has a fixture file, all four parsed in
 `packages/yonder-core/src/net/nmcli/parse.ts`:
 
-| Command | Fixture file | Parser |
-|---|---|---|
-| `device status` | `fixtures/device-status.txt` | `parseTerse`, 4 fields |
-| `connection show` | `fixtures/connection-list.txt` | `parseTerse`, 4 fields |
-| `device wifi list` | `fixtures/wifi-scan.txt` | `parseTerse`, 3 fields |
-| `device show` (`IP4.ADDRESS`) | `fixtures/device-show-ip4.txt` | `parseDeviceShow`, a field stream |
+| Command | Fixture file | Parser | Where it came from |
+|---|---|---|---|
+| `device status` | `fixtures/device-status.txt` | `parseTerse`, 4 fields | **Captured from a board** |
+| `connection show` | `fixtures/connection-list.txt` | `parseTerse`, 4 fields | Hand-written |
+| `device wifi list` | `fixtures/wifi-scan.txt` | `parseTerse`, 3 fields | Hand-written |
+| `device show` (`IP4.ADDRESS`) | `fixtures/device-show-ip4.txt` | `parseDeviceShow`, a field stream | **Captured from a board** |
 
 (Paths are relative to `packages/yonder-core/src/net/nmcli/`.)
 
-**The fourth is the one to look at hardest.** `device show` is the only one of the four
-whose output shape has never been seen — see the note at the top of this document. It is
-also the call the fallback watchdog in Step 6 depends on, so a misreading of it is a device
-that never raises its access point, or one that raises it on every boot forever. Three
-things to check against `parseDeviceShow`:
+Two of the four are now real captures — see *What a board has already told us* at the top of
+this document for what they printed and what it settled. The other two are still guesses,
+because the boot that produced the captures never got as far as creating a connection or
+scanning for one. **Replace them, and re-capture the first two on your own board too:** a
+second NetworkManager version disagreeing with the first is exactly the kind of finding this
+step exists for.
+
+`device show` is still the one to look at hardest. It is the call the fallback watchdog in
+Step 6 depends on, so a misreading of it is a device that never raises its access point, or
+one that raises it on every boot forever. Four things to check against `parseDeviceShow`,
+with what the captured board did:
 
 - Field names are **section-qualified**: `GENERAL.DEVICE`, not the bare `DEVICE` that
   belongs to `device status`. If your `nmcli` rejects the field list outright, that is the
-  finding.
+  finding. (Accepted, on 1.52.)
 - Output is a **stream** of `FIELD:value` lines — one line per property, per device — not
   one record per device. A device with no address should occupy one line; a device with two
-  addresses, three.
-- Addresses appear as `IP4.ADDRESS[1]` (indexed) or `IP4.ADDRESS`. Record which.
+  addresses, three. (Confirmed, with a blank line between each device's block.)
+- Addresses appear as `IP4.ADDRESS[1]` (indexed) or `IP4.ADDRESS`. Record which. (Indexed.)
 - What a device holding **no** address actually prints for `IP4.ADDRESS`, if anything at
   all — an omitted line, an empty value (`IP4.ADDRESS[1]:`), or a placeholder such as `--`
-  or `(none)`. Nobody has observed this on real hardware. `parseDeviceShow` treats any value
-  that does not itself look like an IPv4 address (with or without a `/prefix`) as "no
-  address", precisely so a placeholder cannot be misread as one — but which form your
-  NetworkManager build actually emits has never been confirmed. Record the exact text.
+  or `(none)`. **On the captured board: nothing at all.** No line is emitted. If your
+  version emits one, that is a finding worth recording — `parseDeviceShow` treats any value
+  that does not itself look like an IPv4 address as "no address" precisely so a placeholder
+  cannot be misread as one, and that handling is deliberately kept for versions nobody has
+  run it against.
 
 Replace all four fixture files with what you captured. Redact real SSIDs and connection
 UUIDs if you want to — a UUID or an SSID string doesn't need to be genuine — but **preserve
@@ -201,10 +320,17 @@ This runs every role under `installer/roles/` in order: `10-base.sh` installs
 `network-manager` and `dnsmasq-base` — the second explicitly, because NetworkManager only
 *Recommends* it and this installer passes `--no-install-recommends`, and without it
 `ipv4.method shared` has no DHCP server to run — and creates `/etc/yonder` (mode `0750`),
-`/var/lib/yonder`, and `/etc/NetworkManager/dnsmasq-shared.d`; `20-yonder-core.sh` installs Node dependencies,
+`/var/lib/yonder`, and `/etc/NetworkManager/dnsmasq-shared.d`; `20-yonder-core.sh` resolves a
+Node, links it at `/usr/local/bin/yonder-node`, installs Node dependencies,
 builds `yonder-core` into `/opt/yonder/packages/yonder-core`, copies
-`systemd/yonder-core.service` into place, seeds `/etc/yonder/config.yaml`, and runs
+`systemd/yonder-core.service` into place, checks that the binary the unit's `ExecStart` names
+is actually executable, seeds `/etc/yonder/config.yaml`, and runs
 `systemctl daemon-reload`, `enable` and `restart`.
+
+On Raspberry Pi OS Lite, `10-base.sh` installs nothing: `network-manager`, `dnsmasq-base` and
+`ca-certificates` are all already present, and `ensure_pkgs` reports them as such. Expect
+`packages already present: …` rather than an `apt-get` line, and expect the role to need no
+network at all on that image.
 
 **The installer leaves the service running and the device configured.** There is nothing to
 write by hand: `config/defaults/config.yaml` — generated from `DEFAULT_CONFIG` and identical
@@ -281,6 +407,22 @@ Expect a line beginning `srw-rw----` owned by `root root`.
 > failed recovery. If the journal shows
 > `could not render the current configuration, serving anyway: …`, the API is still up and
 > Step 3 will still answer — record what it said.
+>
+> **On a cold boot the radio may not be ready in time for that first render**, and the
+> daemon says so rather than giving up. If the journal shows
+>
+> ```
+> network: no usable wifi radio yet (wlan0=unavailable); waiting for NetworkManager
+> network: wifi radio is usable now (wlan0=disconnected)
+> network: a wifi radio became usable; rendering again
+> ```
+>
+> that is the bounded wait doing its job: the socket bound first, the radio arrived a few
+> seconds later, and the access point went up on the second render. **This is the normal
+> shape of a cold boot on a real board** — the capture at the top of this document is
+> exactly that moment. Record how long it took; the wait gives up after 30 s with
+> `network: no usable wifi radio after 30 s (…); carrying on without one`, and a board that
+> reaches *that* line with a radio fitted is a finding.
 >
 > If you then wait 90 seconds: the fallback watchdog fires, finds only the access point's
 > own address, and tries to raise the access point again. `FallbackWatchdog.check()`
@@ -691,42 +833,57 @@ document, this one needs one.
 
 ## Results
 
-Fill in after running the steps above on real hardware.
+### Boot 1 — 2026-09-01
+
+The first boot. It stopped at Step 2 and never reached a render, so most of this document is
+still unrun — but what it did reach was decisive, and the two defects it found are fixed.
 
 | Field | Value |
 |---|---|
-| Board model | |
-| `cat /etc/os-release` | |
-| `uname -r` | |
-| `nmcli -v` | |
-| `NetworkManager --version` | |
-| Wi-Fi adapter / driver | |
-| Date tested | |
+| Board model | Raspberry Pi 4, aarch64, 905 MB usable RAM |
+| `cat /etc/os-release` | Raspberry Pi OS Lite, Debian 13 (trixie) |
+| `uname -r` | `6.18.34` |
+| `nmcli -v` | Not recorded on this boot. Debian 13 ships NetworkManager 1.52 — capture the exact string next time |
+| `NetworkManager --version` | As above |
+| Wi-Fi adapter / driver | Built in, `wlan0`; driver not recorded |
+| Date tested | 2026-09-01 |
 
 | Step | Pass / fail | Notes |
 |---|---|---|
-| 1 — Real fixtures captured, `npm test` green | | |
-| 1 — `nmcli connection modify yonder-ap type wifi` rejected, `connection.interface-name` accepted | | |
-| 2 — Install alone leaves the service running, the config seeded and the access point on the air | | |
-| 3 — All four routes answer as documented | | |
-| 4 — Apply, join over Wi-Fi, DHCP in pool, ping reaches the board, confirm | | |
-| 5 — Unconfirmed apply reverts within the window | | |
-| 6 — Fallback brings the access point up after reboot | | |
+| 1 — Real fixtures captured, `npm test` green | **Pass, partial** | `device status` and `device show` captured and committed; `connection show` and `device wifi list` not reached. `npm test` green against the captures |
+| 1 — `nmcli connection modify yonder-ap type wifi` rejected, `connection.interface-name` accepted | Not run | Needs a connection to exist, which needs a render, which needs the service to start |
+| 2 — Install alone leaves the service running, the config seeded and the access point on the air | **Fail → fixed** | The install itself was perfect. The service could not start: `ExecStart=/usr/bin/node` did not exist on a board whose Node came from the bundled runtime. `203/EXEC`, restarting for ever. See *The two defects that boot exposed* |
+| 3 — All four routes answer as documented | Not run | No daemon |
+| 4 — Apply, join over Wi-Fi, DHCP in pool, ping reaches the board, confirm | Not run | No daemon |
+| 5 — Unconfirmed apply reverts within the window | Not run | No daemon |
+| 6 — Fallback brings the access point up after reboot | Not run, **and a defect found by inspection of the capture** | `wlan0` was `unavailable` at the moment the daemon would have rendered. The start-up render writes the `yonder-ap` profile the fallback raises, and it rendered once and never looked again — so on this board the fallback would have had nothing to raise. Fixed; see Defect 2 |
+
+Both fixes are gated by tests that fail without them, and by an installer post-condition that
+fails when `ExecStart` names a missing binary. Neither has yet run on hardware. **Boot 2 is
+what makes this document true**; start again at Step 1 and fill in a new section below.
 
 What behaved differently from the unit tests (there is almost certainly something — this
 document flags a few candidates worth checking specifically):
 
-- Did any captured record have a field count `parseTerse` didn't expect?
+- Did any captured record have a field count `parseTerse` didn't expect? *(Boot 1: no, but a
+  state came back as `connected (externally)` — one field containing a space and
+  parentheses, which the hand-written fixtures had no example of.)*
 - Did `nmcli -t -f GENERAL.DEVICE,IP4.ADDRESS device show` emit the field stream
   `parseDeviceShow` assumes — `GENERAL.DEVICE` lines, `IP4.ADDRESS[n]` lines — or something
-  else?
+  else? *(Boot 1: yes, exactly that, with a blank line between each device's block. An
+  address-less device emits no `IP4.ADDRESS` line at all.)*
 - Did the access-point-address alternative in Step 5's closing note actually fail to break
-  reachability, as the code reading there predicted?
+  reachability, as the code reading there predicted? *(Not reached.)*
 - Any `nmcli`/NetworkManager version-specific quirks worth recording for the next board?
+  *(Boot 1: devices sit in `unavailable` for a while after boot. That is not a quirk, it is
+  the normal shape of a cold boot, and reading it as "no radio" was a real defect — see
+  Defect 2.)*
+- Did the daemon start at all? *(Boot 1: no. Ask this first — a `203/EXEC` restart loop looks
+  from a distance exactly like a board that booted and did nothing.)*
 
 ---
 
-Once this section is filled in, the fixtures in
+Once a new Results section is filled in, the remaining fixtures in
 `packages/yonder-core/src/net/nmcli/fixtures/` are real captures rather than hand-written
 ones, and `docs/known-issues.md` is updated if the board revealed anything new, commit with:
 
@@ -741,3 +898,6 @@ nothing else is reachable.
 
 R-NET-07"
 ```
+
+A capture that disagrees with a parser is the finding, not a problem with the board. Fix the
+code and replace the fixture; never reshape a capture to fit what is written here.
