@@ -6,20 +6,80 @@ import { pathToFileURL } from "node:url";
 import { ApplyEngine } from "../apply/engine.js";
 import { warn } from "../log.js";
 import { createRouter } from "./routes.js";
-import type { Renderer } from "../apply/types.js";
+import { loadConfig } from "../config/load.js";
+import { SecretStore } from "../secrets/store.js";
+import { NmcliClient } from "../net/nmcli/client.js";
+import { NetworkRenderer } from "../net/renderer.js";
+import { FallbackWatchdog } from "../net/watchdog.js";
+import { AP_CONNECTION } from "../net/profiles.js";
+import { systemRunner, type CommandRunner } from "../net/runner.js";
+import { systemClock, type Renderer } from "../apply/types.js";
 
 export interface ServerOptions {
   socketPath: string;
   configPath: string;
   journalPath: string;
   renderers: Renderer[];
+  /** Where per-device secrets (the access-point password, the editor password, …) live. */
+  secretsPath?: string;
+  /** Forwarded to ApplyEngine; defaults to the engine's own default when unset. */
+  renderTimeoutMs?: number;
+  /**
+   * Overrides the network renderer's command runner. Not part of the public
+   * shape production code needs — it exists so tests can inject a fake and
+   * never invoke a real nmcli, the same reason buildRenderers takes one.
+   */
+  runner?: CommandRunner;
+}
+
+export interface BuildRenderersOptions {
+  secretsPath: string;
+  dnsmasqPath?: string;
+  runner?: CommandRunner;
+  log?: (line: string) => void;
+}
+
+/**
+ * Assemble the renderers and make sure every secret the config references
+ * exists. Secrets created here are reported so the caller can display them
+ * once — a per-device access-point password is no use if nobody ever sees it.
+ */
+export function buildRenderers(opts: BuildRenderersOptions): {
+  renderers: Renderer[];
+  secrets: SecretStore;
+  client: NmcliClient;
+  generated: string[];
+} {
+  const log = opts.log ?? ((l: string) => process.stdout.write(`${l}\n`));
+  const secrets = new SecretStore(opts.secretsPath);
+  const generated: string[] = [];
+  for (const [name, kind] of [["ap_psk", "psk"], ["editor_password", "password"]] as const) {
+    if (secrets.ensure(name, kind).created) generated.push(name);
+  }
+  const client = new NmcliClient(opts.runner ?? systemRunner, log);
+  const renderer = new NetworkRenderer({
+    client, secrets, dnsmasqPath: opts.dnsmasqPath, log,
+  });
+  return { renderers: [renderer], secrets, client, generated };
 }
 
 export async function startServer(opts: ServerOptions): Promise<{ close(): Promise<void> }> {
+  const { renderers: netRenderers, secrets, client, generated } = buildRenderers({
+    secretsPath: opts.secretsPath ?? "/etc/yonder/secrets.yaml",
+    runner: opts.runner,
+  });
+  // A per-device secret nobody ever sees is useless — this is the operator's
+  // only chance to learn it. Only secrets created just now are reported, so
+  // a restart that finds them already in secrets.yaml prints nothing.
+  for (const name of generated) {
+    process.stdout.write(`generated ${name}: ${secrets.get(name)}\n`);
+  }
+
   const engine = new ApplyEngine({
     configPath: opts.configPath,
     journalPath: opts.journalPath,
-    renderers: opts.renderers,
+    renderers: [...opts.renderers, ...netRenderers],
+    renderTimeoutMs: opts.renderTimeoutMs,
   });
 
   // Anything left pending by a previous process is reverted before we serve.
@@ -34,6 +94,18 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   }
 
   const route = createRouter({ engine, configPath: opts.configPath });
+
+  // Started after recover(), not before: recovery may roll a config back,
+  // and the watchdog must judge the configuration actually in force rather
+  // than the one that was just discarded.
+  const watchdog = new FallbackWatchdog({
+    client,
+    clock: systemClock,
+    config: loadConfig(opts.configPath),
+    apUp: () => client.up(AP_CONNECTION),
+    log: (l) => process.stdout.write(`${l}\n`),
+  });
+  watchdog.start();
 
   const server: Server = createServer((req, res) => {
     const chunks: Buffer[] = [];
@@ -76,6 +148,9 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   return {
     close: () =>
       new Promise<void>((resolve) => {
+        // Stopped before the server closes, or a restart (or a test) leaves
+        // the fallback timer running against a socket that no longer exists.
+        watchdog.stop();
         server.close(() => {
           if (existsSync(opts.socketPath)) unlinkSync(opts.socketPath);
           resolve();
@@ -89,6 +164,7 @@ async function main(): Promise<void> {
     socketPath: process.env.YONDER_SOCKET ?? "/run/yonder/core.sock",
     configPath: process.env.YONDER_CONFIG ?? "/etc/yonder/config.yaml",
     journalPath: process.env.YONDER_JOURNAL ?? "/var/lib/yonder/apply.json",
+    secretsPath: process.env.YONDER_SECRETS ?? "/etc/yonder/secrets.yaml",
     renderers: [],
   });
   process.stdout.write("yonder-core listening\n");

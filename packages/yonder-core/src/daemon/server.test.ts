@@ -12,10 +12,17 @@ import { loadConfig } from "../config/load.js";
 import { DEFAULT_CONFIG } from "../schema/config.js";
 import type { Clock, Renderer } from "../apply/types.js";
 import type { Config } from "../schema/config.js";
+import type { CommandRunner } from "../net/runner.js";
 
 let dir: string, configPath: string, journalPath: string;
 const noopRenderer: Renderer = { name: "noop", async render() {} };
 const frozenClock: Clock = { now: () => 0, setTimer: () => 1, clearTimer: () => {} };
+
+// startServer now also assembles a network renderer via buildRenderers(). A
+// fake runner and a secretsPath inside the test's own tmpdir keep it inert —
+// these tests exercise the HTTP/apply plumbing, not networking, and must
+// never touch a real nmcli or write outside the sandbox.
+const noopRunner: CommandRunner = async () => ({ code: 0, stdout: "", stderr: "" });
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "yonder-api-"));
@@ -113,7 +120,7 @@ describe("startServer", () => {
   beforeEach(() => { socketPath = join(dir, "core.sock"); });
 
   it("binds a Unix socket, group-accessible and nothing wider", async () => {
-    const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer] });
+    const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner: noopRunner });
     try {
       // A socket in the filesystem, reachable only by something that can open
       // it: no interface can expose the configuration API by accident.
@@ -131,7 +138,7 @@ describe("startServer", () => {
 
   it("replaces a socket left behind by a previous process", async () => {
     writeFileSync(socketPath, "");
-    const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer] });
+    const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner: noopRunner });
     try {
       expect(statSync(socketPath).isSocket()).toBe(true);
     } finally {
@@ -140,7 +147,7 @@ describe("startServer", () => {
   });
 
   it("answers 400 to a body that is not JSON", async () => {
-    const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer] });
+    const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner: noopRunner });
     try {
       const res = await call(socketPath, "POST", "/apply", "{ truncated");
       expect(res.status).toBe(400);
@@ -160,7 +167,7 @@ describe("startServer", () => {
       async render() { socketAtRender.push(existsSync(socketPath)); },
     };
 
-    const server = await startServer({ socketPath, configPath, journalPath, renderers: [watcher] });
+    const server = await startServer({ socketPath, configPath, journalPath, renderers: [watcher], secretsPath: join(dir, "secrets.yaml"), runner: noopRunner });
     try {
       expect(loadConfig(configPath).system.hostname).toBe("yonder");
       // Binding first would let a console connect to a device still carrying
@@ -184,7 +191,7 @@ describe("startServer", () => {
       // Occupy the temp path the atomic write needs, so the rollback fails.
       mkdirSync(`${configPath}.tmp`);
 
-      const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer] });
+      const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner: noopRunner });
       try {
         // A daemon that refuses to start because it could not roll back leaves
         // an operator with no way in at all.

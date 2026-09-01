@@ -17,3 +17,30 @@ export {
   type ApplyOutcome,
 } from "./apply/types.js";
 export { startServer } from "./daemon/server.js";
+export {
+  systemRunner,
+  redactArgv,
+  type CommandRunner,
+  type CommandResult,
+} from "./net/runner.js";
+export {
+  NmcliClient,
+  NmcliError,
+  type DeviceInfo,
+  type ConnectionInfo,
+  type AccessPointInfo,
+} from "./net/nmcli/client.js";
+export {
+  AP_CONNECTION,
+  CLIENT_CONNECTION,
+  ETHERNET_CONNECTION,
+  apProfile,
+  clientProfile,
+  ethernetProfile,
+  desiredProfiles,
+  type DesiredProfile,
+  type Interfaces,
+} from "./net/profiles.js";
+export { NetworkRenderer, type NetworkRendererOptions } from "./net/renderer.js";
+export { FallbackWatchdog, type FallbackWatchdogOptions } from "./net/watchdog.js";
+export { DNSMASQ_DROPIN, renderDnsmasqConf, writeDnsmasqConf } from "./net/dnsmasq.js";
