@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, statSync } from "node:fs";
+import { mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SecretStore } from "./store.js";
@@ -41,5 +41,11 @@ describe("SecretStore", () => {
   it("throws when resolving a reference that does not exist", () => {
     const s = new SecretStore(join(dir, "secrets.yaml"));
     expect(() => s.resolve({ secret: "missing" })).toThrow(/missing/);
+  });
+
+  it("rejects a secrets file that is not a flat map of strings", () => {
+    const p = join(dir, "secrets.yaml");
+    writeFileSync(p, "ap_psk:\n  nested: true\n");
+    expect(() => new SecretStore(p)).toThrow(/flat map/);
   });
 });

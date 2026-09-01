@@ -33,16 +33,6 @@ Harmless today because there are no renderers. M1 adds the first real one, and a
 apply can hang on a wedged `nmcli` or a driver that never returns. Needs a timeout that
 fails the apply and rolls back, not an indefinite wait.
 
-### K-03 · `SecretStore` trusts the shape of `secrets.yaml`
-`src/secrets/store.ts`
-
-The constructor casts the parsed YAML `as Bag` without checking it is a flat map of strings.
-Safe while `flush()` is the only writer.
-
-It bites the moment `resolve()` feeds a renderer: a hand-edited nested value interpolates
-into a NetworkManager keyfile as `[object Object]`, producing a broken access point with no
-error anywhere. A `z.record(z.string())` parse in the constructor is two lines.
-
 ---
 
 ## General

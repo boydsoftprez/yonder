@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { readFileSync, existsSync, unlinkSync } from "node:fs";
 import { parse, stringify } from "yaml";
+import { z } from "zod";
 import { writeFileDurable } from "../fs/durable.js";
 import { generateSecret } from "./generate.js";
-import { ConfigError } from "../config/errors.js";
+import { ConfigError, formatIssues } from "../config/errors.js";
 import type { SecretRef } from "../schema/config.js";
 
 type Bag = Record<string, string>;
+
+const BagSchema = z.record(z.string());
 
 export class SecretStore {
   private readonly path: string;
@@ -14,7 +17,18 @@ export class SecretStore {
 
   constructor(path: string) {
     this.path = path;
-    this.bag = existsSync(path) ? (parse(readFileSync(path, "utf8")) as Bag) ?? {} : {};
+    if (!existsSync(path)) {
+      this.bag = {};
+      return;
+    }
+    const parsed = BagSchema.safeParse(parse(readFileSync(path, "utf8")) ?? {});
+    if (!parsed.success) {
+      throw new ConfigError(
+        `${path} must be a flat map of names to string values`,
+        formatIssues(parsed.error),
+      );
+    }
+    this.bag = parsed.data;
   }
 
   get(name: string): string | undefined {
