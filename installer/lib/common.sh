@@ -63,6 +63,30 @@ ensure_dir() {
     return 0
 }
 
+# A prebuilt Node.js distribution vendored at $YONDER_SRC/vendor/node, when
+# present. Installing it lets a role satisfy its node dependency without
+# `ensure_pkgs nodejs` touching the network — the same offline requirement
+# that gives 20-yonder-core.sh a prebuilt-tree path for yonder-core itself.
+# Copies the whole distribution (bin/, lib/, and the npm it carries) to
+# $YONDER_PREFIX/node and prepends it to PATH for the rest of this run.
+# Idempotent: re-running replaces any previously installed copy with
+# whatever vendor/node currently holds.
+#
+# Returns 1 with nothing changed when there is no vendored node, so the
+# caller falls back to ensure_pkgs nodejs.
+install_bundled_node() {
+    # shellcheck disable=SC2153 # YONDER_SRC is exported by install.sh, not a typo of YONDER_ETC
+    vendor_node="$YONDER_SRC/vendor/node"
+    [ -f "$vendor_node/bin/node" ] || return 1
+
+    log "bundled node found at $vendor_node; installing to $YONDER_PREFIX/node, skipping ensure_pkgs nodejs"
+    run rm -rf "$YONDER_PREFIX/node"
+    run cp -r "$vendor_node" "$YONDER_PREFIX/node"
+    PATH="$YONDER_PREFIX/node/bin:$PATH"
+    export PATH
+    return 0
+}
+
 # The major version of the node on PATH, or nothing if there is no node.
 node_major() {
     command -v node >/dev/null 2>&1 || return 0

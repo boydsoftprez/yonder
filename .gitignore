@@ -3,6 +3,11 @@ dist/
 *.log
 .DS_Store
 
+# Bundled Node runtime for offline installs. installer/lib/common.sh's
+# install_bundled_node copies vendor/node into images when present; it is a
+# downloaded binary, not source, so it is never committed.
+vendor/
+
 # Device state. secrets.yaml holds per-device credentials and config.yaml is
 # whatever one board happens to be set to; neither belongs in the repository.
 # Shipped defaults live in config/defaults/ and are exempt.

@@ -2,7 +2,9 @@
 # Install the core configuration service and its unit.
 # shellcheck shell=sh
 
-ensure_pkgs nodejs
+# A vendored Node avoids the network entirely; ensure_pkgs nodejs is only
+# needed when there is none.
+install_bundled_node || ensure_pkgs nodejs
 command -v npm >/dev/null 2>&1 || ensure_pkgs npm
 require_node 20
 
@@ -13,22 +15,47 @@ log "installing yonder-core into $yc_dest"
 ensure_dir "$YONDER_PREFIX/packages" 0755
 ensure_dir "$yc_dest" 0755
 run rm -rf "$yc_dest/src"
-run cp -r "$yc_src/src" "$yc_dest/src"
 run cp "$yc_src/package.json" "$yc_dest/package.json"
 run cp "$yc_src/package-lock.json" "$yc_dest/package-lock.json"
 run cp "$yc_src/tsconfig.json" "$yc_dest/tsconfig.json"
 
-# The unit starts dist/daemon/server.js, which is generated, and the daemon's
-# dependencies live in the workspace root when the tree is a checkout. Neither
-# is present on a board, so build here and leave behind only what the service
-# needs to run. `npm ci` rather than `npm install`: it requires the lockfile
-# copied above and installs exactly the versions it pins, so two boards
-# imaged a week apart get the same dependency tree instead of whatever the
-# registry serves at flash time.
-log "installing dependencies and building"
-run env npm --prefix "$yc_dest" ci --no-audit --no-fund
-run env npm --prefix "$yc_dest" run build
-run env npm --prefix "$yc_dest" prune --omit=dev
+# A prebuilt tree needs both dist/ (the compiled daemon) and node_modules/
+# (its production dependencies) - either alone cannot run, so both must be
+# present before this path is trusted. One without the other falls back to
+# installing and building instead, same as neither being present.
+yc_prebuilt=0
+if [ -f "$yc_src/dist/daemon/server.js" ] && [ -d "$yc_src/node_modules" ]; then
+    yc_prebuilt=1
+elif [ -f "$yc_src/dist/daemon/server.js" ] || [ -d "$yc_src/node_modules" ]; then
+    log "prebuilt tree in $yc_src is missing dist/ or node_modules/ (both are required to use it); installing and building instead"
+fi
+
+if [ "$yc_prebuilt" = "1" ]; then
+    log "prebuilt dist/ and node_modules/ found in $yc_src; using them, skipping install and build"
+    # src/ is TypeScript, only needed to build it. Nothing at $yc_dest reads
+    # it once dist/ exists, so copying it here would be the same dead weight
+    # the installer already carries by shipping *.test.ts inside src/ on the
+    # network path below - no reason to repeat that on the one path that can
+    # just skip it.
+    run rm -rf "$yc_dest/dist"
+    run cp -r "$yc_src/dist" "$yc_dest/dist"
+    run rm -rf "$yc_dest/node_modules"
+    run cp -r "$yc_src/node_modules" "$yc_dest/node_modules"
+else
+    run cp -r "$yc_src/src" "$yc_dest/src"
+
+    # The unit starts dist/daemon/server.js, which is generated, and the daemon's
+    # dependencies live in the workspace root when the tree is a checkout. Neither
+    # is present on a board, so build here and leave behind only what the service
+    # needs to run. `npm ci` rather than `npm install`: it requires the lockfile
+    # copied above and installs exactly the versions it pins, so two boards
+    # imaged a week apart get the same dependency tree instead of whatever the
+    # registry serves at flash time.
+    log "installing dependencies and building"
+    run env npm --prefix "$yc_dest" ci --no-audit --no-fund
+    run env npm --prefix "$yc_dest" run build
+    run env npm --prefix "$yc_dest" prune --omit=dev
+fi
 
 if [ "$DRY_RUN" != "1" ] && [ ! -f "$yc_dest/dist/daemon/server.js" ]; then
     die "build produced no $yc_dest/dist/daemon/server.js; the service would not start"
