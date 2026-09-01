@@ -106,14 +106,19 @@ function looksLikeAnAddress(value: string): boolean {
  * nothing is reachable, and the access point comes up — the harmless
  * direction.
  *
- * ASSUMED, NOT OBSERVED: there was no nmcli on the machine where this was
- * written. The shape above comes from the documented grammar of `-t` output,
- * and confirming it is the first thing docs/hardware/verifying-m1a.md asks of
- * a real board — including what an address-less device actually prints for
- * `IP4.ADDRESS`, which nobody has observed and which is exactly what the
- * placeholder handling above is guessing at. If a board disagrees, **this
- * parser is wrong** — fix it and replace the fixture with what the board
- * actually printed.
+ * OBSERVED. A Raspberry Pi 4 on Debian 13 (NetworkManager 1.52) printed
+ * exactly this shape, and `fixtures/device-show-ip4.txt` is that capture
+ * rather than a hand-written guess. It settled the one question this parser
+ * was written blind against: **an address-less device emits no `IP4.ADDRESS`
+ * line at all** — not `--`, not `(none)`, not an empty value. It occupies a
+ * single `GENERAL.DEVICE` line, and a blank line separates each device's
+ * block.
+ *
+ * The placeholder handling stays anyway. One board on one NetworkManager
+ * version does not speak for the versions this has still never run against,
+ * and the cost of keeping it is a comparison; the cost of being wrong is a
+ * device that decides it is reachable when it is not. See
+ * docs/hardware/verifying-m1a.md for what else that boot recorded.
  */
 export function parseDeviceShow(stdout: string): DeviceAddresses[] {
   const devices: DeviceAddresses[] = [];

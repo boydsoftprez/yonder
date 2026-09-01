@@ -1,3 +1,3 @@
-eth0:ethernet:connected:Wired connection 1
-wlan0:wifi:disconnected:
-lo:loopback:unmanaged:
+lo:loopback:connected (externally):lo
+eth0:ethernet:unavailable:
+wlan0:wifi:unavailable:

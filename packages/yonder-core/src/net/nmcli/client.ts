@@ -82,8 +82,9 @@ export class NmcliClient {
   /**
    * Every IPv4 address currently held, one entry per address per interface.
    *
-   * This is the probe behind the access-point fallback (R-NET-07) and the one
-   * call here whose real output has never been seen — see parseDeviceShow.
+   * This is the probe behind the access-point fallback (R-NET-07). Its output
+   * shape has now been seen on a real board — see parseDeviceShow, and
+   * `fixtures/device-show-ip4.txt`, which is that capture.
    *
    * Two things about the argv are deliberate. `device show` takes
    * section-qualified field names, so it is `GENERAL.DEVICE`, never the bare

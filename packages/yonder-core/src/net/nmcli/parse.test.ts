@@ -38,11 +38,37 @@ describe("parseTerse", () => {
     expect(() => parseTerse("a:b:c\n", 2)).toThrow(/expected 2 fields/);
   });
 
+  /**
+   * A state is not a single bare word. `connected (externally)` — what a real
+   * Raspberry Pi 4 on Debian 13 printed for its loopback device — carries a
+   * space and parentheses, and a splitter that treated whitespace as a field
+   * separator, or that expected `[a-z]+`, would have lost the record.
+   */
+  it("keeps a state containing a space and parentheses in one field", () => {
+    expect(parseTerse("lo:loopback:connected (externally):lo\n", 4))
+      .toEqual([["lo", "loopback", "connected (externally)", "lo"]]);
+  });
+
   it("parses recorded device status", () => {
     const rows = parseTerse(fixture("device-status.txt"), 4);
     expect(rows.length).toBeGreaterThan(0);
     expect(rows.every((r) => r.length === 4)).toBe(true);
     expect(rows.map((r) => r[0])).toContain("wlan0");
+  });
+
+  /**
+   * The capture this fixture holds is the cold boot the whole M1a hardware
+   * fix exists for: both real interfaces present and `unavailable`, and a
+   * loopback state with a space in it. Asserting the two shapes by name keeps
+   * them from being quietly normalised away the next time the fixture is
+   * touched — they are the two things the invented fixture did not have.
+   */
+  it("keeps both shapes the real board printed", () => {
+    const rows = parseTerse(fixture("device-status.txt"), 4);
+    const state = (device: string) => rows.find((r) => r[0] === device)?.[2];
+    expect(state("lo")).toBe("connected (externally)");
+    expect(state("eth0")).toBe("unavailable");
+    expect(state("wlan0")).toBe("unavailable");
   });
 
   it("parses recorded connection list", () => {
@@ -151,11 +177,35 @@ describe("parseDeviceShow", () => {
     expect(parseDeviceShow("")).toEqual([]);
   });
 
+  /**
+   * The real capture, from a Raspberry Pi 4 on Debian 13 (NetworkManager
+   * 1.52). It settles the question the parser was written blind against: an
+   * address-less device emits **no `IP4.ADDRESS` line at all** — not `--`,
+   * not `(none)`, not an empty value. `eth0` and `wlan0` occupy one line
+   * each, and a blank line separates each device's block.
+   *
+   * The placeholder handling above stays regardless. This is one
+   * NetworkManager version on one board; a parser behind a safety probe is
+   * allowed to be defensive about the versions nobody has run it against.
+   */
   it("parses the recorded device show", () => {
     expect(parseDeviceShow(fixture("device-show-ip4.txt"))).toEqual([
-      { device: "eth0", addresses: ["192.168.1.50/24"] },
-      { device: "wlan0", addresses: [] },
       { device: "lo", addresses: ["127.0.0.1/8"] },
+      { device: "eth0", addresses: [] },
+      { device: "wlan0", addresses: [] },
     ]);
+  });
+
+  /**
+   * The same capture read the way FallbackWatchdog.check() reads it. Loopback
+   * is the only thing holding an address, and the watchdog discards it — so
+   * this board has nothing reachable and its access point must come up. A
+   * parser that invented an address here is a device that never raises one.
+   */
+  it("finds nothing reachable in the recorded cold boot", () => {
+    const addressed = parseDeviceShow(fixture("device-show-ip4.txt"))
+      .filter((d) => d.device !== "lo")
+      .flatMap((d) => d.addresses);
+    expect(addressed).toEqual([]);
   });
 });
