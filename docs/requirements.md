@@ -205,7 +205,7 @@ Parameter writes are vehicle commands. R-CMD applies to every requirement here.
 | R-CFG-03 | Apply changes behind a confirmation timer, reverting to the last known good configuration if unconfirmed | 1 |
 | R-CFG-04 | Keep secrets in a separate file that is never included in an image, a backup or a support bundle | 1 |
 | R-CFG-05 | Configure a device fully headless by placing a configuration file on the boot partition | 1 |
-| R-CFG-06 | Generate any secret not supplied at first boot, and display it once | 1 |
+| R-CFG-06 | Seed any credential the system needs but the operator has not supplied — from a published default where one is defined (R-SEC-01), otherwise generated per device and retrievable through the console rather than only from a log. **Never leave a device unusable for want of a credential.** See [ADR-0007](adr/0007-credential-boundary.md) | 1 |
 | R-CFG-07 | Never require a vendor tool, an imaging wizard or a network service to configure a device | 1 |
 | R-CFG-08 | **A freshly flashed device reaches a joinable, usable state with no operator input.** A default configuration is seeded, the access point comes up, and the console is served — before anyone has configured anything | 1 |
 
