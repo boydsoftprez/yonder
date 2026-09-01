@@ -207,6 +207,7 @@ Parameter writes are vehicle commands. R-CMD applies to every requirement here.
 | R-CFG-05 | Configure a device fully headless by placing a configuration file on the boot partition | 1 |
 | R-CFG-06 | Generate any secret not supplied at first boot, and display it once | 1 |
 | R-CFG-07 | Never require a vendor tool, an imaging wizard or a network service to configure a device | 1 |
+| R-CFG-08 | **A freshly flashed device reaches a joinable, usable state with no operator input.** A default configuration is seeded, the access point comes up, and the console is served — before anyone has configured anything | 1 |
 
 ## R-HW — Hardware support
 
@@ -233,7 +234,7 @@ Parameter writes are vehicle commands. R-CMD applies to every requirement here.
 
 | ID | Requirement | P |
 |---|---|---|
-| R-SEC-01 | Ship no shared default credential of any kind. Every secret is per device and generated at first boot | 1 |
+| R-SEC-01 | Ship no shared default credential **that protects the vehicle or its configuration**. The setup access point may carry a published default passphrase, documented and never presented as a secret; every other credential is per device. See [ADR-0007](adr/0007-credential-boundary.md) | 1 |
 | R-SEC-02 | Disable remote root login; administrative access is by key | 1 |
 | R-SEC-03 | Run the control plane as a dedicated unprivileged user, using narrowly scoped helpers for privileged operations | 2 |
 | R-SEC-04 | Expose no unauthenticated write path to configuration or to the vehicle from a non-loopback interface by default | 1 |
@@ -241,6 +242,7 @@ Parameter writes are vehicle commands. R-CMD applies to every requirement here.
 | R-SEC-06 | Contact no external service, ever. No activation, no licence check, no usage reporting | 1 |
 | R-SEC-07 | Include no credential material in a published image | 1 |
 | R-SEC-08 | Offer TLS for the web interface | 2 |
+| R-SEC-09 | **Until an administrator password has been set, the console offers no function but setting one.** No configuration read, no command, no status beyond what that step needs | 1 |
 
 ## R-UI — Interface
 

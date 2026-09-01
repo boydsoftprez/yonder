@@ -49,7 +49,9 @@ the fix for the worst failure mode in this class of product: if Wi-Fi credential
 ever entered through a console you reach over the access point, there is nothing to get
 wrong at flash time and no way to end up locked out of your own device.
 
-- Access point with a per-device password and a static address — R-NET-01, R-SEC-01, R-CFG-06
+- Access point with the published setup passphrase and a static address — R-NET-01, R-SEC-01
+- **Flash-and-boot: seeded config, access point up, console served, no input required** — R-CFG-08
+- **First-run setup: the console offers nothing until an administrator password is set** — R-SEC-09
 - DHCP for access-point clients — R-NET-02
 - Web console served from the device, no asset fetched from the internet — R-UI-01, R-UI-02
 - Board and resource status: model, CPU load and temperature, memory, uptime — R-SYS-01, R-SYS-02
