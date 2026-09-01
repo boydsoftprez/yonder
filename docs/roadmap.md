@@ -39,6 +39,11 @@ in tests, and the installer runs to completion on a clean board.
 
 *Flash it, power it on, and you are looking at Yonder.*
 
+Split for execution into **M1a — network layer** (access point, Wi-Fi client, Ethernet,
+fallback watchdog; driven by the config file, no UI) and **M1b — the console** (Node-RED,
+Dashboard 2.x, board status, editor auth, themes). M1a is testable by editing `config.yaml`
+and poking the daemon's socket; M1b is the front door on top of it.
+
 This is the front door and the substrate for everything after it. It is also, on its own,
 the fix for the worst failure mode in this class of product: if Wi-Fi credentials are only
 ever entered through a console you reach over the access point, there is nothing to get
