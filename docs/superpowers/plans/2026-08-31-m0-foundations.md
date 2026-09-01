@@ -14,7 +14,7 @@
 - **Commits:** GPG-signed and DCO signed-off. Always `git commit -s`. Never `--no-gpg-sign`.
 - **Node:** 20.x minimum (Debian trixie ships 20 via nodesource). Do not use APIs newer than Node 20.
 - **Requirements:** every task cites the `R-*` IDs it satisfies. Requirements live in `docs/requirements.md`.
-- **Never reference `~/yonder-research`** or reintroduce the words *research*, *clean room*, *capability matrix*, *observed*, *vendor product* into this repository. See `CLAUDE.md`.
+- **This repository is self-contained.** No references to paths outside it; no comparisons to other products; state what Yonder does, positively. See `CLAUDE.md`.
 - **Paths:** config `/etc/yonder/config.yaml`, secrets `/etc/yonder/secrets.yaml` (mode `0600`), state `/var/lib/yonder/`, socket `/run/yonder/core.sock`.
 - **No placeholder secrets.** No default password, key or token may appear in any source file or committed fixture.
 - **Package naming:** `yonder-core` is a plain library/daemon package. Node-RED packages are unscoped `node-red-contrib-yonder-*` (none in M0).

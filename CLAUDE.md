@@ -13,18 +13,18 @@ Status: **pre-alpha**. Design and requirements are settled; no code yet. M0 is n
 
 ## Rules that are not negotiable
 
-### 1. There is a private research repository. Never reference it.
+### 1. This repository is self-contained.
 
-`~/yonder-research` holds design-input material. **Nothing in this repository may mention
-it, link to it, or hint that it exists.** The public repo was deliberately scrubbed of the
-words *research*, *clean room*, *capability matrix*, *observed*, *vendor product*. Do not
-reintroduce them.
+`docs/requirements.md` is the definition of what Yonder must do, written in Yonder's own
+voice. It is deliberately self-sufficient: **everything needed to build Yonder is in this
+repository.**
 
-`docs/requirements.md` exists precisely so this repo is self-sufficient. If something seems
-to be missing, add a requirement in Yonder's own voice — do not import framing from
-elsewhere.
+- Do not add references to local paths, directories or files outside this repository.
+- Do not describe Yonder by comparison to other products, and do not import terminology
+  or framing from outside. State what Yonder does, positively.
+- If something seems to be missing, add a requirement. Do not reach elsewhere for it.
 
-`.gitignore` blocks `research/`, `notes/` and `*.img` as a backstop. Do not remove those.
+`.gitignore` carries entries for scratch directories and image files. Do not remove them.
 
 ### 2. Logic lives in node packages, never in Node-RED function nodes.
 
