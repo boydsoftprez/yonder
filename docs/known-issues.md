@@ -22,17 +22,6 @@ cannot open the socket at all. M1 introduces that console, so M1 has to settle t
 ownership model — a shared group, a `User=`/`Group=` on the unit, and matching modes on the
 runtime directory and the socket.
 
-### K-02 · `apply()` has no render timeout
-`src/apply/engine.ts`
-
-The apply reservation is held for the whole duration of `renderAll`. A renderer that throws
-is handled; a renderer that **never settles** pins the engine in `applying` permanently, and
-every later apply is refused with "an apply is already pending".
-
-Harmless today because there are no renderers. M1 adds the first real one, and a network
-apply can hang on a wedged `nmcli` or a driver that never returns. Needs a timeout that
-fails the apply and rolls back, not an indefinite wait.
-
 ---
 
 ## General

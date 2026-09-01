@@ -254,6 +254,48 @@ describe("ApplyEngine", () => {
     await second.recover();
     expect(second.status().lastResult).toEqual({ id, outcome: "reverted", at: 0 });
   });
+
+  it("fails the apply and rolls back when a renderer never settles", async () => {
+    const { clock, advance } = fakeClock();
+    const hung: Renderer = { name: "hung", render: () => new Promise(() => {}) };
+    const e = new ApplyEngine({
+      configPath, journalPath, renderers: [hung], clock, renderTimeoutMs: 60_000,
+    });
+    const applying = e.apply(changed());
+    advance(61_000);
+    await expect(applying).rejects.toThrow(/timed out/i);
+    expect(loadConfig(configPath).system.hostname).toBe("yonder");
+    expect(e.status().state).toBe("idle");
+  });
+
+  it("accepts a later apply after a render timed out", async () => {
+    const { clock, advance } = fakeClock();
+    let hang = true;
+    const sometimes: Renderer = {
+      name: "sometimes",
+      render: () => (hang ? new Promise<void>(() => {}) : Promise.resolve()),
+    };
+    const e = new ApplyEngine({
+      configPath, journalPath, renderers: [sometimes], clock, renderTimeoutMs: 60_000,
+    });
+    const first = e.apply(changed());
+    advance(61_000);
+    await expect(first).rejects.toThrow(/timed out/i);
+    hang = false;
+    await expect(e.apply(changed())).resolves.toHaveProperty("id");
+  });
+
+  it("records a timed-out apply as failed in lastResult", async () => {
+    const { clock, advance } = fakeClock();
+    const hung: Renderer = { name: "hung", render: () => new Promise(() => {}) };
+    const e = new ApplyEngine({
+      configPath, journalPath, renderers: [hung], clock, renderTimeoutMs: 60_000,
+    });
+    const applying = e.apply(changed());
+    advance(61_000);
+    await applying.catch(() => {});
+    expect(e.status().lastResult?.outcome).toBe("failed");
+  });
 });
 
 /**

@@ -22,16 +22,31 @@ export interface ApplyEngineOptions {
   renderers: Renderer[];
   clock?: Clock;
   timeoutMs?: number;
+  renderTimeoutMs?: number;
 }
 
 /** States in which a new apply may not start. */
 const BUSY: readonly ApplyState[] = ["applying", "pending", "reverting"];
+
+/**
+ * Distinguishes a render timeout from any other renderer failure. A renderer
+ * that just timed out is presumed still wedged, so apply()'s catch block
+ * skips the best-effort rollback re-render rather than immediately spending
+ * a second full renderTimeoutMs waiting on the same stuck renderer.
+ */
+class RenderTimeoutError extends ConfigError {
+  constructor(message: string) {
+    super(message);
+    this.name = "RenderTimeoutError";
+  }
+}
 
 export class ApplyEngine {
   private readonly configPath: string;
   private readonly renderers: Renderer[];
   private readonly clock: Clock;
   private readonly timeoutMs: number;
+  private readonly renderTimeoutMs: number;
   private readonly journal: Journal;
 
   private state: ApplyState = "idle";
@@ -48,6 +63,7 @@ export class ApplyEngine {
     this.renderers = opts.renderers;
     this.clock = opts.clock ?? systemClock;
     this.timeoutMs = opts.timeoutMs ?? 120_000;
+    this.renderTimeoutMs = opts.renderTimeoutMs ?? 60_000;
     this.journal = new Journal(opts.journalPath);
   }
 
@@ -102,7 +118,15 @@ export class ApplyEngine {
       } catch (restoreError) {
         warn(`could not restore ${this.configPath} after a failed apply: ${(restoreError as Error).message}`);
       }
-      await this.renderAll(previous).catch(() => { /* best effort */ });
+      // A renderer that just timed out is presumed still wedged: retrying it
+      // immediately here would hold the reservation for a second full
+      // renderTimeoutMs before giving up again, which is exactly what K-02
+      // needs to not happen. The configuration file is already restored
+      // above regardless; re-rendering the previous config is only
+      // attempted when there is a reasonable chance it can still help.
+      if (!(e instanceof RenderTimeoutError)) {
+        await this.renderAll(previous).catch(() => { /* best effort */ });
+      }
       // finish() must run in a finally: a journal that cannot be cleared
       // (e.g. EIO fsyncing the journal directory) must not leave the
       // reservation held forever, or every later apply is refused with a
@@ -186,8 +210,31 @@ export class ApplyEngine {
     if (this.settling === settling) this.settling = undefined;
   }
 
+  /**
+   * A renderer that throws is a failure we already handle. A renderer that
+   * never returns would otherwise hold the reservation for ever, refusing
+   * every later apply with "already pending". Time comes from the injected
+   * clock so this is testable without waiting.
+   */
+  private withTimeout<T>(work: Promise<T>, ms: number, what: string): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      let settled = false;
+      const timer = this.clock.setTimer(ms, () => {
+        if (settled) return;
+        settled = true;
+        reject(new RenderTimeoutError(`${what} timed out after ${ms} ms`));
+      });
+      work.then(
+        (value) => { if (!settled) { settled = true; this.clock.clearTimer(timer); resolve(value); } },
+        (err) => { if (!settled) { settled = true; this.clock.clearTimer(timer); reject(err); } },
+      );
+    });
+  }
+
   private async renderAll(config: Config): Promise<void> {
-    for (const r of this.renderers) await r.render(config);
+    for (const r of this.renderers) {
+      await this.withTimeout(r.render(config), this.renderTimeoutMs, `renderer "${r.name}"`);
+    }
   }
 
   /** Return to rest, recording how the apply ended. */
