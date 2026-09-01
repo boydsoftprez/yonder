@@ -25,17 +25,61 @@ point comes up regardless of configuration.** The AP is a floor, not a mode.
 
 ## Secrets
 
-Values written as `!secret <name>` are read from `/etc/yonder/secrets.yaml`, which is
-mode `0600` and never included in an image or a support bundle. Secrets not present at
-first boot are generated and shown once.
+A value written as a mapping `{ secret: <name> }` is read from `/etc/yonder/secrets.yaml`,
+which is mode `0600` and never included in an image or a support bundle. Secrets not
+present at first boot are generated and shown once.
+
+```yaml
+psk: { secret: ap_psk }         # the value lives in secrets.yaml under "ap_psk"
+```
+
+Nothing else is a secret reference. A bare string is a bare string, and validation says so
+rather than silently treating it as a name to look up.
 
 ## Schema
 
-The authoritative schema is in [`config/schema/`](../config/schema/). Draft below.
+The authoritative schema is in [`config/schema/`](../config/schema/), generated from the
+model in `yonder-core`. The configuration below is what the daemon accepts today; the test
+suite parses this very block through the schema, so the two cannot drift apart.
 
+<!-- yonder:reference-config -->
 ```yaml
 version: 1
 
+network:
+  ap:
+    enabled: true
+    ssid: yonder
+    psk: { secret: ap_psk }
+    address: 192.168.77.1/24
+    dhcp: { start: 192.168.77.2, end: 192.168.77.50, lease: 12h }
+    fallback: { enabled: true, timeout: 90 }   # never disable this without reason
+  client:
+    ssid: null                                 # set from the console, not at flash time
+    psk: null                                  # then { secret: wifi_psk }
+  ethernet: { dhcp: true }
+  priority: [ethernet, modem, wifi_client]     # egress preference, highest first
+
+ui:
+  port: 3000
+  theme: day                                   # day | night
+  editor:
+    enabled: true
+    password: { secret: editor_password }
+    interfaces: [ethernet, wifi_client]        # note: cellular excluded by default
+
+system:
+  hostname: yonder
+  timezone: UTC
+```
+
+### Sections that arrive with later milestones
+
+Designed, and rejected by the schema until the code that reads them lands — the loader
+refuses keys it does not know, so adding these to a live `config.yaml` today fails
+validation. They are here so the shape is settled before the milestone opens.
+
+```yaml
 vehicle:
   autopilot: ardupilot          # ardupilot | px4 (px4 later)
 
@@ -75,44 +119,21 @@ cameras:
       - { type: srt,    port: 8890 }
 
 network:
-  ap:
-    enabled: true
-    ssid: yonder
-    psk: !secret ap_psk
-    address: 192.168.77.1/24
-    dhcp: { start: 192.168.77.2, end: 192.168.77.50, lease: 12h }
-    fallback: { enabled: true, timeout: 90 }   # never disable this without reason
-  client:
-    ssid: null
-    psk: !secret wifi_psk
-  ethernet: { dhcp: true }
   modem:
     enabled: true
     mode: auto                  # auto | hilink | stick
     apn: null
     username: null
-    password: !secret modem_psk
-  priority: [ethernet, modem, wifi_client]     # egress preference, highest first
+    password: { secret: modem_psk }
 
 remote:
   zerotier:  { enabled: false, network_id: null }   # primary — joins by network ID
-  tailscale: { enabled: false, auth_key: !secret ts_authkey }
+  tailscale: { enabled: false, auth_key: { secret: ts_authkey } }
 
 gpio:
   relays:
     - { id: 1, pin: 17, mode: latching }
     - { id: 5, pin: 27, mode: pulse, duration: 1.5 }
-
-ui:
-  port: 3000
-  editor:
-    enabled: true
-    password: !secret editor_password
-    interfaces: [ap, ethernet, wifi_client]    # note: cellular excluded by default
-
-system:
-  hostname: yonder
-  timezone: UTC
 ```
 
 ## Notes on specific keys

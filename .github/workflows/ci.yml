@@ -1,0 +1,39 @@
+name: CI
+on:
+  push: { branches: [main] }
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      # The installer builds the daemon on the board. A compile error that only
+      # shows up there is found after the flash, not before it.
+      - run: npm run build
+      # The checked-in JSON Schema is generated from the Zod schema. If it can
+      # drift, it is not the schema, it is a stale copy of one.
+      - name: Check the generated schema is current
+        run: |
+          npm run schema -w yonder-core
+          git diff --exit-code config/schema
+
+  installer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Lint shell
+        run: |
+          sudo apt-get update && sudo apt-get install -y shellcheck
+          shellcheck installer/install.sh installer/lib/*.sh installer/roles/*.sh
+      - name: Installer dry run
+        run: ./installer/install.sh --dry-run

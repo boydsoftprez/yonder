@@ -1,0 +1,25 @@
+{
+  "name": "yonder-core",
+  "version": "0.1.0",
+  "license": "GPL-3.0-or-later",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "yonder-core": "./dist/daemon/server.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "schema": "tsc -p tsconfig.json && node dist/schema/generate.js ../../config/schema/yonder.schema.json"
+  },
+  "dependencies": {
+    "yaml": "^2.5.0",
+    "zod": "^3.23.0",
+    "zod-to-json-schema": "^3.25.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "typescript": "^5.6.0"
+  }
+}
