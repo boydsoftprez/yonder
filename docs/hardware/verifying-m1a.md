@@ -13,17 +13,20 @@ NetworkManager, a real Wi-Fi radio, a second device to observe from, and a real 
 <!-- yonder:hardware-observed -->
 
 A first boot has happened. It did not get as far as Step 2 — the service could not start at
-all — but it captured `nmcli` output and it exposed two defects that no unit test had. Both
-are fixed; what the board actually printed is recorded here, and the fixtures in
-`packages/yonder-core/src/net/nmcli/` are those captures rather than hand-written guesses.
+all — but it captured `nmcli` output and it exposed two defects that no unit test had. A
+later boot, with those fixed, got the service running and exposed a third: the radio itself
+is shipped disabled. All three are fixed; what the board actually printed is recorded here,
+and the fixtures in `packages/yonder-core/src/net/nmcli/` are those captures rather than
+hand-written guesses.
 
 | Field | Observed |
 |---|---|
 | Board | Raspberry Pi 4, aarch64, 905 MB usable RAM |
 | OS | Raspberry Pi OS Lite, Debian 13 (trixie) |
 | Kernel | `6.18.34` |
-| NetworkManager / `nmcli` | 1.52, the version Debian 13 ships. The exact `nmcli -v` string was not written down on this boot — capture it on the next one |
+| NetworkManager / `nmcli` | 1.52.1, the version Debian 13 ships |
 | Radio at daemon start | `wlan0`, present and `unavailable` |
+| Radio out of the box | Soft-blocked by the kernel *and* disabled in NetworkManager's state file — see Defect 3 |
 | Date | 2026-09-01 |
 
 **`network-manager`, `dnsmasq-base` and `ca-certificates` are already present on Raspberry
@@ -76,7 +79,7 @@ believes it is reachable when it is not.
 Read the way `FallbackWatchdog.check()` reads it, that capture is a board with nothing
 reachable but loopback — so its access point must come up.
 
-### The two defects that boot exposed
+### The defects a real board exposed
 
 **1. The service could not find Node.**
 
@@ -113,6 +116,43 @@ Fixed by `NetworkRenderer.waitForRadio()`: a bounded, `Clock`-driven wait for a 
 device, run in the background *after* the socket binds, followed by one more render if the
 radio appeared. The fallback's deadline is unchanged; its action waits on that bounded wait
 so it cannot fire at a profile no render has written yet.
+
+**3. The Wi-Fi radio ships disabled, behind two independent locks.**
+
+A later boot, with the service running, still raised no access point. The radio was off, and
+off twice over:
+
+```
+$ rfkill list
+1: phy0: Wireless LAN
+        Soft blocked: yes
+
+$ nmcli radio all
+WIFI-HW   WIFI
+enabled   disabled
+
+$ journalctl -u NetworkManager
+manager: rfkill: Wi-Fi enabled by radio killswitch; disabled by state file
+```
+
+The kernel's rfkill soft block is one lock. NetworkManager's own `WirelessEnabled` property
+— persisted in its state file, and entirely separate from rfkill — is the other; that
+journal line is NetworkManager saying so in as many words. Clearing either alone leaves
+`wlan0` in state `unavailable`, which looks exactly like Defect 2 and is nothing like it: a
+block does not clear on its own, so the bounded wait expires and the board still has no
+access point. Running both by hand moved `wlan0` from `unavailable` to `disconnected`, and
+everything worked.
+
+A freshly flashed Raspberry Pi therefore never reached a joinable state on its own, which is
+R-CFG-08 broken on the boot the requirement is written about.
+
+Fixed in the network renderer, before it reads the device list: `enableWifiRadio` issues
+`rfkill unblock wifi` and then `nmcli radio wifi on`, neither of which can fail a render —
+`rfkill` is a separate binary that some boards do not carry, and a board with no radio at
+all is legitimate. It runs on every render rather than once at install, because a block is
+persistent state a board can acquire at any time, and it is gated on the configuration
+wanting a radio at all so that an operator who has turned Wi-Fi off is not overruled
+(`radioWanted`, R-NET-08).
 
 ## Still to confirm on a board
 

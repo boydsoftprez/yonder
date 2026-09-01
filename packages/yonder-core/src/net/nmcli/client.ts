@@ -47,14 +47,26 @@ export class NmcliError extends Error {
 }
 
 export class NmcliClient {
+  /**
+   * The process runner this client was built from, deliberately readable.
+   *
+   * Not every command the network layer has to issue is an nmcli one:
+   * clearing the kernel's rfkill block needs `rfkill`, a separate binary,
+   * which has no business on a class named for nmcli. The alternative — a
+   * second runner handed to the network renderer alongside this client — is
+   * two references that must agree and can silently stop agreeing, and the
+   * failure mode of them disagreeing is a test reaching a real `rfkill` on
+   * the machine running it. One runner, read from the one place that holds
+   * it, cannot drift.
+   */
   constructor(
-    private readonly run: CommandRunner,
+    readonly runner: CommandRunner,
     private readonly log: (line: string) => void = () => {},
   ) {}
 
   private async exec(argv: string[]): Promise<string> {
     this.log(redactArgv(argv).join(" "));
-    const result = await this.run(argv);
+    const result = await this.runner(argv);
     if (result.code !== 0) throw new NmcliError(argv, result.code, result.stderr);
     return result.stdout;
   }

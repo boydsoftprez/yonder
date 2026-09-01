@@ -4,6 +4,7 @@ import type { Config } from "../schema/config.js";
 import type { SecretStore } from "../secrets/store.js";
 import { NmcliClient, type DeviceInfo } from "./nmcli/client.js";
 import { writeDnsmasqConf, DNSMASQ_DROPIN } from "./dnsmasq.js";
+import { enableWifiRadio, radioWanted } from "./radio.js";
 import {
   desiredProfiles, AP_CONNECTION, CLIENT_CONNECTION, ETHERNET_CONNECTION,
   type Interfaces,
@@ -221,6 +222,37 @@ export class NetworkRenderer implements Renderer {
   }
 
   async render(config: Config): Promise<void> {
+    // Before the device list is read, not after it.
+    //
+    // A Raspberry Pi ships its Wi-Fi radio behind two independent locks — the
+    // kernel's rfkill soft block and NetworkManager's own persistent
+    // `WirelessEnabled` flag — and a board carrying either of them reports
+    // `wlan0:wifi:unavailable:`, which is the same shape as the cold-boot
+    // race waitForRadio exists for and is not the same problem at all: a
+    // block does not clear on its own, so waiting out the full RADIO_WAIT_MS
+    // achieves nothing and the access point never comes up. On a freshly
+    // flashed board that is R-CFG-08 broken outright (see radio.ts).
+    //
+    // Reading the device list first and clearing the locks only for a board
+    // that listed a radio would look tidier and is a trap: whether a device
+    // NetworkManager has been told to keep the radio off for appears in
+    // `device status` at all is NetworkManager's business, not ours, and a
+    // gate that depends on it deadlocks the moment it does not — no radio
+    // listed, so no unblock, so no radio listed. Two commands that are
+    // no-ops on hardware that does not need them are the cheaper side of
+    // that trade, and neither can fail a render (enableWifiRadio never
+    // throws).
+    //
+    // Every render, not once at install: a block is persistent state that a
+    // board can acquire at any time, and the installer's own run happens in a
+    // chroot during an image build, where `rfkill` would act on the build
+    // host and `nmcli` has no NetworkManager to talk to. Gated on the
+    // configuration wanting a radio at all, so an operator who has turned
+    // Wi-Fi off is not overruled on every apply — see radioWanted.
+    if (radioWanted(config)) {
+      await enableWifiRadio(this.client.runner, this.log);
+    }
+
     const devices = await this.client.devices();
     const ifaces: Interfaces = {
       wifi: devices.find((d) => d.type === "wifi")?.device ?? null,

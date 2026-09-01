@@ -50,5 +50,11 @@ export {
   RADIO_POLL_MS,
   type NetworkRendererOptions,
 } from "./net/renderer.js";
+export {
+  enableWifiRadio,
+  radioWanted,
+  RFKILL_UNBLOCK_WIFI,
+  NMCLI_RADIO_WIFI_ON,
+} from "./net/radio.js";
 export { FallbackWatchdog, type FallbackWatchdogOptions } from "./net/watchdog.js";
 export { DNSMASQ_DROPIN, renderDnsmasqConf, writeDnsmasqConf } from "./net/dnsmasq.js";

@@ -7,6 +7,7 @@ import { NetworkRenderer, deviceIsUsable } from "./renderer.js";
 import { NmcliClient } from "./nmcli/client.js";
 import { SecretStore } from "../secrets/store.js";
 import { AP_CONNECTION, CLIENT_CONNECTION, ETHERNET_CONNECTION, DEFAULT_AP_PASSPHRASE } from "./profiles.js";
+import { RFKILL_UNBLOCK_WIFI, NMCLI_RADIO_WIFI_ON } from "./radio.js";
 import { DEFAULT_CONFIG } from "../schema/config.js";
 import type { Clock } from "../apply/types.js";
 import type { Config } from "../schema/config.js";
@@ -76,6 +77,12 @@ interface HarnessOptions {
   clock?: Clock;
   /** Overrides the wait's bound, in milliseconds. */
   radioWaitMs?: number;
+  /**
+   * Commands, keyed on their joined argv, that must come back failed. This is
+   * how a board with no `rfkill` binary is expressed: `systemRunner` reports a
+   * missing executable as exit 127, so that is what the fake returns.
+   */
+  fails?: Record<string, CommandResult>;
 }
 
 /**
@@ -99,6 +106,8 @@ function harness(opts: HarnessOptions = {}) {
   const run: CommandRunner = async (argv) => {
     calls.push(argv);
     const key = argv.join(" ");
+    const canned = opts.fails?.[key];
+    if (canned !== undefined) return canned;
     if (key === "nmcli -t -f DEVICE,TYPE,STATE,CONNECTION device status") {
       if (opts.deviceStatus !== undefined) return opts.deviceStatus;
       // The last entry repeats: a board does not un-finish booting.
@@ -458,5 +467,141 @@ describe("NetworkRenderer.cancelRadioWait", () => {
     expect(await renderer.waitForRadio()).toBe(false);
     // Not even one look: the daemon this belongs to is gone.
     expect(calls).toEqual([]);
+  });
+});
+
+/**
+ * The two locks a Raspberry Pi ships its Wi-Fi radio behind, and why the
+ * renderer clears them.
+ *
+ * Raspberry Pi OS arrives with the radio soft-blocked in the kernel *and*
+ * disabled in NetworkManager's own state file. Both were observed on a
+ * Raspberry Pi 4 running Debian 13 with NetworkManager 1.52.1:
+ *
+ *     rfkill list        1: phy0: Wireless LAN  Soft blocked: yes
+ *     nmcli radio all    WIFI-HW enabled  WIFI disabled
+ *     NetworkManager[…]  rfkill: Wi-Fi enabled by radio killswitch;
+ *                        disabled by state file
+ *
+ * The board reports `wlan0:wifi:unavailable:` for either one, which looks
+ * exactly like the cold-boot race above and is nothing like it: a block does
+ * not clear on its own, so a freshly flashed device waits out the whole of
+ * RADIO_WAIT_MS and still never raises its access point. That is R-CFG-08
+ * broken on every Raspberry Pi, and it is a render's job to fix because a
+ * block is persistent state a board can acquire at any time, not a one-off
+ * condition an installer could clear once.
+ */
+describe("NetworkRenderer, and the radio a Raspberry Pi ships disabled", () => {
+  const at = (calls: string[][], argv: string[]) =>
+    calls.findIndex((c) => c.join(" ") === argv.join(" "));
+
+  it("clears both locks, before it reads the device list", async () => {
+    const { renderer, calls } = harness();
+    await renderer.render(DEFAULT_CONFIG);
+
+    const rfkill = at(calls, RFKILL_UNBLOCK_WIFI);
+    const radioOn = at(calls, NMCLI_RADIO_WIFI_ON);
+    const status = calls.findIndex((c) => c.join(" ").endsWith("device status"));
+
+    expect(rfkill).toBeGreaterThanOrEqual(0);
+    expect(radioOn).toBeGreaterThanOrEqual(0);
+    // The kernel block first: NetworkManager re-reads the killswitch when its
+    // own flag is turned on, and clearing them the other way round leaves the
+    // radio down behind a flag that says it is up.
+    expect(rfkill).toBeLessThan(radioOn);
+    // And both before the device list, which is the whole point: a blocked
+    // radio reads as `unavailable`, and every decision this renderer makes
+    // comes out of that list.
+    expect(radioOn).toBeLessThan(status);
+  });
+
+  it("clears them on every render, not only the first", async () => {
+    // A block is not a first-boot condition. `nmcli radio wifi off` at any
+    // time, by anyone, persists in NetworkManager's state file across
+    // reboots — so the fix has to be something that runs again.
+    const { renderer, calls } = harness({ connections: [AP_CONNECTION, ETHERNET_CONNECTION] });
+    await renderer.render(DEFAULT_CONFIG);
+    await renderer.render(DEFAULT_CONFIG);
+    expect(calls.filter((c) => c.join(" ") === RFKILL_UNBLOCK_WIFI.join(" "))).toHaveLength(2);
+    expect(calls.filter((c) => c.join(" ") === NMCLI_RADIO_WIFI_ON.join(" "))).toHaveLength(2);
+  });
+
+  /**
+   * The other half of the gate. R-NET-08 is an operator saying "no Wi-Fi, I
+   * am flying", and a renderer that turned the radio back on at every apply
+   * would overrule them on their own device.
+   */
+  it("does not touch the radio when nothing in the configuration wants one", async () => {
+    const c: Config = structuredClone(DEFAULT_CONFIG);
+    c.network.ap.enabled = false;
+    c.network.ap.fallback.enabled = false;
+    c.network.client.ssid = null;
+    const { renderer, calls } = harness({ connections: [AP_CONNECTION, ETHERNET_CONNECTION] });
+    await renderer.render(c);
+    expect(at(calls, RFKILL_UNBLOCK_WIFI)).toBe(-1);
+    expect(at(calls, NMCLI_RADIO_WIFI_ON)).toBe(-1);
+  });
+
+  it("still clears them when the access point is off but its fallback is not", async () => {
+    // R-NET-07 raises the access point regardless of configuration, and `up
+    // yonder-ap` cannot do that on a blocked radio. A configuration that
+    // keeps the fallback has not disabled Wi-Fi.
+    const c: Config = structuredClone(DEFAULT_CONFIG);
+    c.network.ap.enabled = false;
+    const { renderer, calls } = harness({ connections: [AP_CONNECTION, ETHERNET_CONNECTION] });
+    await renderer.render(c);
+    expect(at(calls, RFKILL_UNBLOCK_WIFI)).toBeGreaterThanOrEqual(0);
+    expect(at(calls, NMCLI_RADIO_WIFI_ON)).toBeGreaterThanOrEqual(0);
+  });
+
+  it("clears them for a client-only configuration", async () => {
+    const c: Config = structuredClone(DEFAULT_CONFIG);
+    c.network.ap.enabled = false;
+    c.network.ap.fallback.enabled = false;
+    c.network.client.ssid = "HomeNetwork";
+    const { renderer, calls } = harness({ connections: [AP_CONNECTION, ETHERNET_CONNECTION] });
+    await renderer.render(c);
+    expect(at(calls, RFKILL_UNBLOCK_WIFI)).toBeGreaterThanOrEqual(0);
+  });
+
+  it("renders on when rfkill is not installed", async () => {
+    // `rfkill` is a separate binary and some boards do not carry it;
+    // systemRunner reports a missing executable as exit 127. Neither the
+    // access point nor anything else may be lost over it — and NetworkManager's
+    // own flag, the lock a Raspberry Pi's state file holds, is still cleared.
+    const { renderer, calls, raised } = harness({
+      fails: { [RFKILL_UNBLOCK_WIFI.join(" ")]: { code: 127, stdout: "", stderr: "rfkill: not found" } },
+    });
+    await renderer.render(DEFAULT_CONFIG);
+    expect(at(calls, NMCLI_RADIO_WIFI_ON)).toBeGreaterThanOrEqual(0);
+    expect(calls.some((c) => c[2] === "add" && c[4] === AP_CONNECTION)).toBe(true);
+    expect(raised()).toBe(1);
+  });
+
+  it("renders on when NetworkManager refuses to enable the radio", async () => {
+    const { renderer, raised } = harness({
+      fails: {
+        [NMCLI_RADIO_WIFI_ON.join(" ")]: { code: 8, stdout: "", stderr: "Error: NetworkManager is not running." },
+      },
+    });
+    await renderer.render(DEFAULT_CONFIG);
+    // The real diagnosis belongs to `device status`, one step later, which
+    // throws properly when NetworkManager genuinely is not there. Failing the
+    // render here would only replace that message with a worse one.
+    expect(raised()).toBe(1);
+  });
+
+  it("skips nothing on a board with no wifi device at all", async () => {
+    // Ethernet-only hardware is legitimate. Both commands are no-ops there,
+    // and running them anyway is deliberate: whether a device NetworkManager
+    // has been told to keep the radio off for appears in `device status` is
+    // NetworkManager's business, and a gate that waited to see one first
+    // could never clear the block that hid it.
+    const { renderer, calls } = harness({
+      devices: "eth0:ethernet:connected:yonder-eth\nlo:loopback:unmanaged:\n",
+    });
+    await renderer.render(DEFAULT_CONFIG);
+    expect(at(calls, RFKILL_UNBLOCK_WIFI)).toBeGreaterThanOrEqual(0);
+    expect(calls.some((c) => c.includes(ETHERNET_CONNECTION))).toBe(true);
   });
 });
