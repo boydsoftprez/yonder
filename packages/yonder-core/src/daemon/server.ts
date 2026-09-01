@@ -12,7 +12,7 @@ import { SecretStore } from "../secrets/store.js";
 import { NmcliClient } from "../net/nmcli/client.js";
 import { NetworkRenderer } from "../net/renderer.js";
 import { FallbackWatchdog } from "../net/watchdog.js";
-import { AP_CONNECTION } from "../net/profiles.js";
+import { AP_CONNECTION, DEFAULT_AP_PASSPHRASE } from "../net/profiles.js";
 import { systemRunner, type CommandRunner } from "../net/runner.js";
 import { systemClock, type Renderer } from "../apply/types.js";
 
@@ -21,7 +21,7 @@ export interface ServerOptions {
   configPath: string;
   journalPath: string;
   renderers: Renderer[];
-  /** Where per-device secrets (the access-point password, the editor password, …) live. */
+  /** Where the device's secrets (the access-point passphrase, later the administrator password, …) live. */
   secretsPath?: string;
   /** Forwarded to ApplyEngine; defaults to the engine's own default when unset. */
   renderTimeoutMs?: number;
@@ -41,9 +41,19 @@ export interface BuildRenderersOptions {
 }
 
 /**
- * Assemble the renderers and make sure every secret the config references
- * exists. Secrets created here are reported so the caller can display them
- * once — a per-device access-point password is no use if nobody ever sees it.
+ * Assemble the renderers and make sure the access point has a passphrase.
+ *
+ * ap_psk is seeded with the published default, not a random per-device value
+ * (ADR-0007, R-SEC-01). The random one could only ever be read from the
+ * device's own journal, and joining this access point is how anyone gets to
+ * the device — so it shipped a credential no operator could retrieve.
+ *
+ * editor_password is deliberately not seeded at all. It must not exist until
+ * the operator sets it from the console; that is what makes the first-run
+ * setup step mean something (R-SEC-09).
+ *
+ * `generated` names what was created just now, so a caller can tell a first
+ * boot from a restart. It is no longer a list of values to display.
  */
 export function buildRenderers(opts: BuildRenderersOptions): {
   renderers: Renderer[];
@@ -54,9 +64,8 @@ export function buildRenderers(opts: BuildRenderersOptions): {
   const log = opts.log ?? ((l: string) => process.stdout.write(`${l}\n`));
   const secrets = new SecretStore(opts.secretsPath);
   const generated: string[] = [];
-  for (const [name, kind] of [["ap_psk", "psk"], ["editor_password", "password"]] as const) {
-    if (secrets.ensure(name, kind).created) generated.push(name);
-  }
+  // Only if absent: an operator who has changed the passphrase keeps theirs.
+  if (secrets.ensureValue("ap_psk", DEFAULT_AP_PASSPHRASE).created) generated.push("ap_psk");
   const client = new NmcliClient(opts.runner ?? systemRunner, log);
   const renderer = new NetworkRenderer({
     client, secrets, dnsmasqPath: opts.dnsmasqPath, log,
@@ -76,15 +85,19 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
     process.stdout.write(`seeded a default configuration at ${opts.configPath}\n`);
   }
 
-  const { renderers: netRenderers, secrets, client, generated } = buildRenderers({
+  const { renderers: netRenderers, secrets, client } = buildRenderers({
     secretsPath: opts.secretsPath ?? "/etc/yonder/secrets.yaml",
     runner: opts.runner,
   });
-  // A per-device secret nobody ever sees is useless — this is the operator's
-  // only chance to learn it. Only secrets created just now are reported, so
-  // a restart that finds them already in secrets.yaml prints nothing.
-  for (const name of generated) {
-    process.stdout.write(`generated ${name}: ${secrets.get(name)}\n`);
+  // No secret is ever printed. That mechanism existed to surface a random
+  // per-device access-point passphrase and there is no longer one to surface
+  // (ADR-0007). What an operator does need telling is that the device is
+  // still on the published default — which stays true on every boot until
+  // they change it, not just the boot that seeded it.
+  if (secrets.get("ap_psk") === DEFAULT_AP_PASSPHRASE) {
+    process.stdout.write(
+      "access point: using the published default passphrase; change it from the console\n",
+    );
   }
 
   const engine = new ApplyEngine({

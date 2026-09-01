@@ -32,6 +32,7 @@ export {
   type AccessPointInfo,
 } from "./net/nmcli/client.js";
 export {
+  DEFAULT_AP_PASSPHRASE,
   AP_CONNECTION,
   CLIENT_CONNECTION,
   ETHERNET_CONNECTION,

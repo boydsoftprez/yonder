@@ -9,7 +9,9 @@ import { startServer } from "./server.js";
 import { ApplyEngine } from "../apply/engine.js";
 import { saveConfig } from "../config/save.js";
 import { loadConfig } from "../config/load.js";
+import { SecretStore } from "../secrets/store.js";
 import { DEFAULT_CONFIG } from "../schema/config.js";
+import { DEFAULT_AP_PASSPHRASE } from "../net/profiles.js";
 import type { Clock, Renderer } from "../apply/types.js";
 import type { Config } from "../schema/config.js";
 import type { CommandRunner } from "../net/runner.js";
@@ -248,6 +250,47 @@ describe("startServer", () => {
     const server = await startServer({ socketPath, configPath, journalPath, renderers: [watcher], secretsPath: join(dir, "secrets.yaml"), runner: noopRunner });
     try {
       expect(seen).toEqual([{ ssid: "yonder", socket: false }]);
+    } finally {
+      await server.close();
+    }
+  });
+
+  /**
+   * ADR-0007. The daemon used to print every secret it generated, because a
+   * random per-device passphrase nobody sees is useless. There is no random
+   * passphrase now, so nothing is printed — but the operator is still told,
+   * plainly, that the device is on the published default.
+   */
+  it("reports the default passphrase without printing any secret", async () => {
+    const lines: string[] = [];
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
+      lines.push(String(chunk));
+      return true;
+    });
+    let server: { close(): Promise<void> };
+    try {
+      server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner: noopRunner });
+    } finally {
+      stdout.mockRestore();
+    }
+    try {
+      const out = lines.join("");
+      expect(out).toMatch(/access point: using the published default passphrase/);
+      expect(out).not.toMatch(/generated /);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("seeds the access point passphrase but never an administrator password", async () => {
+    const secretsPath = join(dir, "secrets.yaml");
+    const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath, runner: noopRunner });
+    try {
+      const bag = new SecretStore(secretsPath);
+      expect(bag.get("ap_psk")).toBe(DEFAULT_AP_PASSPHRASE);
+      // R-SEC-09: it does not exist until the operator sets it. That absence
+      // is what makes the console's first-run setup step mean anything.
+      expect(bag.get("editor_password")).toBeUndefined();
     } finally {
       await server.close();
     }

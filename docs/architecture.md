@@ -311,11 +311,11 @@ Commitments, enforced in review. Each maps to an `R-SEC` requirement.
 
 | | |
 |---|---|
-| **No shared secrets** | Every credential is per device, generated at first boot, shown once |
+| **One shared default, and it is published** | The setup access point carries a documented default passphrase, never presented as a secret. Everything that guards the vehicle or its configuration is per device — see [ADR-0007](adr/0007-credential-boundary.md) |
 | **No remote root** | Key authentication; root login disabled; password authentication off unless enabled |
 | **No open command path** | MAVLink ingest on loopback only unless explicitly opted in |
 | **Least privilege** | Control plane runs as a dedicated user; privileged operations via narrowly scoped helpers |
-| **No default admin secrets** | Every service secret generated per device, never left at an upstream default |
+| **No default administrator credential** | No administrator password exists until the operator sets one at first use, and no service is left at an upstream default |
 | **Encryption available** | HTTP on the local access point; TLS available; the mesh VPN carries its own |
 | **Code execution is gated** | The flow editor requires a password set at setup, and is not reachable from the cellular interface by default |
 

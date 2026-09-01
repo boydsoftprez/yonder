@@ -31,6 +31,25 @@ describe("SecretStore", () => {
     expect(new SecretStore(p).get("ap_psk")).toBe(value);
   });
 
+  it("sets a fixed value on first ensureValue and reports it as new", () => {
+    const s = new SecretStore(join(dir, "secrets.yaml"));
+    const first = s.ensureValue("ap_psk", "yonder1234");
+    expect(first).toEqual({ value: "yonder1234", created: true });
+    // A published default is a starting point. Once the value is there it is
+    // the device's, and a later start must not put the default back.
+    expect(s.ensureValue("ap_psk", "yonder1234")).toEqual({ value: "yonder1234", created: false });
+  });
+
+  it("never replaces an existing value with the one ensureValue was given", () => {
+    const p = join(dir, "secrets.yaml");
+    const s = new SecretStore(p);
+    s.ensureValue("ap_psk", "an-operator-chose-this");
+    expect(s.ensureValue("ap_psk", "yonder1234")).toEqual({
+      value: "an-operator-chose-this", created: false,
+    });
+    expect(new SecretStore(p).get("ap_psk")).toBe("an-operator-chose-this");
+  });
+
   it("resolves a secret reference", () => {
     const p = join(dir, "secrets.yaml");
     const s = new SecretStore(p);

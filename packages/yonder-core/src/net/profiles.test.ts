@@ -1,12 +1,32 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, it, expect } from "vitest";
-import { apProfile, clientProfile, ethernetProfile, AP_CONNECTION, CLIENT_CONNECTION } from "./profiles.js";
+import {
+  apProfile, clientProfile, ethernetProfile,
+  AP_CONNECTION, CLIENT_CONNECTION, DEFAULT_AP_PASSPHRASE,
+} from "./profiles.js";
 import { DEFAULT_CONFIG } from "../schema/config.js";
 import type { Config } from "../schema/config.js";
 
 function settingsOf(p: { settings: string[][] }): Record<string, string> {
   return Object.fromEntries(p.settings.map(([k, v]) => [k, v]));
 }
+
+describe("DEFAULT_AP_PASSPHRASE", () => {
+  /**
+   * ADR-0007: published, documented, the same on every device. A value the
+   * radio would refuse is not a joinable device, and this one is quoted in
+   * the README and in the setup procedure, so it has to be typeable.
+   */
+  it("is a pre-shared key WPA2 will accept", () => {
+    expect(DEFAULT_AP_PASSPHRASE.length).toBeGreaterThanOrEqual(8);
+    expect(DEFAULT_AP_PASSPHRASE.length).toBeLessThanOrEqual(63);
+    expect(DEFAULT_AP_PASSPHRASE).toMatch(/^[\x20-\x7e]+$/);
+  });
+
+  it("is the value the documentation publishes", () => {
+    expect(DEFAULT_AP_PASSPHRASE).toBe("yonder1234");
+  });
+});
 
 describe("apProfile", () => {
   it("declares a wifi access point on the given interface", () => {

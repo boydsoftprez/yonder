@@ -26,8 +26,17 @@ point comes up regardless of configuration.** The AP is a floor, not a mode.
 ## Secrets
 
 A value written as a mapping `{ secret: <name> }` is read from `/etc/yonder/secrets.yaml`,
-which is mode `0600` and never included in an image or a support bundle. Secrets not
-present at first boot are generated and shown once.
+which is mode `0600` and never included in an image or a support bundle.
+
+Two names are seeded differently, and deliberately so — see
+[ADR-0007](adr/0007-credential-boundary.md):
+
+- **`ap_psk`** is seeded with the published default passphrase **`yonder1234`**, the same on
+  every device. It is documented rather than secret: it exists so a freshly flashed board is
+  joinable, and a value only readable from the device's own journal would lock out the one
+  person entitled to it. Change it from the console and the daemon keeps your value.
+- **`editor_password`** is **not** seeded at all. It does not exist until the operator sets
+  an administrator password, which is what makes the console's first-run step meaningful.
 
 ```yaml
 psk: { secret: ap_psk }         # the value lives in secrets.yaml under "ap_psk"

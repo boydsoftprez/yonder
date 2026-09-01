@@ -2,6 +2,22 @@
 import type { Config } from "../schema/config.js";
 import type { SecretStore } from "../secrets/store.js";
 
+/**
+ * The setup access point's passphrase: published, documented, and the same on
+ * every device (ADR-0007, R-SEC-01).
+ *
+ * It is not a secret and must never be described as one. A per-device value
+ * printed to the journal can only be read by someone already on the device,
+ * and joining this access point is how you get on the device — so it guarded
+ * nothing and locked out the legitimate operator. The credential that matters
+ * is the console's administrator password, which the operator sets at first
+ * use and which does not exist until they do (R-SEC-09).
+ *
+ * Named here so the README, the setup procedure and the tests all read one
+ * value instead of three copies of a string.
+ */
+export const DEFAULT_AP_PASSPHRASE = "yonder1234";
+
 export const AP_CONNECTION = "yonder-ap";
 export const CLIENT_CONNECTION = "yonder-wifi";
 export const ETHERNET_CONNECTION = "yonder-eth";
