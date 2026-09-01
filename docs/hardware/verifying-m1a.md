@@ -192,8 +192,10 @@ sudo ./installer/install.sh
 ```
 
 This runs every role under `installer/roles/` in order: `10-base.sh` installs
-`network-manager`, and creates `/etc/yonder` (mode `0750`), `/var/lib/yonder`, and
-`/etc/NetworkManager/dnsmasq-shared.d`; `20-yonder-core.sh` installs Node dependencies,
+`network-manager` and `dnsmasq-base` — the second explicitly, because NetworkManager only
+*Recommends* it and this installer passes `--no-install-recommends`, and without it
+`ipv4.method shared` has no DHCP server to run — and creates `/etc/yonder` (mode `0750`),
+`/var/lib/yonder`, and `/etc/NetworkManager/dnsmasq-shared.d`; `20-yonder-core.sh` installs Node dependencies,
 builds `yonder-core` into `/opt/yonder/packages/yonder-core`, copies
 `systemd/yonder-core.service` into place, seeds `/etc/yonder/config.yaml`, and runs
 `systemctl daemon-reload`, `enable` and `restart`.
@@ -400,7 +402,8 @@ Now, from your second device, **within the two-minute window**:
 - Join it with the published passphrase **`yonder1234`**.
 - Confirm the address you were handed is inside `192.168.77.2`–`192.168.77.50` (the
   configured DHCP pool) — check your device's network details panel, or `ip addr` /
-  `ipconfig`.
+  `ipconfig`. **Joining but never being given an address is the signature of a missing
+  `dnsmasq-base`**; check `dpkg -l dnsmasq-base` before looking anywhere else.
 - From that same second device, confirm you can reach the board at its configured address:
 
   ```bash
