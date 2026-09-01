@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ApplyEngine } from "./engine.js";
@@ -146,5 +146,160 @@ describe("ApplyEngine", () => {
     await e.recover();
     expect(e.status().state).toBe("idle");
     expect(loadConfig(configPath).system.hostname).toBe("yonder");
+  });
+
+  it("keeps the rollback record on disk only while the change is unconfirmed", async () => {
+    const { clock } = fakeClock();
+    const e = new ApplyEngine({ configPath, journalPath, renderers: [renderer()], clock });
+    const { id } = await e.apply(changed());
+
+    // While pending, the journal names the apply and the configuration to go
+    // back to — not the one being applied.
+    const entry = JSON.parse(readFileSync(journalPath, "utf8")) as {
+      id: string;
+      previous: Config;
+    };
+    expect(entry.id).toBe(id);
+    expect(entry.previous.system.hostname).toBe("yonder");
+
+    e.confirm(id);
+    expect(existsSync(journalPath)).toBe(false);
+  });
+
+  it("leaves a confirmed change in place when the daemon restarts", async () => {
+    const { clock } = fakeClock();
+    const first = new ApplyEngine({ configPath, journalPath, renderers: [renderer()], clock });
+    const { id } = await first.apply(changed());
+    first.confirm(id);
+
+    // Crash and restart. A journal left behind by confirm() would make the
+    // next start undo a change the operator explicitly kept — the exact
+    // inverse of the safety property.
+    const r = renderer();
+    const second = new ApplyEngine({ configPath, journalPath, renderers: [r], clock });
+    await second.recover();
+    expect(loadConfig(configPath).system.hostname).toBe("changed");
+    expect(r.calls).toHaveLength(0);
+  });
+
+  it("leaves no journal behind when a renderer fails, so a restart does not re-revert", async () => {
+    const { clock } = fakeClock();
+    const bad: Renderer = { name: "bad", async render() { throw new Error("nope"); } };
+    const e = new ApplyEngine({ configPath, journalPath, renderers: [bad], clock });
+    await expect(e.apply(changed())).rejects.toThrow(/nope/);
+    expect(existsSync(journalPath)).toBe(false);
+
+    const r = renderer();
+    const second = new ApplyEngine({ configPath, journalPath, renderers: [r], clock });
+    await second.recover();
+    expect(loadConfig(configPath).system.hostname).toBe("yonder");
+    expect(r.calls).toHaveLength(0);
+  });
+
+  it("refuses a second apply while the first is still rendering", async () => {
+    const { clock } = fakeClock();
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const slow: Renderer = { name: "slow", async render() { await gate; } };
+    const e = new ApplyEngine({ configPath, journalPath, renderers: [slow], clock });
+
+    const first = e.apply(changed());
+    // The renderer has not returned, so the reservation must already be held:
+    // M1's network renderer takes seconds, and a second apply accepted here
+    // would journal the first apply's unconfirmed configuration as its
+    // rollback target and orphan its countdown.
+    expect(e.status().state).toBe("applying");
+
+    const other = structuredClone(DEFAULT_CONFIG);
+    other.system.hostname = "second";
+    await expect(e.apply(other)).rejects.toThrow(/already pending/);
+
+    release();
+    await first;
+    expect(loadConfig(configPath).system.hostname).toBe("changed");
+    const entry = JSON.parse(readFileSync(journalPath, "utf8")) as { previous: Config };
+    expect(entry.previous.system.hostname).toBe("yonder");
+  });
+
+  it("reports how the last apply ended, so a rollback is not mistaken for nothing happening", async () => {
+    const { clock, advance } = fakeClock();
+    const e = new ApplyEngine({ configPath, journalPath, renderers: [renderer()], clock, timeoutMs: 120_000 });
+    expect(e.status().lastResult).toBeUndefined();
+
+    const { id } = await e.apply(changed());
+    advance(121_000);
+    expect(e.status().state).toBe("idle");
+    expect(e.status().lastResult).toEqual({ id, outcome: "reverted", at: 121_000 });
+
+    const second = await e.apply(changed());
+    e.confirm(second.id);
+    expect(e.status().lastResult).toEqual({ id: second.id, outcome: "confirmed", at: 121_000 });
+  });
+
+  it("reports a failed apply as failed", async () => {
+    const { clock } = fakeClock();
+    const bad: Renderer = { name: "bad", async render() { throw new Error("nope"); } };
+    const e = new ApplyEngine({ configPath, journalPath, renderers: [bad], clock });
+    await expect(e.apply(changed())).rejects.toThrow(/nope/);
+    expect(e.status().lastResult?.outcome).toBe("failed");
+  });
+
+  it("reports a rollback performed at start-up", async () => {
+    const { clock } = fakeClock();
+    const first = new ApplyEngine({ configPath, journalPath, renderers: [renderer()], clock });
+    const { id } = await first.apply(changed());
+
+    const second = new ApplyEngine({ configPath, journalPath, renderers: [renderer()], clock });
+    await second.recover();
+    expect(second.status().lastResult).toEqual({ id, outcome: "reverted", at: 0 });
+  });
+});
+
+/**
+ * A journal that parses but does not hold a usable configuration is the
+ * dangerous case: handing it to saveConfig writes garbage over the only good
+ * copy on the device, and throwing out of recover() stops the daemon starting
+ * at all. Neither is acceptable, so an unusable journal is treated as none.
+ */
+describe("ApplyEngine.recover with a damaged journal", () => {
+  let stderr: string;
+
+  beforeEach(() => {
+    stderr = "";
+    vi.spyOn(process.stderr, "write").mockImplementation((chunk: unknown) => {
+      stderr += String(chunk);
+      return true;
+    });
+  });
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  async function recoverFrom(contents: string): Promise<ApplyEngine> {
+    writeFileSync(journalPath, contents);
+    const { clock } = fakeClock();
+    const e = new ApplyEngine({ configPath, journalPath, renderers: [renderer()], clock });
+    await e.recover();
+    return e;
+  }
+
+  it("discards a journal that is not valid JSON", async () => {
+    const e = await recoverFrom("{ truncated by a power cut");
+    expect(loadConfig(configPath)).toEqual(DEFAULT_CONFIG);
+    expect(existsSync(journalPath)).toBe(false);
+    expect(e.status().state).toBe("idle");
+    expect(stderr).toMatch(/discarding the apply journal/);
+  });
+
+  it("never writes a rollback target that is not a configuration", async () => {
+    await recoverFrom(JSON.stringify({ id: "x", previous: { nonsense: true }, startedAt: 0 }));
+    expect(loadConfig(configPath)).toEqual(DEFAULT_CONFIG);
+    expect(existsSync(journalPath)).toBe(false);
+    expect(stderr).toMatch(/discarding the apply journal/);
+  });
+
+  it("starts cleanly when the journal has no rollback target at all", async () => {
+    const e = await recoverFrom(JSON.stringify({ id: "x", startedAt: 0 }));
+    expect(loadConfig(configPath)).toEqual(DEFAULT_CONFIG);
+    expect(existsSync(journalPath)).toBe(false);
+    expect(e.status().state).toBe("idle");
   });
 });

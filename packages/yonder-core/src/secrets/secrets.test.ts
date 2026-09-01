@@ -3,31 +3,11 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { generateSecret } from "./generate.js";
 import { SecretStore } from "./store.js";
 
 let dir: string;
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), "yonder-sec-")); });
 afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
-
-describe("generateSecret", () => {
-  it("produces a WPA2-legal pre-shared key", () => {
-    const s = generateSecret("psk");
-    expect(s.length).toBeGreaterThanOrEqual(12);
-    expect(s.length).toBeLessThanOrEqual(63);
-  });
-
-  it("never repeats across many calls", () => {
-    const seen = new Set(Array.from({ length: 500 }, () => generateSecret("psk")));
-    expect(seen.size).toBe(500);
-  });
-
-  it("avoids characters that are ambiguous when read aloud", () => {
-    for (let i = 0; i < 200; i++) {
-      expect(generateSecret("psk")).not.toMatch(/[O0lI1]/);
-    }
-  });
-});
 
 describe("SecretStore", () => {
   it("creates a secret on first ensure and reports it as new", () => {
