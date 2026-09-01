@@ -7,5 +7,13 @@ export { ConfigError } from "./config/errors.js";
 export { SecretStore } from "./secrets/store.js";
 export { generateSecret } from "./secrets/generate.js";
 export { ApplyEngine } from "./apply/engine.js";
-export { systemClock, type Renderer, type Clock, type ApplyStatus } from "./apply/types.js";
+export {
+  systemClock,
+  type Renderer,
+  type Clock,
+  type ApplyStatus,
+  type ApplyState,
+  type ApplyResult,
+  type ApplyOutcome,
+} from "./apply/types.js";
 export { startServer } from "./daemon/server.js";
