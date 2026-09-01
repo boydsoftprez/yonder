@@ -19,7 +19,8 @@ already do well, so it waits.
 *The only milestone with nothing to look at. Kept deliberately thin.*
 
 - Repository, GPL-3.0, contribution and security policy
-- CI: lint, unit tests, and a Node-RED node test harness that actually runs
+- CI: lint and unit tests. The Node-RED node test harness lands with the first node
+  package in M1 — there is nothing to exercise it on until then
 - Configuration schema and model — R-CFG-01, R-CFG-02
 - Apply/rollback engine with the confirmation timer — R-CFG-03
 - Secret generation and storage — R-CFG-04
