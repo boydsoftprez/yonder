@@ -1,0 +1,235 @@
+# Roadmap
+
+[`requirements.md`](requirements.md) says what Yonder must do. This says in what order.
+
+**Ordering principle: build the front door first, then add rooms behind it.**
+
+M1 produces the console. Every milestone after it adds a section to that console and can
+be dogfooded the day it lands. Nothing is built without somewhere to put it, and nothing
+sits in a branch waiting for a UI to exist.
+
+Within that, the differentiators come early: remote access and cellular are what make
+Yonder worth building. Telemetry routing over a local network is the part other projects
+already do well, so it waits.
+
+---
+
+## M0 — Groundwork
+
+*The only milestone with nothing to look at. Kept deliberately thin.*
+
+- Repository, GPL-3.0, contribution and security policy
+- CI: lint, unit tests, and a Node-RED node test harness that actually runs
+- Configuration schema and model — R-CFG-01, R-CFG-02
+- Apply/rollback engine with the confirmation timer — R-CFG-03
+- Secret generation and storage — R-CFG-04
+- `installer/install.sh` skeleton with the role runner
+
+The rollback engine is here rather than later for one reason: once a dozen call sites
+write configuration directly, adding a confirmation timer means touching all of them.
+Built first, every later feature inherits it and none can bypass it.
+
+**Done when:** CI is green, a configuration round-trips through validate → apply → revert
+in tests, and the installer runs to completion on a clean board.
+
+---
+
+## M1 — First boot
+
+*Flash it, power it on, and you are looking at Yonder.*
+
+This is the front door and the substrate for everything after it. It is also, on its own,
+the fix for the worst failure mode in this class of product: if Wi-Fi credentials are only
+ever entered through a console you reach over the access point, there is nothing to get
+wrong at flash time and no way to end up locked out of your own device.
+
+- Access point with a per-device password and a static address — R-NET-01, R-SEC-01, R-CFG-06
+- DHCP for access-point clients — R-NET-02
+- Web console served from the device, no asset fetched from the internet — R-UI-01, R-UI-02
+- Board and resource status: model, CPU load and temperature, memory, uptime — R-SYS-01, R-SYS-02
+- Live activity log — R-DIA-05
+- **Wi-Fi client configured from the console**, including scanning for networks — R-NET-03
+- Ethernet with DHCP — R-NET-04
+- **Access-point fallback after 90 seconds without traffic** — R-NET-07
+- Configuration apply and rollback used in anger for the first time — R-CFG-03
+- Reachability and ping diagnostics — R-DIA-01, R-DIA-02
+- **No unauthenticated write path from a non-loopback interface** — R-SEC-04
+- **Flow editor gated behind the password set at setup** — R-SEC-05
+
+The last two are here rather than in a later hardening pass because the console is a
+configuration write path and a code-execution surface from the first commit that serves
+it. Bolting authentication on afterwards means a window in which it was absent, and habits
+formed around its absence.
+
+**Done when:** a freshly flashed board brings up an access point, you join it from a
+laptop, open the console, scan for your Wi-Fi, join it, and the board is online — and when
+you enter the wrong Wi-Fi password on purpose, the access point comes back on its own and
+you fix it from the same console. No card reader.
+
+---
+
+## M2 — Remote access
+
+*The first half of the pitch, and the lifeline for the next milestone.*
+
+Placed before cellular because it needs no extra hardware — the mesh works over the Wi-Fi
+or Ethernet connection M1 just gave you — and because having it working means you can
+still reach the board while you are breaking its cellular configuration.
+
+- ZeroTier: join by network ID from the config file, leave, status — R-VPN-01, R-VPN-04
+- Tailscale, fully implemented — R-VPN-02
+- Direct-versus-relayed reporting — R-VPN-03
+- Neither enabled by default — R-VPN-05
+- Order and rationale in [ADR-0004](adr/0004-zerotier-primary-mesh-vpn.md)
+
+**Done when:** you open the console from a different network entirely, through the mesh.
+
+---
+
+## M3 — Cellular
+
+*The other half. The grind, with a lifeline already in place.*
+
+- Tethered-appliance modems — R-CEL-01
+- APN-configured modems — R-CEL-02, R-CEL-03
+- Mode-switch quirk table, extensible without code changes — R-CEL-04
+- Signal, operator and radio technology reporting — R-CEL-05
+- Reconnect without operator action — R-CEL-06
+- Egress preference from configuration, now that there is more than one path — R-NET-06
+
+**Done when:** a board with a SIM and no other connection gets online by itself, reports
+its carrier and signal, and is reachable over the mesh through carrier CGNAT.
+
+At this point Yonder does the thing its name is about, with nothing attached to it.
+
+---
+
+## M4 — Video, one USB camera
+
+*The payload.*
+
+USB first, deliberately. It works on every board in the matrix, needs no libcamera stack,
+and many USB cameras emit H.264 already — so the first stream can be captured and
+repackaged **without touching the per-board encoder matrix at all.** That separates "get
+bytes moving over a cellular link" from "encode efficiently on each SoC", and those are two
+different problems that should not be debugged at the same time.
+
+- USB UVC capture, including cameras that emit compressed video — R-CAM-02
+- Pass-through or software path first; per-board encoder selection deferred to M6 — R-CAM-06
+- RTP/UDP H.264 to a ground station — R-VID-01, R-VID-10
+- WebRTC preview in the browser — R-VID-03
+- **Both simultaneously** — R-VID-05
+- RTSP output — R-VID-04
+- Stream controls: start, stop, resolution, bitrate, and a status readout — R-CTL-01 … R-CTL-03, R-CTL-10
+- Fixed bitrate, for operators who want determinism — R-VID-08
+
+**Done when:** you watch usable video in a browser, over a cellular link, from another
+network — while a ground station receives the same feed.
+
+---
+
+## M5 — Telemetry
+
+*Now attach an aircraft.*
+
+- MAVLink routing configured from the config file — R-MAV-03, R-MAV-04, R-MAV-05
+- Ground-station traffic on a path a control-plane restart cannot interrupt — R-MAV-06
+- Flight-controller autodetect by baud sweep — R-MAV-01, R-MAV-02
+- Three ground-station endpoints, settable from the console — R-MAV-03
+- Loopback-only ingest by default — R-MAV-07
+- Autocast: telemetry up at boot with no operator action — R-MAV-08, R-MAV-09
+- Link state reporting — R-MAV-10
+- Attitude, heading, altitude, GPS, speeds, mode, arm state — R-TEL-01 … R-TEL-07
+- Per-cell voltage — R-TEL-08
+- **Telemetry overlay on the video** — R-TEL-12
+- Moving map, fullscreen, and inset swap — R-TEL-11, R-TEL-13, R-TEL-14
+- MAVLink path verification — R-DIA-04
+
+**Done when:** a ground station has telemetry and video over cellular from beyond line of
+sight, with the HUD drawn over the picture.
+
+**That is the whole product, minimally.** Everything after this makes it good.
+
+---
+
+## M6 — Multi-camera and the full board matrix
+
+- Per-board encoder resolution at install — R-CAM-06, R-CAM-07, R-HW-01, R-HW-02
+- CSI capture — R-CAM-01
+- Stable camera identity; hardware-generated navigation — R-CAM-05, R-UI-03
+- Independent pipeline per camera — R-CAM-09
+- Per-board limits enforced in validation — R-CAM-10, R-HW-05
+- HDMI input with EDID push — R-CAM-03
+- Rockchip boards: hardware H.264 and H.265 — R-HW-03, R-CAM-08, R-VID-02
+- Second Ethernet and USB gadget — R-NET-04, R-NET-05
+- One image per board family, no overclocking by default — R-HW-04, R-HW-06
+
+**Done when:** two cameras stream simultaneously on a board that supports it, and every
+board in the matrix boots and streams.
+
+---
+
+## M7 — Commanding and the rest of the console
+
+- **Command safety in place before any command ships** — R-CMD-04 … R-CMD-09
+- Flight-mode set and the autopilot's advertised command set — R-CMD-01 … R-CMD-03
+- Full parameter get/set with search — R-PAR-01 … R-PAR-04
+- Battery model and tuning shortcuts — R-PAR-06, R-PAR-07
+- Efficiency and consumed energy — R-TEL-09, R-TEL-10
+- GPIO relays, latching and pulsed — R-IO-01 … R-IO-04
+- Restart and shutdown — R-SYS-03
+- Remaining camera controls — R-CTL-04 … R-CTL-09
+- Gimbal camera control — R-CAM-11
+- Disable Wi-Fi for flight; hostname discovery — R-NET-08, R-NET-09
+- Throughput reporting, bandwidth test, link-loss response — R-NET-10, R-NET-11, R-DIA-03
+- Support bundle with secrets removed — R-DIA-06
+- Usability: tablet layout, command feedback, high-latency tolerance — R-UI-04 … R-UI-06
+
+**Done when:** every P1 and P2 requirement is met.
+
+---
+
+## M8 — Reproducible images
+
+- CI runs the installer in a chroot over base OS images
+- A published image per board family, per release — R-HW-04
+- Headless setup by dropping a config file on the boot partition — R-CFG-05, R-CFG-07
+- Release process, checksums, signed tags
+- Update mechanism with no entitlement check — R-SYS-04, R-SYS-05
+- Image builds verified to carry no credential material — R-SEC-07
+- Storage and wear behaviour verified — R-STO-01 … R-STO-03, R-STO-05
+- Remaining security posture: no remote root, unprivileged control plane, verified no outbound contact — R-SEC-02, R-SEC-03, R-SEC-06
+
+**Done when:** a tagged commit produces the same images on a clean runner, and a stranger
+can flash one and fly.
+
+---
+
+## M9 — The reasons to choose it
+
+| Capability | Requirement |
+|---|---|
+| Adaptive bitrate from link feedback | R-VID-07 |
+| SRT for lossy cellular links | R-VID-06 |
+| Instant picture for late joiners | R-VID-09 |
+| All ArduPilot vehicle types | R-MAV-11 |
+| Dual modem, failover and bonding | R-CEL-07, R-CEL-08 |
+| Network cameras over RTSP | R-CAM-04 |
+| NTRIP / RTK corrections | R-SYS-07 |
+| Flight log management | R-SYS-06 |
+| Remote ID | R-SYS-08 |
+| Read-only or overlay root | R-STO-04 |
+| TLS for the web console | R-SEC-08 |
+| PX4 | R-MAV-12 |
+
+Ordered within M9 by value over effort. Adaptive bitrate and SRT come first: they are the
+difference between a stream that degrades and a stream that drops, and on a cellular link
+that is the whole product.
+
+---
+
+## Deliberately not scheduled
+
+- A ground-station application — Mission Planner and QGroundControl exist
+- Fleet management, accounts, cloud anything
+- Anything in the "Non-requirements" section of [`requirements.md`](requirements.md)

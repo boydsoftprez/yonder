@@ -1,0 +1,347 @@
+# Yonder architecture
+
+Status: **draft for review** · Last updated: 2026-08-31
+
+Yonder is a companion-computer stack for fixed-wing and multirotor UAS that gives
+unlimited range over 4G/5G. It runs on Raspberry Pi and Radxa boards alongside an
+ArduPilot flight controller, and it works with no internet connection, ever.
+
+This document explains what runs, why, and where the boundaries are. What it must do is
+in [`requirements.md`](requirements.md).
+
+---
+
+## 1. Principles
+
+These are load-bearing. Where a design choice below looks odd, it is usually one of these
+being enforced.
+
+1. **Offline-first, always.** No component may require a network call to a server we
+   operate. Not at boot, not at first run, not to unlock a feature. If the aircraft is in
+   a field with no signal, everything still works.
+2. **The autopilot flies the aircraft.** Yonder is a radio, a camera and a web page. It
+   relays commands an operator asked for — mode changes, parameter writes, payload
+   outputs — and never originates one. If Yonder stops, the aircraft carries on under the
+   autopilot's own logic. That property is never traded away for a feature.
+3. **Unbrickable.** No configuration change may leave the device unreachable. There is
+   always a way back in without a card reader.
+4. **Reviewable by strangers.** Every behaviour lives in source a contributor can read,
+   diff and test. Generated blobs are build outputs, never the source of truth.
+5. **One installer.** The installer is the only definition of a working system. Images are
+   produced by running it. There is no hand-made image.
+6. **Requirements first.** Every behaviour traces to a numbered requirement, so scope is
+   arguable in the open rather than assumed.
+
+---
+
+## 2. What runs on the device
+
+Five long-lived processes. Everything else is a library or a system service that ships
+with the distribution.
+
+| Process | Role | Licence | Ours? |
+|---|---|---|---|
+| **Node-RED** | Control plane: operator UI, MAVLink logic, orchestration of everything below | Apache-2.0 | Configure + custom nodes |
+| **mavlink-router** | MAVLink fan-out: serial/USB in, UDP + TCP out | Apache-2.0 | Configure |
+| **mediamtx** | Media server: WebRTC, RTSP, SRT, RTMP, HLS from one binary | MIT | Configure |
+| **GStreamer** | One capture/encode pipeline per camera | LGPL-2.1 | Compose pipelines |
+| **NetworkManager + ModemManager** | Interfaces, Wi-Fi AP, cellular | GPL-2.0 | Configure |
+
+Two absences are deliberate:
+
+- **No separate WebRTC gateway.** mediamtx does WebRTC *and* RTSP *and* SRT in a single
+  MIT-licensed Go binary. A dedicated gateway would mean a second server for the other
+  protocols, and would not give us SRT.
+- **No hostapd.** NetworkManager's own AP mode covers everything we need.
+
+### 2.1 Why Node-RED is the core
+
+Decided in [ADR-0001](adr/0001-node-red-as-core.md). Briefly: it is the proven shape for
+this product, it is one thing to install and debug, and its node ecosystem is genuinely
+valuable to the audience.
+
+Node-RED is sometimes associated with products that fetch their interface at boot. That
+is a consequence of coupling the UI to a licence check — if the UI is the flows and the
+licence check is in the flows, shipping the UI ships the bypass. Yonder has no licence
+check, so the flows ship on the card, work offline, and live in git where they can be
+reviewed.
+
+### 2.2 The rule that makes it reviewable
+
+**Logic lives in custom nodes. Never in function nodes.**
+
+A `function` node is JavaScript typed into a box and serialised into `flows.json` along
+with every wire and every pixel coordinate. A pull request against it is unreadable, and
+therefore unmergeable. A repo that cannot take pull requests is not an open-source
+project.
+
+So:
+
+- Every behaviour ships as `node-red-contrib-yonder-*`, an ordinary npm package with
+  source files, unit tests and a version number.
+- The shipped flows are **wiring only** — nodes and connections, no embedded code.
+- `functionExternalModules` is off and the `function` node type is not enabled in the
+  shipped profile. An operator who wants it opts in explicitly.
+
+This also keeps a future migration open: if one service ever needs to leave the Node-RED
+process for fault isolation, a clean node package can be lifted out and run standalone.
+Logic buried in function nodes could never be.
+
+---
+
+## 3. Data flows
+
+### 3.1 MAVLink
+
+```
+Flight controller (ArduPilot)
+   │  UART @ 57600/115200/230400/921600  or  USB CDC-ACM
+   ▼
+mavlink-router
+   ├── UDP  → ground station 0        (default :14550)
+   ├── UDP  → ground station 1        (default :14551)
+   ├── UDP  → ground station 2        (default :14552)
+   ├── TCP  server                    (default :5760)
+   └── UDP  → 127.0.0.1:14559         → Node-RED
+```
+
+**Raw MAVLink never passes through Node-RED on its way to a ground station.**
+mavlink-router fans it out directly. If Node-RED restarts, Mission Planner does not
+notice. Node-RED is a *consumer* of a loopback copy, plus a producer of commands.
+
+Flight-controller detection sweeps the baud rates above in order — these are the rates
+ArduPilot is actually configured for in the field — and reports the port and baud it
+settled on.
+
+MAVLink ingest binds **loopback only** unless an operator explicitly opts in, and the
+opt-in is logged. An open UDP server on a routable address is an unauthenticated command
+path to the vehicle.
+
+### 3.2 Video
+
+One pipeline per camera, with a `tee`. This is the important departure.
+
+```
+Camera (CSI / USB / HDMI-via-TC358743)
+   │
+   ▼
+GStreamer: capture → convert → encode (board-specific encoder)
+   │
+   ├── tee branch A → RTP/UDP → ground station :5604      (Mission Planner / QGC)
+   │
+   └── tee branch B → mediamtx
+                         ├── WebRTC  → browser preview (the Cockpit)
+                         ├── RTSP    → :8554/<camera>   (QGC, VLC)
+                         └── SRT     → lossy-link transport with recovery
+```
+
+A single-destination design forces a choice between watching in the browser and feeding
+your ground station. A `tee` costs almost nothing and removes the trade-off: **you get the
+browser preview and the ground-station feed at the same time.**
+
+Encoder selection is per board, resolved at install time and recorded in config:
+
+| Board | H.264 | H.265 |
+|---|---|---|
+| Pi Zero 2 W, Pi 3, Pi 4, CM3, CM4 | V4L2 M2M hardware | — |
+| Pi 5, CM5 | **software** (`x264enc`) | — |
+| Radxa (rk35xx) | rkmpp hardware | rkmpp hardware |
+
+The Pi 5 dropped the hardware H.264 encoder its predecessors had. It works, in software,
+and it runs hotter and slower than a Pi 4 doing the same job.
+
+### 3.3 Control and state
+
+```
+Browser ──HTTP/WS──► Node-RED ──► custom nodes ──┬──► mavlink-router  (config + reload)
+                                                  ├──► mediamtx       (HTTP control API)
+                                                  ├──► GStreamer      (spawn / supervise)
+                                                  ├──► NetworkManager (D-Bus)
+                                                  ├──► ModemManager   (D-Bus)
+                                                  └──► libgpiod       (relays)
+```
+
+Node-RED talks to system services over their real interfaces — D-Bus for NM and MM, an
+HTTP API for mediamtx — not by shelling out and parsing text where an interface exists.
+
+---
+
+## 4. Configuration
+
+### 4.1 One declarative file
+
+`/etc/yonder/config.yaml` is the single source of truth for device state. Everything
+else — `mavlink-router` config, NetworkManager keyfiles, mediamtx config, GStreamer
+pipeline parameters — is **generated** from it.
+
+```yaml
+version: 1
+vehicle:
+  autopilot: ardupilot
+mavlink:
+  serial: { device: auto, baud: auto }
+  endpoints:
+    - { name: gcs0, host: 192.168.2.10, port: 14550 }
+  tcp_server: { enabled: true, port: 5760 }
+  autocast: true
+cameras:
+  - id: cam0
+    source: { type: csi }
+    encoder: auto
+    bitrate: { mode: adaptive, min: 500k, target: 2M, max: 6M }
+    outputs:
+      - { type: rtp,  host: 192.168.2.10, port: 5604 }
+      - { type: webrtc }
+      - { type: rtsp, path: /cam0 }
+network:
+  ap:     { ssid: yonder, psk: !secret ap_psk, address: 192.168.77.1/24 }
+  client: { ssid: null, psk: !secret wifi_psk }
+  modem:  { mode: auto, apn: null }
+  priority: [ethernet, modem, wifi_client]
+```
+
+Two properties matter more than the schema:
+
+- **A human can write it.** Headless setup means dropping this file on the boot partition.
+  No imaging wizard, no cloud, no dialog.
+- **Nothing is authoritative except this file.** If you edit a NetworkManager keyfile by
+  hand, the next apply overwrites it. That is intentional — a single writer is what makes
+  rollback possible.
+
+### 4.2 Rollback, and why the device cannot brick
+
+The failure this exists to prevent: a wrong Wi-Fi SSID typed at flash time leaves a device
+that never joins a network, with no way back in short of a card reader.
+
+Our apply cycle:
+
+1. Validate the new config against the schema. Reject and keep running on failure.
+2. Snapshot the current config as `last-known-good`.
+3. Apply, and start a **confirmation timer** (default 120 s).
+4. If the operator's session reaches the device again, the change is confirmed.
+5. If the timer expires unconfirmed, **revert to last-known-good and reboot**.
+
+And independently of all that, a boot-time guarantee:
+
+> **If no configured network is carrying traffic within 90 seconds of boot, the access
+> point comes up regardless of configuration.**
+
+The AP is a floor, not a mode. There is always a way in. The fallback is on by default,
+and disabling it requires a config key whose name says what it does.
+
+---
+
+## 5. Repository layout
+
+```
+yonder/
+├── LICENSE                     GPL-3.0
+├── README.md
+├── CONTRIBUTING.md
+├── SECURITY.md
+├── docs/
+│   ├── requirements.md         what Yonder must do, numbered
+│   ├── architecture.md         this file
+│   ├── roadmap.md
+│   ├── configuration.md        config.yaml reference
+│   ├── getting-started.md
+│   ├── hardware/               per-board notes and wiring
+│   └── adr/                    architecture decision records
+├── packages/                   the Node-RED nodes — where logic lives
+│   ├── yonder-core/            config model, schema, apply/rollback engine
+│   ├── node-red-contrib-yonder-mavlink/
+│   ├── node-red-contrib-yonder-video/
+│   ├── node-red-contrib-yonder-network/
+│   ├── node-red-contrib-yonder-modem/
+│   ├── node-red-contrib-yonder-system/
+│   └── node-red-contrib-yonder-gpio/
+├── flows/                      shipped dashboard flows — wiring only
+├── config/
+│   ├── schema/                 JSON Schema for config.yaml
+│   └── defaults/
+├── installer/
+│   ├── install.sh              the single source of truth
+│   ├── roles/                  idempotent units of work
+│   └── profiles/               per-board overrides
+├── systemd/
+├── image/                      CI image build (chroot over base OS images)
+└── .github/workflows/
+```
+
+Node packages are published **unscoped** as `node-red-contrib-yonder-*` so that Node-RED's
+palette manager finds them by its normal `node-red-contrib-` search. `yonder-core` is a
+plain library package.
+
+### Why `packages/` is a workspace of many small packages
+
+Each node package has one job, its own tests, and its own version. A contributor who
+knows cellular modems can work in `yonder-modem` without reading the video code. That is
+the difference between a project people contribute to and a project people fork.
+
+---
+
+## 6. Distribution
+
+The installer is the source of truth. Images are a build product.
+
+```
+installer/install.sh
+   │
+   ├── run on a running board          → working system
+   │
+   └── run in a chroot in CI
+         ├── over Raspberry Pi OS Lite  → yonder-rpi-<ver>.img.xz
+         └── over Armbian (rk35xx)      → yonder-radxa-<ver>.img.xz
+```
+
+Radxa hardware encoding needs the board vendor's BSP kernel and the Rockchip MPP
+libraries, which is why Radxa is image-only in practice. The Pi supports both paths.
+
+Every release publishes both artifacts and the installer that produced them, so anyone can
+reproduce the image from the same commit.
+
+---
+
+## 7. Security posture
+
+Commitments, enforced in review. Each maps to an `R-SEC` requirement.
+
+| | |
+|---|---|
+| **No shared secrets** | Every credential is per device, generated at first boot, shown once |
+| **No remote root** | Key authentication; root login disabled; password authentication off unless enabled |
+| **No open command path** | MAVLink ingest on loopback only unless explicitly opted in |
+| **Least privilege** | Control plane runs as a dedicated user; privileged operations via narrowly scoped helpers |
+| **No default admin secrets** | Every service secret generated per device, never left at an upstream default |
+| **Encryption available** | HTTP on the local access point; TLS available; the mesh VPN carries its own |
+| **Code execution is gated** | The flow editor requires a password set at setup, and is not reachable from the cellular interface by default |
+
+None of this is exotic. It is the difference between a product and a hobby image.
+
+---
+
+## 8. What we deliberately do not do
+
+- **We do not fly the aircraft.** Yonder *does* command it — a mode change, a parameter
+  write, a payload output are all commands, and sending them is a requirement (R-CMD).
+  What Yonder does not do is decide to send one: no autonomy, no control loops, no
+  failsafe logic. The autopilot owns those, and duplicating them would be dangerous.
+- **We do not implement a licence check**, an activation step, or telemetry back to
+  anyone. Beyond the values argument, coupling a UI to a licence check is what forces a
+  product to fetch its interface at boot.
+- **We do not build a ground station.** Mission Planner and QGC exist. We interoperate.
+- **We do not fork Rpanion-server.** Being GPL-3.0 ourselves means specific components may
+  be borrowed with attribution where that is genuinely better than writing them —
+  see [ADR-0002](adr/0002-licence-gplv3.md).
+
+---
+
+## 9. Open questions
+
+| # | Question | Blocks |
+|---|---|---|
+| 1 | Dashboard 1.x or Dashboard 2.x? 1.x has more nodes; 2.x is maintained and Vue-based | Flow work, M1 |
+| 2 | Which parts of Rpanion-server to borrow — NTRIP client and log management are the candidates | M9 |
+| 3 | Adaptive bitrate control signal: RTCP receiver reports, SRT statistics, or both | M9 |
+| 4 | Does `yonder-core` run inside Node-RED or as a small sidecar owning `config.yaml`? | M0 |
+| 5 | Do we support USB-gadget Ethernet on Pi 4/5, giving a wired path to the UI over the USB port? (R-NET-05) | M5 |
