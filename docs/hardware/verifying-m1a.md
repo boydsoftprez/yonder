@@ -88,39 +88,48 @@ nmcli -t -f SSID,SIGNAL,SECURITY device wifi list ifname wlan0 --rescan yes
 ```
 
 ```bash
-nmcli -t -f DEVICE,IP4.ADDRESS device show
+nmcli -t -f GENERAL.DEVICE,IP4.ADDRESS device show
 ```
 
 These four calls are the entire real interface between `yonder-core` and NetworkManager —
 see `NmcliClient` in `packages/yonder-core/src/net/nmcli/client.ts`, which issues exactly
 these four commands (`devices()`, `connections()`, `scan()`, `activeIpv4()`) and nowhere
-else. Three of the four have a recorded fixture file today, each hand-written and each
-parsed with a pinned field count in `packages/yonder-core/src/net/nmcli/parse.ts`:
+else. Each has a fixture file, all four hand-written, all four parsed in
+`packages/yonder-core/src/net/nmcli/parse.ts`:
 
-| Command | Fixture file | Fields `parseTerse` expects |
+| Command | Fixture file | Parser |
 |---|---|---|
-| `device status` | `packages/yonder-core/src/net/nmcli/fixtures/device-status.txt` | 4 |
-| `connection show` | `packages/yonder-core/src/net/nmcli/fixtures/connection-list.txt` | 4 |
-| `device wifi list` | `packages/yonder-core/src/net/nmcli/fixtures/wifi-scan.txt` | 3 |
-| `device show` (`IP4.ADDRESS`) | none — only an inline example in `client.test.ts` | 2 |
+| `device status` | `fixtures/device-status.txt` | `parseTerse`, 4 fields |
+| `connection show` | `fixtures/connection-list.txt` | `parseTerse`, 4 fields |
+| `device wifi list` | `fixtures/wifi-scan.txt` | `parseTerse`, 3 fields |
+| `device show` (`IP4.ADDRESS`) | `fixtures/device-show-ip4.txt` | `parseDeviceShow`, a field stream |
 
-Capture all four for your own records regardless — the fourth (`activeIpv4`) is what the
-fallback watchdog in Step 6 depends on, and it's worth knowing what your board's real output
-looks like even though there's no on-disk fixture to replace for it today. (Adding one, with
-a matching case in `parse.test.ts`, would be a reasonable follow-up but is outside this
-document's job of writing down what you observed.)
+(Paths are relative to `packages/yonder-core/src/net/nmcli/`.)
 
-Replace the three fixture files with what you captured. Redact real SSIDs and connection
+**The fourth is the one to look at hardest.** `device show` is the only one of the four
+whose output shape has never been seen — see the note at the top of this document. It is
+also the call the fallback watchdog in Step 6 depends on, so a misreading of it is a device
+that never raises its access point, or one that raises it on every boot forever. Three
+things to check against `parseDeviceShow`:
+
+- Field names are **section-qualified**: `GENERAL.DEVICE`, not the bare `DEVICE` that
+  belongs to `device status`. If your `nmcli` rejects the field list outright, that is the
+  finding.
+- Output is a **stream** of `FIELD:value` lines — one line per property, per device — not
+  one record per device. A device with no address should occupy one line; a device with two
+  addresses, three.
+- Addresses appear as `IP4.ADDRESS[1]` (indexed) or `IP4.ADDRESS`. Record which.
+
+Replace all four fixture files with what you captured. Redact real SSIDs and connection
 UUIDs if you want to — a UUID or an SSID string doesn't need to be genuine — but **preserve
 the exact escaping and field structure**: `nmcli -t` escapes a literal colon or backslash
-inside a value with a backslash, and `parseTerse` walks the string character by character to
-undo exactly that (see the comment at the top of `parse.ts`). A redacted SSID like
-`Guest\:Wifi` has to keep its backslash; collapsing it to `Guest:Wifi` changes the field
-count `parseTerse` sees.
+inside a value with a backslash, and both parsers walk the string character by character to
+undo exactly that (see the comments in `parse.ts`). A redacted SSID like `Guest\:Wifi` has to
+keep its backslash; collapsing it to `Guest:Wifi` changes the field count `parseTerse` sees.
 
-**If any record from your board has a different field count than `parseTerse` expects, that
-is a real finding about this parser, not about the fixture.** Fix
-`packages/yonder-core/src/net/nmcli/parse.ts` (and its test in `parse.test.ts`) to handle
+**If your board's output disagrees with either parser — a different field count, a different
+field name, a different shape — the parser is wrong, never the fixture.** Fix
+`packages/yonder-core/src/net/nmcli/parse.ts` (and its tests in `parse.test.ts`) to handle
 what your NetworkManager version actually emits. Do not truncate, reshape, or hand-edit the
 captured output to make it fit the parser as it stands today — the entire point of this step
 is to find out where a real `nmcli` disagrees with what the parser assumed.
@@ -131,7 +140,7 @@ Once the fixtures are in place, from the repository root:
 npm test
 ```
 
-Confirm it's still green before moving on — `parse.test.ts` reads the three fixture files
+Confirm it's still green before moving on — `parse.test.ts` reads all four fixture files
 directly and asserts on their shape (see `packages/yonder-core/src/net/nmcli/parse.test.ts`).
 
 ## Step 2 — Install, and watch the access point come up

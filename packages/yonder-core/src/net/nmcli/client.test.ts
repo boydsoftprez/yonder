@@ -108,13 +108,48 @@ describe("NmcliClient", () => {
     expect(lines.join("\n")).toContain("<redacted>");
   });
 
+  /**
+   * The probe behind the access-point fallback. `device show` takes
+   * section-qualified fields — `GENERAL.DEVICE`, not the bare `DEVICE` that
+   * belongs to `device status` — and emits a stream of `FIELD:value` lines
+   * rather than one record per device.
+   */
+  it("asks device show for section-qualified fields", async () => {
+    const { run, calls } = fake({});
+    await new NmcliClient(run).activeIpv4();
+    expect(calls[0]).toEqual([
+      "nmcli", "-t", "-f", "GENERAL.DEVICE,IP4.ADDRESS", "device", "show",
+    ]);
+  });
+
   it("reports active IPv4 addresses per device", async () => {
     const { run } = fake({
-      "nmcli -t -f DEVICE,IP4.ADDRESS device show":
-        ok("eth0:192.168.1.50/24\nwlan0:\n"),
+      "nmcli -t -f GENERAL.DEVICE,IP4.ADDRESS device show": ok(
+        "GENERAL.DEVICE:eth0\nIP4.ADDRESS[1]:192.168.1.50/24\nGENERAL.DEVICE:wlan0\n",
+      ),
     });
     expect(await new NmcliClient(run).activeIpv4()).toEqual([
       { device: "eth0", address: "192.168.1.50/24" },
     ]);
+  });
+
+  it("reports each address separately when a device holds several", async () => {
+    const { run } = fake({
+      "nmcli -t -f GENERAL.DEVICE,IP4.ADDRESS device show": ok(
+        "GENERAL.DEVICE:eth0\nIP4.ADDRESS[1]:192.168.1.50/24\nIP4.ADDRESS[2]:10.42.0.1/24\n",
+      ),
+    });
+    expect(await new NmcliClient(run).activeIpv4()).toEqual([
+      { device: "eth0", address: "192.168.1.50/24" },
+      { device: "eth0", address: "10.42.0.1/24" },
+    ]);
+  });
+
+  it("reports nothing when no device holds an address", async () => {
+    const { run } = fake({
+      "nmcli -t -f GENERAL.DEVICE,IP4.ADDRESS device show":
+        ok("GENERAL.DEVICE:eth0\nGENERAL.DEVICE:wlan0\n"),
+    });
+    expect(await new NmcliClient(run).activeIpv4()).toEqual([]);
   });
 });

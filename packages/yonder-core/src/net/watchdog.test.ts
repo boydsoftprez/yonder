@@ -41,10 +41,26 @@ function fakeClock() {
   };
 }
 
+/**
+ * `nmcli -t -f GENERAL.DEVICE,IP4.ADDRESS device show` output, in the shape
+ * the real thing emits: a stream of `FIELD:value` lines, one per property per
+ * device, not one record per device. See parseDeviceShow.
+ */
+const DEVICE_SHOW = {
+  /** Two interfaces, neither holding an address. */
+  none: "GENERAL.DEVICE:eth0\nGENERAL.DEVICE:wlan0\n",
+  /** One interface only, holding nothing. */
+  nothingUp: "GENERAL.DEVICE:eth0\n",
+  ethernetUp: "GENERAL.DEVICE:eth0\nIP4.ADDRESS[1]:192.168.1.50/24\nGENERAL.DEVICE:wlan0\n",
+  /** Only the access point's own address is up. */
+  apOnly: "GENERAL.DEVICE:wlan0\nIP4.ADDRESS[1]:192.168.77.1/24\n",
+  loopbackOnly: "GENERAL.DEVICE:lo\nIP4.ADDRESS[1]:127.0.0.1/8\nGENERAL.DEVICE:eth0\n",
+};
+
 function harness(deviceShow: string, config: Config = DEFAULT_CONFIG) {
   const { clock, advance } = fakeClock();
   const run: CommandRunner = async (argv) =>
-    argv.join(" ") === "nmcli -t -f DEVICE,IP4.ADDRESS device show" ? ok(deviceShow) : ok();
+    argv.join(" ") === "nmcli -t -f GENERAL.DEVICE,IP4.ADDRESS device show" ? ok(deviceShow) : ok();
   let raised = 0;
   const wd = new FallbackWatchdog({
     client: new NmcliClient(run),
@@ -57,7 +73,7 @@ function harness(deviceShow: string, config: Config = DEFAULT_CONFIG) {
 
 describe("FallbackWatchdog", () => {
   it("raises the access point when nothing is reachable at the deadline", async () => {
-    const { wd, advance, raised } = harness("eth0:\nwlan0:\n");
+    const { wd, advance, raised } = harness(DEVICE_SHOW.none);
     wd.start();
     advance(90_000);
     await flushMicrotasks();
@@ -65,7 +81,7 @@ describe("FallbackWatchdog", () => {
   });
 
   it("does not raise it when an interface has an address", async () => {
-    const { wd, advance, raised } = harness("eth0:192.168.1.50/24\nwlan0:\n");
+    const { wd, advance, raised } = harness(DEVICE_SHOW.ethernetUp);
     wd.start();
     advance(90_000);
     await flushMicrotasks();
@@ -73,7 +89,7 @@ describe("FallbackWatchdog", () => {
   });
 
   it("does not raise it before the deadline", async () => {
-    const { wd, advance, raised } = harness("eth0:\n");
+    const { wd, advance, raised } = harness(DEVICE_SHOW.nothingUp);
     wd.start();
     advance(89_000);
     await Promise.resolve();
@@ -83,7 +99,7 @@ describe("FallbackWatchdog", () => {
   it("ignores the access point's own address when deciding", async () => {
     // 192.168.77.1 is the access point itself; its presence must not count
     // as "we are reachable", or the fallback could never fire twice.
-    const { wd, advance, raised } = harness("wlan0:192.168.77.1/24\n");
+    const { wd, advance, raised } = harness(DEVICE_SHOW.apOnly);
     wd.start();
     advance(90_000);
     await flushMicrotasks();
@@ -91,7 +107,7 @@ describe("FallbackWatchdog", () => {
   });
 
   it("ignores loopback", async () => {
-    const { wd, advance, raised } = harness("lo:127.0.0.1/8\neth0:\n");
+    const { wd, advance, raised } = harness(DEVICE_SHOW.loopbackOnly);
     wd.start();
     advance(90_000);
     await flushMicrotasks();
@@ -101,7 +117,7 @@ describe("FallbackWatchdog", () => {
   it("honours a configured timeout other than the default", async () => {
     const c: Config = structuredClone(DEFAULT_CONFIG);
     c.network.ap.fallback.timeout = 120;
-    const { wd, advance, raised } = harness("eth0:\n", c);
+    const { wd, advance, raised } = harness(DEVICE_SHOW.nothingUp, c);
     wd.start();
     advance(90_000);
     await Promise.resolve();
@@ -114,7 +130,7 @@ describe("FallbackWatchdog", () => {
   it("does nothing at all when the fallback is disabled", async () => {
     const c: Config = structuredClone(DEFAULT_CONFIG);
     c.network.ap.fallback.enabled = false;
-    const { wd, advance, raised } = harness("eth0:\n", c);
+    const { wd, advance, raised } = harness(DEVICE_SHOW.nothingUp, c);
     wd.start();
     advance(200_000);
     await Promise.resolve();
@@ -122,7 +138,7 @@ describe("FallbackWatchdog", () => {
   });
 
   it("stop() cancels a pending check", async () => {
-    const { wd, advance, raised } = harness("eth0:\n");
+    const { wd, advance, raised } = harness(DEVICE_SHOW.nothingUp);
     wd.start();
     wd.stop();
     advance(200_000);
