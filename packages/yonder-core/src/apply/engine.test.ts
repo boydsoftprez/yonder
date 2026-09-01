@@ -285,6 +285,65 @@ describe("ApplyEngine", () => {
     await expect(e.apply(changed())).resolves.toHaveProperty("id");
   });
 
+  /**
+   * The guard that makes renderCurrent() safe to call from outside. apply()
+   * holds the reservation across its renders precisely so two configurations
+   * are never in flight at once; a public entry into renderAll that ignored
+   * that could push a stale configuration through a renderer mid-apply.
+   * Deleting the guard left every test green.
+   */
+  it("refuses renderCurrent() while an apply is in flight", async () => {
+    const { clock } = fakeClock();
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const seen: Config[] = [];
+    // Blocks the first render only, so removing the guard produces a clean
+    // "resolved instead of rejecting" rather than a hang.
+    const slow: Renderer = {
+      name: "slow",
+      async render(c) { seen.push(structuredClone(c)); if (seen.length === 1) await gate; },
+    };
+    const e = new ApplyEngine({ configPath, journalPath, renderers: [slow], clock });
+
+    const applying = e.apply(changed());
+    expect(e.status().state).toBe("applying");
+    await expect(e.renderCurrent()).rejects.toThrow(/in flight/);
+    // And nothing reached the renderer behind the apply's back.
+    expect(seen).toHaveLength(1);
+
+    release();
+    await applying;
+  });
+
+  /**
+   * Task 6 skipped the rollback re-render for a renderer that timed out, on
+   * the grounds that it is presumed still wedged (K-10). What it promised to
+   * preserve was the behaviour for every *other* failure: a renderer that
+   * threw still gets the previous configuration pushed back through it, so
+   * the system goes back as well as the file. Only the inverse was gated —
+   * `if (!(e instanceof RenderTimeoutError))` could be `if (false)` and the
+   * suite stayed green.
+   */
+  it("re-renders the previous configuration when a renderer throws", async () => {
+    const { clock } = fakeClock();
+    const seen: Config[] = [];
+    let fail = true;
+    const flaky: Renderer = {
+      name: "flaky",
+      async render(c) {
+        seen.push(structuredClone(c));
+        if (fail) { fail = false; throw new Error("nope"); }
+      },
+    };
+    const e = new ApplyEngine({ configPath, journalPath, renderers: [flaky], clock });
+
+    await expect(e.apply(changed())).rejects.toThrow(/nope/);
+    // config.yaml is restored either way. This is the other half: the running
+    // system is told about it too.
+    expect(seen).toHaveLength(2);
+    expect(seen[1].system.hostname).toBe("yonder");
+  });
+
   it("records a timed-out apply as failed in lastResult", async () => {
     const { clock, advance } = fakeClock();
     const hung: Renderer = { name: "hung", render: () => new Promise(() => {}) };
