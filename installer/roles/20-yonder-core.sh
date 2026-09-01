@@ -3,10 +3,32 @@
 # shellcheck shell=sh
 
 ensure_pkgs nodejs
+command -v npm >/dev/null 2>&1 || ensure_pkgs npm
+require_node 20
 
-log "copying yonder-core to $YONDER_PREFIX"
+yc_src="$YONDER_SRC/packages/yonder-core"
+yc_dest="$YONDER_PREFIX/packages/yonder-core"
+
+log "installing yonder-core into $yc_dest"
 ensure_dir "$YONDER_PREFIX/packages" 0755
-run cp -r "$YONDER_SRC/packages/yonder-core" "$YONDER_PREFIX/packages/"
+ensure_dir "$yc_dest" 0755
+run rm -rf "$yc_dest/src"
+run cp -r "$yc_src/src" "$yc_dest/src"
+run cp "$yc_src/package.json" "$yc_dest/package.json"
+run cp "$yc_src/tsconfig.json" "$yc_dest/tsconfig.json"
+
+# The unit starts dist/daemon/server.js, which is generated, and the daemon's
+# dependencies live in the workspace root when the tree is a checkout. Neither
+# is present on a board, so build here and leave behind only what the service
+# needs to run.
+log "installing dependencies and building"
+run env npm --prefix "$yc_dest" install --no-audit --no-fund
+run env npm --prefix "$yc_dest" run build
+run env npm --prefix "$yc_dest" prune --omit=dev
+
+if [ "$DRY_RUN" != "1" ] && [ ! -f "$yc_dest/dist/daemon/server.js" ]; then
+    die "build produced no $yc_dest/dist/daemon/server.js; the service would not start"
+fi
 
 if [ -f "$YONDER_SRC/systemd/yonder-core.service" ]; then
     run cp "$YONDER_SRC/systemd/yonder-core.service" /etc/systemd/system/yonder-core.service

@@ -61,7 +61,16 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
 
   // A Unix socket, never a TCP port: the configuration API is reachable only
   // through the filesystem, so no interface can expose it by accident.
-  await new Promise<void>((resolve) => server.listen(opts.socketPath, resolve));
+  // A bind failure has to come back as a rejection: an unhandled 'error'
+  // event would take the process down with a stack trace instead of a line
+  // saying which path could not be bound.
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(opts.socketPath, () => {
+      server.removeListener("error", reject);
+      resolve();
+    });
+  });
   chmodSync(opts.socketPath, 0o660);
 
   return {
