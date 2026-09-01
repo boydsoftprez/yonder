@@ -34,11 +34,35 @@ if [ "$DRY_RUN" != "1" ] && [ ! -f "$yc_dest/dist/daemon/server.js" ]; then
     die "build produced no $yc_dest/dist/daemon/server.js; the service would not start"
 fi
 
+# A board with no configuration has nothing for the daemon to load: it throws
+# before it can listen, and Restart=always turns that into a restart loop
+# rather than a working device. Seed the shipped default, once.
+#
+# An operator's own file is never overwritten. After the first install this
+# file belongs to the device, and the daemon is its only writer.
+yc_default_config="$YONDER_SRC/config/defaults/config.yaml"
+ensure_dir "$YONDER_ETC" 0750
+if [ -f "$YONDER_ETC/config.yaml" ]; then
+    log "configuration already present, leaving it alone: $YONDER_ETC/config.yaml"
+elif [ -f "$yc_default_config" ]; then
+    log "seeding $YONDER_ETC/config.yaml from the shipped default"
+    run cp "$yc_default_config" "$YONDER_ETC/config.yaml"
+    run chmod 0644 "$YONDER_ETC/config.yaml"
+else
+    die "no default configuration at $yc_default_config"
+fi
+
 if [ -f "$YONDER_SRC/systemd/yonder-core.service" ]; then
     run cp "$YONDER_SRC/systemd/yonder-core.service" /etc/systemd/system/yonder-core.service
     if [ "$DRY_RUN" != "1" ] && command -v systemctl >/dev/null 2>&1; then
         run systemctl daemon-reload
         run systemctl enable yonder-core.service
+        # Enabling only arms the next boot. Without a start, a freshly flashed
+        # board sits there running nothing until someone reboots it, and the
+        # access point never appears. `restart` rather than `start` so
+        # re-running the installer also picks up the daemon just rebuilt
+        # above, instead of leaving the previous process in place.
+        run systemctl restart yonder-core.service
     else
         log "skipping systemctl (dry run or not a systemd host)"
     fi
