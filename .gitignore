@@ -9,6 +9,9 @@ dist/
 secrets.yaml
 config.yaml
 !config/defaults/*.yaml
+# ...but never a file named secrets.yaml, even a shipped default: re-exclude
+# it specifically so the negation above can never un-ignore one.
+config/defaults/secrets.yaml
 
 # Local R&D scratch. Never committed.
 research/
