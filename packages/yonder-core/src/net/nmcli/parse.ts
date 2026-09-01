@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import { IPV4_PATTERN, CIDR_PATTERN } from "../../schema/config.js";
 
 /**
  * Split one `nmcli -t` line into its fields.
@@ -66,6 +67,16 @@ const DEVICE_FIELD = "GENERAL.DEVICE";
 const ADDRESS_FIELD = /^IP4\.ADDRESS(\[\d+\])?$/;
 
 /**
+ * True for a value that actually looks like an IPv4 address, with or without
+ * a `/prefix` — the same octet-accurate patterns the schema holds a
+ * configured address to (packages/yonder-core/src/schema/config.ts), reused
+ * rather than a third regex that could disagree with either.
+ */
+function looksLikeAnAddress(value: string): boolean {
+  return IPV4_PATTERN.test(value) || CIDR_PATTERN.test(value);
+}
+
+/**
  * Parse `nmcli -t -f GENERAL.DEVICE,IP4.ADDRESS device show`.
  *
  * `device show` does not emit records. It emits a **stream** of `FIELD:value`
@@ -83,17 +94,26 @@ const ADDRESS_FIELD = /^IP4\.ADDRESS(\[\d+\])?$/;
  * would read as "this device is reachable" and stand down.
  *
  * So this parser can only ever *lose* an address, never invent one. A
- * `GENERAL.DEVICE` line starts a device; only a value under a recognised
- * IP4.ADDRESS field becomes an address; every other line is ignored. If a
- * NetworkManager version emits a shape this does not recognise, the result is
- * an empty list, the watchdog decides nothing is reachable, and the access
- * point comes up — the harmless direction.
+ * `GENERAL.DEVICE` line starts a device; a value under a recognised
+ * IP4.ADDRESS field becomes an address only when it also looks like one.
+ * Recognising the field name is not enough by itself: a NetworkManager build
+ * that prints a recognised field with a placeholder for "nothing here" —
+ * `--` and `(none)` both appear across real versions — is otherwise exactly
+ * the "GENERAL.DEVICE read as an address" bug this parser exists to prevent,
+ * just moved from the field name to the value. Every line that fails either
+ * test is ignored. If a NetworkManager version emits a shape or a value this
+ * does not recognise, the result is an empty list, the watchdog decides
+ * nothing is reachable, and the access point comes up — the harmless
+ * direction.
  *
  * ASSUMED, NOT OBSERVED: there was no nmcli on the machine where this was
  * written. The shape above comes from the documented grammar of `-t` output,
  * and confirming it is the first thing docs/hardware/verifying-m1a.md asks of
- * a real board. If a board disagrees, **this parser is wrong** — fix it and
- * replace the fixture with what the board actually printed.
+ * a real board — including what an address-less device actually prints for
+ * `IP4.ADDRESS`, which nobody has observed and which is exactly what the
+ * placeholder handling above is guessing at. If a board disagrees, **this
+ * parser is wrong** — fix it and replace the fixture with what the board
+ * actually printed.
  */
 export function parseDeviceShow(stdout: string): DeviceAddresses[] {
   const devices: DeviceAddresses[] = [];
@@ -113,7 +133,7 @@ export function parseDeviceShow(stdout: string): DeviceAddresses[] {
       devices.push({ device: value, addresses: [] });
       continue;
     }
-    if (!ADDRESS_FIELD.test(name) || value === "") continue;
+    if (!ADDRESS_FIELD.test(name) || !looksLikeAnAddress(value)) continue;
     // An address before any device line cannot be attributed to an interface,
     // and an address we cannot attribute is not evidence of reachability.
     const current = devices[devices.length - 1];

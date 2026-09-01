@@ -91,6 +91,35 @@ describe("parseDeviceShow", () => {
       .toEqual([{ device: "wlan0", addresses: [] }]);
   });
 
+  it("accepts a bare address with no /prefix", () => {
+    // Every fixture seen so far includes a prefix, but nothing guarantees
+    // every NetworkManager build does, and the field name alone does not
+    // say — the value is what has to look like an address.
+    expect(parseDeviceShow("GENERAL.DEVICE:eth0\nIP4.ADDRESS[1]:192.168.1.50\n"))
+      .toEqual([{ device: "eth0", addresses: ["192.168.1.50"] }]);
+  });
+
+  /**
+   * The unsafe direction this parser's own docstring used to claim was
+   * impossible. Probed directly against a fake runner: `IP4.ADDRESS[1]:--`
+   * used to parse into `addresses: ["--"]`, which is exactly what
+   * FallbackWatchdog.check() reads as "something is reachable" — the device
+   * believes it holds an address when it holds none, and the access point
+   * that R-NET-07 exists to raise never comes up. A recognised field name is
+   * not the same as a real value: some NetworkManager versions print a
+   * placeholder for "nothing here" instead of an empty value or omitting the
+   * line entirely.
+   */
+  it("does not invent an address from a `--` placeholder value", () => {
+    expect(parseDeviceShow("GENERAL.DEVICE:wlan0\nIP4.ADDRESS[1]:--\n"))
+      .toEqual([{ device: "wlan0", addresses: [] }]);
+  });
+
+  it("does not invent an address from a `(none)` placeholder value", () => {
+    expect(parseDeviceShow("GENERAL.DEVICE:wlan0\nIP4.ADDRESS[1]:(none)\n"))
+      .toEqual([{ device: "wlan0", addresses: [] }]);
+  });
+
   it("ignores fields it does not recognise, and blank separator lines", () => {
     expect(parseDeviceShow(
       "GENERAL.DEVICE:eth0\nGENERAL.TYPE:ethernet\nIP6.ADDRESS[1]:fe80::1/64\n\nGENERAL.DEVICE:wlan0\n",

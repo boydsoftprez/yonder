@@ -9,12 +9,25 @@ import { z } from "zod";
 const OCTET = String.raw`(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)`;
 const IPV4 = `${OCTET}(\\.${OCTET}){3}`;
 
+/**
+ * An IPv4 address, no prefix — e.g. `192.168.77.1`. Exported so code outside
+ * the schema can recognise a real address by the same octet-accurate rule a
+ * configured one is held to, instead of a second, looser pattern that could
+ * drift from this one. `parseDeviceShow`
+ * (packages/yonder-core/src/net/nmcli/parse.ts) is the first such caller: it
+ * has to tell a genuine `nmcli` address apart from a placeholder like `--` or
+ * `(none)`.
+ */
+export const IPV4_PATTERN = new RegExp(`^${IPV4}$`);
+/** An IPv4 address in CIDR form — e.g. `192.168.77.1/24`. See IPV4_PATTERN. */
+export const CIDR_PATTERN = new RegExp(`^${IPV4}/(3[0-2]|[12]?\\d)$`);
+
 const cidr = z.string().regex(
-  new RegExp(`^${IPV4}/(3[0-2]|[12]?\\d)$`),
+  CIDR_PATTERN,
   "must be an address in CIDR form, for example 192.168.77.1/24",
 );
 
-const ipv4 = z.string().regex(new RegExp(`^${IPV4}$`), "must be an IPv4 address");
+const ipv4 = z.string().regex(IPV4_PATTERN, "must be an IPv4 address");
 const port = z.number().int().min(1).max(65535);
 
 /** Dotted quad to a 32-bit number. Only ever called on a value `ipv4` accepted. */

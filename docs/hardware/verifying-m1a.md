@@ -136,6 +136,12 @@ things to check against `parseDeviceShow`:
   one record per device. A device with no address should occupy one line; a device with two
   addresses, three.
 - Addresses appear as `IP4.ADDRESS[1]` (indexed) or `IP4.ADDRESS`. Record which.
+- What a device holding **no** address actually prints for `IP4.ADDRESS`, if anything at
+  all — an omitted line, an empty value (`IP4.ADDRESS[1]:`), or a placeholder such as `--`
+  or `(none)`. Nobody has observed this on real hardware. `parseDeviceShow` treats any value
+  that does not itself look like an IPv4 address (with or without a `/prefix`) as "no
+  address", precisely so a placeholder cannot be misread as one — but which form your
+  NetworkManager build actually emits has never been confirmed. Record the exact text.
 
 Replace all four fixture files with what you captured. Redact real SSIDs and connection
 UUIDs if you want to — a UUID or an SSID string doesn't need to be genuine — but **preserve
