@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { writeFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { ConfigSchema } from "./config.js";
 
@@ -21,4 +22,7 @@ function main(): void {
   process.stdout.write(`wrote ${out}\n`);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) main();
+// Compare file URLs rather than strings so a path with a space or a
+// non-ASCII character still matches (see daemon/server.ts).
+const entry = process.argv[1];
+if (entry !== undefined && import.meta.url === pathToFileURL(entry).href) main();

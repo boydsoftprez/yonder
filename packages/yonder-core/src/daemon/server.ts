@@ -2,7 +2,9 @@
 import { createServer, type Server } from "node:http";
 import { unlinkSync, existsSync, mkdirSync, chmodSync } from "node:fs";
 import { dirname } from "node:path";
+import { pathToFileURL } from "node:url";
 import { ApplyEngine } from "../apply/engine.js";
+import { warn } from "../log.js";
 import { createRouter } from "./routes.js";
 import type { Renderer } from "../apply/types.js";
 
@@ -21,7 +23,15 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   });
 
   // Anything left pending by a previous process is reverted before we serve.
-  await engine.recover();
+  // A failure here must not stop the socket binding: recovery is exactly the
+  // path that runs after a crash, and a daemon that refuses to start because
+  // it could not roll back leaves an operator with no way in at all. The
+  // journal is left in place, so the next start tries again.
+  try {
+    await engine.recover();
+  } catch (e) {
+    warn(`recovery failed, serving anyway: ${(e as Error).message}`);
+  }
 
   const route = createRouter({ engine, configPath: opts.configPath });
 
@@ -49,6 +59,8 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   mkdirSync(dirname(opts.socketPath), { recursive: true });
   if (existsSync(opts.socketPath)) unlinkSync(opts.socketPath);
 
+  // A Unix socket, never a TCP port: the configuration API is reachable only
+  // through the filesystem, so no interface can expose it by accident.
   await new Promise<void>((resolve) => server.listen(opts.socketPath, resolve));
   chmodSync(opts.socketPath, 0o660);
 
@@ -73,4 +85,17 @@ async function main(): Promise<void> {
   process.stdout.write("yonder-core listening\n");
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) void main();
+/**
+ * Compare file URLs, not strings: process.argv[1] is a path, and building a
+ * URL from it by hand mis-encodes spaces and non-ASCII and never matches when
+ * the daemon is started through the symlink npm installs for `bin`. A missed
+ * match here exits 0 having done nothing, which under Restart=always is a
+ * silent restart loop.
+ */
+const entry = process.argv[1];
+if (entry !== undefined && import.meta.url === pathToFileURL(entry).href) {
+  main().catch((e: unknown) => {
+    warn(`failed to start: ${(e as Error).message}`);
+    process.exitCode = 1;
+  });
+}
