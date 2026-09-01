@@ -16,7 +16,8 @@ const CONFIG_MODE = 0o644;
  */
 const CONFIG_DIR_MODE = 0o750;
 
-const HEADER = `# Yonder default configuration.
+const HEADER = `# SPDX-License-Identifier: GPL-3.0-or-later
+# Yonder default configuration.
 #
 # Generated from DEFAULT_CONFIG in packages/yonder-core/src/schema/config.ts.
 # Regenerate with \`npm run defaults -w yonder-core\`; do not hand-edit the copy

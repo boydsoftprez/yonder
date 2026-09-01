@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Yonder default configuration.
 #
 # Generated from DEFAULT_CONFIG in packages/yonder-core/src/schema/config.ts.
