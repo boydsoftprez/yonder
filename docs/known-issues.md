@@ -91,6 +91,17 @@ somebody trusts the screen over the radio. The fix is a renderer that can report
 managed to do before it stalled, or a reconciling render on the next start; the startup
 render added for R-CFG-08 already narrows the window to "until the daemon next restarts".
 
+**And the abandoned work keeps running.** `withTimeout` rejects on the deadline but has no
+way to cancel what it was waiting for: the renderer's promise is simply dropped. So after a
+render timeout the network renderer carries on issuing `nmcli` commands, while `finish()`
+has already released the apply reservation — which means a second apply can be accepted and
+start rendering *concurrently with the first one that never stopped*. Two renders
+interleaving their `nmcli` calls can leave a connection carrying half of each configuration,
+which is a worse divergence than the one above and harder to read from the outside. The
+reservation is what normally makes that impossible; a timeout is the one path that gets
+past it. Fixing this properly means a renderer that takes an AbortSignal and honours it,
+which is the same change as reporting partial work, so the two are one piece of work.
+
 ### K-11 · The fallback watchdog fires once per daemon start, and never again
 `src/net/watchdog.ts`, `src/daemon/server.ts`
 
@@ -98,7 +109,8 @@ render added for R-CFG-08 already narrows the window to "until the daemon next r
 `startServer()`, and nothing re-arms it — not an apply, not a confirm, not a revert. After
 that one check the guarantee is spent for the life of the process.
 
-R-NET-07 is written about boot, so this satisfies it as worded. What it does not cover is
+R-NET-07 is written about the window after `yonder-core` starts, so this satisfies it as
+worded. What it does not cover is
 the case the requirement exists for: an operator applies a change that takes the board off
 the air *after* the window has already elapsed. The apply confirmation timer catches the
 unconfirmed case, but a change that is confirmed — or one whose damage appears later than
@@ -106,3 +118,61 @@ the render — leaves no watchdog behind it. It starts to matter with M1b, where
 makes applying changes routine and a device may run for days between restarts. The fix is to
 re-arm on every apply and confirm, which is small; it is recorded rather than done because
 M1a's exit criterion is the boot path.
+
+### K-12 · The loopback clause in the fallback's reachability check is redundant
+`src/net/watchdog.ts`
+
+`check()` filters on both `a.device !== "lo"` and `!a.address.startsWith("127.")`. The second
+subsumes the first for every case that can actually occur: loopback is 127.0.0.0/8 by
+definition, and an interface literally named `lo` holding a non-127 address is not a
+configuration this code will meet. Harmless, and it costs a reader a moment working out
+which of the two is load-bearing.
+
+Left as it is deliberately: this is the reachability probe behind R-NET-07, the one
+guarantee M1a exists to satisfy, and it is safer belt-and-braces than clever. Worth
+collapsing to the address test alone the next time this function is touched for a reason,
+not on its own.
+
+### K-13 · The access point and the Wi-Fi client bind the same radio, with no arbitration
+`src/net/profiles.ts`, `src/net/renderer.ts`
+
+`desiredProfiles` hands `ifaces.wifi` to both `apProfile` and `clientProfile`. On a
+single-radio board — every Raspberry Pi with built-in Wi-Fi — that is two connection
+profiles claiming one interface, one in AP mode and one in infrastructure mode. Nothing in
+this code decides which wins; NetworkManager does, by whatever its own activation rules say,
+and this repository has never observed what that is. The access point is `autoconnect no`
+and brought up deliberately while the client is `autoconnect yes`, which makes the outcome
+*likely* to be "whichever was activated last", but that is a guess written down, not a
+design.
+
+`network.priority` — the ordered egress preference in the configuration — is parsed by the
+schema, carried in every config file, and **read by nothing**. R-NET-06 asks for routing
+metrics generated from it; no code generates any.
+
+Both belong to the milestone that does multi-interface egress, where a modem, Ethernet and
+Wi-Fi have to be ranked against each other for real. It is recorded here rather than left
+silent because "the access point and the client profile fight over one radio" is exactly the
+kind of thing that reads as a bug in the field, and because a configuration key that does
+nothing is worse than an absent one — it invites an operator to set it and expect an effect.
+
+### K-14 · A device with an invalid configuration is reachable but not repairable over the API
+`src/apply/engine.ts`, `src/daemon/server.ts`
+
+The daemon now binds its socket whatever the state of `config.yaml`, so `GET /config`
+answers 400 with the schema issues and `GET /status` answers 200 — an operator can reach the
+device and see exactly what is wrong with it. What they cannot do is fix it from there:
+`apply()` snapshots the current configuration as its rollback target before writing
+anything, and `loadConfig` on an invalid file throws, so **every** `POST /apply` against a
+device in this state is refused with that same validation error, including one carrying a
+perfectly good configuration.
+
+The repair path today is to edit `/etc/yonder/config.yaml` over SSH or on the card. That is
+acceptable while there is no console; it stops being acceptable in M1b, where the console is
+the only interface most operators will ever have and "reachable but unfixable" is
+indistinguishable from broken.
+
+The fix needs a decision, not just code: what an apply rolls back *to* when there is no
+valid current configuration. The shipped default is the obvious candidate — it is what the
+device would have had if the file had been absent rather than invalid — but that trades a
+guaranteed-safe rollback target for one the operator did not choose. Worth settling
+alongside R-SEC-09's first-run flow.

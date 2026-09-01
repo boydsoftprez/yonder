@@ -28,6 +28,8 @@ control of an aircraft in flight, and reports should be weighted accordingly.
 **Out of scope**
 
 - Physical access to the board or the SD card
+- Joining the setup access point with its published passphrase. It is documented, it is the
+  same on every device, and it is not a secret — see the design commitment below
 - Attacks requiring the operator to deliberately disable a documented protection
 - Anything in the flight controller — report those to ArduPilot
 - Denial of service by jamming or saturating a cellular link
@@ -36,7 +38,17 @@ control of an aircraft in flight, and reports should be weighted accordingly.
 
 These are enforced in review, not aspirations:
 
-- **No shared default credentials.** Anything secret is generated per device at first boot.
+- **No shared default credential protects the vehicle or its configuration.** The setup
+  access point is the one deliberate exception: it carries a published default passphrase,
+  documented and identical on every device, and it is never presented as a secret. It
+  guards nothing — being in radio range is enough to join either way — and a per-device
+  value would have been readable only from the device's own journal, which you need the
+  passphrase to reach. The credential that matters is the console's administrator password,
+  which does not exist until the operator sets it at first use, and until then the console
+  offers nothing else. See [ADR-0007](docs/adr/0007-credential-boundary.md), R-SEC-01 and
+  R-SEC-09.
+- **No credential in a log line, an error message or an API response.** Redaction happens
+  where the value is captured, not where it is printed (R-SEC-10).
 - **No unauthenticated write path** to configuration, the flow editor, or MAVLink from a
   non-loopback interface by default.
 - **Least privilege.** The control plane does not run as root; privileged operations go
