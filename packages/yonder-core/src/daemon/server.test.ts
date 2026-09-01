@@ -170,9 +170,11 @@ describe("startServer", () => {
     const server = await startServer({ socketPath, configPath, journalPath, renderers: [watcher], secretsPath: join(dir, "secrets.yaml"), runner: noopRunner });
     try {
       expect(loadConfig(configPath).system.hostname).toBe("yonder");
-      // Binding first would let a console connect to a device still carrying
-      // the change that cut its operator off.
-      expect(socketAtRender).toEqual([false]);
+      // Two renders: the rollback, then the startup render that brings the
+      // access point up on a device nobody has applied anything to. Binding
+      // first would let a console connect to a device still carrying the
+      // change that cut its operator off.
+      expect(socketAtRender).toEqual([false, false]);
 
       const res = await call(socketPath, "GET", "/status");
       const status = res.body as { state: string; lastResult?: { id: string; outcome: string } };
@@ -199,6 +201,72 @@ describe("startServer", () => {
         expect((await call(socketPath, "GET", "/status")).status).toBe(200);
         // The journal stays, so the next start tries the rollback again.
         expect(existsSync(journalPath)).toBe(true);
+      } finally {
+        await server.close();
+      }
+    } finally {
+      stderr.mockRestore();
+    }
+  });
+
+  it("seeds a default configuration when the device has none", async () => {
+    // A freshly flashed board that was never given a config.yaml. Before this,
+    // loadConfig threw before listen() and Restart=always looped forever.
+    rmSync(configPath);
+    const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner: noopRunner });
+    try {
+      expect(loadConfig(configPath)).toEqual(DEFAULT_CONFIG);
+      expect((await call(socketPath, "GET", "/status")).status).toBe(200);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("leaves an existing configuration alone", async () => {
+    saveConfig(configPath, changed());
+    const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner: noopRunner });
+    try {
+      expect(loadConfig(configPath).system.hostname).toBe("changed");
+    } finally {
+      await server.close();
+    }
+  });
+
+  /**
+   * R-CFG-08. Without this, renderAll only ever ran from apply() and the two
+   * rollback paths, so a device nobody had posted an apply to came up with no
+   * access point — and nobody could post one, because reaching the device is
+   * what the access point is for.
+   */
+  it("renders the current configuration at startup, before the socket exists", async () => {
+    const seen: { ssid: string; socket: boolean }[] = [];
+    const watcher: Renderer = {
+      name: "watch",
+      async render(c) { seen.push({ ssid: c.network.ap.ssid, socket: existsSync(socketPath) }); },
+    };
+
+    const server = await startServer({ socketPath, configPath, journalPath, renderers: [watcher], secretsPath: join(dir, "secrets.yaml"), runner: noopRunner });
+    try {
+      expect(seen).toEqual([{ ssid: "yonder", socket: false }]);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("binds the socket even when the startup render fails", async () => {
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      const wedged: Renderer = {
+        name: "wedged",
+        async render() { throw new Error("NetworkManager is not running"); },
+      };
+      // A board whose networking is broken is exactly the one an operator
+      // needs to be able to ask what is wrong. The configuration API comes up
+      // regardless, the same as when recovery fails.
+      const server = await startServer({ socketPath, configPath, journalPath, renderers: [wedged], secretsPath: join(dir, "secrets.yaml"), runner: noopRunner });
+      try {
+        expect(statSync(socketPath).isSocket()).toBe(true);
+        expect((await call(socketPath, "GET", "/status")).status).toBe(200);
       } finally {
         await server.close();
       }

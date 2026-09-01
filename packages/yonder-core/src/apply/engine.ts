@@ -177,6 +177,27 @@ export class ApplyEngine {
     this.finish(entry.id, "reverted");
   }
 
+  /**
+   * Render the configuration exactly as it stands, changing nothing.
+   *
+   * Called once at start-up. renderAll otherwise runs only from apply() and
+   * from the two rollback paths, so a device nobody has ever posted an apply
+   * to rendered no network state at all — no access point, and therefore no
+   * way for anyone to post the apply that would have created one (R-CFG-08,
+   * R-NET-01). Nothing is written and no confirmation timer starts: this is
+   * the running system being made to match the file, not a change to it.
+   */
+  async renderCurrent(): Promise<void> {
+    // apply() holds the reservation across its renders precisely so two
+    // configurations are never in flight at once. A public entry into
+    // renderAll must respect the same rule, or a caller could push a stale
+    // configuration through a renderer mid-apply.
+    if (BUSY.includes(this.state)) {
+      throw new ConfigError("an apply is in flight; the configuration is already being rendered");
+    }
+    await this.renderAll(loadConfig(this.configPath));
+  }
+
   private async revert(): Promise<void> {
     if (this.state !== "pending" || this.previous === undefined) return;
     this.state = "reverting";

@@ -7,6 +7,7 @@ import { ApplyEngine } from "../apply/engine.js";
 import { warn } from "../log.js";
 import { createRouter } from "./routes.js";
 import { loadConfig } from "../config/load.js";
+import { seedConfigIfAbsent } from "../config/defaults.js";
 import { SecretStore } from "../secrets/store.js";
 import { NmcliClient } from "../net/nmcli/client.js";
 import { NetworkRenderer } from "../net/renderer.js";
@@ -64,6 +65,17 @@ export function buildRenderers(opts: BuildRenderersOptions): {
 }
 
 export async function startServer(opts: ServerOptions): Promise<{ close(): Promise<void> }> {
+  // First, before anything reads the configuration. A device that has never
+  // been configured has no file to load, and every path below — recover(),
+  // the startup render, the watchdog — would throw before the socket could
+  // bind, which under Restart=always is a crash loop rather than a device
+  // (R-CFG-08). The installer seeds the same content on a clean install; this
+  // is the half that also covers a hand-installed board, an upgrade from a
+  // build that shipped no default, and a configuration someone deleted.
+  if (seedConfigIfAbsent(opts.configPath)) {
+    process.stdout.write(`seeded a default configuration at ${opts.configPath}\n`);
+  }
+
   const { renderers: netRenderers, secrets, client, generated } = buildRenderers({
     secretsPath: opts.secretsPath ?? "/etc/yonder/secrets.yaml",
     runner: opts.runner,
@@ -91,6 +103,22 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
     await engine.recover();
   } catch (e) {
     warn(`recovery failed, serving anyway: ${(e as Error).message}`);
+  }
+
+  // Nothing else renders on a clean start. renderAll runs only from apply()
+  // and from the two rollback paths, so a device nobody has ever posted an
+  // apply to came up with no access point at all — and nobody could post one,
+  // because reaching the device is what the access point is for (R-CFG-08,
+  // R-NET-01).
+  //
+  // Guarded exactly like recover() above, and for the same reason: the
+  // configuration API must come up even when the network cannot. A board
+  // whose NetworkManager is wedged is one an operator still has to be able to
+  // ask what is wrong.
+  try {
+    await engine.renderCurrent();
+  } catch (e) {
+    warn(`could not render the current configuration, serving anyway: ${(e as Error).message}`);
   }
 
   const route = createRouter({ engine, configPath: opts.configPath });
