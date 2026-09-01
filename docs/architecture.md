@@ -161,8 +161,11 @@ Browser ──HTTP/WS──► Node-RED ──► custom nodes ──┬──�
                                                   └──► libgpiod       (relays)
 ```
 
-Node-RED talks to system services over their real interfaces — D-Bus for NM and MM, an
-HTTP API for mediamtx — not by shelling out and parsing text where an interface exists.
+Components talk to system services over their real interfaces — an HTTP API for mediamtx,
+D-Bus where it is the right fit — rather than shelling out and parsing text by default. The
+network renderer is a deliberate, recorded exception: it drives NetworkManager through
+`nmcli`'s machine-readable mode behind an injected command runner, for the reasons in
+[ADR-0006](adr/0006-nmcli-not-dbus.md).
 
 ---
 
