@@ -113,13 +113,22 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   // must cost the network renderer, not the socket: without the socket there
   // is no way to post the corrected configuration either.
   let built: ReturnType<typeof buildRenderers> | undefined;
+  // Set when buildRenderers could not be assembled, and handed to the apply
+  // engine so it refuses POST /apply instead of "succeeding" against a
+  // renderer set missing the one that does real work — see
+  // ApplyEngineOptions.degraded. GET /config and GET /status do not depend
+  // on it, so the device stays reachable and diagnosable either way.
+  let degraded: string | undefined;
   try {
     built = buildRenderers({
       secretsPath: opts.secretsPath ?? "/etc/yonder/secrets.yaml",
       runner: opts.runner,
     });
   } catch (e) {
-    warn(`could not assemble the network renderer, serving anyway: ${(e as Error).message}`);
+    const message = (e as Error).message;
+    warn(`could not assemble the network renderer, serving anyway: ${message}`);
+    degraded = `the network renderer could not be built (${message}); `
+      + "fix that and restart yonder-core before applying a network change";
   }
   const netRenderers = built?.renderers ?? [];
   // The watchdog still needs a way to talk to NetworkManager even when the
@@ -146,6 +155,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
     renderers: [...opts.renderers, ...netRenderers],
     renderTimeoutMs: opts.renderTimeoutMs,
     clock,
+    degraded,
   });
 
   // Anything left pending by a previous process is reverted before we serve.

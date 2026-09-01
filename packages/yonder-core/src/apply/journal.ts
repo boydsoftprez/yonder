@@ -9,6 +9,14 @@ export interface JournalEntry {
   id: string;
   previous: Config;
   startedAt: number;
+  /**
+   * True when `previous` is the shipped default substituted for a
+   * config.yaml that could not be loaded when this apply started, rather
+   * than the operator's actual previous configuration (K-14, see
+   * ApplyEngine.apply). Defaults to false so a journal written by a daemon
+   * build that predates this field still reads as the ordinary case.
+   */
+  previousIsDefault: boolean;
 }
 
 /**
@@ -22,6 +30,7 @@ const JournalEntrySchema = z.object({
   id: z.string().min(1),
   previous: ConfigSchema,
   startedAt: z.number().finite(),
+  previousIsDefault: z.boolean().default(false),
 });
 
 /**

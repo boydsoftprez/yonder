@@ -154,25 +154,3 @@ Wi-Fi have to be ranked against each other for real. It is recorded here rather 
 silent because "the access point and the client profile fight over one radio" is exactly the
 kind of thing that reads as a bug in the field, and because a configuration key that does
 nothing is worse than an absent one — it invites an operator to set it and expect an effect.
-
-### K-14 · A device with an invalid configuration is reachable but not repairable over the API
-`src/apply/engine.ts`, `src/daemon/server.ts`
-
-The daemon now binds its socket whatever the state of `config.yaml`, so `GET /config`
-answers 400 with the schema issues and `GET /status` answers 200 — an operator can reach the
-device and see exactly what is wrong with it. What they cannot do is fix it from there:
-`apply()` snapshots the current configuration as its rollback target before writing
-anything, and `loadConfig` on an invalid file throws, so **every** `POST /apply` against a
-device in this state is refused with that same validation error, including one carrying a
-perfectly good configuration.
-
-The repair path today is to edit `/etc/yonder/config.yaml` over SSH or on the card. That is
-acceptable while there is no console; it stops being acceptable in M1b, where the console is
-the only interface most operators will ever have and "reachable but unfixable" is
-indistinguishable from broken.
-
-The fix needs a decision, not just code: what an apply rolls back *to* when there is no
-valid current configuration. The shipped default is the obvious candidate — it is what the
-device would have had if the file had been absent rather than invalid — but that trades a
-guaranteed-safe rollback target for one the operator did not choose. Worth settling
-alongside R-SEC-09's first-run flow.

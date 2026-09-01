@@ -46,4 +46,13 @@ export interface ApplyStatus {
   id?: string;
   expiresAt?: number;
   lastResult?: ApplyResult;
+  /**
+   * Set, with the reason, when the renderer set could not be fully assembled
+   * — e.g. daemon/server.ts caught a malformed secrets.yaml out of
+   * buildRenderers and is serving with the network renderer missing. Absent
+   * when the renderer set is complete. See ApplyEngineOptions.degraded: while
+   * this is set, apply() refuses every request rather than "succeeding"
+   * against a renderer set that would silently do less than it claims.
+   */
+  degraded?: string;
 }

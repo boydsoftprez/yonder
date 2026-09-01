@@ -395,6 +395,33 @@ describe("startServer", () => {
     }
   });
 
+  /**
+   * K-14, at the HTTP layer. `apply()` used to snapshot config.yaml as its
+   * rollback target before validating the operator's own posted body, so an
+   * unloadable file on disk refused *every* apply through this route —
+   * including a good one — with the schema issues for the file already on
+   * disk, which reads as though the posted body was rejected. The daemon
+   * itself starting from an invalid config.yaml is exercised just above;
+   * this is the repair path that used to be unreachable from it.
+   */
+  it("accepts a good POST /apply even though the configuration on disk is invalid", async () => {
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      writeFileSync(configPath, "version: 99\nnetwork: nonsense\n");
+      const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner: noopRunner });
+      try {
+        const res = await call(socketPath, "POST", "/apply", changed());
+        expect(res.status).toBe(200);
+        expect((res.body as { previousIsDefault?: boolean }).previousIsDefault).toBe(true);
+        expect(loadConfig(configPath).system.hostname).toBe("changed");
+      } finally {
+        await server.close();
+      }
+    } finally {
+      stderr.mockRestore();
+    }
+  });
+
   /** The same class of failure through the other file the daemon must read. */
   it("binds the socket when secrets.yaml cannot be read", async () => {
     const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
@@ -411,6 +438,78 @@ describe("startServer", () => {
     } finally {
       stderr.mockRestore();
     }
+  });
+
+  /**
+   * A malformed secrets.yaml means buildRenderers threw, so the daemon is
+   * serving with the network renderer missing (see buildRenderers' catch in
+   * startServer). Before this, POST /apply still answered 200, POST /confirm
+   * still answered 200 "confirmed", and zero nmcli commands were ever issued
+   * — the operator was told their change took effect when nothing happened.
+   * That is strictly worse than a loud failure, so apply() now refuses
+   * outright while degraded, and says why.
+   */
+  describe("with a renderer set degraded by a malformed secrets.yaml", () => {
+    function startDegraded() {
+      const secretsPath = join(dir, "secrets.yaml");
+      writeFileSync(secretsPath, "ap_psk:\n  not: a-string\n", { mode: 0o600 });
+      return startServer({
+        socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath, runner: noopRunner,
+      });
+    }
+
+    it("reports the degraded reason on GET /status", async () => {
+      const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+      try {
+        const server = await startDegraded();
+        try {
+          const res = await call(socketPath, "GET", "/status");
+          expect(res.status).toBe(200);
+          const body = res.body as { degraded?: string };
+          expect(body.degraded).toMatch(/network renderer could not be built/);
+        } finally {
+          await server.close();
+        }
+      } finally {
+        stderr.mockRestore();
+      }
+    });
+
+    it("refuses POST /apply with a clear reason instead of silently succeeding", async () => {
+      const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+      try {
+        const server = await startDegraded();
+        try {
+          const res = await call(socketPath, "POST", "/apply", changed());
+          // It used to be 200 here, with config.yaml written and nothing
+          // rendered. Refused instead, and config.yaml is untouched.
+          expect(res.status).toBe(400);
+          const body = res.body as { error: string };
+          expect(body.error).toMatch(/degraded/);
+          expect(body.error).toMatch(/network renderer could not be built/);
+          expect(loadConfig(configPath).system.hostname).toBe("yonder");
+        } finally {
+          await server.close();
+        }
+      } finally {
+        stderr.mockRestore();
+      }
+    });
+
+    it("keeps GET /config and GET /status answering so the device stays diagnosable", async () => {
+      const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+      try {
+        const server = await startDegraded();
+        try {
+          expect((await call(socketPath, "GET", "/config")).status).toBe(200);
+          expect((await call(socketPath, "GET", "/status")).status).toBe(200);
+        } finally {
+          await server.close();
+        }
+      } finally {
+        stderr.mockRestore();
+      }
+    });
   });
 
   it("binds the socket when the configuration directory cannot be seeded", async () => {
