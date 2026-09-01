@@ -3,6 +3,7 @@ export const VERSION = "0.1.0";
 export { ConfigSchema, DEFAULT_CONFIG, type Config, type SecretRef } from "./schema/config.js";
 export { loadConfig } from "./config/load.js";
 export { saveConfig } from "./config/save.js";
+export { renderDefaultConfig, seedConfigIfAbsent } from "./config/defaults.js";
 export { ConfigError } from "./config/errors.js";
 export { SecretStore } from "./secrets/store.js";
 export { generateSecret } from "./secrets/generate.js";

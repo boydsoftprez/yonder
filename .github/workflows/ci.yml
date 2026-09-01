@@ -23,6 +23,13 @@ jobs:
         run: |
           npm run schema -w yonder-core
           git diff --exit-code config/schema
+      # The shipped default configuration is generated from DEFAULT_CONFIG and
+      # seeded onto every clean board. A stale copy is a device that boots on a
+      # configuration the schema no longer accepts.
+      - name: Check the shipped default configuration is current
+        run: |
+          npm run defaults -w yonder-core
+          git diff --exit-code config/defaults
 
   installer:
     runs-on: ubuntu-latest

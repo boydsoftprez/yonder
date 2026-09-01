@@ -11,7 +11,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "vitest run",
-    "schema": "tsc -p tsconfig.json && node dist/schema/generate.js ../../config/schema/yonder.schema.json"
+    "schema": "tsc -p tsconfig.json && node dist/schema/generate.js ../../config/schema/yonder.schema.json",
+    "defaults": "tsc -p tsconfig.json && node dist/config/defaults.js ../../config/defaults/config.yaml"
   },
   "dependencies": {
     "yaml": "^2.5.0",
