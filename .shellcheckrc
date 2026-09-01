@@ -1,0 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Resolve "# shellcheck source=" directives relative to the script being
+# checked, not shellcheck's working directory, so installer/install.sh's
+# source of lib/common.sh resolves correctly no matter where lint is run from.
+source-path=SCRIPTDIR

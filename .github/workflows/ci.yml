@@ -14,3 +14,12 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm test
+
+  installer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lint shell
+        run: |
+          sudo apt-get update && sudo apt-get install -y shellcheck
+          shellcheck installer/install.sh installer/lib/*.sh installer/roles/*.sh
