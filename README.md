@@ -55,6 +55,7 @@ Not yet. See [the roadmap](docs/roadmap.md) — M8 is the first release you can 
 | [Roadmap](docs/roadmap.md) | Milestones, in the order they get built |
 | [Configuration](docs/configuration.md) | `config.yaml` reference |
 | [Decision records](docs/adr/) | Why things are the way they are |
+| [Known issues](docs/known-issues.md) | Recorded defects and when each starts to matter |
 | [Requirements](docs/requirements.md) | Everything Yonder must do, numbered |
 
 ## Contributing
