@@ -117,6 +117,34 @@ function call(
   });
 }
 
+/** A clock the test drives by hand; see the equivalent in watchdog.test.ts. */
+function fakeClock() {
+  let t = 0;
+  const timers = new Map<number, { at: number; fn: () => void }>();
+  let next = 1;
+  const clock: Clock = {
+    now: () => t,
+    setTimer: (ms, fn) => { const h = next++; timers.set(h, { at: t + ms, fn }); return h; },
+    clearTimer: (h) => { timers.delete(h as number); },
+  };
+  return {
+    clock,
+    advance(ms: number) {
+      t += ms;
+      for (const [h, timer] of [...timers]) if (timer.at <= t) { timers.delete(h); timer.fn(); }
+    },
+  };
+}
+
+/**
+ * The fallback fires through several chained awaits before it reaches the
+ * runner. Draining them is what makes an assertion about what did *not*
+ * happen mean anything — see the long note in watchdog.test.ts.
+ */
+async function flushMicrotasks(): Promise<void> {
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+}
+
 describe("startServer", () => {
   let socketPath: string;
   beforeEach(() => { socketPath = join(dir, "core.sock"); });
@@ -364,6 +392,94 @@ describe("startServer", () => {
       }
     } finally {
       stderr.mockRestore();
+    }
+  });
+
+  /**
+   * R-NET-07, at the level that matters: not "the FallbackWatchdog class
+   * behaves", but "this daemon actually arms one, points it at the access
+   * point, and stops it on close". Every line of that wiring — the
+   * watchdog.start(), the apUp closure, the watchdog.stop() in close() —
+   * could be deleted with the whole suite green, because nothing above the
+   * class ever tested it.
+   *
+   * The runner records every argv, so `nmcli connection up yonder-ap` is the
+   * observable. Nothing else issues it here: the fake device list is empty,
+   * so the start-up render finds no wifi interface and never raises the
+   * access point itself.
+   */
+  function watchdogHarness() {
+    const { clock, advance } = fakeClock();
+    const calls: string[][] = [];
+    const runner: CommandRunner = async (argv) => {
+      calls.push(argv);
+      return { code: 0, stdout: "", stderr: "" };
+    };
+    const raised = () => calls.filter((c) => c.join(" ") === "nmcli connection up yonder-ap").length;
+    return { clock, advance, calls, runner, raised };
+  }
+
+  it("arms the fallback watchdog and raises the access point when nothing is reachable", async () => {
+    const { clock, advance, runner, raised } = watchdogHarness();
+    const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner, clock });
+    try {
+      advance(89_000);
+      await flushMicrotasks();
+      expect(raised()).toBe(0);
+
+      advance(2_000);
+      await flushMicrotasks();
+      // activeIpv4() returned nothing, so nothing is reachable, so the one
+      // action that gets an operator back to the board happens.
+      expect(raised()).toBe(1);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("stops the fallback watchdog when the server closes", async () => {
+    const { clock, advance, runner, raised } = watchdogHarness();
+    const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner, clock });
+    await server.close();
+    advance(200_000);
+    await flushMicrotasks();
+    // A timer left running against a closed daemon reconfigures a radio
+    // nobody is managing any more.
+    expect(raised()).toBe(0);
+  });
+
+  it("arms the fallback watchdog even when the configuration cannot be loaded", async () => {
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      const { clock, advance, runner, raised } = watchdogHarness();
+      writeFileSync(configPath, "version: 99\nnetwork: nonsense\n");
+      const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner, clock });
+      try {
+        advance(91_000);
+        await flushMicrotasks();
+        // The device whose config.yaml is unreadable is the one that most
+        // needs its access point raised.
+        expect(raised()).toBe(1);
+      } finally {
+        await server.close();
+      }
+    } finally {
+      stderr.mockRestore();
+    }
+  });
+
+  it("leaves the fallback alone when configuration disables it", async () => {
+    const { clock, advance, runner, raised } = watchdogHarness();
+    const off = structuredClone(DEFAULT_CONFIG);
+    off.network.ap.fallback.enabled = false;
+    saveConfig(configPath, off);
+    const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner, clock });
+    try {
+      advance(200_000);
+      await flushMicrotasks();
+      expect(raised()).toBe(0);
+    } finally {
+      await server.close();
     }
   });
 

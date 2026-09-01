@@ -18,6 +18,14 @@ const ok = (stdout = ""): CommandResult => ({ code: 0, stdout, stderr: "" });
  * watchdog mid-flight rather than settled. Looping enough ticks drains the
  * chain deterministically — no timers, no wall-clock wait, nothing to make
  * this flaky — without depending on the exact call depth staying fixed.
+ *
+ * **Every** test that asserts raised() === 0 needs this just as much as the
+ * ones that assert raised() === 1, and for a sharper reason: without it the
+ * assertion runs before the increment could ever have happened, so it holds
+ * no matter what the code does. Four tests here were written that way, and
+ * between them they let every daemon-side line wiring this watchdog up be
+ * deleted with the whole suite green. A bare `await Promise.resolve()` in
+ * this file is a bug.
  */
 async function flushMicrotasks(): Promise<void> {
   for (let i = 0; i < 10; i++) await Promise.resolve();
@@ -93,7 +101,7 @@ describe("FallbackWatchdog", () => {
     const { wd, advance, raised } = harness(DEVICE_SHOW.nothingUp);
     wd.start();
     advance(89_000);
-    await Promise.resolve();
+    await flushMicrotasks();
     expect(raised()).toBe(0);
   });
 
@@ -121,7 +129,7 @@ describe("FallbackWatchdog", () => {
     const { wd, advance, raised } = harness(DEVICE_SHOW.nothingUp, c);
     wd.start();
     advance(90_000);
-    await Promise.resolve();
+    await flushMicrotasks();
     expect(raised()).toBe(0);
     advance(31_000);
     await flushMicrotasks();
@@ -134,7 +142,7 @@ describe("FallbackWatchdog", () => {
     const { wd, advance, raised } = harness(DEVICE_SHOW.nothingUp, c);
     wd.start();
     advance(200_000);
-    await Promise.resolve();
+    await flushMicrotasks();
     expect(raised()).toBe(0);
   });
 
@@ -143,7 +151,7 @@ describe("FallbackWatchdog", () => {
     wd.start();
     wd.stop();
     advance(200_000);
-    await Promise.resolve();
+    await flushMicrotasks();
     expect(raised()).toBe(0);
   });
 
