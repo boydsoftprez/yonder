@@ -1,0 +1,23 @@
+[Unit]
+Description=Yonder core configuration service
+Documentation=https://github.com/boydsoftprez/yonder
+After=local-fs.target
+Before=network-pre.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/node /opt/yonder/packages/yonder-core/dist/daemon/server.js
+Restart=always
+RestartSec=2
+RuntimeDirectory=yonder
+RuntimeDirectoryMode=0750
+StateDirectory=yonder
+StateDirectoryMode=0750
+ProtectSystem=strict
+ReadWritePaths=/etc/yonder /var/lib/yonder
+ProtectHome=yes
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
