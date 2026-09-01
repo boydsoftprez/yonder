@@ -70,3 +70,39 @@ A name matching no role skips every role and exits 0 reporting "done".
 - `require_node` errors under `set -e` if `node -p` ever emits non-numeric output.
 - `writeFileDurable`'s leading unlink of the temp path defeats the `wx` exclusivity it
   documents, if two writers ever race the same path. Related to K-07.
+
+### K-10 · A render timeout rolls the configuration back but not the system
+`src/apply/engine.ts`
+
+When a renderer exceeds `renderTimeoutMs`, `apply()` restores `config.yaml` to the previous
+configuration and then **deliberately skips the rollback re-render** — a renderer that has
+just timed out is presumed still wedged, and retrying it would hold the apply reservation
+for a second full timeout before failing again the same way.
+
+The consequence is that the file on disk and the running system can disagree. The renderer
+may have applied part of the change before it stalled: a NetworkManager connection modified,
+a drop-in written, a profile brought up. Nothing undoes that. `config.yaml` says one thing,
+`nmcli` says another, and `GET /config` reports the file.
+
+Bounded in practice — the access-point fallback still raises the access point if the board
+ends up unreachable, so this is a divergence rather than a lockout. It starts to matter when
+the console shows a configuration the board is not actually running, which is the moment
+somebody trusts the screen over the radio. The fix is a renderer that can report what it
+managed to do before it stalled, or a reconciling render on the next start; the startup
+render added for R-CFG-08 already narrows the window to "until the daemon next restarts".
+
+### K-11 · The fallback watchdog fires once per daemon start, and never again
+`src/net/watchdog.ts`, `src/daemon/server.ts`
+
+`FallbackWatchdog.start()` sets a single timer and `fire()` clears it. It is armed once, in
+`startServer()`, and nothing re-arms it — not an apply, not a confirm, not a revert. After
+that one check the guarantee is spent for the life of the process.
+
+R-NET-07 is written about boot, so this satisfies it as worded. What it does not cover is
+the case the requirement exists for: an operator applies a change that takes the board off
+the air *after* the window has already elapsed. The apply confirmation timer catches the
+unconfirmed case, but a change that is confirmed — or one whose damage appears later than
+the render — leaves no watchdog behind it. It starts to matter with M1b, where a console
+makes applying changes routine and a device may run for days between restarts. The fix is to
+re-arm on every apply and confirm, which is small; it is recorded rather than done because
+M1a's exit criterion is the boot path.

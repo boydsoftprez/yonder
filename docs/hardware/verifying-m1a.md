@@ -12,7 +12,7 @@ NetworkManager, a real Wi-Fi radio, a second device to observe from, and a real 
 
 | Requirement | What the fake `nmcli` could never tell you |
 |---|---|
-| R-NET-01, R-SEC-01, R-CFG-06 — access point with a per-device password | A fake `nmcli` always reports success. It cannot tell you whether a real phone can complete a real WPA2 handshake against the password the daemon generated. |
+| R-NET-01, R-SEC-01 — access point with the published setup passphrase | A fake `nmcli` always reports success. It cannot tell you whether a real phone can complete a real WPA2 handshake against `yonder1234`. |
 | R-NET-02 — DHCP for access-point clients | A fake `nmcli` cannot hand a real device a real lease. Nothing before this procedure has ever offered an IP address to anything. |
 | R-NET-03, R-NET-04 — Wi-Fi client and Ethernet | The renderer has only ever been told "the command exited 0." It has never watched a real radio fail to associate, or a real cable fail to carry a DHCP offer. |
 | R-CFG-03 — apply behind a confirmation timer, revert if unconfirmed | Every existing test drives the confirmation timer with a fake clock that jumps straight to "120 seconds later" (see `advance(ms)` in `packages/yonder-core/src/net/watchdog.test.ts` and the equivalent in `apply/engine.test.ts`). This is the first time the timer runs against the real one, for a real two minutes, while a real `nmcli` is told to build and tear down real connections. |
@@ -33,7 +33,7 @@ installed service always uses the right-hand column below.
 | `YONDER_SOCKET` | `/run/yonder/core.sock` | The Unix socket the HTTP API listens on |
 | `YONDER_CONFIG` | `/etc/yonder/config.yaml` | The single source of truth for device state |
 | `YONDER_JOURNAL` | `/var/lib/yonder/apply.json` | The pending-apply record `recover()` reads at startup |
-| `YONDER_SECRETS` | `/etc/yonder/secrets.yaml` | Generated per-device secrets, mode `0600` |
+| `YONDER_SECRETS` | `/etc/yonder/secrets.yaml` | The device's secrets, mode `0600`. Seeded with `ap_psk` only |
 
 Three different timers matter below and it's easy to conflate them:
 
@@ -134,7 +134,7 @@ npm test
 Confirm it's still green before moving on — `parse.test.ts` reads the three fixture files
 directly and asserts on their shape (see `packages/yonder-core/src/net/nmcli/parse.test.ts`).
 
-## Step 2 — Install and start the daemon
+## Step 2 — Install, and watch the access point come up
 
 ```bash
 sudo ./installer/install.sh
@@ -144,63 +144,15 @@ This runs every role under `installer/roles/` in order: `10-base.sh` installs
 `network-manager`, and creates `/etc/yonder` (mode `0750`), `/var/lib/yonder`, and
 `/etc/NetworkManager/dnsmasq-shared.d`; `20-yonder-core.sh` installs Node dependencies,
 builds `yonder-core` into `/opt/yonder/packages/yonder-core`, copies
-`systemd/yonder-core.service` into place, and runs `systemctl daemon-reload` and
-`systemctl enable yonder-core.service`.
+`systemd/yonder-core.service` into place, seeds `/etc/yonder/config.yaml`, and runs
+`systemctl daemon-reload`, `enable` and `restart`.
 
-**`install.sh` enables the service for the next boot; it does not start it now**, and it
-does not create `/etc/yonder/config.yaml` either — nothing in the installer does. Every
-existing test that starts the daemon seeds a config file itself before doing so (see the
-`saveConfig(configPath, DEFAULT_CONFIG)` call in every `beforeEach` in
-`packages/yonder-core/src/daemon/server.test.ts` and `server.wiring.test.ts`); on a real
-board, that step is yours. Without it, `startServer()` throws while building the fallback
-watchdog (it calls `loadConfig(opts.configPath)` directly, unguarded, right after
-`engine.recover()`), and the service crash-loops under `Restart=always`.
-
-Create the config file the daemon needs. The block below is exactly the reference
-configuration from `docs/configuration.md`, which `packages/yonder-core/src/docs.test.ts`
-parses through the real schema in CI on every change — so it is guaranteed to be accepted:
-
-```bash
-sudo tee /etc/yonder/config.yaml > /dev/null <<'EOF'
-version: 1
-
-network:
-  ap:
-    enabled: true
-    ssid: yonder
-    psk: { secret: ap_psk }
-    address: 192.168.77.1/24
-    dhcp: { start: 192.168.77.2, end: 192.168.77.50, lease: 12h }
-    fallback: { enabled: true, timeout: 90 }   # never disable this without reason
-  client:
-    ssid: null                                 # set from the console, not at flash time
-    psk: null                                  # then { secret: wifi_psk }
-  ethernet: { dhcp: true }
-  priority: [ethernet, modem, wifi_client]     # egress preference, highest first
-
-ui:
-  port: 3000
-  theme: day                                   # day | night
-  editor:
-    enabled: true
-    password: { secret: editor_password }
-    interfaces: [ethernet, wifi_client]        # note: cellular excluded by default
-
-system:
-  hostname: yonder
-  timezone: UTC
-EOF
-```
-
-```bash
-sudo chmod 644 /etc/yonder/config.yaml
-```
-
-Now start the service:
-
-```bash
-sudo systemctl start yonder-core
-```
+**The installer leaves the service running and the device configured.** There is nothing to
+write by hand: `config/defaults/config.yaml` — generated from `DEFAULT_CONFIG` and identical
+to the reference configuration in `docs/configuration.md` — is copied into place when, and
+only when, no configuration exists. Re-running the installer on a board you have configured
+leaves your file exactly as it is. The daemon seeds the same content itself if it ever
+starts against a missing configuration, so a hand-installed board is covered too.
 
 ```bash
 sudo systemctl status yonder-core
@@ -209,27 +161,37 @@ sudo systemctl status yonder-core
 Expect `Active: active (running)`.
 
 ```bash
+sudo cat /etc/yonder/config.yaml
+```
+
+Expect the shipped default: access point `yonder` enabled on `192.168.77.1/24`, no client
+SSID, fallback enabled at 90 s.
+
+```bash
 sudo journalctl -u yonder-core -n 50 --no-pager
 ```
 
-Near the top, expect two lines like:
+Expect this line, and expect it on every boot until you change the passphrase:
 
 ```
-generated ap_psk: aB3dEfGhJkLmNpQr
-generated editor_password: Xy2Zab3CdEfGh4Jk
+access point: using the published default passphrase; change it from the console
 ```
 
-**Record the `ap_psk` value — it's the access point's WPA2 password and you'll need it in
-Step 4.** Both secrets are 16 characters drawn from an alphabet that excludes `O`, `0`, `l`,
-`I` and `1` (see `packages/yonder-core/src/secrets/generate.ts`) precisely so a human can
-read one off a screen and type it correctly. You'll see both lines because the default
-configuration references both secrets, even though `editor_password` guards the console
-editor, which is M1b and doesn't exist yet — ignore that second line for this milestone.
-These lines print exactly once: `buildRenderers()` only reports a secret it just created
-(see `generated` in `packages/yonder-core/src/daemon/server.ts`), so a restart that finds
-`secrets.yaml` already populated prints nothing. If you need to see them again, stop the
-service, delete `/etc/yonder/secrets.yaml`, and start it again — that also generates a new
-`ap_psk`.
+**The access point's WPA2 passphrase is `yonder1234`** — published, documented, the same on
+every device, and never presented as a secret. It is
+`DEFAULT_AP_PASSPHRASE` in `packages/yonder-core/src/net/profiles.ts`, and it is seeded into
+`secrets.yaml` only when `ap_psk` is absent, so a passphrase you have changed is kept.
+[ADR-0007](../adr/0007-credential-boundary.md) is why: a random per-device value could only
+be read from this journal, and getting to this journal means already being on the device.
+
+Nothing prints a secret. `editor_password` is **not** seeded at all — it does not exist
+until an operator sets an administrator password from the console, which is M1b.
+
+```bash
+sudo cat /etc/yonder/secrets.yaml
+```
+
+Expect exactly one entry, `ap_psk: yonder1234`.
 
 ```bash
 sudo ls -l /run/yonder/core.sock
@@ -237,29 +199,39 @@ sudo ls -l /run/yonder/core.sock
 
 Expect a line beginning `srw-rw----` owned by `root root`.
 
-> **Nothing is on the air yet, and that's expected.** Starting the service does not, by
-> itself, touch NetworkManager. `yonder-core` only renders network state from inside
-> `ApplyEngine.apply()` and its own recovery/rollback paths (grep `renderAll` in
-> `apply/engine.ts` — every call site is one of those three) — never on a plain startup with
-> nothing pending. Don't expect to see an access point yet; that's Step 4.
+> **The access point should already be on the air.** `startServer()` renders the
+> configuration once at startup — after `engine.recover()` and before the socket binds — so
+> a board nobody has ever posted an apply to still brings up its access point. That is
+> R-CFG-08, and it is the whole point of a device you can reach without having configured
+> it first. Expect the renderer's own lines in the journal immediately after the service
+> starts:
 >
-> If you wait around instead: the fallback watchdog is already armed (it started right
-> after the lines above), and its 90-second one-shot timer will find nothing reachable on a
-> board that's done nothing else yet. It will try to bring the access point up on its own —
-> and fail, because the `yonder-ap` NetworkManager connection doesn't exist until something
-> has actually rendered the config at least once. Expect to see, about 90 seconds after the
-> service started, a pair of lines whose first half is exact (it's a literal string in
-> `watchdog.ts`) and whose second half is whatever your real `nmcli` says when told to
-> activate a connection that was never created — this document hasn't run that command, so
-> it can't tell you the exact wording, only the shape:
+> ```
+> network: wifi=wlan0 ethernet=eth0
+> network: bringing the access point up
+> ```
+>
+> (exact interface names depend on your board; a missing radio prints `none` for that
+> slot). **Confirm the SSID `yonder` is visible from your second device now, before going
+> any further.** If it is not, stop here — nothing later in this document will work, and
+> the failure is the one that matters most.
+>
+> A render failure at startup is logged and does not stop the socket binding, the same as a
+> failed recovery. If the journal shows
+> `could not render the current configuration, serving anyway: …`, the API is still up and
+> Step 3 will still answer — record what it said.
+>
+> If you then wait 90 seconds: the fallback watchdog fires, finds only the access point's
+> own address, and tries to raise the access point again. `FallbackWatchdog.check()`
+> deliberately ignores the access-point subnet — "reachable" means some *other* interface
+> holds an address — so on a board with nothing but its own access point up, this is
+> expected and harmless:
 > ```
 > fallback: nothing reachable, bringing the access point up
-> fallback: could not bring the access point up: nmcli exited <code>: <nmcli's own error text>
 > ```
-> That is a correct, harmless consequence of testing this in numbered steps rather than
-> having a console apply a config automatically — it stops happening the moment Step 4 runs.
-> Complete Step 4 within 90 seconds of starting the service if you'd rather not see it at
-> all.
+> The connection already exists this time, so `nmcli connection up` on an already-active
+> profile is what actually runs. Record whatever your NetworkManager says to that; this
+> document has not run it.
 
 ## Step 3 — Talk to the daemon over the socket
 
@@ -271,7 +243,7 @@ anywhere in M1a to reach it by IP.
 sudo curl --unix-socket /run/yonder/core.sock -s http://localhost/config
 ```
 
-Expect the configuration you seeded in Step 2, as one line of compact JSON:
+Expect the seeded default configuration, as one line of compact JSON:
 
 ```
 {"version":1,"network":{"ap":{"enabled":true,"ssid":"yonder","psk":{"secret":"ap_psk"},"address":"192.168.77.1/24","dhcp":{"start":"192.168.77.2","end":"192.168.77.50","lease":"12h"},"fallback":{"enabled":true,"timeout":90}},"client":{"ssid":null,"psk":null},"ethernet":{"dhcp":true},"priority":["ethernet","modem","wifi_client"]},"ui":{"port":3000,"theme":"day","editor":{"enabled":true,"password":{"secret":"editor_password"},"interfaces":["ethernet","wifi_client"]}},"system":{"hostname":"yonder","timezone":"UTC"}}
@@ -309,11 +281,11 @@ Expect `404`.
 succeeds — starts the 120-second confirmation window described above. It returns the applied
 change's `id` and the epoch-millisecond `expiresAt` you have until it reverts on its own.
 
-The body below is identical to what you seeded in Step 2 except `system.hostname`, which the
-network renderer never reads — a safe way to prove the whole pipeline end-to-end. Because
-nothing has rendered yet, **this apply is also the first time an access point, an Ethernet
-profile, and the DHCP drop-in actually get created** — not automatically, but as a direct
-result of this one command.
+The body below is identical to the seeded default except `system.hostname`, which the
+network renderer never reads — a safe way to prove the whole pipeline end-to-end. The access
+point, the Ethernet profile and the DHCP drop-in already exist by now: the startup render in
+Step 2 created them. **What this step proves is the apply path itself** — validate, write,
+render, start the confirmation window — over a device that is already up and reachable.
 
 ```bash
 cat > ~/yonder-apply-1.json <<'EOF'
@@ -357,20 +329,22 @@ Expect a 200 response shaped like `{"id":"<a uuid>","expiresAt":<a number>}`. **
 sudo journalctl -u yonder-core -n 20 --no-pager
 ```
 
-Expect the network renderer's own log lines to appear for the first time, for example:
+Expect the network renderer's own log lines again, for example:
 
 ```
 network: wifi=wlan0 ethernet=eth0
-network: bringing the access point up
 ```
 
-(exact interface names depend on your board; a missing radio prints `none` for that slot).
+`bringing the access point up` will **not** repeat: `render()` only calls `nmcli connection
+up` when the access point's active state actually has to flip, and the startup render in
+Step 2 already brought it up. Seeing only the interface line here is correct.
 
 Now, from your second device, **within the two-minute window**:
 
 - Scan for Wi-Fi networks and confirm the configured SSID (`yonder`, unless you changed it)
-  is visible.
-- Join it using the `ap_psk` value you recorded in Step 2.
+  is visible. It should already have been, since Step 2 — this re-checks it survived the
+  apply.
+- Join it with the published passphrase **`yonder1234`**.
 - Confirm the address you were handed is inside `192.168.77.2`–`192.168.77.50` (the
   configured DHCP pool) — check your device's network details panel, or `ip addr` /
   `ipconfig`.
@@ -534,10 +508,11 @@ Expect `client: { ssid: null, psk: null }` again.
 > configuration key."* This is the requirement the M1a milestone exists to satisfy. It's
 > implemented in `FallbackWatchdog` (`packages/yonder-core/src/net/watchdog.ts`).
 
-The watchdog's timer is armed exactly once — in `startServer()`, immediately after
-`engine.recover()` resolves — and it is never re-armed by a later apply or confirm. The only
-way to re-arm it is to start the daemon again, which is exactly what a reboot does. That's
-why, alone among the steps in this document, this one needs one.
+The watchdog's timer is armed exactly once, at daemon start, and it is never re-armed by a
+later apply or confirm — recorded as **K-11** in
+[`docs/known-issues.md`](../known-issues.md). The only way to re-arm it is to start the
+daemon again, which is exactly what a reboot does. That's why, alone among the steps in this
+document, this one needs one.
 
 > **Confirm this apply before you reboot — this is the step most likely to silently fail.**
 > `ApplyEngine.recover()` runs at every startup and reverts any apply still sitting
@@ -618,16 +593,20 @@ why, alone among the steps in this document, this one needs one.
    ```
 
    Expect, in order:
-   - No new `generated ...` lines — `secrets.yaml` already exists, so nothing is generated
-     on an ordinary restart.
+   - `access point: using the published default passphrase; …` again, unless you changed the
+     passphrase. It is printed on every boot while the default is still in force, not once.
+   - No `seeded a default configuration …` line — `/etc/yonder/config.yaml` already exists.
+   - The startup render's `network: wifi=… ethernet=…` line. **The configuration under test
+     here has `ap.enabled: false`, so the startup render will not raise the access point** —
+     it renders the configuration as written, which is exactly what makes the rest of this
+     step a real test of the fallback rather than of the render.
    - `fallback: will check for a reachable interface in 90 s` (or however many seconds you
      configured) shortly after the service starts.
-   - Nothing network-related for the rest of that window — a clean startup with no pending
-     journal entry renders nothing on its own, exactly as in Step 2.
+   - Nothing network-related for the rest of that window.
    - At the end of the window: `fallback: nothing reachable, bringing the access point up`.
 
 6. From your second device: scan, confirm the SSID is visible again — it's the same SSID and
-   `ap_psk` as before, since neither was touched by this step — join it, and confirm you're
+   passphrase as before, since neither was touched by this step — join it, and confirm you're
    back on the `192.168.77.0/24` network.
 
 7. Worth confirming directly, for the results section below:
@@ -661,7 +640,7 @@ Fill in after running the steps above on real hardware.
 | Step | Pass / fail | Notes |
 |---|---|---|
 | 1 — Real fixtures captured, `npm test` green | | |
-| 2 — Install, config seeded, service `active (running)`, AP password recorded | | |
+| 2 — Install alone leaves the service running, the config seeded and the access point on the air | | |
 | 3 — All four routes answer as documented | | |
 | 4 — Apply, join over Wi-Fi, DHCP in pool, ping reaches the board, confirm | | |
 | 5 — Unconfirmed apply reverts within the window | | |
