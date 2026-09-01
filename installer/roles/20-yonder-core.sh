@@ -15,14 +15,18 @@ ensure_dir "$yc_dest" 0755
 run rm -rf "$yc_dest/src"
 run cp -r "$yc_src/src" "$yc_dest/src"
 run cp "$yc_src/package.json" "$yc_dest/package.json"
+run cp "$yc_src/package-lock.json" "$yc_dest/package-lock.json"
 run cp "$yc_src/tsconfig.json" "$yc_dest/tsconfig.json"
 
 # The unit starts dist/daemon/server.js, which is generated, and the daemon's
 # dependencies live in the workspace root when the tree is a checkout. Neither
 # is present on a board, so build here and leave behind only what the service
-# needs to run.
+# needs to run. `npm ci` rather than `npm install`: it requires the lockfile
+# copied above and installs exactly the versions it pins, so two boards
+# imaged a week apart get the same dependency tree instead of whatever the
+# registry serves at flash time.
 log "installing dependencies and building"
-run env npm --prefix "$yc_dest" install --no-audit --no-fund
+run env npm --prefix "$yc_dest" ci --no-audit --no-fund
 run env npm --prefix "$yc_dest" run build
 run env npm --prefix "$yc_dest" prune --omit=dev
 
