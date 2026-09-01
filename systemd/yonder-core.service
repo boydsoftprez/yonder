@@ -7,7 +7,15 @@ Wants=NetworkManager.service
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/node /opt/yonder/packages/yonder-core/dist/daemon/server.js
+# /usr/local/bin/yonder-node, not /usr/bin/node: a unit's ExecStart is an
+# absolute path that systemd resolves against nothing, and the offline install
+# route puts its bundled runtime at /opt/yonder/node/bin/node and on PATH for
+# the installer's own run only. Naming the distro path was therefore
+# `Unable to locate executable '/usr/bin/node'`, status=203/EXEC, for ever
+# under Restart=always. The installer's link_node points this fixed path at
+# whichever node it resolved — bundled or packaged — so both routes look the
+# same from here. See installer/lib/common.sh.
+ExecStart=/usr/local/bin/yonder-node /opt/yonder/packages/yonder-core/dist/daemon/server.js
 Restart=always
 RestartSec=2
 RuntimeDirectory=yonder

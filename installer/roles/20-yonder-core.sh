@@ -8,6 +8,12 @@ install_bundled_node || ensure_pkgs nodejs
 command -v npm >/dev/null 2>&1 || ensure_pkgs npm
 require_node 20
 
+# Now that a node is resolved, give systemd a fixed path to it. The unit
+# cannot name either candidate directly: the bundled runtime lives under
+# $YONDER_PREFIX and is only on PATH inside this script, and the packaged one
+# is only present on the route that installed it.
+link_node
+
 yc_src="$YONDER_SRC/packages/yonder-core"
 yc_dest="$YONDER_PREFIX/packages/yonder-core"
 
@@ -81,6 +87,21 @@ fi
 
 if [ -f "$YONDER_SRC/systemd/yonder-core.service" ]; then
     run cp "$YONDER_SRC/systemd/yonder-core.service" /etc/systemd/system/yonder-core.service
+
+    # Post-condition, before anything is enabled or started: the unit systemd
+    # is about to run names a binary that is there. A board whose ExecStart
+    # points at nothing does not fail visibly — it fails at step EXEC with
+    # status=203 and, under Restart=always, keeps failing, which is discovered
+    # by fetching the aircraft back and reading its journal. Checked against
+    # the copy systemd will actually read; on a dry run there is none, so the
+    # source it was copied from stands in.
+    if [ "$DRY_RUN" = "1" ]; then
+        yc_unit="$YONDER_SRC/systemd/yonder-core.service"
+    else
+        yc_unit=/etc/systemd/system/yonder-core.service
+    fi
+    assert_unit_exec "$yc_unit" "$YONDER_NODE_LINK"
+
     if [ "$DRY_RUN" != "1" ] && command -v systemctl >/dev/null 2>&1; then
         run systemctl daemon-reload
         run systemctl enable yonder-core.service
