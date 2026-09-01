@@ -73,7 +73,7 @@ export const RETIRED_KEYS: readonly RetiredKey[] = [
     path: "network.ap.dhcp",
     note:
       "the access point's DHCP range is not configurable; NetworkManager derives it from "
-      + "network.ap.address, so this key decided nothing (K-14)",
+      + "network.ap.address, so this key decided nothing (K-15)",
   },
 ];
 

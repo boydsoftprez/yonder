@@ -173,7 +173,7 @@ key at all.
 
 Removed, rather than documented as inert. What remains true is what R-NET-02 now says:
 clients get addresses inside the access point's own subnet, because NetworkManager derives
-that range from the access point's address. K-14 records what a configurable pool would
+that range from the access point's address. K-15 records what a configurable pool would
 cost — a dnsmasq of our own to run and supervise, not a drop-in.
 
 ## Still to confirm on a board
@@ -611,7 +611,7 @@ Now, from your second device, **within the two-minute window**:
 - Join it with the published passphrase **`yonder1234`**.
 - Confirm you were handed an address inside `192.168.77.0/24` — the access point's own
   subnet, which is what R-NET-02 promises and all it promises. The range within that subnet
-  is NetworkManager's to choose and is not configurable (K-14); a real board handed a client
+  is NetworkManager's to choose and is not configurable (K-15); a real board handed a client
   `192.168.77.154`. Check your device's network details panel, or `ip addr` / `ipconfig`.
   **Joining but never being given an address is the signature of a missing
   `dnsmasq-base`**; check `dpkg -l dnsmasq-base` before looking anywhere else.

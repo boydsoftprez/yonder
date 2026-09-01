@@ -74,7 +74,7 @@ describe("ConfigSchema", () => {
   });
 
   /**
-   * The DHCP pool is gone (K-14), and this schema still rejects it. That is
+   * The DHCP pool is gone (K-15), and this schema still rejects it. That is
    * the half that has not changed and must not: strictness is what turns a
    * misspelled key into an error instead of a setting an operator wrongly
    * believes is in force.

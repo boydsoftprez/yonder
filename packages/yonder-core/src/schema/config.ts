@@ -56,7 +56,7 @@ const ApFallback = z.object({
  * Yonder used to write into that conf-dir decided nothing: a client on a real
  * board was handed 192.168.77.154, inside NetworkManager's range and outside
  * the configured 192.168.77.2–50. A configuration key that does nothing is
- * worse than an absent one, so it is absent. See K-14 in docs/known-issues.md
+ * worse than an absent one, so it is absent. See K-15 in docs/known-issues.md
  * for what bringing it back would cost, and R-NET-02 for what is actually
  * promised: DHCP inside the access point's subnet, from an address range that
  * is not currently configurable.

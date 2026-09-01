@@ -41,7 +41,7 @@ export interface DesiredProfile extends ConnectionSpec {
  * masquerade for clients, from a range it derives from `ipv4.addresses` and
  * passes to its own dnsmasq on the command line — which is why the address
  * below is the only thing that decides what clients are given, and why there
- * is no pool in the configuration (K-14, R-NET-02).
+ * is no pool in the configuration (K-15, R-NET-02).
  *
  * `connection.autoconnect no` is the one that matters here: the access point
  * is brought up deliberately — by configuration or by the fallback watchdog —

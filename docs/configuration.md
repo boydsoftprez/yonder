@@ -63,7 +63,7 @@ nothing else. There used to be a `network.ap.dhcp` block here; it was written to
 NetworkManager's own command line overrode, so it decided nothing, and it has been removed
 rather than left looking authoritative. A `config.yaml` still carrying it loads anyway — it
 is a *retired* key, dropped with a line in the journal saying so, and you need not delete
-anything (see below). K-14 in [`known-issues.md`](known-issues.md) records what a
+anything (see below). K-15 in [`known-issues.md`](known-issues.md) records what a
 configurable pool would cost.
 
 <!-- yonder:reference-config -->
@@ -113,7 +113,7 @@ path, because a key silently ignored is a setting you believe is in force and is
 <!-- yonder:retired-keys -->
 | Key | What became of it |
 |---|---|
-| `network.ap.dhcp` | The access point's DHCP range is not configurable; NetworkManager derives it from `network.ap.address`, so this key decided nothing (K-14) |
+| `network.ap.dhcp` | The access point's DHCP range is not configurable; NetworkManager derives it from `network.ap.address`, so this key decided nothing (K-15) |
 
 ### Sections that arrive with later milestones
 

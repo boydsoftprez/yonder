@@ -142,7 +142,7 @@ Parameter writes are vehicle commands. R-CMD applies to every requirement here.
 | ID | Requirement | P |
 |---|---|---|
 | R-NET-01 | Run a WPA2 access point with a configurable SSID, a per-device password, and a static address | 1 |
-| R-NET-02 | Serve DHCP to clients of the access point, from addresses inside the access point's configured subnet. The address range itself is **not** configurable: it is derived from the access point's address by the network stack that serves it. See K-14 | 1 |
+| R-NET-02 | Serve DHCP to clients of the access point, from addresses inside the access point's configured subnet. The address range itself is **not** configurable: it is derived from the access point's address by the network stack that serves it. See K-15 | 1 |
 | R-NET-03 | Join an existing Wi-Fi network as a client, including scanning for networks | 1 |
 | R-NET-04 | Support wired Ethernet, including a second adapter | 2 |
 | R-NET-05 | Present as a USB Ethernet gadget where the board supports it, giving a wired path to the interface over the USB port | 3 |

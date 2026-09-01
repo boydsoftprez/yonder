@@ -6,6 +6,10 @@ rediscover them.
 
 Nothing here is a requirement. Requirements live in [`requirements.md`](requirements.md).
 
+**K numbers are stable.** A closed issue keeps its number and is struck through rather than
+deleted, because source comments cite these. Never reuse a number — K-14 was briefly reused
+for a second issue, and four comments in `src/apply/` were left pointing at the wrong entry.
+
 ---
 
 ## Must be resolved during M1
@@ -155,7 +159,19 @@ silent because "the access point and the client profile fight over one radio" is
 kind of thing that reads as a bug in the field, and because a configuration key that does
 nothing is worse than an absent one — it invites an operator to set it and expect an effect.
 
-### K-14 · The access point's DHCP range is not configurable
+### K-14 · ~~A device with an invalid configuration was reachable but not repairable~~ — CLOSED
+
+`apply()` snapshotted the configuration on disk before writing the new one, so a device
+whose `config.yaml` no longer validated refused **every** apply, including a good one. The
+socket bound, so the device could be reached and diagnosed, but not fixed — only a card
+reader or an SSH session could repair it.
+
+Closed in `d53b3cb`: an apply whose snapshot cannot be read falls back to the posted
+configuration as the rollback target rather than refusing. Retained here, and not deleted,
+because `src/apply/engine.ts` and `src/apply/journal.ts` still cite K-14 when explaining
+why that fallback exists.
+
+### K-15 · The access point's DHCP range is not configurable
 `src/schema/config.ts`, `src/net/profiles.ts`
 
 `config.network.ap.dhcp` — `start`, `end`, `lease` — has been **removed**. It was written to
