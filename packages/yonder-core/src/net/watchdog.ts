@@ -9,6 +9,16 @@ export interface FallbackWatchdogOptions {
   config: Config;
   apUp: () => Promise<void>;
   log?: (line: string) => void;
+  /**
+   * When the deadline is measured from. Defaults to the moment start() runs.
+   *
+   * R-NET-07 gives a number of seconds "from start-up", and the daemon does
+   * real work before it can arm this — recovery, and the start-up render,
+   * each of which can spend up to renderTimeoutMs inside a single renderer.
+   * Measuring from a caller-supplied instant means slow start-up work eats
+   * into the window rather than pushing the deadline out behind it.
+   */
+  since?: number;
 }
 
 /**
@@ -40,8 +50,14 @@ export class FallbackWatchdog {
       this.log("fallback: disabled by configuration");
       return;
     }
-    const ms = fallback.timeout * 1000;
-    this.log(`fallback: will check for a reachable interface in ${fallback.timeout} s`);
+    // Whatever start-up has already spent comes out of the window, so the
+    // deadline lands where R-NET-07 says it does rather than that many
+    // seconds after however long the daemon took to get here. Clamped at
+    // zero: a start-up slower than the whole window checks immediately.
+    const window = fallback.timeout * 1000;
+    const elapsed = Math.max(0, this.opts.clock.now() - (this.opts.since ?? this.opts.clock.now()));
+    const ms = Math.max(0, window - elapsed);
+    this.log(`fallback: will check for a reachable interface in ${Math.round(ms / 1000)} s`);
     this.timer = this.opts.clock.setTimer(ms, () => { void this.fire(); });
   }
 

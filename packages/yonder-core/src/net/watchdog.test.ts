@@ -57,7 +57,7 @@ const DEVICE_SHOW = {
   loopbackOnly: "GENERAL.DEVICE:lo\nIP4.ADDRESS[1]:127.0.0.1/8\nGENERAL.DEVICE:eth0\n",
 };
 
-function harness(deviceShow: string, config: Config = DEFAULT_CONFIG) {
+function harness(deviceShow: string, config: Config = DEFAULT_CONFIG, since?: number) {
   const { clock, advance } = fakeClock();
   const run: CommandRunner = async (argv) =>
     argv.join(" ") === "nmcli -t -f GENERAL.DEVICE,IP4.ADDRESS device show" ? ok(deviceShow) : ok();
@@ -66,6 +66,7 @@ function harness(deviceShow: string, config: Config = DEFAULT_CONFIG) {
     client: new NmcliClient(run),
     clock,
     config,
+    since,
     apUp: async () => { raised++; },
   });
   return { wd, advance, raised: () => raised };
@@ -144,6 +145,33 @@ describe("FallbackWatchdog", () => {
     advance(200_000);
     await Promise.resolve();
     expect(raised()).toBe(0);
+  });
+
+  /**
+   * R-NET-07 gives a deadline, not a delay. The daemon does real work before
+   * it can arm this — recovery, and the start-up render, each able to spend a
+   * full renderTimeoutMs inside one wedged renderer — and measuring from
+   * whenever that finished pushed the check out behind it.
+   */
+  it("measures the deadline from the given start, not from when it was armed", async () => {
+    const { wd, advance, raised } = harness(DEVICE_SHOW.nothingUp, DEFAULT_CONFIG, 0);
+    advance(30_000);   // start-up spent this before the watchdog was armed
+    wd.start();
+    advance(59_000);   // 89 s since start
+    await flushMicrotasks();
+    expect(raised()).toBe(0);
+    advance(2_000);    // 91 s since start
+    await flushMicrotasks();
+    expect(raised()).toBe(1);
+  });
+
+  it("checks at once when start-up has already used the whole window", async () => {
+    const { wd, advance, raised } = harness(DEVICE_SHOW.nothingUp, DEFAULT_CONFIG, 0);
+    advance(200_000);
+    wd.start();
+    advance(0);
+    await flushMicrotasks();
+    expect(raised()).toBe(1);
   });
 
   it("raises the access point even when nmcli fails, rather than assuming reachability", async () => {

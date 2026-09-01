@@ -147,7 +147,7 @@ Parameter writes are vehicle commands. R-CMD applies to every requirement here.
 | R-NET-04 | Support wired Ethernet, including a second adapter | 2 |
 | R-NET-05 | Present as a USB Ethernet gadget where the board supports it, giving a wired path to the interface over the USB port | 3 |
 | R-NET-06 | Take egress preference as an ordered list in configuration, and generate routing metrics from it | 1 |
-| R-NET-07 | **If no configured network carries traffic within 90 seconds of boot, bring up the access point regardless of configuration.** Disabling this requires an explicitly named configuration key | 1 |
+| R-NET-07 | **If no configured network carries traffic within 90 seconds of `yonder-core` starting, bring up the access point regardless of configuration.** The window is measured from the moment the daemon starts, not from kernel boot, and start-up work comes out of it rather than pushing the deadline back. Disabling this requires an explicitly named configuration key | 1 |
 | R-NET-08 | Disable Wi-Fi entirely on request, for flight | 2 |
 | R-NET-09 | Be discoverable on a local network by hostname | 2 |
 | R-NET-10 | Report per-interface throughput | 3 |

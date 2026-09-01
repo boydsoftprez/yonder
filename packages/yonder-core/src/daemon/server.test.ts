@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtempSync, mkdirSync, rmSync, statSync, existsSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, statSync, existsSync, writeFileSync, readFileSync } from "node:fs";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -293,6 +293,77 @@ describe("startServer", () => {
       expect(bag.get("editor_password")).toBeUndefined();
     } finally {
       await server.close();
+    }
+  });
+
+  /**
+   * The crash loop with no socket. seedConfigIfAbsent covers *absent*, not
+   * *invalid* — an existing file is never touched, whatever is in it — so a
+   * configuration an operator has hand-edited into nonsense, or one a schema
+   * tightening on upgrade has just invalidated, used to take the daemon down
+   * before listen(): the start-up render logged "serving anyway", the
+   * watchdog's own loadConfig threw on the next line, startServer rejected,
+   * main() exited 1, and Restart=always did it again forever.
+   *
+   * A device with a broken configuration is exactly the device somebody has
+   * to be able to reach.
+   */
+  it("binds the socket when the configuration on disk is invalid", async () => {
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      writeFileSync(configPath, "version: 99\nnetwork: nonsense\n");
+      const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner: noopRunner });
+      try {
+        expect(statSync(socketPath).isSocket()).toBe(true);
+        expect((await call(socketPath, "GET", "/status")).status).toBe(200);
+        // And the API says what is wrong with it, rather than the operator
+        // having to guess from a service that will not start.
+        const res = await call(socketPath, "GET", "/config");
+        expect(res.status).toBe(400);
+        expect((res.body as { issues: string[] }).issues.length).toBeGreaterThan(0);
+      } finally {
+        await server.close();
+      }
+      // The operator's file is never silently replaced with defaults.
+      expect(readFileSync(configPath, "utf8")).toContain("version: 99");
+    } finally {
+      stderr.mockRestore();
+    }
+  });
+
+  /** The same class of failure through the other file the daemon must read. */
+  it("binds the socket when secrets.yaml cannot be read", async () => {
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      const secretsPath = join(dir, "secrets.yaml");
+      writeFileSync(secretsPath, "ap_psk:\n  not: a-string\n", { mode: 0o600 });
+      const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath, runner: noopRunner });
+      try {
+        expect(statSync(socketPath).isSocket()).toBe(true);
+        expect((await call(socketPath, "GET", "/status")).status).toBe(200);
+      } finally {
+        await server.close();
+      }
+    } finally {
+      stderr.mockRestore();
+    }
+  });
+
+  it("binds the socket when the configuration directory cannot be seeded", async () => {
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      // A path the durable write cannot create: seedConfigIfAbsent throws
+      // ConfigError, and that must cost a default configuration, not the API.
+      const wedged = join(dir, "config.yaml", "config.yaml");
+      const server = await startServer({ socketPath, configPath: wedged, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner: noopRunner });
+      try {
+        expect(statSync(socketPath).isSocket()).toBe(true);
+        expect((await call(socketPath, "GET", "/status")).status).toBe(200);
+      } finally {
+        await server.close();
+      }
+    } finally {
+      stderr.mockRestore();
     }
   });
 

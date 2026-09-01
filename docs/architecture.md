@@ -226,11 +226,18 @@ Our apply cycle:
 
 And independently of all that, a boot-time guarantee:
 
-> **If no configured network is carrying traffic within 90 seconds of boot, the access
-> point comes up regardless of configuration.**
+> **If no configured network is carrying traffic within 90 seconds of `yonder-core`
+> starting, the access point comes up regardless of configuration.**
 
 The AP is a floor, not a mode. There is always a way in. The fallback is on by default,
 and disabling it requires a config key whose name says what it does.
+
+The window is measured from the moment the daemon process starts — the unit orders itself
+after `NetworkManager`, so that is a little after kernel boot — and whatever start-up work
+happens before the watchdog is armed comes out of the 90 seconds rather than being added to
+them. That matters because two of those steps, the rollback of an unconfirmed change and the
+start-up render, can each spend up to the per-renderer timeout inside a wedged renderer. The
+deadline is a deadline, not a delay after an unbounded prologue.
 
 ---
 

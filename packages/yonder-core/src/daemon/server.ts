@@ -14,7 +14,8 @@ import { NetworkRenderer } from "../net/renderer.js";
 import { FallbackWatchdog } from "../net/watchdog.js";
 import { AP_CONNECTION, DEFAULT_AP_PASSPHRASE } from "../net/profiles.js";
 import { systemRunner, type CommandRunner } from "../net/runner.js";
-import { systemClock, type Renderer } from "../apply/types.js";
+import { systemClock, type Clock, type Renderer } from "../apply/types.js";
+import { DEFAULT_CONFIG, type Config } from "../schema/config.js";
 
 export interface ServerOptions {
   socketPath: string;
@@ -31,6 +32,12 @@ export interface ServerOptions {
    * never invoke a real nmcli, the same reason buildRenderers takes one.
    */
   runner?: CommandRunner;
+  /**
+   * The clock the confirmation window and the fallback deadline are measured
+   * on. Test-only, for the same reason as `runner`: nothing in this daemon
+   * may wait on the wall clock in a test.
+   */
+  clock?: Clock;
 }
 
 export interface BuildRenderersOptions {
@@ -74,27 +81,60 @@ export function buildRenderers(opts: BuildRenderersOptions): {
 }
 
 export async function startServer(opts: ServerOptions): Promise<{ close(): Promise<void> }> {
-  // First, before anything reads the configuration. A device that has never
-  // been configured has no file to load, and every path below — recover(),
-  // the startup render, the watchdog — would throw before the socket could
-  // bind, which under Restart=always is a crash loop rather than a device
-  // (R-CFG-08). The installer seeds the same content on a clean install; this
-  // is the half that also covers a hand-installed board, an upgrade from a
-  // build that shipped no default, and a configuration someone deleted.
-  if (seedConfigIfAbsent(opts.configPath)) {
-    process.stdout.write(`seeded a default configuration at ${opts.configPath}\n`);
+  const clock = opts.clock ?? systemClock;
+  // Fixed before any work: the fallback deadline is measured from here, not
+  // from whenever the daemon finally gets round to arming it (R-NET-07).
+  const startedAt = clock.now();
+
+  // EVERY step between here and listen() is guarded, and each one for the
+  // same reason: the socket must always bind. A device whose configuration is
+  // broken is precisely the device an operator has to be able to reach in
+  // order to fix it, and one that exits instead is, under Restart=always, a
+  // crash loop with no socket rather than a device (R-CFG-08). Nothing below
+  // may throw out of this function except the bind itself.
+
+  // First, before anything reads the configuration: a device that has never
+  // been configured has no file to load. The installer seeds the same content
+  // on a clean install; this is the half that also covers a hand-installed
+  // board, an upgrade from a build that shipped no default, and a
+  // configuration someone deleted. Seeding covers *absent*, not *invalid* —
+  // an existing file is never touched, whatever is in it — so the steps below
+  // still have to survive a config.yaml an operator has hand-edited into
+  // nonsense, or one a schema tightening on upgrade has just invalidated.
+  try {
+    if (seedConfigIfAbsent(opts.configPath)) {
+      process.stdout.write(`seeded a default configuration at ${opts.configPath}\n`);
+    }
+  } catch (e) {
+    warn(`could not seed a default configuration, serving anyway: ${(e as Error).message}`);
   }
 
-  const { renderers: netRenderers, secrets, client } = buildRenderers({
-    secretsPath: opts.secretsPath ?? "/etc/yonder/secrets.yaml",
-    runner: opts.runner,
-  });
+  // A malformed secrets.yaml throws out of the SecretStore constructor. That
+  // must cost the network renderer, not the socket: without the socket there
+  // is no way to post the corrected configuration either.
+  let built: ReturnType<typeof buildRenderers> | undefined;
+  try {
+    built = buildRenderers({
+      secretsPath: opts.secretsPath ?? "/etc/yonder/secrets.yaml",
+      runner: opts.runner,
+    });
+  } catch (e) {
+    warn(`could not assemble the network renderer, serving anyway: ${(e as Error).message}`);
+  }
+  const netRenderers = built?.renderers ?? [];
+  // The watchdog still needs a way to talk to NetworkManager even when the
+  // renderers could not be built — raising the access point is the one action
+  // that helps a device in that state. Constructing a client cannot fail; it
+  // is only the secret store above that can.
+  const client = built?.client
+    ?? new NmcliClient(opts.runner ?? systemRunner, (l) => process.stdout.write(`${l}\n`));
+
   // No secret is ever printed. That mechanism existed to surface a random
   // per-device access-point passphrase and there is no longer one to surface
   // (ADR-0007). What an operator does need telling is that the device is
   // still on the published default — which stays true on every boot until
   // they change it, not just the boot that seeded it.
-  if (secrets.get("ap_psk") === DEFAULT_AP_PASSPHRASE) {
+  if (built?.secrets.get("ap_psk") === DEFAULT_AP_PASSPHRASE) {
     process.stdout.write(
       "access point: using the published default passphrase; change it from the console\n",
     );
@@ -105,6 +145,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
     journalPath: opts.journalPath,
     renderers: [...opts.renderers, ...netRenderers],
     renderTimeoutMs: opts.renderTimeoutMs,
+    clock,
   });
 
   // Anything left pending by a previous process is reverted before we serve.
@@ -117,6 +158,33 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   } catch (e) {
     warn(`recovery failed, serving anyway: ${(e as Error).message}`);
   }
+
+  // Armed after recover(), because recovery may roll a config back and the
+  // watchdog must judge the configuration actually in force rather than the
+  // one that was just discarded — but *before* the start-up render below,
+  // which can spend a full renderTimeoutMs inside a wedged renderer. A
+  // watchdog armed after that render is a watchdog whose deadline moved,
+  // and the deadline is the guarantee.
+  //
+  // A configuration the schema rejects must not cost the fallback either: the
+  // access point is exactly what an operator needs raised on a device whose
+  // config.yaml is unloadable. The defaults are used instead, which is what
+  // the fallback's own settings would be on a device nobody has configured.
+  let watchdogConfig: Config = DEFAULT_CONFIG;
+  try {
+    watchdogConfig = loadConfig(opts.configPath);
+  } catch (e) {
+    warn(`fallback: cannot read the configuration, using defaults: ${(e as Error).message}`);
+  }
+  const watchdog = new FallbackWatchdog({
+    client,
+    clock,
+    config: watchdogConfig,
+    since: startedAt,
+    apUp: () => client.up(AP_CONNECTION),
+    log: (l) => process.stdout.write(`${l}\n`),
+  });
+  watchdog.start();
 
   // Nothing else renders on a clean start. renderAll runs only from apply()
   // and from the two rollback paths, so a device nobody has ever posted an
@@ -135,18 +203,6 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   }
 
   const route = createRouter({ engine, configPath: opts.configPath });
-
-  // Started after recover(), not before: recovery may roll a config back,
-  // and the watchdog must judge the configuration actually in force rather
-  // than the one that was just discarded.
-  const watchdog = new FallbackWatchdog({
-    client,
-    clock: systemClock,
-    config: loadConfig(opts.configPath),
-    apUp: () => client.up(AP_CONNECTION),
-    log: (l) => process.stdout.write(`${l}\n`),
-  });
-  watchdog.start();
 
   const server: Server = createServer((req, res) => {
     const chunks: Buffer[] = [];

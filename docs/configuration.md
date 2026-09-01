@@ -20,8 +20,10 @@ No imager, no cloud, no dialog.
 4. Reaching the device again confirms the change.
 5. Timer expires unconfirmed → revert and reboot.
 
-Independently: **if no configured network carries traffic within 90 s of boot, the access
-point comes up regardless of configuration.** The AP is a floor, not a mode.
+Independently: **if no configured network carries traffic within 90 s of `yonder-core`
+starting, the access point comes up regardless of configuration.** The window is measured
+from the moment the daemon starts, and start-up work comes out of it rather than delaying
+it. The AP is a floor, not a mode.
 
 ## Secrets
 

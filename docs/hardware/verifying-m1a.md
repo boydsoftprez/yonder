@@ -58,7 +58,7 @@ Three different timers matter below and it's easy to conflate them:
 |---|---|---|---|
 | Apply confirmation window | 120 s | `ApplyEngine`'s own hard-coded default (`timeoutMs` in `apply/engine.ts`) | No environment variable reaches it. Only code that constructs `ApplyEngine` directly (the test suite) can override it. |
 | Render timeout, per renderer | 60 s | Same file, `renderTimeoutMs` | `ServerOptions.renderTimeoutMs` exists, but `main()` never sets it from the environment, so the shipped daemon always uses 60 s. |
-| Access-point fallback | 90 s | `network.ap.fallback.timeout` in `config.yaml` (schema range 30–600 s) | Yes — it's a config value, not a build constant. |
+| Access-point fallback | 90 s, measured from the moment the daemon process starts | `network.ap.fallback.timeout` in `config.yaml` (schema range 30–600 s) | Yes — it's a config value, not a build constant. |
 
 ## Prerequisites
 
@@ -554,8 +554,8 @@ Expect `client: { ssid: null, psk: null }` again.
 
 ## Step 6 — Prove the fallback (R-NET-07)
 
-> R-NET-07: *"If no configured network carries traffic within 90 seconds of boot, bring up
-> the access point regardless of configuration. Disabling this requires an explicitly named
+> R-NET-07: *"If no configured network carries traffic within 90 seconds of `yonder-core`
+> starting, bring up the access point regardless of configuration. Disabling this requires an explicitly named
 > configuration key."* This is the requirement the M1a milestone exists to satisfy. It's
 > implemented in `FallbackWatchdog` (`packages/yonder-core/src/net/watchdog.ts`).
 
@@ -652,7 +652,11 @@ document, this one needs one.
      it renders the configuration as written, which is exactly what makes the rest of this
      step a real test of the fallback rather than of the render.
    - `fallback: will check for a reachable interface in 90 s` (or however many seconds you
-     configured) shortly after the service starts.
+     configured) shortly after the service starts. **A second or two less is correct, not a
+     bug**: the deadline is measured from when the process started, so whatever recovery and
+     the start-up render have already spent comes out of the window rather than delaying it.
+     Record the number you see — on a board where the start-up render stalls, it should be
+     visibly smaller.
    - Nothing network-related for the rest of that window.
    - At the end of the window: `fallback: nothing reachable, bringing the access point up`.
 
