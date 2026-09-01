@@ -110,6 +110,18 @@ const System = z.object({
   timezone: z.string().default("UTC"),
 }).strict();
 
+/**
+ * Strict, deliberately: an unrecognised key is a misspelling, and a
+ * misspelling silently ignored is a setting an operator believes is in force
+ * and is not.
+ *
+ * That makes every *removal* from this schema a hazard to devices already in
+ * the field, which is why removals are enumerated in `retired.ts`. **Anything
+ * validating a document an operator may have written — a file, a request body
+ * — must run it through `withoutRetiredKeys` first** (R-CFG-09); a validator
+ * added here without that strands every device carrying a key an earlier
+ * build wrote. `retired.test.ts` fails when a new call site appears.
+ */
 export const ConfigSchema = z.object({
   version: z.literal(1),
   network: Network,

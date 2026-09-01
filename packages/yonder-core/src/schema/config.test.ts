@@ -1,6 +1,19 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, it, expect } from "vitest";
 import { ConfigSchema, DEFAULT_CONFIG } from "./config.js";
+import { withoutRetiredKeys } from "./retired.js";
+
+/** A config.yaml as a build before the pool was removed would have written it. */
+function seededByAnEarlierBuild(): unknown {
+  const network = DEFAULT_CONFIG.network;
+  return {
+    ...DEFAULT_CONFIG,
+    network: {
+      ...network,
+      ap: { ...network.ap, dhcp: { start: "192.168.77.2", end: "192.168.77.50", lease: "12h" } },
+    },
+  };
+}
 
 describe("ConfigSchema", () => {
   it("accepts the default config", () => {
@@ -61,23 +74,24 @@ describe("ConfigSchema", () => {
   });
 
   /**
-   * The DHCP pool is gone, and this schema is strict, so a config.yaml
-   * carrying the key an earlier build seeded is now rejected rather than
-   * quietly ignored (K-14). Stated as a test because "rejected" is a
-   * deliberate answer here and not an oversight: a key that decided nothing
-   * should not go on looking as though it decides something, and `GET
-   * /config` names the offending path so an operator can see which two lines
-   * to delete.
+   * The DHCP pool is gone (K-14), and this schema still rejects it. That is
+   * the half that has not changed and must not: strictness is what turns a
+   * misspelled key into an error instead of a setting an operator wrongly
+   * believes is in force.
+   *
+   * Tolerance lives one layer up, in `retired.ts`, and only for keys this
+   * project can name. The two halves are asserted together here because they
+   * are a pair: the schema knows nothing about history, and the loader knows
+   * exactly one thing about it — the enumerated list. A device seeded by an
+   * earlier build boots (R-CFG-09) without the schema going soft on typos.
    */
   it("rejects an access-point DHCP pool, which no longer decides anything", () => {
-    const network = DEFAULT_CONFIG.network;
-    const seededByAnEarlierBuild = {
-      ...DEFAULT_CONFIG,
-      network: {
-        ...network,
-        ap: { ...network.ap, dhcp: { start: "192.168.77.2", end: "192.168.77.50", lease: "12h" } },
-      },
-    };
-    expect(ConfigSchema.safeParse(seededByAnEarlierBuild).success).toBe(false);
+    expect(ConfigSchema.safeParse(seededByAnEarlierBuild()).success).toBe(false);
+  });
+
+  it("accepts that same configuration once the retired key is dropped", () => {
+    const { doc, dropped } = withoutRetiredKeys(seededByAnEarlierBuild());
+    expect(dropped.map((k) => k.path)).toEqual(["network.ap.dhcp"]);
+    expect(ConfigSchema.safeParse(doc).success).toBe(true);
   });
 });

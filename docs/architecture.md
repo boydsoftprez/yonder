@@ -239,6 +239,24 @@ them. That matters because two of those steps, the rollback of an unconfirmed ch
 start-up render, can each spend up to the per-renderer timeout inside a wedged renderer. The
 deadline is a deadline, not a delay after an unbounded prologue.
 
+And a third way to brick a device, which neither of those two covers: **the configuration
+was written by an older Yonder.** The schema is strict, so a release that removes a setting
+rejects every `config.yaml` still carrying it — and the guarantees above do not help.
+Rollback has nothing to roll back to: the file being refused is the one already in force,
+and no apply put it there. The access-point floor does not stand on its own either — its
+only action is to raise the `yonder-ap` profile, and that profile is written by a render
+that cannot run, because rendering needs the configuration that would not load. A board did
+exactly this: no access point, and the only way to it was an Ethernet cable that happened to
+be plugged in.
+
+So a removed key is **retired, not merely deleted**. The removals are enumerated in
+`src/schema/retired.ts`; a document is stripped of them before validation, each drop is
+logged naming the key, and the operator's file is left alone until something saves it. Every
+key that was never a Yonder setting is still refused, with the offending path named, because
+a misspelling silently ignored is a setting an operator believes is in force and is not
+(R-CFG-09). Retiring a key is deliberate: one line in that file, one row in the table in
+[`configuration.md`](configuration.md), both gated by tests.
+
 ---
 
 ## 5. Repository layout

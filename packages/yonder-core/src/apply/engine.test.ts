@@ -68,6 +68,54 @@ describe("ApplyEngine", () => {
     expect(e.status().state).toBe("idle");
   });
 
+  /**
+   * R-CFG-09 on the way in, not just on the way out. A configuration that
+   * loads has to be one that applies: an operator on a device seeded by an
+   * earlier build can read their own file — from the boot partition, from a
+   * backup, from `GET /config` on an older console — and post it back, and
+   * this API is the only repair path a console has. Refusing it here would
+   * hand them a device they can read and cannot fix.
+   *
+   * The key is dropped, not stored: what reaches the renderers and the file
+   * is the validated document, so the next write is already free of it.
+   */
+  it("accepts a posted configuration carrying a retired key, and does not store it", async () => {
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      const { clock } = fakeClock();
+      const r = renderer();
+      const e = new ApplyEngine({ configPath, journalPath, renderers: [r], clock });
+
+      const fromAnEarlierBuild = {
+        ...changed(),
+        network: {
+          ...DEFAULT_CONFIG.network,
+          ap: {
+            ...DEFAULT_CONFIG.network.ap,
+            dhcp: { start: "192.168.77.2", end: "192.168.77.50", lease: "12h" },
+          },
+        },
+      };
+
+      const { id } = await e.apply(fromAnEarlierBuild as unknown as Config);
+      e.confirm(id);
+
+      expect(loadConfig(configPath).system.hostname).toBe("changed");
+      expect(readFileSync(configPath, "utf8")).not.toContain("lease:");
+      expect("dhcp" in r.calls[0]!.network.ap).toBe(false);
+    } finally {
+      stderr.mockRestore();
+    }
+  });
+
+  it("still rejects a posted configuration with a key nobody retired", async () => {
+    const { clock } = fakeClock();
+    const e = new ApplyEngine({ configPath, journalPath, renderers: [renderer()], clock });
+    const typo = { ...changed(), network: { ...DEFAULT_CONFIG.network, ap: { ...DEFAULT_CONFIG.network.ap, ssdi: "yonder" } } };
+    await expect(e.apply(typo as unknown as Config)).rejects.toThrow(/ssdi/);
+    expect(loadConfig(configPath).system.hostname).toBe("yonder");
+  });
+
   it("writes the new config and enters pending", async () => {
     const { clock } = fakeClock();
     const r = renderer();

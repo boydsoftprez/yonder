@@ -189,9 +189,28 @@ address on a device whose only way in is that access point — the exact shape o
 unreachability R-NET-07 exists to catch. A configurable pool is a nice-to-have and does not
 buy that. Revisit only with a reason that does.
 
-**One upgrade consequence.** The schema is strict, so a device whose `/etc/yonder/config.yaml`
-was seeded by an earlier build still carries a `dhcp:` block the current daemon rejects. The
-daemon still starts and still serves — an unloadable configuration is guarded at every step
-of `startServer` — and `GET /config` answers 400 naming the offending path, so the fix is
-visible: delete those lines, or reflash. There is no migration machinery, and at pre-alpha
-none is being written for one removed key.
+**The upgrade consequence is closed, and it cost a board to find.** A Raspberry Pi seeded by
+an earlier build was upgraded past the removal and still carried the `dhcp:` block. The
+schema is strict, so every read of its `config.yaml` failed: the network was never rendered,
+the fallback watchdog could not read the file either and ran on defaults, and the board was
+reachable only because it happened to have an Ethernet cable in it. On an aircraft that is a
+card reader. `network.ap.dhcp` is now the first entry in `src/schema/retired.ts` — an
+enumerated list of keys this project has removed — so a file carrying it loads: the key is
+dropped, the drop is logged naming the key, and the file itself is left alone until
+something saves the configuration. R-CFG-09 states the obligation; the loader, the apply
+engine and a daemon start-up test gate it. A key nobody retired is still rejected exactly as
+before, so a misspelling still fails loudly.
+
+**What that does not close.** The blast radius of an unloadable configuration is smaller —
+a file that was invalid *only* because of a retired key is not invalid at all any more — but
+nothing about a genuinely invalid one has changed. `apply()` still cannot snapshot a
+`config.yaml` it cannot load, so it still substitutes the shipped default as that apply's
+rollback target and says so through `previousIsDefault`. An operator who hand-edits a real
+mistake into the file still loses their own configuration as a rollback target until they
+fix it.
+
+*(This ID previously named a different defect — a device reachable but not repairable,
+because `apply()` snapshotted `config.yaml` before validating the body an operator had just
+posted and so refused every apply, including a good one. That was closed by the change which
+introduced the default-substitution described above, and the ID was re-used for this entry.
+K numbers are not requirement IDs; the reuse is recorded here rather than silently.)*

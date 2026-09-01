@@ -3,7 +3,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, mkdirSync, rmSync, statSync, existsSync, writeFileSync, readFileSync } from "node:fs";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createRouter } from "./routes.js";
 import { startServer } from "./server.js";
 import { ApplyEngine } from "../apply/engine.js";
@@ -622,6 +623,91 @@ describe("startServer", () => {
       expect(raised()).toBe(0);
     } finally {
       await server.close();
+    }
+  });
+
+  /**
+   * R-CFG-09, at the level the board actually failed at.
+   *
+   * A Raspberry Pi running an earlier build was upgraded past the commit that
+   * removed `network.ap.dhcp`. Its `/etc/yonder/config.yaml` still carried
+   * that key, the schema is strict, and so every read of the file failed. The
+   * journal said all of it:
+   *
+   *     could not render the current configuration, serving anyway: …
+   *       network.ap: Unrecognized key(s) in object: 'dhcp'
+   *     fallback: cannot read the configuration, using defaults: …same…
+   *
+   * Both halves matter and neither is visible from `loadConfig` alone. The
+   * network was never rendered, so there was no access point; the fallback
+   * watchdog — the thing that exists precisely for a device nobody can reach
+   * — was running on the shipped defaults rather than on the operator's
+   * settings. The board was reachable only because someone had left an
+   * Ethernet cable in it. On an aircraft that is a card reader and a bench.
+   *
+   * So the assertions are behavioural, not textual. The fixture is the file
+   * that build seeded, byte for byte, with two values changed away from the
+   * defaults — the SSID and the fallback timeout — so that "the renderer and
+   * the watchdog got *this* document" is provable rather than inferred from a
+   * log line that happens not to appear.
+   */
+  it("renders and arms the fallback from a configuration an earlier version wrote", async () => {
+    let journal = "";
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation((chunk: unknown) => {
+      journal += String(chunk);
+      return true;
+    });
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    try {
+      const { clock, advance, runner, raised } = watchdogHarness();
+      const onTheCard = readFileSync(
+        join(dirname(fileURLToPath(import.meta.url)), "..", "config", "fixtures", "config-0.1.0-with-dhcp.yaml"),
+        "utf8",
+      ).replace("ssid: yonder", "ssid: yonder-field").replace("timeout: 90", "timeout: 300");
+      writeFileSync(configPath, onTheCard);
+
+      const rendered: string[] = [];
+      const watcher: Renderer = {
+        name: "watch",
+        async render(c) { rendered.push(c.network.ap.ssid); },
+      };
+
+      const server = await startServer({ socketPath, configPath, journalPath, renderers: [watcher], secretsPath: join(dir, "secrets.yaml"), runner, clock });
+      try {
+        // The start-up render ran, and against the operator's configuration.
+        // This is the line that used to read "could not render the current
+        // configuration, serving anyway".
+        expect(rendered).toEqual(["yonder-field"]);
+        expect(journal).not.toContain("could not render the current configuration");
+
+        // And the fallback is armed on the operator's 300 s, not the 90 s a
+        // watchdog handed DEFAULT_CONFIG would have used. Nothing textual
+        // here: at 91 s a defaulted watchdog has already fired.
+        expect(journal).not.toContain("fallback: cannot read the configuration");
+        advance(91_000);
+        await flushMicrotasks();
+        expect(raised()).toBe(0);
+        advance(210_000);
+        await flushMicrotasks();
+        expect(raised()).toBe(1);
+
+        // Loud, and reachable: the console gets the configuration rather than
+        // the 400 that a device in this state used to answer with.
+        expect(journal).toContain("network.ap.dhcp");
+        expect(journal).toContain("no longer used by Yonder");
+        const res = await call(socketPath, "GET", "/config");
+        expect(res.status).toBe(200);
+        expect((res.body as Config).network.ap.ssid).toBe("yonder-field");
+      } finally {
+        await server.close();
+      }
+
+      // Booting did not edit the operator's file. The retired key is still
+      // there, ignored, until something saves the configuration.
+      expect(readFileSync(configPath, "utf8")).toBe(onTheCard);
+    } finally {
+      stdout.mockRestore();
+      stderr.mockRestore();
     }
   });
 

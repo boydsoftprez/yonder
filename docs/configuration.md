@@ -61,9 +61,10 @@ NetworkManager's `shared` method runs its own dnsmasq and hands it a range on th
 line, derived from the access-point address — so the range follows the subnet you set and
 nothing else. There used to be a `network.ap.dhcp` block here; it was written to a drop-in
 NetworkManager's own command line overrode, so it decided nothing, and it has been removed
-rather than left looking authoritative. The schema is strict, so a `config.yaml` still
-carrying it is rejected with the offending path named: delete those lines. See K-14 in
-[`known-issues.md`](known-issues.md) for what a configurable pool would cost.
+rather than left looking authoritative. A `config.yaml` still carrying it loads anyway — it
+is a *retired* key, dropped with a line in the journal saying so, and you need not delete
+anything (see below). K-14 in [`known-issues.md`](known-issues.md) records what a
+configurable pool would cost.
 
 <!-- yonder:reference-config -->
 ```yaml
@@ -94,6 +95,25 @@ system:
   hostname: yonder
   timezone: UTC
 ```
+
+### Keys that have been retired
+
+A key Yonder once accepted and has since removed is **dropped on load, not rejected**: the
+daemon names it in the journal and carries on. An upgrade therefore never strands a device
+on a configuration its own daemon refuses to read (R-CFG-09) — which is what a strict schema
+does otherwise, on the one file that decides how you reach the aircraft.
+
+Your file is not rewritten. The key stays where it is, ignored, and simply is not written
+back the next time the configuration is saved.
+
+Only the keys listed here are treated this way. Anything else the schema does not recognise
+— a misspelling, a setting from somewhere else — is still an error naming the offending
+path, because a key silently ignored is a setting you believe is in force and is not.
+
+<!-- yonder:retired-keys -->
+| Key | What became of it |
+|---|---|
+| `network.ap.dhcp` | The access point's DHCP range is not configurable; NetworkManager derives it from `network.ap.address`, so this key decided nothing (K-14) |
 
 ### Sections that arrive with later milestones
 

@@ -208,6 +208,7 @@ Parameter writes are vehicle commands. R-CMD applies to every requirement here.
 | R-CFG-06 | Seed any credential the system needs but the operator has not supplied — from a published default where one is defined (R-SEC-01), otherwise generated per device and retrievable through the console rather than only from a log. **Never leave a device unusable for want of a credential.** See [ADR-0007](adr/0007-credential-boundary.md) | 1 |
 | R-CFG-07 | Never require a vendor tool, an imaging wizard or a network service to configure a device | 1 |
 | R-CFG-08 | **A freshly flashed device reaches a joinable, usable state with no operator input.** A default configuration is seeded, the access point comes up, and the console is served — before anyone has configured anything | 1 |
+| R-CFG-09 | **A configuration written by an earlier version of Yonder still loads.** A key a later version has retired is dropped, named in the log and ignored; a key that was never a Yonder setting is still rejected, so a misspelling can never pass for a setting. Loading does not rewrite the operator's file. **An upgrade must never strand a device on a configuration its own daemon refuses to read** | 1 |
 
 ## R-HW — Hardware support
 

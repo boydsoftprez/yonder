@@ -2,6 +2,7 @@
 import { randomUUID } from "node:crypto";
 import { copyFileSync, existsSync } from "node:fs";
 import { ConfigSchema, DEFAULT_CONFIG, type Config } from "../schema/config.js";
+import { withoutRetiredKeys, retirementNotice } from "../schema/retired.js";
 import { ConfigError, formatIssues } from "../config/errors.js";
 import { loadConfig } from "../config/load.js";
 import { saveConfig } from "../config/save.js";
@@ -140,7 +141,21 @@ export class ApplyEngine {
       throw new ConfigError("an apply is already pending; confirm or wait for it to revert");
     }
 
-    const parsed = ConfigSchema.safeParse(next);
+    // Given the same tolerance the loader gives a file on disk (R-CFG-09),
+    // and from the same enumerated list: a configuration that loads has to be
+    // one that applies. Otherwise an operator on a device seeded by an
+    // earlier build could read their configuration back, change one field and
+    // be refused when they posted it — and the API is the only repair path a
+    // console has. A key nobody retired is still rejected below, unchanged.
+    const { doc: posted, dropped } = withoutRetiredKeys(next);
+    for (const key of dropped) {
+      warn(
+        `${retirementNotice("the posted configuration", key)}; `
+        + `it is dropped rather than written to ${this.configPath}`,
+      );
+    }
+
+    const parsed = ConfigSchema.safeParse(posted);
     if (!parsed.success) {
       throw new ConfigError("rejected: not a valid configuration", formatIssues(parsed.error));
     }
