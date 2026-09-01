@@ -197,3 +197,124 @@ assert_unit_exec() {
     [ -x "$unit_exec" ] || die "$unit starts $unit_exec, which is not an executable file; the service would fail at step EXEC (203) on every boot"
     log "$unit starts $unit_exec, which is executable"
 }
+
+# Whether a tree carries a production dependency closure the daemon inside it
+# could actually run from.
+#
+#     prebuilt_deps_present <tree>
+#
+# The test this replaces was `[ -d "$tree/node_modules" ]` — that the directory
+# exists. A checkout that has ever run the test suite satisfies that with a
+# node_modules holding nothing but a `.vite` cache, and copying it to a board
+# produces a daemon that dies on its first import:
+#
+#     ERR_MODULE_NOT_FOUND: Cannot find package 'zod' imported from
+#     /opt/yonder/packages/yonder-core/dist/schema/config.js
+#
+# Under Restart=always that is a permanent crash loop with no socket, no
+# access point and no console — and the install that produced it reported
+# success. So the question asked here is the one that matters: does every
+# dependency this package declares actually resolve?
+#
+# Resolution is pinned *inside* the tree deliberately. These packages live in a
+# workspace, so a checkout hoists the daemon's dependencies to the repository
+# root, where a resolver allowed to walk upwards finds them and answers yes for
+# a tree that ships none of them. The root node_modules is not what gets copied
+# to the board; only this one is.
+#
+# node is the resolver rather than a directory listing because node is what
+# will be asked the same question on the board, and it is already a hard
+# dependency of the role that calls this. Without one — only possible on a dry
+# run, since require_node dies otherwise — the tree cannot be judged, so it is
+# not trusted, and the install-and-build path runs instead. That path is always
+# correct; it only costs time.
+#
+# Returns 0 when the tree can be used as-is, 1 with the reason logged when not.
+PREBUILT_DEPS_PROBE='
+const { createRequire } = require("node:module");
+const { readFileSync, statSync } = require("node:fs");
+const { resolve, sep } = require("node:path");
+const root = resolve(process.env.YONDER_TREE);
+const manifest = root + sep + "package.json";
+const deps = Object.keys(JSON.parse(readFileSync(manifest, "utf8")).dependencies || {});
+const inside = root + sep + "node_modules" + sep;
+const req = createRequire(manifest);
+const missing = [];
+for (const name of deps) {
+  let where;
+  try {
+    where = req.resolve(name);
+  } catch (e) {
+    // A package whose exports map offers no require entry still ships a
+    // package.json. The question is whether it is here, not how it is entered.
+    try { statSync(inside + name + sep + "package.json"); where = inside + name; }
+    catch (e2) { missing.push(name + " is not installed"); continue; }
+  }
+  if (!where.startsWith(inside)) missing.push(name + " resolves to " + where + ", outside the tree");
+}
+if (missing.length > 0) { console.error(missing.join("; ")); process.exit(1); }
+'
+
+prebuilt_deps_present() {
+    pdp_tree="$1"
+    if ! command -v node >/dev/null 2>&1; then
+        log "no node here to check the dependency tree in $pdp_tree"
+        return 1
+    fi
+    if pdp_why=$(YONDER_TREE="$pdp_tree" node -e "$PREBUILT_DEPS_PROBE" 2>&1); then
+        return 0
+    fi
+    log "the node_modules in $pdp_tree is not a dependency tree the daemon could run from: $pdp_why"
+    return 1
+}
+
+# The post-condition on the tree this installer has just installed: the entry
+# point systemd is about to start, and every module it imports, actually load.
+#
+#     assert_module_graph <tree> <entry, relative to the tree> <node binary>
+#
+# The sibling of assert_unit_exec, one layer in. That check answers "is there
+# an executable at the path ExecStart names"; this one answers "and can it get
+# past its own imports". A tree missing its dependencies passes every check
+# short of this one — the file named by ExecStart exists, the node binary
+# exists, the daemon's entry point exists — and still fails at the first
+# import, on a board, under Restart=always. Nothing before this could see that,
+# because the only thing that can is node resolving the graph for real.
+#
+# Run against the installed copy with the node the unit names, not against the
+# source tree with whatever node is on PATH: the pair systemd will use is the
+# pair worth proving.
+#
+# No arguments are passed to node, on purpose. The daemon starts itself only
+# when `import.meta.url` matches `process.argv[1]`, and with `node -e` and no
+# arguments there is no argv[1] to match — so importing the entry point loads
+# the whole graph and starts no server, binds no socket and touches no radio.
+#
+# The dry-run split follows assert_unit_exec: the check needs a real installed
+# tree and a real node, and on a dry run there is neither, so it says what it
+# would have checked.
+MODULE_GRAPH_PROBE='
+const { pathToFileURL } = require("node:url");
+import(pathToFileURL(process.env.YONDER_ENTRY).href).catch((e) => {
+  console.error(e && e.message ? e.message : String(e));
+  process.exit(1);
+});
+'
+
+assert_module_graph() {
+    amg_tree="$1"
+    amg_entry="$2"
+    amg_node="$3"
+    if [ "$DRY_RUN" = "1" ]; then
+        log "would check that $amg_tree/$amg_entry and everything it imports load under $amg_node"
+        return 0
+    fi
+    [ -f "$amg_tree/$amg_entry" ] \
+        || die "$amg_tree/$amg_entry was not produced; the service would not start"
+    if amg_why=$(YONDER_ENTRY="$amg_tree/$amg_entry" "$amg_node" -e "$MODULE_GRAPH_PROBE" 2>&1); then
+        log "$amg_entry and everything it imports load"
+        return 0
+    fi
+    die "$amg_tree/$amg_entry cannot be loaded by $amg_node: $amg_why
+the daemon would fail on its first import on every start, and under Restart=always that is a crash loop with no socket, no access point and no console"
+}

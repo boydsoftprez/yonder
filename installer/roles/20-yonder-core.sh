@@ -25,19 +25,27 @@ run cp "$yc_src/package.json" "$yc_dest/package.json"
 run cp "$yc_src/package-lock.json" "$yc_dest/package-lock.json"
 run cp "$yc_src/tsconfig.json" "$yc_dest/tsconfig.json"
 
-# A prebuilt tree needs both dist/ (the compiled daemon) and node_modules/
-# (its production dependencies) - either alone cannot run, so both must be
-# present before this path is trusted. One without the other falls back to
-# installing and building instead, same as neither being present.
+# A prebuilt tree needs both dist/ (the compiled daemon) and a node_modules/
+# that actually holds its production dependencies - either alone cannot run,
+# so both must be present before this path is trusted. Anything less falls
+# back to installing and building, same as neither being present.
+#
+# "Actually holds", not "is a directory". A checkout that has ever run the
+# test suite has a packages/yonder-core/node_modules containing one entry,
+# `.vite`, while the daemon's real dependencies are hoisted to the workspace
+# root - so a directory test selects this path and copies a tree with no
+# dependencies in it to a board. See prebuilt_deps_present.
 yc_prebuilt=0
-if [ -f "$yc_src/dist/daemon/server.js" ] && [ -d "$yc_src/node_modules" ]; then
-    yc_prebuilt=1
-elif [ -f "$yc_src/dist/daemon/server.js" ] || [ -d "$yc_src/node_modules" ]; then
-    log "prebuilt tree in $yc_src is missing dist/ or node_modules/ (both are required to use it); installing and building instead"
+if [ -f "$yc_src/dist/daemon/server.js" ]; then
+    if prebuilt_deps_present "$yc_src"; then
+        yc_prebuilt=1
+    fi
+else
+    log "no compiled daemon at $yc_src/dist/daemon/server.js"
 fi
 
 if [ "$yc_prebuilt" = "1" ]; then
-    log "prebuilt dist/ and node_modules/ found in $yc_src; using them, skipping install and build"
+    log "prebuilt dist/ and a complete node_modules/ found in $yc_src; using them, skipping install and build"
     # src/ is TypeScript, only needed to build it. Nothing at $yc_dest reads
     # it once dist/ exists, so copying it here would be the same dead weight
     # the installer already carries by shipping *.test.ts inside src/ on the
@@ -63,9 +71,13 @@ else
     run env npm --prefix "$yc_dest" prune --omit=dev
 fi
 
-if [ "$DRY_RUN" != "1" ] && [ ! -f "$yc_dest/dist/daemon/server.js" ]; then
-    die "build produced no $yc_dest/dist/daemon/server.js; the service would not start"
-fi
+# Both routes end here, and neither is trusted to have produced something that
+# runs. The file existing was the whole of this check and it is not enough: an
+# entry point is a file whether or not the packages it imports are underneath
+# it, and the failure a missing one produces is ERR_MODULE_NOT_FOUND on every
+# start rather than anything visible here. So the entry point is loaded, with
+# the node the unit names, from the tree systemd will read.
+assert_module_graph "$yc_dest" dist/daemon/server.js "$YONDER_NODE_LINK"
 
 # A board with no configuration has nothing for the daemon to load: it throws
 # before it can listen, and Restart=always turns that into a restart loop
