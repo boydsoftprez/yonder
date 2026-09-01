@@ -340,7 +340,7 @@ None of this is exotic. It is the difference between a product and a hobby image
 
 | # | Question | Blocks |
 |---|---|---|
-| 1 | Dashboard 1.x or Dashboard 2.x? 1.x has more nodes; 2.x is maintained and Vue-based | Flow work, M1 |
+| 1 | ~~Dashboard 1.x or 2.x?~~ Settled in [ADR-0005](adr/0005-console-substrate.md) | — |
 | 2 | Which parts of Rpanion-server to borrow — NTRIP client and log management are the candidates | M9 |
 | 3 | Adaptive bitrate control signal: RTCP receiver reports, SRT statistics, or both | M9 |
 | 4 | Does `yonder-core` run inside Node-RED or as a small sidecar owning `config.yaml`? | M0 |

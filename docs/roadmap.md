@@ -55,6 +55,7 @@ wrong at flash time and no way to end up locked out of your own device.
 - Reachability and ping diagnostics — R-DIA-01, R-DIA-02
 - **No unauthenticated write path from a non-loopback interface** — R-SEC-04
 - **Flow editor gated behind the password set at setup** — R-SEC-05
+- Day and night themes, operator-selectable — R-UI-07
 
 The last two are here rather than in a later hardening pass because the console is a
 configuration write path and a code-execution surface from the first commit that serves

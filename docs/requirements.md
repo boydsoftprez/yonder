@@ -252,6 +252,7 @@ Parameter writes are vehicle commands. R-CMD applies to every requirement here.
 | R-UI-04 | Remain usable on a tablet in the field | 2 |
 | R-UI-05 | Show the operator when a control has taken effect, not merely that it was sent | 2 |
 | R-UI-06 | Function on a link with hundreds of milliseconds of latency | 1 |
+| R-UI-07 | Provide **day and night themes as equal, operator-selectable modes**, defaulting to day. The choice persists across reboots and is never overridden by the host or the browser | 1 |
 
 ---
 
