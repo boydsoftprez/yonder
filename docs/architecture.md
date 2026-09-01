@@ -194,8 +194,8 @@ cameras:
       - { type: webrtc }
       - { type: rtsp, path: /cam0 }
 network:
-  ap:     { ssid: yonder, psk: !secret ap_psk, address: 192.168.77.1/24 }
-  client: { ssid: null, psk: !secret wifi_psk }
+  ap:     { ssid: yonder, psk: { secret: ap_psk }, address: 192.168.77.1/24 }
+  client: { ssid: null, psk: { secret: wifi_psk } }
   modem:  { mode: auto, apn: null }
   priority: [ethernet, modem, wifi_client]
 ```

@@ -9,7 +9,10 @@ Radxa board rides on the aircraft beside an ArduPilot flight controller and carr
 telemetry and video over the cell network to a browser and to a ground station. No cloud,
 no activation, no phone-home.
 
-Status: **pre-alpha**. Design and requirements are settled; no code yet. M0 is next.
+Status: **pre-alpha**. Design and requirements are settled. M0 is complete — the
+configuration schema, the apply/rollback engine with its confirmation timer, per-device
+secrets, the `yonder-core` daemon and the installer's role runner. M1, the first-boot
+console, is next.
 
 ## Rules that are not negotiable
 

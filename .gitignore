@@ -3,6 +3,13 @@ dist/
 *.log
 .DS_Store
 
+# Device state. secrets.yaml holds per-device credentials and config.yaml is
+# whatever one board happens to be set to; neither belongs in the repository.
+# Shipped defaults live in config/defaults/ and are exempt.
+secrets.yaml
+config.yaml
+!config/defaults/*.yaml
+
 # Local R&D scratch. Never committed.
 research/
 notes/
