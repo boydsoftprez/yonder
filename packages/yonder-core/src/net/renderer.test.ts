@@ -3,11 +3,12 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { NetworkRenderer } from "./renderer.js";
+import { NetworkRenderer, deviceIsUsable } from "./renderer.js";
 import { NmcliClient } from "./nmcli/client.js";
 import { SecretStore } from "../secrets/store.js";
 import { AP_CONNECTION, CLIENT_CONNECTION, ETHERNET_CONNECTION, DEFAULT_AP_PASSPHRASE } from "./profiles.js";
 import { DEFAULT_CONFIG } from "../schema/config.js";
+import type { Clock } from "../apply/types.js";
 import type { Config } from "../schema/config.js";
 import type { CommandRunner, CommandResult } from "./runner.js";
 
@@ -22,13 +23,59 @@ const DEVICES = "eth0:ethernet:connected:yonder-eth\nwlan0:wifi:disconnected:\nl
 /** Deliberately not the published default, so the two can be told apart. */
 const OPERATOR_PSK = "an-operator-chose-this";
 
+/**
+ * The real cold boot, captured from a Raspberry Pi 4 moments before
+ * `yonder-core` would have rendered: both interfaces present, neither usable
+ * yet, and a loopback state with a space in it.
+ * See `packages/yonder-core/src/net/nmcli/fixtures/device-status.txt`.
+ */
+const COLD_BOOT = "lo:loopback:connected (externally):lo\neth0:ethernet:unavailable:\nwlan0:wifi:unavailable:\n";
+
+/** The same board a few seconds later, with the radio ready to be configured. */
+const RADIO_READY = "lo:loopback:connected (externally):lo\neth0:ethernet:unavailable:\nwlan0:wifi:disconnected:\n";
+
+/** Earlier still: NetworkManager has not registered the radio at all. */
+const NO_RADIO_YET = "lo:loopback:connected (externally):lo\neth0:ethernet:unavailable:\n";
+
+/**
+ * A clock that fast-forwards instead of waiting: `setTimer` moves `now()` on
+ * by the interval asked for and runs the callback off the microtask queue.
+ * A bounded poll finishes in microseconds however long its bound is, and no
+ * test ever waits on the wall clock — the same rule as `advance()` in
+ * watchdog.test.ts, arranged for a loop that sleeps rather than a one-shot
+ * deadline the test drives by hand.
+ */
+function fastClock(): Clock {
+  let t = 0;
+  return {
+    now: () => t,
+    setTimer: (ms, fn) => { t += ms; queueMicrotask(fn); return 0; },
+    clearTimer: () => {},
+  };
+}
+
+/** The state nmcli reports for the wifi device in a `device status` block. */
+function wifiState(deviceStatus: string): string | undefined {
+  return deviceStatus.split("\n").map((l) => l.split(":")).find((f) => f[1] === "wifi")?.[2];
+}
+
 interface HarnessOptions {
   /** `nmcli device status` output. */
   devices?: string;
+  /**
+   * Successive `nmcli device status` outputs, one consumed per call, the last
+   * repeating. This is how a radio that becomes usable partway through is
+   * expressed — a single fixed string cannot say "and then it changed".
+   */
+  deviceSequence?: string[];
   /** Connection names NetworkManager already holds when the render starts. */
   connections?: string[];
   /** Replaces the result of `device status`, to make it fail. */
   deviceStatus?: CommandResult;
+  /** Drives waitForRadio's bounded wait. */
+  clock?: Clock;
+  /** Overrides the wait's bound, in milliseconds. */
+  radioWaitMs?: number;
 }
 
 /**
@@ -45,12 +92,20 @@ interface HarnessOptions {
 function harness(opts: HarnessOptions = {}) {
   const calls: string[][] = [];
   const names = new Set(opts.connections ?? []);
-  const deviceStatus = opts.deviceStatus ?? ok(opts.devices ?? DEVICES);
+  const sequence = opts.deviceSequence ?? [opts.devices ?? DEVICES];
+  let step = 0;
+  let raised = 0;
 
   const run: CommandRunner = async (argv) => {
     calls.push(argv);
     const key = argv.join(" ");
-    if (key === "nmcli -t -f DEVICE,TYPE,STATE,CONNECTION device status") return deviceStatus;
+    if (key === "nmcli -t -f DEVICE,TYPE,STATE,CONNECTION device status") {
+      if (opts.deviceStatus !== undefined) return opts.deviceStatus;
+      // The last entry repeats: a board does not un-finish booting.
+      const text = sequence[Math.min(step, sequence.length - 1)] ?? "";
+      step++;
+      return ok(text);
+    }
     if (key === "nmcli -t -f NAME,UUID,TYPE,DEVICE connection show") {
       return ok([...names].map((n) => `${n}:u-${n}:802-11-wireless:\n`).join(""));
     }
@@ -59,6 +114,18 @@ function harness(opts: HarnessOptions = {}) {
       // the name at argv[3].
       if (argv[2] === "add") names.add(argv[4]);
       if (argv[2] === "delete") names.delete(argv[3]);
+      // A profile can be written against a radio NetworkManager has not
+      // finished with — the keyfile does not care — but it cannot be
+      // *activated* on one. Modelling that is what makes a cold boot a real
+      // test rather than a fake that says yes to everything: without it the
+      // renderer appears to bring an access point up on a radio that is not
+      // there, which is precisely the illusion a hardware boot dispelled.
+      const state = wifiState(sequence[Math.min(step - 1, sequence.length - 1)] ?? "");
+      const wifiConnection = argv[3] === AP_CONNECTION || argv[3] === CLIENT_CONNECTION;
+      if (argv[2] === "up" && wifiConnection && (state === "unavailable" || state === "unknown")) {
+        return { code: 4, stdout: "", stderr: `Error: Connection activation failed: device is not ready (${state})` };
+      }
+      if (argv[2] === "up" && argv[3] === AP_CONNECTION) raised++;
     }
     return ok();
   };
@@ -69,8 +136,10 @@ function harness(opts: HarnessOptions = {}) {
     client: new NmcliClient(run),
     secrets,
     dnsmasqPath: join(dir, "yonder.conf"),
+    clock: opts.clock,
+    radioWaitMs: opts.radioWaitMs,
   });
-  return { renderer, calls, secrets, names };
+  return { renderer, calls, secrets, names, raised: () => raised };
 }
 
 const argvOf = (calls: string[][], verb: string, name: string) =>
@@ -239,5 +308,155 @@ describe("NetworkRenderer", () => {
     });
     await renderer.render(DEFAULT_CONFIG);
     expect(lines.join("\n")).not.toContain(psk);
+  });
+});
+
+/**
+ * The cold boot a real board exposed, and the guarantee it broke.
+ *
+ * `yonder-core` starts before NetworkManager has finished with the radio. The
+ * start-up render is the only thing that ever writes the `yonder-ap` profile,
+ * and the fallback watchdog's only action is `nmcli connection up yonder-ap`.
+ * So a render that reads a not-yet-ready radio as "nothing to do here", and
+ * never looks again, is a device with no access point and no way to recover
+ * one — the exact failure R-NET-07 exists to prevent, on the boot it matters
+ * most.
+ *
+ * Both shapes of "not ready" are here, because they cost different things.
+ * A radio present but `unavailable` gets a profile that cannot be activated;
+ * a radio not yet listed at all gets no profile written, which is the worse
+ * of the two — the watchdog then tries to raise something that does not
+ * exist.
+ */
+describe("NetworkRenderer, when the radio is not ready yet", () => {
+  it("treats a state with a space and parentheses as usable", () => {
+    // `connected (externally)` is what the board printed for loopback. A
+    // reader that matched whole strings against a list of bare words, or that
+    // split on whitespace, would have got this wrong in the unsafe direction.
+    expect(deviceIsUsable("connected (externally)")).toBe(true);
+    expect(deviceIsUsable("disconnected")).toBe(true);
+    expect(deviceIsUsable("unmanaged")).toBe(true);
+    expect(deviceIsUsable("unavailable")).toBe(false);
+    expect(deviceIsUsable("unknown")).toBe(false);
+    // A parenthesised reason must not turn "unavailable" into a state this
+    // reads as ready.
+    expect(deviceIsUsable("unavailable (initializing)")).toBe(false);
+  });
+
+  it("cannot raise the access point on a radio that is unavailable", async () => {
+    // The mechanism, stated once: nmcli refuses to activate a profile on a
+    // radio it has not finished bringing up, so the start-up render fails and
+    // the access point is not on the air.
+    const { renderer, raised } = harness({ devices: COLD_BOOT });
+    await expect(renderer.render(DEFAULT_CONFIG)).rejects.toThrow(/not ready/);
+    expect(raised()).toBe(0);
+  });
+
+  it("writes no access-point profile at all when the radio is not listed yet", async () => {
+    // The worse half. `up yonder-ap` is the fallback's only move, and after a
+    // render like this there is no yonder-ap for it to raise.
+    const { renderer, names } = harness({ devices: NO_RADIO_YET });
+    await renderer.render(DEFAULT_CONFIG);
+    expect(names.has(AP_CONNECTION)).toBe(false);
+  });
+
+  it("ends with the access point created and raised once an unavailable radio becomes usable", async () => {
+    const { renderer, names, raised } = harness({
+      deviceSequence: [COLD_BOOT, COLD_BOOT, RADIO_READY],
+      clock: fastClock(),
+    });
+    // The start-up render, against the board as it actually was.
+    await expect(renderer.render(DEFAULT_CONFIG)).rejects.toThrow(/not ready/);
+    expect(raised()).toBe(0);
+
+    expect(await renderer.waitForRadio()).toBe(true);
+    await renderer.render(DEFAULT_CONFIG);
+
+    expect(names.has(AP_CONNECTION)).toBe(true);
+    expect(raised()).toBe(1);
+  });
+
+  it("ends with the access point created and raised once a radio appears at all", async () => {
+    const { renderer, names, raised } = harness({
+      deviceSequence: [NO_RADIO_YET, NO_RADIO_YET, RADIO_READY],
+      clock: fastClock(),
+    });
+    await renderer.render(DEFAULT_CONFIG);
+    expect(names.has(AP_CONNECTION)).toBe(false);
+
+    expect(await renderer.waitForRadio()).toBe(true);
+    await renderer.render(DEFAULT_CONFIG);
+
+    expect(names.has(AP_CONNECTION)).toBe(true);
+    expect(raised()).toBe(1);
+  });
+
+  it("does not wait at all when the radio is already usable", async () => {
+    const { renderer, calls } = harness({ clock: fastClock() });
+    // Nothing to wait for, so nothing is waited for: one look at the device
+    // list, no polling, and no second render asked of the caller.
+    expect(await renderer.waitForRadio()).toBe(false);
+    expect(calls.filter((c) => c.join(" ").endsWith("device status"))).toHaveLength(1);
+  });
+
+  it("gives up at the bound rather than waiting for ever", async () => {
+    const { renderer } = harness({ devices: COLD_BOOT, clock: fastClock(), radioWaitMs: 5_000 });
+    // A radio that never becomes usable must not hold the daemon open. The
+    // bound is what makes "wait for it" safe to say at all.
+    expect(await renderer.waitForRadio()).toBe(false);
+  });
+
+  it("gives up at the bound on a board that genuinely has no radio", async () => {
+    // Ethernet-only hardware is a legitimate board, not a broken one. It pays
+    // the bound once, in the background, behind an already-bound socket, and
+    // then carries on.
+    const { renderer } = harness({ devices: NO_RADIO_YET, clock: fastClock(), radioWaitMs: 5_000 });
+    expect(await renderer.waitForRadio()).toBe(false);
+  });
+
+  it("keeps waiting when nmcli itself is not answering yet", async () => {
+    // NetworkManager not being up is the same cold-boot race one layer down.
+    // Reading a question that could not be asked as "this board has no radio"
+    // is how the daemon would talk itself out of the access point again.
+    let asked = 0;
+    const run: CommandRunner = async (argv) => {
+      if (argv.join(" ").endsWith("device status")) {
+        asked++;
+        if (asked < 3) return { code: 8, stdout: "", stderr: "Error: NetworkManager is not running." };
+        return ok(RADIO_READY);
+      }
+      return ok();
+    };
+    const secrets = new SecretStore(join(dir, "s.yaml"));
+    secrets.ensureValue("ap_psk", OPERATOR_PSK);
+    const renderer = new NetworkRenderer({
+      client: new NmcliClient(run), secrets, dnsmasqPath: join(dir, "y.conf"), clock: fastClock(),
+    });
+    expect(await renderer.waitForRadio()).toBe(true);
+  });
+});
+
+describe("NetworkRenderer.cancelRadioWait", () => {
+  it("abandons a wait in progress instead of leaving it pending", async () => {
+    // A daemon that has closed its socket must not leave a loop questioning
+    // NetworkManager on its behalf — the same rule FallbackWatchdog.stop()
+    // exists for. A fake clock whose timer never fires stands in for a wait
+    // that would otherwise run to its full bound.
+    const stalled: Clock = { now: () => 0, setTimer: () => 1, clearTimer: () => {} };
+    const { renderer } = harness({ devices: COLD_BOOT, clock: stalled });
+    const waiting = renderer.waitForRadio();
+    // Cancelled mid-poll, which is when a shutdown actually arrives: the loop
+    // must notice without waiting for a timer that is never going to fire.
+    await Promise.resolve();
+    renderer.cancelRadioWait();
+    expect(await waiting).toBe(false);
+  });
+
+  it("refuses to start another wait once cancelled", async () => {
+    const { renderer, calls } = harness({ devices: COLD_BOOT, clock: fastClock() });
+    renderer.cancelRadioWait();
+    expect(await renderer.waitForRadio()).toBe(false);
+    // Not even one look: the daemon this belongs to is gone.
+    expect(calls).toEqual([]);
   });
 });

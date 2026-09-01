@@ -43,6 +43,12 @@ export {
   type DesiredProfile,
   type Interfaces,
 } from "./net/profiles.js";
-export { NetworkRenderer, type NetworkRendererOptions } from "./net/renderer.js";
+export {
+  NetworkRenderer,
+  deviceIsUsable,
+  RADIO_WAIT_MS,
+  RADIO_POLL_MS,
+  type NetworkRendererOptions,
+} from "./net/renderer.js";
 export { FallbackWatchdog, type FallbackWatchdogOptions } from "./net/watchdog.js";
 export { DNSMASQ_DROPIN, renderDnsmasqConf, writeDnsmasqConf } from "./net/dnsmasq.js";

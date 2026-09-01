@@ -38,6 +38,15 @@ export interface ServerOptions {
    * may wait on the wall clock in a test.
    */
   clock?: Clock;
+  /**
+   * Where the network renderer writes the access point's DHCP drop-in.
+   * Test-only, and for the third variant of the same reason: the default is
+   * `/etc/NetworkManager/dnsmasq-shared.d/yonder.conf`, and a test that gets
+   * far enough into a render to reach it would either write outside its
+   * sandbox or fail there — which is what hid a render failure behind a
+   * device list that never had a radio in it.
+   */
+  dnsmasqPath?: string;
 }
 
 export interface BuildRenderersOptions {
@@ -45,6 +54,8 @@ export interface BuildRenderersOptions {
   dnsmasqPath?: string;
   runner?: CommandRunner;
   log?: (line: string) => void;
+  /** Drives the network renderer's bounded wait for a radio. See waitForRadio. */
+  clock?: Clock;
 }
 
 /**
@@ -64,6 +75,8 @@ export interface BuildRenderersOptions {
  */
 export function buildRenderers(opts: BuildRenderersOptions): {
   renderers: Renderer[];
+  /** The same renderer as `renderers[0]`, typed, for waitForRadio. */
+  renderer: NetworkRenderer;
   secrets: SecretStore;
   client: NmcliClient;
   generated: string[];
@@ -75,9 +88,9 @@ export function buildRenderers(opts: BuildRenderersOptions): {
   if (secrets.ensureValue("ap_psk", DEFAULT_AP_PASSPHRASE).created) generated.push("ap_psk");
   const client = new NmcliClient(opts.runner ?? systemRunner, log);
   const renderer = new NetworkRenderer({
-    client, secrets, dnsmasqPath: opts.dnsmasqPath, log,
+    client, secrets, dnsmasqPath: opts.dnsmasqPath, log, clock: opts.clock,
   });
-  return { renderers: [renderer], secrets, client, generated };
+  return { renderers: [renderer], renderer, secrets, client, generated };
 }
 
 export async function startServer(opts: ServerOptions): Promise<{ close(): Promise<void> }> {
@@ -122,7 +135,9 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   try {
     built = buildRenderers({
       secretsPath: opts.secretsPath ?? "/etc/yonder/secrets.yaml",
+      dnsmasqPath: opts.dnsmasqPath,
       runner: opts.runner,
+      clock,
     });
   } catch (e) {
     const message = (e as Error).message;
@@ -186,12 +201,31 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   } catch (e) {
     warn(`fallback: cannot read the configuration, using defaults: ${(e as Error).message}`);
   }
+  // Assigned once the socket is bound, below. Declared here because the
+  // watchdog's action has to be able to wait on it.
+  let radioSettled: Promise<void> = Promise.resolve();
+
   const watchdog = new FallbackWatchdog({
     client,
     clock,
     config: watchdogConfig,
     since: startedAt,
-    apUp: () => client.up(AP_CONNECTION),
+    // The fallback's only action is `nmcli connection up yonder-ap`, and that
+    // profile exists only because a render created it. On a cold boot the
+    // render may still be waiting for the radio when the deadline lands —
+    // `network.ap.fallback.timeout` goes as low as 30 s, the same order as
+    // RADIO_WAIT_MS — and raising a profile that does not exist yet fails
+    // with an error about an unknown connection, which says nothing about the
+    // real cause and buries the one line an operator needed.
+    //
+    // The deadline itself is not moved: that is the guarantee, and moving it
+    // is what `since` exists to prevent. Only the *action* waits, and only on
+    // something already bounded by RADIO_WAIT_MS, so the fallback is at worst
+    // that much later and never silently wrong.
+    apUp: async () => {
+      await radioSettled;
+      await client.up(AP_CONNECTION);
+    },
     log: (l) => process.stdout.write(`${l}\n`),
   });
   watchdog.start();
@@ -252,12 +286,52 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   });
   chmodSync(opts.socketPath, 0o660);
 
+  // The start-up render above ran once, before the socket bound, and on a
+  // cold boot it can run before NetworkManager has finished bringing the
+  // radio up — a real board printed `wlan0:wifi:unavailable:` at exactly that
+  // moment. A single render against that list leaves no usable access point,
+  // and nothing ever rendered again, so the device came up unreachable.
+  //
+  // The wait is *here*, after listen(), rather than in front of the start-up
+  // render. Two reasons, and they point the same way:
+  //
+  //   - Reaching the device beats rendering it. A board whose radio never
+  //     appears is precisely the one an operator needs to be able to ask what
+  //     is wrong, and making them wait 30 s for the socket to answer buys
+  //     nothing — the render happens either way.
+  //   - The pre-listen render stays exactly as it was, so a console still
+  //     cannot connect to a device carrying a configuration that recovery has
+  //     not yet rolled back. That ordering is a separate guarantee and this
+  //     change does not touch it.
+  //
+  // Nothing awaits this: it is background work with its own bound. A failure
+  // is logged, the same as the start-up render's.
+  radioSettled = (async () => {
+    const renderer = built?.renderer;
+    if (renderer === undefined) return;
+    try {
+      if (!(await renderer.waitForRadio())) return;
+      process.stdout.write("network: a wifi radio became usable; rendering again\n");
+      // Through the engine, not the renderer: renderCurrent() refuses while
+      // an apply is in flight, so this cannot push a stale configuration
+      // through a renderer mid-apply.
+      await engine.renderCurrent();
+    } catch (e) {
+      warn(`could not render after waiting for the wifi radio: ${(e as Error).message}`);
+    }
+  })();
+
   return {
     close: () =>
       new Promise<void>((resolve) => {
         // Stopped before the server closes, or a restart (or a test) leaves
         // the fallback timer running against a socket that no longer exists.
+        // The radio wait is stopped for exactly the same reason: it is the
+        // other timer this daemon owns, and a poll loop outliving its daemon
+        // would go on questioning NetworkManager — and could still reach a
+        // render — on behalf of a process that has already closed.
         watchdog.stop();
+        built?.renderer.cancelRadioWait();
         server.close(() => {
           if (existsSync(opts.socketPath)) unlinkSync(opts.socketPath);
           resolve();

@@ -176,9 +176,16 @@ function fakeClock() {
  * The fallback fires through several chained awaits before it reaches the
  * runner. Draining them is what makes an assertion about what did *not*
  * happen mean anything — see the long note in watchdog.test.ts.
+ *
+ * The count is deliberately far larger than any chain here is deep. The
+ * daemon's start-up work is now more than one call away from the runner — a
+ * bounded wait for the radio, then a whole render through the apply engine —
+ * and a number tuned to the shortest chain that happened to exist when it was
+ * written is a helper that silently stops draining the moment anything grows.
+ * Extra turns of an empty microtask queue cost nothing.
  */
 async function flushMicrotasks(): Promise<void> {
-  for (let i = 0; i < 10; i++) await Promise.resolve();
+  for (let i = 0; i < 200; i++) await Promise.resolve();
 }
 
 describe("startServer", () => {
@@ -186,7 +193,7 @@ describe("startServer", () => {
   beforeEach(() => { socketPath = join(dir, "core.sock"); });
 
   it("binds a Unix socket, group-accessible and nothing wider", async () => {
-    const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner: noopRunner });
+    const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), dnsmasqPath: join(dir, "yonder.conf"), runner: noopRunner });
     try {
       // A socket in the filesystem, reachable only by something that can open
       // it: no interface can expose the configuration API by accident.
@@ -204,7 +211,7 @@ describe("startServer", () => {
 
   it("replaces a socket left behind by a previous process", async () => {
     writeFileSync(socketPath, "");
-    const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner: noopRunner });
+    const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), dnsmasqPath: join(dir, "yonder.conf"), runner: noopRunner });
     try {
       expect(statSync(socketPath).isSocket()).toBe(true);
     } finally {
@@ -213,7 +220,7 @@ describe("startServer", () => {
   });
 
   it("answers 400 to a body that is not JSON", async () => {
-    const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner: noopRunner });
+    const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), dnsmasqPath: join(dir, "yonder.conf"), runner: noopRunner });
     try {
       const res = await call(socketPath, "POST", "/apply", "{ truncated");
       expect(res.status).toBe(400);
@@ -233,7 +240,7 @@ describe("startServer", () => {
       async render() { socketAtRender.push(existsSync(socketPath)); },
     };
 
-    const server = await startServer({ socketPath, configPath, journalPath, renderers: [watcher], secretsPath: join(dir, "secrets.yaml"), runner: noopRunner });
+    const server = await startServer({ socketPath, configPath, journalPath, renderers: [watcher], secretsPath: join(dir, "secrets.yaml"), dnsmasqPath: join(dir, "yonder.conf"), runner: noopRunner });
     try {
       expect(loadConfig(configPath).system.hostname).toBe("yonder");
       // Two renders: the rollback, then the startup render that brings the
@@ -259,7 +266,7 @@ describe("startServer", () => {
       // Occupy the temp path the atomic write needs, so the rollback fails.
       mkdirSync(`${configPath}.tmp`);
 
-      const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner: noopRunner });
+      const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), dnsmasqPath: join(dir, "yonder.conf"), runner: noopRunner });
       try {
         // A daemon that refuses to start because it could not roll back leaves
         // an operator with no way in at all.
@@ -279,7 +286,7 @@ describe("startServer", () => {
     // A freshly flashed board that was never given a config.yaml. Before this,
     // loadConfig threw before listen() and Restart=always looped forever.
     rmSync(configPath);
-    const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner: noopRunner });
+    const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), dnsmasqPath: join(dir, "yonder.conf"), runner: noopRunner });
     try {
       expect(loadConfig(configPath)).toEqual(DEFAULT_CONFIG);
       expect((await call(socketPath, "GET", "/status")).status).toBe(200);
@@ -290,7 +297,7 @@ describe("startServer", () => {
 
   it("leaves an existing configuration alone", async () => {
     saveConfig(configPath, changed());
-    const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner: noopRunner });
+    const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), dnsmasqPath: join(dir, "yonder.conf"), runner: noopRunner });
     try {
       expect(loadConfig(configPath).system.hostname).toBe("changed");
     } finally {
@@ -311,7 +318,7 @@ describe("startServer", () => {
       async render(c) { seen.push({ ssid: c.network.ap.ssid, socket: existsSync(socketPath) }); },
     };
 
-    const server = await startServer({ socketPath, configPath, journalPath, renderers: [watcher], secretsPath: join(dir, "secrets.yaml"), runner: noopRunner });
+    const server = await startServer({ socketPath, configPath, journalPath, renderers: [watcher], secretsPath: join(dir, "secrets.yaml"), dnsmasqPath: join(dir, "yonder.conf"), runner: noopRunner });
     try {
       expect(seen).toEqual([{ ssid: "yonder", socket: false }]);
     } finally {
@@ -333,7 +340,7 @@ describe("startServer", () => {
     });
     let server: { close(): Promise<void> };
     try {
-      server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner: noopRunner });
+      server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), dnsmasqPath: join(dir, "yonder.conf"), runner: noopRunner });
     } finally {
       stdout.mockRestore();
     }
@@ -348,7 +355,7 @@ describe("startServer", () => {
 
   it("seeds the access point passphrase but never an administrator password", async () => {
     const secretsPath = join(dir, "secrets.yaml");
-    const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath, runner: noopRunner });
+    const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath, dnsmasqPath: join(dir, "yonder.conf"), runner: noopRunner });
     try {
       const bag = new SecretStore(secretsPath);
       expect(bag.get("ap_psk")).toBe(DEFAULT_AP_PASSPHRASE);
@@ -376,7 +383,7 @@ describe("startServer", () => {
     const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     try {
       writeFileSync(configPath, "version: 99\nnetwork: nonsense\n");
-      const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner: noopRunner });
+      const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), dnsmasqPath: join(dir, "yonder.conf"), runner: noopRunner });
       try {
         expect(statSync(socketPath).isSocket()).toBe(true);
         expect((await call(socketPath, "GET", "/status")).status).toBe(200);
@@ -408,7 +415,7 @@ describe("startServer", () => {
     const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     try {
       writeFileSync(configPath, "version: 99\nnetwork: nonsense\n");
-      const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner: noopRunner });
+      const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), dnsmasqPath: join(dir, "yonder.conf"), runner: noopRunner });
       try {
         const res = await call(socketPath, "POST", "/apply", changed());
         expect(res.status).toBe(200);
@@ -428,7 +435,7 @@ describe("startServer", () => {
     try {
       const secretsPath = join(dir, "secrets.yaml");
       writeFileSync(secretsPath, "ap_psk:\n  not: a-string\n", { mode: 0o600 });
-      const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath, runner: noopRunner });
+      const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath, dnsmasqPath: join(dir, "yonder.conf"), runner: noopRunner });
       try {
         expect(statSync(socketPath).isSocket()).toBe(true);
         expect((await call(socketPath, "GET", "/status")).status).toBe(200);
@@ -454,7 +461,7 @@ describe("startServer", () => {
       const secretsPath = join(dir, "secrets.yaml");
       writeFileSync(secretsPath, "ap_psk:\n  not: a-string\n", { mode: 0o600 });
       return startServer({
-        socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath, runner: noopRunner,
+        socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath, dnsmasqPath: join(dir, "yonder.conf"), runner: noopRunner,
       });
     }
 
@@ -518,7 +525,7 @@ describe("startServer", () => {
       // A path the durable write cannot create: seedConfigIfAbsent throws
       // ConfigError, and that must cost a default configuration, not the API.
       const wedged = join(dir, "config.yaml", "config.yaml");
-      const server = await startServer({ socketPath, configPath: wedged, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner: noopRunner });
+      const server = await startServer({ socketPath, configPath: wedged, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), dnsmasqPath: join(dir, "yonder.conf"), runner: noopRunner });
       try {
         expect(statSync(socketPath).isSocket()).toBe(true);
         expect((await call(socketPath, "GET", "/status")).status).toBe(200);
@@ -556,7 +563,7 @@ describe("startServer", () => {
 
   it("arms the fallback watchdog and raises the access point when nothing is reachable", async () => {
     const { clock, advance, runner, raised } = watchdogHarness();
-    const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner, clock });
+    const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), dnsmasqPath: join(dir, "yonder.conf"), runner, clock });
     try {
       advance(89_000);
       await flushMicrotasks();
@@ -574,7 +581,7 @@ describe("startServer", () => {
 
   it("stops the fallback watchdog when the server closes", async () => {
     const { clock, advance, runner, raised } = watchdogHarness();
-    const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner, clock });
+    const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), dnsmasqPath: join(dir, "yonder.conf"), runner, clock });
     await server.close();
     advance(200_000);
     await flushMicrotasks();
@@ -588,7 +595,7 @@ describe("startServer", () => {
     try {
       const { clock, advance, runner, raised } = watchdogHarness();
       writeFileSync(configPath, "version: 99\nnetwork: nonsense\n");
-      const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner, clock });
+      const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), dnsmasqPath: join(dir, "yonder.conf"), runner, clock });
       try {
         advance(91_000);
         await flushMicrotasks();
@@ -608,13 +615,188 @@ describe("startServer", () => {
     const off = structuredClone(DEFAULT_CONFIG);
     off.network.ap.fallback.enabled = false;
     saveConfig(configPath, off);
-    const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner, clock });
+    const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), dnsmasqPath: join(dir, "yonder.conf"), runner, clock });
     try {
       advance(200_000);
       await flushMicrotasks();
       expect(raised()).toBe(0);
     } finally {
       await server.close();
+    }
+  });
+
+  /**
+   * R-NET-07 and R-CFG-08 on the boot that broke them.
+   *
+   * A real Raspberry Pi 4 printed `wlan0:wifi:unavailable:` moments before
+   * `yonder-core` would have rendered. The start-up render is the only thing
+   * that writes the `yonder-ap` profile, and the fallback watchdog's only
+   * action is to raise that profile — so a daemon that renders once against a
+   * radio NetworkManager has not finished with, and never looks again, comes
+   * up with no access point and no way to recover one.
+   *
+   * This is the wiring, not the class: `waitForRadio()` could behave
+   * perfectly and the daemon could still never call it. The observables are
+   * the argv the daemon issued and whether nmcli accepted it.
+   *
+   * The fake answers `device status` from the **fake clock**, not from a call
+   * counter, so "the radio becomes usable at t" is exactly what the test
+   * says rather than something recovered from how many times the daemon
+   * happened to ask. It also refuses the two activations a real
+   * NetworkManager refuses — a profile that does not exist, and a radio that
+   * is not ready — because a fake that says yes to both is a fake in which
+   * this defect cannot be reproduced at all.
+   */
+  const COLD_BOOT = "lo:loopback:connected (externally):lo\neth0:ethernet:unavailable:\nwlan0:wifi:unavailable:\n";
+  const RADIO_READY = "lo:loopback:connected (externally):lo\neth0:ethernet:unavailable:\nwlan0:wifi:disconnected:\n";
+  const NO_RADIO_YET = "lo:loopback:connected (externally):lo\neth0:ethernet:unavailable:\n";
+
+  const AP_UP = "nmcli connection up yonder-ap";
+
+  function coldBootHarness(deviceStatusAt: (now: number) => string) {
+    const { clock, advance } = fakeClock();
+    const calls: string[][] = [];
+    const names = new Set<string>();
+    let current = "";
+    let activated = 0;
+    const runner: CommandRunner = async (argv) => {
+      calls.push(argv);
+      const key = argv.join(" ");
+      if (key === "nmcli -t -f DEVICE,TYPE,STATE,CONNECTION device status") {
+        current = deviceStatusAt(clock.now());
+        return { code: 0, stdout: current, stderr: "" };
+      }
+      if (key === "nmcli -t -f NAME,UUID,TYPE,DEVICE connection show") {
+        return { code: 0, stdout: [...names].map((n) => `${n}:u-${n}:802-11-wireless:\n`).join(""), stderr: "" };
+      }
+      if (argv[1] === "connection") {
+        if (argv[2] === "add") names.add(argv[4] ?? "");
+        if (argv[2] === "delete") names.delete(argv[3] ?? "");
+        if (argv[2] === "up") {
+          const name = argv[3] ?? "";
+          // The failure the fallback logs on a board whose render never got
+          // far enough to write the profile.
+          if (!names.has(name)) {
+            return { code: 10, stdout: "", stderr: `Error: unknown connection '${name}'.` };
+          }
+          const wifiRow = current.split("\n").map((l) => l.split(":")).find((f) => f[1] === "wifi");
+          if (name === "yonder-ap" && wifiRow?.[2] === "unavailable") {
+            return { code: 4, stdout: "", stderr: "Error: Connection activation failed: device is not ready" };
+          }
+          if (name === "yonder-ap") activated++;
+        }
+      }
+      return { code: 0, stdout: "", stderr: "" };
+    };
+    return {
+      clock, advance, calls, names, runner,
+      /** Activations nmcli accepted — not commands issued. On a cold boot those come apart, which is the whole defect. */
+      raised: () => activated,
+      /** Activations nmcli refused. Must stay at zero: each one is a line in the journal that says nothing useful. */
+      refused: () => calls.filter((c) => c.join(" ") === AP_UP).length - activated,
+    };
+  }
+
+  /** Quiet the daemon's own stdout/stderr for a test that expects both. */
+  function muted() {
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    return () => { stdout.mockRestore(); stderr.mockRestore(); };
+  }
+
+  it("raises the access point when the radio only becomes usable after the socket binds", async () => {
+    const unmute = muted();
+    try {
+      const { clock, advance, names, runner, raised, refused } =
+        coldBootHarness((now) => (now < 1_000 ? COLD_BOOT : RADIO_READY));
+      const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), dnsmasqPath: join(dir, "yonder.conf"), runner, clock });
+      try {
+        await flushMicrotasks();
+        // The socket is up regardless: reaching a board to ask what is wrong
+        // never waits on a radio.
+        expect(statSync(socketPath).isSocket()).toBe(true);
+        expect((await call(socketPath, "GET", "/status")).status).toBe(200);
+        // nmcli refused the start-up activation, exactly as it does on a radio
+        // that is not ready. Nothing is on the air.
+        expect(raised()).toBe(0);
+
+        advance(1_000);
+        await flushMicrotasks();
+
+        expect(names.has("yonder-ap")).toBe(true);
+        expect(raised()).toBe(1);
+        expect(refused()).toBe(1); // the start-up attempt, and only that one
+      } finally {
+        await server.close();
+      }
+    } finally {
+      unmute();
+    }
+  });
+
+  it("creates the access-point profile when the radio is not even listed at the first render", async () => {
+    const unmute = muted();
+    try {
+      const { clock, advance, names, runner, raised } =
+        coldBootHarness((now) => (now < 1_000 ? NO_RADIO_YET : RADIO_READY));
+      const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), dnsmasqPath: join(dir, "yonder.conf"), runner, clock });
+      try {
+        await flushMicrotasks();
+        // The render found no wifi interface, so it wrote no yonder-ap at all
+        // — and `up yonder-ap` is the only thing the fallback knows how to do.
+        expect(names.has("yonder-ap")).toBe(false);
+
+        advance(1_000);
+        await flushMicrotasks();
+
+        expect(names.has("yonder-ap")).toBe(true);
+        expect(raised()).toBe(1);
+      } finally {
+        await server.close();
+      }
+    } finally {
+      unmute();
+    }
+  });
+
+  /**
+   * The interaction between the wait above and R-NET-07's deadline, in the
+   * one arrangement where they genuinely collide: `network.ap.fallback.timeout`
+   * at its schema minimum of 30 s, which is also where the radio wait's own
+   * bound lands, on a board whose radio is not listed until that very moment.
+   *
+   * The deadline is not moved — that is the guarantee. What must not happen is
+   * the fallback's *action* running while the render that creates the profile
+   * is still in flight: `nmcli connection up yonder-ap` against a profile that
+   * does not exist fails with `unknown connection`, which tells an operator
+   * nothing about a radio that was simply slow. So the observable is that
+   * every activation this daemon issued was one nmcli could accept.
+   */
+  it("does not raise the access point before the render that creates it", async () => {
+    const unmute = muted();
+    try {
+      const soon = structuredClone(DEFAULT_CONFIG);
+      soon.network.ap.fallback.timeout = 30;
+      saveConfig(configPath, soon);
+
+      const { clock, advance, names, runner, raised, refused } =
+        coldBootHarness((now) => (now < 30_000 ? NO_RADIO_YET : RADIO_READY));
+      const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), dnsmasqPath: join(dir, "yonder.conf"), runner, clock });
+      try {
+        // Walk to the deadline one poll at a time, the way the daemon
+        // actually experiences it.
+        for (let i = 0; i < 31; i++) {
+          advance(1_000);
+          await flushMicrotasks();
+        }
+        expect(names.has("yonder-ap")).toBe(true);
+        expect(raised()).toBeGreaterThanOrEqual(1);
+        expect(refused()).toBe(0);
+      } finally {
+        await server.close();
+      }
+    } finally {
+      unmute();
     }
   });
 
@@ -628,7 +810,7 @@ describe("startServer", () => {
       // A board whose networking is broken is exactly the one an operator
       // needs to be able to ask what is wrong. The configuration API comes up
       // regardless, the same as when recovery fails.
-      const server = await startServer({ socketPath, configPath, journalPath, renderers: [wedged], secretsPath: join(dir, "secrets.yaml"), runner: noopRunner });
+      const server = await startServer({ socketPath, configPath, journalPath, renderers: [wedged], secretsPath: join(dir, "secrets.yaml"), dnsmasqPath: join(dir, "yonder.conf"), runner: noopRunner });
       try {
         expect(statSync(socketPath).isSocket()).toBe(true);
         expect((await call(socketPath, "GET", "/status")).status).toBe(200);
