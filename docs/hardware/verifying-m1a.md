@@ -154,6 +154,28 @@ persistent state a board can acquire at any time, and it is gated on the configu
 wanting a radio at all so that an operator who has turned Wi-Fi off is not overruled
 (`radioWanted`, R-NET-08).
 
+**4. The configured DHCP pool was never in force.**
+
+With the radio up and the access point on the air, a client joined and was handed
+`192.168.77.154` — inside the subnet, and nowhere near the `192.168.77.2`–`.50` the
+configuration asked for. The reason was on the dnsmasq command line NetworkManager had
+built:
+
+```
+/usr/sbin/dnsmasq … --dhcp-range=192.168.77.10,192.168.77.254,3600 \
+                    --conf-dir=/etc/NetworkManager/dnsmasq-shared.d
+```
+
+The drop-in Yonder wrote into that conf-dir *was* being read. It simply lost: a range on
+the command line takes precedence over one in a conf-dir file. So `network.ap.dhcp` decided
+nothing while looking as though it decided the pool, which is worse than not offering the
+key at all.
+
+Removed, rather than documented as inert. What remains true is what R-NET-02 now says:
+clients get addresses inside the access point's own subnet, because NetworkManager derives
+that range from the access point's address. K-14 records what a configurable pool would
+cost — a dnsmasq of our own to run and supervise, not a drop-in.
+
 ## Still to confirm on a board
 
 **`nmcli connection modify` has still never been executed.** The first boot never reached a
@@ -489,7 +511,7 @@ sudo curl --unix-socket /run/yonder/core.sock -s http://localhost/config
 Expect the seeded default configuration, as one line of compact JSON:
 
 ```
-{"version":1,"network":{"ap":{"enabled":true,"ssid":"yonder","psk":{"secret":"ap_psk"},"address":"192.168.77.1/24","dhcp":{"start":"192.168.77.2","end":"192.168.77.50","lease":"12h"},"fallback":{"enabled":true,"timeout":90}},"client":{"ssid":null,"psk":null},"ethernet":{"dhcp":true},"priority":["ethernet","modem","wifi_client"]},"ui":{"port":3000,"theme":"day","editor":{"enabled":true,"password":null,"interfaces":["ethernet","wifi_client"]}},"system":{"hostname":"yonder","timezone":"UTC"}}
+{"version":1,"network":{"ap":{"enabled":true,"ssid":"yonder","psk":{"secret":"ap_psk"},"address":"192.168.77.1/24","fallback":{"enabled":true,"timeout":90}},"client":{"ssid":null,"psk":null},"ethernet":{"dhcp":true},"priority":["ethernet","modem","wifi_client"]},"ui":{"port":3000,"theme":"day","editor":{"enabled":true,"password":null,"interfaces":["ethernet","wifi_client"]}},"system":{"hostname":"yonder","timezone":"UTC"}}
 ```
 
 (Pipe any of these commands through `python3 -m json.tool` if you'd rather read it
@@ -526,8 +548,8 @@ change's `id` and the epoch-millisecond `expiresAt` you have until it reverts on
 
 The body below is identical to the seeded default except `system.hostname`, which the
 network renderer never reads — a safe way to prove the whole pipeline end-to-end. The access
-point, the Ethernet profile and the DHCP drop-in already exist by now: the startup render in
-Step 2 created them. **What this step proves is the apply path itself** — validate, write,
+point and the Ethernet profile already exist by now: the startup render in Step 2 created
+them. **What this step proves is the apply path itself** — validate, write,
 render, start the confirmation window — over a device that is already up and reachable.
 
 ```bash
@@ -540,7 +562,6 @@ cat > ~/yonder-apply-1.json <<'EOF'
       "ssid": "yonder",
       "psk": { "secret": "ap_psk" },
       "address": "192.168.77.1/24",
-      "dhcp": { "start": "192.168.77.2", "end": "192.168.77.50", "lease": "12h" },
       "fallback": { "enabled": true, "timeout": 90 }
     },
     "client": { "ssid": null, "psk": null },
@@ -588,9 +609,11 @@ Now, from your second device, **within the two-minute window**:
   is visible. It should already have been, since Step 2 — this re-checks it survived the
   apply.
 - Join it with the published passphrase **`yonder1234`**.
-- Confirm the address you were handed is inside `192.168.77.2`–`192.168.77.50` (the
-  configured DHCP pool) — check your device's network details panel, or `ip addr` /
-  `ipconfig`. **Joining but never being given an address is the signature of a missing
+- Confirm you were handed an address inside `192.168.77.0/24` — the access point's own
+  subnet, which is what R-NET-02 promises and all it promises. The range within that subnet
+  is NetworkManager's to choose and is not configurable (K-14); a real board handed a client
+  `192.168.77.154`. Check your device's network details panel, or `ip addr` / `ipconfig`.
+  **Joining but never being given an address is the signature of a missing
   `dnsmasq-base`**; check `dpkg -l dnsmasq-base` before looking anywhere else.
 - From that same second device, confirm you can reach the board at its configured address:
 
@@ -668,7 +691,6 @@ cat > ~/yonder-apply-2.json <<'EOF'
       "ssid": "yonder",
       "psk": { "secret": "ap_psk" },
       "address": "192.168.77.1/24",
-      "dhcp": { "start": "192.168.77.2", "end": "192.168.77.50", "lease": "12h" },
       "fallback": { "enabled": true, "timeout": 90 }
     },
     "client": { "ssid": "verification-test", "psk": { "secret": "verify_wrong_psk" } },
@@ -783,7 +805,6 @@ document, this one needs one.
          "ssid": "yonder",
          "psk": { "secret": "ap_psk" },
          "address": "192.168.77.1/24",
-         "dhcp": { "start": "192.168.77.2", "end": "192.168.77.50", "lease": "12h" },
          "fallback": { "enabled": true, "timeout": 90 }
        },
        "client": { "ssid": "this-network-does-not-exist", "psk": null },

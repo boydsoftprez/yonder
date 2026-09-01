@@ -38,20 +38,10 @@ export interface ServerOptions {
    * may wait on the wall clock in a test.
    */
   clock?: Clock;
-  /**
-   * Where the network renderer writes the access point's DHCP drop-in.
-   * Test-only, and for the third variant of the same reason: the default is
-   * `/etc/NetworkManager/dnsmasq-shared.d/yonder.conf`, and a test that gets
-   * far enough into a render to reach it would either write outside its
-   * sandbox or fail there — which is what hid a render failure behind a
-   * device list that never had a radio in it.
-   */
-  dnsmasqPath?: string;
 }
 
 export interface BuildRenderersOptions {
   secretsPath: string;
-  dnsmasqPath?: string;
   runner?: CommandRunner;
   log?: (line: string) => void;
   /** Drives the network renderer's bounded wait for a radio. See waitForRadio. */
@@ -87,9 +77,7 @@ export function buildRenderers(opts: BuildRenderersOptions): {
   // Only if absent: an operator who has changed the passphrase keeps theirs.
   if (secrets.ensureValue("ap_psk", DEFAULT_AP_PASSPHRASE).created) generated.push("ap_psk");
   const client = new NmcliClient(opts.runner ?? systemRunner, log);
-  const renderer = new NetworkRenderer({
-    client, secrets, dnsmasqPath: opts.dnsmasqPath, log, clock: opts.clock,
-  });
+  const renderer = new NetworkRenderer({ client, secrets, log, clock: opts.clock });
   return { renderers: [renderer], renderer, secrets, client, generated };
 }
 
@@ -135,7 +123,6 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   try {
     built = buildRenderers({
       secretsPath: opts.secretsPath ?? "/etc/yonder/secrets.yaml",
-      dnsmasqPath: opts.dnsmasqPath,
       runner: opts.runner,
       clock,
     });

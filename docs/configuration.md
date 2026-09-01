@@ -56,12 +56,14 @@ The authoritative schema is in [`config/schema/`](../config/schema/), generated 
 model in `yonder-core`. The configuration below is what the daemon accepts today; the test
 suite parses this very block through the schema, so the two cannot drift apart.
 
-One rule the generated JSON Schema cannot express, and the daemon enforces anyway: **the
-DHCP pool must be a range of host addresses inside the access point's own subnet, and must
-not contain the access point's address.** JSON Schema has no way to compare two fields, so
-an editor validating against `yonder.schema.json` will accept a pool the device rejects.
-The check exists because the failure is silent — the render succeeds, so nothing rolls
-back, and the device only stops handing out addresses at the next boot.
+**The access point's DHCP range is not configurable, and `address` is what decides it.**
+NetworkManager's `shared` method runs its own dnsmasq and hands it a range on the command
+line, derived from the access-point address — so the range follows the subnet you set and
+nothing else. There used to be a `network.ap.dhcp` block here; it was written to a drop-in
+NetworkManager's own command line overrode, so it decided nothing, and it has been removed
+rather than left looking authoritative. The schema is strict, so a `config.yaml` still
+carrying it is rejected with the offending path named: delete those lines. See K-14 in
+[`known-issues.md`](known-issues.md) for what a configurable pool would cost.
 
 <!-- yonder:reference-config -->
 ```yaml
@@ -72,8 +74,7 @@ network:
     enabled: true
     ssid: yonder
     psk: { secret: ap_psk }
-    address: 192.168.77.1/24
-    dhcp: { start: 192.168.77.2, end: 192.168.77.50, lease: 12h }
+    address: 192.168.77.1/24                   # also decides the DHCP range clients are given
     fallback: { enabled: true, timeout: 90 }   # never disable this without reason
   client:
     ssid: null                                 # set from the console, not at flash time

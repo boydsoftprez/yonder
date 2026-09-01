@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NetworkRenderer, deviceIsUsable } from "./renderer.js";
@@ -144,7 +144,6 @@ function harness(opts: HarnessOptions = {}) {
   const renderer = new NetworkRenderer({
     client: new NmcliClient(run),
     secrets,
-    dnsmasqPath: join(dir, "yonder.conf"),
     clock: opts.clock,
     radioWaitMs: opts.radioWaitMs,
   });
@@ -168,13 +167,6 @@ describe("NetworkRenderer", () => {
     expect(calls.some((c) => c.includes(AP_CONNECTION)) && calls.some((c) => c.includes(ETHERNET_CONNECTION))).toBe(true);
     expect(calls.some((c) => c.includes(AP_CONNECTION))).toBe(true);
     expect(calls.some((c) => c.includes(ETHERNET_CONNECTION))).toBe(true);
-  });
-
-  it("writes the DHCP drop-in", async () => {
-    const { renderer } = harness();
-    await renderer.render(DEFAULT_CONFIG);
-    expect(existsSync(join(dir, "yonder.conf"))).toBe(true);
-    expect(readFileSync(join(dir, "yonder.conf"), "utf8")).toContain("dhcp-range=");
   });
 
   it("does not create a client profile when no ssid is configured", async () => {
@@ -312,7 +304,6 @@ describe("NetworkRenderer", () => {
     const renderer = new NetworkRenderer({
       client: new NmcliClient(run, (l) => lines.push(l)),
       secrets,
-      dnsmasqPath: join(dir, "y.conf"),
       log: (l) => lines.push(l),
     });
     await renderer.render(DEFAULT_CONFIG);
@@ -439,7 +430,7 @@ describe("NetworkRenderer, when the radio is not ready yet", () => {
     const secrets = new SecretStore(join(dir, "s.yaml"));
     secrets.ensureValue("ap_psk", OPERATOR_PSK);
     const renderer = new NetworkRenderer({
-      client: new NmcliClient(run), secrets, dnsmasqPath: join(dir, "y.conf"), clock: fastClock(),
+      client: new NmcliClient(run), secrets, clock: fastClock(),
     });
     expect(await renderer.waitForRadio()).toBe(true);
   });

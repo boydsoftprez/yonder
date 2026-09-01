@@ -2,9 +2,10 @@
 import { z } from "zod";
 
 /**
- * A dotted-quad octet, 0–255. Pinned this tightly because the cross-field
- * check below does arithmetic on these values: `\d{1,3}` accepts 999.1.1.1,
- * and a subnet calculation over that answers a question nobody asked.
+ * A dotted-quad octet, 0–255. Pinned to the range an octet actually has
+ * rather than the `\d{1,3}` that would be shorter: that accepts 999.1.1.1,
+ * and IPV4_PATTERN is exported for readers outside this file that have to
+ * tell a genuine address apart from something that only looks like one.
  */
 const OCTET = String.raw`(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)`;
 const IPV4 = `${OCTET}(\\.${OCTET}){3}`;
@@ -27,13 +28,7 @@ const cidr = z.string().regex(
   "must be an address in CIDR form, for example 192.168.77.1/24",
 );
 
-const ipv4 = z.string().regex(IPV4_PATTERN, "must be an IPv4 address");
 const port = z.number().int().min(1).max(65535);
-
-/** Dotted quad to a 32-bit number. Only ever called on a value `ipv4` accepted. */
-function toInt(address: string): number {
-  return address.split(".").reduce((acc, octet) => acc * 256 + Number(octet), 0);
-}
 
 /** A reference to a value held in secrets.yaml rather than inline. */
 export const SecretRef = z.object({ secret: z.string().min(1) }).strict();
@@ -47,70 +42,38 @@ const ApFallback = z.object({
 }).strict();
 
 /**
- * The access point, with the one cross-field rule the fields cannot express
- * on their own: **the DHCP pool has to be inside the access point's subnet.**
+ * The access point.
  *
- * Nothing downstream catches this. Changing `address` to 10.0.0.1/24 while
- * the pool still reads 192.168.77.2–50 renders successfully — a `nmcli
- * connection modify` and a file write, both of which report success — so
- * there is nothing for the apply engine to roll back. The operator's existing
- * DHCP lease keeps them connected long enough to confirm the change. On the
- * next boot no client can get an address, and the fallback watchdog's only
- * action is to raise that same unusable access point.
+ * **There is no DHCP pool here, deliberately.** `ipv4.method shared` makes
+ * NetworkManager run its own dnsmasq for this connection, and NetworkManager
+ * passes that dnsmasq a range on the command line, derived from the access
+ * point's own address:
  *
- * The pool is checked strictly inside the subnet, not merely within it: the
- * network and broadcast addresses are not host addresses, and the access
- * point's own address must not be in a pool it hands out.
+ *     /usr/sbin/dnsmasq … --dhcp-range=192.168.77.10,192.168.77.254,3600 \
+ *                         --conf-dir=/etc/NetworkManager/dnsmasq-shared.d
+ *
+ * A command-line range wins over a `dhcp-range` in a drop-in, so the pool
+ * Yonder used to write into that conf-dir decided nothing: a client on a real
+ * board was handed 192.168.77.154, inside NetworkManager's range and outside
+ * the configured 192.168.77.2–50. A configuration key that does nothing is
+ * worse than an absent one, so it is absent. See K-14 in docs/known-issues.md
+ * for what bringing it back would cost, and R-NET-02 for what is actually
+ * promised: DHCP inside the access point's subnet, from an address range that
+ * is not currently configurable.
+ *
+ * `address` still matters, and is still the only thing that does: the range
+ * NetworkManager chooses is derived from it, so moving the access point to
+ * another subnet moves the pool with it. That is what removed the cross-field
+ * check this schema used to carry — the pool cannot be left behind in an old
+ * subnet if there is no pool to leave behind.
  */
 const AccessPoint = z.object({
   enabled: z.boolean().default(true),
   ssid: z.string().min(1).max(32).default("yonder"),
   psk: SecretRef,
   address: cidr.default("192.168.77.1/24"),
-  dhcp: z.object({
-    start: ipv4.default("192.168.77.2"),
-    end: ipv4.default("192.168.77.50"),
-    lease: z.string().regex(/^\d+[mhd]$/).default("12h"),
-  }).strict().default({}),
   fallback: ApFallback.default({}),
-}).strict().superRefine((ap, ctx) => {
-  const [host, length] = ap.address.split("/");
-  const prefix = Number(length);
-  // Every intermediate is forced back to unsigned: JavaScript's bitwise
-  // operators work on *signed* 32-bit integers, so 192.168.77.0 & /24 comes
-  // out negative and compares below every address in its own subnet.
-  const mask = prefix === 0 ? 0 : (0xffffffff << (32 - prefix)) >>> 0;
-  const network = (toInt(host) & mask) >>> 0;
-  const broadcast = (network | (~mask >>> 0)) >>> 0;
-  const self = toInt(host);
-  const start = toInt(ap.dhcp.start);
-  const end = toInt(ap.dhcp.end);
-
-  const say = (path: string[], message: string) =>
-    ctx.addIssue({ code: z.ZodIssueCode.custom, path, message });
-
-  // Strictly inside: the network and broadcast addresses are not host
-  // addresses and a client handed either of them has no usable link.
-  for (const [field, value] of [["start", start], ["end", end]] as const) {
-    if (value <= network || value >= broadcast) {
-      say(
-        ["dhcp", field],
-        `${ap.dhcp[field]} is not a host address inside the access point's subnet ${ap.address}; `
-        + "a client given an address outside it cannot reach the device",
-      );
-    }
-  }
-
-  if (start > end) {
-    say(["dhcp", "end"], `the DHCP pool ends (${ap.dhcp.end}) before it starts (${ap.dhcp.start})`);
-  } else if (self >= start && self <= end) {
-    say(
-      ["dhcp", "start"],
-      `the pool ${ap.dhcp.start}–${ap.dhcp.end} contains the access point's own address `
-      + `${host}, which cannot be handed out to a client`,
-    );
-  }
-});
+}).strict();
 
 const Network = z.object({
   ap: AccessPoint,

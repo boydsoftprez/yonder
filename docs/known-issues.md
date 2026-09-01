@@ -154,3 +154,44 @@ Wi-Fi have to be ranked against each other for real. It is recorded here rather 
 silent because "the access point and the client profile fight over one radio" is exactly the
 kind of thing that reads as a bug in the field, and because a configuration key that does
 nothing is worse than an absent one — it invites an operator to set it and expect an effect.
+
+### K-14 · The access point's DHCP range is not configurable
+`src/schema/config.ts`, `src/net/profiles.ts`
+
+`config.network.ap.dhcp` — `start`, `end`, `lease` — has been **removed**. It was written to
+`/etc/NetworkManager/dnsmasq-shared.d/yonder.conf`, and that drop-in *is* read; it simply
+never won. NetworkManager's `shared` method starts its own dnsmasq and passes it a range on
+the command line, which takes precedence over a `dhcp-range` in a conf-dir file:
+
+```
+/usr/sbin/dnsmasq … --dhcp-range=192.168.77.10,192.168.77.254,3600 \
+                    --conf-dir=/etc/NetworkManager/dnsmasq-shared.d
+```
+
+A client that joined a real board was handed `192.168.77.154` — inside NetworkManager's
+range, outside the configured `.2`–`.50`. So the setting decided nothing and the file it
+wrote was actively misleading, which is worse than an absent key: it invites an operator to
+set a pool and expect an effect. Removed rather than documented as inert.
+
+**What is still true** is what R-NET-02 now says: clients of the access point get addresses,
+inside the access point's own subnet, because NetworkManager derives that range from
+`ipv4.addresses`. Moving `network.ap.address` to another subnet moves the range with it.
+That also retired the cross-field check the schema used to carry — a pool cannot be left
+behind in an old subnet when there is no pool to leave behind.
+
+**What it would cost to bring back.** Not a drop-in — that has been tried and this entry is
+the result. It needs Yonder to run its own dnsmasq: the access point's connection set to a
+static address rather than `shared`, our own dnsmasq bound to the wifi interface with our
+own pool, our own NAT and forwarding rules to replace what `shared` was doing, a unit to
+supervise it, and a restart on every apply that changes the pool. That is a second network
+daemon to own on a 512 MB board, and its failure mode is a client that never gets an
+address on a device whose only way in is that access point — the exact shape of
+unreachability R-NET-07 exists to catch. A configurable pool is a nice-to-have and does not
+buy that. Revisit only with a reason that does.
+
+**One upgrade consequence.** The schema is strict, so a device whose `/etc/yonder/config.yaml`
+was seeded by an earlier build still carries a `dhcp:` block the current daemon rejects. The
+daemon still starts and still serves — an unloadable configuration is guarded at every step
+of `startServer` — and `GET /config` answers 400 naming the offending path, so the fix is
+visible: delete those lines, or reflash. There is no migration machinery, and at pre-alpha
+none is being written for one removed key.

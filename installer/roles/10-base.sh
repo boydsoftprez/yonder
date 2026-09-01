@@ -22,6 +22,11 @@ ensure_dir "$YONDER_ETC" 0750
 ensure_dir /var/lib/yonder 0750
 ensure_dir "$YONDER_PREFIX" 0755
 
-# NetworkManager's `shared` method runs its own dnsmasq for the access point;
-# this is where the network renderer's drop-in sets the DHCP pool.
-ensure_dir /etc/NetworkManager/dnsmasq-shared.d 0755
+# NetworkManager passes --conf-dir at this directory every time it starts the
+# dnsmasq behind `ipv4.method shared`, so it has to exist. Yonder no longer
+# writes anything into it: the DHCP drop-in that used to live here was
+# overridden by NetworkManager's own command line and has been removed
+# (K-14). The directory comes with the network-manager package; created here
+# anyway, because the cost is one mkdir and the cost of being wrong is an
+# access point that hands out no addresses on a device whose only way in is
+# that access point.

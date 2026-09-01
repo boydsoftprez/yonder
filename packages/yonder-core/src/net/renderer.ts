@@ -3,7 +3,6 @@ import { systemClock, type Clock, type Renderer } from "../apply/types.js";
 import type { Config } from "../schema/config.js";
 import type { SecretStore } from "../secrets/store.js";
 import { NmcliClient, type DeviceInfo } from "./nmcli/client.js";
-import { writeDnsmasqConf, DNSMASQ_DROPIN } from "./dnsmasq.js";
 import { enableWifiRadio, radioWanted } from "./radio.js";
 import {
   desiredProfiles, AP_CONNECTION, CLIENT_CONNECTION, ETHERNET_CONNECTION,
@@ -77,7 +76,6 @@ function describe(devices: DeviceInfo[]): string {
 export interface NetworkRendererOptions {
   client: NmcliClient;
   secrets: SecretStore;
-  dnsmasqPath?: string;
   log?: (line: string) => void;
   /**
    * Drives waitForRadio's bounded wait. Injected for the same reason as
@@ -94,7 +92,6 @@ export class NetworkRenderer implements Renderer {
   readonly name = "network";
   private readonly client: NmcliClient;
   private readonly secrets: SecretStore;
-  private readonly dnsmasqPath: string;
   private readonly log: (line: string) => void;
   private readonly clock: Clock;
   private readonly radioWaitMs: number;
@@ -106,7 +103,6 @@ export class NetworkRenderer implements Renderer {
   constructor(opts: NetworkRendererOptions) {
     this.client = opts.client;
     this.secrets = opts.secrets;
-    this.dnsmasqPath = opts.dnsmasqPath ?? DNSMASQ_DROPIN;
     this.log = opts.log ?? (() => {});
     this.clock = opts.clock ?? systemClock;
     this.radioWaitMs = opts.radioWaitMs ?? RADIO_WAIT_MS;
@@ -274,10 +270,6 @@ export class NetworkRenderer implements Renderer {
 
     for (const profile of desired) {
       await this.client.addOrModify(profile.name, profile);
-    }
-
-    if (ifaces.wifi !== null) {
-      writeDnsmasqConf(this.dnsmasqPath, config);
     }
 
     // The access point is brought up or taken down deliberately; everything

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, it, expect } from "vitest";
 import { ConfigSchema, DEFAULT_CONFIG } from "./config.js";
-import { formatIssues } from "../config/errors.js";
 
 describe("ConfigSchema", () => {
   it("accepts the default config", () => {
@@ -60,64 +59,25 @@ describe("ConfigSchema", () => {
     set.ui.editor.password = { secret: "editor_password" };
     expect(ConfigSchema.safeParse(set).success).toBe(true);
   });
-});
 
-/**
- * The rule none of the fields can state on its own. Changing the access point
- * to another subnet while the pool stays behind renders *successfully* — a
- * `connection modify` and a file write, both reporting success — so the apply
- * engine has nothing to roll back, and the operator's existing lease keeps
- * them connected long enough to confirm it. The device only becomes
- * unreachable at the next boot, and the fallback watchdog's one action is to
- * raise that same access point nobody can get an address from.
- */
-describe("the DHCP pool against the access point's subnet", () => {
-  function withPool(address: string, start: string, end: string) {
-    const c = structuredClone(DEFAULT_CONFIG);
-    c.network.ap.address = address;
-    c.network.ap.dhcp.start = start;
-    c.network.ap.dhcp.end = end;
-    return ConfigSchema.safeParse(c);
-  }
-
-  it("accepts the shipped default", () => {
-    expect(withPool("192.168.77.1/24", "192.168.77.2", "192.168.77.50").success).toBe(true);
-  });
-
-  it("rejects a pool left behind when the address moves to another subnet", () => {
-    const r = withPool("10.0.0.1/24", "192.168.77.2", "192.168.77.50");
-    expect(r.success).toBe(false);
-    expect(formatIssues(r.error!).join("\n")).toMatch(/inside the access point's subnet/);
-  });
-
-  it("rejects a pool that spills past the end of a narrow subnet", () => {
-    // /28 is 192.168.77.0–15; .50 is outside it.
-    expect(withPool("192.168.77.1/28", "192.168.77.2", "192.168.77.50").success).toBe(false);
-  });
-
-  it("accepts a pool that fits inside that narrow subnet", () => {
-    expect(withPool("192.168.77.1/28", "192.168.77.2", "192.168.77.14").success).toBe(true);
-  });
-
-  it("rejects the network and broadcast addresses, which are not host addresses", () => {
-    expect(withPool("192.168.77.1/24", "192.168.77.0", "192.168.77.50").success).toBe(false);
-    expect(withPool("192.168.77.1/24", "192.168.77.2", "192.168.77.255").success).toBe(false);
-  });
-
-  it("rejects a pool containing the access point's own address", () => {
-    const r = withPool("192.168.77.10/24", "192.168.77.2", "192.168.77.50");
-    expect(r.success).toBe(false);
-    expect(formatIssues(r.error!).join("\n")).toMatch(/access point's own address/);
-  });
-
-  it("rejects a pool that ends before it starts", () => {
-    const r = withPool("192.168.77.1/24", "192.168.77.50", "192.168.77.2");
-    expect(r.success).toBe(false);
-    expect(formatIssues(r.error!).join("\n")).toMatch(/before it starts/);
-  });
-
-  it("names the field that is wrong, so the operator can fix it", () => {
-    const r = withPool("10.0.0.1/24", "192.168.77.2", "192.168.77.50");
-    expect(formatIssues(r.error!).join("\n")).toContain("network.ap.dhcp.start");
+  /**
+   * The DHCP pool is gone, and this schema is strict, so a config.yaml
+   * carrying the key an earlier build seeded is now rejected rather than
+   * quietly ignored (K-14). Stated as a test because "rejected" is a
+   * deliberate answer here and not an oversight: a key that decided nothing
+   * should not go on looking as though it decides something, and `GET
+   * /config` names the offending path so an operator can see which two lines
+   * to delete.
+   */
+  it("rejects an access-point DHCP pool, which no longer decides anything", () => {
+    const network = DEFAULT_CONFIG.network;
+    const seededByAnEarlierBuild = {
+      ...DEFAULT_CONFIG,
+      network: {
+        ...network,
+        ap: { ...network.ap, dhcp: { start: "192.168.77.2", end: "192.168.77.50", lease: "12h" } },
+      },
+    };
+    expect(ConfigSchema.safeParse(seededByAnEarlierBuild).success).toBe(false);
   });
 });

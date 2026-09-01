@@ -23,7 +23,11 @@ RuntimeDirectoryMode=0750
 StateDirectory=yonder
 StateDirectoryMode=0750
 ProtectSystem=strict
-ReadWritePaths=/etc/yonder /var/lib/yonder /etc/NetworkManager/dnsmasq-shared.d
+# /etc/NetworkManager/dnsmasq-shared.d is no longer here: the DHCP drop-in that
+# needed it decided nothing and has been removed (K-14). Nothing this daemon does
+# writes under /etc/NetworkManager any more — NetworkManager's own keyfiles are
+# written by NetworkManager, on this daemon's behalf, over D-Bus.
+ReadWritePaths=/etc/yonder /var/lib/yonder
 ProtectHome=yes
 NoNewPrivileges=yes
 PrivateTmp=yes

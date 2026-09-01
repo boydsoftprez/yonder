@@ -193,7 +193,7 @@ describe("startServer", () => {
   beforeEach(() => { socketPath = join(dir, "core.sock"); });
 
   it("binds a Unix socket, group-accessible and nothing wider", async () => {
-    const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), dnsmasqPath: join(dir, "yonder.conf"), runner: noopRunner });
+    const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner: noopRunner });
     try {
       // A socket in the filesystem, reachable only by something that can open
       // it: no interface can expose the configuration API by accident.
@@ -211,7 +211,7 @@ describe("startServer", () => {
 
   it("replaces a socket left behind by a previous process", async () => {
     writeFileSync(socketPath, "");
-    const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), dnsmasqPath: join(dir, "yonder.conf"), runner: noopRunner });
+    const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner: noopRunner });
     try {
       expect(statSync(socketPath).isSocket()).toBe(true);
     } finally {
@@ -220,7 +220,7 @@ describe("startServer", () => {
   });
 
   it("answers 400 to a body that is not JSON", async () => {
-    const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), dnsmasqPath: join(dir, "yonder.conf"), runner: noopRunner });
+    const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner: noopRunner });
     try {
       const res = await call(socketPath, "POST", "/apply", "{ truncated");
       expect(res.status).toBe(400);
@@ -240,7 +240,7 @@ describe("startServer", () => {
       async render() { socketAtRender.push(existsSync(socketPath)); },
     };
 
-    const server = await startServer({ socketPath, configPath, journalPath, renderers: [watcher], secretsPath: join(dir, "secrets.yaml"), dnsmasqPath: join(dir, "yonder.conf"), runner: noopRunner });
+    const server = await startServer({ socketPath, configPath, journalPath, renderers: [watcher], secretsPath: join(dir, "secrets.yaml"), runner: noopRunner });
     try {
       expect(loadConfig(configPath).system.hostname).toBe("yonder");
       // Two renders: the rollback, then the startup render that brings the
@@ -266,7 +266,7 @@ describe("startServer", () => {
       // Occupy the temp path the atomic write needs, so the rollback fails.
       mkdirSync(`${configPath}.tmp`);
 
-      const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), dnsmasqPath: join(dir, "yonder.conf"), runner: noopRunner });
+      const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner: noopRunner });
       try {
         // A daemon that refuses to start because it could not roll back leaves
         // an operator with no way in at all.
@@ -286,7 +286,7 @@ describe("startServer", () => {
     // A freshly flashed board that was never given a config.yaml. Before this,
     // loadConfig threw before listen() and Restart=always looped forever.
     rmSync(configPath);
-    const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), dnsmasqPath: join(dir, "yonder.conf"), runner: noopRunner });
+    const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner: noopRunner });
     try {
       expect(loadConfig(configPath)).toEqual(DEFAULT_CONFIG);
       expect((await call(socketPath, "GET", "/status")).status).toBe(200);
@@ -297,7 +297,7 @@ describe("startServer", () => {
 
   it("leaves an existing configuration alone", async () => {
     saveConfig(configPath, changed());
-    const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), dnsmasqPath: join(dir, "yonder.conf"), runner: noopRunner });
+    const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner: noopRunner });
     try {
       expect(loadConfig(configPath).system.hostname).toBe("changed");
     } finally {
@@ -318,7 +318,7 @@ describe("startServer", () => {
       async render(c) { seen.push({ ssid: c.network.ap.ssid, socket: existsSync(socketPath) }); },
     };
 
-    const server = await startServer({ socketPath, configPath, journalPath, renderers: [watcher], secretsPath: join(dir, "secrets.yaml"), dnsmasqPath: join(dir, "yonder.conf"), runner: noopRunner });
+    const server = await startServer({ socketPath, configPath, journalPath, renderers: [watcher], secretsPath: join(dir, "secrets.yaml"), runner: noopRunner });
     try {
       expect(seen).toEqual([{ ssid: "yonder", socket: false }]);
     } finally {
@@ -340,7 +340,7 @@ describe("startServer", () => {
     });
     let server: { close(): Promise<void> };
     try {
-      server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), dnsmasqPath: join(dir, "yonder.conf"), runner: noopRunner });
+      server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner: noopRunner });
     } finally {
       stdout.mockRestore();
     }
@@ -355,7 +355,7 @@ describe("startServer", () => {
 
   it("seeds the access point passphrase but never an administrator password", async () => {
     const secretsPath = join(dir, "secrets.yaml");
-    const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath, dnsmasqPath: join(dir, "yonder.conf"), runner: noopRunner });
+    const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath, runner: noopRunner });
     try {
       const bag = new SecretStore(secretsPath);
       expect(bag.get("ap_psk")).toBe(DEFAULT_AP_PASSPHRASE);
@@ -383,7 +383,7 @@ describe("startServer", () => {
     const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     try {
       writeFileSync(configPath, "version: 99\nnetwork: nonsense\n");
-      const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), dnsmasqPath: join(dir, "yonder.conf"), runner: noopRunner });
+      const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner: noopRunner });
       try {
         expect(statSync(socketPath).isSocket()).toBe(true);
         expect((await call(socketPath, "GET", "/status")).status).toBe(200);
@@ -415,7 +415,7 @@ describe("startServer", () => {
     const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     try {
       writeFileSync(configPath, "version: 99\nnetwork: nonsense\n");
-      const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), dnsmasqPath: join(dir, "yonder.conf"), runner: noopRunner });
+      const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner: noopRunner });
       try {
         const res = await call(socketPath, "POST", "/apply", changed());
         expect(res.status).toBe(200);
@@ -435,7 +435,7 @@ describe("startServer", () => {
     try {
       const secretsPath = join(dir, "secrets.yaml");
       writeFileSync(secretsPath, "ap_psk:\n  not: a-string\n", { mode: 0o600 });
-      const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath, dnsmasqPath: join(dir, "yonder.conf"), runner: noopRunner });
+      const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath, runner: noopRunner });
       try {
         expect(statSync(socketPath).isSocket()).toBe(true);
         expect((await call(socketPath, "GET", "/status")).status).toBe(200);
@@ -461,7 +461,7 @@ describe("startServer", () => {
       const secretsPath = join(dir, "secrets.yaml");
       writeFileSync(secretsPath, "ap_psk:\n  not: a-string\n", { mode: 0o600 });
       return startServer({
-        socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath, dnsmasqPath: join(dir, "yonder.conf"), runner: noopRunner,
+        socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath, runner: noopRunner,
       });
     }
 
@@ -525,7 +525,7 @@ describe("startServer", () => {
       // A path the durable write cannot create: seedConfigIfAbsent throws
       // ConfigError, and that must cost a default configuration, not the API.
       const wedged = join(dir, "config.yaml", "config.yaml");
-      const server = await startServer({ socketPath, configPath: wedged, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), dnsmasqPath: join(dir, "yonder.conf"), runner: noopRunner });
+      const server = await startServer({ socketPath, configPath: wedged, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner: noopRunner });
       try {
         expect(statSync(socketPath).isSocket()).toBe(true);
         expect((await call(socketPath, "GET", "/status")).status).toBe(200);
@@ -563,7 +563,7 @@ describe("startServer", () => {
 
   it("arms the fallback watchdog and raises the access point when nothing is reachable", async () => {
     const { clock, advance, runner, raised } = watchdogHarness();
-    const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), dnsmasqPath: join(dir, "yonder.conf"), runner, clock });
+    const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner, clock });
     try {
       advance(89_000);
       await flushMicrotasks();
@@ -581,7 +581,7 @@ describe("startServer", () => {
 
   it("stops the fallback watchdog when the server closes", async () => {
     const { clock, advance, runner, raised } = watchdogHarness();
-    const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), dnsmasqPath: join(dir, "yonder.conf"), runner, clock });
+    const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner, clock });
     await server.close();
     advance(200_000);
     await flushMicrotasks();
@@ -595,7 +595,7 @@ describe("startServer", () => {
     try {
       const { clock, advance, runner, raised } = watchdogHarness();
       writeFileSync(configPath, "version: 99\nnetwork: nonsense\n");
-      const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), dnsmasqPath: join(dir, "yonder.conf"), runner, clock });
+      const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner, clock });
       try {
         advance(91_000);
         await flushMicrotasks();
@@ -615,7 +615,7 @@ describe("startServer", () => {
     const off = structuredClone(DEFAULT_CONFIG);
     off.network.ap.fallback.enabled = false;
     saveConfig(configPath, off);
-    const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), dnsmasqPath: join(dir, "yonder.conf"), runner, clock });
+    const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner, clock });
     try {
       advance(200_000);
       await flushMicrotasks();
@@ -709,7 +709,7 @@ describe("startServer", () => {
     try {
       const { clock, advance, names, runner, raised, refused } =
         coldBootHarness((now) => (now < 1_000 ? COLD_BOOT : RADIO_READY));
-      const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), dnsmasqPath: join(dir, "yonder.conf"), runner, clock });
+      const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner, clock });
       try {
         await flushMicrotasks();
         // The socket is up regardless: reaching a board to ask what is wrong
@@ -739,7 +739,7 @@ describe("startServer", () => {
     try {
       const { clock, advance, names, runner, raised } =
         coldBootHarness((now) => (now < 1_000 ? NO_RADIO_YET : RADIO_READY));
-      const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), dnsmasqPath: join(dir, "yonder.conf"), runner, clock });
+      const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner, clock });
       try {
         await flushMicrotasks();
         // The render found no wifi interface, so it wrote no yonder-ap at all
@@ -781,7 +781,7 @@ describe("startServer", () => {
 
       const { clock, advance, names, runner, raised, refused } =
         coldBootHarness((now) => (now < 30_000 ? NO_RADIO_YET : RADIO_READY));
-      const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), dnsmasqPath: join(dir, "yonder.conf"), runner, clock });
+      const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner, clock });
       try {
         // Walk to the deadline one poll at a time, the way the daemon
         // actually experiences it.
@@ -810,7 +810,7 @@ describe("startServer", () => {
       // A board whose networking is broken is exactly the one an operator
       // needs to be able to ask what is wrong. The configuration API comes up
       // regardless, the same as when recovery fails.
-      const server = await startServer({ socketPath, configPath, journalPath, renderers: [wedged], secretsPath: join(dir, "secrets.yaml"), dnsmasqPath: join(dir, "yonder.conf"), runner: noopRunner });
+      const server = await startServer({ socketPath, configPath, journalPath, renderers: [wedged], secretsPath: join(dir, "secrets.yaml"), runner: noopRunner });
       try {
         expect(statSync(socketPath).isSocket()).toBe(true);
         expect((await call(socketPath, "GET", "/status")).status).toBe(200);
