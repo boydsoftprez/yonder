@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { readFileSync, writeFileSync, renameSync, existsSync, unlinkSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
+import { writeFileDurable, unlinkDurable } from "../fs/durable.js";
 import type { Config } from "../schema/config.js";
 
 export interface JournalEntry {
@@ -17,9 +18,11 @@ export class Journal {
   constructor(private readonly path: string) {}
 
   write(entry: JournalEntry): void {
-    const tmp = `${this.path}.tmp`;
-    writeFileSync(tmp, JSON.stringify(entry), { mode: 0o600 });
-    renameSync(tmp, this.path);
+    // Durability matters more here than anywhere else in the daemon: this is
+    // the record that says "put the old configuration back". If it is still in
+    // the page cache when the battery goes, the machine comes up holding an
+    // unconfirmed change with nothing left to undo it.
+    writeFileDurable(this.path, JSON.stringify(entry), 0o600);
   }
 
   read(): JournalEntry | null {
@@ -32,6 +35,6 @@ export class Journal {
   }
 
   clear(): void {
-    try { unlinkSync(this.path); } catch { /* already gone */ }
+    unlinkDurable(this.path);
   }
 }

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { readFileSync, writeFileSync, renameSync, chmodSync, existsSync, unlinkSync } from "node:fs";
+import { readFileSync, existsSync, unlinkSync } from "node:fs";
 import { parse, stringify } from "yaml";
+import { writeFileDurable } from "../fs/durable.js";
 import { generateSecret } from "./generate.js";
 import { ConfigError } from "../config/errors.js";
 import type { SecretRef } from "../schema/config.js";
@@ -38,15 +39,17 @@ export class SecretStore {
     return value;
   }
 
+  /**
+   * Durable, not merely atomic. First boot generates the access-point password
+   * and shows it once; if that write is still in the page cache when power is
+   * cut, the device comes back with a different password and the one written
+   * down no longer opens the only interface that is always there.
+   */
   private flush(): void {
-    const tmp = `${this.path}.tmp`;
     try {
-      writeFileSync(tmp, stringify(this.bag), { mode: 0o600 });
-      chmodSync(tmp, 0o600);
-      renameSync(tmp, this.path);
-      chmodSync(this.path, 0o600);
+      writeFileDurable(this.path, stringify(this.bag), 0o600);
     } catch (e) {
-      try { unlinkSync(tmp); } catch { /* nothing to clean up */ }
+      try { unlinkSync(`${this.path}.tmp`); } catch { /* nothing to clean up */ }
       throw new ConfigError(`cannot write ${this.path}: ${(e as Error).message}`);
     }
   }

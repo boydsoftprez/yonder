@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, readdirSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "./load.js";
@@ -53,5 +53,21 @@ describe("saveConfig", () => {
     const p = join(dir, "config.yaml");
     saveConfig(p, DEFAULT_CONFIG);
     expect(readdirSync(dir)).toEqual(["config.yaml"]);
+  });
+
+  it("leaves the original byte-identical when the write cannot be completed", () => {
+    const p = join(dir, "config.yaml");
+    saveConfig(p, DEFAULT_CONFIG);
+    const original = readFileSync(p);
+
+    // Occupy the temp path the atomic write depends on. A writer that opens
+    // the live file directly never touches it and would truncate the only
+    // good copy of the configuration on the device.
+    mkdirSync(`${p}.tmp`);
+    const other = structuredClone(DEFAULT_CONFIG);
+    other.system.hostname = "clobbered";
+
+    expect(() => saveConfig(p, other)).toThrow(ConfigError);
+    expect(readFileSync(p)).toEqual(original);
   });
 });
