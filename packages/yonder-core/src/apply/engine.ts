@@ -103,8 +103,19 @@ export class ApplyEngine {
         warn(`could not restore ${this.configPath} after a failed apply: ${(restoreError as Error).message}`);
       }
       await this.renderAll(previous).catch(() => { /* best effort */ });
-      this.journal.clear();
-      this.finish(id, "failed");
+      // finish() must run in a finally: a journal that cannot be cleared
+      // (e.g. EIO fsyncing the journal directory) must not leave the
+      // reservation held forever, or every later apply is refused with a
+      // misleading "an apply is already pending". The original failure `e`
+      // is what the caller needs to see, so a clear() failure is logged
+      // rather than allowed to replace it.
+      try {
+        this.journal.clear();
+      } catch (clearError) {
+        warn(`could not clear the apply journal after a failed apply: ${(clearError as Error).message}`);
+      } finally {
+        this.finish(id, "failed");
+      }
       throw e;
     }
 
@@ -119,10 +130,13 @@ export class ApplyEngine {
   confirm(id: string): void {
     if (this.state !== "pending") throw new ConfigError("nothing is pending confirmation");
     if (id !== this.id) throw new ConfigError(`unknown apply id "${id}"`);
-    if (this.timer !== undefined) this.clock.clearTimer(this.timer);
-    // Clearing the journal is what makes the change permanent. Leave it and
-    // the next start reverts a change the operator explicitly kept.
+    // Clearing the journal is what makes the change permanent, and it comes
+    // before disarming the countdown on purpose: if clear() throws (e.g. EIO
+    // fsyncing the journal directory), the timer is left armed rather than
+    // cleared, so the change still reverts on schedule instead of being
+    // stuck "pending" with no rollback timer left to save it.
     this.journal.clear();
+    if (this.timer !== undefined) this.clock.clearTimer(this.timer);
     this.state = "confirmed";
     this.timer = undefined;
     this.expiresAt = undefined;
@@ -152,7 +166,19 @@ export class ApplyEngine {
     // is done. The render is still issued and still awaited here, and a new
     // apply waits on `settling` before touching anything, so it cannot
     // interleave with this one.
-    this.journal.clear();
+    //
+    // clear() is guarded: this runs fire-and-forget (`void this.revert()`
+    // off the countdown timer), so a throw here would otherwise be an
+    // unhandled rejection that takes the whole daemon down. The rollback
+    // above already happened, which is the part that matters; a journal
+    // that cannot be cleared is logged and left for the next clear() to
+    // retry, and finish() still runs so the engine is not left "reverting"
+    // forever, refusing every later apply.
+    try {
+      this.journal.clear();
+    } catch (e) {
+      warn(`could not clear the apply journal after a revert: ${(e as Error).message}`);
+    }
     this.finish(id, "reverted");
     const settling = this.renderAll(previous).catch(() => { /* best effort */ });
     this.settling = settling;

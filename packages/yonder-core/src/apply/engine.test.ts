@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ApplyEngine } from "./engine.js";
+import { Journal } from "./journal.js";
 import type { Renderer, Clock } from "./types.js";
 import { saveConfig } from "../config/save.js";
 import { loadConfig } from "../config/load.js";
@@ -301,5 +302,94 @@ describe("ApplyEngine.recover with a damaged journal", () => {
     expect(loadConfig(configPath)).toEqual(DEFAULT_CONFIG);
     expect(existsSync(journalPath)).toBe(false);
     expect(e.status().state).toBe("idle");
+  });
+});
+
+/**
+ * Journal.clear() (unlinkDurable -> fsyncDir) can throw: unlink's own failure
+ * is swallowed, but the directory fsync's openSync/fsyncSync is not, and the
+ * realistic trigger on this hardware is EIO from a worn SD card during the
+ * journal directory fsync. Three call sites in the engine assumed clear()
+ * could not fail. Journal.prototype.clear is spied on to throw, which is the
+ * same fault the reviewer reproduced with the journal directory at mode 0300
+ * (unlink succeeds, opening the directory to fsync it does not).
+ */
+describe("ApplyEngine when the journal cannot be cleared", () => {
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  function explodingClear(): void {
+    vi.spyOn(Journal.prototype, "clear").mockImplementation(() => {
+      throw new Error("EIO: simulated fsync failure clearing the apply journal");
+    });
+  }
+
+  it("still releases the reservation for a future apply when clear() throws during apply()'s own rollback", async () => {
+    const { clock } = fakeClock();
+    // Fails the first render (forcing apply()'s rollback path), then behaves,
+    // so a second apply on the *same* engine instance is the proof that the
+    // in-memory reservation was actually released.
+    let shouldFail = true;
+    const flaky: Renderer = { name: "flaky", async render() { if (shouldFail) throw new Error("nope"); } };
+    const e = new ApplyEngine({ configPath, journalPath, renderers: [flaky], clock });
+    explodingClear();
+
+    // The renderer's failure is what the caller needs to see, not a secondary
+    // failure to clean up the journal.
+    await expect(e.apply(changed())).rejects.toThrow(/nope/);
+    expect(e.status().state).toBe("idle");
+
+    vi.restoreAllMocks();
+    shouldFail = false;
+    // Before the fix this fails with "an apply is already pending": the
+    // engine was stuck "applying" forever because finish() never ran.
+    await expect(e.apply(changed())).resolves.toBeTruthy();
+  });
+
+  it("leaves the countdown armed when clear() throws during confirm(), so the change still reverts on schedule", async () => {
+    const { clock, advance } = fakeClock();
+    const e = new ApplyEngine({ configPath, journalPath, renderers: [renderer()], clock, timeoutMs: 120_000 });
+    const { id } = await e.apply(changed());
+
+    explodingClear();
+    expect(() => e.confirm(id)).toThrow(/EIO/);
+    vi.restoreAllMocks();
+
+    // Neither committed nor stuck limbo: still pending, countdown still live.
+    expect(e.status().state).toBe("pending");
+    advance(120_000);
+    expect(loadConfig(configPath).system.hostname).toBe("yonder");
+    expect(e.status().state).toBe("idle");
+  });
+
+  it("does not produce an unhandled rejection or a stuck state when clear() throws during the timeout revert", async () => {
+    const { clock, advance } = fakeClock();
+    const e = new ApplyEngine({ configPath, journalPath, renderers: [renderer()], clock, timeoutMs: 120_000 });
+    await e.apply(changed());
+    explodingClear();
+
+    // revert() runs fire-and-forget off the countdown timer (`void
+    // this.revert()`); nothing awaits its promise, so a throw inside it would
+    // otherwise be an unhandled rejection.
+    const rejections: unknown[] = [];
+    const onUnhandledRejection = (reason: unknown) => rejections.push(reason);
+    process.on("unhandledRejection", onUnhandledRejection);
+    try {
+      advance(120_000);
+      // Let the microtask queue drain so Node has a chance to report an
+      // unhandled rejection before we assert none occurred.
+      await new Promise((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
+    } finally {
+      process.off("unhandledRejection", onUnhandledRejection);
+    }
+
+    expect(rejections).toEqual([]);
+    // The rollback itself is the correctness-critical part and must still
+    // have happened even though the journal could not be cleared afterward.
+    expect(loadConfig(configPath).system.hostname).toBe("yonder");
+    expect(e.status().state).toBe("idle");
+
+    vi.restoreAllMocks();
+    await expect(e.apply(changed())).resolves.toBeTruthy();
   });
 });
