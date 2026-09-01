@@ -6,6 +6,23 @@ export interface DeviceInfo { device: string; type: string; state: string; conne
 export interface ConnectionInfo { name: string; uuid: string; type: string; device: string }
 export interface AccessPointInfo { ssid: string; signal: number; security: string }
 
+/**
+ * One connection, in the two halves nmcli actually distinguishes.
+ *
+ * `type` and `ifname` are `connection add` common options, not properties;
+ * `settings` are `setting.property value` pairs, valid on both add and modify.
+ * Keeping them apart in the type is what stops an add-only option being sent
+ * to `connection modify` — see addOrModify.
+ */
+export interface ConnectionSpec {
+  /** nmcli connection type: `wifi`, `ethernet`. Sent only when creating. */
+  type: string;
+  /** The interface to bind. `ifname` when creating, `connection.interface-name` when modifying. */
+  ifname: string;
+  /** Fully-qualified `setting.property value` pairs. Never a bare property name. */
+  settings: string[][];
+}
+
 export class NmcliError extends Error {
   readonly argv: string[];
   readonly stderr: string;
@@ -71,14 +88,40 @@ export class NmcliClient {
     );
   }
 
-  /** Create the connection if absent, otherwise update it in place. Idempotent. */
-  async addOrModify(name: string, settings: string[][]): Promise<void> {
+  /**
+   * Create the connection if absent, otherwise update it in place. Idempotent.
+   *
+   * The two nmcli subcommands do not take the same arguments, and sending one
+   * argument list to both is why every render after the first used to fail.
+   *
+   * `connection add` takes *common options* — `type`, `ifname`, `con-name` —
+   * followed by `setting.property value` pairs. `connection modify` takes
+   * `[+|-]setting.property value` pairs and nothing else: `type` and `ifname`
+   * are not properties, and a connection's type cannot be changed at all. So
+   * the type is sent only on the add path, and the interface binding is sent
+   * under its real property name, `connection.interface-name`, on the modify
+   * path.
+   *
+   * ASSUMED, NOT OBSERVED: there was no nmcli on the machine this was written
+   * on. Confirming that `nmcli connection modify yonder-ap type wifi` is
+   * rejected — and that `connection.interface-name` is accepted — is Step 1 of
+   * docs/hardware/verifying-m1a.md.
+   */
+  async addOrModify(name: string, spec: ConnectionSpec): Promise<void> {
     const existing = await this.connections();
-    const flat = settings.flat();
+    const properties = spec.settings.flat();
     if (existing.some((c) => c.name === name)) {
-      await this.exec(["nmcli", "connection", "modify", name, ...flat]);
+      await this.exec([
+        "nmcli", "connection", "modify", name,
+        "connection.interface-name", spec.ifname,
+        ...properties,
+      ]);
     } else {
-      await this.exec(["nmcli", "connection", "add", "con-name", name, ...flat]);
+      await this.exec([
+        "nmcli", "connection", "add", "con-name", name,
+        "type", spec.type, "ifname", spec.ifname,
+        ...properties,
+      ]);
     }
   }
 

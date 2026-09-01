@@ -8,6 +8,23 @@ the test hands it. This procedure is what runs the same code against a real one.
 Nothing below can be replaced by a better unit test. It requires a Raspberry Pi, a real
 NetworkManager, a real Wi-Fi radio, a second device to observe from, and a real reboot.
 
+## Do these two first
+
+**There is no `nmcli` on the machine `yonder-core` was written on.** Every claim in this
+document is backed by a unit test against a fake runner — but a fake runner can only ever
+confirm that the code agrees with itself. Two pieces of `nmcli` grammar were written from
+the documentation and have never been executed, and both of them are load-bearing. Step 1
+confirms them, and nothing after Step 1 means much until it has.
+
+| What to confirm | Command | Why it matters |
+|---|---|---|
+| The shape of `device show` output | the four capture commands in Step 1, especially `nmcli -t -f GENERAL.DEVICE,IP4.ADDRESS device show` | It is the reachability probe behind the access-point fallback (R-NET-07), parsed by `parseDeviceShow`. Misread it and the board either raises its access point on every boot forever, or never raises it at all. |
+| That `connection modify` rejects add-only options | `nmcli connection modify yonder-ap type wifi` | `type` and `ifname` belong to `connection add`. If `modify` accepted them the code would be over-cautious; if it rejects them, as expected, every render after the first would have failed had they still been sent. |
+
+**If a real board disagrees with either, the code is wrong and the fixture is right.** Fix
+the parser or the argv, replace the fixture with what the board actually printed, and say so
+in the Results section. Do not reshape a capture to fit what is written here.
+
 ## What this verifies, and why it can't be verified any other way
 
 | Requirement | What the fake `nmcli` could never tell you |
@@ -142,6 +159,31 @@ npm test
 
 Confirm it's still green before moving on — `parse.test.ts` reads all four fixture files
 directly and asserts on their shape (see `packages/yonder-core/src/net/nmcli/parse.test.ts`).
+
+### And confirm what `connection modify` will not accept
+
+This one needs a connection to exist, so run it after Step 2 and come back here to record
+the answer. `NmcliClient.addOrModify` creates a connection with `nmcli connection add
+con-name … type … ifname … setting.property value …`, and updates one with
+`nmcli connection modify … connection.interface-name … setting.property value …`. The
+difference is deliberate: `type` and `ifname` are `connection add` common options, and a
+connection's type cannot be changed at all.
+
+```bash
+sudo nmcli connection modify yonder-ap type wifi
+```
+
+**Expect this to fail.** Record the exact error. A success here would mean `modify` is more
+permissive than the manual says, which is worth knowing but changes nothing — the code does
+not send it either way.
+
+```bash
+sudo nmcli connection modify yonder-ap connection.interface-name wlan0
+```
+
+Expect this to succeed silently (substitute your radio's interface name). This is the form
+the renderer actually sends on every render after the first, so a failure here is a real
+defect in `addOrModify` — fix `packages/yonder-core/src/net/nmcli/client.ts`.
 
 ## Step 2 — Install, and watch the access point come up
 
@@ -649,6 +691,7 @@ Fill in after running the steps above on real hardware.
 | Step | Pass / fail | Notes |
 |---|---|---|
 | 1 — Real fixtures captured, `npm test` green | | |
+| 1 — `nmcli connection modify yonder-ap type wifi` rejected, `connection.interface-name` accepted | | |
 | 2 — Install alone leaves the service running, the config seeded and the access point on the air | | |
 | 3 — All four routes answer as documented | | |
 | 4 — Apply, join over Wi-Fi, DHCP in pool, ping reaches the board, confirm | | |
@@ -659,6 +702,9 @@ What behaved differently from the unit tests (there is almost certainly somethin
 document flags a few candidates worth checking specifically):
 
 - Did any captured record have a field count `parseTerse` didn't expect?
+- Did `nmcli -t -f GENERAL.DEVICE,IP4.ADDRESS device show` emit the field stream
+  `parseDeviceShow` assumes — `GENERAL.DEVICE` lines, `IP4.ADDRESS[n]` lines — or something
+  else?
 - Did the access-point-address alternative in Step 5's closing note actually fail to break
   reachability, as the code reading there predicted?
 - Any `nmcli`/NetworkManager version-specific quirks worth recording for the next board?

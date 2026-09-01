@@ -54,7 +54,7 @@ export class NetworkRenderer implements Renderer {
     }
 
     for (const profile of desired) {
-      await this.client.addOrModify(profile.name, profile.settings);
+      await this.client.addOrModify(profile.name, profile);
     }
 
     if (ifaces.wifi !== null) {

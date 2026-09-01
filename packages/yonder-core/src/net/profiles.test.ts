@@ -30,11 +30,35 @@ describe("DEFAULT_AP_PASSPHRASE", () => {
 
 describe("apProfile", () => {
   it("declares a wifi access point on the given interface", () => {
-    const s = settingsOf(apProfile(DEFAULT_CONFIG, "secretpsk123", "wlan0"));
-    expect(s["type"]).toBe("wifi");
-    expect(s["ifname"]).toBe("wlan0");
+    const p = apProfile(DEFAULT_CONFIG, "secretpsk123", "wlan0");
+    expect(p.type).toBe("wifi");
+    expect(p.ifname).toBe("wlan0");
+    const s = settingsOf(p);
     expect(s["802-11-wireless.mode"]).toBe("ap");
     expect(s["802-11-wireless.ssid"]).toBe("yonder");
+  });
+
+  /**
+   * `type` and `ifname` are `connection add` common options, not properties.
+   * A settings pair named either of them would be sent to
+   * `connection modify` too, which rejects it — and a connection's type
+   * cannot be changed at all. Every settings pair has to be a fully-qualified
+   * setting.property that modify will accept.
+   */
+  it("carries no add-only option among its settings", () => {
+    const withClient: Config = structuredClone(DEFAULT_CONFIG);
+    withClient.network.client.ssid = "HomeNetwork";
+    for (const p of [
+      apProfile(DEFAULT_CONFIG, "p", "wlan0"),
+      clientProfile(withClient, "p", "wlan0")!,
+      ethernetProfile(DEFAULT_CONFIG, "eth0"),
+    ]) {
+      for (const [key] of p.settings) {
+        expect(key).not.toBe("type");
+        expect(key).not.toBe("ifname");
+        expect(key, `${key} is not a fully-qualified setting.property`).toMatch(/^[a-z0-9-]+\.[a-z0-9-]+$/);
+      }
+    }
   });
 
   it("uses WPA-PSK with the resolved secret, never a literal from config", () => {
@@ -59,8 +83,13 @@ describe("apProfile", () => {
     expect(s["ipv4.addresses"]).toBe("10.9.0.1/24");
   });
 
+  /**
+   * Asserted on the pair that actually reaches nmcli. The profile used to
+   * carry a separate `autoconnect` boolean as well, which nothing read: this
+   * assertion held while the live setting was flipped to "yes".
+   */
   it("does not autoconnect: the access point is brought up deliberately", () => {
-    expect(apProfile(DEFAULT_CONFIG, "p", "wlan0").autoconnect).toBe(false);
+    expect(settingsOf(apProfile(DEFAULT_CONFIG, "p", "wlan0"))["connection.autoconnect"]).toBe("no");
   });
 
   it("is named consistently", () => {
@@ -85,7 +114,9 @@ describe("clientProfile", () => {
     expect(s["802-11-wireless.ssid"]).toBe("HomeNetwork");
     expect(s["802-11-wireless-security.psk"]).toBe("homesecret");
     expect(s["ipv4.method"]).toBe("auto");
-    expect(p!.autoconnect).toBe(true);
+    expect(s["connection.autoconnect"]).toBe("yes");
+    expect(p!.type).toBe("wifi");
+    expect(p!.ifname).toBe("wlan0");
   });
 
   it("builds an open-network profile when there is no key", () => {
@@ -107,10 +138,10 @@ describe("clientProfile", () => {
 describe("ethernetProfile", () => {
   it("uses DHCP by default and autoconnects", () => {
     const p = ethernetProfile(DEFAULT_CONFIG, "eth0");
+    expect(p.type).toBe("ethernet");
+    expect(p.ifname).toBe("eth0");
     const s = settingsOf(p);
-    expect(s["type"]).toBe("ethernet");
-    expect(s["ifname"]).toBe("eth0");
     expect(s["ipv4.method"]).toBe("auto");
-    expect(p.autoconnect).toBe(true);
+    expect(s["connection.autoconnect"]).toBe("yes");
   });
 });

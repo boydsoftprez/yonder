@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import type { Config } from "../schema/config.js";
 import type { SecretStore } from "../secrets/store.js";
+import type { ConnectionSpec } from "./nmcli/client.js";
 
 /**
  * The setup access point's passphrase: published, documented, and the same on
@@ -22,27 +23,33 @@ export const AP_CONNECTION = "yonder-ap";
 export const CLIENT_CONNECTION = "yonder-wifi";
 export const ETHERNET_CONNECTION = "yonder-eth";
 
-export interface DesiredProfile {
+/**
+ * A connection this renderer owns.
+ *
+ * There is no `autoconnect` field. There used to be one, set on every profile
+ * and read by nothing: the behaviour comes entirely from the
+ * `connection.autoconnect` pair in `settings`, which is what actually reaches
+ * nmcli. A second, dead copy of a safety-relevant flag is worse than none —
+ * it reads like the source of truth and cannot be.
+ */
+export interface DesiredProfile extends ConnectionSpec {
   name: string;
-  settings: string[][];
-  autoconnect: boolean;
 }
 
 /**
  * The access point. `ipv4.method shared` makes NetworkManager run DHCP and
  * masquerade for clients; the pool itself comes from a dnsmasq drop-in, see
- * dnsmasq.ts. autoconnect is false because the access point is brought up
- * deliberately — by configuration or by the fallback watchdog — never as a
- * side effect of a radio appearing.
+ * dnsmasq.ts. `connection.autoconnect no` is the one that matters here: the
+ * access point is brought up deliberately — by configuration or by the
+ * fallback watchdog — never as a side effect of a radio appearing.
  */
 export function apProfile(config: Config, psk: string, iface: string): DesiredProfile {
   const ap = config.network.ap;
   return {
     name: AP_CONNECTION,
-    autoconnect: false,
+    type: "wifi",
+    ifname: iface,
     settings: [
-      ["type", "wifi"],
-      ["ifname", iface],
       ["802-11-wireless.mode", "ap"],
       ["802-11-wireless.ssid", ap.ssid],
       ["802-11-wireless-security.key-mgmt", "wpa-psk"],
@@ -59,8 +66,6 @@ export function clientProfile(config: Config, psk: string | null, iface: string)
   if (client.ssid === null || client.ssid === "") return null;
 
   const settings: string[][] = [
-    ["type", "wifi"],
-    ["ifname", iface],
     ["802-11-wireless.mode", "infrastructure"],
     ["802-11-wireless.ssid", client.ssid],
     ["ipv4.method", "auto"],
@@ -70,16 +75,15 @@ export function clientProfile(config: Config, psk: string | null, iface: string)
     settings.push(["802-11-wireless-security.key-mgmt", "wpa-psk"]);
     settings.push(["802-11-wireless-security.psk", psk]);
   }
-  return { name: CLIENT_CONNECTION, autoconnect: true, settings };
+  return { name: CLIENT_CONNECTION, type: "wifi", ifname: iface, settings };
 }
 
 export function ethernetProfile(config: Config, iface: string): DesiredProfile {
   return {
     name: ETHERNET_CONNECTION,
-    autoconnect: true,
+    type: "ethernet",
+    ifname: iface,
     settings: [
-      ["type", "ethernet"],
-      ["ifname", iface],
       ["ipv4.method", config.network.ethernet.dhcp ? "auto" : "disabled"],
       ["connection.autoconnect", "yes"],
     ],

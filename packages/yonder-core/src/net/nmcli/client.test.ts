@@ -61,30 +61,58 @@ describe("NmcliClient", () => {
     ]);
   });
 
+  const AP_SPEC = {
+    type: "wifi",
+    ifname: "wlan0",
+    settings: [["802-11-wireless.ssid", "yonder"]],
+  };
+
   it("adds a connection when it does not exist", async () => {
     const { run, calls } = fake({
       "nmcli -t -f NAME,UUID,TYPE,DEVICE connection show": ok(""),
     });
-    await new NmcliClient(run).addOrModify("yonder-ap", [
-      ["type", "wifi"],
-      ["ifname", "wlan0"],
-      ["ssid", "yonder"],
-    ]);
+    await new NmcliClient(run).addOrModify("yonder-ap", AP_SPEC);
     const add = calls.find((c) => c[1] === "connection" && c[2] === "add");
-    expect(add).toBeDefined();
-    expect(add).toContain("con-name");
-    expect(add).toContain("yonder-ap");
+    // `type` and `ifname` are common options: valid here, and only here.
+    expect(add).toEqual([
+      "nmcli", "connection", "add", "con-name", "yonder-ap",
+      "type", "wifi", "ifname", "wlan0",
+      "802-11-wireless.ssid", "yonder",
+    ]);
   });
 
+  /**
+   * The second render, and every render after it, on a real board. `modify`
+   * takes `[+|-]setting.property value` and nothing else — sending it the
+   * `type` and `ifname` common options that belong to `add` made every render
+   * after the first fail, which rolled the apply back and left renderCurrent()
+   * failing on every boot after the first.
+   */
   it("modifies a connection that already exists rather than adding a duplicate", async () => {
     const { run, calls } = fake({
       "nmcli -t -f NAME,UUID,TYPE,DEVICE connection show":
         ok("yonder-ap:u-1:802-11-wireless:\n"),
     });
-    await new NmcliClient(run).addOrModify("yonder-ap", [["ssid", "yonder"]]);
+    await new NmcliClient(run).addOrModify("yonder-ap", AP_SPEC);
     expect(calls.some((c) => c[2] === "add")).toBe(false);
     const mod = calls.find((c) => c[2] === "modify");
-    expect(mod).toEqual(["nmcli", "connection", "modify", "yonder-ap", "ssid", "yonder"]);
+    expect(mod).toEqual([
+      "nmcli", "connection", "modify", "yonder-ap",
+      "connection.interface-name", "wlan0",
+      "802-11-wireless.ssid", "yonder",
+    ]);
+  });
+
+  it("never sends an add-only option to modify", async () => {
+    const { run, calls } = fake({
+      "nmcli -t -f NAME,UUID,TYPE,DEVICE connection show":
+        ok("yonder-ap:u-1:802-11-wireless:\n"),
+    });
+    await new NmcliClient(run).addOrModify("yonder-ap", AP_SPEC);
+    const mod = calls.find((c) => c[2] === "modify")!;
+    // A connection's type cannot be changed at all, so it is not offered.
+    expect(mod).not.toContain("type");
+    expect(mod).not.toContain("ifname");
   });
 
   it("throws NmcliError with the redacted argv on a non-zero exit", async () => {
@@ -101,9 +129,11 @@ describe("NmcliClient", () => {
     const { run } = fake({
       "nmcli -t -f NAME,UUID,TYPE,DEVICE connection show": ok("yonder-ap:u-1:802-11-wireless:\n"),
     });
-    await new NmcliClient(run, (l) => lines.push(l)).addOrModify("yonder-ap", [
-      ["wifi-sec.psk", "hunter2hunter2"],
-    ]);
+    await new NmcliClient(run, (l) => lines.push(l)).addOrModify("yonder-ap", {
+      type: "wifi",
+      ifname: "wlan0",
+      settings: [["wifi-sec.psk", "hunter2hunter2"]],
+    });
     expect(lines.join("\n")).not.toContain("hunter2hunter2");
     expect(lines.join("\n")).toContain("<redacted>");
   });
