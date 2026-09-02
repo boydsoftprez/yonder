@@ -1,0 +1,25 @@
+modem.generic.device-identifier                 : 8d0a398cac8d78a16d19481147f5d2ca5ec9760e
+modem.generic.manufacturer                      : Quectel
+modem.generic.model                             : EC25
+modem.generic.primary-port                      : cdc-wdm0
+modem.generic.ports.length                      : 6
+modem.generic.ports.value[1]                    : cdc-wdm0 (mbim)
+modem.generic.ports.value[2]                    : ttyUSB0 (ignored)
+modem.generic.ports.value[3]                    : ttyUSB1 (gps)
+modem.generic.ports.value[4]                    : ttyUSB2 (at)
+modem.generic.ports.value[5]                    : ttyUSB3 (at)
+modem.generic.ports.value[6]                    : wwan0 (net)
+modem.generic.state                             : connected
+modem.generic.state-failed-reason               : --
+modem.generic.power-state                       : on
+modem.generic.access-technologies.length        : 1
+modem.generic.access-technologies.value[1]      : lte
+modem.generic.signal-quality.value              : 29
+modem.generic.signal-quality.recent             : no
+modem.3gpp.imei                                 : 357014749990990
+modem.3gpp.operator-code                        : 310410
+modem.3gpp.operator-name                        : Dark Star
+modem.3gpp.registration-state                   : home
+modem.generic.bearers.length                    : 2
+modem.generic.bearers.value[1]                  : /org/freedesktop/ModemManager1/Bearer/1
+modem.generic.bearers.value[2]                  : /org/freedesktop/ModemManager1/Bearer/0

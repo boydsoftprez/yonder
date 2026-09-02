@@ -1,0 +1,14 @@
+modem.signal.refresh.rate         : 2
+modem.signal.threshold.rssi       : 0
+modem.signal.threshold.error-rate : no
+modem.signal.gsm.rssi             : --
+modem.signal.umts.rssi            : --
+modem.signal.lte.rssi             : -71.00
+modem.signal.lte.rsrq             : -9.00
+modem.signal.lte.rsrp             : -100.00
+modem.signal.lte.snr              : 19.00
+modem.signal.lte.error-rate       : --
+modem.signal.5g.rssi              : --
+modem.signal.5g.rsrq              : --
+modem.signal.5g.rsrp              : --
+modem.signal.5g.snr               : --
