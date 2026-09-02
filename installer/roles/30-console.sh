@@ -3,9 +3,12 @@
 # shellcheck shell=sh
 
 # Node-RED 5 refuses to start on anything older than 22.9 — red.js checks and
-# exits before it does anything else — so this role's floor is 22 where
-# 20-yonder-core.sh's is 20. Two different numbers on purpose: a role should
-# say what it needs. A board with a distro node 20 and no vendored payload
+# exits before it does anything else. The real floor is higher: the settings.js
+# this role generates is CommonJS that `require()`s an ES module, which node
+# supports from 22.12, so 22.9 through 22.11 satisfy Node-RED and then throw
+# ERR_REQUIRE_ESM on every start. 22.12 is the number that is actually true,
+# where 20-yonder-core.sh's is 20. Two different floors on purpose: a role
+# should say what it needs. A board with a distro node 20 and no vendored payload
 # therefore installs a working daemon and stops here, with a reason, instead
 # of installing a console that cannot start.
 #
@@ -13,12 +16,11 @@
 # runs first in a full install. Installing it again would copy a hundred
 # megabytes for nothing, so it is only fetched when what is on PATH will not
 # do — which is also what makes `--only 30-console` work on its own.
-con_major=$(node_major)
-if [ -z "$con_major" ] || [ "$con_major" -lt 22 ]; then
+if ! node_at_least 22.12; then
     install_bundled_node || ensure_pkgs nodejs
 fi
 command -v npm >/dev/null 2>&1 || ensure_pkgs npm
-require_node 22
+require_node 22.12
 
 # Idempotent, and needed here as well as in 20-yonder-core.sh so that
 # `--only 30-console` leaves a unit whose ExecStart resolves.

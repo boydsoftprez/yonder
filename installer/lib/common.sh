@@ -106,24 +106,62 @@ node_major() {
     node -p 'process.versions.node.split(".")[0]' 2>/dev/null || true
 }
 
-# Refuse to build against a node older than yonder-core supports. The distro
-# package is whatever the release froze — bookworm's is 18 — while the daemon
-# is ESM with NodeNext resolution and declares engines.node >= 20. Without this
-# the install appears to succeed and the service fails at run time.
+# The major.minor of the node on PATH, or nothing if there is no node.
+node_version() {
+    command -v node >/dev/null 2>&1 || return 0
+    node -p 'process.versions.node.split(".").slice(0, 2).join(".")' 2>/dev/null || true
+}
+
+# Whether the node on PATH is at least <major>[.<minor>]. Silent; returns 1
+# when it is too old and 2 when there is no node at all, so a caller can tell
+# "wrong version" from "nothing to check".
+node_at_least() {
+    nal_want="$1"
+    nal_want_major=${nal_want%%.*}
+    case "$nal_want" in
+        *.*) nal_want_minor=${nal_want#*.} ;;
+        *)   nal_want_minor=0 ;;
+    esac
+    nal_have=$(node_version)
+    [ -n "$nal_have" ] || return 2
+    nal_have_major=${nal_have%%.*}
+    nal_have_minor=${nal_have#*.}
+    [ "$nal_have_major" -gt "$nal_want_major" ] && return 0
+    [ "$nal_have_major" -lt "$nal_want_major" ] && return 1
+    [ "$nal_have_minor" -lt "$nal_want_minor" ] && return 1
+    return 0
+}
+
+# Refuse to build against a node older than the calling role supports. The
+# distro package is whatever the release froze — bookworm's is 18 — while the
+# daemon is ESM with NodeNext resolution and declares engines.node >= 20.
+# Without this the install appears to succeed and the service fails at run
+# time.
+#
+#     require_node <major>[.<minor>]
+#
+# A minor is accepted because one of the floors here needs one, and a
+# major-only check was wrong in a way nothing downstream could catch. The
+# console's generated settings.js is CommonJS that `require()`s an ES module;
+# node supports that from **22.12**, and on 22.0 through 22.11 it throws
+# ERR_REQUIRE_ESM on every start. Node-RED's own floor is 22.9, so
+# `require_node 22` admitted three releases — 22.9, 22.10, 22.11 — that pass
+# every check this installer makes and produce a console that crash-loops on a
+# board. The vendored payload is 24, so this only bites an install running on
+# a distro node, which is exactly the install nobody tests before flying.
 require_node() {
     want="$1"
-    major=$(node_major)
-    if [ -z "$major" ]; then
+    have=$(node_version)
+    if [ -z "$have" ]; then
         if [ "$DRY_RUN" = "1" ]; then
             log "no node here; a real run requires node $want or newer"
             return 0
         fi
-        die "node was not installed; yonder-core needs node $want or newer"
+        die "node was not installed; this step needs node $want or newer"
     fi
-    if [ "$major" -lt "$want" ]; then
-        die "node $major is too old; yonder-core needs node $want or newer"
-    fi
-    log "node $major meets the minimum of $want"
+    node_at_least "$want" \
+        || die "node $have is too old; this step needs node $want or newer"
+    log "node $have meets the minimum of $want"
 }
 
 # Point $YONDER_NODE_LINK at the node this run resolved.
