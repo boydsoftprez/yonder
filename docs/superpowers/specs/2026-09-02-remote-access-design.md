@@ -5,8 +5,8 @@
 [ADR-0004](../../adr/0004-zerotier-primary-mesh-vpn.md) settles that ZeroTier is the
 primary mesh VPN and Tailscale the supported second. It does not settle how a join is
 represented, how the clients get onto a board with no network, where a Tailscale key comes
-from, or whether a join belongs behind the confirmation timer. This document settles those
-four, and records the evidence each was decided on.
+from, or whether a join belongs behind the confirmation timer. This document settles those four
+and where the result lands in the console, and records the evidence each was decided on.
 
 Everything below was measured on a Debian 13 (trixie) arm64 board running
 `zerotier-one 1.16.2` and `tailscale 1.94.2`, on 2026-09-02. Where a status word or a
@@ -385,7 +385,64 @@ requirement text, which is what R-CFG-10 and R-CFG-11 already do.
 
 ---
 
-## 6. Shape of the code
+## 6. Where it goes in the console
+
+**A group on the Network page, below Wi-Fi.** Not a page of its own. The page already
+carries an interface summary, Wi-Fi and Activity; remote access becomes the third group and
+Activity moves below it.
+
+```
+Network
+┌─ interfaces ─────┐  ┌─ WI-FI ───────────┐
+│ Radio off        │  │ network  [ ... ]  │
+└──────────────────┘  │ password [ ... ]  │
+                      │ JOIN              │   ← the page's one primary action
+                      └───────────────────┘
+┌─ ZEROTIER ───────┐  ┌─ TAILSCALE ───────┐
+│ WAITING FOR YOU  │  │ key      [ ... ]  │
+│ TO APPROVE IT    │  │                   │
+│ 9fef8a3bf9 [copy]│  │                   │
+└──────────────────┘  └───────────────────┘
+┌─ ACTIVITY ─────────────────────────────────┐
+└────────────────────────────────────────────┘
+```
+
+The group is always present, unlike a camera section: R-UI-03 builds navigation from
+detected hardware, and a mesh is not hardware — there is nothing to detect. On a fresh
+board it reads *not configured*, which is what R-VPN-05 looks like from the front.
+
+### The constraint this placement carries
+
+Wi-Fi's `JOIN` is the one control in this console that can cost the operator the board —
+it is the reason R-CFG-11 exists. A mesh join cannot (§4). Sitting them one above the
+other risks making the dangerous control and the safe one look interchangeable, so the
+distinction is drawn deliberately rather than left to adjacency:
+
+- **R-UI-10 settles it: a page has at most one primary action, and on this page that is
+  Wi-Fi's `JOIN`.** Every mesh control is therefore secondary. This is not a stylistic
+  preference — the build check enforces it, and the accepted-violations file is empty and
+  may only shrink.
+- **The mesh group reads as an instrument, not a form** (R-UI-11): a state, an identifier
+  and a means of copying it. The only text input on the whole page that takes a credential
+  stays the Wi-Fi passphrase; Tailscale's key field appears only when Tailscale is being
+  configured, and never sits directly under it.
+- **`leave` is not placed adjacent to Wi-Fi's `JOIN`.** Two destructive-looking controls
+  in one column, one of which drops the operator's own link, is the mistake this section
+  exists to avoid.
+
+### Cost, and what M3 inherits
+
+No new page: `docs/console/capture/network.{day,night}.png` and
+`docs/console/shape/network.{day,night}.darwin.json` change and are reviewed, and the
+ADR-0009 check must pass on the rebuilt page (R-UI-12). No new snapshot files.
+
+**M3 puts cellular on this same page**, which will make Network the densest surface in the
+console — five groups and a table. That is M3's layout problem, not M2's, and it is
+recorded here so it arrives as a known consequence rather than a surprise.
+
+---
+
+## 7. Shape of the code
 
 ```
 packages/yonder-core/src/remote/
@@ -402,6 +459,7 @@ packages/yonder-core/src/remote/
 
 packages/node-red-contrib-yonder-remote/       nodes
 packages/node-red-dashboard-2-yonder/          the waiting-for-approval instrument
+flows/flows.json                               wiring only: the group on the Network page
 ```
 
 This follows `src/net/` exactly, including the parts that matter most:
