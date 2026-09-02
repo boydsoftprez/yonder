@@ -147,6 +147,7 @@ export function buildRenderers(opts: BuildRenderersOptions): {
     run: opts.runner ?? systemRunner,
     statePath: opts.remoteStatePath,
     log,
+    clock: opts.clock,
   });
 
   // After the network renderer, deliberately. Renderers run in order, so this

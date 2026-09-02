@@ -3,10 +3,27 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import type { Clock } from "../apply/types.js";
 import type { CommandResult, CommandRunner } from "../net/runner.js";
 import { ConfigSchema, type Config } from "../schema/config.js";
 import { ZeroTierCli } from "./zerotier/cli.js";
-import { RemoteRenderer } from "./renderer.js";
+import { RemoteRenderer, ZEROTIER_POLL_MS, ZEROTIER_WAIT_MS } from "./renderer.js";
+
+/**
+ * A clock that fast-forwards instead of waiting: `setTimer` moves `now()` on
+ * by the interval asked for and runs the callback off the microtask queue.
+ * A bounded poll finishes in microseconds however long its bound is, and no
+ * test ever waits on the wall clock — the same rule `net/renderer.test.ts`
+ * uses for `waitForRadio`.
+ */
+function fastClock(): Clock {
+  let t = 0;
+  return {
+    now: () => t,
+    setTimer: (ms, fn) => { t += ms; queueMicrotask(fn); return 0; },
+    clearTimer: () => {},
+  };
+}
 
 const config = (network_id: string | null, enabled = network_id !== null): Config =>
   ConfigSchema.parse({
@@ -16,7 +33,10 @@ const config = (network_id: string | null, enabled = network_id !== null): Confi
     remote: { zerotier: { enabled, network_id } },
   });
 
-function harness(reply: (argv: string[]) => CommandResult = () => ({ code: 0, stdout: "[]", stderr: "" })) {
+function harness(
+  reply: (argv: string[]) => CommandResult = () => ({ code: 0, stdout: "[]", stderr: "" }),
+  opts: { clock?: Clock; zerotierWaitMs?: number; zerotierPollMs?: number } = {},
+) {
   const calls: string[][] = [];
   const run: CommandRunner = async (argv) => {
     calls.push(argv);
@@ -27,7 +47,10 @@ function harness(reply: (argv: string[]) => CommandResult = () => ({ code: 0, st
   // and the test that matters is the one where a *different* renderer instance
   // reads it back.
   const statePath = join(mkdtempSync(join(tmpdir(), "yonder-remote-")), "remote.json");
-  const make = () => new RemoteRenderer({ cli: new ZeroTierCli(run), run, statePath, log });
+  const make = () => new RemoteRenderer({
+    cli: new ZeroTierCli(run), run, statePath, log,
+    clock: opts.clock, zerotierWaitMs: opts.zerotierWaitMs, zerotierPollMs: opts.zerotierPollMs,
+  });
   return { calls, log, statePath, make, renderer: make() };
 }
 
@@ -277,5 +300,71 @@ describe("RemoteRenderer", () => {
     mkdirSync(h.statePath, { recursive: true });
     await expect(h.renderer.render(config("9fef8a3bf9000001"))).rejects.toThrow();
     expect(argvOf(h.calls, "zerotier-cli").some((a) => a[1] === "join")).toBe(false);
+  });
+});
+
+// A real board measured `enable --now zerotier-one` returning well before the
+// client would answer `listnetworks` — ~368 ms on a warm start, and slower
+// still on the first start after installation, because the client generates
+// an identity keypair before it opens its control socket. The very first
+// join on a freshly installed device is exactly that path, and a render that
+// asked immediately lost the race and reverted the operator's network id.
+describe("RemoteRenderer waiting for the client to answer", () => {
+  it("joins once the client answers, after polling past several failures", async () => {
+    // The first three `listnetworks` calls land before the client is
+    // listening; the fourth succeeds, as a real board's does once its
+    // identity is generated and its socket is open.
+    let listnetworksCalls = 0;
+    const h = harness(
+      (argv) => {
+        if (argv.includes("listnetworks")) {
+          listnetworksCalls++;
+          if (listnetworksCalls < 4) return { code: 1, stdout: "", stderr: "cannot connect" };
+          return { code: 0, stdout: "[]", stderr: "" };
+        }
+        return { code: 0, stdout: "", stderr: "" };
+      },
+      { clock: fastClock() },
+    );
+    await h.renderer.render(config("9fef8a3bf9000001"));
+    expect(listnetworksCalls).toBe(4);
+    expect(argvOf(h.calls, "zerotier-cli")).toContainEqual(["zerotier-cli", "join", "9fef8a3bf9000001"]);
+    // The record was still written, and the wait itself was logged for the
+    // activity pane, once — not on every one of the failed polls.
+    expect(JSON.parse(readFileSync(h.statePath, "utf8"))).toEqual({ network: "9fef8a3bf9000001" });
+    expect(h.log).toHaveBeenCalledWith(expect.stringContaining("has not answered yet"));
+  });
+
+  it("still fails with the \"did not answer\" error when the client never comes up, and does not hang past the bound", async () => {
+    const h = harness(
+      (argv) =>
+        argv.includes("listnetworks")
+          ? { code: 1, stdout: "", stderr: "cannot connect" }
+          : { code: 0, stdout: "", stderr: "" },
+      { clock: fastClock(), zerotierWaitMs: 2_000, zerotierPollMs: 250 },
+    );
+    await expect(h.renderer.render(config("9fef8a3bf9000001"))).rejects.toThrow(
+      /the client did not answer; look at the journal for zerotier-one/,
+    );
+    // Nothing was ever recorded as joined, and no join was attempted against
+    // a client that never answered at all.
+    expect(existsSync(h.statePath)).toBe(false);
+    expect(argvOf(h.calls, "zerotier-cli").some((a) => a[1] === "join")).toBe(false);
+  });
+
+  it("does not wait at all when the client answers immediately", async () => {
+    const h = harness(() => ({ code: 0, stdout: "[]", stderr: "" }), { clock: fastClock() });
+    await h.renderer.render(config("9fef8a3bf9000001"));
+    expect(h.calls.filter((a) => a.includes("listnetworks"))).toHaveLength(1);
+    expect(h.log).not.toHaveBeenCalledWith(expect.stringContaining("has not answered yet"));
+  });
+
+  it("exports the production bound and poll interval", () => {
+    // Sanity check on the constants documented above: the bound must stay a
+    // fraction of the 60 s per-renderer timeout in apply/engine.ts, not
+    // approach it — that margin is what lets this renderer's own message win
+    // the race against the engine's generic timeout.
+    expect(ZEROTIER_WAIT_MS).toBeLessThan(60_000);
+    expect(ZEROTIER_POLL_MS).toBeLessThan(ZEROTIER_WAIT_MS);
   });
 });

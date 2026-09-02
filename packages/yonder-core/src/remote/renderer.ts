@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { readFileSync } from "node:fs";
-import type { Renderer } from "../apply/types.js";
+import { systemClock, type Clock, type Renderer } from "../apply/types.js";
 import { writeFileDurable, unlinkDurable } from "../fs/durable.js";
 import type { CommandRunner } from "../net/runner.js";
 import type { Config } from "../schema/config.js";
@@ -8,6 +8,41 @@ import { ZeroTierCli } from "./zerotier/cli.js";
 import type { ZeroTierNetwork } from "./zerotier/parse.js";
 
 const UNIT = "zerotier-one";
+
+/**
+ * How long to wait, after `systemctl enable --now zerotier-one` reports
+ * success, for the client to answer `zerotier-cli listnetworks`.
+ *
+ * `enable --now` returns as soon as systemd has forked the unit, not once the
+ * client is listening on its control socket, and a render that calls
+ * `listNetworks()` straight after that lost the race on a real board: the
+ * first join on a freshly installed device — the exact path an operator takes
+ * — failed with
+ *
+ *     POST /remote/join failed: zerotier is configured and its service
+ *     started, but the client did not answer; look at the journal for
+ *     zerotier-one
+ *
+ * and because render() throws, the apply engine reverted the change and
+ * discarded the operator's network id along with it. Measured on that same
+ * board: a *warm* start (the unit already run once, its identity already on
+ * disk) becomes answerable after **~368 ms**. A *first* start after
+ * installation is slower still, because the client has no identity yet and
+ * generates a keypair before it opens its control socket — which is exactly
+ * the start every fresh device makes.
+ *
+ * 10 s is about 27x the measured warm figure, which leaves ample room for a
+ * first-boot keypair generation the warm number never had to pay for, while
+ * staying a sixth of `renderTimeoutMs` (60 s, `apply/engine.ts`) so a client
+ * that is genuinely absent or wedged is still reported with this renderer's
+ * own "did not answer" message — pointing at the journal, which is
+ * actionable — rather than by the engine's generic per-renderer timeout
+ * firing first and saying nothing about which command was waited on.
+ */
+export const ZEROTIER_WAIT_MS = 10_000;
+
+/** How often `listnetworks` is retried while waiting for the client. */
+export const ZEROTIER_POLL_MS = 250;
 
 /**
  * What systemd and a shell say when the thing asked for is not on the device.
@@ -47,6 +82,9 @@ export class RemoteRenderer implements Renderer {
   private readonly run: CommandRunner;
   private readonly statePath: string;
   private readonly log: (line: string) => void;
+  private readonly clock: Clock;
+  private readonly waitMs: number;
+  private readonly pollMs: number;
 
   constructor(opts: {
     cli: ZeroTierCli;
@@ -54,11 +92,63 @@ export class RemoteRenderer implements Renderer {
     /** Where the joined network is recorded, under /var/lib/yonder. */
     statePath: string;
     log?: (line: string) => void;
+    /**
+     * Drives waitForClient's bounded wait. Injected for the same reason as
+     * everywhere else in this daemon: no test may wait on the wall clock.
+     */
+    clock?: Clock;
+    /** Overrides ZEROTIER_WAIT_MS. Test-only. */
+    zerotierWaitMs?: number;
+    /** Overrides ZEROTIER_POLL_MS. Test-only. */
+    zerotierPollMs?: number;
   }) {
     this.cli = opts.cli;
     this.run = opts.run;
     this.statePath = opts.statePath;
     this.log = opts.log ?? (() => {});
+    this.clock = opts.clock ?? systemClock;
+    this.waitMs = opts.zerotierWaitMs ?? ZEROTIER_WAIT_MS;
+    this.pollMs = opts.zerotierPollMs ?? ZEROTIER_POLL_MS;
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+      this.clock.setTimer(ms, resolve);
+    });
+  }
+
+  /**
+   * Poll `listnetworks` until the client answers or the bound runs out.
+   *
+   * Returns the parsed list on success. Throws the same "did not answer"
+   * error `render()` has always thrown on the first failure, once the bound
+   * is spent — a client that never comes up must still fail the apply
+   * (R-VPN-07); this only buys the client the time a real one needs to
+   * finish starting before that verdict is reached.
+   */
+  private async waitForClient(): Promise<ZeroTierNetwork[]> {
+    const deadline = this.clock.now() + this.waitMs;
+    let waited = false;
+
+    for (;;) {
+      try {
+        const networks = await this.cli.listNetworks();
+        if (waited) this.log("zerotier: the client answered");
+        return networks;
+      } catch (e) {
+        if (this.clock.now() >= deadline) {
+          throw new Error(
+            `zerotier is configured and its service started, but the client did not answer; ` +
+              `look at the journal for ${UNIT}`,
+          );
+        }
+        if (!waited) {
+          this.log(`zerotier: the client has not answered yet (${(e as Error).message}); waiting for it to start`);
+          waited = true;
+        }
+        await this.sleep(this.pollMs);
+      }
+    }
   }
 
   /**
@@ -175,15 +265,9 @@ export class RemoteRenderer implements Renderer {
       );
     }
 
-    let joined: ZeroTierNetwork[];
-    try {
-      joined = await this.cli.listNetworks();
-    } catch {
-      throw new Error(
-        `zerotier is configured and its service started, but the client did not answer; ` +
-          `look at the journal for ${UNIT}`,
-      );
-    }
+    // Bounded, because `enable --now` returning does not mean the client is
+    // listening yet — see ZEROTIER_WAIT_MS above.
+    const joined = await this.waitForClient();
 
     // A network id that changed: leave the old one before joining the new, or
     // the device sits on both and the configuration describes neither. Not
