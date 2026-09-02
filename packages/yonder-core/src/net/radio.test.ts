@@ -46,6 +46,26 @@ describe("radioWanted", () => {
   });
 
   /**
+   * The access point on its own, with the fallback off and no client network.
+   *
+   * R-NET-07 allows exactly this shape — the fallback is what an explicitly
+   * named configuration key turns off — and every other test here that has
+   * the access point enabled inherits `fallback.enabled` from DEFAULT_CONFIG,
+   * so the fallback disjunct carried the predicate and `ap.enabled` could be
+   * deleted with all 273 green.
+   *
+   * On this configuration the mutant never unblocks the radio, so `wlan0`
+   * stays `unavailable`, `up yonder-ap` fails, and the fallback is off so
+   * nothing is left to recover the board. R-CFG-08 broken on the one
+   * configuration the radio fix exists for.
+   */
+  it("is true when only the access point itself wants a radio", () => {
+    const c = noWifi();
+    c.network.ap.enabled = true;
+    expect(radioWanted(c)).toBe(true);
+  });
+
+  /**
    * R-NET-07: the fallback raises the access point *regardless of
    * configuration*, and `nmcli connection up yonder-ap` cannot do that on a
    * radio the kernel has blocked. So a configuration that keeps the fallback
@@ -63,6 +83,24 @@ describe("radioWanted", () => {
 });
 
 describe("enableWifiRadio", () => {
+  /**
+   * The argv itself, not the constant that holds it.
+   *
+   * Every other assertion in this file compares what the runner saw against
+   * the exported constants, so the *contents* of those constants are never
+   * pinned: `NMCLI_RADIO_WIFI_ON` could become `["nmcli","radio","all","on"]`
+   * and the whole suite stays green. `rfkill unblock wifi` is already pinned,
+   * by the literal the log-line assertion below matches on; this pins the
+   * other one the same way, and it is the argv that is the entire fix for the
+   * defect a board found — the state file that keeps a Raspberry Pi's radio
+   * disabled is NetworkManager's `WirelessEnabled` flag, and `wifi` is the
+   * word that turns it on.
+   */
+  it("issues exactly `rfkill unblock wifi` and `nmcli radio wifi on`", () => {
+    expect(RFKILL_UNBLOCK_WIFI).toEqual(["rfkill", "unblock", "wifi"]);
+    expect(NMCLI_RADIO_WIFI_ON).toEqual(["nmcli", "radio", "wifi", "on"]);
+  });
+
   /**
    * Two locks, cleared in this order. They are independent — the kernel's
    * rfkill soft block and NetworkManager's own persistent `WirelessEnabled`

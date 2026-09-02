@@ -60,6 +60,27 @@ function wifiState(deviceStatus: string): string | undefined {
   return deviceStatus.split("\n").map((l) => l.split(":")).find((f) => f[1] === "wifi")?.[2];
 }
 
+/**
+ * The same block as nmcli reports it once `up yonder-ap` has been accepted:
+ * the wifi device moves to `connected` and the CONNECTION column names the
+ * profile that is on it.
+ *
+ * The fake did not model this, so `apActive` was false on every render and
+ * `&& !apActive` in the renderer could be deleted with the suite green. That
+ * is not a cosmetic gate: re-issuing `up` on an access point already on the
+ * air drops every joined station and brings it back, on every render — which
+ * includes the operator waiting to confirm the apply that is rendering.
+ */
+function withApActive(deviceStatus: string): string {
+  return deviceStatus
+    .split("\n")
+    .map((line) => {
+      const f = line.split(":");
+      return f[1] === "wifi" ? `${f[0]}:wifi:connected:${AP_CONNECTION}` : line;
+    })
+    .join("\n");
+}
+
 interface HarnessOptions {
   /** `nmcli device status` output. */
   devices?: string;
@@ -102,6 +123,18 @@ function harness(opts: HarnessOptions = {}) {
   const sequence = opts.deviceSequence ?? [opts.devices ?? DEVICES];
   let step = 0;
   let raised = 0;
+  let apActive = false;
+
+  /**
+   * The device list as it stands at reading `n`. The last entry of the
+   * sequence repeats — a board does not un-finish booting — and an accepted
+   * `up yonder-ap` is reflected in it, because a fake that forgets what it
+   * was told cannot tell a first render from a second.
+   */
+  const listedAt = (n: number): string => {
+    const text = sequence[Math.min(n, sequence.length - 1)] ?? "";
+    return apActive ? withApActive(text) : text;
+  };
 
   const run: CommandRunner = async (argv) => {
     calls.push(argv);
@@ -110,8 +143,7 @@ function harness(opts: HarnessOptions = {}) {
     if (canned !== undefined) return canned;
     if (key === "nmcli -t -f DEVICE,TYPE,STATE,CONNECTION device status") {
       if (opts.deviceStatus !== undefined) return opts.deviceStatus;
-      // The last entry repeats: a board does not un-finish booting.
-      const text = sequence[Math.min(step, sequence.length - 1)] ?? "";
+      const text = listedAt(step);
       step++;
       return ok(text);
     }
@@ -129,12 +161,15 @@ function harness(opts: HarnessOptions = {}) {
       // test rather than a fake that says yes to everything: without it the
       // renderer appears to bring an access point up on a radio that is not
       // there, which is precisely the illusion a hardware boot dispelled.
-      const state = wifiState(sequence[Math.min(step - 1, sequence.length - 1)] ?? "");
+      const state = wifiState(listedAt(step - 1));
       const wifiConnection = argv[3] === AP_CONNECTION || argv[3] === CLIENT_CONNECTION;
       if (argv[2] === "up" && wifiConnection && (state === "unavailable" || state === "unknown")) {
         return { code: 4, stdout: "", stderr: `Error: Connection activation failed: device is not ready (${state})` };
       }
-      if (argv[2] === "up" && argv[3] === AP_CONNECTION) raised++;
+      // A refused activation never gets here, so a radio that was not ready
+      // leaves the access point down — which is what the board did.
+      if (argv[2] === "up" && argv[3] === AP_CONNECTION) { raised++; apActive = true; }
+      if (argv[2] === "down" && argv[3] === AP_CONNECTION) apActive = false;
     }
     return ok();
   };
@@ -241,6 +276,30 @@ describe("NetworkRenderer", () => {
     await renderer.render(c);
     expect(argvOf(calls, "up", AP_CONNECTION)).toBeUndefined();
     expect(argvOf(calls, "down", AP_CONNECTION)).toBeUndefined();
+  });
+
+  /**
+   * `up yonder-ap` is not free to re-issue. NetworkManager tears the access
+   * point down and brings it back, so every joined station is dropped —
+   * including the operator's, whose confirmation is what an apply is waiting
+   * for. A render happens on every apply, every confirm, every rollback and
+   * every start-up, so a renderer that raises an access point already on the
+   * air makes the confirmation window unusable over the very link it is
+   * confirming on.
+   *
+   * `&& !apActive` is what stops it, and it survived deletion: the fake never
+   * reflected an activation in the CONNECTION column, so `apActive` was false
+   * on every render and both branches of the mutant agreed.
+   */
+  it("does not re-raise an access point that is already up", async () => {
+    const { renderer, raised } = harness();
+    await renderer.render(DEFAULT_CONFIG);
+    expect(raised()).toBe(1);
+    // Twice more, against a board that now reports `wlan0` connected on
+    // yonder-ap — the state the first render left it in.
+    await renderer.render(DEFAULT_CONFIG);
+    await renderer.render(DEFAULT_CONFIG);
+    expect(raised()).toBe(1);
   });
 
   /**

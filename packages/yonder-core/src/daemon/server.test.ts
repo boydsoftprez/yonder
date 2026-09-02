@@ -591,6 +591,53 @@ describe("startServer", () => {
     expect(raised()).toBe(0);
   });
 
+  /**
+   * R-NET-07, second sentence: the window "is measured from the moment the
+   * daemon starts, not from kernel boot, and start-up work comes out of it
+   * rather than pushing the deadline back."
+   *
+   * That clause is the daemon's to honour, not the watchdog's. `since` has
+   * its own unit tests in watchdog.test.ts, and nothing gated that
+   * `startServer` actually passes it — deleting `since: startedAt` left all
+   * 273 green.
+   *
+   * Recovery is the start-up work that can be slow, and the one path
+   * guaranteed to run before the watchdog can be armed: a board that crashed
+   * mid-apply rolls the configuration back and re-renders it through every
+   * renderer. Give that 60 s and the deadline still has to land at t=90 s.
+   * The mutant arms a full 90 s after recovery finishes instead, and the
+   * access point that R-NET-07 promises within 90 s appears at 150.
+   */
+  it("measures the fallback deadline from start-up, not from when it arms the watchdog", async () => {
+    const { clock, advance, runner, raised } = watchdogHarness();
+    // A journal entry left by a previous process is what makes recover() do
+    // any work at all; without one it returns immediately.
+    writeFileSync(journalPath, JSON.stringify({ id: "prior", previous: DEFAULT_CONFIG, startedAt: 0 }));
+    let recovering = true;
+    const slowRecovery: Renderer = {
+      name: "slow-recovery",
+      async render() {
+        // Only the rollback re-render inside recover(). The start-up render
+        // runs after the watchdog is armed, and moving the clock there would
+        // be moving it past a deadline this test is about to check.
+        if (recovering) { recovering = false; advance(60_000); }
+      },
+    };
+    const server = await startServer({ socketPath, configPath, journalPath, renderers: [slowRecovery], secretsPath: join(dir, "secrets.yaml"), runner, clock });
+    try {
+      // t = 60_000, and R-NET-07's 90 s is 30 s away rather than 90.
+      advance(29_000);
+      await flushMicrotasks();
+      expect(raised()).toBe(0);
+
+      advance(1_000);
+      await flushMicrotasks();
+      expect(raised()).toBe(1);
+    } finally {
+      await server.close();
+    }
+  });
+
   it("arms the fallback watchdog even when the configuration cannot be loaded", async () => {
     const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     try {
@@ -881,6 +928,46 @@ describe("startServer", () => {
       } finally {
         await server.close();
       }
+    } finally {
+      unmute();
+    }
+  });
+
+  /**
+   * The radio wait is the second timer this daemon owns, and `close()` stops
+   * it for the same reason it stops the watchdog. Deleting
+   * `built?.renderer.cancelRadioWait()` survived the suite: nothing asked
+   * what the poll loop did after the daemon it belongs to had gone.
+   *
+   * It does not merely keep asking NetworkManager questions. A wait that
+   * succeeds calls `engine.renderCurrent()`, so a loop outliving its daemon
+   * reconfigures a radio nobody is managing any more — on a board where the
+   * next process may already be managing it — and does so through a daemon
+   * whose socket is unlinked, where nothing can see it happen or stop it.
+   */
+  it("stops the radio wait when the server closes", async () => {
+    const unmute = muted();
+    try {
+      const { clock, advance, calls, names, runner, raised } =
+        coldBootHarness((now) => (now < 5_000 ? NO_RADIO_YET : RADIO_READY));
+      const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner, clock });
+      await flushMicrotasks();
+      // The wait is running: no radio was listed, so no profile was written
+      // and the wait is what would eventually write one.
+      expect(names.has("yonder-ap")).toBe(false);
+
+      await server.close();
+      await flushMicrotasks();
+      const issued = calls.length;
+
+      // The radio appears, well inside the wait's own 30 s bound — so a loop
+      // that was not cancelled is still there to see it.
+      advance(10_000);
+      await flushMicrotasks();
+
+      expect(calls.length).toBe(issued);
+      expect(names.has("yonder-ap")).toBe(false);
+      expect(raised()).toBe(0);
     } finally {
       unmute();
     }
