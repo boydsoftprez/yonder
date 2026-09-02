@@ -63,3 +63,12 @@ export {
   NMCLI_RADIO_WIFI_ON,
 } from "./net/radio.js";
 export { FallbackWatchdog, type FallbackWatchdogOptions } from "./net/watchdog.js";
+export {
+  hashPassword,
+  verifyPassword,
+  SCRYPT_N,
+  SCRYPT_R,
+  SCRYPT_P,
+  SALT_BYTES,
+  KEY_BYTES,
+} from "./console/password.js";
