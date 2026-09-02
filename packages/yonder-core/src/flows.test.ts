@@ -614,3 +614,27 @@ describe("flows/flows.json network page", () => {
     expect(groups[1]?.id).toBe("group-net-join");
   });
 });
+
+/**
+ * The activity pane must accumulate, not replace.
+ *
+ * `yonder-activity` emits only what is new since its own cursor, so a table
+ * set to `replace` is wiped the moment a poll returns nothing — which is most
+ * polls on an idle device. Reported from the board: "activity shows activity
+ * then clears out before I can read it".
+ */
+describe("flows/flows.json activity panes", () => {
+  const tables = flows.filter((n) => n.type === "ui-table" && String(n.id).includes("activity"));
+
+  it("has at least one", () => {
+    expect(tables.length).toBeGreaterThan(0);
+  });
+
+  it("appends, because the source only ever sends what is new", () => {
+    for (const t of tables) {
+      expect(t.action, `${String(t.id)} must append`).toBe("append");
+      // And is bounded, or an append-only pane is a leak with a nice name.
+      expect(Number(t.maxrows)).toBeGreaterThan(0);
+    }
+  });
+});

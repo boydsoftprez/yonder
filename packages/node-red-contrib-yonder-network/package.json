@@ -14,8 +14,7 @@
       "yonder-scan": "dist/scan.js",
       "yonder-apply": "dist/apply.js",
       "yonder-confirm": "dist/confirm.js",
-      "yonder-join": "dist/join.js",
-      "yonder-netstate": "dist/state.js"
+      "yonder-join": "dist/join.js"
     }
   },
   "scripts": {

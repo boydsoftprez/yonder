@@ -432,6 +432,16 @@ html, body, .v-application, .nrdb-app {
   margin: var(--yonder-space-4) 0;
 }
 
+/* ---- a live log is not a paged report ---------------------------------
+   The activity pane is something you glance at while a command runs. Its
+   footer offers 'Items per page' and 'first/previous/next/last' over a list
+   that is already only the last few dozen lines, which is furniture for a
+   report rather than a readout - and it takes the vertical space the log
+   itself should have. */
+.nrdb-ui-table .v-data-table-footer {
+  display: none !important;
+}
+
 /* ---- prose is never clipped ------------------------------------------
    A Dashboard widget takes its height from a configured row span, and prose
    does not have a row count that is right at every width: the same words are

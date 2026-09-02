@@ -13,7 +13,8 @@
       "yonder-status": "dist/status.js",
       "yonder-activity": "dist/activity.js",
       "yonder-diag": "dist/diag.js",
-      "yonder-theme": "dist/theme.js"
+      "yonder-theme": "dist/theme.js",
+      "yonder-netstate": "dist/netstate.js"
     }
   },
   "scripts": {

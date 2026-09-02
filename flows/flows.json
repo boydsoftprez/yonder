@@ -1188,7 +1188,8 @@
                 "text-netstate",
                 "text-netaddr"
             ]
-        ]
+        ],
+        "interval": 5
     },
     {
         "id": "text-netstate",
@@ -1276,13 +1277,13 @@
         "order": 1,
         "width": 12,
         "height": 6,
-        "maxrows": 60,
+        "maxrows": 200,
         "passthru": false,
         "autocols": false,
         "showSearch": false,
         "selectionType": "none",
         "deselect": true,
-        "action": "replace",
+        "action": "append",
         "mobileBreakpoint": "sm",
         "mobileBreakpointType": "defaults",
         "className": "",
