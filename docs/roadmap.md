@@ -76,6 +76,13 @@ laptop, open the console, scan for your Wi-Fi, join it, and the board is online 
 you enter the wrong Wi-Fi password on purpose, the access point comes back on its own and
 you fix it from the same console. No card reader.
 
+**M1a status:** merged. The network layer is built and its mechanisms have each been seen
+working on a Raspberry Pi 4 — rollback, the access-point fallback, the radio unblock, the
+retired-key strip. What has *not* happened is a cold flash of a card built from this branch,
+powered on and left alone; the only cold flash so far predates five fixes and ended in a
+crash loop. See [`hardware/verifying-m1a.md`](hardware/verifying-m1a.md). That boot is
+outstanding and M1a is not finished without it.
+
 ---
 
 ## M2 — Remote access
