@@ -145,6 +145,25 @@ still reach the board while you are breaking its cellular configuration.
 
 **Done when:** you open the console from a different network entirely, through the mesh.
 
+**M2a — ZeroTier — proven on a board, 2026-09-02.** Raspberry Pi 4 Model B, Debian 13
+trixie, aarch64, `zerotier-one` 1.16.2 installed from the offline payload with `apt`
+pointed at a dead proxy — `Need to get 0 B/2,807 kB of archives`, so R-CFG-07 holds — and
+left stopped and disabled. A join reached `waiting-for-approval` in four seconds carrying
+the address a human approves, **held that state unattended for seven and a half minutes
+with nothing reverting and nothing timing out** (R-VPN-07), and reached `connected` with an
+assigned address about twenty seconds after the device was authorised in a real ZeroTier
+controller. Every apply came back `confirmed` with no confirmation window.
+
+The board found two defects no test had, both since fixed: `deb-systemd-helper` refuses to
+run outside `dpkg`, so the client shipped enabled until the role's own post-condition
+caught it; and the renderer asked the client for its networks immediately after starting
+the service, which a first start — generating an identity keypair — is far too slow to
+answer, so the very first join on a fresh device failed and reverted the operator's network
+id. It also surfaced [K-33](known-issues.md), which predates this milestone.
+
+Still outstanding for M2a: serving the console *over* the mesh from a machine sharing no
+local network with the board (R-VPN-04), which is the exit criterion above.
+
 ---
 
 ## M3 — Cellular
