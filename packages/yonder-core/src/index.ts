@@ -258,4 +258,5 @@ export {
 } from "./net/join.js";
 export { setTheme, THEMES, type ThemeRequest, type ThemeResult } from "./ui/theme.js";
 export { ssidOptions, type DropdownOption } from "./net/scan.js";
+export { joinSucceeded, type JoinedResult } from "./net/joined.js";
 export { STATIC_ROOT, THEME_FILE, THEME_HREF, CONSOLE_HOME } from "./console/settings.js";

@@ -64,7 +64,16 @@ export class NmcliClient {
     private readonly log: (line: string) => void = () => {},
   ) {}
 
-  private async exec(argv: string[]): Promise<string> {
+  /**
+   * Run one nmcli command and return its stdout.
+   *
+   * Public because `joinSucceeded` (net/joined.ts) needs a field set no
+   * method here returns — device, connection, address and gateway together —
+   * and adding a one-caller method to this class would be a worse trade than
+   * letting that caller name its own fields. Everything about redaction and
+   * error shaping still happens here.
+   */
+  async exec(argv: string[]): Promise<string> {
     this.log(redactArgv(argv).join(" "));
     const result = await this.runner(argv);
     if (result.code !== 0) throw new NmcliError(argv, result.code, result.stderr);

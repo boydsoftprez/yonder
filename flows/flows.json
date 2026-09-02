@@ -235,11 +235,11 @@
     {
         "id": "group-net-now",
         "type": "ui-group",
-        "name": "Where this device is now",
-        "page": "page-network",
+        "name": "Network",
+        "page": "page-status",
         "width": 6,
         "height": 1,
-        "order": 1,
+        "order": 3,
         "showTitle": true,
         "className": "",
         "visible": true,
@@ -253,21 +253,7 @@
         "page": "page-network",
         "width": 6,
         "height": 1,
-        "order": 2,
-        "showTitle": true,
-        "className": "",
-        "visible": true,
-        "disabled": false,
-        "groupType": "default"
-    },
-    {
-        "id": "group-net-confirm",
-        "type": "ui-group",
-        "name": "After it comes back",
-        "page": "page-network",
-        "width": 6,
-        "height": 1,
-        "order": 3,
+        "order": 1,
         "showTitle": true,
         "className": "",
         "visible": true,
@@ -588,8 +574,7 @@
         "y": 430,
         "wires": [
             [
-                "remember-apply",
-                "text-apply-state"
+                "remember-apply"
             ]
         ]
     },
@@ -819,7 +804,7 @@
         "width": 6,
         "height": 6,
         "name": "what is about to happen",
-        "content": "**Joining a network takes the `yonder` access point down.** One radio; it can do one or the other.\n\nYour browser will lose this page. Find the device again on that network \u2014 **yonder.local:3000**, or your router's client list \u2014 and confirm within **5 minutes**.\n\n**Wrong password? Do nothing.** The access point comes back by itself.",
+        "content": "**You will lose this page while it joins.** Find the device again at **yonder.local:3000**, or in your router's client list.\n\nIf the password was wrong, the access point comes back by itself.",
         "className": "yonder-warning",
         "x": 200,
         "y": 780,
@@ -834,8 +819,7 @@
         "y": 860,
         "wires": [
             [
-                "remember-apply",
-                "text-apply-state"
+                "remember-apply"
             ]
         ]
     },
@@ -865,83 +849,6 @@
         ]
     },
     {
-        "id": "text-apply-state",
-        "type": "ui-text",
-        "z": "yonder-console",
-        "group": "group-net-confirm",
-        "order": 1,
-        "width": 6,
-        "height": 2,
-        "name": "what the device said",
-        "label": "",
-        "format": "{{msg.payload}}",
-        "layout": "col-center",
-        "style": false,
-        "font": "",
-        "fontSize": 16,
-        "color": "#717171",
-        "wrapText": true,
-        "className": "yonder-note",
-        "x": 820,
-        "y": 920,
-        "wires": [],
-        "value": "payload.message",
-        "valueType": "msg"
-    },
-    {
-        "id": "note-confirm",
-        "type": "ui-markdown",
-        "z": "yonder-console",
-        "group": "group-net-confirm",
-        "order": 2,
-        "width": 6,
-        "height": 3,
-        "name": "why this button exists",
-        "content": "Confirm from wherever you are now. If you don't, the previous settings come back by themselves \u2014 and so does the access point.",
-        "className": "",
-        "x": 200,
-        "y": 980,
-        "wires": []
-    },
-    {
-        "id": "button-confirm",
-        "type": "ui-button",
-        "z": "yonder-console",
-        "group": "group-net-confirm",
-        "order": 3,
-        "width": 6,
-        "height": 1,
-        "label": "Yes, I can still reach it",
-        "tooltip": "",
-        "color": "",
-        "bgcolor": "",
-        "className": "",
-        "icon": "",
-        "iconPosition": "left",
-        "payload": "",
-        "payloadType": "str",
-        "topic": "",
-        "topicType": "str",
-        "buttonColor": "",
-        "textColor": "",
-        "iconColor": "",
-        "enableClick": true,
-        "enablePointerdown": false,
-        "pointerdownPayload": "",
-        "pointerdownPayloadType": "str",
-        "enablePointerup": false,
-        "pointerupPayload": "",
-        "pointerupPayloadType": "str",
-        "emulateClick": false,
-        "x": 200,
-        "y": 1040,
-        "wires": [
-            [
-                "recall-apply"
-            ]
-        ]
-    },
-    {
         "id": "recall-apply",
         "type": "change",
         "z": "yonder-console",
@@ -963,47 +870,8 @@
         "x": 500,
         "y": 1040,
         "wires": [
-            [
-                "confirm"
-            ]
+            []
         ]
-    },
-    {
-        "id": "confirm",
-        "type": "yonder-confirm",
-        "z": "yonder-console",
-        "name": "confirm",
-        "x": 780,
-        "y": 1040,
-        "wires": [
-            [
-                "text-confirm-state"
-            ]
-        ]
-    },
-    {
-        "id": "text-confirm-state",
-        "type": "ui-text",
-        "z": "yonder-console",
-        "group": "group-net-confirm",
-        "order": 4,
-        "width": 6,
-        "height": 2,
-        "name": "confirmation",
-        "label": "",
-        "format": "{{msg.payload}}",
-        "layout": "col-center",
-        "style": false,
-        "font": "",
-        "fontSize": 16,
-        "color": "#717171",
-        "wrapText": true,
-        "className": "yonder-note",
-        "x": 1040,
-        "y": 1040,
-        "wires": [],
-        "value": "payload.message",
-        "valueType": "msg"
     },
     {
         "id": "activity-poll",
@@ -1319,9 +1187,7 @@
         "x": 500,
         "y": 430,
         "wires": [
-            [
-                "text-apply-state"
-            ]
+            []
         ]
     },
     {

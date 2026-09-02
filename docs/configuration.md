@@ -279,3 +279,37 @@ one mode at a time, the configured client wins, and the client is raised before 
 point is dropped (R-NET-12, K-13). If the join fails, the access point comes back — the
 renderer raises it, and if that does not happen the confirmation window expires and the whole
 configuration reverts.
+
+## Joining a Wi-Fi network
+
+The console's Network page is a network picker and a password box. What it does
+underneath is worth knowing once, and is deliberately not on the page.
+
+**This board has one Wi-Fi radio.** It can run its own access point, or it can
+join a network. It cannot do both — so the moment a join is applied, the access
+point goes off the air and the console goes with it. That is not a fault and it
+is not avoidable on this hardware; it is what one radio means. The radio *can*
+scan while serving the access point, which is why the network list works at all,
+but it cannot associate: NetworkManager answers `The Wi-Fi network could not be
+found` because the interface is busy being an AP.
+
+**Nothing is asked of the operator afterwards** (R-CFG-11). The device decides
+whether the join took: it waits for an address on the new network and then pings
+the gateway it was handed. Both true, and the change is confirmed and kept. Not
+true, and the apply reverts, the previous configuration is restored, and the
+`yonder` access point comes back on its own.
+
+This replaced a confirmation the operator had to give by hand, inside a window,
+from a console that had just disappeared — which meant a **working**
+configuration was discarded whenever somebody was slow finding the device again.
+
+What the device cannot establish is whether *you* can reach it. A network that
+isolates its clients will satisfy every check above and still hide the board from
+the laptop beside it. R-CFG-11 states that trade rather than leaving it as a
+surprise; the way back is Ethernet, or the card.
+
+**Finding it again.** The device publishes its hostname over mDNS, so
+`yonder.local:3000` usually works — on macOS and iOS, on Windows 10 and later,
+and on many Android versions, but not on every network and not on every device,
+and it has not been verified on hardware for this build. The router's list of
+connected clients always works.

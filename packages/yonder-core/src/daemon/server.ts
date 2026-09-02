@@ -16,6 +16,7 @@ import { NmcliClient } from "../net/nmcli/client.js";
 import { NetworkRenderer } from "../net/renderer.js";
 import { HostnameRenderer } from "../system/hostname.js";
 import { FallbackWatchdog } from "../net/watchdog.js";
+import { joinSucceeded } from "../net/joined.js";
 import { AP_CONNECTION, DEFAULT_AP_PASSPHRASE } from "../net/profiles.js";
 import { scanForNetworks } from "../net/scan.js";
 import { ping, reachable } from "../diag/probe.js";
@@ -255,6 +256,15 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
     radioTimeoutMs: windows.radioTimeout * 1000,
     clock,
     degraded,
+    // R-CFG-11: a join confirms itself, because the operator cannot - the
+    // console leaves the air with the access point. `client` is the same
+    // NmcliClient the watchdog uses, so this asks the radio directly.
+    verifyRadioMove: () => joinSucceeded({
+      client,
+      runner: opts.runner ?? systemRunner,
+      clock,
+      log: (line) => process.stdout.write(`${line}\n`),
+    }),
   });
 
   // Anything left pending by a previous process is reverted before we serve.

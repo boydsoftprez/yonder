@@ -255,17 +255,19 @@ describe("flows/flows.json", () => {
     expect(warning, "the Wi-Fi form has no warning on it").toBeDefined();
     const content = String(warning?.content ?? "").toLowerCase();
 
-    // 1. the access point stops
-    expect(content).toContain("access point");
-    // 2. where to find the device afterwards, and a way that does not depend
-    //    on a name resolving
+    // 1. the page goes away
+    expect(content).toMatch(/lose this page|lose the page/);
+    // 2. where to find the device afterwards, and a way that needs no name
     expect(content).toContain("yonder.local");
     expect(content).toMatch(/router|client list/);
-    // 3. how long they have
-    expect(content).toMatch(/\b5 minutes\b|\bfive minutes\b/);
-    // 4. and that a wrong password costs them nothing but the wait
+    // 3. a wrong password costs nothing
     expect(content).toMatch(/wrong|did not|cannot join/);
     expect(content).toMatch(/by itself|on its own|returns|comes back/);
+
+    // What it no longer says is anything about how many radios this board
+    // has. That was the device's problem leaking onto the operator's screen,
+    // and it is in docs/configuration.md where somebody can go and read it.
+    expect(content).not.toMatch(/one radio|single radio|channel/);
   });
 
   /**
@@ -519,12 +521,21 @@ describe("flows/flows.json join controls", () => {
   });
 
   /**
-   * Confirming stays its own panel, and that separation is the point: it
-   * happens minutes later, after the operator has been disconnected and has
-   * found the device again on another network. It is not a step in this
-   * sequence, it is what you come back to.
+   * There is no confirmation step any more (R-CFG-11).
+   *
+   * There used to be a whole panel for it: join, lose the page, find the
+   * device on another network, sign in, navigate back, and press "Yes, I can
+   * still reach it" — inside five minutes, or a **working** configuration was
+   * thrown away because somebody was slow. The device establishes for itself
+   * whether the join took, so nothing is asked of the operator at all.
    */
-  it("keeps confirming separate, because it happens later", () => {
-    expect(flows.find((n) => n.id === "group-net-confirm")).toBeDefined();
+  it("asks the operator to confirm nothing", () => {
+    expect(flows.find((n) => n.id === "group-net-confirm")).toBeUndefined();
+    expect(flows.find((n) => n.type === "yonder-confirm")).toBeUndefined();
+    const words = flows
+      .filter((n) => n.type === "ui-markdown" || n.type === "ui-button")
+      .map((n) => `${String(n.content ?? "")} ${String(n.label ?? "")}`.toLowerCase())
+      .join(" ");
+    expect(words).not.toMatch(/can still reach it|confirm within|press .?yes/);
   });
 });
