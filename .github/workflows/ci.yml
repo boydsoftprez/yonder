@@ -13,10 +13,9 @@ jobs:
       # helper tests cannot run on 20 at all. 24 is the line the offline
       # payload ships (installer/make-payload.sh), so CI runs what a board runs.
       #
-      # What this gives up: nothing here now proves yonder-core still works on
-      # the node 20 its own `require_node 20` claims. That floor is the
-      # daemon's and it is still true of the code; it is no longer true of the
-      # test run.
+      # yonder-core's own floor of 20 is covered by the `core-on-its-floor`
+      # job below, because a claim nothing tests is a claim that stops being
+      # true without anyone noticing.
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
@@ -57,3 +56,28 @@ jobs:
           shellcheck installer/install.sh installer/lib/*.sh installer/roles/*.sh scripts/*.sh
       - name: Installer dry run
         run: ./installer/install.sh --dry-run
+
+  # yonder-core declares `engines.node >= 20` and `20-yonder-core.sh` calls
+  # `require_node 20`, and that floor is load-bearing rather than decorative:
+  # the installer deliberately supports a board with a distro node 20 and no
+  # vendored payload. It installs a working daemon there and stops at the
+  # console with a reason (see 30-console.sh). Nothing tested that once the
+  # main job moved to 24, so a change needing 22 would have shipped a daemon
+  # that cannot start on the runtime its own installer accepts — found on a
+  # board, not here.
+  #
+  # yonder-core only. The contrib packages need node-red, which needs 22.9, so
+  # running them here would assert something that was never true. Verified to
+  # pass on 20.20.2 before this job was added, rather than added hopefully.
+  core-on-its-floor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      # The workspace root's install resolves every package; only yonder-core
+      # is then exercised.
+      - run: npm ci
+      - run: npx vitest run --root packages/yonder-core
