@@ -14,7 +14,7 @@ import type { RED } from "./red.js";
  * what is broadcasting, which anything with a radio can already see.
  *
  * **Two outputs from one scan.** The first is the list a table shows. The
- * second is the same list shaped as `msg.ui_update.dropdownOptions`, which is
+ * second is the same list shaped as `msg.ui_update.options`, which is
  * how a Dashboard form is told what to offer — because the join form's SSID
  * field is a dropdown, not a box to transcribe a name into. A form cannot be
  * fed from its own input, so this is the only way the two agree.
@@ -28,6 +28,6 @@ export = function register(RED: RED): void {
       const networks = (value as { networks?: unknown[] } | undefined)?.networks;
       return `${Array.isArray(networks) ? networks.length : 0} networks`;
     },
-    (value) => ({ ui_update: { dropdownOptions: ssidOptions(value as never) } }),
+    (value) => ({ ui_update: { options: ssidOptions(value as never) } }),
   );
 };

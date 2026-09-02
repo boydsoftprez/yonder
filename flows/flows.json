@@ -822,7 +822,7 @@
                 "scan-rows"
             ],
             [
-                "form-join"
+                "join-ssid"
             ]
         ]
     },
@@ -916,54 +916,6 @@
         "x": 200,
         "y": 780,
         "wires": []
-    },
-    {
-        "id": "form-join",
-        "type": "ui-form",
-        "z": "yonder-console",
-        "group": "group-net-join",
-        "name": "join a network",
-        "label": "",
-        "order": 2,
-        "width": 6,
-        "height": 1,
-        "options": [
-            {
-                "label": "Network",
-                "key": "ssid",
-                "type": "dropdown",
-                "required": true,
-                "rows": null
-            },
-            {
-                "label": "Password",
-                "key": "psk",
-                "type": "password",
-                "required": false,
-                "rows": null
-            }
-        ],
-        "formValue": {
-            "ssid": "",
-            "psk": ""
-        },
-        "payload": "",
-        "topic": "",
-        "topicType": "msg",
-        "splitLayout": false,
-        "className": "",
-        "passthru": false,
-        "resetOnSubmit": true,
-        "submit": "Join \u2014 the access point will go away",
-        "cancel": "Clear",
-        "x": 200,
-        "y": 860,
-        "wires": [
-            [
-                "join"
-            ]
-        ],
-        "dropdownOptions": []
     },
     {
         "id": "join",
@@ -1461,6 +1413,96 @@
         "wires": [
             [
                 "text-apply-state"
+            ]
+        ]
+    },
+    {
+        "id": "join-ssid",
+        "type": "ui-dropdown",
+        "z": "yonder-console",
+        "group": "group-net-join",
+        "name": "network",
+        "label": "Network",
+        "tooltip": "",
+        "place": "Choose a network",
+        "order": 2,
+        "width": 6,
+        "height": 1,
+        "passthru": false,
+        "multiple": false,
+        "chips": false,
+        "options": [],
+        "payload": "",
+        "payloadType": "str",
+        "topic": "ssid",
+        "topicType": "str",
+        "className": "",
+        "x": 200,
+        "y": 860,
+        "wires": [
+            [
+                "join"
+            ]
+        ]
+    },
+    {
+        "id": "join-psk",
+        "type": "ui-text-input",
+        "z": "yonder-console",
+        "group": "group-net-join",
+        "name": "passphrase",
+        "label": "Password",
+        "tooltip": "",
+        "order": 3,
+        "width": 6,
+        "height": 1,
+        "topic": "psk",
+        "topicType": "str",
+        "mode": "password",
+        "delay": 300,
+        "passthru": false,
+        "sendOnBlur": true,
+        "className": "",
+        "icon": "",
+        "iconPosition": "left",
+        "clearable": false,
+        "sendOnDelay": true,
+        "x": 200,
+        "y": 900,
+        "wires": [
+            [
+                "join"
+            ]
+        ]
+    },
+    {
+        "id": "join-go",
+        "type": "ui-button",
+        "z": "yonder-console",
+        "group": "group-net-join",
+        "name": "join",
+        "label": "Join this network",
+        "order": 4,
+        "width": 6,
+        "height": 1,
+        "tooltip": "",
+        "color": "",
+        "bgcolor": "",
+        "className": "",
+        "icon": "",
+        "payload": "",
+        "payloadType": "str",
+        "topic": "join",
+        "topicType": "str",
+        "buttonColor": "",
+        "textColor": "",
+        "iconColor": "",
+        "enablePointerdown": false,
+        "x": 200,
+        "y": 940,
+        "wires": [
+            [
+                "join"
             ]
         ]
     }

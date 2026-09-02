@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, it, expect } from "vitest";
 import { CONSOLE_HOME, THEME_HREF } from "./console/settings.js";
+import { JOIN_TOPIC } from "./net/join.js";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -415,29 +416,52 @@ describe("flows/flows.json stylesheet injection", () => {
  * could not have filled the box; what it can take is `ui_update.dropdownOptions`.
  * So the field is a dropdown and the scan feeds it.
  */
-describe("flows/flows.json join form", () => {
-  const form = flows.find((n) => n.id === "form-join");
+describe("flows/flows.json join controls", () => {
+  const ssid = flows.find((n) => n.id === "join-ssid");
+  const psk = flows.find((n) => n.id === "join-psk");
+  const go = flows.find((n) => n.id === "join-go");
   const scan = flows.find((n) => n.type === "yonder-scan");
 
   it("asks for the network as a choice, not as typing", () => {
-    const ssid = (form?.options as { key: string; type: string }[]).find((o) => o.key === "ssid");
-    expect(ssid?.type).toBe("dropdown");
+    expect(ssid?.type).toBe("ui-dropdown");
   });
 
-  it("still takes the passphrase as a password field", () => {
-    const psk = (form?.options as { key: string; type: string }[]).find((o) => o.key === "psk");
-    expect(psk?.type).toBe("password");
+  /**
+   * The reason this is three widgets and not one form: `ui-form` renders
+   * text, email, number, multiline, checkbox, switch, date, time and
+   * dropdown — and nothing masked. A passphrase in a `ui-form` would be on
+   * screen in clear. `ui-text-input` masks, and is its own widget.
+   */
+  it("masks the passphrase", () => {
+    expect(psk?.type).toBe("ui-text-input");
+    expect(psk?.mode).toBe("password");
   });
 
-  it("feeds that dropdown from the scan, on the scan's second output", () => {
+  it("labels each message so the node can tell them apart", () => {
+    expect([ssid?.topic, psk?.topic, go?.topic]).toEqual([
+      JOIN_TOPIC.ssid, JOIN_TOPIC.psk, JOIN_TOPIC.join,
+    ]);
+    for (const n of [ssid, psk, go]) expect(n?.topicType).toBe("str");
+  });
+
+  it("sends all three to the one node that holds them", () => {
+    for (const n of [ssid, psk, go]) expect((n?.wires as string[][])[0]).toContain("join");
+  });
+
+  it("never lets a widget echo what was typed back out", () => {
+    // passthru would put the passphrase on an outgoing message.
+    for (const n of [ssid, psk, go]) expect(n?.passthru ?? false).toBe(false);
+  });
+
+  it("feeds the dropdown from the scan's second output", () => {
     const wires = scan?.wires as string[][];
     expect(wires?.length, "yonder-scan must have two outputs wired").toBeGreaterThanOrEqual(2);
-    expect(wires[1]).toContain("form-join");
+    expect(wires[1]).toContain("join-ssid");
   });
 
   it("still sends the scan to the table on its first output", () => {
     const wires = scan?.wires as string[][];
     expect(wires[0].length).toBeGreaterThan(0);
-    expect(wires[0]).not.toContain("form-join");
+    expect(wires[0]).not.toContain("join-ssid");
   });
 });

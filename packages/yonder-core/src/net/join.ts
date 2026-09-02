@@ -98,3 +98,18 @@ export function joinNetwork(
   }
   return { ok: true, config };
 }
+
+/**
+ * How the console's three join widgets label what they send.
+ *
+ * The network, the passphrase and the button are separate widgets — `ui-form`
+ * has no password field type, and `ui-text-input`, which does mask, is its own
+ * widget — so they arrive as three messages and `msg.topic` is what tells them
+ * apart. Defined here so the flows and `yonder-join` read one set of strings
+ * rather than two copies that can drift.
+ */
+export const JOIN_TOPIC = {
+  ssid: "ssid",
+  psk: "psk",
+  join: "join",
+} as const;

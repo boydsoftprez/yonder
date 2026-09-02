@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { NmcliClient } from "./nmcli/client.js";
 import type { CommandResult, CommandRunner } from "./runner.js";
-import { scanForNetworks, ssidOptions, SSID_FIELD } from "./scan.js";
+import { scanForNetworks, ssidOptions } from "./scan.js";
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "nmcli", "fixtures");
 const fixture = (name: string): string => readFileSync(join(FIXTURES, name), "utf8");
@@ -155,10 +155,6 @@ describe("ssidOptions", () => {
       expect(scan.networks.map((n) => n.ssid)).toContain(o.value);
       expect(o.label).toContain(o.value);
     }
-  });
-
-  it("names the field it belongs to, because the widget filters on it", () => {
-    for (const o of ssidOptions(scan)) expect(o.dropdown).toBe(SSID_FIELD);
   });
 
   it("drops networks with no name rather than offering a blank row", () => {

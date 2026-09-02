@@ -70,20 +70,13 @@ export async function scanForNetworks(client: NmcliClient): Promise<ScanResult> 
 }
 
 /**
- * One entry in a Dashboard form's dropdown.
- *
- * `dropdown` names the form field the option belongs to — the widget filters
- * its list with `option.dropdown === field.key` — and `label`/`value` are what
- * it shows and what it submits.
+ * One entry in the console's network dropdown: what it shows, and what it
+ * submits when chosen.
  */
 export interface DropdownOption {
-  dropdown: string;
   label: string;
   value: string;
 }
-
-/** The form field the SSID list feeds. Shared so the two cannot drift. */
-export const SSID_FIELD = "ssid";
 
 /**
  * The networks in range, as options an operator picks from.
@@ -107,7 +100,6 @@ export function ssidOptions(scan: ScanResult | null | undefined): DropdownOption
   return networks
     .filter((n) => typeof n.ssid === "string" && n.ssid !== "")
     .map((n) => ({
-      dropdown: SSID_FIELD,
       label: Number.isFinite(n.signal) ? `${n.ssid}  ·  ${String(n.signal)}%` : n.ssid,
       value: n.ssid,
     }));
