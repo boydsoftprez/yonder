@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!--
+  Shown once, after an administrator password has been set.
+
+  Self-contained (R-UI-01) and day-themed (R-UI-07), like the other two. No
+  automatic refresh: the console is restarting underneath this page, and a
+  browser reloading into a service that has not finished coming back gets a
+  connection error instead of a login form, which reads as a device that has
+  broken rather than one that is doing what it was asked.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Password set</title>
+<style>
+  :root {
+    color-scheme: light;
+    --ink: #14181d;
+    --quiet: #4a5560;
+    --paper: #f2f4f6;
+    --card: #ffffff;
+    --line: #c9d1d9;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 3rem 1rem;
+    background: var(--paper);
+    color: var(--ink);
+    font: 17px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  main {
+    max-width: 30rem;
+    margin: 0 auto;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 1.75rem;
+  }
+  h1 { font-size: 1.4rem; margin: 0 0 .75rem; letter-spacing: -0.01em; }
+  p { margin: 0 0 1rem; }
+  .quiet { color: var(--quiet); font-size: .93rem; margin-bottom: 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>The password is set</h1>
+  <p>The console is restarting so it can come back with the rest of itself behind that
+    password. Give it a few seconds, then reload this page and sign in.</p>
+  <p class="quiet">Keep the password. It cannot be changed or recovered from the console
+    yet, and nothing on this device can tell you what it was.</p>
+</main>
+</body>
+</html>

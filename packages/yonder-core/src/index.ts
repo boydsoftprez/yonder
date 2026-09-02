@@ -93,3 +93,28 @@ export {
   secretValuesIn,
   redactValues,
 } from "./secrets/redact.js";
+export {
+  DaemonClient,
+  unixTransport,
+  REQUEST_TIMEOUT_MS,
+  type Transport,
+  type DaemonRequest,
+  type DaemonResponse,
+  type DaemonReply,
+  type DaemonFailure,
+  type DaemonClientOptions,
+  type PasswordResult,
+} from "./console/client.js";
+export { SessionStore, IDLE_TIMEOUT_MS, type SessionStoreOptions } from "./console/session.js";
+export {
+  setupMiddleware,
+  consoleMiddleware,
+  readFields,
+  cookieValue,
+  SESSION_COOKIE,
+  type Middleware,
+  type Submission,
+  type SetupMiddlewareDeps,
+  type ConsoleMiddlewareDeps,
+} from "./console/middleware.js";
+export { renderPage, pageSource, escapeHtml, type PageName } from "./console/assets.js";
