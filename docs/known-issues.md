@@ -866,3 +866,28 @@ This is the second documentation divergence of the same kind — the first was a
 `remote.tailscale` example that the strict schema rejected, fixed in `f4469ef`.
 Both were written as descriptions of a finished system rather than of the one
 that exists.
+
+### K-40 · The Pi 4's hardware JPEG decoder advertises MJPEG and cannot be started
+
+`/dev/video10` (`bcm2835-codec-decode`) lists `MJPG` on its output side, so `v4l2jpegdec`
+negotiates against it happily. Streaming never starts. The pipeline stalls indefinitely —
+not slowly, permanently — and the kernel logs
+`bcm2835_codec_start_streaming: Failed enabling i/p port, ret -3` followed by a warning
+trace.
+
+This matters because USB cameras hand us compressed frames and nothing else worth flying
+with: at 1080p this camera offers MJPEG at 90 fps and raw at 5. Decoding those JPEGs in
+software is roughly 50% of one core at 1080p30, and it is the **entire** cost of the video
+pipeline — the hardware H.264 encoder beside it adds four points. So the whole of M4's CPU
+budget is a workaround for this.
+
+Characterised in [`hardware/usb-camera-on-a-pi-4.md`](hardware/usb-camera-on-a-pi-4.md), so
+that nobody looks at that 50% and reaches for the hardware decoder again: it is not a
+resolution limit (640×480 fails identically), not a missing parser (`jpegparse` in front
+fails faster, with `Internal data stream error`), and not a GStreamer fault — the element
+issues the ioctls correctly and the driver cannot enable the port.
+
+Not ours to fix, and not worth working around further. It is recorded because it is
+invisible from the outside: the capability is advertised, so every reasonable person will
+try it once. Revisit only if a kernel update changes the behaviour, and re-run the
+reproduction in that note rather than assuming.
