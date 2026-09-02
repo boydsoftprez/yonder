@@ -424,10 +424,12 @@ html, body, .v-application, .nrdb-app {
   margin: var(--yonder-space-4) 0;
 }
 
-/* ---- prose is never clipped ------------------------------------------
-   A Dashboard widget takes its height from a configured row span, and prose
-   does not have a row count that is right at every width: the same words are
-   taller on a narrower screen, in a larger system font, in another language.
+/* ---- content is never clipped ----------------------------------------
+   A Dashboard widget takes its height from a configured row span, and some
+   content has no row count that is right at every width: the same words are
+   taller on a narrower screen, in a larger system font, in another language,
+   and a form is as tall as the fields it holds however many rows somebody
+   typed into the editor.
 
    The default silently wins that argument with overflow: auto. On the first
    board this ran on, the Network page's "Read this before you join a network"
@@ -439,12 +441,37 @@ html, body, .v-application, .nrdb-app {
    an operator would have read the first half, pressed Join, and lost the page
    before reaching the part that says what to do next.
 
-   So prose sizes to its content and the grid takes the rows it needs. A fixed
-   height is legitimate for a chart or a gauge, where the shape is the point.
-   It is never legitimate for words somebody has to act on. */
-.nrdb-ui-widget.nrdb-ui-markdown {
+   **That fix was scoped too narrowly, and the capture gate found the rest.**
+   It named the defect "prose", so it covered markdown and stopped. Forms have
+   the identical problem for the identical reason, and two of them shipped
+   clipped: the join form was 172px of content in 48px with 72% hidden, and
+   the ping form 112px in 48px with 57% hidden. The join form is the one an
+   operator fills in immediately *after* reading the warning above - so the
+   page explained carefully what pressing Join would cost, and then hid the
+   field they had to type into to do it (K-27).
+
+   The rule is not about prose. It is: **a widget whose height is a function
+   of its content, rather than of its shape, sizes to that content and the
+   grid takes the rows it needs.** A fixed height is legitimate for a chart or
+   a gauge, where the shape is the point. It is never legitimate for something
+   an operator has to read or fill in.
+
+   Anything added here needs the same test in theme.test.ts, because the cost
+   of getting it wrong is silent. */
+.nrdb-ui-widget.nrdb-ui-markdown,
+.nrdb-ui-widget.nrdb-ui-form {
   grid-row-end: auto !important;
   grid-template-rows: none !important;
+  height: auto !important;
+  min-height: 0;
+  overflow: visible !important;
+}
+
+/* The form's own inner box, which is a second place the same clipping can
+   happen: the widget growing does nothing if what is inside it still scrolls.
+   Both are needed, and only one of them is visible in a stylesheet diff. */
+.nrdb-ui-form .nrdb-ui-form-content,
+.nrdb-ui-form form {
   height: auto !important;
   min-height: 0;
   overflow: visible !important;

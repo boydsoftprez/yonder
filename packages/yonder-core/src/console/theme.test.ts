@@ -176,25 +176,60 @@ describe("themeCss ships a whole shell", () => {
 });
 
 /**
- * Words an operator has to act on are never behind a scrollbar.
+ * Anything an operator has to read or fill in is never behind a scrollbar.
  *
- * Dashboard sizes a widget from a configured row span. Prose has no row count
- * that is correct at every width, and the default resolves that with
+ * Dashboard sizes a widget from a configured row span. Some content has no row
+ * count that is correct at every width, and the default resolves that with
  * `overflow: auto` — silently. On the first board this ran on, the Network
  * page's "Read this before you join a network" was 706px of text in a 372px
  * widget: 39% hidden, with nothing to indicate it. That block is what tells an
  * operator the access point is about to disappear and that they have five
  * minutes to confirm — the mitigation written for K-13.
+ *
+ * The fix for that was named after prose, so it covered markdown and stopped.
+ * The capture gate (R-UI-12) found the rest: the join form was 172px of
+ * content in 48px with 72% hidden, and the ping form 112px in 48px with 57%
+ * hidden (K-27). The join form is the one an operator fills in immediately
+ * after reading the warning above — so the page explained what pressing Join
+ * would cost and then hid the field they had to type into to do it.
+ *
+ * These tests are per widget type on purpose. A single assertion over a
+ * combined selector would pass while a type was quietly dropped from it.
  */
-describe("themeCss never clips prose", () => {
+describe("themeCss never clips content an operator has to act on", () => {
+  /** The widget types whose height is a function of content, not of shape. */
+  const sizesToContent = ["nrdb-ui-markdown", "nrdb-ui-form"];
+
   for (const t of ["day", "night"] as ThemeName[]) {
-    it(`lets markdown widgets size to their content (${t})`, () => {
+    for (const type of sizesToContent) {
+      it(`lets ${type} widgets size to their content (${t})`, () => {
+        const css = themeCss(t);
+        // The selector may be shared with other types, so find the rule this
+        // one is *in* rather than a rule that is only about it.
+        const rule = new RegExp(
+          `[^}]*\\.nrdb-ui-widget\\.${type}\\b[^{]*\\{[^}]*\\}`,
+          "s",
+        ).exec(css)?.[0] ?? "";
+        expect(rule, `there must be a rule covering ${type} widgets`).not.toBe("");
+        expect(rule).toMatch(/height:\s*auto/);
+        expect(rule).toMatch(/overflow:\s*visible/);
+        expect(rule).toMatch(/grid-row-end:\s*auto/);
+      });
+    }
+  }
+
+  /**
+   * A form clips in two places, and only one of them is visible in a diff of
+   * the widget rule: the widget growing does nothing if the box inside it
+   * still scrolls.
+   */
+  for (const t of ["day", "night"] as ThemeName[]) {
+    it(`unclips the form's own inner box too (${t})`, () => {
       const css = themeCss(t);
-      const rule = /\.nrdb-ui-widget\.nrdb-ui-markdown\s*\{[^}]*\}/s.exec(css)?.[0] ?? "";
-      expect(rule, "there must be a rule for markdown widgets").not.toBe("");
-      expect(rule).toMatch(/height:\s*auto/);
+      const rule = /[^}]*\.nrdb-ui-form form[^{]*\{[^}]*\}/s.exec(css)?.[0] ?? "";
+      expect(rule, "the inner form element needs its own rule").not.toBe("");
       expect(rule).toMatch(/overflow:\s*visible/);
-      expect(rule).toMatch(/grid-row-end:\s*auto/);
+      expect(rule).toMatch(/height:\s*auto/);
     });
   }
 });

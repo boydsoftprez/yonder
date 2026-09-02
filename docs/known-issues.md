@@ -520,14 +520,20 @@ The capture gate found six violations of ADR-0009 on its first run, and they are
   can still reach it`, `Check reachability`, each 588 px of 588 px. R-UI-10. This is not a
   styling slip: a stock `ui-button` is a whole row of its group and cannot be smaller than
   one, so no stylesheet reaches it.
-- **Two forms clipping their own content** — the join form hides 72% of 172 px in 48 px, the
-  ping form 57% of 112 px in 48 px. The same defect as K-13 in a widget type nobody had
-  checked. `theme.ts` unclips markdown; a form has the same problem for the same reason, and
-  the join form is the one an operator fills in *after* reading the warning about losing the
-  page.
+- ~~**Two forms clipping their own content**~~ — **fixed.** The join form hid 72% of 172 px
+  in 48 px and the ping form 57% of 112 px in 48 px, so on the join form the operator saw the
+  SSID field and neither the Join nor the Clear button — immediately after reading the warning
+  that pressing Join would take the page away.
 
-The form clipping is the more urgent of the two: it hides input from somebody who is already
-being asked to do something irreversible. It may be fixable in `theme.ts` the way the
-markdown clipping was, without waiting for the rebuild.
+  The K-13 fix had been named after *prose*, so it covered markdown widgets and stopped;
+  forms had the identical problem for the identical reason. `theme.ts` now unclips **any
+  widget whose height is a function of its content rather than of its shape**, and the form's
+  own inner box as well — the widget growing does nothing if what is inside it still scrolls,
+  and only one of those two is visible in a stylesheet diff. `theme.test.ts` asserts it per
+  widget type, because one assertion over a combined selector would pass while a type was
+  quietly dropped from it. The join form now renders at 588×172 and the ping form at 588×112.
+
+The four spanning actions remain. They are not a styling slip and no stylesheet reaches them:
+a stock `ui-button` is a whole row of its group and cannot be smaller than one.
 
 **Closes when** the pages are rebuilt on the instrument library and the debt list is empty.
