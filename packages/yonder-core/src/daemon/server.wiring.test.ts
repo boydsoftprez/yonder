@@ -77,8 +77,8 @@ describe("buildRenderers", () => {
 describe("consolePathsFromEnv", () => {
   it("uses the installed paths when the environment says nothing", () => {
     expect(consolePathsFromEnv({})).toEqual({
-      settings: "/opt/yonder/console/settings.js",
-      publicDir: "/opt/yonder/console/public",
+      settings: "/var/lib/yonder/console/settings.js",
+      publicDir: "/var/lib/yonder/console/public",
       userDir: "/var/lib/yonder/console",
       socket: "/run/yonder/core.sock",
       coreTree: "/opt/yonder/packages/yonder-core",

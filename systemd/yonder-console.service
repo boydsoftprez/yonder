@@ -32,7 +32,7 @@ Group=yonder
 # systemd resolves against nothing, and the offline route puts its runtime at
 # /opt/yonder/node/bin/node. The installer's link_node points this fixed path
 # at whichever node the install resolved.
-ExecStart=/usr/local/bin/yonder-node /opt/yonder/console/node_modules/node-red/red.js -s /opt/yonder/console/settings.js
+ExecStart=/usr/local/bin/yonder-node /opt/yonder/console/node_modules/node-red/red.js -s /var/lib/yonder/console/settings.js
 Restart=always
 RestartSec=3
 

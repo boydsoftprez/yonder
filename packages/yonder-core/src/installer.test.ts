@@ -5,6 +5,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, readdirSyn
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { DEFAULT_CONSOLE_PATHS } from "./console/settings.js";
 
 /**
  * The installer's shell helpers, exercised rather than read.
@@ -241,7 +242,7 @@ describe("systemd/yonder-console.service", () => {
     const exec = /^ExecStart=(.*)$/m.exec(unit)?.[1] ?? "";
     expect(exec.split(" ")[0]).toBe("/usr/local/bin/yonder-node");
     expect(exec).toContain("node_modules/node-red/red.js");
-    expect(exec).toContain("-s /opt/yonder/console/settings.js");
+    expect(exec).toContain("-s /var/lib/yonder/console/settings.js");
   });
 
   it("comes back on its own, because a console nobody can reach is the failure", () => {
@@ -285,5 +286,51 @@ describe("the two units together", () => {
     expect(core).toMatch(/^Group=yonder$/m);
     expect(core).toMatch(/^RuntimeDirectory=yonder$/m);
     expect(core).not.toMatch(/^User=/m);
+  });
+});
+
+/**
+ * The invariant the first board taught us, pinned so it cannot come back.
+ *
+ * `yonder-core.service` is `ProtectSystem=strict`, so the daemon may only
+ * write what its `ReadWritePaths` names. Everything the `ConsoleRenderer`
+ * writes has to be inside that set — and while `settings.js` and `theme.css`
+ * lived under `/opt`, they were not. Every render failed `EROFS` from inside
+ * the service, silently: the installer generates `settings.js` as root
+ * *outside* systemd, so the install still reported success and the console
+ * still came up. The failure surfaced only when an operator set an
+ * administrator password and the console could not be flipped to match,
+ * leaving a device whose only page contradicted itself and whose only
+ * recovery was the card.
+ *
+ * Asserted against the shipped unit and the shipped defaults, so it fails
+ * here rather than on hardware.
+ */
+describe("the daemon can write everything the console renderer writes", () => {
+  it("keeps every generated console path inside yonder-core's ReadWritePaths", () => {
+    const unit = readFileSync(join(ROOT, "systemd/yonder-core.service"), "utf8");
+    expect(unit).toContain("ProtectSystem=strict");
+
+    const roots = unit
+      .split("\n")
+      .filter((l) => l.startsWith("ReadWritePaths="))
+      .flatMap((l) => l.slice("ReadWritePaths=".length).trim().split(/\s+/))
+      .filter(Boolean);
+    expect(roots.length).toBeGreaterThan(0);
+
+    const inside = (p: string): boolean =>
+      roots.some((r) => p === r || p.startsWith(`${r}/`));
+
+    for (const p of [DEFAULT_CONSOLE_PATHS.settings, DEFAULT_CONSOLE_PATHS.publicDir]) {
+      expect(inside(p), `${p} must be inside one of: ${roots.join(" ")}`).toBe(true);
+    }
+  });
+
+  it("starts the console from the same path the daemon regenerates", () => {
+    // Two halves of a pair. A unit reading one settings.js while the daemon
+    // rewrites another is a console that never changes, and nothing else
+    // would say so.
+    const unit = readFileSync(join(ROOT, "systemd/yonder-console.service"), "utf8");
+    expect(unit).toContain(`-s ${DEFAULT_CONSOLE_PATHS.settings}`);
   });
 });

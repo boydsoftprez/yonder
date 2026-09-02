@@ -47,9 +47,41 @@ export interface ConsolePaths {
   unit: string;
 }
 
+/**
+ * Generated artefacts live in `/var/lib`, never in `/opt`.
+ *
+ * `settings.js` and `theme.css` used to sit in `/opt/yonder/console`, beside
+ * the installed console. That looked tidy and it made the device unusable on
+ * the first board it ever ran on.
+ *
+ * `yonder-core.service` is sandboxed `ProtectSystem=strict` with
+ * `ReadWritePaths=/etc/yonder /var/lib/yonder`, so from inside the daemon
+ * every write under `/opt` is `EROFS`. The installer generates `settings.js`
+ * as root *outside* systemd, so a fresh install looked perfect — the console
+ * came up, served its setup page, and passed every post-condition. Then the
+ * operator set an administrator password, the daemon stored it, and the
+ * render that was supposed to flip the console into provisioned mode failed:
+ *
+ *     could not restart the console after the password was set:
+ *     EROFS: read-only file system, open '/opt/yonder/console/public/theme.css.tmp'
+ *
+ * The daemon was provisioned and the console was not. The only page it served
+ * was the setup page, whose POST now answers 409, so the screen contradicted
+ * itself — "no administrator password yet" above "an administrator password
+ * is already set" — and the only way back in was to take the card out. Every
+ * step before that click reported success.
+ *
+ * `/opt` is installed code and the installer owns it. `settings.js` and
+ * `theme.css` are variable state that the daemon rewrites on every apply, so
+ * they belong under the state directory the daemon is already allowed to
+ * write. Widening `ReadWritePaths` would have fixed the symptom by making the
+ * sandbox mean less; this fixes it by putting the file where it always
+ * belonged. `installer/lib/common.sh:assert_daemon_can_write` now fails the
+ * install if these two ever drift apart again.
+ */
 export const DEFAULT_CONSOLE_PATHS: ConsolePaths = {
-  settings: "/opt/yonder/console/settings.js",
-  publicDir: "/opt/yonder/console/public",
+  settings: "/var/lib/yonder/console/settings.js",
+  publicDir: "/var/lib/yonder/console/public",
   userDir: "/var/lib/yonder/console",
   socket: "/run/yonder/core.sock",
   coreTree: "/opt/yonder/packages/yonder-core",

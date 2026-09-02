@@ -409,6 +409,25 @@ the first hardware boot is where it would show up — as Node-RED failing to wri
 state, with a permissions error and no obvious cause. Moving the console to
 `/var/lib/yonder-console` removes the question entirely and is the fix if it does.
 
+### K-24 · The hostname is set but `/etc/hosts` is not, so every `sudo` does a failed lookup
+`src/system/hostname.ts`, `systemd/yonder-core.service`
+
+`HostnameRenderer` runs `hostnamectl set-hostname`, which on Debian does not touch
+`/etc/hosts`. That file still carries `127.0.1.1 raspberrypi` from the image, so the moment
+the hostname becomes `yonder` nothing resolves it, and every `sudo` on the board prints
+
+    sudo: unable to resolve host yonder: Name or service not known
+
+after a DNS timeout. Observed on the first board this project installed on.
+
+Cosmetic in effect and irritating in practice — it slows every privileged command — but the
+fix is not free. `yonder-core.service` is `ProtectSystem=strict` with
+`ReadWritePaths=/etc/yonder /var/lib/yonder`, so the daemon cannot write `/etc/hosts` either.
+Closing this means a targeted `ReadWritePaths=/etc/hosts`, a pure function that rewrites only
+the `127.0.1.1` line, and tests for both — which is why it is here rather than folded into
+the change that found it. `assert_daemon_can_write` must be given `/etc/hosts` at the same
+time, or the fix reproduces K-19 in a new place.
+
 ### K-22 · The diagnostics probe refuses IPv6 addresses
 `src/diag/probe.ts`
 

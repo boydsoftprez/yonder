@@ -421,3 +421,59 @@ assert_unit_accounts() {
         log "$aua_unit runs as group $aua_name, which exists"
     done
 }
+
+# The post-condition that would have caught the defect it exists for.
+#
+#     assert_daemon_can_write <unit-file> <path> [<path> ...]
+#
+# yonder-core.service runs ProtectSystem=strict, so the only paths it may
+# write are the ones its ReadWritePaths names. The daemon's ConsoleRenderer
+# writes settings.js and theme.css — and while those lived under /opt, every
+# one of those writes was EROFS from inside the service.
+#
+# Nothing caught it, because the installer generates settings.js as root
+# *outside* systemd, where the sandbox does not apply. So a fresh install
+# reported success at every step, the console came up and served its setup
+# page, and the failure appeared only when an operator set an administrator
+# password: the daemon stored it, then could not rewrite the console to match.
+#
+#     could not restart the console after the password was set:
+#     EROFS: read-only file system, open '/opt/yonder/console/public/theme.css.tmp'
+#
+# The daemon was provisioned and the console was not. The one page it served
+# was the setup page, whose POST now answers 409, so it contradicted itself on
+# screen — and the only way back in was to take the card out. Found on the
+# first board this project ever installed on, by an operator clicking the one
+# button the device offers.
+#
+# Static on purpose: it compares two files this repository ships, so it fails
+# in CI, on a machine with no systemd and no board, rather than in a field.
+assert_daemon_can_write() {
+    adcw_unit="$1"
+    shift
+    [ -f "$adcw_unit" ] || die "no unit at $adcw_unit to check writable paths against"
+
+    # Not sandboxed means not constrained, and nothing to check.
+    if ! grep -q '^ProtectSystem=strict' "$adcw_unit"; then
+        log "$(basename "$adcw_unit") is not ProtectSystem=strict; nothing constrains its writes"
+        return 0
+    fi
+
+    adcw_roots=$(sed -n 's/^ReadWritePaths=//p' "$adcw_unit" | tr ' ' '\n' | grep -v '^$' || true)
+    [ -n "$adcw_roots" ] \
+        || die "$adcw_unit is ProtectSystem=strict and names no ReadWritePaths; it can write nothing at all"
+
+    for adcw_want in "$@"; do
+        adcw_ok=0
+        for adcw_root in $adcw_roots; do
+            case "$adcw_want" in
+                "$adcw_root"|"$adcw_root"/*) adcw_ok=1; break ;;
+            esac
+        done
+        if [ "$adcw_ok" != "1" ]; then
+            die "$(basename "$adcw_unit") writes $adcw_want, but ProtectSystem=strict and ReadWritePaths only covers: $(echo "$adcw_roots" | tr '\n' ' ')
+that write is EROFS from inside the service. The install would still succeed — the installer runs outside the sandbox — and the console would never leave setup mode."
+        fi
+        log "$adcw_want is inside $(basename "$adcw_unit")'s writable paths"
+    done
+}

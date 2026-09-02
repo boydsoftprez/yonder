@@ -114,11 +114,6 @@ if [ -d "$yc_dest" ] || [ "$DRY_RUN" = "1" ]; then
     run ln -s "$yc_dest" "$con_dest/node_modules/yonder-core"
 fi
 
-# Where the generated palette is served from (R-UI-07). A directory of its
-# own: settings.js is one level up and must never be a candidate for
-# express.static.
-ensure_dir "$con_dest/public" 0755
-
 # Node-RED's userDir: its flows, its own state, and nothing of ours. Owned by
 # the account the console runs as, because it is the only thing that writes
 # here. 0750 so the group can read it and nobody else can.
@@ -131,6 +126,18 @@ ensure_dir "$con_state" 0750
 if getent passwd yonder >/dev/null 2>&1 || [ "$DRY_RUN" = "1" ]; then
     run chown yonder:yonder "$con_state"
 fi
+
+# Where the generated palette is served from (R-UI-07). A directory of its
+# own: settings.js is one level up and must never be a candidate for
+# express.static.
+#
+# Under the state directory, not the console tree. The daemon rewrites this
+# file on every apply, and the daemon is sandboxed ProtectSystem=strict with
+# only /etc/yonder and /var/lib/yonder writable - so a theme.css under /opt
+# was EROFS from inside the service, which is what left the first board this
+# ran on stuck in setup mode after its password was set. See
+# DEFAULT_CONSOLE_PATHS in packages/yonder-core/src/console/settings.ts.
+ensure_dir "$con_state/public" 0755
 
 # The empty flows file setup mode runs on. Separate from flows.json rather
 # than an emptied version of it, so provisioning a device never has to
@@ -180,8 +187,14 @@ fi
 # on every start, with the right answer for whether a password has been set.
 # Regenerating it here would put a provisioned console back into setup mode
 # until the next apply.
-if [ -f "$con_dest/settings.js" ]; then
-    log "console settings already present, leaving them alone: $con_dest/settings.js"
+# Before generating anything: the daemon rewrites both of these on every
+# apply, from inside a sandbox that only lets it write what ReadWritePaths
+# names. If they ever drift back outside it, fail here rather than on a board.
+yc_unit_src="$YONDER_SRC/systemd/yonder-core.service"
+assert_daemon_can_write "$yc_unit_src" "$con_state/settings.js" "$con_state/public"
+
+if [ -f "$con_state/settings.js" ]; then
+    log "console settings already present, leaving them alone: $con_state/settings.js"
 else
     # Whether this device already has an administrator password. Only the
     # presence of the key is read; nothing prints its value.
@@ -191,12 +204,12 @@ else
         con_provisioned="--provisioned"
         log "this device already has an administrator password; generating a console to match"
     fi
-    log "generating $con_dest/settings.js"
+    log "generating $con_state/settings.js"
     # shellcheck disable=SC2086 # con_provisioned is one optional flag, or nothing
     run "$YONDER_NODE_LINK" "$yc_dest/dist/console/settings.js" \
-        "$YONDER_ETC/config.yaml" "$con_dest/settings.js" \
+        "$YONDER_ETC/config.yaml" "$con_state/settings.js" \
         --core-tree "$yc_dest" --user-dir "$con_state" \
-        --public-dir "$con_dest/public" $con_provisioned
+        --public-dir "$con_state/public" $con_provisioned
 fi
 
 if [ -f "$YONDER_SRC/systemd/yonder-console.service" ]; then
