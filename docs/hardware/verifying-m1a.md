@@ -30,8 +30,10 @@ hand-written guesses.
 | Date | 2026-09-01 |
 
 **`network-manager`, `dnsmasq-base` and `ca-certificates` are already present on Raspberry
-Pi OS Lite.** `ensure_pkgs` reports them as such and installs nothing, so `10-base.sh` needs
-no network on this image. That does not make the explicit `dnsmasq-base` line redundant — an
+Pi OS Lite.** `ensure_pkgs` reported all three as such. `10-base.sh` also asks for `curl`,
+which this boot did not record either way — so "the base role needs no network on this
+image" is true of three packages out of four and not yet of the role. That does not make the
+explicit `dnsmasq-base` line redundant — an
 installer that only works because the image happened to carry a package is an installer that
 breaks on the next image — but it does mean the base role is not where an offline install
 gets stuck.
@@ -379,20 +381,24 @@ sudo ./installer/install.sh
 ```
 
 This runs every role under `installer/roles/` in order: `10-base.sh` installs
-`network-manager` and `dnsmasq-base` — the second explicitly, because NetworkManager only
-*Recommends* it and this installer passes `--no-install-recommends`, and without it
-`ipv4.method shared` has no DHCP server to run — and creates `/etc/yonder` (mode `0750`),
-`/var/lib/yonder`, and `/etc/NetworkManager/dnsmasq-shared.d`; `20-yonder-core.sh` resolves a
-Node, links it at `/usr/local/bin/yonder-node`, installs Node dependencies,
-builds `yonder-core` into `/opt/yonder/packages/yonder-core`, copies
-`systemd/yonder-core.service` into place, checks that the binary the unit's `ExecStart` names
-is actually executable, seeds `/etc/yonder/config.yaml`, and runs
-`systemctl daemon-reload`, `enable` and `restart`.
+`ca-certificates`, `curl`, `network-manager` and `dnsmasq-base` — the last explicitly,
+because NetworkManager only *Recommends* it and this installer passes
+`--no-install-recommends`, and without it `ipv4.method shared` has no DHCP server to run —
+and creates `/etc/yonder` (mode `0750`), `/var/lib/yonder` and `/opt/yonder`;
+`20-yonder-core.sh` resolves a Node, links it at `/usr/local/bin/yonder-node`, installs or
+copies in `yonder-core` at `/opt/yonder/packages/yonder-core`, checks that its entry point
+and everything it imports actually load, copies `systemd/yonder-core.service` into place,
+checks that the binary the unit's `ExecStart` names is actually executable, seeds
+`/etc/yonder/config.yaml`, and runs `systemctl daemon-reload`, `enable` and `restart`.
 
-On Raspberry Pi OS Lite, `10-base.sh` installs nothing: `network-manager`, `dnsmasq-base` and
-`ca-certificates` are all already present, and `ensure_pkgs` reports them as such. Expect
-`packages already present: …` rather than an `apt-get` line, and expect the role to need no
-network at all on that image.
+Nothing creates `/etc/NetworkManager/dnsmasq-shared.d`. It arrives with the
+`network-manager` package, and Yonder no longer writes into it at all — the DHCP drop-in
+that needed it decided nothing and has been removed (K-15).
+
+On Raspberry Pi OS Lite the role asks for four packages and expects to install few of them.
+Boot 1 recorded `network-manager`, `dnsmasq-base` and `ca-certificates` as already present —
+`packages already present: …` rather than an `apt-get` line. `curl` was not recorded either
+way, so **do not assume this role needs no network until a boot says so for all four.**
 
 **The installer leaves the service running and the device configured.** There is nothing to
 write by hand: `config/defaults/config.yaml` — generated from `DEFAULT_CONFIG` and identical
@@ -920,8 +926,11 @@ still unrun — but what it did reach was decisive, and the two defects it found
 | 6 — Fallback brings the access point up after reboot | Not run, **and a defect found by inspection of the capture** | `wlan0` was `unavailable` at the moment the daemon would have rendered. The start-up render writes the `yonder-ap` profile the fallback raises, and it rendered once and never looked again — so on this board the fallback would have had nothing to raise. Fixed; see Defect 2 |
 
 Both fixes are gated by tests that fail without them, and by an installer post-condition that
-fails when `ExecStart` names a missing binary. Neither has yet run on hardware. **Boot 2 is
-what makes this document true**; start again at Step 1 and fill in a new section below.
+fails when `ExecStart` names a missing binary. **Neither has yet run on a boot.** What
+happened instead — this board carried forward by hand, fix by fix, without a re-flash — is
+written out under *What has actually run on hardware* below, and it does not replace this.
+**Boot 2 is what makes this document true**; start again at Step 1 and record it as a new
+Results section here.
 
 What behaved differently from the unit tests (there is almost certainly something — this
 document flags a few candidates worth checking specifically):
@@ -966,41 +975,97 @@ code and replace the fixture; never reshape a capture to fit what is written her
 
 ---
 
-## Verified on hardware — 2026-09-01
+## What has actually run on hardware — 2026-09-01
 
 Raspberry Pi 4 Model B Rev 1.5 · Debian GNU/Linux 13 (trixie) · kernel 6.18.34+rpt-rpi-v8
 aarch64 · 905 MB · NetworkManager 1.52.1 · installed entirely offline from a card.
 
-All three exit criteria passed:
+**One board, flashed once, and carried forward by hand from there.** Every result below
+came from that single card. It was not re-flashed after any of the five fixes, and the
+sequence matters more than the results do, so it is written out rather than summarised.
 
-| | Observed |
+1. **Cold flash, boot 1.** The offline install ran end to end: bundled Node installed,
+   prebuilt tree copied, `/etc/yonder/config.yaml` seeded, the unit installed and enabled.
+   The service then crash-looped — `ExecStart=/usr/bin/node`, a path the bundled runtime
+   does not use — `203/EXEC`, restarting for ever. **No access point.** This is the whole of
+   what a cold flash has ever been observed to do.
+2. **The radio-wait fix was written from boot 1's capture, not from a boot.** `wlan0` was
+   `unavailable` in the `device status` taken at the moment the daemon would have rendered,
+   and the consequence was read off the code. No boot has yet exercised it.
+3. **A later run on the same board**: the service ran, and there was still no access point.
+   The radio was blocked.
+4. **The radio was unblocked by hand** — `rfkill unblock wifi` then `nmcli radio wifi on`.
+   Only then did the access point come up: `wlan0:wifi:connected:yonder-ap`,
+   `192.168.77.1/24`, `iw dev wlan0: ssid yonder, type AP, channel 6`, DHCP serving, and
+   the socket answering `{"state":"idle"}`.
+5. **The rollback test passed** on that hand-patched board: an apply left unconfirmed
+   returned the configuration to its previous value, `lastResult.outcome = "reverted"`, and
+   the access point never dropped.
+6. **The fallback test passed** on that same board — access point disabled *and confirmed*,
+   Ethernet disconnected, and the daemon **restarted with `systemctl restart`, not
+   rebooted**. 90 s later: `fallback: nothing reachable, bringing the access point up` →
+   `yonder-ap` active. It came up despite the configuration saying it was disabled.
+7. **The DHCP finding** came from a client joining that already-running board.
+8. **The retired-key defect** was found by upgrading that same board in place, past the
+   removal, with its old `config.yaml` still on it.
+9. **The radio fix was verified by blocking the radio by hand and restarting the service** —
+   not by a cold flash.
+
+### What that proves, and what it does not
+
+| | |
 |---|---|
-| **Flash, boot, access point** | `wlan0:wifi:connected:yonder-ap`, `192.168.77.1/24`, `iw dev wlan0: ssid yonder, type AP, channel 6`, DHCP serving, socket answering `{"state":"idle"}` |
-| **Apply without confirming reverts** | Config and the rendered file both returned to their previous values; `lastResult.outcome = "reverted"`; the access point never dropped |
-| **Fallback raises the access point** | Access point disabled *and confirmed*, Ethernet disconnected, daemon restarted. 90 s later: `fallback: nothing reachable, bringing the access point up` → `yonder-ap` active. **It came up despite configuration saying it was disabled** |
+| **The offline install mechanism works from a cold card** | Proven, on boot 1: bundled Node, prebuilt tree, seeded configuration, unit enabled — all of it, offline |
+| **Rollback of an unconfirmed apply** | Proven, on a running, hand-patched board |
+| **The fallback raises the access point when nothing is reachable** | Proven, on a running, hand-patched board, across a service restart |
+| **The radio unblock clears both locks** | Proven, on a running board with the radio blocked by hand |
+| **The retired-key strip loads an older configuration** | Proven, by an in-place upgrade of that board |
+| **A cold flash to a joinable access point with no intervention** | **Not proven.** The only cold flash there has ever been ended in a crash loop. Every result above sits on a board that a human had already reached |
+| **Any of it across a real reboot** | **Not proven.** The fallback was exercised with `systemctl restart`. Nothing here has survived the kernel coming up again |
+
+So the exit criteria are not met by this run. The mechanisms behind them have each been seen
+to work; the boot they are supposed to work *on* has not happened since the first one, and
+the first one failed. **Boot 2 — a fresh flash of a card built from this branch, powered on
+and left alone — is still what makes this document true.** It is the one test none of the
+above substitutes for, because every fix listed here was applied to a board that was already
+running, and a fix that works when applied by hand to a live system is not yet a fix that
+works when a board is switched on.
 
 ### What the hardware found that the test suite could not
 
-Five defects, all fixed and gated:
+Five defects, all fixed and gated. How each was found is part of the finding, so it is said
+here rather than left to be assumed:
 
 1. The unit hardcoded a Node path the bundled runtime did not use — the service crash-looped.
+   *Found by the cold boot, which is the only thing that could have found it.*
 2. On a cold boot the radio is not ready when the daemon starts; the render found no radio,
-   never retried, and the fallback had no access-point profile to raise.
+   never retried, and the fallback had no access-point profile to raise. *Found by reading
+   boot 1's `device status` capture — `wlan0:wifi:unavailable:` at the moment the daemon
+   would have rendered — and following it through the code. Not found by a boot, and the fix
+   has not yet met one.*
 3. **Raspberry Pi OS ships the Wi-Fi radio disabled behind two independent locks** — kernel
    rfkill *and* NetworkManager's own persistent flag (`rfkill: Wi-Fi enabled by radio
    killswitch; disabled by state file`). Both must be cleared or no Pi ever raises an
-   access point.
+   access point. *Found by a running board with no access point, and confirmed by clearing
+   both locks by hand and watching one appear. The fix was verified by re-blocking the radio
+   and restarting the service, not by a flash.*
 4. The configurable DHCP pool decided nothing: NetworkManager's shared mode passes its own
    `--dhcp-range` on the dnsmasq command line, which wins over any drop-in. A client was
-   handed `.154` while the file asked for `.2`–`.50`. The setting was removed.
+   handed `.154` while the file asked for `.2`–`.50`. The setting was removed. *Found by a
+   real client joining that running board.*
 5. **Removing that setting stranded the board that already had it.** Strict validation
    rejected the whole file, so the network never came up. On an aircraft with no cable that
    device would have needed a card reader. Retired keys are now dropped with a clear log
-   line rather than rejecting the document.
+   line rather than rejecting the document. *Found by upgrading that same board in place,
+   which is the only place a configuration written by an earlier version existed.*
 
-Every fake command runner in the suite reports a radio that is present, unblocked and
-enabled, and a configuration written by the current version. None of them could have found
-3 or 5.
+None of these could have been found by the suite as it stood: every fake command runner
+reported a radio present, unblocked and enabled, and every configuration under test had been
+written by the current version. That is no longer the shape of the suite — it now carries
+`COLD_BOOT` and `NO_RADIO_YET` device lists, a runner that refuses an activation on a radio
+that is not ready, and a fixture configuration written by an earlier version — but those
+harnesses exist *because* of this board, so they are not evidence that the next defect of
+this kind would be caught either.
 
 ### Notes for anyone repeating this
 

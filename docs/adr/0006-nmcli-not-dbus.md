@@ -45,9 +45,15 @@ that no test ever shells out.
 - **Field lists are pinned explicitly.** Every call names the fields it reads with `-f`, so
   a distribution shipping a different default field order cannot silently change what we
   parse.
-- **Distribution differences are a real risk.** The two supported bases ship different
-  NetworkManager versions. Recorded fixtures come from both, and the parser tests run
-  against both.
+- **Distribution differences are a real risk, and this is not yet covered.** The two
+  supported bases ship different NetworkManager versions. The fixtures come from **one**
+  board — a Raspberry Pi 4 on Debian 13, NetworkManager 1.52.1 — and only two of the four
+  are captures at all: `device-status.txt` and `device-show-ip4.txt`. `connection-list.txt`
+  and `wifi-scan.txt` are still written from the documentation. That is not a small
+  distinction: the `device show` fixture was hand-written too, and while it was,
+  `parseDeviceShow` expected a placeholder address for an address-less device — a board
+  prints no line at all. Capturing the remaining two, and the whole set from a second base,
+  is outstanding work.
 - **Shelling out stays confined to renderers.** This is not a general licence. Everywhere
   else, if a service offers a real interface, use it.
 - If the parsing surface ever becomes the source of recurring bugs, the injected runner is
