@@ -198,3 +198,20 @@ describe("themeCss never clips prose", () => {
     });
   }
 });
+
+/**
+ * Vuetify's block button is `min-width: 100%` with `flex: 1 0 auto` — not
+ * `width`. Overriding `width` alone does nothing, which is how the first
+ * attempt at this shipped a console whose every action was still a 704px
+ * slab. Asserted because the property that matters is not the obvious one.
+ */
+describe("themeCss sizes actions to their words", () => {
+  for (const t of ["day", "night"] as ThemeName[]) {
+    it(`overrides min-width, not just width (${t})`, () => {
+      const rule = /\.nrdb-ui-button \.v-btn\.v-btn--block\s*\{[^}]*\}/s.exec(themeCss(t))?.[0] ?? "";
+      expect(rule, "there must be a rule for block buttons").not.toBe("");
+      expect(rule).toMatch(/min-width:\s*12rem\s*!important/);
+      expect(rule).toMatch(/flex:\s*0 0 auto/);
+    });
+  }
+});

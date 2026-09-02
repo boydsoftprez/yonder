@@ -317,15 +317,23 @@ html, body, .v-application, .nrdb-app {
   padding-inline: var(--yonder-space-5);
 }
 
+/* Vuetify's block button is min-width:100% and flex:1 0 auto, not width, so
+   overriding width alone does nothing - which is how the first attempt at
+   this left every action still 704px wide. */
 .nrdb-ui-button .v-btn.v-btn--block {
+  min-width: 12rem !important;
   width: auto;
-  min-width: 12rem;
+  flex: 0 0 auto;
+  align-self: flex-start;
 }
 
 /* Below this the column is too narrow for a button to sit beside anything,
    so it may as well take the width and be easy to hit. */
 @media (max-width: 599px) {
-  .nrdb-ui-button .v-btn.v-btn--block { width: 100%; }
+  .nrdb-ui-button .v-btn.v-btn--block {
+    min-width: 100% !important;
+    width: 100%;
+  }
 }
 
 .v-btn--variant-flat {
