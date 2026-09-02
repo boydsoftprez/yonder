@@ -41,6 +41,10 @@ fi
 # So the client ships installed and off. yonder-core starts it when, and only
 # when, a network id is configured, and stops it again on leave (R-VPN-05,
 # R-VPN-08).
+# `try`, not `run ... || true`: roles are sourced, so `die`'s `exit` inside
+# `run` terminates the whole install and the `||` never sees it. Both of these
+# legitimately fail where an image is built - a chroot with no running systemd
+# answers neither - and neither is worth an install for.
 log "stopping and disabling zerotier-one until a network is configured"
-run systemctl stop zerotier-one || true
-run systemctl disable zerotier-one || true
+try systemctl stop zerotier-one
+try systemctl disable zerotier-one

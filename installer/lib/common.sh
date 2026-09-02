@@ -34,6 +34,27 @@ run() {
     fi
 }
 
+# Run a command whose failure is not this installer's business.
+#
+# **`run ... || true` does not do this, and cannot.** `run` calls `die`, `die`
+# calls `exit`, and `exit` inside a shell function terminates the shell -
+# roles are *sourced* by install.sh, not run in a subshell, so there is no
+# subshell for the `||` to catch. A role that wrote it got the opposite of
+# what it meant: a command that may legitimately fail aborting the whole
+# install. `--dry-run` cannot surface that, because `run` never executes
+# anything on that path.
+#
+# So the tolerance belongs inside the helper, where the failure is caught
+# before anything decides to exit over it. Says what it ignored, because a
+# step that is allowed to fail silently is a step nobody can debug from a log.
+try() {
+    if [ "$DRY_RUN" = "1" ]; then
+        printf '  + %s\n' "$*"
+    else
+        "$@" || log "($* exited $?; carrying on)"
+    fi
+}
+
 # True when a package is already installed.
 have_pkg() {
     dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q 'ok installed'
