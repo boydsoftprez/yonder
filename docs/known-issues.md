@@ -631,3 +631,27 @@ the gate is meant to make unnecessary.
 What is left is cosmetic. **Closes when** either the palette gains the triplets Vuetify
 wants, or the dropdown stops being `required` until a scan has run — arguably the truer
 fix, since before a scan there is nothing to require.
+
+### K-32 · ~~Choosing a palette applied, then undid itself~~ — CLOSED
+
+R-CFG-11 removed the operator confirmation, because joining a network takes the access
+point off the air and the console you would confirm from goes with it. The device verifies
+a *radio move* for itself and confirms on that evidence.
+
+Nothing else was verified by anything. A theme change does not move the radio, so it went
+pending and the timer reverted it two minutes later — and there was no longer any control
+on the console able to confirm it. An operator chose a palette, watched it take, and
+watched it undo itself. Reported by eye; nothing in the suite could see it, because every
+test that confirmed an apply called `confirm()` directly.
+
+Closed by R-CFG-12. The confirmation window is the price of R-CFG-03's guarantee that a
+device comes back by itself, and a change that touches nothing reachable has nothing to
+guarantee. `affectsReachability` compares the whole document with only the interface's
+appearance removed — *everything is reachable until proven otherwise* — so a field added
+to the schema later is load-bearing by default rather than silently exempt. Getting that
+bias backwards costs a device nobody can reach; getting it this way costs a palette that
+reverts, and only one of those is recoverable from a chair.
+
+The harness saw it too, once it stopped hiding: `verify-pages.sh` restored the default
+palette with `|| true` after capturing, so a run that failed to restore reported nothing
+and left a held console in the night palette.

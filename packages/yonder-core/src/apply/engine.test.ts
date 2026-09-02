@@ -868,3 +868,49 @@ describe("what counts as moving the radio", () => {
     expect(await classify(from, to)).toBe(false);
   });
 });
+/**
+ * A change that cannot cost reachability is kept, not held (R-CFG-11).
+ *
+ * The confirmation window is the price of R-NET-07's guarantee that a device
+ * comes back by itself. A palette cannot take a device off the air, so it has
+ * nothing to guarantee — and holding it anyway broke the control: R-CFG-11
+ * removed the operator confirmation, so choosing a theme applied, went
+ * pending, and reverted two minutes later with nothing able to confirm it.
+ */
+describe("an apply that cannot cost reachability", () => {
+  /** Only the appearance changes; everything else is the shipped default. */
+  const cosmetic = () => {
+    const next = structuredClone(DEFAULT_CONFIG);
+    next.ui.theme = "night";
+    return next;
+  };
+
+  it("is confirmed at once, with nothing to count down", async () => {
+    const { clock } = fakeClock();
+    const e = new ApplyEngine({ configPath, journalPath, renderers: [renderer()], clock });
+    const result = await e.apply(cosmetic());
+    expect(result.expiresAt, "there is nothing to expire").toBeNull();
+    expect(e.status().state).toBe("confirmed");
+    expect(loadConfig(configPath).ui.theme).toBe("night");
+  });
+
+  it("leaves nothing armed that could revert it later", async () => {
+    const { clock, advance } = fakeClock();
+    const e = new ApplyEngine({ configPath, journalPath, renderers: [renderer()], clock });
+    await e.apply(cosmetic());
+    // Well past any window. The change an operator made is still the one made.
+    advance(600_000);
+    expect(e.status().state).toBe("confirmed");
+    expect(loadConfig(configPath).ui.theme).toBe("night");
+  });
+
+  it("does not let a network change ride along on the same ticket", async () => {
+    const { clock } = fakeClock();
+    const e = new ApplyEngine({ configPath, journalPath, renderers: [renderer()], clock });
+    const next = cosmetic();
+    next.network.client.ssid = "hangar-2g";
+    const result = await e.apply(next);
+    expect(result.expiresAt, "a radio move still waits").not.toBeNull();
+    expect(e.status().state).toBe("pending");
+  });
+});

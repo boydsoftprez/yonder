@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { randomUUID } from "node:crypto";
+import { affectsReachability } from "./reachability.js";
 import { copyFileSync, existsSync } from "node:fs";
 import { ConfigSchema, DEFAULT_CONFIG, type Config } from "../schema/config.js";
 import { withoutRetiredKeys, retirementNotice } from "../schema/retired.js";
@@ -173,7 +174,13 @@ export class ApplyEngine {
    */
   async apply(next: unknown): Promise<{
     id: string;
-    expiresAt: number;
+    /**
+     * When the change reverts unless confirmed, or **null when there is
+     * nothing to confirm** — an apply that cannot cost reachability is kept
+     * the moment it is made. A caller that renders a countdown should render
+     * none for null rather than treating it as "expires now".
+     */
+    expiresAt: number | null;
     /** Set only when true: the rollback target for this apply is the shipped
      *  default, not the operator's actual previous configuration. See the
      *  loadConfig catch below. */
@@ -326,6 +333,38 @@ export class ApplyEngine {
         `this apply moves the wifi radio to ${wifiMode(parsed.data)} mode; `
         + `confirm it within ${Math.round(window / 1000)} s or it reverts`,
       );
+    }
+
+    /**
+     * An apply that cannot cost reachability does not wait to be confirmed.
+     *
+     * The confirmation window exists for one reason: a configuration change
+     * can take the device off the air, and R-NET-07 and R-CFG-03 say the
+     * device must come back by itself when it does. Nothing else about it is
+     * a virtue — it is a cost paid to make that guarantee.
+     *
+     * A change that touches nothing reachable has nothing to guarantee. The
+     * palette is the worked example and it was broken: choosing day or night
+     * applied, went pending, and reverted two minutes later, because R-CFG-11
+     * had removed the only control that could confirm it. An operator picked
+     * a theme, watched it take, and watched it undo itself.
+     *
+     * Compared rather than listed: everything that is *not* the interface's
+     * own appearance is treated as reachable until proven otherwise, so a
+     * field added to the schema later is safe by default rather than silently
+     * exempt.
+     */
+    if (!affectsReachability(previous, parsed.data)) {
+      // Same order as confirm(): the journal is cleared first, because that
+      // is what makes the change permanent.
+      this.journal.clear();
+      this.state = "confirmed";
+      this.lastResult = { id, outcome: "confirmed", at: this.clock.now() };
+      return {
+        id,
+        expiresAt: null,
+        ...(previousIsDefault ? { previousIsDefault } : {}),
+      };
     }
 
     this.state = "pending";
