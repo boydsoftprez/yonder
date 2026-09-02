@@ -105,6 +105,43 @@ password" is how one of them ends up weaker than the other.
   is the correct direction: the alternative is a console that lets people in when the thing
   holding the credential is not answering.
 
+## The one thing in front of the gate, and what it cost
+
+`GET /status` sits deliberately *outside* the administrator-password gate. It is the only
+route that does. A board whose `secrets.yaml` cannot be read has no credential to check a
+password against, so every gated route must refuse — and if the route that explains *why*
+also refuses, the device can only answer `403` to a fault the operator has to be standing
+next to it to fix. R-SEC-09 has been amended to state that carve-out rather than leave the
+code arguing with the requirement.
+
+Leaving it open cost something, and the cost is worth recording because it was invisible
+until someone went looking. `ApplyStatus.degraded` carried the message of whatever error
+stopped the renderer set being built — and the thing that stops it is a malformed
+`secrets.yaml`. The YAML parser reports a syntax error by quoting the offending lines
+straight back:
+
+    Tabs are not allowed as indentation at line 2, column 1:
+
+    ap_psk: <the access-point passphrase, in full>
+    	admin_password: <the stored hash, in full>
+
+So a stray tab in that file turned the one deliberately ungated route into an
+unauthenticated credential dump over the access point, and put the same lines in the
+journal on the way past. Both halves of R-SEC-10 — "an error message", "an API response" —
+in a single character of whitespace.
+
+The fix is at the capture point, which is what R-SEC-10 asks for: `SecretStore` now refuses
+a file it cannot parse with a message that keeps the line and column and discards the
+parser's reason, because the reason is inseparable from the quoted line that carries it.
+Nothing above that call can reintroduce the leak, and no future route has to remember to
+strip anything.
+
+**The general lesson, which outlives this ADR:** a route is not safe because of what it was
+designed to return. It is safe because of what everything upstream of it can be made to put
+there. `degraded` was specified as a short human-readable reason and became a file
+transcript, and the route in front of the gate was chosen before anyone asked what could
+reach that field.
+
 ## Not decided here
 
 What the console *contains* once it is unlocked. This ADR is about the lock. The pages behind

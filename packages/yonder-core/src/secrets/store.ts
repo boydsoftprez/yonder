@@ -11,6 +11,48 @@ type Bag = Record<string, string>;
 
 const BagSchema = z.record(z.string());
 
+/**
+ * Parse the secrets file without letting its contents escape inside an error.
+ *
+ * The YAML parser reports a syntax error by quoting the offending lines back:
+ *
+ *     Tabs are not allowed as indentation at line 2, column 1:
+ *
+ *     ap_psk: <the access-point passphrase, in full>
+ *     	admin_password: <the stored hash, in full>
+ *     ^
+ *
+ * That message travelled. `parse()` threw straight past the `safeParse` guard
+ * below, out of the constructor, out of `buildRenderers`, into
+ * `ApplyStatus.degraded` — and `GET /status` is deliberately in front of the
+ * administrator-password gate, so a device whose secrets.yaml had a stray tab
+ * in it would hand its passphrase and password hash to an unauthenticated
+ * caller on the access point. `warn()` put the same lines in the journal on
+ * the way past.
+ *
+ * R-SEC-10 says redaction happens where the value is captured rather than
+ * where it is printed, so that a new caller cannot reintroduce the leak.
+ * This is that point: above this line no error ever carries the file's
+ * contents, and no route, log call or support bundle has to remember to
+ * strip them.
+ *
+ * The position survives, because an operator fixing the file needs it and it
+ * names nothing. The parser's reason does not, because the reason is
+ * inseparable from the quoted line that carries it.
+ */
+function parseSecretsFile(path: string, text: string): unknown {
+  try {
+    return parse(text);
+  } catch (e) {
+    const at = (e as { linePos?: { line: number; col: number }[] }).linePos?.[0];
+    const where = at === undefined ? "" : ` at line ${at.line}, column ${at.col}`;
+    throw new ConfigError(`${path} is not valid YAML${where}`, [
+      "the parser's reason is not repeated here: it quotes the offending line, "
+        + "and every line of this file is a credential",
+    ]);
+  }
+}
+
 export class SecretStore {
   private readonly path: string;
   private bag: Bag;
@@ -21,7 +63,7 @@ export class SecretStore {
       this.bag = {};
       return;
     }
-    const parsed = BagSchema.safeParse(parse(readFileSync(path, "utf8")) ?? {});
+    const parsed = BagSchema.safeParse(parseSecretsFile(path, readFileSync(path, "utf8")) ?? {});
     if (!parsed.success) {
       throw new ConfigError(
         `${path} must be a flat map of names to string values`,
