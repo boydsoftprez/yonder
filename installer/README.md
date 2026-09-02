@@ -21,15 +21,52 @@ image where none of those are guaranteed to exist.
 
 ## Building an offline payload
 
-`20-yonder-core.sh` will install a prebuilt `yonder-core` rather than fetching
-and building one, and `install_bundled_node` will install a vendored Node
-runtime rather than reaching for the distro package. Together those are an
-install that touches the network for nothing. Neither is present in a
-checkout, and neither is produced by any step above — this is how to make
-them.
+Yonder installs without a network (R-CFG-07). `install_bundled_node` installs
+a vendored Node runtime rather than reaching for the distro package,
+`20-yonder-core.sh` installs a prebuilt `yonder-core` rather than building
+one, and `30-console.sh` copies a prebuilt console rather than fetching
+Node-RED. None of those is present in a checkout. This is how to make them.
 
-**The daemon.** `packages/yonder-core` needs a `dist/` and a `node_modules/`
-holding its *production* dependencies:
+**Everything that is downloaded — the Node runtime and the console —
+comes from one script:**
+
+```sh
+./installer/make-payload.sh --arch linux-arm64     # a Raspberry Pi or Radxa
+./installer/make-payload.sh --arch linux-x64       # a PC
+```
+
+It stages `vendor/node/bin/node` and
+`vendor/console/node_modules/node-red/red.js`, and it is re-runnable: each run
+replaces what the last one left. `vendor/` is downloaded binaries rather than
+source, so `.gitignore` keeps it out of the repository.
+
+Two things it does that a by-hand download does not:
+
+- **It verifies the Node tarball against the published `SHASUMS256.txt`** and
+  refuses to unpack one that does not match. The thing being substituted would
+  be the process that talks to an aircraft.
+- **It resolves the console's dependencies for the *board*, not for the build
+  machine** — `--os`, `--cpu` and `--libc`. Node-RED pulls `@node-rs/bcrypt`,
+  whose real code is in a per-platform optional package, so a payload built on
+  a laptop otherwise carries a macOS binary and no Linux one at all. Node-RED
+  catches that and falls back to pure JavaScript, which is exactly why it
+  would never have been noticed.
+
+`installer/console/package-lock.json` **is** committed, and is what makes two
+payloads built a week apart identical: the script installs with `npm ci` when
+it is there, and writes one when it is not.
+
+**Node 24, not 20.** Node 20 reached end of life in April 2026 and Node-RED 5
+requires 22.9 or newer, so the payload's runtime is the current 24 LTS line.
+The two roles still ask for different minimums, on purpose: `require_node 20`
+in `20-yonder-core.sh` is genuinely the daemon's floor, and `require_node 22`
+in `30-console.sh` is Node-RED's. A board with a distro Node 20 and no payload
+therefore installs a working daemon and fails loudly at the console, with a
+reason, rather than installing a console that cannot start.
+
+**The daemon.** `packages/yonder-core` also needs a `dist/` and a
+`node_modules/` holding its *production* dependencies. That one is built from
+this repository rather than downloaded, so it is not part of `make-payload.sh`:
 
 ```sh
 npm run build -w yonder-core
@@ -44,10 +81,10 @@ looks complete from the repository root and arrives on the board empty.
 `node_modules/.vite` — a vitest cache, created by `npm test` — is **not** a
 dependency tree. The installer says so and builds instead of trusting it.
 
-**The Node runtime.** Unpack a Linux build for the board's architecture
-(`arm64` for a Raspberry Pi 4 or 5) into `vendor/node`, so that
-`vendor/node/bin/node` exists. It is a downloaded binary rather than source,
-so `.gitignore` keeps it out of the repository.
+`npm run build` also copies `src/**/assets` into `dist/`, which is how the
+console's pages get onto a board. `tsc` copies only what it compiles, so a
+`dist/` built any other way produces a console that answers every request
+with a stack trace about a missing `setup.html`.
 
 **Checking the payload before it is flashed.** A dry run reports which route
 each half took:
