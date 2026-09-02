@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, it, expect } from "vitest";
+import { CONSOLE_HOME } from "./console/settings.js";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -291,5 +292,65 @@ describe("flows/flows.json", () => {
   it("caches no configuration in flow context for a form to edit", () => {
     const cached = flows.filter((n) => JSON.stringify(n).includes("yonderConfig"));
     expect(cached.map((n) => n.id)).toEqual([]);
+  });
+});
+
+/**
+ * Every `ui-text` widget must say where its value comes from.
+ *
+ * Dashboard 2.x's `ui-text` has two fields that look like they select content
+ * — the mustache-ish `format`, and the typed-input pair `value`/`valueType`.
+ * Only the second one does anything. `nodes/widgets/ui_text.js` reads
+ * `config.value`/`config.valueType` and nothing else, and there is no
+ * mustache renderer anywhere in the shipped UI bundle: `format` is vestigial.
+ *
+ * The shipped flows carried `format: "{{msg.payload.display.model}}"` and no
+ * `value`, so the widget fell through to the raw message and every field on
+ * the Status page rendered the string `[object Object]` — on a real board, in
+ * a browser, after everything else in this milestone had passed. Nothing
+ * caught it because no test had ever opened the page: `verify-pages.sh`
+ * checks HTTP bodies for substrings, and the substring it looked for was in
+ * the page shell rather than in a value.
+ */
+describe("flows/flows.json ui-text widgets", () => {
+  const texts = flows.filter((n) => n.type === "ui-text");
+
+  it("has some", () => {
+    expect(texts.length).toBeGreaterThan(0);
+  });
+
+  it("gives every one a typed-input value, because format renders nothing", () => {
+    for (const n of texts) {
+      expect(n.valueType, `${String(n.id)} must set valueType`).toBe("msg");
+      expect(typeof n.value, `${String(n.id)} must set value`).toBe("string");
+      expect(String(n.value).length, `${String(n.id)} value must not be empty`).toBeGreaterThan(0);
+    }
+  });
+
+  it("leaves no subpath in format, which would read as if it still worked", () => {
+    for (const n of texts) {
+      expect(n.format, `${String(n.id)} should carry the stock default`).toBe("{{msg.payload}}");
+    }
+  });
+});
+
+/**
+ * The dashboard's path and the place a signed-in operator is sent must be the
+ * same string.
+ *
+ * They were not. `POST /login` redirected to `/`, and in a provisioned
+ * console nothing is mounted there — the dashboard is at the `ui-base` node's
+ * path and the editor at its own root. So the final step of first-run setup
+ * ended on Express's bare `Cannot GET /`: the password was right, the session
+ * cookie was set, and the operator was looking at a white page with an error.
+ *
+ * Two files have to agree and neither could see the other, which is what this
+ * test is for.
+ */
+describe("flows/flows.json dashboard path", () => {
+  it("mounts the dashboard where the login redirect sends people", () => {
+    const base = flows.find((n) => n.type === "ui-base");
+    expect(base, "the flows must contain a ui-base node").toBeDefined();
+    expect(base?.path).toBe(CONSOLE_HOME);
   });
 });

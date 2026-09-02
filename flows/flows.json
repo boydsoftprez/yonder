@@ -380,7 +380,7 @@
         "height": 1,
         "name": "model",
         "label": "Board",
-        "format": "{{msg.payload.display.model}}",
+        "format": "{{msg.payload}}",
         "layout": "row-spread",
         "style": false,
         "font": "",
@@ -390,7 +390,9 @@
         "className": "",
         "x": 470,
         "y": 80,
-        "wires": []
+        "wires": [],
+        "value": "payload.display.model",
+        "valueType": "msg"
     },
     {
         "id": "text-load",
@@ -402,7 +404,7 @@
         "height": 1,
         "name": "load",
         "label": "CPU load (1, 5, 15 min)",
-        "format": "{{msg.payload.display.load}}",
+        "format": "{{msg.payload}}",
         "layout": "row-spread",
         "style": false,
         "font": "",
@@ -412,7 +414,9 @@
         "className": "",
         "x": 470,
         "y": 120,
-        "wires": []
+        "wires": [],
+        "value": "payload.display.load",
+        "valueType": "msg"
     },
     {
         "id": "text-temp",
@@ -424,7 +428,7 @@
         "height": 1,
         "name": "temperature",
         "label": "CPU temperature",
-        "format": "{{msg.payload.display.temperature}}",
+        "format": "{{msg.payload}}",
         "layout": "row-spread",
         "style": false,
         "font": "",
@@ -434,7 +438,9 @@
         "className": "",
         "x": 470,
         "y": 160,
-        "wires": []
+        "wires": [],
+        "value": "payload.display.temperature",
+        "valueType": "msg"
     },
     {
         "id": "text-memory",
@@ -446,7 +452,7 @@
         "height": 1,
         "name": "memory",
         "label": "Memory",
-        "format": "{{msg.payload.display.memory}}",
+        "format": "{{msg.payload}}",
         "layout": "row-spread",
         "style": false,
         "font": "",
@@ -456,7 +462,9 @@
         "className": "",
         "x": 470,
         "y": 200,
-        "wires": []
+        "wires": [],
+        "value": "payload.display.memory",
+        "valueType": "msg"
     },
     {
         "id": "text-uptime",
@@ -468,7 +476,7 @@
         "height": 1,
         "name": "uptime",
         "label": "Up for",
-        "format": "{{msg.payload.display.uptime}}",
+        "format": "{{msg.payload}}",
         "layout": "row-spread",
         "style": false,
         "font": "",
@@ -478,7 +486,9 @@
         "className": "",
         "x": 470,
         "y": 240,
-        "wires": []
+        "wires": [],
+        "value": "payload.display.uptime",
+        "valueType": "msg"
     },
     {
         "id": "text-yonder",
@@ -490,7 +500,7 @@
         "height": 1,
         "name": "yonder version",
         "label": "Yonder",
-        "format": "{{msg.payload.display.yonder}}",
+        "format": "{{msg.payload}}",
         "layout": "row-spread",
         "style": false,
         "font": "",
@@ -500,7 +510,9 @@
         "className": "",
         "x": 470,
         "y": 280,
-        "wires": []
+        "wires": [],
+        "value": "payload.display.yonder",
+        "valueType": "msg"
     },
     {
         "id": "text-os",
@@ -512,7 +524,7 @@
         "height": 1,
         "name": "os version",
         "label": "Operating system",
-        "format": "{{msg.payload.display.os}}",
+        "format": "{{msg.payload}}",
         "layout": "row-spread",
         "style": false,
         "font": "",
@@ -522,7 +534,9 @@
         "className": "",
         "x": 470,
         "y": 320,
-        "wires": []
+        "wires": [],
+        "value": "payload.display.os",
+        "valueType": "msg"
     },
     {
         "id": "note-theme",
@@ -681,7 +695,7 @@
         "height": 1,
         "name": "joined network",
         "label": "Joined Wi-Fi network",
-        "format": "{{msg.payload.network.client.ssid}}",
+        "format": "{{msg.payload}}",
         "layout": "row-spread",
         "style": false,
         "font": "",
@@ -691,7 +705,9 @@
         "className": "",
         "x": 840,
         "y": 540,
-        "wires": []
+        "wires": [],
+        "value": "payload.network.client.ssid",
+        "valueType": "msg"
     },
     {
         "id": "text-ap-ssid",
@@ -703,7 +719,7 @@
         "height": 1,
         "name": "access point",
         "label": "Access point",
-        "format": "{{msg.payload.network.ap.ssid}}",
+        "format": "{{msg.payload}}",
         "layout": "row-spread",
         "style": false,
         "font": "",
@@ -713,7 +729,9 @@
         "className": "",
         "x": 840,
         "y": 580,
-        "wires": []
+        "wires": [],
+        "value": "payload.network.ap.ssid",
+        "valueType": "msg"
     },
     {
         "id": "text-hostname",
@@ -725,7 +743,7 @@
         "height": 1,
         "name": "hostname",
         "label": "Name on the network",
-        "format": "{{msg.payload.system.hostname}}",
+        "format": "{{msg.payload}}",
         "layout": "row-spread",
         "style": false,
         "font": "",
@@ -735,7 +753,9 @@
         "className": "",
         "x": 840,
         "y": 620,
-        "wires": []
+        "wires": [],
+        "value": "payload.system.hostname",
+        "valueType": "msg"
     },
     {
         "id": "note-net-now",
@@ -990,7 +1010,7 @@
         "height": 2,
         "name": "what the device said",
         "label": "",
-        "format": "{{msg.payload.message}}",
+        "format": "{{msg.payload}}",
         "layout": "col-center",
         "style": false,
         "font": "",
@@ -1000,7 +1020,9 @@
         "className": "yonder-note",
         "x": 820,
         "y": 920,
-        "wires": []
+        "wires": [],
+        "value": "payload.message",
+        "valueType": "msg"
     },
     {
         "id": "note-confirm",
@@ -1105,7 +1127,7 @@
         "height": 2,
         "name": "confirmation",
         "label": "",
-        "format": "{{msg.payload.message}}",
+        "format": "{{msg.payload}}",
         "layout": "col-center",
         "style": false,
         "font": "",
@@ -1115,7 +1137,9 @@
         "className": "yonder-note",
         "x": 1040,
         "y": 1040,
-        "wires": []
+        "wires": [],
+        "value": "payload.message",
+        "valueType": "msg"
     },
     {
         "id": "activity-poll",
@@ -1245,7 +1269,7 @@
         "height": 1,
         "name": "host",
         "label": "Host",
-        "format": "{{msg.payload.host}}",
+        "format": "{{msg.payload}}",
         "layout": "row-spread",
         "style": false,
         "font": "",
@@ -1255,7 +1279,9 @@
         "className": "",
         "x": 740,
         "y": 1160,
-        "wires": []
+        "wires": [],
+        "value": "payload.host",
+        "valueType": "msg"
     },
     {
         "id": "text-ping-result",
@@ -1267,7 +1293,7 @@
         "height": 1,
         "name": "replies",
         "label": "Replies",
-        "format": "{{msg.payload.received}} of {{msg.payload.transmitted}}",
+        "format": "{{msg.payload}}",
         "layout": "row-spread",
         "style": false,
         "font": "",
@@ -1277,7 +1303,9 @@
         "className": "",
         "x": 740,
         "y": 1200,
-        "wires": []
+        "wires": [],
+        "value": "payload.message",
+        "valueType": "msg"
     },
     {
         "id": "text-ping-rtt",
@@ -1288,8 +1316,8 @@
         "width": 6,
         "height": 1,
         "name": "round trip",
-        "label": "Round trip",
-        "format": "{{msg.payload.rttMs}} ms",
+        "label": "Round trip (ms)",
+        "format": "{{msg.payload}}",
         "layout": "row-spread",
         "style": false,
         "font": "",
@@ -1299,7 +1327,9 @@
         "className": "",
         "x": 740,
         "y": 1240,
-        "wires": []
+        "wires": [],
+        "value": "payload.rttMs",
+        "valueType": "msg"
     },
     {
         "id": "note-reach",
@@ -1379,7 +1409,7 @@
         "height": 1,
         "name": "probed",
         "label": "Probed",
-        "format": "{{msg.payload.host}}",
+        "format": "{{msg.payload}}",
         "layout": "row-spread",
         "style": false,
         "font": "",
@@ -1389,7 +1419,9 @@
         "className": "",
         "x": 760,
         "y": 1330,
-        "wires": []
+        "wires": [],
+        "value": "payload.host",
+        "valueType": "msg"
     },
     {
         "id": "text-reach-result",
@@ -1401,7 +1433,7 @@
         "height": 1,
         "name": "replies",
         "label": "Replies",
-        "format": "{{msg.payload.received}} of {{msg.payload.transmitted}}",
+        "format": "{{msg.payload}}",
         "layout": "row-spread",
         "style": false,
         "font": "",
@@ -1411,7 +1443,9 @@
         "className": "",
         "x": 760,
         "y": 1380,
-        "wires": []
+        "wires": [],
+        "value": "payload.message",
+        "valueType": "msg"
     },
     {
         "id": "theme-apply",

@@ -103,6 +103,21 @@ export const CONSOLE_FLOW_FILE = "flows.json";
 /** The contents of that empty flows file. */
 export const EMPTY_FLOWS = "[]\n";
 
+/**
+ * Where a signed-in operator is sent, and where the console actually lives.
+ *
+ * The dashboard mounts itself at the `ui-base` node's `path`, so nothing at
+ * all is served at `/` once a device is provisioned. The login handler used
+ * to redirect there anyway, which meant the last step of first-run setup —
+ * type the password you just chose, press Sign in — landed on Express's bare
+ * `Cannot GET /`. Every part of the flow worked and the operator was looking
+ * at a white page with an error on it.
+ *
+ * Exported so the middleware and `flows/flows.json` cannot drift: a test in
+ * `flows.test.ts` asserts the `ui-base` node's path is exactly this.
+ */
+export const CONSOLE_HOME = "/dashboard";
+
 /** Where the flow editor lives, when it lives anywhere. */
 export const EDITOR_ROOT = "/editor";
 

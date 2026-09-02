@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { renderPage } from "./assets.js";
+import { CONSOLE_HOME } from "./settings.js";
 import type { DaemonClient } from "./client.js";
 import type { SessionStore } from "./session.js";
 
@@ -292,7 +293,7 @@ export function consoleMiddleware(deps: ConsoleMiddlewareDeps): Middleware {
           res.setHeader("set-cookie", sessionCookie(deps.sessions.mint()));
           // 303, so the browser follows with a GET and a reload does not
           // re-post the password.
-          res.writeHead(303, { location: "/", "cache-control": "no-store" });
+          res.writeHead(303, { location: CONSOLE_HOME, "cache-control": "no-store" });
           res.end();
           return;
         }

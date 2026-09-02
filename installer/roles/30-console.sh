@@ -257,7 +257,7 @@ if [ -f "$YONDER_SRC/systemd/yonder-console.service" ]; then
     # enough to do that. A node that cannot is a console that dies on start-up
     # with ERR_REQUIRE_ESM, for ever, under Restart=always. Here the message
     # says so and the install stops.
-    assert_module_graph "$con_dest" settings.js "$YONDER_NODE_LINK"
+    assert_module_graph "$con_state" settings.js "$YONDER_NODE_LINK"
 
     if [ "$DRY_RUN" != "1" ] && command -v systemctl >/dev/null 2>&1; then
         run systemctl daemon-reload

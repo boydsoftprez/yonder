@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { CONSOLE_HOME } from "./settings.js";
 import { createServer, request, type Server } from "node:http";
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -286,7 +287,9 @@ describe("consoleMiddleware", () => {
     await serve(consoleWith(answering(200, '{"ok":true}')).middleware);
     const login = await call("POST", "/login", { form: { password: GOOD } });
     expect(login.status).toBe(303);
-    expect(login.headers.location).toBe("/");
+    // Where the dashboard actually is. Redirecting to "/" landed a
+    // freshly signed-in operator on Express's bare "Cannot GET /".
+    expect(login.headers.location).toBe(CONSOLE_HOME);
 
     const cookie = Array.isArray(login.headers["set-cookie"])
       ? login.headers["set-cookie"][0]!
