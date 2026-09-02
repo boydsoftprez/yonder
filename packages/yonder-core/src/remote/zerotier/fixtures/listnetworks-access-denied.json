@@ -1,0 +1,14 @@
+[
+  {
+    "id": "9fef8a3bf9000001",
+    "nwid": "9fef8a3bf9000001",
+    "mac": "02:9f:ef:73:00:73",
+    "name": "",
+    "status": "ACCESS_DENIED",
+    "type": "PRIVATE",
+    "portDeviceName": "ztuqliuo7y",
+    "assignedAddresses": [],
+    "routes": [],
+    "netconfRevision": 0
+  }
+]
