@@ -1,0 +1,45 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!--
+  The editor half of the identity instrument. Node-RED finds this by basename
+  beside the node's .js; without it the widget registers and shows as "unknown
+  node". A form and a registration, nothing else (CLAUDE.md rule 2, R-UI-01).
+-->
+<script type="text/html" data-template-name="ui-yonder-identity">
+  <div class="form-row"><label for="node-input-group"><i class="fa fa-table"></i> Group</label>
+    <input type="text" id="node-input-group" /></div>
+  <div class="form-row"><label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name" /></div>
+  <div class="form-row"><label for="node-input-label"><i class="fa fa-font"></i> Label</label>
+    <input type="text" id="node-input-label" placeholder="THIS DEVICE" /></div>
+  <div class="form-row"><label for="node-input-key"><i class="fa fa-key"></i> Key</label>
+    <input type="text" id="node-input-key" placeholder="deviceId" /></div>
+  <div class="form-tips">
+    Names one property of <code>msg.payload</code>. Shown in the mono face,
+    because an identifier is compared character by character, with a control
+    that puts it on the clipboard. A key that is absent draws as an em dash and
+    the copy control is not offered: a button that copies nothing is a button
+    that lies.
+  </div>
+</script>
+<script type="text/html" data-help-name="ui-yonder-identity">
+<p>An identifier and a means of copying it (R-VPN-06) &mdash; the number a
+person has to approve on a controller's website.</p>
+<p>Send an object on <code>msg.payload</code>; the widget reads the property
+named by <b>Key</b>. Nothing is sent back to the device: copying happens in
+the browser.</p>
+</script>
+<script type="text/javascript">
+  RED.nodes.registerType("ui-yonder-identity", {
+    category: "dashboard 2", color: "#c7e0d4",
+    defaults: {
+      name: { value: "" },
+      group: { type: "ui-group", required: true },
+      order: { value: 0 }, width: { value: 0 }, height: { value: 0 },
+      label: { value: "" }, key: { value: "value" }
+    },
+    inputs: 1, outputs: 0,
+    icon: "font-awesome/fa-id-card-o",
+    paletteLabel: "yonder identity",
+    label: function () { return this.name || this.label || "yonder identity"; }
+  });
+</script>

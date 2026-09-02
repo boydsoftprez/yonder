@@ -747,6 +747,45 @@ describe("flows/flows.json ZeroTier tab", () => {
     },
   );
 
+  // R-VPN-06: the identifier a person must approve is shown "with a means of
+  // copying it". The means is an instrument in
+  // node-red-dashboard-2-yonder, because Dashboard 1.31.0 has no clipboard
+  // path and CLAUDE.md rule 2 forbids the `function` node and the
+  // `ui-template` script that would otherwise have supplied one.
+  it("shows the device id through the instrument that can copy it", () => {
+    const shown = flows.filter(
+      (n) => n.group === "group-net-zerotier" && n.type === "ui-yonder-identity",
+    );
+    expect(shown).toHaveLength(1);
+    expect(shown[0]!.key).toBe("deviceId");
+  });
+
+  it("wires the mesh state to it, or it shows an em dash for ever", () => {
+    const state = flows.find((n) => n.type === "yonder-remote-state");
+    expect(state, "the tab has no state node").toBeDefined();
+    expect((state!.wires as string[][]).flat()).toContain("identity-zt-device");
+  });
+
+  /**
+   * A control that says it will act and does not.
+   *
+   * The `Copy` button shipped with `"wires": [[]]` and a tooltip telling the
+   * operator to select the text above and copy it by hand — it cost them the
+   * ten seconds of trying before they worked that out, at an aircraft, with a
+   * laptop open. A dead control is worse than an absent one, and nothing but
+   * an assertion here can see one: the pages capture correctly, the node
+   * tests pass, and pressing it does nothing at all.
+   */
+  it("has no button on the tab that goes nowhere", () => {
+    const dead = flows.filter(
+      (n) =>
+        n.group === "group-net-zerotier"
+        && n.type === "ui-button"
+        && (n.wires as string[][] | undefined)?.flat().length === 0,
+    );
+    expect(dead.map((n) => n.id)).toEqual([]);
+  });
+
   // CLAUDE.md rule 2: a function node is JavaScript serialised next to wire
   // coordinates, so it cannot be reviewed, so it cannot be merged.
   it("ships no function node", () => {

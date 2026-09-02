@@ -13,6 +13,7 @@ const tapeNode = (await import("./tape.js")).default ?? await import("./tape.js"
 const annunciatorNode = (await import("./annunciator.js")).default ?? await import("./annunciator.js");
 const databarNode = (await import("./databar.js")).default ?? await import("./databar.js");
 const softkeysNode = (await import("./softkeys.js")).default ?? await import("./softkeys.js");
+const identityNode = (await import("./identity.js")).default ?? await import("./identity.js");
 
 /**
  * What is tested here, and what honestly cannot be.
@@ -212,6 +213,19 @@ describe("the widgets", () => {
     expect(props!.cells).toEqual([{ key: "host", label: "HOST", kind: "id" }]);
   });
 
+  it("identity names the payload property it shows", () => {
+    const { props, type } = build(identityNode as (RED: RED) => void, { label: "THIS DEVICE", key: "deviceId" });
+    expect(type).toBe("ui-yonder-identity");
+    expect(props).toMatchObject({ label: "THIS DEVICE", key: "deviceId" });
+  });
+
+  it("identity falls back to a key rather than to no key at all", () => {
+    // An unset field must not become `undefined`, which would read
+    // `payload[undefined]` and draw an em dash for ever with no clue why.
+    expect(build(identityNode as (RED: RED) => void, {}).props!.key).toBe("value");
+    expect(build(identityNode as (RED: RED) => void, { key: 7 }).props!.key).toBe("value");
+  });
+
   it("soft keys carry their keys", () => {
     const { props } = build(softkeysNode as (RED: RED) => void, { keys: '[{"label":"REFRESH","action":"refresh","tone":"act"}]' });
     expect(props!.keys).toEqual([{ label: "REFRESH", action: "refresh", tone: "act" }]);
@@ -233,7 +247,7 @@ describe("the widgets", () => {
 
   it("leaves onAction off the read-only instruments", () => {
     // A gauge that could emit is a gauge that could originate a command.
-    for (const mod of [gaugeNode, tapeNode, annunciatorNode, databarNode]) {
+    for (const mod of [gaugeNode, tapeNode, annunciatorNode, databarNode, identityNode]) {
       const { events } = build(mod as (RED: RED) => void, {});
       expect(events?.onAction, "an instrument must not send").toBeUndefined();
     }
