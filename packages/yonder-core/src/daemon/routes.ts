@@ -13,6 +13,8 @@ import { displayFacts, type BoardDisplay } from "../system/format.js";
 import { isProbeHost, type PingResult } from "../diag/probe.js";
 import { joinNetwork, leaveNetwork, type JoinRequest } from "../net/join.js";
 import type { NetworkState } from "../net/state.js";
+import type { ModemState } from "../net/modem/state.js";
+import type { ReachState } from "../net/reach/standing.js";
 import { setTheme, type ThemeRequest } from "../ui/theme.js";
 import type { ScanResult } from "../net/scan.js";
 import type { BoardFacts } from "../system/facts.js";
@@ -39,6 +41,10 @@ export interface RouterDeps {
   throttle?: AttemptThrottle;
   /** What the radio is doing. Injected, so this router still knows no nmcli. */
   netState?: () => Promise<NetworkState>;
+  /** What the modem says about itself. Injected, so this router knows no mmcli. */
+  modemState?: () => Promise<ModemState>;
+  /** Which way out is in use, and which paths have been stood down. */
+  reachState?: () => Promise<ReachState>;
   /**
    * Called after an administrator password is set, so the console can be
    * rewritten and restarted into its provisioned shape.
@@ -391,6 +397,34 @@ export function createRouter(deps: RouterDeps): Router {
           };
         }
         return { status: 200, body: await deps.netState() };
+      }
+
+      // What the modem says about itself, and which way out is actually
+      // working. Two routes rather than one because they answer different
+      // questions and fail independently: a board can have a modem this
+      // daemon can read and no reach monitor, or the reverse.
+      //
+      // Absent means *this daemon has no such layer*, which is a 503 naming
+      // the absence — never an empty record, which a page would render as a
+      // modem with no signal on a board that has one.
+      if (method === "GET" && path === "/modem/state") {
+        if (deps.modemState === undefined) {
+          say("GET /modem/state: there is no modem layer on this daemon to ask");
+          return { status: 503, body: { error: "this device cannot report a modem" } };
+        }
+        // Never a credential. ModemState is assembled from what the device
+        // reports, not from the configuration, so the APN comes back off the
+        // connected bearer and `gsm.password` has no field to arrive in
+        // (R-SEC-10).
+        return { status: 200, body: await deps.modemState() };
+      }
+
+      if (method === "GET" && path === "/reach/state") {
+        if (deps.reachState === undefined) {
+          say("GET /reach/state: there is no reach monitor on this daemon to ask");
+          return { status: 503, body: { error: "this device cannot report its way out" } };
+        }
+        return { status: 200, body: await deps.reachState() };
       }
 
       if (method === "GET" && path === "/config") {

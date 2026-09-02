@@ -13,6 +13,12 @@ import { loadConfig } from "../config/load.js";
 import { seedConfigIfAbsent } from "../config/defaults.js";
 import { SecretStore } from "../secrets/store.js";
 import { NmcliClient } from "../net/nmcli/client.js";
+import { MmcliClient } from "../net/modem/mmcli/client.js";
+import { modemState } from "../net/modem/state.js";
+import { Standing } from "../net/reach/standing.js";
+import { commandProbe } from "../net/reach/probe.js";
+import { ReachMonitor, pathDevices, pathInUse } from "../net/reach/monitor.js";
+import type { PathName } from "../net/reach/standing.js";
 import { NetworkRenderer } from "../net/renderer.js";
 import { HostnameRenderer } from "../system/hostname.js";
 import { FallbackWatchdog } from "../net/watchdog.js";
@@ -35,6 +41,18 @@ import { DEFAULT_CONFIG, type Config } from "../schema/config.js";
  * the operator spends reading "the console is restarting".
  */
 export const PROVISION_RESTART_DELAY_MS = 1_500;
+
+/**
+ * How often ModemManager is asked to refresh the detailed signal numbers.
+ *
+ * R-CEL-10. Until this is set a modem reports only a coarse quality
+ * percentage, which on the measured board read 60 and then 29 while the real
+ * numbers moved three dB. Two seconds is the modem's own polling interval,
+ * not a rate anything here reads at: the readings are taken from the modem
+ * when a page asks, and arming this costs no bytes on the operator's link
+ * (R-CEL-09).
+ */
+export const SIGNAL_POLL_SECONDS = 2;
 
 export interface ServerOptions {
   socketPath: string;
@@ -108,6 +126,8 @@ export function buildRenderers(opts: BuildRenderersOptions): {
   consoleRenderer?: ConsoleRenderer;
   secrets: SecretStore;
   client: NmcliClient;
+  /** ModemManager, read and never driven. See net/modem/mmcli/client.ts. */
+  modemClient: MmcliClient;
   generated: string[];
 } {
   const log = opts.log ?? note;
@@ -123,6 +143,13 @@ export function buildRenderers(opts: BuildRenderersOptions): {
   // operator's view with `nmcli -t -f DEVICE,TYPE,STATE,CONNECTION device
   // status` twice a tick and buried what their Join actually did.
   const client = new NmcliClient(opts.runner ?? systemRunner, opts.trace ?? trace);
+  // The same runner as the nmcli client, deliberately, for the reason
+  // NmcliClient records about rfkill: two runners that must agree can stop
+  // agreeing, and the failure mode is a test reaching a real mmcli on the
+  // machine running it. The same two loggers apply too — an `mmcli` command
+  // line is diagnostic and belongs in the journal, not in the operator's
+  // activity pane.
+  const modemClient = new MmcliClient(opts.runner ?? systemRunner, opts.trace ?? trace);
   const renderer = new NetworkRenderer({ client, secrets, log, clock: opts.clock });
 
   // After the network renderer, deliberately. Renderers run in order, so this
@@ -160,6 +187,7 @@ export function buildRenderers(opts: BuildRenderersOptions): {
     ...(consoleRenderer === undefined ? {} : { consoleRenderer }),
     secrets,
     client,
+    modemClient,
     generated,
   };
 }
@@ -242,6 +270,50 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
     // `trace`, not `note`: an nmcli command line is diagnostic, and the
     // activity pane is where an operator looks for what their Join did.
     ?? new NmcliClient(opts.runner ?? systemRunner, trace);
+  // The same one buildRenderers made, so a test injecting a fake runner
+  // cannot reach a real mmcli, with the same fallback and for the same
+  // reason as the nmcli client above.
+  const modemClient = built?.modemClient
+    ?? new MmcliClient(opts.runner ?? systemRunner, trace);
+
+  /**
+   * Turn on ModemManager's detailed signal reporting, once per modem.
+   *
+   * R-CEL-10. A modem reports only a coarse quality percentage until this is
+   * set, and that percentage read 60 and then 29 on a board whose real
+   * numbers moved three dB.
+   *
+   * Here rather than in NetworkRenderer, deliberately. That class has no
+   * modem client and never raises the modem connection itself — the profile
+   * carries `connection.autoconnect yes` and NetworkManager brings the link
+   * up (R-CEL-06) — so there is no "after the modem came up" moment in the
+   * render path to hang this on. Manufacturing one would mean giving an
+   * mmcli dependency to the class that decides whether the device is
+   * reachable, to arm a page's detail. This is instead the first place that
+   * has the modem's ModemManager path in hand at all.
+   *
+   * **It can only ever log.** Failing to arm it costs detail on a page; the
+   * read it sits in front of still answers with whatever the modem does
+   * report, and a modem that has just appeared may simply not be ready yet —
+   * so a failure is retried on the next read and said once per modem, or a
+   * console polling every few seconds would fill the journal with it.
+   */
+  let armedModem: string | null = null;
+  let armFailedFor: string | null = null;
+  const armSignal = async (path: string): Promise<void> => {
+    if (armedModem === path) return;
+    try {
+      await modemClient.armSignal(path, SIGNAL_POLL_SECONDS);
+      armedModem = path;
+      armFailedFor = null;
+      note("modem: detailed signal reporting is on");
+    } catch (e) {
+      if (armFailedFor !== path) {
+        armFailedFor = path;
+        warn(`modem: could not turn on detailed signal reporting (${(e as Error).message})`);
+      }
+    }
+  };
 
   // No secret is ever printed. That mechanism existed to surface a random
   // per-device access-point passphrase and there is no longer one to surface
@@ -320,11 +392,63 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   // K-17, along with why it cannot simply be assigned earlier.
   let radioSettled: Promise<void> = Promise.resolve();
 
+  // Which way out is working, assembled from the parts in net/reach/.
+  //
+  // Built here, from the same NmcliClient and the same CommandRunner as
+  // everything else, so a test injecting a fake runner cannot reach a real
+  // `curl` — and built even when buildRenderers threw, because the watchdog
+  // below asks it a question and a board whose secret store is unreadable is
+  // exactly the board that must still raise its access point.
+  //
+  // Every input is read fresh on each call rather than captured: the
+  // configuration can change under an apply, and a monitor answering from the
+  // document that was in force at start-up would be answering about a device
+  // that no longer exists.
+  const reachConfig = (): Config => {
+    try {
+      return loadConfig(opts.configPath);
+    } catch {
+      return DEFAULT_CONFIG;
+    }
+  };
+  const reach = new ReachMonitor({
+    standing: new Standing({ clock, log: note }),
+    probe: commandProbe(opts.runner ?? systemRunner),
+    devices: async () => pathDevices(reachConfig(), await client.devices()),
+    order: () => reachConfig().network.priority.filter(
+      // `usb` is in the schema's interface list and no renderer writes one,
+      // so there is no path to report or probe for it.
+      (i): i is PathName => i !== "usb",
+    ),
+    inUse: async () => {
+      const config = reachConfig();
+      const [devices, addresses] = await Promise.all([client.devices(), client.activeIpv4()]);
+      return pathInUse(
+        config.network.priority.filter((i): i is PathName => i !== "usb"),
+        pathDevices(config, devices),
+        addresses,
+        config.network.ap.address.split("/")[0] ?? "",
+      );
+    },
+    log: note,
+  });
+
   const watchdog = new FallbackWatchdog({
     client,
     clock,
     config: watchdogConfig,
     since: startedAt,
+    // K-33. An address is not a way back: a modem with the wrong APN
+    // registers, attaches, takes an address and installs a route while
+    // completing no request, and a device configured that way from the boot
+    // partition with no other path never raised its access point.
+    //
+    // The monitor answers true on every doubt — a path nothing has probed
+    // yet, an address belonging to no path it knows, a question it could not
+    // ask — so wiring this in can only ever make the fallback fire *more*
+    // readily than the address check alone, never less. That direction is the
+    // one rule 6 allows.
+    carrying: () => reach.carrying(),
     // The fallback's only action is `nmcli connection up yonder-ap`, and that
     // profile exists only because a render created it. On a cold boot the
     // render may still be waiting for the radio when the deadline lands —
@@ -426,8 +550,34 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
         const [devices, addresses] = await Promise.all([client.devices(), client.activeIpv4()]);
         return networkState(loadConfig(opts.configPath), devices, addresses);
       },
+      // What the modem says about itself, read from ModemManager and never
+      // from the configuration — the APN comes off the connected bearer, so
+      // this reports what the link is actually using rather than what was
+      // asked for, which is the pair that disagrees exactly when it matters.
+      modemState: async () => {
+        const config = loadConfig(opts.configPath);
+        const paths = await modemClient.modems();
+        // No modem is an ordinary answer, not a failure. A board without one
+        // is an ordinary board, and an appliance is a named adapter
+        // ModemManager will never have heard of — modemState says which of
+        // those this is, and the nulls are what "not measured" looks like.
+        // Never zeroes: 0 dBm is a real and extraordinary reading.
+        if (paths.length === 0) {
+          return modemState(config, null, null, { rssi: null, rsrq: null, rsrp: null, snr: null });
+        }
+        const modem = await modemClient.modem(paths[0]);
+        await armSignal(modem.path);
+        const bearer = await modemClient.connectedBearer(modem);
+        const signal = await modemClient.signal(modem.path);
+        return modemState(config, modem, bearer, signal);
+      },
       secrets: built.secrets,
     }),
+    // Not behind `built`: the reach monitor is assembled from the runner and
+    // the nmcli client, neither of which depends on the secret store, so a
+    // board whose secrets.yaml is unreadable can still say which way out is
+    // working — which is most of what an operator needs to fix it.
+    reachState: () => reach.state(),
     ...(onProvisioned === undefined ? {} : { onProvisioned }),
   });
 

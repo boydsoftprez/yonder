@@ -14,6 +14,8 @@ import { DEFAULT_CONFIG, type Config } from "../schema/config.js";
 import { AdminCredential } from "../console/credential.js";
 import { AttemptThrottle, FAILURE_LIMIT, LOCKOUT_MS } from "../console/throttle.js";
 import type { Clock, Renderer } from "../apply/types.js";
+import type { ModemState } from "../net/modem/state.js";
+import type { ReachState } from "../net/reach/standing.js";
 
 /**
  * The routes that own the administrator password, and the gate R-SEC-09 puts
@@ -85,6 +87,8 @@ interface RouterOptions {
   secrets?: { put(name: string, value: string): void };
   activity?: ActivityLog;
   system?: () => SystemReport;
+  modemState?: () => Promise<ModemState>;
+  reachState?: () => Promise<ReachState>;
 }
 
 function router(opts: RouterOptions = {}): Router {
@@ -109,6 +113,8 @@ function router(opts: RouterOptions = {}): Router {
       : { secrets: { put: () => {} } }),
     ...(opts.activity === undefined ? {} : { activity: opts.activity }),
     ...(opts.throttle === undefined ? {} : { throttle: opts.throttle }),
+    ...(opts.modemState === undefined ? {} : { modemState: opts.modemState }),
+    ...(opts.reachState === undefined ? {} : { reachState: opts.reachState }),
   });
 }
 
@@ -848,5 +854,89 @@ describe("POST /ui/theme", () => {
   it("does not claim to move the radio", async () => {
     const result = await provisioned({})("POST", "/ui/theme", { theme: "night" });
     expect(result.body).not.toMatchObject({ movesRadio: true });
+  });
+});
+
+/**
+ * What M3b's contrib nodes read, and the two records this daemon is the only
+ * source of. Both are injected — this router knows no mmcli and no probe.
+ */
+describe("GET /modem/state", () => {
+  const CONNECTED: ModemState = {
+    mode: "connected",
+    summary: "Connected to Dark Star",
+    operator: "Dark Star",
+    technology: "lte",
+    registration: "home",
+    apn: "ereseller",
+    address: "10.31.95.33",
+    mtu: 1430,
+    signal: { rssi: -71, rsrq: -9, rsrp: -100, snr: 19 },
+    ports: ["cdc-wdm0 (mbim)", "wwan0 (net)"],
+    reportsSignal: true,
+  };
+
+  it("serves the modem state", async () => {
+    const res = await provisioned({ modemState: async () => CONNECTED })(
+      "GET", "/modem/state", undefined,
+    );
+    expect(res.status).toBe(200);
+    expect((res.body as { operator: string }).operator).toBe("Dark Star");
+  });
+
+  it("says so plainly when this daemon has no modem layer to ask", async () => {
+    // The same shape /net/state uses: a 503 naming the absence, never an empty
+    // body a page would render as "no signal".
+    const res = await provisioned({})("GET", "/modem/state", undefined);
+    expect(res.status).toBe(503);
+    expect((res.body as { error: string }).error).toMatch(/cannot report a modem/);
+  });
+
+  it("never puts the modem password in a response", async () => {
+    // R-SEC-10. The modem state is assembled from the device, not the config,
+    // and this asserts the boundary rather than trusting it.
+    const res = await provisioned({
+      modemState: async () => ({ ...CONNECTED, operator: null, address: null, mtu: null }),
+    })("GET", "/modem/state", undefined);
+    expect(JSON.stringify(res.body)).not.toMatch(/password|secret/i);
+  });
+
+  it("is behind the administrator password like every other configuration read", async () => {
+    // R-SEC-09. A modem's operator, technology and address are function, and
+    // a device with no password set offers none.
+    const res = await router({ modemState: async () => CONNECTED })(
+      "GET", "/modem/state", undefined,
+    );
+    expect(res.status).toBe(403);
+  });
+});
+
+describe("GET /reach/state", () => {
+  const STATE: ReachState = {
+    inUse: "modem",
+    carrying: true,
+    paths: [
+      { path: "ethernet", device: "eth0", standing: "no-route-out", since: 1_000, detail: "Stood down" },
+      { path: "modem", device: "wwan0", standing: "in-use", since: null, detail: "Carrying traffic" },
+    ],
+  };
+
+  it("serves which way out is in use", async () => {
+    const res = await provisioned({ reachState: async () => STATE })(
+      "GET", "/reach/state", undefined,
+    );
+    expect(res.status).toBe(200);
+    expect((res.body as { inUse: string }).inUse).toBe("modem");
+  });
+
+  it("says so plainly when this daemon has no reach monitor to ask", async () => {
+    const res = await provisioned({})("GET", "/reach/state", undefined);
+    expect(res.status).toBe(503);
+    expect((res.body as { error: string }).error).toMatch(/cannot report its way out/);
+  });
+
+  it("is behind the administrator password", async () => {
+    const res = await router({ reachState: async () => STATE })("GET", "/reach/state", undefined);
+    expect(res.status).toBe(403);
   });
 });

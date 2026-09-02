@@ -74,6 +74,40 @@ export {
 } from "./net/radio.js";
 export { FallbackWatchdog, type FallbackWatchdogOptions } from "./net/watchdog.js";
 export {
+  MmcliClient,
+  MmcliError,
+  type ModemInfo,
+  type ModemPorts,
+  type BearerInfo,
+  type SignalReading,
+} from "./net/modem/mmcli/client.js";
+export { modemState, type ModemState, type ModemMode } from "./net/modem/state.js";
+export { MODEM_CONNECTION, modemProfile, metricFor } from "./net/modem/profiles.js";
+export {
+  Standing,
+  PATH_WORDS,
+  FAILURES_TO_STAND_DOWN,
+  SUCCESSES_TO_RETURN,
+  type PathName,
+  type PathStanding,
+  type PathReport,
+  type ReachState,
+} from "./net/reach/standing.js";
+export { commandProbe, type Probe } from "./net/reach/probe.js";
+export {
+  systemCounters,
+  movement,
+  looksDead,
+  type Counters,
+  type CounterReader,
+} from "./net/reach/counters.js";
+export {
+  ReachMonitor,
+  pathDevices,
+  pathInUse,
+  type ReachMonitorOptions,
+} from "./net/reach/monitor.js";
+export {
   hashPassword,
   verifyPassword,
   SCRYPT_N,
