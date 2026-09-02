@@ -247,27 +247,13 @@
         "groupType": "default"
     },
     {
-        "id": "group-net-scan",
-        "type": "ui-group",
-        "name": "Networks in range",
-        "page": "page-network",
-        "width": 6,
-        "height": 1,
-        "order": 2,
-        "showTitle": true,
-        "className": "",
-        "visible": true,
-        "disabled": false,
-        "groupType": "default"
-    },
-    {
         "id": "group-net-join",
         "type": "ui-group",
         "name": "Join a network",
         "page": "page-network",
         "width": 6,
         "height": 1,
-        "order": 3,
+        "order": 2,
         "showTitle": true,
         "className": "",
         "visible": true,
@@ -281,7 +267,7 @@
         "page": "page-network",
         "width": 6,
         "height": 1,
-        "order": 4,
+        "order": 3,
         "showTitle": true,
         "className": "",
         "visible": true,
@@ -776,8 +762,8 @@
         "id": "button-scan",
         "type": "ui-button",
         "z": "yonder-console",
-        "group": "group-net-scan",
-        "order": 1,
+        "group": "group-net-join",
+        "order": 2,
         "width": 6,
         "height": 1,
         "label": "Scan for networks",
@@ -818,88 +804,10 @@
         "x": 500,
         "y": 690,
         "wires": [
-            [
-                "scan-rows"
-            ],
+            [],
             [
                 "join-ssid"
             ]
-        ]
-    },
-    {
-        "id": "scan-rows",
-        "type": "change",
-        "z": "yonder-console",
-        "name": "the rows, for the table",
-        "rules": [
-            {
-                "t": "move",
-                "p": "payload.networks",
-                "pt": "msg",
-                "to": "payload",
-                "tot": "msg"
-            }
-        ],
-        "action": "",
-        "property": "",
-        "from": "",
-        "to": "",
-        "reg": false,
-        "x": 760,
-        "y": 690,
-        "wires": [
-            [
-                "table-scan"
-            ]
-        ]
-    },
-    {
-        "id": "table-scan",
-        "type": "ui-table",
-        "z": "yonder-console",
-        "group": "group-net-scan",
-        "name": "networks in range",
-        "label": "",
-        "order": 2,
-        "width": 6,
-        "height": 6,
-        "maxrows": 0,
-        "passthru": false,
-        "autocols": false,
-        "showSearch": false,
-        "selectionType": "none",
-        "deselect": true,
-        "action": "replace",
-        "columns": [
-            {
-                "title": "Network",
-                "key": "ssid",
-                "type": "text",
-                "width": "",
-                "align": "start"
-            },
-            {
-                "title": "Signal",
-                "key": "signal",
-                "type": "text",
-                "width": "80px",
-                "align": "end"
-            },
-            {
-                "title": "Security",
-                "key": "security",
-                "type": "text",
-                "width": "",
-                "align": "start"
-            }
-        ],
-        "mobileBreakpoint": "sm",
-        "mobileBreakpointType": "defaults",
-        "className": "",
-        "x": 1020,
-        "y": 690,
-        "wires": [
-            []
         ]
     },
     {
@@ -1425,7 +1333,7 @@
         "label": "Network",
         "tooltip": "",
         "place": "Choose a network",
-        "order": 2,
+        "order": 3,
         "width": 6,
         "height": 1,
         "passthru": false,
@@ -1453,7 +1361,7 @@
         "name": "passphrase",
         "label": "Password",
         "tooltip": "",
-        "order": 3,
+        "order": 4,
         "width": 6,
         "height": 1,
         "topic": "psk",
@@ -1482,7 +1390,7 @@
         "group": "group-net-join",
         "name": "join",
         "label": "Join this network",
-        "order": 4,
+        "order": 5,
         "width": 6,
         "height": 1,
         "tooltip": "",

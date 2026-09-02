@@ -459,9 +459,46 @@ describe("flows/flows.json join controls", () => {
     expect(wires[1]).toContain("join-ssid");
   });
 
-  it("still sends the scan to the table on its first output", () => {
+  /**
+   * There is no table any more. It listed name, signal and security beside a
+   * dropdown that already carries name and signal, so it was a second copy of
+   * the thing you choose from — and it existed only because the scan needed
+   * somewhere to put its results before the dropdown did.
+   *
+   * The first output stays, unwired. It is the scan itself, which is the
+   * useful thing to hang anything else off later.
+   */
+  it("keeps the scan's own output available, wired to nothing", () => {
     const wires = scan?.wires as string[][];
-    expect(wires[0].length).toBeGreaterThan(0);
-    expect(wires[0]).not.toContain("join-ssid");
+    expect(wires[0]).toEqual([]);
+  });
+
+  /**
+   * One panel, in the order the operator does it: read what is about to
+   * happen, scan, choose, type the passphrase, join. It used to be three
+   * panels — widgets grouped by kind rather than by the task — for a single
+   * thing you are trying to do.
+   */
+  it("puts the whole task in one group, in the order it is done", () => {
+    const inGroup = flows
+      .filter((n) => n.group === "group-net-join")
+      .sort((a, b) => Number(a.order) - Number(b.order))
+      .map((n) => n.id);
+    expect(inGroup).toEqual(["warning-join", "button-scan", "join-ssid", "join-psk", "join-go"]);
+  });
+
+  it("has no leftover panel that held only the table", () => {
+    expect(flows.find((n) => n.id === "group-net-scan")).toBeUndefined();
+    expect(flows.find((n) => n.type === "ui-table" && n.group === "group-net-join")).toBeUndefined();
+  });
+
+  /**
+   * Confirming stays its own panel, and that separation is the point: it
+   * happens minutes later, after the operator has been disconnected and has
+   * found the device again on another network. It is not a step in this
+   * sequence, it is what you come back to.
+   */
+  it("keeps confirming separate, because it happens later", () => {
+    expect(flows.find((n) => n.id === "group-net-confirm")).toBeDefined();
   });
 });
