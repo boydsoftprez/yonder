@@ -14,17 +14,23 @@ for a second issue, and four comments in `src/apply/` were left pointing at the 
 
 ## Must be resolved during M1
 
-### K-01 · The daemon socket is unreachable by the console
-`systemd/yonder-core.service`, `src/daemon/server.ts`
+### K-01 · ~~The daemon socket is unreachable by the console~~ — CLOSED
 
-The unit sets no `User=` or `Group=`, so the daemon runs as root and the socket is created
-`root:root` mode `0660`. `RuntimeDirectory` is `0750`, so `/run/yonder` is root-only too.
+The unit set no `User=` or `Group=`, so the daemon ran as root and the socket was created
+`root:root` mode `0660`, inside a `/run/yonder` that was `0750` root. The design says
+filesystem ownership is the access control for the configuration API, and nothing expressed
+that model: a console running as anything but root could not open the socket at all.
 
-The design says filesystem ownership is the access control for the configuration API. That
-model is not expressed anywhere yet: as it stands, a console running as a non-root user
-cannot open the socket at all. M1 introduces that console, so M1 has to settle the
-ownership model — a shared group, a `User=`/`Group=` on the unit, and matching modes on the
-runtime directory and the socket.
+Closed in M1b-1. `systemd/yonder-core.service` carries `Group=yonder` — no `User=`, because
+the daemon drives NetworkManager and stays root — so systemd creates `/run/yonder` as
+`root:yonder 0750` and the socket the daemon binds inherits that group; the existing
+`chmodSync(socketPath, 0o660)` in `src/daemon/server.ts` makes it group-writable.
+`installer/roles/10-base.sh` creates the system user and group, and
+`assert_unit_accounts` in `installer/lib/common.sh` refuses to enable a unit naming an
+account that does not exist — a `Group=` with no group is `status=217/USER` on every start,
+which for this daemon is a board with no network at all.
+
+Nothing chowns from code: the unit is the one place this is expressed.
 
 ### K-02 · ~~`apply()` has no render timeout~~ — CLOSED
 
@@ -297,3 +303,85 @@ minimum on a slow board — and it fails in the same direction as K-16, toward a
 that fails rather than a wrong one that succeeds. Recorded, not fixed: the assignment cannot
 simply move earlier without moving the wait itself in front of `listen()`, which is the
 ordering `server.ts` argues against at length and for good reasons.
+
+### K-18 · Console sessions do not survive a console restart
+`src/console/session.ts`
+
+The session signing key is minted per process and the live-session set is in memory, so
+every console restart logs everyone out — and the console is restarted whenever the
+configuration is applied, because `settings.js` is generated from it.
+
+This is deliberate ([ADR-0008](adr/0008-the-setup-gate.md)): there is then no session secret
+at rest, so someone who takes the SD card cannot forge a session, and a device that restarts
+its console on configuration change has no long-lived state to keep consistent. It is
+recorded because it is a real thing an operator will notice — apply a network change and you
+are asked to sign in again — and because the obvious fix is worse than it looks. Persisting
+the key means writing a credential to the card; persisting the sessions means writing a list
+of live tokens. Both are new things to protect for the sake of not retyping a password.
+
+If it becomes load-bearing, the shape to reach for is a key derived from the administrator
+password hash rather than one stored beside it, so that a card carries nothing a password
+does not already unlock.
+
+### K-19 · A failing renderer stops the ones behind it, including the console
+`src/apply/engine.ts`, `src/daemon/server.ts`
+
+`renderAll` runs renderers in sequence and stops at the first failure. The network renderer
+is first and the console renderer is second, deliberately — a console failure then rolls back
+onto a network that was working, rather than one that was never rendered
+([ADR-0008](adr/0008-the-setup-gate.md)) — but the consequence in the other direction is that
+a board whose NetworkManager is wedged never renders its console either. The start-up
+`renderCurrent()` writes no `settings.js` at all on such a board.
+
+Found by writing `scripts/verify-console.sh`, which has no NetworkManager: the daemon logged
+`could not render the current configuration, serving anyway` and the console had nothing to
+start from. On a real device the installer has already generated a `settings.js`, so this
+costs an *update* to that file rather than its existence.
+
+Setting the administrator password is unaffected: that path calls the console renderer
+directly rather than through the apply engine, precisely so provisioning cannot be blocked by
+the network being broken.
+
+Not fixed, because both obvious fixes are worse. Continuing past a failed renderer would make
+`POST /apply` report success having done part of the work, which is the silent-success failure
+the degraded check in `ApplyEngine` exists to prevent. Reordering puts the console in front of
+the network, which is the ordering rule 6 argues against.
+
+### K-20 · The session cookie cannot be `Secure`, because the access point is plain HTTP
+`src/console/middleware.ts`
+
+The console's session cookie is `HttpOnly` and `SameSite=Strict` and is deliberately **not**
+`Secure`. There is no certificate a device with no name and no internet connection could
+present, so the access point is plain HTTP — and a `Secure` cookie over plain HTTP is never
+sent by the browser at all. Setting it would produce a console that accepts a password and
+then behaves as though nobody had signed in.
+
+What it costs: anyone already inside the access point's radio range can read the session
+cookie off the air, and replay it until the console restarts. They are inside a network whose
+passphrase is published (ADR-0007), so they could reach the login page anyway; what the cookie
+gains them is skipping it.
+
+Closing it is R-SEC-08 — TLS for the web interface — which needs a certificate story for a
+device with no name, and is a later milestone. When it lands, `Secure` goes on the cookie in
+the same change.
+
+### K-21 · The console's state directory sits inside the daemon's
+`systemd/yonder-console.service`, `installer/roles/10-base.sh`
+
+`yonder-core.service` declares `StateDirectory=yonder` and `yonder-console.service` declares
+`StateDirectory=yonder/console`, so one service's state directory is nested inside the
+other's. systemd sets ownership on the directories it manages, and the exact behaviour for a
+*nested* directory owned by a different account — in particular whether the outer service's
+start can reassert ownership over the inner one — has not been checked against a real
+systemd. If it does, the console would keep read access and lose write access to its own
+`userDir` until its next start.
+
+Three things make this unlikely to bite and none of them proves it does not: the installer
+sets `yonder:yonder` on `/var/lib/yonder/console` explicitly, the console unit re-declares it
+so its own start re-establishes it, and the console starts after the daemon on every boot.
+The case not covered is `yonder-core` being restarted while the console is running.
+
+This has not been observed. It is recorded because it was reasoned about and not tested, and
+the first hardware boot is where it would show up — as Node-RED failing to write its own
+state, with a permissions error and no obvious cause. Moving the console to
+`/var/lib/yonder-console` removes the question entirely and is the fix if it does.

@@ -245,6 +245,8 @@ Parameter writes are vehicle commands. R-CMD applies to every requirement here.
 | R-SEC-08 | Offer TLS for the web interface | 2 |
 | R-SEC-09 | **Until an administrator password has been set, the console offers no function but setting one.** No configuration read, no command, no status beyond what that step needs | 1 |
 | R-SEC-10 | **Emit no credential anywhere a credential does not belong** — a log line, an error message, a support bundle, or an API response. Redaction happens where the value is captured, not where it is printed, so a new caller cannot reintroduce the leak | 1 |
+| R-SEC-11 | **Authentication fails closed.** A component that cannot reach, or cannot get an answer from, whatever holds a credential refuses the login. Being unable to check a password is never treated as the password being right, and a device that cannot tell whether it has a lock behaves as though it has one nobody can open | 1 |
+| R-SEC-12 | **A failure of the interface never costs the network.** Nothing that serves the console — the process, its configuration, its dependencies — may stop, restart or reconfigure the service that keeps the device reachable. A console that will not start is a device you can still reach | 1 |
 
 ## R-UI — Interface
 

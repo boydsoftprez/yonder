@@ -216,11 +216,24 @@ export function parseSettingsArgs(argv: readonly string[]): SettingsArgs | undef
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i] ?? "";
     const takeValue = (): string | undefined => argv[++i];
+    const PATH_FLAGS: Record<string, keyof ConsolePaths> = {
+      "--core-tree": "coreTree",
+      "--user-dir": "userDir",
+      "--socket": "socket",
+    };
+
+    const key = PATH_FLAGS[arg];
+    if (key !== undefined) {
+      const value = takeValue();
+      // A flag with nothing after it is a truncated command line, and taking
+      // the next flag as its value is how a path ends up named "--socket".
+      if (value === undefined) return undefined;
+      paths[key] = value;
+      continue;
+    }
+
     switch (arg) {
       case "--provisioned": provisioned = true; break;
-      case "--core-tree": { const v = takeValue(); if (v === undefined) return undefined; paths.coreTree = v; break; }
-      case "--user-dir": { const v = takeValue(); if (v === undefined) return undefined; paths.userDir = v; break; }
-      case "--socket": { const v = takeValue(); if (v === undefined) return undefined; paths.socket = v; break; }
       default:
         // An unknown flag is a typo, and a typo silently treated as a file
         // name would write settings.js somewhere nobody asked for.

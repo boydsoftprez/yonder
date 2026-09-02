@@ -105,8 +105,9 @@
     <label for="confirm">Type it again</label>
     <input id="confirm" name="confirm" type="password" autocomplete="new-password" required
            minlength="8">
-    <p class="hint">This password cannot be changed from the console yet, so a typo here
-      would lock you out of the device.</p>
+    <p class="hint">This password cannot be changed or recovered from the console yet, so a
+      typo here would lock you out. Getting back in would mean taking the card out and
+      removing <code>admin_password</code> from <code>/etc/yonder/secrets.yaml</code>.</p>
 
     <button type="submit">Set the password</button>
   </form>

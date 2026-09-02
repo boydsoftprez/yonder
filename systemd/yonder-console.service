@@ -8,7 +8,7 @@ After=network.target yonder-core.service
 # correct, so it needs the daemon to be useful — but a Requires= would make a
 # console that cannot start able to stop the daemon with it, and the daemon is
 # what renders the network and holds the access point up. A device whose
-# console is broken must still be a device you can reach (rule 6).
+# console is broken must still be a device you can reach (R-SEC-12, rule 6).
 Wants=yonder-core.service
 
 [Service]

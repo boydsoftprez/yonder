@@ -21,9 +21,9 @@ import { consolePaths, renderSettings, type ConsolePaths } from "./settings.js";
  *
  * It does two things: write `settings.js`, and restart the console. It writes
  * nothing else and it restarts nothing else. In particular it must **never**
- * restart `yonder-core`: the console is the internet-adjacent surface and the
- * daemon is what holds the network up, and a console that can take the daemon
- * with it is rule 6 broken through the side door. The constructor refuses a
+ * restart `yonder-core` (R-SEC-12): the console is the internet-adjacent
+ * surface and the daemon is what holds the network up, and a console that can
+ * take the daemon with it is rule 6 broken through the side door. The constructor refuses a
  * unit name that looks like the daemon's, so that is a failure at start-up
  * rather than a discovery in the field.
  */

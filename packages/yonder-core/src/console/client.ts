@@ -9,10 +9,10 @@ import { request } from "node:http";
  * not something it *can* read. Authentication is therefore a question it asks
  * over this socket, and every answer here is treated accordingly.
  *
- * **Everything fails closed.** A socket that is not there, a connection
- * refused, a daemon that has stopped answering, a reply that is not JSON, a
- * reply that is JSON but not the shape expected — all of them are "cannot
- * verify", which is a failed login. None of them is an exception, either:
+ * **Everything fails closed** (R-SEC-11). A socket that is not there, a
+ * connection refused, a daemon that has stopped answering, a reply that is not
+ * JSON, a reply that is JSON but not the shape expected — all of them are
+ * "cannot verify", which is a failed login. None of them is an exception:
  * this runs inside Node-RED, and an unhandled rejection from a middleware is
  * a console that falls over. The rule is that a daemon which is down, slow or
  * returning nonsense produces a failed login and never a successful one.

@@ -37,11 +37,24 @@ Two names are seeded differently, and deliberately so — see
   every device. It is documented rather than secret: it exists so a freshly flashed board is
   joinable, and a value only readable from the device's own journal would lock out the one
   person entitled to it. Change it from the console and the daemon keeps your value.
-- **`editor_password`** is **not** seeded at all. It does not exist until the operator sets
-  an administrator password, which is what makes the console's first-run step meaningful.
-  The shipped configuration says so too: `ui.editor.password` is `null` until there is a
-  password to point at. A default that named a secret nothing ever creates would break the
-  first code that resolved it eagerly, on every fresh device.
+- **`admin_password`** is the administrator password, and it is **not** seeded at all. It
+  does not exist until the operator sets one from the console, which is what makes the
+  first-run step meaningful (R-SEC-09, [ADR-0008](adr/0008-the-setup-gate.md)). It is stored
+  hashed — `scrypt$N$r$p$salt$hash` — never in the clear, and it is the one secret that is
+  *not* referenced from `config.yaml` at all: nothing points at it, because nothing but the
+  daemon may read it. The console runs as the unprivileged `yonder` user and cannot open
+  `secrets.yaml`; it asks the daemon over its socket whether a submitted password is right.
+
+  Setting it is one way. There is no console path that replaces it, because a path that could
+  replace it without knowing it would be a device with no lock. Forgetting it means the card:
+  remove the `admin_password` line from `/etc/yonder/secrets.yaml` and restart
+  `yonder-core`.
+
+- **`editor_password`** is a name from an earlier design and is never created. `ui.editor.
+  password` still exists in the schema and is `null`, and it stays `null`: the flow editor is
+  gated by the same `admin_password` as the console, checked in the same place. A default
+  that named a secret nothing ever creates would break the first code that resolved it
+  eagerly, on every fresh device.
 
 ```yaml
 psk: { secret: ap_psk }         # the value lives in secrets.yaml under "ap_psk"
@@ -88,7 +101,7 @@ ui:
   theme: day                                   # day | night
   editor:
     enabled: true
-    password: null                             # then { secret: editor_password }, once set
+    password: null                             # stays null; admin_password is the credential
     interfaces: [ethernet, wifi_client]        # note: cellular excluded by default
 
 system:
@@ -192,3 +205,20 @@ in order, and the metrics are generated.
 **`ui.editor.interfaces`** deliberately omits `modem`. The flow editor is a
 code-execution surface; it should not be reachable from a public cellular address without
 a conscious decision.
+
+**`ui.port`** is the port the console listens on, and changing it goes through apply and
+rollback like anything else: the console's `settings.js` is generated from this file, so a
+port change rewrites it and restarts the console. If the new port turns out to be
+unreachable, the confirmation timer puts the old one back (R-CFG-03). The console binds every
+interface — what stands in front of it is the administrator password, not the bind address.
+
+**`ui.editor.enabled`** decides whether the flow editor is mounted at all. `false` means
+Node-RED's admin application is not mounted: not hidden, not password-protected, absent, and
+`/editor` is a 404 like any other path. `true` mounts it at `/editor` behind the same
+administrator password as the console — and it is `true` only on a device that has one. Until
+a password is set the editor is unmounted whatever this says, because there is nothing to
+gate it with (R-SEC-05, R-SEC-09).
+
+Both keys take effect on the next apply. The daemon rewrites `settings.js` and restarts the
+console when — and only when — that file would change, so a network change does not sign you
+out of the console you made it from.
