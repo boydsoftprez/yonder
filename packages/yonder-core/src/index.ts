@@ -255,4 +255,5 @@ export {
   type JoinResult,
   type SecretSink,
 } from "./net/join.js";
+export { setTheme, THEMES, type ThemeRequest, type ThemeResult } from "./ui/theme.js";
 export { STATIC_ROOT, THEME_FILE, THEME_HREF } from "./console/settings.js";

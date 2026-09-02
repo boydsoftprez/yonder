@@ -271,10 +271,25 @@ describe("flows/flows.json", () => {
     const values = (dropdown?.options as { value: string }[]).map((o) => o.value).sort();
     expect(values).toEqual(["day", "night"]);
 
-    // The choice goes through the configuration, which is what makes it
-    // persist and what puts it behind the confirmation timer.
-    const change = flows.find((n) => n.id === "theme-into-config");
-    expect(JSON.stringify(change?.rules)).toContain("payload.ui.theme");
-    expect(flows.find((n) => n.id === "apply-config")?.type).toBe("yonder-apply");
+    // The choice goes to a node, which posts it to POST /ui/theme — which is
+    // what makes it persist and what puts it behind the confirmation timer.
+    expect(dropdown?.wires).toEqual([["theme-apply"]]);
+    expect(flows.find((n) => n.id === "theme-apply")?.type).toBe("yonder-theme");
+  });
+
+  /**
+   * The wiring this replaced cached the configuration in `flow.yonderConfig`
+   * and assigned `payload.ui.theme` through a reference to it. Node-RED's
+   * change node stores and reads flow context by reference, so all three
+   * steps addressed one object: choosing a theme edited the cache in place
+   * whether or not the apply was ever confirmed, and a revert left the cache
+   * holding a theme the device did not have.
+   *
+   * Asserted against the shipped artefact, not against the runtime, because
+   * the whole failure was invisible from the page.
+   */
+  it("caches no configuration in flow context for a form to edit", () => {
+    const cached = flows.filter((n) => JSON.stringify(n).includes("yonderConfig"));
+    expect(cached.map((n) => n.id)).toEqual([]);
   });
 });

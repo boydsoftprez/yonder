@@ -12,7 +12,8 @@
     "nodes": {
       "yonder-status": "dist/status.js",
       "yonder-activity": "dist/activity.js",
-      "yonder-diag": "dist/diag.js"
+      "yonder-diag": "dist/diag.js",
+      "yonder-theme": "dist/theme.js"
     }
   },
   "scripts": {

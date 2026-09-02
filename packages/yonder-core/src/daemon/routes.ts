@@ -12,6 +12,7 @@ import { readVersions } from "../system/versions.js";
 import { displayFacts, type BoardDisplay } from "../system/format.js";
 import { isProbeHost, type PingResult } from "../diag/probe.js";
 import { joinNetwork, type JoinRequest } from "../net/join.js";
+import { setTheme, type ThemeRequest } from "../ui/theme.js";
 import type { ScanResult } from "../net/scan.js";
 import type { BoardFacts } from "../system/facts.js";
 import type { Versions } from "../system/versions.js";
@@ -352,6 +353,18 @@ export function createRouter(deps: RouterDeps): Router {
         const join = joinNetwork(loadConfig(deps.configPath), body as JoinRequest, deps.secrets);
         if (!join.ok) return { status: 400, body: { error: join.error } };
         return { status: 200, body: await deps.engine.apply(join.config) };
+      }
+
+      // The same shape as /net/join, and for the same reason. A page that
+      // merged a theme into the configuration would be editing the document
+      // that decides whether the device is reachable, in wiring, from a
+      // browser — and the wiring that did it held the last configuration in
+      // flow context and assigned straight through the reference, so choosing
+      // a theme mutated the cache in place and a revert left it lying.
+      if (method === "POST" && path === "/ui/theme") {
+        const chosen = setTheme(loadConfig(deps.configPath), body as ThemeRequest);
+        if (!chosen.ok) return { status: 400, body: { error: chosen.error } };
+        return { status: 200, body: await deps.engine.apply(chosen.config) };
       }
 
       if (method === "GET" && path === "/config") {

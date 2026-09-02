@@ -34,6 +34,7 @@ vi.mock("yonder-core", async (importOriginal) => {
 const statusNode = (await import("./status.js")).default ?? await import("./status.js");
 const activityNode = (await import("./activity.js")).default ?? await import("./activity.js");
 const diagNode = (await import("./diag.js")).default ?? await import("./diag.js");
+const themeNode = (await import("./theme.js")).default ?? await import("./theme.js");
 
 const ok = (body: unknown): DaemonReply => ({ ok: true, status: 200, body });
 const unreachable: DaemonReply = {
@@ -162,5 +163,50 @@ describe("yonder-diag", () => {
     await new Promise<void>((resolve) => { void helper.load(diagNode, flow, resolve); });
     await new Promise((r) => setTimeout(r, 50));
     expect(asked).toEqual([]);
+  });
+});
+
+/**
+ * `yonder-theme` — R-UI-07.
+ *
+ * It exists because the wiring it replaced could not be right. Two `change`
+ * nodes cached the configuration in `flow.yonderConfig` and assigned
+ * `payload.ui.theme` through a reference to it, so choosing a theme mutated
+ * the cache in place whether or not the apply was confirmed — and a deploy
+ * that happened while the daemon was down left the control broken until
+ * someone refreshed a different page. This node caches nothing.
+ */
+describe("yonder-theme", () => {
+  it("posts the bare string a dropdown sends", async () => {
+    replies.push(ok({ id: "a1", expiresAt: Date.now() + 120_000 }));
+    await firstMessage(themeNode, "yonder-theme", { payload: "night" });
+    expect(asked[0]).toMatchObject({ method: "POST", path: "/ui/theme", body: { theme: "night" } });
+  });
+
+  it("posts the object a form sends", async () => {
+    replies.push(ok({ id: "a2", expiresAt: Date.now() + 120_000 }));
+    await firstMessage(themeNode, "yonder-theme", { payload: { theme: "day" } });
+    expect(asked[0]).toMatchObject({ body: { theme: "day" } });
+  });
+
+  it("reads no configuration of its own", async () => {
+    replies.push(ok({ id: "a3", expiresAt: Date.now() + 120_000 }));
+    await firstMessage(themeNode, "yonder-theme", { payload: "night" });
+    // One request, and it is the write. Anything that fetched the
+    // configuration first would be caching it again.
+    expect(asked).toHaveLength(1);
+    expect(asked.map((a) => a.path)).not.toContain("/config");
+  });
+
+  it("emits a pending state carrying the apply, not a bare acknowledgement", async () => {
+    replies.push(ok({ id: "a4", expiresAt: Date.now() + 120_000 }));
+    const msg = await firstMessage(themeNode, "yonder-theme", { payload: "night" });
+    expect(msg.yonder?.state).toBe("pending");
+  });
+
+  it("emits a rejected state rather than nothing when the daemon is down", async () => {
+    replies.push(unreachable);
+    const msg = await firstMessage(themeNode, "yonder-theme", { payload: "night" });
+    expect(msg.yonder?.state).toBe("rejected");
   });
 });

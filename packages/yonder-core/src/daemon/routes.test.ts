@@ -798,3 +798,55 @@ describe("POST /net/join", () => {
     expect(result.status).toBe(503);
   });
 });
+
+/**
+ * `POST /ui/theme` — R-UI-07, and the reason it is a route.
+ *
+ * The wiring this replaced kept the last configuration in `flow.yonderConfig`,
+ * copied it into the message, and set `payload.ui.theme` through that copy.
+ * Node-RED's change node stores and retrieves flow context by reference, so
+ * all three steps addressed one object: choosing a theme edited the cached
+ * configuration in place, whether or not the apply was ever confirmed. A
+ * revert then left the cache holding a theme the device did not have, and the
+ * next apply of anything at all carried it along.
+ */
+describe("POST /ui/theme", () => {
+  it("is 403 while unprovisioned", async () => {
+    expect((await router()("POST", "/ui/theme", { theme: "night" })).status).toBe(403);
+  });
+
+  it("applies a configuration with the theme set, and starts the clock", async () => {
+    const route = provisioned({});
+    const result = await route("POST", "/ui/theme", { theme: "night" });
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({ id: expect.any(String) as unknown as string });
+    expect(((await route("GET", "/config", undefined)).body as Config).ui.theme).toBe("night");
+  });
+
+  it("changes nothing but the theme", async () => {
+    const route = provisioned({});
+    const before = (await route("GET", "/config", undefined)).body as Config;
+    await route("POST", "/ui/theme", { theme: "night" });
+    const after = (await route("GET", "/config", undefined)).body as Config;
+    expect({ ...after, ui: { ...after.ui, theme: before.ui.theme } }).toEqual(before);
+  });
+
+  it("is 400 for a theme that is not one of the two, and applies nothing", async () => {
+    const route = provisioned({});
+    for (const bad of ["dusk", "", 1, null]) {
+      const result = await route("POST", "/ui/theme", { theme: bad });
+      expect(result.status, `${JSON.stringify(bad)} must be refused`).toBe(400);
+      expect(((await route("GET", "/config", undefined)).body as Config).ui.theme).toBe("day");
+    }
+  });
+
+  /**
+   * Changing the theme does not move the radio, so it must not borrow the long
+   * window a Wi-Fi join needs. An operator who picks the wrong palette should
+   * get it back in ninety seconds, not five minutes.
+   */
+  it("does not claim to move the radio", async () => {
+    const result = await provisioned({})("POST", "/ui/theme", { theme: "night" });
+    expect(result.body).not.toMatchObject({ movesRadio: true });
+  });
+});
