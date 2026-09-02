@@ -41,7 +41,15 @@ export interface ReachState {
 export const FAILURES_TO_STAND_DOWN = 3;
 export const SUCCESSES_TO_RETURN = 1;
 
-const WORDS: Record<PathName, string> = {
+/**
+ * What to call a path in a line an operator reads.
+ *
+ * Exported because the monitor assembling `PathReport.detail` says the same
+ * words about the same paths, and two copies of operator-facing wording drift
+ * — one of them ends up calling `modem` "modem" in a log line and "cellular"
+ * on a page about the same event.
+ */
+export const PATH_WORDS: Record<PathName, string> = {
   ethernet: "ethernet",
   modem: "cellular",
   wifi_client: "Wi-Fi",
@@ -84,7 +92,7 @@ export class Standing {
       if (r.down && r.successes >= SUCCESSES_TO_RETURN) {
         r.down = false;
         r.since = null;
-        this.log(`network: ${WORDS[path]} is reaching the internet again and is back in use`);
+        this.log(`network: ${PATH_WORDS[path]} is reaching the internet again and is back in use`);
       }
     } else {
       r.successes = 0;
@@ -93,7 +101,7 @@ export class Standing {
         r.down = true;
         r.since = this.clock.now();
         this.log(
-          `network: ${WORDS[path]} reached nothing on ${r.failures} tries and has been stood down; ` +
+          `network: ${PATH_WORDS[path]} reached nothing on ${r.failures} tries and has been stood down; ` +
           `traffic will use the next path that works`,
         );
       }
