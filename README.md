@@ -8,8 +8,8 @@ from a web page, with nothing phoning home.
 
 > *yonder* — over there, in the distance, past where you can see.
 
-> **Status: pre-alpha.** The design and requirements are settled. The code is not
-> written yet. See the [roadmap](docs/roadmap.md).
+> **Status: pre-alpha.** The configuration engine and the network layer are built and
+> tested; the web console is the next milestone. See the [roadmap](docs/roadmap.md).
 
 ## What it does
 
@@ -45,7 +45,39 @@ Cameras: CSI, USB (UVC), HDMI via a TC358743 bridge. Flight controller over UART
 
 ## Getting started
 
-Not yet. See [the roadmap](docs/roadmap.md) — M8 is the first release you can flash.
+1. **Flash** the image to a card and put it in the board.
+2. **Power on.** There is nothing to configure first and nothing to plug in.
+3. **Join the Wi-Fi network `yonder`** with the passphrase **`yonder1234`**.
+4. **Open `http://192.168.77.1:3000`.**
+5. **Set an administrator password.** The console offers nothing else until you do.
+
+That passphrase is published, identical on every device, and is not a secret — it exists so
+a board you have never touched is joinable at all. The password you set in step 5 is the one
+that guards the aircraft, and you can change the access-point passphrase from the console
+once you are in. [ADR-0007](docs/adr/0007-credential-boundary.md) explains why the boundary
+sits there rather than on the access point.
+
+### What of that works today
+
+**Steps 2 and 3 do.** A board that has never been configured seeds itself a default
+configuration, raises the access point and hands out DHCP leases, with no operator input and
+no apply — and if a configuration change ever leaves it unreachable, the access point comes
+back on its own. That is the network layer, and it is done.
+
+**Step 4 does not, yet.** There is no console to open: it is the next milestone, and until
+it lands the device is configured by posting to the daemon's Unix socket. See
+[verifying M1a](docs/hardware/verifying-m1a.md) for what that looks like on real hardware.
+
+**Step 1 comes later still.** There is no published image to flash yet; M8 is the first
+release built as one. Today you install onto a board yourself, which is the same thing the
+image build runs:
+
+```sh
+sudo ./installer/install.sh          # Raspberry Pi OS or Debian, with NetworkManager
+./installer/install.sh --dry-run     # print the plan, change nothing
+```
+
+Everything from step 2 onward is the same afterwards.
 
 ## Documentation
 

@@ -6,6 +6,10 @@ rediscover them.
 
 Nothing here is a requirement. Requirements live in [`requirements.md`](requirements.md).
 
+**K numbers are stable.** A closed issue keeps its number and is struck through rather than
+deleted, because source comments cite these. Never reuse a number — K-14 was briefly reused
+for a second issue, and four comments in `src/apply/` were left pointing at the wrong entry.
+
 ---
 
 ## Must be resolved during M1
@@ -22,26 +26,29 @@ cannot open the socket at all. M1 introduces that console, so M1 has to settle t
 ownership model — a shared group, a `User=`/`Group=` on the unit, and matching modes on the
 runtime directory and the socket.
 
-### K-02 · `apply()` has no render timeout
-`src/apply/engine.ts`
+### K-02 · ~~`apply()` has no render timeout~~ — CLOSED
 
-The apply reservation is held for the whole duration of `renderAll`. A renderer that throws
-is handled; a renderer that **never settles** pins the engine in `applying` permanently, and
-every later apply is refused with "an apply is already pending".
+The apply reservation was held for the whole duration of `renderAll`. A renderer that threw
+was handled; a renderer that **never settled** pinned the engine in `applying` permanently,
+and every later apply was refused with "an apply is already pending". Harmless while there
+were no renderers; M1 added the first real one, and a network apply can hang on a wedged
+`nmcli` or a driver that never returns.
 
-Harmless today because there are no renderers. M1 adds the first real one, and a network
-apply can hang on a wedged `nmcli` or a driver that never returns. Needs a timeout that
-fails the apply and rolls back, not an indefinite wait.
+Closed in `b736d2f`: `renderAll` runs under `renderTimeoutMs`, and exceeding it fails the
+apply and rolls the configuration back. What that fix could not do — undo the part of the
+render that had already happened, or stop the abandoned renderer still running — is
+**K-10**, which is the entry code touching this path should cite.
 
-### K-03 · `SecretStore` trusts the shape of `secrets.yaml`
-`src/secrets/store.ts`
+### K-03 · ~~`SecretStore` trusts the shape of `secrets.yaml`~~ — CLOSED
 
-The constructor casts the parsed YAML `as Bag` without checking it is a flat map of strings.
-Safe while `flush()` is the only writer.
+The constructor cast the parsed YAML `as Bag` without checking it was a flat map of strings.
+Safe while `flush()` was the only writer, and not safe once `resolve()` fed a renderer: a
+hand-edited nested value would interpolate into a NetworkManager keyfile as
+`[object Object]`, producing a broken access point with no error anywhere.
 
-It bites the moment `resolve()` feeds a renderer: a hand-edited nested value interpolates
-into a NetworkManager keyfile as `[object Object]`, producing a broken access point with no
-error anywhere. A `z.record(z.string())` parse in the constructor is two lines.
+Closed by parsing the document in the constructor rather than asserting its type. A
+malformed `secrets.yaml` now throws where it can be reported — which is why `startServer`
+guards `buildRenderers` and serves in a degraded state rather than exiting.
 
 ---
 
@@ -91,3 +98,202 @@ A name matching no role skips every role and exits 0 reporting "done".
 - `require_node` errors under `set -e` if `node -p` ever emits non-numeric output.
 - `writeFileDurable`'s leading unlink of the temp path defeats the `wx` exclusivity it
   documents, if two writers ever race the same path. Related to K-07.
+
+### K-10 · A render timeout rolls the configuration back but not the system
+`src/apply/engine.ts`
+
+When a renderer exceeds `renderTimeoutMs`, `apply()` restores `config.yaml` to the previous
+configuration and then **deliberately skips the rollback re-render** — a renderer that has
+just timed out is presumed still wedged, and retrying it would hold the apply reservation
+for a second full timeout before failing again the same way.
+
+The consequence is that the file on disk and the running system can disagree. The renderer
+may have applied part of the change before it stalled: a NetworkManager connection modified,
+a drop-in written, a profile brought up. Nothing undoes that. `config.yaml` says one thing,
+`nmcli` says another, and `GET /config` reports the file.
+
+Bounded in practice — the access-point fallback still raises the access point if the board
+ends up unreachable, so this is a divergence rather than a lockout. It starts to matter when
+the console shows a configuration the board is not actually running, which is the moment
+somebody trusts the screen over the radio. The fix is a renderer that can report what it
+managed to do before it stalled, or a reconciling render on the next start; the startup
+render added for R-CFG-08 already narrows the window to "until the daemon next restarts".
+
+**And the abandoned work keeps running.** `withTimeout` rejects on the deadline but has no
+way to cancel what it was waiting for: the renderer's promise is simply dropped. So after a
+render timeout the network renderer carries on issuing `nmcli` commands, while `finish()`
+has already released the apply reservation — which means a second apply can be accepted and
+start rendering *concurrently with the first one that never stopped*. Two renders
+interleaving their `nmcli` calls can leave a connection carrying half of each configuration,
+which is a worse divergence than the one above and harder to read from the outside. The
+reservation is what normally makes that impossible; a timeout is the one path that gets
+past it. Fixing this properly means a renderer that takes an AbortSignal and honours it,
+which is the same change as reporting partial work, so the two are one piece of work.
+
+### K-11 · The fallback watchdog fires once per daemon start, and never again
+`src/net/watchdog.ts`, `src/daemon/server.ts`
+
+`FallbackWatchdog.start()` sets a single timer and `fire()` clears it. It is armed once, in
+`startServer()`, and nothing re-arms it — not an apply, not a confirm, not a revert. After
+that one check the guarantee is spent for the life of the process.
+
+R-NET-07 is written about the window after `yonder-core` starts, so this satisfies it as
+worded. What it does not cover is
+the case the requirement exists for: an operator applies a change that takes the board off
+the air *after* the window has already elapsed. The apply confirmation timer catches the
+unconfirmed case, but a change that is confirmed — or one whose damage appears later than
+the render — leaves no watchdog behind it. It starts to matter with M1b, where a console
+makes applying changes routine and a device may run for days between restarts. The fix is to
+re-arm on every apply and confirm, which is small; it is recorded rather than done because
+M1a's exit criterion is the boot path.
+
+### K-12 · The loopback clause in the fallback's reachability check is redundant
+`src/net/watchdog.ts`
+
+`check()` filters on both `a.device !== "lo"` and `!a.address.startsWith("127.")`. The second
+subsumes the first for every case that can actually occur: loopback is 127.0.0.0/8 by
+definition, and an interface literally named `lo` holding a non-127 address is not a
+configuration this code will meet. Harmless, and it costs a reader a moment working out
+which of the two is load-bearing.
+
+Left as it is deliberately: this is the reachability probe behind R-NET-07, the one
+guarantee M1a exists to satisfy, and it is safer belt-and-braces than clever. Worth
+collapsing to the address test alone the next time this function is touched for a reason,
+not on its own.
+
+### K-13 · The access point and the Wi-Fi client bind the same radio, with no arbitration
+`src/net/profiles.ts`, `src/net/renderer.ts`
+
+`desiredProfiles` hands `ifaces.wifi` to both `apProfile` and `clientProfile`. On a
+single-radio board — every Raspberry Pi with built-in Wi-Fi — that is two connection
+profiles claiming one interface, one in AP mode and one in infrastructure mode. Nothing in
+this code decides which wins; NetworkManager does, by whatever its own activation rules say,
+and this repository has never observed what that is. The access point is `autoconnect no`
+and brought up deliberately while the client is `autoconnect yes`, which makes the outcome
+*likely* to be "whichever was activated last", but that is a guess written down, not a
+design.
+
+`network.priority` — the ordered egress preference in the configuration — is parsed by the
+schema, carried in every config file, and **read by nothing**. R-NET-06 asks for routing
+metrics generated from it; no code generates any.
+
+Both belong to the milestone that does multi-interface egress, where a modem, Ethernet and
+Wi-Fi have to be ranked against each other for real. It is recorded here rather than left
+silent because "the access point and the client profile fight over one radio" is exactly the
+kind of thing that reads as a bug in the field, and because a configuration key that does
+nothing is worse than an absent one — it invites an operator to set it and expect an effect.
+
+### K-14 · ~~A device with an invalid configuration was reachable but not repairable~~ — CLOSED
+
+`apply()` snapshotted the configuration on disk before writing the new one, so a device
+whose `config.yaml` no longer validated refused **every** apply, including a good one. The
+socket bound, so the device could be reached and diagnosed, but not fixed — only a card
+reader or an SSH session could repair it.
+
+Closed in `d53b3cb`: an apply whose snapshot cannot be read falls back to the posted
+configuration as the rollback target rather than refusing. Retained here, and not deleted,
+because `src/apply/engine.ts` and `src/apply/journal.ts` still cite K-14 when explaining
+why that fallback exists.
+
+### K-15 · The access point's DHCP range is not configurable
+`src/schema/config.ts`, `src/net/profiles.ts`
+
+`config.network.ap.dhcp` — `start`, `end`, `lease` — has been **removed**. It was written to
+`/etc/NetworkManager/dnsmasq-shared.d/yonder.conf`, and that drop-in *is* read; it simply
+never won. NetworkManager's `shared` method starts its own dnsmasq and passes it a range on
+the command line, which takes precedence over a `dhcp-range` in a conf-dir file:
+
+```
+/usr/sbin/dnsmasq … --dhcp-range=192.168.77.10,192.168.77.254,3600 \
+                    --conf-dir=/etc/NetworkManager/dnsmasq-shared.d
+```
+
+A client that joined a real board was handed `192.168.77.154` — inside NetworkManager's
+range, outside the configured `.2`–`.50`. So the setting decided nothing and the file it
+wrote was actively misleading, which is worse than an absent key: it invites an operator to
+set a pool and expect an effect. Removed rather than documented as inert.
+
+**What is still true** is what R-NET-02 now says: clients of the access point get addresses,
+inside the access point's own subnet, because NetworkManager derives that range from
+`ipv4.addresses`. Moving `network.ap.address` to another subnet moves the range with it.
+That also retired the cross-field check the schema used to carry — a pool cannot be left
+behind in an old subnet when there is no pool to leave behind.
+
+**What it would cost to bring back.** Not a drop-in — that has been tried and this entry is
+the result. It needs Yonder to run its own dnsmasq: the access point's connection set to a
+static address rather than `shared`, our own dnsmasq bound to the wifi interface with our
+own pool, our own NAT and forwarding rules to replace what `shared` was doing, a unit to
+supervise it, and a restart on every apply that changes the pool. That is a second network
+daemon to own on a 512 MB board, and its failure mode is a client that never gets an
+address on a device whose only way in is that access point — the exact shape of
+unreachability R-NET-07 exists to catch. A configurable pool is a nice-to-have and does not
+buy that. Revisit only with a reason that does.
+
+**The upgrade consequence is closed, and it cost a board to find.** A Raspberry Pi seeded by
+an earlier build was upgraded past the removal and still carried the `dhcp:` block. The
+schema is strict, so every read of its `config.yaml` failed: the network was never rendered,
+the fallback watchdog could not read the file either and ran on defaults, and the board was
+reachable only because it happened to have an Ethernet cable in it. On an aircraft that is a
+card reader. `network.ap.dhcp` is now the first entry in `src/schema/retired.ts` — an
+enumerated list of keys this project has removed — so a file carrying it loads: the key is
+dropped, the drop is logged naming the key, and the file itself is left alone until
+something saves the configuration. R-CFG-09 states the obligation; the loader, the apply
+engine and a daemon start-up test gate it. A key nobody retired is still rejected exactly as
+before, so a misspelling still fails loudly.
+
+**What that does not close.** The blast radius of an unloadable configuration is smaller —
+a file that was invalid *only* because of a retired key is not invalid at all any more — but
+nothing about a genuinely invalid one has changed. `apply()` still cannot snapshot a
+`config.yaml` it cannot load, so it still substitutes the shipped default as that apply's
+rollback target and says so through `previousIsDefault`. An operator who hand-edits a real
+mistake into the file still loses their own configuration as a rollback target until they
+fix it.
+
+### K-16 · The radio wait gives up once, and the fallback cannot make the profile it needs
+`src/net/renderer.ts`, `src/daemon/server.ts`
+
+`waitForRadio()` runs once and is bounded at 30 s. If NetworkManager has not registered
+`wlan0` at all by then, the render it triggers never happens, and a render is the only thing
+that writes the `yonder-ap` profile. A radio that appears at, say, 35 s is therefore never
+rendered against. At 90 s the fallback watchdog fires and runs its only action —
+`nmcli connection up yonder-ap` — against a profile that does not exist. It logs
+`unknown connection`, and never tries again. **The device is unreachable until a power
+cycle**, which on an aircraft means fetching it back.
+
+K-11 covers "the watchdog fires once". This is the other half: the one shot can fail against
+something that was never created, and the two together are the failure R-NET-07 exists to
+prevent, reached by a route R-NET-07's own wording does not describe.
+
+**Re-arming the watchdog does not fix it, and the obvious version of that change is an exact
+no-op.** Re-arming once when `waitForRadio` resolves recomputes the same deadline: `since` is
+`startedAt`, so a watchdog re-armed at t=30 s with a 90 s window is armed for t=90 s, which
+is when the first one was already going to fire. Re-arming with a *fresh* window only moves
+the same command later — the action is still `up yonder-ap`, and the profile is still absent,
+because nothing between the two attempts rendered. Both were prototyped against a board whose
+radio appears at 35 s: profile absent, activations accepted 0, in every arrangement.
+
+What would close it is a re-render, not a re-arm. Two candidates, both bigger than they look:
+render once more when the wait's bound expires rather than only when it succeeds; or let the
+fallback's action render before it activates. The second puts a renderer — and up to a full
+`renderTimeoutMs` — inside the one path that must always work, which is the trade K-10
+already describes going wrong. It belongs with the re-arm-on-apply work in K-11, done
+together and deliberately, rather than as a change to M1a's central guarantee made on the way
+to merging it.
+
+### K-17 · `radioSettled` is a resolved promise for the whole of start-up
+`src/daemon/server.ts`
+
+`radioSettled` is initialised to `Promise.resolve()` and only assigned the real promise after
+`renderCurrent()` and `listen()` have both returned. The fallback watchdog is armed before
+either. So for the whole of start-up, the `await radioSettled` in the watchdog's `apUp` is a
+no-op against a promise that was never about the radio.
+
+The comment on `apUp` says the fallback's action must not run while the render that creates
+its profile is still in flight. On a board where recovery and the start-up render are slow
+enough that the deadline lands before `listen()` returns, it does exactly that: `apUp` runs
+concurrently with an in-flight render, which is what the await was added to prevent. Narrow —
+it needs the deadline to land inside start-up, so `network.ap.fallback.timeout` at its 30 s
+minimum on a slow board — and it fails in the same direction as K-16, toward an activation
+that fails rather than a wrong one that succeeds. Recorded, not fixed: the assignment cannot
+simply move earlier without moving the wait itself in front of `listen()`, which is the
+ordering `server.ts` argues against at length and for good reasons.

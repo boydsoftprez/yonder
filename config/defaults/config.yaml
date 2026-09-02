@@ -1,0 +1,42 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Yonder default configuration.
+#
+# Generated from DEFAULT_CONFIG in packages/yonder-core/src/schema/config.ts.
+# Regenerate with `npm run defaults -w yonder-core`; do not hand-edit the copy
+# under config/defaults/, or the shipped default drifts from the schema that
+# validates it.
+#
+# The copy at /etc/yonder/config.yaml belongs to the device. It is seeded from
+# this file on a clean install and is never overwritten afterwards.
+version: 1
+network:
+  ap:
+    enabled: true
+    ssid: yonder
+    psk:
+      secret: ap_psk
+    address: 192.168.77.1/24
+    fallback:
+      enabled: true
+      timeout: 90
+  client:
+    ssid: null
+    psk: null
+  ethernet:
+    dhcp: true
+  priority:
+    - ethernet
+    - modem
+    - wifi_client
+ui:
+  port: 3000
+  theme: day
+  editor:
+    enabled: true
+    password: null
+    interfaces:
+      - ethernet
+      - wifi_client
+system:
+  hostname: yonder
+  timezone: UTC

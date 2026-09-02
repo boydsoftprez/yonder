@@ -226,11 +226,36 @@ Our apply cycle:
 
 And independently of all that, a boot-time guarantee:
 
-> **If no configured network is carrying traffic within 90 seconds of boot, the access
-> point comes up regardless of configuration.**
+> **If no configured network is carrying traffic within 90 seconds of `yonder-core`
+> starting, the access point comes up regardless of configuration.**
 
 The AP is a floor, not a mode. There is always a way in. The fallback is on by default,
 and disabling it requires a config key whose name says what it does.
+
+The window is measured from the moment the daemon process starts — the unit orders itself
+after `NetworkManager`, so that is a little after kernel boot — and whatever start-up work
+happens before the watchdog is armed comes out of the 90 seconds rather than being added to
+them. That matters because two of those steps, the rollback of an unconfirmed change and the
+start-up render, can each spend up to the per-renderer timeout inside a wedged renderer. The
+deadline is a deadline, not a delay after an unbounded prologue.
+
+And a third way to brick a device, which neither of those two covers: **the configuration
+was written by an older Yonder.** The schema is strict, so a release that removes a setting
+rejects every `config.yaml` still carrying it — and the guarantees above do not help.
+Rollback has nothing to roll back to: the file being refused is the one already in force,
+and no apply put it there. The access-point floor does not stand on its own either — its
+only action is to raise the `yonder-ap` profile, and that profile is written by a render
+that cannot run, because rendering needs the configuration that would not load. A board did
+exactly this: no access point, and the only way to it was an Ethernet cable that happened to
+be plugged in.
+
+So a removed key is **retired, not merely deleted**. The removals are enumerated in
+`src/schema/retired.ts`; a document is stripped of them before validation, each drop is
+logged naming the key, and the operator's file is left alone until something saves it. Every
+key that was never a Yonder setting is still refused, with the offending path named, because
+a misspelling silently ignored is a setting an operator believes is in force and is not
+(R-CFG-09). Retiring a key is deliberate: one line in that file, one row in the table in
+[`configuration.md`](configuration.md), both gated by tests.
 
 ---
 
@@ -311,11 +336,11 @@ Commitments, enforced in review. Each maps to an `R-SEC` requirement.
 
 | | |
 |---|---|
-| **No shared secrets** | Every credential is per device, generated at first boot, shown once |
+| **One shared default, and it is published** | The setup access point carries a documented default passphrase, never presented as a secret. Everything that guards the vehicle or its configuration is per device — see [ADR-0007](adr/0007-credential-boundary.md) |
 | **No remote root** | Key authentication; root login disabled; password authentication off unless enabled |
 | **No open command path** | MAVLink ingest on loopback only unless explicitly opted in |
 | **Least privilege** | Control plane runs as a dedicated user; privileged operations via narrowly scoped helpers |
-| **No default admin secrets** | Every service secret generated per device, never left at an upstream default |
+| **No default administrator credential** | No administrator password exists until the operator sets one at first use, and no service is left at an upstream default |
 | **Encryption available** | HTTP on the local access point; TLS available; the mesh VPN carries its own |
 | **Code execution is gated** | The flow editor requires a password set at setup, and is not reachable from the cellular interface by default |
 

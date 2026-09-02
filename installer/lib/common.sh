@@ -6,6 +6,19 @@
 : "${YONDER_PREFIX:=/opt/yonder}"
 : "${YONDER_ETC:=/etc/yonder}"
 
+# The one path the systemd unit's ExecStart names, and a symlink this
+# installer points at whichever node the install actually resolved.
+#
+# Deliberately not overridable from the environment: it is half of a pair with
+# `ExecStart=` in systemd/yonder-core.service, and a value the two halves can
+# disagree about is the defect this constant exists to close. A bundled node
+# installs to $YONDER_PREFIX/node/bin/node and a distro one to /usr/bin/node;
+# systemd resolves neither, because a unit's ExecStart is an absolute path and
+# systemd knows nothing of the PATH this installer sets for its own run. So
+# the unit names a fixed path, and link_node makes that path mean the right
+# thing on both install routes.
+YONDER_NODE_LINK=/usr/local/bin/yonder-node
+
 APT_UPDATED=0
 
 log()  { printf '  %s\n' "$*"; }
@@ -63,6 +76,30 @@ ensure_dir() {
     return 0
 }
 
+# A prebuilt Node.js distribution vendored at $YONDER_SRC/vendor/node, when
+# present. Installing it lets a role satisfy its node dependency without
+# `ensure_pkgs nodejs` touching the network — the same offline requirement
+# that gives 20-yonder-core.sh a prebuilt-tree path for yonder-core itself.
+# Copies the whole distribution (bin/, lib/, and the npm it carries) to
+# $YONDER_PREFIX/node and prepends it to PATH for the rest of this run.
+# Idempotent: re-running replaces any previously installed copy with
+# whatever vendor/node currently holds.
+#
+# Returns 1 with nothing changed when there is no vendored node, so the
+# caller falls back to ensure_pkgs nodejs.
+install_bundled_node() {
+    # shellcheck disable=SC2153 # YONDER_SRC is exported by install.sh, not a typo of YONDER_ETC
+    vendor_node="$YONDER_SRC/vendor/node"
+    [ -f "$vendor_node/bin/node" ] || return 1
+
+    log "bundled node found at $vendor_node; installing to $YONDER_PREFIX/node, skipping ensure_pkgs nodejs"
+    run rm -rf "$YONDER_PREFIX/node"
+    run cp -r "$vendor_node" "$YONDER_PREFIX/node"
+    PATH="$YONDER_PREFIX/node/bin:$PATH"
+    export PATH
+    return 0
+}
+
 # The major version of the node on PATH, or nothing if there is no node.
 node_major() {
     command -v node >/dev/null 2>&1 || return 0
@@ -87,4 +124,197 @@ require_node() {
         die "node $major is too old; yonder-core needs node $want or newer"
     fi
     log "node $major meets the minimum of $want"
+}
+
+# Point $YONDER_NODE_LINK at the node this run resolved.
+#
+# The unit used to name /usr/bin/node directly, which is true only on the
+# route that installs the distro package. On the offline route
+# install_bundled_node unpacks a runtime to $YONDER_PREFIX/node and prepends
+# it to PATH *for this script*; systemd inherits none of that, so the service
+# hit `Unable to locate executable '/usr/bin/node'` and, under Restart=always,
+# crash-looped for ever. One symlink at a fixed path makes both routes
+# identical from systemd's point of view and depends on no PATH at all.
+#
+# Fails here, loudly, rather than leaving a unit that cannot start: an
+# installer that reports success and hands back a device in a restart loop is
+# worse than one that stops with the reason.
+#
+# Idempotent: the link is removed and recreated, so re-running the installer
+# after switching between the bundled and the packaged node repoints it
+# instead of failing on an existing file.
+link_node() {
+    node_bin=$(command -v node 2>/dev/null || true)
+    if [ -z "$node_bin" ]; then
+        if [ "$DRY_RUN" = "1" ]; then
+            log "no node here; a real run would link $YONDER_NODE_LINK -> the node it resolved"
+            return 0
+        fi
+        die "no node on PATH to link at $YONDER_NODE_LINK; the service would not start"
+    fi
+    if [ "$DRY_RUN" != "1" ] && [ ! -x "$node_bin" ]; then
+        die "$node_bin is not executable; refusing to point $YONDER_NODE_LINK at it"
+    fi
+    log "linking $YONDER_NODE_LINK -> $node_bin"
+    ensure_dir "$(dirname "$YONDER_NODE_LINK")"
+    # rm then ln, not `ln -sfn`: -n is not POSIX, and without it `ln -sf` on an
+    # existing symlink-to-a-directory creates the link *inside* it.
+    run rm -f "$YONDER_NODE_LINK"
+    run ln -s "$node_bin" "$YONDER_NODE_LINK"
+}
+
+# The post-condition on a unit this installer has just written: the binary its
+# ExecStart names is the one this installer prepared, and it can be executed.
+#
+#     assert_unit_exec <unit-file> [path ExecStart is expected to name]
+#
+# systemd resolves nothing for you. An ExecStart naming a path that is not
+# there is `status=203/EXEC` on every start, and with Restart=always that is a
+# board that boots, fails, and boots again for ever — discovered after the
+# flash, on hardware, rather than here where the message can say what is
+# wrong. This check is what would have caught that before the board booted.
+#
+# The two halves fail at different times on purpose. The expected-path
+# comparison is pure string work, so it runs on a dry run too and catches the
+# unit and the installer drifting apart in CI, on a machine with no systemd
+# and no node. The executability check needs the real filesystem the service
+# will start against, so on a dry run it says what it would have checked.
+assert_unit_exec() {
+    unit="$1"
+    want_exec="${2:-}"
+    # ExecStart may carry arguments; the executable is the first word. A
+    # leading '-' or '@' modifier is not used by any unit here, so the first
+    # word is the path.
+    unit_exec=$(sed -n 's/^ExecStart=\([^ ]*\).*/\1/p' "$unit" | head -n 1)
+    [ -n "$unit_exec" ] || die "$unit has no ExecStart; the service would not start"
+    if [ -n "$want_exec" ] && [ "$unit_exec" != "$want_exec" ]; then
+        die "$unit starts $unit_exec, but this installer prepares $want_exec; the unit and the installer have drifted apart"
+    fi
+    if [ "$DRY_RUN" = "1" ]; then
+        log "would check that $unit_exec exists and is executable (ExecStart of $unit)"
+        return 0
+    fi
+    [ -x "$unit_exec" ] || die "$unit starts $unit_exec, which is not an executable file; the service would fail at step EXEC (203) on every boot"
+    log "$unit starts $unit_exec, which is executable"
+}
+
+# Whether a tree carries a production dependency closure the daemon inside it
+# could actually run from.
+#
+#     prebuilt_deps_present <tree>
+#
+# The test this replaces was `[ -d "$tree/node_modules" ]` — that the directory
+# exists. A checkout that has ever run the test suite satisfies that with a
+# node_modules holding nothing but a `.vite` cache, and copying it to a board
+# produces a daemon that dies on its first import:
+#
+#     ERR_MODULE_NOT_FOUND: Cannot find package 'zod' imported from
+#     /opt/yonder/packages/yonder-core/dist/schema/config.js
+#
+# Under Restart=always that is a permanent crash loop with no socket, no
+# access point and no console — and the install that produced it reported
+# success. So the question asked here is the one that matters: does every
+# dependency this package declares actually resolve?
+#
+# Resolution is pinned *inside* the tree deliberately. These packages live in a
+# workspace, so a checkout hoists the daemon's dependencies to the repository
+# root, where a resolver allowed to walk upwards finds them and answers yes for
+# a tree that ships none of them. The root node_modules is not what gets copied
+# to the board; only this one is.
+#
+# node is the resolver rather than a directory listing because node is what
+# will be asked the same question on the board, and it is already a hard
+# dependency of the role that calls this. Without one — only possible on a dry
+# run, since require_node dies otherwise — the tree cannot be judged, so it is
+# not trusted, and the install-and-build path runs instead. That path is always
+# correct; it only costs time.
+#
+# Returns 0 when the tree can be used as-is, 1 with the reason logged when not.
+PREBUILT_DEPS_PROBE='
+const { createRequire } = require("node:module");
+const { readFileSync, statSync } = require("node:fs");
+const { resolve, sep } = require("node:path");
+const root = resolve(process.env.YONDER_TREE);
+const manifest = root + sep + "package.json";
+const deps = Object.keys(JSON.parse(readFileSync(manifest, "utf8")).dependencies || {});
+const inside = root + sep + "node_modules" + sep;
+const req = createRequire(manifest);
+const missing = [];
+for (const name of deps) {
+  let where;
+  try {
+    where = req.resolve(name);
+  } catch (e) {
+    // A package whose exports map offers no require entry still ships a
+    // package.json. The question is whether it is here, not how it is entered.
+    try { statSync(inside + name + sep + "package.json"); where = inside + name; }
+    catch (e2) { missing.push(name + " is not installed"); continue; }
+  }
+  if (!where.startsWith(inside)) missing.push(name + " resolves to " + where + ", outside the tree");
+}
+if (missing.length > 0) { console.error(missing.join("; ")); process.exit(1); }
+'
+
+prebuilt_deps_present() {
+    pdp_tree="$1"
+    if ! command -v node >/dev/null 2>&1; then
+        log "no node here to check the dependency tree in $pdp_tree"
+        return 1
+    fi
+    if pdp_why=$(YONDER_TREE="$pdp_tree" node -e "$PREBUILT_DEPS_PROBE" 2>&1); then
+        return 0
+    fi
+    log "the node_modules in $pdp_tree is not a dependency tree the daemon could run from: $pdp_why"
+    return 1
+}
+
+# The post-condition on the tree this installer has just installed: the entry
+# point systemd is about to start, and every module it imports, actually load.
+#
+#     assert_module_graph <tree> <entry, relative to the tree> <node binary>
+#
+# The sibling of assert_unit_exec, one layer in. That check answers "is there
+# an executable at the path ExecStart names"; this one answers "and can it get
+# past its own imports". A tree missing its dependencies passes every check
+# short of this one — the file named by ExecStart exists, the node binary
+# exists, the daemon's entry point exists — and still fails at the first
+# import, on a board, under Restart=always. Nothing before this could see that,
+# because the only thing that can is node resolving the graph for real.
+#
+# Run against the installed copy with the node the unit names, not against the
+# source tree with whatever node is on PATH: the pair systemd will use is the
+# pair worth proving.
+#
+# No arguments are passed to node, on purpose. The daemon starts itself only
+# when `import.meta.url` matches `process.argv[1]`, and with `node -e` and no
+# arguments there is no argv[1] to match — so importing the entry point loads
+# the whole graph and starts no server, binds no socket and touches no radio.
+#
+# The dry-run split follows assert_unit_exec: the check needs a real installed
+# tree and a real node, and on a dry run there is neither, so it says what it
+# would have checked.
+MODULE_GRAPH_PROBE='
+const { pathToFileURL } = require("node:url");
+import(pathToFileURL(process.env.YONDER_ENTRY).href).catch((e) => {
+  console.error(e && e.message ? e.message : String(e));
+  process.exit(1);
+});
+'
+
+assert_module_graph() {
+    amg_tree="$1"
+    amg_entry="$2"
+    amg_node="$3"
+    if [ "$DRY_RUN" = "1" ]; then
+        log "would check that $amg_tree/$amg_entry and everything it imports load under $amg_node"
+        return 0
+    fi
+    [ -f "$amg_tree/$amg_entry" ] \
+        || die "$amg_tree/$amg_entry was not produced; the service would not start"
+    if amg_why=$(YONDER_ENTRY="$amg_tree/$amg_entry" "$amg_node" -e "$MODULE_GRAPH_PROBE" 2>&1); then
+        log "$amg_entry and everything it imports load"
+        return 0
+    fi
+    die "$amg_tree/$amg_entry cannot be loaded by $amg_node: $amg_why
+the daemon would fail on its first import on every start, and under Restart=always that is a crash loop with no socket, no access point and no console"
 }

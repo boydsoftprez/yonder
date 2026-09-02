@@ -68,15 +68,66 @@ describe("ApplyEngine", () => {
     expect(e.status().state).toBe("idle");
   });
 
+  /**
+   * R-CFG-09 on the way in, not just on the way out. A configuration that
+   * loads has to be one that applies: an operator on a device seeded by an
+   * earlier build can read their own file — from the boot partition, from a
+   * backup, from `GET /config` on an older console — and post it back, and
+   * this API is the only repair path a console has. Refusing it here would
+   * hand them a device they can read and cannot fix.
+   *
+   * The key is dropped, not stored: what reaches the renderers and the file
+   * is the validated document, so the next write is already free of it.
+   */
+  it("accepts a posted configuration carrying a retired key, and does not store it", async () => {
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      const { clock } = fakeClock();
+      const r = renderer();
+      const e = new ApplyEngine({ configPath, journalPath, renderers: [r], clock });
+
+      const fromAnEarlierBuild = {
+        ...changed(),
+        network: {
+          ...DEFAULT_CONFIG.network,
+          ap: {
+            ...DEFAULT_CONFIG.network.ap,
+            dhcp: { start: "192.168.77.2", end: "192.168.77.50", lease: "12h" },
+          },
+        },
+      };
+
+      const { id } = await e.apply(fromAnEarlierBuild as unknown as Config);
+      e.confirm(id);
+
+      expect(loadConfig(configPath).system.hostname).toBe("changed");
+      expect(readFileSync(configPath, "utf8")).not.toContain("lease:");
+      expect("dhcp" in r.calls[0]!.network.ap).toBe(false);
+    } finally {
+      stderr.mockRestore();
+    }
+  });
+
+  it("still rejects a posted configuration with a key nobody retired", async () => {
+    const { clock } = fakeClock();
+    const e = new ApplyEngine({ configPath, journalPath, renderers: [renderer()], clock });
+    const typo = { ...changed(), network: { ...DEFAULT_CONFIG.network, ap: { ...DEFAULT_CONFIG.network.ap, ssdi: "yonder" } } };
+    await expect(e.apply(typo as unknown as Config)).rejects.toThrow(/ssdi/);
+    expect(loadConfig(configPath).system.hostname).toBe("yonder");
+  });
+
   it("writes the new config and enters pending", async () => {
     const { clock } = fakeClock();
     const r = renderer();
     const e = new ApplyEngine({ configPath, journalPath, renderers: [r], clock });
-    const { id } = await e.apply(changed());
-    expect(id).toBeTruthy();
+    const result = await e.apply(changed());
+    expect(result.id).toBeTruthy();
     expect(e.status().state).toBe("pending");
     expect(loadConfig(configPath).system.hostname).toBe("changed");
     expect(r.calls).toHaveLength(1);
+    // The ordinary case: config.yaml on disk was readable, so the rollback
+    // target is the operator's own previous configuration, not the default.
+    expect(result.previousIsDefault).toBeUndefined();
   });
 
   it("stays applied once confirmed, even after the timeout passes", async () => {
@@ -254,6 +305,107 @@ describe("ApplyEngine", () => {
     await second.recover();
     expect(second.status().lastResult).toEqual({ id, outcome: "reverted", at: 0 });
   });
+
+  it("fails the apply and rolls back when a renderer never settles", async () => {
+    const { clock, advance } = fakeClock();
+    const hung: Renderer = { name: "hung", render: () => new Promise(() => {}) };
+    const e = new ApplyEngine({
+      configPath, journalPath, renderers: [hung], clock, renderTimeoutMs: 60_000,
+    });
+    const applying = e.apply(changed());
+    advance(61_000);
+    await expect(applying).rejects.toThrow(/timed out/i);
+    expect(loadConfig(configPath).system.hostname).toBe("yonder");
+    expect(e.status().state).toBe("idle");
+  });
+
+  it("accepts a later apply after a render timed out", async () => {
+    const { clock, advance } = fakeClock();
+    let hang = true;
+    const sometimes: Renderer = {
+      name: "sometimes",
+      render: () => (hang ? new Promise<void>(() => {}) : Promise.resolve()),
+    };
+    const e = new ApplyEngine({
+      configPath, journalPath, renderers: [sometimes], clock, renderTimeoutMs: 60_000,
+    });
+    const first = e.apply(changed());
+    advance(61_000);
+    await expect(first).rejects.toThrow(/timed out/i);
+    hang = false;
+    await expect(e.apply(changed())).resolves.toHaveProperty("id");
+  });
+
+  /**
+   * The guard that makes renderCurrent() safe to call from outside. apply()
+   * holds the reservation across its renders precisely so two configurations
+   * are never in flight at once; a public entry into renderAll that ignored
+   * that could push a stale configuration through a renderer mid-apply.
+   * Deleting the guard left every test green.
+   */
+  it("refuses renderCurrent() while an apply is in flight", async () => {
+    const { clock } = fakeClock();
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const seen: Config[] = [];
+    // Blocks the first render only, so removing the guard produces a clean
+    // "resolved instead of rejecting" rather than a hang.
+    const slow: Renderer = {
+      name: "slow",
+      async render(c) { seen.push(structuredClone(c)); if (seen.length === 1) await gate; },
+    };
+    const e = new ApplyEngine({ configPath, journalPath, renderers: [slow], clock });
+
+    const applying = e.apply(changed());
+    expect(e.status().state).toBe("applying");
+    await expect(e.renderCurrent()).rejects.toThrow(/in flight/);
+    // And nothing reached the renderer behind the apply's back.
+    expect(seen).toHaveLength(1);
+
+    release();
+    await applying;
+  });
+
+  /**
+   * Task 6 skipped the rollback re-render for a renderer that timed out, on
+   * the grounds that it is presumed still wedged (K-10). What it promised to
+   * preserve was the behaviour for every *other* failure: a renderer that
+   * threw still gets the previous configuration pushed back through it, so
+   * the system goes back as well as the file. Only the inverse was gated —
+   * `if (!(e instanceof RenderTimeoutError))` could be `if (false)` and the
+   * suite stayed green.
+   */
+  it("re-renders the previous configuration when a renderer throws", async () => {
+    const { clock } = fakeClock();
+    const seen: Config[] = [];
+    let fail = true;
+    const flaky: Renderer = {
+      name: "flaky",
+      async render(c) {
+        seen.push(structuredClone(c));
+        if (fail) { fail = false; throw new Error("nope"); }
+      },
+    };
+    const e = new ApplyEngine({ configPath, journalPath, renderers: [flaky], clock });
+
+    await expect(e.apply(changed())).rejects.toThrow(/nope/);
+    // config.yaml is restored either way. This is the other half: the running
+    // system is told about it too.
+    expect(seen).toHaveLength(2);
+    expect(seen[1].system.hostname).toBe("yonder");
+  });
+
+  it("records a timed-out apply as failed in lastResult", async () => {
+    const { clock, advance } = fakeClock();
+    const hung: Renderer = { name: "hung", render: () => new Promise(() => {}) };
+    const e = new ApplyEngine({
+      configPath, journalPath, renderers: [hung], clock, renderTimeoutMs: 60_000,
+    });
+    const applying = e.apply(changed());
+    advance(61_000);
+    await applying.catch(() => {});
+    expect(e.status().lastResult?.outcome).toBe("failed");
+  });
 });
 
 /**
@@ -391,5 +543,108 @@ describe("ApplyEngine when the journal cannot be cleared", () => {
 
     vi.restoreAllMocks();
     await expect(e.apply(changed())).resolves.toBeTruthy();
+  });
+});
+/**
+ * A degraded renderer set (daemon/server.ts catching a malformed
+ * secrets.yaml out of buildRenderers) used to leave apply() rendering
+ * against an empty renderer set: config.yaml got written, the renderer loop
+ * did nothing, and the operator was told 200/confirmed for a change that
+ * never reached anything. apply() now refuses outright while degraded; see
+ * daemon/server.test.ts for the same gate proven through the HTTP layer.
+ */
+describe("ApplyEngine when the renderer set is degraded", () => {
+  it("has no degraded reason by default", () => {
+    const { clock } = fakeClock();
+    const e = new ApplyEngine({ configPath, journalPath, renderers: [renderer()], clock });
+    expect(e.status().degraded).toBeUndefined();
+  });
+
+  it("reports the reason from status()", () => {
+    const { clock } = fakeClock();
+    const e = new ApplyEngine({
+      configPath, journalPath, renderers: [renderer()], clock,
+      degraded: "the network renderer could not be built (test)",
+    });
+    expect(e.status().degraded).toBe("the network renderer could not be built (test)");
+  });
+
+  it("refuses apply() while degraded, touching neither the file nor the renderers", async () => {
+    const { clock } = fakeClock();
+    const r = renderer();
+    const e = new ApplyEngine({
+      configPath, journalPath, renderers: [r], clock,
+      degraded: "the network renderer could not be built (test)",
+    });
+    await expect(e.apply(changed())).rejects.toThrow(/degraded/);
+    expect(loadConfig(configPath).system.hostname).toBe("yonder");
+    expect(r.calls).toHaveLength(0);
+    expect(e.status().state).toBe("idle");
+  });
+});
+
+/**
+ * K-14. `apply()` used to snapshot config.yaml as its rollback target before
+ * even looking at the operator's posted body: an unloadable file on disk
+ * threw straight out of that snapshot, refusing *every* apply — including a
+ * perfectly good one — with an error describing the file already there, not
+ * what was just posted. The shipped default now stands in as the rollback
+ * target instead, recorded rather than silent.
+ */
+describe("ApplyEngine.apply when config.yaml on disk is unloadable", () => {
+  beforeEach(() => {
+    writeFileSync(configPath, "version: 99\nnetwork: nonsense\n");
+  });
+
+  it("accepts a good apply instead of refusing it", async () => {
+    const { clock } = fakeClock();
+    const r = renderer();
+    const e = new ApplyEngine({ configPath, journalPath, renderers: [r], clock });
+    const result = await e.apply(changed());
+    expect(result.id).toBeTruthy();
+    expect(e.status().state).toBe("pending");
+    expect(loadConfig(configPath).system.hostname).toBe("changed");
+    expect(r.calls).toHaveLength(1);
+  });
+
+  it("marks the rollback target as the shipped default, not silently", async () => {
+    const { clock } = fakeClock();
+    const e = new ApplyEngine({ configPath, journalPath, renderers: [renderer()], clock });
+    const result = await e.apply(changed());
+    expect(result.previousIsDefault).toBe(true);
+
+    const entry = JSON.parse(readFileSync(journalPath, "utf8")) as {
+      previous: Config;
+      previousIsDefault: boolean;
+    };
+    expect(entry.previousIsDefault).toBe(true);
+    expect(entry.previous).toEqual(DEFAULT_CONFIG);
+  });
+
+  it("rolls back to the shipped default, not the unloadable file, when the apply then fails", async () => {
+    const { clock } = fakeClock();
+    const bad: Renderer = { name: "bad", async render() { throw new Error("nope"); } };
+    const e = new ApplyEngine({ configPath, journalPath, renderers: [bad], clock });
+    await expect(e.apply(changed())).rejects.toThrow(/nope/);
+    expect(loadConfig(configPath)).toEqual(DEFAULT_CONFIG);
+  });
+
+  it("preserves the unloadable file as config.yaml.invalid before overwriting it", async () => {
+    const before = readFileSync(configPath, "utf8");
+    const { clock } = fakeClock();
+    const e = new ApplyEngine({ configPath, journalPath, renderers: [renderer()], clock });
+    await e.apply(changed());
+    expect(readFileSync(`${configPath}.invalid`, "utf8")).toBe(before);
+  });
+
+  it("falls back to the default when config.yaml is missing outright, without preserving nothing", async () => {
+    // A different failure than "invalid": there is no file at all to copy.
+    rmSync(configPath);
+    const { clock } = fakeClock();
+    const e = new ApplyEngine({ configPath, journalPath, renderers: [renderer()], clock });
+    const result = await e.apply(changed());
+    expect(result.previousIsDefault).toBe(true);
+    expect(existsSync(`${configPath}.invalid`)).toBe(false);
+    expect(loadConfig(configPath).system.hostname).toBe("changed");
   });
 });

@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { readFileSync, existsSync, unlinkSync } from "node:fs";
 import { parse, stringify } from "yaml";
+import { z } from "zod";
 import { writeFileDurable } from "../fs/durable.js";
 import { generateSecret } from "./generate.js";
-import { ConfigError } from "../config/errors.js";
+import { ConfigError, formatIssues } from "../config/errors.js";
 import type { SecretRef } from "../schema/config.js";
 
 type Bag = Record<string, string>;
+
+const BagSchema = z.record(z.string());
 
 export class SecretStore {
   private readonly path: string;
@@ -14,7 +17,18 @@ export class SecretStore {
 
   constructor(path: string) {
     this.path = path;
-    this.bag = existsSync(path) ? (parse(readFileSync(path, "utf8")) as Bag) ?? {} : {};
+    if (!existsSync(path)) {
+      this.bag = {};
+      return;
+    }
+    const parsed = BagSchema.safeParse(parse(readFileSync(path, "utf8")) ?? {});
+    if (!parsed.success) {
+      throw new ConfigError(
+        `${path} must be a flat map of names to string values`,
+        formatIssues(parsed.error),
+      );
+    }
+    this.bag = parsed.data;
   }
 
   get(name: string): string | undefined {
@@ -31,6 +45,21 @@ export class SecretStore {
     return { value, created: true };
   }
 
+  /**
+   * Set the secret to a given value if it is absent, and report whether it
+   * had to. Used for a published default — the setup access-point passphrase
+   * — where the value is fixed rather than drawn from the CSPRNG. An existing
+   * value is never replaced, so an operator who changes the passphrase keeps
+   * it across every later start.
+   */
+  ensureValue(name: string, value: string): { value: string; created: boolean } {
+    const existing = this.bag[name];
+    if (existing !== undefined) return { value: existing, created: false };
+    this.bag[name] = value;
+    this.flush();
+    return { value, created: true };
+  }
+
   resolve(ref: SecretRef): string {
     const value = this.bag[ref.secret];
     if (value === undefined) {
@@ -40,10 +69,11 @@ export class SecretStore {
   }
 
   /**
-   * Durable, not merely atomic. First boot generates the access-point password
-   * and shows it once; if that write is still in the page cache when power is
-   * cut, the device comes back with a different password and the one written
-   * down no longer opens the only interface that is always there.
+   * Durable, not merely atomic. A secret this file records is one something
+   * else is already relying on — an access-point passphrase an operator has
+   * changed, an administrator password they have just set. If the write is
+   * still in the page cache when power is cut, the device comes back without
+   * it, and what they entered no longer opens anything.
    */
   private flush(): void {
     try {

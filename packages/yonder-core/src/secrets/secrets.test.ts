@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, statSync } from "node:fs";
+import { mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SecretStore } from "./store.js";
@@ -31,6 +31,25 @@ describe("SecretStore", () => {
     expect(new SecretStore(p).get("ap_psk")).toBe(value);
   });
 
+  it("sets a fixed value on first ensureValue and reports it as new", () => {
+    const s = new SecretStore(join(dir, "secrets.yaml"));
+    const first = s.ensureValue("ap_psk", "yonder1234");
+    expect(first).toEqual({ value: "yonder1234", created: true });
+    // A published default is a starting point. Once the value is there it is
+    // the device's, and a later start must not put the default back.
+    expect(s.ensureValue("ap_psk", "yonder1234")).toEqual({ value: "yonder1234", created: false });
+  });
+
+  it("never replaces an existing value with the one ensureValue was given", () => {
+    const p = join(dir, "secrets.yaml");
+    const s = new SecretStore(p);
+    s.ensureValue("ap_psk", "an-operator-chose-this");
+    expect(s.ensureValue("ap_psk", "yonder1234")).toEqual({
+      value: "an-operator-chose-this", created: false,
+    });
+    expect(new SecretStore(p).get("ap_psk")).toBe("an-operator-chose-this");
+  });
+
   it("resolves a secret reference", () => {
     const p = join(dir, "secrets.yaml");
     const s = new SecretStore(p);
@@ -41,5 +60,11 @@ describe("SecretStore", () => {
   it("throws when resolving a reference that does not exist", () => {
     const s = new SecretStore(join(dir, "secrets.yaml"));
     expect(() => s.resolve({ secret: "missing" })).toThrow(/missing/);
+  });
+
+  it("rejects a secrets file that is not a flat map of strings", () => {
+    const p = join(dir, "secrets.yaml");
+    writeFileSync(p, "ap_psk:\n  nested: true\n");
+    expect(() => new SecretStore(p)).toThrow(/flat map/);
   });
 });

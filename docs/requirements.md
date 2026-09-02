@@ -142,12 +142,12 @@ Parameter writes are vehicle commands. R-CMD applies to every requirement here.
 | ID | Requirement | P |
 |---|---|---|
 | R-NET-01 | Run a WPA2 access point with a configurable SSID, a per-device password, and a static address | 1 |
-| R-NET-02 | Serve DHCP to access-point clients | 1 |
+| R-NET-02 | Serve DHCP to clients of the access point, from addresses inside the access point's configured subnet. The address range itself is **not** configurable: it is derived from the access point's address by the network stack that serves it. See K-15 | 1 |
 | R-NET-03 | Join an existing Wi-Fi network as a client, including scanning for networks | 1 |
 | R-NET-04 | Support wired Ethernet, including a second adapter | 2 |
 | R-NET-05 | Present as a USB Ethernet gadget where the board supports it, giving a wired path to the interface over the USB port | 3 |
 | R-NET-06 | Take egress preference as an ordered list in configuration, and generate routing metrics from it | 1 |
-| R-NET-07 | **If no configured network carries traffic within 90 seconds of boot, bring up the access point regardless of configuration.** Disabling this requires an explicitly named configuration key | 1 |
+| R-NET-07 | **If no configured network carries traffic within 90 seconds of `yonder-core` starting, bring up the access point regardless of configuration.** The window is measured from the moment the daemon starts, not from kernel boot, and start-up work comes out of it rather than pushing the deadline back. Disabling this requires an explicitly named configuration key | 1 |
 | R-NET-08 | Disable Wi-Fi entirely on request, for flight | 2 |
 | R-NET-09 | Be discoverable on a local network by hostname | 2 |
 | R-NET-10 | Report per-interface throughput | 3 |
@@ -205,8 +205,10 @@ Parameter writes are vehicle commands. R-CMD applies to every requirement here.
 | R-CFG-03 | Apply changes behind a confirmation timer, reverting to the last known good configuration if unconfirmed | 1 |
 | R-CFG-04 | Keep secrets in a separate file that is never included in an image, a backup or a support bundle | 1 |
 | R-CFG-05 | Configure a device fully headless by placing a configuration file on the boot partition | 1 |
-| R-CFG-06 | Generate any secret not supplied at first boot, and display it once | 1 |
+| R-CFG-06 | Seed any credential the system needs but the operator has not supplied — from a published default where one is defined (R-SEC-01), otherwise generated per device and retrievable through the console rather than only from a log. **Never leave a device unusable for want of a credential.** See [ADR-0007](adr/0007-credential-boundary.md) | 1 |
 | R-CFG-07 | Never require a vendor tool, an imaging wizard or a network service to configure a device | 1 |
+| R-CFG-08 | **A freshly flashed device reaches a joinable, usable state with no operator input.** A default configuration is seeded, the access point comes up, and the console is served — before anyone has configured anything | 1 |
+| R-CFG-09 | **A configuration written by an earlier version of Yonder still loads.** A key a later version has retired is dropped, named in the log and ignored; a key that was never a Yonder setting is still rejected, so a misspelling can never pass for a setting. Loading does not rewrite the operator's file. **An upgrade must never strand a device on a configuration its own daemon refuses to read** | 1 |
 
 ## R-HW — Hardware support
 
@@ -233,7 +235,7 @@ Parameter writes are vehicle commands. R-CMD applies to every requirement here.
 
 | ID | Requirement | P |
 |---|---|---|
-| R-SEC-01 | Ship no shared default credential of any kind. Every secret is per device and generated at first boot | 1 |
+| R-SEC-01 | Ship no shared default credential **that protects the vehicle or its configuration**. The setup access point may carry a published default passphrase, documented and never presented as a secret; every other credential is per device. See [ADR-0007](adr/0007-credential-boundary.md) | 1 |
 | R-SEC-02 | Disable remote root login; administrative access is by key | 1 |
 | R-SEC-03 | Run the control plane as a dedicated unprivileged user, using narrowly scoped helpers for privileged operations | 2 |
 | R-SEC-04 | Expose no unauthenticated write path to configuration or to the vehicle from a non-loopback interface by default | 1 |
@@ -241,6 +243,8 @@ Parameter writes are vehicle commands. R-CMD applies to every requirement here.
 | R-SEC-06 | Contact no external service, ever. No activation, no licence check, no usage reporting | 1 |
 | R-SEC-07 | Include no credential material in a published image | 1 |
 | R-SEC-08 | Offer TLS for the web interface | 2 |
+| R-SEC-09 | **Until an administrator password has been set, the console offers no function but setting one.** No configuration read, no command, no status beyond what that step needs | 1 |
+| R-SEC-10 | **Emit no credential anywhere a credential does not belong** — a log line, an error message, a support bundle, or an API response. Redaction happens where the value is captured, not where it is printed, so a new caller cannot reintroduce the leak | 1 |
 
 ## R-UI — Interface
 

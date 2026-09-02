@@ -49,7 +49,9 @@ the fix for the worst failure mode in this class of product: if Wi-Fi credential
 ever entered through a console you reach over the access point, there is nothing to get
 wrong at flash time and no way to end up locked out of your own device.
 
-- Access point with a per-device password and a static address — R-NET-01, R-SEC-01, R-CFG-06
+- Access point with the published setup passphrase and a static address — R-NET-01, R-SEC-01
+- **Flash-and-boot: seeded config, access point up, console served, no input required** — R-CFG-08
+- **First-run setup: the console offers nothing until an administrator password is set** — R-SEC-09
 - DHCP for access-point clients — R-NET-02
 - Web console served from the device, no asset fetched from the internet — R-UI-01, R-UI-02
 - Board and resource status: model, CPU load and temperature, memory, uptime — R-SYS-01, R-SYS-02
@@ -60,6 +62,7 @@ wrong at flash time and no way to end up locked out of your own device.
 - Configuration apply and rollback used in anger for the first time — R-CFG-03
 - Reachability and ping diagnostics — R-DIA-01, R-DIA-02
 - **No unauthenticated write path from a non-loopback interface** — R-SEC-04
+- **No credential in a log line, an error message or an API response** — R-SEC-10
 - **Flow editor gated behind the password set at setup** — R-SEC-05
 - Day and night themes, operator-selectable — R-UI-07
 
@@ -72,6 +75,13 @@ formed around its absence.
 laptop, open the console, scan for your Wi-Fi, join it, and the board is online — and when
 you enter the wrong Wi-Fi password on purpose, the access point comes back on its own and
 you fix it from the same console. No card reader.
+
+**M1a status:** merged. The network layer is built and its mechanisms have each been seen
+working on a Raspberry Pi 4 — rollback, the access-point fallback, the radio unblock, the
+retired-key strip. What has *not* happened is a cold flash of a card built from this branch,
+powered on and left alone; the only cold flash so far predates five fixes and ended in a
+crash loop. See [`hardware/verifying-m1a.md`](hardware/verifying-m1a.md). That boot is
+outstanding and M1a is not finished without it.
 
 ---
 

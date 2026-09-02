@@ -36,30 +36,8 @@
             },
             "address": {
               "type": "string",
-              "pattern": "^(\\d{1,3}\\.){3}\\d{1,3}\\/\\d{1,2}$",
+              "pattern": "^(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)(\\.(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)){3}\\/(3[0-2]|[12]?\\d)$",
               "default": "192.168.77.1/24"
-            },
-            "dhcp": {
-              "type": "object",
-              "properties": {
-                "start": {
-                  "type": "string",
-                  "pattern": "^(\\d{1,3}\\.){3}\\d{1,3}$",
-                  "default": "192.168.77.2"
-                },
-                "end": {
-                  "type": "string",
-                  "pattern": "^(\\d{1,3}\\.){3}\\d{1,3}$",
-                  "default": "192.168.77.50"
-                },
-                "lease": {
-                  "type": "string",
-                  "pattern": "^\\d+[mhd]$",
-                  "default": "12h"
-                }
-              },
-              "additionalProperties": false,
-              "default": {}
             },
             "fallback": {
               "type": "object",
@@ -187,17 +165,25 @@
               "default": true
             },
             "password": {
-              "type": "object",
-              "properties": {
-                "secret": {
-                  "type": "string",
-                  "minLength": 1
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "secret": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": [
+                    "secret"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "null"
                 }
-              },
-              "required": [
-                "secret"
               ],
-              "additionalProperties": false
+              "default": null
             },
             "interfaces": {
               "type": "array",
@@ -216,9 +202,6 @@
               ]
             }
           },
-          "required": [
-            "password"
-          ],
           "additionalProperties": false
         }
       },

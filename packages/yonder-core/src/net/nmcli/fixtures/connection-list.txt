@@ -1,0 +1,2 @@
+Wired connection 1:8f2c1d3e-0000-4000-8000-000000000001:802-3-ethernet:eth0
+yonder-ap:8f2c1d3e-0000-4000-8000-000000000002:802-11-wireless:

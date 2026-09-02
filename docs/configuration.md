@@ -20,14 +20,28 @@ No imager, no cloud, no dialog.
 4. Reaching the device again confirms the change.
 5. Timer expires unconfirmed → revert and reboot.
 
-Independently: **if no configured network carries traffic within 90 s of boot, the access
-point comes up regardless of configuration.** The AP is a floor, not a mode.
+Independently: **if no configured network carries traffic within 90 s of `yonder-core`
+starting, the access point comes up regardless of configuration.** The window is measured
+from the moment the daemon starts, and start-up work comes out of it rather than delaying
+it. The AP is a floor, not a mode.
 
 ## Secrets
 
 A value written as a mapping `{ secret: <name> }` is read from `/etc/yonder/secrets.yaml`,
-which is mode `0600` and never included in an image or a support bundle. Secrets not
-present at first boot are generated and shown once.
+which is mode `0600` and never included in an image or a support bundle.
+
+Two names are seeded differently, and deliberately so — see
+[ADR-0007](adr/0007-credential-boundary.md):
+
+- **`ap_psk`** is seeded with the published default passphrase **`yonder1234`**, the same on
+  every device. It is documented rather than secret: it exists so a freshly flashed board is
+  joinable, and a value only readable from the device's own journal would lock out the one
+  person entitled to it. Change it from the console and the daemon keeps your value.
+- **`editor_password`** is **not** seeded at all. It does not exist until the operator sets
+  an administrator password, which is what makes the console's first-run step meaningful.
+  The shipped configuration says so too: `ui.editor.password` is `null` until there is a
+  password to point at. A default that named a secret nothing ever creates would break the
+  first code that resolved it eagerly, on every fresh device.
 
 ```yaml
 psk: { secret: ap_psk }         # the value lives in secrets.yaml under "ap_psk"
@@ -42,6 +56,16 @@ The authoritative schema is in [`config/schema/`](../config/schema/), generated 
 model in `yonder-core`. The configuration below is what the daemon accepts today; the test
 suite parses this very block through the schema, so the two cannot drift apart.
 
+**The access point's DHCP range is not configurable, and `address` is what decides it.**
+NetworkManager's `shared` method runs its own dnsmasq and hands it a range on the command
+line, derived from the access-point address — so the range follows the subnet you set and
+nothing else. There used to be a `network.ap.dhcp` block here; it was written to a drop-in
+NetworkManager's own command line overrode, so it decided nothing, and it has been removed
+rather than left looking authoritative. A `config.yaml` still carrying it loads anyway — it
+is a *retired* key, dropped with a line in the journal saying so, and you need not delete
+anything (see below). K-15 in [`known-issues.md`](known-issues.md) records what a
+configurable pool would cost.
+
 <!-- yonder:reference-config -->
 ```yaml
 version: 1
@@ -51,8 +75,7 @@ network:
     enabled: true
     ssid: yonder
     psk: { secret: ap_psk }
-    address: 192.168.77.1/24
-    dhcp: { start: 192.168.77.2, end: 192.168.77.50, lease: 12h }
+    address: 192.168.77.1/24                   # also decides the DHCP range clients are given
     fallback: { enabled: true, timeout: 90 }   # never disable this without reason
   client:
     ssid: null                                 # set from the console, not at flash time
@@ -65,13 +88,32 @@ ui:
   theme: day                                   # day | night
   editor:
     enabled: true
-    password: { secret: editor_password }
+    password: null                             # then { secret: editor_password }, once set
     interfaces: [ethernet, wifi_client]        # note: cellular excluded by default
 
 system:
   hostname: yonder
   timezone: UTC
 ```
+
+### Keys that have been retired
+
+A key Yonder once accepted and has since removed is **dropped on load, not rejected**: the
+daemon names it in the journal and carries on. An upgrade therefore never strands a device
+on a configuration its own daemon refuses to read (R-CFG-09) — which is what a strict schema
+does otherwise, on the one file that decides how you reach the aircraft.
+
+Your file is not rewritten. The key stays where it is, ignored, and simply is not written
+back the next time the configuration is saved.
+
+Only the keys listed here are treated this way. Anything else the schema does not recognise
+— a misspelling, a setting from somewhere else — is still an error naming the offending
+path, because a key silently ignored is a setting you believe is in force and is not.
+
+<!-- yonder:retired-keys -->
+| Key | What became of it |
+|---|---|
+| `network.ap.dhcp` | The access point's DHCP range is not configurable; NetworkManager derives it from `network.ap.address`, so this key decided nothing (K-15) |
 
 ### Sections that arrive with later milestones
 
