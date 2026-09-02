@@ -153,6 +153,22 @@ const System = z.object({
 }).strict();
 
 /**
+ * Sixteen lowercase hex characters. Uppercase is rejected rather than folded:
+ * `zerotier-cli` takes the id verbatim, and a configuration that stores one
+ * form while the client reports another is two spellings of the same network.
+ */
+export const ZEROTIER_NETWORK_ID = /^[0-9a-f]{16}$/;
+
+const ZeroTier = z
+  .object({
+    enabled: z.boolean().default(false),
+    network_id: z.string().regex(ZEROTIER_NETWORK_ID).nullable().default(null),
+  })
+  .strict();
+
+const Remote = z.object({ zerotier: ZeroTier.default({}) }).strict();
+
+/**
  * Strict, deliberately: an unrecognised key is a misspelling, and a
  * misspelling silently ignored is a setting an operator believes is in force
  * and is not.
@@ -170,6 +186,7 @@ export const ConfigSchema = z.object({
   ui: Ui,
   apply: Apply.default({}),
   system: System.default({}),
+  remote: Remote.default({}),
 }).strict();
 
 export type Config = z.infer<typeof ConfigSchema>;
