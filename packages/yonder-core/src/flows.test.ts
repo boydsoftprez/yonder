@@ -579,3 +579,54 @@ describe("flows/flows.json join feedback", () => {
     expect(JSON.stringify(flows)).not.toContain("yonderApply");
   });
 });
+
+/**
+ * A notification belongs to the dashboard, not to a page.
+ *
+ * `ui_notification.js` says so in as many words — *"In contradiction to other
+ * ui nodes (which belong to a group), the notification node belongs to a ui
+ * instead"* — and resolves `RED.nodes.getNode(config.ui)`. Pointed at a page
+ * id it silently never registers, which is exactly what happened: an operator
+ * pressed Join, no toast appeared, and the page sat there telling them
+ * nothing about whether they were still connected.
+ */
+describe("flows/flows.json notification target", () => {
+  it("attaches the toast to the dashboard, not to a page", () => {
+    const base = flows.find((n) => n.type === "ui-base");
+    const pages = new Set(flows.filter((n) => n.type === "ui-page").map((n) => n.id));
+    for (const toast of flows.filter((n) => n.type === "ui-notification")) {
+      expect(toast.ui, `${String(toast.id)} must name the ui-base`).toBe(base?.id);
+      expect(pages.has(String(toast.ui)), `${String(toast.id)} names a page`).toBe(false);
+    }
+  });
+});
+
+/**
+ * The page whose job is joining a network must show whether you are on one.
+ *
+ * This readout was moved to Status on the reasoning that it describes what
+ * the device *is*. In use that was plainly wrong: an operator who has just
+ * pressed Join is standing on the Network page, and it could tell them
+ * nothing — not whether it worked, not what they were connected to, not
+ * whether they were in limbo.
+ */
+describe("flows/flows.json network page", () => {
+  it("shows where the device is, on the page where you change it", () => {
+    const page = flows.find((n) => n.type === "ui-page" && n.name === "Network");
+    const groups = flows.filter((n) => n.type === "ui-group" && n.page === page?.id);
+    const ids = new Set(groups.map((g) => g.id));
+    const readouts = flows.filter((n) => ids.has(String(n.group)) && n.type === "ui-text");
+    const values = readouts.map((n) => String(n.value));
+    expect(values).toContain("payload.network.client.ssid");
+    expect(values).toContain("payload.network.ap.ssid");
+  });
+
+  it("puts what you are connected to above the controls that change it", () => {
+    const page = flows.find((n) => n.type === "ui-page" && n.name === "Network");
+    const groups = flows
+      .filter((n) => n.type === "ui-group" && n.page === page?.id)
+      .sort((a, b) => Number(a.order) - Number(b.order));
+    expect(groups[0]?.id).toBe("group-net-now");
+    expect(groups[1]?.id).toBe("group-net-join");
+  });
+});

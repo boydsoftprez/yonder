@@ -701,19 +701,24 @@ describe("the confirmation window", () => {
   });
 
   /**
-   * Compared on the *mode*, not on the client settings. Changing the
-   * passphrase of a network already configured does not move the radio, and
-   * neither does renaming the access point — and handing those five minutes
-   * only means a change that broke the device sits there for five minutes.
+   * The short window is for a change the operator can watch happen.
+   *
+   * This asserted the opposite — that changing the client SSID got 120 s —
+   * on the reasoning that only a *mode* change moves the radio. A board
+   * disproved it: already a client, passphrase changed, connection dropped,
+   * and the confirmation was expected from a console that had gone with it.
+   * Anything touching `network.client` can take the operator away, so the
+   * short window is now for changes that cannot: the access point's own name,
+   * the hostname, the theme.
    */
   it("does not widen the window for a change that leaves the radio where it is", async () => {
     saveConfig(configPath, joining());
     const { clock } = fakeClock();
     const engine = engineWithWindows(clock);
-    const changedPsk = joining();
-    changedPsk.network.client.ssid = "SomeOtherNetwork";
-    changedPsk.network.ap.ssid = "renamed-ap";
-    const result = await engine.apply(changedPsk);
+    const elsewhere = joining();
+    elsewhere.network.ap.ssid = "renamed-ap";
+    elsewhere.system.hostname = "renamed";
+    const result = await engine.apply(elsewhere);
     expect(result.expiresAt).toBe(120_000);
     expect(result.movesRadio).toBeUndefined();
   });
@@ -803,5 +808,63 @@ describe("a radio move confirms itself", () => {
     await settle();
     expect(asked).toBe(0);
     expect(engine.status().state).toBe("pending");
+  });
+});
+
+/**
+ * Which applies can take the operator's connection away.
+ *
+ * This used to ask whether the Wi-Fi *mode* changed, which missed the state a
+ * board is most often in: already a client, and the operator changing the
+ * passphrase of the network they are connected through. Observed on hardware
+ * — that apply got the short window, needed a confirmation from a console
+ * that was no longer reachable, and reverted 120 s later.
+ */
+describe("what counts as moving the radio", () => {
+  function withClient(ssid: string | null, secret: string | null): Config {
+    const c = structuredClone(DEFAULT_CONFIG);
+    c.network.client.ssid = ssid;
+    c.network.client.psk = secret === null ? null : { secret };
+    return c;
+  }
+
+  async function classify(from: Config, to: Config): Promise<boolean> {
+    saveConfig(configPath, from);
+    const { clock } = fakeClock();
+    const engine = new ApplyEngine({
+      configPath, journalPath, renderers: [renderer()], clock,
+      verifyRadioMove: () => new Promise(() => { /* never settles */ }),
+    });
+    return (await engine.apply(to)).movesRadio === true;
+  }
+
+  it("counts joining a network", async () => {
+    expect(await classify(DEFAULT_CONFIG, withClient("HomeNetwork", "wifi_psk"))).toBe(true);
+  });
+
+  it("counts leaving one", async () => {
+    expect(await classify(withClient("HomeNetwork", "wifi_psk"), DEFAULT_CONFIG)).toBe(true);
+  });
+
+  /** The one that was missed. A wrong key deauthenticates you like a failed join. */
+  it("counts changing the passphrase of the network you are on", async () => {
+    expect(await classify(
+      withClient("HomeNetwork", "wifi_psk"),
+      withClient("HomeNetwork", "wifi_psk_2"),
+    )).toBe(true);
+  });
+
+  it("counts moving to a different network", async () => {
+    expect(await classify(
+      withClient("HomeNetwork", "wifi_psk"),
+      withClient("OtherNetwork", "wifi_psk"),
+    )).toBe(true);
+  });
+
+  it("does not count a change that leaves the radio alone", async () => {
+    const from = withClient("HomeNetwork", "wifi_psk");
+    const to = structuredClone(from);
+    to.system.hostname = "renamed";
+    expect(await classify(from, to)).toBe(false);
   });
 });

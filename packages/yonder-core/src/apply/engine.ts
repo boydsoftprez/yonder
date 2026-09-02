@@ -96,6 +96,30 @@ function preserveUnloadable(configPath: string, cause: Error): void {
   }
 }
 
+/**
+ * Whether this apply can take the operator's own connection away.
+ *
+ * This asked whether the *mode* changed — access point to client, or back.
+ * That missed the case a board is most often in: already a client, and the
+ * operator changing the passphrase of the very network they are connected
+ * through. A wrong key deauthenticates them exactly as a failed join does,
+ * and because the mode did not change it got the short window and waited for
+ * a confirmation from a console that was no longer reachable. Observed: a
+ * passphrase change reverted 120 s later with nobody able to say otherwise.
+ *
+ * So the question is not "did the mode change" but "could this change the
+ * network this device is on" — which is any edit to `network.client`, plus
+ * the mode change itself.
+ *
+ * The device can verify all of them the same way (R-CFG-11): hold an address,
+ * reach the gateway. There is no case here where a human is better placed to
+ * answer than the board is.
+ */
+function touchesWifiClient(previous: Config, next: Config): boolean {
+  if (wifiMode(previous) !== wifiMode(next)) return true;
+  return JSON.stringify(previous.network.client) !== JSON.stringify(next.network.client);
+}
+
 export class ApplyEngine {
   private readonly configPath: string;
   private readonly renderers: Renderer[];
@@ -295,7 +319,7 @@ export class ApplyEngine {
     // Compared on the mode, not on the client settings: changing the
     // passphrase of a network already configured is not a radio move, and
     // neither is renaming the access point.
-    const movesRadio = wifiMode(previous) !== wifiMode(parsed.data);
+    const movesRadio = touchesWifiClient(previous, parsed.data);
     const window = movesRadio ? this.radioTimeoutMs : this.timeoutMs;
     if (movesRadio) {
       warn(
