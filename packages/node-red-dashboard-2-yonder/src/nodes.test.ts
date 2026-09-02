@@ -68,8 +68,9 @@ function build(
   module(RED);
   const node = fakeNode();
   registered[0]!.construct.call(node, { group: "g1", ...config });
-  const call = group?.register.mock.calls[0] as [RedNode, Record<string, unknown>, unknown] | undefined;
-  return { node, group, type: registered[0]!.type, props: call?.[1] };
+  const call = group?.register.mock.calls[0] as
+    [RedNode, Record<string, unknown>, Record<string, unknown>] | undefined;
+  return { node, group, type: registered[0]!.type, props: call?.[1], events: call?.[2] };
 }
 
 describe("field readers", () => {
@@ -214,6 +215,28 @@ describe("the widgets", () => {
   it("soft keys carry their keys", () => {
     const { props } = build(softkeysNode as (RED: RED) => void, { keys: '[{"label":"REFRESH","action":"refresh","tone":"act"}]' });
     expect(props!.keys).toEqual([{ label: "REFRESH", action: "refresh", tone: "act" }]);
+  });
+
+  /**
+   * The press has to reach the node.
+   *
+   * Dashboard drops a `widget-action` unless the widget registered `onAction`
+   * — silently, with no error anywhere. Every soft key shipped dead because
+   * this was `{}`: the nodes registered, the groups resolved, the pages
+   * captured correctly, and pressing a key did nothing. No layout check can
+   * see that, so it is asserted here.
+   */
+  it("registers onAction for the soft keys, or every press is dropped", () => {
+    const { events } = build(softkeysNode as (RED: RED) => void, { keys: "[]" });
+    expect(events, "soft keys must register onAction").toMatchObject({ onAction: true });
+  });
+
+  it("leaves onAction off the read-only instruments", () => {
+    // A gauge that could emit is a gauge that could originate a command.
+    for (const mod of [gaugeNode, tapeNode, annunciatorNode, databarNode]) {
+      const { events } = build(mod as (RED: RED) => void, {});
+      expect(events?.onAction, "an instrument must not send").toBeUndefined();
+    }
   });
 
   it("a malformed list field leaves the widget drawing nothing, not throwing", () => {

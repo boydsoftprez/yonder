@@ -119,6 +119,20 @@ const under = (value, fallback) => {
 const refs = under(arg("refs"), "docs/console");
 const artifacts = under(arg("artifacts"), "vendor/capture");
 const accept = has("accept");
+/**
+ * A soft key to press once the pages are captured.
+ *
+ * This exists because of a bug no layout check could see. Dashboard drops a
+ * `widget-action` unless the widget registered `onAction`, silently — so every
+ * soft key on every page shipped dead. The nodes were right, the wiring was
+ * right, the pages captured correctly, and pressing a key did nothing at all.
+ *
+ * The gate already had to change palette to photograph the second one. Doing
+ * that by pressing the actual control, rather than by posting to the socket,
+ * turns a setup step into the only end-to-end proof that a control on this
+ * console does anything.
+ */
+const press = arg("press");
 
 if (!password) {
   process.stderr.write("capture-pages: --password is required\n");
@@ -391,6 +405,30 @@ for (const page of pages) {
   }
 
   await tab.close();
+}
+
+// ---- press a key, and let the caller check the device reacted -------------
+if (press) {
+  let pressed = false;
+  for (const page of pages) {
+    const tab = await context.newPage();
+    await tab.goto(baseUrl + page.url, { waitUntil: "networkidle" });
+    await tab.waitForTimeout(500);
+    const key = tab.locator("button", { hasText: press }).first();
+    if (await key.count()) {
+      await key.click();
+      note(`  ok    pressed "${press}" on ${page.title}`);
+      pressed = true;
+      await tab.waitForTimeout(600);
+      await tab.close();
+      break;
+    }
+    await tab.close();
+  }
+  if (!pressed) {
+    note(`  FAIL  no control labelled "${press}" exists on any page to press`);
+    failures += 1;
+  }
 }
 
 await browser.close();

@@ -315,8 +315,7 @@ describe("flows/flows.json", () => {
    * `ui.theme`, never inferred from the browser or the host.
    *
    * This was a dropdown until the pages moved onto the soft-key rail
-   * (ADR-0009), and two modes until R-UI-14 added the third for direct
-   * sunlight. The requirement is about the *choice* and where it is kept,
+   * (ADR-0009). The requirement is about the *choice* and where it is kept,
    * not about the control, so the assertion is on what the operator can pick
    * and where it goes — which is what would still be true if the rail changed
    * shape again.
@@ -328,7 +327,7 @@ describe("flows/flows.json", () => {
     const actions = (JSON.parse(String(rail?.keys ?? "[]")) as { action: string }[])
       .map((k) => k.action)
       .sort();
-    expect(actions).toEqual(["day", "night", "sunlight"]);
+    expect(actions).toEqual(["day", "night"]);
 
     // The choice goes to a node, which posts it to POST /ui/theme — which is
     // what makes it persist and what puts it behind the confirmation timer.

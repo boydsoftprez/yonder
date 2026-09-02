@@ -49,23 +49,19 @@ describe("the palettes", () => {
     return 0.2126 * ((n >> 16) & 255) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255);
   };
 
-  it("is one design at two brightnesses, never an inversion", () => {
-    // The display face and the page behind it are dimmer at night.
-    for (const key of ["display", "pane", "background", "value"] as const) {
+  it("is two designed palettes, never one and its inversion", () => {
+    // Night is darker everywhere it counts.
+    for (const key of ["display", "pane", "background"] as const) {
       expect(
         luminance(PALETTES.night[key]),
-        `${key}: night must be dimmer than day`,
+        `${key}: night must be darker than day`,
       ).toBeLessThan(luminance(PALETTES.day[key]));
     }
-
-    // Both are light-on-dark. An inversion would put one of them the other
-    // way up, which is the thing R-UI-07 exists to prevent.
-    for (const t of ["day", "night"] as const) {
-      expect(
-        luminance(PALETTES[t].value),
-        `${t}: the reading must be brighter than the face it is on`,
-      ).toBeGreaterThan(luminance(PALETTES[t].display));
-    }
+    // But it is not day with the lightness flipped: the accents are chosen,
+    // not complemented. Night pulls away from the blue that costs dark
+    // adaptation, so its select tone is not day's inverted.
+    expect(PALETTES.night.select).not.toBe(PALETTES.day.select);
+    expect(PALETTES.night.waiting).not.toBe(PALETTES.day.waiting);
   });
 
   /**
@@ -76,22 +72,24 @@ describe("the palettes", () => {
    * at any brightness. This is the one place the three modes genuinely
    * differ, so it is the one thing asserted about it.
    */
-  it("turns the page over for direct sunlight, and only there", () => {
+  it("reads dark on light by day and light on dark at night", () => {
+    // The two modes are two answers, not one at two levels: a chart is read
+    // in daylight and a glass display after dusk.
     expect(
-      luminance(PALETTES.sunlight.display),
-      "the sunlight face must be light",
-    ).toBeGreaterThan(luminance(PALETTES.day.display));
+      luminance(PALETTES.day.value),
+      "a chart is dark ink on a light face",
+    ).toBeLessThan(luminance(PALETTES.day.display));
     expect(
-      luminance(PALETTES.sunlight.value),
-      "the sunlight reading must be dark on its face",
-    ).toBeLessThan(luminance(PALETTES.sunlight.display));
+      luminance(PALETTES.night.value),
+      "a display is a light reading on a dark face",
+    ).toBeGreaterThan(luminance(PALETTES.night.display));
     // Near-white, never white: a page in sunlight should not be a light
     // source of its own.
-    expect(luminance(PALETTES.sunlight.display)).toBeLessThan(luminance("#ffffff"));
+    expect(luminance(PALETTES.day.display)).toBeLessThan(luminance("#ffffff"));
   });
 
-  it("keeps the tones legible against the face in all three", () => {
-    for (const t of ["day", "night", "sunlight"] as const) {
+  it("keeps the tones legible against the face in both", () => {
+    for (const t of ["day", "night"] as const) {
       for (const tone of ["good", "waiting", "bad", "select"] as const) {
         expect(
           Math.abs(luminance(PALETTES[t][tone]) - luminance(PALETTES[t].display)),
@@ -234,7 +232,9 @@ describe("themeCss ships a whole shell", () => {
    * is how the first attempt shipped — so this checks the contrast is real.
    */
   it("draws the carbon panel, in CSS, with a weave you can actually see", () => {
-    for (const t of ["day", "night"] as ThemeName[]) {
+    // Carbon is night's material; day is the chart, and its ground is
+    // asserted on its own below.
+    for (const t of ["night"] as ThemeName[]) {
       const css = themeCss(t);
       expect(css, `${t}: no carbon`).toMatch(/repeating-linear-gradient/);
       const weave = /linear-gradient\(45deg,\s*(#[0-9a-f]{6})[^)]*\)/i.exec(css)?.[1];
@@ -257,25 +257,24 @@ describe("themeCss ships a whole shell", () => {
   });
 
   /**
-   * Sunlight is mounted on terrain, not carbon (R-UI-14, R-UI-13).
+   * Day is mounted on terrain, night on carbon (R-UI-13).
    *
-   * That mode is the chart mode, so its ground is what a chart is of: broad
-   * hypsometric washes under contour rings and a graticule. Carbon is a dark
-   * material and the point of the mode is that the page turns over, so the
-   * ground turns over with it. Still generated, still tiling, still nothing
-   * fetched.
+   * Day is the chart mode, so its ground is what a chart is of: broad
+   * hypsometric washes under contour rings and a graticule. Carbon is the
+   * airframe the display is mounted in and belongs to night. Both generated,
+   * both tiling, neither fetched.
    */
-  it("grounds the sunlight palette in terrain instead of carbon", () => {
-    const css = themeCss("sunlight");
+  it("grounds the day palette in terrain instead of carbon", () => {
+    const css = themeCss("day");
     const rule = /\.nrdb-app,[\s\S]*?\}/.exec(css)?.[0] ?? "";
-    expect(rule, "no ground rule for sunlight").not.toBe("");
-    expect(rule, "sunlight must not be carbon").not.toMatch(/linear-gradient\(135deg/);
+    expect(rule, "no ground rule for day").not.toBe("");
+    expect(rule, "day must not be carbon").not.toMatch(/linear-gradient\(135deg/);
     expect(rule, "contours").toMatch(/repeating-radial-gradient/);
     expect(rule, "the graticule a sectional carries").toMatch(/repeating-linear-gradient\(0deg/);
     expect(rule, "hypsometric washes").toMatch(/radial-gradient\(\d+% \d+% at /);
     expect(rule).toMatch(/background-repeat:\s*repeat/);
     const base = /background-color:\s*(#[0-9a-f]{6})/i.exec(rule)?.[1] ?? "#000000";
-    expect(parseInt(base.slice(1), 16), "the sunlight ground must be light")
+    expect(parseInt(base.slice(1), 16), "the day ground must be light")
       .toBeGreaterThan(0x999999);
   });
 
@@ -283,15 +282,15 @@ describe("themeCss ships a whole shell", () => {
    * The chart's own vocabulary, in the chart's own mode.
    *
    * Sectional blue for anything addressable and sectional magenta for the one
-   * control that takes the page away. A light mode reusing the glass display's
-   * cyan would be a light page wearing a dark page's colours.
+   * control that takes the page away. Day reusing night's cyan would be a
+   * light page wearing a dark page's colours.
    */
-  it("uses chart line work for the sunlight palette", () => {
-    expect(PALETTES.sunlight.select).toBe("#2c5f8f");
-    expect(PALETTES.sunlight.irreversible).toBe("#b23a7a");
+  it("uses chart line work for the day palette", () => {
+    expect(PALETTES.day.select).toBe("#2c5f8f");
+    expect(PALETTES.day.irreversible).toBe("#b23a7a");
     // Warm paper, not neutral grey: a sectional is printed on buff, and the
     // warmth is what keeps a light page from glaring.
-    const hex = PALETTES.sunlight.display;
+    const hex = PALETTES.day.display;
     const r = parseInt(hex.slice(1, 3), 16);
     const b = parseInt(hex.slice(5, 7), 16);
     expect(r, "the chart face must be warm").toBeGreaterThan(b);

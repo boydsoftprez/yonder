@@ -14,7 +14,7 @@
 # resolve `yonder-core` lives. None of those fails a unit test; all of them are
 # a console page that is silently missing a control.
 #
-# Since R-UI-12 it also captures every page in every palette in a real browser,
+# Since R-UI-12 it also captures every page in both palettes in a real browser,
 # checks that nothing is clipped and no action spans its surface, and fails when
 # a page changed shape without somebody accepting it.
 #
@@ -345,7 +345,7 @@ hits=$(grep -c "$PASSWORD" "$JOURNAL" || true)
 expect "the password appears nowhere in what either service printed" 0 "$hits"
 
 # ---------------------------------------------------------------------------
-say "R-UI-12: capture every page, in every palette, and look at them"
+say "R-UI-12: capture every page, in both palettes, and look at them"
 
 # The gate this repository did not have when 39% of the join warning shipped
 # behind a scrollbar. Every check above this line passed on that build.
@@ -375,6 +375,15 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
     # Each palette through the route an operator uses, not by writing the
     # file: this also proves the palette a page is captured in is one the
     # device actually reached.
+    wait_for_theme() {
+        i=0
+        while [ "$i" -lt "$TRIES" ]; do
+            grep -q -- "--yonder-theme: \"$1\"" "$CONSOLE/public/theme.css" 2>/dev/null && return 0
+            sleep "$POLL"; i=$((i + 1))
+        done
+        return 1
+    }
+
     reach_theme() {
         reply=$(sock_post /ui/theme "{\"theme\":\"$1\"}")
         id=$(printf '%s' "$reply" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
@@ -387,14 +396,31 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
         return 1
     }
 
-    for palette in sunlight night; do
-        if reach_theme "$palette"; then
-            ok "the device reached the $palette palette through /ui/theme"
-            capture "$palette"
-        else
-            bad "the console never regenerated theme.css as $palette, so it was not captured"
-        fi
-    done
+    # Day is captured above, as the default the device boots into.
+    #
+    # Night is reached by **pressing the key**, not by posting to the socket.
+    # The gate has to change palette anyway to photograph the second one, and
+    # doing it through the control makes that the one end-to-end proof that
+    # anything on this console does anything when pressed. Every soft key
+    # shipped dead once — Dashboard drops a widget-action from a widget that
+    # did not register onAction, silently — and no layout check could see it.
+    node "$REPO/scripts/capture-pages.mjs" \
+        --base-url "http://127.0.0.1:$PORT" --password "$PASSWORD" \
+        --palette day --artifacts "$REPO/vendor/capture" \
+        --press NIGHT >/dev/null 2>&1 || true
+
+    if wait_for_theme night; then
+        ok "pressing NIGHT on the rail actually reached the device"
+    else
+        bad "pressing NIGHT did nothing: the control is wired but dead"
+    fi
+
+    if reach_theme night; then
+        ok "the device reached the night palette through /ui/theme"
+        capture night
+    else
+        bad "the console never regenerated theme.css as night, so it was not captured"
+    fi
 
     # Back to the default, so a kept working directory is left as it was found.
     reach_theme day >/dev/null || true

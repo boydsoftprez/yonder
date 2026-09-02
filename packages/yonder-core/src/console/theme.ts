@@ -84,51 +84,56 @@ export interface Palette {
 }
 
 /**
- * Day — the display at daylight brightness (ADR-0009).
+ * Day — the chart (R-UI-07, ADR-0005, ADR-0009).
  *
- * Not a light page. ADR-0009 settled the console as a glass cockpit display
- * mounted in a carbon panel, and a multi-function display does not turn white
- * at noon: it lifts its levels. So day and night are the same layout in the
- * same materials at two brightnesses, which is what R-UI-07 has been asking
- * for and what a light-page day mode could never be.
+ * ADR-0005 got this right the first time and it took a detour to come back to
+ * it: **in direct sunlight a dark screen becomes a mirror**, which is why
+ * every electronic flight bag ships day-first and why day is a light page.
  *
- * The cost is named in ADR-0009's Open section and is not hidden here: a real
- * MFD is legible at noon because it is a high-brightness transflective panel
- * and a consumer tablet is not. If the field says so, the answer is a third,
- * genuinely light palette — the layout does not change to add one.
+ * There was briefly a third mode. Day was a dark display at daylight
+ * brightness, night the same display dimmer, and a `sunlight` palette carried
+ * the chart. Two of those were one idea at two levels and only one was a
+ * different answer to a different question, so the middle one went. Day is the
+ * chart, night is the glass display, and the difference between them is what
+ * an operator is actually choosing between.
+ *
+ * Chart paper and chart line work: warm rather than neutral, because a
+ * sectional is printed on buff and the warmth is what keeps a light page from
+ * glaring. Near-white, never white — a page in sunlight should not be a light
+ * source of its own.
  */
 const DAY: Palette = {
-  // The page behind the display is the panel: carbon, painted as an image in
-  // the chrome section below. This is its base colour, and what shows through.
-  background: "#12151a",
-  // The display face itself, lifted for daylight.
-  surface: "#0c1015",
-  border: "#3e4854",
-  text: "#ffffff",
-  muted: "#9aa6b2",
-  accent: "#4fe0f7",
-  neutral: "#7f8a95",
-  waiting: "#ffd944",
-  good: "#4ee07f",
-  bad: "#ff5a4e",
-  onTone: "#04060a",
-  display: "#0c1015",
-  pane: "#11161c",
-  divider: "#3e4854",
-  label: "#9aa6b2",
-  value: "#ffffff",
-  track: "#1f262e",
-  select: "#4fe0f7",
-  irreversible: "#ff6fd8",
+  background: "#e6dfcc",
+  surface: "#f6f1e3",
+  border: "#c3b99e",
+  text: "#1b1811",
+  muted: "#6d6555",
+  // Sectional blue for anything addressable, sectional magenta for the one
+  // control that takes the page away. The chart's own vocabulary.
+  accent: "#2c5f8f",
+  neutral: "#7a7263",
+  waiting: "#9a6a1c",
+  good: "#2f6b4f",
+  bad: "#a8322c",
+  onTone: "#ffffff",
+  display: "#f6f1e3",
+  pane: "#ede6d3",
+  divider: "#c3b99e",
+  label: "#6d6555",
+  value: "#1b1811",
+  track: "#e0d8c2",
+  select: "#2c5f8f",
+  irreversible: "#b23a7a",
 };
 
 /**
- * Night — the same display, dimmer.
+ * Night — the glass display (R-UI-07, ADR-0009).
  *
- * Every value here is the day one brought down; nothing moves, nothing is
- * renamed, no element appears or disappears. That is the whole point of
- * ADR-0009's "one design in two materials": the operator who learns this
- * console in daylight is looking at the same instrument after dusk.
+ * A cockpit display in a carbon panel: dim, and pulled away from the blue
+ * that costs dark adaptation. Not the day palette inverted. The *layout* is
+ * identical and nothing moves between them, but the material is different,
+ * because a chart read by daylight and a glass display read after dusk are
+ * two instruments for two conditions rather than one at two brightnesses.
  */
 const NIGHT: Palette = {
   background: "#0a0c0f",
@@ -152,56 +157,7 @@ const NIGHT: Palette = {
   irreversible: "#f03fce",
 };
 
-/**
- * Sunlight — the page turned over (R-UI-14, ADR-0009).
- *
- * The third palette that ADR-0009 left open, and the reason it left it open:
- * day and night are one display at two brightnesses, and **in direct sun a
- * dark screen is a mirror at any brightness**. No amount of contrast recovers
- * a reflection of the sky; the only answer is a light reading surface.
- *
- * So this is the same instrument in a different material. The display face
- * goes to near-white rather than white, because a page in sunlight should not
- * be a light source of its own, and the panel around it becomes brushed
- * aluminium instead of carbon — a light machined surface, which is what a
- * panel is when it is not carbon. Nothing moves. No element appears or
- * disappears. An operator who steps out of the shade is looking at the
- * console they already know.
- *
- * The tones are darkened rather than reused: #35d06a on white is a
- * suggestion, not a reading.
- */
-const SUNLIGHT: Palette = {
-  // Chart paper and chart line work. Warm rather than neutral: a sectional is
-  // printed on buff, and the warmth is what keeps a light page from glaring.
-  background: "#e6dfcc",
-  surface: "#f6f1e3",
-  border: "#c3b99e",
-  text: "#1b1811",
-  muted: "#6d6555",
-  // Sectional blue for anything addressable, sectional magenta for the one
-  // control that takes the page away. Both are the chart's own vocabulary.
-  accent: "#2c5f8f",
-  neutral: "#7a7263",
-  waiting: "#9a6a1c",
-  good: "#2f6b4f",
-  bad: "#a8322c",
-  onTone: "#ffffff",
-  display: "#f6f1e3",
-  pane: "#ede6d3",
-  divider: "#c3b99e",
-  label: "#6d6555",
-  value: "#1b1811",
-  track: "#e0d8c2",
-  select: "#2c5f8f",
-  irreversible: "#b23a7a",
-};
-
-export const PALETTES: Record<ThemeName, Palette> = {
-  day: DAY,
-  night: NIGHT,
-  sunlight: SUNLIGHT,
-};
+export const PALETTES: Record<ThemeName, Palette> = { day: DAY, night: NIGHT };
 
 /** Day, and this is the requirement rather than a preference. See above. */
 export const DEFAULT_THEME: ThemeName = "day";
@@ -215,9 +171,7 @@ export const DEFAULT_THEME: ThemeName = "day";
  * a console an operator cannot reach.
  */
 export function themeName(value: unknown): ThemeName {
-  if (value === "night") return "night";
-  if (value === "sunlight") return "sunlight";
-  return DEFAULT_THEME;
+  return value === "night" ? "night" : DEFAULT_THEME;
 }
 
 const HEADER = `/* SPDX-License-Identifier: GPL-3.0-or-later
@@ -303,21 +257,21 @@ function panelCss(theme: ThemeName): string {
   background-attachment: fixed;
 }`;
 
-  return theme === "sunlight" ? terrain : carbon;
+  return theme === "night" ? carbon : terrain;
 }
 
 /**
  * Chrome that is not a palette colour: the machined edges.
  *
  * A bezel is a hard dark edge and a lit inner lip, and "lit" means white on a
- * carbon panel and *dark* on an aluminium one — the light comes from the same
+ * carbon panel and *dark* on chart paper — the light comes from the same
  * place, but the surface it falls on is the other way up. These are derived
  * per theme rather than added to `Palette`, because they are properties of the
  * material rather than of the palette, and a reader looking for a colour
  * should not find a shadow.
  */
 function chromeCss(theme: ThemeName): string {
-  const dark = theme !== "sunlight";
+  const dark = theme === "night";
   return `  --yonder-bezel: ${dark ? "#000000" : "#8b9199"};
   --yonder-lip: ${dark ? "rgba(255, 255, 255, 0.10)" : "rgba(255, 255, 255, 0.85)"};
   --yonder-seat: ${dark ? "rgba(0, 0, 0, 0.55)" : "rgba(0, 0, 0, 0.16)"};

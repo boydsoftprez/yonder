@@ -24,6 +24,8 @@ import type { SoftKey } from "./shapes.js";
 export = function register(RED: RED): void {
   registerWidget(RED, {
     type: "ui-yonder-softkeys",
+    // The only widget in this package that sends anything back.
+    emitsActions: true,
     props: (node, config) => ({
       keys: list<SoftKey>(config.keys, node, "keys"),
     }),

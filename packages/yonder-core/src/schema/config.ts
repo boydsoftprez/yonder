@@ -86,26 +86,23 @@ const Network = z.object({
 }).strict();
 
 /**
- * The palettes, in one place (R-UI-07, R-UI-14, ADR-0009).
+ * The palettes, in one place (R-UI-07, ADR-0009).
  *
  * `ui/theme.ts` validates `POST /ui/theme` against this same list rather than
  * restating it. It used to restate it, and the copies drifted the moment a
  * third mode was added: the schema accepted `sunlight`, the route refused it,
  * and the console offered a control that returned an error. One list.
  */
-export const THEME_NAMES = ["day", "night", "sunlight"] as const;
+export const THEME_NAMES = ["day", "night"] as const;
 
 const Ui = z.object({
   port: port.default(3000),
   /**
-   * Three modes for three lighting conditions, not two and a compromise
-   * (R-UI-07, R-UI-14, ADR-0009).
+   * Two modes for two conditions (R-UI-07, ADR-0009).
    *
-   * `day` and `night` are the same glass display at two brightnesses.
-   * `sunlight` is the third palette ADR-0009 left open: in direct sun a dark
-   * screen is a mirror whatever its brightness, so that mode turns the page
-   * over — a light reading surface in a light machined panel. It is a
-   * different *material*, never a different layout.
+   * `day` is the chart: a light page, because in direct sun a dark screen is a
+   * mirror at any brightness. `night` is the glass display in its carbon
+   * panel. Different materials, identical layout — nothing moves between them.
    */
   theme: z.enum(THEME_NAMES).default("day"),
   editor: z.object({

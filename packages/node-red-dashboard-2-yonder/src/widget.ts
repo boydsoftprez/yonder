@@ -74,6 +74,21 @@ export interface WidgetDefinition {
   type: string;
   /** Editor fields this widget renders from, resolved once at construction. */
   props(node: RedNode, config: Record<string, unknown>): Record<string, unknown>;
+  /**
+   * Whether this widget sends anything back.
+   *
+   * **Dashboard drops a `widget-action` unless the widget registered
+   * `onAction`** — `if (!wNode || !widgetEvents.onAction) return`, in its
+   * ui-base. There is no error and no warning: the component emits, the socket
+   * carries it, the server looks up the widget and returns. Every soft key on
+   * every page shipped dead because this was registered as `{}`, and nothing
+   * could see it: the nodes were right, the wiring was right, the pages
+   * captured correctly, and pressing a key did nothing at all.
+   *
+   * Read-only instruments leave it off. A gauge that could emit is a gauge
+   * that could originate a command.
+   */
+  emitsActions?: boolean;
 }
 
 /**
@@ -99,6 +114,10 @@ export function registerWidget(RED: RED, definition: WidgetDefinition): void {
     // Static configuration travels to the component as `props`. The live value
     // arrives separately, on msg.payload, and Dashboard's default input
     // handling stores and forwards it — which is all these widgets need.
-    group.register(node, { ...config, ...definition.props(node, config) }, {});
+    //
+    // `onAction` is what makes a press reach the node's output. See the note
+    // on `emitsActions`: without it Dashboard silently drops the event.
+    const events = definition.emitsActions ? { onAction: true } : {};
+    group.register(node, { ...config, ...definition.props(node, config) }, events);
   });
 }

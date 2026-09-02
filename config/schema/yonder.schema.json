@@ -153,8 +153,7 @@
           "type": "string",
           "enum": [
             "day",
-            "night",
-            "sunlight"
+            "night"
           ],
           "default": "day"
         },

@@ -133,45 +133,46 @@ command-state language remains built once in `yonder-core` and shared.
   against a browser on a desk. A tablet at arm's length in sunlight is the condition that
   matters, and it has not been tried.
 
-## Resolved — the third palette exists
+## Resolved — two modes, and day is the chart
 
-**Answered by building it.** Day stays a lifted version of the display, and a third mode,
-`sunlight`, was added for the condition the other two cannot cover: in direct sun a dark
-screen is a mirror at *any* brightness, and no amount of contrast recovers a reflection of
-the sky.
+**Answered by building it and then removing a mode.**
 
-It is the same instrument in a different material, and that is the whole of it. Nothing
-moves, no element appears or disappears, and an operator stepping out of the shade is
-looking at the console they already know.
+For a while there were three: day was a dark display at daylight brightness,
+night the same display dimmer, and a `sunlight` palette carried the chart. Two of
+those were one idea at two levels, and only one was a different answer to a
+different question. The middle one went.
 
-**The material is the chart.** Sunlight is the one mode that is read the way a sectional
-is read, so it is drawn that way: warm chart paper for the faces — never white, because a
-page in sunlight should not be a light source of its own — sectional blue for anything
-addressable, sectional magenta for the one control that takes the page away, and the
-ground is what a chart is *of*. Broad hypsometric washes, low green through buff to tan,
-under faint contour rings and the graticule ticks a sectional carries. Terrain from above
-on a clear day, generated from gradients like the carbon and held just as quiet, because
-it is ground and the instruments bolted to it are what get read.
+**Day is the chart. Night is the glass display.** That is what ADR-0005 argued in
+the first place — *in direct sunlight a dark screen becomes a mirror*, which is why
+every electronic flight bag ships day-first — and the detour was mine.
 
-A first attempt made this mode brushed aluminium with neutral grey panels. It satisfied
-every requirement and had no chart in it at all, which is the same failure this ADR was
-written to stop: the constraints met, the identity absent.
+Day's ground is what a chart is *of*: broad hypsometric washes, low green through
+buff to tan, under faint contour rings and the graticule ticks a sectional carries.
+Its faces are warm chart paper, never white, and sectional blue and magenta do the
+semantic work. Night's ground is the airframe: a 10px carbon twill with its light
+tone close to the base. Both generated from gradients, neither fetched (R-UI-13).
 
-Recorded as **R-UI-14**, and `ui.theme` now takes `day`, `night` or `sunlight`. The
-capture gate photographs all three on every run.
+The layout is identical between them. Nothing moves, nothing is renamed, no
+instrument appears or disappears — only the material changes. `R-UI-14` is
+withdrawn: with day as the chart there was nothing left for a third mode to be.
 
-Two things this exposed, both worth keeping in mind for the next mode:
+Three things this exposed, all of the same kind — a second copy nobody was
+watching:
 
-- **The list of valid themes existed twice** — once as the schema enum, once as a literal
-  in `ui/theme.ts`. Adding the third to the schema alone shipped a console that offered a
-  control the route refused. There is now one list, in the schema, re-exported.
+- **The list of valid themes existed twice**, as the schema enum and as a literal
+  in the route. One list now.
 - **A test's own list of themes went stale without failing.** `theme.test.ts` held
-  `["day", "night"]`, so every assertion in it silently stopped covering a third of the
-  console. It derives the list from `PALETTES` now. A hand-written list of the things
-  under test is a list that rots quietly.
+  `["day", "night"]`, so its assertions silently stopped covering a mode. It
+  derives the list from `PALETTES` now.
+- **Every soft key shipped dead.** Dashboard drops a `widget-action` from a widget
+  that did not register `onAction`, with no error anywhere: the nodes registered,
+  the groups resolved, the pages captured correctly, and pressing a key did
+  nothing. No layout check can see that, so the gate now changes palette by
+  *pressing the key* rather than by posting to the socket — which makes the one
+  step it had to take anyway into the only end-to-end proof that a control on this
+  console does something.
 
 ## Open
 
 Nothing outstanding in this decision. What remains is not a design question but an
-unverified one: none of these three palettes has been read on a board, in the light it is
-named for.
+unverified one: neither palette has been read on a board, in the light it is named for.

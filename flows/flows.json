@@ -362,7 +362,7 @@
         "width": 6,
         "height": 2,
         "name": "what changing this costs",
-        "content": "**Three modes for three lights.** Day and night are the same display at two brightnesses — nothing moves between them, so what you learn in one you already know in the other.\n\n**Sun** turns the page over. In direct sunlight a dark screen is a mirror at any brightness, and no amount of contrast recovers a reflection of the sky, so that mode puts a light reading surface in a light panel. Same instruments, same places, different material.\n\nChanging it is a configuration change like any other. It is applied straight away and it reverts by itself unless you confirm it on the Network page. The console is not restarted, so you stay signed in — refresh the page to see it.",
+        "content": "**Day is the chart and night is the display.** Two modes for two conditions, not one at two brightnesses — in direct sunlight a dark screen is a mirror, so day is a light page; after dusk a light page destroys dark adaptation, so night is the glass display in its panel.\n\nThe layout is identical between them. Nothing moves, nothing is renamed, no instrument appears or disappears — only the material changes.\n\nChanging it is a configuration change like any other. It is applied straight away and it reverts by itself unless you confirm it on the Network page. The console is not restarted, so you stay signed in — refresh the page to see it.",
         "className": "",
         "x": 200,
         "y": 380,
@@ -1297,7 +1297,7 @@
         "order": 1,
         "width": 12,
         "height": 1,
-        "keys": "[{\"label\":\"DAY\",\"action\":\"day\",\"tone\":\"act\"},{\"label\":\"SUN\",\"action\":\"sunlight\",\"tone\":\"act\"},{\"label\":\"NIGHT\",\"action\":\"night\",\"tone\":\"act\"}]",
+        "keys": "[{\"label\":\"DAY\",\"action\":\"day\",\"tone\":\"act\"},{\"label\":\"NIGHT\",\"action\":\"night\",\"tone\":\"act\"}]",
         "x": 260,
         "y": 640,
         "wires": [
