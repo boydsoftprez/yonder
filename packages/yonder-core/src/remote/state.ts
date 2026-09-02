@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import type { Config } from "../schema/config.js";
+import type { ZeroTierCli } from "./zerotier/cli.js";
 import type { ZeroTierInfo, ZeroTierNetwork } from "./zerotier/parse.js";
 
 /**
@@ -79,4 +80,31 @@ export function remoteState(input: {
       // newer client invents - is a fault the operator is told the name of.
       return { ...common, phase: "fault", detail: net.status };
   }
+}
+
+/**
+ * The same state, having asked a client for as little as it can get away with.
+ *
+ * The console polls this every five seconds for the life of the flight, so
+ * what it costs is not a detail. It asked three times — `installed()`, which
+ * runs `zerotier-cli -j info`; `info()`, which runs it again; and
+ * `listNetworks()` — regardless of whether a mesh was configured at all. On
+ * the shipped default that is roughly fifty thousand `execFile` spawns a day,
+ * every one of them an ENOENT, to produce a state `remoteState` decides is
+ * `off` from the configuration alone before it looks at any of them.
+ *
+ * So: nothing configured, nothing asked. Otherwise two calls, and `installed`
+ * is what `info()` already answered rather than a separate probe for it — the
+ * client that cannot say who it is cannot list its networks either, and a
+ * second question with the same answer is a second subprocess.
+ */
+export async function readRemoteState(config: Config, cli: ZeroTierCli): Promise<RemoteState> {
+  const { enabled, network_id } = config.remote.zerotier;
+  if (!enabled || network_id === null) {
+    return remoteState({ config, installed: false, info: null, networks: [] });
+  }
+  const info = await cli.info().catch(() => null);
+  if (info === null) return remoteState({ config, installed: false, info: null, networks: [] });
+  const networks = await cli.listNetworks().catch(() => []);
+  return remoteState({ config, installed: true, info, networks });
 }

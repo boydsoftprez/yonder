@@ -18,7 +18,7 @@ import { HostnameRenderer } from "../system/hostname.js";
 import { FallbackWatchdog } from "../net/watchdog.js";
 import { joinSucceeded } from "../net/joined.js";
 import { networkState } from "../net/state.js";
-import { remoteState } from "../remote/state.js";
+import { readRemoteState } from "../remote/state.js";
 import { RemoteRenderer } from "../remote/renderer.js";
 import { ZeroTierCli } from "../remote/zerotier/cli.js";
 import { AP_CONNECTION, DEFAULT_AP_PASSPHRASE } from "../net/profiles.js";
@@ -456,13 +456,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
         return networkState(loadConfig(opts.configPath), devices, addresses);
       },
       secrets: built.secrets,
-      remoteState: async () =>
-        remoteState({
-          config: loadConfig(opts.configPath),
-          installed: await built.zerotier.installed(),
-          info: await built.zerotier.info().catch(() => null),
-          networks: await built.zerotier.listNetworks().catch(() => []),
-        }),
+      remoteState: () => readRemoteState(loadConfig(opts.configPath), built.zerotier),
     }),
     ...(onProvisioned === undefined ? {} : { onProvisioned }),
   });

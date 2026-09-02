@@ -2,7 +2,9 @@
 import { describe, expect, it } from "vitest";
 import { ConfigSchema, type Config } from "../schema/config.js";
 import type { ZeroTierNetwork } from "./zerotier/parse.js";
-import { remoteState } from "./state.js";
+import type { CommandResult, CommandRunner } from "../net/runner.js";
+import { ZeroTierCli } from "./zerotier/cli.js";
+import { readRemoteState, remoteState } from "./state.js";
 
 const config = (network_id: string | null, enabled = network_id !== null): Config =>
   ConfigSchema.parse({
@@ -112,5 +114,68 @@ describe("remoteState", () => {
     });
     expect(s.phase).toBe("fault");
     expect(s.detail).toBe("PORT_ERROR");
+  });
+});
+
+/**
+ * What the console's five-second poll costs, which is not a detail: it runs
+ * for the whole flight whether or not a mesh is configured, and the shipped
+ * default is no mesh.
+ */
+describe("readRemoteState", () => {
+  const harness = (reply: (argv: string[]) => CommandResult) => {
+    const calls: string[][] = [];
+    const run: CommandRunner = async (argv) => {
+      calls.push(argv);
+      return reply(argv);
+    };
+    return { calls, cli: new ZeroTierCli(run) };
+  };
+
+  const absent = () => ({ code: 127, stdout: "", stderr: "command not found" });
+
+  it("asks a client nothing at all when no mesh is configured", async () => {
+    const h = harness(absent);
+    expect((await readRemoteState(config(null), h.cli)).phase).toBe("off");
+    expect(h.calls).toEqual([]);
+  });
+
+  it("asks nothing when the mesh is enabled but has no network id", async () => {
+    const h = harness(absent);
+    expect((await readRemoteState(config(null, true), h.cli)).phase).toBe("off");
+    expect(h.calls).toEqual([]);
+  });
+
+  // One question, not two. `installed` is what `info` already answered - a
+  // client that cannot say who it is cannot list its networks either.
+  it("asks once, not twice, when there is no client to answer", async () => {
+    const h = harness(absent);
+    expect((await readRemoteState(config("9fef8a3bf9000001"), h.cli)).phase).toBe("no-client");
+    expect(h.calls).toEqual([["zerotier-cli", "-j", "info"]]);
+  });
+
+  it("asks twice when a mesh is configured and a client answers", async () => {
+    const h = harness((argv) =>
+      argv.includes("info")
+        ? { code: 0, stdout: JSON.stringify({ address: "9fef8a3bf9", online: true, version: "1.16.2" }), stderr: "" }
+        : {
+          code: 0,
+          stdout: JSON.stringify([{
+            nwid: "9fef8a3bf9000001",
+            name: "",
+            status: "ACCESS_DENIED",
+            portDeviceName: "ztuqliuo7y",
+            assignedAddresses: [],
+          }]),
+          stderr: "",
+        },
+    );
+    const s = await readRemoteState(config("9fef8a3bf9000001"), h.cli);
+    expect(s.phase).toBe("waiting-for-approval");
+    expect(s.deviceId).toBe("9fef8a3bf9");
+    expect(h.calls).toEqual([
+      ["zerotier-cli", "-j", "info"],
+      ["zerotier-cli", "-j", "listnetworks"],
+    ]);
   });
 });
