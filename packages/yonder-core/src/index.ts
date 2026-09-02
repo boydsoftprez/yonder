@@ -169,3 +169,17 @@ export {
   type Versions,
   type ReadVersionsOptions,
 } from "./system/versions.js";
+export {
+  ping,
+  reachable,
+  isProbeHost,
+  parsePingSummary,
+  MAX_COUNT,
+  DEFAULT_COUNT,
+  PROBE_TIMEOUT_MS,
+  DEFAULT_REACHABILITY_HOST,
+  type PingResult,
+  type PingSummary,
+  type ProbeFailure,
+  type ProbeOptions,
+} from "./diag/probe.js";
