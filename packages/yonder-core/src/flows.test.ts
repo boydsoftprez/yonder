@@ -42,7 +42,11 @@ const ids = new Set(flows.map((n) => n.id));
 /** The node types each Yonder contrib package registers, from its manifest. */
 function contribTypes(): Set<string> {
   const types = new Set<string>();
-  for (const pkg of ["node-red-contrib-yonder-system", "node-red-contrib-yonder-network"]) {
+  for (const pkg of [
+    "node-red-contrib-yonder-system",
+    "node-red-contrib-yonder-network",
+    "node-red-dashboard-2-yonder",
+  ]) {
     const manifest = JSON.parse(
       readFileSync(join(ROOT, "packages", pkg, "package.json"), "utf8"),
     ) as { "node-red": { nodes: Record<string, string> } };
@@ -161,7 +165,12 @@ describe("flows/flows.json", () => {
    */
   it("uses only Yonder node types that a package actually registers", () => {
     const registered = contribTypes();
-    const used = new Set(flows.map((n) => n.type).filter((t) => t.startsWith("yonder-")));
+    // `ui-yonder-` as well as `yonder-`: the instrument widgets are Dashboard
+    // widget types, and leaving them out of this check was how a renamed one
+    // would have reached a board as a page with a hole in it.
+    const used = new Set(
+      flows.map((n) => n.type).filter((t) => t.startsWith("yonder-") || t.startsWith("ui-yonder-")),
+    );
     expect(used.size).toBeGreaterThan(0);
     for (const type of used) {
       expect(registered.has(type), `${type} is used in the flows but no package registers it`).toBe(true);
@@ -188,6 +197,36 @@ describe("flows/flows.json", () => {
       "a node's id is also a node type. Node-RED reads that as a config node "
       + "depending on itself and refuses to start the flows.",
     ).toEqual([]);
+  });
+
+  /**
+   * A node with no `z` belongs to no tab, and Node-RED simply never
+   * instantiates it. There is no error, no warning and no "unknown type" —
+   * the node registers, the flow starts, and a widget that should be on a
+   * page is silently absent.
+   *
+   * This is not hypothetical. `ui-page` is a *config* node and carries no
+   * `z`, so reading one to find the tab id yields `undefined`, and every node
+   * added that way was dropped on the floor. Every check in the suite passed
+   * and the page rendered an empty box.
+   */
+  it("puts every runtime node on the tab", () => {
+    const configTypes = new Set(["tab", "ui-base", "ui-page", "ui-group", "ui-theme"]);
+    const tab = flows.find((n) => n.type === "tab");
+    expect(tab, "there is no tab for the runtime nodes to be on").toBeDefined();
+
+    const orphans = flows
+      .filter((n) => !configTypes.has(n.type) && !n.z)
+      .map((n) => `${n.type}(${n.id})`);
+    expect(
+      orphans,
+      "a node with no z is on no tab, so Node-RED never instantiates it and "
+      + "nothing says so",
+    ).toEqual([]);
+
+    for (const node of flows.filter((n) => !configTypes.has(n.type))) {
+      expect(node.z, `${node.id} is on a tab that does not exist`).toBe(tab?.id);
+    }
   });
 
   it("wires nothing to a node that is not here", () => {
@@ -274,17 +313,58 @@ describe("flows/flows.json", () => {
   /**
    * R-UI-07. Day and night, chosen by the operator and persisted in
    * `ui.theme`, never inferred from the browser or the host.
+   *
+   * This was a dropdown until the pages moved onto the soft-key rail
+   * (ADR-0009). The requirement is about the *choice* and where it is kept,
+   * not about the control, so the assertion is on what the operator can pick
+   * and where it goes — which is what would still be true if the rail changed
+   * shape again.
    */
   it("lets the operator choose day or night, and says what that costs", () => {
-    const dropdown = flows.find((n) => n.id === "theme-choice");
-    expect(dropdown?.type).toBe("ui-dropdown");
-    const values = (dropdown?.options as { value: string }[]).map((o) => o.value).sort();
-    expect(values).toEqual(["day", "night"]);
+    const rail = flows.find((n) => n.id === "keys-status");
+    expect(rail?.type).toBe("ui-yonder-softkeys");
+
+    const actions = (JSON.parse(String(rail?.keys ?? "[]")) as { action: string }[])
+      .map((k) => k.action)
+      .sort();
+    expect(actions).toEqual(["day", "night"]);
 
     // The choice goes to a node, which posts it to POST /ui/theme — which is
     // what makes it persist and what puts it behind the confirmation timer.
-    expect(dropdown?.wires).toEqual([["theme-apply"]]);
+    expect(rail?.wires).toEqual([["theme-apply"]]);
     expect(flows.find((n) => n.id === "theme-apply")?.type).toBe("yonder-theme");
+  });
+
+  /**
+   * R-UI-10, over the artefact rather than over a rendering.
+   *
+   * The capture gate checks this in a real browser, which is the check that
+   * matters — but it needs a browser, a staged console tree and two minutes.
+   * This one runs in milliseconds on every commit and catches the specific
+   * mistake of reaching for a stock button again, which is how all four
+   * spanning actions got there in the first place.
+   */
+  it("puts every action in a soft-key rail, and none in a stock button", () => {
+    expect(
+      flows.filter((n) => n.type === "ui-button").map((n) => n.id),
+      "an action is a stock ui-button, which is a whole row of its group and "
+      + "so always spans it (ADR-0009, R-UI-10)",
+    ).toEqual([]);
+
+    const rails = flows.filter((n) => n.type === "ui-yonder-softkeys");
+    expect(rails.length).toBeGreaterThan(0);
+
+    for (const r of rails) {
+      const list = JSON.parse(String(r.keys ?? "[]")) as { label: string; action: string; tone?: string }[];
+      expect(list.length, `${r.id} is a rail with no keys on it`).toBeGreaterThan(0);
+      for (const k of list) {
+        expect(typeof k.label, `${r.id} has a key with no label`).toBe("string");
+        expect(typeof k.action, `${r.id} key "${k.label}" sends nothing`).toBe("string");
+      }
+      // At most one control per page takes the page away from the operator.
+      const warn = list.filter((k) => k.tone === "warn");
+      expect(warn.length, `${r.id} has ${warn.length} keys marked warn`).toBeLessThanOrEqual(1);
+    }
   });
 
   /**

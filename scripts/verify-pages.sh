@@ -244,12 +244,26 @@ cp "$REPO/flows/flows.json" "$USERDIR/flows.json"
 mkdir -p "$CONSOLE/node_modules"
 # rm then ln, never `ln -sfn`: -n is not POSIX, and without it `ln -sf` onto an
 # existing symlink-to-a-directory creates the link inside it.
-for pkg in node-red-contrib-yonder-system node-red-contrib-yonder-network; do
+for pkg in node-red-contrib-yonder-system node-red-contrib-yonder-network \
+           node-red-dashboard-2-yonder; do
     rm -f "$CONSOLE/node_modules/$pkg"
     ln -s "$REPO/packages/$pkg" "$CONSOLE/node_modules/$pkg"
 done
 rm -f "$CONSOLE/node_modules/yonder-core"
 ln -s "$CORE" "$CONSOLE/node_modules/yonder-core"
+# What 30-console.sh also does, and what the widgets do not appear without:
+# Dashboard discovers a third-party widget package by reading the *user
+# directory's* package.json for a dependency and resolving it beneath that
+# directory. A package in the console tree's node_modules is where Node-RED
+# finds the nodes and is invisible to that scan (K-26).
+mkdir -p "$USERDIR/node_modules"
+rm -f "$USERDIR/node_modules/node-red-dashboard-2-yonder"
+ln -s "$REPO/packages/node-red-dashboard-2-yonder" \
+      "$USERDIR/node_modules/node-red-dashboard-2-yonder"
+cat > "$USERDIR/package.json" <<'MANIFEST'
+{ "name": "yonder-console-state", "version": "0.0.0", "private": true,
+  "dependencies": { "node-red-dashboard-2-yonder": "0.1.0" } }
+MANIFEST
 # The dashboard and node-red itself come from the staged tree.
 for entry in "$CONSOLE_TREE/node_modules"/*; do
     name=$(basename "$entry")
@@ -388,4 +402,14 @@ fi
 # ---------------------------------------------------------------------------
 say "result"
 printf '  %s passed, %s failed\n' "$pass" "$fail"
+
+# HOLD=1 leaves the daemon and the console running so a browser can be pointed
+# at them. The alternative, when a page renders blank, is reading framework
+# source and guessing — which is slower and less honest than looking.
+if [ "${HOLD:-0}" = "1" ]; then
+    printf '\n  holding: http://127.0.0.1:%s/dashboard  (password: %s)\n' "$PORT" "$PASSWORD"
+    printf '  root: %s\n  ctrl-c to stop\n' "$ROOT"
+    while kill -0 "$CONSOLE_PID" 2>/dev/null; do sleep 1; done
+fi
+
 [ "$fail" = "0" ] || exit 1

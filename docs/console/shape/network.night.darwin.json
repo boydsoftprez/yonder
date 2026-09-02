@@ -11,23 +11,14 @@
         "x": 12,
         "y": 76,
         "w": 622,
-        "h": 503
-      }
-    },
-    {
-      "key": "nrdb-ui-button.nrdb-ui-widget",
-      "box": {
-        "x": 29,
-        "y": 154,
-        "w": 588,
-        "h": 48
+        "h": 443
       }
     },
     {
       "key": "nrdb-ui-text.nrdb-ui-widget#0",
       "box": {
         "x": 29,
-        "y": 214,
+        "y": 154,
         "w": 588,
         "h": 48
       }
@@ -36,7 +27,7 @@
       "key": "nrdb-ui-text.nrdb-ui-widget#1",
       "box": {
         "x": 29,
-        "y": 274,
+        "y": 214,
         "w": 588,
         "h": 48
       }
@@ -45,7 +36,7 @@
       "key": "nrdb-ui-text.nrdb-ui-widget#2",
       "box": {
         "x": 29,
-        "y": 334,
+        "y": 274,
         "w": 588,
         "h": 48
       }
@@ -54,9 +45,18 @@
       "key": "nrdb-ui-markdown.nrdb-ui-widget",
       "box": {
         "x": 29,
-        "y": 394,
+        "y": 334,
         "w": 588,
         "h": 106
+      }
+    },
+    {
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-annunciator",
+      "box": {
+        "x": 29,
+        "y": 452,
+        "w": 488,
+        "h": 48
       }
     },
     {
@@ -65,23 +65,14 @@
         "x": 646,
         "y": 76,
         "w": 622,
-        "h": 503
-      }
-    },
-    {
-      "key": "nrdb-ui-button.nrdb-ui-widget",
-      "box": {
-        "x": 663,
-        "y": 154,
-        "w": 588,
-        "h": 48
+        "h": 443
       }
     },
     {
       "key": "nrdb-ui-table.nrdb-ui-widget",
       "box": {
         "x": 663,
-        "y": 214,
+        "y": 154,
         "w": 588,
         "h": 348
       }
@@ -90,7 +81,7 @@
       "key": "nrdb-ui-group#2",
       "box": {
         "x": 12,
-        "y": 591,
+        "y": 531,
         "w": 622,
         "h": 1013
       }
@@ -99,7 +90,7 @@
       "key": "nrdb-ui-markdown.nrdb-ui-widget.yonder-warning",
       "box": {
         "x": 29,
-        "y": 669,
+        "y": 609,
         "w": 588,
         "h": 734
       }
@@ -108,9 +99,18 @@
       "key": "nrdb-ui-form.nrdb-ui-widget",
       "box": {
         "x": 29,
-        "y": 1415,
+        "y": 1355,
         "w": 588,
         "h": 172
+      }
+    },
+    {
+      "key": "nrdb-ui-text-field.nrdb-ui-widget",
+      "box": {
+        "x": 29,
+        "y": 1363,
+        "w": 588,
+        "h": 48
       }
     },
     {
@@ -123,19 +123,10 @@
       }
     },
     {
-      "key": "nrdb-ui-text-field.nrdb-ui-widget",
-      "box": {
-        "x": 29,
-        "y": 1483,
-        "w": 588,
-        "h": 48
-      }
-    },
-    {
       "key": "nrdb-ui-group#3",
       "box": {
         "x": 646,
-        "y": 591,
+        "y": 531,
         "w": 622,
         "h": 1013
       }
@@ -144,7 +135,7 @@
       "key": "nrdb-ui-text.nrdb-ui-widget.yonder-note#0",
       "box": {
         "x": 663,
-        "y": 669,
+        "y": 609,
         "w": 588,
         "h": 108
       }
@@ -153,27 +144,36 @@
       "key": "nrdb-ui-markdown.nrdb-ui-widget",
       "box": {
         "x": 663,
-        "y": 789,
+        "y": 729,
         "w": 588,
         "h": 131
-      }
-    },
-    {
-      "key": "nrdb-ui-button.nrdb-ui-widget",
-      "box": {
-        "x": 663,
-        "y": 932,
-        "w": 588,
-        "h": 48
       }
     },
     {
       "key": "nrdb-ui-text.nrdb-ui-widget.yonder-note#1",
       "box": {
         "x": 663,
-        "y": 992,
+        "y": 872,
         "w": 588,
         "h": 108
+      }
+    },
+    {
+      "key": "nrdb-ui-group.yonder-rail",
+      "box": {
+        "x": 12,
+        "y": 1556,
+        "w": 1256,
+        "h": 82
+      }
+    },
+    {
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-softkeys",
+      "box": {
+        "x": 29,
+        "y": 1573,
+        "w": 1222,
+        "h": 48
       }
     }
   ]

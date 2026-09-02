@@ -11,7 +11,7 @@
         "x": 12,
         "y": 76,
         "w": 622,
-        "h": 431
+        "h": 387
       }
     },
     {
@@ -65,7 +65,7 @@
         "x": 646,
         "y": 76,
         "w": 622,
-        "h": 431
+        "h": 387
       }
     },
     {
@@ -78,7 +78,7 @@
       }
     },
     {
-      "key": "nrdb-ui-button.nrdb-ui-widget",
+      "key": "nrdb-ui-text.nrdb-ui-widget#0",
       "box": {
         "x": 663,
         "y": 322,
@@ -87,7 +87,7 @@
       }
     },
     {
-      "key": "nrdb-ui-text.nrdb-ui-widget#0",
+      "key": "nrdb-ui-text.nrdb-ui-widget#1",
       "box": {
         "x": 663,
         "y": 382,
@@ -96,11 +96,20 @@
       }
     },
     {
-      "key": "nrdb-ui-text.nrdb-ui-widget#1",
+      "key": "nrdb-ui-group.yonder-rail",
       "box": {
-        "x": 663,
-        "y": 442,
-        "w": 588,
+        "x": 12,
+        "y": 475,
+        "w": 1256,
+        "h": 82
+      }
+    },
+    {
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-softkeys",
+      "box": {
+        "x": 29,
+        "y": 492,
+        "w": 1222,
         "h": 48
       }
     }

@@ -60,6 +60,27 @@ export interface Palette {
   bad: string;
   /** Text placed on a tone. */
   onTone: string;
+
+  /* ---- the instrument roles (ADR-0009) -------------------------------
+     Named for what they mean, not for a colour. `cyan` set to amber at
+     night would be a stylesheet that lies about itself. */
+
+  /** The face an instrument is drawn on. */
+  display: string;
+  /** A recess within it: a meter track, a tape scale. */
+  pane: string;
+  /** Hairlines between instruments. */
+  divider: string;
+  /** A micro-label above or beside a reading. */
+  label: string;
+  /** The reading itself. */
+  value: string;
+  /** An unfilled meter track. */
+  track: string;
+  /** Something addressable or selected — an address, a bug on a tape. */
+  select: string;
+  /** The one control on a page that takes the page away from the operator. */
+  irreversible: string;
 }
 
 /**
@@ -81,6 +102,14 @@ const DAY: Palette = {
   good: "#1f6f43",
   bad: "#a3231d",
   onTone: "#ffffff",
+  display: "#ffffff",
+  pane: "#f4f5f2",
+  divider: "#c9cdc6",
+  label: "#4d5560",
+  value: "#16191c",
+  track: "#e2e5df",
+  select: "#1d5b8f",
+  irreversible: "#b23a7a",
 };
 
 /**
@@ -103,6 +132,16 @@ const NIGHT: Palette = {
   good: "#6f9e5e",
   bad: "#c8654e",
   onTone: "#12140f",
+  display: "#1c1f19",
+  pane: "#12140f",
+  divider: "#343930",
+  label: "#a49d8c",
+  value: "#e6e2d6",
+  track: "#2a2e25",
+  // Warm at night, not cyan. The role is "addressable"; the colour that
+  // serves it is the one that costs least dark adaptation (R-UI-07).
+  select: "#d29a3c",
+  irreversible: "#c87da8",
 };
 
 export const PALETTES: Record<ThemeName, Palette> = { day: DAY, night: NIGHT };
@@ -166,6 +205,21 @@ export function themeCss(theme: ThemeName): string {
   --yonder-good: ${p.good};
   --yonder-bad: ${p.bad};
   --yonder-on-tone: ${p.onTone};
+
+  /* ---- the instrument roles (ADR-0009) ------------------------------
+     Read by the components in node-red-dashboard-2-yonder. They carry
+     fallbacks, so a widget still draws if this sheet has not arrived - but
+     the fallbacks are night values, and on a day board that would be the
+     one thing you must not put in front of an eye. These are what make
+     day and night one design in two materials rather than two designs. */
+  --yonder-display: ${p.display};
+  --yonder-pane: ${p.pane};
+  --yonder-divider: ${p.divider};
+  --yonder-label: ${p.label};
+  --yonder-value: ${p.value};
+  --yonder-track: ${p.track};
+  --yonder-select: ${p.select};
+  --yonder-irreversible: ${p.irreversible};
 
   /* ---- type -------------------------------------------------------
      A system stack, never a webfont: R-UI-01 forbids fetching one, and a

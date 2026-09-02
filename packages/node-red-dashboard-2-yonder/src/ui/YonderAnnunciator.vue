@@ -7,7 +7,6 @@
 </template>
 
 <script>
-import { mapState } from 'vuex'
 import { presentation } from 'yonder-core/presentation'
 
 /**
@@ -23,6 +22,17 @@ import { presentation } from 'yonder-core/presentation'
  * This component chooses neither, which is what stops a control meaning one
  * thing on the network page and another in the cockpit.
  */
+/**
+ * The store is reached through `$store`, not through vuex's `mapState`.
+ *
+ * `vuex` has to be external — bundling it would give these components a second
+ * store, and they would read an empty one on a page where everything else
+ * worked. But Dashboard does not put a `Vuex` global on the page either, so a
+ * UMD external for it resolves to `undefined` and the first property access
+ * throws before anything renders. Dashboard *does* install the store as
+ * `$store`, which is the supported way in, needs no import, and cannot become
+ * a second copy of anything.
+ */
 export default {
     name: 'YonderAnnunciator',
     inject: ['$socket', '$dataTracker'],
@@ -32,10 +42,9 @@ export default {
         state: { type: Object, default: () => ({}) }
     },
     computed: {
-        ...mapState('data', ['messages']),
         /** A CommandStatus, from the shared channel or from the payload. */
         status () {
-            const msg = this.messages?.[this.id]
+            const msg = this.$store?.state?.data?.messages?.[this.id]
             if (!msg) return null
             const from = this.props.source === 'payload' ? msg.payload : msg.yonder
             return from && typeof from === 'object' ? from : null

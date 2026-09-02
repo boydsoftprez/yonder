@@ -23,7 +23,6 @@
 </template>
 
 <script>
-import { mapState } from 'vuex'
 import { reading } from 'yonder-core/presentation'
 
 /**
@@ -38,6 +37,17 @@ import { reading } from 'yonder-core/presentation'
  * single layout rule this object exists to keep: a bar that fills its
  * container is the slab this design language replaced.
  */
+/**
+ * The store is reached through `$store`, not through vuex's `mapState`.
+ *
+ * `vuex` has to be external — bundling it would give these components a second
+ * store, and they would read an empty one on a page where everything else
+ * worked. But Dashboard does not put a `Vuex` global on the page either, so a
+ * UMD external for it resolves to `undefined` and the first property access
+ * throws before anything renders. Dashboard *does* install the store as
+ * `$store`, which is the supported way in, needs no import, and cannot become
+ * a second copy of anything.
+ */
 export default {
     name: 'YonderGauge',
     inject: ['$socket', '$dataTracker'],
@@ -47,10 +57,16 @@ export default {
         state: { type: Object, default: () => ({}) }
     },
     computed: {
-        ...mapState('data', ['messages']),
         value () {
-            const payload = this.messages?.[this.id]?.payload
-            return typeof payload === 'number' ? payload : Number(payload)
+            const payload = this.$store?.state?.data?.messages?.[this.id]?.payload
+            if (typeof payload === 'number') return payload
+            // `Number(null)` is 0 and `Number('')` is 0, and 0 is a perfectly
+            // good reading — so a board with no thermal sensor drew 0.0 °C,
+            // which says "cold" rather than "not there". facts.ts is explicit
+            // that absent is null and never zero; this is the other end of
+            // that rule, and it was wrong here until a capture showed it.
+            if (payload === null || payload === undefined || payload === '') return Number.NaN
+            return Number(payload)
         },
         r () {
             return reading(this.value, {
@@ -86,7 +102,13 @@ export default {
 <style scoped>
 .y-gauge {
     display: grid;
-    grid-template-columns: 1fr auto auto;
+    /* Label, track, value — and the *value* takes the slack, not the label.
+       With `1fr` on the label the whole instrument was shoved against the
+       right edge of its group and read as an afterthought. */
+    grid-template-columns: 7.5rem auto auto;
+    /* Nothing stretches: the instrument is as wide as it needs and the rest
+       of the group is space, not a value box a hundred characters long. */
+    justify-content: start;
     align-items: center;
     gap: 8px;
     /* Tall enough for the band strip that hangs below the track. */
@@ -101,7 +123,7 @@ export default {
     letter-spacing: 0.12em;
     text-transform: uppercase;
     color: var(--yonder-label, #7f8a95);
-    text-align: right;
+    text-align: left;
     white-space: nowrap;
 }
 
@@ -153,9 +175,8 @@ export default {
     font-size: 0.8125rem;
     font-weight: 700;
     font-variant-numeric: tabular-nums;
-    text-align: right;
+    text-align: left;
     white-space: nowrap;
-    min-width: 4.5em;
     color: var(--yonder-value, #fff);
 }
 .tone-waiting .y-gauge__value { color: var(--yonder-waiting, #ffcf28); }

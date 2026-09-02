@@ -7,9 +7,9 @@ import vue from "@vitejs/plugin-vue";
  * One widget per build, because UMD has one entry.
  *
  * Dashboard 2.x loads a third-party widget by the `output` file named in this
- * package's `node-red-dashboard-2` manifest, and a UMD bundle exposes exactly
- * one global — so a bundle per widget is the format's requirement rather than
- * a choice. `scripts/build-widgets.mjs` reads the manifest and drives this
+ * package's `node-red-dashboard-2` manifest, fetched over Node-RED's resources
+ * route, and a UMD bundle exposes exactly one global — so a bundle per widget
+ * is the format's requirement rather than a choice. `scripts/build-widgets.mjs` reads the manifest and drives this
  * config once per entry, which keeps the manifest the single list.
  *
  * `vue` and `vuex` are external: Dashboard already has both on the page. A
@@ -73,15 +73,25 @@ function inlineStyles (type) {
 export default defineConfig(({ mode }) => {
   const name = process.env.WIDGET;
   if (!name) throw new Error("vite.config.js: set WIDGET to the component name");
+  if (!process.env.WIDGET_ENTRY) throw new Error("vite.config.js: set WIDGET_ENTRY; run scripts/build-widgets.mjs");
   return {
     plugins: [vue(), inlineStyles(process.env.WIDGET_TYPE)],
     define: { "process.env.NODE_ENV": JSON.stringify(mode) },
     build: {
       emptyOutDir: false,
-      outDir: "dist",
+      // `resources/`, not `dist/`. Node-RED serves a node package's static
+      // assets from `<module>/resources/<path>` at
+      // `<httpAdminRoot>/resources/<module>/<path>`, and that is the URL
+      // Dashboard builds from this package's manifest. Built into `dist/` the
+      // bundles are present, correct, and 404 — which is what the first
+      // attempt did, with the widgets instantiated and the page still empty.
+      outDir: "resources",
       lib: {
-        entry: fileURLToPath(new URL(`./src/ui/${name}.vue`, import.meta.url)),
-        name,
+        // The generated entry, which re-exports the component under its name.
+        entry: process.env.WIDGET_ENTRY,
+        // The UMD global is the **widget type**, not the component: Dashboard
+        // resolves `window[type][component]`.
+        name: process.env.WIDGET_TYPE,
         formats: ["umd"],
         fileName: () => `${process.env.WIDGET_TYPE}.umd.js`,
       },

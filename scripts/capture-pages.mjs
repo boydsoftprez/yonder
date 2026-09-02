@@ -266,6 +266,22 @@ const note = (s) => process.stdout.write(s + "\n");
 
 for (const page of pages) {
   const tab = await context.newPage();
+
+  // A page that throws, or whose widget bundle 404s, renders as an empty box
+  // and says nothing. That is how the first build of the instrument widgets
+  // looked: every node registered, every group resolved, and the page drew
+  // blank. Console errors and failed requests are collected so the gate can
+  // say what happened instead of leaving a picture of nothing.
+  const noise = [];
+  tab.on("console", (m) => {
+    if (m.type() === "error") noise.push(`console: ${m.text().slice(0, 200)}`);
+  });
+  tab.on("pageerror", (e) => noise.push(`uncaught: ${String(e.message).slice(0, 200)}`));
+  tab.on("requestfailed", (r) => noise.push(`request failed: ${r.url().slice(-90)}`));
+  tab.on("response", (r) => {
+    if (r.status() >= 400) noise.push(`HTTP ${r.status()}: ${r.url().slice(-90)}`);
+  });
+
   await tab.goto(baseUrl + page.url, { waitUntil: "networkidle" });
   // The dashboard renders its widgets after the socket connects, so waiting on
   // the network alone captures an empty page.
@@ -307,6 +323,12 @@ for (const page of pages) {
 
   if (shape.widgets.length === 0) {
     note(`  FAIL  ${page.title} (${palette}) rendered no widgets at all`);
+    failures += 1;
+  }
+  const unique = [...new Set(noise)];
+  if (unique.length) {
+    note(`  FAIL  ${page.title} (${palette}) reported ${unique.length} error(s) in the browser`);
+    for (const n of unique.slice(0, 6)) note(`          ${n}`);
     failures += 1;
   }
   for (const c of shape.clipped) {

@@ -11,7 +11,6 @@
 </template>
 
 <script>
-import { mapState } from 'vuex'
 
 /**
  * The data bar (ADR-0009).
@@ -26,6 +25,17 @@ import { mapState } from 'vuex'
  * *nothing* are different answers, and only one of them is honest — the same
  * distinction R-UI-05 makes about commands, applied to a fact.
  */
+/**
+ * The store is reached through `$store`, not through vuex's `mapState`.
+ *
+ * `vuex` has to be external — bundling it would give these components a second
+ * store, and they would read an empty one on a page where everything else
+ * worked. But Dashboard does not put a `Vuex` global on the page either, so a
+ * UMD external for it resolves to `undefined` and the first property access
+ * throws before anything renders. Dashboard *does* install the store as
+ * `$store`, which is the supported way in, needs no import, and cannot become
+ * a second copy of anything.
+ */
 export default {
     name: 'YonderDataBar',
     inject: ['$socket', '$dataTracker'],
@@ -35,9 +45,8 @@ export default {
         state: { type: Object, default: () => ({}) }
     },
     computed: {
-        ...mapState('data', ['messages']),
         payload () {
-            const value = this.messages?.[this.id]?.payload
+            const value = this.$store?.state?.data?.messages?.[this.id]?.payload
             return value && typeof value === 'object' ? value : {}
         }
     },
@@ -96,6 +105,6 @@ export default {
 
 /* An identifier is compared character by character, so it is cyan and
    addressable rather than white and read. */
-.y-bar__v.id { color: var(--yonder-cyan, #2ad4f0); }
+.y-bar__v.id { color: var(--yonder-select, #2ad4f0); }
 .y-bar__v.absent { color: var(--yonder-label, #7f8a95); font-weight: 400; }
 </style>

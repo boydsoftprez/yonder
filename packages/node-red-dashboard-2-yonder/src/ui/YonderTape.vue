@@ -22,7 +22,6 @@
 </template>
 
 <script>
-import { mapState } from 'vuex'
 import { reading } from 'yonder-core/presentation'
 
 /**
@@ -36,6 +35,17 @@ import { reading } from 'yonder-core/presentation'
  * `1 - fraction` throughout, and that inversion lives here rather than in
  * `reading()`, which describes a value and not a direction.
  */
+/**
+ * The store is reached through `$store`, not through vuex's `mapState`.
+ *
+ * `vuex` has to be external — bundling it would give these components a second
+ * store, and they would read an empty one on a page where everything else
+ * worked. But Dashboard does not put a `Vuex` global on the page either, so a
+ * UMD external for it resolves to `undefined` and the first property access
+ * throws before anything renders. Dashboard *does* install the store as
+ * `$store`, which is the supported way in, needs no import, and cannot become
+ * a second copy of anything.
+ */
 export default {
     name: 'YonderTape',
     inject: ['$socket', '$dataTracker'],
@@ -45,10 +55,16 @@ export default {
         state: { type: Object, default: () => ({}) }
     },
     computed: {
-        ...mapState('data', ['messages']),
         value () {
-            const payload = this.messages?.[this.id]?.payload
-            return typeof payload === 'number' ? payload : Number(payload)
+            const payload = this.$store?.state?.data?.messages?.[this.id]?.payload
+            if (typeof payload === 'number') return payload
+            // `Number(null)` is 0 and `Number('')` is 0, and 0 is a perfectly
+            // good reading — so a board with no thermal sensor drew 0.0 °C,
+            // which says "cold" rather than "not there". facts.ts is explicit
+            // that absent is null and never zero; this is the other end of
+            // that rule, and it was wrong here until a capture showed it.
+            if (payload === null || payload === undefined || payload === '') return Number.NaN
+            return Number(payload)
         },
         r () {
             return reading(this.value, {
@@ -138,7 +154,7 @@ export default {
     left: 0;
     width: 20px;
     height: 2px;
-    background: var(--yonder-cyan, #2ad4f0);
+    background: var(--yonder-select, #2ad4f0);
     z-index: 1;
 }
 
@@ -147,7 +163,7 @@ export default {
     left: 26px;
     transform: translateY(-50%);
     background: #000;
-    border: 1px solid var(--yonder-cyan, #2ad4f0);
+    border: 1px solid var(--yonder-select, #2ad4f0);
     padding: 2px 7px;
     font-family: var(--yonder-font-mono);
     font-size: 0.9375rem;
@@ -169,7 +185,7 @@ export default {
     height: 0;
     border-top: 5px solid transparent;
     border-bottom: 5px solid transparent;
-    border-right: 6px solid var(--yonder-cyan, #2ad4f0);
+    border-right: 6px solid var(--yonder-select, #2ad4f0);
 }
 
 .y-tape__key { position: relative; flex: 1; min-width: 74px; margin-left: 64px; }

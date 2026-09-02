@@ -1,48 +1,17 @@
 {
   "why": [
-    "Violations of ADR-0009 that exist on the pages M1b shipped, written down so",
-    "the gate can fail on new ones from its first run rather than after the pages",
-    "are rebuilt. It can only shrink: a finding that is not here fails the build,",
-    "and an entry here that no longer matches anything also fails, with 'this is",
-    "fixed, delete the line'. Every entry is a defect, not a decision.",
+    "Empty, and that is the point.",
     "",
-    "palette '*' means the finding is the same in day and night, which it should",
-    "be \u2014 day and night are one design in two materials (R-UI-07), so a violation",
-    "in only one of them is itself worth looking at.",
+    "This held the violations of ADR-0009 that the pages M1b shipped already had:",
+    "four actions spanning 100% of their surface and two forms clipping their own",
+    "content. The forms were fixed in theme.ts; the four actions closed when the",
+    "pages were rebuilt on the soft-key rail, which is what the entries said they",
+    "were waiting for.",
     "",
-    "The two clipped forms that were here are fixed: theme.ts now unclips any",
-    "widget whose height is a function of its content rather than its shape.",
-    "The four spanning actions remain, and close when the pages are rebuilt on",
-    "the soft-key rail."
+    "It can only shrink. A finding that is not here fails the build, and an entry",
+    "here that no longer matches anything also fails, with 'this is fixed, delete",
+    "the line'. Both halves have now been exercised. Anything added must be a",
+    "defect with a reason and a way out, never a decision."
   ],
-  "accepted": [
-    {
-      "rule": "spanning",
-      "page": "network",
-      "palette": "*",
-      "key": "Refresh",
-      "note": "R-UI-10. A stock ui-button is a whole row of its group and cannot be smaller than one, so it fills the surface. Closes when the page is rebuilt on the soft-key rail (ADR-0009)."
-    },
-    {
-      "rule": "spanning",
-      "page": "network",
-      "palette": "*",
-      "key": "Scan for networks",
-      "note": "R-UI-10, as above."
-    },
-    {
-      "rule": "spanning",
-      "page": "network",
-      "palette": "*",
-      "key": "Yes, I can still reach it",
-      "note": "R-UI-10, as above. This is the confirmation for a radio-moving apply, so it is the one that most needs to be reachable rather than merely large."
-    },
-    {
-      "rule": "spanning",
-      "page": "diagnostics",
-      "palette": "*",
-      "key": "Check reachability",
-      "note": "R-UI-10, as above."
-    }
-  ]
+  "accepted": []
 }

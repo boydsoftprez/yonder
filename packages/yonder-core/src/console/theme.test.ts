@@ -196,6 +196,34 @@ describe("themeCss ships a whole shell", () => {
  * These tests are per widget type on purpose. A single assertion over a
  * combined selector would pass while a type was quietly dropped from it.
  */
+/**
+ * The instrument roles reach the page.
+ *
+ * The components in `node-red-dashboard-2-yonder` read these and carry night
+ * fallbacks, so a missing token is not a blank widget — it is a **dark
+ * instrument on a day board**, which is the one failure mode R-UI-07 exists to
+ * prevent and the one nobody would notice in a lab at night. It shipped
+ * exactly that way for one build.
+ */
+describe("themeCss carries the instrument roles (ADR-0009)", () => {
+  const roles = [
+    "display", "pane", "divider", "label", "value", "track", "select", "irreversible",
+  ];
+  for (const t of ["day", "night"] as ThemeName[]) {
+    for (const role of roles) {
+      it(`defines --yonder-${role} (${t})`, () => {
+        expect(themeCss(t)).toMatch(new RegExp(`--yonder-${role}:\\s*#[0-9a-f]{6};`, "i"));
+      });
+    }
+  }
+
+  it("gives day and night different instrument faces", () => {
+    // If these matched, one of the two palettes would be undesigned.
+    const face = (t: ThemeName) => /--yonder-display:\s*(#[0-9a-f]{6})/i.exec(themeCss(t))?.[1];
+    expect(face("day")).not.toBe(face("night"));
+  });
+});
+
 describe("themeCss never clips content an operator has to act on", () => {
   /** The widget types whose height is a function of content, not of shape. */
   const sizesToContent = ["nrdb-ui-markdown", "nrdb-ui-form"];

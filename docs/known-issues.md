@@ -478,7 +478,7 @@ installer's output. The shape of a fix is a separate flow file for an operator's
 which Node-RED does not offer directly, or a deliberate "keep mine" prompt the installer
 cannot ask on an unattended image build.
 
-### K-26 · The instrument widgets have never been rendered by Dashboard
+### K-26 · ~~The instrument widgets have never been rendered by Dashboard~~ — CLOSED
 
 `node-red-dashboard-2-yonder` ships five widgets — gauge, tape, annunciator, data bar and
 soft keys — and **not one of them has been drawn by Dashboard 2.x.** What is verified is
@@ -505,13 +505,33 @@ markup and CSS, which is why the layout and the palette are worth anything at al
 reproduction is not the runtime, and this entry exists so nobody mistakes one for the
 other.
 
-**Closes when** a board serves these widgets on a real page and `scripts/verify-pages.sh`
-captures them in both palettes. **The gate now exists** — R-UI-12 is built, and every page
-is captured in a real browser on every run — but it captures the *current* pages, which are
-still assembled from stock widgets. Nothing has yet put a Yonder instrument on a page for it
-to photograph.
+**Closed.** The pages were rebuilt on the instrument library and the capture gate now
+photographs every widget in both palettes on every run. Getting there took four separate
+failures, none of which any test in this repository could have found, and all four are worth
+recording because each produced *a page that rendered nothing and said nothing about why*:
 
-### K-27 · The pages violate the language they are now measured against
+1. **Every added node had no `z`.** `ui-page` is a config node and carries none, so reading
+   one to find the tab id yielded `undefined`. Node-RED never instantiates a node that is on
+   no tab — no error, no warning, no "unknown type". `flows.test.ts` now asserts it.
+2. **Dashboard discovers a widget package from the *user directory's* `package.json`**, by
+   dependency name, resolving it at `<userDir>/node_modules/<name>`. A package present in
+   the console tree's `node_modules` — which is where Node-RED finds the *nodes* — is
+   invisible to that scan. The installer now writes that manifest.
+3. **The bundles were built into `dist/`.** Node-RED serves a package's static assets from
+   `<module>/resources`, which is the URL Dashboard asks for, so every widget instantiated
+   and the browser quietly collected 404s.
+4. **The UMD global was wrong.** Dashboard resolves `window[widgetType][componentName]`; a
+   bundle exposing the component as its own global fails a check *inside Dashboard's own
+   bundle* and surfaces as `TypeError: Chaining cycle detected for promise` — an error that
+   names nothing and blames nobody.
+
+Two more only a picture could have caught: `vuex` as a UMD external resolves to `undefined`
+because Dashboard puts no `Vuex` on the page (the store is reached through `$store`), and
+`theme.ts` defined none of the instrument tokens, so both palettes fell back to the
+components' night defaults — a **dark instrument on a day board**, which is the exact failure
+R-UI-07 exists to prevent and the one nobody notices in a lab at night.
+
+### K-27 · ~~The pages violate the language they are now measured against~~ — CLOSED
 
 The capture gate found six violations of ADR-0009 on its first run, and they are recorded in
 `docs/console/accepted-violations.json` so that new ones fail while these do not:
@@ -533,7 +553,14 @@ The capture gate found six violations of ADR-0009 on its first run, and they are
   widget type, because one assertion over a combined selector would pass while a type was
   quietly dropped from it. The join form now renders at 588×172 and the ping form at 588×112.
 
-The four spanning actions remain. They are not a styling slip and no stylesheet reaches them:
-a stock `ui-button` is a whole row of its group and cannot be smaller than one.
+- ~~**Four actions spanning 100% of their surface**~~ — **fixed.** Not a styling slip and no
+  stylesheet reached them: a stock `ui-button` is a whole row of its group and cannot be
+  smaller than one. All four are now keys on a soft-key rail, and `flows.test.ts` asserts
+  that no `ui-button` comes back.
 
-**Closes when** the pages are rebuilt on the instrument library and the debt list is empty.
+**Closed.** `docs/console/accepted-violations.json` is empty, which is what closes this: the
+gate has no accepted violation left to hide behind. One defect the rebuild exposed and fixed
+on the way: a reading of `null` became `Number(null)` — zero, and finite — so a board with no
+thermal sensor drew **0.0 °C**, which says *cold* rather than *not there*. `facts.ts` is
+explicit that absent is null and never zero; the components were the other end of that rule
+and had it wrong.

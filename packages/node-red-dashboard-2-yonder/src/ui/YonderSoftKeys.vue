@@ -65,8 +65,12 @@ export default {
 }
 
 .y-keys__key {
-    flex: 1;
-    min-width: 0;
+    /* Sized to its words, with a floor for a gloved finger — never `flex: 1`.
+       Two keys stretched across a 1256px rail are the slab this whole design
+       language replaced, wearing a rail for a hat. */
+    flex: 0 0 auto;
+    min-width: 8rem;
+    padding-inline: 1.25rem;
     /* Deep enough for a gloved finger (R-UI-04) without becoming a slab: the
        rail is the full width, a key within it never is. */
     min-height: 34px;
@@ -90,15 +94,15 @@ export default {
 .y-keys__key.on {
     color: var(--yonder-value, #fff);
     background: rgba(255, 255, 255, 0.06);
-    box-shadow: inset 0 2px 0 var(--yonder-cyan, #2ad4f0);
+    box-shadow: inset 0 2px 0 var(--yonder-select, #2ad4f0);
 }
 
-.tone-act { color: var(--yonder-cyan, #2ad4f0); }
-.tone-warn { color: var(--yonder-magenta, #f03fce); }
+.tone-act { color: var(--yonder-select, #2ad4f0); }
+.tone-warn { color: var(--yonder-irreversible, #f03fce); }
 
 .y-keys__key:hover { background: rgba(255, 255, 255, 0.04); }
 .y-keys__key:focus-visible {
-    outline: 2px solid var(--yonder-cyan, #2ad4f0);
+    outline: 2px solid var(--yonder-select, #2ad4f0);
     outline-offset: -2px;
 }
 

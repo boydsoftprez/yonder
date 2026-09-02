@@ -66,9 +66,22 @@ every quantity was the mistake this decision replaces.
 | **Tape** | a quantity being watched | A vertical scale with a fill, a bug at the current value, and a boxed reading. Limits marked on the scale |
 | **Annunciator** | command state | The four tones from `command.ts` as a lit caption (R-UI-11) |
 | **Data bar** | facts | Label in small caps, value beside it, on one row. Six facts fit where one stock widget held one string |
-| **Soft keys** | every action, and navigation | A rail along the foot of the display. Cyan for a command, magenta for one that takes the page away. **No action lives anywhere else on a page** (R-UI-10) |
+| **Soft keys** | every action | A rail along the foot of the display. The *select* tone for a command, the *irreversible* tone for one that takes the page away. **No action lives anywhere else on a page** (R-UI-10) |
 
 ### The rules that follow
+
+**Navigation is not in the rail**, though an earlier draft of this table said
+it was. R-UI-03 requires navigation to be built from detected hardware — a
+camera that is not present has no section — and that is exactly what
+Dashboard's dynamic page creation gives us. A hand-built rail of page links
+would have to be regenerated from the same detection and would fight the
+framework to arrive at the same place. So the rail carries actions, the page
+list stays Dashboard's, and the two do not overlap.
+
+**The tones are named for their roles, not their colours.** `select` and
+`irreversible` rather than cyan and magenta: night pulls away from blue for
+dark adaptation (R-UI-07), so a token called `--yonder-cyan` holding an amber
+would be a stylesheet that lies about itself.
 
 - A bounded quantity is never a bare number (R-UI-09).
 - No action is full-width above a narrow viewport, and a page has at most one primary
