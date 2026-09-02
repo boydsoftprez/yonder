@@ -185,10 +185,60 @@ export function renderSettings(config: Config, opts: RenderSettingsOptions): str
   return lines.join("\n");
 }
 
+export interface SettingsArgs {
+  configPath: string;
+  out: string;
+  provisioned: boolean;
+  paths: Partial<ConsolePaths>;
+}
+
+/**
+ * The command line the installer uses.
+ *
+ *     settings.js <config.yaml> <settings.js> [--provisioned]
+ *                 [--core-tree DIR] [--user-dir DIR] [--socket PATH]
+ *
+ * The path overrides exist because the defaults describe one installation
+ * layout and the installer's own prefix is a variable. A generator that
+ * always writes /opt/yonder into the file is a generator that is wrong the
+ * moment anything is installed anywhere else, and wrong in a way whose only
+ * symptom is a console that cannot find its own wiring.
+ *
+ * Separated from main() so it can be tested: an argument parser that is only
+ * exercised by running the installer is one nobody finds out is broken until
+ * a board is being built.
+ */
+export function parseSettingsArgs(argv: readonly string[]): SettingsArgs | undefined {
+  const positional: string[] = [];
+  const paths: Partial<ConsolePaths> = {};
+  let provisioned = false;
+
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i] ?? "";
+    const takeValue = (): string | undefined => argv[++i];
+    switch (arg) {
+      case "--provisioned": provisioned = true; break;
+      case "--core-tree": { const v = takeValue(); if (v === undefined) return undefined; paths.coreTree = v; break; }
+      case "--user-dir": { const v = takeValue(); if (v === undefined) return undefined; paths.userDir = v; break; }
+      case "--socket": { const v = takeValue(); if (v === undefined) return undefined; paths.socket = v; break; }
+      default:
+        // An unknown flag is a typo, and a typo silently treated as a file
+        // name would write settings.js somewhere nobody asked for.
+        if (arg.startsWith("--")) return undefined;
+        positional.push(arg);
+    }
+  }
+
+  const [configPath, out] = positional;
+  if (configPath === undefined || out === undefined || positional.length > 2) return undefined;
+  return { configPath, out, provisioned, paths };
+}
+
+const USAGE = "usage: settings.js <config.yaml> <settings.js> [--provisioned]"
+  + " [--core-tree DIR] [--user-dir DIR] [--socket PATH]\n";
+
 /**
  * Generate settings.js from a configuration file.
- *
- *     node dist/console/settings.js <config.yaml> <settings.js> [--provisioned]
  *
  * The installer's route into this, so the file a freshly flashed board starts
  * with and the file the next apply writes come from the same function. Two
@@ -196,15 +246,17 @@ export function renderSettings(config: Config, opts: RenderSettingsOptions): str
  * would be the one nobody runs until a board is in the field.
  */
 function main(): void {
-  const [configPath, out] = process.argv.slice(2);
-  if (configPath === undefined || out === undefined) {
-    process.stderr.write("usage: settings.js <config.yaml> <settings.js> [--provisioned]\n");
+  const args = parseSettingsArgs(process.argv.slice(2));
+  if (args === undefined) {
+    process.stderr.write(USAGE);
     process.exitCode = 2;
     return;
   }
-  const provisioned = process.argv.includes("--provisioned");
-  writeFileSync(out, renderSettings(loadConfig(configPath), { provisioned }));
-  process.stdout.write(`wrote ${out} (${provisioned ? "provisioned" : "setup mode"})\n`);
+  writeFileSync(args.out, renderSettings(loadConfig(args.configPath), {
+    provisioned: args.provisioned,
+    paths: args.paths,
+  }));
+  process.stdout.write(`wrote ${args.out} (${args.provisioned ? "provisioned" : "setup mode"})\n`);
 }
 
 // Compare file URLs rather than strings so a path with a space or a

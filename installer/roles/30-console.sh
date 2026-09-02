@@ -122,7 +122,8 @@ else
     log "generating $con_dest/settings.js"
     # shellcheck disable=SC2086 # con_provisioned is one optional flag, or nothing
     run "$YONDER_NODE_LINK" "$yc_dest/dist/console/settings.js" \
-        "$YONDER_ETC/config.yaml" "$con_dest/settings.js" $con_provisioned
+        "$YONDER_ETC/config.yaml" "$con_dest/settings.js" \
+        --core-tree "$yc_dest" --user-dir "$con_state" $con_provisioned
 fi
 
 if [ -f "$YONDER_SRC/systemd/yonder-console.service" ]; then

@@ -144,6 +144,8 @@ export function consolePathsFromEnv(env: NodeJS.ProcessEnv = process.env): Conso
   if (env.YONDER_CONSOLE_SETTINGS !== undefined) overrides.settings = env.YONDER_CONSOLE_SETTINGS;
   if (env.YONDER_CONSOLE_USERDIR !== undefined) overrides.userDir = env.YONDER_CONSOLE_USERDIR;
   if (env.YONDER_SOCKET !== undefined) overrides.socket = env.YONDER_SOCKET;
+  if (env.YONDER_CONSOLE_CORE_TREE !== undefined) overrides.coreTree = env.YONDER_CONSOLE_CORE_TREE;
+  if (env.YONDER_CONSOLE_UNIT !== undefined) overrides.unit = env.YONDER_CONSOLE_UNIT;
   return consolePaths(overrides);
 }
 

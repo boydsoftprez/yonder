@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, it, expect } from "vitest";
 import { createContext, runInContext } from "node:vm";
-import { renderSettings, EXCLUDED_NODES, SETUP_FLOW_FILE, CONSOLE_FLOW_FILE, EDITOR_ROOT } from "./settings.js";
+import {
+  renderSettings, parseSettingsArgs, EXCLUDED_NODES, SETUP_FLOW_FILE, CONSOLE_FLOW_FILE, EDITOR_ROOT,
+} from "./settings.js";
 import { DEFAULT_CONFIG, type Config } from "../schema/config.js";
 
 /**
@@ -217,5 +219,70 @@ describe("renderSettings", () => {
     });
     const { exports } = evaluate(text);
     expect(exports.userDir).toBe('/var/lib/"; process.exit(1); //');
+  });
+});
+
+/**
+ * The installer's command line into renderSettings.
+ *
+ * Parsed by an exported function rather than inline in main(), because an
+ * argument parser exercised only by running the installer is one nobody finds
+ * out is broken until a board is being built.
+ */
+describe("parseSettingsArgs", () => {
+  it("takes the configuration and the output file", () => {
+    expect(parseSettingsArgs(["/etc/yonder/config.yaml", "/opt/yonder/console/settings.js"]))
+      .toEqual({
+        configPath: "/etc/yonder/config.yaml",
+        out: "/opt/yonder/console/settings.js",
+        provisioned: false,
+        paths: {},
+      });
+  });
+
+  it("takes the provisioned flag in any position", () => {
+    expect(parseSettingsArgs(["--provisioned", "a", "b"])?.provisioned).toBe(true);
+    expect(parseSettingsArgs(["a", "--provisioned", "b"])?.provisioned).toBe(true);
+    expect(parseSettingsArgs(["a", "b", "--provisioned"])?.provisioned).toBe(true);
+  });
+
+  /**
+   * The defaults describe one installation layout, and the installer's prefix
+   * is a variable. A generator that always writes /opt/yonder into the file
+   * is wrong the moment anything is installed anywhere else, and its only
+   * symptom is a console that cannot find its own wiring.
+   */
+  it("takes each path override", () => {
+    const args = parseSettingsArgs([
+      "a", "b",
+      "--core-tree", "/srv/yonder/core",
+      "--user-dir", "/srv/console",
+      "--socket", "/srv/run/core.sock",
+    ]);
+    expect(args?.paths).toEqual({
+      coreTree: "/srv/yonder/core",
+      userDir: "/srv/console",
+      socket: "/srv/run/core.sock",
+    });
+  });
+
+  it("refuses a flag with nothing after it", () => {
+    expect(parseSettingsArgs(["a", "b", "--core-tree"])).toBeUndefined();
+  });
+
+  /**
+   * A typo silently treated as a file name would write settings.js somewhere
+   * nobody asked for — and leave the console reading the one that was already
+   * there.
+   */
+  it("refuses an unknown flag rather than treating it as a path", () => {
+    expect(parseSettingsArgs(["a", "b", "--provisionned"])).toBeUndefined();
+    expect(parseSettingsArgs(["a", "b", "--user-directory", "/x"])).toBeUndefined();
+  });
+
+  it("refuses too few or too many paths", () => {
+    expect(parseSettingsArgs([])).toBeUndefined();
+    expect(parseSettingsArgs(["a"])).toBeUndefined();
+    expect(parseSettingsArgs(["a", "b", "c"])).toBeUndefined();
   });
 });

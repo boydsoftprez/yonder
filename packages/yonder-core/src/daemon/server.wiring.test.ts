@@ -74,6 +74,18 @@ describe("consolePathsFromEnv", () => {
     expect(consolePathsFromEnv({ YONDER_SOCKET: "/tmp/probe.sock" }).socket).toBe("/tmp/probe.sock");
   });
 
+  it("lets the tree the console requires its wiring from be moved", () => {
+    // The generated settings.js requires a module out of the daemon's own
+    // installed tree, so an install with a different prefix has to be able to
+    // say where that is. Same for the unit, which the renderer restarts.
+    const paths = consolePathsFromEnv({
+      YONDER_CONSOLE_CORE_TREE: "/srv/yonder/core",
+      YONDER_CONSOLE_UNIT: "yonder-console-test.service",
+    });
+    expect(paths.coreTree).toBe("/srv/yonder/core");
+    expect(paths.unit).toBe("yonder-console-test.service");
+  });
+
   it("lets the settings path and userDir be moved", () => {
     const paths = consolePathsFromEnv({
       YONDER_CONSOLE_SETTINGS: "/srv/console/settings.js",
