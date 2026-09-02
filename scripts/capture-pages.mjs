@@ -324,7 +324,12 @@ for (const page of pages) {
     path: join(refs, "capture", `${stem}.png`),
     fullPage: true,
     mask: masks,
-    maskColor: "#8891993d",
+    // Opaque, and that is the whole point. This was #8891993d - 24% alpha -
+    // so a live reading showed straight through its own mask and the
+    // committed picture changed on every run: a load average, a timestamp, a
+    // temporary directory name in the activity log. A mask you can read
+    // through is not a mask, it is a tint.
+    maskColor: "#8b8f94",
   });
   await tab.screenshot({ path: join(artifacts, `${stem}.png`), fullPage: true });
 
