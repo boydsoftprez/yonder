@@ -65,7 +65,12 @@ const DEVICE_SHOW = {
   loopbackOnly: "GENERAL.DEVICE:lo\nIP4.ADDRESS[1]:127.0.0.1/8\nGENERAL.DEVICE:eth0\n",
 };
 
-function harness(deviceShow: string, config: Config = DEFAULT_CONFIG, since?: number) {
+function harness(
+  deviceShow: string,
+  config: Config = DEFAULT_CONFIG,
+  since?: number,
+  carrying?: () => Promise<boolean>,
+) {
   const { clock, advance } = fakeClock();
   const run: CommandRunner = async (argv) =>
     argv.join(" ") === "nmcli -t -f GENERAL.DEVICE,IP4.ADDRESS device show" ? ok(deviceShow) : ok();
@@ -76,6 +81,7 @@ function harness(deviceShow: string, config: Config = DEFAULT_CONFIG, since?: nu
     config,
     since,
     apUp: async () => { raised++; },
+    ...(carrying !== undefined ? { carrying } : {}),
   });
   return { wd, advance, raised: () => raised };
 }
@@ -194,5 +200,35 @@ describe("FallbackWatchdog", () => {
     advance(90_000);
     await flushMicrotasks();
     expect(raised).toBe(1);
+  });
+
+  it("raises the access point when the only interface holds an address and reaches nothing", async () => {
+    // K-33. A cellular link with a wrong APN registers, attaches, takes an
+    // address and installs a route while completing no request - measured on
+    // hardware, and the reason this check could not stay as it was.
+    const { wd, advance, raised } = harness(DEVICE_SHOW.ethernetUp, DEFAULT_CONFIG, undefined, async () => false);
+    wd.start();
+    advance(90_000);
+    await flushMicrotasks();
+    expect(raised()).toBe(1);
+  });
+
+  it("leaves a link that is carrying traffic alone", async () => {
+    const { wd, advance, raised } = harness(DEVICE_SHOW.ethernetUp, DEFAULT_CONFIG, undefined, async () => true);
+    wd.start();
+    advance(90_000);
+    await flushMicrotasks();
+    expect(raised()).toBe(0);
+  });
+
+  it("accepts an address when nothing was wired to say whether traffic flows", async () => {
+    // Absent means "nobody told me", and the answer must be unchanged from
+    // before this option existed: a daemon assembled without a reach monitor
+    // must not become one that raises an access point on a working device.
+    const { wd, advance, raised } = harness(DEVICE_SHOW.ethernetUp);
+    wd.start();
+    advance(90_000);
+    await flushMicrotasks();
+    expect(raised()).toBe(0);
   });
 });

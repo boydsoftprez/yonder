@@ -19,6 +19,23 @@ export interface FallbackWatchdogOptions {
    * into the window rather than pushing the deadline out behind it.
    */
   since?: number;
+  /**
+   * Whether any path is actually carrying traffic.
+   *
+   * R-NET-07 has always said "carries traffic". This check implemented it as
+   * "holds an address" because a connected but idle Ethernet link carries
+   * none and is perfectly reachable — sound reasoning, and broken by
+   * cellular: a modem with a wrong APN registers, attaches, takes an address
+   * and installs a route while completing no request. That satisfied the old
+   * test, and a device configured that way from the boot partition with no
+   * other path never raised its access point (K-33).
+   *
+   * **Absent means "nobody told me", and the answer is unchanged from before
+   * this existed: an address is accepted.** A daemon assembled without a
+   * reach monitor must not become one that raises an access point on a
+   * working device.
+   */
+  carrying?: () => Promise<boolean>;
 }
 
 /**
@@ -26,9 +43,11 @@ export interface FallbackWatchdogOptions {
  *
  * R-NET-07 is written as "carries traffic". Byte counters are the wrong
  * test — a connected but idle Ethernet link carries none and is perfectly
- * reachable — so the implemented test is "no interface other than the access
- * point itself holds an IPv4 address". That is what "you can still reach me"
- * actually means.
+ * reachable — so the base test is "no interface other than the access point
+ * itself holds an IPv4 address". Cellular breaks that reasoning: a modem
+ * with a wrong APN can hold an address while carrying nothing (K-33), so an
+ * address is necessary but, when a `carrying` reach monitor is wired in, no
+ * longer sufficient on its own.
  *
  * On any doubt, including nmcli failing outright, the access point comes up.
  * A spurious access point costs an operator nothing; a missing one costs a
@@ -68,17 +87,24 @@ export class FallbackWatchdog {
     }
   }
 
-  /** True when some interface other than the access point holds an address. */
+  /**
+   * True when some interface other than the access point holds an address
+   * and, if a reach monitor is wired in, is carrying traffic.
+   */
   async check(): Promise<boolean> {
     const apAddress = this.opts.config.network.ap.address.split("/")[0];
     try {
       const active = await this.opts.client.activeIpv4();
-      return active.some(
+      const holdsAddress = active.some(
         (a) =>
           a.device !== "lo" &&
           !a.address.startsWith("127.") &&
           a.address.split("/")[0] !== apAddress,
       );
+      if (!holdsAddress) return false;
+      // An address is necessary and, since cellular, no longer sufficient.
+      if (this.opts.carrying === undefined) return true;
+      return await this.opts.carrying();
     } catch (e) {
       this.log(`fallback: cannot determine reachability (${(e as Error).message}); assuming none`);
       return false;
