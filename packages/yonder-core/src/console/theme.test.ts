@@ -415,7 +415,7 @@ describe("themeCss carries the instrument roles (ADR-0009)", () => {
 
 describe("themeCss never clips content an operator has to act on", () => {
   /** The widget types whose height is a function of content, not of shape. */
-  const sizesToContent = ["nrdb-ui-markdown", "nrdb-ui-form"];
+  const sizesToContent = ["nrdb-ui-markdown", "nrdb-ui-form", "nrdb-ui-dropdown"];
 
   for (const t of ["day", "night"] as ThemeName[]) {
     for (const type of sizesToContent) {

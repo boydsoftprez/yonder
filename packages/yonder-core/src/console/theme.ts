@@ -744,10 +744,18 @@ ${panelCss(theme)}
    a gauge, where the shape is the point. It is never legitimate for something
    an operator has to read or fill in.
 
+   A dropdown belongs here too, and it took an operator's eye to notice. Its
+   box is 48px and its content 70 once Vuetify adds a message under the field,
+   and because the widget does not scroll, the extra 22px does not hide - it
+   escapes, and the next widget is painted over the top of it. Same cause as
+   the form, opposite symptom, and the gate was only looking for the first
+   one.
+
    Anything added here needs the same test in theme.test.ts, because the cost
    of getting it wrong is silent. */
 .nrdb-ui-widget.nrdb-ui-markdown,
-.nrdb-ui-widget.nrdb-ui-form {
+.nrdb-ui-widget.nrdb-ui-form,
+.nrdb-ui-widget.nrdb-ui-dropdown {
   grid-row-end: auto !important;
   grid-template-rows: none !important;
   height: auto !important;

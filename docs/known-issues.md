@@ -609,18 +609,25 @@ exactly this and stopped naming it in the same change, so nothing was watching e
 apply that does not move the radio still goes through the engine's confirmation timer, so
 there may be a real caller here rather than a deletion.
 
-### K-31 · The network dropdown shows an error state before anything is scanned
+### K-31 · The network dropdown's label is red before anything is scanned
 
 `join-ssid` is a required `ui-dropdown` with no options until a scan fills it, and Vuetify
 paints an empty required select in its error colour. So a page an operator has only just
-opened labels "Network" in red and says "No options available" — shouting about a list they
-have not asked for yet, in the one place the console should look calm.
+opened labels "Network" in red — shouting about a list they have not asked for yet, in the
+one place the console should look calm.
 
-The generated stylesheet quietens the field outline and the helper text, and the *label*
-still comes through red: Vuetify resolves it from `--v-theme-error` rather than from a
+The generated stylesheet quietens the field outline and the helper text; the *label* still
+comes through red, because Vuetify resolves it from `--v-theme-error` rather than from a
 class the theme can reach, and setting that variable per widget needs the palette to carry
 RGB triplets it does not have.
 
-Cosmetic, and it is on the page an operator sees first. **Closes when** either the palette
-gains the triplets Vuetify wants, or the dropdown stops being `required` until a scan has
-run — which is arguably the truer fix, since before a scan there is nothing to require.
+**The worse half of this is fixed.** The message also *escaped its widget* — a 48px box
+with 70px of content — and the password field, four pixels below, was painted over the top
+of it. The theme now sizes a dropdown to its content the way it already did for prose and
+forms, and the capture gate looks for content that spills as well as content that hides,
+which it did not before. That was found by eye on a running console, which is the check
+the gate is meant to make unnecessary.
+
+What is left is cosmetic. **Closes when** either the palette gains the triplets Vuetify
+wants, or the dropdown stops being `required` until a scan has run — arguably the truer
+fix, since before a scan there is nothing to require.
