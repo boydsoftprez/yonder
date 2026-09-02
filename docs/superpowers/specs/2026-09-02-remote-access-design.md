@@ -460,6 +460,25 @@ Remote tab, would be an unusually poor joke.
 in both palettes, named `network-<tab>.{day,night}`. It already presses a soft key after
 capture, so driving a tab strip is within what it does rather than a new capability.
 
+### One defect the layout uncovers
+
+The tab strip was stood up against the real console and photographed in both palettes
+before this was written. It works — four tabs, `Interfaces`, `Wi-Fi`, `Remote`, `Activity`
+— and in day it sits correctly in the visual language.
+
+**In night the tab labels are near-black on the carbon panel, and the selected-tab
+indicator is a black underline on a dark ground.** Neither is legible. Nothing is wrong
+with the page: the night palette has simply never styled a tab strip, because no page has
+ever had one, so Vuetify's own default colour survives into a theme that overrides
+everything else. Styling `v-tab`, its label and its active indicator in `theme.ts` is part
+of this work, not a follow-up — a control the operator cannot read at night is a defect in
+the palette (R-UI-08), and ADR-0009 says why night matters.
+
+This is the argument for R-UI-12 in miniature, and for walking the tabs rather than
+capturing the first one: the strip renders on every tab, so a check that only ever
+photographed `Interfaces` would still have caught it — but nothing that only read the flows
+would have.
+
 ### Cost
 
 `docs/console/capture/network.{day,night}.png` and
