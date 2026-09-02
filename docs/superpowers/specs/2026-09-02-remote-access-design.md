@@ -553,10 +553,18 @@ tab strip is perfectly legible in the same screenshot that makes `Interfaces` di
 Tabs never got the same treatment because no page has ever had a tab strip, so Vuetify's
 own defaults survive into a theme that overrides everything else.
 
-**So `theme.ts` gives a tab a surface**, in the panel material, with the selected one
-distinguished the way a selected navigation item is — not by tinting text. That is part of
-this work, not a follow-up: a control the operator cannot read at night is a defect in the
-palette (R-UI-08), and ADR-0009 is explicit that night is not the lesser mode.
+**Fixed here rather than queued.** `theme.ts` now gives a tab the seat a navigation item
+already has: a ground in the panel material, a raised face when it is the one selected, and
+a lit edge in the accent — with Vuetify's own slider removed, because the lit edge already
+says it and the slider said it again in a colour nobody chose. The label is the same
+letterspaced mono caps the drawer uses, so the two controls that both answer *which surface
+am I looking at* are read the same way.
+
+It belonged in this change rather than a follow-up: a control the operator cannot read at
+night is a defect in the palette (R-UI-08), and ADR-0009 is explicit that night is not the
+lesser mode. The shipped pages are unaffected — none of them has a tab strip yet, so the
+rules are inert on them, and `verify-pages.sh` confirms every page in both palettes still
+captures with no change of shape.
 
 This is the argument for R-UI-12 in miniature, and for walking the tabs rather than
 capturing the first one: the strip renders on every tab, so a check that only ever
