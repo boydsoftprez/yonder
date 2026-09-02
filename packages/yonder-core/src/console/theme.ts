@@ -289,10 +289,14 @@ html, body {
    any display, and it follows the palette instead of needing a second file
    per theme.
 
-   The weave is 16px. Smaller reads as noise at arm's length; larger reads as
-   a checkerboard. The first attempt used four tones within ten RGB values of
-   each other and rendered as nothing at all, which is a way of getting this
-   wrong that survives code review and dies the moment somebody looks.
+   The weave is 10px and its light tone sits close to the base. 16px with a
+   strong light tone reads as a checkerboard across a full page rather than as
+   fibre - fine on the narrow bezel of a mockup, overpowering on 1280px of
+   console. Both ends of this have now been wrong: the first attempt used four
+   tones within ten RGB values of each other and rendered as nothing at all,
+   which is a way of being wrong that survives code review and dies the moment
+   somebody looks; the second was loud enough to compete with the instruments.
+   It is chrome. It should be felt and not read.
 
    The sheen is a soft radial from the top left rather than a raking linear
    one. A linear sheen across the whole page lit one corner and washed the
@@ -304,13 +308,13 @@ html, body {
   background-color: #12151a;
   background-image:
     radial-gradient(120% 80% at 22% 0%, rgba(255,255,255,0.07), transparent 62%),
-    repeating-linear-gradient(45deg, rgba(255,255,255,0.05) 0 1px, transparent 1px 4px),
-    linear-gradient(45deg, #2c333d 25%, transparent 25%, transparent 75%, #2c333d 75%),
-    linear-gradient(45deg, #2c333d 25%, transparent 25%, transparent 75%, #2c333d 75%),
-    linear-gradient(135deg, #090b0e 25%, transparent 25%, transparent 75%, #090b0e 75%),
-    linear-gradient(135deg, #090b0e 25%, transparent 25%, transparent 75%, #090b0e 75%);
-  background-size: 100% 100%, 6px 6px, 16px 16px, 16px 16px, 16px 16px, 16px 16px;
-  background-position: 0 0, 0 0, 0 0, 8px 8px, 0 0, 8px 8px;
+    repeating-linear-gradient(45deg, rgba(255,255,255,0.03) 0 1px, transparent 1px 3px),
+    linear-gradient(45deg, #1e242b 25%, transparent 25%, transparent 75%, #1e242b 75%),
+    linear-gradient(45deg, #1e242b 25%, transparent 25%, transparent 75%, #1e242b 75%),
+    linear-gradient(135deg, #0d1014 25%, transparent 25%, transparent 75%, #0d1014 75%),
+    linear-gradient(135deg, #0d1014 25%, transparent 25%, transparent 75%, #0d1014 75%);
+  background-size: 100% 100%, 4px 4px, 10px 10px, 10px 10px, 10px 10px, 10px 10px;
+  background-position: 0 0, 0 0, 0 0, 5px 5px, 0 0, 5px 5px;
   /* Stated, never inherited. Vuetify sets background-repeat: no-repeat
      on .v-application__wrap, so leaving this to the CSS default painted
      exactly one 16px tile in the top-left corner of the page and nothing
