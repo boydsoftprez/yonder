@@ -95,4 +95,22 @@ describe("affectsReachability", () => {
     after.remote.tailscale = { enabled: true };
     expect(affectsReachability(before, after)).toBe(true);
   });
+
+  // The exemption is two named fields, not the subtree they sit in. A field
+  // added under `remote.zerotier` next year - `allow_default` is the one that
+  // would actually hurt, because it is the knob that can replace the default
+  // route - must not inherit a kept-not-held apply from its neighbours with
+  // nobody deciding it should.
+  it("holds a field added under remote.zerotier that nobody has measured", () => {
+    const before = ConfigSchema.parse({
+      version: 1,
+      network: { ap: { psk: { secret: "ap_psk" } } },
+      ui: { editor: {} },
+    });
+    const after = structuredClone(before) as Config & {
+      remote: { zerotier: Record<string, unknown> };
+    };
+    after.remote.zerotier.allow_default = true;
+    expect(affectsReachability(before, after)).toBe(true);
+  });
 });
