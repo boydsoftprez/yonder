@@ -376,14 +376,34 @@ push that could have taken the console away. `allowDefault` is `false`, `allowGl
 
 ### Decision
 
-**The join goes through the ordinary apply path, and the device confirms it itself,
-immediately.**
+**The join goes through the ordinary apply path and is kept rather than held: no
+confirmation window.**
 
-This needs no new concept. R-CFG-11 already says a change the device can verify for itself
-is confirmed by the device; joining a Wi-Fi network is called out there as the case that
-matters, and this is another case of the same rule. The device verifies the one thing it
-genuinely can — the join was accepted and the client is running — which is true within
-seconds.
+This needs no new concept, and the concept it needs is newer than this document's first
+draft. **R-CFG-12** — *a change that cannot cost reachability is kept, not held* — landed on
+`main` while this was being written, and it is exactly this case stated in general. The
+confirmation window is the price of R-CFG-03's guarantee that a device comes back by
+itself; a change that touches nothing reachable has nothing to guarantee, and holding it
+means an operator watches their own choice undo itself.
+
+The mechanism is `affectsReachability` in `src/apply/reachability.ts`, and its design is
+the reason this must be done carefully. It compares the whole configuration with the
+non-reachability fields *removed*, rather than listing the fields that matter, so
+**everything is load-bearing by default** and a key added next year is treated as
+reachability-affecting until somebody proves otherwise. `ui.theme` is the only exemption
+today and, as the file says, it earned it the hard way.
+
+**So `remote.zerotier` is added to that exemption, and nothing else.** It is earned by §4's
+measurements and not by analogy: a join only ever adds a route, and the client itself
+refused the one push that would have overlapped the operator's own network. Tailscale is
+*not* exempted here. `tailscale up` installs packet-filter rules, that has not been
+measured, and R-CFG-12's own principle is that unproven means load-bearing. Its exemption
+is M2's second half to earn, with its own evidence, or not at all.
+
+A render still runs and a render can still fail: a malformed ID, a client that is not
+installed, a service that will not start. Those fail the apply and revert like anything
+else. What is given up is only the *window*, and only for the one subtree that has been
+shown not to need it.
 
 ```
 apply
@@ -407,7 +427,8 @@ Three things fall out of it:
   watched happen would revert a perfectly good configuration. §1 and §4 are the same
   decision seen from two ends.
 
-R-VPN-07 carries this.
+R-VPN-07 carries this, and is deliberately narrow: it says what the device may skip the
+window for and why, and leaves R-CFG-12 to say what the window is for.
 
 ---
 
@@ -419,7 +440,7 @@ IDs continue the R-VPN block, which currently ends at R-VPN-05.
 | ID | Requirement | P |
 |---|---|---|
 | R-VPN-06 | **Joined but not yet authorised is a state in its own right, and the interface says so.** Where a mesh requires a person to approve a device, the interface names that state as neither a fault nor a connection, shows the identifier that must be approved with a means of copying it, and waits indefinitely. Nothing times out and nothing is reverted while a device waits to be approved: a week in this state is a correct outcome. What this gives up is telling a mistyped network ID apart from a controller that cannot be reached — the client reports both as an ordinary join in progress, forever, and the interface does not guess between them | 1 |
-| R-VPN-07 | **A mesh join is confirmed by the device on the join being accepted, never on a person approving it.** It is a case of R-CFG-11: the device verifies what it can — that the client accepted the join and is running — and does so within seconds. Approval by a person is outside the device's control and is never waited on inside a confirmation window, because a window that expires while somebody walks to their laptop discards a working configuration. A join that fails for a reason the device *can* see — a malformed network ID, a client that is not installed, a service that will not start — fails the apply and reverts like any other change | 1 |
+| R-VPN-07 | **Joining a mesh is kept, not held.** It is a case of R-CFG-12, and it is earned by measurement rather than by argument: a join only ever adds a route, and the client refuses a route that would overlap a network the device is already on. Approval by a person is never waited on inside a confirmation window, because a window that expires while somebody walks to their laptop discards a working configuration — and waiting to be approved is the ordinary case, not the rare one. **Each mesh earns this separately.** R-CFG-12 treats what has not been shown to be safe as load-bearing, so a second mesh is held until its own behaviour has been measured. A join that fails for a reason the device can see — a malformed network ID, a client that is not installed, a service that will not start — fails the apply and reverts like any other change | 1 |
 | R-VPN-08 | **The primary mesh client installs on a board with no network.** It is carried in the offline payload, pinned to a version and a fingerprint recorded in this repository, and verified against the publisher's signature — using a key committed here rather than fetched — before it is staged. The second mesh client, whose install pulls a dependency tree and changes system-wide packet-filter alternatives, is fetched over the network by a role that runs only when it is configured. **Installing a mesh client does not start one:** the unit is stopped and disabled at install and started only when a network is configured, so a device carries no connection to anyone's infrastructure until it is asked for one | 1 |
 | R-VPN-09 | **Where a mesh needs a key the operator generates, the interface says where to get one and what kind to generate, and reports when the device's access expires.** The key is held in the secrets file and handed to the client as a file, never on a command line other processes can read. Once joined, the interface reports the expiry of the device's own access — including when there is none — so an aircraft cannot quietly lose remote access on a date nobody was told about. A key is never refused for being of the wrong kind (R-CFG-06) | 2 |
 
