@@ -65,7 +65,7 @@ export interface CommandPresentation {
 
 const PRESENTATION: Record<CommandState, CommandPresentation> = {
   idle: { label: "Ready", tone: "neutral" },
-  pending: { label: "Waiting for you to confirm", tone: "waiting" },
+  pending: { label: "In progress", tone: "waiting" },
   confirmed: { label: "Confirmed", tone: "good" },
   rejected: { label: "Not applied", tone: "bad" },
 };

@@ -1249,5 +1249,36 @@
         "x": 380,
         "y": 940,
         "wires": []
+    },
+    {
+        "id": "button-leave",
+        "type": "ui-button",
+        "z": "yonder-console",
+        "group": "group-net-now",
+        "name": "leave",
+        "order": 6,
+        "width": 6,
+        "height": 1,
+        "label": "Leave this network",
+        "tooltip": "",
+        "color": "",
+        "bgcolor": "",
+        "className": "",
+        "icon": "",
+        "payload": "",
+        "payloadType": "str",
+        "topic": "leave",
+        "topicType": "str",
+        "buttonColor": "",
+        "textColor": "",
+        "iconColor": "",
+        "enablePointerdown": false,
+        "x": 200,
+        "y": 690,
+        "wires": [
+            [
+                "join"
+            ]
+        ]
     }
 ]

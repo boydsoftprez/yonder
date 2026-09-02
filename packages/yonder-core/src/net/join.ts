@@ -112,4 +112,25 @@ export const JOIN_TOPIC = {
   ssid: "ssid",
   psk: "psk",
   join: "join",
+  leave: "leave",
 } as const;
+
+/**
+ * The configuration that puts this device back on its own access point.
+ *
+ * Joining was a one-way door: the console could take the radio to a network
+ * and had no control to bring it back, so an operator who joined the wrong
+ * network — or simply wanted the access point again — had no way to say so
+ * from the interface that put them there.
+ *
+ * Clearing the SSID is the whole of it. `wifiMode` reads a null or empty
+ * SSID as access-point mode, `radioPlan` then takes the client down and
+ * raises the access point, and the passphrase reference goes with it so a
+ * stale secret is not left pointing at a network this device is not on.
+ */
+export function leaveNetwork(current: Config): Config {
+  const config = structuredClone(current);
+  config.network.client.ssid = null;
+  config.network.client.psk = null;
+  return config;
+}

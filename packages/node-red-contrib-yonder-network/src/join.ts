@@ -55,6 +55,22 @@ export = function register(RED: RED): void {
           return;
         }
 
+        if (topic === JOIN_TOPIC.leave) {
+          const left = applyStatus(
+            await node.client.request({ method: "POST", path: "/net/leave", body: {} }),
+            Date.now(),
+          );
+          node.chosen = { ssid: null, psk: null };
+          node.status({
+            fill: left.state === "pending" ? "yellow" : "red",
+            shape: left.state === "pending" ? "dot" : "ring",
+            text: presentation(left.state).label,
+          });
+          send({ payload: left.message, yonder: left });
+          done();
+          return;
+        }
+
         // Anything else is the button. Refuse early and say which half is
         // missing, rather than spending a five-minute confirmation window on
         // an apply that was never going to associate.

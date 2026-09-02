@@ -124,7 +124,9 @@ describe("applyStatus", () => {
       0,
     );
     expect(status.movesRadio).toBe(true);
-    expect(status.message).toContain("access point is going away");
+    // What it must convey, not the sentence it uses.
+    expect(status.message).toMatch(/page is about to go|lose this page/i);
+    expect(status.message).toMatch(/comes back/i);
     expect(status.expiresAt).toBe(300_000);
   });
 

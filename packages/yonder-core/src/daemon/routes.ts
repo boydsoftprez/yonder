@@ -11,7 +11,7 @@ import { readBoardFacts } from "../system/read.js";
 import { readVersions } from "../system/versions.js";
 import { displayFacts, type BoardDisplay } from "../system/format.js";
 import { isProbeHost, type PingResult } from "../diag/probe.js";
-import { joinNetwork, type JoinRequest } from "../net/join.js";
+import { joinNetwork, leaveNetwork, type JoinRequest } from "../net/join.js";
 import { setTheme, type ThemeRequest } from "../ui/theme.js";
 import type { ScanResult } from "../net/scan.js";
 import type { BoardFacts } from "../system/facts.js";
@@ -365,6 +365,14 @@ export function createRouter(deps: RouterDeps): Router {
         const chosen = setTheme(loadConfig(deps.configPath), body as ThemeRequest);
         if (!chosen.ok) return { status: 400, body: { error: chosen.error } };
         return { status: 200, body: await deps.engine.apply(chosen.config) };
+      }
+
+      // The inverse of /net/join, and the control the console did not have:
+      // joining was a one-way door, so an operator on the wrong network had
+      // no way back to the access point from the interface that took them
+      // there. Clearing the SSID is the whole change; radioPlan does the rest.
+      if (method === "POST" && path === "/net/leave") {
+        return { status: 200, body: await deps.engine.apply(leaveNetwork(loadConfig(deps.configPath))) };
       }
 
       if (method === "GET" && path === "/config") {

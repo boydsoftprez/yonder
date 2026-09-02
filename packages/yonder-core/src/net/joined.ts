@@ -4,6 +4,8 @@ import { ping } from "../diag/probe.js";
 import type { CommandRunner } from "./runner.js";
 import type { NmcliClient } from "./nmcli/client.js";
 import type { Clock } from "../apply/types.js";
+import type { Config } from "../schema/config.js";
+import { AP_CONNECTION } from "./profiles.js";
 
 /**
  * Whether the device actually got onto the network it was told to join
@@ -37,6 +39,8 @@ export const ADDRESS_GRACE_MS = 20_000;
 export const POLL_MS = 2_000;
 
 export interface JoinedOptions {
+  /** The configuration being verified. Decides what counts as success. */
+  target: Config;
   client: NmcliClient;
   runner: CommandRunner;
   clock: Clock;
@@ -101,6 +105,20 @@ async function clientGateway(client: NmcliClient): Promise<{ device: string; gat
  */
 export async function joinSucceeded(opts: JoinedOptions): Promise<JoinedResult> {
   const log = opts.log ?? (() => {});
+
+  // Going back to the access point is the other direction, and the check for
+  // a client address would fail it every time — reverting an operator right
+  // back onto the network they just asked to leave. What proves that change
+  // is the access point being on the air.
+  const ssid = opts.target.network.client.ssid;
+  if (ssid === null || ssid === "") {
+    const devices = await opts.client.devices().catch(() => []);
+    const up = devices.some((d) => d.connection === AP_CONNECTION);
+    return up
+      ? { ok: true, reason: "the access point is back on the air" }
+      : { ok: false, reason: "the access point did not come back up" };
+  }
+
   const grace = opts.graceMs ?? ADDRESS_GRACE_MS;
   const poll = opts.pollMs ?? POLL_MS;
   const deadline = opts.clock.now() + grace;

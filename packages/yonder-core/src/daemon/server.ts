@@ -259,7 +259,8 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
     // R-CFG-11: a join confirms itself, because the operator cannot - the
     // console leaves the air with the access point. `client` is the same
     // NmcliClient the watchdog uses, so this asks the radio directly.
-    verifyRadioMove: () => joinSucceeded({
+    verifyRadioMove: (target) => joinSucceeded({
+      target,
       client,
       runner: opts.runner ?? systemRunner,
       clock,

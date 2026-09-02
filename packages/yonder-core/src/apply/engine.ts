@@ -46,7 +46,7 @@ export interface ApplyEngineOptions {
    * a test can answer without either. Absent means the old behaviour: the
    * window runs and only a human confirms.
    */
-  verifyRadioMove?: () => Promise<{ ok: boolean; reason: string }>;
+  verifyRadioMove?: (target: Config) => Promise<{ ok: boolean; reason: string }>;
   renderTimeoutMs?: number;
   /**
    * Set when the caller could not fully assemble `renderers` — daemon/
@@ -126,7 +126,7 @@ export class ApplyEngine {
   private readonly clock: Clock;
   private readonly timeoutMs: number;
   private readonly radioTimeoutMs: number;
-  private readonly verifyRadioMove?: () => Promise<{ ok: boolean; reason: string }>;
+  private readonly verifyRadioMove?: (target: Config) => Promise<{ ok: boolean; reason: string }>;
   private readonly renderTimeoutMs: number;
   private readonly journal: Journal;
   private readonly degraded?: string;
@@ -344,7 +344,7 @@ export class ApplyEngine {
     // timer reverts exactly as it did before.
     if (movesRadio && this.verifyRadioMove !== undefined) {
       const applyId = id;
-      void this.verifyRadioMove().then(
+      void this.verifyRadioMove(parsed.data).then(
         (result) => {
           if (this.state !== "pending" || this.id !== applyId) return;
           if (result.ok) {

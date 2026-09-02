@@ -4,6 +4,8 @@ import { joinSucceeded } from "./joined.js";
 import { NmcliClient } from "./nmcli/client.js";
 import type { CommandRunner } from "./runner.js";
 import type { Clock } from "../apply/types.js";
+import { DEFAULT_CONFIG } from "../schema/config.js";
+import type { Config } from "../schema/config.js";
 
 /**
  * A clock a test drives. `advance` moves `now` and fires anything due, then
@@ -59,6 +61,14 @@ IP4.ADDRESS[1]:169.254.3.9/16
 IP4.GATEWAY:--
 `;
 
+/** A configuration that is on its way to a network, which is what makes the
+ *  join checks apply at all. */
+function joiningConfig(): Config {
+  const c = structuredClone(DEFAULT_CONFIG);
+  c.network.client.ssid = "HomeNetwork";
+  return c;
+}
+
 function harness(show: string, pingOk: boolean): {
   run: () => ReturnType<typeof joinSucceeded>;
   argv: string[][];
@@ -75,7 +85,7 @@ function harness(show: string, pingOk: boolean): {
   };
   const clock = manualClock();
   const client = new NmcliClient(runner, () => {});
-  return { run: () => joinSucceeded({ client, runner, clock, graceMs: 6_000, pollMs: 1_000 }), argv, clock };
+  return { run: () => joinSucceeded({ target: joiningConfig(), client, runner, clock, graceMs: 6_000, pollMs: 1_000 }), argv, clock };
 }
 
 describe("joinSucceeded", () => {
@@ -121,7 +131,7 @@ describe("joinSucceeded", () => {
     const clock = manualClock();
     const runner: CommandRunner = () => Promise.reject(new Error("nmcli is not here"));
     const client = new NmcliClient(runner, () => {});
-    const p = joinSucceeded({ client, runner, clock, graceMs: 4_000, pollMs: 1_000 });
+    const p = joinSucceeded({ target: joiningConfig(), client, runner, clock, graceMs: 4_000, pollMs: 1_000 });
     await clock.advance(5_000);
     expect((await p).ok).toBe(false);
   });

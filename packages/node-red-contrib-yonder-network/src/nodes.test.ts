@@ -140,7 +140,12 @@ describe("yonder-apply", () => {
     replies.push(ok({ id: "abc", expiresAt: 300_000, movesRadio: true }));
     const msg = await send(applyNode, "yonder-apply", { payload: { version: 1 } });
     expect(msg.yonder?.movesRadio).toBe(true);
-    expect(msg.yonder?.message).toContain("access point is going away");
+    // Asserted on what it must convey, not on a phrase: that the page is
+    // about to go, and that a failure puts the access point back. The words
+    // changed once already when the confirmation was removed, and a test
+    // pinned to a sentence broke without anything being wrong.
+    expect(String(msg.yonder?.message)).toMatch(/page is about to go|lose this page/i);
+    expect(String(msg.yonder?.message)).toMatch(/access point comes back|comes back/i);
     expect(msg.yonder?.expiresAt).toBe(300_000);
   });
 
@@ -305,7 +310,12 @@ describe("yonder-join", () => {
       { topic: "ssid", payload: "HomeNetwork" },
       { topic: "join", payload: "" },
     ]);
-    expect(msg.yonder?.message).toContain("access point is going away");
+    // Asserted on what it must convey, not on a phrase: that the page is
+    // about to go, and that a failure puts the access point back. The words
+    // changed once already when the confirmation was removed, and a test
+    // pinned to a sentence broke without anything being wrong.
+    expect(String(msg.yonder?.message)).toMatch(/page is about to go|lose this page/i);
+    expect(String(msg.yonder?.message)).toMatch(/access point comes back|comes back/i);
   });
 
   it("relays the daemon's refusal rather than validating twice", async () => {
