@@ -95,10 +95,75 @@ describe("ConsoleRenderer", () => {
       .toThrow(/will not restart yonder-core/);
   });
 
-  it("writes nothing but settings.js", async () => {
+  it("writes nothing but settings.js and the generated palette", async () => {
     await renderer().render(config());
     const { readdirSync } = await import("node:fs");
-    expect(readdirSync(consoleDir)).toEqual(["settings.js"]);
+    expect(readdirSync(consoleDir).sort()).toEqual(["public", "settings.js"]);
+    expect(readdirSync(join(consoleDir, "public"))).toEqual(["theme.css"]);
+  });
+
+  /**
+   * The palette is generated from `ui.theme` (R-UI-07) and lives in a
+   * directory of its own. `httpStatic` serves that directory in front of the
+   * login gate — gating a stylesheet would mean an unstyled login page — so
+   * anything in it is readable by whoever can reach the port, and
+   * `settings.js` must stay one level up.
+   */
+  it("puts the palette somewhere httpStatic can serve without exposing settings.js", async () => {
+    await renderer().render(config());
+    const { readFileSync, readdirSync } = await import("node:fs");
+    const publicDir = join(consoleDir, "public");
+    expect(readdirSync(publicDir)).not.toContain("settings.js");
+    expect(readFileSync(join(publicDir, "theme.css"), "utf8")).toContain("--yonder-background");
+  });
+
+  it("writes the palette the configuration asks for", async () => {
+    const night = config();
+    night.ui.theme = "night";
+    await renderer().render(night);
+    const { readFileSync } = await import("node:fs");
+    const css = readFileSync(join(consoleDir, "public", "theme.css"), "utf8");
+    expect(css).toContain('--yonder-theme: "night"');
+    expect(css).not.toContain('--yonder-theme: "day"');
+  });
+
+  /**
+   * **A theme change must not restart the console**, and that is the whole
+   * reason the palette is a separate file.
+   *
+   * A theme goes through the apply engine like every other change, so it has
+   * to be confirmed from the other side within the window or it reverts
+   * (R-CFG-03). A restart signs the operator out (K-18) — so if choosing a
+   * theme bounced the console, the operator would have to sign back in and
+   * confirm before the timer ran out, and the ordinary outcome would be a
+   * theme that reverted.
+   */
+  it("rewrites the palette without restarting, when only the theme changed", async () => {
+    const calls: string[][] = [];
+    const recording = renderer(async (argv) => { calls.push(argv); return { code: 0, stdout: "", stderr: "" }; });
+    await recording.render(config());
+    calls.length = 0;
+
+    const night = config();
+    night.ui.theme = "night";
+    await recording.render(night);
+    const { readFileSync } = await import("node:fs");
+    expect(readFileSync(join(consoleDir, "public", "theme.css"), "utf8"))
+      .toContain('--yonder-theme: "night"');
+    expect(calls).toEqual([]);
+  });
+
+  /** A change that does touch settings.js still restarts, as it always did. */
+  it("still restarts when settings.js itself changed", async () => {
+    const calls: string[][] = [];
+    const recording = renderer(async (argv) => { calls.push(argv); return { code: 0, stdout: "", stderr: "" }; });
+    await recording.render(config());
+    calls.length = 0;
+
+    const moved = config();
+    moved.ui.port = 3001;
+    await recording.render(moved);
+    expect(calls.map((c) => c.join(" "))).toEqual(["systemctl restart yonder-console.service"]);
   });
 
   /**

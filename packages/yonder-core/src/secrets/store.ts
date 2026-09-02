@@ -119,6 +119,25 @@ export class SecretStore {
     return { value, created: true };
   }
 
+  /**
+   * Set a secret, replacing whatever was there.
+   *
+   * The one writer that overwrites. `ensure` and `ensureValue` deliberately do
+   * not — an operator who changed the access-point passphrase keeps theirs
+   * across every start — but joining a *different* Wi-Fi network has to
+   * replace the passphrase of the last one, and a store that could only ever
+   * add would leave a device carrying a key for a network it is not on.
+   *
+   * Callers must be sure the value is a credential the operator meant to
+   * change. Today there is one: POST /net/join.
+   */
+  put(name: string, value: string): void {
+    if (this.bag[name] === value) return;
+    this.bag[name] = value;
+    guardSecretValue(value);
+    this.flush();
+  }
+
   resolve(ref: SecretRef): string {
     const value = this.bag[ref.secret];
     if (value === undefined) {

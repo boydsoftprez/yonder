@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { existsSync, readFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import type { Renderer } from "../apply/types.js";
 import type { Config } from "../schema/config.js";
 import { writeFileDurable } from "../fs/durable.js";
 import type { CommandRunner } from "../net/runner.js";
 import { redactText } from "../net/runner.js";
 import type { AdminCredential } from "./credential.js";
-import { consolePaths, renderSettings, type ConsolePaths } from "./settings.js";
+import { consolePaths, renderSettings, THEME_FILE, type ConsolePaths } from "./settings.js";
+import { themeCss, themeName } from "./theme.js";
 
 /**
  * The console, as a renderer.
@@ -19,8 +20,8 @@ import { consolePaths, renderSettings, type ConsolePaths } from "./settings.js";
  * console change that leaves the device unusable is reverted by the same
  * timer that reverts a network change (R-CFG-03).
  *
- * It does two things: write `settings.js`, and restart the console. It writes
- * nothing else and it restarts nothing else. In particular it must **never**
+ * It writes two files — `settings.js` and the generated `theme.css` — and
+ * restarts the console. It writes nothing else and it restarts nothing else. In particular it must **never**
  * restart `yonder-core` (R-SEC-12): the console is the internet-adjacent
  * surface and the daemon is what holds the network up, and a console that can
  * take the daemon with it is rule 6 broken through the side door. The constructor refuses a
@@ -28,7 +29,11 @@ import { consolePaths, renderSettings, type ConsolePaths } from "./settings.js";
  * rather than a discovery in the field.
  */
 
-/** The mode settings.js is written with. It carries no secret; it is read by the console. */
+/**
+ * The mode the generated files are written with. Neither carries a secret —
+ * one is a description of the console and the other is a palette — and both
+ * are read by a console running as a different account.
+ */
 const SETTINGS_MODE = 0o644;
 
 export interface ConsoleRendererOptions {
@@ -64,6 +69,7 @@ export class ConsoleRenderer implements Renderer {
       provisioned: this.credential.isSet(),
       paths: this.paths,
     });
+    const wantedTheme = themeCss(themeName(config.ui.theme));
 
     // A device where the console was never installed — 30-console.sh did not
     // run, or ran on a board whose node was too old — must still be able to
@@ -83,8 +89,43 @@ export class ConsoleRenderer implements Renderer {
     // console each time yonder-core restarted. The text is a pure function of
     // the configuration and of whether a password is set, so equality here is
     // exactly "nothing about the console has changed".
-    if (existsSync(this.paths.settings) && readFileSync(this.paths.settings, "utf8") === wanted) {
-      this.log("console: settings.js is already what this configuration asks for");
+    const themePath = join(this.paths.publicDir, THEME_FILE);
+    const settingsChanged = !existsSync(this.paths.settings)
+      || readFileSync(this.paths.settings, "utf8") !== wanted;
+    const themeChanged = !existsSync(themePath)
+      || readFileSync(themePath, "utf8") !== wantedTheme;
+
+    if (!settingsChanged && !themeChanged) {
+      this.log("console: settings.js and theme.css are already what this configuration asks for");
+      return;
+    }
+
+    // The palette, generated (R-UI-07). The directory is created rather than
+    // required: it did not exist before this milestone, so a device upgraded
+    // into this build has a console tree with no public/ in it.
+    if (themeChanged) {
+      this.log(`console: writing ${themePath}`);
+      mkdirSync(this.paths.publicDir, { recursive: true });
+      writeFileDurable(themePath, wantedTheme, SETTINGS_MODE);
+    }
+
+    // **Only `settings.js` costs a restart**, and the distinction is the whole
+    // reason the palette is a separate file.
+    //
+    // `settings.js` is read once, by `require`, when Node-RED starts, so a
+    // change to it is only in force after a restart — and a restart logs the
+    // operator out (K-18). `theme.css` is served off disk by `httpStatic` on
+    // every request, so a new one is in force at the operator's next page
+    // load with nothing bounced.
+    //
+    // That matters more than it looks. A theme change goes through the apply
+    // engine like everything else, which means it has to be confirmed from the
+    // other side within the window or it reverts (R-CFG-03). If choosing a
+    // theme restarted the console, the operator would be signed out by their
+    // own change and would have to sign back in and confirm before the timer
+    // ran out — so the ordinary case would be a theme that reverted.
+    if (!settingsChanged) {
+      this.log("console: the palette changed and nothing else, so the console is left running");
       return;
     }
 

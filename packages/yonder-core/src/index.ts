@@ -231,3 +231,28 @@ export {
   DEFAULT_SOCKET_PATH,
   type Fetched,
 } from "./console/node.js";
+export {
+  displayFacts,
+  formatLoad,
+  formatMemory,
+  formatTemperature,
+  formatUptime,
+  UNKNOWN,
+  type BoardDisplay,
+} from "./system/format.js";
+export {
+  PALETTES,
+  DEFAULT_THEME,
+  themeCss,
+  themeName,
+  type Palette,
+  type ThemeName,
+} from "./console/theme.js";
+export {
+  joinNetwork,
+  CLIENT_PSK_SECRET,
+  type JoinRequest,
+  type JoinResult,
+  type SecretSink,
+} from "./net/join.js";
+export { STATIC_ROOT, THEME_FILE, THEME_HREF } from "./console/settings.js";

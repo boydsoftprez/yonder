@@ -1,0 +1,354 @@
+[
+  {
+    "id": "yonder-console",
+    "type": "tab",
+    "label": "Yonder console",
+    "disabled": false,
+    "info": "The shipped console.\n\nWIRING ONLY (CLAUDE.md rule 2). Every node here is either a Dashboard\nwidget, a core node moving a value from one place to another, or one of\nthe `yonder-*` adapters from packages/node-red-contrib-yonder-*. There is\nno `function` node and there cannot be one: `settings.js` excludes the\ntype, and `src/flows.test.ts` asserts against this file.\n\nAnything that needed a decision was written in yonder-core instead —\nthe number formatting on the status page, the folding of a Wi-Fi scan, the\nmerge that turns a form into a configuration, and the command-state\nlanguage that decides what pending, confirmed and rejected look like.",
+    "env": []
+  },
+
+  {
+    "id": "dashboard",
+    "type": "ui-base",
+    "name": "Yonder",
+    "path": "/dashboard",
+    "appIcon": "",
+    "includeClientData": true,
+    "acceptsClientConfig": ["ui-notification", "ui-control"],
+    "showPathInSidebar": false,
+    "headerContent": "page",
+    "navigationStyle": "default",
+    "titleBarStyle": "default",
+    "showReconnectNotification": true,
+    "notificationDisplayTime": 5,
+    "showDisconnectNotification": true,
+    "allowInstall": false
+  },
+  {
+    "id": "palette",
+    "type": "ui-theme",
+    "name": "Yonder",
+    "colors": {
+      "surface": "#ffffff",
+      "primary": "#1d5b8f",
+      "bgPage": "#f4f5f2",
+      "groupBg": "#ffffff",
+      "groupOutline": "#c9cdc6"
+    },
+    "sizes": {
+      "density": "default",
+      "pagePadding": "12px",
+      "groupGap": "12px",
+      "groupBorderRadius": "4px",
+      "widgetGap": "12px"
+    }
+  },
+
+  {
+    "id": "page-status", "type": "ui-page", "name": "Status", "ui": "dashboard",
+    "path": "/status", "icon": "microchip", "layout": "grid", "theme": "palette",
+    "breakpoints": [
+      { "name": "Default", "px": "0", "cols": "3" },
+      { "name": "Tablet", "px": "576", "cols": "6" },
+      { "name": "Small Desktop", "px": "768", "cols": "9" },
+      { "name": "Desktop", "px": "1024", "cols": "12" }
+    ],
+    "order": 1, "className": "", "visible": true, "disabled": false
+  },
+  {
+    "id": "page-network", "type": "ui-page", "name": "Network", "ui": "dashboard",
+    "path": "/network", "icon": "wifi", "layout": "grid", "theme": "palette",
+    "breakpoints": [
+      { "name": "Default", "px": "0", "cols": "3" },
+      { "name": "Tablet", "px": "576", "cols": "6" },
+      { "name": "Small Desktop", "px": "768", "cols": "9" },
+      { "name": "Desktop", "px": "1024", "cols": "12" }
+    ],
+    "order": 2, "className": "", "visible": true, "disabled": false
+  },
+  {
+    "id": "page-log", "type": "ui-page", "name": "Log", "ui": "dashboard",
+    "path": "/log", "icon": "format-list-bulleted", "layout": "grid", "theme": "palette",
+    "breakpoints": [
+      { "name": "Default", "px": "0", "cols": "3" },
+      { "name": "Tablet", "px": "576", "cols": "6" },
+      { "name": "Small Desktop", "px": "768", "cols": "9" },
+      { "name": "Desktop", "px": "1024", "cols": "12" }
+    ],
+    "order": 3, "className": "", "visible": true, "disabled": false
+  },
+  {
+    "id": "page-diagnostics", "type": "ui-page", "name": "Diagnostics", "ui": "dashboard",
+    "path": "/diagnostics", "icon": "stethoscope", "layout": "grid", "theme": "palette",
+    "breakpoints": [
+      { "name": "Default", "px": "0", "cols": "3" },
+      { "name": "Tablet", "px": "576", "cols": "6" },
+      { "name": "Small Desktop", "px": "768", "cols": "9" },
+      { "name": "Desktop", "px": "1024", "cols": "12" }
+    ],
+    "order": 4, "className": "", "visible": true, "disabled": false
+  },
+
+  { "id": "group-board", "type": "ui-group", "name": "This board", "page": "page-status", "width": 6, "height": 1, "order": 1, "showTitle": true, "className": "", "visible": true, "disabled": false, "groupType": "default" },
+  { "id": "group-versions", "type": "ui-group", "name": "Versions", "page": "page-status", "width": 6, "height": 1, "order": 2, "showTitle": true, "className": "", "visible": true, "disabled": false, "groupType": "default" },
+  { "id": "group-appearance", "type": "ui-group", "name": "Appearance", "page": "page-status", "width": 6, "height": 1, "order": 3, "showTitle": true, "className": "", "visible": true, "disabled": false, "groupType": "default" },
+
+  { "id": "group-net-now", "type": "ui-group", "name": "Where this device is now", "page": "page-network", "width": 6, "height": 1, "order": 1, "showTitle": true, "className": "", "visible": true, "disabled": false, "groupType": "default" },
+  { "id": "group-net-scan", "type": "ui-group", "name": "Networks in range", "page": "page-network", "width": 6, "height": 1, "order": 2, "showTitle": true, "className": "", "visible": true, "disabled": false, "groupType": "default" },
+  { "id": "group-net-join", "type": "ui-group", "name": "Join a network", "page": "page-network", "width": 6, "height": 1, "order": 3, "showTitle": true, "className": "", "visible": true, "disabled": false, "groupType": "default" },
+  { "id": "group-net-confirm", "type": "ui-group", "name": "After it comes back", "page": "page-network", "width": 6, "height": 1, "order": 4, "showTitle": true, "className": "", "visible": true, "disabled": false, "groupType": "default" },
+
+  { "id": "group-log", "type": "ui-group", "name": "Activity", "page": "page-log", "width": 12, "height": 1, "order": 1, "showTitle": true, "className": "", "visible": true, "disabled": false, "groupType": "default" },
+
+  { "id": "group-diag-ping", "type": "ui-group", "name": "Ping a host", "page": "page-diagnostics", "width": 6, "height": 1, "order": 1, "showTitle": true, "className": "", "visible": true, "disabled": false, "groupType": "default" },
+  { "id": "group-diag-reach", "type": "ui-group", "name": "Reachability", "page": "page-diagnostics", "width": 6, "height": 1, "order": 2, "showTitle": true, "className": "", "visible": true, "disabled": false, "groupType": "default" },
+
+  {
+    "id": "style-link",
+    "type": "ui-template",
+    "z": "yonder-console",
+    "name": "the generated palette",
+    "group": "",
+    "page": "",
+    "ui": "dashboard",
+    "format": "<link rel=\"stylesheet\" href=\"/yonder/theme.css\" />\n",
+    "storeOutMessages": false,
+    "passthru": false,
+    "resendOnRefresh": false,
+    "templateScope": "site",
+    "className": "",
+    "x": 180, "y": 60,
+    "wires": [[]]
+  },
+
+  {
+    "id": "status-poll", "type": "yonder-status", "z": "yonder-console",
+    "name": "board facts", "interval": 5,
+    "x": 160, "y": 140, "wires": [["text-model", "text-load", "text-temp", "text-memory", "text-uptime", "text-yonder", "text-os"]]
+  },
+  { "id": "text-model", "type": "ui-text", "z": "yonder-console", "group": "group-board", "order": 1, "width": 6, "height": 1, "name": "model", "label": "Board", "format": "{{msg.payload.display.model}}", "layout": "row-spread", "style": false, "font": "", "fontSize": 16, "color": "#717171", "wrapText": false, "className": "", "x": 470, "y": 80, "wires": [] },
+  { "id": "text-load", "type": "ui-text", "z": "yonder-console", "group": "group-board", "order": 2, "width": 6, "height": 1, "name": "load", "label": "CPU load (1, 5, 15 min)", "format": "{{msg.payload.display.load}}", "layout": "row-spread", "style": false, "font": "", "fontSize": 16, "color": "#717171", "wrapText": false, "className": "", "x": 470, "y": 120, "wires": [] },
+  { "id": "text-temp", "type": "ui-text", "z": "yonder-console", "group": "group-board", "order": 3, "width": 6, "height": 1, "name": "temperature", "label": "CPU temperature", "format": "{{msg.payload.display.temperature}}", "layout": "row-spread", "style": false, "font": "", "fontSize": 16, "color": "#717171", "wrapText": false, "className": "", "x": 470, "y": 160, "wires": [] },
+  { "id": "text-memory", "type": "ui-text", "z": "yonder-console", "group": "group-board", "order": 4, "width": 6, "height": 1, "name": "memory", "label": "Memory", "format": "{{msg.payload.display.memory}}", "layout": "row-spread", "style": false, "font": "", "fontSize": 16, "color": "#717171", "wrapText": false, "className": "", "x": 470, "y": 200, "wires": [] },
+  { "id": "text-uptime", "type": "ui-text", "z": "yonder-console", "group": "group-board", "order": 5, "width": 6, "height": 1, "name": "uptime", "label": "Up for", "format": "{{msg.payload.display.uptime}}", "layout": "row-spread", "style": false, "font": "", "fontSize": 16, "color": "#717171", "wrapText": false, "className": "", "x": 470, "y": 240, "wires": [] },
+  { "id": "text-yonder", "type": "ui-text", "z": "yonder-console", "group": "group-versions", "order": 1, "width": 6, "height": 1, "name": "yonder version", "label": "Yonder", "format": "{{msg.payload.display.yonder}}", "layout": "row-spread", "style": false, "font": "", "fontSize": 16, "color": "#717171", "wrapText": false, "className": "", "x": 470, "y": 280, "wires": [] },
+  { "id": "text-os", "type": "ui-text", "z": "yonder-console", "group": "group-versions", "order": 2, "width": 6, "height": 1, "name": "os version", "label": "Operating system", "format": "{{msg.payload.display.os}}", "layout": "row-spread", "style": false, "font": "", "fontSize": 16, "color": "#717171", "wrapText": false, "className": "", "x": 470, "y": 320, "wires": [] },
+
+  {
+    "id": "note-theme", "type": "ui-markdown", "z": "yonder-console",
+    "group": "group-appearance", "order": 1, "width": 6, "height": 2, "name": "what changing this costs",
+    "content": "**Day is the default because a dark screen in sunlight is a mirror.** Night exists for the same aircraft after dusk.\n\nChanging it is a configuration change like any other: it is applied straight away and it reverts by itself unless you confirm it on the Network page. The console is not restarted, so you stay signed in — refresh the page to see the new colours.",
+    "className": "", "x": 200, "y": 380, "wires": []
+  },
+  {
+    "id": "theme-choice", "type": "ui-dropdown", "z": "yonder-console",
+    "group": "group-appearance", "order": 2, "width": 6, "height": 1,
+    "name": "theme", "label": "Theme", "tooltip": "", "options": [
+      { "label": "Day", "value": "day", "type": "str" },
+      { "label": "Night", "value": "night", "type": "str" }
+    ],
+    "topic": "theme", "topicType": "str", "multiple": false, "chips": false,
+    "clearable": false, "typeIsComboBox": false, "msgTrigger": false, "className": "",
+    "payload": "", "x": 170, "y": 430, "wires": [["theme-into-config"]]
+  },
+  {
+    "id": "theme-into-config", "type": "change", "z": "yonder-console",
+    "name": "the configuration, with that theme",
+    "rules": [
+      { "t": "set", "p": "theme", "pt": "msg", "to": "payload", "tot": "msg" },
+      { "t": "set", "p": "payload", "pt": "msg", "to": "yonderConfig", "tot": "flow" },
+      { "t": "set", "p": "payload.ui.theme", "pt": "msg", "to": "theme", "tot": "msg" }
+    ],
+    "action": "", "property": "", "from": "", "to": "", "reg": false,
+    "x": 500, "y": 430, "wires": [["apply-config"]]
+  },
+  {
+    "id": "apply-config", "type": "yonder-apply", "z": "yonder-console",
+    "name": "apply", "x": 820, "y": 430, "wires": [["remember-apply", "text-apply-state"]]
+  },
+
+  {
+    "id": "config-on-open", "type": "inject", "z": "yonder-console",
+    "name": "read the configuration once", "props": [{ "p": "payload" }],
+    "repeat": "", "crontab": "", "once": true, "onceDelay": "1",
+    "topic": "", "payload": "", "payloadType": "date",
+    "x": 220, "y": 520, "wires": [["read-config"]]
+  },
+  {
+    "id": "button-reread", "type": "ui-button", "z": "yonder-console",
+    "group": "group-net-now", "order": 1, "width": 6, "height": 1,
+    "label": "Refresh", "tooltip": "", "color": "", "bgcolor": "", "className": "",
+    "icon": "", "iconPosition": "left", "payload": "", "payloadType": "str",
+    "topic": "", "topicType": "str", "buttonColor": "", "textColor": "", "iconColor": "",
+    "enableClick": true, "enablePointerdown": false, "pointerdownPayload": "", "pointerdownPayloadType": "str",
+    "enablePointerup": false, "pointerupPayload": "", "pointerupPayloadType": "str", "emulateClick": false,
+    "x": 200, "y": 570, "wires": [["read-config"]]
+  },
+  {
+    "id": "read-config", "type": "yonder-config", "z": "yonder-console",
+    "name": "read", "x": 500, "y": 540, "wires": [["remember-config", "text-client-ssid", "text-ap-ssid", "text-hostname"]]
+  },
+  {
+    "id": "remember-config", "type": "change", "z": "yonder-console",
+    "name": "keep it, so a form can change one field of it",
+    "rules": [{ "t": "set", "p": "yonderConfig", "pt": "flow", "to": "payload", "tot": "msg" }],
+    "action": "", "property": "", "from": "", "to": "", "reg": false,
+    "x": 840, "y": 500, "wires": [[]]
+  },
+  { "id": "text-client-ssid", "type": "ui-text", "z": "yonder-console", "group": "group-net-now", "order": 2, "width": 6, "height": 1, "name": "joined network", "label": "Joined Wi-Fi network", "format": "{{msg.payload.network.client.ssid}}", "layout": "row-spread", "style": false, "font": "", "fontSize": 16, "color": "#717171", "wrapText": false, "className": "", "x": 840, "y": 540, "wires": [] },
+  { "id": "text-ap-ssid", "type": "ui-text", "z": "yonder-console", "group": "group-net-now", "order": 3, "width": 6, "height": 1, "name": "access point", "label": "Access point", "format": "{{msg.payload.network.ap.ssid}}", "layout": "row-spread", "style": false, "font": "", "fontSize": 16, "color": "#717171", "wrapText": false, "className": "", "x": 840, "y": 580, "wires": [] },
+  { "id": "text-hostname", "type": "ui-text", "z": "yonder-console", "group": "group-net-now", "order": 4, "width": 6, "height": 1, "name": "hostname", "label": "Name on the network", "format": "{{msg.payload.system.hostname}}", "layout": "row-spread", "style": false, "font": "", "fontSize": 16, "color": "#717171", "wrapText": false, "className": "", "x": 840, "y": 620, "wires": [] },
+  {
+    "id": "note-net-now", "type": "ui-markdown", "z": "yonder-console",
+    "group": "group-net-now", "order": 5, "width": 6, "height": 2, "name": "what a blank means",
+    "content": "A blank **Joined Wi-Fi network** means this device has not been given one, and is running its own access point instead.\n\nThis board has one radio, so it can do one of those at a time.",
+    "className": "", "x": 200, "y": 620, "wires": []
+  },
+
+  {
+    "id": "button-scan", "type": "ui-button", "z": "yonder-console",
+    "group": "group-net-scan", "order": 1, "width": 6, "height": 1,
+    "label": "Scan for networks", "tooltip": "", "color": "", "bgcolor": "", "className": "",
+    "icon": "", "iconPosition": "left", "payload": "", "payloadType": "str",
+    "topic": "", "topicType": "str", "buttonColor": "", "textColor": "", "iconColor": "",
+    "enableClick": true, "enablePointerdown": false, "pointerdownPayload": "", "pointerdownPayloadType": "str",
+    "enablePointerup": false, "pointerupPayload": "", "pointerupPayloadType": "str", "emulateClick": false,
+    "x": 200, "y": 690, "wires": [["scan"]]
+  },
+  { "id": "scan", "type": "yonder-scan", "z": "yonder-console", "name": "scan", "x": 500, "y": 690, "wires": [["scan-rows"]] },
+  {
+    "id": "scan-rows", "type": "change", "z": "yonder-console",
+    "name": "the rows, for the table",
+    "rules": [{ "t": "move", "p": "payload.networks", "pt": "msg", "to": "payload", "tot": "msg" }],
+    "action": "", "property": "", "from": "", "to": "", "reg": false,
+    "x": 760, "y": 690, "wires": [["table-scan"]]
+  },
+  {
+    "id": "table-scan", "type": "ui-table", "z": "yonder-console",
+    "group": "group-net-scan", "name": "networks in range", "label": "", "order": 2,
+    "width": 6, "height": 6, "maxrows": 0, "passthru": false, "autocols": false,
+    "showSearch": false, "selectionType": "none", "deselect": true, "action": "replace",
+    "columns": [
+      { "title": "Network", "key": "ssid", "type": "text", "width": "", "align": "start" },
+      { "title": "Signal", "key": "signal", "type": "text", "width": "80px", "align": "end" },
+      { "title": "Security", "key": "security", "type": "text", "width": "", "align": "start" }
+    ],
+    "mobileBreakpoint": "sm", "mobileBreakpointType": "defaults", "className": "",
+    "x": 1020, "y": 690, "wires": [[]]
+  },
+
+  {
+    "id": "warning-join", "type": "ui-markdown", "z": "yonder-console",
+    "group": "group-net-join", "order": 1, "width": 6, "height": 6,
+    "name": "what is about to happen",
+    "content": "### Read this before you join a network\n\nThis board has **one Wi-Fi radio**. It can run its own access point, or it can join a network. It cannot do both.\n\nSo the moment you press Join:\n\n1. **The `yonder` access point disappears.** Your browser will lose this page. That is not a fault — it is the radio being retuned to the network you chose.\n2. Join that same network yourself, then open the console again at **`http://yonder.local:3000/dashboard`**. If that name does not work on your network or your device, look for the device in your router's list of connected clients and use its address instead. (See the note below.)\n3. **Come back within 5 minutes and press \"Yes, I can still reach it\".** If you do not, the device puts everything back the way it was and the access point returns by itself.\n\n**If the password was wrong, do nothing.** The device cannot join, so it gives up, restores the old configuration, and brings the `yonder` access point back on its own. Wait for the five minutes, rejoin `yonder`, and try again.\n\n---\n\n*About the name:* this device publishes `yonder.local` over mDNS. That works on macOS and iOS, on Windows 10 and later, and on many Android versions — but not on every network and not on every device, and it has not been verified on real hardware for this build. The router's client list always works.",
+    "className": "yonder-warning", "x": 200, "y": 780, "wires": []
+  },
+  {
+    "id": "form-join", "type": "ui-form", "z": "yonder-console",
+    "group": "group-net-join", "name": "join a network", "label": "", "order": 2,
+    "width": 6, "height": 1,
+    "options": [
+      { "label": "Network name (SSID)", "key": "ssid", "type": "text", "required": true, "rows": null },
+      { "label": "Password", "key": "psk", "type": "password", "required": false, "rows": null }
+    ],
+    "formValue": { "ssid": "", "psk": "" },
+    "payload": "", "topic": "", "topicType": "msg",
+    "splitLayout": false, "className": "", "passthru": false, "resetOnSubmit": true,
+    "submit": "Join — the access point will go away", "cancel": "Clear",
+    "x": 200, "y": 860, "wires": [["join"]]
+  },
+  { "id": "join", "type": "yonder-join", "z": "yonder-console", "name": "join", "x": 500, "y": 860, "wires": [["remember-apply", "text-apply-state"]] },
+  {
+    "id": "remember-apply", "type": "change", "z": "yonder-console",
+    "name": "keep the apply, so it can be confirmed",
+    "rules": [{ "t": "set", "p": "yonderApply", "pt": "flow", "to": "yonder", "tot": "msg" }],
+    "action": "", "property": "", "from": "", "to": "", "reg": false,
+    "x": 820, "y": 860, "wires": [[]]
+  },
+  { "id": "text-apply-state", "type": "ui-text", "z": "yonder-console", "group": "group-net-confirm", "order": 1, "width": 6, "height": 2, "name": "what the device said", "label": "", "format": "{{msg.payload.message}}", "layout": "col-center", "style": false, "font": "", "fontSize": 16, "color": "#717171", "wrapText": true, "className": "yonder-note", "x": 820, "y": 920, "wires": [] },
+
+  {
+    "id": "note-confirm", "type": "ui-markdown", "z": "yonder-console",
+    "group": "group-net-confirm", "order": 2, "width": 6, "height": 3, "name": "why this button exists",
+    "content": "A change is only kept if you can still reach the device afterwards — so the device asks you to say so from wherever you are now.\n\nIf you do not, it puts the previous configuration back by itself and the access point returns. Nothing is lost by waiting.",
+    "className": "", "x": 200, "y": 980, "wires": []
+  },
+  {
+    "id": "button-confirm", "type": "ui-button", "z": "yonder-console",
+    "group": "group-net-confirm", "order": 3, "width": 6, "height": 1,
+    "label": "Yes, I can still reach it", "tooltip": "", "color": "", "bgcolor": "", "className": "",
+    "icon": "", "iconPosition": "left", "payload": "", "payloadType": "str",
+    "topic": "", "topicType": "str", "buttonColor": "", "textColor": "", "iconColor": "",
+    "enableClick": true, "enablePointerdown": false, "pointerdownPayload": "", "pointerdownPayloadType": "str",
+    "enablePointerup": false, "pointerupPayload": "", "pointerupPayloadType": "str", "emulateClick": false,
+    "x": 200, "y": 1040, "wires": [["recall-apply"]]
+  },
+  {
+    "id": "recall-apply", "type": "change", "z": "yonder-console",
+    "name": "the apply this is about",
+    "rules": [{ "t": "set", "p": "yonder", "pt": "msg", "to": "yonderApply", "tot": "flow" }],
+    "action": "", "property": "", "from": "", "to": "", "reg": false,
+    "x": 500, "y": 1040, "wires": [["confirm"]]
+  },
+  { "id": "confirm", "type": "yonder-confirm", "z": "yonder-console", "name": "confirm", "x": 780, "y": 1040, "wires": [["text-confirm-state"]] },
+  { "id": "text-confirm-state", "type": "ui-text", "z": "yonder-console", "group": "group-net-confirm", "order": 4, "width": 6, "height": 2, "name": "confirmation", "label": "", "format": "{{msg.payload.message}}", "layout": "col-center", "style": false, "font": "", "fontSize": 16, "color": "#717171", "wrapText": true, "className": "yonder-note", "x": 1040, "y": 1040, "wires": [] },
+
+  {
+    "id": "activity-poll", "type": "yonder-activity", "z": "yonder-console",
+    "name": "activity log", "interval": 5, "x": 160, "y": 1120, "wires": [["table-log"]]
+  },
+  {
+    "id": "table-log", "type": "ui-table", "z": "yonder-console",
+    "group": "group-log", "name": "activity", "label": "", "order": 1,
+    "width": 12, "height": 12, "maxrows": 400, "passthru": false, "autocols": false,
+    "showSearch": true, "selectionType": "none", "deselect": true, "action": "append",
+    "columns": [
+      { "title": "Time (UTC)", "key": "time", "type": "text", "width": "110px", "align": "start" },
+      { "title": "Level", "key": "level", "type": "text", "width": "80px", "align": "start" },
+      { "title": "What happened", "key": "message", "type": "text", "width": "", "align": "start" }
+    ],
+    "mobileBreakpoint": "sm", "mobileBreakpointType": "defaults", "className": "",
+    "x": 460, "y": 1120, "wires": [[]]
+  },
+
+  {
+    "id": "form-ping", "type": "ui-form", "z": "yonder-console",
+    "group": "group-diag-ping", "name": "ping", "label": "", "order": 1,
+    "width": 6, "height": 1,
+    "options": [
+      { "label": "Host name or IPv4 address", "key": "host", "type": "text", "required": true, "rows": null }
+    ],
+    "formValue": { "host": "" },
+    "payload": "", "topic": "", "topicType": "msg",
+    "splitLayout": false, "className": "", "passthru": false, "resetOnSubmit": false,
+    "submit": "Ping", "cancel": "Clear",
+    "x": 180, "y": 1200, "wires": [["ping"]]
+  },
+  { "id": "ping", "type": "yonder-diag", "z": "yonder-console", "name": "ping", "probe": "ping", "x": 460, "y": 1200, "wires": [["text-ping-host", "text-ping-result", "text-ping-rtt"]] },
+  { "id": "text-ping-host", "type": "ui-text", "z": "yonder-console", "group": "group-diag-ping", "order": 2, "width": 6, "height": 1, "name": "host", "label": "Host", "format": "{{msg.payload.host}}", "layout": "row-spread", "style": false, "font": "", "fontSize": 16, "color": "#717171", "wrapText": false, "className": "", "x": 740, "y": 1160, "wires": [] },
+  { "id": "text-ping-result", "type": "ui-text", "z": "yonder-console", "group": "group-diag-ping", "order": 3, "width": 6, "height": 1, "name": "replies", "label": "Replies", "format": "{{msg.payload.received}} of {{msg.payload.transmitted}}", "layout": "row-spread", "style": false, "font": "", "fontSize": 16, "color": "#717171", "wrapText": false, "className": "", "x": 740, "y": 1200, "wires": [] },
+  { "id": "text-ping-rtt", "type": "ui-text", "z": "yonder-console", "group": "group-diag-ping", "order": 4, "width": 6, "height": 1, "name": "round trip", "label": "Round trip", "format": "{{msg.payload.rttMs}} ms", "layout": "row-spread", "style": false, "font": "", "fontSize": 16, "color": "#717171", "wrapText": false, "className": "", "x": 740, "y": 1240, "wires": [] },
+
+  {
+    "id": "note-reach", "type": "ui-markdown", "z": "yonder-console",
+    "group": "group-diag-reach", "order": 1, "width": 6, "height": 3,
+    "name": "what this actually tests",
+    "content": "This sends a few packets to one well-known public address and reports whether any came back. Nothing else on this device contacts anything off it.\n\nIt is evidence, not proof. A network that blocks this kind of packet reports *no reply* while carrying traffic perfectly well, and a captive portal reports *replied* while carrying nothing you want.",
+    "className": "", "x": 200, "y": 1300, "wires": []
+  },
+  {
+    "id": "button-reach", "type": "ui-button", "z": "yonder-console",
+    "group": "group-diag-reach", "order": 2, "width": 6, "height": 1,
+    "label": "Check reachability", "tooltip": "", "color": "", "bgcolor": "", "className": "",
+    "icon": "", "iconPosition": "left", "payload": "", "payloadType": "str",
+    "topic": "", "topicType": "str", "buttonColor": "", "textColor": "", "iconColor": "",
+    "enableClick": true, "enablePointerdown": false, "pointerdownPayload": "", "pointerdownPayloadType": "str",
+    "enablePointerup": false, "pointerupPayload": "", "pointerupPayloadType": "str", "emulateClick": false,
+    "x": 200, "y": 1360, "wires": [["reachable"]]
+  },
+  { "id": "reachable", "type": "yonder-diag", "z": "yonder-console", "name": "reachable", "probe": "reachable", "x": 480, "y": 1360, "wires": [["text-reach-host", "text-reach-result"]] },
+  { "id": "text-reach-host", "type": "ui-text", "z": "yonder-console", "group": "group-diag-reach", "order": 3, "width": 6, "height": 1, "name": "probed", "label": "Probed", "format": "{{msg.payload.host}}", "layout": "row-spread", "style": false, "font": "", "fontSize": 16, "color": "#717171", "wrapText": false, "className": "", "x": 760, "y": 1330, "wires": [] },
+  { "id": "text-reach-result", "type": "ui-text", "z": "yonder-console", "group": "group-diag-reach", "order": 4, "width": 6, "height": 1, "name": "replies", "label": "Replies", "format": "{{msg.payload.received}} of {{msg.payload.transmitted}}", "layout": "row-spread", "style": false, "font": "", "fontSize": 16, "color": "#717171", "wrapText": false, "className": "", "x": 760, "y": 1380, "wires": [] }
+]

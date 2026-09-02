@@ -34,6 +34,7 @@ const configNode = (await import("./config.js")).default ?? await import("./conf
 const scanNode = (await import("./scan.js")).default ?? await import("./scan.js");
 const applyNode = (await import("./apply.js")).default ?? await import("./apply.js");
 const confirmNode = (await import("./confirm.js")).default ?? await import("./confirm.js");
+const joinNode = (await import("./join.js")).default ?? await import("./join.js");
 
 const ok = (body: unknown): DaemonReply => ({ ok: true, status: 200, body });
 const unreachable: DaemonReply = {
@@ -187,5 +188,50 @@ describe("yonder-confirm", () => {
     const msg = await send(confirmNode, "yonder-confirm", { yonder: { id: "abc" } });
     expect(msg.yonder?.state).toBe("rejected");
     expect(msg.yonder?.id).toBe("abc");
+  });
+});
+
+describe("yonder-join", () => {
+  it("posts the form to the route that owns the passphrase", async () => {
+    replies.push(ok({ id: "abc", expiresAt: 300_000, movesRadio: true }));
+    const msg = await send(joinNode, "yonder-join", {
+      payload: { ssid: "HomeNetwork", psk: "a-passphrase" },
+    });
+    expect(asked).toEqual([{
+      method: "POST", path: "/net/join", body: { ssid: "HomeNetwork", psk: "a-passphrase" },
+    }]);
+    expect(msg.yonder?.state).toBe("pending");
+    expect(msg.yonder?.movesRadio).toBe(true);
+  });
+
+  /**
+   * The single most important piece of copy in the product reaches the page on
+   * this message. The operator is about to lose the access point they are
+   * reading it over.
+   */
+  it("carries the words that say the access point is going away", async () => {
+    replies.push(ok({ id: "abc", expiresAt: 300_000, movesRadio: true }));
+    const msg = await send(joinNode, "yonder-join", { payload: { ssid: "HomeNetwork", psk: "a-passphrase" } });
+    expect(msg.yonder?.message).toContain("access point is going away");
+  });
+
+  it("relays the daemon's refusal rather than validating twice", async () => {
+    replies.push({
+      ok: true,
+      status: 400,
+      body: { error: "the passphrase must be between 8 and 63 characters; that is what WPA2 accepts" },
+    });
+    const msg = await send(joinNode, "yonder-join", { payload: { ssid: "HomeNetwork", psk: "short" } });
+    expect(msg.yonder?.state).toBe("rejected");
+    expect(msg.yonder?.message).toContain("WPA2");
+    // Sent anyway: a second copy of the rule here is a second copy to keep in
+    // step with the one that actually decides.
+    expect(asked).toHaveLength(1);
+  });
+
+  it("reports a daemon that never answered as rejected", async () => {
+    replies.push(unreachable);
+    const msg = await send(joinNode, "yonder-join", { payload: { ssid: "HomeNetwork" } });
+    expect(msg.yonder?.state).toBe("rejected");
   });
 });

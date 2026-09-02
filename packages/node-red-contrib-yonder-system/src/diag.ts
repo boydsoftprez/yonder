@@ -38,7 +38,15 @@ export = function register(RED: RED): void {
             method: "POST",
             path: "/diag/ping",
             body: {
-              host: typeof msg.payload === "string" ? msg.payload : (msg as { host?: unknown }).host,
+              // Three places a host can arrive from, because three things
+              // send one: a bare string from a button, `{host}` from a form,
+              // and `msg.host` from a flow that set it. None of them is
+              // validated here — the daemon does that, and a second copy of
+              // the rule is a second copy to keep in step.
+              host: typeof msg.payload === "string"
+                ? msg.payload
+                : (msg.payload as { host?: unknown } | null | undefined)?.host
+                  ?? (msg as { host?: unknown }).host,
               ...(typeof (msg as { count?: unknown }).count === "number"
                 ? { count: (msg as { count: number }).count }
                 : {}),

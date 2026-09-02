@@ -390,8 +390,13 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
     credential,
     diag,
     // Absent when buildRenderers threw. GET /net/scan then says this device
-    // cannot scan, which is true, rather than reporting an empty air.
-    ...(built === undefined ? {} : { scan: () => scanForNetworks(client) }),
+    // cannot scan, which is true, rather than reporting an empty air; and
+    // POST /net/join refuses rather than applying a configuration whose
+    // secret reference points at nothing.
+    ...(built === undefined ? {} : {
+      scan: () => scanForNetworks(client),
+      secrets: built.secrets,
+    }),
     ...(onProvisioned === undefined ? {} : { onProvisioned }),
   });
 

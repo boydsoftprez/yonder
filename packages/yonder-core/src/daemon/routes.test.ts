@@ -66,6 +66,15 @@ const FACTS: SystemReport = {
     cpuTemperatureC: 58,
   },
   versions: { yonder: "0.1.0", os: "Debian GNU/Linux 13 (trixie)" },
+  display: {
+    model: "Raspberry Pi 4 Model B Rev 1.5",
+    load: "0.52, 0.58, 0.59",
+    memory: "180 MB of 905 MB used (20%)",
+    uptime: "41 seconds",
+    temperature: "58.0 °C",
+    yonder: "0.1.0",
+    os: "Debian GNU/Linux 13 (trixie)",
+  },
 };
 
 interface RouterOptions {
@@ -73,6 +82,7 @@ interface RouterOptions {
   throttle?: AttemptThrottle;
   scan?: () => Promise<ScanResult>;
   diag?: DiagProbes;
+  secrets?: { put(name: string, value: string): void };
   activity?: ActivityLog;
   system?: () => SystemReport;
 }
@@ -94,6 +104,9 @@ function router(opts: RouterOptions = {}): Router {
         reachable: () => Promise.resolve(REPLIED),
       },
     }),
+    ...("secrets" in opts
+      ? (opts.secrets === undefined ? {} : { secrets: opts.secrets })
+      : { secrets: { put: () => {} } }),
     ...(opts.activity === undefined ? {} : { activity: opts.activity }),
     ...(opts.throttle === undefined ? {} : { throttle: opts.throttle }),
   });
@@ -693,5 +706,95 @@ describe("GET /log", () => {
     const result = await router({ activity })("GET", "/log?since=0", undefined);
     expect(result.status).toBe(403);
     expect(JSON.stringify(result.body)).not.toContain("something the daemon did");
+  });
+});
+
+/**
+ * `POST /net/join` — the one write the network page makes.
+ *
+ * A route rather than a form that assembles a configuration in a browser: the
+ * passphrase has to reach `secrets.yaml` (which only root can write), the
+ * configuration has to carry a reference to it, and the whole document has to
+ * go through the apply engine so it inherits the confirmation timer. A page
+ * doing that itself would be making a decision, in wiring, about the document
+ * that decides whether the device is reachable.
+ */
+describe("POST /net/join", () => {
+  function secretSink(): { put(name: string, value: string): void; stored: Record<string, string> } {
+    const stored: Record<string, string> = {};
+    return { stored, put: (name, value) => { stored[name] = value; } };
+  }
+
+  it("is 403 while unprovisioned", async () => {
+    const result = await router()("POST", "/net/join", { ssid: "HomeNetwork", psk: "a-passphrase" });
+    expect(result.status).toBe(403);
+  });
+
+  it("applies a configuration that joins the network, and starts the clock", async () => {
+    const secrets = secretSink();
+    const route = provisioned({ secrets });
+    const result = await route("POST", "/net/join", { ssid: "HomeNetwork", psk: "a-passphrase" });
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({ id: expect.any(String) as unknown as string });
+    // The written configuration is the one that joins.
+    const config = (await route("GET", "/config", undefined)).body as Config;
+    expect(config.network.client.ssid).toBe("HomeNetwork");
+    expect(config.network.client.psk).toEqual({ secret: "wifi_psk" });
+    expect(secrets.stored.wifi_psk).toBe("a-passphrase");
+  });
+
+  /**
+   * The one that matters: this apply moves the radio, so it gets the longer
+   * confirmation window — the operator has to find the device again on
+   * another network before they can confirm anything.
+   */
+  it("reports that it moves the radio, so a page can say so", async () => {
+    const result = await provisioned({ secrets: secretSink() })(
+      "POST", "/net/join", { ssid: "HomeNetwork", psk: "a-passphrase" },
+    );
+    expect(result.body).toMatchObject({ movesRadio: true });
+  });
+
+  it("is 400 for a passphrase no access point would accept, and stores nothing", async () => {
+    const secrets = secretSink();
+    const result = await provisioned({ secrets })("POST", "/net/join", { ssid: "HomeNetwork", psk: "short" });
+    expect(result.status).toBe(400);
+    expect(secrets.stored).toEqual({});
+  });
+
+  it("is 400 for an ssid that is not one", async () => {
+    const route = provisioned({ secrets: secretSink() });
+    for (const ssid of ["", undefined, 42]) {
+      expect((await route("POST", "/net/join", { ssid, psk: "a-passphrase" })).status, JSON.stringify(ssid)).toBe(400);
+    }
+  });
+
+  /**
+   * R-SEC-10, at the point of capture. The body is redacted at the top of the
+   * router before any branch can touch it, so nothing this route logs can
+   * carry the passphrase — which is the property that survives somebody
+   * adding a new log line here later.
+   */
+  it("never writes the passphrase to the journal", async () => {
+    const written: string[] = [];
+    const spy = vi.spyOn(process.stderr, "write").mockImplementation((chunk) => {
+      written.push(String(chunk));
+      return true;
+    });
+    try {
+      const route = provisioned({ secrets: secretSink() });
+      await route("POST", "/net/join", { ssid: "HomeNetwork", psk: "the-actual-passphrase" });
+      await route("POST", "/net/join", { ssid: "", psk: "the-actual-passphrase" });
+    } finally {
+      spy.mockRestore();
+    }
+    expect(written.join("")).not.toContain("the-actual-passphrase");
+  });
+
+  it("refuses rather than applying when the secret store could not be read", async () => {
+    const result = await provisioned({ secrets: undefined })(
+      "POST", "/net/join", { ssid: "HomeNetwork", psk: "a-passphrase" },
+    );
+    expect(result.status).toBe(503);
   });
 });

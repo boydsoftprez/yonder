@@ -27,6 +27,18 @@ import { redactLine } from "../secrets/redact.js";
 
 export type ActivityLevel = "info" | "warn";
 
+/**
+ * `14:03:12` from epoch milliseconds, in UTC.
+ *
+ * `Date` rather than a formatter: this runs on a board with no locale data to
+ * speak of, and the answer has to be the same on every one of them.
+ */
+function utcClockTime(at: number): string {
+  const when = new Date(at);
+  const pad = (n: number): string => String(n).padStart(2, "0");
+  return `${pad(when.getUTCHours())}:${pad(when.getUTCMinutes())}:${pad(when.getUTCSeconds())}`;
+}
+
 export interface ActivityEntry {
   /**
    * Increasing, never reused, and the *only* ordering this buffer promises.
@@ -39,6 +51,21 @@ export interface ActivityEntry {
   seq: number;
   /** Milliseconds since the epoch, from the injected clock. */
   at: number;
+  /**
+   * `14:03:12`, in UTC, for a page to show.
+   *
+   * Formatted here rather than in a widget for the reason everything else in
+   * this milestone is: a Dashboard widget binds a value and cannot turn epoch
+   * milliseconds into a clock time, and doing that in a `function` node is
+   * CLAUDE.md rule 2. `at` is still there for anything that wants to sort or
+   * age an entry.
+   *
+   * UTC, and labelled as such wherever it is shown. `system.timezone` exists
+   * in the schema and is read by nothing; a log that silently used the
+   * daemon's local zone would be one whose times could not be compared with
+   * `journalctl` on the same board.
+   */
+  time: string;
   level: ActivityLevel;
   message: string;
 }
@@ -107,7 +134,8 @@ export class ActivityLog {
       ? `${redacted.slice(0, ACTIVITY_MESSAGE_LIMIT)}…`
       : redacted;
 
-    this.buffer.push({ seq: this.nextSeq++, at: this.clock.now(), level, message: text });
+    const at = this.clock.now();
+    this.buffer.push({ seq: this.nextSeq++, at, time: utcClockTime(at), level, message: text });
     if (this.buffer.length > this.capacity) {
       this.discarded += this.buffer.length - this.capacity;
       this.buffer = this.buffer.slice(this.buffer.length - this.capacity);

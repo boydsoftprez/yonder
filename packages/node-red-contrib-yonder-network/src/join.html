@@ -1,0 +1,40 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!--
+  The editor half of join a network.
+
+  Node-RED finds this by basename beside the node's .js, and without it the
+  flow editor shows the node as "unknown" even though the runtime registered
+  it. It is a form and a registration, and deliberately nothing else: no
+  behaviour lives here (CLAUDE.md rule 2 in spirit — a diff has to be
+  readable), and no asset is fetched from anywhere (R-UI-01).
+-->
+<script type="text/html" data-template-name="yonder-join">
+  <div class="form-row">
+    <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name" />
+  </div>
+</script>
+
+<script type="text/html" data-help-name="yonder-join">
+<p>Posts <code>{ ssid, psk }</code> from <code>msg.payload</code> to
+<code>POST /net/join</code>.</p>
+<p>The daemon stores the passphrase in <code>secrets.yaml</code>, writes a
+reference to it into the configuration, and puts the whole document through the
+apply engine — so this is an apply, and what comes back is a <b>pending</b>
+command state with a deadline on it.</p>
+<p>On a single-radio board this is the apply that takes the access point off the
+air. <code>msg.yonder.movesRadio</code> is set when it does, and it carries the
+longer confirmation window.</p>
+</script>
+
+<script type="text/javascript">
+  RED.nodes.registerType("yonder-join", {
+    category: "yonder",
+    color: "#c7d4e0",
+    defaults: { name: { value: "" } },
+    inputs: 1,
+    outputs: 1,
+    icon: "font-awesome/fa-sign-in",
+    label: function () { return this.name || "join a network"; },
+  });
+</script>

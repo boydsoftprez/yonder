@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { loadConfig } from "../config/load.js";
 import type { Config } from "../schema/config.js";
 
@@ -24,6 +24,19 @@ import type { Config } from "../schema/config.js";
 export interface ConsolePaths {
   /** Where the generated settings.js is written. */
   settings: string;
+  /**
+   * The one directory the console serves files out of, and the only place
+   * `theme.css` is written.
+   *
+   * A directory of its own, never the console tree. Node-RED mounts
+   * `httpNodeAuth` at `httpNodeRoot` *before* `httpStatic` (red.js), so
+   * everything under here is behind the same login as the dashboard — which is
+   * the right place for it: the palette styles the dashboard, and the login
+   * page carries its own inline CSS and needs none of this. What the separate
+   * directory buys is that `settings.js`, one level up, is never a candidate
+   * for `express.static` at all.
+   */
+  publicDir: string;
   /** Node-RED's userDir: flows, the credential store, its own state. */
   userDir: string;
   /** The daemon's Unix socket, as the console must reach it. */
@@ -36,6 +49,7 @@ export interface ConsolePaths {
 
 export const DEFAULT_CONSOLE_PATHS: ConsolePaths = {
   settings: "/opt/yonder/console/settings.js",
+  publicDir: "/opt/yonder/console/public",
   userDir: "/var/lib/yonder/console",
   socket: "/run/yonder/core.sock",
   coreTree: "/opt/yonder/packages/yonder-core",
@@ -59,6 +73,15 @@ export const EMPTY_FLOWS = "[]\n";
 
 /** Where the flow editor lives, when it lives anywhere. */
 export const EDITOR_ROOT = "/editor";
+
+/** Where `publicDir` is mounted, and therefore where `theme.css` is fetched from. */
+export const STATIC_ROOT = "/yonder/";
+
+/** The generated stylesheet's name inside `publicDir`. */
+export const THEME_FILE = "theme.css";
+
+/** What a page links to. Relative to STATIC_ROOT, and never to another host. */
+export const THEME_HREF = `${STATIC_ROOT}${THEME_FILE}`;
 
 /**
  * Core nodes that are never loaded.
@@ -84,7 +107,18 @@ export interface RenderSettingsOptions {
 }
 
 export function consolePaths(overrides?: Partial<ConsolePaths>): ConsolePaths {
-  return { ...DEFAULT_CONSOLE_PATHS, ...overrides };
+  const merged = { ...DEFAULT_CONSOLE_PATHS, ...overrides };
+  // `publicDir` belongs beside `settings.js`, so it is *derived* from it
+  // rather than defaulted alongside it. A caller that has moved the console —
+  // the installer with a different prefix, a test with a temporary directory —
+  // would otherwise get a settings path in one place and a public directory
+  // still pointing at the shipped one. That is not hypothetical: every
+  // existing test overrides `settings` and nothing else, and a plain default
+  // had them all writing into /opt/yonder on whatever machine they ran on.
+  if (overrides?.publicDir === undefined) {
+    merged.publicDir = join(dirname(merged.settings), "public");
+  }
+  return merged;
 }
 
 /** A JavaScript literal for a value, quoted so nothing in it can escape. */
@@ -180,6 +214,21 @@ export function renderSettings(config: Config, opts: RenderSettingsOptions): str
   // an operator could edit in the flow editor. Node-RED exposes the whole
   // settings object to a node as `RED.settings`, so one generated value
   // reaches every node without any of them carrying a default of its own.
+  if (opts.provisioned) {
+    lines.push("  // One directory, and only when there is a console to style. The theme");
+    lines.push("  // stylesheet the ConsoleRenderer generates is served from here, same");
+    lines.push("  // origin, no network (R-UI-01).");
+    lines.push("  //");
+    lines.push("  // Node-RED mounts httpNodeAuth before httpStatic, so this is behind the");
+    lines.push("  // same login as the dashboard it styles. A directory of its own, so");
+    lines.push("  // settings.js one level up is never a candidate for express.static.");
+    lines.push("  //");
+    lines.push("  // Absent while unprovisioned, so setup mode still serves exactly one");
+    lines.push("  // page and nothing else (R-SEC-09).");
+    lines.push(`  httpStatic: [{ path: ${literal(paths.publicDir)}, root: ${literal(STATIC_ROOT)} }],`);
+    lines.push("");
+  }
+
   lines.push("  // Where the yonder-* nodes find the configuration daemon. Read as");
   lines.push("  // RED.settings.yonder.socketPath; flows.json carries no path of its own.");
   lines.push("  yonder: {");
@@ -211,6 +260,7 @@ export interface SettingsArgs {
  *
  *     settings.js <config.yaml> <settings.js> [--provisioned]
  *                 [--core-tree DIR] [--user-dir DIR] [--socket PATH]
+ *                 [--public-dir DIR]
  *
  * The path overrides exist because the defaults describe one installation
  * layout and the installer's own prefix is a variable. A generator that
@@ -234,6 +284,7 @@ export function parseSettingsArgs(argv: readonly string[]): SettingsArgs | undef
       "--core-tree": "coreTree",
       "--user-dir": "userDir",
       "--socket": "socket",
+      "--public-dir": "publicDir",
     };
 
     const key = PATH_FLAGS[arg];
@@ -262,7 +313,7 @@ export function parseSettingsArgs(argv: readonly string[]): SettingsArgs | undef
 }
 
 const USAGE = "usage: settings.js <config.yaml> <settings.js> [--provisioned]"
-  + " [--core-tree DIR] [--user-dir DIR] [--socket PATH]\n";
+  + " [--core-tree DIR] [--user-dir DIR] [--socket PATH] [--public-dir DIR]\n";
 
 /**
  * Generate settings.js from a configuration file.

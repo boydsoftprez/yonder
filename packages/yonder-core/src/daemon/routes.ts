@@ -9,7 +9,9 @@ import { AttemptThrottle } from "../console/throttle.js";
 import { secretValuesIn, redactValues } from "../secrets/redact.js";
 import { readBoardFacts } from "../system/read.js";
 import { readVersions } from "../system/versions.js";
+import { displayFacts, type BoardDisplay } from "../system/format.js";
 import { isProbeHost, type PingResult } from "../diag/probe.js";
+import { joinNetwork, type JoinRequest } from "../net/join.js";
 import type { ScanResult } from "../net/scan.js";
 import type { BoardFacts } from "../system/facts.js";
 import type { Versions } from "../system/versions.js";
@@ -59,6 +61,13 @@ export interface RouterDeps {
   scan?: () => Promise<ScanResult>;
   /** See DiagProbes. Absent means this daemon cannot probe, not that nothing answered. */
   diag?: DiagProbes;
+  /**
+   * Stores the Wi-Fi passphrase for POST /net/join. Absent when the secret
+   * store could not be read, which is the same condition that leaves
+   * `credential` undefined — so the route refuses rather than applying a
+   * configuration whose secret reference points at nothing.
+   */
+  secrets?: { put(name: string, value: string): void };
   /** The buffer GET /log serves. Defaults to the one this process writes to. */
   activity?: ActivityLog;
 }
@@ -67,6 +76,8 @@ export interface RouterDeps {
 export interface SystemReport {
   facts: BoardFacts;
   versions: Versions;
+  /** The same facts as strings a widget can bind. See system/format.ts. */
+  display: BoardDisplay;
 }
 
 /**
@@ -115,10 +126,17 @@ function sinceParam(query: string): number {
 export function createRouter(deps: RouterDeps): Router {
   const throttle = deps.throttle ?? new AttemptThrottle();
   const activity = deps.activity ?? activityLog;
-  const system = deps.system ?? ((): SystemReport => ({
-    facts: readBoardFacts(),
-    versions: readVersions(),
-  }));
+  const system = deps.system ?? ((): SystemReport => {
+    const facts = readBoardFacts();
+    const versions = readVersions();
+    // `display` alongside the raw record, not instead of it. A page binds a
+    // widget to a string and cannot divide bytes by 1024 twice — doing that
+    // in a `function` node is CLAUDE.md rule 2, and doing it in a contrib
+    // node is what this milestone forbids for the same reason — so the
+    // formatting happens in yonder-core, where it has tests. Anything that
+    // wants the numbers still has them.
+    return { facts, versions, display: displayFacts(facts, versions) };
+  });
 
   return async (method, rawPath, body) => {
     // `req.url` carries the query string, and every comparison below is an
@@ -307,6 +325,33 @@ export function createRouter(deps: RouterDeps): Router {
         // into the buffer, not on the way out of it (R-SEC-10). There is no
         // filtering step here to forget.
         return { status: 200, body: activity.page(sinceParam(query)) };
+      }
+
+      // The one write the network page makes, and the reason it is a route
+      // rather than a form that assembles a configuration in a browser.
+      //
+      // Joining a network is three things that have to happen together: the
+      // passphrase into `secrets.yaml` (which only root can write), a
+      // reference to it into `network.client`, and the whole document through
+      // the apply engine so it inherits the confirmation timer. A page that
+      // did that itself would have to hold the operator's whole configuration
+      // and merge into it, in a browser, and post back something it had built
+      // — which is a decision, in wiring, about the thing that decides whether
+      // the device is reachable.
+      //
+      // The submitted passphrase is redacted at the top of this function like
+      // every other body, so nothing below can log it (R-SEC-10).
+      if (method === "POST" && path === "/net/join") {
+        if (deps.secrets === undefined) {
+          say("POST /net/join: the secret store could not be read, so nothing can be stored in it");
+          return {
+            status: 503,
+            body: { error: "the device's secrets could not be read; see the device journal" },
+          };
+        }
+        const join = joinNetwork(loadConfig(deps.configPath), body as JoinRequest, deps.secrets);
+        if (!join.ok) return { status: 400, body: { error: join.error } };
+        return { status: 200, body: await deps.engine.apply(join.config) };
       }
 
       if (method === "GET" && path === "/config") {
