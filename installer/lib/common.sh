@@ -318,3 +318,68 @@ assert_module_graph() {
     die "$amg_tree/$amg_entry cannot be loaded by $amg_node: $amg_why
 the daemon would fail on its first import on every start, and under Restart=always that is a crash loop with no socket, no access point and no console"
 }
+
+# The post-condition on a unit that names an account: the account is there.
+#
+#     assert_unit_accounts <unit-file>
+#
+# The sibling of assert_unit_exec, one field over. That one answers "is there
+# an executable at the path ExecStart names"; this one answers "and is there a
+# user and a group for systemd to run it as". A `User=` or `Group=` naming an
+# account that does not exist is not a warning — the service fails at step
+# USER with status=217 before it executes anything, on every start, and under
+# Restart=always that is a board that boots, fails and boots again for ever.
+#
+# For yonder-core that failure is total: no daemon means no render, so no
+# access point, so no console and no way in at all. It is the same class of
+# defect assert_unit_exec was written for and it is load-bearing against rule
+# 6, which is why it is checked here rather than discovered after a flash.
+#
+# Split like assert_unit_exec, and for the same reason. Reading the unit is
+# pure string work and happens on a dry run too, so a unit and the installer
+# drifting apart is caught in CI on a machine with no systemd and no account
+# database. Resolving the accounts needs the real system the service will
+# start against, so on a dry run it says what it would have checked.
+assert_unit_accounts() {
+    aua_unit="$1"
+    [ -f "$aua_unit" ] || die "$aua_unit is not there to check"
+
+    # The first word of the value: systemd accepts `User=yonder` and a numeric
+    # id equally, and either is something getent can be asked about.
+    aua_users=$(sed -n 's/^User=[[:space:]]*\([^[:space:]]\{1,\}\).*/\1/p' "$aua_unit")
+    aua_groups=$(sed -n 's/^Group=[[:space:]]*\([^[:space:]]\{1,\}\).*/\1/p' "$aua_unit")
+
+    if [ -z "$aua_users" ] && [ -z "$aua_groups" ]; then
+        log "$aua_unit names no User= or Group=; it runs as root"
+        return 0
+    fi
+
+    if [ "$DRY_RUN" = "1" ]; then
+        for aua_name in $aua_users; do
+            log "would check that the user $aua_name exists (User= in $aua_unit)"
+        done
+        for aua_name in $aua_groups; do
+            log "would check that the group $aua_name exists (Group= in $aua_unit)"
+        done
+        return 0
+    fi
+
+    # Stopping here is deliberate. The alternative to a check that cannot run
+    # is not "no check": it is enabling a unit nobody has verified, which is
+    # the crash loop this function exists to prevent. A loud failure during an
+    # install, where the message can be read, beats a silent one on a board
+    # that has already been fitted to an aircraft.
+    command -v getent >/dev/null 2>&1 \
+        || die "no getent here, so the accounts $aua_unit names cannot be checked; refusing to enable a unit that may fail at step USER (217) on every start"
+
+    for aua_name in $aua_users; do
+        getent passwd "$aua_name" >/dev/null 2>&1 \
+            || die "$aua_unit runs as user '$aua_name', which does not exist; the service would fail at step USER (217) on every start"
+        log "$aua_unit runs as user $aua_name, which exists"
+    done
+    for aua_name in $aua_groups; do
+        getent group "$aua_name" >/dev/null 2>&1 \
+            || die "$aua_unit runs as group '$aua_name', which does not exist; the service would fail at step USER (217) on every start"
+        log "$aua_unit runs as group $aua_name, which exists"
+    done
+}
