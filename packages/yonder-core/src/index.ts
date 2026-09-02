@@ -46,8 +46,12 @@ export {
   clientProfile,
   ethernetProfile,
   desiredProfiles,
+  radioPlan,
+  wifiMode,
   type DesiredProfile,
   type Interfaces,
+  type RadioStep,
+  type WifiMode,
 } from "./net/profiles.js";
 export {
   NetworkRenderer,

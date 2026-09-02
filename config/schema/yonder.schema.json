@@ -210,6 +210,25 @@
       ],
       "additionalProperties": false
     },
+    "apply": {
+      "type": "object",
+      "properties": {
+        "timeout": {
+          "type": "integer",
+          "minimum": 30,
+          "maximum": 600,
+          "default": 120
+        },
+        "radioTimeout": {
+          "type": "integer",
+          "minimum": 30,
+          "maximum": 600,
+          "default": 300
+        }
+      },
+      "additionalProperties": false,
+      "default": {}
+    },
     "system": {
       "type": "object",
       "properties": {

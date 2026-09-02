@@ -655,3 +655,136 @@ describe("NetworkRenderer, and the radio a Raspberry Pi ships disabled", () => {
     expect(calls.some((c) => c.includes(ETHERNET_CONNECTION))).toBe(true);
   });
 });
+
+/**
+ * The radio, arbitrated (K-13, Task 5 of M1b-2).
+ *
+ * One radio can be an access point or a client, not both. What is under test
+ * here is not *which* — `radioPlan` decides that and profiles.test.ts covers
+ * it — but that the renderer carries the decision out in an order that keeps
+ * the operator connected, and that a failed move never ends with nothing on
+ * the air.
+ */
+describe("moving the radio", () => {
+  /** A configuration that joins a network, with the access point as given. */
+  function joining(apEnabled = true): Config {
+    const config = structuredClone(DEFAULT_CONFIG);
+    config.network.client.ssid = "HomeNetwork";
+    config.network.client.psk = { secret: "wifi_psk" };
+    config.network.ap.enabled = apEnabled;
+    return config;
+  }
+
+  const ASSOCIATION_FAILED: CommandResult = {
+    code: 4,
+    stdout: "",
+    stderr: "Error: Connection activation failed: Secrets were required, but not provided",
+  };
+
+  function order(calls: string[][]): string[] {
+    return calls
+      .filter((c) => c[1] === "connection" && (c[2] === "up" || c[2] === "down"))
+      .map((c) => `${c[2]} ${c[3]}`);
+  }
+
+  /**
+   * The operator is talking to this device over the access point, and the
+   * access point is on the radio being retuned. Raise first, lower second.
+   */
+  it("raises the client before it takes the access point down", async () => {
+    const { renderer, calls, secrets } = harness({ devices: withApActive(DEVICES) });
+    secrets.ensure("wifi_psk", "psk");
+    await renderer.render(joining());
+    expect(order(calls)).toEqual([`up ${CLIENT_CONNECTION}`, `down ${AP_CONNECTION}`]);
+  });
+
+  /**
+   * The whole point of that order. A board that never associates must still
+   * have the access point the operator is watching this apply through.
+   */
+  it("leaves the access point up when the client does not associate", async () => {
+    const { renderer, calls, secrets } = harness({
+      devices: withApActive(DEVICES),
+      fails: { [`nmcli connection up ${CLIENT_CONNECTION}`]: ASSOCIATION_FAILED },
+    });
+    secrets.ensure("wifi_psk", "psk");
+    await expect(renderer.render(joining())).rejects.toThrow(/nmcli exited 4/);
+    expect(order(calls)).toEqual([`up ${CLIENT_CONNECTION}`]);
+    expect(order(calls)).not.toContain(`down ${AP_CONNECTION}`);
+  });
+
+  /**
+   * **The nasty one, and the reason this test exists at all.**
+   *
+   * An operator disables the access point and joins a network in one apply,
+   * and the password is wrong. The access point is not up — `ap.enabled` is
+   * false and nothing has raised it — and the client will not come up either.
+   * Left alone that is a device with nothing on the air.
+   *
+   * Three things stand behind it and this is the first: the renderer raises
+   * the access point itself, *regardless of what the configuration says*,
+   * because R-NET-07 is about reachability and not about preference. Behind
+   * that, the confirmation timer reverts the whole configuration; behind
+   * that, the fallback watchdog. Doing it here as well is deliberate — the
+   * watchdog fires once per daemon start and may have spent its one shot
+   * hours ago (K-11), so a device that had been up a while would otherwise
+   * have nothing left.
+   */
+  it("raises the access point anyway when a failed join would leave nothing up", async () => {
+    const { renderer, calls, secrets } = harness({
+      devices: DEVICES, // the access point is not on the air
+      fails: { [`nmcli connection up ${CLIENT_CONNECTION}`]: ASSOCIATION_FAILED },
+    });
+    secrets.ensure("wifi_psk", "psk");
+
+    await expect(renderer.render(joining(false))).rejects.toThrow(/nmcli exited 4/);
+
+    // The access point came up, after the client's failure, and was never
+    // taken down.
+    expect(order(calls)).toEqual([`up ${CLIENT_CONNECTION}`, `up ${AP_CONNECTION}`]);
+  });
+
+  /**
+   * And the profile it raises has to exist. Deleting `yonder-ap` when a
+   * client is configured is the tidier-looking change that would make the
+   * line above raise a connection nothing had created — K-16's failure, which
+   * is a device unreachable until a power cycle.
+   */
+  it("still writes the access point's profile while in client mode", async () => {
+    const { renderer, names, secrets } = harness({ devices: withApActive(DEVICES) });
+    secrets.ensure("wifi_psk", "psk");
+    await renderer.render(joining(false));
+    expect(names.has(AP_CONNECTION)).toBe(true);
+    expect(names.has(CLIENT_CONNECTION)).toBe(true);
+  });
+
+  /**
+   * Re-issuing `up` on a live access point drops every joined station and
+   * brings it back — including the operator watching the apply. So the rescue
+   * is conditional, and when there was nothing to rescue it does nothing.
+   */
+  it("does not re-raise an access point that is already on the air", async () => {
+    const { renderer, calls, secrets } = harness({
+      devices: withApActive(DEVICES),
+      fails: { [`nmcli connection up ${CLIENT_CONNECTION}`]: ASSOCIATION_FAILED },
+    });
+    secrets.ensure("wifi_psk", "psk");
+    await expect(renderer.render(joining())).rejects.toThrow();
+    expect(order(calls).filter((o) => o === `up ${AP_CONNECTION}`)).toEqual([]);
+  });
+
+  it("still says what it is doing in the words the hardware procedure quotes", async () => {
+    const lines: string[] = [];
+    const { renderer } = harness();
+    // The renderer built by the harness has no log; build one that does,
+    // sharing nothing else, so this asserts the wording and not the plumbing.
+    const logging = new NetworkRenderer({
+      client: (renderer as unknown as { client: NmcliClient }).client,
+      secrets: new SecretStore(join(dir, "secrets2.yaml")),
+      log: (l) => lines.push(l),
+    });
+    (logging as unknown as { secrets: SecretStore }).secrets.ensureValue("ap_psk", OPERATOR_PSK);
+    await logging.render(DEFAULT_CONFIG);
+    expect(lines).toContain("network: bringing the access point up");
+  });
+});

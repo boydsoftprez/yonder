@@ -5,7 +5,8 @@ import type { SecretStore } from "../secrets/store.js";
 import { NmcliClient, type DeviceInfo } from "./nmcli/client.js";
 import { enableWifiRadio, radioWanted } from "./radio.js";
 import {
-  desiredProfiles, AP_CONNECTION, CLIENT_CONNECTION, ETHERNET_CONNECTION,
+  desiredProfiles, radioPlan, wifiMode,
+  AP_CONNECTION, CLIENT_CONNECTION, ETHERNET_CONNECTION,
   type Interfaces,
 } from "./profiles.js";
 
@@ -66,6 +67,21 @@ const RADIO_NOT_READY = new Set(["unavailable", "unknown"]);
 export function deviceIsUsable(state: string): boolean {
   const word = state.trim().toLowerCase().split(/\s+/)[0] ?? "";
   return word !== "" && !RADIO_NOT_READY.has(word);
+}
+
+/**
+ * What to call a connection in a log line.
+ *
+ * Names, not identifiers. `docs/hardware/verifying-m1a.md` quotes these lines
+ * as what a board prints, and an operator following that procedure on a bench
+ * is matching text — so "bringing the access point up" stays exactly what it
+ * has always been, rather than becoming `yonder-ap` because the code now
+ * loops over a plan instead of branching.
+ */
+function connectionName(connection: string): string {
+  if (connection === AP_CONNECTION) return "the access point";
+  if (connection === CLIENT_CONNECTION) return "the wifi client";
+  return connection;
 }
 
 /** `wlan0=unavailable`, for a log line that says which radio and why. */
@@ -277,17 +293,79 @@ export class NetworkRenderer implements Renderer {
       await this.client.addOrModify(profile.name, profile);
     }
 
-    // The access point is brought up or taken down deliberately; everything
-    // else autoconnects.
+    // The radio, arbitrated (K-13). One radio can be an access point or a
+    // client, not both, so `radioPlan` decides which and in what order and
+    // this loop carries it out. Nothing here is left to NetworkManager's
+    // activation rules, which is the whole of the defect K-13 recorded.
     if (ifaces.wifi !== null) {
-      const apActive = devices.some((d) => d.connection === AP_CONNECTION);
-      if (config.network.ap.enabled && !apActive) {
-        this.log("network: bringing the access point up");
-        await this.client.up(AP_CONNECTION);
-      } else if (!config.network.ap.enabled && apActive) {
-        this.log("network: taking the access point down");
-        await this.client.down(AP_CONNECTION);
+      await this.settleRadio(config, devices);
+    }
+  }
+
+  /**
+   * Carry out the radio plan, and never end a failed move with nothing up.
+   *
+   * The step that can fail is raising the client, and it is the one an
+   * operator is standing in: they submitted these credentials over the access
+   * point, and the access point is on the radio being retuned. Two things
+   * protect them, in this order.
+   *
+   * **The client is raised before the access point is taken down.** So a
+   * board that never associates has not already thrown away the thing the
+   * operator is talking through — the access point is still up, and the
+   * failed apply reverts under them rather than stranding them.
+   *
+   * **And if raising the client fails, the access point is raised again
+   * before the failure is reported.** Not because the configuration asks for
+   * it — in the case that matters `ap.enabled` is false and it explicitly
+   * does not — but because R-NET-07 says the access point comes up regardless
+   * of configuration when nothing else carries traffic, and a radio that has
+   * just refused to associate is that. Doing it here rather than leaving it
+   * to the fallback watchdog is deliberate: the watchdog fires once per
+   * daemon start and may have spent its one shot hours ago (K-11), so relying
+   * on it would make reachability depend on how long the device had been up.
+   *
+   * The failure is still a failure. The access point coming back does not
+   * turn an apply that did not work into one that did, so the error is
+   * rethrown and the engine rolls the configuration back.
+   */
+  private async settleRadio(config: Config, devices: DeviceInfo[]): Promise<void> {
+    const active = new Set(devices.map((d) => d.connection).filter((c) => c !== ""));
+    const plan = radioPlan(config);
+    const movingToClient = wifiMode(config) === "client";
+
+    try {
+      for (const step of plan) {
+        if (step.action === "up") {
+          if (active.has(step.connection)) continue;
+          this.log(`network: bringing ${connectionName(step.connection)} up`);
+          await this.client.up(step.connection);
+          active.add(step.connection);
+        } else {
+          if (!active.has(step.connection)) continue;
+          this.log(`network: taking ${connectionName(step.connection)} down`);
+          await this.client.down(step.connection);
+          active.delete(step.connection);
+        }
       }
+    } catch (e) {
+      // Only when the access point is not already on the air. Re-issuing `up`
+      // on a live access point drops every joined station and brings it back
+      // — including the operator, who is watching this apply. When the client
+      // failed before the access point was taken down, which is the ordinary
+      // shape of this failure, there is nothing to do and doing nothing is
+      // the right answer.
+      if (movingToClient && !active.has(AP_CONNECTION)) {
+        this.log(
+          "network: the wifi client did not come up; raising the access point so the device "
+          + "stays reachable",
+        );
+        // Best effort by construction. If this fails too there is nothing
+        // further this renderer can do, and the original failure is the one
+        // the operator needs to see.
+        await this.client.up(AP_CONNECTION).catch(() => {});
+      }
+      throw e;
     }
   }
 }

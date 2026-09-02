@@ -105,6 +105,31 @@ const Ui = z.object({
   }).strict(),
 }).strict();
 
+/**
+ * The confirmation windows R-CFG-03 is built on.
+ *
+ * A change is applied, and reverts unless the operator confirms it from the
+ * other side. The window is how long they have to get back in and say so, and
+ * one number cannot serve both cases:
+ *
+ *   - An ordinary change — an SSID, a console port — leaves the operator's
+ *     connection exactly where it was. They confirm in seconds.
+ *   - A change that **moves the Wi-Fi radio between modes** takes the access
+ *     point off the air, because one radio cannot be an access point and a
+ *     client at once. The operator has to notice, find the device on a
+ *     different network, and open it again. That is minutes, not seconds, and
+ *     a window budgeted for the first case reverts a perfectly good
+ *     configuration out from under them.
+ *
+ * Both are bounded at both ends, the same 30–600 seconds the access-point
+ * fallback is: below 30 s no operator can confirm anything, and above 600 s an
+ * unconfirmed change that broke the device sits there for ten minutes.
+ */
+const Apply = z.object({
+  timeout: z.number().int().min(30).max(600).default(120),
+  radioTimeout: z.number().int().min(30).max(600).default(300),
+}).strict();
+
 const System = z.object({
   hostname: z.string().regex(/^[a-z0-9][a-z0-9-]{0,62}$/).default("yonder"),
   timezone: z.string().default("UTC"),
@@ -126,6 +151,7 @@ export const ConfigSchema = z.object({
   version: z.literal(1),
   network: Network,
   ui: Ui,
+  apply: Apply.default({}),
   system: System.default({}),
 }).strict();
 

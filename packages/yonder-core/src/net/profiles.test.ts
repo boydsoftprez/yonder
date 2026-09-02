@@ -1,11 +1,19 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
-  apProfile, clientProfile, ethernetProfile,
+  apProfile, clientProfile, ethernetProfile, desiredProfiles, radioPlan, wifiMode,
   AP_CONNECTION, CLIENT_CONNECTION, DEFAULT_AP_PASSPHRASE,
 } from "./profiles.js";
+import { SecretStore } from "../secrets/store.js";
 import { DEFAULT_CONFIG } from "../schema/config.js";
 import type { Config } from "../schema/config.js";
+
+let dir: string;
+beforeEach(() => { dir = mkdtempSync(join(tmpdir(), "yonder-prof-")); });
+afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
 
 function settingsOf(p: { settings: string[][] }): Record<string, string> {
   return Object.fromEntries(p.settings.map(([k, v]) => [k, v]));
@@ -143,5 +151,114 @@ describe("ethernetProfile", () => {
     const s = settingsOf(p);
     expect(s["ipv4.method"]).toBe("auto");
     expect(s["connection.autoconnect"]).toBe("yes");
+  });
+});
+
+/**
+ * The arbitration K-13 says nothing used to do (Task 5 of M1b-2).
+ *
+ * One radio can be an access point or a client, not both. These tests are
+ * about which, and in what order — the decision, tested without an nmcli,
+ * because the decision is the part that has to be readable.
+ */
+describe("wifiMode", () => {
+  it("is the access point when no client network is configured", () => {
+    expect(wifiMode(DEFAULT_CONFIG)).toBe("ap");
+  });
+
+  /**
+   * There is no reading of "I entered an SSID and a passphrase" under which
+   * the access point is what the operator wanted. They get it back
+   * automatically when the join does not work, which is the rollback engine
+   * and the fallback doing their jobs — not a second interpretation of the
+   * configuration.
+   */
+  it("is the client whenever one is configured, whatever the access point says", () => {
+    for (const apEnabled of [true, false]) {
+      const config = structuredClone(DEFAULT_CONFIG);
+      config.network.ap.enabled = apEnabled;
+      config.network.client.ssid = "HomeNetwork";
+      expect(wifiMode(config), `ap.enabled=${apEnabled}`).toBe("client");
+    }
+  });
+
+  it("treats an empty ssid as no client, the same as a null one", () => {
+    const config = structuredClone(DEFAULT_CONFIG);
+    config.network.client.ssid = "";
+    expect(wifiMode(config)).toBe("ap");
+  });
+});
+
+describe("radioPlan", () => {
+  it("raises the access point when that is the mode and it is enabled", () => {
+    expect(radioPlan(DEFAULT_CONFIG)).toEqual([{ action: "up", connection: AP_CONNECTION }]);
+  });
+
+  it("takes the access point down when it is disabled and no client is configured", () => {
+    const config = structuredClone(DEFAULT_CONFIG);
+    config.network.ap.enabled = false;
+    expect(radioPlan(config)).toEqual([{ action: "down", connection: AP_CONNECTION }]);
+  });
+
+  /**
+   * Raise before lower, and the order is the point. The operator submitting
+   * these credentials is talking to the device over the radio being retuned,
+   * so a board that fails to associate must not have already thrown away the
+   * thing they are talking through.
+   */
+  it("raises the client before it takes the access point down", () => {
+    const config = structuredClone(DEFAULT_CONFIG);
+    config.network.client.ssid = "HomeNetwork";
+    expect(radioPlan(config)).toEqual([
+      { action: "up", connection: CLIENT_CONNECTION },
+      { action: "down", connection: AP_CONNECTION },
+    ]);
+  });
+
+  /**
+   * `ap.enabled` decides what happens in access-point mode, which is the only
+   * mode where there is a choice. In client mode the radio cannot serve both,
+   * so leaving the access point up is not an option the hardware offers.
+   */
+  it("takes the access point down in client mode even when it is enabled", () => {
+    const config = structuredClone(DEFAULT_CONFIG);
+    config.network.client.ssid = "HomeNetwork";
+    config.network.ap.enabled = true;
+    expect(radioPlan(config).filter((s) => s.connection === AP_CONNECTION))
+      .toEqual([{ action: "down", connection: AP_CONNECTION }]);
+  });
+
+  it("never raises two things on one radio", () => {
+    for (const [ssid, enabled] of [["HomeNetwork", true], ["HomeNetwork", false], [null, true], [null, false]] as const) {
+      const config = structuredClone(DEFAULT_CONFIG);
+      config.network.client.ssid = ssid;
+      config.network.ap.enabled = enabled;
+      expect(radioPlan(config).filter((s) => s.action === "up").length,
+        `ssid=${String(ssid)} ap.enabled=${enabled}`).toBeLessThanOrEqual(1);
+    }
+  });
+});
+
+/**
+ * The half of the arbitration that must not be "tidied up" later. Deleting
+ * the access point's profile when a client is configured would look like the
+ * cleaner fix and would leave `nmcli connection up yonder-ap` — the fallback
+ * watchdog's only action — naming a profile nothing had created, which is
+ * K-16's failure: a device unreachable until a power cycle (R-NET-07).
+ */
+describe("the access point's profile in client mode", () => {
+  it("is still written, so the fallback has something to raise", () => {
+    const store = new SecretStore(join(dir, "secrets.yaml"));
+    store.ensureValue("ap_psk", "a-passphrase");
+    store.ensureValue("wifi_psk", "another-one");
+    const config = structuredClone(DEFAULT_CONFIG);
+    config.network.client.ssid = "HomeNetwork";
+    config.network.client.psk = { secret: "wifi_psk" };
+    config.network.ap.enabled = false;
+
+    const names = desiredProfiles(config, store, { wifi: "wlan0", ethernet: null })
+      .map((p) => p.name);
+    expect(names).toContain(AP_CONNECTION);
+    expect(names).toContain(CLIENT_CONNECTION);
   });
 });

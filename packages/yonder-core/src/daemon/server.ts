@@ -220,11 +220,24 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
     note("access point: using the published default passphrase; change it from the console");
   }
 
+  // The confirmation windows come from the configuration (R-CFG-03). Read
+  // here rather than per apply, and defaulted when config.yaml will not load:
+  // an unloadable configuration must not also cost the operator the window
+  // they are relying on to get back in.
+  let windows = DEFAULT_CONFIG.apply;
+  try {
+    windows = loadConfig(opts.configPath).apply;
+  } catch {
+    warn("using the default confirmation windows; the configuration could not be read");
+  }
+
   const engine = new ApplyEngine({
     configPath: opts.configPath,
     journalPath: opts.journalPath,
     renderers: [...opts.renderers, ...netRenderers],
     renderTimeoutMs: opts.renderTimeoutMs,
+    timeoutMs: windows.timeout * 1000,
+    radioTimeoutMs: windows.radioTimeout * 1000,
     clock,
     degraded,
   });

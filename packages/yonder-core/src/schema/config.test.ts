@@ -95,3 +95,40 @@ describe("ConfigSchema", () => {
     expect(ConfigSchema.safeParse(doc).success).toBe(true);
   });
 });
+
+/**
+ * The confirmation windows (R-CFG-03). A new section, so nothing retires —
+ * `retired.ts` is for keys this project has *removed*, and an addition
+ * strands nobody.
+ */
+describe("apply", () => {
+  it("defaults to 120 s for an ordinary apply and 300 s for a radio move", () => {
+    expect(DEFAULT_CONFIG.apply).toEqual({ timeout: 120, radioTimeout: 300 });
+  });
+
+  it("is optional, so a configuration written before it existed still loads", () => {
+    const without = structuredClone(DEFAULT_CONFIG) as Record<string, unknown>;
+    delete without.apply;
+    const parsed = ConfigSchema.parse(without);
+    expect(parsed.apply).toEqual({ timeout: 120, radioTimeout: 300 });
+  });
+
+  /**
+   * Bounded at both ends, the same 30–600 seconds the access-point fallback
+   * is. Below 30 s no operator can confirm anything; above 600 s an
+   * unconfirmed change that broke the device sits there for ten minutes.
+   */
+  it("refuses a window nobody could confirm in, and one nobody would wait out", () => {
+    for (const apply of [{ timeout: 5 }, { timeout: 900 }, { radioTimeout: 10 }, { radioTimeout: 3600 }]) {
+      expect(ConfigSchema.safeParse({ ...DEFAULT_CONFIG, apply }).success, JSON.stringify(apply))
+        .toBe(false);
+    }
+  });
+
+  it("is strict, so a misspelled window is a refusal and not a silent default", () => {
+    expect(ConfigSchema.safeParse({
+      ...DEFAULT_CONFIG,
+      apply: { timeout: 120, radioTimeoutSeconds: 300 },
+    }).success).toBe(false);
+  });
+});
