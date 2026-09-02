@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, it, expect } from "vitest";
-import { CONSOLE_HOME } from "./console/settings.js";
+import { CONSOLE_HOME, THEME_HREF } from "./console/settings.js";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -104,16 +104,25 @@ describe("flows/flows.json", () => {
    */
   it("fetches no asset from anywhere", () => {
     expect(text).not.toMatch(/(?:src|href)\s*=\s*["']https?:/i);
-    expect(text).not.toMatch(/@import/);
     expect(text).not.toMatch(/url\s*\(\s*["']?https?:/i);
     expect(text).not.toMatch(/fonts\.googleapis|fonts\.gstatic|cdnjs|unpkg|jsdelivr|cdn\./i);
+    // The rule is the host, not the mechanism. This used to ban `@import`
+    // outright, which read as caution and was the opposite: the flows had to
+    // import the generated stylesheet somehow, and the `<link>` they carried
+    // instead sat in a `ui-template` with a scope Dashboard does not accept,
+    // so it was never injected and the whole palette was inert. A blanket ban
+    // on the working mechanism kept the broken one passing.
+    expect(text).not.toMatch(/@import\s+url\(\s*["']?(?:https?:)?\/\//i);
   });
 
-  it("links exactly one stylesheet, and it is the one generated on the device", () => {
-    const links = [...text.matchAll(/<link[^>]*>/g)].map((m) => m[0]);
-    expect(links).toHaveLength(1);
-    expect(links[0]).toContain(THEME_HREF);
+  it("imports exactly one stylesheet, and it is the one generated on the device", () => {
+    const imports = [...text.matchAll(/@import\s+url\(([^)]*)\)/g)].map((m) => m[1]);
+    expect(imports).toHaveLength(1);
+    expect(imports[0]).toContain(THEME_HREF);
     expect(THEME_HREF.startsWith("/")).toBe(true);
+    // Root-relative, so it is same-origin whatever address the operator
+    // reached the console on - the access point, the LAN, or a mesh address.
+    expect(imports[0]).not.toMatch(/https?:|\/\//);
   });
 
   /**
@@ -352,5 +361,46 @@ describe("flows/flows.json dashboard path", () => {
     const base = flows.find((n) => n.type === "ui-base");
     expect(base, "the flows must contain a ui-base node").toBeDefined();
     expect(base?.path).toBe(CONSOLE_HOME);
+  });
+});
+
+/**
+ * The generated stylesheet has to actually reach the page.
+ *
+ * It did not. A `ui-template` node carried
+ * `<link rel="stylesheet" href="/yonder/theme.css">` with
+ * `templateScope: "site"` — and `"site"` is not one of the scopes Dashboard
+ * 2.x accepts (`site:style`, `site:script`, `page:style`, `page:script`), so
+ * the template was never injected at all. Every `--yonder-*` variable was
+ * undefined in the document, the app bar stayed Vuetify white in both
+ * palettes, and the `.yonder-tone-*` classes that ADR-0005 calls the shared
+ * command-state language matched nothing.
+ *
+ * It was invisible because the file *was* served, correctly, at its URL: a
+ * check that fetched it got 200 and the right bytes. Only the page knew it
+ * was never linked.
+ *
+ * `site:style` sets the `<style>` element's innerHTML, so the content has to
+ * be CSS. A `<link>` tag inside a stylesheet is nothing.
+ */
+describe("flows/flows.json stylesheet injection", () => {
+  const link = flows.find((n) => n.id === "style-link");
+
+  it("exists", () => {
+    expect(link, "the flows must carry the generated stylesheet").toBeDefined();
+    expect(link?.type).toBe("ui-template");
+  });
+
+  it("uses a scope Dashboard actually honours", () => {
+    expect(["site:style", "page:style"]).toContain(link?.templateScope);
+  });
+
+  it("imports the path the console serves it from", () => {
+    // THEME_HREF is what settings.js mounts. Two files that have to agree.
+    expect(String(link?.format)).toContain(`@import url("${THEME_HREF}")`);
+  });
+
+  it("carries CSS, not markup, because site:style is a style element", () => {
+    expect(String(link?.format)).not.toMatch(/<link|<style|rel=/i);
   });
 });

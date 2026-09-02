@@ -114,3 +114,63 @@ describe("themeCss", () => {
     expect(themeCss("day")).toContain("theme.ts");
   });
 });
+
+/**
+ * The shell, not just the palette.
+ *
+ * These assert the parts that were missing when the console was first put in
+ * front of a person: a font stack that never fetches, figures that do not
+ * reflow as they change, an app bar that is themed rather than Vuetify's
+ * white, and touch targets sized for the device this runs on.
+ */
+describe("themeCss ships a whole shell", () => {
+  const themes: ThemeName[] = ["day", "night"];
+
+  it("uses a system font stack and no webfont", () => {
+    for (const t of themes) {
+      const css = themeCss(t);
+      expect(css, t).toContain("--yonder-font:");
+      expect(css, t).toContain("system-ui");
+      // @font-face or a font URL would be an asset fetched at runtime.
+      expect(css, t).not.toMatch(/@font-face/);
+      expect(css, t).not.toMatch(/fonts\.(googleapis|gstatic)/);
+    }
+  });
+
+  it("gives readouts tabular figures, so a changing value does not reflow", () => {
+    for (const t of themes) {
+      expect(themeCss(t), t).toContain("tabular-nums");
+    }
+  });
+
+  it("themes the app bar, which Vuetify otherwise paints white in both palettes", () => {
+    // The worst thing to put in front of a dark-adapted eye is the one
+    // element that is always on screen, still white.
+    for (const t of themes) {
+      const css = themeCss(t);
+      expect(css, t).toMatch(/\.v-app-bar[^{]*\{[^}]*--yonder-surface/s);
+    }
+  });
+
+  it("sizes anything hittable for a gloved finger", () => {
+    for (const t of themes) {
+      const css = themeCss(t);
+      expect(css, t).toContain("--yonder-touch: 44px");
+      expect(css, t).toMatch(/min-height:\s*var\(--yonder-touch\)/);
+    }
+  });
+
+  it("stops the dashboard shouting its buttons in capitals", () => {
+    for (const t of themes) {
+      expect(themeCss(t), t).toContain("text-transform: none");
+    }
+  });
+
+  it("still reaches no other host, in either palette", () => {
+    for (const t of themes) {
+      const css = themeCss(t);
+      expect(css, t).not.toMatch(/https?:\/\//);
+      expect(css, t).not.toMatch(/@import/);
+    }
+  });
+});
