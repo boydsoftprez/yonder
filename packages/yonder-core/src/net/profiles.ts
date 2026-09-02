@@ -134,13 +134,36 @@ export interface RadioStep {
  * without an nmcli, and so that what this project chose is written down in
  * one readable place rather than distributed through a sequence of `if`s.
  *
- * **Raise before lower.** In client mode the client comes up first and only
- * then does the access point go down. The operator submitting these
- * credentials is standing in the failure — they are talking to this device
- * over the very radio being retuned — so a board that fails to associate must
- * not have already thrown away the thing they are talking through. The
- * renderer additionally raises the access point again if the client's
- * activation fails and nothing else is up; see NetworkRenderer.settleRadio.
+ * **Lower before raise, because the hardware gives no choice.**
+ *
+ * This used to be the other way round, and the reasoning read well: the
+ * operator submitting these credentials is talking to the device over the
+ * very radio being retuned, so a board that fails to associate should not
+ * have already thrown away the thing they are talking through. Raise the
+ * client first, then drop the access point.
+ *
+ * A Raspberry Pi 4 says otherwise:
+ *
+ *     nmcli connection up yonder-wifi
+ *     Error: Connection activation failed: The Wi-Fi network could not be found
+ *
+ * — with the radio at that moment sitting on channel 6 beaconing as `yonder`.
+ * A single radio can *scan* while it serves an access point (observed, and
+ * what makes the console's network list work at all), but it cannot
+ * **associate**: the interface is busy being an AP, so the network it is
+ * asked to join is not there to be found. Every unit test passed, because a
+ * fake nmcli activates anything it is asked to.
+ *
+ * So the access point comes down first, freeing the radio, and only then does
+ * the client come up. The operator does lose the page at that moment, and
+ * that is not a flaw in the ordering — it is what one radio means.
+ *
+ * What protects them is not the ordering but everything underneath it: an
+ * activation failure fails the render and the engine restores the previous
+ * configuration, `NetworkRenderer.settleRadio` raises the access point again
+ * when the client did not come up, and the fallback watchdog raises it when
+ * nothing is reachable (R-NET-07). All three have now been seen doing so on
+ * hardware.
  *
  * The access point goes down in client mode **whatever `ap.enabled` says**.
  * The radio cannot serve both, so leaving it up is not an option the hardware
@@ -156,8 +179,8 @@ export interface RadioStep {
 export function radioPlan(config: Config): RadioStep[] {
   if (wifiMode(config) === "client") {
     return [
-      { action: "up", connection: CLIENT_CONNECTION },
       { action: "down", connection: AP_CONNECTION },
+      { action: "up", connection: CLIENT_CONNECTION },
     ];
   }
   return [{ action: config.network.ap.enabled ? "up" : "down", connection: AP_CONNECTION }];

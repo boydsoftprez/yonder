@@ -349,12 +349,14 @@ export class NetworkRenderer implements Renderer {
         }
       }
     } catch (e) {
-      // Only when the access point is not already on the air. Re-issuing `up`
-      // on a live access point drops every joined station and brings it back
-      // — including the operator, who is watching this apply. When the client
-      // failed before the access point was taken down, which is the ordinary
-      // shape of this failure, there is nothing to do and doing nothing is
-      // the right answer.
+      // The ordinary shape of this failure, now that the access point comes
+      // down first: the radio has been freed, the client did not associate,
+      // and nothing is on the air. Raising the access point again is the only
+      // thing standing between the operator and a board they cannot reach.
+      //
+      // Guarded on the access point not already being up, because re-issuing
+      // `up` on a live one drops every joined station and brings it back —
+      // including the operator watching this apply.
       if (movingToClient && !active.has(AP_CONNECTION)) {
         this.log(
           "network: the wifi client did not come up; raising the access point so the device "

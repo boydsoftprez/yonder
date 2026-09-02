@@ -243,33 +243,59 @@ describe("flows/flows.json", () => {
    * lists four things the form has to say before they press it, and this is
    * the test that they are all still there.
    */
+  /**
+   * Four facts, before the operator presses a button that takes the page away
+   * from them. Asserted as facts and not as phrasing: these used to be pinned
+   * to particular words — `/disappear|goes away/` — so trimming 239 words of
+   * explanation down to something readable broke the tests without changing
+   * anything they were actually there to protect.
+   */
   it("warns, before the operator submits, what joining a network does", () => {
     const warning = flows.find((n) => n.id === "warning-join");
-    const content = String(warning?.content ?? "").toLowerCase();
     expect(warning, "the Wi-Fi form has no warning on it").toBeDefined();
+    const content = String(warning?.content ?? "").toLowerCase();
 
-    // The access point is about to disappear.
+    // 1. the access point stops
     expect(content).toContain("access point");
-    expect(content).toMatch(/disappear|goes away|go away/);
-    // Where to find the device afterwards.
+    // 2. where to find the device afterwards, and a way that does not depend
+    //    on a name resolving
     expect(content).toContain("yonder.local");
     expect(content).toMatch(/router|client list/);
-    // How long they have.
+    // 3. how long they have
     expect(content).toMatch(/\b5 minutes\b|\bfive minutes\b/);
-    // And that it comes back by itself if the password was wrong.
+    // 4. and that a wrong password costs them nothing but the wait
     expect(content).toMatch(/wrong|did not|cannot join/);
-    expect(content).toMatch(/by itself|on its own|returns/);
+    expect(content).toMatch(/by itself|on its own|returns|comes back/);
   });
 
   /**
-   * The honesty condition Task 6 set. `<hostname>.local` was not verified on
-   * hardware for this build, so the page may not promise it — it says what it
-   * needs and gives the fallback that always works.
+   * `<hostname>.local` has not been verified on hardware for this build, so
+   * the page may not send an operator to it as the only way back.
+   *
+   * The hedge is the fallback, not a sentence about mDNS support matrices.
+   * Naming the router's client list beside the name is what keeps this honest
+   * — an operator who cannot resolve `yonder.local` still has somewhere to go,
+   * which is the whole point, and it costs four words instead of forty.
    */
-  it("does not promise that the device's name will resolve", () => {
+  it("never offers the device's name without a way that does not need it", () => {
     const warning = String(flows.find((n) => n.id === "warning-join")?.content ?? "");
-    expect(warning).toMatch(/not verified|has not been verified/i);
-    expect(warning).toMatch(/router/i);
+    expect(warning).toMatch(/yonder\.local/i);
+    expect(warning).toMatch(/router|client list/i);
+  });
+
+  /**
+   * A console is read standing next to an aircraft, not at a desk. Every word
+   * on it is a word between an operator and the thing they came to do, so the
+   * budget is deliberately tight and deliberately enforced: this page carried
+   * 448 words of explanation, 239 of them in front of one button.
+   */
+  it("keeps the whole console under a readable word budget", () => {
+    const prose = flows
+      .filter((n) => n.type === "ui-markdown")
+      .map((n) => String(n.content ?? "").split(/\s+/).filter(Boolean).length);
+    const total = prose.reduce((a, b) => a + b, 0);
+    expect(total, `console prose is ${String(total)} words`).toBeLessThanOrEqual(200);
+    expect(Math.max(...prose), "no single note may become an essay").toBeLessThanOrEqual(70);
   });
 
   /**

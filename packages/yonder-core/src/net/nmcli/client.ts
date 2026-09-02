@@ -151,6 +151,34 @@ export class NmcliClient {
   }
 
   async up(name: string): Promise<void> { await this.exec(["nmcli", "connection", "up", name]); }
-  async down(name: string): Promise<void> { await this.exec(["nmcli", "connection", "down", name]); }
+  /**
+   * Take a connection down, tolerating one that is already down.
+   *
+   * `nmcli connection down` exits 10 with "is not an active connection" when
+   * the thing is not up. That is the state being asked for, not a failure —
+   * but it failed a whole render on a real board:
+   *
+   *     POST /net/join failed: nmcli exited 10:
+   *     Error: 'yonder-ap' is not an active connection.
+   *
+   * `settleRadio` does check first, against the device list it read at the
+   * start of the render. Between that read and this command NetworkManager
+   * can have moved: a connection that was activating can have given up, and
+   * the radio can have been reconfigured by the profile writes in between. A
+   * check against a snapshot cannot close that, so the command itself has to
+   * be idempotent — which is what "down" should have meant all along.
+   */
+  async down(name: string): Promise<void> {
+    try {
+      await this.exec(["nmcli", "connection", "down", name]);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      if (/is not an active connection|no active connection provided/i.test(message)) {
+        this.log(`network: ${name} was already down`);
+        return;
+      }
+      throw e;
+    }
+  }
   async remove(name: string): Promise<void> { await this.exec(["nmcli", "connection", "delete", name]); }
 }
