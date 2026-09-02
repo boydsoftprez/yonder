@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { createServer, type Server } from "node:http";
 import { unlinkSync, existsSync, mkdirSync, chmodSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { ApplyEngine } from "../apply/engine.js";
 import { warn, note, trace } from "../log.js";
@@ -18,6 +18,9 @@ import { HostnameRenderer } from "../system/hostname.js";
 import { FallbackWatchdog } from "../net/watchdog.js";
 import { joinSucceeded } from "../net/joined.js";
 import { networkState } from "../net/state.js";
+import { remoteState } from "../remote/state.js";
+import { RemoteRenderer } from "../remote/renderer.js";
+import { ZeroTierCli } from "../remote/zerotier/cli.js";
 import { AP_CONNECTION, DEFAULT_AP_PASSPHRASE } from "../net/profiles.js";
 import { scanForNetworks } from "../net/scan.js";
 import { ping, reachable } from "../diag/probe.js";
@@ -83,6 +86,13 @@ export interface BuildRenderersOptions {
    * production values come from consolePathsFromEnv(), in main().
    */
   console?: Partial<ConsolePaths>;
+  /**
+   * Where the remote renderer records the mesh it joined. **Given, never
+   * defaulted**, like `console` above and for the same reason: a path with a
+   * default is a path a test writes to by forgetting to override it, and this
+   * one would be `/var/lib/yonder`.
+   */
+  remoteStatePath: string;
 }
 
 /**
@@ -108,6 +118,9 @@ export function buildRenderers(opts: BuildRenderersOptions): {
   consoleRenderer?: ConsoleRenderer;
   secrets: SecretStore;
   client: NmcliClient;
+  /** Talks to the installed zerotier-cli, over the same runner as everything else. */
+  zerotier: ZeroTierCli;
+  remoteRenderer: RemoteRenderer;
   generated: string[];
 } {
   const log = opts.log ?? note;
@@ -124,6 +137,17 @@ export function buildRenderers(opts: BuildRenderersOptions): {
   // status` twice a tick and buried what their Join actually did.
   const client = new NmcliClient(opts.runner ?? systemRunner, opts.trace ?? trace);
   const renderer = new NetworkRenderer({ client, secrets, log, clock: opts.clock });
+
+  // After the network renderer: a mesh runs over whatever the network layer
+  // just brought up, so ordering it first would join over an interface that
+  // does not exist yet.
+  const zerotier = new ZeroTierCli(opts.runner ?? systemRunner, opts.trace ?? trace);
+  const remoteRenderer = new RemoteRenderer({
+    cli: zerotier,
+    run: opts.runner ?? systemRunner,
+    statePath: opts.remoteStatePath,
+    log,
+  });
 
   // After the network renderer, deliberately. Renderers run in order, so this
   // puts the console behind a network that has already settled: if the
@@ -154,12 +178,14 @@ export function buildRenderers(opts: BuildRenderersOptions): {
 
   return {
     renderers: consoleRenderer === undefined
-      ? [hostname, renderer]
-      : [hostname, renderer, consoleRenderer],
+      ? [hostname, renderer, remoteRenderer]
+      : [hostname, renderer, remoteRenderer, consoleRenderer],
     renderer,
     ...(consoleRenderer === undefined ? {} : { consoleRenderer }),
     secrets,
     client,
+    zerotier,
+    remoteRenderer,
     generated,
   };
 }
@@ -225,6 +251,9 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
       secretsPath: opts.secretsPath ?? "/etc/yonder/secrets.yaml",
       runner: opts.runner,
       clock,
+      // The same directory the apply journal already lives in — one state
+      // directory for this daemon, not a second one this renderer invented.
+      remoteStatePath: join(dirname(opts.journalPath), "remote.json"),
       ...(opts.console === undefined ? {} : { console: opts.console }),
     });
   } catch (e) {
@@ -427,6 +456,13 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
         return networkState(loadConfig(opts.configPath), devices, addresses);
       },
       secrets: built.secrets,
+      remoteState: async () =>
+        remoteState({
+          config: loadConfig(opts.configPath),
+          installed: await built.zerotier.installed(),
+          info: await built.zerotier.info().catch(() => null),
+          networks: await built.zerotier.listNetworks().catch(() => []),
+        }),
     }),
     ...(onProvisioned === undefined ? {} : { onProvisioned }),
   });

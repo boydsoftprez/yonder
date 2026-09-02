@@ -1183,11 +1183,15 @@ describe("startServer, provisioning the console", () => {
       secretsPath: join(dir, "fresh-secrets.yaml"), runner, clock,
     });
     try {
-      // Nothing was written to the production path by default, and nothing
-      // was restarted. That is what keeps every other test in this file from
-      // touching /opt/yonder.
+      // Nothing was written to the production path by default, and the
+      // console was never restarted. That is what keeps every other test in
+      // this file from touching /opt/yonder. (The remote renderer's own
+      // `systemctl stop/disable zerotier-one` runs regardless — remote is
+      // disabled by default, and that renderer is assembled either way — so
+      // this checks only for the console's unit.)
       expect(existsSync(settingsPath)).toBe(false);
-      expect(calls.filter((argv) => argv[0] === "systemctl")).toEqual([]);
+      expect(calls.filter((argv) => argv[0] === "systemctl" && argv.includes("yonder-console.service")))
+        .toEqual([]);
     } finally {
       await server.close();
     }

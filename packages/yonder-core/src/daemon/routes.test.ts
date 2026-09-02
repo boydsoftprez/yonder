@@ -14,6 +14,7 @@ import { DEFAULT_CONFIG, type Config } from "../schema/config.js";
 import { AdminCredential } from "../console/credential.js";
 import { AttemptThrottle, FAILURE_LIMIT, LOCKOUT_MS } from "../console/throttle.js";
 import type { Clock, Renderer } from "../apply/types.js";
+import type { RemoteState } from "../remote/state.js";
 
 /**
  * The routes that own the administrator password, and the gate R-SEC-09 puts
@@ -85,6 +86,8 @@ interface RouterOptions {
   secrets?: { put(name: string, value: string): void };
   activity?: ActivityLog;
   system?: () => SystemReport;
+  /** The mesh join state. Undefined, as in production, unless a test says otherwise. */
+  remoteState?: () => Promise<RemoteState>;
 }
 
 function router(opts: RouterOptions = {}): Router {
@@ -109,6 +112,7 @@ function router(opts: RouterOptions = {}): Router {
       : { secrets: { put: () => {} } }),
     ...(opts.activity === undefined ? {} : { activity: opts.activity }),
     ...(opts.throttle === undefined ? {} : { throttle: opts.throttle }),
+    ...(opts.remoteState === undefined ? {} : { remoteState: opts.remoteState }),
   });
 }
 
@@ -848,5 +852,73 @@ describe("POST /ui/theme", () => {
   it("does not claim to move the radio", async () => {
     const result = await provisioned({})("POST", "/ui/theme", { theme: "night" });
     expect(result.body).not.toMatchObject({ movesRadio: true });
+  });
+});
+
+/**
+ * The mesh routes: GET /remote/state, POST /remote/join, POST /remote/leave.
+ *
+ * The join and leave routes do nothing zerotier-cli would recognise — each
+ * merges one field into the configuration and hands the whole document to the
+ * apply engine, exactly like /net/join and /ui/theme above. What they do own
+ * is validation: a network id that is not sixteen lowercase hex characters
+ * draws no complaint from zerotier-cli either — it simply never finishes
+ * joining — so the route is the last chance to catch a typo before it goes
+ * quiet.
+ */
+describe("the remote routes", () => {
+  it("is 403 while unprovisioned", async () => {
+    expect((await router()("GET", "/remote/state", undefined)).status).toBe(403);
+  });
+
+  it("GET /remote/state answers with the join state", async () => {
+    const state: RemoteState = {
+      phase: "waiting-for-approval",
+      networkId: "9fef8a3bf9000001",
+      deviceId: "9fef8a3bf9",
+      addresses: [],
+      interface: "ztuqliuo7y",
+      detail: null,
+    };
+    const route = provisioned({ remoteState: () => Promise.resolve(state) });
+    const res = await route("GET", "/remote/state", undefined);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual(state);
+  });
+
+  // Never a 500 for a board that has no remote layer.
+  it("GET /remote/state says so when this daemon has no remote layer", async () => {
+    const route = provisioned({});
+    expect((await route("GET", "/remote/state", undefined)).status).toBe(503);
+  });
+
+  it("POST /remote/join applies a configuration carrying the network id", async () => {
+    const route = provisioned({});
+    const res = await route("POST", "/remote/join", { networkId: "9fef8a3bf9000001" });
+    expect(res.status).toBe(200);
+    const config = (await route("GET", "/config", undefined)).body as Config;
+    expect(config.remote.zerotier).toEqual({ enabled: true, network_id: "9fef8a3bf9000001" });
+  });
+
+  // The last chance to catch a typo: a wrong id draws no complaint from the
+  // client, it simply never finishes joining.
+  it.each(["9FEF8A3BF9000001", "9fef8a3bf900000", "nonsense", ""])(
+    "POST /remote/join refuses %s without touching the configuration",
+    async (bad) => {
+      const route = provisioned({});
+      const res = await route("POST", "/remote/join", { networkId: bad });
+      expect(res.status).toBe(400);
+      expect((res.body as { error: string }).error).toMatch(/sixteen/i);
+      const config = (await route("GET", "/config", undefined)).body as Config;
+      expect(config.remote.zerotier).toEqual(DEFAULT_CONFIG.remote.zerotier);
+    },
+  );
+
+  it("POST /remote/leave clears the network and disables it", async () => {
+    const route = provisioned({});
+    const res = await route("POST", "/remote/leave", undefined);
+    expect(res.status).toBe(200);
+    const config = (await route("GET", "/config", undefined)).body as Config;
+    expect(config.remote.zerotier).toEqual({ enabled: false, network_id: null });
   });
 });
