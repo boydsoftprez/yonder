@@ -10,6 +10,48 @@ import type { ZeroTierNetwork } from "./zerotier/parse.js";
 const UNIT = "zerotier-one";
 
 /**
+ * What `systemctl` needs to be told before it will enable or disable a unit
+ * from inside this daemon's sandbox.
+ *
+ * `yonder-core.service` runs under `ProtectSystem=strict` with
+ * `ReadWritePaths=/etc/yonder /var/lib/yonder`, so every other path in /etc is
+ * mounted read-only in the daemon's own mount namespace. That is a commitment
+ * worth keeping, and it collides with one detail of Debian's systemctl: the
+ * unit-file symlink work of `enable`/`disable` is done by PID 1 over D-Bus and
+ * is unaffected, but the SysV compatibility step is run *client-side*, in this
+ * process's namespace. The ZeroTier package ships an `/etc/init.d` script
+ * alongside its unit, so systemctl also runs
+ * `/usr/lib/systemd/systemd-sysv-install`, which runs `update-rc.d`, which
+ * tries to write the `/etc/rc?.d` symlinks — and gets EROFS. Measured on a
+ * board, both through this daemon and in a transient unit given the same two
+ * sandbox settings:
+ *
+ *     Synchronizing state of zerotier-one.service with SysV service script …
+ *     Executing: /usr/lib/systemd/systemd-sysv-install disable zerotier-one
+ *     update-rc.d: error: Read-only file system
+ *     (exit 1)
+ *
+ * so `disable` failed every leave, and `enable` failed every join that had to
+ * create those links — an exit status this renderer is right to treat as a
+ * failure (R-VPN-07), for a step whose outcome Yonder does not care about.
+ * The banner is the *first* line and the error the third, which is why every
+ * report of this quoted a line that is printed on success too.
+ *
+ * Yonder does not manage SysV runlevels. This board boots systemd, systemd
+ * runs the native unit, and the generator that would make something of an
+ * init.d script skips one that has a unit of its own; the `/etc/rc?.d` links
+ * decide nothing here, which is why the installer's offline path (which uses
+ * deb-systemd-helper) has never touched them either. So the step is skipped
+ * rather than the sandbox widened: `SYSTEMCTL_SKIP_SYSV` is the switch
+ * systemctl reads for exactly this, and skipping it leaves nothing for the
+ * read-only mount to refuse. If a future systemctl stopped honouring the
+ * variable the failure would be the loud one above, not a silent one.
+ *
+ * K-34.
+ */
+const SYSTEMCTL_ENV = { SYSTEMCTL_SKIP_SYSV: "1" } as const;
+
+/**
  * How long to wait, after `systemctl enable --now zerotier-one` reports
  * success, for the client to answer `zerotier-cli listnetworks`.
  *
@@ -195,7 +237,7 @@ export class RemoteRenderer implements Renderer {
    * on the device — including one that has nothing to do with a mesh.
    */
   private async systemctl(args: string[], opts: { absentIsFine?: boolean } = {}): Promise<void> {
-    const { code, stdout, stderr } = await this.run(["systemctl", ...args]);
+    const { code, stdout, stderr } = await this.run(["systemctl", ...args], { env: { ...SYSTEMCTL_ENV } });
     if (code === 0) return;
     const reason = said(stderr, stdout, code);
     if (opts.absentIsFine === true && ABSENT.test(reason)) {
@@ -249,7 +291,7 @@ export class RemoteRenderer implements Renderer {
     // The service first, because the two failures R-VPN-07 distinguishes —
     // no client at all, and a client whose service will not start — are both
     // reported here and they have different remedies.
-    const enable = await this.run(["systemctl", "enable", "--now", UNIT]);
+    const enable = await this.run(["systemctl", "enable", "--now", UNIT], { env: { ...SYSTEMCTL_ENV } });
     if (enable.code !== 0) {
       const reason = said(enable.stderr, enable.stdout, enable.code);
       throw new Error(
@@ -304,8 +346,24 @@ export class RemoteRenderer implements Renderer {
   }
 }
 
-/** The first line a command said about itself, or its exit status. */
+/**
+ * Everything a command said about itself, or its exit status.
+ *
+ * This took the *first* line, and that cost days. `systemctl disable` on a
+ * unit with a SysV script opens with a banner it prints on success too —
+ * *Synchronizing state of zerotier-one.service …* — and says what actually
+ * went wrong two lines later. Every report of the defect above therefore
+ * quoted a sentence that is not an error, and every attempt to reproduce it
+ * by hand succeeded, because the one line that named the cause
+ * (*update-rc.d: error: Read-only file system*) was thrown away here.
+ *
+ * So: all of it, joined, in the order it was said. A diagnostic is only worth
+ * carrying if it carries the reason. K-34.
+ */
 function said(stderr: string, stdout: string, code: number): string {
-  const line = (stderr || stdout).trim().split("\n")[0] ?? "";
-  return line === "" ? `exited ${code}` : line;
+  const lines = (stderr || stdout)
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l !== "");
+  return lines.length === 0 ? `exited ${code}` : lines.join("; ");
 }

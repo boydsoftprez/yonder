@@ -15,7 +15,20 @@ export interface CommandResult {
  * a runner rather than calling child_process directly, so tests can assert on
  * the exact argv and return canned output without a real NetworkManager.
  */
-export type CommandRunner = (argv: string[]) => Promise<CommandResult>;
+export type CommandRunner = (argv: string[], opts?: CommandOptions) => Promise<CommandResult>;
+
+/**
+ * The few things a caller may vary about how a command is run.
+ *
+ * Only `env` so far, and deliberately only additions to it: a renderer says
+ * which variables this one command needs, and everything else the daemon was
+ * started with — PATH above all — is inherited unchanged. Replacing the
+ * environment wholesale is how a child stops finding its own binaries.
+ */
+export interface CommandOptions {
+  /** Merged over the daemon's own environment for this one child. */
+  env?: Record<string, string>;
+}
 
 /**
  * The renderer logs what it ran so an operator can reproduce it by hand. That
@@ -53,10 +66,14 @@ export function redactText(text: string, argv: string[]): string {
 }
 
 /** Never rejects: a non-zero exit is a result, not an exception. */
-export const systemRunner: CommandRunner = (argv) =>
+export const systemRunner: CommandRunner = (argv, opts) =>
   new Promise((resolve) => {
     const [cmd, ...args] = argv;
-    execFile(cmd, args, { encoding: "utf8", maxBuffer: 8 << 20 }, (err, stdout, stderr) => {
+    // `env: undefined` is execFile's own "inherit", so the common case pays
+    // nothing; a caller that asked for a variable gets the daemon's
+    // environment with that variable laid over it.
+    const env = opts?.env === undefined ? undefined : { ...process.env, ...opts.env };
+    execFile(cmd, args, { encoding: "utf8", maxBuffer: 8 << 20, env }, (err, stdout, stderr) => {
       const code =
         err && typeof (err as NodeJS.ErrnoException & { code?: number }).code === "number"
           ? ((err as unknown as { code: number }).code)

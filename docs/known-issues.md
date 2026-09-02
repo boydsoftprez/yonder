@@ -693,3 +693,50 @@ cache-busted stylesheet URL the theme change updates, or have the console
 re-request it — and give the capture gate a case that changes the palette
 *without* reloading, or this returns.
 
+### K-34 · ~~Every mesh join and leave failed on a board, and said the wrong thing about why~~ — CLOSED
+
+`POST /remote/join` and `POST /remote/leave` failed deterministically when driven through
+the daemon socket on a real board, while every reproduction of the same call by hand
+succeeded. Both reported the same sentence:
+
+```
+systemctl disable zerotier-one failed: Synchronizing state of zerotier-one.service
+with SysV service script with /usr/lib/systemd/systemd-sysv-install.
+```
+
+That sentence is a banner `systemctl` prints on a **successful** enable or disable of a
+unit that also ships a SysV init script, which is why the reports read as nonsense and why
+several days went into hunting a fault in `systemRunner` that was not there.
+
+**What was actually happening.** `yonder-core.service` runs under `ProtectSystem=strict`
+with `ReadWritePaths=/etc/yonder /var/lib/yonder`, so the rest of `/etc` is read-only in
+the daemon's own mount namespace. `systemctl enable`/`disable` does its unit-file symlink
+work in PID 1 over D-Bus, which the sandbox does not touch — but its SysV compatibility
+step runs **client-side**, in the calling process. The ZeroTier package ships
+`/etc/init.d/zerotier-one`, so `systemctl` also ran `/usr/lib/systemd/systemd-sysv-install`
+→ `update-rc.d`, which tried to write the `/etc/rc?.d` symlinks and got EROFS:
+
+```
+Synchronizing state of zerotier-one.service with SysV service script with /usr/lib/systemd/systemd-sysv-install.
+Executing: /usr/lib/systemd/systemd-sysv-install disable zerotier-one
+update-rc.d: error: Read-only file system
+```
+
+exit 1. `disable` failed every leave; `enable` failed every join that had to create those
+links. Reproduced in a transient unit given nothing but the same two sandbox settings, so
+it is the sandbox and not the daemon.
+
+**Why nothing caught it, and why the reports misled.** `said()` in
+`src/remote/renderer.ts` reported the **first** line of a command's output. The banner is
+line one and the reason is line three, so the one line that named the cause was thrown
+away at the point of failure. A diagnostic that keeps the noise and drops the reason is
+worse than none: it sent every reader to reproduce a command that works.
+
+Closed with `SYSTEMCTL_SKIP_SYSV=1` on the two `systemctl` calls that change unit files —
+Yonder does not manage SysV runlevels, this board boots systemd, and the generator that
+would make something of an init.d script skips one that has a unit of its own — so the
+step is skipped rather than the sandbox widened. `CommandRunner` grew an optional `env`,
+merged *over* the daemon's environment rather than replacing it. `said()` now reports
+every line. Both are pinned by tests in `src/remote/renderer.test.ts` and
+`src/net/runner.test.ts` that fail against the old code, so this no longer needs a board
+to see. R-VPN-01, R-VPN-07.

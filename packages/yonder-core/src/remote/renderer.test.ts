@@ -38,8 +38,11 @@ function harness(
   opts: { clock?: Clock; zerotierWaitMs?: number; zerotierPollMs?: number } = {},
 ) {
   const calls: string[][] = [];
-  const run: CommandRunner = async (argv) => {
+  /** The environment each call was given, index-for-index with `calls`. */
+  const envs: (Record<string, string> | undefined)[] = [];
+  const run: CommandRunner = async (argv, opts) => {
     calls.push(argv);
+    envs.push(opts?.env);
     return reply(argv);
   };
   const log = vi.fn();
@@ -51,7 +54,7 @@ function harness(
     cli: new ZeroTierCli(run), run, statePath, log,
     clock: opts.clock, zerotierWaitMs: opts.zerotierWaitMs, zerotierPollMs: opts.zerotierPollMs,
   });
-  return { calls, log, statePath, make, renderer: make() };
+  return { calls, envs, log, statePath, make, renderer: make() };
 }
 
 const argvOf = (calls: string[][], head: string) => calls.filter((a) => a[0] === head);
@@ -66,6 +69,13 @@ const joinedList = (...nwids: string[]) =>
       assignedAddresses: [],
     })),
   );
+
+/** The environments of every call whose argv started with `head`. */
+const envOf = (
+  calls: string[][],
+  envs: (Record<string, string> | undefined)[],
+  head: string,
+) => calls.map((a, i) => [a, envs[i]] as const).filter(([a]) => a[0] === head).map(([, e]) => e);
 
 describe("RemoteRenderer", () => {
   // R-VPN-08: installing a client must not start one. With zero networks joined
@@ -357,6 +367,63 @@ describe("RemoteRenderer waiting for the client to answer", () => {
     await h.renderer.render(config("9fef8a3bf9000001"));
     expect(h.calls.filter((a) => a.includes("listnetworks"))).toHaveLength(1);
     expect(h.log).not.toHaveBeenCalledWith(expect.stringContaining("has not answered yet"));
+  });
+
+  /**
+   * The board defect this file's SYSTEMCTL_SKIP_SYSV comment describes.
+   *
+   * `yonder-core.service` runs under ProtectSystem=strict, so /etc is
+   * read-only in the daemon's namespace, and systemctl's *client-side* SysV
+   * compatibility step — which ZeroTier's init.d script triggers — tried to
+   * write /etc/rc?.d and exited 1. Every leave failed and every join that had
+   * to create those links failed with it. Nothing but a board could see it,
+   * which is precisely why it is pinned here: every systemctl this renderer
+   * runs carries the variable that skips that step.
+   */
+  it("skips systemctl's SysV compatibility step on every unit-file change", async () => {
+    const h = harness((argv) =>
+      argv.includes("listnetworks")
+        ? { code: 0, stdout: joinedList("9fef8a3bf9000001"), stderr: "" }
+        : { code: 0, stdout: "", stderr: "" },
+    );
+    await h.renderer.render(config("9fef8a3bf9000001"));
+    await h.renderer.render(config(null));
+
+    const seen = argvOf(h.calls, "systemctl").map((a) => a.slice(1).join(" "));
+    expect(seen).toEqual(
+      expect.arrayContaining(["enable --now zerotier-one", "stop zerotier-one", "disable zerotier-one"]),
+    );
+    const envs = envOf(h.calls, h.envs, "systemctl");
+    expect(envs).toHaveLength(seen.length);
+    for (const env of envs) expect(env).toMatchObject({ SYSTEMCTL_SKIP_SYSV: "1" });
+  });
+
+  /**
+   * And the reason the defect above survived so long: systemctl's first line
+   * is a banner it prints on success too, so reporting only that line said
+   * nothing at all. The failure must name what failed.
+   */
+  it("reports every line of a systemctl failure, not just the banner", async () => {
+    const h = harness((argv) => {
+      if (argv[0] === "systemctl" && argv[1] === "disable") {
+        return {
+          code: 1,
+          stdout: "",
+          stderr:
+            "Synchronizing state of zerotier-one.service with SysV service script with " +
+            "/usr/lib/systemd/systemd-sysv-install.\n" +
+            "Executing: /usr/lib/systemd/systemd-sysv-install disable zerotier-one\n" +
+            "update-rc.d: error: Read-only file system\n",
+        };
+      }
+      return argv.includes("listnetworks")
+        ? { code: 0, stdout: joinedList("9fef8a3bf9000001"), stderr: "" }
+        : { code: 0, stdout: "", stderr: "" };
+    });
+    await h.renderer.render(config("9fef8a3bf9000001"));
+    await expect(h.renderer.render(config(null))).rejects.toThrow(
+      /update-rc\.d: error: Read-only file system/,
+    );
   });
 
   it("exports the production bound and poll interval", () => {
