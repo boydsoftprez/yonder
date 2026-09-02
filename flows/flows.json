@@ -20,7 +20,7 @@
         ],
         "showPathInSidebar": false,
         "headerContent": "page",
-        "navigationStyle": "default",
+        "navigationStyle": "fixed",
         "titleBarStyle": "default",
         "showReconnectNotification": true,
         "notificationDisplayTime": 5,

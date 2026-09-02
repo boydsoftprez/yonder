@@ -184,15 +184,24 @@ function measure(liveSelectors) {
   const widgets = [...document.querySelectorAll('[class*="nrdb-ui-widget"], [class*="nrdb-ui-group"]')];
 
   /**
-   * Clipped content: a scrollable box whose content is taller than it is.
-   * This is the K-13 failure, generalised — 39% of a safety warning behind an
-   * inner scrollbar that nothing indicated was there.
+   * Content that does not fit its box, either way it fails.
+   *
+   * A scrollable box hides the excess — that is K-13, 39% of a safety warning
+   * behind an inner scrollbar nothing indicated was there. A box that does
+   * *not* scroll lets the excess escape instead, and the next widget is
+   * painted over the top of it. Same cause, opposite symptom, and this check
+   * only looked for the first one until an operator spotted the second: a
+   * dropdown 48px tall with 70px of content, its message under the password
+   * field that follows it.
    */
   const clipped = [];
   for (const el of document.querySelectorAll("*")) {
     const style = getComputedStyle(el);
     const scrolls = /auto|scroll|hidden/.test(style.overflowY);
-    if (!scrolls) continue;
+    const isWidget = /nrdb-ui-widget/.test(el.className || "");
+    // A scroller hides its overflow; a widget that does not scroll spills it
+    // onto whatever is drawn next. Both are content that does not fit.
+    if (!scrolls && !isWidget) continue;
     if (el.scrollHeight <= el.clientHeight + 2) continue;
     if (el.clientHeight === 0) continue;
     // The page's own scroller. A console taller than the window is a page you
@@ -204,6 +213,7 @@ function measure(liveSelectors) {
     if (el.closest(".v-data-table__wrapper, .v-table__wrapper")) continue;
     clipped.push({
       key: keyOf(el),
+      how: scrolls ? "hides" : "spills over what follows it",
       visible: el.clientHeight,
       content: el.scrollHeight,
       hidden: Math.round((1 - el.clientHeight / el.scrollHeight) * 100),
@@ -314,7 +324,12 @@ for (const page of pages) {
     path: join(refs, "capture", `${stem}.png`),
     fullPage: true,
     mask: masks,
-    maskColor: "#8891993d",
+    // Opaque, and that is the whole point. This was #8891993d - 24% alpha -
+    // so a live reading showed straight through its own mask and the
+    // committed picture changed on every run: a load average, a timestamp, a
+    // temporary directory name in the activity log. A mask you can read
+    // through is not a mask, it is a tint.
+    maskColor: "#8b8f94",
   });
   await tab.screenshot({ path: join(artifacts, `${stem}.png`), fullPage: true });
 
@@ -348,7 +363,7 @@ for (const page of pages) {
   for (const c of shape.clipped) {
     report(
       { rule: "clipped", page: page.name, palette, key: c.key },
-      `${page.title} (${palette}) clips content: ${c.hidden}% of ${c.content}px hidden in ${c.visible}px`,
+      `${page.title} (${palette}) ${c.how}: ${c.content}px of content in ${c.visible}px (${c.hidden}%)`,
       `${c.key}  "${c.text}"`,
     );
   }

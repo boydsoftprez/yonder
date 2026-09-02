@@ -280,6 +280,19 @@ function chromeCss(theme: ThemeName): string {
 }
 
 /**
+ * A hex colour as the "r g b" triplet Vuetify's theme variables want.
+ *
+ * Vuetify resolves its own colours as `rgb(var(--v-theme-error))`, so the
+ * variable holds three numbers and not a colour. Nothing a stylesheet says
+ * about `color` can reach a label it paints that way — the only way in is to
+ * give it a different triplet.
+ */
+function triplet(hex: string): string {
+  const n = parseInt(hex.slice(1), 16);
+  return `${(n >> 16) & 255} ${(n >> 8) & 255} ${n & 255}`;
+}
+
+/**
  * The whole palette as a stylesheet.
  *
  * Custom properties first, so a page can use them, then the handful of rules
@@ -619,15 +632,31 @@ ${panelCss(theme)}
   outline-offset: 2px;
 }
 
-/* Nothing has been scanned yet, which is a state and not a fault. Vuetify
-   paints an empty required select in its error colour, so a page an operator
-   has only just opened shouts at them about a list they have not asked for. */
-.nrdb-ui-dropdown .v-field--error:not(.v-field--dirty),
-.nrdb-ui-dropdown .v-messages__message {
-  color: var(--yonder-label) !important;
+/* Nothing has been scanned yet, which is a state and not a fault.
+   
+   Dashboard hardcodes an error message of "No options available" on a
+   dropdown whenever its options list is empty - so a page an operator has
+   only just opened puts a red label and a red rule around a list nobody has
+   asked for. There is no "required" flag to turn off; the widget is simply in
+   Vuetify's error state whenever there is nothing to choose from.
+
+   And the label cannot be recoloured, because Vuetify paints it with
+   rgb(var(--v-theme-error)) - a triplet, not a colour, so no rule about the
+   color property reaches it. The way in is to hand that widget a different
+   triplet. The message stays, which is right: "No options available" is the
+   true and useful thing to say before a scan. It just stops being an alarm.
+
+   Setting it on the widget alone is not enough. Vuetify stamps its theme
+   class on elements inside the field as well, and each of those redeclares
+   every --v-theme-* for its own subtree - so the widget-level value was
+   overridden two elements before it reached the label. The second selector
+   catches those, and outranks them. */
+.nrdb-ui-dropdown,
+.nrdb-ui-dropdown [class*="v-theme--"] {
+  --v-theme-error: ${triplet(p.label)};
 }
 
-.nrdb-ui-dropdown .v-field--error:not(.v-field--dirty) .v-field__outline {
+.nrdb-ui-dropdown .v-field__outline {
   color: var(--yonder-divider) !important;
 }
 
@@ -744,10 +773,18 @@ ${panelCss(theme)}
    a gauge, where the shape is the point. It is never legitimate for something
    an operator has to read or fill in.
 
+   A dropdown belongs here too, and it took an operator's eye to notice. Its
+   box is 48px and its content 70 once Vuetify adds a message under the field,
+   and because the widget does not scroll, the extra 22px does not hide - it
+   escapes, and the next widget is painted over the top of it. Same cause as
+   the form, opposite symptom, and the gate was only looking for the first
+   one.
+
    Anything added here needs the same test in theme.test.ts, because the cost
    of getting it wrong is silent. */
 .nrdb-ui-widget.nrdb-ui-markdown,
-.nrdb-ui-widget.nrdb-ui-form {
+.nrdb-ui-widget.nrdb-ui-form,
+.nrdb-ui-widget.nrdb-ui-dropdown {
   grid-row-end: auto !important;
   grid-template-rows: none !important;
   height: auto !important;

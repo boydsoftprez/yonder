@@ -256,6 +256,21 @@ describe("flows/flows.json", () => {
   });
 
   /** All four pages M1b-2 owes, each with something on it. */
+  /**
+   * The navigation pane is visible, not hidden behind a hamburger.
+   *
+   * Dashboard's `default` is "Collapsing": the pane is a drawer at every
+   * width, so a console on a laptop hides its own four pages behind a button
+   * for no reason. `fixed` shows the pane, and the client still falls back to
+   * a drawer when it is actually narrow — `navigationStyle === "fixed" &&
+   * isMobile ? "temporary" : navigationStyle` — which is what R-UI-04 wants
+   * on a tablet without giving up the pane on everything else.
+   */
+  it("shows the navigation pane rather than collapsing it at every width", () => {
+    const base = flows.find((n) => n.type === "ui-base");
+    expect(base?.navigationStyle, "default collapses the pane at every width").toBe("fixed");
+  });
+
   it("serves the four pages this milestone is for", () => {
     const pages = flows.filter((n) => n.type === "ui-page");
     expect(pages.map((p) => p.name).sort())

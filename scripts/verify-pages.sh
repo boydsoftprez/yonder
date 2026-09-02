@@ -428,8 +428,14 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
         bad "the console never regenerated theme.css as night, so it was not captured"
     fi
 
-    # Back to the default, so a kept working directory is left as it was found.
-    reach_theme day >/dev/null || true
+    # Back to the default, so a kept run is left as it was found — and said
+    # out loud, because `|| true` on a restore is how a HOLD=1 console sat in
+    # the night palette while its own log claimed everything passed.
+    if reach_theme day; then
+        ok "the console was left in the default palette"
+    else
+        bad "the console is still in the night palette; a held run will be wrong"
+    fi
 else
     printf '  SKIP  no browser: the pages were not captured and nobody looked\n'
     printf '        npm install --save-dev playwright && npx playwright install --with-deps chromium\n'

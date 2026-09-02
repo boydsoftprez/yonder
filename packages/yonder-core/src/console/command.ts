@@ -131,7 +131,10 @@ export function rejected(message: string, opts: CommandOptions): CommandStatus {
  * counting down to "-14 s" is a page showing a number that means nothing.
  */
 export function secondsRemaining(status: CommandStatus, now: number): number | null {
-  if (status.state !== "pending" || status.expiresAt === undefined) return null;
+  // `== null` on purpose: an apply that cannot cost reachability is confirmed
+  // the moment it is made and carries `expiresAt: null`, and a countdown from
+  // null is a countdown from zero.
+  if (status.state !== "pending" || status.expiresAt == null) return null;
   const left = Math.ceil((status.expiresAt - now) / 1000);
   return left > 0 ? left : null;
 }

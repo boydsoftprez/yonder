@@ -609,18 +609,49 @@ exactly this and stopped naming it in the same change, so nothing was watching e
 apply that does not move the radio still goes through the engine's confirmation timer, so
 there may be a real caller here rather than a deletion.
 
-### K-31 · The network dropdown shows an error state before anything is scanned
+### K-31 · The network dropdown's label is red before anything is scanned
 
 `join-ssid` is a required `ui-dropdown` with no options until a scan fills it, and Vuetify
 paints an empty required select in its error colour. So a page an operator has only just
-opened labels "Network" in red and says "No options available" — shouting about a list they
-have not asked for yet, in the one place the console should look calm.
+opened labels "Network" in red — shouting about a list they have not asked for yet, in the
+one place the console should look calm.
 
-The generated stylesheet quietens the field outline and the helper text, and the *label*
-still comes through red: Vuetify resolves it from `--v-theme-error` rather than from a
+The generated stylesheet quietens the field outline and the helper text; the *label* still
+comes through red, because Vuetify resolves it from `--v-theme-error` rather than from a
 class the theme can reach, and setting that variable per widget needs the palette to carry
 RGB triplets it does not have.
 
-Cosmetic, and it is on the page an operator sees first. **Closes when** either the palette
-gains the triplets Vuetify wants, or the dropdown stops being `required` until a scan has
-run — which is arguably the truer fix, since before a scan there is nothing to require.
+**The worse half of this is fixed.** The message also *escaped its widget* — a 48px box
+with 70px of content — and the password field, four pixels below, was painted over the top
+of it. The theme now sizes a dropdown to its content the way it already did for prose and
+forms, and the capture gate looks for content that spills as well as content that hides,
+which it did not before. That was found by eye on a running console, which is the check
+the gate is meant to make unnecessary.
+
+What is left is cosmetic. **Closes when** either the palette gains the triplets Vuetify
+wants, or the dropdown stops being `required` until a scan has run — arguably the truer
+fix, since before a scan there is nothing to require.
+
+### K-32 · ~~Choosing a palette applied, then undid itself~~ — CLOSED
+
+R-CFG-11 removed the operator confirmation, because joining a network takes the access
+point off the air and the console you would confirm from goes with it. The device verifies
+a *radio move* for itself and confirms on that evidence.
+
+Nothing else was verified by anything. A theme change does not move the radio, so it went
+pending and the timer reverted it two minutes later — and there was no longer any control
+on the console able to confirm it. An operator chose a palette, watched it take, and
+watched it undo itself. Reported by eye; nothing in the suite could see it, because every
+test that confirmed an apply called `confirm()` directly.
+
+Closed by R-CFG-12. The confirmation window is the price of R-CFG-03's guarantee that a
+device comes back by itself, and a change that touches nothing reachable has nothing to
+guarantee. `affectsReachability` compares the whole document with only the interface's
+appearance removed — *everything is reachable until proven otherwise* — so a field added
+to the schema later is load-bearing by default rather than silently exempt. Getting that
+bias backwards costs a device nobody can reach; getting it this way costs a palette that
+reverts, and only one of those is recoverable from a chair.
+
+The harness saw it too, once it stopped hiding: `verify-pages.sh` restored the default
+palette with `|| true` after capturing, so a run that failed to restore reported nothing
+and left a held console in the night palette.
