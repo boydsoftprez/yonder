@@ -14,6 +14,7 @@ import { seedConfigIfAbsent } from "../config/defaults.js";
 import { SecretStore } from "../secrets/store.js";
 import { NmcliClient } from "../net/nmcli/client.js";
 import { NetworkRenderer } from "../net/renderer.js";
+import { HostnameRenderer } from "../system/hostname.js";
 import { FallbackWatchdog } from "../net/watchdog.js";
 import { AP_CONNECTION, DEFAULT_AP_PASSPHRASE } from "../net/profiles.js";
 import { scanForNetworks } from "../net/scan.js";
@@ -124,8 +125,22 @@ export function buildRenderers(opts: BuildRenderersOptions): {
       log,
     });
 
+  // First, and deliberately.
+  //
+  // K-19: renderers run in sequence and a failure stops the ones behind it,
+  // which is why the console is behind the network. This one goes in *front*
+  // of the network for the mirror-image reason: it cannot fail (see
+  // HostnameRenderer.render), so nothing is put at risk by it, and a board
+  // whose NetworkManager is wedged still ends up with the name its
+  // configuration gives it — which is the board an operator is most likely to
+  // be looking for by name. It also means NetworkManager sends the right
+  // hostname on the DHCP request the network render is about to make.
+  const hostname = new HostnameRenderer({ runner: opts.runner ?? systemRunner, log });
+
   return {
-    renderers: consoleRenderer === undefined ? [renderer] : [renderer, consoleRenderer],
+    renderers: consoleRenderer === undefined
+      ? [hostname, renderer]
+      : [hostname, renderer, consoleRenderer],
     renderer,
     ...(consoleRenderer === undefined ? {} : { consoleRenderer }),
     secrets,

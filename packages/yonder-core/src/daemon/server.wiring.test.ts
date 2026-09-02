@@ -21,7 +21,7 @@ describe("buildRenderers", () => {
       secretsPath: join(dir, "secrets.yaml"),
       runner: run,
     });
-    expect(renderers.map((r) => r.name)).toEqual(["network"]);
+    expect(renderers.map((r) => r.name)).toEqual(["hostname", "network"]);
   });
 
   /**
@@ -34,7 +34,7 @@ describe("buildRenderers", () => {
     const run: CommandRunner = async () => ({ code: 0, stdout: "", stderr: "" });
     const built = buildRenderers({ secretsPath: join(dir, "secrets.yaml"), runner: run });
     expect(built.consoleRenderer).toBeUndefined();
-    expect(built.renderers.map((r) => r.name)).toEqual(["network"]);
+    expect(built.renderers.map((r) => r.name)).toEqual(["hostname", "network"]);
   });
 
   /**
@@ -51,8 +51,26 @@ describe("buildRenderers", () => {
       runner: run,
       console: { settings: join(dir, "console", "settings.js") },
     });
-    expect(built.renderers.map((r) => r.name)).toEqual(["network", "console"]);
+    expect(built.renderers.map((r) => r.name)).toEqual(["hostname", "network", "console"]);
     expect(built.consoleRenderer).toBeDefined();
+  });
+
+  /**
+   * In front of the network, and for the mirror image of the reason the
+   * console is behind it. K-19: a failing renderer stops the ones behind it.
+   * HostnameRenderer cannot fail, so nothing is put at risk by going first —
+   * and a board whose NetworkManager is wedged still gets the name its
+   * configuration gives it, which is the board most likely to be searched for
+   * by name.
+   */
+  it("puts the hostname renderer in front of everything, because it cannot fail", () => {
+    const run: CommandRunner = async () => ({ code: 0, stdout: "", stderr: "" });
+    const built = buildRenderers({
+      secretsPath: join(dir, "secrets.yaml"),
+      runner: run,
+      console: { settings: join(dir, "console", "settings.js") },
+    });
+    expect(built.renderers[0]?.name).toBe("hostname");
   });
 });
 

@@ -16,6 +16,38 @@ ensure_pkgs network-manager
 # that same access point again (R-NET-02).
 ensure_pkgs dnsmasq-base
 
+# mDNS, so the device answers to a name and not only to an address.
+#
+# This is what stands behind the one instruction an operator needs after they
+# join a Wi-Fi network from the console: the access point goes away, the board
+# takes a DHCP address on the new network, and they have to find it again.
+# avahi-daemon publishes the system hostname — which yonder-core's
+# HostnameRenderer sets from `system.hostname` — as `<hostname>.local`.
+#
+# **What this does not guarantee is that the operator's device can resolve
+# it.** That needs an mDNS resolver on their side. macOS and iOS have always
+# had one; Windows has had one since Windows 10; Android's support has varied
+# by version and by app. Yonder cannot test any of that from here, so the
+# console's own wording says the name *may* work and gives the address as the
+# answer that always does. A printed instruction that does not work costs an
+# operator the time to discover it is wrong.
+#
+# libnss-mdns is deliberately not installed. It would let *this* board resolve
+# other .local names, which nothing here needs, and it edits nsswitch.conf —
+# a change to name resolution on a device whose reachability is the thing this
+# project is most careful about.
+ensure_pkgs avahi-daemon
+
+if [ "$DRY_RUN" != "1" ] && command -v systemctl >/dev/null 2>&1; then
+    # Enabled and started, like every other unit here: enabling alone arms the
+    # next boot, and R-CFG-08 says a freshly flashed board is usable with no
+    # operator input.
+    run systemctl enable avahi-daemon.service
+    run systemctl restart avahi-daemon.service
+else
+    log "skipping systemctl for avahi-daemon (dry run or not a systemd host)"
+fi
+
 # The account the console runs as, and the group that is the access control
 # on the daemon's socket.
 #

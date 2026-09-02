@@ -205,3 +205,4 @@ export {
 } from "./log/activity.js";
 export { scanForNetworks, type ScanResult } from "./net/scan.js";
 export type { DiagProbes, SystemReport } from "./daemon/routes.js";
+export { HostnameRenderer, HOSTNAME_FILE, type HostnameRendererOptions } from "./system/hostname.js";
