@@ -26,6 +26,17 @@ export interface RouterDeps {
   credential: AdminCredential | undefined;
   /** Backoff on failed logins. One administrator, one counter — see throttle.ts. */
   throttle?: AttemptThrottle;
+  /**
+   * Called after an administrator password is set, so the console can be
+   * rewritten and restarted into its provisioned shape.
+   *
+   * Synchronous and not awaited, on purpose. Restarting the console kills the
+   * process that is answering the operator's browser, so this route must
+   * return first; the implementation in server.ts defers the work on the
+   * injected clock. A hook that could block this route would turn the one
+   * interaction every operator has into a connection reset.
+   */
+  onProvisioned?: () => void;
 }
 
 export interface RouteResult {
@@ -93,6 +104,14 @@ export function createRouter(deps: RouterDeps): Router {
         const result = deps.credential.set(password);
         if (result.ok) {
           say("an administrator password was set");
+          try {
+            deps.onProvisioned?.();
+          } catch (e) {
+            // The password is set. A console that did not get restarted comes
+            // back into the right mode on the next apply or the next boot,
+            // and that is not worth turning a success into a failure over.
+            say(`the console could not be scheduled for a restart: ${(e as Error).message}`);
+          }
           return { status: 200, body: { ok: true } };
         }
         // The message states the rule and never quotes what was submitted.

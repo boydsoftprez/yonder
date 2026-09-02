@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRouter } from "./routes.js";
-import { startServer } from "./server.js";
+import { startServer, PROVISION_RESTART_DELAY_MS } from "./server.js";
 import { ApplyEngine } from "../apply/engine.js";
 import { saveConfig } from "../config/save.js";
 import { loadConfig } from "../config/load.js";
@@ -1035,6 +1035,161 @@ describe("startServer", () => {
       }
     } finally {
       stderr.mockRestore();
+    }
+  });
+});
+
+/**
+ * Setting the administrator password changes what the console *is*: an empty
+ * flows file and one page become the console proper behind a login, and that
+ * shape is decided when settings.js is generated. So the daemon has to
+ * rewrite it and restart the console — and it has to do that *after* it has
+ * answered, because the restart kills the process that is writing the "the
+ * password is set" page into the operator's browser.
+ *
+ * Every line of that wiring could be deleted with the rest of the suite green.
+ */
+describe("startServer, provisioning the console", () => {
+  let socketPath: string, consoleDir: string, settingsPath: string;
+
+  beforeEach(() => {
+    socketPath = join(dir, "core.sock");
+    consoleDir = join(dir, "console");
+    mkdirSync(consoleDir);
+    settingsPath = join(consoleDir, "settings.js");
+  });
+
+  function consolePaths() {
+    return {
+      settings: settingsPath,
+      userDir: join(dir, "console-state"),
+      socket: socketPath,
+      coreTree: join(dir, "core"),
+      unit: "yonder-console.service",
+    };
+  }
+
+  function harness() {
+    const { clock, advance } = fakeClock();
+    const calls: string[][] = [];
+    const runner: CommandRunner = async (argv) => {
+      calls.push(argv);
+      return { code: 0, stdout: "", stderr: "" };
+    };
+    // A fresh secrets file with no administrator password: this is a device
+    // nobody has provisioned.
+    const secretsPath = join(dir, "fresh-secrets.yaml");
+    return {
+      calls,
+      advance,
+      start: () => startServer({
+        socketPath, configPath, journalPath, renderers: [],
+        secretsPath, runner, clock, console: consolePaths(),
+      }),
+    };
+  }
+
+  const restarts = (calls: string[][]): string[][] =>
+    calls.filter((argv) => argv[0] === "systemctl");
+
+  it("writes a setup-mode settings.js on a device with no password", async () => {
+    const h = harness();
+    const server = await h.start();
+    try {
+      const text = readFileSync(settingsPath, "utf8");
+      expect(text).toContain("httpAdminRoot: false");
+      expect(text).toContain("provisioned: false");
+      expect(text).toContain("setup-flows.json");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("answers first and restarts the console afterwards", async () => {
+    const h = harness();
+    const server = await h.start();
+    try {
+      const before = restarts(h.calls).length;
+      const res = await call(socketPath, "POST", "/admin/password", { password: "a long enough password" });
+      expect(res.status).toBe(200);
+
+      // Nothing yet. Restarting here would have killed the console while it
+      // was still writing the page that says the password was set.
+      await flushMicrotasks();
+      expect(restarts(h.calls).length).toBe(before);
+      expect(readFileSync(settingsPath, "utf8")).toContain("provisioned: false");
+
+      h.advance(PROVISION_RESTART_DELAY_MS);
+      await flushMicrotasks();
+
+      const text = readFileSync(settingsPath, "utf8");
+      expect(text).toContain("provisioned: true");
+      expect(text).toContain('httpAdminRoot: "/editor"');
+      expect(restarts(h.calls).slice(before)).toEqual([["systemctl", "restart", "yonder-console.service"]]);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("restarts the console and nothing else", async () => {
+    const h = harness();
+    const server = await h.start();
+    try {
+      await call(socketPath, "POST", "/admin/password", { password: "a long enough password" });
+      h.advance(PROVISION_RESTART_DELAY_MS);
+      await flushMicrotasks();
+      for (const argv of restarts(h.calls)) {
+        expect(argv.join(" ")).not.toContain("yonder-core");
+      }
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("does not restart the console for a refused password", async () => {
+    const h = harness();
+    const server = await h.start();
+    try {
+      const before = restarts(h.calls).length;
+      expect((await call(socketPath, "POST", "/admin/password", { password: "short" })).status).toBe(400);
+      h.advance(PROVISION_RESTART_DELAY_MS * 4);
+      await flushMicrotasks();
+      expect(restarts(h.calls).length).toBe(before);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("leaves no timer armed after close", async () => {
+    const h = harness();
+    const server = await h.start();
+    await call(socketPath, "POST", "/admin/password", { password: "a long enough password" });
+    await server.close();
+    const before = h.calls.length;
+    // A timer surviving close() would restart a console on behalf of a
+    // process that has already let go of its socket — the same defect the
+    // watchdog and the radio wait both grew a stop() for.
+    h.advance(PROVISION_RESTART_DELAY_MS * 4);
+    await flushMicrotasks();
+    expect(h.calls.length).toBe(before);
+  });
+
+  it("assembles no console renderer at all when nobody said where the console is", async () => {
+    const { clock } = fakeClock();
+    const calls: string[][] = [];
+    const runner: CommandRunner = async (argv) => { calls.push(argv); return { code: 0, stdout: "", stderr: "" }; };
+    const server = await startServer({
+      socketPath, configPath, journalPath, renderers: [],
+      secretsPath: join(dir, "fresh-secrets.yaml"), runner, clock,
+    });
+    try {
+      // Nothing was written to the production path by default, and nothing
+      // was restarted. That is what keeps every other test in this file from
+      // touching /opt/yonder.
+      expect(existsSync(settingsPath)).toBe(false);
+      expect(calls.filter((argv) => argv[0] === "systemctl")).toEqual([]);
+    } finally {
+      await server.close();
     }
   });
 });

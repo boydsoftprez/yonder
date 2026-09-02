@@ -118,3 +118,24 @@ export {
   type ConsoleMiddlewareDeps,
 } from "./console/middleware.js";
 export { renderPage, pageSource, escapeHtml, type PageName } from "./console/assets.js";
+export {
+  renderSettings,
+  consolePaths,
+  DEFAULT_CONSOLE_PATHS,
+  SETUP_FLOW_FILE,
+  CONSOLE_FLOW_FILE,
+  EMPTY_FLOWS,
+  EDITOR_ROOT,
+  EXCLUDED_NODES,
+  type ConsolePaths,
+  type RenderSettingsOptions,
+} from "./console/settings.js";
+export { ConsoleRenderer, type ConsoleRendererOptions } from "./console/renderer.js";
+export {
+  consoleGate,
+  editorAuth,
+  ADMIN_USERNAME,
+  type GateOptions,
+  type EditorAuth,
+  type EditorUser,
+} from "./console/wiring.js";

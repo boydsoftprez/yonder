@@ -7,6 +7,8 @@ import { ApplyEngine } from "../apply/engine.js";
 import { warn } from "../log.js";
 import { createRouter } from "./routes.js";
 import { AdminCredential } from "../console/credential.js";
+import { ConsoleRenderer } from "../console/renderer.js";
+import { consolePaths, type ConsolePaths } from "../console/settings.js";
 import { loadConfig } from "../config/load.js";
 import { seedConfigIfAbsent } from "../config/defaults.js";
 import { SecretStore } from "../secrets/store.js";
@@ -17,6 +19,17 @@ import { AP_CONNECTION, DEFAULT_AP_PASSPHRASE } from "../net/profiles.js";
 import { systemRunner, type CommandRunner } from "../net/runner.js";
 import { systemClock, type Clock, type Renderer } from "../apply/types.js";
 import { DEFAULT_CONFIG, type Config } from "../schema/config.js";
+
+/**
+ * How long after an administrator password is set before the console is
+ * restarted into its provisioned shape.
+ *
+ * The restart kills the process that is answering the operator's browser, so
+ * it has to happen after that answer is on its way. A second and a half is
+ * far longer than a local socket round trip and a page write, and it is time
+ * the operator spends reading "the console is restarting".
+ */
+export const PROVISION_RESTART_DELAY_MS = 1_500;
 
 export interface ServerOptions {
   socketPath: string;
@@ -39,6 +52,11 @@ export interface ServerOptions {
    * may wait on the wall clock in a test.
    */
   clock?: Clock;
+  /**
+   * Where the console lives, and whether there is one to render at all.
+   * Absent means no ConsoleRenderer is assembled — see BuildRenderersOptions.
+   */
+  console?: Partial<ConsolePaths>;
 }
 
 export interface BuildRenderersOptions {
@@ -47,6 +65,13 @@ export interface BuildRenderersOptions {
   log?: (line: string) => void;
   /** Drives the network renderer's bounded wait for a radio. See waitForRadio. */
   clock?: Clock;
+  /**
+   * Where the console lives. **Given, never defaulted**: a ConsoleRenderer is
+   * assembled only when a caller says where the console is, so nothing in a
+   * test can write to /opt/yonder by forgetting to override a path. The
+   * production values come from consolePathsFromEnv(), in main().
+   */
+  console?: Partial<ConsolePaths>;
 }
 
 /**
@@ -68,6 +93,8 @@ export function buildRenderers(opts: BuildRenderersOptions): {
   renderers: Renderer[];
   /** The same renderer as `renderers[0]`, typed, for waitForRadio. */
   renderer: NetworkRenderer;
+  /** Present only when `opts.console` said where the console is. */
+  consoleRenderer?: ConsoleRenderer;
   secrets: SecretStore;
   client: NmcliClient;
   generated: string[];
@@ -79,7 +106,45 @@ export function buildRenderers(opts: BuildRenderersOptions): {
   if (secrets.ensureValue("ap_psk", DEFAULT_AP_PASSPHRASE).created) generated.push("ap_psk");
   const client = new NmcliClient(opts.runner ?? systemRunner, log);
   const renderer = new NetworkRenderer({ client, secrets, log, clock: opts.clock });
-  return { renderers: [renderer], renderer, secrets, client, generated };
+
+  // After the network renderer, deliberately. Renderers run in order, so this
+  // puts the console behind a network that has already settled: if the
+  // console then fails and the apply rolls back, the rollback re-renders a
+  // network that was working rather than one that was never rendered at all.
+  // The reverse order would mean a console failure could leave the access
+  // point untouched by either pass, which is rule 6.
+  const consoleRenderer = opts.console === undefined
+    ? undefined
+    : new ConsoleRenderer({
+      runner: opts.runner ?? systemRunner,
+      credential: new AdminCredential(secrets),
+      paths: opts.console,
+      log,
+    });
+
+  return {
+    renderers: consoleRenderer === undefined ? [renderer] : [renderer, consoleRenderer],
+    renderer,
+    ...(consoleRenderer === undefined ? {} : { consoleRenderer }),
+    secrets,
+    client,
+    generated,
+  };
+}
+
+/**
+ * Where the console is on a real device.
+ *
+ * Read from the environment with the installed paths as defaults, in one
+ * place, so that the only thing which decides a production path is this
+ * function and the only thing which decides a test path is the test.
+ */
+export function consolePathsFromEnv(env: NodeJS.ProcessEnv = process.env): ConsolePaths {
+  const overrides: Partial<ConsolePaths> = {};
+  if (env.YONDER_CONSOLE_SETTINGS !== undefined) overrides.settings = env.YONDER_CONSOLE_SETTINGS;
+  if (env.YONDER_CONSOLE_USERDIR !== undefined) overrides.userDir = env.YONDER_CONSOLE_USERDIR;
+  if (env.YONDER_SOCKET !== undefined) overrides.socket = env.YONDER_SOCKET;
+  return consolePaths(overrides);
 }
 
 export async function startServer(opts: ServerOptions): Promise<{ close(): Promise<void> }> {
@@ -126,6 +191,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
       secretsPath: opts.secretsPath ?? "/etc/yonder/secrets.yaml",
       runner: opts.runner,
       clock,
+      ...(opts.console === undefined ? {} : { console: opts.console }),
     });
   } catch (e) {
     const message = (e as Error).message;
@@ -244,7 +310,47 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   // rather than assuming a device with an unreadable secret store has no
   // lock on it. GET /status is unaffected, so the fault is still visible.
   const credential = built === undefined ? undefined : new AdminCredential(built.secrets);
-  const route = createRouter({ engine, configPath: opts.configPath, credential });
+
+  // Setting the administrator password changes what the console *is* — an
+  // empty flows file and one page become the console proper behind a login —
+  // and that shape is decided when settings.js is generated. So the file has
+  // to be rewritten and the console restarted, or the operator sets a
+  // password and the setup page stays until something else happens to apply.
+  //
+  // Deferred, and that is the whole point of the timer. Restarting the
+  // console is what answers the operator's browser: kill it while it is still
+  // writing the "the password is set" page and they get a connection reset
+  // instead, on the one interaction every single user has. The delay is
+  // generous by the standards of a local socket and costs nothing.
+  //
+  // Only the console renderer, not engine.renderCurrent(): a password is not
+  // a network change, and there is no reason for setting one to issue a
+  // single nmcli command.
+  let provisionTimer: unknown;
+  const consoleRenderer = built?.consoleRenderer;
+  const onProvisioned = consoleRenderer === undefined ? undefined : (): void => {
+    if (provisionTimer !== undefined) clock.clearTimer(provisionTimer);
+    provisionTimer = clock.setTimer(PROVISION_RESTART_DELAY_MS, () => {
+      provisionTimer = undefined;
+      void (async () => {
+        try {
+          await consoleRenderer.render(loadConfig(opts.configPath));
+        } catch (e) {
+          // Never fatal. The password is set either way, and a console that
+          // did not restart comes back into the right mode on the next apply
+          // or the next boot.
+          warn(`could not restart the console after the password was set: ${(e as Error).message}`);
+        }
+      })();
+    });
+  };
+
+  const route = createRouter({
+    engine,
+    configPath: opts.configPath,
+    credential,
+    ...(onProvisioned === undefined ? {} : { onProvisioned }),
+  });
 
   const server: Server = createServer((req, res) => {
     const chunks: Buffer[] = [];
@@ -330,6 +436,10 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
         // render — on behalf of a process that has already closed.
         watchdog.stop();
         built?.renderer.cancelRadioWait();
+        // The third timer this daemon can own. Same reason as the other two:
+        // one still armed after close() would restart a console on behalf of
+        // a process that has already let go of its socket.
+        if (provisionTimer !== undefined) clock.clearTimer(provisionTimer);
         server.close(() => {
           if (existsSync(opts.socketPath)) unlinkSync(opts.socketPath);
           resolve();
@@ -345,6 +455,9 @@ async function main(): Promise<void> {
     journalPath: process.env.YONDER_JOURNAL ?? "/var/lib/yonder/apply.json",
     secretsPath: process.env.YONDER_SECRETS ?? "/etc/yonder/secrets.yaml",
     renderers: [],
+    // The one place production console paths are decided. Everywhere else
+    // they are given, so nothing can write to /opt/yonder by default.
+    console: consolePathsFromEnv(),
   });
   process.stdout.write("yonder-core listening\n");
 }

@@ -191,6 +191,61 @@ describe("POST /admin/password", () => {
   });
 });
 
+/**
+ * Setting the password changes what the console is, and that shape is decided
+ * when settings.js is generated — so something has to rewrite it. The route's
+ * side of that contract is narrow and worth pinning: called once, on success
+ * only, and never able to turn a set password into a failed request.
+ */
+describe("the console-restart hook", () => {
+  function withHook(hook: () => void): Router {
+    const engine = new ApplyEngine({ configPath, journalPath, renderers: [noopRenderer], clock: frozenClock });
+    return createRouter({
+      engine,
+      configPath,
+      credential: new AdminCredential(new SecretStore(secretsPath)),
+      onProvisioned: hook,
+    });
+  }
+
+  it("is called once when a password is set", async () => {
+    let calls = 0;
+    const r = withHook(() => { calls += 1; });
+    await r("POST", "/admin/password", { password: GOOD });
+    expect(calls).toBe(1);
+  });
+
+  it("is not called when the password is refused", async () => {
+    let calls = 0;
+    const r = withHook(() => { calls += 1; });
+    await r("POST", "/admin/password", { password: "short" });
+    await r("POST", "/admin/password", {});
+    expect(calls).toBe(0);
+  });
+
+  it("is not called again when a second attempt is refused as already set", async () => {
+    let calls = 0;
+    const r = withHook(() => { calls += 1; });
+    await r("POST", "/admin/password", { password: GOOD });
+    const again = await r("POST", "/admin/password", { password: "another one entirely" });
+    expect(again.status).toBe(409);
+    expect(calls).toBe(1);
+  });
+
+  it("cannot turn a password that was set into a failed request", async () => {
+    // The password is stored either way. A console that did not get restarted
+    // comes back into the right mode on the next apply or the next boot,
+    // which is not worth telling the operator their password did not take.
+    const captured = await captureLog(async () => {
+      const r = withHook(() => { throw new Error("systemctl is not here"); });
+      const res = await r("POST", "/admin/password", { password: GOOD });
+      expect(res.status).toBe(200);
+      expect((await r("GET", "/console/state", undefined)).body).toEqual({ provisioned: true });
+    });
+    expect(captured).toContain("could not be scheduled");
+  });
+});
+
 describe("POST /admin/verify", () => {
   it("is true for the password and false for anything else", async () => {
     const r = provisionedRouter();

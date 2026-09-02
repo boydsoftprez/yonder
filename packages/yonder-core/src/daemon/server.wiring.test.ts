@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildRenderers } from "./server.js";
+import { buildRenderers, consolePathsFromEnv } from "./server.js";
 import { DEFAULT_AP_PASSPHRASE } from "../net/profiles.js";
 import { saveConfig } from "../config/save.js";
 import { DEFAULT_CONFIG } from "../schema/config.js";
@@ -22,6 +22,65 @@ describe("buildRenderers", () => {
       runner: run,
     });
     expect(renderers.map((r) => r.name)).toEqual(["network"]);
+  });
+
+  /**
+   * Absent unless a caller says where the console is. That is what stops a
+   * test — or a future call site that forgot an option — writing to
+   * /opt/yonder on whatever machine it happens to run on. Production supplies
+   * the paths from consolePathsFromEnv, in main().
+   */
+  it("produces no console renderer when nobody said where the console is", () => {
+    const run: CommandRunner = async () => ({ code: 0, stdout: "", stderr: "" });
+    const built = buildRenderers({ secretsPath: join(dir, "secrets.yaml"), runner: run });
+    expect(built.consoleRenderer).toBeUndefined();
+    expect(built.renderers.map((r) => r.name)).toEqual(["network"]);
+  });
+
+  /**
+   * Order is load-bearing. Renderers run in sequence, so the console goes
+   * behind a network that has already settled: if the console then fails and
+   * the apply rolls back, the rollback re-renders a network that was working.
+   * The reverse order would let a console failure leave the access point
+   * untouched by either pass, which is rule 6.
+   */
+  it("puts the console renderer after the network one", () => {
+    const run: CommandRunner = async () => ({ code: 0, stdout: "", stderr: "" });
+    const built = buildRenderers({
+      secretsPath: join(dir, "secrets.yaml"),
+      runner: run,
+      console: { settings: join(dir, "console", "settings.js") },
+    });
+    expect(built.renderers.map((r) => r.name)).toEqual(["network", "console"]);
+    expect(built.consoleRenderer).toBeDefined();
+  });
+});
+
+describe("consolePathsFromEnv", () => {
+  it("uses the installed paths when the environment says nothing", () => {
+    expect(consolePathsFromEnv({})).toEqual({
+      settings: "/opt/yonder/console/settings.js",
+      userDir: "/var/lib/yonder/console",
+      socket: "/run/yonder/core.sock",
+      coreTree: "/opt/yonder/packages/yonder-core",
+      unit: "yonder-console.service",
+    });
+  });
+
+  it("takes the socket from the same variable the daemon binds", () => {
+    // One variable, so the daemon and the console cannot end up pointed at
+    // two different sockets — which would be a console that can never
+    // authenticate anyone and a device nobody can log in to.
+    expect(consolePathsFromEnv({ YONDER_SOCKET: "/tmp/probe.sock" }).socket).toBe("/tmp/probe.sock");
+  });
+
+  it("lets the settings path and userDir be moved", () => {
+    const paths = consolePathsFromEnv({
+      YONDER_CONSOLE_SETTINGS: "/srv/console/settings.js",
+      YONDER_CONSOLE_USERDIR: "/srv/console/state",
+    });
+    expect(paths.settings).toBe("/srv/console/settings.js");
+    expect(paths.userDir).toBe("/srv/console/state");
   });
 
   /**
