@@ -1,0 +1,61 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[Unit]
+Description=Yonder console
+Documentation=https://github.com/boydsoftprez/yonder
+After=network.target yonder-core.service
+
+# Wants=, never Requires=. The console asks yonder-core whether a password is
+# correct, so it needs the daemon to be useful — but a Requires= would make a
+# console that cannot start able to stop the daemon with it, and the daemon is
+# what renders the network and holds the access point up. A device whose
+# console is broken must still be a device you can reach (R-SEC-12, rule 6).
+Wants=yonder-core.service
+
+[Service]
+Type=simple
+
+# The console is not root. It reads no secret and writes no system state: it
+# serves pages and asks the daemon questions over /run/yonder/core.sock, which
+# it can open because the socket is root:yonder 0660 and this account is in
+# that group (K-01, R-SEC-04). The administrator password hash stays in
+# /etc/yonder/secrets.yaml, 0600 root, where this process cannot read it — so
+# a compromise of the console yields nothing to crack offline (ADR-0007).
+#
+# installer/roles/10-base.sh creates the account and assert_unit_accounts
+# checks it before this unit is enabled; a User= or Group= naming an account
+# that does not exist is status=217/USER on every start.
+User=yonder
+Group=yonder
+
+# /usr/local/bin/yonder-node, not /usr/bin/node, for the same reason
+# yonder-core.service names it: a unit's ExecStart is an absolute path that
+# systemd resolves against nothing, and the offline route puts its runtime at
+# /opt/yonder/node/bin/node. The installer's link_node points this fixed path
+# at whichever node the install resolved.
+ExecStart=/usr/local/bin/yonder-node /opt/yonder/console/node_modules/node-red/red.js -s /opt/yonder/console/settings.js
+Restart=always
+RestartSec=3
+
+# Node-RED's userDir. Declared here as well as created by the installer, so
+# systemd re-establishes yonder:yonder on it at every start rather than
+# leaving the console's ability to write its own state depending on what last
+# touched /var/lib/yonder.
+StateDirectory=yonder/console
+StateDirectoryMode=0750
+WorkingDirectory=/var/lib/yonder/console
+
+# This is the internet-adjacent surface: it is what a browser talks to, over
+# the access point and over a cell link. Everything it does not need is off.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+# The only thing it writes. /run stays read-only, which is no obstacle:
+# connecting to a Unix socket is not a write to the filesystem holding it.
+ReadWritePaths=/var/lib/yonder/console
+
+[Install]
+WantedBy=multi-user.target

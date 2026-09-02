@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!--
+  The one page a device with no administrator password serves.
+
+  Self-contained by requirement, not by preference (R-UI-01): no font, no
+  stylesheet, no script and no image is fetched from anywhere. A device on an
+  aircraft has no route to the internet, and an operator standing in a field
+  with a tablet has none either. Everything this page needs is in this file.
+
+  Day-themed, because day is the default (R-UI-07) and because in direct
+  sunlight a dark screen is a mirror. Night is a mode the console gains later;
+  this page just must not be dark.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Set an administrator password</title>
+<style>
+  :root {
+    color-scheme: light;
+    --ink: #14181d;
+    --quiet: #4a5560;
+    --paper: #f2f4f6;
+    --card: #ffffff;
+    --line: #c9d1d9;
+    --accent: #16507a;
+    --warn: #8a2f18;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 1.5rem 1rem 3rem;
+    background: var(--paper);
+    color: var(--ink);
+    font: 17px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  main {
+    max-width: 34rem;
+    margin: 0 auto;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 1.5rem;
+  }
+  h1 { font-size: 1.5rem; margin: 0 0 .25rem; letter-spacing: -0.01em; }
+  .lede { color: var(--quiet); margin: 0 0 1.5rem; }
+  label { display: block; font-weight: 600; margin: 1.1rem 0 .35rem; }
+  input[type=password] {
+    width: 100%;
+    padding: .7rem .75rem;
+    font: inherit;
+    color: var(--ink);
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 7px;
+  }
+  input[type=password]:focus { outline: 3px solid #bcd6ea; border-color: var(--accent); }
+  .hint { color: var(--quiet); font-size: .9rem; margin: .35rem 0 0; }
+  button {
+    margin-top: 1.5rem;
+    width: 100%;
+    padding: .8rem 1rem;
+    font: inherit;
+    font-weight: 600;
+    color: #fff;
+    background: var(--accent);
+    border: 0;
+    border-radius: 7px;
+    cursor: pointer;
+  }
+  .note {
+    margin: 1.75rem 0 0;
+    padding: .9rem 1rem;
+    border-left: 4px solid var(--line);
+    background: var(--paper);
+    color: var(--quiet);
+    font-size: .93rem;
+  }
+  .note strong { color: var(--ink); }
+  .error {
+    margin: 0 0 1.25rem;
+    padding: .8rem 1rem;
+    border-left: 4px solid var(--warn);
+    background: #fbeeea;
+    color: var(--warn);
+    font-weight: 600;
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>Set an administrator password</h1>
+  <p class="lede">This device has no administrator password yet, so it offers nothing else.</p>
+
+  <!--yonder:error-->
+
+  <form method="post" action="/setup">
+    <label for="password">Administrator password</label>
+    <input id="password" name="password" type="password" autocomplete="new-password" required
+           minlength="8" autofocus>
+    <p class="hint">At least 8 characters. Length is what makes a password hard to guess.</p>
+
+    <label for="confirm">Type it again</label>
+    <input id="confirm" name="confirm" type="password" autocomplete="new-password" required
+           minlength="8">
+    <p class="hint">This password cannot be changed or recovered from the console yet, so a
+      typo here would lock you out. Getting back in would mean taking the card out and
+      removing <code>admin_password</code> from <code>/etc/yonder/secrets.yaml</code>.</p>
+
+    <button type="submit">Set the password</button>
+  </form>
+
+  <p class="note">
+    <strong>The Wi-Fi passphrase you used to get here is a published default.</strong>
+    It is the same on every Yonder device and it is written in the documentation, so it
+    keeps nobody out. This password is the lock: it is what stands in front of reading or
+    changing anything on this device, and in front of anything that reaches the aircraft.
+  </p>
+</main>
+</body>
+</html>

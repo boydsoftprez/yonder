@@ -106,24 +106,62 @@ node_major() {
     node -p 'process.versions.node.split(".")[0]' 2>/dev/null || true
 }
 
-# Refuse to build against a node older than yonder-core supports. The distro
-# package is whatever the release froze — bookworm's is 18 — while the daemon
-# is ESM with NodeNext resolution and declares engines.node >= 20. Without this
-# the install appears to succeed and the service fails at run time.
+# The major.minor of the node on PATH, or nothing if there is no node.
+node_version() {
+    command -v node >/dev/null 2>&1 || return 0
+    node -p 'process.versions.node.split(".").slice(0, 2).join(".")' 2>/dev/null || true
+}
+
+# Whether the node on PATH is at least <major>[.<minor>]. Silent; returns 1
+# when it is too old and 2 when there is no node at all, so a caller can tell
+# "wrong version" from "nothing to check".
+node_at_least() {
+    nal_want="$1"
+    nal_want_major=${nal_want%%.*}
+    case "$nal_want" in
+        *.*) nal_want_minor=${nal_want#*.} ;;
+        *)   nal_want_minor=0 ;;
+    esac
+    nal_have=$(node_version)
+    [ -n "$nal_have" ] || return 2
+    nal_have_major=${nal_have%%.*}
+    nal_have_minor=${nal_have#*.}
+    [ "$nal_have_major" -gt "$nal_want_major" ] && return 0
+    [ "$nal_have_major" -lt "$nal_want_major" ] && return 1
+    [ "$nal_have_minor" -lt "$nal_want_minor" ] && return 1
+    return 0
+}
+
+# Refuse to build against a node older than the calling role supports. The
+# distro package is whatever the release froze — bookworm's is 18 — while the
+# daemon is ESM with NodeNext resolution and declares engines.node >= 20.
+# Without this the install appears to succeed and the service fails at run
+# time.
+#
+#     require_node <major>[.<minor>]
+#
+# A minor is accepted because one of the floors here needs one, and a
+# major-only check was wrong in a way nothing downstream could catch. The
+# console's generated settings.js is CommonJS that `require()`s an ES module;
+# node supports that from **22.12**, and on 22.0 through 22.11 it throws
+# ERR_REQUIRE_ESM on every start. Node-RED's own floor is 22.9, so
+# `require_node 22` admitted three releases — 22.9, 22.10, 22.11 — that pass
+# every check this installer makes and produce a console that crash-loops on a
+# board. The vendored payload is 24, so this only bites an install running on
+# a distro node, which is exactly the install nobody tests before flying.
 require_node() {
     want="$1"
-    major=$(node_major)
-    if [ -z "$major" ]; then
+    have=$(node_version)
+    if [ -z "$have" ]; then
         if [ "$DRY_RUN" = "1" ]; then
             log "no node here; a real run requires node $want or newer"
             return 0
         fi
-        die "node was not installed; yonder-core needs node $want or newer"
+        die "node was not installed; this step needs node $want or newer"
     fi
-    if [ "$major" -lt "$want" ]; then
-        die "node $major is too old; yonder-core needs node $want or newer"
-    fi
-    log "node $major meets the minimum of $want"
+    node_at_least "$want" \
+        || die "node $have is too old; this step needs node $want or newer"
+    log "node $have meets the minimum of $want"
 }
 
 # Point $YONDER_NODE_LINK at the node this run resolved.
@@ -317,4 +355,69 @@ assert_module_graph() {
     fi
     die "$amg_tree/$amg_entry cannot be loaded by $amg_node: $amg_why
 the daemon would fail on its first import on every start, and under Restart=always that is a crash loop with no socket, no access point and no console"
+}
+
+# The post-condition on a unit that names an account: the account is there.
+#
+#     assert_unit_accounts <unit-file>
+#
+# The sibling of assert_unit_exec, one field over. That one answers "is there
+# an executable at the path ExecStart names"; this one answers "and is there a
+# user and a group for systemd to run it as". A `User=` or `Group=` naming an
+# account that does not exist is not a warning — the service fails at step
+# USER with status=217 before it executes anything, on every start, and under
+# Restart=always that is a board that boots, fails and boots again for ever.
+#
+# For yonder-core that failure is total: no daemon means no render, so no
+# access point, so no console and no way in at all. It is the same class of
+# defect assert_unit_exec was written for and it is load-bearing against rule
+# 6, which is why it is checked here rather than discovered after a flash.
+#
+# Split like assert_unit_exec, and for the same reason. Reading the unit is
+# pure string work and happens on a dry run too, so a unit and the installer
+# drifting apart is caught in CI on a machine with no systemd and no account
+# database. Resolving the accounts needs the real system the service will
+# start against, so on a dry run it says what it would have checked.
+assert_unit_accounts() {
+    aua_unit="$1"
+    [ -f "$aua_unit" ] || die "$aua_unit is not there to check"
+
+    # The first word of the value: systemd accepts `User=yonder` and a numeric
+    # id equally, and either is something getent can be asked about.
+    aua_users=$(sed -n 's/^User=[[:space:]]*\([^[:space:]]\{1,\}\).*/\1/p' "$aua_unit")
+    aua_groups=$(sed -n 's/^Group=[[:space:]]*\([^[:space:]]\{1,\}\).*/\1/p' "$aua_unit")
+
+    if [ -z "$aua_users" ] && [ -z "$aua_groups" ]; then
+        log "$aua_unit names no User= or Group=; it runs as root"
+        return 0
+    fi
+
+    if [ "$DRY_RUN" = "1" ]; then
+        for aua_name in $aua_users; do
+            log "would check that the user $aua_name exists (User= in $aua_unit)"
+        done
+        for aua_name in $aua_groups; do
+            log "would check that the group $aua_name exists (Group= in $aua_unit)"
+        done
+        return 0
+    fi
+
+    # Stopping here is deliberate. The alternative to a check that cannot run
+    # is not "no check": it is enabling a unit nobody has verified, which is
+    # the crash loop this function exists to prevent. A loud failure during an
+    # install, where the message can be read, beats a silent one on a board
+    # that has already been fitted to an aircraft.
+    command -v getent >/dev/null 2>&1 \
+        || die "no getent here, so the accounts $aua_unit names cannot be checked; refusing to enable a unit that may fail at step USER (217) on every start"
+
+    for aua_name in $aua_users; do
+        getent passwd "$aua_name" >/dev/null 2>&1 \
+            || die "$aua_unit runs as user '$aua_name', which does not exist; the service would fail at step USER (217) on every start"
+        log "$aua_unit runs as user $aua_name, which exists"
+    done
+    for aua_name in $aua_groups; do
+        getent group "$aua_name" >/dev/null 2>&1 \
+            || die "$aua_unit runs as group '$aua_name', which does not exist; the service would fail at step USER (217) on every start"
+        log "$aua_unit runs as group $aua_name, which exists"
+    done
 }

@@ -9,7 +9,7 @@
     "yonder-core": "./dist/daemon/server.js"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node scripts/copy-assets.mjs",
     "test": "vitest run",
     "schema": "tsc -p tsconfig.json && node dist/schema/generate.js ../../config/schema/yonder.schema.json",
     "defaults": "tsc -p tsconfig.json && node dist/config/defaults.js ../../config/defaults/config.yaml"

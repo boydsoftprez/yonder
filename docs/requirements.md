@@ -152,6 +152,7 @@ Parameter writes are vehicle commands. R-CMD applies to every requirement here.
 | R-NET-09 | Be discoverable on a local network by hostname | 2 |
 | R-NET-10 | Report per-interface throughput | 3 |
 | R-NET-11 | Detect and report loss of the primary link, and act on it according to configuration | 2 |
+| R-NET-12 | **One Wi-Fi radio serves one mode at a time, and which one is decided here rather than by the network stack.** Where a board has a single radio and a client network is configured, the client wins and the access point is taken down deliberately — and the client is raised *before* the access point is dropped, because the operator submitting those credentials is reaching the device through the radio being retuned. A change that leaves the radio on no network brings the access point back without waiting for the confirmation window to expire | 1 |
 
 ## R-VPN — Remote access
 
@@ -209,6 +210,7 @@ Parameter writes are vehicle commands. R-CMD applies to every requirement here.
 | R-CFG-07 | Never require a vendor tool, an imaging wizard or a network service to configure a device | 1 |
 | R-CFG-08 | **A freshly flashed device reaches a joinable, usable state with no operator input.** A default configuration is seeded, the access point comes up, and the console is served — before anyone has configured anything | 1 |
 | R-CFG-09 | **A configuration written by an earlier version of Yonder still loads.** A key a later version has retired is dropped, named in the log and ignored; a key that was never a Yonder setting is still rejected, so a misspelling can never pass for a setting. Loading does not rewrite the operator's file. **An upgrade must never strand a device on a configuration its own daemon refuses to read** | 1 |
+| R-CFG-10 | **A change that moves the operator's own connection gets a longer window to be confirmed in than one that does not.** R-CFG-03's timer is measured from the apply; a change that takes the access point off the air costs the operator the time to notice, find the device again on another network and open the console there, and a window budgeted for a change they watched happen reverts a good configuration out from under them. Both windows are named in the configuration | 1 |
 
 ## R-HW — Hardware support
 
@@ -243,8 +245,10 @@ Parameter writes are vehicle commands. R-CMD applies to every requirement here.
 | R-SEC-06 | Contact no external service, ever. No activation, no licence check, no usage reporting | 1 |
 | R-SEC-07 | Include no credential material in a published image | 1 |
 | R-SEC-08 | Offer TLS for the web interface | 2 |
-| R-SEC-09 | **Until an administrator password has been set, the console offers no function but setting one.** No configuration read, no command, no status beyond what that step needs | 1 |
+| R-SEC-09 | **Until an administrator password has been set, the console offers no function but setting one.** No configuration read, no command, and no status beyond two things: whether a password has been set, and whether the device is healthy enough to set one. The second is a deliberate carve-out — a board that cannot say *why* it is refusing is a board that goes back in a box — and it is bounded to state that names no configuration, no interface, no address and no credential | 1 |
 | R-SEC-10 | **Emit no credential anywhere a credential does not belong** — a log line, an error message, a support bundle, or an API response. Redaction happens where the value is captured, not where it is printed, so a new caller cannot reintroduce the leak | 1 |
+| R-SEC-11 | **Authentication fails closed.** A component that cannot reach, or cannot get an answer from, whatever holds a credential refuses the login. Being unable to check a password is never treated as the password being right, and a device that cannot tell whether it has a lock behaves as though it has one nobody can open | 1 |
+| R-SEC-12 | **A failure of the interface never costs the network.** Nothing that serves the console — the process, its configuration, its dependencies — may stop, restart or reconfigure the service that keeps the device reachable. A console that will not start is a device you can still reach | 1 |
 
 ## R-UI — Interface
 

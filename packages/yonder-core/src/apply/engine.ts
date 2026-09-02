@@ -7,6 +7,12 @@ import { ConfigError, formatIssues } from "../config/errors.js";
 import { loadConfig } from "../config/load.js";
 import { saveConfig } from "../config/save.js";
 import { warn } from "../log.js";
+// A pure function of Config, imported for one question this engine cannot
+// answer on its own: does this change move the Wi-Fi radio between modes?
+// Which mode a configuration puts the radio in is the network layer's
+// knowledge, and a second copy of that rule here is a copy that would drift
+// from the one the renderer actually acts on.
+import { wifiMode } from "../net/profiles.js";
 import { Journal } from "./journal.js";
 import {
   systemClock,
@@ -24,6 +30,14 @@ export interface ApplyEngineOptions {
   renderers: Renderer[];
   clock?: Clock;
   timeoutMs?: number;
+  /**
+   * The window for an apply that moves the Wi-Fi radio between access-point
+   * and client mode. Longer than `timeoutMs`, because such an apply takes the
+   * access point off the air and the operator has to find the device again on
+   * a different network before they can confirm anything — see
+   * `config.apply.radioTimeout`.
+   */
+  radioTimeoutMs?: number;
   renderTimeoutMs?: number;
   /**
    * Set when the caller could not fully assemble `renderers` — daemon/
@@ -78,6 +92,7 @@ export class ApplyEngine {
   private readonly renderers: Renderer[];
   private readonly clock: Clock;
   private readonly timeoutMs: number;
+  private readonly radioTimeoutMs: number;
   private readonly renderTimeoutMs: number;
   private readonly journal: Journal;
   private readonly degraded?: string;
@@ -96,6 +111,7 @@ export class ApplyEngine {
     this.renderers = opts.renderers;
     this.clock = opts.clock ?? systemClock;
     this.timeoutMs = opts.timeoutMs ?? 120_000;
+    this.radioTimeoutMs = opts.radioTimeoutMs ?? 300_000;
     this.renderTimeoutMs = opts.renderTimeoutMs ?? 60_000;
     this.journal = new Journal(opts.journalPath);
     this.degraded = opts.degraded;
@@ -127,6 +143,10 @@ export class ApplyEngine {
      *  default, not the operator's actual previous configuration. See the
      *  loadConfig catch below. */
     previousIsDefault?: boolean;
+    /** Set only when true: this apply moves the Wi-Fi radio, so it got the
+     *  longer confirmation window. The console says so before it happens and
+     *  has to be able to say so afterwards. */
+    movesRadio?: boolean;
   }> {
     // Checked before anything else: rendering against a renderer set the
     // caller told us is incomplete would write config.yaml, report 200, and
@@ -250,11 +270,39 @@ export class ApplyEngine {
       throw e;
     }
 
-    this.state = "pending";
-    this.expiresAt = this.clock.now() + this.timeoutMs;
-    this.timer = this.clock.setTimer(this.timeoutMs, () => { void this.revert(); });
+    // The longer window, and only for the apply that needs it.
+    //
+    // A change that does not touch which mode the radio is in leaves the
+    // operator's connection exactly where it was, and they confirm in
+    // seconds; giving that five minutes only means a change that broke the
+    // device sits there for five minutes. A change that *does* move the radio
+    // takes the access point off the air under them, and they have to find
+    // the device again on a different network before they can confirm
+    // anything. Same requirement (R-CFG-03), two very different amounts of
+    // work between the apply and the confirmation.
+    //
+    // Compared on the mode, not on the client settings: changing the
+    // passphrase of a network already configured is not a radio move, and
+    // neither is renaming the access point.
+    const movesRadio = wifiMode(previous) !== wifiMode(parsed.data);
+    const window = movesRadio ? this.radioTimeoutMs : this.timeoutMs;
+    if (movesRadio) {
+      warn(
+        `this apply moves the wifi radio to ${wifiMode(parsed.data)} mode; `
+        + `confirm it within ${Math.round(window / 1000)} s or it reverts`,
+      );
+    }
 
-    return { id, expiresAt: this.expiresAt, ...(previousIsDefault ? { previousIsDefault } : {}) };
+    this.state = "pending";
+    this.expiresAt = this.clock.now() + window;
+    this.timer = this.clock.setTimer(window, () => { void this.revert(); });
+
+    return {
+      id,
+      expiresAt: this.expiresAt,
+      ...(previousIsDefault ? { previousIsDefault } : {}),
+      ...(movesRadio ? { movesRadio } : {}),
+    };
   }
 
   /** Operator saw the device still working. Keep the change. */

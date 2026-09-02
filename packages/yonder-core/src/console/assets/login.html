@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!--
+  The page a provisioned console serves to anyone without a session.
+
+  Self-contained by requirement (R-UI-01): nothing here is fetched from
+  anywhere. Day-themed for the same reason as the setup page (R-UI-07).
+
+  A plain form, no script. That is not minimalism for its own sake: an
+  operator reaching this over a cell link with hundreds of milliseconds of
+  latency (R-UI-06) should be looking at a usable page after one round trip,
+  and a browser with no JavaScript enabled should still be able to log in.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Yonder — sign in</title>
+<style>
+  :root {
+    color-scheme: light;
+    --ink: #14181d;
+    --quiet: #4a5560;
+    --paper: #f2f4f6;
+    --card: #ffffff;
+    --line: #c9d1d9;
+    --accent: #16507a;
+    --warn: #8a2f18;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 3rem 1rem;
+    background: var(--paper);
+    color: var(--ink);
+    font: 17px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  main {
+    max-width: 26rem;
+    margin: 0 auto;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 1.75rem;
+  }
+  h1 { font-size: 1.4rem; margin: 0 0 1.25rem; letter-spacing: -0.01em; }
+  label { display: block; font-weight: 600; margin: 0 0 .35rem; }
+  input[type=password] {
+    width: 100%;
+    padding: .7rem .75rem;
+    font: inherit;
+    color: var(--ink);
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 7px;
+  }
+  input[type=password]:focus { outline: 3px solid #bcd6ea; border-color: var(--accent); }
+  button {
+    margin-top: 1.25rem;
+    width: 100%;
+    padding: .8rem 1rem;
+    font: inherit;
+    font-weight: 600;
+    color: #fff;
+    background: var(--accent);
+    border: 0;
+    border-radius: 7px;
+    cursor: pointer;
+  }
+  .error {
+    margin: 0 0 1.25rem;
+    padding: .8rem 1rem;
+    border-left: 4px solid var(--warn);
+    background: #fbeeea;
+    color: var(--warn);
+    font-weight: 600;
+  }
+  .note { margin: 1.5rem 0 0; color: var(--quiet); font-size: .9rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Yonder</h1>
+
+  <!--yonder:error-->
+
+  <form method="post" action="/login">
+    <label for="password">Administrator password</label>
+    <input id="password" name="password" type="password" autocomplete="current-password"
+           required autofocus>
+    <button type="submit">Sign in</button>
+  </form>
+
+  <p class="note">Signing in ends when this console restarts, which it does whenever the
+    device's configuration changes.</p>
+</main>
+</body>
+</html>

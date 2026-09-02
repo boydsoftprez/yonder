@@ -1,0 +1,40 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!--
+  The editor half of choose a theme.
+
+  Node-RED finds this by basename beside the node's .js, and without it the
+  flow editor shows the node as "unknown" even though the runtime registered
+  it. It is a form and a registration, and deliberately nothing else: no
+  behaviour lives here (CLAUDE.md rule 2 in spirit — a diff has to be
+  readable), and no asset is fetched from anywhere (R-UI-01).
+-->
+<script type="text/html" data-template-name="yonder-theme">
+  <div class="form-row">
+    <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name" />
+  </div>
+</script>
+
+<script type="text/html" data-help-name="yonder-theme">
+<p>Posts the chosen theme — <code>day</code> or <code>night</code> — to
+<code>POST /ui/theme</code>, as a bare string in <code>msg.payload</code> or as
+<code>{ theme }</code>.</p>
+<p>The daemon reads the configuration, sets <code>ui.theme</code> on a copy and
+puts the whole document through the apply engine, so this is an apply and what
+comes back is a <b>pending</b> command state. It does not move the radio, so it
+gets the ordinary confirmation window and not the long one a Wi-Fi join needs.</p>
+<p>This node caches nothing. The daemon holds the configuration, which is the
+only place it is true.</p>
+</script>
+
+<script type="text/javascript">
+  RED.nodes.registerType("yonder-theme", {
+    category: "yonder",
+    color: "#c7d4e0",
+    defaults: { name: { value: "" } },
+    inputs: 1,
+    outputs: 1,
+    icon: "font-awesome/fa-adjust",
+    label: function () { return this.name || "choose a theme"; },
+  });
+</script>

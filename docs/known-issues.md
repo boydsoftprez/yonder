@@ -14,17 +14,23 @@ for a second issue, and four comments in `src/apply/` were left pointing at the 
 
 ## Must be resolved during M1
 
-### K-01 · The daemon socket is unreachable by the console
-`systemd/yonder-core.service`, `src/daemon/server.ts`
+### K-01 · ~~The daemon socket is unreachable by the console~~ — CLOSED
 
-The unit sets no `User=` or `Group=`, so the daemon runs as root and the socket is created
-`root:root` mode `0660`. `RuntimeDirectory` is `0750`, so `/run/yonder` is root-only too.
+The unit set no `User=` or `Group=`, so the daemon ran as root and the socket was created
+`root:root` mode `0660`, inside a `/run/yonder` that was `0750` root. The design says
+filesystem ownership is the access control for the configuration API, and nothing expressed
+that model: a console running as anything but root could not open the socket at all.
 
-The design says filesystem ownership is the access control for the configuration API. That
-model is not expressed anywhere yet: as it stands, a console running as a non-root user
-cannot open the socket at all. M1 introduces that console, so M1 has to settle the
-ownership model — a shared group, a `User=`/`Group=` on the unit, and matching modes on the
-runtime directory and the socket.
+Closed in M1b-1. `systemd/yonder-core.service` carries `Group=yonder` — no `User=`, because
+the daemon drives NetworkManager and stays root — so systemd creates `/run/yonder` as
+`root:yonder 0750` and the socket the daemon binds inherits that group; the existing
+`chmodSync(socketPath, 0o660)` in `src/daemon/server.ts` makes it group-writable.
+`installer/roles/10-base.sh` creates the system user and group, and
+`assert_unit_accounts` in `installer/lib/common.sh` refuses to enable a unit naming an
+account that does not exist — a `Group=` with no group is `status=217/USER` on every start,
+which for this daemon is a board with no network at all.
+
+Nothing chowns from code: the unit is the one place this is expressed.
 
 ### K-02 · ~~`apply()` has no render timeout~~ — CLOSED
 
@@ -161,27 +167,50 @@ guarantee M1a exists to satisfy, and it is safer belt-and-braces than clever. Wo
 collapsing to the address test alone the next time this function is touched for a reason,
 not on its own.
 
-### K-13 · The access point and the Wi-Fi client bind the same radio, with no arbitration
+### K-13 · One radio, arbitrated — but still one radio
 `src/net/profiles.ts`, `src/net/renderer.ts`
 
-`desiredProfiles` hands `ifaces.wifi` to both `apProfile` and `clientProfile`. On a
-single-radio board — every Raspberry Pi with built-in Wi-Fi — that is two connection
-profiles claiming one interface, one in AP mode and one in infrastructure mode. Nothing in
-this code decides which wins; NetworkManager does, by whatever its own activation rules say,
-and this repository has never observed what that is. The access point is `autoconnect no`
-and brought up deliberately while the client is `autoconnect yes`, which makes the outcome
-*likely* to be "whichever was activated last", but that is a guess written down, not a
-design.
+**Narrowed in M1b-2, not closed.**
 
-`network.priority` — the ordered egress preference in the configuration — is parsed by the
-schema, carried in every config file, and **read by nothing**. R-NET-06 asks for routing
-metrics generated from it; no code generates any.
+*What it used to say:* `desiredProfiles` handed `ifaces.wifi` to both `apProfile` and
+`clientProfile`, and nothing decided which won. The access point was `autoconnect no` and
+raised deliberately while the client was `autoconnect yes`, which made "whichever was
+activated last" *likely* — a guess written down rather than a design. On the milestone that
+put a Wi-Fi form in front of an operator that was not good enough, because the operator is
+standing in the failure: they submit credentials over the access point, and the access point
+is on the radio being retuned.
 
-Both belong to the milestone that does multi-interface egress, where a modem, Ethernet and
-Wi-Fi have to be ranked against each other for real. It is recorded here rather than left
-silent because "the access point and the client profile fight over one radio" is exactly the
-kind of thing that reads as a bug in the field, and because a configuration key that does
-nothing is worse than an absent one — it invites an operator to set it and expect an effect.
+*What now decides.* `radioPlan` (R-NET-12) is a pure function of the configuration and
+returns an ordered list of activations. Where a client SSID is configured the client wins,
+and the plan is **raise the client, then take the access point down** — in that order, so a
+board that never associates has not already thrown away the thing the operator is reading
+the page on. If the client activation fails and nothing else is on the air, the renderer
+raises the access point itself, regardless of what `ap.enabled` says: R-NET-07 is about
+reachability, and the fallback watchdog cannot be relied on for this because it fires once
+per daemon start and may have spent its shot hours earlier (K-11).
+
+The access point's *profile* is still written in client mode, and deliberately. Deleting it
+is the tidier-looking change and it is the one that breaks R-NET-07 — `nmcli connection up
+yonder-ap` against a profile nothing created is K-16, a device unreachable until a power
+cycle. Only the activation is arbitrated.
+
+**What is still open, and why this keeps its number.**
+
+- **A second virtual interface has never been tried here.** Some chipsets support an access
+  point and a client on one radio at once, and that is the eventual answer. This repository
+  has not observed it working on a board, and unobserved hardware behaviour does not get
+  written down as design. Until it is, joining a network costs the access point.
+- **Scanning while the radio is serving the access point is unobserved.** `GET /net/scan` on
+  a single-radio board is the ordinary case — the operator is scanning over the very access
+  point they are connected through — and whether NetworkManager scans in AP mode, returns a
+  stale cache, or refuses outright has not been seen. `scanForNetworks` says so in a comment.
+  It is the first thing the hardware run should look at.
+- **`network.priority` is still read by nothing.** The ordered egress preference is parsed by
+  the schema and carried in every config file; R-NET-06 asks for routing metrics generated
+  from it and no code generates any. That belongs to the milestone that does multi-interface
+  egress, where a modem, Ethernet and Wi-Fi have to be ranked for real. A configuration key
+  that does nothing is worse than an absent one — it invites an operator to set it and expect
+  an effect.
 
 ### K-14 · ~~A device with an invalid configuration was reachable but not repairable~~ — CLOSED
 
@@ -297,3 +326,114 @@ minimum on a slow board — and it fails in the same direction as K-16, toward a
 that fails rather than a wrong one that succeeds. Recorded, not fixed: the assignment cannot
 simply move earlier without moving the wait itself in front of `listen()`, which is the
 ordering `server.ts` argues against at length and for good reasons.
+
+### K-18 · Console sessions do not survive a console restart
+`src/console/session.ts`
+
+The session signing key is minted per process and the live-session set is in memory, so
+every console restart logs everyone out — and the console is restarted whenever the
+configuration is applied, because `settings.js` is generated from it.
+
+This is deliberate ([ADR-0008](adr/0008-the-setup-gate.md)): there is then no session secret
+at rest, so someone who takes the SD card cannot forge a session, and a device that restarts
+its console on configuration change has no long-lived state to keep consistent. It is
+recorded because it is a real thing an operator will notice — apply a network change and you
+are asked to sign in again — and because the obvious fix is worse than it looks. Persisting
+the key means writing a credential to the card; persisting the sessions means writing a list
+of live tokens. Both are new things to protect for the sake of not retyping a password.
+
+If it becomes load-bearing, the shape to reach for is a key derived from the administrator
+password hash rather than one stored beside it, so that a card carries nothing a password
+does not already unlock.
+
+### K-19 · A failing renderer stops the ones behind it, including the console
+`src/apply/engine.ts`, `src/daemon/server.ts`
+
+`renderAll` runs renderers in sequence and stops at the first failure. The network renderer
+is first and the console renderer is second, deliberately — a console failure then rolls back
+onto a network that was working, rather than one that was never rendered
+([ADR-0008](adr/0008-the-setup-gate.md)) — but the consequence in the other direction is that
+a board whose NetworkManager is wedged never renders its console either. The start-up
+`renderCurrent()` writes no `settings.js` at all on such a board.
+
+Found by writing `scripts/verify-console.sh`, which has no NetworkManager: the daemon logged
+`could not render the current configuration, serving anyway` and the console had nothing to
+start from. On a real device the installer has already generated a `settings.js`, so this
+costs an *update* to that file rather than its existence.
+
+Setting the administrator password is unaffected: that path calls the console renderer
+directly rather than through the apply engine, precisely so provisioning cannot be blocked by
+the network being broken.
+
+Not fixed, because both obvious fixes are worse. Continuing past a failed renderer would make
+`POST /apply` report success having done part of the work, which is the silent-success failure
+the degraded check in `ApplyEngine` exists to prevent. Reordering puts the console in front of
+the network, which is the ordering rule 6 argues against.
+
+### K-20 · The session cookie cannot be `Secure`, because the access point is plain HTTP
+`src/console/middleware.ts`
+
+The console's session cookie is `HttpOnly` and `SameSite=Strict` and is deliberately **not**
+`Secure`. There is no certificate a device with no name and no internet connection could
+present, so the access point is plain HTTP — and a `Secure` cookie over plain HTTP is never
+sent by the browser at all. Setting it would produce a console that accepts a password and
+then behaves as though nobody had signed in.
+
+What it costs: anyone already inside the access point's radio range can read the session
+cookie off the air, and replay it until the console restarts. They are inside a network whose
+passphrase is published (ADR-0007), so they could reach the login page anyway; what the cookie
+gains them is skipping it.
+
+Closing it is R-SEC-08 — TLS for the web interface — which needs a certificate story for a
+device with no name, and is a later milestone. When it lands, `Secure` goes on the cookie in
+the same change.
+
+### K-21 · The console's state directory sits inside the daemon's
+`systemd/yonder-console.service`, `installer/roles/10-base.sh`
+
+`yonder-core.service` declares `StateDirectory=yonder` and `yonder-console.service` declares
+`StateDirectory=yonder/console`, so one service's state directory is nested inside the
+other's. systemd sets ownership on the directories it manages, and the exact behaviour for a
+*nested* directory owned by a different account — in particular whether the outer service's
+start can reassert ownership over the inner one — has not been checked against a real
+systemd. If it does, the console would keep read access and lose write access to its own
+`userDir` until its next start.
+
+Three things make this unlikely to bite and none of them proves it does not: the installer
+sets `yonder:yonder` on `/var/lib/yonder/console` explicitly, the console unit re-declares it
+so its own start re-establishes it, and the console starts after the daemon on every boot.
+The case not covered is `yonder-core` being restarted while the console is running.
+
+This has not been observed. It is recorded because it was reasoned about and not tested, and
+the first hardware boot is where it would show up — as Node-RED failing to write its own
+state, with a permissions error and no obvious cause. Moving the console to
+`/var/lib/yonder-console` removes the question entirely and is the fix if it does.
+
+### K-22 · The diagnostics probe refuses IPv6 addresses
+`src/diag/probe.ts`
+
+`isProbeHost` accepts an IPv4 address or a DNS hostname and nothing else, so
+`ping 2001:db8::1` from the diagnostics page is refused as "not a host name or an IPv4
+address". On an IPv6-only cellular network — which exists, and which is exactly the network
+this device is most likely to be on — that makes the ping tool useless for the addresses
+that matter.
+
+Deliberate rather than overlooked. The value goes on a command line, and the rule that
+stops `-i0.001` being read as a flag is the same rule that rejects a colon; a validator
+loosened to admit IPv6 without someone having thought carefully about IPv6 is how the thing
+it was written to stop gets through. Closing it means an IPv6 literal test worth trusting,
+`ping -6`, and a board to try it on.
+
+### K-23 · An operator's own flows are replaced on every install
+`installer/roles/30-console.sh`
+
+`flows.json` is copied from the repository over whatever is on the device, every time the
+installer runs. That is right for a shipped artefact — an upgrade that installed new nodes
+and left the old pages behind would be an upgrade that did nothing visible — and it is the
+same treatment `settings.js` gets, which is rewritten on every apply.
+
+What it costs is that the flow editor is not a place to keep work. An operator who builds
+something in it loses it at the next install, with no warning beyond a line in the
+installer's output. The shape of a fix is a separate flow file for an operator's own flows,
+which Node-RED does not offer directly, or a deliberate "keep mine" prompt the installer
+cannot ask on an unattended image build.

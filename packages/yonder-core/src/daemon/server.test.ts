@@ -6,11 +6,13 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRouter } from "./routes.js";
-import { startServer } from "./server.js";
+import { startServer, PROVISION_RESTART_DELAY_MS } from "./server.js";
 import { ApplyEngine } from "../apply/engine.js";
 import { saveConfig } from "../config/save.js";
 import { loadConfig } from "../config/load.js";
 import { SecretStore } from "../secrets/store.js";
+import { AdminCredential, ADMIN_PASSWORD_SECRET } from "../console/credential.js";
+import { hashPassword } from "../console/password.js";
 import { DEFAULT_CONFIG } from "../schema/config.js";
 import { DEFAULT_AP_PASSPHRASE } from "../net/profiles.js";
 import { NmcliError } from "../net/nmcli/client.js";
@@ -28,17 +30,43 @@ const frozenClock: Clock = { now: () => 0, setTimer: () => 1, clearTimer: () => 
 // never touch a real nmcli or write outside the sandbox.
 const noopRunner: CommandRunner = async () => ({ code: 0, stdout: "", stderr: "" });
 
+/**
+ * A device that already has an administrator password.
+ *
+ * Almost every test below is about the apply engine, the socket or the
+ * rollback, and none of those is a test of R-SEC-09's gate — but the gate now
+ * sits in front of GET /config, POST /apply and POST /confirm, so a device
+ * with no password answers 403 to all three. Seeding one here keeps each test
+ * about the thing it was written for. The gate itself is exercised
+ * deliberately, in routes.test.ts and in the tests here that deliberately use
+ * a secrets file of their own.
+ *
+ * Hashed once, at module load: scrypt is expensive on purpose, and paying for
+ * it in every beforeEach would put seconds on the suite for no coverage.
+ */
+const ADMIN_PASSWORD = "an operator's password";
+const ADMIN_HASH = hashPassword(ADMIN_PASSWORD);
+
+function provision(path: string): void {
+  new SecretStore(path).ensureValue(ADMIN_PASSWORD_SECRET, ADMIN_HASH);
+}
+
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "yonder-api-"));
   configPath = join(dir, "config.yaml");
   journalPath = join(dir, "apply.json");
   saveConfig(configPath, DEFAULT_CONFIG);
+  provision(join(dir, "secrets.yaml"));
 });
 afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
 
+function credential(): AdminCredential {
+  return new AdminCredential(new SecretStore(join(dir, "secrets.yaml")));
+}
+
 function router() {
   const engine = new ApplyEngine({ configPath, journalPath, renderers: [noopRenderer], clock: frozenClock });
-  return createRouter({ engine, configPath });
+  return createRouter({ engine, configPath, credential: credential() });
 }
 
 function changed(): Config {
@@ -115,7 +143,7 @@ describe("router", () => {
         },
       };
       const engine = new ApplyEngine({ configPath, journalPath, renderers: [leaky], clock: frozenClock });
-      const res = await createRouter({ engine, configPath })("POST", "/apply", changed());
+      const res = await createRouter({ engine, configPath, credential: credential() })("POST", "/apply", changed());
 
       expect(res.status).toBe(500);
       const text = JSON.stringify(res.body);
@@ -355,14 +383,18 @@ describe("startServer", () => {
   });
 
   it("seeds the access point passphrase but never an administrator password", async () => {
-    const secretsPath = join(dir, "secrets.yaml");
+    // A secrets file of its own, untouched by the fixture above: the whole
+    // point of this test is what a device that nobody has provisioned does
+    // not have.
+    const secretsPath = join(dir, "unprovisioned-secrets.yaml");
     const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath, runner: noopRunner });
     try {
       const bag = new SecretStore(secretsPath);
       expect(bag.get("ap_psk")).toBe(DEFAULT_AP_PASSPHRASE);
-      // R-SEC-09: it does not exist until the operator sets it. That absence
-      // is what makes the console's first-run setup step mean anything.
+      // R-SEC-09: neither exists until the operator sets one. That absence is
+      // what makes the console's first-run setup step mean anything.
       expect(bag.get("editor_password")).toBeUndefined();
+      expect(bag.get(ADMIN_PASSWORD_SECRET)).toBeUndefined();
     } finally {
       await server.close();
     }
@@ -483,7 +515,7 @@ describe("startServer", () => {
       }
     });
 
-    it("refuses POST /apply with a clear reason instead of silently succeeding", async () => {
+    it("refuses POST /apply instead of silently succeeding", async () => {
       const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
       try {
         const server = await startDegraded();
@@ -491,10 +523,15 @@ describe("startServer", () => {
           const res = await call(socketPath, "POST", "/apply", changed());
           // It used to be 200 here, with config.yaml written and nothing
           // rendered. Refused instead, and config.yaml is untouched.
-          expect(res.status).toBe(400);
-          const body = res.body as { error: string };
-          expect(body.error).toMatch(/degraded/);
-          expect(body.error).toMatch(/network renderer could not be built/);
+          //
+          // 403 rather than the engine's own 400: the secrets.yaml that
+          // degraded the renderer set is the same file the administrator
+          // password lives in, so this daemon cannot tell whether the device
+          // has a lock on it, and a daemon that cannot tell refuses. The
+          // engine's degraded refusal is unchanged and tested directly in
+          // apply/engine.test.ts; the reason still reaches an operator
+          // through GET /status, above.
+          expect(res.status).toBe(403);
           expect(loadConfig(configPath).system.hostname).toBe("yonder");
         } finally {
           await server.close();
@@ -504,13 +541,19 @@ describe("startServer", () => {
       }
     });
 
-    it("keeps GET /config and GET /status answering so the device stays diagnosable", async () => {
+    it("keeps GET /status answering so the device stays diagnosable", async () => {
       const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
       try {
         const server = await startDegraded();
         try {
-          expect((await call(socketPath, "GET", "/config")).status).toBe(200);
+          // GET /status carries no configuration, so it stays in front of the
+          // gate and is what makes this state visible at all. GET /config
+          // does carry configuration, and R-SEC-09 does not let a device that
+          // cannot prove it has an administrator password hand it over.
           expect((await call(socketPath, "GET", "/status")).status).toBe(200);
+          const res = await call(socketPath, "GET", "/config");
+          expect(res.status).toBe(403);
+          expect((res.body as { error: string }).error).toMatch(/administrator password/);
         } finally {
           await server.close();
         }
@@ -993,5 +1036,264 @@ describe("startServer", () => {
     } finally {
       stderr.mockRestore();
     }
+  });
+});
+
+/**
+ * Setting the administrator password changes what the console *is*: an empty
+ * flows file and one page become the console proper behind a login, and that
+ * shape is decided when settings.js is generated. So the daemon has to
+ * rewrite it and restart the console — and it has to do that *after* it has
+ * answered, because the restart kills the process that is writing the "the
+ * password is set" page into the operator's browser.
+ *
+ * Every line of that wiring could be deleted with the rest of the suite green.
+ */
+describe("startServer, provisioning the console", () => {
+  let socketPath: string, consoleDir: string, settingsPath: string;
+
+  beforeEach(() => {
+    socketPath = join(dir, "core.sock");
+    consoleDir = join(dir, "console");
+    mkdirSync(consoleDir);
+    settingsPath = join(consoleDir, "settings.js");
+  });
+
+  function consolePaths() {
+    return {
+      settings: settingsPath,
+      userDir: join(dir, "console-state"),
+      socket: socketPath,
+      coreTree: join(dir, "core"),
+      unit: "yonder-console.service",
+    };
+  }
+
+  function harness() {
+    const { clock, advance } = fakeClock();
+    const calls: string[][] = [];
+    const runner: CommandRunner = async (argv) => {
+      calls.push(argv);
+      return { code: 0, stdout: "", stderr: "" };
+    };
+    // A fresh secrets file with no administrator password: this is a device
+    // nobody has provisioned.
+    const secretsPath = join(dir, "fresh-secrets.yaml");
+    return {
+      calls,
+      advance,
+      start: () => startServer({
+        socketPath, configPath, journalPath, renderers: [],
+        secretsPath, runner, clock, console: consolePaths(),
+      }),
+    };
+  }
+
+  const restarts = (calls: string[][]): string[][] =>
+    calls.filter((argv) => argv[0] === "systemctl");
+
+  it("writes a setup-mode settings.js on a device with no password", async () => {
+    const h = harness();
+    const server = await h.start();
+    try {
+      const text = readFileSync(settingsPath, "utf8");
+      expect(text).toContain("httpAdminRoot: false");
+      expect(text).toContain("provisioned: false");
+      expect(text).toContain("setup-flows.json");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("answers first and restarts the console afterwards", async () => {
+    const h = harness();
+    const server = await h.start();
+    try {
+      const before = restarts(h.calls).length;
+      const res = await call(socketPath, "POST", "/admin/password", { password: "a long enough password" });
+      expect(res.status).toBe(200);
+
+      // Nothing yet. Restarting here would have killed the console while it
+      // was still writing the page that says the password was set.
+      await flushMicrotasks();
+      expect(restarts(h.calls).length).toBe(before);
+      expect(readFileSync(settingsPath, "utf8")).toContain("provisioned: false");
+
+      h.advance(PROVISION_RESTART_DELAY_MS);
+      await flushMicrotasks();
+
+      const text = readFileSync(settingsPath, "utf8");
+      expect(text).toContain("provisioned: true");
+      expect(text).toContain('httpAdminRoot: "/editor"');
+      expect(restarts(h.calls).slice(before)).toEqual([["systemctl", "restart", "yonder-console.service"]]);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("restarts the console and nothing else", async () => {
+    const h = harness();
+    const server = await h.start();
+    try {
+      await call(socketPath, "POST", "/admin/password", { password: "a long enough password" });
+      h.advance(PROVISION_RESTART_DELAY_MS);
+      await flushMicrotasks();
+      for (const argv of restarts(h.calls)) {
+        expect(argv.join(" ")).not.toContain("yonder-core");
+      }
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("does not restart the console for a refused password", async () => {
+    const h = harness();
+    const server = await h.start();
+    try {
+      const before = restarts(h.calls).length;
+      expect((await call(socketPath, "POST", "/admin/password", { password: "short" })).status).toBe(400);
+      h.advance(PROVISION_RESTART_DELAY_MS * 4);
+      await flushMicrotasks();
+      expect(restarts(h.calls).length).toBe(before);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("leaves no timer armed after close", async () => {
+    const h = harness();
+    const server = await h.start();
+    await call(socketPath, "POST", "/admin/password", { password: "a long enough password" });
+    await server.close();
+    const before = h.calls.length;
+    // A timer surviving close() would restart a console on behalf of a
+    // process that has already let go of its socket — the same defect the
+    // watchdog and the radio wait both grew a stop() for.
+    h.advance(PROVISION_RESTART_DELAY_MS * 4);
+    await flushMicrotasks();
+    expect(h.calls.length).toBe(before);
+  });
+
+  it("assembles no console renderer at all when nobody said where the console is", async () => {
+    const { clock } = fakeClock();
+    const calls: string[][] = [];
+    const runner: CommandRunner = async (argv) => { calls.push(argv); return { code: 0, stdout: "", stderr: "" }; };
+    const server = await startServer({
+      socketPath, configPath, journalPath, renderers: [],
+      secretsPath: join(dir, "fresh-secrets.yaml"), runner, clock,
+    });
+    try {
+      // Nothing was written to the production path by default, and nothing
+      // was restarted. That is what keeps every other test in this file from
+      // touching /opt/yonder.
+      expect(existsSync(settingsPath)).toBe(false);
+      expect(calls.filter((argv) => argv[0] === "systemctl")).toEqual([]);
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+/**
+ * The page routes, reached the way the console reaches them — over the real
+ * socket, through the real router the daemon assembled.
+ *
+ * The point of these is the wiring, not the routes: `scan` and `diag` are
+ * given to `createRouter` rather than defaulted, so a daemon that forgot to
+ * supply them would answer 503 to a page and nothing would have failed. Every
+ * one of them runs against the injected runner, so no real `nmcli` and no real
+ * `ping` is executed.
+ */
+describe("the page routes, as the daemon assembles them", () => {
+  let socketPath: string;
+  beforeEach(() => { socketPath = join(dir, "core.sock"); });
+
+  /** An nmcli that reports one radio, and a ping that answered. */
+  const boardRunner: CommandRunner = async (argv) => {
+    if (argv[0] === "ping") {
+      return {
+        code: 0,
+        stdout: "3 packets transmitted, 3 received, 0% packet loss, time 2003ms\n"
+          + "rtt min/avg/max/mdev = 8.294/9.117/10.352/0.884 ms\n",
+        stderr: "",
+      };
+    }
+    if (argv.includes("status")) {
+      return { code: 0, stdout: "lo:loopback:connected:lo\nwlan0:wifi:disconnected:\n", stderr: "" };
+    }
+    if (argv.includes("list")) {
+      return { code: 0, stdout: "HomeNetwork:78:WPA2\nHomeNetwork:41:WPA2\n", stderr: "" };
+    }
+    return { code: 0, stdout: "", stderr: "" };
+  };
+
+  async function withServer(fn: (socket: string) => Promise<void>): Promise<void> {
+    const server = await startServer({
+      socketPath, configPath, journalPath,
+      renderers: [noopRenderer],
+      secretsPath: join(dir, "secrets.yaml"),
+      runner: boardRunner,
+    });
+    try { await fn(socketPath); } finally { await server.close(); }
+  }
+
+  it("serves GET /system", async () => {
+    await withServer(async (socket) => {
+      const res = await call(socket, "GET", "/system");
+      expect(res.status).toBe(200);
+      // The shape, not the values: this machine has no /proc, so every fact
+      // is legitimately null here and the record still has to be whole.
+      expect(Object.keys(res.body as object).sort()).toEqual(["display", "facts", "versions"]);
+      // Formatted here, not in a page: a widget binds a string and cannot
+      // divide bytes by 1024 twice. On a machine with no /proc every one of
+      // them is legitimately "unknown", which is the point — a blank cell
+      // reads as a broken page.
+      expect((res.body as { display: Record<string, string> }).display.model).toBe("unknown");
+    });
+  });
+
+  it("serves GET /net/scan, folded and sorted, from the daemon's own nmcli client", async () => {
+    await withServer(async (socket) => {
+      const res = await call(socket, "GET", "/net/scan");
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({
+        interface: "wlan0",
+        networks: [{ ssid: "HomeNetwork", signal: 78, security: "WPA2" }],
+      });
+    });
+  });
+
+  it("serves POST /diag/ping and GET /diag/reachable over the injected runner", async () => {
+    await withServer(async (socket) => {
+      const probe = await call(socket, "POST", "/diag/ping", { host: "1.1.1.1" });
+      expect(probe.status).toBe(200);
+      expect(probe.body).toMatchObject({ reachable: true, received: 3, rttMs: 9.117 });
+
+      const out = await call(socket, "GET", "/diag/reachable");
+      expect(out.status).toBe(200);
+      expect(out.body).toMatchObject({ reachable: true });
+    });
+  });
+
+  it("refuses a host that is not one, with a 400 and no probe", async () => {
+    await withServer(async (socket) => {
+      const res = await call(socket, "POST", "/diag/ping", { host: "1.1.1.1; reboot" });
+      expect(res.status).toBe(400);
+    });
+  });
+
+  /**
+   * The daemon's own start-up lines go through warn()/note(), so the log a
+   * page reads is what the daemon actually did rather than a second stream
+   * somebody has to remember to write to.
+   */
+  it("serves GET /log, and it already contains this daemon's own start-up", async () => {
+    await withServer(async (socket) => {
+      const res = await call(socket, "GET", "/log");
+      expect(res.status).toBe(200);
+      const body = res.body as { entries: { message: string }[] };
+      expect(body.entries.length).toBeGreaterThan(0);
+      expect(body.entries.map((e) => e.message).join("\n")).toContain("network:");
+    });
   });
 });

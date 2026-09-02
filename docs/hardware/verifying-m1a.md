@@ -188,6 +188,26 @@ unproven, and it is load-bearing.
 |---|---|---|
 | That `connection modify` rejects add-only options | `nmcli connection modify yonder-ap type wifi` | `type` and `ifname` belong to `connection add`. If `modify` accepted them the code would be over-cautious; if it rejects them, as expected, every render after the first would have failed had they still been sent. |
 
+**M1b-2 added three things that are unproven on hardware and cheap to check while a board is
+on the bench.** Each is written as an assumption in the code that makes it, and each has a
+comment saying so:
+
+| What to confirm | Command | Why it matters |
+|---|---|---|
+| That `<hostname>.local` resolves from the device an operator is holding | Join the same network as the board, then `ping yonder.local` from a laptop and from a phone | The console tells an operator to look there after joining a network. A printed instruction that does not work costs them the time to discover it is wrong, which is why the page currently says the name *may* work and gives the router's client list as the answer that always does. If it resolves reliably, that hedge can go. |
+| What a scan returns while the radio is serving the access point | `nmcli -t -f SSID,SIGNAL,SECURITY device wifi list ifname wlan0 --rescan yes` with `yonder-ap` up | This is the ordinary case for `GET /net/scan` on a single-radio board — the operator is scanning over the access point they are connected through. Whether NetworkManager scans in AP mode, returns a stale cache, or refuses is unobserved (K-13). |
+| That the access point comes back after a failed join | Enter a deliberately wrong Wi-Fi password from the console | Three things should produce this, in order: the renderer raising the access point when the client will not come up, the confirmation window expiring, and the fallback watchdog. Only the first is unit-tested against a fake nmcli. |
+
+**The `/proc` and `/sys` fixtures in `packages/yonder-core/src/system/fixtures/` are
+constructed, not captured.** They are built to each file's documented format and to the board
+recorded above — a Pi 4 with 905 MB — because the machine M1b-2 was written on is not Linux
+and has no `/proc` at all. That is the opposite of the `nmcli` fixtures beside them, and the
+distinction is the whole value of the convention: a constructed fixture proves the parser
+handles the shape someone believed the file has. Replacing them with a real
+`cat /proc/meminfo`, `cat /proc/loadavg`, `cat /proc/uptime`,
+`cat /sys/class/thermal/thermal_zone0/temp` and `cat /proc/device-tree/model | xxd | tail -1`
+from a board is a five-minute job and is worth doing on the same bench visit.
+
 **If a real board disagrees, the code is wrong and the fixture is right.** Fix the parser or
 the argv, replace the fixture with what the board actually printed, and say so in the Results
 section. Do not reshape a capture to fit what is written here.

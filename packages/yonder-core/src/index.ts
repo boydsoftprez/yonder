@@ -46,8 +46,12 @@ export {
   clientProfile,
   ethernetProfile,
   desiredProfiles,
+  radioPlan,
+  wifiMode,
   type DesiredProfile,
   type Interfaces,
+  type RadioStep,
+  type WifiMode,
 } from "./net/profiles.js";
 export {
   NetworkRenderer,
@@ -63,3 +67,193 @@ export {
   NMCLI_RADIO_WIFI_ON,
 } from "./net/radio.js";
 export { FallbackWatchdog, type FallbackWatchdogOptions } from "./net/watchdog.js";
+export {
+  hashPassword,
+  verifyPassword,
+  SCRYPT_N,
+  SCRYPT_R,
+  SCRYPT_P,
+  SALT_BYTES,
+  KEY_BYTES,
+} from "./console/password.js";
+export {
+  AdminCredential,
+  ADMIN_PASSWORD_SECRET,
+  MIN_PASSWORD_LENGTH,
+  type SetResult,
+  type SetRefusal,
+} from "./console/credential.js";
+export {
+  AttemptThrottle,
+  FAILURE_LIMIT,
+  LOCKOUT_MS,
+  type ThrottleDecision,
+  type ThrottleOptions,
+} from "./console/throttle.js";
+export {
+  SECRET_KEYS,
+  REDACTED,
+  isSecretKey,
+  secretValuesIn,
+  redactValues,
+  redactNamedValues,
+  redactGuarded,
+  redactLine,
+  guardSecretValue,
+  forgetGuardedValues,
+} from "./secrets/redact.js";
+export {
+  DaemonClient,
+  unixTransport,
+  REQUEST_TIMEOUT_MS,
+  type Transport,
+  type DaemonRequest,
+  type DaemonResponse,
+  type DaemonReply,
+  type DaemonFailure,
+  type DaemonClientOptions,
+  type PasswordResult,
+} from "./console/client.js";
+export { SessionStore, IDLE_TIMEOUT_MS, type SessionStoreOptions } from "./console/session.js";
+export {
+  setupMiddleware,
+  consoleMiddleware,
+  readFields,
+  cookieValue,
+  SESSION_COOKIE,
+  type Middleware,
+  type Submission,
+  type SetupMiddlewareDeps,
+  type ConsoleMiddlewareDeps,
+} from "./console/middleware.js";
+export { renderPage, pageSource, escapeHtml, type PageName } from "./console/assets.js";
+export {
+  renderSettings,
+  consolePaths,
+  DEFAULT_CONSOLE_PATHS,
+  SETUP_FLOW_FILE,
+  CONSOLE_FLOW_FILE,
+  EMPTY_FLOWS,
+  EDITOR_ROOT,
+  EXCLUDED_NODES,
+  type ConsolePaths,
+  type RenderSettingsOptions,
+} from "./console/settings.js";
+export { ConsoleRenderer, type ConsoleRendererOptions } from "./console/renderer.js";
+export {
+  consoleGate,
+  editorAuth,
+  ADMIN_USERNAME,
+  type GateOptions,
+  type EditorAuth,
+  type EditorUser,
+} from "./console/wiring.js";
+export {
+  boardFacts,
+  parseModel,
+  parseLoadAverage,
+  parseMeminfo,
+  parseUptime,
+  parseCpuTemperature,
+  type BoardFacts,
+  type FactSources,
+  type LoadAverage,
+  type MemoryFacts,
+} from "./system/facts.js";
+export {
+  readBoardFacts,
+  readFactSources,
+  systemReader,
+  DEFAULT_FACT_PATHS,
+  type FileReader,
+  type FactPaths,
+  type ReadFactsOptions,
+} from "./system/read.js";
+export {
+  readVersions,
+  parseOsRelease,
+  parsePackageVersion,
+  DEFAULT_OS_RELEASE,
+  DEFAULT_PACKAGE_MANIFEST,
+  type Versions,
+  type ReadVersionsOptions,
+} from "./system/versions.js";
+export {
+  ping,
+  reachable,
+  isProbeHost,
+  parsePingSummary,
+  MAX_COUNT,
+  DEFAULT_COUNT,
+  PROBE_TIMEOUT_MS,
+  DEFAULT_REACHABILITY_HOST,
+  type PingResult,
+  type PingSummary,
+  type ProbeFailure,
+  type ProbeOptions,
+} from "./diag/probe.js";
+export { warn, note } from "./log.js";
+export {
+  ActivityLog,
+  activityLog,
+  ACTIVITY_CAPACITY,
+  ACTIVITY_MESSAGE_LIMIT,
+  type ActivityEntry,
+  type ActivityLevel,
+  type ActivityPage,
+  type ActivityLogOptions,
+} from "./log/activity.js";
+export { scanForNetworks, type ScanResult } from "./net/scan.js";
+export type { DiagProbes, SystemReport } from "./daemon/routes.js";
+export { HostnameRenderer, HOSTNAME_FILE, type HostnameRendererOptions } from "./system/hostname.js";
+export {
+  idle,
+  pending,
+  confirmed,
+  rejected,
+  presentation,
+  secondsRemaining,
+  type CommandState,
+  type CommandStatus,
+  type CommandPresentation,
+  type CommandOptions,
+} from "./console/command.js";
+export {
+  pollIntervalMs,
+  socketPathFrom,
+  clientFor,
+  fetched,
+  applyStatus,
+  confirmStatus,
+  readFailure,
+  MIN_POLL_MS,
+  DEFAULT_POLL_MS,
+  DEFAULT_SOCKET_PATH,
+  type Fetched,
+} from "./console/node.js";
+export {
+  displayFacts,
+  formatLoad,
+  formatMemory,
+  formatTemperature,
+  formatUptime,
+  UNKNOWN,
+  type BoardDisplay,
+} from "./system/format.js";
+export {
+  PALETTES,
+  DEFAULT_THEME,
+  themeCss,
+  themeName,
+  type Palette,
+  type ThemeName,
+} from "./console/theme.js";
+export {
+  joinNetwork,
+  CLIENT_PSK_SECRET,
+  type JoinRequest,
+  type JoinResult,
+  type SecretSink,
+} from "./net/join.js";
+export { setTheme, THEMES, type ThemeRequest, type ThemeResult } from "./ui/theme.js";
+export { STATIC_ROOT, THEME_FILE, THEME_HREF } from "./console/settings.js";

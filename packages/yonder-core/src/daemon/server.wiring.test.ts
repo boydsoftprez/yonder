@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildRenderers } from "./server.js";
+import { buildRenderers, consolePathsFromEnv } from "./server.js";
 import { DEFAULT_AP_PASSPHRASE } from "../net/profiles.js";
 import { saveConfig } from "../config/save.js";
 import { DEFAULT_CONFIG } from "../schema/config.js";
@@ -21,7 +21,97 @@ describe("buildRenderers", () => {
       secretsPath: join(dir, "secrets.yaml"),
       runner: run,
     });
-    expect(renderers.map((r) => r.name)).toEqual(["network"]);
+    expect(renderers.map((r) => r.name)).toEqual(["hostname", "network"]);
+  });
+
+  /**
+   * Absent unless a caller says where the console is. That is what stops a
+   * test — or a future call site that forgot an option — writing to
+   * /opt/yonder on whatever machine it happens to run on. Production supplies
+   * the paths from consolePathsFromEnv, in main().
+   */
+  it("produces no console renderer when nobody said where the console is", () => {
+    const run: CommandRunner = async () => ({ code: 0, stdout: "", stderr: "" });
+    const built = buildRenderers({ secretsPath: join(dir, "secrets.yaml"), runner: run });
+    expect(built.consoleRenderer).toBeUndefined();
+    expect(built.renderers.map((r) => r.name)).toEqual(["hostname", "network"]);
+  });
+
+  /**
+   * Order is load-bearing. Renderers run in sequence, so the console goes
+   * behind a network that has already settled: if the console then fails and
+   * the apply rolls back, the rollback re-renders a network that was working.
+   * The reverse order would let a console failure leave the access point
+   * untouched by either pass, which is rule 6.
+   */
+  it("puts the console renderer after the network one", () => {
+    const run: CommandRunner = async () => ({ code: 0, stdout: "", stderr: "" });
+    const built = buildRenderers({
+      secretsPath: join(dir, "secrets.yaml"),
+      runner: run,
+      console: { settings: join(dir, "console", "settings.js") },
+    });
+    expect(built.renderers.map((r) => r.name)).toEqual(["hostname", "network", "console"]);
+    expect(built.consoleRenderer).toBeDefined();
+  });
+
+  /**
+   * In front of the network, and for the mirror image of the reason the
+   * console is behind it. K-19: a failing renderer stops the ones behind it.
+   * HostnameRenderer cannot fail, so nothing is put at risk by going first —
+   * and a board whose NetworkManager is wedged still gets the name its
+   * configuration gives it, which is the board most likely to be searched for
+   * by name.
+   */
+  it("puts the hostname renderer in front of everything, because it cannot fail", () => {
+    const run: CommandRunner = async () => ({ code: 0, stdout: "", stderr: "" });
+    const built = buildRenderers({
+      secretsPath: join(dir, "secrets.yaml"),
+      runner: run,
+      console: { settings: join(dir, "console", "settings.js") },
+    });
+    expect(built.renderers[0]?.name).toBe("hostname");
+  });
+});
+
+describe("consolePathsFromEnv", () => {
+  it("uses the installed paths when the environment says nothing", () => {
+    expect(consolePathsFromEnv({})).toEqual({
+      settings: "/opt/yonder/console/settings.js",
+      publicDir: "/opt/yonder/console/public",
+      userDir: "/var/lib/yonder/console",
+      socket: "/run/yonder/core.sock",
+      coreTree: "/opt/yonder/packages/yonder-core",
+      unit: "yonder-console.service",
+    });
+  });
+
+  it("takes the socket from the same variable the daemon binds", () => {
+    // One variable, so the daemon and the console cannot end up pointed at
+    // two different sockets — which would be a console that can never
+    // authenticate anyone and a device nobody can log in to.
+    expect(consolePathsFromEnv({ YONDER_SOCKET: "/tmp/probe.sock" }).socket).toBe("/tmp/probe.sock");
+  });
+
+  it("lets the tree the console requires its wiring from be moved", () => {
+    // The generated settings.js requires a module out of the daemon's own
+    // installed tree, so an install with a different prefix has to be able to
+    // say where that is. Same for the unit, which the renderer restarts.
+    const paths = consolePathsFromEnv({
+      YONDER_CONSOLE_CORE_TREE: "/srv/yonder/core",
+      YONDER_CONSOLE_UNIT: "yonder-console-test.service",
+    });
+    expect(paths.coreTree).toBe("/srv/yonder/core");
+    expect(paths.unit).toBe("yonder-console-test.service");
+  });
+
+  it("lets the settings path and userDir be moved", () => {
+    const paths = consolePathsFromEnv({
+      YONDER_CONSOLE_SETTINGS: "/srv/console/settings.js",
+      YONDER_CONSOLE_USERDIR: "/srv/console/state",
+    });
+    expect(paths.settings).toBe("/srv/console/settings.js");
+    expect(paths.userDir).toBe("/srv/console/state");
   });
 
   /**

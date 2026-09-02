@@ -1,0 +1,11 @@
+{
+  "name": "yonder-console-payload",
+  "version": "0.1.0",
+  "private": true,
+  "license": "GPL-3.0-or-later",
+  "description": "The console's runtime dependencies. Installed into vendor/console by installer/make-payload.sh and copied to /opt/yonder/console on the board. Not published, and not part of the workspace: this manifest exists to pin what the payload carries.",
+  "dependencies": {
+    "node-red": "^5.0.0",
+    "@flowfuse/node-red-dashboard": "^1.0.0"
+  }
+}

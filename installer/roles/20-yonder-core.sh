@@ -114,6 +114,14 @@ if [ -f "$YONDER_SRC/systemd/yonder-core.service" ]; then
     fi
     assert_unit_exec "$yc_unit" "$YONDER_NODE_LINK"
 
+    # The other half of the same post-condition. This unit carries
+    # `Group=yonder` so the socket it binds is reachable by the console
+    # (K-01), and a Group= naming an account that does not exist is
+    # status=217/USER on every start — the same crash loop as a missing
+    # ExecStart, arriving from a different field. 10-base.sh creates the
+    # account; this is the check that it did.
+    assert_unit_accounts "$yc_unit"
+
     if [ "$DRY_RUN" != "1" ] && command -v systemctl >/dev/null 2>&1; then
         run systemctl daemon-reload
         run systemctl enable yonder-core.service

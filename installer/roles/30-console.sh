@@ -1,0 +1,260 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Install the console: Node-RED, its generated settings, and the unit.
+# shellcheck shell=sh
+
+# Node-RED 5 refuses to start on anything older than 22.9 — red.js checks and
+# exits before it does anything else. The real floor is higher: the settings.js
+# this role generates is CommonJS that `require()`s an ES module, which node
+# supports from 22.12, so 22.9 through 22.11 satisfy Node-RED and then throw
+# ERR_REQUIRE_ESM on every start. 22.12 is the number that is actually true,
+# where 20-yonder-core.sh's is 20. Two different floors on purpose: a role
+# should say what it needs. A board with a distro node 20 and no vendored payload
+# therefore installs a working daemon and stops here, with a reason, instead
+# of installing a console that cannot start.
+#
+# The bundled runtime may already be on PATH from 20-yonder-core.sh, which
+# runs first in a full install. Installing it again would copy a hundred
+# megabytes for nothing, so it is only fetched when what is on PATH will not
+# do — which is also what makes `--only 30-console` work on its own.
+if ! node_at_least 22.12; then
+    install_bundled_node || ensure_pkgs nodejs
+fi
+command -v npm >/dev/null 2>&1 || ensure_pkgs npm
+require_node 22.12
+
+# Idempotent, and needed here as well as in 20-yonder-core.sh so that
+# `--only 30-console` leaves a unit whose ExecStart resolves.
+link_node
+
+con_src="$YONDER_SRC/vendor/console"
+con_dest="$YONDER_PREFIX/console"
+con_state=/var/lib/yonder/console
+yc_dest="$YONDER_PREFIX/packages/yonder-core"
+
+ensure_dir "$con_dest" 0755
+
+# The offline route: a vendor/console staged by installer/make-payload.sh.
+#
+# prebuilt_deps_present, not `[ -d node_modules ]`. A directory that exists is
+# not a dependency closure that resolves, and the failure a half-populated one
+# produces is a console that starts, fails on its first import, and — under
+# Restart=always — does that for ever. The same lesson 20-yonder-core.sh
+# learned about the daemon's tree.
+con_prebuilt=0
+if [ -f "$con_src/package.json" ]; then
+    if prebuilt_deps_present "$con_src"; then
+        con_prebuilt=1
+    fi
+else
+    log "no vendored console at $con_src"
+fi
+
+if [ "$con_prebuilt" = "1" ]; then
+    log "vendored console found at $con_src; using it, skipping npm install"
+    run rm -rf "$con_dest/node_modules"
+    run cp "$con_src/package.json" "$con_dest/package.json"
+    [ -f "$con_src/package-lock.json" ] \
+        && run cp "$con_src/package-lock.json" "$con_dest/package-lock.json"
+    run cp -r "$con_src/node_modules" "$con_dest/node_modules"
+else
+    # The network route. `npm ci` when there is a lockfile to obey, so two
+    # boards imaged a week apart get the same console rather than whatever
+    # the registry was serving each day.
+    log "installing the console's dependencies over the network"
+    run cp "$YONDER_SRC/installer/console/package.json" "$con_dest/package.json"
+    if [ -f "$YONDER_SRC/installer/console/package-lock.json" ]; then
+        run cp "$YONDER_SRC/installer/console/package-lock.json" "$con_dest/package-lock.json"
+        run env npm --prefix "$con_dest" ci --omit=dev --no-audit --no-fund
+    else
+        run env npm --prefix "$con_dest" install --omit=dev --no-audit --no-fund
+    fi
+fi
+
+# The console's two Yonder node packages.
+#
+# Copied rather than `npm install`ed: they are in this repository, they have no
+# runtime dependency but `yonder-core`, and a board has no registry to fetch
+# them from. Into the console's own node_modules, which is where Node-RED
+# looks for a package named in its `nodes` map.
+#
+# **Prebuilt, and that is a hard requirement here** where 20-yonder-core.sh
+# offers a fallback. Building these on a board would need TypeScript, the
+# workspace's lockfile and a script two directories above the package — none of
+# which is on a device — so a missing dist/ stops the install with a reason
+# rather than producing a console whose pages are silently empty.
+for pkg in node-red-contrib-yonder-system node-red-contrib-yonder-network; do
+    pkg_src="$YONDER_SRC/packages/$pkg"
+    pkg_dest="$con_dest/node_modules/$pkg"
+    if [ ! -d "$pkg_src/dist" ] && [ "$DRY_RUN" != "1" ]; then
+        die "$pkg has not been built (no $pkg_src/dist); run: npm run build"
+    fi
+    log "installing $pkg"
+    ensure_dir "$con_dest/node_modules" 0755
+    run rm -rf "$pkg_dest"
+    ensure_dir "$pkg_dest" 0755
+    run cp "$pkg_src/package.json" "$pkg_dest/package.json"
+    run cp -r "$pkg_src/dist" "$pkg_dest/dist"
+done
+
+# And the one thing they import. A symlink rather than a copy: there is exactly
+# one yonder-core on this device and two trees that have to see the same one —
+# a copy is a second version to keep in step, and the version that drifted
+# would be the one answering the console's questions.
+#
+# The nodes are CommonJS and yonder-core is an ES module, which is why this
+# role needs node 22.12: `require()` of an ES module is what makes one package
+# serve both the daemon and the console.
+if [ -d "$yc_dest" ] || [ "$DRY_RUN" = "1" ]; then
+    log "pointing the console's node_modules at $yc_dest"
+    # rm then ln, not `ln -sfn`, for the reason link_node gives: -n is not
+    # POSIX, and without it `ln -sf` onto an existing symlink-to-a-directory
+    # creates the link *inside* it — so a second install would leave
+    # node_modules/yonder-core/yonder-core and a console that resolves nothing.
+    run rm -f "$con_dest/node_modules/yonder-core"
+    run ln -s "$yc_dest" "$con_dest/node_modules/yonder-core"
+fi
+
+# Where the generated palette is served from (R-UI-07). A directory of its
+# own: settings.js is one level up and must never be a candidate for
+# express.static.
+ensure_dir "$con_dest/public" 0755
+
+# Node-RED's userDir: its flows, its own state, and nothing of ours. Owned by
+# the account the console runs as, because it is the only thing that writes
+# here. 0750 so the group can read it and nobody else can.
+#
+# The unit also declares StateDirectory=yonder/console, so systemd
+# re-establishes this ownership at every start. Both, deliberately: the
+# installer's copy is what makes the first start work before systemd has ever
+# looked at this unit.
+ensure_dir "$con_state" 0750
+if getent passwd yonder >/dev/null 2>&1 || [ "$DRY_RUN" = "1" ]; then
+    run chown yonder:yonder "$con_state"
+fi
+
+# The empty flows file setup mode runs on. Separate from flows.json rather
+# than an emptied version of it, so provisioning a device never has to
+# un-empty anything and an operator's flows are never what setup mode serves.
+# In setup mode there is no flow, so there is no node, so there is nothing to
+# call — which is R-SEC-09 made structural rather than conditional.
+if [ -f "$con_state/setup-flows.json" ]; then
+    log "setup flows already present: $con_state/setup-flows.json"
+elif [ "$DRY_RUN" = "1" ]; then
+    log "would write an empty $con_state/setup-flows.json"
+else
+    printf '[]\n' > "$con_state/setup-flows.json"
+    chown yonder:yonder "$con_state/setup-flows.json"
+    chmod 0640 "$con_state/setup-flows.json"
+    log "seeded an empty $con_state/setup-flows.json"
+fi
+
+# The shipped flows.
+#
+# **Overwritten on every install, unlike config.yaml and settings.js.** Those
+# two describe one device and belong to it; flows.json is product — the four
+# pages this project ships — and it is generated no more by hand than
+# settings.js is. An upgrade that left an old flows.json in place would be an
+# upgrade that installed new nodes and no pages to use them.
+#
+# What that costs is an operator's own edits in the flow editor, and it is
+# recorded as such in docs/known-issues.md rather than hidden here.
+if [ -f "$YONDER_SRC/flows/flows.json" ]; then
+    log "installing the shipped console flows into $con_state/flows.json"
+    run cp "$YONDER_SRC/flows/flows.json" "$con_state/flows.json"
+    if [ "$DRY_RUN" != "1" ]; then
+        chown yonder:yonder "$con_state/flows.json"
+        chmod 0640 "$con_state/flows.json"
+    fi
+else
+    die "no shipped flows at $YONDER_SRC/flows/flows.json"
+fi
+
+# settings.js is generated, and generated by the same function the daemon's
+# ConsoleRenderer uses — invoked through the node this install resolved, from
+# the tree 20-yonder-core.sh installed. Two generators would be two things to
+# keep in step, and the one that drifted would be the one nobody runs until a
+# board is in the field.
+#
+# Seeded only when absent, exactly like config.yaml. After the first install
+# this file belongs to the device: the daemon rewrites it on every apply and
+# on every start, with the right answer for whether a password has been set.
+# Regenerating it here would put a provisioned console back into setup mode
+# until the next apply.
+if [ -f "$con_dest/settings.js" ]; then
+    log "console settings already present, leaving them alone: $con_dest/settings.js"
+else
+    # Whether this device already has an administrator password. Only the
+    # presence of the key is read; nothing prints its value.
+    con_provisioned=""
+    if [ -f "$YONDER_ETC/secrets.yaml" ] \
+       && grep -q '^admin_password:' "$YONDER_ETC/secrets.yaml" 2>/dev/null; then
+        con_provisioned="--provisioned"
+        log "this device already has an administrator password; generating a console to match"
+    fi
+    log "generating $con_dest/settings.js"
+    # shellcheck disable=SC2086 # con_provisioned is one optional flag, or nothing
+    run "$YONDER_NODE_LINK" "$yc_dest/dist/console/settings.js" \
+        "$YONDER_ETC/config.yaml" "$con_dest/settings.js" \
+        --core-tree "$yc_dest" --user-dir "$con_state" \
+        --public-dir "$con_dest/public" $con_provisioned
+fi
+
+if [ -f "$YONDER_SRC/systemd/yonder-console.service" ]; then
+    run cp "$YONDER_SRC/systemd/yonder-console.service" /etc/systemd/system/yonder-console.service
+
+    if [ "$DRY_RUN" = "1" ]; then
+        con_unit="$YONDER_SRC/systemd/yonder-console.service"
+    else
+        con_unit=/etc/systemd/system/yonder-console.service
+    fi
+
+    # Three post-conditions, before anything is enabled or started, each
+    # catching a different way this unit can be a crash loop nobody sees until
+    # the board is in an aircraft:
+    #
+    #   - the binary ExecStart names is the one this installer prepared
+    #     (203/EXEC otherwise),
+    #   - the accounts User= and Group= name exist (217/USER otherwise),
+    #   - the tree loads: red.js's own dependency closure, and the generated
+    #     settings.js with it.
+    assert_unit_exec "$con_unit" "$YONDER_NODE_LINK"
+    assert_unit_accounts "$con_unit"
+
+    # node-red/lib/red.js, not red.js. The latter is a program: importing it
+    # parses argv, starts a server and binds a port, which is not something an
+    # installer may do in a chroot. lib/red.js is the module it loads and is
+    # the whole dependency closure that matters.
+    assert_module_graph "$con_dest" node_modules/node-red/lib/red.js "$YONDER_NODE_LINK"
+    [ -f "$con_dest/node_modules/node-red/red.js" ] || [ "$DRY_RUN" = "1" ] \
+        || die "$con_dest/node_modules/node-red/red.js is missing; the unit's ExecStart names it"
+
+    # And so does a contrib node, which is a different question from whether
+    # its file exists. These are CommonJS requiring an ES module out of the
+    # daemon's tree through a symlink; if that symlink is wrong, or the node is
+    # too old for `require(esm)`, every yonder-* node fails to register and the
+    # console serves four pages of empty groups with nothing on screen saying
+    # why. The same class of defect assert_module_graph was written for.
+    assert_module_graph "$con_dest" \
+        node_modules/node-red-contrib-yonder-system/dist/status.js "$YONDER_NODE_LINK"
+    assert_module_graph "$con_dest" \
+        node_modules/node-red-contrib-yonder-network/dist/join.js "$YONDER_NODE_LINK"
+
+    # The generated settings.js loads too, and this is not decoration: it
+    # `require`s an ES module out of the daemon's tree, which needs a node new
+    # enough to do that. A node that cannot is a console that dies on start-up
+    # with ERR_REQUIRE_ESM, for ever, under Restart=always. Here the message
+    # says so and the install stops.
+    assert_module_graph "$con_dest" settings.js "$YONDER_NODE_LINK"
+
+    if [ "$DRY_RUN" != "1" ] && command -v systemctl >/dev/null 2>&1; then
+        run systemctl daemon-reload
+        run systemctl enable yonder-console.service
+        # Enabled *and* started, for the same reason 20-yonder-core.sh starts
+        # the daemon: enabling only arms the next boot, and R-CFG-08 says a
+        # freshly flashed board reaches a usable state with no operator input.
+        # A console nobody can reach until they reboot is not that.
+        run systemctl restart yonder-console.service
+    else
+        log "skipping systemctl (dry run or not a systemd host)"
+    fi
+fi

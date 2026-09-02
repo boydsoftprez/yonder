@@ -648,3 +648,88 @@ describe("ApplyEngine.apply when config.yaml on disk is unloadable", () => {
     expect(loadConfig(configPath).system.hostname).toBe("changed");
   });
 });
+
+/**
+ * The confirmation window, and which one an apply gets (R-CFG-03, Task 5 of
+ * M1b-2).
+ *
+ * Same requirement, two very different amounts of work between the apply and
+ * the confirmation. A change that leaves the operator's connection where it
+ * was is confirmed in seconds; one that moves the Wi-Fi radio takes the access
+ * point off the air and they have to find the device again on a different
+ * network first.
+ */
+describe("the confirmation window", () => {
+  function joining(): Config {
+    const c = structuredClone(DEFAULT_CONFIG);
+    c.network.client.ssid = "HomeNetwork";
+    return c;
+  }
+
+  function engineWithWindows(clock: Clock): ApplyEngine {
+    return new ApplyEngine({
+      configPath, journalPath, renderers: [renderer()], clock,
+      timeoutMs: 120_000, radioTimeoutMs: 300_000,
+    });
+  }
+
+  it("gives an ordinary change the ordinary window", async () => {
+    const { clock } = fakeClock();
+    const engine = engineWithWindows(clock);
+    const c = structuredClone(DEFAULT_CONFIG);
+    c.system.hostname = "renamed";
+    const result = await engine.apply(c);
+    expect(result.expiresAt).toBe(120_000);
+    expect(result.movesRadio).toBeUndefined();
+  });
+
+  it("gives an apply that moves the radio the longer one", async () => {
+    const { clock } = fakeClock();
+    const engine = engineWithWindows(clock);
+    const result = await engine.apply(joining());
+    expect(result.expiresAt).toBe(300_000);
+    expect(result.movesRadio).toBe(true);
+  });
+
+  it("gives the longer window to a move back to the access point too", async () => {
+    saveConfig(configPath, joining());
+    const { clock } = fakeClock();
+    const engine = engineWithWindows(clock);
+    const result = await engine.apply(DEFAULT_CONFIG);
+    expect(result.expiresAt).toBe(300_000);
+    expect(result.movesRadio).toBe(true);
+  });
+
+  /**
+   * Compared on the *mode*, not on the client settings. Changing the
+   * passphrase of a network already configured does not move the radio, and
+   * neither does renaming the access point — and handing those five minutes
+   * only means a change that broke the device sits there for five minutes.
+   */
+  it("does not widen the window for a change that leaves the radio where it is", async () => {
+    saveConfig(configPath, joining());
+    const { clock } = fakeClock();
+    const engine = engineWithWindows(clock);
+    const changedPsk = joining();
+    changedPsk.network.client.ssid = "SomeOtherNetwork";
+    changedPsk.network.ap.ssid = "renamed-ap";
+    const result = await engine.apply(changedPsk);
+    expect(result.expiresAt).toBe(120_000);
+    expect(result.movesRadio).toBeUndefined();
+  });
+
+  it("actually reverts on the widened deadline, not before it", async () => {
+    const { clock, advance } = fakeClock();
+    const engine = engineWithWindows(clock);
+    await engine.apply(joining());
+
+    advance(120_001); // past the ordinary window
+    expect(engine.status().state).toBe("pending");
+    expect(loadConfig(configPath).network.client.ssid).toBe("HomeNetwork");
+
+    advance(180_000); // past the widened one
+    expect(engine.status().state).toBe("idle");
+    expect(engine.status().lastResult?.outcome).toBe("reverted");
+    expect(loadConfig(configPath).network.client.ssid).toBeNull();
+  });
+});

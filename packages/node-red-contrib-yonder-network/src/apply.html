@@ -1,0 +1,38 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!--
+  The editor half of apply configuration.
+
+  Node-RED finds this by basename beside the node's .js, and without it the
+  flow editor shows the node as "unknown" even though the runtime registered
+  it. It is a form and a registration, and deliberately nothing else: no
+  behaviour lives here (CLAUDE.md rule 2 in spirit — a diff has to be
+  readable), and no asset is fetched from anywhere (R-UI-01).
+-->
+<script type="text/html" data-template-name="yonder-apply">
+  <div class="form-row">
+    <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name" />
+  </div>
+</script>
+
+<script type="text/html" data-help-name="yonder-apply">
+<p>Posts <code>msg.payload</code> — a whole configuration — to
+<code>POST /apply</code>.</p>
+<p><b>A successful apply is pending, not done.</b> The change is in force and
+reverts unless it is confirmed from the other side within the window
+(R-CFG-03). The command state on <code>msg.yonder</code> carries the apply id,
+the deadline, and whether this apply moves the Wi-Fi radio — which is the one
+that takes the access point away from under the operator.</p>
+</script>
+
+<script type="text/javascript">
+  RED.nodes.registerType("yonder-apply", {
+    category: "yonder",
+    color: "#c7d4e0",
+    defaults: { name: { value: "" } },
+    inputs: 1,
+    outputs: 1,
+    icon: "font-awesome/fa-wifi",
+    label: function () { return this.name || "apply configuration"; },
+  });
+</script>

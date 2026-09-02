@@ -68,3 +68,51 @@ describe("SecretStore", () => {
     expect(() => new SecretStore(p)).toThrow(/flat map/);
   });
 });
+
+describe("SecretStore, when the file will not parse", () => {
+  // The passphrase and the hash below are what a real secrets.yaml holds, and
+  // the YAML parser quotes the line it choked on straight back into its
+  // error message. That message used to reach ApplyStatus.degraded and so
+  // GET /status, which sits in front of the administrator-password gate.
+  // R-SEC-10: no credential in an error message or an API response.
+  const PSK = "field-passphrase-do-not-leak";
+  const HASH = "scrypt$16384$8$1$c2FsdHNhbHQ$aGFzaGhhc2g";
+
+  const malformed = [
+    ["a tab for indentation", `ap_psk: ${PSK}\n\tadmin_password: ${HASH}\n`],
+    ["an unclosed quote", `ap_psk: "${PSK}\n  admin_password: ${HASH}\n`],
+    ["a duplicated key", `ap_psk: ${PSK}\nap_psk: ${HASH}\n`],
+  ] as const;
+
+  for (const [why, text] of malformed) {
+    it(`refuses ${why} without repeating what it read`, () => {
+      const path = join(dir, "secrets.yaml");
+      writeFileSync(path, text);
+
+      let thrown: Error | undefined;
+      try { new SecretStore(path); } catch (e) { thrown = e as Error; }
+
+      // It must fail — a file it cannot parse is not a file it may treat as
+      // empty, because an empty bag looks exactly like a device with no
+      // administrator password set.
+      expect(thrown, "a malformed secrets.yaml must not parse as an empty one").toBeDefined();
+
+      // Everything the caller could ever print. `message` already folds the
+      // issues in, but assert on both so neither can regress alone.
+      const surfaces = [thrown!.message, ...((thrown as { issues?: string[] }).issues ?? [])].join("\n");
+      expect(surfaces).not.toContain(PSK);
+      expect(surfaces).not.toContain(HASH);
+
+      // And it still has to be useful to whoever has to fix the file.
+      expect(surfaces).toContain(path);
+    });
+  }
+
+  it("keeps the position, which names nothing", () => {
+    const path = join(dir, "secrets.yaml");
+    writeFileSync(path, `ap_psk: ${PSK}\n\tadmin_password: ${HASH}\n`);
+    try { new SecretStore(path); } catch (e) {
+      expect((e as Error).message).toMatch(/line \d+, column \d+/);
+    }
+  });
+});

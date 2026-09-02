@@ -18,6 +18,20 @@ Type=simple
 ExecStart=/usr/local/bin/yonder-node /opt/yonder/packages/yonder-core/dist/daemon/server.js
 Restart=always
 RestartSec=2
+# No User=. This daemon drives NetworkManager and stays root.
+#
+# Group=, though, is what makes the socket reachable. systemd sets the
+# process's primary group from this, so /run/yonder is created root:yonder
+# 0750 and the socket the daemon binds inside it inherits that group; the
+# chmod to 0660 in src/daemon/server.ts then makes it group-writable, and a
+# console running as the unprivileged yonder user can open it. Nothing chowns
+# from code: the unit is the one place this is expressed (K-01, R-SEC-04).
+#
+# The account must exist before this unit is started, or systemd fails it at
+# step USER with status=217 on every start — which for this daemon is a board
+# with no access point and no console. installer/roles/10-base.sh creates it
+# and assert_unit_accounts checks it before anything is enabled.
+Group=yonder
 RuntimeDirectory=yonder
 RuntimeDirectoryMode=0750
 StateDirectory=yonder

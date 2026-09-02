@@ -37,6 +37,9 @@ ui:
     interfaces:
       - ethernet
       - wifi_client
+apply:
+  timeout: 120
+  radioTimeout: 300
 system:
   hostname: yonder
   timezone: UTC
