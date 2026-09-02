@@ -178,6 +178,11 @@ export class NetworkRenderer implements Renderer {
    * never pays again. Distinguishing "absent because slow" from "absent
    * because there is none" is not possible from one reading of the list, and
    * guessing wrong in the other direction is a device nobody can reach.
+   *
+   * What the bound costs is a radio that appears just after it: nothing
+   * renders, so no `yonder-ap` profile is ever written, and the fallback's
+   * one action has nothing to raise. K-16 records that, and why re-arming
+   * the watchdog is not the fix it looks like.
    */
   async waitForRadio(): Promise<boolean> {
     const deadline = this.clock.now() + this.radioWaitMs;

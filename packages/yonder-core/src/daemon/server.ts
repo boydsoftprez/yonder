@@ -190,6 +190,10 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   }
   // Assigned once the socket is bound, below. Declared here because the
   // watchdog's action has to be able to wait on it.
+  //
+  // Until that assignment this is a resolved promise, so the `await
+  // radioSettled` in apUp is a no-op for the whole of start-up — recorded as
+  // K-17, along with why it cannot simply be assigned earlier.
   let radioSettled: Promise<void> = Promise.resolve();
 
   const watchdog = new FallbackWatchdog({

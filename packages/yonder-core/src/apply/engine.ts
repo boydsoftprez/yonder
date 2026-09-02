@@ -223,10 +223,14 @@ export class ApplyEngine {
       }
       // A renderer that just timed out is presumed still wedged: retrying it
       // immediately here would hold the reservation for a second full
-      // renderTimeoutMs before giving up again, which is exactly what K-02
-      // needs to not happen. The configuration file is already restored
-      // above regardless; re-rendering the previous config is only
-      // attempted when there is a reasonable chance it can still help.
+      // renderTimeoutMs before giving up again, which is the pinned-engine
+      // failure the timeout exists to prevent. The configuration file is
+      // already restored above regardless; re-rendering the previous config
+      // is only attempted when there is a reasonable chance it can still
+      // help. What that costs — the file and the running system able to
+      // disagree, because nothing undoes what the renderer managed before it
+      // stalled — is K-10, which is also what engine.test.ts cites for this
+      // branch.
       if (!(e instanceof RenderTimeoutError)) {
         await this.renderAll(previous).catch(() => { /* best effort */ });
       }

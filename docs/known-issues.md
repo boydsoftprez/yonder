@@ -26,6 +26,30 @@ cannot open the socket at all. M1 introduces that console, so M1 has to settle t
 ownership model — a shared group, a `User=`/`Group=` on the unit, and matching modes on the
 runtime directory and the socket.
 
+### K-02 · ~~`apply()` has no render timeout~~ — CLOSED
+
+The apply reservation was held for the whole duration of `renderAll`. A renderer that threw
+was handled; a renderer that **never settled** pinned the engine in `applying` permanently,
+and every later apply was refused with "an apply is already pending". Harmless while there
+were no renderers; M1 added the first real one, and a network apply can hang on a wedged
+`nmcli` or a driver that never returns.
+
+Closed in `b736d2f`: `renderAll` runs under `renderTimeoutMs`, and exceeding it fails the
+apply and rolls the configuration back. What that fix could not do — undo the part of the
+render that had already happened, or stop the abandoned renderer still running — is
+**K-10**, which is the entry code touching this path should cite.
+
+### K-03 · ~~`SecretStore` trusts the shape of `secrets.yaml`~~ — CLOSED
+
+The constructor cast the parsed YAML `as Bag` without checking it was a flat map of strings.
+Safe while `flush()` was the only writer, and not safe once `resolve()` fed a renderer: a
+hand-edited nested value would interpolate into a NetworkManager keyfile as
+`[object Object]`, producing a broken access point with no error anywhere.
+
+Closed by parsing the document in the constructor rather than asserting its type. A
+malformed `secrets.yaml` now throws where it can be reported — which is why `startServer`
+guards `buildRenderers` and serves in a degraded state rather than exiting.
+
 ---
 
 ## General
@@ -225,8 +249,51 @@ rollback target and says so through `previousIsDefault`. An operator who hand-ed
 mistake into the file still loses their own configuration as a rollback target until they
 fix it.
 
-*(This ID previously named a different defect — a device reachable but not repairable,
-because `apply()` snapshotted `config.yaml` before validating the body an operator had just
-posted and so refused every apply, including a good one. That was closed by the change which
-introduced the default-substitution described above, and the ID was re-used for this entry.
-K numbers are not requirement IDs; the reuse is recorded here rather than silently.)*
+### K-16 · The radio wait gives up once, and the fallback cannot make the profile it needs
+`src/net/renderer.ts`, `src/daemon/server.ts`
+
+`waitForRadio()` runs once and is bounded at 30 s. If NetworkManager has not registered
+`wlan0` at all by then, the render it triggers never happens, and a render is the only thing
+that writes the `yonder-ap` profile. A radio that appears at, say, 35 s is therefore never
+rendered against. At 90 s the fallback watchdog fires and runs its only action —
+`nmcli connection up yonder-ap` — against a profile that does not exist. It logs
+`unknown connection`, and never tries again. **The device is unreachable until a power
+cycle**, which on an aircraft means fetching it back.
+
+K-11 covers "the watchdog fires once". This is the other half: the one shot can fail against
+something that was never created, and the two together are the failure R-NET-07 exists to
+prevent, reached by a route R-NET-07's own wording does not describe.
+
+**Re-arming the watchdog does not fix it, and the obvious version of that change is an exact
+no-op.** Re-arming once when `waitForRadio` resolves recomputes the same deadline: `since` is
+`startedAt`, so a watchdog re-armed at t=30 s with a 90 s window is armed for t=90 s, which
+is when the first one was already going to fire. Re-arming with a *fresh* window only moves
+the same command later — the action is still `up yonder-ap`, and the profile is still absent,
+because nothing between the two attempts rendered. Both were prototyped against a board whose
+radio appears at 35 s: profile absent, activations accepted 0, in every arrangement.
+
+What would close it is a re-render, not a re-arm. Two candidates, both bigger than they look:
+render once more when the wait's bound expires rather than only when it succeeds; or let the
+fallback's action render before it activates. The second puts a renderer — and up to a full
+`renderTimeoutMs` — inside the one path that must always work, which is the trade K-10
+already describes going wrong. It belongs with the re-arm-on-apply work in K-11, done
+together and deliberately, rather than as a change to M1a's central guarantee made on the way
+to merging it.
+
+### K-17 · `radioSettled` is a resolved promise for the whole of start-up
+`src/daemon/server.ts`
+
+`radioSettled` is initialised to `Promise.resolve()` and only assigned the real promise after
+`renderCurrent()` and `listen()` have both returned. The fallback watchdog is armed before
+either. So for the whole of start-up, the `await radioSettled` in the watchdog's `apUp` is a
+no-op against a promise that was never about the radio.
+
+The comment on `apUp` says the fallback's action must not run while the render that creates
+its profile is still in flight. On a board where recovery and the start-up render are slow
+enough that the deadline lands before `listen()` returns, it does exactly that: `apUp` runs
+concurrently with an in-flight render, which is what the await was added to prevent. Narrow —
+it needs the deadline to land inside start-up, so `network.ap.fallback.timeout` at its 30 s
+minimum on a slow board — and it fails in the same direction as K-16, toward an activation
+that fails rather than a wrong one that succeeds. Recorded, not fixed: the assignment cannot
+simply move earlier without moving the wait itself in front of `listen()`, which is the
+ordering `server.ts` argues against at length and for good reasons.
