@@ -68,6 +68,53 @@ remote · zerotier
 a correct outcome, not a stall. See §4 — this is the same decision as the confirmation one,
 seen from the other end.
 
+### Before any of that: the operator has to enter the network ID
+
+R-VPN-01 requires join, leave and status *from the interface*, and none of the states above
+exist until somebody supplies a 16-hex network ID. The tab therefore has four states, not
+one, and the waiting screen is the third of them.
+
+```
+NOT CONFIGURED
+  network ID   [ 16 hex characters ]         [ JOIN ]
+  Find this on your network's page in ZeroTier.
+
+JOINING…
+  network      9fef8a3bf9000001
+  (see §1's give-up: this state is also where a wrong ID lands, silently)
+
+WAITING FOR YOU TO APPROVE IT
+  network      9fef8a3bf9000001
+  this device  9fef8a3bf9        [copy]
+  Approve this device on ZeroTier's website. It will
+  connect the moment you do, and wait as long as it takes.
+                                             [ leave ]
+
+CONNECTED   10.147.20.26
+  network      9fef8a3bf9000001
+  this device  9fef8a3bf9        [copy]
+                                             [ leave ]
+```
+
+`JOIN` is the tab's one primary action, and it exists only in the first state (R-UI-10).
+Once joined there is no primary action at all — `copy` and `leave` are both secondary, and
+`leave` is the destructive one, so it is never the biggest thing on the surface.
+
+The field writes `remote.zerotier.network_id` and goes through apply and rollback like any
+other configuration change (§4). Nothing is stored anywhere else: the ID is not a secret,
+so unlike Tailscale's key it lives in `config.yaml` rather than `secrets.yaml`.
+
+**The ID is validated for shape before it is applied: exactly 16 hexadecimal characters.**
+That is worth doing precisely because of §1's give-up. A wrong ID produces no error from
+the client at all — it sits in `JOINING` forever — so the last chance to catch a mistyped
+one is before it is sent. Shape validation catches a dropped character, an extra one, and a
+letter past `f`; it cannot catch a well-formed ID for a network that does not exist, and
+that residue is what §1 records.
+
+A device configured headlessly from the boot partition (R-CFG-05) arrives with the ID
+already set and simply starts in `JOINING`. The field is then showing what is configured,
+not an empty box.
+
 ### Tailscale is the same shape
 
 `tailscale status --json` reports a `BackendState`, and it has the same three-part life
@@ -488,21 +535,33 @@ capture, so driving a tab strip is within what it does rather than a new capabil
 ### One defect the layout uncovers
 
 The tab strip was stood up against the real console and photographed in both palettes
-before this was written. It works — four tabs, `Interfaces`, `Wi-Fi`, `ZeroTier`, `Activity`
-— and in day it sits correctly in the visual language.
+before this was written. It works — `Interfaces`, `Wi-Fi`, `ZeroTier`, `Activity` — and in
+day it sits correctly in the visual language: the labels have a light ground, and the
+selected tab carries a faint chip and a dark underline.
 
-**In night the tab labels are near-black on the carbon panel, and the selected-tab
-indicator is a black underline on a dark ground.** Neither is legible. Nothing is wrong
-with the page: the night palette has simply never styled a tab strip, because no page has
-ever had one, so Vuetify's own default colour survives into a theme that overrides
-everything else. Styling `v-tab`, its label and its active indicator in `theme.ts` is part
-of this work, not a follow-up — a control the operator cannot read at night is a defect in
-the palette (R-UI-08), and ADR-0009 says why night matters.
+**In night the tab strip is not readable, and the cause is structural rather than a
+colour.** A tab has no surface of its own: the label is drawn straight onto the carbon
+weave, so the texture runs through the letters, and the selected tab's chip is a
+light-palette tint that disappears entirely against a dark panel. The underline that marks
+the selection is a dark rule on a dark ground. Three separate things fail, and recolouring
+the text fixes none of them properly — a lighter label on bare weave is still a label with
+no ground.
+
+The console already knows how to do this, one component over. A navigation item in the same
+drawer, in the same palette, has a raised surface and a lit edge, and `STATUS` beside the
+tab strip is perfectly legible in the same screenshot that makes `Interfaces` disappear.
+Tabs never got the same treatment because no page has ever had a tab strip, so Vuetify's
+own defaults survive into a theme that overrides everything else.
+
+**So `theme.ts` gives a tab a surface**, in the panel material, with the selected one
+distinguished the way a selected navigation item is — not by tinting text. That is part of
+this work, not a follow-up: a control the operator cannot read at night is a defect in the
+palette (R-UI-08), and ADR-0009 is explicit that night is not the lesser mode.
 
 This is the argument for R-UI-12 in miniature, and for walking the tabs rather than
 capturing the first one: the strip renders on every tab, so a check that only ever
 photographed `Interfaces` would still have caught it — but nothing that only read the flows
-would have.
+would have, and nothing that only looked at day would have either.
 
 ### Cost
 
