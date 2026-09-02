@@ -233,14 +233,18 @@ say "the shipped flows, in a real Node-RED with the real dashboard"
 # packages where the console's own node resolution will find them.
 cp "$REPO/flows/flows.json" "$USERDIR/flows.json"
 mkdir -p "$CONSOLE/node_modules"
+# rm then ln, never `ln -sfn`: -n is not POSIX, and without it `ln -sf` onto an
+# existing symlink-to-a-directory creates the link inside it.
 for pkg in node-red-contrib-yonder-system node-red-contrib-yonder-network; do
-    ln -sfn "$REPO/packages/$pkg" "$CONSOLE/node_modules/$pkg"
+    rm -f "$CONSOLE/node_modules/$pkg"
+    ln -s "$REPO/packages/$pkg" "$CONSOLE/node_modules/$pkg"
 done
-ln -sfn "$CORE" "$CONSOLE/node_modules/yonder-core"
+rm -f "$CONSOLE/node_modules/yonder-core"
+ln -s "$CORE" "$CONSOLE/node_modules/yonder-core"
 # The dashboard and node-red itself come from the staged tree.
 for entry in "$CONSOLE_TREE/node_modules"/*; do
     name=$(basename "$entry")
-    [ -e "$CONSOLE/node_modules/$name" ] || ln -sfn "$entry" "$CONSOLE/node_modules/$name"
+    [ -e "$CONSOLE/node_modules/$name" ] || ln -s "$entry" "$CONSOLE/node_modules/$name"
 done
 
 node "$CONSOLE/node_modules/node-red/red.js" -s "$CONSOLE/settings.js" >>"$JOURNAL" 2>&1 &

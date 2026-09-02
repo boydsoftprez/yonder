@@ -7,9 +7,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # 24, not 20. Node-RED 5 refuses to start below 22.9, and the console's
+      # generated settings.js and both contrib packages `require()` an ES
+      # module, which node supports from 22.12 — so the node-red-node-test-
+      # helper tests cannot run on 20 at all. 24 is the line the offline
+      # payload ships (installer/make-payload.sh), so CI runs what a board runs.
+      #
+      # What this gives up: nothing here now proves yonder-core still works on
+      # the node 20 its own `require_node 20` claims. That floor is the
+      # daemon's and it is still true of the code; it is no longer true of the
+      # test run.
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
           cache: npm
       - run: npm ci
       - run: npm run lint
@@ -35,12 +45,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # The console role calls `require_node 22.12`, and require_node dies on a
+      # node that is present and too old — including on a dry run. So this job
+      # needs the same runtime the other one does.
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
       - name: Lint shell
         run: |
           sudo apt-get update && sudo apt-get install -y shellcheck
-          shellcheck installer/install.sh installer/lib/*.sh installer/roles/*.sh
+          shellcheck installer/install.sh installer/lib/*.sh installer/roles/*.sh scripts/*.sh
       - name: Installer dry run
         run: ./installer/install.sh --dry-run

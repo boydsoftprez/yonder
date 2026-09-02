@@ -106,7 +106,12 @@ done
 # serve both the daemon and the console.
 if [ -d "$yc_dest" ] || [ "$DRY_RUN" = "1" ]; then
     log "pointing the console's node_modules at $yc_dest"
-    run ln -sfn "$yc_dest" "$con_dest/node_modules/yonder-core"
+    # rm then ln, not `ln -sfn`, for the reason link_node gives: -n is not
+    # POSIX, and without it `ln -sf` onto an existing symlink-to-a-directory
+    # creates the link *inside* it — so a second install would leave
+    # node_modules/yonder-core/yonder-core and a console that resolves nothing.
+    run rm -f "$con_dest/node_modules/yonder-core"
+    run ln -s "$yc_dest" "$con_dest/node_modules/yonder-core"
 fi
 
 # Where the generated palette is served from (R-UI-07). A directory of its
