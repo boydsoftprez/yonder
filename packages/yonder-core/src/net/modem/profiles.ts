@@ -11,6 +11,22 @@ export const MODEM_CONNECTION = "yonder-modem";
  * read off a board: ethernet 100, gsm 700. Keeping them means a Yonder-written
  * profile sorts against a connection Yonder did not write exactly as it would
  * have anyway, which matters on a board where an operator has added one.
+ *
+ * **Every egress profile gets one, not just the modem.** Left to
+ * NetworkManager's defaults the Wi-Fi client sits at 600 and the modem at
+ * 700, so at the shipped `priority: [ethernet, modem, wifi_client]` the radio
+ * outranks the modem while the configuration says the opposite — and a
+ * `priority` beginning `[modem, ethernet, …]` would tie the two at 100 and
+ * express nothing at all. It is more than untidiness because
+ * `net/reach/monitor.ts` derives the path traffic is leaving by from
+ * `network.priority` on the stated premise that the metrics were generated
+ * from it; with two addresses up and no metrics written, the watch reads the
+ * wrong device's counters and judges the wrong link.
+ *
+ * The access point is deliberately not in this list. `ipv4.method shared`
+ * hands out addresses and masquerades for clients — it is how an operator
+ * reaches a board with no way out, not a way out — so it has no place in an
+ * ordering of egress paths.
  */
 const METRIC_BY_RANK = [100, 700, 800, 900];
 

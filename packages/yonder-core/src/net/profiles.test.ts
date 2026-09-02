@@ -7,7 +7,7 @@ import {
   apProfile, clientProfile, ethernetProfile, desiredProfiles, radioPlan, wifiMode,
   AP_CONNECTION, CLIENT_CONNECTION, DEFAULT_AP_PASSPHRASE,
 } from "./profiles.js";
-import { MODEM_CONNECTION } from "./modem/profiles.js";
+import { MODEM_CONNECTION, metricFor, modemProfile } from "./modem/profiles.js";
 import { SecretStore } from "../secrets/store.js";
 import { DEFAULT_CONFIG } from "../schema/config.js";
 import type { Config } from "../schema/config.js";
@@ -163,6 +163,66 @@ describe("ethernetProfile", () => {
     const s = settingsOf(p);
     expect(s["ipv4.method"]).toBe("auto");
     expect(s["connection.autoconnect"]).toBe("yes");
+  });
+});
+
+/**
+ * R-NET-06: `network.priority` is the operator's order, and route metrics are
+ * how it reaches the kernel.
+ *
+ * These are about the *relation* between the profiles rather than the
+ * literals, because the literals are NetworkManager's own defaults and the
+ * thing that has to hold is that a path earlier in `network.priority` sorts
+ * ahead of one later in it. `net/reach/monitor.ts` derives which path is
+ * carrying traffic from exactly this premise, so a profile without a metric
+ * is not untidiness — it makes `pathInUse` name the wrong interface, and the
+ * watch then reads the wrong device's counters.
+ */
+describe("route metrics follow network.priority", () => {
+  const eth = (c: Config) => settingsOf(ethernetProfile(c, "eth0"));
+  const wifi = (c: Config) => settingsOf(clientProfile(c, null, "wlan0")!);
+  const modem = (c: Config) => settingsOf(modemProfile(c, null, "cdc-wdm0")!);
+
+  function board(priority: Config["network"]["priority"]): Config {
+    const c: Config = structuredClone(DEFAULT_CONFIG);
+    c.network.priority = priority;
+    c.network.client.ssid = "HomeNetwork";
+    c.network.modem.enabled = true;
+    return c;
+  }
+
+  it("sorts every path the way the operator ordered it", () => {
+    const c = board(["ethernet", "modem", "wifi_client"]);
+    // The shipped default. Left alone, NetworkManager gives Wi-Fi 600 and the
+    // modem 700, so the radio outranks the modem while the configuration says
+    // the opposite.
+    expect(Number(eth(c)["ipv4.route-metric"]))
+      .toBeLessThan(Number(modem(c)["ipv4.route-metric"]));
+    expect(Number(modem(c)["ipv4.route-metric"]))
+      .toBeLessThan(Number(wifi(c)["ipv4.route-metric"]));
+  });
+
+  it("puts the modem ahead of ethernet when that is what was asked for", () => {
+    const c = board(["modem", "wifi_client", "ethernet"]);
+    expect(Number(modem(c)["ipv4.route-metric"]))
+      .toBeLessThan(Number(wifi(c)["ipv4.route-metric"]));
+    expect(Number(wifi(c)["ipv4.route-metric"]))
+      .toBeLessThan(Number(eth(c)["ipv4.route-metric"]));
+  });
+
+  it("gives ethernet and the Wi-Fi client the same metric on v4 and v6", () => {
+    const c = board(["ethernet", "modem", "wifi_client"]);
+    expect(eth(c)["ipv6.route-metric"]).toBe(String(metricFor(c, "ethernet")));
+    expect(wifi(c)["ipv6.route-metric"]).toBe(String(metricFor(c, "wifi_client")));
+  });
+
+  it("gives the access point no metric at all", () => {
+    // `ipv4.method shared` — the access point hands out addresses and
+    // masquerades for its clients. It is not a way out of this board, and a
+    // metric on it would enter it into an ordering it does not belong to.
+    const s = settingsOf(apProfile(DEFAULT_CONFIG, "p", "wlan0"));
+    expect(s["ipv4.route-metric"]).toBeUndefined();
+    expect(s["ipv6.route-metric"]).toBeUndefined();
   });
 });
 

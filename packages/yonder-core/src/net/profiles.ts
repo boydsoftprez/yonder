@@ -2,9 +2,9 @@
 import type { Config } from "../schema/config.js";
 import type { SecretStore } from "../secrets/store.js";
 import type { ConnectionSpec } from "./nmcli/client.js";
-import { MODEM_CONNECTION, modemProfile } from "./modem/profiles.js";
+import { MODEM_CONNECTION, metricFor, modemProfile } from "./modem/profiles.js";
 
-export { MODEM_CONNECTION };
+export { MODEM_CONNECTION, metricFor };
 
 /**
  * The setup access point's passphrase: published, documented, and the same on
@@ -72,10 +72,13 @@ export function clientProfile(config: Config, psk: string | null, iface: string)
   const client = config.network.client;
   if (client.ssid === null || client.ssid === "") return null;
 
+  const metric = String(metricFor(config, "wifi_client"));
   const settings: string[][] = [
     ["802-11-wireless.mode", "infrastructure"],
     ["802-11-wireless.ssid", client.ssid],
     ["ipv4.method", "auto"],
+    ["ipv4.route-metric", metric],
+    ["ipv6.route-metric", metric],
     ["connection.autoconnect", "yes"],
   ];
   if (psk !== null) {
@@ -86,12 +89,15 @@ export function clientProfile(config: Config, psk: string | null, iface: string)
 }
 
 export function ethernetProfile(config: Config, iface: string): DesiredProfile {
+  const metric = String(metricFor(config, "ethernet"));
   return {
     name: ETHERNET_CONNECTION,
     type: "ethernet",
     ifname: iface,
     settings: [
       ["ipv4.method", config.network.ethernet.dhcp ? "auto" : "disabled"],
+      ["ipv4.route-metric", metric],
+      ["ipv6.route-metric", metric],
       ["connection.autoconnect", "yes"],
     ],
   };
