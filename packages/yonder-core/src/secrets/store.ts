@@ -5,6 +5,7 @@ import { z } from "zod";
 import { writeFileDurable } from "../fs/durable.js";
 import { generateSecret } from "./generate.js";
 import { ConfigError, formatIssues } from "../config/errors.js";
+import { guardSecretValue } from "./redact.js";
 import type { SecretRef } from "../schema/config.js";
 
 type Bag = Record<string, string>;
@@ -57,6 +58,19 @@ export class SecretStore {
   private readonly path: string;
   private bag: Bag;
 
+  /**
+   * Tell the redactor every value this store now holds.
+   *
+   * Here rather than at each call site, because R-SEC-10 says redaction
+   * happens where the value is captured and this is the only place a value
+   * enters the process. A caller that later writes one of these into a log
+   * line — under no recognisable name, in a sentence nobody anticipated — has
+   * it stripped without having to know that it should.
+   */
+  private guardAll(): void {
+    for (const value of Object.values(this.bag)) guardSecretValue(value);
+  }
+
   constructor(path: string) {
     this.path = path;
     if (!existsSync(path)) {
@@ -71,6 +85,7 @@ export class SecretStore {
       );
     }
     this.bag = parsed.data;
+    this.guardAll();
   }
 
   get(name: string): string | undefined {
@@ -83,6 +98,7 @@ export class SecretStore {
     if (existing !== undefined) return { value: existing, created: false };
     const value = generateSecret(kind);
     this.bag[name] = value;
+    guardSecretValue(value);
     this.flush();
     return { value, created: true };
   }
@@ -98,6 +114,7 @@ export class SecretStore {
     const existing = this.bag[name];
     if (existing !== undefined) return { value: existing, created: false };
     this.bag[name] = value;
+    guardSecretValue(value);
     this.flush();
     return { value, created: true };
   }

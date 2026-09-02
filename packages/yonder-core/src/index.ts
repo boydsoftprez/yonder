@@ -92,6 +92,11 @@ export {
   isSecretKey,
   secretValuesIn,
   redactValues,
+  redactNamedValues,
+  redactGuarded,
+  redactLine,
+  guardSecretValue,
+  forgetGuardedValues,
 } from "./secrets/redact.js";
 export {
   DaemonClient,
@@ -183,3 +188,14 @@ export {
   type ProbeFailure,
   type ProbeOptions,
 } from "./diag/probe.js";
+export { warn, note } from "./log.js";
+export {
+  ActivityLog,
+  activityLog,
+  ACTIVITY_CAPACITY,
+  ACTIVITY_MESSAGE_LIMIT,
+  type ActivityEntry,
+  type ActivityLevel,
+  type ActivityPage,
+  type ActivityLogOptions,
+} from "./log/activity.js";

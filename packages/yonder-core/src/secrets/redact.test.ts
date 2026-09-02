@@ -1,9 +1,22 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { describe, it, expect } from "vitest";
-import { readdirSync, readFileSync } from "node:fs";
+import { describe, it, expect, afterEach } from "vitest";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { SECRET_KEYS, REDACTED, isSecretKey, secretValuesIn, redactValues } from "./redact.js";
+import {
+  SECRET_KEYS,
+  REDACTED,
+  isSecretKey,
+  secretValuesIn,
+  redactValues,
+  redactNamedValues,
+  redactGuarded,
+  redactLine,
+  guardSecretValue,
+  forgetGuardedValues,
+} from "./redact.js";
+import { SecretStore } from "./store.js";
 import { redactArgv, redactText } from "../net/runner.js";
 
 describe("secretValuesIn", () => {
@@ -108,5 +121,96 @@ describe("one list, two callers", () => {
 
   it("has no duplicate entries hiding a typo", () => {
     expect(SECRET_KEYS.size).toBeGreaterThan(5);
+  });
+});
+
+/**
+ * The third consumer of the one list, after argv and request bodies. The
+ * activity buffer this feeds is served to a browser, and a log line has
+ * neither an argv slot nor a JSON key to key redaction off.
+ */
+describe("redactNamedValues", () => {
+  it("strips the value after a secret-bearing name", () => {
+    expect(redactNamedValues("psk=hunter2")).toBe(`psk=${REDACTED}`);
+    expect(redactNamedValues("802-11-wireless-security.psk: hunter2"))
+      .toBe(`802-11-wireless-security.psk: ${REDACTED}`);
+    expect(redactNamedValues('gsm.password = "hunter2"'))
+      .toBe(`gsm.password = ${REDACTED}`);
+  });
+
+  /**
+   * Longest name first. Otherwise the qualified nmcli property is matched as
+   * a bare `psk` with a prefix, and the prefix survives into the line.
+   */
+  it("matches the qualified name rather than its last word", () => {
+    const out = redactNamedValues("wifi-sec.psk=hunter2");
+    expect(out).toBe(`wifi-sec.psk=${REDACTED}`);
+    expect(out).not.toContain("hunter2");
+  });
+
+  /**
+   * This is still not a guess about what a secret looks like — that is the
+   * mistake this module refuses to make, because a password can look like a
+   * word. A sentence that merely mentions one is left alone.
+   */
+  it("leaves a sentence that only mentions a password alone", () => {
+    const line = "an administrator password was set";
+    expect(redactNamedValues(line)).toBe(line);
+    expect(redactNamedValues("POST /admin/password refused: too-short"))
+      .toBe("POST /admin/password refused: too-short");
+  });
+
+  it("strips every occurrence, not just the first", () => {
+    const out = redactNamedValues("psk=one and psk=two");
+    expect(out).not.toContain("one");
+    expect(out).not.toContain("two");
+  });
+});
+
+describe("the registry of values this device holds", () => {
+  afterEach(() => { forgetGuardedValues(); });
+
+  /**
+   * Names are knowledge this module has by construction; values are knowledge
+   * only the secret store has. Registering them is what covers the line
+   * nobody anticipated — one that names nothing and matches no pattern.
+   */
+  it("strips a registered value out of a line that names nothing", () => {
+    guardSecretValue("correct-horse-battery");
+    expect(redactGuarded("joining home-network with correct-horse-battery"))
+      .toBe(`joining home-network with ${REDACTED}`);
+  });
+
+  it("leaves a line alone when nothing is registered", () => {
+    expect(redactGuarded("joining home-network")).toBe("joining home-network");
+  });
+
+  it("ignores an empty value, which would otherwise match everywhere", () => {
+    guardSecretValue("");
+    expect(redactGuarded("nothing to strip here")).toBe("nothing to strip here");
+  });
+
+  /**
+   * The point of doing it in SecretStore's constructor: a value becomes
+   * un-loggable the moment it is read, so no later call site has to remember.
+   */
+  it("is populated by reading a secrets file, without anyone asking", () => {
+    const dir = mkdtempSync(join(tmpdir(), "yonder-redact-"));
+    try {
+      const path = join(dir, "secrets.yaml");
+      writeFileSync(path, "ap_psk: a-passphrase-from-the-file\n");
+      new SecretStore(path);
+      expect(redactGuarded("the access point uses a-passphrase-from-the-file"))
+        .toContain(REDACTED);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("redactLine applies both mechanisms", () => {
+    guardSecretValue("a-registered-value");
+    const out = redactLine("psk=hunter2 while holding a-registered-value");
+    expect(out).not.toContain("hunter2");
+    expect(out).not.toContain("a-registered-value");
   });
 });

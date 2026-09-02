@@ -4,7 +4,7 @@ import { unlinkSync, existsSync, mkdirSync, chmodSync } from "node:fs";
 import { dirname } from "node:path";
 import { pathToFileURL } from "node:url";
 import { ApplyEngine } from "../apply/engine.js";
-import { warn } from "../log.js";
+import { warn, note } from "../log.js";
 import { createRouter } from "./routes.js";
 import { AdminCredential } from "../console/credential.js";
 import { ConsoleRenderer } from "../console/renderer.js";
@@ -99,7 +99,7 @@ export function buildRenderers(opts: BuildRenderersOptions): {
   client: NmcliClient;
   generated: string[];
 } {
-  const log = opts.log ?? ((l: string) => process.stdout.write(`${l}\n`));
+  const log = opts.log ?? note;
   const secrets = new SecretStore(opts.secretsPath);
   const generated: string[] = [];
   // Only if absent: an operator who has changed the passphrase keeps theirs.
@@ -172,7 +172,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   // nonsense, or one a schema tightening on upgrade has just invalidated.
   try {
     if (seedConfigIfAbsent(opts.configPath)) {
-      process.stdout.write(`seeded a default configuration at ${opts.configPath}\n`);
+      note(`seeded a default configuration at ${opts.configPath}`);
     }
   } catch (e) {
     warn(`could not seed a default configuration, serving anyway: ${(e as Error).message}`);
@@ -207,7 +207,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   // that helps a device in that state. Constructing a client cannot fail; it
   // is only the secret store above that can.
   const client = built?.client
-    ?? new NmcliClient(opts.runner ?? systemRunner, (l) => process.stdout.write(`${l}\n`));
+    ?? new NmcliClient(opts.runner ?? systemRunner, note);
 
   // No secret is ever printed. That mechanism existed to surface a random
   // per-device access-point passphrase and there is no longer one to surface
@@ -215,9 +215,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   // still on the published default — which stays true on every boot until
   // they change it, not just the boot that seeded it.
   if (built?.secrets.get("ap_psk") === DEFAULT_AP_PASSPHRASE) {
-    process.stdout.write(
-      "access point: using the published default passphrase; change it from the console\n",
-    );
+    note("access point: using the published default passphrase; change it from the console");
   }
 
   const engine = new ApplyEngine({
@@ -286,7 +284,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
       await radioSettled;
       await client.up(AP_CONNECTION);
     },
-    log: (l) => process.stdout.write(`${l}\n`),
+    log: note,
   });
   watchdog.start();
 
@@ -417,7 +415,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
     if (renderer === undefined) return;
     try {
       if (!(await renderer.waitForRadio())) return;
-      process.stdout.write("network: a wifi radio became usable; rendering again\n");
+      note("network: a wifi radio became usable; rendering again");
       // Through the engine, not the renderer: renderCurrent() refuses while
       // an apply is in flight, so this cannot push a stale configuration
       // through a renderer mid-apply.
@@ -461,7 +459,7 @@ async function main(): Promise<void> {
     // they are given, so nothing can write to /opt/yonder by default.
     console: consolePathsFromEnv(),
   });
-  process.stdout.write("yonder-core listening\n");
+  note("yonder-core listening");
 }
 
 /**
