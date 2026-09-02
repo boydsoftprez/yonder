@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { mkdtempSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -33,6 +33,17 @@ function harness(reply: (argv: string[]) => CommandResult = () => ({ code: 0, st
 
 const argvOf = (calls: string[][], head: string) => calls.filter((a) => a[0] === head);
 
+const joinedList = (...nwids: string[]) =>
+  JSON.stringify(
+    nwids.map((nwid) => ({
+      nwid,
+      name: "",
+      status: "OK",
+      portDeviceName: "zt0",
+      assignedAddresses: [],
+    })),
+  );
+
 describe("RemoteRenderer", () => {
   // R-VPN-08: installing a client must not start one. With zero networks joined
   // the daemon still holds live sessions with ZeroTier's root servers, which is
@@ -40,13 +51,31 @@ describe("RemoteRenderer", () => {
   it("does not start the service when nothing is configured", async () => {
     const { renderer, calls } = harness();
     await renderer.render(config(null));
-    expect(argvOf(calls, "systemctl").map((a) => a[1])).not.toContain("start");
+    expect(argvOf(calls, "systemctl")).not.toContainEqual([
+      "systemctl", "enable", "--now", "zerotier-one",
+    ]);
   });
 
-  it("stops the service when nothing is configured", async () => {
+  // CLAUDE.md rule 6, and the reason this branch is gated at all. A device an
+  // operator joined to a mesh by hand, and is reaching the console over, must
+  // not lose it to a change of palette: every apply on a default device lands
+  // here, and a palette change carries no confirmation window to undo it.
+  it("touches nothing at all when it has never started the service", async () => {
     const { renderer, calls } = harness();
     await renderer.render(config(null));
-    expect(argvOf(calls, "systemctl")).toContainEqual(["systemctl", "stop", "zerotier-one"]);
+    expect(calls).toEqual([]);
+  });
+
+  it("stops and disables the service it started, once the mesh is turned off", async () => {
+    const h = harness((argv) =>
+      argv.includes("listnetworks")
+        ? { code: 0, stdout: joinedList("9fef8a3bf9000001"), stderr: "" }
+        : { code: 0, stdout: "", stderr: "" },
+    );
+    await h.renderer.render(config("9fef8a3bf9000001"));
+    await h.renderer.render(config(null));
+    expect(argvOf(h.calls, "systemctl")).toContainEqual(["systemctl", "stop", "zerotier-one"]);
+    expect(argvOf(h.calls, "systemctl")).toContainEqual(["systemctl", "disable", "zerotier-one"]);
   });
 
   it("starts and enables the service when a network is configured", async () => {
@@ -122,5 +151,131 @@ describe("RemoteRenderer", () => {
     const { renderer, log } = harness();
     await renderer.render(config("9fef8a3bf9000001"));
     expect(log).toHaveBeenCalledWith(expect.stringContaining("9fef8a3bf9000001"));
+  });
+
+  // The network id changed: the old membership has to go, or the device sits
+  // on two meshes and the configuration names neither.
+  it("leaves the old network before joining a new one", async () => {
+    // A client that remembers, so the second render sees what the first did.
+    const member = new Set<string>();
+    const h = harness((argv) => {
+      if (argv.includes("listnetworks")) {
+        return { code: 0, stdout: joinedList(...member), stderr: "" };
+      }
+      if (argv[1] === "join") member.add(argv[2] as string);
+      if (argv[1] === "leave") member.delete(argv[2] as string);
+      return { code: 0, stdout: "", stderr: "" };
+    });
+    await h.renderer.render(config("9fef8a3bf9000001"));
+    await h.renderer.render(config("aaaaaaaaaaaaaaaa"));
+    const zt = argvOf(h.calls, "zerotier-cli").filter((a) => a[1] === "leave" || a[1] === "join");
+    expect(zt).toEqual([
+      ["zerotier-cli", "join", "9fef8a3bf9000001"],
+      ["zerotier-cli", "leave", "9fef8a3bf9000001"],
+      ["zerotier-cli", "join", "aaaaaaaaaaaaaaaa"],
+    ]);
+    expect(member).toEqual(new Set(["aaaaaaaaaaaaaaaa"]));
+    expect(JSON.parse(readFileSync(h.statePath, "utf8"))).toEqual({ network: "aaaaaaaaaaaaaaaa" });
+  });
+
+  // A leave that failed did not happen. The membership is still in the
+  // client's own database, so an apply that reported success and forgot the
+  // network would leave the aircraft on a mesh nothing records and nothing
+  // will ever remove.
+  it("fails the apply when a leave fails, and keeps the record of what it joined", async () => {
+    const h = harness((argv) => {
+      if (argv.includes("listnetworks")) {
+        return { code: 0, stdout: joinedList("9fef8a3bf9000001"), stderr: "" };
+      }
+      if (argv[1] === "leave") return { code: 1, stdout: "", stderr: "leave failed" };
+      return { code: 0, stdout: "", stderr: "" };
+    });
+    await h.renderer.render(config("9fef8a3bf9000001"));
+    await expect(h.renderer.render(config(null))).rejects.toThrow();
+    expect(JSON.parse(readFileSync(h.statePath, "utf8"))).toEqual({ network: "9fef8a3bf9000001" });
+    // And nothing was stopped either: the device is still on that mesh.
+    expect(argvOf(h.calls, "systemctl")).not.toContainEqual(["systemctl", "stop", "zerotier-one"]);
+  });
+
+  // R-VPN-07 names "a service that will not start" as one of the three
+  // failures that must fail the apply, and it must not be reported as one of
+  // the other two: an operator whose client cannot bind its port is not
+  // helped by being sent to rebuild a payload.
+  it("fails the apply, naming the service, when the unit will not start", async () => {
+    const h = harness((argv) =>
+      argv[0] === "systemctl"
+        ? { code: 1, stdout: "", stderr: "Job for zerotier-one.service failed" }
+        : { code: 0, stdout: "[]", stderr: "" },
+    );
+    await expect(h.renderer.render(config("9fef8a3bf9000001"))).rejects.toThrow(/would not start/);
+    // And it stopped there, rather than blaming the payload two calls later.
+    expect(argvOf(h.calls, "zerotier-cli")).toEqual([]);
+  });
+
+  it("says the client is not installed when systemd has no such unit", async () => {
+    const h = harness((argv) =>
+      argv[0] === "systemctl"
+        ? { code: 1, stdout: "", stderr: "Failed to enable unit: Unit file zerotier-one.service does not exist." }
+        : { code: 0, stdout: "[]", stderr: "" },
+    );
+    await expect(h.renderer.render(config("9fef8a3bf9000001"))).rejects.toThrow(/not installed/);
+  });
+
+  // R-VPN-08's "installed and off" is a claim this renderer makes, so it has
+  // to check it. A stop that silently failed leaves the aircraft talking to a
+  // company's root servers with nothing on the console saying so.
+  it("fails the apply when the service will not stop", async () => {
+    const h = harness((argv) => {
+      if (argv.includes("listnetworks")) return { code: 0, stdout: "[]", stderr: "" };
+      if (argv[0] === "systemctl" && argv[1] === "stop") {
+        return { code: 1, stdout: "", stderr: "Failed to stop zerotier-one.service" };
+      }
+      return { code: 0, stdout: "", stderr: "" };
+    });
+    await h.renderer.render(config("9fef8a3bf9000001"));
+    await expect(h.renderer.render(config(null))).rejects.toThrow(/systemctl stop/);
+    expect(JSON.parse(readFileSync(h.statePath, "utf8"))).toEqual({ network: "9fef8a3bf9000001" });
+  });
+
+  // Except the one case where the goal is already met: a unit systemd has
+  // never heard of is neither running nor going to start at boot. A client
+  // somebody removed by hand must not fail every later apply on the device.
+  it("accepts a unit that is not there when it is trying to turn one off", async () => {
+    const h = harness((argv) => {
+      if (argv[0] === "systemctl" && (argv[1] === "stop" || argv[1] === "disable")) {
+        return { code: 5, stdout: "", stderr: "Unit zerotier-one.service not loaded." };
+      }
+      if (argv.includes("listnetworks")) return { code: 0, stdout: "[]", stderr: "" };
+      return { code: 0, stdout: "", stderr: "" };
+    });
+    await h.renderer.render(config("9fef8a3bf9000001"));
+    await expect(h.renderer.render(config(null))).resolves.toBeUndefined();
+    expect(existsSync(h.statePath)).toBe(false);
+  });
+
+  // The record is a write-ahead, not a receipt. A companion computer on an
+  // aircraft is not a machine that shuts down politely, and a record written
+  // after the join leaves a window where the device is a member of a network
+  // nothing on disk says Yonder put it on.
+  it("records the network before it joins it, not after", async () => {
+    const seen: (string | null)[] = [];
+    const h = harness((argv) => {
+      if (argv[1] === "join") {
+        seen.push(existsSync(h.statePath) ? readFileSync(h.statePath, "utf8").trim() : null);
+      }
+      return { code: 0, stdout: "[]", stderr: "" };
+    });
+    await h.renderer.render(config("9fef8a3bf9000001"));
+    expect(seen).toEqual([JSON.stringify({ network: "9fef8a3bf9000001" })]);
+  });
+
+  // The other half of the same window: a write that fails must fail the apply
+  // rather than leave a membership nothing knows about.
+  it("fails the apply when the record cannot be written, before joining anything", async () => {
+    const h = harness();
+    // A directory where the file should be: writeFileDurable cannot replace it.
+    mkdirSync(h.statePath, { recursive: true });
+    await expect(h.renderer.render(config("9fef8a3bf9000001"))).rejects.toThrow();
+    expect(argvOf(h.calls, "zerotier-cli").some((a) => a[1] === "join")).toBe(false);
   });
 });
