@@ -1,0 +1,57 @@
+{
+  "why": [
+    "Violations of ADR-0009 that exist on the pages M1b shipped, written down so",
+    "the gate can fail on new ones from its first run rather than after the pages",
+    "are rebuilt. It can only shrink: a finding that is not here fails the build,",
+    "and an entry here that no longer matches anything also fails, with 'this is",
+    "fixed, delete the line'. Every entry is a defect, not a decision.",
+    "",
+    "palette '*' means the finding is the same in day and night, which it should",
+    "be — day and night are one design in two materials (R-UI-07), so a violation",
+    "in only one of them is itself worth looking at."
+  ],
+  "accepted": [
+    {
+      "rule": "spanning",
+      "page": "network",
+      "palette": "*",
+      "key": "Refresh",
+      "note": "R-UI-10. A stock ui-button is a whole row of its group and cannot be smaller than one, so it fills the surface. Closes when the page is rebuilt on the soft-key rail (ADR-0009)."
+    },
+    {
+      "rule": "spanning",
+      "page": "network",
+      "palette": "*",
+      "key": "Scan for networks",
+      "note": "R-UI-10, as above."
+    },
+    {
+      "rule": "spanning",
+      "page": "network",
+      "palette": "*",
+      "key": "Yes, I can still reach it",
+      "note": "R-UI-10, as above. This is the confirmation for a radio-moving apply, so it is the one that most needs to be reachable rather than merely large."
+    },
+    {
+      "rule": "spanning",
+      "page": "diagnostics",
+      "palette": "*",
+      "key": "Check reachability",
+      "note": "R-UI-10, as above."
+    },
+    {
+      "rule": "clipped",
+      "page": "network",
+      "palette": "*",
+      "key": "nrdb-ui-form.nrdb-ui-widget",
+      "note": "The join form is 172px of content in 48px. Same class of defect as K-13 — theme.ts already unclips markdown, and a form has the same problem for the same reason: a widget takes its height from a configured row span, and a form is taller than one row."
+    },
+    {
+      "rule": "clipped",
+      "page": "diagnostics",
+      "palette": "*",
+      "key": "nrdb-ui-form.nrdb-ui-widget",
+      "note": "The ping form, 112px of content in 48px. As above."
+    }
+  ]
+}

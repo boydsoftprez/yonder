@@ -1,0 +1,391 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// The capture gate (R-UI-12).
+//
+// "Capture every page in both palettes on every build, and fail the build when
+// a page changes shape unreviewed. A console nobody looks at is a console
+// nobody has checked."
+//
+// That requirement exists because of a specific failure. The Network page's
+// "Read this before you join a network" — the warning that tells an operator
+// the access point is about to disappear and that they have five minutes to
+// confirm — was 706 px of text in a 372 px widget. 39% of it was behind an
+// inner scrollbar that nothing indicated was there. Every unit test passed.
+// The daemon was right, the flows were right, the words were right, and the
+// page was wrong, because nothing in this repository had ever looked at one.
+//
+// So this does three things, and they are deliberately different from each
+// other:
+//
+//   1. **Rules.** Checks that a page cannot violate ADR-0009 silently: nothing
+//      clipped, no action spanning its container, no page scrolling sideways,
+//      no page rendering nothing at all. These fail the build on their own.
+//   2. **Shape.** A manifest of every widget's geometry, committed and diffed.
+//      Geometry rather than pixels, because "shape" is what the requirement
+//      says and because a pixel diff across macOS and CI is a coin toss about
+//      font rasterisation, not a check.
+//   3. **A picture.** Written on every run so somebody can look. The committed
+//      copy masks live readings — a load average changes between two runs and
+//      would make the file dirty forever — so what it records is the layout.
+//      The unmasked copy goes to an artifact directory for the full view.
+//
+// Usage:
+//   node scripts/capture-pages.mjs --base-url URL --password PW --palette day
+//   node scripts/capture-pages.mjs ... --accept     # adopt the new shape
+import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { join, dirname, isAbsolute } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const REPO = join(dirname(fileURLToPath(import.meta.url)), "..");
+
+/** The pages, from the shipped flows rather than a list beside them. */
+function pagesFromFlows() {
+  const flows = JSON.parse(readFileSync(join(REPO, "flows/flows.json"), "utf8"));
+  const base = flows.find((n) => n.type === "ui-base");
+  return flows
+    .filter((n) => n.type === "ui-page")
+    .map((p) => ({
+      name: String(p.name).toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+      title: p.name,
+      url: (base?.path ?? "/dashboard") + p.path,
+    }));
+}
+
+/**
+ * What carries a live reading.
+ *
+ * These are masked in the committed picture and excluded from the shape
+ * manifest's text, because their content changes between two runs of the same
+ * console and neither the picture nor the manifest is about their values.
+ */
+const LIVE = [
+  ".nrdb-ui-text-value",
+  ".v-data-table td",
+  ".y-gauge__value",
+  ".y-bar__v",
+  ".tape__box",
+];
+
+/** Fixed, so geometry means the same thing on a laptop and on a CI runner. */
+const VIEWPORT = { width: 1280, height: 900 };
+
+/**
+ * The debt list.
+ *
+ * These pages were built before ADR-0009 and they break its rules — that is
+ * the reason the rules exist. A gate that failed on all of it from the first
+ * run would be a gate somebody turned off within a week, so each known
+ * violation is written down here, once, with a reason.
+ *
+ * It can only shrink. A finding not on the list fails the build, and an entry
+ * on the list that no longer matches anything **also** fails, with "this is
+ * fixed, delete the line" — because a debt list nobody prunes stops being a
+ * list of debts and becomes a list of excuses.
+ */
+function acceptedViolations(dir) {
+  const path = join(dir, "accepted-violations.json");
+  if (!existsSync(path)) return { path, entries: [] };
+  const parsed = JSON.parse(readFileSync(path, "utf8"));
+  return { path, entries: parsed.accepted ?? [] };
+}
+
+const matches = (entry, f) =>
+  entry.rule === f.rule &&
+  entry.page === f.page &&
+  (entry.palette === "*" || entry.palette === f.palette) &&
+  entry.key === f.key;
+
+function arg(name, fallback) {
+  const i = process.argv.indexOf(`--${name}`);
+  return i === -1 ? fallback : process.argv[i + 1];
+}
+const has = (name) => process.argv.includes(`--${name}`);
+
+const baseUrl = arg("base-url", "http://127.0.0.1:18881");
+const password = arg("password");
+const palette = arg("palette", "day");
+/**
+ * Relative to the repository, or absolute if that is what was given.
+ *
+ * `join("/repo", "/tmp/x")` is `/repo/tmp/x`, not `/tmp/x` — so a caller
+ * passing an absolute path got a directory created *inside the working tree*,
+ * silently, with a name that looked like a system path. It happened here.
+ */
+const under = (value, fallback) => {
+  const given = value ?? fallback;
+  return isAbsolute(given) ? given : join(REPO, given);
+};
+
+const refs = under(arg("refs"), "docs/console");
+const artifacts = under(arg("artifacts"), "vendor/capture");
+const accept = has("accept");
+
+if (!password) {
+  process.stderr.write("capture-pages: --password is required\n");
+  process.exit(2);
+}
+
+let chromium;
+try {
+  ({ chromium } = await import("playwright"));
+} catch {
+  process.stderr.write(
+    "capture-pages: playwright is not installed.\n" +
+    "  npm install --save-dev playwright && npx playwright install --with-deps chromium\n",
+  );
+  process.exit(2);
+}
+
+/**
+ * Everything measured inside the page.
+ *
+ * Runs in the browser, so it can only use what is on the page. Returns plain
+ * data; every judgement about it is made out here where it can be read.
+ */
+function measure(liveSelectors) {
+  const round = (n) => Math.round(n);
+  const boxOf = (el) => {
+    const r = el.getBoundingClientRect();
+    return { x: round(r.x), y: round(r.y), w: round(r.width), h: round(r.height) };
+  };
+
+  /**
+   * A key that survives a reorder of unrelated widgets. The element's own
+   * classes plus its position among its siblings — not an index into a flat
+   * list, which would renumber everything below an insertion and report five
+   * changes where there was one.
+   */
+  const keyOf = (el) => {
+    const cls = [...el.classList]
+      .filter((c) => !/^(v-|mdi-)/.test(c) && !c.includes("theme--"))
+      .sort()
+      .join(".");
+    const siblings = [...(el.parentElement?.children ?? [])].filter(
+      (s) => s.className === el.className,
+    );
+    const nth = siblings.indexOf(el);
+    return cls + (siblings.length > 1 ? `#${nth}` : "");
+  };
+
+  const widgets = [...document.querySelectorAll('[class*="nrdb-ui-widget"], [class*="nrdb-ui-group"]')];
+
+  /**
+   * Clipped content: a scrollable box whose content is taller than it is.
+   * This is the K-13 failure, generalised — 39% of a safety warning behind an
+   * inner scrollbar that nothing indicated was there.
+   */
+  const clipped = [];
+  for (const el of document.querySelectorAll("*")) {
+    const style = getComputedStyle(el);
+    const scrolls = /auto|scroll|hidden/.test(style.overflowY);
+    if (!scrolls) continue;
+    if (el.scrollHeight <= el.clientHeight + 2) continue;
+    if (el.clientHeight === 0) continue;
+    // The page's own scroller. A console taller than the window is a page you
+    // scroll, not content that is hidden — the defect is a box *inside* the
+    // page clipping what it holds.
+    if (el === document.documentElement || el === document.body) continue;
+    if (el.clientHeight >= window.innerHeight - 4) continue;
+    // A table body scrolling is a table doing its job. Prose is not.
+    if (el.closest(".v-data-table__wrapper, .v-table__wrapper")) continue;
+    clipped.push({
+      key: keyOf(el),
+      visible: el.clientHeight,
+      content: el.scrollHeight,
+      hidden: Math.round((1 - el.clientHeight / el.scrollHeight) * 100),
+      text: (el.textContent ?? "").trim().slice(0, 80),
+    });
+  }
+
+  /**
+   * An action spanning the surface it sits on. R-UI-10, checked in the DOM
+   * rather than over the flows, because a widget width of "auto" that CSS
+   * then stretches is exactly the case a JSON check cannot see.
+   */
+  const spanning = [];
+  for (const el of document.querySelectorAll("button, .nrdb-ui-button .v-btn")) {
+    const parent = el.parentElement;
+    if (!parent) continue;
+    const own = el.getBoundingClientRect().width;
+    const around = parent.getBoundingClientRect().width;
+    if (around < 8 || own / around < 0.9) continue;
+    if (own < 240) continue; // a narrow column is allowed to be filled
+    spanning.push({
+      key: keyOf(el),
+      label: (el.textContent ?? "").trim().slice(0, 40),
+      width: Math.round(own),
+      of: Math.round(around),
+    });
+  }
+
+  const live = new Set();
+  for (const sel of liveSelectors) {
+    for (const el of document.querySelectorAll(sel)) live.add(el);
+  }
+
+  return {
+    viewport: { w: window.innerWidth, h: window.innerHeight },
+    scrollWidth: document.documentElement.scrollWidth,
+    widgets: widgets.map((el) => ({ key: keyOf(el), box: boxOf(el) })),
+    liveBoxes: [...live].map(boxOf).filter((b) => b.w > 0 && b.h > 0),
+    clipped,
+    spanning,
+  };
+}
+
+// ---------------------------------------------------------------------------
+
+const pages = pagesFromFlows();
+mkdirSync(join(refs, "shape"), { recursive: true });
+mkdirSync(join(refs, "capture"), { recursive: true });
+mkdirSync(artifacts, { recursive: true });
+
+const debt = acceptedViolations(refs);
+const seen = new Set();
+
+const browser = await chromium.launch();
+const context = await browser.newContext({
+  viewport: VIEWPORT,
+  deviceScaleFactor: 1,
+  reducedMotion: "reduce",
+  colorScheme: "light",
+});
+
+// The console's own form login, so the capture goes through the gate every
+// other client does rather than around it.
+const login = await context.request.post(`${baseUrl}/login`, { form: { password } });
+if (!login.ok()) {
+  process.stderr.write(`capture-pages: sign-in failed (${login.status()})\n`);
+  await browser.close();
+  process.exit(1);
+}
+
+let failures = 0;
+let changed = 0;
+const note = (s) => process.stdout.write(s + "\n");
+
+for (const page of pages) {
+  const tab = await context.newPage();
+  await tab.goto(baseUrl + page.url, { waitUntil: "networkidle" });
+  // The dashboard renders its widgets after the socket connects, so waiting on
+  // the network alone captures an empty page.
+  await tab.waitForSelector('[class*="nrdb-ui-widget"], [class*="nrdb-ui-group"]', { timeout: 15000 })
+    .catch(() => {});
+  await tab.waitForTimeout(400);
+
+  const shape = await tab.evaluate(measure, LIVE);
+  const stem = `${page.name}.${palette}`;
+
+  // The picture. Masked for the committed copy — a load average changes
+  // between two runs and would leave the file permanently dirty — and whole
+  // for the artifact a person actually looks at.
+  const masks = LIVE.map((s) => tab.locator(s));
+  await tab.screenshot({
+    path: join(refs, "capture", `${stem}.png`),
+    fullPage: true,
+    mask: masks,
+    maskColor: "#8891993d",
+  });
+  await tab.screenshot({ path: join(artifacts, `${stem}.png`), fullPage: true });
+
+  // ---- rules ----
+  // A finding on the debt list is reported and not counted; anything else
+  // fails. Nothing is silently tolerated either way — the point of looking is
+  // to see what is there.
+  const report = (finding, line, detail) => {
+    const known = debt.entries.find((e) => matches(e, finding));
+    if (known) {
+      seen.add(known);
+      note(`  debt  ${line}`);
+      if (known.note) note(`          accepted: ${known.note}`);
+      return;
+    }
+    note(`  FAIL  ${line}`);
+    if (detail) note(`          ${detail}`);
+    failures += 1;
+  };
+
+  if (shape.widgets.length === 0) {
+    note(`  FAIL  ${page.title} (${palette}) rendered no widgets at all`);
+    failures += 1;
+  }
+  for (const c of shape.clipped) {
+    report(
+      { rule: "clipped", page: page.name, palette, key: c.key },
+      `${page.title} (${palette}) clips content: ${c.hidden}% of ${c.content}px hidden in ${c.visible}px`,
+      `${c.key}  "${c.text}"`,
+    );
+  }
+  for (const a of shape.spanning) {
+    report(
+      { rule: "spanning", page: page.name, palette, key: a.label },
+      `${page.title} (${palette}) has an action spanning its surface: "${a.label}" ${a.width}px of ${a.of}px`,
+    );
+  }
+  if (shape.scrollWidth > shape.viewport.w + 1) {
+    note(`  FAIL  ${page.title} (${palette}) scrolls sideways: ${shape.scrollWidth}px in ${shape.viewport.w}px`);
+    failures += 1;
+  }
+
+  // ---- shape, which fails when it changed and nobody said so ----
+  // Only the geometry: the rule findings above are the current state of the
+  // page, not something to freeze, and a reference that carried them would
+  // let a defect become the accepted answer.
+  // Geometry is not portable. The same page wraps differently on macOS and on
+  // a CI runner, because the system font stack resolves to different faces
+  // with different metrics and a wrapped line is twenty pixels of widget
+  // height. One shared reference would fail on the first run somewhere and
+  // teach everyone to ignore the gate.
+  //
+  // So there is a reference per platform, below, and each machine enforces its
+  // own. The *rules* above need none of this: clipped content, a spanning
+  // action and a sideways scroll are relative comparisons within one
+  // rendering, and they hold anywhere.
+  const recorded = { platform: process.platform, viewport: shape.viewport, widgets: shape.widgets };
+  // One reference per platform, so every machine enforces rather than one
+  // machine enforcing and the rest printing a note nobody reads. A platform
+  // with no reference yet records one and says so.
+  const refPath = join(refs, "shape", `${stem}.${process.platform}.json`);
+  const next = JSON.stringify(recorded, null, 2) + "\n";
+
+  if (accept || !existsSync(refPath)) {
+    writeFileSync(refPath, next);
+    note(`  new   ${page.title} (${palette}) shape recorded for ${process.platform}`);
+  } else {
+    const previous = readFileSync(refPath, "utf8");
+    if (previous === next) {
+      note(`  ok    ${page.title} (${palette}) unchanged, ${shape.widgets.length} widgets`);
+    } else {
+      const was = JSON.parse(previous);
+      const moved = recorded.widgets.filter((w, i) => {
+        const before = was.widgets[i];
+        return !before || before.key !== w.key || JSON.stringify(before.box) !== JSON.stringify(w.box);
+      });
+      note(`  FAIL  ${page.title} (${palette}) changed shape: ${was.widgets.length} widgets -> ${recorded.widgets.length}, ${moved.length} moved`);
+      for (const w of moved.slice(0, 4)) note(`          ${w.key} now ${w.box.w}x${w.box.h} at ${w.box.x},${w.box.y}`);
+      note(`          look at ${join("docs/console/capture", stem + ".png")}, then re-run with ACCEPT_SHAPE=1`);
+      changed += 1;
+    }
+  }
+
+  await tab.close();
+}
+
+await browser.close();
+
+// An accepted violation that no longer happens is a line to delete. Left in,
+// it would quietly re-accept the same defect if it ever came back.
+const stale = debt.entries.filter(
+  (e) => !seen.has(e) && (e.palette === "*" || e.palette === palette),
+);
+for (const e of stale) {
+  note(`  FAIL  ${e.page} (${e.palette}) no longer has the accepted "${e.rule}" on "${e.key}"`);
+  note(`          it is fixed — delete that entry from ${join(refs, "accepted-violations.json")}`);
+  failures += 1;
+}
+
+note("");
+note(`  captured ${pages.length} pages in the ${palette} palette`);
+if (failures) note(`  ${failures} rule failure(s)`);
+if (changed) note(`  ${changed} page(s) changed shape without being accepted`);
+process.exit(failures + changed === 0 ? 0 : 1);

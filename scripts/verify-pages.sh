@@ -14,11 +14,16 @@
 # resolve `yonder-core` lives. None of those fails a unit test; all of them are
 # a console page that is silently missing a control.
 #
-# What it does NOT prove: that a page looks right, that a widget is usable on a
-# tablet, or anything at all about hardware, systemd, NetworkManager or a
-# radio. Those need a browser and a board.
+# Since R-UI-12 it also captures every page in both palettes in a real browser,
+# checks that nothing is clipped and no action spans its surface, and fails when
+# a page changed shape without somebody accepting it.
+#
+# What it does NOT prove: that a widget is usable on a tablet, that a reading is
+# legible in sunlight, or anything at all about hardware, systemd,
+# NetworkManager or a radio. Those need a board and a person holding it.
 #
 #     ./scripts/verify-pages.sh
+#     ACCEPT_SHAPE=1 ./scripts/verify-pages.sh   # adopt a deliberate change
 #
 # Requires: a node new enough for Node-RED (22.12+), curl, a built yonder-core
 # and contrib tree (`npm run build`), and a console tree staged by
@@ -165,6 +170,10 @@ wait_for_console() {
 status() { curl -s -o /dev/null -w '%{http_code}' -b "$ROOT/cookies" -X "$1" "http://127.0.0.1:$PORT$2"; }
 body()   { curl -s -b "$ROOT/cookies" "http://127.0.0.1:$PORT$1"; }
 sock()   { curl -s --unix-socket "$SOCKET" "http://localhost$1"; }
+sock_post() {
+    curl -s -H 'content-type: application/json' --data "$2" \
+        --unix-socket "$SOCKET" "http://localhost$1"
+}
 
 expect() {
     what="$1"; want="$2"; got="$3"
@@ -320,6 +329,61 @@ say "R-SEC-10: the password is nowhere in the journal"
 
 hits=$(grep -c "$PASSWORD" "$JOURNAL" || true)
 expect "the password appears nowhere in what either service printed" 0 "$hits"
+
+# ---------------------------------------------------------------------------
+say "R-UI-12: capture every page, in both palettes, and look at them"
+
+# The gate this repository did not have when 39% of the join warning shipped
+# behind a scrollbar. Every check above this line passed on that build.
+#
+# It needs a browser, which is not something to assume on a development
+# machine — so a missing playwright is a loud skip rather than a failure, and
+# CI installs it so that there it is neither.
+if node -e 'import("playwright")' >/dev/null 2>&1; then
+    capture() {
+        if node "$REPO/scripts/capture-pages.mjs" \
+                --base-url "http://127.0.0.1:$PORT" \
+                --password "$PASSWORD" \
+                --palette "$1" \
+                --artifacts "$REPO/vendor/capture" \
+                ${ACCEPT_SHAPE:+--accept}; then
+            ok "the $1 palette: every page captured, and none changed shape"
+        else
+            bad "the $1 palette: see the capture output above"
+        fi
+    }
+
+    capture day
+
+    # Night through the route an operator uses, not by writing the file: the
+    # theme goes through the apply engine, so this also proves the palette a
+    # page is captured in is one the device actually reached.
+    theme_reply=$(sock_post /ui/theme '{"theme":"night"}')
+    theme_id=$(printf '%s' "$theme_reply" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+    if [ -n "$theme_id" ]; then
+        sock_post /confirm "{\"id\":\"$theme_id\"}" >/dev/null
+    fi
+
+    i=0
+    while [ "$i" -lt "$TRIES" ]; do
+        grep -q -- '--yonder-theme: "night"' "$CONSOLE/public/theme.css" 2>/dev/null && break
+        sleep "$POLL"; i=$((i + 1))
+    done
+    if grep -q -- '--yonder-theme: "night"' "$CONSOLE/public/theme.css" 2>/dev/null; then
+        ok "the device reached the night palette through /ui/theme"
+        capture night
+    else
+        bad "the console never regenerated theme.css as night, so night was not captured"
+    fi
+
+    # Back to the default, so a kept working directory is left as it was found.
+    back=$(sock_post /ui/theme '{"theme":"day"}')
+    back_id=$(printf '%s' "$back" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+    [ -n "$back_id" ] && sock_post /confirm "{\"id\":\"$back_id\"}" >/dev/null
+else
+    printf '  SKIP  no browser: the pages were not captured and nobody looked\n'
+    printf '        npm install --save-dev playwright && npx playwright install --with-deps chromium\n'
+fi
 
 # ---------------------------------------------------------------------------
 say "result"

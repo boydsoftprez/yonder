@@ -208,8 +208,70 @@ its generated palette are both behind the login while `settings.js` is not serve
   carries its own inline CSS — but it was assumed the other way round and the assumption was
   wrong.
 
-**What it still does not prove.** Nothing about how a page *looks*, whether a widget is
-usable on a tablet in sunlight, or anything at all about hardware. There is no browser in
-this run: it asserts that the flows load, that the widgets resolve their groups, and that the
-routes answer. Every visual claim in this milestone — that the night palette is legible, that
-the Wi-Fi warning is readable before the form — is unverified.
+**What it still does not prove.** Whether a widget is usable on a tablet in sunlight, or
+anything at all about hardware. Every claim about a real board remains unverified.
+
+## The capture gate
+
+Since R-UI-12, the same run drives a real browser over every page in both palettes. It was
+added because of a specific failure: the Network page's *"Read this before you join a
+network"* — the warning that says the access point is about to disappear and that there are
+five minutes to confirm — shipped as 706 px of text in a 372 px widget, with 39% of it behind
+an inner scrollbar that nothing indicated was there. Every check above this line passed on
+that build. Nothing in this repository had ever looked at a page.
+
+It does three separate things.
+
+**Rules that fail on their own.** Nothing clipped inside a box, no action spanning the
+surface it sits on (R-UI-10), no page scrolling sideways, no page rendering nothing at all.
+These are relative comparisons within one rendering, so they hold on any machine.
+
+**A shape manifest**, committed and diffed — every widget's geometry, so a page that moves
+fails until somebody accepts it. Geometry rather than pixels, because *shape* is what the
+requirement says and because a pixel diff between a laptop and a CI runner is a question
+about font rasterisation rather than a check. References are named for the platform that
+recorded them (`status.day.darwin.json`, `status.day.linux.json`) so every machine enforces
+its own instead of one enforcing and the rest printing a note nobody reads.
+
+**A picture**, in `docs/console/capture/`, written every run. The committed copy masks live
+readings — a load average changes between two runs and would leave the file permanently
+dirty — so what it records is the layout. The unmasked copy goes to `vendor/capture/`, which
+CI uploads as an artifact.
+
+```
+./scripts/verify-pages.sh                    # capture, and gate
+ACCEPT_SHAPE=1 ./scripts/verify-pages.sh     # adopt a deliberate change
+```
+
+Without playwright installed the run says so loudly and skips, rather than passing quietly:
+
+```
+npm install --save-dev playwright && npx playwright install --with-deps chromium
+```
+
+### The debt list
+
+`docs/console/accepted-violations.json` holds the violations the pages M1b shipped already
+have — four actions spanning their surface, two forms clipping their own content — each with
+a reason. Without it the gate would have failed on everything from its first run and been
+turned off within a week.
+
+It can only shrink. A finding that is not on it fails the build, and an entry on it that no
+longer matches anything **also** fails, with *this is fixed, delete the line* — because a
+debt list nobody prunes stops being a list of debts and becomes a list of excuses.
+
+**What the gate found on its first run**, and what no unit test could have:
+
+- **Four actions at 588 px of 588 px.** `Refresh`, `Scan for networks`, `Yes, I can still
+  reach it` and `Check reachability` each fill 100% of the surface they sit on. This is
+  R-UI-10 stated as a measurement rather than an opinion, and it is the mechanical
+  consequence of a stock widget being a whole row of its group — see
+  [ADR-0009](adr/0009-console-visual-language.md).
+- **Two forms clipping their own content.** The join form is 172 px of content in 48 px, 72%
+  hidden; the ping form is 112 px in 48 px, 57% hidden. Exactly the K-13 defect, in a widget
+  type nobody had thought to check: `theme.ts` unclips markdown, and a form has the same
+  problem for the same reason.
+
+**What it still does not prove.** That a reading is legible in sunlight, that a target is
+big enough for a gloved finger, or that any of it works on a board. A headless browser at
+1280×900 is not a tablet on a wing.

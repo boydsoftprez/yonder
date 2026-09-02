@@ -1,0 +1,180 @@
+{
+  "platform": "darwin",
+  "viewport": {
+    "w": 1280,
+    "h": 900
+  },
+  "widgets": [
+    {
+      "key": "nrdb-ui-group#0",
+      "box": {
+        "x": 12,
+        "y": 76,
+        "w": 622,
+        "h": 503
+      }
+    },
+    {
+      "key": "nrdb-ui-button.nrdb-ui-widget",
+      "box": {
+        "x": 29,
+        "y": 154,
+        "w": 588,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-text.nrdb-ui-widget#0",
+      "box": {
+        "x": 29,
+        "y": 214,
+        "w": 588,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-text.nrdb-ui-widget#1",
+      "box": {
+        "x": 29,
+        "y": 274,
+        "w": 588,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-text.nrdb-ui-widget#2",
+      "box": {
+        "x": 29,
+        "y": 334,
+        "w": 588,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-markdown.nrdb-ui-widget",
+      "box": {
+        "x": 29,
+        "y": 394,
+        "w": 588,
+        "h": 106
+      }
+    },
+    {
+      "key": "nrdb-ui-group#1",
+      "box": {
+        "x": 646,
+        "y": 76,
+        "w": 622,
+        "h": 503
+      }
+    },
+    {
+      "key": "nrdb-ui-button.nrdb-ui-widget",
+      "box": {
+        "x": 663,
+        "y": 154,
+        "w": 588,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-table.nrdb-ui-widget",
+      "box": {
+        "x": 663,
+        "y": 214,
+        "w": 588,
+        "h": 348
+      }
+    },
+    {
+      "key": "nrdb-ui-group#2",
+      "box": {
+        "x": 12,
+        "y": 591,
+        "w": 622,
+        "h": 889
+      }
+    },
+    {
+      "key": "nrdb-ui-markdown.nrdb-ui-widget.yonder-warning",
+      "box": {
+        "x": 29,
+        "y": 669,
+        "w": 588,
+        "h": 734
+      }
+    },
+    {
+      "key": "nrdb-ui-form.nrdb-ui-widget",
+      "box": {
+        "x": 29,
+        "y": 1415,
+        "w": 588,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-text-field.nrdb-ui-widget",
+      "box": {
+        "x": 29,
+        "y": 1423,
+        "w": 588,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-text-field.nrdb-ui-widget",
+      "box": {
+        "x": 29,
+        "y": 1483,
+        "w": 588,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-group#3",
+      "box": {
+        "x": 646,
+        "y": 591,
+        "w": 622,
+        "h": 889
+      }
+    },
+    {
+      "key": "nrdb-ui-text.nrdb-ui-widget.yonder-note#0",
+      "box": {
+        "x": 663,
+        "y": 669,
+        "w": 588,
+        "h": 108
+      }
+    },
+    {
+      "key": "nrdb-ui-markdown.nrdb-ui-widget",
+      "box": {
+        "x": 663,
+        "y": 789,
+        "w": 588,
+        "h": 131
+      }
+    },
+    {
+      "key": "nrdb-ui-button.nrdb-ui-widget",
+      "box": {
+        "x": 663,
+        "y": 932,
+        "w": 588,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-text.nrdb-ui-widget.yonder-note#1",
+      "box": {
+        "x": 663,
+        "y": 992,
+        "w": 588,
+        "h": 108
+      }
+    }
+  ]
+}

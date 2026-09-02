@@ -57,6 +57,48 @@ jobs:
       - name: Installer dry run
         run: ./installer/install.sh --dry-run
 
+  # R-UI-12: capture every page in both palettes, look at them, and fail when
+  # one changed shape without somebody accepting it.
+  #
+  # This is the job that would have caught K-13 — 39% of the join warning
+  # behind an inner scrollbar — which every other check in this file passed.
+  # It needs the whole stack up: a real daemon, a real Node-RED, the real
+  # dashboard and a real browser, which is why it is its own job rather than a
+  # step in `test`.
+  console-pages:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      # The same staged tree a board gets. linux-x64 here rather than the
+      # arm64 a Pi runs, because this runner has to execute it.
+      - name: Stage the console tree
+        run: ./installer/make-payload.sh --arch linux-x64
+      - name: Install the browser the capture gate needs
+        run: npx playwright install --with-deps chromium
+      - name: Verify the pages, and capture them
+        run: ./scripts/verify-pages.sh
+      # Geometry is per-platform — the system font stack resolves differently
+      # here than on a laptop — so references are named for the platform that
+      # recorded them and this checks the ones for *this* one. A first run on a
+      # new platform records a baseline and fails here, which is correct: a
+      # baseline nobody reviewed is not a baseline.
+      - name: Check the recorded shape is current and committed
+        run: git diff --exit-code docs/console/shape
+      # The unmasked pictures, so a reviewer can look at what the run saw
+      # rather than at a description of it.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: console-pages
+          path: vendor/capture/
+          if-no-files-found: warn
+
   # yonder-core declares `engines.node >= 20` and `20-yonder-core.sh` calls
   # `require_node 20`, and that floor is load-bearing rather than decorative:
   # the installer deliberately supports a board with a distro node 20 and no

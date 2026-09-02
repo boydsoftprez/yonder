@@ -506,5 +506,28 @@ reproduction is not the runtime, and this entry exists so nobody mistakes one fo
 other.
 
 **Closes when** a board serves these widgets on a real page and `scripts/verify-pages.sh`
-captures them in both palettes, which is the gate R-UI-12 asks for and which does not yet
-exist.
+captures them in both palettes. **The gate now exists** — R-UI-12 is built, and every page
+is captured in a real browser on every run — but it captures the *current* pages, which are
+still assembled from stock widgets. Nothing has yet put a Yonder instrument on a page for it
+to photograph.
+
+### K-27 · The pages violate the language they are now measured against
+
+The capture gate found six violations of ADR-0009 on its first run, and they are recorded in
+`docs/console/accepted-violations.json` so that new ones fail while these do not:
+
+- **Four actions spanning 100% of their surface** — `Refresh`, `Scan for networks`, `Yes, I
+  can still reach it`, `Check reachability`, each 588 px of 588 px. R-UI-10. This is not a
+  styling slip: a stock `ui-button` is a whole row of its group and cannot be smaller than
+  one, so no stylesheet reaches it.
+- **Two forms clipping their own content** — the join form hides 72% of 172 px in 48 px, the
+  ping form 57% of 112 px in 48 px. The same defect as K-13 in a widget type nobody had
+  checked. `theme.ts` unclips markdown; a form has the same problem for the same reason, and
+  the join form is the one an operator fills in *after* reading the warning about losing the
+  page.
+
+The form clipping is the more urgent of the two: it hides input from somebody who is already
+being asked to do something irreversible. It may be fixable in `theme.ts` the way the
+markdown clipping was, without waiting for the rebuild.
+
+**Closes when** the pages are rebuilt on the instrument library and the debt list is empty.
