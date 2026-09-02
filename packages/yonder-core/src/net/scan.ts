@@ -68,3 +68,47 @@ export async function scanForNetworks(client: NmcliClient): Promise<ScanResult> 
     b.signal - a.signal || a.ssid.localeCompare(b.ssid));
   return { interface: iface, networks };
 }
+
+/**
+ * One entry in a Dashboard form's dropdown.
+ *
+ * `dropdown` names the form field the option belongs to — the widget filters
+ * its list with `option.dropdown === field.key` — and `label`/`value` are what
+ * it shows and what it submits.
+ */
+export interface DropdownOption {
+  dropdown: string;
+  label: string;
+  value: string;
+}
+
+/** The form field the SSID list feeds. Shared so the two cannot drift. */
+export const SSID_FIELD = "ssid";
+
+/**
+ * The networks in range, as options an operator picks from.
+ *
+ * The join form used to be a free-text SSID box beside a list of networks, so
+ * the scan told you the name and then you transcribed it. That is the feature
+ * defeating itself: the reason to scan is not knowing the name, and the device
+ * most likely to be holding this page is a phone, where a mistyped SSID is
+ * easy and costs five minutes of access point before the apply gives up.
+ *
+ * The label carries the signal because two networks with the same name is the
+ * normal case — a mesh, or a neighbour — and the number is how an operator
+ * tells which one they are standing next to. The **value is the SSID alone**:
+ * what gets submitted has to be the name and nothing else.
+ *
+ * Pure, and ordered by whatever `scanForNetworks` decided, which is strongest
+ * first. Re-sorting here would mean two orderings to keep in step.
+ */
+export function ssidOptions(scan: ScanResult | null | undefined): DropdownOption[] {
+  const networks = scan?.networks ?? [];
+  return networks
+    .filter((n) => typeof n.ssid === "string" && n.ssid !== "")
+    .map((n) => ({
+      dropdown: SSID_FIELD,
+      label: Number.isFinite(n.signal) ? `${n.ssid}  ·  ${String(n.signal)}%` : n.ssid,
+      value: n.ssid,
+    }));
+}

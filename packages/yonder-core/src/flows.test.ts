@@ -404,3 +404,40 @@ describe("flows/flows.json stylesheet injection", () => {
     expect(String(link?.format)).not.toMatch(/<link|<style|rel=/i);
   });
 });
+
+/**
+ * You pick a network. You do not transcribe one.
+ *
+ * The scan table and a free-text SSID box meant the console told you the name
+ * and then asked you to type it back — on a phone, where the cost of a typo is
+ * the access point going away for five minutes while a doomed apply rolls
+ * back. `ui-form` cannot be pre-filled from a message, so a tappable table
+ * could not have filled the box; what it can take is `ui_update.dropdownOptions`.
+ * So the field is a dropdown and the scan feeds it.
+ */
+describe("flows/flows.json join form", () => {
+  const form = flows.find((n) => n.id === "form-join");
+  const scan = flows.find((n) => n.type === "yonder-scan");
+
+  it("asks for the network as a choice, not as typing", () => {
+    const ssid = (form?.options as { key: string; type: string }[]).find((o) => o.key === "ssid");
+    expect(ssid?.type).toBe("dropdown");
+  });
+
+  it("still takes the passphrase as a password field", () => {
+    const psk = (form?.options as { key: string; type: string }[]).find((o) => o.key === "psk");
+    expect(psk?.type).toBe("password");
+  });
+
+  it("feeds that dropdown from the scan, on the scan's second output", () => {
+    const wires = scan?.wires as string[][];
+    expect(wires?.length, "yonder-scan must have two outputs wired").toBeGreaterThanOrEqual(2);
+    expect(wires[1]).toContain("form-join");
+  });
+
+  it("still sends the scan to the table on its first output", () => {
+    const wires = scan?.wires as string[][];
+    expect(wires[0].length).toBeGreaterThan(0);
+    expect(wires[0]).not.toContain("form-join");
+  });
+});

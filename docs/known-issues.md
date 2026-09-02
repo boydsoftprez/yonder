@@ -449,32 +449,30 @@ already reports it, but no page subscribes to anything today. It belongs with wh
 makes the console reactive rather than poll-and-hope, and it should be built once for every
 control rather than patched onto the theme dropdown.
 
-### K-26 · The scan list looks tappable and is not
-`flows/flows.json`
+### K-26 · ~~The scan list looks tappable and is not~~ — CLOSED
 
-"Networks in range" is a `ui-table` with `selectionType: "none"` and no output wire, so a row
-click does nothing. The join form below it is a free-text SSID field: you are meant to read the
-list and type the name yourself. Reported from a phone on the access point — scan, tap a network,
-nothing happens.
+"Networks in range" was a `ui-table` with `selectionType: "none"` and no output wire, beside a
+join form whose SSID field was free text. The scan told you the name and then asked you to type
+it back. Reported from a phone on the access point: scan, tap a network, nothing happens.
 
-It is not a broken wire. Nothing was ever connected, and the path works as built. The defect is
-that a list of networks invites a tap, and the device most likely to be holding this page is a
-phone, where typing an SSID by hand is exactly where case-sensitivity, spaces and lookalike
-characters bite — on the one form whose failure mode is the access point disappearing and not
-coming back for five minutes.
+It was filed here as a design matter and that was wrong. The reason to scan is not knowing the
+name, so a scan you have to transcribe is the feature defeating itself — and the device most
+likely to be holding this page is a phone, where a mistyped SSID costs five minutes of no access
+point while a doomed apply rolls back.
 
-**The obvious fix is not available.** `ui-table` does support `selectionType: "click"`, so the
-table can emit the row. But `ui-form` cannot be pre-filled from a message: its `beforeSend`
-handles `ui_update` for `label`, `options` and `dropdownOptions` only, there is no path to set a
-field's value, and `passthru` is forced off. So "tap a row, the SSID appears in the box" cannot be
-wired.
+The obvious fix was unavailable: `ui-form` cannot be pre-filled from a message — `beforeSend`
+handles `ui_update` for `label`, `options` and `dropdownOptions` only, and `passthru` is forced
+off — so a tappable table could not have filled the box. What a form *does* accept is
+`ui_update.dropdownOptions`.
 
-What is available is a dropdown of SSIDs fed from the scan via `ui_update.dropdownOptions`,
-replacing the free-text field — pick what is in range rather than transcribe it. That is a change
-to what the page *is*, not to how it is wired, so it belongs with the console's design pass rather
-than being patched in ahead of it.
+Closed in `eb8ac49`'s successor: the SSID field is a dropdown, `ssidOptions` in
+`src/net/scan.ts` turns a scan into its options, and `yonder-scan` gained a second output that
+carries them. One scan feeds both the table and the dropdown, because on a single-radio board a
+scan retunes the radio the operator is connected through (K-13) and doing it twice for one button
+is doing it once too often.
 
-Until then the join path works by typing the network name.
+The table stays, and stays unclickable: it is the readable list, with signal strengths, that tells
+you which of two identically-named networks you are standing next to.
 
 ### K-22 · The diagnostics probe refuses IPv6 addresses
 `src/diag/probe.ts`

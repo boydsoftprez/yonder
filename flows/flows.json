@@ -820,6 +820,9 @@
         "wires": [
             [
                 "scan-rows"
+            ],
+            [
+                "form-join"
             ]
         ]
     },
@@ -926,9 +929,9 @@
         "height": 1,
         "options": [
             {
-                "label": "Network name (SSID)",
+                "label": "Network",
                 "key": "ssid",
-                "type": "text",
+                "type": "dropdown",
                 "required": true,
                 "rows": null
             },
@@ -959,7 +962,8 @@
             [
                 "join"
             ]
-        ]
+        ],
+        "dropdownOptions": []
     },
     {
         "id": "join",
