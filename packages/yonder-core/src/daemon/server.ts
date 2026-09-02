@@ -15,7 +15,7 @@ import { SecretStore } from "../secrets/store.js";
 import { NmcliClient } from "../net/nmcli/client.js";
 import { MmcliClient } from "../net/modem/mmcli/client.js";
 import { modemState } from "../net/modem/state.js";
-import { Standing } from "../net/reach/standing.js";
+import { Standing, type StandingView } from "../net/reach/standing.js";
 import { commandProbe } from "../net/reach/probe.js";
 import { ReachMonitor, pathDevices, pathsHolding } from "../net/reach/monitor.js";
 import { ReachWatch } from "../net/reach/watch.js";
@@ -106,6 +106,13 @@ export interface BuildRenderersOptions {
   /** Drives the network renderer's bounded wait for a radio. See waitForRadio. */
   clock?: Clock;
   /**
+   * Which paths have stopped reaching anything, read by the network renderer
+   * while it generates route metrics (R-NET-13). Read-only, and an input to
+   * generating configuration rather than a second writer of it — see
+   * NetworkRendererOptions.standing.
+   */
+  standing?: StandingView;
+  /**
    * Where the console lives. **Given, never defaulted**: a ConsoleRenderer is
    * assembled only when a caller says where the console is, so nothing in a
    * test can write to /opt/yonder by forgetting to override a path. The
@@ -161,7 +168,9 @@ export function buildRenderers(opts: BuildRenderersOptions): {
   // line is diagnostic and belongs in the journal, not in the operator's
   // activity pane.
   const modemClient = new MmcliClient(opts.runner ?? systemRunner, opts.trace ?? trace);
-  const renderer = new NetworkRenderer({ client, secrets, log, clock: opts.clock });
+  const renderer = new NetworkRenderer({
+    client, secrets, log, clock: opts.clock, standing: opts.standing,
+  });
 
   // After the network renderer, deliberately. Renderers run in order, so this
   // puts the console behind a network that has already settled: if the
@@ -249,6 +258,22 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
     warn(`could not seed a default configuration, serving anyway: ${(e as Error).message}`);
   }
 
+  // The configuration, read fresh every time rather than captured: an apply
+  // can replace it under any of the callers below, and a monitor answering
+  // from the document that was in force at start-up would be answering about
+  // a device that no longer exists. Defined here because the standing below
+  // needs it, and the standing has to exist before the renderer that reads it.
+  const reachConfig = (): Config => {
+    try {
+      return loadConfig(opts.configPath);
+    } catch {
+      return DEFAULT_CONFIG;
+    }
+  };
+  /** `usb` is in the schema's interface list and no renderer writes one. */
+  const reachOrder = (config: Config): PathName[] =>
+    config.network.priority.filter((i): i is PathName => i !== "usb");
+
   // A malformed secrets.yaml throws out of the SecretStore constructor. That
   // must cost the network renderer, not the socket: without the socket there
   // is no way to post the corrected configuration either.
@@ -259,11 +284,69 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   // ApplyEngineOptions.degraded. GET /config and GET /status do not depend
   // on it, so the device stays reachable and diagnosable either way.
   let degraded: string | undefined;
+
+  /**
+   * R-NET-13's second half: **traffic moves to the next path that works.**
+   *
+   * Standing decides whether a path participates; the renderer generates the
+   * route metrics; this is the wire between them. On a change of standing —
+   * a demotion or a recovery, never a probe — the renderer recomputes the
+   * metrics for the egress connections it owns and writes them, which is what
+   * actually moves the default route.
+   *
+   * **It is not a second writer of configuration.** `config.yaml` still
+   * states preference, `metricFor` still generates the numbers from it, and
+   * the renderer is still the only thing that writes one. All that has
+   * changed is that one of the renderer's inputs can now move without an
+   * apply — so a demotion cannot sit unwritten until the next unrelated
+   * render, which is what "and traffic moves" would otherwise have meant in
+   * practice.
+   *
+   * Serialised against itself and swallowing every failure, because the
+   * caller is a probe result folding into standing: there is nobody to report
+   * an error to, nothing to roll back, and two overlapping passes writing the
+   * same three connections would be two nmcli commands racing for no gain.
+   */
+  let remetricing: Promise<void> = Promise.resolve();
+  let remetricStopped = false;
+  const remetric = (): void => {
+    remetricing = remetricing.then(async () => {
+      // Same reason the watchdog and the reach watch have stop(): a pass
+      // queued behind another one must not reconfigure NetworkManager on
+      // behalf of a process that has already let go of its socket.
+      if (remetricStopped) return;
+      const renderer = built?.renderer;
+      // Only when buildRenderers threw — an unreadable secrets.yaml. There is
+      // no renderer to write a metric with, and the fallback watchdog is what
+      // keeps that board reachable.
+      if (renderer === undefined) return;
+      try {
+        await renderer.remetric(reachConfig());
+      } catch (e) {
+        warn(`could not move traffic off a path that stopped working: ${(e as Error).message}`);
+      }
+      // Nothing above can reject, and the chain is guarded anyway: one
+      // rejected link would skip every pass queued behind it, which is a
+      // demotion that silently never reaches the routing table.
+    }).catch(() => {});
+  };
+
+  // Built before the renderers, because the renderer reads it while
+  // generating route metrics and a renderer holding a standing that arrived
+  // later would generate the first render's metrics from nothing.
+  const standing = new Standing({
+    clock,
+    log: note,
+    order: () => reachOrder(reachConfig()),
+    onChange: remetric,
+  });
+
   try {
     built = buildRenderers({
       secretsPath: opts.secretsPath ?? "/etc/yonder/secrets.yaml",
       runner: opts.runner,
       clock,
+      standing,
       ...(opts.console === undefined ? {} : { console: opts.console }),
     });
   } catch (e) {
@@ -411,17 +494,8 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   // below asks it a question and a board whose secret store is unreadable is
   // exactly the board that must still raise its access point.
   //
-  // Every input is read fresh on each call rather than captured: the
-  // configuration can change under an apply, and a monitor answering from the
-  // document that was in force at start-up would be answering about a device
-  // that no longer exists.
-  const reachConfig = (): Config => {
-    try {
-      return loadConfig(opts.configPath);
-    } catch {
-      return DEFAULT_CONFIG;
-    }
-  };
+  // Every input is read fresh on each call rather than captured — see
+  // reachConfig, above, which is where that is done and why.
   /**
    * The interface the modem's bytes actually go out of.
    *
@@ -451,12 +525,8 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
       return null;
     }
   };
-  /** `usb` is in the schema's interface list and no renderer writes one. */
-  const reachOrder = (config: Config): PathName[] =>
-    config.network.priority.filter((i): i is PathName => i !== "usb");
-
   const reach = new ReachMonitor({
-    standing: new Standing({ clock, log: note }),
+    standing,
     probe: commandProbe(opts.runner ?? systemRunner),
     ...(opts.counters !== undefined ? { counters: opts.counters } : {}),
     devices: async () => {
@@ -734,6 +804,8 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
         // loop outliving its daemon would go on running `curl` on somebody's
         // metered link on behalf of a process that has closed its socket.
         reachWatch.stop();
+        // And with them, the re-metric the reach watch is the only caller of.
+        remetricStopped = true;
         built?.renderer.cancelRadioWait();
         // The third timer this daemon can own. Same reason as the other two:
         // one still armed after close() would restart a console on behalf of

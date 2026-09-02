@@ -5,10 +5,11 @@ import type { SecretStore } from "../secrets/store.js";
 import { NmcliClient, type DeviceInfo } from "./nmcli/client.js";
 import { enableWifiRadio, radioWanted } from "./radio.js";
 import {
-  desiredProfiles, radioPlan, wifiMode,
-  AP_CONNECTION, CLIENT_CONNECTION, ETHERNET_CONNECTION, MODEM_CONNECTION,
+  desiredProfiles, metricFor, radioPlan, wifiMode,
+  AP_CONNECTION, CLIENT_CONNECTION, EGRESS_CONNECTIONS, ETHERNET_CONNECTION, MODEM_CONNECTION,
   type Interfaces,
 } from "./profiles.js";
+import { NOTHING_STOOD_DOWN, type StandingView } from "./reach/standing.js";
 
 /** The only connection names this renderer will ever create or delete. */
 const OWNED = new Set([AP_CONNECTION, CLIENT_CONNECTION, ETHERNET_CONNECTION, MODEM_CONNECTION]);
@@ -117,6 +118,20 @@ export interface NetworkRendererOptions {
   radioWaitMs?: number;
   /** Overrides RADIO_POLL_MS. Test-only. */
   radioPollMs?: number;
+  /**
+   * Which paths have stopped reaching anything (R-NET-13).
+   *
+   * **An input to generating route metrics, and nothing else.** This
+   * renderer stays the only thing that writes a metric; standing only
+   * changes what it writes, so `config.yaml` remains the single writer of
+   * configuration and health decides participation rather than order.
+   *
+   * Defaults to a board where nothing has been stood down, so a renderer
+   * built without one — every caller before this existed, and every test that
+   * is not about failover — writes exactly the metrics `network.priority`
+   * alone generates.
+   */
+  standing?: StandingView;
 }
 
 export class NetworkRenderer implements Renderer {
@@ -127,6 +142,7 @@ export class NetworkRenderer implements Renderer {
   private readonly clock: Clock;
   private readonly radioWaitMs: number;
   private readonly radioPollMs: number;
+  private readonly standing: StandingView;
   private waitTimer: unknown;
   private wakeWait: (() => void) | undefined;
   private waitCancelled = false;
@@ -138,6 +154,7 @@ export class NetworkRenderer implements Renderer {
     this.clock = opts.clock ?? systemClock;
     this.radioWaitMs = opts.radioWaitMs ?? RADIO_WAIT_MS;
     this.radioPollMs = opts.radioPollMs ?? RADIO_POLL_MS;
+    this.standing = opts.standing ?? NOTHING_STOOD_DOWN;
   }
 
   private sleep(ms: number): Promise<void> {
@@ -293,7 +310,11 @@ export class NetworkRenderer implements Renderer {
     };
     this.log(`network: wifi=${ifaces.wifi ?? "none"} ethernet=${ifaces.ethernet ?? "none"}`);
 
-    const desired = desiredProfiles(config, this.secrets, ifaces);
+    // The standing is read here, at the moment the profiles are generated, so
+    // a render never reinstates a metric that a demotion has already
+    // superseded — which is what "a full render does not undo a demotion"
+    // means (R-NET-13).
+    const desired = desiredProfiles(config, this.secrets, ifaces, this.standing);
     const wanted = new Set(desired.map((p) => p.name));
 
     // Remove only what we own and no longer want. A connection created by
@@ -315,6 +336,74 @@ export class NetworkRenderer implements Renderer {
     // activation rules, which is the whole of the defect K-13 recorded.
     if (ifaces.wifi !== null) {
       await this.settleRadio(config, devices);
+    }
+  }
+
+  /**
+   * Rewrite the route metrics for the egress connections this renderer owns,
+   * and nothing else.
+   *
+   * This is R-NET-13's second half — *and traffic moves to the next path that
+   * works* — and it is the whole of it. A path that has been stood down gets
+   * a metric so high nothing will pick it (`STOOD_DOWN_METRIC`), a path that
+   * has recovered gets its configured one back, and the kernel moves the
+   * default route accordingly. The daemon calls this on a change of standing
+   * and never on a probe, because writing the metric into `desiredProfiles`
+   * alone would leave a demotion waiting for the next unrelated render.
+   *
+   * **Deliberately narrow, and each exclusion is load-bearing.**
+   *
+   * - **Nothing is created and nothing is deleted.** Only connections
+   *   NetworkManager already holds are touched, so this can never be the
+   *   thing that removes the profile the fallback watchdog raises (K-16).
+   * - **The radio is not touched and `radioPlan` does not run.** A path
+   *   stopping working is not a reason to re-arbitrate what the one radio is
+   *   doing, and re-issuing `up` on a live access point drops every station
+   *   joined to it — including the operator.
+   * - **The access point gets no metric.** It is not an egress path; see
+   *   `EGRESS_CONNECTIONS`.
+   * - **Nothing is taken down.** A stood-down ethernet keeps its carrier,
+   *   its address and its on-link route, because an operator may be sitting
+   *   on that very cable. `device reapply` re-applies a connection in place
+   *   rather than cycling it, which is why it is the mechanism here.
+   *
+   * Every failure is logged and stepped over rather than thrown. The caller
+   * is a probe result folding into standing, not an apply: there is no
+   * rollback to trigger and no operator waiting on an answer, and a modem
+   * whose metric could not be rewritten must not stop the ethernet's from
+   * being.
+   */
+  async remetric(config: Config): Promise<void> {
+    const [connections, devices] = await Promise.all([
+      this.client.connections(),
+      this.client.devices(),
+    ]);
+    const present = new Set(connections.map((c) => c.name));
+
+    for (const [name, path] of EGRESS_CONNECTIONS) {
+      if (!present.has(name)) continue;
+      const metric = metricFor(config, path, this.standing);
+      try {
+        await this.client.setRouteMetric(name, metric);
+      } catch (e) {
+        this.log(`network: could not set the route metric on ${name} (${(e as Error).message})`);
+        continue;
+      }
+      // The stored profile now says one thing and the running device another.
+      // A device with no active connection has nothing to reapply — it will
+      // pick the new metric up when it next comes up — and a reapply that
+      // fails is a metric that takes effect later rather than a reason to
+      // stop.
+      const device = devices.find((d) => d.connection === name)?.device;
+      if (device === undefined) continue;
+      try {
+        await this.client.reapply(device);
+      } catch (e) {
+        this.log(
+          `network: ${name} has a new route metric that ${device} has not taken up yet `
+          + `(${(e as Error).message})`,
+        );
+      }
     }
   }
 

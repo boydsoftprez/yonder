@@ -97,6 +97,53 @@ export const PATH_WORDS: Record<PathName, string> = {
 interface Record_ { failures: number; successes: number; down: boolean; since: number | null }
 
 /**
+ * The one question anything outside `reach/` may ask of standing.
+ *
+ * Deliberately this narrow. `NetworkRenderer` asks it while generating route
+ * metrics, which is what makes traffic actually move off a dead path
+ * (R-NET-13) — and a wider view handed to the thing that writes NetworkManager
+ * profiles would be an invitation to let health decide something other than
+ * participation. It cannot record, it cannot reorder, and it cannot be
+ * written to.
+ */
+export interface StandingView {
+  isStoodDown(path: PathName): boolean;
+}
+
+/**
+ * The view every existing caller gets: a board where nothing has been stood
+ * down. Route metrics then come out exactly as `network.priority` alone says,
+ * which is what `metricFor` did before standing existed.
+ */
+export const NOTHING_STOOD_DOWN: StandingView = { isStoodDown: () => false };
+
+export interface StandingOptions {
+  clock: Clock;
+  log?: (line: string) => void;
+  /**
+   * The operator's order, from `config.network.priority`.
+   *
+   * Read, never written. It is here so that a line about a path being stood
+   * down can name **what traffic moved to**, which R-NET-13 asks for by name
+   * and which cannot be said without knowing what outranks what. An empty
+   * order — the default, for a `Standing` nobody told — means the line says
+   * only what it can establish, never a move it cannot vouch for.
+   */
+  order?: () => PathName[];
+  /**
+   * Called once on each change of standing, in either direction, and never
+   * on a probe that changed nothing.
+   *
+   * This is the hook that makes R-NET-13's second half real: the daemon wires
+   * it to `NetworkRenderer.remetric`, which recomputes the route metrics with
+   * the new standing and writes them. **It is not a second writer of
+   * configuration** — the renderer stays the only thing that writes a metric,
+   * and this only tells it that one of its inputs has moved.
+   */
+  onChange?: (path: PathName, stoodDown: boolean) => void;
+}
+
+/**
  * Which paths participate, and the hysteresis that decides.
  *
  * **This never reorders anything.** `network.priority` is the only statement
@@ -104,14 +151,18 @@ interface Record_ { failures: number; successes: number; down: boolean; since: n
  * decides is whether a path is in the running at all, which is what lets the
  * mechanism exist without a second writer of configuration.
  */
-export class Standing {
+export class Standing implements StandingView {
   private readonly clock: Clock;
   private readonly log: (line: string) => void;
+  private readonly order: () => PathName[];
+  private readonly onChange: (path: PathName, stoodDown: boolean) => void;
   private readonly records = new Map<PathName, Record_>();
 
-  constructor(opts: { clock: Clock; log?: (line: string) => void }) {
+  constructor(opts: StandingOptions) {
     this.clock = opts.clock;
     this.log = opts.log ?? (() => {});
+    this.order = opts.order ?? (() => []);
+    this.onChange = opts.onChange ?? (() => {});
   }
 
   private recordFor(path: PathName): Record_ {
@@ -131,7 +182,8 @@ export class Standing {
       if (r.down && r.successes >= SUCCESSES_TO_RETURN) {
         r.down = false;
         r.since = null;
-        this.log(`network: ${PATH_WORDS[path]} is reaching the internet again and is back in use`);
+        this.log(`network: ${PATH_WORDS[path]} is reaching the internet again ${this.at()}${this.andThen(path)}`);
+        this.announce(path, false);
       }
     } else {
       r.successes = 0;
@@ -139,20 +191,83 @@ export class Standing {
       if (!r.down && r.failures >= FAILURES_TO_STAND_DOWN) {
         r.down = true;
         r.since = this.clock.now();
+        const moved = this.carryingNow();
         this.log(
-          `network: ${PATH_WORDS[path]} reached nothing on ${r.failures} tries and has been stood down; ` +
-          `traffic will use the next path that works`,
+          `network: ${PATH_WORDS[path]} reached nothing on ${r.failures} tries; stood down ${this.at()}`
+          + (moved === null
+            // Never claim a move that cannot happen. A board whose every path
+            // has been stood down keeps the route it has — a metric is not a
+            // disconnect — and the operator needs to read that, not a
+            // sentence about traffic going somewhere there is nowhere to go.
+            ? ", and there is no other path reaching anything for traffic to move to"
+            : ` and traffic moves to ${PATH_WORDS[moved]}`),
         );
+        this.announce(path, true);
       }
     }
     return this.standingOf(path);
   }
 
   standingOf(path: PathName): PathStanding {
-    return this.records.get(path)?.down === true ? "no-route-out" : "standing-by";
+    return this.isStoodDown(path) ? "no-route-out" : "standing-by";
+  }
+
+  isStoodDown(path: PathName): boolean {
+    return this.records.get(path)?.down === true;
   }
 
   since(path: PathName): number | null {
     return this.records.get(path)?.since ?? null;
+  }
+
+  /** The "and when" R-NET-13 asks for, off the injected clock and never the wall one. */
+  private at(): string {
+    return `at ${new Date(this.clock.now()).toISOString()}`;
+  }
+
+  /**
+   * The path traffic goes out by, given standing exactly as it is now.
+   *
+   * The first path in the operator's order that is not stood down **and whose
+   * last test reached something**. Both halves matter: a path with no record
+   * has never been tested and may not exist on this board, and a path whose
+   * last probe failed is not something to promise an operator traffic has
+   * moved to. Null means nothing can be vouched for, and the caller says so
+   * rather than inventing a destination.
+   *
+   * This is a reading of evidence, not a decision. What actually moves the
+   * traffic is the route metric the renderer writes, generated from the same
+   * order and the same standing — see `metricFor`.
+   */
+  private carryingNow(): PathName | null {
+    for (const path of this.order()) {
+      const r = this.records.get(path);
+      if (r !== undefined && !r.down && r.successes > 0) return path;
+    }
+    return null;
+  }
+
+  /** What a recovery means for where traffic is, said only as far as it can be. */
+  private andThen(path: PathName): string {
+    const head = this.carryingNow();
+    if (head === path) return "; traffic moves back to it";
+    if (head === null) return " and is back in the running";
+    return `; ${PATH_WORDS[head]} goes on carrying traffic and ${PATH_WORDS[path]} is back in the running behind it`;
+  }
+
+  /**
+   * Tell whoever asked that a standing changed, without letting them end a probe.
+   *
+   * The listener writes route metrics through nmcli. A failure there is a
+   * path that did not move, which is worth a line — but a throw out of
+   * `record` would abandon the rest of the tick, including the tests of the
+   * alternatives that establish which path can take over.
+   */
+  private announce(path: PathName, stoodDown: boolean): void {
+    try {
+      this.onChange(path, stoodDown);
+    } catch (e) {
+      this.log(`network: could not act on ${PATH_WORDS[path]} changing standing (${(e as Error).message})`);
+    }
   }
 }

@@ -2,9 +2,10 @@
 import type { Config } from "../schema/config.js";
 import type { SecretStore } from "../secrets/store.js";
 import type { ConnectionSpec } from "./nmcli/client.js";
-import { MODEM_CONNECTION, metricFor, modemProfile } from "./modem/profiles.js";
+import { MODEM_CONNECTION, STOOD_DOWN_METRIC, metricFor, modemProfile } from "./modem/profiles.js";
+import { NOTHING_STOOD_DOWN, type PathName, type StandingView } from "./reach/standing.js";
 
-export { MODEM_CONNECTION, metricFor };
+export { MODEM_CONNECTION, STOOD_DOWN_METRIC, metricFor };
 
 /**
  * The setup access point's passphrase: published, documented, and the same on
@@ -68,11 +69,16 @@ export function apProfile(config: Config, psk: string, iface: string): DesiredPr
   };
 }
 
-export function clientProfile(config: Config, psk: string | null, iface: string): DesiredProfile | null {
+export function clientProfile(
+  config: Config,
+  psk: string | null,
+  iface: string,
+  standing: StandingView = NOTHING_STOOD_DOWN,
+): DesiredProfile | null {
   const client = config.network.client;
   if (client.ssid === null || client.ssid === "") return null;
 
-  const metric = String(metricFor(config, "wifi_client"));
+  const metric = String(metricFor(config, "wifi_client", standing));
   const settings: string[][] = [
     ["802-11-wireless.mode", "infrastructure"],
     ["802-11-wireless.ssid", client.ssid],
@@ -88,8 +94,12 @@ export function clientProfile(config: Config, psk: string | null, iface: string)
   return { name: CLIENT_CONNECTION, type: "wifi", ifname: iface, settings };
 }
 
-export function ethernetProfile(config: Config, iface: string): DesiredProfile {
-  const metric = String(metricFor(config, "ethernet"));
+export function ethernetProfile(
+  config: Config,
+  iface: string,
+  standing: StandingView = NOTHING_STOOD_DOWN,
+): DesiredProfile {
+  const metric = String(metricFor(config, "ethernet", standing));
   return {
     name: ETHERNET_CONNECTION,
     type: "ethernet",
@@ -210,24 +220,50 @@ export function radioPlan(config: Config): RadioStep[] {
  * watchdog whose one action names a profile nothing created is not a
  * watchdog (R-NET-07, K-16).
  */
-export function desiredProfiles(config: Config, secrets: SecretStore, ifaces: Interfaces): DesiredProfile[] {
+export function desiredProfiles(
+  config: Config,
+  secrets: SecretStore,
+  ifaces: Interfaces,
+  standing: StandingView = NOTHING_STOOD_DOWN,
+): DesiredProfile[] {
   const out: DesiredProfile[] = [];
 
   if (ifaces.wifi !== null) {
     out.push(apProfile(config, secrets.resolve(config.network.ap.psk), ifaces.wifi));
     const clientPsk = config.network.client.psk === null ? null : secrets.resolve(config.network.client.psk);
-    const client = clientProfile(config, clientPsk, ifaces.wifi);
+    const client = clientProfile(config, clientPsk, ifaces.wifi, standing);
     if (client !== null) out.push(client);
   }
   if (ifaces.ethernet !== null) {
-    out.push(ethernetProfile(config, ifaces.ethernet));
+    out.push(ethernetProfile(config, ifaces.ethernet, standing));
   }
   if (ifaces.modem !== null) {
     const password = config.network.modem.password === null
       ? null
       : secrets.resolve(config.network.modem.password);
-    const modem = modemProfile(config, password, ifaces.modem);
+    const modem = modemProfile(config, password, ifaces.modem, standing);
     if (modem !== null) out.push(modem);
   }
   return out;
 }
+
+/**
+ * The connections that carry a route metric, and which path each one is.
+ *
+ * The list `NetworkRenderer.remetric` walks when a path's standing changes,
+ * and the reason it is here rather than there: it is the same set
+ * `desiredProfiles` writes a metric into, and two lists that must agree
+ * would eventually stop agreeing — a connection added to one and not the
+ * other is a path that renders with a metric and then never has it rewritten
+ * when it stops working.
+ *
+ * **The access point is not in it, and must never be.** `ipv4.method shared`
+ * is how an operator reaches a board with no way out, not a way out. It has
+ * no metric to recompute and nothing about a dead egress path is a reason to
+ * disturb the one connection the operator may be standing on.
+ */
+export const EGRESS_CONNECTIONS: readonly (readonly [string, PathName])[] = [
+  [ETHERNET_CONNECTION, "ethernet"],
+  [CLIENT_CONNECTION, "wifi_client"],
+  [MODEM_CONNECTION, "modem"],
+];

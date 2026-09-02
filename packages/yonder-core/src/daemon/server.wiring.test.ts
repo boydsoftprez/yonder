@@ -30,7 +30,10 @@ function movingCounters(): CounterReader {
   return () => { seen += 4_000; return { rx: seen, tx: seen }; };
 }
 import type { CommandResult } from "../net/runner.js";
-import { DEFAULT_AP_PASSPHRASE } from "../net/profiles.js";
+import {
+  AP_CONNECTION, MODEM_CONNECTION, DEFAULT_AP_PASSPHRASE, STOOD_DOWN_METRIC, metricFor,
+} from "../net/profiles.js";
+import { loadConfig } from "../config/load.js";
 import { saveConfig } from "../config/save.js";
 import { DEFAULT_CONFIG } from "../schema/config.js";
 import type { CommandRunner } from "../net/runner.js";
@@ -452,10 +455,24 @@ describe("the daemon drives the reach watch", () => {
    * A board with a modem holding the default route and reaching nothing: the
    * wrong APN, in a runner. `curl` on the modem's interface always fails.
    */
-  function deadModemRunner(seen: string[][]): CommandRunner {
+  function deadModemRunner(seen: string[][], reaches: () => boolean = () => false): CommandRunner {
+    // The connections NetworkManager holds, remembered rather than replayed.
+    // A fake that forgets what it was told cannot say whether a profile the
+    // start-up render created is there to have its route metric rewritten —
+    // and `remetric` deliberately writes only to connections that exist.
+    const names = new Set<string>();
     return async (argv): Promise<CommandResult> => {
       seen.push(argv);
-      if (argv[0] === "curl") return { code: 7, stdout: "", stderr: "" };
+      if (argv[0] === "curl") return { code: reaches() ? 0 : 7, stdout: "", stderr: "" };
+      if (argv[0] === "nmcli" && argv.includes("NAME,UUID,TYPE,DEVICE")) {
+        return {
+          code: 0,
+          stdout: [...names].map((n) => `${n}:u-${n}:gsm:cdc-wdm0\n`).join(""),
+          stderr: "",
+        };
+      }
+      if (argv[0] === "nmcli" && argv[1] === "connection" && argv[2] === "add") names.add(argv[4]!);
+      if (argv[0] === "nmcli" && argv[1] === "connection" && argv[2] === "delete") names.delete(argv[3]!);
       // The board's own two names: the connection is bound to the control
       // port, and every byte goes out of the net port (design spec, "three
       // names that are not the obvious ones").
@@ -540,6 +557,57 @@ describe("the daemon drives the reach watch", () => {
       const res = await call(socketPath, "GET", "/reach/state");
       const state = res.body as { carrying: boolean; paths: { path: string; standing: string }[] };
       expect(state.paths.find((p) => p.path === "modem")?.standing).not.toBe("no-route-out");
+      expect(state.carrying).toBe(true);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("moves traffic off the path it stood down, and puts it back when it returns", async () => {
+    // R-NET-13's second half, at the socket. `Standing` worked out that the
+    // modem reached nothing long before anything acted on it: the path kept
+    // its winning route metric and the default route indefinitely while the
+    // log line said traffic had moved. This is the assertion that would have
+    // caught that absence.
+    withModem();
+    const seen: string[][] = [];
+    const hand = handClock();
+    let reaches = false;
+    const server = await startServer({
+      socketPath, configPath, journalPath, renderers: [noop], secretsPath,
+      runner: deadModemRunner(seen, () => reaches), clock: hand.clock, counters: noCounters,
+    });
+    try {
+      const metricsWritten = (): number[] =>
+        seen
+          .filter((a) => a[1] === "connection" && a[2] === "modify" && a[3] === MODEM_CONNECTION)
+          .map((a) => Number(a[a.indexOf("ipv4.route-metric") + 1]));
+
+      // Nothing has been stood down yet, so nothing has been re-metricked.
+      expect(metricsWritten()).toEqual([]);
+
+      for (let i = 0; i < FAILURES_TO_STAND_DOWN + 1; i++) await hand.advance(REACH_TICK_MS);
+
+      const configured = metricFor(loadConfig(configPath), "modem");
+      expect(metricsWritten()).toEqual([configured + STOOD_DOWN_METRIC]);
+      // The stored profile said one thing and the running device another
+      // until this. The net port is where the bytes go, but the connection is
+      // bound to the control port, and that is the device to reapply.
+      expect(seen.some((a) => a.join(" ") === "nmcli device reapply cdc-wdm0")).toBe(true);
+      // Nothing was taken down and the access point was not disturbed: an
+      // operator may be reaching this board over the very path that failed.
+      expect(seen.some((a) => a[1] === "connection" && a[2] === "down")).toBe(false);
+      expect(seen.some((a) => a[1] === "connection" && a[2] === "modify" && a[3] === AP_CONNECTION))
+        .toBe(false);
+
+      // Quick to return: the APN is fixed, the probe succeeds, and the
+      // configured metric comes straight back.
+      reaches = true;
+      await hand.advance(REACH_TICK_MS);
+      expect(metricsWritten()).toEqual([configured + STOOD_DOWN_METRIC, configured]);
+
+      const res = await call(socketPath, "GET", "/reach/state");
+      const state = res.body as { carrying: boolean };
       expect(state.carrying).toBe(true);
     } finally {
       await server.close();

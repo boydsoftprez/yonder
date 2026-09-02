@@ -159,6 +159,40 @@ export class NmcliClient {
     }
   }
 
+  /**
+   * Set both address families' route metrics on a connection that already exists.
+   *
+   * `connection modify`, never `add`: this is only ever called about a
+   * profile a render wrote, and the metric is the only property being
+   * touched. Both families together because a board can hold a v6 default
+   * route as well as a v4 one, and moving traffic off a path that reaches
+   * nothing means moving all of it.
+   *
+   * It changes the stored profile, not the live device — see `reapply`.
+   */
+  async setRouteMetric(name: string, metric: number): Promise<void> {
+    await this.exec([
+      "nmcli", "connection", "modify", name,
+      "ipv4.route-metric", String(metric),
+      "ipv6.route-metric", String(metric),
+    ]);
+  }
+
+  /**
+   * Make a device take up the changes to the profile it is already running.
+   *
+   * `nmcli device reapply` re-applies the connection **in place**: the link
+   * is not taken down, the address is not released, and the on-link route
+   * stays. That is what makes a route-metric change safe to issue against a
+   * cable an operator is sitting on, and it was measured doing exactly this
+   * on the board (design spec §6: removing and restoring a default route
+   * moved traffic between paths, and `nmcli device reapply eth0` put it
+   * back).
+   */
+  async reapply(device: string): Promise<void> {
+    await this.exec(["nmcli", "device", "reapply", device]);
+  }
+
   async up(name: string): Promise<void> { await this.exec(["nmcli", "connection", "up", name]); }
   /**
    * Take a connection down, tolerating one that is already down.

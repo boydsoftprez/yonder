@@ -8,7 +8,10 @@ import { NmcliClient } from "./nmcli/client.js";
 import { SecretStore } from "../secrets/store.js";
 import {
   AP_CONNECTION, CLIENT_CONNECTION, ETHERNET_CONNECTION, MODEM_CONNECTION, DEFAULT_AP_PASSPHRASE,
+  metricFor,
 } from "./profiles.js";
+import { STOOD_DOWN_METRIC } from "./modem/profiles.js";
+import type { PathName, StandingView } from "./reach/standing.js";
 import { RFKILL_UNBLOCK_WIFI, NMCLI_RADIO_WIFI_ON } from "./radio.js";
 import { DEFAULT_CONFIG } from "../schema/config.js";
 import type { Clock } from "../apply/types.js";
@@ -106,6 +109,8 @@ interface HarnessOptions {
    * missing executable as exit 127, so that is what the fake returns.
    */
   fails?: Record<string, CommandResult>;
+  /** Which paths have stopped reaching anything (R-NET-13). */
+  standing?: StandingView;
 }
 
 /**
@@ -183,6 +188,7 @@ function harness(opts: HarnessOptions = {}) {
     secrets,
     clock: opts.clock,
     radioWaitMs: opts.radioWaitMs,
+    standing: opts.standing,
   });
   return { renderer, calls, secrets, names, raised: () => raised };
 }
@@ -830,5 +836,181 @@ describe("NetworkRenderer and a modem", () => {
     const added = calls.filter((c) => c.includes("add")).map((c) => c.join(" "));
     expect(added.some((c) => c.includes(MODEM_CONNECTION) && c.includes("gsm"))).toBe(true);
     expect(calls.some((c) => c.includes("delete") && c.includes(MODEM_CONNECTION))).toBe(false);
+  });
+});
+
+/**
+ * R-NET-13's second half: **and traffic moves to the next path that works.**
+ *
+ * The renderer stays the only thing that writes a route metric; a change of
+ * standing changes what it writes and then makes the device take it up.
+ * `Standing` correctly worked out that a path had stopped reaching anything
+ * long before any of this existed — and nothing acted on it, so a stood-down
+ * ethernet kept its carrier, kept its winning metric and kept the default
+ * route indefinitely while the log line said traffic had moved.
+ */
+describe("NetworkRenderer moves traffic off a path that stopped working", () => {
+  const saying = (...down: PathName[]): StandingView => {
+    const set = new Set<PathName>(down);
+    return { isStoodDown: (path) => set.has(path) };
+  };
+
+  /** A board with all three paths configured, so every egress connection exists. */
+  function threePaths(): Config {
+    const c: Config = structuredClone(DEFAULT_CONFIG);
+    c.network.client.ssid = "HomeNetwork";
+    c.network.modem.enabled = true;
+    c.network.modem.apn = "ereseller";
+    return c;
+  }
+
+  const ALL_DEVICES =
+    "eth0:ethernet:connected:yonder-eth\nwlan0:wifi:connected:yonder-wifi\n"
+    + "cdc-wdm0:gsm:connected:yonder-modem\nlo:loopback:unmanaged:\n";
+
+  const metricIn = (calls: string[][], name: string): number | undefined => {
+    const call = calls.find((c) => c[1] === "connection" && c[2] === "modify" && c[3] === name);
+    const at = call?.indexOf("ipv4.route-metric") ?? -1;
+    return call === undefined || at === -1 ? undefined : Number(call[at + 1]);
+  };
+
+  it("writes the losing metric on a stood-down path and leaves the others alone", async () => {
+    const config = threePaths();
+    const { renderer, calls } = harness({
+      devices: ALL_DEVICES,
+      connections: [AP_CONNECTION, CLIENT_CONNECTION, ETHERNET_CONNECTION, MODEM_CONNECTION],
+      standing: saying("ethernet"),
+    });
+    await renderer.remetric(config);
+
+    expect(metricIn(calls, ETHERNET_CONNECTION))
+      .toBe(metricFor(config, "ethernet") + STOOD_DOWN_METRIC);
+    expect(metricIn(calls, MODEM_CONNECTION)).toBe(metricFor(config, "modem"));
+    expect(metricIn(calls, CLIENT_CONNECTION)).toBe(metricFor(config, "wifi_client"));
+    // The point of the number: the modem now wins.
+    expect(metricIn(calls, ETHERNET_CONNECTION)!)
+      .toBeGreaterThan(metricIn(calls, MODEM_CONNECTION)!);
+  });
+
+  it("gives the configured metric back when the path recovers", async () => {
+    const config = threePaths();
+    const { renderer, calls } = harness({
+      devices: ALL_DEVICES,
+      connections: [AP_CONNECTION, CLIENT_CONNECTION, ETHERNET_CONNECTION, MODEM_CONNECTION],
+      standing: saying(),
+    });
+    await renderer.remetric(config);
+    expect(metricIn(calls, ETHERNET_CONNECTION)).toBe(metricFor(config, "ethernet"));
+    expect(metricIn(calls, ETHERNET_CONNECTION)!)
+      .toBeLessThan(metricIn(calls, MODEM_CONNECTION)!);
+  });
+
+  it("writes the same metric on v6 as on v4", async () => {
+    // A board can hold a v6 default route as well as a v4 one, and moving
+    // traffic off a path that reaches nothing means moving all of it.
+    const config = threePaths();
+    const { renderer, calls } = harness({
+      devices: ALL_DEVICES,
+      connections: [ETHERNET_CONNECTION],
+      standing: saying("ethernet"),
+    });
+    await renderer.remetric(config);
+    const call = calls.find((c) => c[2] === "modify" && c[3] === ETHERNET_CONNECTION)!;
+    expect(call[call.indexOf("ipv6.route-metric") + 1])
+      .toBe(call[call.indexOf("ipv4.route-metric") + 1]);
+  });
+
+  it("makes the running device take the new metric up, without cycling it", async () => {
+    // `device reapply` re-applies the connection in place: the link is not
+    // taken down, the address is not released, and the on-link route stays —
+    // which is what makes this safe against a cable an operator is sitting on.
+    const config = threePaths();
+    const { renderer, calls } = harness({
+      devices: ALL_DEVICES,
+      connections: [ETHERNET_CONNECTION],
+      standing: saying("ethernet"),
+    });
+    await renderer.remetric(config);
+    expect(calls.some((c) => c.join(" ") === "nmcli device reapply eth0")).toBe(true);
+    expect(calls.some((c) => c[1] === "device" && c[2] === "disconnect")).toBe(false);
+    expect(calls.some((c) => c[1] === "connection" && c[2] === "down")).toBe(false);
+  });
+
+  it("never touches the access point, the radio, or anything it does not own", async () => {
+    // Rule 6. Re-issuing `up` on a live access point drops every station
+    // joined to it, including the operator; deleting a profile is how K-16
+    // left a board unreachable until a power cycle. A path stopping working
+    // is not a reason to do either.
+    // The radio is on the access point, which is how an operator reaches a
+    // board that has no way out — exactly the board this runs on.
+    const config = threePaths();
+    config.network.client.ssid = null;
+    const { renderer, calls, raised } = harness({
+      devices: "eth0:ethernet:connected:yonder-eth\nwlan0:wifi:connected:yonder-ap\n"
+        + "cdc-wdm0:gsm:connected:yonder-modem\nlo:loopback:unmanaged:\n",
+      connections: [AP_CONNECTION, ETHERNET_CONNECTION, MODEM_CONNECTION, "operator-vpn"],
+      standing: saying("ethernet"),
+    });
+    await renderer.remetric(config);
+
+    expect(calls.some((c) => c.includes(AP_CONNECTION))).toBe(false);
+    expect(calls.some((c) => c.includes("operator-vpn"))).toBe(false);
+    expect(calls.some((c) => c[1] === "connection" && (c[2] === "add" || c[2] === "delete"))).toBe(false);
+    expect(calls.some((c) => c[1] === "connection" && (c[2] === "up" || c[2] === "down"))).toBe(false);
+    // The radio, serving the access point, is not reapplied by any of this.
+    expect(calls.some((c) => c.join(" ") === "nmcli device reapply wlan0")).toBe(false);
+    expect(calls.some((c) => c[0] === "rfkill" || c.includes("radio"))).toBe(false);
+    expect(raised()).toBe(0);
+  });
+
+  it("writes nothing for a connection NetworkManager does not hold", async () => {
+    // Only what a render has already created. This can never be the thing
+    // that brings a profile into existence, and it can never reapply a device
+    // on behalf of one.
+    const config = threePaths();
+    const { renderer, calls } = harness({
+      devices: ALL_DEVICES, connections: [ETHERNET_CONNECTION], standing: saying("ethernet"),
+    });
+    await renderer.remetric(config);
+    expect(calls.some((c) => c.includes(MODEM_CONNECTION))).toBe(false);
+    expect(calls.some((c) => c.join(" ") === "nmcli device reapply cdc-wdm0")).toBe(false);
+  });
+
+  it("carries on when one connection will not take the metric", async () => {
+    // A modem whose metric could not be rewritten must not stop the
+    // ethernet's from being. There is nobody to report an error to here: the
+    // caller is a probe result folding into standing, not an apply.
+    const config = threePaths();
+    const { renderer, calls } = harness({
+      devices: ALL_DEVICES,
+      connections: [CLIENT_CONNECTION, ETHERNET_CONNECTION, MODEM_CONNECTION],
+      standing: saying("ethernet"),
+      fails: {
+        [`nmcli connection modify ${CLIENT_CONNECTION} ipv4.route-metric `
+          + `${metricFor(threePaths(), "wifi_client")} ipv6.route-metric `
+          + `${metricFor(threePaths(), "wifi_client")}`]:
+          { code: 1, stdout: "", stderr: "Error: unknown connection" },
+      },
+    });
+    await renderer.remetric(config);
+    expect(metricIn(calls, ETHERNET_CONNECTION))
+      .toBe(metricFor(config, "ethernet") + STOOD_DOWN_METRIC);
+    expect(metricIn(calls, MODEM_CONNECTION)).toBe(metricFor(config, "modem"));
+  });
+
+  it("does not undo a demotion on a full render", async () => {
+    // Profiles are written at render time and standing changes at runtime, so
+    // this is the half that could quietly put a dead path back at the head of
+    // the routing table on the next unrelated apply.
+    const config = threePaths();
+    const { renderer, calls } = harness({
+      devices: ALL_DEVICES,
+      connections: [AP_CONNECTION, CLIENT_CONNECTION, ETHERNET_CONNECTION, MODEM_CONNECTION],
+      standing: saying("ethernet"),
+    });
+    await renderer.render(config);
+    expect(metricIn(calls, ETHERNET_CONNECTION))
+      .toBe(metricFor(config, "ethernet") + STOOD_DOWN_METRIC);
+    expect(metricIn(calls, MODEM_CONNECTION)).toBe(metricFor(config, "modem"));
   });
 });

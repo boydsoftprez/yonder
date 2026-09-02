@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import type { Config } from "../../schema/config.js";
 import type { DesiredProfile } from "../profiles.js";
+import { NOTHING_STOOD_DOWN, type PathName, type StandingView } from "../reach/standing.js";
 
 export const MODEM_CONNECTION = "yonder-modem";
 
@@ -30,9 +31,48 @@ export const MODEM_CONNECTION = "yonder-modem";
  */
 const METRIC_BY_RANK = [100, 700, 800, 900];
 
-export function metricFor(config: Config, iface: "ethernet" | "modem" | "wifi_client"): number {
+/**
+ * What is added to a path's generated metric while it is stood down.
+ *
+ * **A metric, and deliberately not a disconnect.** A path that has stopped
+ * reaching the internet has not stopped being a way to reach *this device*:
+ * an operator may be sitting on the very cable that has just been stood down,
+ * and `nmcli device disconnect` or a lowered connection would take the
+ * on-link route with it and strand them. Rule 6 is the whole reason this is
+ * a number and not a command. Raising the metric moves the default route and
+ * nothing else — the link keeps its carrier, its address and its own subnet.
+ *
+ * **Added to the generated metric rather than replacing it**, so that the
+ * operator's order still decides between two paths that have both been stood
+ * down. Without that they would tie, the kernel would break the tie however
+ * it liked, and `pathInUse`'s premise — that the metrics follow
+ * `network.priority` — would stop holding on exactly the board where it
+ * matters most.
+ *
+ * A million is far above anything NetworkManager generates for itself (the
+ * measured board's own defaults are 100, 600 and 700) and far below what a
+ * kernel route metric can hold, so a demoted path loses to every healthy one
+ * including connections Yonder did not write.
+ */
+export const STOOD_DOWN_METRIC = 1_000_000;
+
+/**
+ * The metric this path gets, from the operator's order and its standing.
+ *
+ * The standing is an **input to generating the metric**, never a second
+ * writer of one: `config.yaml` states preference, this function turns that
+ * into numbers, and the renderer is still the only thing that writes them
+ * (R-NET-13). The default is a board where nothing has been stood down, so
+ * every caller that does not know about standing behaves exactly as it did.
+ */
+export function metricFor(
+  config: Config,
+  iface: PathName,
+  standing: StandingView = NOTHING_STOOD_DOWN,
+): number {
   const rank = config.network.priority.indexOf(iface);
-  return METRIC_BY_RANK[rank === -1 ? METRIC_BY_RANK.length - 1 : rank] ?? 900;
+  const base = METRIC_BY_RANK[rank === -1 ? METRIC_BY_RANK.length - 1 : rank] ?? 900;
+  return standing.isStoodDown(iface) ? base + STOOD_DOWN_METRIC : base;
 }
 
 /**
@@ -56,11 +96,12 @@ export function modemProfile(
   config: Config,
   password: string | null,
   iface: string,
+  standing: StandingView = NOTHING_STOOD_DOWN,
 ): DesiredProfile | null {
   const modem = config.network.modem;
   if (!modem.enabled) return null;
 
-  const metric = String(metricFor(config, "modem"));
+  const metric = String(metricFor(config, "modem", standing));
 
   if (modem.mode === "appliance") {
     return {

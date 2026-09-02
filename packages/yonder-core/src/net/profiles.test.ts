@@ -5,9 +5,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   apProfile, clientProfile, ethernetProfile, desiredProfiles, radioPlan, wifiMode,
-  AP_CONNECTION, CLIENT_CONNECTION, DEFAULT_AP_PASSPHRASE,
+  AP_CONNECTION, CLIENT_CONNECTION, ETHERNET_CONNECTION, DEFAULT_AP_PASSPHRASE,
 } from "./profiles.js";
-import { MODEM_CONNECTION, metricFor, modemProfile } from "./modem/profiles.js";
+import { MODEM_CONNECTION, STOOD_DOWN_METRIC, metricFor, modemProfile } from "./modem/profiles.js";
+import type { PathName, StandingView } from "./reach/standing.js";
 import { SecretStore } from "../secrets/store.js";
 import { DEFAULT_CONFIG } from "../schema/config.js";
 import type { Config } from "../schema/config.js";
@@ -223,6 +224,87 @@ describe("route metrics follow network.priority", () => {
     const s = settingsOf(apProfile(DEFAULT_CONFIG, "p", "wlan0"));
     expect(s["ipv4.route-metric"]).toBeUndefined();
     expect(s["ipv6.route-metric"]).toBeUndefined();
+  });
+});
+
+/**
+ * R-NET-13's second half, at the layer that generates the numbers: **a path
+ * that stops reaching anything is stood down, and traffic moves to the next
+ * path that works.**
+ *
+ * The standing is an input to generating the metric, never a second writer of
+ * one. `network.priority` still says what outranks what; all a demotion does
+ * is push one path out of the running, which is why it is expressed as a
+ * number added to the generated metric rather than as a disconnect.
+ */
+describe("route metrics take standing into account", () => {
+  const saying = (...down: PathName[]): StandingView => {
+    const set = new Set<PathName>(down);
+    return { isStoodDown: (path) => set.has(path) };
+  };
+
+  function board(priority: Config["network"]["priority"]): Config {
+    const c: Config = structuredClone(DEFAULT_CONFIG);
+    c.network.priority = priority;
+    c.network.client.ssid = "HomeNetwork";
+    c.network.modem.enabled = true;
+    return c;
+  }
+
+  it("gives a stood-down path a metric no healthy path can lose to", () => {
+    // The case the milestone is named for, one layer down: a cable plugged
+    // into something with no route out keeps its carrier and its metric of
+    // 100 and wins, while a working cellular link sits at 700 doing nothing.
+    const c = board(["ethernet", "modem", "wifi_client"]);
+    const demoted = metricFor(c, "ethernet", saying("ethernet"));
+    expect(demoted).toBeGreaterThan(metricFor(c, "modem"));
+    expect(demoted).toBeGreaterThan(metricFor(c, "wifi_client"));
+    expect(demoted).toBeGreaterThanOrEqual(STOOD_DOWN_METRIC);
+  });
+
+  it("gives the configured metric straight back when the path recovers", () => {
+    const c = board(["ethernet", "modem", "wifi_client"]);
+    expect(metricFor(c, "ethernet", saying())).toBe(metricFor(c, "ethernet"));
+  });
+
+  it("does not disturb the paths that are still working", () => {
+    const c = board(["ethernet", "modem", "wifi_client"]);
+    const standing = saying("ethernet");
+    expect(metricFor(c, "modem", standing)).toBe(metricFor(c, "modem"));
+    expect(metricFor(c, "wifi_client", standing)).toBe(metricFor(c, "wifi_client"));
+  });
+
+  it("keeps the operator's order between two paths that are both stood down", () => {
+    // Otherwise they tie, the kernel breaks the tie however it likes, and
+    // `pathInUse`'s premise — that the metrics follow network.priority —
+    // stops holding on the board where it matters most.
+    const c = board(["ethernet", "modem", "wifi_client"]);
+    const standing = saying("ethernet", "modem");
+    expect(metricFor(c, "ethernet", standing))
+      .toBeLessThan(metricFor(c, "modem", standing));
+  });
+
+  it("writes the losing metric into the profile itself, on both families", () => {
+    const c = board(["ethernet", "modem", "wifi_client"]);
+    const standing = saying("ethernet");
+    const s = settingsOf(ethernetProfile(c, "eth0", standing));
+    expect(s["ipv4.route-metric"]).toBe(String(metricFor(c, "ethernet", standing)));
+    expect(s["ipv6.route-metric"]).toBe(s["ipv4.route-metric"]);
+    expect(Number(s["ipv4.route-metric"]))
+      .toBeGreaterThan(Number(settingsOf(modemProfile(c, null, "cdc-wdm0", standing)!)["ipv4.route-metric"]));
+  });
+
+  it("carries the demotion through desiredProfiles, and never onto the access point", () => {
+    // A full render must not undo a demotion, and must not touch the one
+    // connection an operator with no way out is reaching the board through.
+    const c = board(["ethernet", "modem", "wifi_client"]);
+    const standing = saying("ethernet");
+    const profiles = desiredProfiles(c, fakeSecrets(), { wifi: "wlan0", ethernet: "eth0", modem: "cdc-wdm0" }, standing);
+    const byName = Object.fromEntries(profiles.map((p) => [p.name, settingsOf(p)]));
+    expect(byName[ETHERNET_CONNECTION]?.["ipv4.route-metric"])
+      .toBe(String(metricFor(c, "ethernet", standing)));
+    expect(byName[AP_CONNECTION]?.["ipv4.route-metric"]).toBeUndefined();
+    expect(byName[AP_CONNECTION]?.["ipv6.route-metric"]).toBeUndefined();
   });
 });
 
