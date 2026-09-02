@@ -232,7 +232,7 @@ describe("ReachMonitor.carrying", () => {
     expect((await monitor.state()).carrying).toBe(true);
   });
 
-  it("is false only once every path holding an address has been stood down", async () => {
+  it("is false once every path holding an address has been stood down", async () => {
     const { monitor } = build({
       devices: { ethernet: "eth0", wifi_client: "wlan0" },
       order: ["ethernet", "wifi_client"],
@@ -251,6 +251,55 @@ describe("ReachMonitor.carrying", () => {
     // wiring the monitor in from being the thing that takes devices off the
     // air.
     const { monitor, probed } = build({ reaches: () => false });
+    expect(await monitor.carrying()).toBe(true);
+    expect(probed).toEqual([]);
+  });
+
+  /**
+   * K-33 by a different route, and the reason "not yet condemned" is not
+   * "working".
+   *
+   * The board: a LAN cable into a switch with no route out, and an `auto`
+   * modem on a wrong APN that registers around 45 s in. The fallback
+   * watchdog fires **once**, and by the time it does ethernet has three
+   * failures and is stood down while the modem, which took its address late,
+   * has only two. Deferring to the modem because nothing has finished
+   * condemning it answers "something is carrying traffic" about a board that
+   * reaches nothing — the access point never comes up, and nothing looks
+   * again.
+   */
+  it("is false while every path holding an address is failing, before the last is condemned", async () => {
+    const { monitor, standing } = build({
+      devices: { ethernet: "eth0", modem: "wwan0" },
+      order: ["ethernet", "modem"],
+      holding: ["ethernet", "modem"],
+      reaches: () => false,
+    });
+    for (let i = 0; i < FAILURES_TO_STAND_DOWN; i++) await monitor.test("ethernet");
+    for (let i = 0; i < FAILURES_TO_STAND_DOWN - 1; i++) await monitor.test("modem");
+
+    expect(standing.standingOf("ethernet")).toBe("no-route-out");
+    expect(standing.standingOf("modem")).not.toBe("no-route-out");
+    expect(await monitor.carrying()).toBe(false);
+  });
+
+  /**
+   * The other half, and why this cannot simply demand a success.
+   *
+   * A single-radio board in client mode, working, at a fallback deadline the
+   * watch has not yet reached its first probe by. Answering false here brings
+   * the access point up on the one radio and tears down the link the operator
+   * is talking over — one bricking traded for another. Silence is not
+   * evidence, and with no evidence the answer is the one an address alone has
+   * always given.
+   */
+  it("is true when nothing holding an address has been probed yet", async () => {
+    const { monitor, probed } = build({
+      devices: { wifi_client: "wlan0" },
+      order: ["wifi_client"],
+      holding: ["wifi_client"],
+      reaches: () => false,
+    });
     expect(await monitor.carrying()).toBe(true);
     expect(probed).toEqual([]);
   });

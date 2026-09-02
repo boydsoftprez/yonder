@@ -159,6 +159,11 @@ export class ReachMonitor {
    * belongs to no path this monitor knows, and a question that could not be
    * asked at all all answer true — and the watchdog's own address check still
    * stands behind this one.
+   *
+   * **A doubt is not the same as evidence against.** A path whose probes are
+   * failing is evidence, whether or not it has run out the three failures
+   * that stand it down, and when every path holding an address is failing
+   * this answers false. See `carryingOn`.
    */
   async carrying(): Promise<boolean> {
     try {
@@ -206,12 +211,38 @@ export class ReachMonitor {
     this.standing.record(path, true);
   }
 
-  /** The same answer, about a reading already taken. See carrying(). */
+  /**
+   * The same answer, about a reading already taken. See carrying().
+   *
+   * **Three states, not two.** "Not stood down" is not "working": it also
+   * covers a path that has failed twice of the three that condemn it, and a
+   * path nothing has ever probed. Deferring to either of those is how a board
+   * with a dead LAN and a modem on a wrong APN answered "something is
+   * carrying traffic" at the fallback deadline — and that deadline is checked
+   * exactly once, so the answer was final and the board stayed unreachable
+   * (K-33, by a different route than the one this milestone closed).
+   *
+   * So evidence may overturn the address test only where there is evidence:
+   *
+   *  - **Any path reaching something** — true, and the reason this asks about
+   *    every path rather than the top one. A dead Ethernet outranking a
+   *    working Wi-Fi client link must not raise an access point on the one
+   *    radio the operator is talking over.
+   *  - **Every path failing** — false, and the access point comes up. Being
+   *    part-way to condemned is still evidence against.
+   *  - **Otherwise** — true. Nothing has been probed yet, so there is nothing
+   *    to overturn the answer an address alone has always given (see
+   *    `FallbackWatchdogOptions.carrying`). Raising the access point on a
+   *    working single-radio board because the watch has not got round to its
+   *    first probe would trade one unreachable device for another.
+   */
   private carryingOn(holding: PathName[]): boolean {
     // Addresses on things this monitor has no path for — a USB gadget, a
     // connection an operator added by hand. Not this check's to condemn.
     if (holding.length === 0) return true;
-    return holding.some((path) => this.standing.standingOf(path) !== "no-route-out");
+    const evidence = holding.map((path) => this.standing.evidenceFor(path));
+    if (evidence.includes("reaching")) return true;
+    return !evidence.every((e) => e === "not-reaching");
   }
 
   /**

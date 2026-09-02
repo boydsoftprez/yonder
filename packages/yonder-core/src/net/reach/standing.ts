@@ -20,6 +20,24 @@ export interface PathReport {
   detail: string;
 }
 
+/**
+ * What the record says about a path, in the three states it actually has.
+ *
+ * `standingOf` collapses this into two — a path is stood down or it is not —
+ * which is the right answer for a console and the wrong one for the fallback
+ * watchdog. "Not stood down" covers a path that is working, a path that has
+ * failed twice of the three that condemn it, and a path nothing has ever
+ * looked at; treating those as one is how a board with no way out reports
+ * itself healthy (K-33).
+ *
+ *  - `reaching` — the most recent probe reached something.
+ *  - `not-reaching` — it is stood down, or its recent probes have been
+ *    failing. Evidence against, whether or not it has run out yet.
+ *  - `untested` — nothing has probed it. No evidence either way, and not the
+ *    same thing as evidence of health.
+ */
+export type PathEvidence = "reaching" | "not-reaching" | "untested";
+
 export interface ReachState {
   paths: PathReport[];
   inUse: PathName | null;
@@ -210,6 +228,27 @@ export class Standing implements StandingView {
 
   standingOf(path: PathName): PathStanding {
     return this.isStoodDown(path) ? "no-route-out" : "standing-by";
+  }
+
+  /**
+   * What is actually known about a path, rather than whether it is condemned.
+   *
+   * `failures` and `successes` are exclusive — folding a result in zeroes the
+   * other — so the counters alone say which way the most recent probe went,
+   * and a path with no record at all has never been probed. Being stood down
+   * is folded into `not-reaching` rather than kept apart, because for anyone
+   * asking "does this reach anything" the two are the same answer with
+   * different amounts of evidence behind them.
+   *
+   * The fallback watchdog is the caller this exists for: it has one chance to
+   * decide whether the access point comes up, and it must be able to tell a
+   * path that is failing from one nobody has looked at (K-33).
+   */
+  evidenceFor(path: PathName): PathEvidence {
+    const r = this.records.get(path);
+    if (r === undefined) return "untested";
+    if (r.down || r.failures > 0) return "not-reaching";
+    return r.successes > 0 ? "reaching" : "untested";
   }
 
   isStoodDown(path: PathName): boolean {
