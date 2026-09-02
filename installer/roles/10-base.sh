@@ -48,6 +48,18 @@ else
     log "skipping systemctl for avahi-daemon (dry run or not a systemd host)"
 fi
 
+# The modem service, from Debian.
+#
+# ZeroTier needed an offline payload, a pinned fingerprint and a signature
+# check because it is not in Debian. This is: `modemmanager 1.24.0-1+deb13u1`
+# in trixie/main, installed in the same chroot, with a network, as every other
+# package here. None of that machinery applies.
+#
+# It is what makes a modem visible at all. Without it a board with a modem
+# plugged in has a `wwan0` link that NetworkManager cannot see and does not
+# list - inert rather than broken, and with nothing saying so.
+ensure_pkgs modemmanager
+
 # The account the console runs as, and the group that is the access control
 # on the daemon's socket.
 #

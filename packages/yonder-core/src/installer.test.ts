@@ -334,3 +334,39 @@ describe("the daemon can write everything the console renderer writes", () => {
     expect(unit).toContain(`-s ${DEFAULT_CONSOLE_PATHS.settings}`);
   });
 });
+
+/**
+ * The modem role. ModemManager's udev rules ship inside the package, so a
+ * port that enumerated before the package was installed carries no
+ * ID_MM_CANDIDATE and the service never looks at it — `mmcli -L` answers "No
+ * modems were found", indistinguishable from unsupported hardware. This
+ * arises on every upgrade of a board already in the field, not on a fresh
+ * flash, because there udev runs after the package is already there.
+ */
+describe("installing a modem", () => {
+  it("installs ModemManager from Debian, with no payload", () => {
+    // ZeroTier needed a payload because it is not in Debian. ModemManager is,
+    // and the installer already installs Debian packages in a chroot with a
+    // network, so none of that machinery applies here.
+    const role = readFileSync(join(ROOT, "installer", "roles", "10-base.sh"), "utf8");
+    expect(role).toMatch(/ensure_pkgs\s+modemmanager/);
+  });
+
+  it("triggers udev and restarts ModemManager, over every subsystem", () => {
+    // A subsystem-filtered trigger (tty, net, usb) misses usbmisc, where the
+    // control port lives, and leaves a modem claimed AT-only with its net
+    // port ignored — a modem with no data path but PPP.
+    const role = readFileSync(join(ROOT, "installer", "roles", "40-modem.sh"), "utf8");
+    expect(role).toMatch(/udevadm trigger/);
+    expect(role).not.toMatch(/udevadm trigger.*--subsystem-match/);
+    expect(role).toMatch(/systemctl restart ModemManager/);
+  });
+
+  it("does not bring a link up", () => {
+    // R-CFG-08 and R-VPN-05's principle: installing support for something is
+    // not configuring it. A device carries no cellular connection until
+    // config.yaml asks for one.
+    const role = readFileSync(join(ROOT, "installer", "roles", "40-modem.sh"), "utf8");
+    expect(role).not.toMatch(/nmcli connection (add|up)/);
+  });
+});
