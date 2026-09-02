@@ -2,6 +2,9 @@
 import type { Config } from "../schema/config.js";
 import type { SecretStore } from "../secrets/store.js";
 import type { ConnectionSpec } from "./nmcli/client.js";
+import { MODEM_CONNECTION, modemProfile } from "./modem/profiles.js";
+
+export { MODEM_CONNECTION };
 
 /**
  * The setup access point's passphrase: published, documented, and the same on
@@ -97,6 +100,11 @@ export function ethernetProfile(config: Config, iface: string): DesiredProfile {
 export interface Interfaces {
   wifi: string | null;
   ethernet: string | null;
+  /**
+   * The modem's control port — `cdc-wdm0`, not `wwan0` — or the adapter the
+   * operator named when the modem is one that dials for itself.
+   */
+  modem: string | null;
 }
 
 /**
@@ -207,6 +215,13 @@ export function desiredProfiles(config: Config, secrets: SecretStore, ifaces: In
   }
   if (ifaces.ethernet !== null) {
     out.push(ethernetProfile(config, ifaces.ethernet));
+  }
+  if (ifaces.modem !== null) {
+    const password = config.network.modem.password === null
+      ? null
+      : secrets.resolve(config.network.modem.password);
+    const modem = modemProfile(config, password, ifaces.modem);
+    if (modem !== null) out.push(modem);
   }
   return out;
 }

@@ -6,12 +6,12 @@ import { NmcliClient, type DeviceInfo } from "./nmcli/client.js";
 import { enableWifiRadio, radioWanted } from "./radio.js";
 import {
   desiredProfiles, radioPlan, wifiMode,
-  AP_CONNECTION, CLIENT_CONNECTION, ETHERNET_CONNECTION,
+  AP_CONNECTION, CLIENT_CONNECTION, ETHERNET_CONNECTION, MODEM_CONNECTION,
   type Interfaces,
 } from "./profiles.js";
 
 /** The only connection names this renderer will ever create or delete. */
-const OWNED = new Set([AP_CONNECTION, CLIENT_CONNECTION, ETHERNET_CONNECTION]);
+const OWNED = new Set([AP_CONNECTION, CLIENT_CONNECTION, ETHERNET_CONNECTION, MODEM_CONNECTION]);
 
 /**
  * How long to wait, after the first render, for a Wi-Fi radio NetworkManager
@@ -87,6 +87,21 @@ function connectionName(connection: string): string {
 /** `wlan0=unavailable`, for a log line that says which radio and why. */
 function describe(devices: DeviceInfo[]): string {
   return devices.map((d) => `${d.device}=${d.state}`).join(" ") || "no wifi device";
+}
+
+/**
+ * The modem's device, if this board has one.
+ *
+ * A named appliance wins outright: the operator has said which adapter it is,
+ * and no amount of device-type inspection improves on being told (R-CEL-11).
+ * Otherwise it is the `gsm` device, which is NetworkManager's own type for a
+ * modem it reaches through ModemManager, and whose name is a control port.
+ */
+function modemDevice(config: Config, devices: DeviceInfo[]): string | null {
+  const modem = config.network.modem;
+  if (!modem.enabled) return null;
+  if (modem.mode === "appliance") return modem.interface;
+  return devices.find((d) => d.type === "gsm")?.device ?? null;
 }
 
 export interface NetworkRendererOptions {
@@ -274,6 +289,7 @@ export class NetworkRenderer implements Renderer {
     const ifaces: Interfaces = {
       wifi: devices.find((d) => d.type === "wifi")?.device ?? null,
       ethernet: devices.find((d) => d.type === "ethernet")?.device ?? null,
+      modem: modemDevice(config, devices),
     };
     this.log(`network: wifi=${ifaces.wifi ?? "none"} ethernet=${ifaces.ethernet ?? "none"}`);
 

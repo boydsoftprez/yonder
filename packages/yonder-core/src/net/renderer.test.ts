@@ -6,7 +6,9 @@ import { join } from "node:path";
 import { NetworkRenderer, deviceIsUsable } from "./renderer.js";
 import { NmcliClient } from "./nmcli/client.js";
 import { SecretStore } from "../secrets/store.js";
-import { AP_CONNECTION, CLIENT_CONNECTION, ETHERNET_CONNECTION, DEFAULT_AP_PASSPHRASE } from "./profiles.js";
+import {
+  AP_CONNECTION, CLIENT_CONNECTION, ETHERNET_CONNECTION, MODEM_CONNECTION, DEFAULT_AP_PASSPHRASE,
+} from "./profiles.js";
 import { RFKILL_UNBLOCK_WIFI, NMCLI_RADIO_WIFI_ON } from "./radio.js";
 import { DEFAULT_CONFIG } from "../schema/config.js";
 import type { Clock } from "../apply/types.js";
@@ -806,5 +808,27 @@ describe("moving the radio", () => {
     (logging as unknown as { secrets: SecretStore }).secrets.ensureValue("ap_psk", OPERATOR_PSK);
     await logging.render(DEFAULT_CONFIG);
     expect(lines).toContain("network: bringing the access point up");
+  });
+});
+
+describe("NetworkRenderer and a modem", () => {
+  it("creates the modem connection and never deletes a connection it does not own", async () => {
+    // OWNED is the list of connections this renderer will delete. A modem
+    // connection missing from it would be created and then removed on the
+    // very next render as a stray.
+    const config = {
+      ...DEFAULT_CONFIG,
+      network: {
+        ...DEFAULT_CONFIG.network,
+        modem: { ...DEFAULT_CONFIG.network.modem, enabled: true, apn: "ereseller" },
+      },
+    };
+    const { renderer, calls } = harness({
+      devices: "wlan0:wifi:disconnected:\ncdc-wdm0:gsm:disconnected:\n",
+    });
+    await renderer.render(config);
+    const added = calls.filter((c) => c.includes("add")).map((c) => c.join(" "));
+    expect(added.some((c) => c.includes(MODEM_CONNECTION) && c.includes("gsm"))).toBe(true);
+    expect(calls.some((c) => c.includes("delete") && c.includes(MODEM_CONNECTION))).toBe(false);
   });
 });

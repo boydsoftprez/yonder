@@ -7,6 +7,7 @@ import {
   apProfile, clientProfile, ethernetProfile, desiredProfiles, radioPlan, wifiMode,
   AP_CONNECTION, CLIENT_CONNECTION, DEFAULT_AP_PASSPHRASE,
 } from "./profiles.js";
+import { MODEM_CONNECTION } from "./modem/profiles.js";
 import { SecretStore } from "../secrets/store.js";
 import { DEFAULT_CONFIG } from "../schema/config.js";
 import type { Config } from "../schema/config.js";
@@ -17,6 +18,17 @@ afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
 
 function settingsOf(p: { settings: string[][] }): Record<string, string> {
   return Object.fromEntries(p.settings.map(([k, v]) => [k, v]));
+}
+
+/**
+ * A secret store good for exactly what `desiredProfiles` needs when a wifi
+ * interface is present: `ap_psk` always resolves, because the access point's
+ * profile is written whenever there is a radio, even in client mode.
+ */
+function fakeSecrets(): SecretStore {
+  const store = new SecretStore(join(dir, `secrets-${Math.random().toString(36).slice(2)}.yaml`));
+  store.ensureValue("ap_psk", "test-ap-psk");
+  return store;
 }
 
 describe("DEFAULT_AP_PASSPHRASE", () => {
@@ -268,9 +280,32 @@ describe("the access point's profile in client mode", () => {
     config.network.client.psk = { secret: "wifi_psk" };
     config.network.ap.enabled = false;
 
-    const names = desiredProfiles(config, store, { wifi: "wlan0", ethernet: null })
+    const names = desiredProfiles(config, store, { wifi: "wlan0", ethernet: null, modem: null })
       .map((p) => p.name);
     expect(names).toContain(AP_CONNECTION);
     expect(names).toContain(CLIENT_CONNECTION);
+  });
+});
+
+describe("desiredProfiles with a modem", () => {
+  it("writes the modem profile when a modem interface was found", () => {
+    const config = {
+      ...DEFAULT_CONFIG,
+      network: {
+        ...DEFAULT_CONFIG.network,
+        modem: { ...DEFAULT_CONFIG.network.modem, enabled: true, apn: "ereseller" },
+      },
+    };
+    const names = desiredProfiles(config, fakeSecrets(), {
+      wifi: "wlan0", ethernet: "eth0", modem: "cdc-wdm0",
+    }).map((p) => p.name);
+    expect(names).toContain(MODEM_CONNECTION);
+  });
+
+  it("writes nothing for a modem on a board that has none", () => {
+    const names = desiredProfiles(DEFAULT_CONFIG, fakeSecrets(), {
+      wifi: "wlan0", ethernet: "eth0", modem: null,
+    }).map((p) => p.name);
+    expect(names).not.toContain(MODEM_CONNECTION);
   });
 });
