@@ -99,15 +99,33 @@ either service printed. See [`verifying-the-console.md`](verifying-the-console.m
 Satisfied by M1b-1: R-SEC-04, R-SEC-05, R-SEC-09, R-SEC-10, R-CFG-07, R-UI-01 (for the three
 pages that exist), and R-SEC-01's console half. K-01 is closed.
 
-**M1b-2 — the pages: outstanding.** Everything the console *contains*: board and resource
-status (R-SYS-01, R-SYS-02), the network form and Wi-Fi scanning (R-NET-03, R-NET-04), the
-activity log (R-DIA-05), reachability and ping (R-DIA-01, R-DIA-02), day and night themes
-(R-UI-07), and the shared command-state language ADR-0005 asks for. M1b-1 built the thing
-they will be served from; none of them exists yet.
+**M1b-2 — the pages: done, on this machine.** Four pages behind the login — status,
+network, log, diagnostics — served by two contrib packages of thin adapters over the
+daemon's socket, with `flows/flows.json` as wiring only and a test asserting against the
+artefact that it contains no `function` node. Day and night are two designed palettes
+generated to a stylesheet on the device, chosen by the operator and persisted in `ui.theme`
+(R-UI-07); the command-state language ADR-0005 asked for is built once in `yonder-core` and
+shared by both packages (R-UI-05).
 
-**Neither closes M1.** M1's exit criterion is a freshly flashed board you join, configure and
-watch recover — and that needs M1b-2's pages *and* the cold boot M1a still owes. Nothing in
-M1b-1 has run on hardware.
+The decision M1 could not close without: **on a single-radio board, joining a network takes
+the access point down, and the console now says so before it happens rather than appearing to
+hang.** `radioPlan` arbitrates — the configured client wins, and it is raised before the
+access point is dropped — and a radio-moving apply gets a longer confirmation window,
+because the operator has to find the device again before they can confirm anything
+(R-NET-12, R-CFG-10). K-13 is narrowed, not closed: a second virtual interface has still
+never been tried here, and scanning while the radio serves the access point is still
+unobserved.
+
+Satisfied by M1b-2, on this machine: R-SYS-01, R-SYS-02, R-DIA-01, R-DIA-02, R-DIA-05,
+R-NET-03, R-NET-12, R-CFG-10, R-UI-05, R-UI-06, R-UI-07, and R-NET-09's device half.
+`scripts/verify-pages.sh` loads the shipped flows in a real Node-RED with the real Dashboard
+in front of the real daemon.
+
+**None of this closes M1.** M1's exit criterion is a freshly flashed board you join,
+configure and watch recover, and that needs the cold boot M1a still owes. **Nothing in M1b
+has run on hardware at all**, and two things this milestone shipped are explicitly unproven
+until it does: whether `<hostname>.local` resolves for the device somebody is holding, and
+what a real board does when asked to scan with its radio already serving an access point.
 
 ---
 

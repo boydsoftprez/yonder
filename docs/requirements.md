@@ -152,6 +152,7 @@ Parameter writes are vehicle commands. R-CMD applies to every requirement here.
 | R-NET-09 | Be discoverable on a local network by hostname | 2 |
 | R-NET-10 | Report per-interface throughput | 3 |
 | R-NET-11 | Detect and report loss of the primary link, and act on it according to configuration | 2 |
+| R-NET-12 | **One Wi-Fi radio serves one mode at a time, and which one is decided here rather than by the network stack.** Where a board has a single radio and a client network is configured, the client wins and the access point is taken down deliberately — and the client is raised *before* the access point is dropped, because the operator submitting those credentials is reaching the device through the radio being retuned. A change that leaves the radio on no network brings the access point back without waiting for the confirmation window to expire | 1 |
 
 ## R-VPN — Remote access
 
@@ -209,6 +210,7 @@ Parameter writes are vehicle commands. R-CMD applies to every requirement here.
 | R-CFG-07 | Never require a vendor tool, an imaging wizard or a network service to configure a device | 1 |
 | R-CFG-08 | **A freshly flashed device reaches a joinable, usable state with no operator input.** A default configuration is seeded, the access point comes up, and the console is served — before anyone has configured anything | 1 |
 | R-CFG-09 | **A configuration written by an earlier version of Yonder still loads.** A key a later version has retired is dropped, named in the log and ignored; a key that was never a Yonder setting is still rejected, so a misspelling can never pass for a setting. Loading does not rewrite the operator's file. **An upgrade must never strand a device on a configuration its own daemon refuses to read** | 1 |
+| R-CFG-10 | **A change that moves the operator's own connection gets a longer window to be confirmed in than one that does not.** R-CFG-03's timer is measured from the apply; a change that takes the access point off the air costs the operator the time to notice, find the device again on another network and open the console there, and a window budgeted for a change they watched happen reverts a good configuration out from under them. Both windows are named in the configuration | 1 |
 
 ## R-HW — Hardware support
 

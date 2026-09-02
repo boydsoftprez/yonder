@@ -168,3 +168,48 @@ Two things, both of which would otherwise have been found on a board:
 - **Node-RED's editor refuses a bad password with 403, not 400.** Harmless, and the reason
   the script asserts on whether a token comes back rather than on a status code Node-RED
   owns.
+
+---
+
+## Verifying the pages
+
+`scripts/verify-console.sh` proves the spine. `scripts/verify-pages.sh` proves the other
+half: the shipped `flows/flows.json` loaded by a real Node-RED with the real Dashboard, with
+both contrib packages installed, in front of the real daemon.
+
+```sh
+npm run build
+./installer/make-payload.sh --arch linux-arm64     # once, for vendor/console
+./scripts/verify-pages.sh
+```
+
+Same conventions: one temporary directory, removed on exit unless `KEEP=1`, and `PORT=`
+moves the console off 18881. `ping`, `nmcli`, `hostnamectl`, `rfkill` and `systemctl` are
+stand-ins on `PATH`; the `nmcli` one reports a `wlan0` and a scan with a duplicated SSID, so
+the folding in `scanForNetworks` has something real to fold.
+
+It checks that the daemon's five page routes answer over the socket and that the scan carries
+no key; that Node-RED starts the shipped flows with **no error at all** and no unregistered
+node type; that every widget found its group, page and dashboard; and that the dashboard and
+its generated palette are both behind the login while `settings.js` is not served at all.
+
+**What it found on its first run**, and what no unit test could have:
+
+- **A config node whose id was also a node type.** `ui-base` had the id `ui-base`. Node-RED's
+  config-node dependency scan compares every string property of a config node against the ids
+  of the others — and a node's own `type` is one of those properties — so it read the node as
+  depending on itself: `Circular config node dependency detected: ui-base`, followed by
+  twenty-odd `No group configured` lines and four pages with nothing on them. The ids are now
+  `dashboard` and `palette`, and `flows.test.ts` asserts the shape of that mistake so it
+  cannot come back.
+- **`httpStatic` is mounted *behind* `httpNodeAuth`, not in front of it.** `red.js` applies
+  the node-root auth at line 428 and the static mounts at 438, so the generated `theme.css` is
+  gated exactly like the dashboard it styles. That is the right place for it — the login page
+  carries its own inline CSS — but it was assumed the other way round and the assumption was
+  wrong.
+
+**What it still does not prove.** Nothing about how a page *looks*, whether a widget is
+usable on a tablet in sunlight, or anything at all about hardware. There is no browser in
+this run: it asserts that the flows load, that the widgets resolve their groups, and that the
+routes answer. Every visual claim in this milestone — that the night palette is legible, that
+the Wi-Fi warning is readable before the form — is unverified.

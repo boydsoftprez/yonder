@@ -167,27 +167,50 @@ guarantee M1a exists to satisfy, and it is safer belt-and-braces than clever. Wo
 collapsing to the address test alone the next time this function is touched for a reason,
 not on its own.
 
-### K-13 · The access point and the Wi-Fi client bind the same radio, with no arbitration
+### K-13 · One radio, arbitrated — but still one radio
 `src/net/profiles.ts`, `src/net/renderer.ts`
 
-`desiredProfiles` hands `ifaces.wifi` to both `apProfile` and `clientProfile`. On a
-single-radio board — every Raspberry Pi with built-in Wi-Fi — that is two connection
-profiles claiming one interface, one in AP mode and one in infrastructure mode. Nothing in
-this code decides which wins; NetworkManager does, by whatever its own activation rules say,
-and this repository has never observed what that is. The access point is `autoconnect no`
-and brought up deliberately while the client is `autoconnect yes`, which makes the outcome
-*likely* to be "whichever was activated last", but that is a guess written down, not a
-design.
+**Narrowed in M1b-2, not closed.**
 
-`network.priority` — the ordered egress preference in the configuration — is parsed by the
-schema, carried in every config file, and **read by nothing**. R-NET-06 asks for routing
-metrics generated from it; no code generates any.
+*What it used to say:* `desiredProfiles` handed `ifaces.wifi` to both `apProfile` and
+`clientProfile`, and nothing decided which won. The access point was `autoconnect no` and
+raised deliberately while the client was `autoconnect yes`, which made "whichever was
+activated last" *likely* — a guess written down rather than a design. On the milestone that
+put a Wi-Fi form in front of an operator that was not good enough, because the operator is
+standing in the failure: they submit credentials over the access point, and the access point
+is on the radio being retuned.
 
-Both belong to the milestone that does multi-interface egress, where a modem, Ethernet and
-Wi-Fi have to be ranked against each other for real. It is recorded here rather than left
-silent because "the access point and the client profile fight over one radio" is exactly the
-kind of thing that reads as a bug in the field, and because a configuration key that does
-nothing is worse than an absent one — it invites an operator to set it and expect an effect.
+*What now decides.* `radioPlan` (R-NET-12) is a pure function of the configuration and
+returns an ordered list of activations. Where a client SSID is configured the client wins,
+and the plan is **raise the client, then take the access point down** — in that order, so a
+board that never associates has not already thrown away the thing the operator is reading
+the page on. If the client activation fails and nothing else is on the air, the renderer
+raises the access point itself, regardless of what `ap.enabled` says: R-NET-07 is about
+reachability, and the fallback watchdog cannot be relied on for this because it fires once
+per daemon start and may have spent its shot hours earlier (K-11).
+
+The access point's *profile* is still written in client mode, and deliberately. Deleting it
+is the tidier-looking change and it is the one that breaks R-NET-07 — `nmcli connection up
+yonder-ap` against a profile nothing created is K-16, a device unreachable until a power
+cycle. Only the activation is arbitrated.
+
+**What is still open, and why this keeps its number.**
+
+- **A second virtual interface has never been tried here.** Some chipsets support an access
+  point and a client on one radio at once, and that is the eventual answer. This repository
+  has not observed it working on a board, and unobserved hardware behaviour does not get
+  written down as design. Until it is, joining a network costs the access point.
+- **Scanning while the radio is serving the access point is unobserved.** `GET /net/scan` on
+  a single-radio board is the ordinary case — the operator is scanning over the very access
+  point they are connected through — and whether NetworkManager scans in AP mode, returns a
+  stale cache, or refuses outright has not been seen. `scanForNetworks` says so in a comment.
+  It is the first thing the hardware run should look at.
+- **`network.priority` is still read by nothing.** The ordered egress preference is parsed by
+  the schema and carried in every config file; R-NET-06 asks for routing metrics generated
+  from it and no code generates any. That belongs to the milestone that does multi-interface
+  egress, where a modem, Ethernet and Wi-Fi have to be ranked for real. A configuration key
+  that does nothing is worse than an absent one — it invites an operator to set it and expect
+  an effect.
 
 ### K-14 · ~~A device with an invalid configuration was reachable but not repairable~~ — CLOSED
 
@@ -385,3 +408,32 @@ This has not been observed. It is recorded because it was reasoned about and not
 the first hardware boot is where it would show up — as Node-RED failing to write its own
 state, with a permissions error and no obvious cause. Moving the console to
 `/var/lib/yonder-console` removes the question entirely and is the fix if it does.
+
+### K-22 · The diagnostics probe refuses IPv6 addresses
+`src/diag/probe.ts`
+
+`isProbeHost` accepts an IPv4 address or a DNS hostname and nothing else, so
+`ping 2001:db8::1` from the diagnostics page is refused as "not a host name or an IPv4
+address". On an IPv6-only cellular network — which exists, and which is exactly the network
+this device is most likely to be on — that makes the ping tool useless for the addresses
+that matter.
+
+Deliberate rather than overlooked. The value goes on a command line, and the rule that
+stops `-i0.001` being read as a flag is the same rule that rejects a colon; a validator
+loosened to admit IPv6 without someone having thought carefully about IPv6 is how the thing
+it was written to stop gets through. Closing it means an IPv6 literal test worth trusting,
+`ping -6`, and a board to try it on.
+
+### K-23 · An operator's own flows are replaced on every install
+`installer/roles/30-console.sh`
+
+`flows.json` is copied from the repository over whatever is on the device, every time the
+installer runs. That is right for a shipped artefact — an upgrade that installed new nodes
+and left the old pages behind would be an upgrade that did nothing visible — and it is the
+same treatment `settings.js` gets, which is rewritten on every apply.
+
+What it costs is that the flow editor is not a place to keep work. An operator who builds
+something in it loses it at the next install, with no warning beyond a line in the
+installer's output. The shape of a fix is a separate flow file for an operator's own flows,
+which Node-RED does not offer directly, or a deliberate "keep mine" prompt the installer
+cannot ask on an unattended image build.

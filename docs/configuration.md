@@ -16,9 +16,20 @@ No imager, no cloud, no dialog.
 
 1. Validate against the schema. Invalid config is rejected; the device keeps running.
 2. Snapshot the current config as `last-known-good`.
-3. Apply, and start a confirmation timer (default 120 s).
+3. Apply, and start a confirmation timer — `apply.timeout`, 120 s by default, or
+   `apply.radioTimeout`, 300 s, when the change moves the Wi-Fi radio between running the
+   access point and joining a network.
 4. Reaching the device again confirms the change.
 5. Timer expires unconfirmed → revert and reboot.
+
+**Two windows, because there are two kinds of change** (R-CFG-10). A change that leaves your
+connection where it was — a hostname, a console port, a theme — is confirmed in seconds, and
+giving it five minutes only means a change that broke the device sits there for five minutes.
+A change that moves the radio takes the access point off the air under you: you have to
+notice, join the other network yourself, find the device again and open the console there.
+The longer window is the time that takes. Which one an apply gets is decided by whether the
+radio changes mode, not by which keys were edited — changing the passphrase of a network
+already configured is not a radio move.
 
 Independently: **if no configured network carries traffic within 90 s of `yonder-core`
 starting, the access point comes up regardless of configuration.** The window is measured
@@ -104,8 +115,12 @@ ui:
     password: null                             # stays null; admin_password is the credential
     interfaces: [ethernet, wifi_client]        # note: cellular excluded by default
 
+apply:
+  timeout: 120                                 # seconds, 30-600
+  radioTimeout: 300                            # seconds, 30-600; an apply that moves the radio
+
 system:
-  hostname: yonder
+  hostname: yonder                             # also published as <hostname>.local
   timezone: UTC
 ```
 
@@ -222,3 +237,45 @@ gate it with (R-SEC-05, R-SEC-09).
 Both keys take effect on the next apply. The daemon rewrites `settings.js` and restarts the
 console when — and only when — that file would change, so a network change does not sign you
 out of the console you made it from.
+
+**`ui.theme`** is `day` or `night`, and both are designed rather than one being the other
+inverted: night is warmer, dimmer and pulled away from blue, because a screen that is right
+at noon costs dark adaptation at midnight. Day is the default because in direct sunlight a
+dark screen becomes a mirror (R-UI-07, [ADR-0005](adr/0005-console-substrate.md)).
+
+The choice is yours and it persists here. It is **never** taken from the browser or the
+host: `prefers-color-scheme` describes the device somebody happens to be holding, not the
+light they are standing in.
+
+Changing it writes a generated stylesheet beside `settings.js` and does **not** restart the
+console — refresh the page to see it. That matters more than it sounds: a theme goes through
+apply and rollback like every other change, so it has to be confirmed, and a restart would
+sign you out of the console you would have confirmed from.
+
+**`apply.timeout` and `apply.radioTimeout`** are the two confirmation windows above, in
+seconds, each between 30 and 600. Below 30 s nobody can confirm anything; above 600 s an
+unconfirmed change that broke the device sits there for ten minutes.
+
+**`system.hostname`** is the device's name, and since M1b-2 it is applied rather than merely
+recorded: the daemon sets the system hostname from it, and `avahi-daemon` publishes it over
+mDNS, so the device answers to `<hostname>.local` on a network it has joined (R-NET-09,
+R-CFG-08). It is a renderer like everything else, so a change goes through apply and
+rollback.
+
+**Whether that name resolves depends on the device you are looking from, and Yonder cannot
+test that from here.** macOS and iOS have always resolved `.local`; Windows has since
+Windows 10; Android varies by version. It has **not** been verified on real hardware for
+this build. The address always works, and your router's list of connected clients is where
+to find it. The console says the same thing rather than the nicer sentence.
+
+**`network.client.ssid` and `network.client.psk`** are normally set from the console's
+Network page rather than by hand. The console posts the network name and passphrase to the
+daemon, which puts the passphrase in `secrets.yaml`, writes `{ secret: wifi_psk }` here, and
+applies the whole document — so the passphrase never lands in this file, which is
+world-readable on the device.
+
+On a board with one Wi-Fi radio, setting these takes the access point down: one radio serves
+one mode at a time, the configured client wins, and the client is raised before the access
+point is dropped (R-NET-12, K-13). If the join fails, the access point comes back — the
+renderer raises it, and if that does not happen the confirmation window expires and the whole
+configuration reverts.

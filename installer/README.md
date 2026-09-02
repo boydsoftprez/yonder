@@ -59,8 +59,10 @@ it is there, and writes one when it is not.
 **Node 24, not 20.** Node 20 reached end of life in April 2026 and Node-RED 5
 requires 22.9 or newer, so the payload's runtime is the current 24 LTS line.
 The two roles still ask for different minimums, on purpose: `require_node 20`
-in `20-yonder-core.sh` is genuinely the daemon's floor, and `require_node 22`
-in `30-console.sh` is Node-RED's. A board with a distro Node 20 and no payload
+in `20-yonder-core.sh` is genuinely the daemon's floor, and `require_node 22.12`
+in `30-console.sh` is the floor that is actually true for the console — Node-RED
+itself needs 22.9, but the generated `settings.js` and both contrib packages
+`require()` an ES module, which node supports from 22.12. A board with a distro Node 20 and no payload
 therefore installs a working daemon and fails loudly at the console, with a
 reason, rather than installing a console that cannot start.
 
@@ -77,6 +79,30 @@ npm ci --omit=dev --prefix packages/yonder-core --workspaces=false
 dependencies to the repository root, which is not what gets copied to the
 board: only `packages/yonder-core/node_modules` is. A tree hoisted that way
 looks complete from the repository root and arrives on the board empty.
+
+**The console's node packages.** `node-red-contrib-yonder-system` and
+`node-red-contrib-yonder-network` are also built from this repository, and
+`30-console.sh` copies their `dist/` into the console's `node_modules`. Unlike
+the daemon there is **no fallback that builds them on the board**: they are
+TypeScript compiled against the workspace's own tooling, and a board has none
+of it. A missing `dist/` stops the install with a reason rather than producing
+a console whose four pages are empty groups.
+
+```sh
+npm run build       # yonder-core first, then both contrib packages, in that order
+```
+
+The order is not decorative: `npm run --workspaces` does not sort
+topologically, and the contrib packages type-resolve `yonder-core` through its
+built declarations. The root `build` and `lint` scripts name the order for that
+reason.
+
+They have no runtime dependency but `yonder-core` itself, which the installer
+**symlinks** into the console tree rather than copying — one device, one
+`yonder-core`, and a copy would be a second version to keep in step. That is
+also why `30-console.sh` needs node 22.12 rather than Node-RED's own 22.9: the
+nodes are CommonJS and `yonder-core` is an ES module, and `require()` of an ES
+module is what lets one package serve both the daemon and the console.
 
 `node_modules/.vite` — a vitest cache, created by `npm test` — is **not** a
 dependency tree. The installer says so and builds instead of trusting it.
