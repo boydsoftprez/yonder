@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, it, expect } from "vitest";
-import { redactArgv, redactText, systemRunner } from "./runner.js";
+import { boundedRunner, redactArgv, redactText, systemRunner } from "./runner.js";
 
 describe("redactArgv", () => {
   it("redacts the value after a wifi-security psk key", () => {
@@ -66,5 +66,16 @@ describe("systemRunner", () => {
     const r = await systemRunner(["yonder-no-such-binary-exists"]);
     expect(r.code).not.toBe(0);
     expect(r.stderr.length).toBeGreaterThan(0);
+  });
+
+  /**
+   * A wedged ModemManager holds `mmcli` on a D-Bus call that never returns,
+   * and with no `timeout` on execFile the daemon waited for it for the life
+   * of the process. Run at 50 ms rather than the shipped two minutes: what is
+   * being tested is that there is a bound at all, not what it is set to.
+   */
+  it("kills a command that never returns, rather than waiting for ever", async () => {
+    const r = await boundedRunner(50)(["sleep", "30"]);
+    expect(r.code).not.toBe(0);
   });
 });

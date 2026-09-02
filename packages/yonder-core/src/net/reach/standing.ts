@@ -61,6 +61,26 @@ export const SUCCESSES_TO_RETURN = 1;
 export const REACH_TICK_MS = 5_000;
 
 /**
+ * How long one tick is given before it is abandoned and the next is armed.
+ *
+ * The loop is chained rather than repeating — the next tick is armed in the
+ * `finally` of this one — which is what stops two `curl`s landing on the same
+ * interface. The cost of that shape is that a tick which never finishes ends
+ * the loop, and **a hang is not a throw**, so the `catch` around it never
+ * fires and nothing is logged. A wedged ModemManager on a D-Bus call does
+ * exactly that: `inUseNow()` waits for an `mmcli -L` that never returns, and
+ * standing freezes at whatever it last was while `carrying()` goes on
+ * answering from it.
+ *
+ * A legitimate tick spends at most one probe per path — `FAILURES_TO_STAND_DOWN`
+ * is about consecutive ticks, not attempts within one — so three paths at the
+ * probe's own 8 s timeout is the worst honest case, well under half a minute.
+ * A minute is generous enough that this can only ever catch something that is
+ * genuinely stuck.
+ */
+export const REACH_TICK_DEADLINE_MS = 60_000;
+
+/**
  * What to call a path in a line an operator reads.
  *
  * Exported because the monitor assembling `PathReport.detail` says the same

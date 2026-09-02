@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import type { Clock } from "../../apply/types.js";
 import { looksDead, movement, systemCounters, type Counters, type CounterReader } from "./counters.js";
+import { withDeadline } from "../deadline.js";
 import type { ReachMonitor } from "./monitor.js";
-import { PATH_WORDS, REACH_TICK_MS, type PathName } from "./standing.js";
+import { PATH_WORDS, REACH_TICK_DEADLINE_MS, REACH_TICK_MS, type PathName } from "./standing.js";
 
 export interface ReachWatchOptions {
   monitor: ReachMonitor;
@@ -49,10 +50,13 @@ export interface ReachWatchOptions {
  * Silence in both directions decides nothing: an idle link is not a dead one,
  * and that is the mistake `looksDead` was written to refuse.
  *
- * It cannot throw into its own timer. A daemon that stopped probing silently
- * would leave standing frozen at whatever it last was, with nothing saying so
- * — worse than one that never probed, because `carrying()` would go on
- * answering from stale evidence.
+ * It cannot throw into its own timer, and it cannot hang in one either. A
+ * daemon that stopped probing silently would leave standing frozen at
+ * whatever it last was, with nothing saying so — worse than one that never
+ * probed, because `carrying()` would go on answering from stale evidence.
+ * Rejection is caught; an answer that never arrives is bounded by
+ * `REACH_TICK_DEADLINE_MS` and the tick abandoned, because a hang is not a
+ * throw and a `catch` does not cover one.
  */
 export class ReachWatch {
   private readonly monitor: ReachMonitor;
@@ -82,6 +86,8 @@ export class ReachWatch {
   private lastDevice: string | null = null;
   /** Paths whose last test failed and which have not since succeeded. */
   private readonly failing = new Set<PathName>();
+  /** Which tick owns the readings above. See schedule(). */
+  private generation = 0;
 
   constructor(opts: ReachWatchOptions) {
     this.monitor = opts.monitor;
@@ -116,17 +122,25 @@ export class ReachWatch {
   /**
    * One tick, chained rather than repeating.
    *
-   * The next tick is armed only once this one has finished, so a tick that
-   * spends three probe timeouts cannot have a second one start behind it —
-   * which would put two `curl`s on the same interface and read the counters
-   * across each other's traffic.
+   * The next tick is armed only once this one has finished — or been given
+   * up on — so a tick that spends three probe timeouts cannot have a second
+   * one start behind it, which would put two `curl`s on the same interface
+   * and read the counters across each other's traffic.
+   *
+   * Chaining is also what makes a hang fatal without the deadline: nothing
+   * else re-arms this loop. So a tick that outlives `REACH_TICK_DEADLINE_MS`
+   * is abandoned and said so in one line, and the generation counter in
+   * `tick()` makes sure the one that was given up on cannot come back later
+   * and write its stale reading over a newer one.
    */
   private schedule(): void {
     this.timer = this.clock.setTimer(this.tickMs, () => {
       this.timer = undefined;
       void (async () => {
         try {
-          await this.tick();
+          await withDeadline(this.clock, REACH_TICK_DEADLINE_MS, this.tick(), () => {
+            this.log("network: a check of which way out is working did not finish in time; going on without it");
+          });
         } catch (e) {
           // Nothing may take the loop down. See the class comment.
           this.log(`network: could not check which way out is working (${(e as Error).message})`);
@@ -155,7 +169,11 @@ export class ReachWatch {
    * calls "on request" without waiting for the next tick.
    */
   async tick(): Promise<void> {
+    const mine = ++this.generation;
     const now = await this.monitor.inUseNow();
+    // A tick that was given up on has no business writing the readings a
+    // newer one is keeping. Its answer is about a moment that has passed.
+    if (mine !== this.generation) return;
     if (now === null) {
       // Nothing is carrying traffic, or nothing this monitor has a path for.
       // There is no subject for any of the questions below, and the readings

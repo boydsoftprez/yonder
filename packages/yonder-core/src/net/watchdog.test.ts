@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, it, expect } from "vitest";
-import { FallbackWatchdog } from "./watchdog.js";
+import { CARRYING_DEADLINE_MS, FallbackWatchdog } from "./watchdog.js";
 import { NmcliClient } from "./nmcli/client.js";
 import { DEFAULT_CONFIG } from "../schema/config.js";
 import type { Config } from "../schema/config.js";
@@ -42,6 +42,8 @@ function fakeClock() {
   };
   return {
     clock,
+    /** Timers still outstanding. A deadline that is never cleared is a leak. */
+    armed: () => timers.size,
     advance(ms: number) {
       t += ms;
       for (const [h, timer] of [...timers]) if (timer.at <= t) { timers.delete(h); timer.fn(); }
@@ -71,7 +73,7 @@ function harness(
   since?: number,
   carrying?: () => Promise<boolean>,
 ) {
-  const { clock, advance } = fakeClock();
+  const { clock, advance, armed } = fakeClock();
   const run: CommandRunner = async (argv) =>
     argv.join(" ") === "nmcli -t -f GENERAL.DEVICE,IP4.ADDRESS device show" ? ok(deviceShow) : ok();
   let raised = 0;
@@ -83,7 +85,7 @@ function harness(
     apUp: async () => { raised++; },
     ...(carrying !== undefined ? { carrying } : {}),
   });
-  return { wd, advance, raised: () => raised };
+  return { wd, advance, armed, raised: () => raised };
 }
 
 describe("FallbackWatchdog", () => {
@@ -219,6 +221,59 @@ describe("FallbackWatchdog", () => {
     advance(90_000);
     await flushMicrotasks();
     expect(raised()).toBe(0);
+  });
+
+  /**
+   * Rule 6, and the one this branch newly opened. `carrying` reaches
+   * ModemManager, and a modem that has enumerated badly leaves it wedged on a
+   * D-Bus call: `mmcli -L` never returns. Before this bound, `check()` never
+   * resolved, `fire()` never reached `apUp()`, and a board holding an address
+   * — so the address check did not save it — stayed unreachable until
+   * somebody pulled the card.
+   *
+   * A hang is not a throw. The `try` inside `check()` never saw this one.
+   */
+  it("raises the access point when nothing answers whether traffic is flowing", async () => {
+    const { wd, advance, raised } = harness(
+      DEVICE_SHOW.ethernetUp, DEFAULT_CONFIG, undefined,
+      () => new Promise<boolean>(() => { /* a wedged ModemManager answers nothing */ }),
+    );
+    wd.start();
+    advance(90_000);
+    await flushMicrotasks();
+    expect(raised()).toBe(0);
+    advance(CARRYING_DEADLINE_MS);
+    await flushMicrotasks();
+    expect(raised()).toBe(1);
+  });
+
+  /**
+   * The one path in this file where getting the direction backwards bricks
+   * devices. `ReachMonitor.carrying` catches its own errors, but nothing
+   * makes a caller pass one that does.
+   */
+  it("raises the access point when the reach monitor throws", async () => {
+    const { wd, advance, raised } = harness(
+      DEVICE_SHOW.ethernetUp, DEFAULT_CONFIG, undefined,
+      async () => { throw new Error("mmcli exited 1"); },
+    );
+    wd.start();
+    advance(90_000);
+    await flushMicrotasks();
+    expect(raised()).toBe(1);
+  });
+
+  it("does not leave a deadline timer behind when the answer arrives", async () => {
+    // A timer per check that nothing clears is a leak in a daemon that runs
+    // for the life of an aircraft.
+    const { wd, advance, armed, raised } = harness(
+      DEVICE_SHOW.ethernetUp, DEFAULT_CONFIG, undefined, async () => true,
+    );
+    wd.start();
+    advance(90_000);
+    await flushMicrotasks();
+    expect(raised()).toBe(0);
+    expect(armed()).toBe(0);
   });
 
   it("accepts an address when nothing was wired to say whether traffic flows", async () => {

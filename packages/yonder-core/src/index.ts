@@ -32,6 +32,8 @@ export {
 export { startServer } from "./daemon/server.js";
 export {
   systemRunner,
+  boundedRunner,
+  RUN_TIMEOUT_MS,
   redactArgv,
   type CommandRunner,
   type CommandResult,
@@ -72,7 +74,7 @@ export {
   RFKILL_UNBLOCK_WIFI,
   NMCLI_RADIO_WIFI_ON,
 } from "./net/radio.js";
-export { FallbackWatchdog, type FallbackWatchdogOptions } from "./net/watchdog.js";
+export { FallbackWatchdog, CARRYING_DEADLINE_MS, type FallbackWatchdogOptions } from "./net/watchdog.js";
 export {
   MmcliClient,
   MmcliError,
@@ -89,6 +91,7 @@ export {
   FAILURES_TO_STAND_DOWN,
   SUCCESSES_TO_RETURN,
   REACH_TICK_MS,
+  REACH_TICK_DEADLINE_MS,
   type PathName,
   type PathStanding,
   type PathReport,
@@ -110,6 +113,7 @@ export {
   type ReachMonitorOptions,
 } from "./net/reach/monitor.js";
 export { ReachWatch, type ReachWatchOptions } from "./net/reach/watch.js";
+export { withDeadline } from "./net/deadline.js";
 export {
   hashPassword,
   verifyPassword,

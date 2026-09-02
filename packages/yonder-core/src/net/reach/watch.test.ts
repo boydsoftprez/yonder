@@ -2,7 +2,13 @@
 import { describe, expect, it } from "vitest";
 import { ReachWatch } from "./watch.js";
 import { ReachMonitor } from "./monitor.js";
-import { FAILURES_TO_STAND_DOWN, REACH_TICK_MS, Standing, type PathName } from "./standing.js";
+import {
+  FAILURES_TO_STAND_DOWN,
+  REACH_TICK_DEADLINE_MS,
+  REACH_TICK_MS,
+  Standing,
+  type PathName,
+} from "./standing.js";
 import type { Clock } from "../../apply/types.js";
 import type { Counters } from "./counters.js";
 
@@ -46,6 +52,10 @@ interface Bench {
   setInUse(path: PathName | null): void;
   /** Rename the interface a path is on, between ticks. */
   setDevices(devices: Partial<Record<PathName, string>>): void;
+  /** Make the reading of which path is in use never come back, or stop. */
+  setInUseHangs(hangs: boolean): void;
+  /** Let every reading that was left hanging answer at last. */
+  releaseInUse(): void;
 }
 
 function bench(opts: {
@@ -56,6 +66,7 @@ function bench(opts: {
   probeThrows?: boolean;
   countersThrow?: boolean;
   inUseThrows?: boolean;
+  inUseHangs?: boolean;
 } = {}): Bench {
   const clock = fakeClock();
   const lines: string[] = [];
@@ -70,6 +81,8 @@ function bench(opts: {
 
   let devices = opts.devices ?? { ethernet: "eth0", modem: "wwan0" };
   let inUse: PathName | null = opts.inUse === undefined ? "modem" : opts.inUse;
+  let hangs = opts.inUseHangs === true;
+  const waiting: (() => void)[] = [];
 
   const monitor = new ReachMonitor({
     standing,
@@ -83,6 +96,8 @@ function bench(opts: {
     order: () => opts.order ?? ["ethernet", "modem"],
     holding: async () => {
       if (opts.inUseThrows === true) throw new Error("NetworkManager is not answering");
+      // A wedged ModemManager: the promise settles only when the test says so.
+      if (hangs) await new Promise<void>((resolve) => waiting.push(resolve));
       return inUse === null ? [] : [inUse];
     },
     log: (l) => lines.push(l),
@@ -99,6 +114,8 @@ function bench(opts: {
     watch, standing, probed, lines, clock, counters,
     setInUse(path) { inUse = path; },
     setDevices(next) { devices = next; },
+    setInUseHangs(next) { hangs = next; },
+    releaseInUse() { while (waiting.length > 0) waiting.pop()?.(); },
   };
 }
 
@@ -345,6 +362,60 @@ describe("ReachWatch", () => {
     await b.clock.advance(REACH_TICK_MS);
     expect(b.clock.armed()).toBe(1);
     expect(b.lines.join("\n")).toMatch(/could not check which way out is working/);
+  });
+
+  /**
+   * A hang is not a throw, and the `catch` around a tick does not cover one.
+   *
+   * The loop is chained: the next tick is armed in the `finally` of this one,
+   * and nothing else arms it. So an `inUseNow()` that never comes back — a
+   * ModemManager wedged on a D-Bus call, which is an everyday failure for a
+   * USB modem that enumerated badly — used to stop the loop for good, with
+   * nothing logged, while `carrying()` went on answering from evidence that
+   * would never be refreshed. The class comment promised that could not
+   * happen.
+   */
+  it("gives up on a tick that never comes back, and goes on ticking", async () => {
+    const b = bench({ devices: { modem: "wwan0" }, order: ["modem"], inUseHangs: true, reaches: () => false });
+    b.counters.set("wwan0", { rx: 0, tx: 0 });
+    b.watch.start();
+    await b.clock.advance(REACH_TICK_MS);
+    // The tick is in flight and bounded, rather than waited on for ever.
+    expect(b.clock.armed()).toBe(1);
+    expect(b.probed).toEqual([]);
+
+    await b.clock.advance(REACH_TICK_DEADLINE_MS);
+    expect(b.lines.join("\n")).toMatch(/did not finish in time/);
+
+    // And the loop recovers the moment the board does.
+    b.setInUseHangs(false);
+    await b.clock.advance(REACH_TICK_MS);
+    expect(b.probed).toContain("wwan0");
+  });
+
+  /**
+   * The abandoned tick is still out there. If it ever answers, its reading is
+   * about a moment that has passed, and writing it over a newer one is C1's
+   * mistake by another route — one interface's counters standing in for
+   * another's.
+   */
+  it("ignores an abandoned tick that answers after it was given up on", async () => {
+    const b = bench({ devices: { modem: "wwan0" }, order: ["modem"], inUseHangs: true, reaches: () => false });
+    b.counters.set("wwan0", { rx: 0, tx: 0 });
+    b.watch.start();
+    await b.clock.advance(REACH_TICK_MS);            // the first tick hangs
+    await b.clock.advance(REACH_TICK_DEADLINE_MS);   // and is given up on
+    b.setInUseHangs(false);
+    await b.clock.advance(REACH_TICK_MS);            // a newer tick takes over
+    const settled = b.probed.length;
+    expect(settled).toBeGreaterThan(0);
+
+    // The abandoned one answers at last. Its reading belongs to a moment that
+    // has passed, and it must not act on it or write it over the newer one.
+    b.releaseInUse();
+    for (let i = 0; i < 200; i++) await Promise.resolve();
+    expect(b.probed.length).toBe(settled);
+    expect(b.clock.armed()).toBe(1);
   });
 
   it("never reads the wall clock", async () => {
