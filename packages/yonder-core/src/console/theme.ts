@@ -172,25 +172,29 @@ const NIGHT: Palette = {
  * suggestion, not a reading.
  */
 const SUNLIGHT: Palette = {
-  background: "#d8dade",
-  surface: "#f7f8f9",
-  border: "#a8aeb5",
-  text: "#0d1114",
-  muted: "#4b545c",
-  accent: "#14567f",
-  neutral: "#5c666e",
-  waiting: "#8a5a00",
-  good: "#136c3a",
-  bad: "#9c1f16",
+  // Chart paper and chart line work. Warm rather than neutral: a sectional is
+  // printed on buff, and the warmth is what keeps a light page from glaring.
+  background: "#e6dfcc",
+  surface: "#f6f1e3",
+  border: "#c3b99e",
+  text: "#1b1811",
+  muted: "#6d6555",
+  // Sectional blue for anything addressable, sectional magenta for the one
+  // control that takes the page away. Both are the chart's own vocabulary.
+  accent: "#2c5f8f",
+  neutral: "#7a7263",
+  waiting: "#9a6a1c",
+  good: "#2f6b4f",
+  bad: "#a8322c",
   onTone: "#ffffff",
-  display: "#f7f8f9",
-  pane: "#e9ebee",
-  divider: "#a8aeb5",
-  label: "#4b545c",
-  value: "#0d1114",
-  track: "#dcdfe3",
-  select: "#14567f",
-  irreversible: "#a3186f",
+  display: "#f6f1e3",
+  pane: "#ede6d3",
+  divider: "#c3b99e",
+  label: "#6d6555",
+  value: "#1b1811",
+  track: "#e0d8c2",
+  select: "#2c5f8f",
+  irreversible: "#b23a7a",
 };
 
 export const PALETTES: Record<ThemeName, Palette> = {
@@ -271,28 +275,35 @@ function panelCss(theme: ThemeName): string {
   background-attachment: fixed;
 }`;
 
-  /* Brushed aluminium: a fine vertical grain under a broad horizontal sheen.
-     The grain is 3px and low-contrast for the same reason the weave is 10px -
-     a panel you can read the texture of is a panel competing with the
-     instruments bolted to it. */
-  const aluminium = `.nrdb-app,
+  /* Terrain, seen from above on a clear day.
+     
+     Sunlight is the chart mode, so its ground is the thing a chart is of.
+     Broad hypsometric washes - low green through buff to tan, the sectional's
+     own elevation tints - under faint contour rings and the graticule ticks a
+     sectional carries. All from gradients, so nothing is fetched and nothing
+     ships as raster (R-UI-13), and it costs one paint rather than a file per
+     theme.
+
+     Held deliberately quiet, for the reason the carbon weave is: this is
+     ground, and an operator reads the instruments bolted to it. Four
+     strengths were rendered side by side before this one was chosen. */
+  const terrain = `.nrdb-app,
 .v-application,
 .v-application__wrap {
-  background-color: #d8dade;
+  background-color: #e6dfcc;
   background-image:
-    linear-gradient(180deg, rgba(255,255,255,0.55) 0%, rgba(255,255,255,0) 38%,
-                    rgba(0,0,0,0.05) 62%, rgba(255,255,255,0.35) 100%),
-    repeating-linear-gradient(90deg,
-      rgba(255,255,255,0.55) 0 1px,
-      rgba(0,0,0,0.045) 1px 2px,
-      transparent 2px 3px);
-  background-size: 100% 100%, 3px 3px;
-  background-position: 0 0, 0 0;
+    repeating-linear-gradient(0deg, rgba(90,72,40,0.05) 0 1px, transparent 1px 48px),
+    repeating-linear-gradient(90deg, rgba(90,72,40,0.05) 0 1px, transparent 1px 48px),
+    repeating-radial-gradient(ellipse 52% 40% at 24% 30%, transparent 0 15px, rgba(122,98,58,0.075) 15px 16px),
+    repeating-radial-gradient(ellipse 46% 38% at 74% 66%, transparent 0 17px, rgba(122,98,58,0.065) 17px 18px),
+    radial-gradient(60% 45% at 18% 22%, rgba(150,168,120,0.30), transparent 70%),
+    radial-gradient(52% 40% at 72% 30%, rgba(198,176,124,0.34), transparent 72%),
+    radial-gradient(46% 38% at 46% 78%, rgba(176,142,92,0.26), transparent 70%);
   background-repeat: repeat;
   background-attachment: fixed;
 }`;
 
-  return theme === "sunlight" ? aluminium : carbon;
+  return theme === "sunlight" ? terrain : carbon;
 }
 
 /**

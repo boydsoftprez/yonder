@@ -140,12 +140,22 @@ command-state language remains built once in `yonder-core` and shared.
 screen is a mirror at *any* brightness, and no amount of contrast recovers a reflection of
 the sky.
 
-It is the same instrument in a different material, and that is the whole of it. The
-reading surface goes to near-white — never white, because a page in sunlight should not be
-a light source of its own — and the panel becomes brushed aluminium instead of carbon,
-since carbon is a dark material and the point of the mode is that the page turns over.
-Nothing moves. No element appears or disappears. An operator stepping out of the shade is
+It is the same instrument in a different material, and that is the whole of it. Nothing
+moves, no element appears or disappears, and an operator stepping out of the shade is
 looking at the console they already know.
+
+**The material is the chart.** Sunlight is the one mode that is read the way a sectional
+is read, so it is drawn that way: warm chart paper for the faces — never white, because a
+page in sunlight should not be a light source of its own — sectional blue for anything
+addressable, sectional magenta for the one control that takes the page away, and the
+ground is what a chart is *of*. Broad hypsometric washes, low green through buff to tan,
+under faint contour rings and the graticule ticks a sectional carries. Terrain from above
+on a clear day, generated from gradients like the carbon and held just as quiet, because
+it is ground and the instruments bolted to it are what get read.
+
+A first attempt made this mode brushed aluminium with neutral grey panels. It satisfied
+every requirement and had no chart in it at all, which is the same failure this ADR was
+written to stop: the constraints met, the identity absent.
 
 Recorded as **R-UI-14**, and `ui.theme` now takes `day`, `night` or `sunlight`. The
 capture gate photographs all three on every run.

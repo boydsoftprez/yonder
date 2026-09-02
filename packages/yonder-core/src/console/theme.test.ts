@@ -257,23 +257,44 @@ describe("themeCss ships a whole shell", () => {
   });
 
   /**
-   * Sunlight is mounted in aluminium, not carbon (R-UI-14).
+   * Sunlight is mounted on terrain, not carbon (R-UI-14, R-UI-13).
    *
-   * Carbon is a dark material and the whole point of the third mode is that
-   * the page turns over, so the panel has to turn over with it. Same rule,
-   * same element, different material — and it still has to say it repeats.
+   * That mode is the chart mode, so its ground is what a chart is of: broad
+   * hypsometric washes under contour rings and a graticule. Carbon is a dark
+   * material and the point of the mode is that the page turns over, so the
+   * ground turns over with it. Still generated, still tiling, still nothing
+   * fetched.
    */
-  it("mounts the sunlight palette in brushed aluminium instead", () => {
+  it("grounds the sunlight palette in terrain instead of carbon", () => {
     const css = themeCss("sunlight");
     const rule = /\.nrdb-app,[\s\S]*?\}/.exec(css)?.[0] ?? "";
-    expect(rule, "no panel rule for sunlight").not.toBe("");
+    expect(rule, "no ground rule for sunlight").not.toBe("");
     expect(rule, "sunlight must not be carbon").not.toMatch(/linear-gradient\(135deg/);
-    expect(rule, "aluminium is a vertical grain").toMatch(/repeating-linear-gradient\(90deg/);
+    expect(rule, "contours").toMatch(/repeating-radial-gradient/);
+    expect(rule, "the graticule a sectional carries").toMatch(/repeating-linear-gradient\(0deg/);
+    expect(rule, "hypsometric washes").toMatch(/radial-gradient\(\d+% \d+% at /);
     expect(rule).toMatch(/background-repeat:\s*repeat/);
-    // A light panel, not a dark one wearing a light display.
     const base = /background-color:\s*(#[0-9a-f]{6})/i.exec(rule)?.[1] ?? "#000000";
-    expect(parseInt(base.slice(1), 16), "the sunlight panel must be light")
+    expect(parseInt(base.slice(1), 16), "the sunlight ground must be light")
       .toBeGreaterThan(0x999999);
+  });
+
+  /**
+   * The chart's own vocabulary, in the chart's own mode.
+   *
+   * Sectional blue for anything addressable and sectional magenta for the one
+   * control that takes the page away. A light mode reusing the glass display's
+   * cyan would be a light page wearing a dark page's colours.
+   */
+  it("uses chart line work for the sunlight palette", () => {
+    expect(PALETTES.sunlight.select).toBe("#2c5f8f");
+    expect(PALETTES.sunlight.irreversible).toBe("#b23a7a");
+    // Warm paper, not neutral grey: a sectional is printed on buff, and the
+    // warmth is what keeps a light page from glaring.
+    const hex = PALETTES.sunlight.display;
+    const r = parseInt(hex.slice(1, 3), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    expect(r, "the chart face must be warm").toBeGreaterThan(b);
   });
 
   it("sizes anything hittable for a gloved finger", () => {
