@@ -393,12 +393,13 @@ requirement text, which is what R-CFG-10 and R-CFG-11 already do.
 
 ## 6. Where it goes in the console
 
-**A tab on the Network page, which becomes a tabbed page.** Not a page of its own —
-Dashboard 2.x cannot nest pages, so separate pages would be flat siblings in the sidebar
-with nothing saying three of them are the same subject. `ui-page` has no parent property
-(its whole configuration is `breakpoints`, `className`, `disabled`, `icon`, `layout`,
-`name`, `order`, `path`, `theme`, `ui`, `visible`), and `navigationStyle` on `ui-base`
-only chooses how the drawer behaves — `default`, `fixed`, `icon`, `temporary`, `none`.
+**A tab on the Network page, named for the mesh it configures, and the page becomes
+tabbed.** Not a page of its own — Dashboard 2.x cannot nest pages, so separate pages would
+be flat siblings in the sidebar with nothing saying three of them are the same subject.
+`ui-page` has no parent property (its whole configuration is `breakpoints`, `className`,
+`disabled`, `icon`, `layout`, `name`, `order`, `path`, `theme`, `ui`, `visible`), and
+`navigationStyle` on `ui-base` only chooses how the drawer behaves — `default`, `fixed`,
+`icon`, `temporary`, `none`.
 
 What does exist is the page's own `layout`. Set to **Tabs**, each `ui-group` becomes a tab
 labelled with the group's name. `LayoutTabs` ships in the `@flowfuse/node-red-dashboard`
@@ -409,29 +410,53 @@ Status   Network   Log   Diagnostics
          ───────
 
 Network
-┌────────────┬───────┬────────┬──────────┐
-│ INTERFACES │ WI-FI │ REMOTE │ ACTIVITY │
-└────────────┴───────┴────────┴──────────┘
+┌────────────┬───────┬──────────┬──────────┐
+│ INTERFACES │ WI-FI │ ZEROTIER │ ACTIVITY │
+└────────────┴───────┴──────────┴──────────┘
 
-(REMOTE selected)
+(ZEROTIER selected)
 
-┌─ ZEROTIER ───────┐  ┌─ TAILSCALE ──────┐
-│ WAITING FOR YOU  │  │ not configured   │
-│ TO APPROVE IT    │  │                  │
-│ 9fef8a3bf9 [copy]│  │ key  [.........] │
-└──────────────────┘  └──────────────────┘
+  WAITING FOR YOU TO APPROVE IT
+
+  this device   9fef8a3bf9      [copy]
 ```
 
-M3's cellular section becomes a fifth tab rather than making the page denser.
+### One tab per mesh, named for the mesh
 
-Two consequences of the layout, neither optional:
+**The tab is `ZeroTier`, not `Remote`.** Tailscale gets its own tab, `Tailscale`, when
+Tailscale lands — the second half of M2 under R-VPN-02, not a placeholder shipped early
+saying *not configured*.
 
-- **The interface summary has to be named.** It is currently a group with an empty name,
-  which was invisible in a grid and would be an unlabelled tab. It becomes `Interfaces`,
-  and it goes first — a tabbed page always opens on its first tab, and "where does this
-  board stand" is the right thing to land on.
-- **Remote is not the first tab**, so nothing about the mesh is on screen until asked for.
-  That is correct: R-VPN-05 means a device with no mesh configured is a normal device.
+The reason is that these are two different products with two different setup stories, and
+nothing is gained by making the operator open a drawer called *Remote* to find out which
+one they are looking at. The person on this tab is about to open ZeroTier's website and
+approve an address; the person on the Tailscale tab is about to generate a key on a
+different company's admin page. Naming the tab after the thing they are going to go and
+use is the shortest path between the console and the task.
+
+**The requirements stay product-neutral and the console does not.** R-VPN-06 says "where a
+mesh requires a person to approve a device", never "ZeroTier", for the reason ADR-0004
+gives: requirements that name tools go stale when tools change licence, get acquired, or
+die. An interface has the opposite obligation. It is looked at by somebody holding a
+particular product's admin page open in another window, and calling that product by its
+name is how they know they are in the right place. If ZeroTier is ever replaced the tab is
+renamed and no requirement moves.
+
+It also improves the layout under R-UI-10. Sharing one surface, the two meshes had to
+divide a single primary action between them; a tab each means each has its own — the
+ZeroTier tab's is `Copy`, the Tailscale tab's is the key it takes.
+
+### What the page holds by the end
+
+```
+Interfaces · Wi-Fi · ZeroTier · Tailscale · Cellular · Activity
+             M1       M2 first   M2 second   M3         M1
+```
+
+Six tabs at the end of M3. That is a tab strip doing what a tab strip is for, and it is why
+the stacked-groups layout was the wrong shape: the same six as stacked panels is a page
+nobody can take in, and the same six as sidebar entries is a sidebar that says nothing
+about which of them belong together.
 
 ### What the layout settles, and what it breaks
 
@@ -442,19 +467,19 @@ screen together, so they cannot be mistaken for each other.
 
 R-UI-10 still applies, and the tabbed page makes its unit explicit: **only one tab renders
 at a time, so the tab is the surface that may hold at most one primary action**, not the
-page. Wi-Fi's `JOIN` is the primary action of the Wi-Fi tab; the Remote tab has its own.
+page. Wi-Fi's `JOIN` is the primary action of the Wi-Fi tab; the ZeroTier tab has its own.
 
 **It breaks the shape check, and fixing that is part of this work.**
 `scripts/capture-pages.mjs` builds its list with
 `flows.filter((n) => n.type === "ui-page")` and captures each page once. A tabbed page
-renders one tab, so Wi-Fi, Remote and Activity would never be captured, never be measured
+renders one tab, so Wi-Fi, ZeroTier and Activity would never be captured, never be measured
 against ADR-0009, and never fail a build when they changed. R-UI-12's coverage would
 shrink to the first tab without anything saying so.
 
 That is precisely the failure R-UI-12 was written for. The harness's own header records
 why it exists: a Network page shipped wrong "because nothing in this repository had ever
-looked at one". Recreating that on the Remote tab, in the change that introduces the
-Remote tab, would be an unusually poor joke.
+looked at one". Recreating that on the ZeroTier tab, in the change that introduces the
+ZeroTier tab, would be an unusually poor joke.
 
 **So the harness walks the tabs.** For a page whose layout is `tabs` it captures each tab
 in both palettes, named `network-<tab>.{day,night}`. It already presses a soft key after
@@ -463,7 +488,7 @@ capture, so driving a tab strip is within what it does rather than a new capabil
 ### One defect the layout uncovers
 
 The tab strip was stood up against the real console and photographed in both palettes
-before this was written. It works — four tabs, `Interfaces`, `Wi-Fi`, `Remote`, `Activity`
+before this was written. It works — four tabs, `Interfaces`, `Wi-Fi`, `ZeroTier`, `Activity`
 — and in day it sits correctly in the visual language.
 
 **In night the tab labels are near-black on the carbon panel, and the selected-tab
@@ -506,7 +531,7 @@ packages/yonder-core/src/remote/
 
 packages/node-red-contrib-yonder-remote/       nodes
 packages/node-red-dashboard-2-yonder/          the waiting-for-approval instrument
-flows/flows.json                               wiring only: the Remote tab, and the
+flows/flows.json                               wiring only: the ZeroTier tab, and the
                                                Network page switched to a tabs layout
 scripts/capture-pages.mjs                      walk the tabs of a tabbed page (§6)
 ```
