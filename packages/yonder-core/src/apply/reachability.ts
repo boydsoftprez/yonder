@@ -28,7 +28,25 @@ export function affectsReachability(previous: Config, next: Config): boolean {
 
 /** The document with the fields that cannot affect reachability removed. */
 function withoutCosmetics(config: Config): unknown {
-  const copy = structuredClone(config) as { ui: Record<string, unknown> };
+  const copy = structuredClone(config) as {
+    ui: Record<string, unknown>;
+    remote?: Record<string, unknown>;
+  };
   delete copy.ui.theme;
+  // Joining a mesh only ever *adds* a path to this device; it cannot take away
+  // the one the operator is using. Measured rather than assumed: on a board, a
+  // join installed exactly one route - the mesh's own subnet - and left the
+  // default route, the LAN route and the access-point route untouched. A
+  // controller was then made to push a route overlapping the board's own LAN
+  // and the client refused to install it.
+  //
+  // Only zerotier, and only because of that. Everything else here stays
+  // load-bearing by default, which is this file's whole design: a second mesh
+  // earns its own exemption with its own evidence, or does not get one
+  // (R-VPN-07).
+  // Optional: a configuration parsed by this schema always has `remote`, but
+  // this function is the one place a missing section would throw rather than
+  // simply compare unequal, and throwing here fails an apply.
+  delete copy.remote?.zerotier;
   return copy;
 }
