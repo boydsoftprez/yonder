@@ -30,7 +30,7 @@ else
         || die "could not install $(basename "$zt_deb")"
 fi
 
-# The whole point of this role's last two lines.
+# The whole point of this role's last three lines.
 #
 # The package enables and starts itself, and a zerotier-one with *zero networks
 # joined* still holds live sessions with ZeroTier's root servers - a board
@@ -40,11 +40,23 @@ fi
 #
 # So the client ships installed and off. yonder-core starts it when, and only
 # when, a network id is configured, and stops it again on leave (R-VPN-05,
-# R-VPN-08).
-# `try`, not `run ... || true`: roles are sourced, so `die`'s `exit` inside
-# `run` terminates the whole install and the `||` never sees it. Both of these
-# legitimately fail where an image is built - a chroot with no running systemd
-# answers neither - and neither is worth an install for.
+# R-VPN-08). Nothing else will: the renderer acts only on a client it has a
+# record of starting, and on a freshly flashed image it has none, so a unit
+# left enabled here is left enabled for ever.
+#
+# `stop` keeps `try`, and needs it. `try`, not `run ... || true`: roles are
+# sourced, so `die`'s `exit` inside `run` terminates the whole install and the
+# `||` never sees it. Stopping a service that is not running, in a chroot with
+# no systemd to ask, is a legitimate no-op and not worth an install for.
+#
+# `disable` does not, because on that same chroot systemctl answers "Running
+# in chroot, ignoring request" and exits 0 - a success that did nothing, which
+# `try` cannot report and which shipped an image that booted the client
+# enabled. deb-systemd-helper is what the package's own postinst enabled the
+# unit with, and it works with or without a running systemd; the assertion
+# after it is what makes "installed and off" a checked claim rather than a
+# hoped-for one. See lib/common.sh for both.
 log "stopping and disabling zerotier-one until a network is configured"
 try systemctl stop zerotier-one
-try systemctl disable zerotier-one
+disable_unit_offline zerotier-one.service
+assert_unit_disabled zerotier-one.service

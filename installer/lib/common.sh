@@ -6,6 +6,13 @@
 : "${YONDER_PREFIX:=/opt/yonder}"
 : "${YONDER_ETC:=/etc/yonder}"
 
+# The directories systemd reads unit enablement from, which is where
+# assert_unit_disabled looks. A variable, and the only reason is that the
+# check is worth testing: a post-condition nothing exercises is a post-
+# condition nobody knows the shape of. An install never sets it - it runs
+# inside the root it is installing to, chroot or board alike.
+: "${YONDER_SYSTEMD_DIRS:=/etc/systemd/system /usr/lib/systemd/system /lib/systemd/system}"
+
 # The one path the systemd unit's ExecStart names, and a symlink this
 # installer points at whichever node the install actually resolved.
 #
@@ -497,4 +504,80 @@ that write is EROFS from inside the service. The install would still succeed —
         fi
         log "$adcw_want is inside $(basename "$adcw_unit")'s writable paths"
     done
+}
+
+# Turn a unit off at boot without needing a running systemd.
+#
+#     disable_unit_offline <unit>
+#
+# `systemctl disable` is the wrong tool here and had been shipping as the
+# right one. Images are built by running this installer in a chroot, and
+# systemctl's unit-file verbs are refused there: with /proc mounted it
+# detects the chroot and answers `Running in chroot, ignoring request:
+# disable` and **exits 0**, and without one it cannot reach the bus at all
+# and exits non-zero. Wrapped in `try` — which is correct, since neither is
+# worth an install — the first of those is not even logged. The unit stayed
+# enabled, and a flashed image booted a mesh client with no network joined,
+# holding live sessions with a company's root servers, with nothing on the
+# device that would ever turn it off (R-VPN-08, R-VPN-05).
+#
+# deb-systemd-helper is the exact counterpart to what put the unit there. The
+# package's postinst enables it with `deb-systemd-helper enable
+# 'zerotier-one.service'`, which is why the enablement survives a chroot in
+# the first place: the helper writes the .wants symlinks straight to the
+# filesystem and records them under /var/lib/systemd/deb-systemd-helper-*.
+# `disable` removes precisely those symlinks and updates that same record, so
+# a later upgrade's `was-enabled` sees a unit the admin turned off rather than
+# a new install to enable again. It talks to no bus and asks nothing of PID 1,
+# so a chroot and a booted board take the identical path.
+#
+# It comes from init-system-helpers, which every Debian base system carries,
+# but this is checked rather than assumed: `systemctl --root=/ disable` is the
+# fallback, because passing --root makes systemctl do the same symlink work
+# client-side instead of handing the verb to a manager that is not there.
+disable_unit_offline() {
+    duo_unit="$1"
+    if command -v deb-systemd-helper >/dev/null 2>&1; then
+        try deb-systemd-helper disable "$duo_unit"
+    elif command -v systemctl >/dev/null 2>&1; then
+        log "no deb-systemd-helper here; disabling $duo_unit with systemctl --root=/"
+        try systemctl --root=/ disable "$duo_unit"
+    else
+        log "neither deb-systemd-helper nor systemctl is here; nothing enabled $duo_unit either"
+    fi
+}
+
+# The post-condition on a unit this installer has just turned off: nothing on
+# disk will start it at the next boot.
+#
+#     assert_unit_disabled <unit>
+#
+# The sibling of assert_unit_exec, pointed the other way. Those checks exist
+# because a unit that cannot start is discovered on hardware; this one exists
+# because a unit that *does* start, and should not, is discovered by watching
+# the traffic — which nobody does. The mechanism above is silent when it works
+# and the one it replaced was silent when it did not, so the claim R-VPN-08
+# makes is checked here rather than trusted.
+#
+# Enablement is symlinks, so that is what is looked for: a link named after
+# the unit inside any .wants or .requires directory systemd reads. A mask
+# (a link to /dev/null at the unit's own name) is deliberately not matched —
+# it is more off, not less.
+#
+# Split like the other asserts: a dry run has nothing installed to inspect, so
+# it says what it would have looked for.
+assert_unit_disabled() {
+    aud_unit="$1"
+    if [ "$DRY_RUN" = "1" ]; then
+        log "would check that nothing in $YONDER_SYSTEMD_DIRS still wants $aud_unit at boot"
+        return 0
+    fi
+    # shellcheck disable=SC2086 # the roots are a deliberate word list
+    aud_wants=$(find $YONDER_SYSTEMD_DIRS -name "$aud_unit" -type l 2>/dev/null \
+        | grep -E '\.(wants|requires)/' | sort -u || true)
+    if [ -n "$aud_wants" ]; then
+        die "$aud_unit is still enabled: $(echo "$aud_wants" | tr '\n' ' ')
+the next boot would start it. R-VPN-08 says installing a mesh client does not start one, and a client with no network joined still holds sessions with its vendor's root servers."
+    fi
+    log "$aud_unit is disabled: nothing on disk wants it at boot"
 }

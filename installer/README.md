@@ -48,7 +48,16 @@ What it stages:
   of which a stock Debian board already has. Pinned, fingerprinted, and verified
   against ZeroTier's repository signature using `installer/keys/zerotier.gpg`.
   Installed by role `40-zerotier`, which leaves it stopped and disabled until
-  a network is configured (R-VPN-05, R-VPN-08).
+  a network is configured (R-VPN-05, R-VPN-08). **Disabled offline**, with
+  `deb-systemd-helper` rather than `systemctl`: the package's `postinst`
+  enables the unit with `deb-systemd-helper enable`, which writes the `.wants`
+  symlink straight to the filesystem and so works perfectly well in a chroot,
+  while `systemctl disable` in that same chroot answers `Running in chroot,
+  ignoring request` and exits 0. An image built with the latter shipped the
+  client enabled, and nothing on the device would ever have turned it off —
+  `yonder-core` only stops a client it has a record of starting, and a fresh
+  image has none. The role asserts the result rather than assuming it, so a
+  build that cannot disable the unit fails where the message can be read.
   Tailscale is **not** carried: it is 31 MB, pulls in `iptables` and two
   libraries that a board does not have, and switches four `update-alternatives`
   entries. It is fetched over the network and installed when Tailscale is

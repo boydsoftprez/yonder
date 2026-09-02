@@ -15,6 +15,14 @@
 # whose whole point was to be allowed to fail could abort an entire install,
 # and nothing in this repository would have said so.
 #
+# The second defect it stands between is the opposite shape, and the reason
+# the cases below run against a stub PATH. `try systemctl disable
+# zerotier-one` never failed in the chroot an image is built in - systemctl
+# answers "Running in chroot, ignoring request" and exits 0 - so `try` had
+# nothing to report and the unit shipped enabled. A test that asks whether the
+# command failed cannot see that. These ask which command was called and what
+# was left on disk afterwards.
+#
 #     ./scripts/verify-installer-lib.sh
 #
 # Requires nothing but a POSIX shell.
@@ -97,11 +105,129 @@ else
     ok "the role does not use 'run ... || true'"
 fi
 
-if grep -q '^try systemctl stop zerotier-one$' "$REPO/installer/roles/40-zerotier.sh" \
-    && grep -q '^try systemctl disable zerotier-one$' "$REPO/installer/roles/40-zerotier.sh"; then
-    ok "installed and off is asked for with try, so a chroot cannot abort the install"
+if grep -q '^try systemctl stop zerotier-one$' "$REPO/installer/roles/40-zerotier.sh"; then
+    ok "stop is asked for with try, so a chroot cannot abort the install"
 else
-    bad "the role no longer stops and disables the unit with try (R-VPN-08)"
+    bad "the role no longer stops the unit with try (R-VPN-08)"
+fi
+
+# `systemctl disable` is the defect, not the fix. It is a no-op in the chroot
+# an image is built in, so the role must not reach for it at all.
+if grep -qE '^[[:space:]]*(try|run)[[:space:]]+systemctl[[:space:]]+disable' "$REPO/installer/roles/40-zerotier.sh"; then
+    bad "the role disables with systemctl, which does nothing in the chroot an image is built in (R-VPN-08)"
+else
+    ok "the role does not disable with systemctl"
+fi
+
+if grep -q '^disable_unit_offline zerotier-one.service$' "$REPO/installer/roles/40-zerotier.sh" \
+    && grep -q '^assert_unit_disabled zerotier-one.service$' "$REPO/installer/roles/40-zerotier.sh"; then
+    ok "the role disables offline and then checks that it worked (R-VPN-05, R-VPN-08)"
+else
+    bad "the role no longer disables the unit offline and asserts the result (R-VPN-05, R-VPN-08)"
+fi
+
+# Which command gets called, recorded by the command itself. Nothing here is
+# systemd: the stubs write their argv to a file and the case reads it, so the
+# choice of mechanism is observable on a machine with no systemd at all.
+printf '\n== disable_unit_offline\n'
+
+stub=$(mktemp -d "${TMPDIR:-/tmp}/yonder-stub.XXXXXX")
+called="$stub/called"
+trap 'rm -f "$case_out"; rm -rf "$stub"' EXIT
+
+make_stub() {
+    cat >"$stub/$1" <<EOF
+#!/bin/sh
+printf '$1 %s\\n' "\$*" >>"$called"
+exit ${2:-0}
+EOF
+    chmod +x "$stub/$1"
+}
+
+make_stub deb-systemd-helper
+make_stub systemctl
+
+: >"$called"
+status=$(in_shell "PATH=\"$stub:\$PATH\"; disable_unit_offline zerotier-one.service")
+if [ "$status" = "0" ] \
+    && grep -q '^deb-systemd-helper disable zerotier-one.service$' "$called" \
+    && ! grep -q '^systemctl' "$called"; then
+    ok "disables with deb-systemd-helper, the offline mechanism the postinst enabled with"
+else
+    bad "disable_unit_offline did not call deb-systemd-helper (exit $status)"
+    sed 's/^/      called: /' "$called"
+    sed 's/^/      /' "$case_out"
+fi
+
+# PATH is the stub directory alone, so deb-systemd-helper is genuinely absent
+# whatever this machine happens to carry. disable_unit_offline needs no
+# external command to reach its decision.
+: >"$called"
+rm -f "$stub/deb-systemd-helper"
+status=$(in_shell "PATH=\"$stub\"; disable_unit_offline zerotier-one.service")
+if [ "$status" = "0" ] && grep -q '^systemctl --root=/ disable zerotier-one.service$' "$called"; then
+    ok "falls back to systemctl --root=/, which also needs no running systemd"
+else
+    bad "disable_unit_offline did not fall back to systemctl --root=/ (exit $status)"
+    sed 's/^/      called: /' "$called"
+    sed 's/^/      /' "$case_out"
+fi
+make_stub deb-systemd-helper
+
+# The post-condition, against a filesystem laid out the way the package's
+# postinst leaves one: the .wants symlink deb-systemd-helper enable writes.
+printf '\n== assert_unit_disabled\n'
+
+root="$stub/root"
+wants="$root/etc/systemd/system/multi-user.target.wants"
+enable_unit() {
+    mkdir -p "$wants"
+    ln -sf /usr/lib/systemd/system/zerotier-one.service "$wants/zerotier-one.service"
+}
+dirs="$root/etc/systemd/system $root/usr/lib/systemd/system"
+
+# What the shipped installer did until this was fixed: a systemctl that
+# ignores the request and exits 0, exactly as one does in a chroot. `try` sees
+# success, and the unit is still enabled. This case fails against that code.
+enable_unit
+status=$(in_shell "YONDER_SYSTEMD_DIRS=\"$dirs\"; try true; assert_unit_disabled zerotier-one.service")
+if [ "$status" != "0" ] && grep -q 'still enabled' "$case_out"; then
+    ok "a disable that did nothing is caught, not reported as success (R-VPN-08)"
+else
+    bad "a unit left enabled passed the check (exit $status)"
+    sed 's/^/      /' "$case_out"
+fi
+
+# And the real mechanism's effect: the symlink gone.
+rm -f "$wants/zerotier-one.service"
+status=$(in_shell "YONDER_SYSTEMD_DIRS=\"$dirs\"; assert_unit_disabled zerotier-one.service")
+if [ "$status" = "0" ] && grep -q 'is disabled' "$case_out"; then
+    ok "a unit nothing wants at boot passes"
+else
+    bad "a disabled unit did not pass the check (exit $status)"
+    sed 's/^/      /' "$case_out"
+fi
+
+# A mask is more off, not less, and must not read as still enabled.
+mkdir -p "$root/etc/systemd/system"
+ln -sf /dev/null "$root/etc/systemd/system/zerotier-one.service"
+status=$(in_shell "YONDER_SYSTEMD_DIRS=\"$dirs\"; assert_unit_disabled zerotier-one.service")
+if [ "$status" = "0" ]; then
+    ok "a masked unit is not mistaken for an enabled one"
+else
+    bad "a masked unit was reported as enabled (exit $status)"
+    sed 's/^/      /' "$case_out"
+fi
+rm -f "$root/etc/systemd/system/zerotier-one.service"
+
+# A dry run inspects nothing: it runs on a build machine with no board.
+enable_unit
+status=$(in_shell "DRY_RUN=1 YONDER_SYSTEMD_DIRS=\"$dirs\" assert_unit_disabled zerotier-one.service")
+if [ "$status" = "0" ] && grep -q 'would check' "$case_out"; then
+    ok "a dry run says what it would have checked and checks nothing"
+else
+    bad "a dry run did not hold off (exit $status)"
+    sed 's/^/      /' "$case_out"
 fi
 
 printf '\n== result\n'
