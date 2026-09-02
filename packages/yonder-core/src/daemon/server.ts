@@ -68,6 +68,12 @@ export interface BuildRenderersOptions {
   secretsPath: string;
   runner?: CommandRunner;
   log?: (line: string) => void;
+  /**
+   * Where the nmcli command lines go. The journal, never the activity pane:
+   * an operator looking for what their Join did should not have to read every
+   * `device status` a status line polled for.
+   */
+  trace?: (line: string) => void;
   /** Drives the network renderer's bounded wait for a radio. See waitForRadio. */
   clock?: Clock;
   /**
@@ -109,7 +115,14 @@ export function buildRenderers(opts: BuildRenderersOptions): {
   const generated: string[] = [];
   // Only if absent: an operator who has changed the passphrase keeps theirs.
   if (secrets.ensureValue("ap_psk", DEFAULT_AP_PASSPHRASE).created) generated.push("ap_psk");
-  const client = new NmcliClient(opts.runner ?? systemRunner, log);
+  // Two loggers, deliberately. The renderer says things an operator acts on
+  // - "bringing the access point up", "the wifi client did not come up" - and
+  // those belong in the activity pane. The client says which nmcli command it
+  // ran, which belongs in the journal and nowhere else: with a status line
+  // polling every few seconds, routing both to the same place filled the
+  // operator's view with `nmcli -t -f DEVICE,TYPE,STATE,CONNECTION device
+  // status` twice a tick and buried what their Join actually did.
+  const client = new NmcliClient(opts.runner ?? systemRunner, opts.trace ?? trace);
   const renderer = new NetworkRenderer({ client, secrets, log, clock: opts.clock });
 
   // After the network renderer, deliberately. Renderers run in order, so this
