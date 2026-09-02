@@ -206,3 +206,28 @@ export {
 export { scanForNetworks, type ScanResult } from "./net/scan.js";
 export type { DiagProbes, SystemReport } from "./daemon/routes.js";
 export { HostnameRenderer, HOSTNAME_FILE, type HostnameRendererOptions } from "./system/hostname.js";
+export {
+  idle,
+  pending,
+  confirmed,
+  rejected,
+  presentation,
+  secondsRemaining,
+  type CommandState,
+  type CommandStatus,
+  type CommandPresentation,
+  type CommandOptions,
+} from "./console/command.js";
+export {
+  pollIntervalMs,
+  socketPathFrom,
+  clientFor,
+  fetched,
+  applyStatus,
+  confirmStatus,
+  readFailure,
+  MIN_POLL_MS,
+  DEFAULT_POLL_MS,
+  DEFAULT_SOCKET_PATH,
+  type Fetched,
+} from "./console/node.js";

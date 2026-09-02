@@ -286,3 +286,30 @@ describe("parseSettingsArgs", () => {
     expect(parseSettingsArgs(["a", "b", "c"])).toBeUndefined();
   });
 });
+
+/**
+ * The socket path the contrib nodes read (Task 7 of M1b-2).
+ *
+ * Generated into settings.js rather than written into flows.json, because
+ * flows.json is wiring (CLAUDE.md rule 2) and a socket path in it is a
+ * deployment detail an operator could edit in the flow editor.
+ */
+describe("what the contrib nodes are told", () => {
+  it("puts the daemon's socket in settings, where every node can read it", () => {
+    const out = renderSettings(DEFAULT_CONFIG, {
+      provisioned: true,
+      paths: { socket: "/run/yonder/core.sock" },
+    });
+    expect(out).toContain("yonder: {");
+    expect(out).toContain('socketPath: "/run/yonder/core.sock"');
+  });
+
+  it("takes it from the paths it was given, not from a constant", () => {
+    const out = renderSettings(DEFAULT_CONFIG, {
+      provisioned: true,
+      paths: { socket: "/tmp/elsewhere.sock" },
+    });
+    expect(out).toContain('socketPath: "/tmp/elsewhere.sock"');
+    expect(out).not.toContain("/run/yonder/core.sock");
+  });
+});

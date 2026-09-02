@@ -2,14 +2,20 @@
   "name": "yonder",
   "private": true,
   "license": "GPL-3.0-or-later",
-  "workspaces": ["packages/*"],
-  "engines": { "node": ">=20" },
+  "workspaces": [
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "test": "npm run test --workspaces --if-present",
-    "build": "npm run build --workspaces --if-present",
-    "lint": "tsc --noEmit -p packages/yonder-core/tsconfig.json"
+    "build": "npm run build -w yonder-core && npm run build -w node-red-contrib-yonder-system && npm run build -w node-red-contrib-yonder-network",
+    "lint": "npm run build -w yonder-core && tsc --noEmit -p packages/yonder-core/tsconfig.json && tsc --noEmit -p packages/node-red-contrib-yonder-system/tsconfig.json && tsc --noEmit -p packages/node-red-contrib-yonder-network/tsconfig.json"
   },
   "devDependencies": {
+    "node-red": "^5.0.6",
+    "node-red-node-test-helper": "^0.3.6",
     "typescript": "^5.6.0",
     "vitest": "^2.1.0"
   }

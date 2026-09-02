@@ -1,0 +1,36 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!--
+  The editor half of read configuration.
+
+  Node-RED finds this by basename beside the node's .js, and without it the
+  flow editor shows the node as "unknown" even though the runtime registered
+  it. It is a form and a registration, and deliberately nothing else: no
+  behaviour lives here (CLAUDE.md rule 2 in spirit — a diff has to be
+  readable), and no asset is fetched from anywhere (R-UI-01).
+-->
+<script type="text/html" data-template-name="yonder-config">
+  <div class="form-row">
+    <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name" />
+  </div>
+</script>
+
+<script type="text/html" data-help-name="yonder-config">
+<p>Reads <code>GET /config</code> when a message arrives and emits the whole
+configuration on <code>msg.payload</code>.</p>
+<p>A read only. Changing anything goes through <code>yonder-apply</code>, which
+is a separate node so that a flow cannot read and write without somebody having
+drawn the second wire.</p>
+</script>
+
+<script type="text/javascript">
+  RED.nodes.registerType("yonder-config", {
+    category: "yonder",
+    color: "#c7d4e0",
+    defaults: { name: { value: "" } },
+    inputs: 1,
+    outputs: 1,
+    icon: "font-awesome/fa-wifi",
+    label: function () { return this.name || "read configuration"; },
+  });
+</script>

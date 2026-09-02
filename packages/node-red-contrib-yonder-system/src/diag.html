@@ -1,0 +1,47 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!--
+  The editor half of diagnostics.
+
+  Node-RED finds this by basename beside the node's .js, and without it the
+  flow editor shows the node as "unknown" even though the runtime registered
+  it. It is a form and a registration, and deliberately nothing else: no
+  behaviour lives here (CLAUDE.md rule 2 in spirit — a diff has to be
+  readable), and no asset is fetched from anywhere (R-UI-01).
+-->
+<script type="text/html" data-template-name="yonder-diag">
+  <div class="form-row">
+    <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-probe"><i class="fa fa-question-circle"></i> Probe</label>
+    <select id="node-input-probe">
+      <option value="reachable">Reachability</option>
+      <option value="ping">Ping a host</option>
+    </select>
+  </div>
+</script>
+
+<script type="text/html" data-help-name="yonder-diag">
+<p>Runs a probe when a message arrives, and only then. Yonder does not contact
+anything off this device on its own.</p>
+<p>For <code>Ping a host</code>, the host is taken from <code>msg.payload</code>
+(or <code>msg.host</code>). It is validated by the daemon, which refuses
+anything that is not a host name or an IPv4 address.</p>
+<p><b>What reachability actually tests:</b> it sends ICMP echo requests to one
+well-known public address and reports whether any came back. A network that
+filters ICMP reports unreachable while working; a captive portal reports
+reachable while carrying nothing.</p>
+</script>
+
+<script type="text/javascript">
+  RED.nodes.registerType("yonder-diag", {
+    category: "yonder",
+    color: "#c7e0d4",
+    defaults: { name: { value: "" }, probe: { value: "reachable" } },
+    inputs: 1,
+    outputs: 1,
+    icon: "font-awesome/fa-stethoscope",
+    label: function () { return this.name || "diagnostics"; },
+  });
+</script>

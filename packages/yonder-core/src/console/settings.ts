@@ -173,6 +173,20 @@ export function renderSettings(config: Config, opts: RenderSettingsOptions): str
   lines.push("  }),");
   lines.push("");
 
+  // Where the contrib nodes find the daemon.
+  //
+  // In settings.js rather than in flows.json, because flows.json is wiring
+  // (CLAUDE.md rule 2) and a socket path in it would be a deployment detail
+  // an operator could edit in the flow editor. Node-RED exposes the whole
+  // settings object to a node as `RED.settings`, so one generated value
+  // reaches every node without any of them carrying a default of its own.
+  lines.push("  // Where the yonder-* nodes find the configuration daemon. Read as");
+  lines.push("  // RED.settings.yonder.socketPath; flows.json carries no path of its own.");
+  lines.push("  yonder: {");
+  lines.push(`    socketPath: ${literal(paths.socket)},`);
+  lines.push("  },");
+  lines.push("");
+
   lines.push("  // No audit. Node-RED's audit events carry request detail, and a");
   lines.push("  // password posted to a login route is exactly the request detail that");
   lines.push("  // would end up in the journal (R-SEC-10).");

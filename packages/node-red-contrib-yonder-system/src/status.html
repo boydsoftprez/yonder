@@ -1,0 +1,47 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!--
+  The editor half of board status.
+
+  Node-RED finds this by basename beside the node's .js, and without it the
+  flow editor shows the node as "unknown" even though the runtime registered
+  it. It is a form and a registration, and deliberately nothing else: no
+  behaviour lives here (CLAUDE.md rule 2 in spirit — a diff has to be
+  readable), and no asset is fetched from anywhere (R-UI-01).
+-->
+<script type="text/html" data-template-name="yonder-status">
+  <div class="form-row">
+    <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-interval"><i class="fa fa-clock-o"></i> Interval</label>
+    <input type="number" id="node-input-interval" min="2" placeholder="5" /> seconds
+  </div>
+  <div class="form-tips">
+    Never faster than 2 seconds. The console has to work on a link with hundreds
+    of milliseconds of latency (R-UI-06), and the floor is enforced in
+    yonder-core whatever is entered here.
+  </div>
+</script>
+
+<script type="text/html" data-help-name="yonder-status">
+<p>Reads <code>GET /system</code> from the yonder-core daemon and emits board
+facts and versions on <code>msg.payload</code>.</p>
+<p>Every field may be <code>null</code>: a board with no thermal zone or no
+device-tree model is legitimate, and an absent reading is reported as absent
+rather than as zero.</p>
+<p>If the daemon does not answer, the node emits <code>msg.payload = null</code>
+and a rejected command state on <code>msg.yonder</code> — never nothing.</p>
+</script>
+
+<script type="text/javascript">
+  RED.nodes.registerType("yonder-status", {
+    category: "yonder",
+    color: "#c7e0d4",
+    defaults: { name: { value: "" }, interval: { value: 5, validate: RED.validators.number(true) } },
+    inputs: 1,
+    outputs: 1,
+    icon: "font-awesome/fa-microchip",
+    label: function () { return this.name || "board status"; },
+  });
+</script>
