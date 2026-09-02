@@ -139,3 +139,33 @@ export {
   type EditorAuth,
   type EditorUser,
 } from "./console/wiring.js";
+export {
+  boardFacts,
+  parseModel,
+  parseLoadAverage,
+  parseMeminfo,
+  parseUptime,
+  parseCpuTemperature,
+  type BoardFacts,
+  type FactSources,
+  type LoadAverage,
+  type MemoryFacts,
+} from "./system/facts.js";
+export {
+  readBoardFacts,
+  readFactSources,
+  systemReader,
+  DEFAULT_FACT_PATHS,
+  type FileReader,
+  type FactPaths,
+  type ReadFactsOptions,
+} from "./system/read.js";
+export {
+  readVersions,
+  parseOsRelease,
+  parsePackageVersion,
+  DEFAULT_OS_RELEASE,
+  DEFAULT_PACKAGE_MANIFEST,
+  type Versions,
+  type ReadVersionsOptions,
+} from "./system/versions.js";
