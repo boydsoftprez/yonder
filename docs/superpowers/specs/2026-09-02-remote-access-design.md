@@ -379,6 +379,12 @@ IDs continue the R-VPN block, which currently ends at R-VPN-05.
 R-VPN-05 is unchanged but gains teeth from R-VPN-08's last sentence: "enable no VPN by
 default" now means no client process running, not merely no network joined.
 
+**One existing requirement gains a sentence rather than a new ID.** R-UI-12 says every page
+is captured in both palettes and the build fails when a page changes shape unreviewed. A
+tabbed page renders one tab, so "every page" stops meaning "everything the page can show"
+(§6). R-UI-12's text is extended to say that a surface which hides part of itself is
+captured in each of those parts. The ID does not change and nothing is renumbered.
+
 No new ADR. ADR-0004 settles the ordering these sit under, and R-CFG-11 is written to
 generalise; in this repository the reasoning for a decision like §4 belongs in the
 requirement text, which is what R-CFG-10 and R-CFG-11 already do.
@@ -387,58 +393,80 @@ requirement text, which is what R-CFG-10 and R-CFG-11 already do.
 
 ## 6. Where it goes in the console
 
-**A group on the Network page, below Wi-Fi.** Not a page of its own. The page already
-carries an interface summary, Wi-Fi and Activity; remote access becomes the third group and
-Activity moves below it.
+**A tab on the Network page, which becomes a tabbed page.** Not a page of its own —
+Dashboard 2.x cannot nest pages, so separate pages would be flat siblings in the sidebar
+with nothing saying three of them are the same subject. `ui-page` has no parent property
+(its whole configuration is `breakpoints`, `className`, `disabled`, `icon`, `layout`,
+`name`, `order`, `path`, `theme`, `ui`, `visible`), and `navigationStyle` on `ui-base`
+only chooses how the drawer behaves — `default`, `fixed`, `icon`, `temporary`, `none`.
+
+What does exist is the page's own `layout`. Set to **Tabs**, each `ui-group` becomes a tab
+labelled with the group's name. `LayoutTabs` ships in the `@flowfuse/node-red-dashboard`
+1.31.0 the payload pins.
 
 ```
+Status   Network   Log   Diagnostics
+         ───────
+
 Network
-┌─ interfaces ─────┐  ┌─ WI-FI ───────────┐
-│ Radio off        │  │ network  [ ... ]  │
-└──────────────────┘  │ password [ ... ]  │
-                      │ JOIN              │   ← the page's one primary action
-                      └───────────────────┘
-┌─ ZEROTIER ───────┐  ┌─ TAILSCALE ───────┐
-│ WAITING FOR YOU  │  │ key      [ ... ]  │
-│ TO APPROVE IT    │  │                   │
-│ 9fef8a3bf9 [copy]│  │                   │
-└──────────────────┘  └───────────────────┘
-┌─ ACTIVITY ─────────────────────────────────┐
-└────────────────────────────────────────────┘
+┌────────────┬───────┬────────┬──────────┐
+│ INTERFACES │ WI-FI │ REMOTE │ ACTIVITY │
+└────────────┴───────┴────────┴──────────┘
+
+(REMOTE selected)
+
+┌─ ZEROTIER ───────┐  ┌─ TAILSCALE ──────┐
+│ WAITING FOR YOU  │  │ not configured   │
+│ TO APPROVE IT    │  │                  │
+│ 9fef8a3bf9 [copy]│  │ key  [.........] │
+└──────────────────┘  └──────────────────┘
 ```
 
-The group is always present, unlike a camera section: R-UI-03 builds navigation from
-detected hardware, and a mesh is not hardware — there is nothing to detect. On a fresh
-board it reads *not configured*, which is what R-VPN-05 looks like from the front.
+M3's cellular section becomes a fifth tab rather than making the page denser.
 
-### The constraint this placement carries
+Two consequences of the layout, neither optional:
 
-Wi-Fi's `JOIN` is the one control in this console that can cost the operator the board —
-it is the reason R-CFG-11 exists. A mesh join cannot (§4). Sitting them one above the
-other risks making the dangerous control and the safe one look interchangeable, so the
-distinction is drawn deliberately rather than left to adjacency:
+- **The interface summary has to be named.** It is currently a group with an empty name,
+  which was invisible in a grid and would be an unlabelled tab. It becomes `Interfaces`,
+  and it goes first — a tabbed page always opens on its first tab, and "where does this
+  board stand" is the right thing to land on.
+- **Remote is not the first tab**, so nothing about the mesh is on screen until asked for.
+  That is correct: R-VPN-05 means a device with no mesh configured is a normal device.
 
-- **R-UI-10 settles it: a page has at most one primary action, and on this page that is
-  Wi-Fi's `JOIN`.** Every mesh control is therefore secondary. This is not a stylistic
-  preference — the build check enforces it, and the accepted-violations file is empty and
-  may only shrink.
-- **The mesh group reads as an instrument, not a form** (R-UI-11): a state, an identifier
-  and a means of copying it. The only text input on the whole page that takes a credential
-  stays the Wi-Fi passphrase; Tailscale's key field appears only when Tailscale is being
-  configured, and never sits directly under it.
-- **`leave` is not placed adjacent to Wi-Fi's `JOIN`.** Two destructive-looking controls
-  in one column, one of which drops the operator's own link, is the mistake this section
-  exists to avoid.
+### What the layout settles, and what it breaks
 
-### Cost, and what M3 inherits
+It settles the adjacency problem by separation rather than by rule. Wi-Fi's `JOIN` is the
+one control in this console that can cost the operator the board — it is why R-CFG-11
+exists — and a mesh join provably cannot (§4). On a tabbed page the two are never on
+screen together, so they cannot be mistaken for each other.
 
-No new page: `docs/console/capture/network.{day,night}.png` and
-`docs/console/shape/network.{day,night}.darwin.json` change and are reviewed, and the
-ADR-0009 check must pass on the rebuilt page (R-UI-12). No new snapshot files.
+R-UI-10 still applies, and the tabbed page makes its unit explicit: **only one tab renders
+at a time, so the tab is the surface that may hold at most one primary action**, not the
+page. Wi-Fi's `JOIN` is the primary action of the Wi-Fi tab; the Remote tab has its own.
 
-**M3 puts cellular on this same page**, which will make Network the densest surface in the
-console — five groups and a table. That is M3's layout problem, not M2's, and it is
-recorded here so it arrives as a known consequence rather than a surprise.
+**It breaks the shape check, and fixing that is part of this work.**
+`scripts/capture-pages.mjs` builds its list with
+`flows.filter((n) => n.type === "ui-page")` and captures each page once. A tabbed page
+renders one tab, so Wi-Fi, Remote and Activity would never be captured, never be measured
+against ADR-0009, and never fail a build when they changed. R-UI-12's coverage would
+shrink to the first tab without anything saying so.
+
+That is precisely the failure R-UI-12 was written for. The harness's own header records
+why it exists: a Network page shipped wrong "because nothing in this repository had ever
+looked at one". Recreating that on the Remote tab, in the change that introduces the
+Remote tab, would be an unusually poor joke.
+
+**So the harness walks the tabs.** For a page whose layout is `tabs` it captures each tab
+in both palettes, named `network-<tab>.{day,night}`. It already presses a soft key after
+capture, so driving a tab strip is within what it does rather than a new capability.
+
+### Cost
+
+`docs/console/capture/network.{day,night}.png` and
+`docs/console/shape/network.{day,night}.darwin.json` are replaced by a pair per tab. The
+whole page changes shape, so this is a real review rather than a diff to wave through, and
+the ADR-0009 rules must pass on every tab. `docs/console/accepted-violations.json` is empty
+and may only shrink, so no tab may arrive owing anything.
 
 ---
 
@@ -459,7 +487,9 @@ packages/yonder-core/src/remote/
 
 packages/node-red-contrib-yonder-remote/       nodes
 packages/node-red-dashboard-2-yonder/          the waiting-for-approval instrument
-flows/flows.json                               wiring only: the group on the Network page
+flows/flows.json                               wiring only: the Remote tab, and the
+                                               Network page switched to a tabs layout
+scripts/capture-pages.mjs                      walk the tabs of a tabbed page (§6)
 ```
 
 This follows `src/net/` exactly, including the parts that matter most:
