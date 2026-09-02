@@ -131,7 +131,10 @@ export class ReachWatch {
    * else re-arms this loop. So a tick that outlives `REACH_TICK_DEADLINE_MS`
    * is abandoned and said so in one line, and the generation counter in
    * `tick()` makes sure the one that was given up on cannot come back later
-   * and write its stale reading over a newer one.
+   * and write anything over a newer one. **Anything**, not only the counter
+   * reading it took: the probe it started is still out there too, and its
+   * result reaches standing from inside `ReachMonitor.test`, so the same
+   * question is asked there rather than only here.
    */
   private schedule(): void {
     this.timer = this.clock.setTimer(this.tickMs, () => {
@@ -170,10 +173,15 @@ export class ReachWatch {
    */
   async tick(): Promise<void> {
     const mine = ++this.generation;
+    // A tick that was given up on has no business writing anything a newer
+    // one is keeping — not the counter readings, and not the probe results
+    // either. Its answers are about a moment that has passed, and the deadline
+    // abandons the *wait*, not the *work*, so every `await` below is followed
+    // by this question again.
+    const stillMine = (): boolean => mine === this.generation;
+
     const now = await this.monitor.inUseNow();
-    // A tick that was given up on has no business writing the readings a
-    // newer one is keeping. Its answer is about a moment that has passed.
-    if (mine !== this.generation) return;
+    if (!stillMine()) return;
     if (now === null) {
       // Nothing is carrying traffic, or nothing this monitor has a path for.
       // There is no subject for any of the questions below, and the readings
@@ -199,7 +207,12 @@ export class ReachWatch {
     if (why === null) return;
 
     this.log(`network: testing ${PATH_WORDS[path]} because ${why}`);
-    if (await this.monitor.test(path)) {
+    // `stillMine` goes into the call as well as being asked after it: the
+    // recording happens inside `test`, so a guard only out here would let a
+    // stale answer reach standing before this line ever ran again.
+    const reached = await this.monitor.test(path, stillMine);
+    if (!stillMine()) return;
+    if (reached) {
       this.failing.delete(path);
       return;
     }
@@ -210,7 +223,9 @@ export class ReachWatch {
     // one that failed — `test` returns immediately for a path this board does
     // not have, so a device with one interface pays nothing for this.
     for (const other of this.monitor.priority()) {
-      if (other !== path) await this.monitor.test(other);
+      if (other === path) continue;
+      await this.monitor.test(other, stillMine);
+      if (!stillMine()) return;
     }
   }
 

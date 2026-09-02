@@ -82,8 +82,15 @@ export class ReachMonitor {
    * already takes about exit code 127: a board that cannot establish that a
    * path works must not report that it does. The cost of being wrong that way
    * is one more probe; the cost of being wrong the other way is an aircraft.
+   *
+   * `stillWanted` is asked between the probe answering and the answer being
+   * recorded, and is where a caller says "the question I asked this for has
+   * been given up on". A probe is not cancellable — a `curl` that has not
+   * come back is still out there — so the only place an abandoned answer can
+   * be stopped is on its way into standing, and it has to be here rather than
+   * in the caller because recording happens inside this call.
    */
-  async test(path: PathName): Promise<boolean> {
+  async test(path: PathName, stillWanted: () => boolean = () => true): Promise<boolean> {
     const device = (await this.devices())[path];
     if (device === undefined) return false;
 
@@ -112,6 +119,17 @@ export class ReachMonitor {
           + `and ${moved.rx} came back`,
         );
       }
+    }
+
+    // Evidence about a moment that has passed. `SUCCESSES_TO_RETURN` is 1, so
+    // one stale success clears `no-route-out` and moves the default route
+    // back onto a path newer probes have called dead.
+    if (!stillWanted()) {
+      this.log(
+        `network: the test of ${PATH_WORDS[path]} on ${device} answered after it `
+        + `was given up on; not recording it`,
+      );
+      return reached;
     }
 
     this.standing.record(path, reached);

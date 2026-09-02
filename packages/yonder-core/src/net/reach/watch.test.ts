@@ -56,6 +56,12 @@ interface Bench {
   setInUseHangs(hangs: boolean): void;
   /** Let every reading that was left hanging answer at last. */
   releaseInUse(): void;
+  /** Make every probe from now on never come back, or stop. */
+  setProbeHangs(hangs: boolean): void;
+  /** Let every probe that was left hanging answer at last, with this result. */
+  releaseProbes(reached: boolean): void;
+  /** Every standing change announced, in order. What the daemon re-metrics on. */
+  changes: [PathName, boolean][];
 }
 
 function bench(opts: {
@@ -72,7 +78,12 @@ function bench(opts: {
   const lines: string[] = [];
   const probed: string[] = [];
   const counters = new Map<string, Counters>();
-  const standing = new Standing({ clock: clock.clock, log: (l) => lines.push(l) });
+  const changes: [PathName, boolean][] = [];
+  const standing = new Standing({
+    clock: clock.clock,
+    log: (l) => lines.push(l),
+    onChange: (path, stoodDown) => changes.push([path, stoodDown]),
+  });
 
   const read = (device: string): Counters | null => {
     if (opts.countersThrow === true) throw new Error("/sys is not readable");
@@ -83,12 +94,18 @@ function bench(opts: {
   let inUse: PathName | null = opts.inUse === undefined ? "modem" : opts.inUse;
   let hangs = opts.inUseHangs === true;
   const waiting: (() => void)[] = [];
+  let probeHangs = false;
+  const heldProbes: ((reached: boolean) => void)[] = [];
 
   const monitor = new ReachMonitor({
     standing,
     probe: async (device) => {
       probed.push(device);
       if (opts.probeThrows === true) throw new Error("curl could not be started");
+      // A `curl` that has not come back yet. Held until the test lets it
+      // answer, which is the only way to make an abandoned tick's probe reply
+      // long after the tick it belonged to was given up on.
+      if (probeHangs) return await new Promise<boolean>((resolve) => heldProbes.push(resolve));
       return opts.reaches === undefined ? true : opts.reaches(device);
     },
     counters: read,
@@ -111,11 +128,13 @@ function bench(opts: {
   });
 
   return {
-    watch, standing, probed, lines, clock, counters,
+    watch, standing, probed, lines, clock, counters, changes,
     setInUse(path) { inUse = path; },
     setDevices(next) { devices = next; },
     setInUseHangs(next) { hangs = next; },
     releaseInUse() { while (waiting.length > 0) waiting.pop()?.(); },
+    setProbeHangs(next) { probeHangs = next; },
+    releaseProbes(reached) { while (heldProbes.length > 0) heldProbes.pop()?.(reached); },
   };
 }
 
@@ -416,6 +435,50 @@ describe("ReachWatch", () => {
     for (let i = 0; i < 200; i++) await Promise.resolve();
     expect(b.probed.length).toBe(settled);
     expect(b.clock.armed()).toBe(1);
+  });
+
+  /**
+   * And the probe it started is still out there too.
+   *
+   * `withDeadline` abandons the *wait*, not the *work*. The generation guard
+   * sat once at the top of `tick()`, immediately after `inUseNow()` — so an
+   * abandoned tick went on to run `monitor.test()`, which folds its result
+   * into `Standing`. `SUCCESSES_TO_RETURN` is 1, so a single stale success
+   * clears `no-route-out` outright, and in the daemon that `onChange` is
+   * `renderer.remetric`: the default route moves back onto a path four newer
+   * probes have called dead, on evidence over a minute old.
+   */
+  it("drops the result of a probe belonging to a tick that was given up on", async () => {
+    const b = bench({
+      devices: { ethernet: "eth0" },
+      order: ["ethernet"],
+      inUse: "ethernet",
+      reaches: () => false,
+    });
+    b.watch.start();
+    for (let i = 0; i < FAILURES_TO_STAND_DOWN; i++) await b.clock.advance(REACH_TICK_MS);
+    expect(b.standing.standingOf("ethernet")).toBe("no-route-out");
+    expect(b.changes).toEqual([["ethernet", true]]);
+
+    // The next tick's `curl` hangs, and the tick is given up on.
+    b.setProbeHangs(true);
+    await b.clock.advance(REACH_TICK_MS);
+    await b.clock.advance(REACH_TICK_DEADLINE_MS);
+    expect(b.lines.join("\n")).toMatch(/did not finish in time/);
+
+    // Four newer ticks probe the same interface, and all four fail.
+    b.setProbeHangs(false);
+    const abandoned = b.probed.length;
+    for (let i = 0; i < 4; i++) await b.clock.advance(REACH_TICK_MS);
+    expect(b.probed.length).toBe(abandoned + 4);
+
+    // The abandoned probe answers success at last. Its answer is about a
+    // moment that has passed and must not reach standing at all.
+    b.releaseProbes(true);
+    for (let i = 0; i < 200; i++) await Promise.resolve();
+
+    expect(b.standing.standingOf("ethernet")).toBe("no-route-out");
+    expect(b.changes).toEqual([["ethernet", true]]);
   });
 
   it("never reads the wall clock", async () => {
