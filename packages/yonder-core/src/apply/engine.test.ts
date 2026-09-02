@@ -701,19 +701,24 @@ describe("the confirmation window", () => {
   });
 
   /**
-   * Compared on the *mode*, not on the client settings. Changing the
-   * passphrase of a network already configured does not move the radio, and
-   * neither does renaming the access point — and handing those five minutes
-   * only means a change that broke the device sits there for five minutes.
+   * The short window is for a change the operator can watch happen.
+   *
+   * This asserted the opposite — that changing the client SSID got 120 s —
+   * on the reasoning that only a *mode* change moves the radio. A board
+   * disproved it: already a client, passphrase changed, connection dropped,
+   * and the confirmation was expected from a console that had gone with it.
+   * Anything touching `network.client` can take the operator away, so the
+   * short window is now for changes that cannot: the access point's own name,
+   * the hostname, the theme.
    */
   it("does not widen the window for a change that leaves the radio where it is", async () => {
     saveConfig(configPath, joining());
     const { clock } = fakeClock();
     const engine = engineWithWindows(clock);
-    const changedPsk = joining();
-    changedPsk.network.client.ssid = "SomeOtherNetwork";
-    changedPsk.network.ap.ssid = "renamed-ap";
-    const result = await engine.apply(changedPsk);
+    const elsewhere = joining();
+    elsewhere.network.ap.ssid = "renamed-ap";
+    elsewhere.system.hostname = "renamed";
+    const result = await engine.apply(elsewhere);
     expect(result.expiresAt).toBe(120_000);
     expect(result.movesRadio).toBeUndefined();
   });
@@ -731,5 +736,135 @@ describe("the confirmation window", () => {
     expect(engine.status().state).toBe("idle");
     expect(engine.status().lastResult?.outcome).toBe("reverted");
     expect(loadConfig(configPath).network.client.ssid).toBeNull();
+  });
+});
+
+/**
+ * R-CFG-11. A radio move confirms itself.
+ *
+ * The operator cannot confirm one: joining a network takes the access point
+ * off the air, so the console they would confirm from goes with it. The
+ * confirmation this replaces meant finding the device on another network,
+ * signing in and clicking inside the window — and missing it threw away a
+ * *working* configuration.
+ */
+describe("a radio move confirms itself", () => {
+  function joining(): Config {
+    const next = structuredClone(DEFAULT_CONFIG);
+    next.network.client.ssid = "HomeNetwork";
+    return next;
+  }
+
+  function engineWith(
+    verifyRadioMove: () => Promise<{ ok: boolean; reason: string }>,
+  ): { engine: ApplyEngine; settle: () => Promise<void> } {
+    const { clock } = fakeClock();
+    const engine = new ApplyEngine({
+      configPath, journalPath, renderers: [renderer()], clock, verifyRadioMove,
+    });
+    // The verifier is deliberately not awaited by apply(); let its promise
+    // chain run before asserting on what it did.
+    const settle = async (): Promise<void> => {
+      for (let i = 0; i < 20; i++) await Promise.resolve();
+    };
+    return { engine, settle };
+  }
+
+  it("confirms without a human when the device got onto the network", async () => {
+    const { engine, settle } = engineWith(() =>
+      Promise.resolve({ ok: true, reason: "the gateway answered" }));
+    const result = await engine.apply(joining());
+    expect(result.movesRadio).toBe(true);
+    await settle();
+    expect(engine.status().state).toBe("confirmed");
+    expect(engine.status().lastResult?.outcome).toBe("confirmed");
+  });
+
+  it("reverts at once when it did not, rather than waiting out the window", async () => {
+    const { engine, settle } = engineWith(() =>
+      Promise.resolve({ ok: false, reason: "no address" }));
+    await engine.apply(joining());
+    await settle();
+    expect(engine.status().lastResult?.outcome).toBe("reverted");
+  });
+
+  /** A verifier that threw has established nothing; the window still runs. */
+  it("leaves the window armed when the check itself failed", async () => {
+    const { engine, settle } = engineWith(() =>
+      Promise.reject(new Error("nmcli is not here")));
+    await engine.apply(joining());
+    await settle();
+    expect(engine.status().state).toBe("pending");
+  });
+
+  /** An apply the operator can watch happen is still theirs to confirm. */
+  it("does not self-confirm a change that does not move the radio", async () => {
+    let asked = 0;
+    const { engine, settle } = engineWith(() => {
+      asked += 1;
+      return Promise.resolve({ ok: true, reason: "" });
+    });
+    await engine.apply(changed());
+    await settle();
+    expect(asked).toBe(0);
+    expect(engine.status().state).toBe("pending");
+  });
+});
+
+/**
+ * Which applies can take the operator's connection away.
+ *
+ * This used to ask whether the Wi-Fi *mode* changed, which missed the state a
+ * board is most often in: already a client, and the operator changing the
+ * passphrase of the network they are connected through. Observed on hardware
+ * — that apply got the short window, needed a confirmation from a console
+ * that was no longer reachable, and reverted 120 s later.
+ */
+describe("what counts as moving the radio", () => {
+  function withClient(ssid: string | null, secret: string | null): Config {
+    const c = structuredClone(DEFAULT_CONFIG);
+    c.network.client.ssid = ssid;
+    c.network.client.psk = secret === null ? null : { secret };
+    return c;
+  }
+
+  async function classify(from: Config, to: Config): Promise<boolean> {
+    saveConfig(configPath, from);
+    const { clock } = fakeClock();
+    const engine = new ApplyEngine({
+      configPath, journalPath, renderers: [renderer()], clock,
+      verifyRadioMove: () => new Promise(() => { /* never settles */ }),
+    });
+    return (await engine.apply(to)).movesRadio === true;
+  }
+
+  it("counts joining a network", async () => {
+    expect(await classify(DEFAULT_CONFIG, withClient("HomeNetwork", "wifi_psk"))).toBe(true);
+  });
+
+  it("counts leaving one", async () => {
+    expect(await classify(withClient("HomeNetwork", "wifi_psk"), DEFAULT_CONFIG)).toBe(true);
+  });
+
+  /** The one that was missed. A wrong key deauthenticates you like a failed join. */
+  it("counts changing the passphrase of the network you are on", async () => {
+    expect(await classify(
+      withClient("HomeNetwork", "wifi_psk"),
+      withClient("HomeNetwork", "wifi_psk_2"),
+    )).toBe(true);
+  });
+
+  it("counts moving to a different network", async () => {
+    expect(await classify(
+      withClient("HomeNetwork", "wifi_psk"),
+      withClient("OtherNetwork", "wifi_psk"),
+    )).toBe(true);
+  });
+
+  it("does not count a change that leaves the radio alone", async () => {
+    const from = withClient("HomeNetwork", "wifi_psk");
+    const to = structuredClone(from);
+    to.system.hostname = "renamed";
+    expect(await classify(from, to)).toBe(false);
   });
 });

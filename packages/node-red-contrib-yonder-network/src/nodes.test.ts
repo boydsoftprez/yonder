@@ -140,7 +140,12 @@ describe("yonder-apply", () => {
     replies.push(ok({ id: "abc", expiresAt: 300_000, movesRadio: true }));
     const msg = await send(applyNode, "yonder-apply", { payload: { version: 1 } });
     expect(msg.yonder?.movesRadio).toBe(true);
-    expect(msg.yonder?.message).toContain("access point is going away");
+    // Asserted on what it must convey, not on a phrase: that the page is
+    // about to go, and that a failure puts the access point back. The words
+    // changed once already when the confirmation was removed, and a test
+    // pinned to a sentence broke without anything being wrong.
+    expect(String(msg.yonder?.message)).toMatch(/page is about to go|lose this page/i);
+    expect(String(msg.yonder?.message)).toMatch(/access point comes back|comes back/i);
     expect(msg.yonder?.expiresAt).toBe(300_000);
   });
 
@@ -192,16 +197,106 @@ describe("yonder-confirm", () => {
 });
 
 describe("yonder-join", () => {
-  it("posts the form to the route that owns the passphrase", async () => {
-    replies.push(ok({ id: "abc", expiresAt: 300_000, movesRadio: true }));
-    const msg = await send(joinNode, "yonder-join", {
-      payload: { ssid: "HomeNetwork", psk: "a-passphrase" },
+  /**
+   * Three widgets, one join. `ui-form` renders nothing masked — its types are
+   * text, email, number, multiline, checkbox, switch, date, time and dropdown
+   * — so a passphrase typed into one would be on screen in clear. The masked
+   * widget, `ui-text-input` with `mode: "password"`, is separate, so the
+   * network, the passphrase and the button arrive as three messages and this
+   * node is what holds them together.
+   */
+  /**
+   * Load the node once and hand it several messages in order.
+   *
+   * `send` above loads a fresh flow per call, which is right for a node that
+   * answers each message on its own. This one deliberately holds state across
+   * messages — the network and the passphrase, until the button — so a helper
+   * that reloaded between them would be testing a node that had forgotten
+   * everything, and passing.
+   *
+   * Resolves with the last message the node emitted, or `{}` if it emitted
+   * none, which is itself the assertion for "this input produces no output".
+   */
+  function feed(node: unknown, msgs: { topic: string; payload: unknown }[]): Promise<Received> {
+    const flow = [
+      { id: "n1", type: "yonder-join", wires: [["n2"]] },
+      { id: "n2", type: "helper" },
+    ];
+    return new Promise((resolve, reject) => {
+      void helper.load(node, flow, () => {
+        let last: Received = {};
+        const sink = helper.getNode("n2") as unknown as {
+          on(event: string, fn: (msg: Received) => void): void;
+        };
+        sink.on("input", (msg) => { last = msg; });
+        const n1 = helper.getNode("n1") as unknown as { receive(m: unknown): void };
+        for (const m of msgs) n1.receive(m);
+        // Long enough for the awaited request inside the node to settle, and
+        // short enough that a hang is a failure rather than a wait.
+        setTimeout(() => { resolve(last); }, 300);
+        setTimeout(() => { reject(new Error("feed never settled")); }, 4_000);
+      });
     });
+  }
+
+  it("joins with the network chosen and the passphrase typed", async () => {
+    replies.push(ok({ id: "abc", expiresAt: 300_000, movesRadio: true }));
+    const msg = await feed(joinNode, [
+      { topic: "ssid", payload: "HomeNetwork" },
+      { topic: "psk", payload: "a-passphrase" },
+      { topic: "join", payload: "" },
+    ]);
     expect(asked).toEqual([{
       method: "POST", path: "/net/join", body: { ssid: "HomeNetwork", psk: "a-passphrase" },
     }]);
     expect(msg.yonder?.state).toBe("pending");
     expect(msg.yonder?.movesRadio).toBe(true);
+  });
+
+  it("asks nothing of the daemon until the button is pressed", async () => {
+    await feed(joinNode, [
+      { topic: "ssid", payload: "HomeNetwork" },
+      { topic: "psk", payload: "a-passphrase" },
+    ]);
+    expect(asked).toHaveLength(0);
+  });
+
+  it("refuses before spending a confirmation window on a join with no network", async () => {
+    const msg = await feed(joinNode, [{ topic: "join", payload: "" }]);
+    expect(asked).toHaveLength(0);
+    expect(msg.yonder?.state).toBe("rejected");
+    expect(String(msg.yonder?.message)).toMatch(/choose a network/i);
+  });
+
+  it("joins an open network, where there is no passphrase to give", async () => {
+    replies.push(ok({ id: "abc", expiresAt: 300_000 }));
+    await feed(joinNode, [
+      { topic: "ssid", payload: "OpenNetwork" },
+      { topic: "join", payload: "" },
+    ]);
+    expect(asked[0]).toMatchObject({ body: { ssid: "OpenNetwork", psk: null } });
+  });
+
+  /** A sent passphrase has no reason to still be in this process. */
+  it("forgets the passphrase once it has been sent", async () => {
+    replies.push(ok({ id: "a", expiresAt: 1 }), ok({ id: "b", expiresAt: 1 }));
+    await feed(joinNode, [
+      { topic: "ssid", payload: "HomeNetwork" },
+      { topic: "psk", payload: "a-passphrase" },
+      { topic: "join", payload: "" },
+      { topic: "join", payload: "" },
+    ]);
+    expect(asked[1]).toMatchObject({ body: { ssid: "HomeNetwork", psk: null } });
+  });
+
+  it("never puts the passphrase on an outgoing message", async () => {
+    replies.push(ok({ id: "abc", expiresAt: 300_000 }));
+    const msg = await feed(joinNode, [
+      { topic: "ssid", payload: "HomeNetwork" },
+      { topic: "psk", payload: "hunter2-and-then-some" },
+      { topic: "join", payload: "" },
+    ]);
+    expect(JSON.stringify(msg)).not.toContain("hunter2");
   });
 
   /**
@@ -211,8 +306,16 @@ describe("yonder-join", () => {
    */
   it("carries the words that say the access point is going away", async () => {
     replies.push(ok({ id: "abc", expiresAt: 300_000, movesRadio: true }));
-    const msg = await send(joinNode, "yonder-join", { payload: { ssid: "HomeNetwork", psk: "a-passphrase" } });
-    expect(msg.yonder?.message).toContain("access point is going away");
+    const msg = await feed(joinNode, [
+      { topic: "ssid", payload: "HomeNetwork" },
+      { topic: "join", payload: "" },
+    ]);
+    // Asserted on what it must convey, not on a phrase: that the page is
+    // about to go, and that a failure puts the access point back. The words
+    // changed once already when the confirmation was removed, and a test
+    // pinned to a sentence broke without anything being wrong.
+    expect(String(msg.yonder?.message)).toMatch(/page is about to go|lose this page/i);
+    expect(String(msg.yonder?.message)).toMatch(/access point comes back|comes back/i);
   });
 
   it("relays the daemon's refusal rather than validating twice", async () => {
@@ -221,17 +324,22 @@ describe("yonder-join", () => {
       status: 400,
       body: { error: "the passphrase must be between 8 and 63 characters; that is what WPA2 accepts" },
     });
-    const msg = await send(joinNode, "yonder-join", { payload: { ssid: "HomeNetwork", psk: "short" } });
+    const msg = await feed(joinNode, [
+      { topic: "ssid", payload: "HomeNetwork" },
+      { topic: "psk", payload: "short" },
+      { topic: "join", payload: "" },
+    ]);
     expect(msg.yonder?.state).toBe("rejected");
     expect(msg.yonder?.message).toContain("WPA2");
-    // Sent anyway: a second copy of the rule here is a second copy to keep in
-    // step with the one that actually decides.
     expect(asked).toHaveLength(1);
   });
 
   it("reports a daemon that never answered as rejected", async () => {
     replies.push(unreachable);
-    const msg = await send(joinNode, "yonder-join", { payload: { ssid: "HomeNetwork" } });
+    const msg = await feed(joinNode, [
+      { topic: "ssid", payload: "HomeNetwork" },
+      { topic: "join", payload: "" },
+    ]);
     expect(msg.yonder?.state).toBe("rejected");
   });
 });

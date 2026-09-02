@@ -34,7 +34,13 @@ export interface RedNode {
   send(msg: NodeMessage | NodeMessage[]): void;
   status(status: NodeStatus | string): void;
   error(message: string, msg?: NodeMessage): void;
-  on(event: "input", handler: (msg: NodeMessage, send: (m: NodeMessage) => void, done: (err?: Error) => void) => void): void;
+  /**
+   * Node-RED's `send` takes one message, or an array with one entry per
+   * output. An entry may be `null`, which means "nothing on that output
+   * this time" - which is how `yonder-scan` reports a failure on its
+   * table output without also emptying the dropdown it feeds.
+   */
+  on(event: "input", handler: (msg: NodeMessage, send: (m: NodeMessage | (NodeMessage | null)[]) => void, done: (err?: Error) => void) => void): void;
   on(event: "close", handler: (done: () => void) => void): void;
 }
 

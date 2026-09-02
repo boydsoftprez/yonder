@@ -4,7 +4,7 @@ import { unlinkSync, existsSync, mkdirSync, chmodSync } from "node:fs";
 import { dirname } from "node:path";
 import { pathToFileURL } from "node:url";
 import { ApplyEngine } from "../apply/engine.js";
-import { warn, note } from "../log.js";
+import { warn, note, trace } from "../log.js";
 import { createRouter, type DiagProbes } from "./routes.js";
 import { AdminCredential } from "../console/credential.js";
 import { ConsoleRenderer } from "../console/renderer.js";
@@ -16,6 +16,8 @@ import { NmcliClient } from "../net/nmcli/client.js";
 import { NetworkRenderer } from "../net/renderer.js";
 import { HostnameRenderer } from "../system/hostname.js";
 import { FallbackWatchdog } from "../net/watchdog.js";
+import { joinSucceeded } from "../net/joined.js";
+import { networkState } from "../net/state.js";
 import { AP_CONNECTION, DEFAULT_AP_PASSPHRASE } from "../net/profiles.js";
 import { scanForNetworks } from "../net/scan.js";
 import { ping, reachable } from "../diag/probe.js";
@@ -66,6 +68,12 @@ export interface BuildRenderersOptions {
   secretsPath: string;
   runner?: CommandRunner;
   log?: (line: string) => void;
+  /**
+   * Where the nmcli command lines go. The journal, never the activity pane:
+   * an operator looking for what their Join did should not have to read every
+   * `device status` a status line polled for.
+   */
+  trace?: (line: string) => void;
   /** Drives the network renderer's bounded wait for a radio. See waitForRadio. */
   clock?: Clock;
   /**
@@ -107,7 +115,14 @@ export function buildRenderers(opts: BuildRenderersOptions): {
   const generated: string[] = [];
   // Only if absent: an operator who has changed the passphrase keeps theirs.
   if (secrets.ensureValue("ap_psk", DEFAULT_AP_PASSPHRASE).created) generated.push("ap_psk");
-  const client = new NmcliClient(opts.runner ?? systemRunner, log);
+  // Two loggers, deliberately. The renderer says things an operator acts on
+  // - "bringing the access point up", "the wifi client did not come up" - and
+  // those belong in the activity pane. The client says which nmcli command it
+  // ran, which belongs in the journal and nowhere else: with a status line
+  // polling every few seconds, routing both to the same place filled the
+  // operator's view with `nmcli -t -f DEVICE,TYPE,STATE,CONNECTION device
+  // status` twice a tick and buried what their Join actually did.
+  const client = new NmcliClient(opts.runner ?? systemRunner, opts.trace ?? trace);
   const renderer = new NetworkRenderer({ client, secrets, log, clock: opts.clock });
 
   // After the network renderer, deliberately. Renderers run in order, so this
@@ -224,7 +239,9 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   // that helps a device in that state. Constructing a client cannot fail; it
   // is only the secret store above that can.
   const client = built?.client
-    ?? new NmcliClient(opts.runner ?? systemRunner, note);
+    // `trace`, not `note`: an nmcli command line is diagnostic, and the
+    // activity pane is where an operator looks for what their Join did.
+    ?? new NmcliClient(opts.runner ?? systemRunner, trace);
 
   // No secret is ever printed. That mechanism existed to surface a random
   // per-device access-point passphrase and there is no longer one to surface
@@ -255,6 +272,16 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
     radioTimeoutMs: windows.radioTimeout * 1000,
     clock,
     degraded,
+    // R-CFG-11: a join confirms itself, because the operator cannot - the
+    // console leaves the air with the access point. `client` is the same
+    // NmcliClient the watchdog uses, so this asks the radio directly.
+    verifyRadioMove: (target) => joinSucceeded({
+      target,
+      client,
+      runner: opts.runner ?? systemRunner,
+      clock,
+      log: (line) => process.stdout.write(`${line}\n`),
+    }),
   });
 
   // Anything left pending by a previous process is reverted before we serve.
@@ -395,6 +422,10 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
     // secret reference points at nothing.
     ...(built === undefined ? {} : {
       scan: () => scanForNetworks(client),
+      netState: async () => {
+        const [devices, addresses] = await Promise.all([client.devices(), client.activeIpv4()]);
+        return networkState(loadConfig(opts.configPath), devices, addresses);
+      },
       secrets: built.secrets,
     }),
     ...(onProvisioned === undefined ? {} : { onProvisioned }),

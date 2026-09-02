@@ -210,3 +210,30 @@ describe("yonder-theme", () => {
     expect(msg.yonder?.state).toBe("rejected");
   });
 });
+
+/**
+ * A quiet tick must send nothing at all.
+ *
+ * Dashboard's table appends with
+ * `payload && payload.length > 0 ? [...existing, ...payload] : payload`
+ * (`nodes/widgets/ui_table.js`), so an **empty array overwrites the store**
+ * rather than being a no-op. An activity log that polls for new lines and
+ * finds none would erase itself on every quiet tick — which is what an
+ * operator saw on the board: entries appearing and flashing straight back
+ * out before they could be read.
+ */
+describe("yonder-activity when nothing has happened", () => {
+  it("sends nothing rather than an empty list", async () => {
+    replies.push(ok({ entries: [], newestSeq: 7 }), ok({ entries: [], newestSeq: 7 }));
+    await expect(
+      firstMessage(activityNode, "yonder-activity", { interval: 5 }),
+    ).rejects.toThrow(/no message/);
+  });
+
+  it("still sends when there is something to say", async () => {
+    const entries = [{ time: "12:00:00", level: "info", message: "the access point came up" }];
+    replies.push(ok({ entries, newestSeq: 8 }), ok({ entries, newestSeq: 8 }));
+    const msg = await firstMessage(activityNode, "yonder-activity", { interval: 5 });
+    expect(msg.payload).toEqual(entries);
+  });
+});

@@ -9,6 +9,8 @@ Nothing here is a requirement. Requirements live in [`requirements.md`](requirem
 **K numbers are stable.** A closed issue keeps its number and is struck through rather than
 deleted, because source comments cite these. Never reuse a number — K-14 was briefly reused
 for a second issue, and four comments in `src/apply/` were left pointing at the wrong entry.
+It happened again when two branches ran in parallel and both reached for K-26; the later one
+became K-28 and K-29, because the earlier number was already cited.
 
 ---
 
@@ -449,6 +451,31 @@ already reports it, but no page subscribes to anything today. It belongs with wh
 makes the console reactive rather than poll-and-hope, and it should be built once for every
 control rather than patched onto the theme dropdown.
 
+### K-26 · ~~The scan list looks tappable and is not~~ — CLOSED
+
+"Networks in range" was a `ui-table` with `selectionType: "none"` and no output wire, beside a
+join form whose SSID field was free text. The scan told you the name and then asked you to type
+it back. Reported from a phone on the access point: scan, tap a network, nothing happens.
+
+It was filed here as a design matter and that was wrong. The reason to scan is not knowing the
+name, so a scan you have to transcribe is the feature defeating itself — and the device most
+likely to be holding this page is a phone, where a mistyped SSID costs five minutes of no access
+point while a doomed apply rolls back.
+
+The obvious fix was unavailable: `ui-form` cannot be pre-filled from a message — `beforeSend`
+handles `ui_update` for `label`, `options` and `dropdownOptions` only, and `passthru` is forced
+off — so a tappable table could not have filled the box. What a form *does* accept is
+`ui_update.dropdownOptions`.
+
+Closed in `eb8ac49`'s successor: the SSID field is a dropdown, `ssidOptions` in
+`src/net/scan.ts` turns a scan into its options, and `yonder-scan` gained a second output that
+carries them. One scan feeds both the table and the dropdown, because on a single-radio board a
+scan retunes the radio the operator is connected through (K-13) and doing it twice for one button
+is doing it once too often.
+
+The table stays, and stays unclickable: it is the readable list, with signal strengths, that tells
+you which of two identically-named networks you are standing next to.
+
 ### K-22 · The diagnostics probe refuses IPv6 addresses
 `src/diag/probe.ts`
 
@@ -478,7 +505,7 @@ installer's output. The shape of a fix is a separate flow file for an operator's
 which Node-RED does not offer directly, or a deliberate "keep mine" prompt the installer
 cannot ask on an unattended image build.
 
-### K-26 · ~~The instrument widgets have never been rendered by Dashboard~~ — CLOSED
+### K-28 · ~~The instrument widgets have never been rendered by Dashboard~~ — CLOSED
 
 `node-red-dashboard-2-yonder` ships five widgets — gauge, tape, annunciator, data bar and
 soft keys — and **not one of them has been drawn by Dashboard 2.x.** What is verified is
@@ -531,7 +558,7 @@ because Dashboard puts no `Vuex` on the page (the store is reached through `$sto
 components' night defaults — a **dark instrument on a day board**, which is the exact failure
 R-UI-07 exists to prevent and the one nobody notices in a lab at night.
 
-### K-27 · ~~The pages violate the language they are now measured against~~ — CLOSED
+### K-29 · ~~The pages violate the language they are now measured against~~ — CLOSED
 
 The capture gate found six violations of ADR-0009 on its first run, and they are recorded in
 `docs/console/accepted-violations.json` so that new ones fail while these do not:
@@ -564,3 +591,36 @@ on the way: a reading of `null` became `Number(null)` — zero, and finite — s
 thermal sensor drew **0.0 °C**, which says *cold* rather than *not there*. `facts.ts` is
 explicit that absent is null and never zero; the components were the other end of that rule
 and had it wrong.
+
+### K-30 · `yonder-confirm` is registered and used by nothing
+
+R-CFG-11 removed the operator confirmation: joining a network takes the access point off
+the air, so the console an operator would confirm from goes with it, and the device answers
+the real question itself instead. The wiring that used `yonder-confirm` went with that
+change and the node did not — `node-red-contrib-yonder-network` still registers it, and no
+flow references it.
+
+It is not harmless. A registered node that nothing uses is a node with no test exercising
+it end to end, and the next person to need a confirmation step will find one that has not
+been run since the flows stopped calling it. `scripts/verify-pages.sh` used to catch
+exactly this and stopped naming it in the same change, so nothing was watching either.
+
+**Closes when** either the node is removed with its route, or something uses it again — an
+apply that does not move the radio still goes through the engine's confirmation timer, so
+there may be a real caller here rather than a deletion.
+
+### K-31 · The network dropdown shows an error state before anything is scanned
+
+`join-ssid` is a required `ui-dropdown` with no options until a scan fills it, and Vuetify
+paints an empty required select in its error colour. So a page an operator has only just
+opened labels "Network" in red and says "No options available" — shouting about a list they
+have not asked for yet, in the one place the console should look calm.
+
+The generated stylesheet quietens the field outline and the helper text, and the *label*
+still comes through red: Vuetify resolves it from `--v-theme-error` rather than from a
+class the theme can reach, and setting that variable per widget needs the palette to carry
+RGB triplets it does not have.
+
+Cosmetic, and it is on the page an operator sees first. **Closes when** either the palette
+gains the triplets Vuetify wants, or the dropdown stops being `required` until a scan has
+run — which is arguably the truer fix, since before a scan there is nothing to require.

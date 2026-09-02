@@ -512,25 +512,69 @@ ${panelCss(theme)}
   padding-inline: var(--yonder-space-5);
 }
 
+/* Vuetify's block button is min-width:100% and flex:1 0 auto, not width, so
+   overriding width alone does nothing - which is how the first attempt at
+   this left every action still 704px wide.
+
+   And the second attempt left it 288px of 288px, because it answered with
+   flex properties and **the widget's own container is a grid**. flex and
+   align-self: flex-start are inert on the inline axis there; a grid item
+   stretches unless something says otherwise, and justify-self is what says
+   it. Both are set, because the parent is a grid here and could be a flex
+   row somewhere else, and neither costs anything in the other model.
+
+   The soft-key rail is where actions belong (R-UI-10), but a stock button
+   still appears where the task panel is the right home for it, and it must
+   not be a slab there either. */
 .nrdb-ui-button .v-btn.v-btn--block {
   width: auto;
-  min-width: 12rem;
+  min-width: 12rem !important;
+  flex: 0 0 auto;
+  align-self: flex-start;
+  justify-self: start;
 }
 
 /* Below this the column is too narrow for a button to sit beside anything,
    so it may as well take the width and be easy to hit. */
 @media (max-width: 599px) {
-  .nrdb-ui-button .v-btn.v-btn--block { width: 100%; }
+  .nrdb-ui-button .v-btn.v-btn--block {
+    min-width: 100% !important;
+    width: 100%;
+  }
 }
 
-/* A form's own submit is the one action not on the rail, because it belongs
-   to the field above it. It is still machined rather than flat. */
-.v-btn--variant-flat {
-  background: linear-gradient(180deg, rgba(255,255,255,0.10), rgba(0,0,0,0.28)),
-              var(--yonder-select) !important;
-  color: var(--yonder-on-tone) !important;
-  border: 1px solid var(--yonder-bezel) !important;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.28) !important;
+/* A stock action, in the same idiom as a soft key.
+   
+   Main's pages keep their controls inside the task panel, in the order the
+   operator does them, and that is the right home for them - but a filled
+   Vuetify button on a chart page reads as a web form, not as a control on an
+   instrument. So a stock button gets the key treatment: a machined face, a
+   hard edge, an engraved label in letterspaced caps. It is the same object
+   the rail is made of, wearing a different container. */
+.nrdb-ui-button .v-btn,
+.nrdb-ui-form-actions .v-btn,
+.v-btn--variant-flat,
+.v-btn--variant-elevated {
+  background: var(--yonder-raised) !important;
+  color: var(--yonder-value) !important;
+  border: 1px solid var(--yonder-divider) !important;
+  border-radius: 2px !important;
+  box-shadow: inset 0 1px 0 var(--yonder-lip) !important;
+  font-family: var(--yonder-font-mono) !important;
+  font-size: 0.75rem !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.13em !important;
+  text-transform: uppercase !important;
+  text-shadow: 0 1px 1px var(--yonder-engraved);
+}
+
+/* The one control on a page that takes the page away from the operator. On
+   this console that is Join: it retunes the radio and the access point goes
+   with it. Nothing else on any page carries this tone (R-UI-10). */
+.nrdb-ui-button .v-btn.yonder-irreversible,
+#nrdb-ui-widget-join-go .v-btn {
+  border-color: var(--yonder-irreversible) !important;
+  color: var(--yonder-irreversible) !important;
 }
 
 .v-btn--variant-outlined {
@@ -575,6 +619,18 @@ ${panelCss(theme)}
   outline-offset: 2px;
 }
 
+/* Nothing has been scanned yet, which is a state and not a fault. Vuetify
+   paints an empty required select in its error colour, so a page an operator
+   has only just opened shouts at them about a list they have not asked for. */
+.nrdb-ui-dropdown .v-field--error:not(.v-field--dirty),
+.nrdb-ui-dropdown .v-messages__message {
+  color: var(--yonder-label) !important;
+}
+
+.nrdb-ui-dropdown .v-field--error:not(.v-field--dirty) .v-field__outline {
+  color: var(--yonder-divider) !important;
+}
+
 /* ---- tables ---------------------------------------------------------- */
 .nrdb-ui-table table,
 .v-data-table {
@@ -595,6 +651,16 @@ ${panelCss(theme)}
   color: var(--yonder-value) !important;
   min-height: var(--yonder-touch);
   border-bottom: 1px solid var(--yonder-border) !important;
+}
+
+/* ---- a live log is not a paged report ---------------------------------
+   The activity pane is something you glance at while a command runs. Its
+   footer offers "Items per page" and first/previous/next/last over a list
+   that is already only the last few dozen lines, which is furniture for a
+   report rather than a readout - and it takes the vertical space the log
+   itself should have. Kept from main. */
+.nrdb-ui-table .v-data-table-footer {
+  display: none !important;
 }
 
 /* Signal strengths and channel numbers are quantities; an SSID is a name you
@@ -670,7 +736,7 @@ ${panelCss(theme)}
    the ping form 112px in 48px with 57% hidden. The join form is the one an
    operator fills in immediately *after* reading the warning above - so the
    page explained carefully what pressing Join would cost, and then hid the
-   field they had to type into to do it (K-27).
+   field they had to type into to do it (K-29).
 
    The rule is not about prose. It is: **a widget whose height is a function
    of its content, rather than of its shape, sizes to that content and the

@@ -96,11 +96,17 @@ export function fetched(reply: DaemonReply): Fetched {
 /**
  * `POST /apply`'s answer, in the command-state language.
  *
- * A successful apply is **pending**, never confirmed. That is the point of
- * R-CFG-03 and the thing a console most easily gets wrong: the change is in
- * force and will be undone unless the operator says, from the other side, that
- * they can still reach the device. A control that showed "done" here would be
- * telling the operator the opposite of what is about to happen.
+ * A successful apply is **pending**, never confirmed: the change is in force
+ * and will be undone unless something confirms it. What differs is *who*.
+ *
+ * A change that moves the Wi-Fi client is confirmed by the device itself
+ * (R-CFG-11) — it waits for an address and pings the gateway — so the
+ * operator is told what is happening and asked for nothing. Anything else is
+ * still theirs to confirm.
+ *
+ * Saying "confirm it to keep it" for a change nobody can confirm, from a
+ * console that is about to go off the air, is worse than saying nothing: it
+ * leaves an operator hunting for a button that is not there.
  */
 export function applyStatus(reply: DaemonReply, now: number): CommandStatus {
   const result = fetched(reply);
@@ -122,7 +128,9 @@ export function applyStatus(reply: DaemonReply, now: number): CommandStatus {
   const movesRadio = body?.movesRadio === true;
   return pending(
     movesRadio
-      ? "Applied. The access point is going away — reconnect and confirm, or this reverts."
+      ? "Joining. This page is about to go away. The device checks the network itself and "
+        + "keeps the change if it works — find it again at yonder.local:3000 or in your "
+        + "router's client list. If it does not work, the access point comes back."
       : "Applied. Confirm it to keep it, or it reverts on its own.",
     {
       at: now,

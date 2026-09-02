@@ -155,7 +155,7 @@ fi
 # editor shows an unknown type. Without this manifest, every widget registers,
 # every group resolves, Node-RED logs nothing at all, and the page draws an
 # empty box. That is exactly what the first build of the instrument widgets
-# did, and only the capture gate saw it (K-26).
+# did, and only the capture gate saw it (K-28).
 log "declaring the widget package where the dashboard looks for it"
 if [ "$DRY_RUN" = "1" ]; then
     log "would write $con_state/package.json and link its node_modules"

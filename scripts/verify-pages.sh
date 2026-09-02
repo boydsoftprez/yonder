@@ -255,7 +255,7 @@ ln -s "$CORE" "$CONSOLE/node_modules/yonder-core"
 # Dashboard discovers a third-party widget package by reading the *user
 # directory's* package.json for a dependency and resolving it beneath that
 # directory. A package in the console tree's node_modules is where Node-RED
-# finds the nodes and is invisible to that scan (K-26).
+# finds the nodes and is invisible to that scan (K-28).
 mkdir -p "$USERDIR/node_modules"
 rm -f "$USERDIR/node_modules/node-red-dashboard-2-yonder"
 ln -s "$REPO/packages/node-red-dashboard-2-yonder" \
@@ -309,7 +309,13 @@ else
     ok "the console logged no error at all"
 fi
 
-for type in yonder-status yonder-activity yonder-diag yonder-config yonder-scan yonder-apply yonder-confirm yonder-join; do
+# yonder-confirm is deliberately absent. R-CFG-11 removed the operator
+# confirmation - joining takes the access point off the air, so the console
+# you would confirm from goes with it, and the device answers the real
+# question itself. The node is still registered by its package and is now used
+# by nothing; that is recorded as K-30 rather than hidden by leaving it in a
+# list nothing checks.
+for type in yonder-status yonder-activity yonder-diag yonder-config yonder-scan yonder-apply yonder-join; do
     if grep -q "\"$type\"" "$USERDIR/flows.json" || grep -q "$type" "$REPO/flows/flows.json"; then
         ok "the flows use $type"
     else

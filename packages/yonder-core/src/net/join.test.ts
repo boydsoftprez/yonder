@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, it, expect } from "vitest";
-import { CLIENT_PSK_SECRET, joinNetwork, type SecretSink } from "./join.js";
+import { CLIENT_PSK_SECRET, joinNetwork, type SecretSink, leaveNetwork } from "./join.js";
 import { wifiMode } from "./profiles.js";
 import { ConfigSchema, DEFAULT_CONFIG } from "../schema/config.js";
 
@@ -105,5 +105,51 @@ describe("joinNetwork", () => {
     const secrets = sink();
     joinNetwork(DEFAULT_CONFIG, { ssid: "", psk: "a-passphrase" }, secrets);
     expect(secrets.stored).toEqual({});
+  });
+});
+
+/**
+ * The way back.
+ *
+ * Joining was a one-way door: the console could take the radio onto a network
+ * and had no control to bring it back, so an operator who joined the wrong
+ * one had no way to say so from the interface that put them there.
+ */
+describe("leaveNetwork", () => {
+  function joined(): Config {
+    const c = structuredClone(DEFAULT_CONFIG);
+    c.network.client.ssid = "HomeNetwork";
+    c.network.client.psk = { secret: "wifi_psk" };
+    return c;
+  }
+
+  it("clears the network, which is what puts the radio back on the access point", () => {
+    const left = leaveNetwork(joined());
+    expect(left.network.client.ssid).toBeNull();
+  });
+
+  it("drops the passphrase reference with it", () => {
+    // A secret still pointing at a network this device is not on is a stale
+    // reference waiting to resolve against the wrong thing.
+    expect(leaveNetwork(joined()).network.client.psk).toBeNull();
+  });
+
+  it("changes nothing else", () => {
+    const from = joined();
+    const left = leaveNetwork(from);
+    const expected = structuredClone(from);
+    expected.network.client = { ssid: null, psk: null };
+    expect(left).toEqual(expected);
+  });
+
+  it("never touches the configuration it was given", () => {
+    const from = joined();
+    const before = structuredClone(from);
+    leaveNetwork(from);
+    expect(from).toEqual(before);
+  });
+
+  it("is safe to ask for when the device is already on its access point", () => {
+    expect(leaveNetwork(DEFAULT_CONFIG)).toEqual(DEFAULT_CONFIG);
   });
 });

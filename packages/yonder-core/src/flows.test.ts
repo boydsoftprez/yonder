@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, it, expect } from "vitest";
 import { CONSOLE_HOME, THEME_HREF } from "./console/settings.js";
+import { JOIN_TOPIC } from "./net/join.js";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -281,33 +282,42 @@ describe("flows/flows.json", () => {
    * lists four things the form has to say before they press it, and this is
    * the test that they are all still there.
    */
-  it("warns, before the operator submits, what joining a network does", () => {
-    const warning = flows.find((n) => n.id === "warning-join");
-    const content = String(warning?.content ?? "").toLowerCase();
-    expect(warning, "the Wi-Fi form has no warning on it").toBeDefined();
-
-    // The access point is about to disappear.
-    expect(content).toContain("access point");
-    expect(content).toMatch(/disappear|goes away|go away/);
-    // Where to find the device afterwards.
-    expect(content).toContain("yonder.local");
-    expect(content).toMatch(/router|client list/);
-    // How long they have.
-    expect(content).toMatch(/\b5 minutes\b|\bfive minutes\b/);
-    // And that it comes back by itself if the password was wrong.
-    expect(content).toMatch(/wrong|did not|cannot join/);
-    expect(content).toMatch(/by itself|on its own|returns/);
+  /**
+   * Four facts, before the operator presses a button that takes the page away
+   * from them. Asserted as facts and not as phrasing: these used to be pinned
+   * to particular words — `/disappear|goes away/` — so trimming 239 words of
+   * explanation down to something readable broke the tests without changing
+   * anything they were actually there to protect.
+   */
+  /**
+   * The page carries no prose at all now, so the four facts an operator needs
+   * before the console disappears travel on the toast instead — delivered at
+   * the moment they matter rather than sitting permanently above a form
+   * nobody reads twice. `applyStatus` composes that message; `node.test.ts`
+   * asserts its content.
+   */
+  it("carries no prose on the page that joins a network", () => {
+    const page = flows.find((n) => n.type === "ui-page" && n.name === "Network");
+    const groups = new Set(
+      flows.filter((n) => n.type === "ui-group" && n.page === page?.id).map((n) => n.id),
+    );
+    const prose = flows.filter((n) => n.type === "ui-markdown" && groups.has(String(n.group)));
+    expect(prose.map((n) => n.id)).toEqual([]);
   });
 
   /**
-   * The honesty condition Task 6 set. `<hostname>.local` was not verified on
-   * hardware for this build, so the page may not promise it — it says what it
-   * needs and gives the fallback that always works.
+   * A console is read standing next to an aircraft, not at a desk. Every word
+   * on it is a word between an operator and the thing they came to do, so the
+   * budget is deliberately tight and deliberately enforced: this page carried
+   * 448 words of explanation, 239 of them in front of one button.
    */
-  it("does not promise that the device's name will resolve", () => {
-    const warning = String(flows.find((n) => n.id === "warning-join")?.content ?? "");
-    expect(warning).toMatch(/not verified|has not been verified/i);
-    expect(warning).toMatch(/router/i);
+  it("keeps the whole console under a readable word budget", () => {
+    const prose = flows
+      .filter((n) => n.type === "ui-markdown")
+      .map((n) => String(n.content ?? "").split(/\s+/).filter(Boolean).length);
+    const total = prose.reduce((a, b) => a + b, 0);
+    expect(total, `console prose is ${String(total)} words`).toBeLessThanOrEqual(200);
+    expect(Math.max(...prose), "no single note may become an essay").toBeLessThanOrEqual(70);
   });
 
   /**
@@ -344,13 +354,14 @@ describe("flows/flows.json", () => {
    * mistake of reaching for a stock button again, which is how all four
    * spanning actions got there in the first place.
    */
-  it("puts every action in a soft-key rail, and none in a stock button", () => {
-    expect(
-      flows.filter((n) => n.type === "ui-button").map((n) => n.id),
-      "an action is a stock ui-button, which is a whole row of its group and "
-      + "so always spans it (ADR-0009, R-UI-10)",
-    ).toEqual([]);
-
+  it("gives every soft-key rail keys that say what they do", () => {
+    // Not "no stock button anywhere". The Network page deliberately keeps its
+    // controls *inside* the task panel, in the order an operator does them —
+    // scan, choose, passphrase, join — because there the behaviour and the
+    // layout are one decision, and that decision came from a device. A rail
+    // there would undo it. What R-UI-10 actually needs is that no action
+    // *spans its surface*, and the capture gate checks exactly that in a real
+    // browser rather than being approximated here.
     const rails = flows.filter((n) => n.type === "ui-yonder-softkeys");
     expect(rails.length).toBeGreaterThan(0);
 
@@ -482,5 +493,229 @@ describe("flows/flows.json stylesheet injection", () => {
 
   it("carries CSS, not markup, because site:style is a style element", () => {
     expect(String(link?.format)).not.toMatch(/<link|<style|rel=/i);
+  });
+});
+
+/**
+ * You pick a network. You do not transcribe one.
+ *
+ * The scan table and a free-text SSID box meant the console told you the name
+ * and then asked you to type it back — on a phone, where the cost of a typo is
+ * the access point going away for five minutes while a doomed apply rolls
+ * back. `ui-form` cannot be pre-filled from a message, so a tappable table
+ * could not have filled the box; what it can take is `ui_update.dropdownOptions`.
+ * So the field is a dropdown and the scan feeds it.
+ */
+describe("flows/flows.json join controls", () => {
+  const ssid = flows.find((n) => n.id === "join-ssid");
+  const psk = flows.find((n) => n.id === "join-psk");
+  const go = flows.find((n) => n.id === "join-go");
+  const scan = flows.find((n) => n.type === "yonder-scan");
+
+  it("asks for the network as a choice, not as typing", () => {
+    expect(ssid?.type).toBe("ui-dropdown");
+  });
+
+  /**
+   * The reason this is three widgets and not one form: `ui-form` renders
+   * text, email, number, multiline, checkbox, switch, date, time and
+   * dropdown — and nothing masked. A passphrase in a `ui-form` would be on
+   * screen in clear. `ui-text-input` masks, and is its own widget.
+   */
+  it("masks the passphrase", () => {
+    expect(psk?.type).toBe("ui-text-input");
+    expect(psk?.mode).toBe("password");
+  });
+
+  it("labels each message so the node can tell them apart", () => {
+    expect([ssid?.topic, psk?.topic, go?.topic]).toEqual([
+      JOIN_TOPIC.ssid, JOIN_TOPIC.psk, JOIN_TOPIC.join,
+    ]);
+    for (const n of [ssid, psk, go]) expect(n?.topicType).toBe("str");
+  });
+
+  it("sends all three to the one node that holds them", () => {
+    for (const n of [ssid, psk, go]) expect((n?.wires as string[][])[0]).toContain("join");
+  });
+
+  it("never lets a widget echo what was typed back out", () => {
+    // passthru would put the passphrase on an outgoing message.
+    for (const n of [ssid, psk, go]) expect(n?.passthru ?? false).toBe(false);
+  });
+
+  it("feeds the dropdown from the scan's second output", () => {
+    const wires = scan?.wires as string[][];
+    expect(wires?.length, "yonder-scan must have two outputs wired").toBeGreaterThanOrEqual(2);
+    expect(wires[1]).toContain("join-ssid");
+  });
+
+  /**
+   * There is no table any more. It listed name, signal and security beside a
+   * dropdown that already carries name and signal, so it was a second copy of
+   * the thing you choose from — and it existed only because the scan needed
+   * somewhere to put its results before the dropdown did.
+   *
+   * The first output stays, unwired. It is the scan itself, which is the
+   * useful thing to hang anything else off later.
+   */
+  it("keeps the scan's own output available, wired to nothing", () => {
+    const wires = scan?.wires as string[][];
+    expect(wires[0]).toEqual([]);
+  });
+
+  /**
+   * One panel, in the order the operator does it: read what is about to
+   * happen, scan, choose, type the passphrase, join. It used to be three
+   * panels — widgets grouped by kind rather than by the task — for a single
+   * thing you are trying to do.
+   */
+  it("puts the whole task in one group, in the order it is done", () => {
+    const inGroup = flows
+      .filter((n) => n.group === "group-net-join")
+      .sort((a, b) => Number(a.order) - Number(b.order))
+      .map((n) => n.id);
+    // Access point or Wi-Fi, then choose, then the passphrase, then go.
+    expect(inGroup).toEqual(["button-leave", "button-scan", "join-ssid", "join-psk", "join-go"]);
+  });
+
+  it("has no leftover panel that held only the table", () => {
+    expect(flows.find((n) => n.id === "group-net-scan")).toBeUndefined();
+    expect(flows.find((n) => n.type === "ui-table" && n.group === "group-net-join")).toBeUndefined();
+  });
+
+  /**
+   * There is no confirmation step any more (R-CFG-11).
+   *
+   * There used to be a whole panel for it: join, lose the page, find the
+   * device on another network, sign in, navigate back, and press "Yes, I can
+   * still reach it" — inside five minutes, or a **working** configuration was
+   * thrown away because somebody was slow. The device establishes for itself
+   * whether the join took, so nothing is asked of the operator at all.
+   */
+  it("asks the operator to confirm nothing", () => {
+    expect(flows.find((n) => n.id === "group-net-confirm")).toBeUndefined();
+    expect(flows.find((n) => n.type === "yonder-confirm")).toBeUndefined();
+    const words = flows
+      .filter((n) => n.type === "ui-markdown" || n.type === "ui-button")
+      .map((n) => `${String(n.content ?? "")} ${String(n.label ?? "")}`.toLowerCase())
+      .join(" ");
+    expect(words).not.toMatch(/can still reach it|confirm within|press .?yes/);
+  });
+});
+
+/**
+ * The page has to say something at the moment it stops being able to.
+ *
+ * Pressing Join takes the access point down, so the console disappears
+ * mid-action. Without a toast the last thing an operator sees is a form that
+ * did nothing, and the natural read of that is "it's broken" — which is
+ * exactly what happened when this was tried on a phone.
+ */
+describe("flows/flows.json join feedback", () => {
+  const toast = flows.find((n) => n.type === "ui-notification");
+  const join = flows.find((n) => n.type === "yonder-join");
+
+  it("tells the operator what is happening when they press Join", () => {
+    expect(toast, "there must be somewhere for the join's answer to appear").toBeDefined();
+    expect((join?.wires as string[][])[0]).toContain(toast?.id);
+  });
+
+  it("shows a countdown, so a message that lingers does not look stuck", () => {
+    expect(toast?.showCountdown).toBe(true);
+    expect(Number(toast?.displayTime)).toBeGreaterThanOrEqual(10);
+  });
+
+  it("can be dismissed, and asks nothing of the operator", () => {
+    expect(toast?.allowDismiss).toBe(true);
+    // A confirm button here would be the confirmation R-CFG-11 removed,
+    // reintroduced as a popup.
+    expect(toast?.allowConfirm).toBe(false);
+  });
+
+  /**
+   * It stored `flow.yonderApply` for a confirm button that no longer exists,
+   * and nothing read it. It is also the same flow-context caching that made
+   * the theme control edit a configuration in place.
+   */
+  it("keeps nothing in flow context for a step that was removed", () => {
+    expect(flows.find((n) => n.id === "remember-apply")).toBeUndefined();
+    expect(JSON.stringify(flows)).not.toContain("yonderApply");
+  });
+});
+
+/**
+ * A notification belongs to the dashboard, not to a page.
+ *
+ * `ui_notification.js` says so in as many words — *"In contradiction to other
+ * ui nodes (which belong to a group), the notification node belongs to a ui
+ * instead"* — and resolves `RED.nodes.getNode(config.ui)`. Pointed at a page
+ * id it silently never registers, which is exactly what happened: an operator
+ * pressed Join, no toast appeared, and the page sat there telling them
+ * nothing about whether they were still connected.
+ */
+describe("flows/flows.json notification target", () => {
+  it("attaches the toast to the dashboard, not to a page", () => {
+    const base = flows.find((n) => n.type === "ui-base");
+    const pages = new Set(flows.filter((n) => n.type === "ui-page").map((n) => n.id));
+    for (const toast of flows.filter((n) => n.type === "ui-notification")) {
+      expect(toast.ui, `${String(toast.id)} must name the ui-base`).toBe(base?.id);
+      expect(pages.has(String(toast.ui)), `${String(toast.id)} names a page`).toBe(false);
+    }
+  });
+});
+
+/**
+ * The page whose job is joining a network must show whether you are on one.
+ *
+ * This readout was moved to Status on the reasoning that it describes what
+ * the device *is*. In use that was plainly wrong: an operator who has just
+ * pressed Join is standing on the Network page, and it could tell them
+ * nothing — not whether it worked, not what they were connected to, not
+ * whether they were in limbo.
+ */
+describe("flows/flows.json network page", () => {
+  it("shows where the device is, on the page where you change it", () => {
+    const page = flows.find((n) => n.type === "ui-page" && n.name === "Network");
+    const groups = flows.filter((n) => n.type === "ui-group" && n.page === page?.id);
+    const ids = new Set(groups.map((g) => g.id));
+    const readouts = flows.filter((n) => ids.has(String(n.group)) && n.type === "ui-text");
+    // One line that says what the radio is doing, rather than two raw
+    // configuration fields the operator has to reconcile themselves.
+    const values = readouts.map((n) => String(n.value));
+    expect(values).toContain("payload.summary");
+    expect(values).toContain("payload.address");
+  });
+
+  it("puts what you are connected to above the controls that change it", () => {
+    const page = flows.find((n) => n.type === "ui-page" && n.name === "Network");
+    const groups = flows
+      .filter((n) => n.type === "ui-group" && n.page === page?.id)
+      .sort((a, b) => Number(a.order) - Number(b.order));
+    expect(groups[0]?.id).toBe("group-net-now");
+    expect(groups[1]?.id).toBe("group-net-join");
+  });
+});
+
+/**
+ * The activity pane must accumulate, not replace.
+ *
+ * `yonder-activity` emits only what is new since its own cursor, so a table
+ * set to `replace` is wiped the moment a poll returns nothing — which is most
+ * polls on an idle device. Reported from the board: "activity shows activity
+ * then clears out before I can read it".
+ */
+describe("flows/flows.json activity panes", () => {
+  const tables = flows.filter((n) => n.type === "ui-table" && String(n.id).includes("activity"));
+
+  it("has at least one", () => {
+    expect(tables.length).toBeGreaterThan(0);
+  });
+
+  it("appends, because the source only ever sends what is new", () => {
+    for (const t of tables) {
+      expect(t.action, `${String(t.id)} must append`).toBe("append");
+      // And is bounded, or an append-only pane is a leak with a nice name.
+      expect(Number(t.maxrows)).toBeGreaterThan(0);
+    }
   });
 });

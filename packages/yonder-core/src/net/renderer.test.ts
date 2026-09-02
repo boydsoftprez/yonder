@@ -691,26 +691,33 @@ describe("moving the radio", () => {
    * The operator is talking to this device over the access point, and the
    * access point is on the radio being retuned. Raise first, lower second.
    */
-  it("raises the client before it takes the access point down", async () => {
+  it("takes the access point down before it raises the client", async () => {
+    // One radio cannot associate while it is serving an access point. The
+    // board answers `The Wi-Fi network could not be found` if you try.
     const { renderer, calls, secrets } = harness({ devices: withApActive(DEVICES) });
     secrets.ensure("wifi_psk", "psk");
     await renderer.render(joining());
-    expect(order(calls)).toEqual([`up ${CLIENT_CONNECTION}`, `down ${AP_CONNECTION}`]);
+    expect(order(calls)).toEqual([`down ${AP_CONNECTION}`, `up ${CLIENT_CONNECTION}`]);
   });
 
   /**
-   * The whole point of that order. A board that never associates must still
-   * have the access point the operator is watching this apply through.
+   * The board is now at its most exposed: the access point is down, the radio
+   * is free, and the client did not associate. Nothing is on the air, and
+   * putting the access point back is the only thing between the operator and
+   * a device they cannot reach.
    */
-  it("leaves the access point up when the client does not associate", async () => {
+  it("puts the access point back when the client does not associate", async () => {
     const { renderer, calls, secrets } = harness({
       devices: withApActive(DEVICES),
       fails: { [`nmcli connection up ${CLIENT_CONNECTION}`]: ASSOCIATION_FAILED },
     });
     secrets.ensure("wifi_psk", "psk");
     await expect(renderer.render(joining())).rejects.toThrow(/nmcli exited 4/);
-    expect(order(calls)).toEqual([`up ${CLIENT_CONNECTION}`]);
-    expect(order(calls)).not.toContain(`down ${AP_CONNECTION}`);
+    expect(order(calls)).toEqual([
+      `down ${AP_CONNECTION}`,
+      `up ${CLIENT_CONNECTION}`,
+      `up ${AP_CONNECTION}`,
+    ]);
   });
 
   /**
@@ -763,14 +770,27 @@ describe("moving the radio", () => {
    * brings it back — including the operator watching the apply. So the rescue
    * is conditional, and when there was nothing to rescue it does nothing.
    */
-  it("does not re-raise an access point that is already on the air", async () => {
+  /**
+   * Raised once, not twice.
+   *
+   * The guard behind this used to be about not re-raising an access point
+   * that was still on the air — a real hazard, because `up` on a live access
+   * point drops every joined station and brings it back, including the
+   * operator watching the apply. With the ordering inverted that state can no
+   * longer occur in client mode: the access point is always taken down first,
+   * so it is never up when the client fails.
+   *
+   * What is still worth pinning is the property that survives: the recovery
+   * issues exactly one `up`, so a failure cannot turn into a flapping radio.
+   */
+  it("raises the access point exactly once when the client fails", async () => {
     const { renderer, calls, secrets } = harness({
       devices: withApActive(DEVICES),
       fails: { [`nmcli connection up ${CLIENT_CONNECTION}`]: ASSOCIATION_FAILED },
     });
     secrets.ensure("wifi_psk", "psk");
     await expect(renderer.render(joining())).rejects.toThrow();
-    expect(order(calls).filter((o) => o === `up ${AP_CONNECTION}`)).toEqual([]);
+    expect(order(calls).filter((o) => o === `up ${AP_CONNECTION}`)).toHaveLength(1);
   });
 
   it("still says what it is doing in the words the hardware procedure quotes", async () => {

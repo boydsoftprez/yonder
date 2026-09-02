@@ -1,0 +1,26 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<script type="text/html" data-template-name="yonder-netstate">
+  <div class="form-row">
+    <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name" />
+  </div>
+</script>
+
+<script type="text/html" data-help-name="yonder-netstate">
+<p>Reads <code>GET /net/state</code>: what the radio is actually doing, computed
+from the configuration and the devices together.</p>
+<p><code>msg.payload</code> carries <code>mode</code>, <code>summary</code>,
+<code>network</code> and <code>address</code>.</p>
+</script>
+
+<script type="text/javascript">
+  RED.nodes.registerType("yonder-netstate", {
+    category: "yonder",
+    color: "#c7d4e0",
+    defaults: { name: { value: "" } },
+    inputs: 1,
+    outputs: 1,
+    icon: "font-awesome/fa-signal",
+    label: function () { return this.name || "network state"; },
+  });
+</script>

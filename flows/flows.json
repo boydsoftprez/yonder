@@ -221,26 +221,12 @@
     {
         "id": "group-net-now",
         "type": "ui-group",
-        "name": "Where this device is now",
+        "name": "",
         "page": "page-network",
         "width": 6,
         "height": 1,
         "order": 1,
-        "showTitle": true,
-        "className": "",
-        "visible": true,
-        "disabled": false,
-        "groupType": "default"
-    },
-    {
-        "id": "group-net-scan",
-        "type": "ui-group",
-        "name": "Networks in range",
-        "page": "page-network",
-        "width": 6,
-        "height": 1,
-        "order": 2,
-        "showTitle": true,
+        "showTitle": false,
         "className": "",
         "visible": true,
         "disabled": false,
@@ -249,25 +235,11 @@
     {
         "id": "group-net-join",
         "type": "ui-group",
-        "name": "Join a network",
+        "name": "Wi-Fi",
         "page": "page-network",
         "width": 6,
         "height": 1,
-        "order": 3,
-        "showTitle": true,
-        "className": "",
-        "visible": true,
-        "disabled": false,
-        "groupType": "default"
-    },
-    {
-        "id": "group-net-confirm",
-        "type": "ui-group",
-        "name": "After it comes back",
-        "page": "page-network",
-        "width": 6,
-        "height": 1,
-        "order": 4,
+        "order": 2,
         "showTitle": true,
         "className": "",
         "visible": true,
@@ -362,7 +334,7 @@
         "width": 6,
         "height": 2,
         "name": "what changing this costs",
-        "content": "**Day is the chart and night is the display.** Two modes for two conditions, not one at two brightnesses — in direct sunlight a dark screen is a mirror, so day is a light page; after dusk a light page destroys dark adaptation, so night is the glass display in its panel.\n\nThe layout is identical between them. Nothing moves, nothing is renamed, no instrument appears or disappears — only the material changes.\n\nChanging it is a configuration change like any other. It is applied straight away and it reverts by itself unless you confirm it on the Network page. The console is not restarted, so you stay signed in — refresh the page to see it.",
+        "content": "**Day is the chart. Night is the display.**\n\nIn sunlight a dark screen is a mirror, so day is a light page. After dusk a light page costs dark adaptation, so night is the glass display in its panel.\n\nThe layout is the same in both. Only the material changes.",
         "className": "",
         "x": 200,
         "y": 380,
@@ -376,11 +348,7 @@
         "x": 820,
         "y": 430,
         "wires": [
-            [
-                "remember-apply",
-                "text-apply-state",
-                "ann-network"
-            ]
+            []
         ]
     },
     {
@@ -409,6 +377,45 @@
         ]
     },
     {
+        "id": "button-reread",
+        "type": "ui-button",
+        "z": "yonder-console",
+        "group": "group-net-now",
+        "order": 1,
+        "width": 3,
+        "height": 1,
+        "label": "Refresh",
+        "tooltip": "",
+        "color": "",
+        "bgcolor": "",
+        "className": "",
+        "icon": "",
+        "iconPosition": "left",
+        "payload": "",
+        "payloadType": "str",
+        "topic": "",
+        "topicType": "str",
+        "buttonColor": "",
+        "textColor": "",
+        "iconColor": "",
+        "enableClick": true,
+        "enablePointerdown": false,
+        "pointerdownPayload": "",
+        "pointerdownPayloadType": "str",
+        "enablePointerup": false,
+        "pointerupPayload": "",
+        "pointerupPayloadType": "str",
+        "emulateClick": false,
+        "x": 200,
+        "y": 570,
+        "wires": [
+            [
+                "read-config",
+                "netstate"
+            ]
+        ]
+    },
+    {
         "id": "read-config",
         "type": "yonder-config",
         "z": "yonder-console",
@@ -416,99 +423,46 @@
         "x": 500,
         "y": 540,
         "wires": [
-            [
-                "text-client-ssid",
-                "text-ap-ssid",
-                "text-hostname"
-            ]
+            []
         ]
     },
     {
-        "id": "text-client-ssid",
-        "type": "ui-text",
+        "id": "button-scan",
+        "type": "ui-button",
         "z": "yonder-console",
-        "group": "group-net-now",
+        "group": "group-net-join",
         "order": 2,
-        "width": 6,
+        "width": 3,
         "height": 1,
-        "name": "joined network",
-        "label": "Joined Wi-Fi network",
-        "format": "{{msg.payload}}",
-        "layout": "row-spread",
-        "style": false,
-        "font": "",
-        "fontSize": 16,
-        "color": "#717171",
-        "wrapText": false,
+        "label": "Scan",
+        "tooltip": "",
+        "color": "",
+        "bgcolor": "",
         "className": "",
-        "x": 840,
-        "y": 540,
-        "wires": [],
-        "value": "payload.network.client.ssid",
-        "valueType": "msg"
-    },
-    {
-        "id": "text-ap-ssid",
-        "type": "ui-text",
-        "z": "yonder-console",
-        "group": "group-net-now",
-        "order": 3,
-        "width": 6,
-        "height": 1,
-        "name": "access point",
-        "label": "Access point",
-        "format": "{{msg.payload}}",
-        "layout": "row-spread",
-        "style": false,
-        "font": "",
-        "fontSize": 16,
-        "color": "#717171",
-        "wrapText": false,
-        "className": "",
-        "x": 840,
-        "y": 580,
-        "wires": [],
-        "value": "payload.network.ap.ssid",
-        "valueType": "msg"
-    },
-    {
-        "id": "text-hostname",
-        "type": "ui-text",
-        "z": "yonder-console",
-        "group": "group-net-now",
-        "order": 4,
-        "width": 6,
-        "height": 1,
-        "name": "hostname",
-        "label": "Name on the network",
-        "format": "{{msg.payload}}",
-        "layout": "row-spread",
-        "style": false,
-        "font": "",
-        "fontSize": 16,
-        "color": "#717171",
-        "wrapText": false,
-        "className": "",
-        "x": 840,
-        "y": 620,
-        "wires": [],
-        "value": "payload.system.hostname",
-        "valueType": "msg"
-    },
-    {
-        "id": "note-net-now",
-        "type": "ui-markdown",
-        "z": "yonder-console",
-        "group": "group-net-now",
-        "order": 5,
-        "width": 6,
-        "height": 2,
-        "name": "what a blank means",
-        "content": "A blank **Joined Wi-Fi network** means this device has not been given one, and is running its own access point instead.\n\nThis board has one radio, so it can do one of those at a time.",
-        "className": "",
+        "icon": "",
+        "iconPosition": "left",
+        "payload": "",
+        "payloadType": "str",
+        "topic": "",
+        "topicType": "str",
+        "buttonColor": "",
+        "textColor": "",
+        "iconColor": "",
+        "enableClick": true,
+        "enablePointerdown": false,
+        "pointerdownPayload": "",
+        "pointerdownPayloadType": "str",
+        "enablePointerup": false,
+        "pointerupPayload": "",
+        "pointerupPayloadType": "str",
+        "emulateClick": false,
         "x": 200,
-        "y": 620,
-        "wires": []
+        "y": 690,
+        "wires": [
+            [
+                "scan"
+            ]
+        ]
     },
     {
         "id": "scan",
@@ -518,146 +472,9 @@
         "x": 500,
         "y": 690,
         "wires": [
+            [],
             [
-                "scan-rows"
-            ]
-        ]
-    },
-    {
-        "id": "scan-rows",
-        "type": "change",
-        "z": "yonder-console",
-        "name": "the rows, for the table",
-        "rules": [
-            {
-                "t": "move",
-                "p": "payload.networks",
-                "pt": "msg",
-                "to": "payload",
-                "tot": "msg"
-            }
-        ],
-        "action": "",
-        "property": "",
-        "from": "",
-        "to": "",
-        "reg": false,
-        "x": 760,
-        "y": 690,
-        "wires": [
-            [
-                "table-scan"
-            ]
-        ]
-    },
-    {
-        "id": "table-scan",
-        "type": "ui-table",
-        "z": "yonder-console",
-        "group": "group-net-scan",
-        "name": "networks in range",
-        "label": "",
-        "order": 2,
-        "width": 6,
-        "height": 6,
-        "maxrows": 0,
-        "passthru": false,
-        "autocols": false,
-        "showSearch": false,
-        "selectionType": "none",
-        "deselect": true,
-        "action": "replace",
-        "columns": [
-            {
-                "title": "Network",
-                "key": "ssid",
-                "type": "text",
-                "width": "",
-                "align": "start"
-            },
-            {
-                "title": "Signal",
-                "key": "signal",
-                "type": "text",
-                "width": "80px",
-                "align": "end"
-            },
-            {
-                "title": "Security",
-                "key": "security",
-                "type": "text",
-                "width": "",
-                "align": "start"
-            }
-        ],
-        "mobileBreakpoint": "sm",
-        "mobileBreakpointType": "defaults",
-        "className": "",
-        "x": 1020,
-        "y": 690,
-        "wires": [
-            []
-        ]
-    },
-    {
-        "id": "warning-join",
-        "type": "ui-markdown",
-        "z": "yonder-console",
-        "group": "group-net-join",
-        "order": 1,
-        "width": 6,
-        "height": 6,
-        "name": "what is about to happen",
-        "content": "### Read this before you join a network\n\nThis board has **one Wi-Fi radio**. It can run its own access point, or it can join a network. It cannot do both.\n\nSo the moment you press Join:\n\n1. **The `yonder` access point disappears.** Your browser will lose this page. That is not a fault — it is the radio being retuned to the network you chose.\n2. Join that same network yourself, then open the console again at **`http://yonder.local:3000/dashboard`**. If that name does not work on your network or your device, look for the device in your router's list of connected clients and use its address instead. (See the note below.)\n3. **Come back within 5 minutes and press \"Yes, I can still reach it\".** If you do not, the device puts everything back the way it was and the access point returns by itself.\n\n**If the password was wrong, do nothing.** The device cannot join, so it gives up, restores the old configuration, and brings the `yonder` access point back on its own. Wait for the five minutes, rejoin `yonder`, and try again.\n\n---\n\n*About the name:* this device publishes `yonder.local` over mDNS. That works on macOS and iOS, on Windows 10 and later, and on many Android versions — but not on every network and not on every device, and it has not been verified on real hardware for this build. The router's client list always works.",
-        "className": "yonder-warning",
-        "x": 200,
-        "y": 780,
-        "wires": []
-    },
-    {
-        "id": "form-join",
-        "type": "ui-form",
-        "z": "yonder-console",
-        "group": "group-net-join",
-        "name": "join a network",
-        "label": "",
-        "order": 2,
-        "width": 6,
-        "height": 1,
-        "options": [
-            {
-                "label": "Network name (SSID)",
-                "key": "ssid",
-                "type": "text",
-                "required": true,
-                "rows": null
-            },
-            {
-                "label": "Password",
-                "key": "psk",
-                "type": "password",
-                "required": false,
-                "rows": null
-            }
-        ],
-        "formValue": {
-            "ssid": "",
-            "psk": ""
-        },
-        "payload": "",
-        "topic": "",
-        "topicType": "msg",
-        "splitLayout": false,
-        "className": "",
-        "passthru": false,
-        "resetOnSubmit": true,
-        "submit": "Join — the access point will go away",
-        "cancel": "Clear",
-        "x": 200,
-        "y": 860,
-        "wires": [
-            [
-                "join"
+                "join-ssid"
             ]
         ]
     },
@@ -670,138 +487,9 @@
         "y": 860,
         "wires": [
             [
-                "remember-apply",
-                "text-apply-state"
+                "join-toast"
             ]
         ]
-    },
-    {
-        "id": "remember-apply",
-        "type": "change",
-        "z": "yonder-console",
-        "name": "keep the apply, so it can be confirmed",
-        "rules": [
-            {
-                "t": "set",
-                "p": "yonderApply",
-                "pt": "flow",
-                "to": "yonder",
-                "tot": "msg"
-            }
-        ],
-        "action": "",
-        "property": "",
-        "from": "",
-        "to": "",
-        "reg": false,
-        "x": 820,
-        "y": 860,
-        "wires": [
-            []
-        ]
-    },
-    {
-        "id": "text-apply-state",
-        "type": "ui-text",
-        "z": "yonder-console",
-        "group": "group-net-confirm",
-        "order": 1,
-        "width": 6,
-        "height": 2,
-        "name": "what the device said",
-        "label": "",
-        "format": "{{msg.payload}}",
-        "layout": "col-center",
-        "style": false,
-        "font": "",
-        "fontSize": 16,
-        "color": "#717171",
-        "wrapText": true,
-        "className": "yonder-note",
-        "x": 820,
-        "y": 920,
-        "wires": [],
-        "value": "payload.message",
-        "valueType": "msg"
-    },
-    {
-        "id": "note-confirm",
-        "type": "ui-markdown",
-        "z": "yonder-console",
-        "group": "group-net-confirm",
-        "order": 2,
-        "width": 6,
-        "height": 3,
-        "name": "why this button exists",
-        "content": "A change is only kept if you can still reach the device afterwards — so the device asks you to say so from wherever you are now.\n\nIf you do not, it puts the previous configuration back by itself and the access point returns. Nothing is lost by waiting.",
-        "className": "",
-        "x": 200,
-        "y": 980,
-        "wires": []
-    },
-    {
-        "id": "recall-apply",
-        "type": "change",
-        "z": "yonder-console",
-        "name": "the apply this is about",
-        "rules": [
-            {
-                "t": "set",
-                "p": "yonder",
-                "pt": "msg",
-                "to": "yonderApply",
-                "tot": "flow"
-            }
-        ],
-        "action": "",
-        "property": "",
-        "from": "",
-        "to": "",
-        "reg": false,
-        "x": 500,
-        "y": 1040,
-        "wires": [
-            [
-                "confirm"
-            ]
-        ]
-    },
-    {
-        "id": "confirm",
-        "type": "yonder-confirm",
-        "z": "yonder-console",
-        "name": "confirm",
-        "x": 780,
-        "y": 1040,
-        "wires": [
-            [
-                "text-confirm-state"
-            ]
-        ]
-    },
-    {
-        "id": "text-confirm-state",
-        "type": "ui-text",
-        "z": "yonder-console",
-        "group": "group-net-confirm",
-        "order": 4,
-        "width": 6,
-        "height": 2,
-        "name": "confirmation",
-        "label": "",
-        "format": "{{msg.payload}}",
-        "layout": "col-center",
-        "style": false,
-        "font": "",
-        "fontSize": 16,
-        "color": "#717171",
-        "wrapText": true,
-        "className": "yonder-note",
-        "x": 1040,
-        "y": 1040,
-        "wires": [],
-        "value": "payload.message",
-        "valueType": "msg"
     },
     {
         "id": "activity-poll",
@@ -1002,7 +690,7 @@
         "width": 6,
         "height": 3,
         "name": "what this actually tests",
-        "content": "This sends a few packets to one well-known public address and reports whether any came back. Nothing else on this device contacts anything off it.\n\nIt is evidence, not proof. A network that blocks this kind of packet reports *no reply* while carrying traffic perfectly well, and a captive portal reports *replied* while carrying nothing you want.",
+        "content": "Sends a few packets to a public address. A network that blocks them reports *no reply* while working perfectly well.",
         "className": "",
         "x": 200,
         "y": 1300,
@@ -1079,23 +767,284 @@
         "x": 500,
         "y": 430,
         "wires": [
+            []
+        ]
+    },
+    {
+        "id": "join-ssid",
+        "type": "ui-dropdown",
+        "z": "yonder-console",
+        "group": "group-net-join",
+        "name": "network",
+        "label": "Network",
+        "tooltip": "",
+        "place": "Choose a network",
+        "order": 3,
+        "width": 6,
+        "height": 1,
+        "passthru": false,
+        "multiple": false,
+        "chips": false,
+        "options": [],
+        "payload": "",
+        "payloadType": "str",
+        "topic": "ssid",
+        "topicType": "str",
+        "className": "",
+        "x": 200,
+        "y": 860,
+        "wires": [
             [
-                "text-apply-state"
+                "join"
             ]
         ]
     },
     {
-        "id": "group-rail-status",
+        "id": "join-psk",
+        "type": "ui-text-input",
+        "z": "yonder-console",
+        "group": "group-net-join",
+        "name": "passphrase",
+        "label": "Password",
+        "tooltip": "",
+        "order": 4,
+        "width": 6,
+        "height": 1,
+        "topic": "psk",
+        "topicType": "str",
+        "mode": "password",
+        "delay": 300,
+        "passthru": false,
+        "sendOnBlur": true,
+        "className": "",
+        "icon": "",
+        "iconPosition": "left",
+        "clearable": false,
+        "sendOnDelay": true,
+        "x": 200,
+        "y": 900,
+        "wires": [
+            [
+                "join"
+            ]
+        ]
+    },
+    {
+        "id": "join-go",
+        "type": "ui-button",
+        "z": "yonder-console",
+        "group": "group-net-join",
+        "name": "join",
+        "label": "Join",
+        "order": 5,
+        "width": 3,
+        "height": 1,
+        "tooltip": "",
+        "color": "",
+        "bgcolor": "",
+        "className": "",
+        "icon": "",
+        "payload": "",
+        "payloadType": "str",
+        "topic": "join",
+        "topicType": "str",
+        "buttonColor": "",
+        "textColor": "",
+        "iconColor": "",
+        "enablePointerdown": false,
+        "x": 200,
+        "y": 940,
+        "wires": [
+            [
+                "join"
+            ]
+        ]
+    },
+    {
+        "id": "join-toast",
+        "type": "ui-notification",
+        "z": "yonder-console",
+        "ui": "dashboard",
+        "name": "what is happening",
+        "position": "top right",
+        "colorDefault": true,
+        "color": null,
+        "displayTime": "20",
+        "showCountdown": true,
+        "outputs": 0,
+        "allowDismiss": true,
+        "dismissText": "Dismiss",
+        "allowConfirm": false,
+        "confirmText": "",
+        "raw": false,
+        "className": "",
+        "x": 380,
+        "y": 940,
+        "wires": []
+    },
+    {
+        "id": "button-leave",
+        "type": "ui-button",
+        "z": "yonder-console",
+        "group": "group-net-join",
+        "name": "leave",
+        "order": 1,
+        "width": 3,
+        "height": 1,
+        "label": "Use access point",
+        "tooltip": "",
+        "color": "",
+        "bgcolor": "",
+        "className": "",
+        "icon": "",
+        "payload": "",
+        "payloadType": "str",
+        "topic": "leave",
+        "topicType": "str",
+        "buttonColor": "",
+        "textColor": "",
+        "iconColor": "",
+        "enablePointerdown": false,
+        "x": 200,
+        "y": 690,
+        "wires": [
+            [
+                "join"
+            ]
+        ]
+    },
+    {
+        "id": "netstate",
+        "type": "yonder-netstate",
+        "z": "yonder-console",
+        "name": "state",
+        "x": 200,
+        "y": 60,
+        "wires": [
+            [
+                "text-netstate",
+                "text-netaddr"
+            ]
+        ],
+        "interval": 5
+    },
+    {
+        "id": "text-netstate",
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-net-now",
+        "order": 2,
+        "width": 8,
+        "height": 1,
+        "name": "summary",
+        "label": "",
+        "format": "{{msg.payload}}",
+        "layout": "col-center",
+        "value": "payload.summary",
+        "valueType": "msg",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "wrapText": false,
+        "className": "",
+        "x": 460,
+        "y": 40,
+        "wires": []
+    },
+    {
+        "id": "text-netaddr",
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-net-now",
+        "order": 3,
+        "width": 4,
+        "height": 1,
+        "name": "address",
+        "label": "Address",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "value": "payload.address",
+        "valueType": "msg",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "wrapText": false,
+        "className": "",
+        "x": 460,
+        "y": 80,
+        "wires": []
+    },
+    {
+        "id": "group-net-activity",
         "type": "ui-group",
-        "name": "Controls",
-        "page": "page-status",
+        "name": "Activity",
+        "page": "page-network",
         "width": 12,
         "height": 1,
-        "order": 20,
-        "showTitle": false,
-        "className": "yonder-rail",
+        "order": 3,
+        "showTitle": true,
+        "className": "",
         "visible": true,
-        "disabled": false
+        "disabled": false,
+        "groupType": "default"
+    },
+    {
+        "id": "net-activity",
+        "type": "yonder-activity",
+        "z": "yonder-console",
+        "name": "activity",
+        "interval": 3,
+        "x": 200,
+        "y": 140,
+        "wires": [
+            [
+                "table-net-activity"
+            ]
+        ]
+    },
+    {
+        "id": "table-net-activity",
+        "type": "ui-table",
+        "z": "yonder-console",
+        "group": "group-net-activity",
+        "name": "what the device is doing",
+        "label": "",
+        "order": 1,
+        "width": 12,
+        "height": 6,
+        "maxrows": 200,
+        "passthru": false,
+        "autocols": false,
+        "showSearch": false,
+        "selectionType": "none",
+        "deselect": true,
+        "action": "append",
+        "mobileBreakpoint": "sm",
+        "mobileBreakpointType": "defaults",
+        "className": "",
+        "columns": [
+            {
+                "title": "Time",
+                "key": "time",
+                "type": "text",
+                "width": "",
+                "align": "start"
+            },
+            {
+                "title": "",
+                "key": "message",
+                "type": "text",
+                "width": "",
+                "align": "start"
+            }
+        ],
+        "x": 460,
+        "y": 140,
+        "wires": [
+            []
+        ]
     },
     {
         "id": "pick-load",
@@ -1248,21 +1197,6 @@
         "z": "yonder-console"
     },
     {
-        "id": "bar-board",
-        "type": "ui-yonder-databar",
-        "group": "group-board",
-        "name": "board facts",
-        "order": 4,
-        "width": 8,
-        "height": 1,
-        "label": "",
-        "cells": "[{\"key\":\"model\",\"label\":\"BOARD\"},{\"key\":\"uptime\",\"label\":\"UP FOR\"},{\"key\":\"yonder\",\"label\":\"YONDER\",\"kind\":\"id\"},{\"key\":\"os\",\"label\":\"SYSTEM\",\"kind\":\"id\"}]",
-        "x": 700,
-        "y": 300,
-        "wires": [],
-        "z": "yonder-console"
-    },
-    {
         "id": "pick-facts",
         "type": "change",
         "name": "the facts, as the data bar reads them",
@@ -1290,6 +1224,34 @@
         "z": "yonder-console"
     },
     {
+        "id": "bar-board",
+        "type": "ui-yonder-databar",
+        "group": "group-board",
+        "name": "board facts",
+        "order": 4,
+        "width": 8,
+        "height": 1,
+        "label": "",
+        "cells": "[{\"key\":\"model\",\"label\":\"BOARD\"},{\"key\":\"uptime\",\"label\":\"UP FOR\"},{\"key\":\"yonder\",\"label\":\"YONDER\",\"kind\":\"id\"},{\"key\":\"os\",\"label\":\"SYSTEM\",\"kind\":\"id\"}]",
+        "x": 700,
+        "y": 300,
+        "wires": [],
+        "z": "yonder-console"
+    },
+    {
+        "id": "group-rail-status",
+        "type": "ui-group",
+        "name": "Controls",
+        "page": "page-status",
+        "width": 12,
+        "height": 1,
+        "order": 20,
+        "showTitle": false,
+        "className": "yonder-rail",
+        "visible": true,
+        "disabled": false
+    },
+    {
         "id": "keys-status",
         "type": "ui-yonder-softkeys",
         "group": "group-rail-status",
@@ -1303,78 +1265,6 @@
         "wires": [
             [
                 "theme-apply"
-            ]
-        ],
-        "z": "yonder-console"
-    },
-    {
-        "id": "group-rail-network",
-        "type": "ui-group",
-        "name": "Controls",
-        "page": "page-network",
-        "width": 12,
-        "height": 1,
-        "order": 20,
-        "showTitle": false,
-        "className": "yonder-rail",
-        "visible": true,
-        "disabled": false
-    },
-    {
-        "id": "keys-network",
-        "type": "ui-yonder-softkeys",
-        "group": "group-rail-network",
-        "name": "actions",
-        "order": 1,
-        "width": 12,
-        "height": 1,
-        "keys": "[{\"label\":\"REFRESH\",\"action\":\"refresh\",\"tone\":\"act\"},{\"label\":\"SCAN\",\"action\":\"scan\",\"tone\":\"act\"},{\"label\":\"I CAN STILL REACH IT\",\"action\":\"confirm\",\"tone\":\"warn\"}]",
-        "x": 260,
-        "y": 1180,
-        "wires": [
-            [
-                "route-network"
-            ]
-        ],
-        "z": "yonder-console"
-    },
-    {
-        "id": "route-network",
-        "type": "switch",
-        "name": "which key was pressed",
-        "property": "payload",
-        "propertyType": "msg",
-        "rules": [
-            {
-                "t": "eq",
-                "v": "refresh",
-                "vt": "str"
-            },
-            {
-                "t": "eq",
-                "v": "scan",
-                "vt": "str"
-            },
-            {
-                "t": "eq",
-                "v": "confirm",
-                "vt": "str"
-            }
-        ],
-        "checkall": "false",
-        "repair": false,
-        "outputs": 3,
-        "x": 470,
-        "y": 1180,
-        "wires": [
-            [
-                "read-config"
-            ],
-            [
-                "scan"
-            ],
-            [
-                "recall-apply"
             ]
         ],
         "z": "yonder-console"
@@ -1408,21 +1298,6 @@
                 "reachable"
             ]
         ],
-        "z": "yonder-console"
-    },
-    {
-        "id": "ann-network",
-        "type": "ui-yonder-annunciator",
-        "group": "group-net-now",
-        "name": "the last thing the device said",
-        "order": 0,
-        "width": 5,
-        "height": 1,
-        "label": "",
-        "source": "yonder",
-        "x": 700,
-        "y": 700,
-        "wires": [],
         "z": "yonder-console"
     }
 ]

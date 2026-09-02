@@ -17,7 +17,13 @@ import type { RED } from "./red.js";
 export = function register(RED: RED): void {
   registerPoller(RED, "yonder-activity", {
     path: (node) => `/log?since=${String(node.cursor)}`,
-    payload: (value) => (value as { entries?: unknown } | undefined)?.entries ?? [],
+    // Nothing new means nothing to say. An empty array would not be a
+    // no-op: Dashboard's table overwrites its store with it (see PollOptions
+    // .payload), so a quiet tick would erase everything already on screen.
+    payload: (value) => {
+      const entries = (value as { entries?: unknown[] } | undefined)?.entries;
+      return Array.isArray(entries) && entries.length > 0 ? entries : undefined;
+    },
     seen: (value, node) => {
       const newest = (value as { newestSeq?: unknown } | undefined)?.newestSeq;
       if (typeof newest === "number" && newest > node.cursor) node.cursor = newest;

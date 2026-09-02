@@ -201,17 +201,29 @@ describe("radioPlan", () => {
   });
 
   /**
-   * Raise before lower, and the order is the point. The operator submitting
-   * these credentials is talking to the device over the radio being retuned,
-   * so a board that fails to associate must not have already thrown away the
-   * thing they are talking through.
+   * Lower before raise, and the order is not a preference.
+   *
+   * This asserted the opposite, with a reason that read well: the operator is
+   * talking to the device over the radio being retuned, so a board that fails
+   * to associate should not already have thrown away the thing they are
+   * talking through. A Raspberry Pi 4 refused:
+   *
+   *     nmcli connection up yonder-wifi
+   *     Error: Connection activation failed: The Wi-Fi network could not be found
+   *
+   * — while that radio was beaconing as `yonder` on channel 6. One radio can
+   * scan in AP mode; it cannot associate. The access point has to come down
+   * to free it, and the operator does lose the page at that moment.
+   *
+   * The test passed for as long as it did because the fake nmcli underneath it
+   * activates whatever it is asked to.
    */
-  it("raises the client before it takes the access point down", () => {
+  it("takes the access point down before it raises the client", () => {
     const config = structuredClone(DEFAULT_CONFIG);
     config.network.client.ssid = "HomeNetwork";
     expect(radioPlan(config)).toEqual([
-      { action: "up", connection: CLIENT_CONNECTION },
       { action: "down", connection: AP_CONNECTION },
+      { action: "up", connection: CLIENT_CONNECTION },
     ]);
   });
 

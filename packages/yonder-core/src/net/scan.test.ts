@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { NmcliClient } from "./nmcli/client.js";
 import type { CommandResult, CommandRunner } from "./runner.js";
-import { scanForNetworks } from "./scan.js";
+import { scanForNetworks, ssidOptions } from "./scan.js";
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "nmcli", "fixtures");
 const fixture = (name: string): string => readFileSync(join(FIXTURES, name), "utf8");
@@ -121,5 +121,53 @@ describe("scanForNetworks", () => {
       list: { code: 2, stderr: "Error: Device 'wlan0' not found." },
     });
     await expect(scanForNetworks(new NmcliClient(runner))).rejects.toThrow(/nmcli exited 2/);
+  });
+});
+
+/**
+ * The join form offers what the scan found.
+ *
+ * It used to be a free-text SSID box beside a table of networks: the scan told
+ * you the name and then you typed it back in. Reported from a phone on the
+ * access point — "I scan, the list populates, I click a network and nothing
+ * happens" — and it is the feature defeating itself, because the reason to
+ * scan is not knowing the name. On a phone a mistyped SSID costs five minutes
+ * of no access point while the apply fails and rolls back.
+ */
+describe("ssidOptions", () => {
+  const scan = {
+    interface: "wlan0",
+    networks: [
+      { ssid: "Field", signal: 74, security: "WPA2" },
+      { ssid: "Barn", signal: 31, security: "WPA2" },
+    ],
+  };
+
+  it("offers one option per network, in the order the scan gave", () => {
+    const opts = ssidOptions(scan);
+    expect(opts.map((o) => o.value)).toEqual(["Field", "Barn"]);
+  });
+
+  it("submits the SSID alone, whatever the label says", () => {
+    // The label carries the signal so two networks with one name can be told
+    // apart. What is submitted has to be the name and nothing else.
+    for (const o of ssidOptions(scan)) {
+      expect(scan.networks.map((n) => n.ssid)).toContain(o.value);
+      expect(o.label).toContain(o.value);
+    }
+  });
+
+  it("drops networks with no name rather than offering a blank row", () => {
+    const opts = ssidOptions({ interface: "wlan0", networks: [
+      { ssid: "", signal: 50, security: "WPA2" },
+      { ssid: "Real", signal: 50, security: "WPA2" },
+    ] });
+    expect(opts.map((o) => o.value)).toEqual(["Real"]);
+  });
+
+  it("survives a board with no radio, and a scan that never answered", () => {
+    expect(ssidOptions({ interface: null, networks: [] })).toEqual([]);
+    expect(ssidOptions(null)).toEqual([]);
+    expect(ssidOptions(undefined)).toEqual([]);
   });
 });

@@ -296,6 +296,30 @@ describe("themeCss ships a whole shell", () => {
     expect(r, "the chart face must be warm").toBeGreaterThan(b);
   });
 
+  /**
+   * A stock action does not span its surface (R-UI-10).
+   *
+   * This has been got wrong twice, in two different container models. First
+   * with `width`, which a Vuetify block button ignores because it sets
+   * `min-width: 100%`. Then with `flex` and `align-self`, which are inert on
+   * the inline axis of a **grid** — and the widget's own container is a grid,
+   * so the button went from 704px to 288px of 288px and was still a slab.
+   *
+   * Both axes are named now. The capture gate measures the rendered width in
+   * a browser, which is the check that found each of these; this one keeps
+   * the properties from quietly going missing.
+   */
+  it("un-blocks a stock action in both container models", () => {
+    for (const t of themes) {
+      const rule = /\.nrdb-ui-button \.v-btn\.v-btn--block\s*\{[^}]*\}/s.exec(themeCss(t))?.[0] ?? "";
+      expect(rule, `${t}: nothing un-blocks a stock button`).not.toBe("");
+      expect(rule, "flex parents").toMatch(/align-self:\s*flex-start/);
+      expect(rule, "grid parents — the one that was missing").toMatch(/justify-self:\s*start/);
+      expect(rule, "Vuetify's block button sets min-width, not width")
+        .toMatch(/min-width:\s*12rem\s*!important/);
+    }
+  });
+
   it("sizes anything hittable for a gloved finger", () => {
     for (const t of themes) {
       const css = themeCss(t);
@@ -333,7 +357,7 @@ describe("themeCss ships a whole shell", () => {
  * The fix for that was named after prose, so it covered markdown and stopped.
  * The capture gate (R-UI-12) found the rest: the join form was 172px of
  * content in 48px with 72% hidden, and the ping form 112px in 48px with 57%
- * hidden (K-27). The join form is the one an operator fills in immediately
+ * hidden (K-29). The join form is the one an operator fills in immediately
  * after reading the warning above — so the page explained what pressing Join
  * would cost and then hid the field they had to type into to do it.
  *
@@ -423,6 +447,23 @@ describe("themeCss never clips content an operator has to act on", () => {
       expect(rule, "the inner form element needs its own rule").not.toBe("");
       expect(rule).toMatch(/overflow:\s*visible/);
       expect(rule).toMatch(/height:\s*auto/);
+    });
+  }
+});
+
+/**
+ * Vuetify's block button is `min-width: 100%` with `flex: 1 0 auto` — not
+ * `width`. Overriding `width` alone does nothing, which is how the first
+ * attempt at this shipped a console whose every action was still a 704px
+ * slab. Asserted because the property that matters is not the obvious one.
+ */
+describe("themeCss sizes actions to their words", () => {
+  for (const t of ["day", "night"] as ThemeName[]) {
+    it(`overrides min-width, not just width (${t})`, () => {
+      const rule = /\.nrdb-ui-button \.v-btn\.v-btn--block\s*\{[^}]*\}/s.exec(themeCss(t))?.[0] ?? "";
+      expect(rule, "there must be a rule for block buttons").not.toBe("");
+      expect(rule).toMatch(/min-width:\s*12rem\s*!important/);
+      expect(rule).toMatch(/flex:\s*0 0 auto/);
     });
   }
 });

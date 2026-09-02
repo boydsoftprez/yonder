@@ -11,7 +11,8 @@ import { readBoardFacts } from "../system/read.js";
 import { readVersions } from "../system/versions.js";
 import { displayFacts, type BoardDisplay } from "../system/format.js";
 import { isProbeHost, type PingResult } from "../diag/probe.js";
-import { joinNetwork, type JoinRequest } from "../net/join.js";
+import { joinNetwork, leaveNetwork, type JoinRequest } from "../net/join.js";
+import type { NetworkState } from "../net/state.js";
 import { setTheme, type ThemeRequest } from "../ui/theme.js";
 import type { ScanResult } from "../net/scan.js";
 import type { BoardFacts } from "../system/facts.js";
@@ -36,6 +37,8 @@ export interface RouterDeps {
   credential: AdminCredential | undefined;
   /** Backoff on failed logins. One administrator, one counter — see throttle.ts. */
   throttle?: AttemptThrottle;
+  /** What the radio is doing. Injected, so this router still knows no nmcli. */
+  netState?: () => Promise<NetworkState>;
   /**
    * Called after an administrator password is set, so the console can be
    * rewritten and restarted into its provisioned shape.
@@ -365,6 +368,29 @@ export function createRouter(deps: RouterDeps): Router {
         const chosen = setTheme(loadConfig(deps.configPath), body as ThemeRequest);
         if (!chosen.ok) return { status: 400, body: { error: chosen.error } };
         return { status: 200, body: await deps.engine.apply(chosen.config) };
+      }
+
+      // The inverse of /net/join, and the control the console did not have:
+      // joining was a one-way door, so an operator on the wrong network had
+      // no way back to the access point from the interface that took them
+      // there. Clearing the SSID is the whole change; radioPlan does the rest.
+      if (method === "POST" && path === "/net/leave") {
+        return { status: 200, body: await deps.engine.apply(leaveNetwork(loadConfig(deps.configPath))) };
+      }
+
+      // One line that answers "what is the radio doing", computed from the
+      // configuration *and* the devices, because the two disagree exactly
+      // when it matters - a configuration naming a network the radio never
+      // joined is the state an apply is about to revert.
+      if (method === "GET" && path === "/net/state") {
+        if (deps.netState === undefined) {
+          say("GET /net/state: there is no network layer on this daemon to ask");
+          return {
+            status: 503,
+            body: { error: "this device cannot report its network state" },
+          };
+        }
+        return { status: 200, body: await deps.netState() };
       }
 
       if (method === "GET" && path === "/config") {

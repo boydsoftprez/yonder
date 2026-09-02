@@ -38,6 +38,15 @@ export interface ApplyEngineOptions {
    * `config.apply.radioTimeout`.
    */
   radioTimeoutMs?: number;
+  /**
+   * Asked, after a radio-moving apply, whether the device actually got onto
+   * the network (R-CFG-11).
+   *
+   * Injected so the engine keeps knowing nothing about nmcli or ping, and so
+   * a test can answer without either. Absent means the old behaviour: the
+   * window runs and only a human confirms.
+   */
+  verifyRadioMove?: (target: Config) => Promise<{ ok: boolean; reason: string }>;
   renderTimeoutMs?: number;
   /**
    * Set when the caller could not fully assemble `renderers` — daemon/
@@ -87,12 +96,37 @@ function preserveUnloadable(configPath: string, cause: Error): void {
   }
 }
 
+/**
+ * Whether this apply can take the operator's own connection away.
+ *
+ * This asked whether the *mode* changed — access point to client, or back.
+ * That missed the case a board is most often in: already a client, and the
+ * operator changing the passphrase of the very network they are connected
+ * through. A wrong key deauthenticates them exactly as a failed join does,
+ * and because the mode did not change it got the short window and waited for
+ * a confirmation from a console that was no longer reachable. Observed: a
+ * passphrase change reverted 120 s later with nobody able to say otherwise.
+ *
+ * So the question is not "did the mode change" but "could this change the
+ * network this device is on" — which is any edit to `network.client`, plus
+ * the mode change itself.
+ *
+ * The device can verify all of them the same way (R-CFG-11): hold an address,
+ * reach the gateway. There is no case here where a human is better placed to
+ * answer than the board is.
+ */
+function touchesWifiClient(previous: Config, next: Config): boolean {
+  if (wifiMode(previous) !== wifiMode(next)) return true;
+  return JSON.stringify(previous.network.client) !== JSON.stringify(next.network.client);
+}
+
 export class ApplyEngine {
   private readonly configPath: string;
   private readonly renderers: Renderer[];
   private readonly clock: Clock;
   private readonly timeoutMs: number;
   private readonly radioTimeoutMs: number;
+  private readonly verifyRadioMove?: (target: Config) => Promise<{ ok: boolean; reason: string }>;
   private readonly renderTimeoutMs: number;
   private readonly journal: Journal;
   private readonly degraded?: string;
@@ -112,6 +146,7 @@ export class ApplyEngine {
     this.clock = opts.clock ?? systemClock;
     this.timeoutMs = opts.timeoutMs ?? 120_000;
     this.radioTimeoutMs = opts.radioTimeoutMs ?? 300_000;
+    this.verifyRadioMove = opts.verifyRadioMove;
     this.renderTimeoutMs = opts.renderTimeoutMs ?? 60_000;
     this.journal = new Journal(opts.journalPath);
     this.degraded = opts.degraded;
@@ -284,7 +319,7 @@ export class ApplyEngine {
     // Compared on the mode, not on the client settings: changing the
     // passphrase of a network already configured is not a radio move, and
     // neither is renaming the access point.
-    const movesRadio = wifiMode(previous) !== wifiMode(parsed.data);
+    const movesRadio = touchesWifiClient(previous, parsed.data);
     const window = movesRadio ? this.radioTimeoutMs : this.timeoutMs;
     if (movesRadio) {
       warn(
@@ -296,6 +331,36 @@ export class ApplyEngine {
     this.state = "pending";
     this.expiresAt = this.clock.now() + window;
     this.timer = this.clock.setTimer(window, () => { void this.revert(); });
+
+    // R-CFG-11. The operator cannot confirm a radio move: the console goes
+    // off the air with the access point, which is the whole difficulty. So
+    // the device establishes for itself whether the join took — an address on
+    // the new network and a gateway that answers — and confirms on that
+    // evidence.
+    //
+    // Deliberately not awaited. `apply()` has to return so the browser gets
+    // its answer before the radio moves out from under it, and the window is
+    // already armed above: if this never resolves, or resolves false, the
+    // timer reverts exactly as it did before.
+    if (movesRadio && this.verifyRadioMove !== undefined) {
+      const applyId = id;
+      void this.verifyRadioMove(parsed.data).then(
+        (result) => {
+          if (this.state !== "pending" || this.id !== applyId) return;
+          if (result.ok) {
+            warn(`the device confirmed the change itself: ${result.reason}`);
+            this.confirm(applyId);
+          } else {
+            warn(`the change did not take (${result.reason}); reverting now rather than waiting`);
+            void this.revert();
+          }
+        },
+        (e: unknown) => {
+          // A verifier that threw proves nothing. Leave the window to run.
+          warn(`could not establish whether the change took: ${(e as Error).message}`);
+        },
+      );
+    }
 
     return {
       id,
