@@ -199,3 +199,5 @@ export {
   type ActivityPage,
   type ActivityLogOptions,
 } from "./log/activity.js";
+export { scanForNetworks, type ScanResult } from "./net/scan.js";
+export type { DiagProbes, SystemReport } from "./daemon/routes.js";

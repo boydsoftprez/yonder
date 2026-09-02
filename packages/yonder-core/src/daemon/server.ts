@@ -5,7 +5,7 @@ import { dirname } from "node:path";
 import { pathToFileURL } from "node:url";
 import { ApplyEngine } from "../apply/engine.js";
 import { warn, note } from "../log.js";
-import { createRouter } from "./routes.js";
+import { createRouter, type DiagProbes } from "./routes.js";
 import { AdminCredential } from "../console/credential.js";
 import { ConsoleRenderer } from "../console/renderer.js";
 import { consolePaths, type ConsolePaths } from "../console/settings.js";
@@ -16,6 +16,8 @@ import { NmcliClient } from "../net/nmcli/client.js";
 import { NetworkRenderer } from "../net/renderer.js";
 import { FallbackWatchdog } from "../net/watchdog.js";
 import { AP_CONNECTION, DEFAULT_AP_PASSPHRASE } from "../net/profiles.js";
+import { scanForNetworks } from "../net/scan.js";
+import { ping, reachable } from "../diag/probe.js";
 import { systemRunner, type CommandRunner } from "../net/runner.js";
 import { systemClock, type Clock, type Renderer } from "../apply/types.js";
 import { DEFAULT_CONFIG, type Config } from "../schema/config.js";
@@ -345,10 +347,23 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
     });
   };
 
+  // The probes the diagnostics page runs, over the same runner the renderers
+  // use. Built here rather than defaulted inside the router so that a test
+  // injecting a fake runner cannot reach a real `ping` — see DiagProbes.
+  const probeRunner = opts.runner ?? systemRunner;
+  const diag: DiagProbes = {
+    ping: (host, count) => ping(host, { runner: probeRunner, clock, ...(count === undefined ? {} : { count }) }),
+    reachable: () => reachable({ runner: probeRunner, clock }),
+  };
+
   const route = createRouter({
     engine,
     configPath: opts.configPath,
     credential,
+    diag,
+    // Absent when buildRenderers threw. GET /net/scan then says this device
+    // cannot scan, which is true, rather than reporting an empty air.
+    ...(built === undefined ? {} : { scan: () => scanForNetworks(client) }),
     ...(onProvisioned === undefined ? {} : { onProvisioned }),
   });
 

@@ -3,9 +3,16 @@ import { ApplyEngine } from "../apply/engine.js";
 import { loadConfig } from "../config/load.js";
 import { ConfigError } from "../config/errors.js";
 import { warn } from "../log.js";
+import { activityLog, type ActivityLog } from "../log/activity.js";
 import { AdminCredential } from "../console/credential.js";
 import { AttemptThrottle } from "../console/throttle.js";
 import { secretValuesIn, redactValues } from "../secrets/redact.js";
+import { readBoardFacts } from "../system/read.js";
+import { readVersions } from "../system/versions.js";
+import { isProbeHost, type PingResult } from "../diag/probe.js";
+import type { ScanResult } from "../net/scan.js";
+import type { BoardFacts } from "../system/facts.js";
+import type { Versions } from "../system/versions.js";
 
 export interface RouterDeps {
   engine: ApplyEngine;
@@ -37,6 +44,44 @@ export interface RouterDeps {
    * interaction every operator has into a connection reset.
    */
   onProvisioned?: () => void;
+  /**
+   * What this board says about itself. Defaulted to the real readers, which
+   * only open files under /proc and /sys and answer null for every one that
+   * is not there — so a test that does not inject gets a record full of
+   * nulls rather than a failure or a real measurement.
+   */
+  system?: () => SystemReport;
+  /**
+   * Scans for Wi-Fi networks. **Absent when the network layer could not be
+   * assembled** — a malformed secrets.yaml does that — and the route then
+   * says so rather than pretending the air is empty.
+   */
+  scan?: () => Promise<ScanResult>;
+  /** See DiagProbes. Absent means this daemon cannot probe, not that nothing answered. */
+  diag?: DiagProbes;
+  /** The buffer GET /log serves. Defaults to the one this process writes to. */
+  activity?: ActivityLog;
+}
+
+/** What GET /system answers with. */
+export interface SystemReport {
+  facts: BoardFacts;
+  versions: Versions;
+}
+
+/**
+ * The reachability probes, injected.
+ *
+ * Given rather than defaulted, for the same reason `scan` is: with a default
+ * these routes would run a real `ping` from any test that reached them, and
+ * "no test may execute ping" is a rule that has to be impossible to break
+ * rather than remembered. `daemon/server.ts` builds them from the same
+ * CommandRunner the renderers use, so a test that injects a fake runner gets
+ * a fake ping for free.
+ */
+export interface DiagProbes {
+  ping(host: string, count: number | undefined): Promise<PingResult>;
+  reachable(): Promise<PingResult>;
 }
 
 export interface RouteResult {
@@ -53,10 +98,36 @@ function submittedPassword(body: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
+/**
+ * A finite, non-negative integer out of a query string, or 0.
+ *
+ * A cursor a page could not parse is a page asking for everything, which is
+ * the harmless direction: it repeats entries it already has rather than
+ * silently skipping ones it never saw.
+ */
+function sinceParam(query: string): number {
+  const raw = new URLSearchParams(query).get("since");
+  if (raw === null) return 0;
+  const value = Number(raw);
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
+}
+
 export function createRouter(deps: RouterDeps): Router {
   const throttle = deps.throttle ?? new AttemptThrottle();
+  const activity = deps.activity ?? activityLog;
+  const system = deps.system ?? ((): SystemReport => ({
+    facts: readBoardFacts(),
+    versions: readVersions(),
+  }));
 
-  return async (method, path, body) => {
+  return async (method, rawPath, body) => {
+    // `req.url` carries the query string, and every comparison below is an
+    // equality against a path. Split once, here, rather than have each route
+    // decide — a route that forgets is a 404 an operator reads as a missing
+    // feature.
+    const queryAt = rawPath.indexOf("?");
+    const path = queryAt < 0 ? rawPath : rawPath.slice(0, queryAt);
+    const query = queryAt < 0 ? "" : rawPath.slice(queryAt + 1);
     // Captured here, at the top, before any branch can do anything with the
     // body — R-SEC-10 says redaction happens where the value is captured, not
     // where it is printed. Everything this function logs goes through `say`,
@@ -170,6 +241,72 @@ export function createRouter(deps: RouterDeps): Router {
               + "set one from the console before reading or changing its configuration",
           },
         };
+      }
+
+      // ---- what the console's pages read -------------------------------
+      //
+      // All of these are behind the gate above, deliberately. None of them is
+      // needed to set an administrator password, so none of them belongs in
+      // front of it: a board model, a scan of the air and an activity log are
+      // all "function", and R-SEC-09 says a device without a password offers
+      // none.
+
+      if (method === "GET" && path === "/system") {
+        return { status: 200, body: system() };
+      }
+
+      if (method === "GET" && path === "/net/scan") {
+        if (deps.scan === undefined) {
+          say("GET /net/scan: there is no network layer on this daemon to scan with");
+          return {
+            status: 503,
+            body: { error: "this device cannot scan; see the device journal for the reason" },
+          };
+        }
+        // Never a pre-shared key: a scan is a list of what is broadcasting,
+        // and ScanResult has no field that could carry one. A failure throws
+        // to the catch-all below rather than returning an empty list — a scan
+        // that did not run is not a neighbourhood with no Wi-Fi in it.
+        return { status: 200, body: await deps.scan() };
+      }
+
+      if (method === "POST" && path === "/diag/ping") {
+        if (deps.diag === undefined) {
+          return {
+            status: 503,
+            body: { error: "this device cannot run a probe; see the device journal for the reason" },
+          };
+        }
+        const host = (body as { host?: unknown } | undefined)?.host;
+        // Refused here as well as inside the probe. The probe cannot be made
+        // to run this string either way; what this adds is a 400 rather than
+        // a 200 carrying a refusal, so a page does not have to read the body
+        // to know the request was wrong.
+        if (typeof host !== "string" || !isProbeHost(host)) {
+          return { status: 400, body: { error: "host must be a host name or an IPv4 address" } };
+        }
+        const count = (body as { count?: unknown } | undefined)?.count;
+        return {
+          status: 200,
+          body: await deps.diag.ping(host, typeof count === "number" ? count : undefined),
+        };
+      }
+
+      if (method === "GET" && path === "/diag/reachable") {
+        if (deps.diag === undefined) {
+          return {
+            status: 503,
+            body: { error: "this device cannot run a probe; see the device journal for the reason" },
+          };
+        }
+        return { status: 200, body: await deps.diag.reachable() };
+      }
+
+      if (method === "GET" && path === "/log") {
+        // Already redacted: entries go through secrets/redact.ts on the way
+        // into the buffer, not on the way out of it (R-SEC-10). There is no
+        // filtering step here to forget.
+        return { status: 200, body: activity.page(sinceParam(query)) };
       }
 
       if (method === "GET" && path === "/config") {

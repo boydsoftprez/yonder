@@ -1193,3 +1193,102 @@ describe("startServer, provisioning the console", () => {
     }
   });
 });
+
+/**
+ * The page routes, reached the way the console reaches them — over the real
+ * socket, through the real router the daemon assembled.
+ *
+ * The point of these is the wiring, not the routes: `scan` and `diag` are
+ * given to `createRouter` rather than defaulted, so a daemon that forgot to
+ * supply them would answer 503 to a page and nothing would have failed. Every
+ * one of them runs against the injected runner, so no real `nmcli` and no real
+ * `ping` is executed.
+ */
+describe("the page routes, as the daemon assembles them", () => {
+  let socketPath: string;
+  beforeEach(() => { socketPath = join(dir, "core.sock"); });
+
+  /** An nmcli that reports one radio, and a ping that answered. */
+  const boardRunner: CommandRunner = async (argv) => {
+    if (argv[0] === "ping") {
+      return {
+        code: 0,
+        stdout: "3 packets transmitted, 3 received, 0% packet loss, time 2003ms\n"
+          + "rtt min/avg/max/mdev = 8.294/9.117/10.352/0.884 ms\n",
+        stderr: "",
+      };
+    }
+    if (argv.includes("status")) {
+      return { code: 0, stdout: "lo:loopback:connected:lo\nwlan0:wifi:disconnected:\n", stderr: "" };
+    }
+    if (argv.includes("list")) {
+      return { code: 0, stdout: "HomeNetwork:78:WPA2\nHomeNetwork:41:WPA2\n", stderr: "" };
+    }
+    return { code: 0, stdout: "", stderr: "" };
+  };
+
+  async function withServer(fn: (socket: string) => Promise<void>): Promise<void> {
+    const server = await startServer({
+      socketPath, configPath, journalPath,
+      renderers: [noopRenderer],
+      secretsPath: join(dir, "secrets.yaml"),
+      runner: boardRunner,
+    });
+    try { await fn(socketPath); } finally { await server.close(); }
+  }
+
+  it("serves GET /system", async () => {
+    await withServer(async (socket) => {
+      const res = await call(socket, "GET", "/system");
+      expect(res.status).toBe(200);
+      // The shape, not the values: this machine has no /proc, so every fact
+      // is legitimately null here and the record still has to be whole.
+      expect(Object.keys(res.body as object).sort()).toEqual(["facts", "versions"]);
+    });
+  });
+
+  it("serves GET /net/scan, folded and sorted, from the daemon's own nmcli client", async () => {
+    await withServer(async (socket) => {
+      const res = await call(socket, "GET", "/net/scan");
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({
+        interface: "wlan0",
+        networks: [{ ssid: "HomeNetwork", signal: 78, security: "WPA2" }],
+      });
+    });
+  });
+
+  it("serves POST /diag/ping and GET /diag/reachable over the injected runner", async () => {
+    await withServer(async (socket) => {
+      const probe = await call(socket, "POST", "/diag/ping", { host: "1.1.1.1" });
+      expect(probe.status).toBe(200);
+      expect(probe.body).toMatchObject({ reachable: true, received: 3, rttMs: 9.117 });
+
+      const out = await call(socket, "GET", "/diag/reachable");
+      expect(out.status).toBe(200);
+      expect(out.body).toMatchObject({ reachable: true });
+    });
+  });
+
+  it("refuses a host that is not one, with a 400 and no probe", async () => {
+    await withServer(async (socket) => {
+      const res = await call(socket, "POST", "/diag/ping", { host: "1.1.1.1; reboot" });
+      expect(res.status).toBe(400);
+    });
+  });
+
+  /**
+   * The daemon's own start-up lines go through warn()/note(), so the log a
+   * page reads is what the daemon actually did rather than a second stream
+   * somebody has to remember to write to.
+   */
+  it("serves GET /log, and it already contains this daemon's own start-up", async () => {
+    await withServer(async (socket) => {
+      const res = await call(socket, "GET", "/log");
+      expect(res.status).toBe(200);
+      const body = res.body as { entries: { message: string }[] };
+      expect(body.entries.length).toBeGreaterThan(0);
+      expect(body.entries.map((e) => e.message).join("\n")).toContain("network:");
+    });
+  });
+});

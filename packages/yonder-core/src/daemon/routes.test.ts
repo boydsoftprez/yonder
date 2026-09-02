@@ -3,7 +3,10 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, rmSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createRouter, type Router } from "./routes.js";
+import { createRouter, type DiagProbes, type Router, type SystemReport } from "./routes.js";
+import { ActivityLog } from "../log/activity.js";
+import type { ScanResult } from "../net/scan.js";
+import type { PingResult } from "../diag/probe.js";
 import { ApplyEngine } from "../apply/engine.js";
 import { saveConfig } from "../config/save.js";
 import { SecretStore } from "../secrets/store.js";
@@ -37,7 +40,44 @@ beforeEach(() => {
 });
 afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
 
-function router(opts: { credential?: AdminCredential | undefined; throttle?: AttemptThrottle } = {}): Router {
+/**
+ * Stubs for the four things the page routes read. None of them touches a
+ * board, a radio or a `ping`: `scan` and `diag` are given rather than
+ * defaulted precisely so a test cannot reach a real one by omission.
+ */
+const SCAN: ScanResult = {
+  interface: "wlan0",
+  networks: [
+    { ssid: "HomeNetwork", signal: 78, security: "WPA2" },
+    { ssid: "Guest:Wifi", signal: 42, security: "WPA2" },
+  ],
+};
+
+const REPLIED: PingResult = {
+  host: "1.1.1.1", reachable: true, transmitted: 3, received: 3, rttMs: 9.117,
+};
+
+const FACTS: SystemReport = {
+  facts: {
+    model: "Raspberry Pi 4 Model B Rev 1.5",
+    load: { one: 0.52, five: 0.58, fifteen: 0.59, runnable: 1, total: 342 },
+    memory: { totalBytes: 949_059_584, availableBytes: 760_762_368, freeBytes: 455_254_016, usedBytes: 188_297_216 },
+    uptimeSeconds: 41.83,
+    cpuTemperatureC: 58,
+  },
+  versions: { yonder: "0.1.0", os: "Debian GNU/Linux 13 (trixie)" },
+};
+
+interface RouterOptions {
+  credential?: AdminCredential | undefined;
+  throttle?: AttemptThrottle;
+  scan?: () => Promise<ScanResult>;
+  diag?: DiagProbes;
+  activity?: ActivityLog;
+  system?: () => SystemReport;
+}
+
+function router(opts: RouterOptions = {}): Router {
   const engine = new ApplyEngine({ configPath, journalPath, renderers: [noopRenderer], clock: frozenClock });
   const credential = "credential" in opts
     ? opts.credential
@@ -46,6 +86,15 @@ function router(opts: { credential?: AdminCredential | undefined; throttle?: Att
     engine,
     configPath,
     credential,
+    system: opts.system ?? (() => FACTS),
+    ...("scan" in opts ? (opts.scan === undefined ? {} : { scan: opts.scan }) : { scan: () => Promise.resolve(SCAN) }),
+    ...("diag" in opts ? (opts.diag === undefined ? {} : { diag: opts.diag }) : {
+      diag: {
+        ping: () => Promise.resolve(REPLIED),
+        reachable: () => Promise.resolve(REPLIED),
+      },
+    }),
+    ...(opts.activity === undefined ? {} : { activity: opts.activity }),
     ...(opts.throttle === undefined ? {} : { throttle: opts.throttle }),
   });
 }
@@ -54,6 +103,12 @@ function router(opts: { credential?: AdminCredential | undefined; throttle?: Att
 function provisionedRouter(throttle?: AttemptThrottle): Router {
   new AdminCredential(new SecretStore(secretsPath)).set(GOOD);
   return router(throttle === undefined ? {} : { throttle });
+}
+
+/** Provisioned, with whatever else the test wants to stub. */
+function provisioned(opts: RouterOptions = {}): Router {
+  new AdminCredential(new SecretStore(secretsPath)).set(GOOD);
+  return router(opts);
 }
 
 function changed(): Config {
@@ -428,5 +483,215 @@ describe("redaction at the capture point", () => {
     });
     expect(captured).toContain("<redacted>");
     expect(captured).not.toMatch(/refused: too-short/);
+  });
+});
+
+/**
+ * The routes the console's pages read (Task 4 of M1b-2).
+ *
+ * The property under test is the same one the rest of this file exists for,
+ * applied to five more routes: **the socket is the boundary.** A board model,
+ * a scan of the air, a probe and an activity log are all function, and R-SEC-09
+ * says a device with no administrator password offers none of it.
+ */
+describe("the page routes", () => {
+  const PAGE_ROUTES: [string, string, unknown][] = [
+    ["GET", "/system", undefined],
+    ["GET", "/net/scan", undefined],
+    ["POST", "/diag/ping", { host: "1.1.1.1" }],
+    ["GET", "/diag/reachable", undefined],
+    ["GET", "/log", undefined],
+  ];
+
+  it("every one of them is 403 while unprovisioned", async () => {
+    const route = router();
+    for (const [method, path, body] of PAGE_ROUTES) {
+      const result = await route(method, path, body);
+      expect(result.status, `${method} ${path}`).toBe(403);
+      expect(JSON.stringify(result.body)).toContain("no administrator password");
+    }
+  });
+
+  /**
+   * *Cannot tell* is not *no password*. A daemon whose secrets.yaml will not
+   * parse must behave as though the device has a lock nobody can open
+   * (R-SEC-11), not as though it needs none.
+   */
+  it("every one of them is 403 when the secret store could not be read", async () => {
+    const route = router({ credential: undefined });
+    for (const [method, path, body] of PAGE_ROUTES) {
+      expect((await route(method, path, body)).status, `${method} ${path}`).toBe(403);
+    }
+  });
+
+  it("every one of them answers once a password is set", async () => {
+    const route = provisioned();
+    for (const [method, path, body] of PAGE_ROUTES) {
+      expect((await route(method, path, body)).status, `${method} ${path}`).toBe(200);
+    }
+  });
+});
+
+describe("GET /system", () => {
+  it("reports the board and the versions", async () => {
+    const result = await provisioned()("GET", "/system", undefined);
+    expect(result.body).toEqual(FACTS);
+  });
+
+  it("carries no configuration and no secret", async () => {
+    const body = JSON.stringify((await provisioned()("GET", "/system", undefined)).body);
+    expect(body).not.toContain("ssid");
+    expect(body).not.toMatch(/psk|password|passphrase/i);
+  });
+});
+
+describe("GET /net/scan", () => {
+  it("lists what is in the air", async () => {
+    const result = await provisioned()("GET", "/net/scan", undefined);
+    expect(result.status).toBe(200);
+    expect(result.body).toEqual(SCAN);
+  });
+
+  /**
+   * A scan is a list of what is broadcasting. It is public by construction —
+   * anything with a radio can see it — and it must never come back carrying a
+   * key for any of it.
+   */
+  it("never returns a pre-shared key", async () => {
+    const body = JSON.stringify((await provisioned()("GET", "/net/scan", undefined)).body);
+    expect(body).not.toMatch(/psk|password|passphrase|key/i);
+  });
+
+  /**
+   * The scan failure path is the one that would leak. `nmcli`'s stderr names
+   * an SSID and a driver path, and echoing an arbitrary error message into a
+   * response body is how those leave the device.
+   */
+  it("swallows nmcli's own words when the scan fails", async () => {
+    const stderr = "Error: Device 'wlan0' not found: /sys/class/net/wlan0 (brcmfmac)";
+    const route = provisioned({ scan: () => Promise.reject(new Error(`nmcli exited 2: ${stderr}`)) });
+    const result = await route("GET", "/net/scan", undefined);
+    expect(result.status).toBe(500);
+    const body = JSON.stringify(result.body);
+    expect(body).not.toContain("brcmfmac");
+    expect(body).not.toContain("wlan0");
+    expect(body).toContain("see the device journal");
+  });
+
+  it("says it cannot scan, rather than reporting an empty air, with no network layer", async () => {
+    const result = await provisioned({ scan: undefined })("GET", "/net/scan", undefined);
+    expect(result.status).toBe(503);
+    expect(JSON.stringify(result.body)).toContain("cannot scan");
+  });
+});
+
+describe("POST /diag/ping", () => {
+  it("probes a host and returns the result", async () => {
+    const asked: [string, number | undefined][] = [];
+    const route = provisioned({
+      diag: {
+        ping: (host, count) => { asked.push([host, count]); return Promise.resolve(REPLIED); },
+        reachable: () => Promise.resolve(REPLIED),
+      },
+    });
+    const result = await route("POST", "/diag/ping", { host: "example.com", count: 4 });
+    expect(result.status).toBe(200);
+    expect(asked).toEqual([["example.com", 4]]);
+  });
+
+  /**
+   * The host is operator input on its way to a command line. It is refused
+   * here as well as inside the probe, so a page gets a 400 rather than a 200
+   * carrying a refusal it has to read the body to notice.
+   */
+  it("is 400 for a host that is not one, and runs no probe", async () => {
+    let ran = false;
+    const route = provisioned({
+      diag: {
+        ping: () => { ran = true; return Promise.resolve(REPLIED); },
+        reachable: () => Promise.resolve(REPLIED),
+      },
+    });
+    for (const host of ["8.8.8.8; rm -rf /", "$(whoami)", "-i0.001", "", 42, undefined, null]) {
+      const result = await route("POST", "/diag/ping", { host });
+      expect(result.status, JSON.stringify(host)).toBe(400);
+    }
+    expect(await route("POST", "/diag/ping", undefined)).toMatchObject({ status: 400 });
+    expect(ran).toBe(false);
+  });
+
+  it("does not echo the refused host back into the answer", async () => {
+    const result = await provisioned()("POST", "/diag/ping", { host: "<script>alert(1)</script>" });
+    expect(JSON.stringify(result.body)).not.toContain("script");
+  });
+});
+
+describe("GET /diag/reachable", () => {
+  it("answers with a probe result", async () => {
+    const result = await provisioned()("GET", "/diag/reachable", undefined);
+    expect(result.status).toBe(200);
+    expect(result.body).toEqual(REPLIED);
+  });
+});
+
+describe("GET /log", () => {
+  it("serves the activity buffer", async () => {
+    const activity = new ActivityLog({ clock: frozenClock });
+    activity.record("info", "the access point is up");
+    activity.record("warn", "could not read the configuration");
+    const result = await provisioned({ activity })("GET", "/log", undefined);
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({
+      entries: [
+        { seq: 1, level: "info", message: "the access point is up" },
+        { seq: 2, level: "warn", message: "could not read the configuration" },
+      ],
+      newestSeq: 2,
+    });
+  });
+
+  /**
+   * `req.url` carries the query string, and every route comparison here is an
+   * equality against a path. A route that forgot to split would be a 404 an
+   * operator reads as a missing feature.
+   */
+  it("takes a cursor out of the query string", async () => {
+    const activity = new ActivityLog({ clock: frozenClock });
+    for (const n of [1, 2, 3]) activity.record("info", `line ${n}`);
+    const route = provisioned({ activity });
+    const result = await route("GET", "/log?since=2", undefined);
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({ entries: [{ seq: 3, message: "line 3" }] });
+  });
+
+  it("treats a cursor it cannot read as asking for everything", async () => {
+    const activity = new ActivityLog({ clock: frozenClock });
+    activity.record("info", "one");
+    const route = provisioned({ activity });
+    for (const query of ["?since=", "?since=nonsense", "?since=-4", "?other=1", ""]) {
+      const result = await route("GET", `/log${query}`, undefined);
+      expect(result.body, query).toMatchObject({ entries: [{ seq: 1 }] });
+    }
+  });
+
+  /**
+   * Redaction happens on the way *into* the buffer, so there is no filtering
+   * step here that a second copy of this route could forget. This asserts the
+   * consequence: a PSK logged by any caller is not in what this route serves.
+   */
+  it("cannot serve a secret, because the buffer never held one", async () => {
+    const activity = new ActivityLog({ clock: frozenClock });
+    activity.record("warn", "nmcli failed: 802-11-wireless-security.psk: hunter2-the-actual-key");
+    const result = await provisioned({ activity })("GET", "/log", undefined);
+    expect(JSON.stringify(result.body)).not.toContain("hunter2-the-actual-key");
+    expect(JSON.stringify(result.body)).toContain("redacted");
+  });
+
+  it("is still gated while unprovisioned, even with a buffer full of entries", async () => {
+    const activity = new ActivityLog({ clock: frozenClock });
+    activity.record("info", "something the daemon did before anyone logged in");
+    const result = await router({ activity })("GET", "/log?since=0", undefined);
+    expect(result.status).toBe(403);
+    expect(JSON.stringify(result.body)).not.toContain("something the daemon did");
   });
 });
