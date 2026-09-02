@@ -539,3 +539,43 @@ describe("flows/flows.json join controls", () => {
     expect(words).not.toMatch(/can still reach it|confirm within|press .?yes/);
   });
 });
+
+/**
+ * The page has to say something at the moment it stops being able to.
+ *
+ * Pressing Join takes the access point down, so the console disappears
+ * mid-action. Without a toast the last thing an operator sees is a form that
+ * did nothing, and the natural read of that is "it's broken" — which is
+ * exactly what happened when this was tried on a phone.
+ */
+describe("flows/flows.json join feedback", () => {
+  const toast = flows.find((n) => n.type === "ui-notification");
+  const join = flows.find((n) => n.type === "yonder-join");
+
+  it("tells the operator what is happening when they press Join", () => {
+    expect(toast, "there must be somewhere for the join's answer to appear").toBeDefined();
+    expect((join?.wires as string[][])[0]).toContain(toast?.id);
+  });
+
+  it("shows a countdown, so a message that lingers does not look stuck", () => {
+    expect(toast?.showCountdown).toBe(true);
+    expect(Number(toast?.displayTime)).toBeGreaterThanOrEqual(10);
+  });
+
+  it("can be dismissed, and asks nothing of the operator", () => {
+    expect(toast?.allowDismiss).toBe(true);
+    // A confirm button here would be the confirmation R-CFG-11 removed,
+    // reintroduced as a popup.
+    expect(toast?.allowConfirm).toBe(false);
+  });
+
+  /**
+   * It stored `flow.yonderApply` for a confirm button that no longer exists,
+   * and nothing read it. It is also the same flow-context caching that made
+   * the theme control edit a configuration in place.
+   */
+  it("keeps nothing in flow context for a step that was removed", () => {
+    expect(flows.find((n) => n.id === "remember-apply")).toBeUndefined();
+    expect(JSON.stringify(flows)).not.toContain("yonderApply");
+  });
+});

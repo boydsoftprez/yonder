@@ -573,9 +573,7 @@
         "x": 820,
         "y": 430,
         "wires": [
-            [
-                "remember-apply"
-            ]
+            []
         ]
     },
     {
@@ -819,58 +817,8 @@
         "y": 860,
         "wires": [
             [
-                "remember-apply"
+                "join-toast"
             ]
-        ]
-    },
-    {
-        "id": "remember-apply",
-        "type": "change",
-        "z": "yonder-console",
-        "name": "keep the apply, so it can be confirmed",
-        "rules": [
-            {
-                "t": "set",
-                "p": "yonderApply",
-                "pt": "flow",
-                "to": "yonder",
-                "tot": "msg"
-            }
-        ],
-        "action": "",
-        "property": "",
-        "from": "",
-        "to": "",
-        "reg": false,
-        "x": 820,
-        "y": 860,
-        "wires": [
-            []
-        ]
-    },
-    {
-        "id": "recall-apply",
-        "type": "change",
-        "z": "yonder-console",
-        "name": "the apply this is about",
-        "rules": [
-            {
-                "t": "set",
-                "p": "yonder",
-                "pt": "msg",
-                "to": "yonderApply",
-                "tot": "flow"
-            }
-        ],
-        "action": "",
-        "property": "",
-        "from": "",
-        "to": "",
-        "reg": false,
-        "x": 500,
-        "y": 1040,
-        "wires": [
-            []
         ]
     },
     {
@@ -1279,5 +1227,27 @@
                 "join"
             ]
         ]
+    },
+    {
+        "id": "join-toast",
+        "type": "ui-notification",
+        "z": "yonder-console",
+        "ui": "page-network",
+        "name": "what is happening",
+        "position": "top right",
+        "colorDefault": true,
+        "color": null,
+        "displayTime": "20",
+        "showCountdown": true,
+        "outputs": 0,
+        "allowDismiss": true,
+        "dismissText": "Dismiss",
+        "allowConfirm": false,
+        "confirmText": "",
+        "raw": false,
+        "className": "",
+        "x": 380,
+        "y": 940,
+        "wires": []
     }
 ]

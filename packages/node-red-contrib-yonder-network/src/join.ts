@@ -61,7 +61,7 @@ export = function register(RED: RED): void {
         if (node.chosen.ssid === null) {
           node.status({ fill: "red", shape: "ring", text: "choose a network first" });
           send({
-            payload: null,
+            payload: "Choose a network first.",
             yonder: { state: "rejected", message: "Choose a network first." },
           });
           done();
@@ -82,7 +82,9 @@ export = function register(RED: RED): void {
           shape: status.state === "pending" ? "dot" : "ring",
           text: presentation(status.state).label,
         });
-        send({ payload: status, yonder: status });
+        // `payload` is what a page displays; the whole state stays on
+        // `msg.yonder` for anything that needs more than words.
+        send({ payload: status.message, yonder: status });
         done();
       })();
     });
