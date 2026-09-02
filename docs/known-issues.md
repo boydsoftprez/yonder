@@ -428,6 +428,27 @@ the `127.0.1.1` line, and tests for both — which is why it is here rather than
 the change that found it. `assert_daemon_can_write` must be given `/etc/hosts` at the same
 time, or the fix reproduces K-19 in a new place.
 
+### K-25 · A control keeps showing a value the device rolled back
+`flows/flows.json`, `src/console/renderer.ts`
+
+Change the theme and let the confirmation window expire. The apply reverts — `lastResult.outcome`
+is `reverted`, the configuration says `day` again, and the renderer rewrites the palette, so the
+page even goes back to the day colours. **The dropdown still reads Night.**
+
+Observed on hardware: `--yonder-theme` resolved to `"day"` while the control's value was `Night`.
+
+Nothing tells a page that an apply it started has resolved. The console is deliberately *not*
+restarted for a palette change — that is what keeps an operator signed in through a rollback — so
+the widget keeps whatever it last held. The gap is that a rollback is exactly the moment the
+operator most needs the interface to be honest about what the device is doing, and instead the one
+control they touched is the one telling them the wrong thing.
+
+The fix is a way for a page to learn that an apply reached a terminal state and re-read the
+configuration. That is a real piece of work — the apply engine has the state and `GET /status`
+already reports it, but no page subscribes to anything today. It belongs with whatever milestone
+makes the console reactive rather than poll-and-hope, and it should be built once for every
+control rather than patched onto the theme dropdown.
+
 ### K-22 · The diagnostics probe refuses IPv6 addresses
 `src/diag/probe.ts`
 

@@ -424,6 +424,32 @@ html, body, .v-application, .nrdb-app {
   margin: var(--yonder-space-4) 0;
 }
 
+/* ---- prose is never clipped ------------------------------------------
+   A Dashboard widget takes its height from a configured row span, and prose
+   does not have a row count that is right at every width: the same words are
+   taller on a narrower screen, in a larger system font, in another language.
+
+   The default silently wins that argument with overflow: auto. On the first
+   board this ran on, the Network page's "Read this before you join a network"
+   was 706px of text in a 372px widget - 39% of it behind an inner scrollbar
+   that nothing indicated was there. That is the warning which tells an
+   operator the access point is about to disappear, where to find the device
+   afterwards, and that they have five minutes to confirm before it all rolls
+   back. It is the mitigation this project deliberately wrote for K-13, and
+   an operator would have read the first half, pressed Join, and lost the page
+   before reaching the part that says what to do next.
+
+   So prose sizes to its content and the grid takes the rows it needs. A fixed
+   height is legitimate for a chart or a gauge, where the shape is the point.
+   It is never legitimate for words somebody has to act on. */
+.nrdb-ui-widget.nrdb-ui-markdown {
+  grid-row-end: auto !important;
+  grid-template-rows: none !important;
+  height: auto !important;
+  min-height: 0;
+  overflow: visible !important;
+}
+
 /* ---- the command-state language, in CSS ------------------------------
    The tone names come from console/command.ts, so a control cannot mean one
    thing on one page and something else on another (ADR-0005, R-UI-05). */

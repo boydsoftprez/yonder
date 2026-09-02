@@ -174,3 +174,27 @@ describe("themeCss ships a whole shell", () => {
     }
   });
 });
+
+/**
+ * Words an operator has to act on are never behind a scrollbar.
+ *
+ * Dashboard sizes a widget from a configured row span. Prose has no row count
+ * that is correct at every width, and the default resolves that with
+ * `overflow: auto` — silently. On the first board this ran on, the Network
+ * page's "Read this before you join a network" was 706px of text in a 372px
+ * widget: 39% hidden, with nothing to indicate it. That block is what tells an
+ * operator the access point is about to disappear and that they have five
+ * minutes to confirm — the mitigation written for K-13.
+ */
+describe("themeCss never clips prose", () => {
+  for (const t of ["day", "night"] as ThemeName[]) {
+    it(`lets markdown widgets size to their content (${t})`, () => {
+      const css = themeCss(t);
+      const rule = /\.nrdb-ui-widget\.nrdb-ui-markdown\s*\{[^}]*\}/s.exec(css)?.[0] ?? "";
+      expect(rule, "there must be a rule for markdown widgets").not.toBe("");
+      expect(rule).toMatch(/height:\s*auto/);
+      expect(rule).toMatch(/overflow:\s*visible/);
+      expect(rule).toMatch(/grid-row-end:\s*auto/);
+    });
+  }
+});
