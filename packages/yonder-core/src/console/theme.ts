@@ -311,6 +311,13 @@ html, body {
     linear-gradient(135deg, #090b0e 25%, transparent 25%, transparent 75%, #090b0e 75%);
   background-size: 100% 100%, 6px 6px, 16px 16px, 16px 16px, 16px 16px, 16px 16px;
   background-position: 0 0, 0 0, 0 0, 8px 8px, 0 0, 8px 8px;
+  /* Stated, never inherited. Vuetify sets background-repeat: no-repeat
+     on .v-application__wrap, so leaving this to the CSS default painted
+     exactly one 16px tile in the top-left corner of the page and nothing
+     else. It looked like a flat background with a smudge, and the smudge was
+     the whole panel. A swatch in isolation renders correctly, which is what
+     made it convincing; this only fails inside the framework's reset. */
+  background-repeat: repeat;
   background-attachment: fixed;
 }
 

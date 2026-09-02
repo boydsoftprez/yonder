@@ -207,6 +207,16 @@ describe("themeCss ships a whole shell", () => {
       expect(shade, `${t}: the twill has no dark tone`).toBeDefined();
       const gap = Math.abs(parseInt(weave.slice(1), 16) - parseInt(shade.slice(1), 16));
       expect(gap, `${t}: the weave tones are too close to see`).toBeGreaterThan(0x080808);
+
+      // Vuetify's reset sets `background-repeat: no-repeat` on the element
+      // this rule lands on. Leaving it to the CSS default painted one 16px
+      // tile in the corner of the page and nothing else — a flat background
+      // with a smudge, where the smudge was the entire panel. A tiled
+      // texture that does not say it tiles is a texture that renders once.
+      const rule = /\.nrdb-app,[\s\S]*?\}/.exec(css)?.[0] ?? "";
+      expect(rule, `${t}: no carbon rule`).not.toBe("");
+      expect(rule, `${t}: the carbon must state that it repeats`)
+        .toMatch(/background-repeat:\s*repeat/);
     }
   });
 

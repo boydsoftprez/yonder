@@ -407,8 +407,18 @@ printf '  %s passed, %s failed\n' "$pass" "$fail"
 # at them. The alternative, when a page renders blank, is reading framework
 # source and guessing — which is slower and less honest than looking.
 if [ "${HOLD:-0}" = "1" ]; then
+    # The stop command, with the real pids in it.
+    #
+    # `pkill -f yonder-pages` looks like it would do this and does not: the
+    # daemon's argv is the *repository* path, so only Node-RED matches and the
+    # daemon is left running with its socket and its port. Three of them
+    # accumulated that way, and the oldest was still answering on this port
+    # with a build from before the palette changed — so a page that had been
+    # rebuilt looked untouched, and the bug appeared to be in the theme.
     printf '\n  holding: http://127.0.0.1:%s/dashboard  (password: %s)\n' "$PORT" "$PASSWORD"
-    printf '  root: %s\n  ctrl-c to stop\n' "$ROOT"
+    printf '  root: %s\n' "$ROOT"
+    printf '  stop:  ctrl-c, or: kill %s %s\n' "$DAEMON_PID" "$CONSOLE_PID"
+    printf '%s %s\n' "$DAEMON_PID" "$CONSOLE_PID" > "$REPO/vendor/verify-pages.pids"
     while kill -0 "$CONSOLE_PID" 2>/dev/null; do sleep 1; done
 fi
 
