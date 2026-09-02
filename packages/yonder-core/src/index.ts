@@ -100,6 +100,8 @@ export {
 export { commandProbe, type Probe } from "./net/reach/probe.js";
 export {
   systemCounters,
+  countersFrom,
+  SYS_CLASS_NET,
   movement,
   looksDead,
   type Counters,

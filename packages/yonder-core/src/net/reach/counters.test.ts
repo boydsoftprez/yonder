@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { describe, expect, it } from "vitest";
-import { looksDead, movement, systemCounters } from "./counters.js";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { countersFrom, looksDead, movement } from "./counters.js";
 
 describe("movement", () => {
   it("reports the difference between two readings", () => {
@@ -38,8 +41,39 @@ describe("looksDead", () => {
   });
 });
 
-describe("systemCounters", () => {
+/**
+ * Against a directory this test wrote, never against `/sys`.
+ *
+ * A test that read the real thing would take a different branch on a CI host
+ * that happens to have an interface named like a fixture, and would be
+ * asserting about the machine rather than about this code. It is the rule the
+ * whole of `reach/` is built around — every reading is injected — and the one
+ * place it could still be broken was the reader itself.
+ */
+describe("the kernel's counters", () => {
+  let root: string;
+  beforeEach(() => { root = mkdtempSync(join(tmpdir(), "yonder-sys-")); });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+
+  function device(name: string, rx: string, tx: string): void {
+    const at = join(root, name, "statistics");
+    mkdirSync(at, { recursive: true });
+    writeFileSync(join(at, "rx_bytes"), `${rx}\n`);
+    writeFileSync(join(at, "tx_bytes"), `${tx}\n`);
+  }
+
+  it("reads both counters for an interface that is there", () => {
+    device("wwan0", "1374", "56842");
+    expect(countersFrom(root)("wwan0")).toEqual({ rx: 1374, tx: 56842 });
+  });
+
   it("answers null for a device that does not exist, rather than throwing", () => {
-    expect(systemCounters("definitely-not-a-device")).toBeNull();
+    // A board with no modem is an ordinary board.
+    expect(countersFrom(root)("wwan0")).toBeNull();
+  });
+
+  it("answers null rather than NaN when a counter is not a number", () => {
+    device("eth0", "not-a-number", "12");
+    expect(countersFrom(root)("eth0")).toBeNull();
   });
 });

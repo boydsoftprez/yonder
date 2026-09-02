@@ -19,6 +19,7 @@ import { Standing } from "../net/reach/standing.js";
 import { commandProbe } from "../net/reach/probe.js";
 import { ReachMonitor, pathDevices, pathsHolding } from "../net/reach/monitor.js";
 import { ReachWatch } from "../net/reach/watch.js";
+import type { CounterReader } from "../net/reach/counters.js";
 import type { PathName } from "../net/reach/standing.js";
 import { NetworkRenderer } from "../net/renderer.js";
 import { HostnameRenderer } from "../system/hostname.js";
@@ -76,6 +77,15 @@ export interface ServerOptions {
    * may wait on the wall clock in a test.
    */
   clock?: Clock;
+  /**
+   * Where the byte counters are read from. Test-only, and for exactly the
+   * reason `runner` is: the default is `readFileSync("/sys/class/net/…")`,
+   * and a test that reaches the real one is asserting about whatever
+   * interfaces the machine running it happens to have. It passes today only
+   * because the fixture names do not exist on the host; a CI board with a
+   * `wwan0` or an `eth0` would take a different branch of `ReachWatch`.
+   */
+  counters?: CounterReader;
   /**
    * Where the console lives, and whether there is one to render at all.
    * Absent means no ConsoleRenderer is assembled — see BuildRenderersOptions.
@@ -448,6 +458,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   const reach = new ReachMonitor({
     standing: new Standing({ clock, log: note }),
     probe: commandProbe(opts.runner ?? systemRunner),
+    ...(opts.counters !== undefined ? { counters: opts.counters } : {}),
     devices: async () => {
       const config = reachConfig();
       const [devices, net] = await Promise.all([client.devices(), modemInterface(config)]);
@@ -479,7 +490,10 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   //
   // The counters are the kernel's own and cost nothing to read, so a device
   // that is working spends nothing on establishing that (R-CEL-09, R-NET-13).
-  const reachWatch = new ReachWatch({ monitor: reach, clock, log: note });
+  const reachWatch = new ReachWatch({
+    monitor: reach, clock, log: note,
+    ...(opts.counters !== undefined ? { counters: opts.counters } : {}),
+  });
 
   const watchdog = new FallbackWatchdog({
     client,

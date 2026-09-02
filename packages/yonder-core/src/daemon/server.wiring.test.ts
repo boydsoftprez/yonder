@@ -10,6 +10,25 @@ import { AdminCredential, ADMIN_PASSWORD_SECRET } from "../console/credential.js
 import { hashPassword } from "../console/password.js";
 import type { Clock, Renderer } from "../apply/types.js";
 import { FAILURES_TO_STAND_DOWN, REACH_TICK_MS } from "../net/reach/standing.js";
+import type { CounterReader } from "../net/reach/counters.js";
+
+/**
+ * The byte counters, injected — never `/sys`.
+ *
+ * `ReachMonitor` and `ReachWatch` both default to `readFileSync
+ * ("/sys/class/net/…")`, so a `startServer` test that passes nothing is
+ * asserting about whatever interfaces the machine running the suite happens
+ * to have. It passed only because `wwan0` and `eth0` do not exist on the
+ * hosts it has run on; on a Linux board that has one, the same test takes a
+ * different branch of the watch. No test may reach a real `/sys`.
+ */
+const noCounters: CounterReader = () => null;
+
+/** A link with bytes moving both ways, which is what a healthy one looks like. */
+function movingCounters(): CounterReader {
+  let seen = 0;
+  return () => { seen += 4_000; return { rx: seen, tx: seen }; };
+}
 import type { CommandResult } from "../net/runner.js";
 import { DEFAULT_AP_PASSPHRASE } from "../net/profiles.js";
 import { saveConfig } from "../config/save.js";
@@ -258,7 +277,7 @@ describe("the daemon serves what M3a assembles", () => {
   async function serve(seen: string[][]): Promise<{ close(): Promise<void> }> {
     return startServer({
       socketPath, configPath, journalPath,
-      renderers: [noop], secretsPath, runner: boardRunner(seen),
+      renderers: [noop], secretsPath, runner: boardRunner(seen), counters: noCounters,
     });
   }
 
@@ -470,7 +489,7 @@ describe("the daemon drives the reach watch", () => {
     const hand = handClock();
     const server = await startServer({
       socketPath, configPath, journalPath, renderers: [noop], secretsPath,
-      runner: deadModemRunner(seen), clock: hand.clock,
+      runner: deadModemRunner(seen), clock: hand.clock, counters: noCounters,
     });
     try {
       for (let i = 0; i < FAILURES_TO_STAND_DOWN + 1; i++) await hand.advance(REACH_TICK_MS);
@@ -491,6 +510,42 @@ describe("the daemon drives the reach watch", () => {
     }
   });
 
+  /**
+   * The injection point itself, at the socket — and the property it makes
+   * testable, which is the one the whole design rests on: a board that is
+   * working spends nothing on establishing that (R-CEL-09, R-NET-13).
+   *
+   * With bytes moving both ways the watch tests once, when the link comes up,
+   * and never again. Without a way to inject the reader these tests read the
+   * host's real `/sys`, got null for every device, and could only ever
+   * exercise the branch where the counters say nothing.
+   */
+  it("takes the byte counters it was given, and probes nothing while they move", async () => {
+    withModem();
+    const seen: string[][] = [];
+    const hand = handClock();
+    const server = await startServer({
+      socketPath, configPath, journalPath, renderers: [noop], secretsPath,
+      runner: deadModemRunner(seen), clock: hand.clock, counters: movingCounters(),
+    });
+    try {
+      await hand.advance(REACH_TICK_MS);
+      const afterLinkUp = seen.filter((a) => a[0] === "curl").length;
+      expect(afterLinkUp).toBe(1);
+      for (let i = 0; i < FAILURES_TO_STAND_DOWN + 2; i++) await hand.advance(REACH_TICK_MS);
+      expect(seen.filter((a) => a[0] === "curl").length).toBe(afterLinkUp);
+
+      // Traffic in both directions is evidence, and it costs nothing: the
+      // modem is not stood down, and the watchdog's question answers true.
+      const res = await call(socketPath, "GET", "/reach/state");
+      const state = res.body as { carrying: boolean; paths: { path: string; standing: string }[] };
+      expect(state.paths.find((p) => p.path === "modem")?.standing).not.toBe("no-route-out");
+      expect(state.carrying).toBe(true);
+    } finally {
+      await server.close();
+    }
+  });
+
   it("stops the watch when the daemon closes", async () => {
     // A tick loop outliving its daemon would go on running curl on somebody's
     // metered link on behalf of a process that has let go of its socket.
@@ -499,7 +554,7 @@ describe("the daemon drives the reach watch", () => {
     const hand = handClock();
     const server = await startServer({
       socketPath, configPath, journalPath, renderers: [noop], secretsPath,
-      runner: deadModemRunner(seen), clock: hand.clock,
+      runner: deadModemRunner(seen), clock: hand.clock, counters: noCounters,
     });
     await hand.advance(REACH_TICK_MS);
     await server.close();
@@ -516,7 +571,7 @@ describe("the daemon drives the reach watch", () => {
     const server = await startServer({
       socketPath, configPath, journalPath, renderers: [noop], secretsPath,
       runner: async (argv) => { seen.push(argv); return { code: 0, stdout: "", stderr: "" }; },
-      clock: hand.clock,
+      clock: hand.clock, counters: noCounters,
     });
     try {
       for (let i = 0; i < 5; i++) await hand.advance(REACH_TICK_MS);

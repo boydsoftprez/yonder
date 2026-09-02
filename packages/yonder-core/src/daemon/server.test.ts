@@ -19,6 +19,7 @@ import { NmcliError } from "../net/nmcli/client.js";
 import type { Clock, Renderer } from "../apply/types.js";
 import type { Config } from "../schema/config.js";
 import type { CommandRunner } from "../net/runner.js";
+import type { CounterReader } from "../net/reach/counters.js";
 
 let dir: string, configPath: string, journalPath: string;
 const noopRenderer: Renderer = { name: "noop", async render() {} };
@@ -29,6 +30,14 @@ const frozenClock: Clock = { now: () => 0, setTimer: () => 1, clearTimer: () => 
 // these tests exercise the HTTP/apply plumbing, not networking, and must
 // never touch a real nmcli or write outside the sandbox.
 const noopRunner: CommandRunner = async () => ({ code: 0, stdout: "", stderr: "" });
+
+/**
+ * The byte counters, injected. Every test below that hands the daemon a clock
+ * it drives by hand advances it far enough for the reach watch to tick, and
+ * the watch's default reader is `readFileSync("/sys/class/net/…")`. No test
+ * may reach a real `/sys`, whatever interfaces the host happens to have.
+ */
+const noCounters: CounterReader = () => null;
 
 /**
  * A device that already has an administrator password.
@@ -607,7 +616,7 @@ describe("startServer", () => {
 
   it("arms the fallback watchdog and raises the access point when nothing is reachable", async () => {
     const { clock, advance, runner, raised } = watchdogHarness();
-    const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner, clock });
+    const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner, clock, counters: noCounters });
     try {
       advance(89_000);
       await flushMicrotasks();
@@ -625,7 +634,7 @@ describe("startServer", () => {
 
   it("stops the fallback watchdog when the server closes", async () => {
     const { clock, advance, runner, raised } = watchdogHarness();
-    const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner, clock });
+    const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner, clock, counters: noCounters });
     await server.close();
     advance(200_000);
     await flushMicrotasks();
@@ -666,7 +675,7 @@ describe("startServer", () => {
         if (recovering) { recovering = false; advance(60_000); }
       },
     };
-    const server = await startServer({ socketPath, configPath, journalPath, renderers: [slowRecovery], secretsPath: join(dir, "secrets.yaml"), runner, clock });
+    const server = await startServer({ socketPath, configPath, journalPath, renderers: [slowRecovery], secretsPath: join(dir, "secrets.yaml"), runner, clock, counters: noCounters });
     try {
       // t = 60_000, and R-NET-07's 90 s is 30 s away rather than 90.
       advance(29_000);
@@ -686,7 +695,7 @@ describe("startServer", () => {
     try {
       const { clock, advance, runner, raised } = watchdogHarness();
       writeFileSync(configPath, "version: 99\nnetwork: nonsense\n");
-      const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner, clock });
+      const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner, clock, counters: noCounters });
       try {
         advance(91_000);
         await flushMicrotasks();
@@ -706,7 +715,7 @@ describe("startServer", () => {
     const off = structuredClone(DEFAULT_CONFIG);
     off.network.ap.fallback.enabled = false;
     saveConfig(configPath, off);
-    const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner, clock });
+    const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner, clock, counters: noCounters });
     try {
       advance(200_000);
       await flushMicrotasks();
@@ -762,7 +771,7 @@ describe("startServer", () => {
         async render(c) { rendered.push(c.network.ap.ssid); },
       };
 
-      const server = await startServer({ socketPath, configPath, journalPath, renderers: [watcher], secretsPath: join(dir, "secrets.yaml"), runner, clock });
+      const server = await startServer({ socketPath, configPath, journalPath, renderers: [watcher], secretsPath: join(dir, "secrets.yaml"), runner, clock, counters: noCounters });
       try {
         // The start-up render ran, and against the operator's configuration.
         // This is the line that used to read "could not render the current
@@ -885,7 +894,7 @@ describe("startServer", () => {
     try {
       const { clock, advance, names, runner, raised, refused } =
         coldBootHarness((now) => (now < 1_000 ? COLD_BOOT : RADIO_READY));
-      const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner, clock });
+      const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner, clock, counters: noCounters });
       try {
         await flushMicrotasks();
         // The socket is up regardless: reaching a board to ask what is wrong
@@ -915,7 +924,7 @@ describe("startServer", () => {
     try {
       const { clock, advance, names, runner, raised } =
         coldBootHarness((now) => (now < 1_000 ? NO_RADIO_YET : RADIO_READY));
-      const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner, clock });
+      const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner, clock, counters: noCounters });
       try {
         await flushMicrotasks();
         // The render found no wifi interface, so it wrote no yonder-ap at all
@@ -957,7 +966,7 @@ describe("startServer", () => {
 
       const { clock, advance, names, runner, raised, refused } =
         coldBootHarness((now) => (now < 30_000 ? NO_RADIO_YET : RADIO_READY));
-      const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner, clock });
+      const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner, clock, counters: noCounters });
       try {
         // Walk to the deadline one poll at a time, the way the daemon
         // actually experiences it.
@@ -993,7 +1002,7 @@ describe("startServer", () => {
     try {
       const { clock, advance, calls, names, runner, raised } =
         coldBootHarness((now) => (now < 5_000 ? NO_RADIO_YET : RADIO_READY));
-      const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner, clock });
+      const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath: join(dir, "secrets.yaml"), runner, clock, counters: noCounters });
       await flushMicrotasks();
       // The wait is running: no radio was listed, so no profile was written
       // and the wait is what would eventually write one.

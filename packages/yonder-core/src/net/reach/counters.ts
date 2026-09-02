@@ -6,25 +6,39 @@ export interface Counters { rx: number; tx: number }
 /** Injected, like every other reading in this daemon, so a test reaches no /sys. */
 export type CounterReader = (device: string) => Counters | null;
 
+/** Where the kernel keeps them. */
+export const SYS_CLASS_NET = "/sys/class/net";
+
 /**
- * How many bytes an interface has carried, from the kernel's own counters.
+ * How many bytes an interface has carried, from the kernel's own counters,
+ * under a given root.
  *
  * Free, in the sense that matters here: these are maintained whether or not
  * anything reads them, so watching a metered cellular link costs the operator
  * nothing (R-CEL-09). Null for a device that is not there — a board with no
  * modem is an ordinary board.
+ *
+ * The root is a parameter so that the *parsing* can be tested against a
+ * directory a test wrote, rather than against whatever interfaces the machine
+ * running the suite happens to have. Nothing in production passes anything
+ * but `SYS_CLASS_NET`; every other caller injects a `CounterReader` instead.
  */
-export const systemCounters: CounterReader = (device) => {
-  try {
-    const at = (f: string) =>
-      Number(readFileSync(`/sys/class/net/${device}/statistics/${f}`, "utf8").trim());
-    const rx = at("rx_bytes");
-    const tx = at("tx_bytes");
-    return Number.isFinite(rx) && Number.isFinite(tx) ? { rx, tx } : null;
-  } catch {
-    return null;
-  }
-};
+export function countersFrom(root: string): CounterReader {
+  return (device) => {
+    try {
+      const at = (f: string) =>
+        Number(readFileSync(`${root}/${device}/statistics/${f}`, "utf8").trim());
+      const rx = at("rx_bytes");
+      const tx = at("tx_bytes");
+      return Number.isFinite(rx) && Number.isFinite(tx) ? { rx, tx } : null;
+    } catch {
+      return null;
+    }
+  };
+}
+
+/** The kernel's own counters. The default nothing in a test may reach. */
+export const systemCounters: CounterReader = countersFrom(SYS_CLASS_NET);
 
 /**
  * The difference between two readings, floored at zero.
