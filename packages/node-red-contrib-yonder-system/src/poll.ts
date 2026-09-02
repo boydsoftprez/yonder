@@ -20,7 +20,21 @@ import type { NodeMessage, RED, RedNode } from "./red.js";
 export interface PollOptions {
   /** The route to read, including any query string. */
   path: (node: PollingNode) => string;
-  /** Given the body, what to put on the outgoing message. */
+  /**
+   * Given the body, what to put on the outgoing message — or `undefined` to
+   * send nothing at all this tick.
+   *
+   * Sending nothing is not the same as sending an empty list, and Dashboard's
+   * table makes the difference load-bearing. `ui_table.js` appends with:
+   *
+   *     payload = payload && payload.length > 0
+   *       ? [...existing, ...payload] : payload
+   *
+   * so an empty array falls through and **overwrites the store with it**. A
+   * log that polls for new lines and finds none would therefore erase itself
+   * on every quiet tick, which is exactly what an operator saw: entries
+   * appearing and then flashing out again before they could be read.
+   */
   payload: (value: unknown, node: PollingNode) => unknown;
   /** Called after a successful read, so a node can advance a cursor. */
   seen?: (value: unknown, node: PollingNode) => void;
@@ -64,7 +78,9 @@ export function registerPoller(RED: RED, type: string, opts: PollOptions): void 
       }
       opts.seen?.(result.value, node);
       node.status({ fill: "green", shape: "dot", text: opts.describe?.(result.value) ?? "ok" });
-      send({ payload: opts.payload(result.value, node) });
+      const payload = opts.payload(result.value, node);
+      if (payload === undefined) return;
+      send({ payload });
     };
 
     // `void`, not `await`: this runs off a timer and off an input handler, and

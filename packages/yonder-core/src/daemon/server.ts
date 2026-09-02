@@ -4,7 +4,7 @@ import { unlinkSync, existsSync, mkdirSync, chmodSync } from "node:fs";
 import { dirname } from "node:path";
 import { pathToFileURL } from "node:url";
 import { ApplyEngine } from "../apply/engine.js";
-import { warn, note } from "../log.js";
+import { warn, note, trace } from "../log.js";
 import { createRouter, type DiagProbes } from "./routes.js";
 import { AdminCredential } from "../console/credential.js";
 import { ConsoleRenderer } from "../console/renderer.js";
@@ -226,7 +226,9 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   // that helps a device in that state. Constructing a client cannot fail; it
   // is only the secret store above that can.
   const client = built?.client
-    ?? new NmcliClient(opts.runner ?? systemRunner, note);
+    // `trace`, not `note`: an nmcli command line is diagnostic, and the
+    // activity pane is where an operator looks for what their Join did.
+    ?? new NmcliClient(opts.runner ?? systemRunner, trace);
 
   // No secret is ever printed. That mechanism existed to surface a random
   // per-device access-point passphrase and there is no longer one to surface

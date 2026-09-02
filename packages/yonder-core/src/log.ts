@@ -27,3 +27,20 @@ export function warn(message: string): void {
 export function note(message: string): void {
   process.stdout.write(`${activityLog.record("info", message)}\n`);
 }
+
+/**
+ * A command this daemon ran. The journal only — never the activity log.
+ *
+ * The activity pane on the console is a product surface: what the *device*
+ * did, in words an operator can act on. The journal is the diagnostic one,
+ * and every `nmcli` invocation belongs there.
+ *
+ * Routing subprocess lines through `note` put them in both, and the moment a
+ * status line started polling every few seconds the pane filled with
+ * `nmcli -t -f DEVICE,TYPE,STATE,CONNECTION device status` twice a tick.
+ * An operator watching for what their Join did could not see it for the
+ * plumbing.
+ */
+export function trace(message: string): void {
+  process.stdout.write(`${message}\n`);
+}
