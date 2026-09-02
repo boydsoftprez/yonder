@@ -535,10 +535,30 @@ that write is EROFS from inside the service. The install would still succeed —
 # but this is checked rather than assumed: `systemctl --root=/ disable` is the
 # fallback, because passing --root makes systemctl do the same symlink work
 # client-side instead of handing the verb to a manager that is not there.
+#
+# DPKG_MAINTSCRIPT_PACKAGE is set because deb-systemd-helper refuses to do
+# anything at all without it - a real board, not a chroot, answered
+# "/usr/bin/deb-systemd-helper was not called from dpkg. Exiting." and exited
+# 1 when this role called it plainly. `try` correctly logged that and carried
+# on, which is exactly the trouble: the unit stayed enabled, and nothing in
+# this installer was the wiser until `assert_unit_disabled` below caught it.
+# Read against the helper's own source rather than guessed at: it gates on
+# exactly one line, `if (!$ENV{DPKG_MAINTSCRIPT_PACKAGE}) { ... exit 1 }`,
+# and never reads the variable again for anything - not for the disable
+# action, not for the state it records under
+# /var/lib/systemd/deb-systemd-helper-*, which is keyed on the unit name it
+# is given, not on this. A run on the board with DPKG_MAINTSCRIPT_PACKAGE set
+# and nothing else - no DPKG_MAINTSCRIPT_NAME - disabled the unit and exited
+# 0, so that is the one variable this sets; adding a second one nothing reads
+# would be cargo cult, not fact. Its value only needs to be non-empty to
+# satisfy the check, and is set to the unit's own name (postrm and postinst
+# maintscripts both pass the package name here, and for this unit the two
+# names coincide) so a reader of a captured command line sees which package
+# this claims to be acting for, rather than an unexplained placeholder.
 disable_unit_offline() {
     duo_unit="$1"
     if command -v deb-systemd-helper >/dev/null 2>&1; then
-        try deb-systemd-helper disable "$duo_unit"
+        try env DPKG_MAINTSCRIPT_PACKAGE="${duo_unit%.service}" deb-systemd-helper disable "$duo_unit"
     elif command -v systemctl >/dev/null 2>&1; then
         log "no deb-systemd-helper here; disabling $duo_unit with systemctl --root=/"
         try systemctl --root=/ disable "$duo_unit"

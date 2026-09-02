@@ -144,19 +144,44 @@ EOF
     chmod +x "$stub/$1"
 }
 
-make_stub deb-systemd-helper
+# The real deb-systemd-helper's one load-bearing behaviour, and the one a
+# plain always-succeeds stub cannot exercise: it refuses to do anything at
+# all unless DPKG_MAINTSCRIPT_PACKAGE is set, and says so on stderr with exit
+# 1 - verbatim what a real board answered when this role called it without
+# that variable, leaving the unit enabled with `try` reporting nothing worse
+# than a carried-on failure. A stub that always exits 0 would pass whether or
+# not disable_unit_offline sets the variable, which is exactly how the
+# regression this guards against shipped unnoticed. This one records argv
+# only when the gate is satisfied, so a case that forgets the variable sees
+# an empty $called rather than a false pass.
+make_dsh_stub() {
+    cat >"$stub/deb-systemd-helper" <<EOF
+#!/bin/sh
+if [ -z "\${DPKG_MAINTSCRIPT_PACKAGE:-}" ]; then
+    printf '%s\\n' "/usr/bin/deb-systemd-helper was not called from dpkg. Exiting." >&2
+    exit 1
+fi
+printf 'deb-systemd-helper %s (DPKG_MAINTSCRIPT_PACKAGE=%s)\\n' "\$*" "\$DPKG_MAINTSCRIPT_PACKAGE" >>"$called"
+exit 0
+EOF
+    chmod +x "$stub/deb-systemd-helper"
+}
+
+make_dsh_stub
 make_stub systemctl
 
 : >"$called"
 status=$(in_shell "PATH=\"$stub:\$PATH\"; disable_unit_offline zerotier-one.service")
 if [ "$status" = "0" ] \
-    && grep -q '^deb-systemd-helper disable zerotier-one.service$' "$called" \
+    && grep -q '^deb-systemd-helper disable zerotier-one.service (DPKG_MAINTSCRIPT_PACKAGE=zerotier-one)$' "$called" \
     && ! grep -q '^systemctl' "$called"; then
     ok "disables with deb-systemd-helper, the offline mechanism the postinst enabled with"
 else
     bad "disable_unit_offline did not call deb-systemd-helper (exit $status)"
     sed 's/^/      called: /' "$called"
     sed 's/^/      /' "$case_out"
+    grep -q 'was not called from dpkg' "$case_out" \
+        && printf '      (this is the board defect: DPKG_MAINTSCRIPT_PACKAGE was not set, R-VPN-08)\n'
 fi
 
 # PATH is the stub directory alone, so deb-systemd-helper is genuinely absent
