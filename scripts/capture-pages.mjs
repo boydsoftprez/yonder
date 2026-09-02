@@ -42,13 +42,30 @@ const REPO = join(dirname(fileURLToPath(import.meta.url)), "..");
 function pagesFromFlows() {
   const flows = JSON.parse(readFileSync(join(REPO, "flows/flows.json"), "utf8"));
   const base = flows.find((n) => n.type === "ui-base");
-  return flows
-    .filter((n) => n.type === "ui-page")
-    .map((p) => ({
-      name: String(p.name).toLowerCase().replace(/[^a-z0-9]+/g, "-"),
-      title: p.name,
-      url: (base?.path ?? "/dashboard") + p.path,
-    }));
+  const out = [];
+  for (const p of flows.filter((n) => n.type === "ui-page")) {
+    const slug = String(p.name).toLowerCase().replace(/[^a-z0-9]+/g, "-");
+    const url = (base?.path ?? "/dashboard") + p.path;
+    // A tabbed page shows one group at a time, so "every page" would quietly
+    // mean "the first tab" unless each tab is captured in its own right
+    // (R-UI-12). The tab's label is its group's name.
+    if (p.layout === "tabs") {
+      const tabs = flows
+        .filter((n) => n.type === "ui-group" && n.page === p.id)
+        .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+      for (const [i, g] of tabs.entries()) {
+        out.push({
+          name: `${slug}-${String(g.name).toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+          title: `${p.name} · ${g.name}`,
+          url,
+          tabIndex: i,
+        });
+      }
+    } else {
+      out.push({ name: slug, title: p.name, url });
+    }
+  }
+  return out;
 }
 
 /**
@@ -312,6 +329,23 @@ for (const page of pages) {
   await tab.waitForSelector('[class*="nrdb-ui-widget"], [class*="nrdb-ui-group"]', { timeout: 15000 })
     .catch(() => {});
   await tab.waitForTimeout(400);
+
+  // Select this entry's tab. Vuetify renders every tab's panel but shows one,
+  // so the click is what makes the measured shape the shape a person sees.
+  //
+  // 700ms, not 400: the click itself leaves a `v-ripple__container` clipped
+  // by the tab's own overflow while its ripple animation finishes, which
+  // `measure()` cannot tell apart from real content hidden behind a
+  // scrollbar. 400ms still caught it mid-animation on every tab in this
+  // page and failed the gate on a ripple, not a defect. 700ms was the
+  // shortest wait, measured here, that let the animation finish first.
+  if (page.tabIndex !== undefined) {
+    const tabs = tab.locator('.v-tab, [role="tab"]');
+    if ((await tabs.count()) > page.tabIndex) {
+      await tabs.nth(page.tabIndex).click();
+      await tab.waitForTimeout(700);
+    }
+  }
 
   const shape = await tab.evaluate(measure, LIVE);
   const stem = `${page.name}.${palette}`;

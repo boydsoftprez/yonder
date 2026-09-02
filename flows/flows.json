@@ -89,7 +89,7 @@
         "ui": "dashboard",
         "path": "/network",
         "icon": "wifi",
-        "layout": "grid",
+        "layout": "tabs",
         "theme": "palette",
         "breakpoints": [
             {
@@ -221,12 +221,12 @@
     {
         "id": "group-net-now",
         "type": "ui-group",
-        "name": "",
+        "name": "Interfaces",
         "page": "page-network",
         "width": 6,
         "height": 1,
         "order": 1,
-        "showTitle": false,
+        "showTitle": true,
         "className": "",
         "visible": true,
         "disabled": false,
@@ -977,13 +977,335 @@
         "wires": []
     },
     {
+        "id": "group-net-zerotier",
+        "type": "ui-group",
+        "name": "ZeroTier",
+        "page": "page-network",
+        "width": 12,
+        "height": 1,
+        "order": 3,
+        "showTitle": true,
+        "className": "",
+        "visible": true,
+        "disabled": false,
+        "groupType": "default"
+    },
+    {
+        "id": "zt-poll",
+        "type": "inject",
+        "z": "yonder-console",
+        "name": "poll the mesh state",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "5",
+        "crontab": "",
+        "once": true,
+        "onceDelay": "1",
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 780,
+        "y": 1440,
+        "wires": [
+            [
+                "zt-state"
+            ]
+        ]
+    },
+    {
+        "id": "zt-state",
+        "type": "yonder-remote-state",
+        "z": "yonder-console",
+        "name": "mesh state",
+        "x": 980,
+        "y": 1440,
+        "wires": [
+            [
+                "text-zt-label",
+                "text-zt-networkid",
+                "text-zt-deviceid"
+            ]
+        ]
+    },
+    {
+        "id": "text-zt-label",
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-net-zerotier",
+        "order": 1,
+        "width": 12,
+        "height": 1,
+        "name": "status",
+        "label": "Status",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "value": "payload.label",
+        "valueType": "msg",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "wrapText": false,
+        "className": "",
+        "x": 1200,
+        "y": 1360,
+        "wires": []
+    },
+    {
+        "id": "zt-network-id",
+        "type": "ui-text-input",
+        "z": "yonder-console",
+        "group": "group-net-zerotier",
+        "name": "network id",
+        "label": "Network ID",
+        "tooltip": "",
+        "order": 2,
+        "width": 8,
+        "height": 1,
+        "topic": "networkId",
+        "topicType": "str",
+        "mode": "text",
+        "delay": 300,
+        "passthru": false,
+        "sendOnBlur": true,
+        "className": "",
+        "icon": "",
+        "iconPosition": "left",
+        "clearable": false,
+        "sendOnDelay": true,
+        "x": 780,
+        "y": 1500,
+        "wires": [
+            [
+                "zt-remember-id"
+            ]
+        ]
+    },
+    {
+        "id": "zt-remember-id",
+        "type": "change",
+        "name": "the typed network id, for Join to read",
+        "rules": [
+            {
+                "t": "set",
+                "p": "networkId",
+                "pt": "flow",
+                "to": "payload",
+                "tot": "msg"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 1020,
+        "y": 1500,
+        "wires": [
+            []
+        ],
+        "z": "yonder-console"
+    },
+    {
+        "id": "button-zt-join",
+        "type": "ui-button",
+        "z": "yonder-console",
+        "group": "group-net-zerotier",
+        "name": "join",
+        "order": 3,
+        "width": 4,
+        "height": 1,
+        "label": "Join",
+        "tooltip": "",
+        "color": "",
+        "bgcolor": "",
+        "className": "",
+        "icon": "",
+        "iconPosition": "left",
+        "payload": "networkId",
+        "payloadType": "flow",
+        "topic": "",
+        "topicType": "str",
+        "buttonColor": "",
+        "textColor": "",
+        "iconColor": "",
+        "enableClick": true,
+        "enablePointerdown": false,
+        "pointerdownPayload": "",
+        "pointerdownPayloadType": "str",
+        "enablePointerup": false,
+        "pointerupPayload": "",
+        "pointerupPayloadType": "str",
+        "emulateClick": false,
+        "x": 780,
+        "y": 1560,
+        "wires": [
+            [
+                "zt-join"
+            ]
+        ]
+    },
+    {
+        "id": "zt-join",
+        "type": "yonder-remote-join",
+        "z": "yonder-console",
+        "name": "join the mesh",
+        "x": 1020,
+        "y": 1560,
+        "wires": [
+            [
+                "join-toast"
+            ]
+        ]
+    },
+    {
+        "id": "text-zt-networkid",
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-net-zerotier",
+        "order": 4,
+        "width": 6,
+        "height": 1,
+        "name": "network",
+        "label": "Network",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "value": "payload.networkId",
+        "valueType": "msg",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "wrapText": false,
+        "className": "",
+        "x": 1200,
+        "y": 1400,
+        "wires": []
+    },
+    {
+        "id": "text-zt-deviceid",
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-net-zerotier",
+        "order": 5,
+        "width": 6,
+        "height": 1,
+        "name": "device",
+        "label": "Device ID",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "value": "payload.deviceId",
+        "valueType": "msg",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "wrapText": false,
+        "className": "",
+        "x": 1210,
+        "y": 1440,
+        "wires": []
+    },
+    {
+        "id": "button-zt-copy",
+        "type": "ui-button",
+        "z": "yonder-console",
+        "group": "group-net-zerotier",
+        "name": "copy",
+        "order": 6,
+        "width": 2,
+        "height": 1,
+        "label": "Copy",
+        "tooltip": "Select the device ID above to copy it",
+        "color": "",
+        "bgcolor": "",
+        "className": "",
+        "icon": "",
+        "iconPosition": "left",
+        "payload": "",
+        "payloadType": "str",
+        "topic": "",
+        "topicType": "str",
+        "buttonColor": "",
+        "textColor": "",
+        "iconColor": "",
+        "enableClick": true,
+        "enablePointerdown": false,
+        "pointerdownPayload": "",
+        "pointerdownPayloadType": "str",
+        "enablePointerup": false,
+        "pointerupPayload": "",
+        "pointerupPayloadType": "str",
+        "emulateClick": false,
+        "x": 780,
+        "y": 1620,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "button-zt-leave",
+        "type": "ui-button",
+        "z": "yonder-console",
+        "group": "group-net-zerotier",
+        "name": "leave",
+        "order": 7,
+        "width": 3,
+        "height": 1,
+        "label": "Leave",
+        "tooltip": "",
+        "color": "",
+        "bgcolor": "",
+        "className": "",
+        "icon": "",
+        "iconPosition": "left",
+        "payload": "",
+        "payloadType": "str",
+        "topic": "",
+        "topicType": "str",
+        "buttonColor": "",
+        "textColor": "",
+        "iconColor": "",
+        "enableClick": true,
+        "enablePointerdown": false,
+        "pointerdownPayload": "",
+        "pointerdownPayloadType": "str",
+        "enablePointerup": false,
+        "pointerupPayload": "",
+        "pointerupPayloadType": "str",
+        "emulateClick": false,
+        "x": 1020,
+        "y": 1620,
+        "wires": [
+            [
+                "zt-leave"
+            ]
+        ]
+    },
+    {
+        "id": "zt-leave",
+        "type": "yonder-remote-leave",
+        "z": "yonder-console",
+        "name": "leave the mesh",
+        "x": 1260,
+        "y": 1620,
+        "wires": [
+            [
+                "join-toast"
+            ]
+        ]
+    },
+    {
         "id": "group-net-activity",
         "type": "ui-group",
         "name": "Activity",
         "page": "page-network",
         "width": 12,
         "height": 1,
-        "order": 3,
+        "order": 4,
         "showTitle": true,
         "className": "",
         "visible": true,

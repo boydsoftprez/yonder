@@ -46,6 +46,7 @@ function contribTypes(): Set<string> {
   for (const pkg of [
     "node-red-contrib-yonder-system",
     "node-red-contrib-yonder-network",
+    "node-red-contrib-yonder-remote",
     "node-red-dashboard-2-yonder",
   ]) {
     const manifest = JSON.parse(
@@ -732,5 +733,23 @@ describe("flows/flows.json activity panes", () => {
       // And is bounded, or an append-only pane is a leak with a nice name.
       expect(Number(t.maxrows)).toBeGreaterThan(0);
     }
+  });
+});
+
+/**
+ * The ZeroTier tab, against the artefact rather than a rendering (R-VPN-06).
+ */
+describe("flows/flows.json ZeroTier tab", () => {
+  it.each(["yonder-remote-state", "yonder-remote-join", "yonder-remote-leave"])(
+    "the shipped flows use %s",
+    (type) => {
+      expect(JSON.stringify(flows)).toContain(`"${type}"`);
+    },
+  );
+
+  // CLAUDE.md rule 2: a function node is JavaScript serialised next to wire
+  // coordinates, so it cannot be reviewed, so it cannot be merged.
+  it("ships no function node", () => {
+    expect(flows.some((n) => n.type === "function")).toBe(false);
   });
 });
