@@ -655,3 +655,22 @@ reverts, and only one of those is recoverable from a chair.
 The harness saw it too, once it stopped hiding: `verify-pages.sh` restored the default
 palette with `|| true` after capturing, so a run that failed to restore reported nothing
 and left a held console in the night palette.
+
+### K-33 · The fallback watchdog accepts an address as proof of reachability
+
+**Status:** Open · **Requirement:** R-NET-07, R-CEL-09
+
+`FallbackWatchdog.check()` asks whether any interface other than the access point holds an
+IPv4 address. R-NET-07's own text says "carries traffic"; the implementation weakened it
+deliberately, because a connected but idle Ethernet link carries none and is perfectly
+reachable, and its comment says so.
+
+Cellular breaks that reasoning. A modem with a wrong APN registers, attaches, takes an
+address and installs a route while completing no request — measured, and recorded in the
+M3 design's §2. That satisfies this check. A device configured that way from the boot
+partition, with no other path, never raises its access point and is unreachable until
+somebody pulls the card. Rule 6.
+
+**Closed by:** Task 8 of the M3a plan, which moves the check onto the same
+carrying-traffic signal R-CEL-09 introduces — which can tell *idle* from *dead*, as byte
+counters alone could not.

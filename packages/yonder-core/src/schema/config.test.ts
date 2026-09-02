@@ -132,3 +132,54 @@ describe("apply", () => {
     }).success).toBe(false);
   });
 });
+
+describe("network.modem", () => {
+  it("is absent from a device that has not configured one", () => {
+    // R-CFG-08: a freshly flashed board is usable with no operator input, and
+    // that means no modem connection is attempted on a board with no modem.
+    expect(DEFAULT_CONFIG.network.modem.enabled).toBe(false);
+    expect(DEFAULT_CONFIG.network.modem.mode).toBe("auto");
+    expect(DEFAULT_CONFIG.network.modem.apn).toBeNull();
+  });
+
+  it("takes an APN, a user, a password reference and a dial string", () => {
+    const config = ConfigSchema.parse({
+      ...DEFAULT_CONFIG,
+      network: {
+        ...DEFAULT_CONFIG.network,
+        modem: {
+          enabled: true,
+          apn: "ereseller",
+          username: "user",
+          password: { secret: "modem_psk" },
+          dial: "*99#",
+        },
+      },
+    });
+    expect(config.network.modem.apn).toBe("ereseller");
+    expect(config.network.modem.password).toEqual({ secret: "modem_psk" });
+    expect(config.network.modem.dial).toBe("*99#");
+  });
+
+  it("names the adapter when the operator names the modem", () => {
+    const config = ConfigSchema.parse({
+      ...DEFAULT_CONFIG,
+      network: {
+        ...DEFAULT_CONFIG.network,
+        modem: { enabled: true, mode: "appliance", interface: "usb0" },
+      },
+    });
+    expect(config.network.modem.mode).toBe("appliance");
+    expect(config.network.modem.interface).toBe("usb0");
+  });
+
+  it("refuses a mode it does not have", () => {
+    // `hilink` and `stick` were the sketch in configuration.md and are not
+    // what shipped. A misspelling silently accepted is a setting an operator
+    // believes is in force and is not.
+    expect(() => ConfigSchema.parse({
+      ...DEFAULT_CONFIG,
+      network: { ...DEFAULT_CONFIG.network, modem: { mode: "hilink" } },
+    })).toThrow();
+  });
+});

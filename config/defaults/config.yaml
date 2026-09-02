@@ -24,6 +24,14 @@ network:
     psk: null
   ethernet:
     dhcp: true
+  modem:
+    enabled: false
+    mode: auto
+    interface: null
+    apn: null
+    username: null
+    password: null
+    dial: null
   priority:
     - ethernet
     - modem

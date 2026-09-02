@@ -105,6 +105,14 @@ network:
     ssid: null                                 # set from the console, not at flash time
     psk: null                                  # then { secret: wifi_psk }
   ethernet: { dhcp: true }
+  modem:
+    enabled: false
+    mode: auto                                 # auto | appliance — see note below
+    interface: null
+    apn: null
+    username: null
+    password: null                             # then { secret: modem_psk }
+    dial: null
   priority: [ethernet, modem, wifi_client]     # egress preference, highest first
 
 ui:
@@ -188,14 +196,6 @@ cameras:
       - { type: rtsp,   path: /cam0 }
       - { type: srt,    port: 8890 }
 
-network:
-  modem:
-    enabled: true
-    mode: auto                  # auto | hilink | stick
-    apn: null
-    username: null
-    password: { secret: modem_psk }
-
 remote:
   zerotier:  { enabled: false, network_id: null }   # primary — joins by network ID
   tailscale: { enabled: false, auth_key: { secret: ts_authkey } }
@@ -216,6 +216,21 @@ a ground-station feed are not a choice between two options (R-VID-05).
 
 **`network.priority`** replaces hand-tuned route metrics. Egress preference is stated once,
 in order, and the metrics are generated.
+
+**`network.modem.mode`** is `auto` or `appliance`. `auto` means the modem the system found —
+the kind ModemManager claims and identifies for itself, with registration, operator, radio
+technology and signal all available without being told anything. `appliance` means a modem
+the operator names in `network.modem.interface`, because it holds the SIM, dials by itself
+and presents to the host as an ordinary network adapter — indistinguishable from any other
+without a list of device identifiers written from a vendor's documentation (R-CEL-11). These
+replace the `hilink`/`stick` sketch that appeared in this reference before M3a: that sketch
+was never implemented and never shipped, so no device in the field can be carrying either
+value.
+
+**`network.modem.apn`** has no default and is never guessed. Debian's carrier database
+lists `NXTGENPHONE` first for the SIM this was measured against, which is the value that
+attached and carried nothing, and the value that worked is absent from the file entirely.
+An APN comes from your carrier (R-CEL-09).
 
 **`ui.editor.interfaces`** deliberately omits `modem`. The flow editor is a
 code-execution surface; it should not be reachable from a public cellular address without

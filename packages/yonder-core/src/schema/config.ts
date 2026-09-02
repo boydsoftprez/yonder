@@ -75,6 +75,40 @@ const AccessPoint = z.object({
   fallback: ApFallback.default({}),
 }).strict();
 
+/**
+ * The cellular modem.
+ *
+ * Two kinds of modem, and only one of them can be found automatically.
+ *
+ * `auto` means the modem ModemManager claims — the kind that exposes
+ * registration, operator, radio technology and signal, and which
+ * NetworkManager drives as a `gsm` connection. That is the only kind this
+ * schema can identify without being told.
+ *
+ * `appliance` is a modem that holds the SIM, dials by itself and appears to
+ * the host as an ordinary network adapter. It is indistinguishable from a
+ * USB network adapter without a list of device identifiers written from a
+ * vendor's documentation, so the operator names it in `interface` instead
+ * (R-CEL-11). Nothing about signal or operator is available for one.
+ *
+ * `enabled: false` is the default and means no modem is configured — not a
+ * modem configured and idle. A board with a stick plugged in and nothing
+ * here brings up no cellular connection (R-CFG-08).
+ *
+ * `dial` exists because R-CEL-02 asks for it and is unused on every modem
+ * measured: a QMI or MBIM bearer has no dial step, and `gsm.number` was empty
+ * on the link that worked. It applies to a serial connection only.
+ */
+const Modem = z.object({
+  enabled: z.boolean().default(false),
+  mode: z.enum(["auto", "appliance"]).default("auto"),
+  interface: z.string().min(1).nullable().default(null),
+  apn: z.string().min(1).max(100).nullable().default(null),
+  username: z.string().nullable().default(null),
+  password: SecretRef.nullable().default(null),
+  dial: z.string().nullable().default(null),
+}).strict();
+
 const Network = z.object({
   ap: AccessPoint,
   client: z.object({
@@ -82,6 +116,7 @@ const Network = z.object({
     psk: SecretRef.nullable().default(null),
   }).strict().default({ ssid: null, psk: null }),
   ethernet: z.object({ dhcp: z.boolean().default(true) }).strict().default({}),
+  modem: Modem.default({}),
   priority: z.array(Interface).min(1).default(["ethernet", "modem", "wifi_client"]),
 }).strict();
 
