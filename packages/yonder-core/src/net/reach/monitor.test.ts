@@ -244,6 +244,23 @@ describe("pathDevices", () => {
     expect(pathDevices(DEFAULT_CONFIG, devices()).modem).toBeUndefined();
   });
 
+  /**
+   * The design spec's first "name that is not the obvious one". `cdc-wdm0` is
+   * what NetworkManager lists and binds a connection to; `wwan0` is what holds
+   * the address and carries every byte, and is the only one with an entry
+   * under /sys/class/net. This map is used to probe an interface and to read
+   * its counters, so it must be the second — `curl --interface cdc-wdm0`
+   * fails on a perfectly good link, and three of those stand a working modem
+   * down.
+   */
+  it("uses the modem's data port, not the port the connection is bound to", () => {
+    expect(pathDevices(withModem("auto"), devices(), "wwan0").modem).toBe("wwan0");
+  });
+
+  it("falls back to the device NetworkManager lists when nothing knows better", () => {
+    expect(pathDevices(withModem("auto"), devices(), null).modem).toBe("cdc-wdm0");
+  });
+
   it("takes the operator's word for an appliance", () => {
     // R-CEL-11: a modem that dials for itself is an adapter, and no amount of
     // device-type inspection improves on having been told which one.
@@ -301,6 +318,19 @@ describe("pathInUse", () => {
       [{ device: "wlan0", address: "10.42.0.1/24" }],
       "10.42.0.1",
     )).toBeNull();
+  });
+
+  it("accepts either of a path's two names when looking for its address", () => {
+    // Which name an address arrives under depends on which tool was asked, so
+    // the modem is not read as "not in use" because NetworkManager reported
+    // against the control port.
+    expect(pathInUse(
+      ["modem"],
+      { modem: "wwan0" },
+      [{ device: "cdc-wdm0", address: "10.31.95.33/30" }],
+      "10.42.0.1",
+      { modem: "cdc-wdm0" },
+    )).toBe("modem");
   });
 
   it("never counts loopback", () => {

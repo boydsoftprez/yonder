@@ -88,6 +88,7 @@ export {
   PATH_WORDS,
   FAILURES_TO_STAND_DOWN,
   SUCCESSES_TO_RETURN,
+  REACH_TICK_MS,
   type PathName,
   type PathStanding,
   type PathReport,
@@ -107,6 +108,7 @@ export {
   pathInUse,
   type ReachMonitorOptions,
 } from "./net/reach/monitor.js";
+export { ReachWatch, type ReachWatchOptions } from "./net/reach/watch.js";
 export {
   hashPassword,
   verifyPassword,

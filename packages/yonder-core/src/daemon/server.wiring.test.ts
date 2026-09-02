@@ -8,7 +8,8 @@ import { buildRenderers, consolePathsFromEnv, startServer, SIGNAL_POLL_SECONDS }
 import { SecretStore } from "../secrets/store.js";
 import { AdminCredential, ADMIN_PASSWORD_SECRET } from "../console/credential.js";
 import { hashPassword } from "../console/password.js";
-import type { Renderer } from "../apply/types.js";
+import type { Clock, Renderer } from "../apply/types.js";
+import { FAILURES_TO_STAND_DOWN, REACH_TICK_MS } from "../net/reach/standing.js";
 import type { CommandResult } from "../net/runner.js";
 import { DEFAULT_AP_PASSPHRASE } from "../net/profiles.js";
 import { saveConfig } from "../config/save.js";
@@ -382,5 +383,146 @@ describe("buildRenderers and the modem", () => {
     expect(built.modemClient).toBeDefined();
     await built.modemClient.modems();
     expect(seen.some((a) => a[0] === "mmcli")).toBe(true);
+  });
+});
+
+/**
+ * The reach watch, at the socket.
+ *
+ * Its own tests prove it decides correctly; these prove the daemon actually
+ * starts it and actually stops it. A watch that is constructed and never
+ * started is a green suite, a `/reach/state` that says `standing-by` for
+ * ever, and the K-33 board still unreachable — which is precisely the class
+ * of defect this file exists to catch.
+ */
+describe("the daemon drives the reach watch", () => {
+  let socketPath: string, configPath: string, journalPath: string, secretsPath: string;
+  const noop: Renderer = { name: "noop", async render() {} };
+
+  beforeEach(() => {
+    socketPath = join(dir, "core.sock");
+    configPath = join(dir, "config.yaml");
+    journalPath = join(dir, "apply.json");
+    secretsPath = join(dir, "secrets.yaml");
+    saveConfig(configPath, DEFAULT_CONFIG);
+    new SecretStore(secretsPath).ensureValue(ADMIN_PASSWORD_SECRET, hashPassword("an operator's password"));
+  });
+
+  /** A clock the test drives by hand; the same shape as the one in server.test.ts. */
+  function handClock() {
+    let t = 0;
+    let next = 1;
+    const timers = new Map<number, { at: number; fn: () => void }>();
+    const clock: Clock = {
+      now: () => t,
+      setTimer: (ms, fn) => { const h = next++; timers.set(h, { at: t + ms, fn }); return h; },
+      clearTimer: (h) => { timers.delete(h as number); },
+    };
+    return {
+      clock,
+      armed: () => timers.size,
+      async advance(ms: number) {
+        t += ms;
+        for (const [h, timer] of [...timers]) if (timer.at <= t) { timers.delete(h); timer.fn(); }
+        for (let i = 0; i < 200; i++) await Promise.resolve();
+      },
+    };
+  }
+
+  /**
+   * A board with a modem holding the default route and reaching nothing: the
+   * wrong APN, in a runner. `curl` on the modem's interface always fails.
+   */
+  function deadModemRunner(seen: string[][]): CommandRunner {
+    return async (argv): Promise<CommandResult> => {
+      seen.push(argv);
+      if (argv[0] === "curl") return { code: 7, stdout: "", stderr: "" };
+      // The board's own two names: the connection is bound to the control
+      // port, and every byte goes out of the net port (design spec, "three
+      // names that are not the obvious ones").
+      if (argv[0] === "mmcli" && argv[1] === "-L") return { code: 0, stdout: fixture("modem-list.txt"), stderr: "" };
+      if (argv[0] === "mmcli" && argv[1] === "-m") {
+        return { code: 0, stdout: fixture("modem-show.txt"), stderr: "" };
+      }
+      if (argv[0] === "nmcli" && argv.includes("device") && argv.includes("status")) {
+        return { code: 0, stdout: "cdc-wdm0:gsm:connected:yonder-modem\n", stderr: "" };
+      }
+      if (argv[0] === "nmcli" && argv.some((a) => a.includes("IP4.ADDRESS"))) {
+        return { code: 0, stdout: "GENERAL.DEVICE:wwan0\nIP4.ADDRESS[1]:10.31.95.33/30\n", stderr: "" };
+      }
+      return { code: 0, stdout: "", stderr: "" };
+    };
+  }
+
+  /** config.yaml asking for the modem, which is what puts it on a path. */
+  function withModem(): void {
+    const config = structuredClone(DEFAULT_CONFIG);
+    config.network.modem.enabled = true;
+    config.network.modem.apn = "nxtgenphone";
+    saveConfig(configPath, config);
+  }
+
+  it("probes on its own, and stands a modem that reaches nothing down", async () => {
+    // K-33 end to end, through the socket: a link with an address, a route
+    // and no way out, and nothing but this loop to notice.
+    withModem();
+    const seen: string[][] = [];
+    const hand = handClock();
+    const server = await startServer({
+      socketPath, configPath, journalPath, renderers: [noop], secretsPath,
+      runner: deadModemRunner(seen), clock: hand.clock,
+    });
+    try {
+      for (let i = 0; i < FAILURES_TO_STAND_DOWN + 1; i++) await hand.advance(REACH_TICK_MS);
+      // The net port, never the control port. `curl --interface cdc-wdm0`
+      // fails on a perfectly good link, and three of those would stand a
+      // working modem down.
+      expect(seen.filter((a) => a[0] === "curl").map((a) => a[a.indexOf("--interface") + 1]))
+        .toContain("wwan0");
+
+      const res = await call(socketPath, "GET", "/reach/state");
+      const state = res.body as { carrying: boolean; paths: { path: string; standing: string }[] };
+      expect(state.paths.find((p) => p.path === "modem")?.standing).toBe("no-route-out");
+      // The answer the fallback watchdog reads. Before this loop existed it
+      // was true for ever, and the board stayed unreachable.
+      expect(state.carrying).toBe(false);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("stops the watch when the daemon closes", async () => {
+    // A tick loop outliving its daemon would go on running curl on somebody's
+    // metered link on behalf of a process that has let go of its socket.
+    withModem();
+    const seen: string[][] = [];
+    const hand = handClock();
+    const server = await startServer({
+      socketPath, configPath, journalPath, renderers: [noop], secretsPath,
+      runner: deadModemRunner(seen), clock: hand.clock,
+    });
+    await hand.advance(REACH_TICK_MS);
+    await server.close();
+    const before = seen.length;
+    await hand.advance(REACH_TICK_MS * 5);
+    expect(seen.length).toBe(before);
+  });
+
+  it("spends nothing on a device that has no path in use", async () => {
+    // No modem configured and no address anywhere: there is no subject to
+    // test, and a tick must not manufacture one.
+    const seen: string[][] = [];
+    const hand = handClock();
+    const server = await startServer({
+      socketPath, configPath, journalPath, renderers: [noop], secretsPath,
+      runner: async (argv) => { seen.push(argv); return { code: 0, stdout: "", stderr: "" }; },
+      clock: hand.clock,
+    });
+    try {
+      for (let i = 0; i < 5; i++) await hand.advance(REACH_TICK_MS);
+      expect(seen.some((a) => a[0] === "curl")).toBe(false);
+    } finally {
+      await server.close();
+    }
   });
 });

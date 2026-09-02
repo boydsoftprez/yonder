@@ -42,6 +42,25 @@ export const FAILURES_TO_STAND_DOWN = 3;
 export const SUCCESSES_TO_RETURN = 1;
 
 /**
+ * How often the path in use is looked at.
+ *
+ * **Provisional in the same way, and measured by the same task**, which is
+ * why it is here rather than beside the loop that uses it: the three numbers
+ * that decide how fast a dead path is noticed belong in one place, so the
+ * measurement against a real dropout has one file to land in.
+ *
+ * A tick costs three local `nmcli` reads and two files out of `/sys`, and no
+ * bytes at all on the operator's link — nothing is probed unless the counters
+ * say the path stopped receiving (R-CEL-09). What sets the number is the
+ * other end: `FAILURES_TO_STAND_DOWN` consecutive failures, each bounded by
+ * the probe's own 8 s timeout, have to complete inside the fallback window or
+ * the watchdog asks its question before there is an answer. Three ticks of
+ * five seconds plus three probes is a little under forty, against a default
+ * window of ninety.
+ */
+export const REACH_TICK_MS = 5_000;
+
+/**
  * What to call a path in a line an operator reads.
  *
  * Exported because the monitor assembling `PathReport.detail` says the same

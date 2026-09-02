@@ -153,6 +153,43 @@ export class ReachMonitor {
     }
   }
 
+  /**
+   * The operator's order, as this monitor was told it.
+   *
+   * For the watch that drives `test()`: when the path in use reaches nothing,
+   * the alternatives are tested so that standing reflects which of them can
+   * take over, and that is the list of them.
+   */
+  priority(): PathName[] {
+    return this.order();
+  }
+
+  /**
+   * The path carrying traffic and the interface it is on, in one reading.
+   *
+   * One call rather than two so that the watch judges a single moment: a
+   * device name fetched after a separate reading of which path is in use can
+   * belong to a path that is no longer the one in use.
+   */
+  async inUseNow(): Promise<{ path: PathName; device: string } | null> {
+    const path = await this.inUse();
+    if (path === null) return null;
+    const device = (await this.devices())[path];
+    return device === undefined ? null : { path, device };
+  }
+
+  /**
+   * Fold in evidence that cost nothing: traffic moved both ways on this path.
+   *
+   * The counters are maintained by the kernel whether or not anything reads
+   * them, so a working device establishes that it is working without sending
+   * a byte of its own (R-CEL-09). This is how a path returns from being stood
+   * down without a probe ever running.
+   */
+  carried(path: PathName): void {
+    this.standing.record(path, true);
+  }
+
   /** The same answer, about a path already read. See carrying(). */
   private carryingOn(inUse: PathName | null): boolean {
     // An address on something this monitor has no path for — a USB gadget, a
@@ -190,11 +227,24 @@ export class ReachMonitor {
 }
 
 /**
- * Which interface each path is on, from NetworkManager's own device list.
+ * Which interface each path **carries traffic on**, from NetworkManager's own
+ * device list and, for a modem, from what ModemManager says its data port is.
  *
  * Pure, and separate from the monitor, so the mapping is testable without an
  * nmcli and so `daemon/server.ts` stays wiring rather than a second place
  * that decides what a modem is.
+ *
+ * **A modem has two names and neither is right for both questions.** The
+ * measured board binds its connection to the control port `cdc-wdm0`, which
+ * is what NetworkManager lists and reports state for — and which has no
+ * entry under `/sys/class/net` at all. `wwan0` is what holds the address and
+ * carries every byte. This map is used to probe an interface and to read its
+ * byte counters, so it is the *net* port that belongs in it: probing
+ * `cdc-wdm0` fails on a perfectly good link, and three of those stand a
+ * working modem down. `modemNet` is that name, from ModemManager, which is
+ * the only thing that knows it; without it this falls back to the device
+ * NetworkManager lists, which is better than nothing on a board where the
+ * two coincide.
  *
  * A path that is absent here is a path with no interface, and the monitor
  * reports it as absent rather than probing it.
@@ -202,6 +252,7 @@ export class ReachMonitor {
 export function pathDevices(
   config: Config,
   devices: DeviceInfo[],
+  modemNet: string | null = null,
 ): Partial<Record<PathName, string>> {
   const found: Partial<Record<PathName, string>> = {};
 
@@ -222,9 +273,11 @@ export function pathDevices(
     // The operator's word wins outright for an appliance (R-CEL-11).
     // Otherwise the `gsm` device, which is NetworkManager's own type for a
     // modem it reaches through ModemManager.
+    // An appliance is already named as the adapter it is, and that adapter
+    // is where its bytes go — there is no second name to reconcile.
     const device = modem.mode === "appliance"
       ? modem.interface
-      : devices.find((d) => d.type === "gsm")?.device ?? null;
+      : modemNet ?? devices.find((d) => d.type === "gsm")?.device ?? null;
     if (device !== null && device !== "") found.modem = device;
   }
 
@@ -244,23 +297,29 @@ export function pathDevices(
  * The access point's own address never counts. It is how an operator reaches
  * a device that has no way out, and counting it as a way out is how a board
  * reports itself healthy while sitting on its own fallback.
+ *
+ * `alsoKnownAs` is the second name a path can appear under — for a modem, the
+ * control port NetworkManager lists, against the data port that holds the
+ * address. Which of the two an address arrives under depends on which tool
+ * was asked, so both are accepted here rather than guessing; anywhere that
+ * has to *act* on an interface uses the one `pathDevices` gives.
  */
 export function pathInUse(
   order: PathName[],
   devices: Partial<Record<PathName, string>>,
   addresses: { device: string; address: string }[],
   apAddress: string,
+  alsoKnownAs: Partial<Record<PathName, string>> = {},
 ): PathName | null {
-  const holds = (device: string): boolean =>
-    addresses.some((a) =>
+  const holds = (device: string | undefined): boolean =>
+    device !== undefined && addresses.some((a) =>
       a.device === device
       && a.device !== "lo"
       && !a.address.startsWith("127.")
       && a.address.split("/")[0] !== apAddress);
 
   for (const path of order) {
-    const device = devices[path];
-    if (device !== undefined && holds(device)) return path;
+    if (holds(devices[path]) || holds(alsoKnownAs[path])) return path;
   }
   return null;
 }

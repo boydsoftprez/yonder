@@ -18,6 +18,7 @@ import { modemState } from "../net/modem/state.js";
 import { Standing } from "../net/reach/standing.js";
 import { commandProbe } from "../net/reach/probe.js";
 import { ReachMonitor, pathDevices, pathInUse } from "../net/reach/monitor.js";
+import { ReachWatch } from "../net/reach/watch.js";
 import type { PathName } from "../net/reach/standing.js";
 import { NetworkRenderer } from "../net/renderer.js";
 import { HostnameRenderer } from "../system/hostname.js";
@@ -411,27 +412,74 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
       return DEFAULT_CONFIG;
     }
   };
+  /**
+   * The interface the modem's bytes actually go out of.
+   *
+   * A modem has two names and neither answers both questions: the connection
+   * is bound to the control port `cdc-wdm0`, which is what NetworkManager
+   * lists, and `wwan0` is what holds the address and carries the traffic.
+   * Probing and counting need the second one, and ModemManager is the only
+   * thing that knows it.
+   *
+   * Asked only when configuration says there is an automatic modem, so a
+   * board without one spends nothing; remembered once found, because a
+   * modem's port layout is a property of the modem; and null on any failure,
+   * which falls back to the name NetworkManager lists rather than costing the
+   * whole reading.
+   */
+  let modemNet: string | null = null;
+  const modemInterface = async (config: Config): Promise<string | null> => {
+    const modem = config.network.modem;
+    if (!modem.enabled || modem.mode !== "auto") return null;
+    if (modemNet !== null) return modemNet;
+    try {
+      const paths = await modemClient.modems();
+      if (paths.length === 0) return null;
+      modemNet = (await modemClient.modem(paths[0])).ports.net;
+      return modemNet;
+    } catch {
+      return null;
+    }
+  };
+  /** `usb` is in the schema's interface list and no renderer writes one. */
+  const reachOrder = (config: Config): PathName[] =>
+    config.network.priority.filter((i): i is PathName => i !== "usb");
+
   const reach = new ReachMonitor({
     standing: new Standing({ clock, log: note }),
     probe: commandProbe(opts.runner ?? systemRunner),
-    devices: async () => pathDevices(reachConfig(), await client.devices()),
-    order: () => reachConfig().network.priority.filter(
-      // `usb` is in the schema's interface list and no renderer writes one,
-      // so there is no path to report or probe for it.
-      (i): i is PathName => i !== "usb",
-    ),
+    devices: async () => {
+      const config = reachConfig();
+      const [devices, net] = await Promise.all([client.devices(), modemInterface(config)]);
+      return pathDevices(config, devices, net);
+    },
+    order: () => reachOrder(reachConfig()),
     inUse: async () => {
       const config = reachConfig();
-      const [devices, addresses] = await Promise.all([client.devices(), client.activeIpv4()]);
+      const [devices, addresses, net] = await Promise.all([
+        client.devices(), client.activeIpv4(), modemInterface(config),
+      ]);
       return pathInUse(
-        config.network.priority.filter((i): i is PathName => i !== "usb"),
-        pathDevices(config, devices),
+        reachOrder(config),
+        pathDevices(config, devices, net),
         addresses,
         config.network.ap.address.split("/")[0] ?? "",
+        // The other name the same path answers to, so an address reported
+        // against the control port is not read as "the modem is not in use".
+        pathDevices(config, devices),
       );
     },
     log: note,
   });
+
+  // What decides when to probe. Without it the monitor above is only ever
+  // asked questions and never told anything: nothing would stand down, and
+  // `carrying` below would answer true for ever — which is the pre-Task-8
+  // behaviour wearing the new mechanism's clothes.
+  //
+  // The counters are the kernel's own and cost nothing to read, so a device
+  // that is working spends nothing on establishing that (R-CEL-09, R-NET-13).
+  const reachWatch = new ReachWatch({ monitor: reach, clock, log: note });
 
   const watchdog = new FallbackWatchdog({
     client,
@@ -468,6 +516,10 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
     log: note,
   });
   watchdog.start();
+  // Started with the watchdog, because the watchdog's question is the one it
+  // exists to be able to answer, and it needs the whole fallback window to
+  // gather consecutive evidence before that question is asked (K-33).
+  reachWatch.start();
 
   // Nothing else renders on a clean start. renderAll runs only from apply()
   // and from the two rollback paths, so a device nobody has ever posted an
@@ -664,6 +716,10 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
         // would go on questioning NetworkManager — and could still reach a
         // render — on behalf of a process that has already closed.
         watchdog.stop();
+        // Stopped with it, and for the same reason one step further: a tick
+        // loop outliving its daemon would go on running `curl` on somebody's
+        // metered link on behalf of a process that has closed its socket.
+        reachWatch.stop();
         built?.renderer.cancelRadioWait();
         // The third timer this daemon can own. Same reason as the other two:
         // one still armed after close() would restart a console on behalf of
