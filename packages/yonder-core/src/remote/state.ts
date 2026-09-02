@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import type { Config } from "../schema/config.js";
+import type { Traffic } from "./traffic.js";
 import type { ZeroTierCli } from "./zerotier/cli.js";
-import type { ZeroTierInfo, ZeroTierNetwork } from "./zerotier/parse.js";
+import type { ZeroTierInfo, ZeroTierNetwork, ZeroTierPeer } from "./zerotier/parse.js";
 
 /**
  * The states an operator can be in, as opposed to the states a client reports.
@@ -16,6 +17,15 @@ import type { ZeroTierInfo, ZeroTierNetwork } from "./zerotier/parse.js";
  * that for twenty seconds against `1234567890abcdef` and would have reported it
  * for ever. Guessing between "still joining" and "that id is wrong" would be
  * wrong every time a board's uplink was merely slow, so this does not guess.
+ *
+ * `no-path` exists because `OK` lies by omission (R-VPN-10). It means the
+ * controller authorised this device and it holds a valid, cached network
+ * config — which a client keeps reporting for as long as it exists, whether
+ * or not the device can currently reach a single other machine over it. A
+ * console that read `status: "OK"` alone said "connected" on an aircraft that
+ * had lost every path to the mesh. `connected` now additionally requires the
+ * node itself to be online; `no-path` is what an authorised-but-unreachable
+ * device is named instead.
  */
 export type RemotePhase =
   | "off"
@@ -23,6 +33,7 @@ export type RemotePhase =
   | "joining"
   | "waiting-for-approval"
   | "connected"
+  | "no-path"
   | "fault";
 
 export interface RemoteState {
@@ -35,6 +46,19 @@ export interface RemoteState {
   interface: string | null;
   /** The client's own word, when the phase is `fault`. Never a secret. */
   detail: string | null;
+  /** Empty until the device is authorised (R-VPN-10), so `null` before then. */
+  networkName: string | null;
+  /** Whether this node has a working path to ZeroTier's infrastructure at all. */
+  online: boolean;
+  /** `null` when there is no telling — no controller peer to ask. */
+  relayed: boolean | null;
+  latencyMs: number | null;
+  /** Epoch ms: the newest `lastReceive` across every peer's active paths. */
+  lastHeardMs: number | null;
+  /** LEAF peers — mesh members, not root infrastructure — with an active path. */
+  peerCount: number;
+  rxBytes: number | null;
+  txBytes: number | null;
 }
 
 export function remoteState(input: {
@@ -42,8 +66,27 @@ export function remoteState(input: {
   installed: boolean;
   info: ZeroTierInfo | null;
   networks: ZeroTierNetwork[];
+  peers?: ZeroTierPeer[];
+  traffic?: Traffic | null;
 }): RemoteState {
   const { enabled, network_id } = input.config.remote.zerotier;
+  const peers = input.peers ?? [];
+  const traffic = input.traffic ?? null;
+
+  const online = input.info?.online === true;
+
+  // Root infrastructure (PLANET, and a MOON should one ever be configured)
+  // is not a mesh member, so it never counts as one, however reachable it is.
+  const peerCount = peers.filter((p) => p.role === "LEAF" && p.paths.some((path) => path.active)).length;
+
+  const lastHeardMs = peers
+    .flatMap((p) => p.paths)
+    .filter((path) => path.active)
+    .reduce<number | null>(
+      (latest, path) => (latest === null || path.lastReceive > latest ? path.lastReceive : latest),
+      null,
+    );
+
   const base: RemoteState = {
     phase: "off",
     networkId: null,
@@ -51,6 +94,14 @@ export function remoteState(input: {
     addresses: [],
     interface: null,
     detail: null,
+    networkName: null,
+    online,
+    relayed: null,
+    latencyMs: null,
+    lastHeardMs,
+    peerCount,
+    rxBytes: null,
+    txBytes: null,
   };
 
   // Nothing configured is not a problem to report (R-VPN-05).
@@ -62,10 +113,23 @@ export function remoteState(input: {
   // has not landed. That is joining, not silence.
   if (net === undefined) return { ...base, phase: "joining", networkId: network_id };
 
+  // The controller's address is deterministic — the first ten hex characters
+  // of the network id — and it is always a member of its own network, so it
+  // is the one peer that reliably answers whether *this device's* link to
+  // *this network* is direct or bounced through a relay (R-VPN-03). If it is
+  // absent from the peer list, relayed and latency are unknown, not guessed
+  // from some other peer that happens to be present.
+  const controller = peers.find((p) => p.address === network_id.slice(0, 10));
+
   const common = {
     ...base,
     networkId: network_id,
     interface: net.portDeviceName === "" ? null : net.portDeviceName,
+    networkName: net.name === "" ? null : net.name,
+    relayed: controller ? controller.relayed : null,
+    latencyMs: controller ? controller.latencyMs : null,
+    rxBytes: traffic?.rxBytes ?? null,
+    txBytes: traffic?.txBytes ?? null,
   };
 
   switch (net.status) {
@@ -74,7 +138,11 @@ export function remoteState(input: {
     case "ACCESS_DENIED":
       return { ...common, phase: "waiting-for-approval" };
     case "OK":
-      return { ...common, phase: "connected", addresses: net.assignedAddresses };
+      // R-VPN-10: authorised is not the same as reachable. A cached "OK"
+      // survives the loss of every path, so `connected` additionally requires
+      // the node itself to be online; an authorised device with no path is
+      // `no-path`, not a silent lie.
+      return { ...common, phase: online ? "connected" : "no-path", addresses: net.assignedAddresses };
     default:
       // Everything else - NOT_FOUND, PORT_ERROR, CLIENT_TOO_OLD, and anything a
       // newer client invents - is a fault the operator is told the name of.
@@ -86,19 +154,23 @@ export function remoteState(input: {
  * The same state, having asked a client for as little as it can get away with.
  *
  * The console polls this every five seconds for the life of the flight, so
- * what it costs is not a detail. It asked three times — `installed()`, which
- * runs `zerotier-cli -j info`; `info()`, which runs it again; and
- * `listNetworks()` — regardless of whether a mesh was configured at all. On
- * the shipped default that is roughly fifty thousand `execFile` spawns a day,
- * every one of them an ENOENT, to produce a state `remoteState` decides is
- * `off` from the configuration alone before it looks at any of them.
+ * what it costs is not a detail. Nothing configured, nothing asked. Otherwise
+ * three calls — `info()`, `listNetworks()`, and `listPeers()` — plus, once a
+ * network is found and authorised enough to have an interface, one read of
+ * that interface's kernel byte counters. `installed` is what `info()` already
+ * answered rather than a separate probe for it — the client that cannot say
+ * who it is cannot list its networks or peers either.
  *
- * So: nothing configured, nothing asked. Otherwise two calls, and `installed`
- * is what `info()` already answered rather than a separate probe for it — the
- * client that cannot say who it is cannot list its networks either, and a
- * second question with the same answer is a second subprocess.
+ * `readTraffic` is not called from here directly with a default: it is the
+ * one piece of I/O in this feature that is not a `zerotier-cli` invocation,
+ * and this file has no reason to import `node:fs` merely to hold a fallback
+ * nothing here would ever exercise. The daemon passes it in.
  */
-export async function readRemoteState(config: Config, cli: ZeroTierCli): Promise<RemoteState> {
+export async function readRemoteState(
+  config: Config,
+  cli: ZeroTierCli,
+  opts: { readTraffic?: (iface: string) => Traffic | null } = {},
+): Promise<RemoteState> {
   const { enabled, network_id } = config.remote.zerotier;
   if (!enabled || network_id === null) {
     return remoteState({ config, installed: false, info: null, networks: [] });
@@ -106,5 +178,11 @@ export async function readRemoteState(config: Config, cli: ZeroTierCli): Promise
   const info = await cli.info().catch(() => null);
   if (info === null) return remoteState({ config, installed: false, info: null, networks: [] });
   const networks = await cli.listNetworks().catch(() => []);
-  return remoteState({ config, installed: true, info, networks });
+  const peers = await cli.listPeers().catch(() => []);
+
+  const net = networks.find((n) => n.nwid === network_id);
+  const iface = net?.portDeviceName;
+  const traffic = iface !== undefined && iface !== "" && opts.readTraffic ? opts.readTraffic(iface) : null;
+
+  return remoteState({ config, installed: true, info, networks, peers, traffic });
 }

@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { parseInfo, parseNetworks } from "./parse.js";
+import { parseInfo, parseNetworks, parsePeers } from "./parse.js";
 
 const fixture = (name: string) =>
   readFileSync(join(import.meta.dirname, "fixtures", `${name}.json`), "utf8");
@@ -57,5 +57,51 @@ describe("parseNetworks", () => {
 
   it("throws on output that is not JSON", () => {
     expect(() => parseNetworks("200 listnetworks <nwid> <name>")).toThrow(/could not be read/);
+  });
+});
+
+describe("parsePeers", () => {
+  it("reads nothing when the node has no peers", () => {
+    expect(parsePeers(fixture("listpeers-empty"))).toEqual([]);
+  });
+
+  it("reads a direct peer's role, latency and path", () => {
+    const [p] = parsePeers(fixture("listpeers-ok"));
+    expect(p.address).toBe("9fef8a3bf9");
+    expect(p.role).toBe("PLANET");
+    expect(p.latencyMs).toBe(34);
+    expect(p.relayed).toBe(false);
+    expect(p.version).toBe("0.0.0");
+    expect(p.paths).toEqual([
+      {
+        active: true,
+        preferred: true,
+        address: "1.2.3.4/9993",
+        lastReceive: 1788367039031,
+      },
+    ]);
+  });
+
+  // An unknown latency is not zero, and a page that prints "0 ms" for "we
+  // have no idea" is lying.
+  it("turns an unknown latency (-1) into null, not zero", () => {
+    const [, p] = parsePeers(fixture("listpeers-ok"));
+    expect(p.latencyMs).toBeNull();
+  });
+
+  it("reads a relayed (tunneled) peer with no paths", () => {
+    const [, p] = parsePeers(fixture("listpeers-ok"));
+    expect(p.role).toBe("LEAF");
+    expect(p.relayed).toBe(true);
+    expect(p.paths).toEqual([]);
+  });
+
+  it("keeps a role it does not recognise rather than discarding the peer", () => {
+    const [p] = parsePeers('[{"address":"9fef8a3bf9","role":"SOMETHING_NEW","latency":-1,"tunneled":false,"paths":[]}]');
+    expect(p.role).toBe("SOMETHING_NEW");
+  });
+
+  it("throws on output that is not JSON, rather than returning a hollow record", () => {
+    expect(() => parsePeers("200 listpeers <address> <role>")).toThrow(/could not be read/);
   });
 });

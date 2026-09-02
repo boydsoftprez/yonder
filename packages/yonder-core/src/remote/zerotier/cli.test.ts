@@ -36,6 +36,16 @@ describe("ZeroTierCli", () => {
     expect(nets[0].status).toBe("ACCESS_DENIED");
   });
 
+  it("lists peers", async () => {
+    const { run, calls } = fakeRunner(() =>
+      ok('[{"address":"9fef8a3bf9","role":"PLANET","latency":34,"version":"0.0.0","tunneled":false,"paths":[]}]'),
+    );
+    const peers = await new ZeroTierCli(run).listPeers();
+    expect(calls[0]).toEqual(["zerotier-cli", "-j", "listpeers"]);
+    expect(peers[0].address).toBe("9fef8a3bf9");
+    expect(peers[0].latencyMs).toBe(34);
+  });
+
   it("joins by network id", async () => {
     const { run, calls } = fakeRunner(() => ok("200 join OK"));
     await new ZeroTierCli(run).join("9fef8a3bf9000001");

@@ -1,6 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import type { CommandRunner } from "../../net/runner.js";
-import { parseInfo, parseNetworks, type ZeroTierInfo, type ZeroTierNetwork } from "./parse.js";
+import {
+  parseInfo,
+  parseNetworks,
+  parsePeers,
+  type ZeroTierInfo,
+  type ZeroTierNetwork,
+  type ZeroTierPeer,
+} from "./parse.js";
 
 /**
  * `zerotier-cli` lives in /usr/sbin and reads a 0600 token owned by its own
@@ -48,6 +55,10 @@ export class ZeroTierCli {
 
   async listNetworks(): Promise<ZeroTierNetwork[]> {
     return parseNetworks(await this.exec([BIN, "-j", "listnetworks"]));
+  }
+
+  async listPeers(): Promise<ZeroTierPeer[]> {
+    return parsePeers(await this.exec([BIN, "-j", "listpeers"]));
   }
 
   async join(nwid: string): Promise<void> {

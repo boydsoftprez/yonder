@@ -60,6 +60,30 @@ export function parseInfo(stdout: string): ZeroTierInfo {
   };
 }
 
+export interface ZeroTierPath {
+  active: boolean;
+  preferred: boolean;
+  address: string;
+  /** Epoch ms. */
+  lastReceive: number;
+}
+
+export interface ZeroTierPeer {
+  /** Ten hex characters. */
+  address: string;
+  role: string;
+  /**
+   * Milliseconds, or `null` when the client does not know. The client prints
+   * `-1` for "unknown", and an unknown latency is not zero — a page that
+   * prints "0 ms" for "we have no idea" is lying.
+   */
+  latencyMs: number | null;
+  /** `tunneled: true` in the client's own JSON means relayed, not direct. */
+  relayed: boolean;
+  version: string;
+  paths: ZeroTierPath[];
+}
+
 export function parseNetworks(stdout: string): ZeroTierNetwork[] {
   const raw = json(stdout, "network list");
   if (!Array.isArray(raw)) return [];
@@ -72,6 +96,33 @@ export function parseNetworks(stdout: string): ZeroTierNetwork[] {
       portDeviceName: typeof n.portDeviceName === "string" ? n.portDeviceName : "",
       assignedAddresses: Array.isArray(n.assignedAddresses)
         ? n.assignedAddresses.filter((a): a is string => typeof a === "string")
+        : [],
+    };
+  });
+}
+
+export function parsePeers(stdout: string): ZeroTierPeer[] {
+  const raw = json(stdout, "peer list");
+  if (!Array.isArray(raw)) return [];
+  return raw.map((entry) => {
+    const p = entry as Record<string, unknown>;
+    const latency = typeof p.latency === "number" ? p.latency : -1;
+    return {
+      address: typeof p.address === "string" ? p.address : "",
+      role: typeof p.role === "string" ? p.role : "",
+      latencyMs: latency === -1 ? null : latency,
+      relayed: p.tunneled === true,
+      version: typeof p.version === "string" ? p.version : "",
+      paths: Array.isArray(p.paths)
+        ? p.paths.map((entry) => {
+          const path = entry as Record<string, unknown>;
+          return {
+            active: path.active === true,
+            preferred: path.preferred === true,
+            address: typeof path.address === "string" ? path.address : "",
+            lastReceive: typeof path.lastReceive === "number" ? path.lastReceive : 0,
+          };
+        })
         : [],
     };
   });

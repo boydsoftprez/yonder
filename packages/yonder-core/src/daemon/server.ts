@@ -21,6 +21,7 @@ import { networkState } from "../net/state.js";
 import { readRemoteState } from "../remote/state.js";
 import { RemoteRenderer } from "../remote/renderer.js";
 import { ZeroTierCli } from "../remote/zerotier/cli.js";
+import { readTraffic } from "../remote/traffic.js";
 import { AP_CONNECTION, DEFAULT_AP_PASSPHRASE } from "../net/profiles.js";
 import { scanForNetworks } from "../net/scan.js";
 import { ping, reachable } from "../diag/probe.js";
@@ -457,7 +458,12 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
         return networkState(loadConfig(opts.configPath), devices, addresses);
       },
       secrets: built.secrets,
-      remoteState: () => readRemoteState(loadConfig(opts.configPath), built.zerotier),
+      // The interface's kernel byte counters, not ZeroTier's own /metrics —
+      // measured empty (0 bytes) on a real board. This is the same call the
+      // route already makes; readTraffic only ever runs once readRemoteState
+      // has found the configured network's interface, so it costs nothing on
+      // every other phase.
+      remoteState: () => readRemoteState(loadConfig(opts.configPath), built.zerotier, { readTraffic }),
     }),
     ...(onProvisioned === undefined ? {} : { onProvisioned }),
   });
