@@ -23,17 +23,50 @@ describe("the palettes", () => {
   });
 
   /**
-   * Two designed palettes rather than a theme and its inversion. If night were
-   * day with the lightness flipped, these would be each other's complements —
-   * and a screen correct at noon destroys dark adaptation at midnight.
+   * One design at two brightnesses, which is what ADR-0009 settled and what
+   * this test used to forbid.
+   *
+   * It previously asserted that *every* value differs and that day is dark
+   * text on a light ground. Both were true of the M1b palette and neither
+   * survives the console becoming a glass cockpit display in a carbon panel:
+   * a multi-function display does not turn white at noon, it lifts its
+   * levels. So the assertion is now the thing that actually matters — night
+   * is dimmer than day everywhere it counts, and neither is the other with
+   * the lightness flipped.
    */
-  it("are two designs, not one and its inversion", () => {
-    for (const key of Object.keys(PALETTES.day) as (keyof typeof PALETTES.day)[]) {
-      expect(PALETTES.day[key], key).not.toBe(PALETTES.night[key]);
+  const luminance = (hex: string) => {
+    const n = parseInt(hex.slice(1), 16);
+    return 0.2126 * ((n >> 16) & 255) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255);
+  };
+
+  it("is one design at two brightnesses, never an inversion", () => {
+    // The display face and the page behind it are dimmer at night.
+    for (const key of ["display", "pane", "background", "value"] as const) {
+      expect(
+        luminance(PALETTES.night[key]),
+        `${key}: night must be dimmer than day`,
+      ).toBeLessThan(luminance(PALETTES.day[key]));
     }
-    // Day is light behind dark; night is dark behind light.
-    expect(PALETTES.day.background > PALETTES.day.text).toBe(true);
-    expect(PALETTES.night.background < PALETTES.night.text).toBe(true);
+
+    // Both are light-on-dark. An inversion would put one of them the other
+    // way up, which is the thing R-UI-07 exists to prevent.
+    for (const t of ["day", "night"] as const) {
+      expect(
+        luminance(PALETTES[t].value),
+        `${t}: the reading must be brighter than the face it is on`,
+      ).toBeGreaterThan(luminance(PALETTES[t].display));
+    }
+  });
+
+  it("keeps the tones legible against the face in both", () => {
+    for (const t of ["day", "night"] as const) {
+      for (const tone of ["good", "waiting", "bad", "select"] as const) {
+        expect(
+          Math.abs(luminance(PALETTES[t][tone]) - luminance(PALETTES[t].display)),
+          `${t}/${tone} is too close to the display face to read`,
+        ).toBeGreaterThan(40);
+      }
+    }
   });
 
   it("names a tone for every command state the language has", () => {
@@ -145,10 +178,35 @@ describe("themeCss ships a whole shell", () => {
 
   it("themes the app bar, which Vuetify otherwise paints white in both palettes", () => {
     // The worst thing to put in front of a dark-adapted eye is the one
-    // element that is always on screen, still white.
+    // element that is always on screen, still white. It is now transparent
+    // over the carbon, which is a stronger answer than painting it a colour —
+    // so the assertion is that it is claimed at all, and that the claim wins.
+    for (const t of themes) {
+      const rule = /\.v-app-bar[^{]*\{[^}]*\}/s.exec(themeCss(t))?.[0] ?? "";
+      expect(rule, `${t}: nothing themes the app bar`).not.toBe("");
+      expect(rule).toMatch(/background:[^;]*!important/);
+      expect(rule).toMatch(/--yonder-value/);
+    }
+  });
+
+  /**
+   * The panel the display is mounted in (ADR-0009, R-UI-13).
+   *
+   * Generated from gradients rather than shipped as an image: it scales to any
+   * display and follows the palette, and R-UI-13 requires it. A weave whose
+   * tones sit within a few RGB values of each other renders as nothing, which
+   * is how the first attempt shipped — so this checks the contrast is real.
+   */
+  it("draws the carbon panel, in CSS, with a weave you can actually see", () => {
     for (const t of themes) {
       const css = themeCss(t);
-      expect(css, t).toMatch(/\.v-app-bar[^{]*\{[^}]*--yonder-surface/s);
+      expect(css, `${t}: no carbon`).toMatch(/repeating-linear-gradient/);
+      const weave = /linear-gradient\(45deg,\s*(#[0-9a-f]{6})[^)]*\)/i.exec(css)?.[1];
+      const shade = /linear-gradient\(135deg,\s*(#[0-9a-f]{6})[^)]*\)/i.exec(css)?.[1];
+      expect(weave, `${t}: the twill has no light tone`).toBeDefined();
+      expect(shade, `${t}: the twill has no dark tone`).toBeDefined();
+      const gap = Math.abs(parseInt(weave.slice(1), 16) - parseInt(shade.slice(1), 16));
+      expect(gap, `${t}: the weave tones are too close to see`).toBeGreaterThan(0x080808);
     }
   });
 

@@ -11,14 +11,14 @@
         "x": 12,
         "y": 76,
         "w": 833,
-        "h": 325
+        "h": 369
       }
     },
     {
       "key": "nrdb-ui-widget.nrdb-ui-yonder-gauge#0",
       "box": {
         "x": 29,
-        "y": 154,
+        "y": 148,
         "w": 799,
         "h": 48
       }
@@ -27,7 +27,7 @@
       "key": "nrdb-ui-widget.nrdb-ui-yonder-gauge#1",
       "box": {
         "x": 29,
-        "y": 214,
+        "y": 208,
         "w": 799,
         "h": 48
       }
@@ -36,7 +36,7 @@
       "key": "nrdb-ui-widget.nrdb-ui-yonder-gauge#2",
       "box": {
         "x": 29,
-        "y": 274,
+        "y": 268,
         "w": 799,
         "h": 48
       }
@@ -45,7 +45,7 @@
       "key": "nrdb-ui-widget.nrdb-ui-yonder-databar",
       "box": {
         "x": 29,
-        "y": 334,
+        "y": 328,
         "w": 799,
         "h": 48
       }
@@ -56,23 +56,23 @@
         "x": 857,
         "y": 76,
         "w": 411,
-        "h": 325
+        "h": 369
       }
     },
     {
       "key": "nrdb-ui-markdown.nrdb-ui-widget",
       "box": {
         "x": 874,
-        "y": 154,
+        "y": 148,
         "w": 377,
-        "h": 230
+        "h": 280
       }
     },
     {
       "key": "nrdb-ui-group.yonder-rail",
       "box": {
         "x": 12,
-        "y": 413,
+        "y": 457,
         "w": 1256,
         "h": 82
       }
@@ -81,7 +81,7 @@
       "key": "nrdb-ui-widget.nrdb-ui-yonder-softkeys",
       "box": {
         "x": 29,
-        "y": 430,
+        "y": 474,
         "w": 1222,
         "h": 48
       }

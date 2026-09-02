@@ -84,64 +84,72 @@ export interface Palette {
 }
 
 /**
- * Day.
+ * Day — the display at daylight brightness (ADR-0009).
  *
- * Near-white rather than white, so a page in sunlight is not a light source
- * of its own, and near-black text for the contrast that a screen behind
- * polarised sunglasses needs.
+ * Not a light page. ADR-0009 settled the console as a glass cockpit display
+ * mounted in a carbon panel, and a multi-function display does not turn white
+ * at noon: it lifts its levels. So day and night are the same layout in the
+ * same materials at two brightnesses, which is what R-UI-07 has been asking
+ * for and what a light-page day mode could never be.
+ *
+ * The cost is named in ADR-0009's Open section and is not hidden here: a real
+ * MFD is legible at noon because it is a high-brightness transflective panel
+ * and a consumer tablet is not. If the field says so, the answer is a third,
+ * genuinely light palette — the layout does not change to add one.
  */
 const DAY: Palette = {
-  background: "#f4f5f2",
-  surface: "#ffffff",
-  border: "#c9cdc6",
-  text: "#16191c",
-  muted: "#4d5560",
-  accent: "#1d5b8f",
-  neutral: "#5b6470",
-  waiting: "#9a6400",
-  good: "#1f6f43",
-  bad: "#a3231d",
-  onTone: "#ffffff",
-  display: "#ffffff",
-  pane: "#f4f5f2",
-  divider: "#c9cdc6",
-  label: "#4d5560",
-  value: "#16191c",
-  track: "#e2e5df",
-  select: "#1d5b8f",
-  irreversible: "#b23a7a",
+  // The page behind the display is the panel: carbon, painted as an image in
+  // the chrome section below. This is its base colour, and what shows through.
+  background: "#12151a",
+  // The display face itself, lifted for daylight.
+  surface: "#0c1015",
+  border: "#3e4854",
+  text: "#ffffff",
+  muted: "#9aa6b2",
+  accent: "#4fe0f7",
+  neutral: "#7f8a95",
+  waiting: "#ffd944",
+  good: "#4ee07f",
+  bad: "#ff5a4e",
+  onTone: "#04060a",
+  display: "#0c1015",
+  pane: "#11161c",
+  divider: "#3e4854",
+  label: "#9aa6b2",
+  value: "#ffffff",
+  track: "#1f262e",
+  select: "#4fe0f7",
+  irreversible: "#ff6fd8",
 };
 
 /**
- * Night.
+ * Night — the same display, dimmer.
  *
- * Warm and dim rather than inverted. The accents are pulled towards amber and
- * away from blue, which is the part of the spectrum that costs dark
- * adaptation, and the background is a very dark grey rather than black so that
- * the edges of a card are still findable.
+ * Every value here is the day one brought down; nothing moves, nothing is
+ * renamed, no element appears or disappears. That is the whole point of
+ * ADR-0009's "one design in two materials": the operator who learns this
+ * console in daylight is looking at the same instrument after dusk.
  */
 const NIGHT: Palette = {
-  background: "#12140f",
-  surface: "#1c1f19",
-  border: "#343930",
-  text: "#e6e2d6",
-  muted: "#a49d8c",
-  accent: "#d29a3c",
-  neutral: "#7d7869",
-  waiting: "#c58a2a",
-  good: "#6f9e5e",
-  bad: "#c8654e",
-  onTone: "#12140f",
-  display: "#1c1f19",
-  pane: "#12140f",
-  divider: "#343930",
-  label: "#a49d8c",
-  value: "#e6e2d6",
-  track: "#2a2e25",
-  // Warm at night, not cyan. The role is "addressable"; the colour that
-  // serves it is the one that costs least dark adaptation (R-UI-07).
-  select: "#d29a3c",
-  irreversible: "#c87da8",
+  background: "#0a0c0f",
+  surface: "#04060a",
+  border: "#2b333c",
+  text: "#e8ecf0",
+  muted: "#7f8a95",
+  accent: "#2ad4f0",
+  neutral: "#6b7580",
+  waiting: "#ffcf28",
+  good: "#35d06a",
+  bad: "#ff4034",
+  onTone: "#04060a",
+  display: "#04060a",
+  pane: "#090d12",
+  divider: "#2b333c",
+  label: "#7f8a95",
+  value: "#e8ecf0",
+  track: "#161b21",
+  select: "#2ad4f0",
+  irreversible: "#f03fce",
 };
 
 export const PALETTES: Record<ThemeName, Palette> = { day: DAY, night: NIGHT };
@@ -252,19 +260,19 @@ export function themeCss(theme: ThemeName): string {
 
   /* ---- the dashboard's own variables, pointed at ours ---------------- */
   --v-theme-background: var(--yonder-background);
-  --v-theme-surface: var(--yonder-surface);
-  --v-theme-on-background: var(--yonder-text);
-  --v-theme-on-surface: var(--yonder-text);
-  --v-theme-primary: var(--yonder-accent);
-  --nrdb-page-background: var(--yonder-background);
-  --nrdb-group-background: var(--yonder-surface);
-  --nrdb-group-border: var(--yonder-border);
-  --nrdb-group-text: var(--yonder-text);
-  --nrdb-page-text: var(--yonder-text);
-  --nrdb-page-sidebar-background: var(--yonder-surface);
+  --v-theme-surface: var(--yonder-display);
+  --v-theme-on-background: var(--yonder-value);
+  --v-theme-on-surface: var(--yonder-value);
+  --v-theme-primary: var(--yonder-select);
+  --nrdb-page-background: transparent;
+  --nrdb-group-background: var(--yonder-display);
+  --nrdb-group-border: var(--yonder-divider);
+  --nrdb-group-text: var(--yonder-value);
+  --nrdb-page-text: var(--yonder-value);
+  --nrdb-page-sidebar-background: transparent;
 }
 
-html, body, .v-application, .nrdb-app {
+html, body {
   background: var(--yonder-background);
   color: var(--yonder-text);
   font-family: var(--yonder-font);
@@ -272,56 +280,126 @@ html, body, .v-application, .nrdb-app {
   -webkit-text-size-adjust: 100%;
 }
 
+/* ---- carbon -----------------------------------------------------------
+   The panel the display is mounted in (ADR-0009).
+
+   A 2x2 twill from four offset checker gradients, a raked sheen across the
+   whole surface, and a fine grain pass. **Generated, never fetched and never
+   shipped as an image** (R-UI-01, R-UI-13): it costs no request, it scales to
+   any display, and it follows the palette instead of needing a second file
+   per theme.
+
+   The weave is 16px. Smaller reads as noise at arm's length; larger reads as
+   a checkerboard. The first attempt used four tones within ten RGB values of
+   each other and rendered as nothing at all, which is a way of getting this
+   wrong that survives code review and dies the moment somebody looks.
+
+   The sheen is a soft radial from the top left rather than a raking linear
+   one. A linear sheen across the whole page lit one corner and washed the
+   weave out of everywhere else - fine on a 200px swatch, wrong on a 1280px
+   panel, and only visible in a capture. */
+.nrdb-app,
+.v-application,
+.v-application__wrap {
+  background-color: #12151a;
+  background-image:
+    radial-gradient(120% 80% at 22% 0%, rgba(255,255,255,0.07), transparent 62%),
+    repeating-linear-gradient(45deg, rgba(255,255,255,0.05) 0 1px, transparent 1px 4px),
+    linear-gradient(45deg, #2c333d 25%, transparent 25%, transparent 75%, #2c333d 75%),
+    linear-gradient(45deg, #2c333d 25%, transparent 25%, transparent 75%, #2c333d 75%),
+    linear-gradient(135deg, #090b0e 25%, transparent 25%, transparent 75%, #090b0e 75%),
+    linear-gradient(135deg, #090b0e 25%, transparent 25%, transparent 75%, #090b0e 75%);
+  background-size: 100% 100%, 6px 6px, 16px 16px, 16px 16px, 16px 16px, 16px 16px;
+  background-position: 0 0, 0 0, 0 0, 8px 8px, 0 0, 8px 8px;
+  background-attachment: fixed;
+}
+
 /* ---- the bar across the top -----------------------------------------
-   Themed, because it was not: Vuetify paints it white from its own defaults,
-   so on a night board the one element always on screen stayed a white slab -
-   the single worst thing you can put in front of a dark-adapted eye. */
+   Machined chrome, not a white slab. It carries the wordmark as a placard:
+   letterspaced caps with a dark shadow, the way a legend is engraved into a
+   panel rather than printed on a card. */
 .v-app-bar,
 .v-app-bar.v-toolbar {
-  background: var(--yonder-surface) !important;
-  color: var(--yonder-text) !important;
-  border-bottom: 1px solid var(--yonder-border);
-  box-shadow: none !important;
+  background: transparent !important;
+  color: var(--yonder-value) !important;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.6);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.06) !important;
 }
 
 .v-app-bar-title,
 .v-app-bar-title .v-toolbar-title__placeholder {
-  font-size: var(--yonder-size-page);
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  color: var(--yonder-text);
+  font-size: 0.9375rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--yonder-value);
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.85);
 }
 
-/* The wordmark. Drawn in CSS rather than shipped as an image, so it costs no
-   request and cannot be the one asset that fails to load. */
 .v-app-bar-title::before {
   content: "YONDER";
   display: inline-block;
   margin-right: var(--yonder-space-3);
   padding-right: var(--yonder-space-3);
-  border-right: 1px solid var(--yonder-border);
-  font-size: 0.8125rem;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  color: var(--yonder-accent);
+  border-right: 1px solid rgba(0, 0, 0, 0.5);
+  box-shadow: 1px 0 0 rgba(255, 255, 255, 0.07);
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.22em;
+  color: var(--yonder-select);
   vertical-align: baseline;
 }
 
-/* ---- groups ---------------------------------------------------------- */
-.nrdb-ui-group > .v-card {
-  background: var(--yonder-surface) !important;
-  border: 1px solid var(--yonder-border) !important;
-  border-radius: var(--yonder-radius);
-  box-shadow: none !important;
+/* The navigation drawer is panel, not page. */
+.v-navigation-drawer {
+  background: rgba(6, 8, 11, 0.72) !important;
+  color: var(--yonder-label) !important;
+  border-right: 1px solid rgba(0, 0, 0, 0.6) !important;
+  box-shadow: 1px 0 0 rgba(255, 255, 255, 0.05);
 }
 
+.v-navigation-drawer .v-list-item-title {
+  font-family: var(--yonder-font-mono);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.v-navigation-drawer .v-list-item--active .v-list-item-title {
+  color: var(--yonder-value);
+}
+
+.v-navigation-drawer .v-list-item--active {
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: inset 2px 0 0 var(--yonder-select);
+}
+
+/* ---- groups: a display seated in the panel ----------------------------
+   Not a white card. A dark display face inside a machined bezel: a hard dark
+   outer edge, a lit inner lip, and a drop shadow so it reads as mounted
+   rather than drawn. */
+.nrdb-ui-group > .v-card {
+  background: var(--yonder-display) !important;
+  border: 1px solid #000 !important;
+  border-radius: 3px;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.10),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 6px 18px rgba(0, 0, 0, 0.55) !important;
+  color: var(--yonder-value);
+}
+
+/* The group's name as a placard: letterspaced caps on the bezel, engraved. */
 .nrdb-ui-group .v-card-title {
-  font-size: var(--yonder-size-title);
-  font-weight: 600;
-  letter-spacing: 0.01em;
-  color: var(--yonder-text);
+  font-family: var(--yonder-font-mono);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--yonder-label);
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.8);
   padding: var(--yonder-space-3) var(--yonder-space-4);
-  border-bottom: 1px solid var(--yonder-border);
+  border-bottom: 1px solid var(--yonder-divider);
   margin-bottom: var(--yonder-space-2);
 }
 
@@ -382,14 +460,20 @@ html, body, .v-application, .nrdb-app {
   .nrdb-ui-button .v-btn.v-btn--block { width: 100%; }
 }
 
+/* A form's own submit is the one action not on the rail, because it belongs
+   to the field above it. It is still machined rather than flat. */
 .v-btn--variant-flat {
-  background: var(--yonder-accent) !important;
-  color: var(--yonder-on-tone) !important;
+  background: linear-gradient(180deg, rgba(255,255,255,0.10), rgba(0,0,0,0.28)),
+              var(--yonder-select) !important;
+  color: #04060a !important;
+  border: 1px solid rgba(0, 0, 0, 0.55) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.28) !important;
 }
 
 .v-btn--variant-outlined {
-  border: 1px solid var(--yonder-border) !important;
-  color: var(--yonder-text) !important;
+  border: 1px solid var(--yonder-divider) !important;
+  color: var(--yonder-value) !important;
+  background: rgba(255, 255, 255, 0.04) !important;
 }
 
 /* ---- inputs ---------------------------------------------------------- */
@@ -397,7 +481,27 @@ html, body, .v-application, .nrdb-app {
 .nrdb-ui-form input {
   font-family: var(--yonder-font);
   font-size: var(--yonder-size-body);
-  color: var(--yonder-text);
+  color: var(--yonder-value);
+}
+
+/* A field is a recess in the panel, not a white box laid on it. */
+.nrdb-ui-form .v-field,
+.nrdb-ui-text-field .v-field {
+  background: var(--yonder-pane) !important;
+  border-radius: 2px;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.6);
+}
+
+.nrdb-ui-form .v-field__outline,
+.nrdb-ui-text-field .v-field__outline {
+  --v-field-border-opacity: 1;
+  color: var(--yonder-divider);
+}
+
+.nrdb-ui-form label,
+.nrdb-ui-form .v-label {
+  color: var(--yonder-label) !important;
+  opacity: 1 !important;
 }
 
 /* Visible, and visible in both palettes. A field device gets driven by
@@ -425,7 +529,7 @@ html, body, .v-application, .nrdb-app {
 
 .v-data-table td {
   font-size: var(--yonder-size-body) !important;
-  color: var(--yonder-text) !important;
+  color: var(--yonder-value) !important;
   min-height: var(--yonder-touch);
   border-bottom: 1px solid var(--yonder-border) !important;
 }
@@ -451,7 +555,7 @@ html, body, .v-application, .nrdb-app {
 .nrdb-ui-markdown-content {
   font-size: var(--yonder-size-body);
   line-height: 1.55;
-  color: var(--yonder-text);
+  color: var(--yonder-value);
   max-width: 68ch;
 }
 
@@ -460,8 +564,9 @@ html, body, .v-application, .nrdb-app {
 .nrdb-ui-markdown-content code {
   font-family: var(--yonder-font-mono);
   font-size: 0.9375em;
-  background: var(--yonder-background);
-  border: 1px solid var(--yonder-border);
+  color: var(--yonder-select);
+  background: var(--yonder-pane);
+  border: 1px solid var(--yonder-divider);
   border-radius: 3px;
   padding: 0.05em 0.35em;
 }
@@ -539,17 +644,30 @@ html, body, .v-application, .nrdb-app {
 .yonder-tone-good    { color: var(--yonder-good); font-weight: 600; }
 .yonder-tone-bad     { color: var(--yonder-bad); font-weight: 600; }
 
+/* The soft-key rail's group: part of the bezel, not another instrument. */
+.nrdb-ui-group.yonder-rail > .v-card,
+.yonder-rail > .v-card {
+  background: rgba(0, 0, 0, 0.35) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    0 0 0 1px rgba(0, 0, 0, 0.7) !important;
+}
+
 .yonder-note {
-  color: var(--yonder-muted);
+  color: var(--yonder-label);
   line-height: 1.55;
   max-width: 68ch;
 }
 
+/* The boundary you have to understand before you cross it. A hard rule and a
+   band fading inward, the way a chart marks one. */
 .yonder-warning {
   border-left: 4px solid var(--yonder-waiting);
   padding: var(--yonder-space-3) var(--yonder-space-4);
-  background: var(--yonder-surface);
-  color: var(--yonder-text);
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--yonder-waiting) 16%, transparent), transparent 90px),
+    var(--yonder-pane);
+  color: var(--yonder-value);
   line-height: 1.55;
   border-radius: 0 var(--yonder-radius) var(--yonder-radius) 0;
 }
