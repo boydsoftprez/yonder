@@ -23,6 +23,12 @@ export {
   type ApplyResult,
   type ApplyOutcome,
 } from "./apply/types.js";
+export {
+  reading,
+  type Reading,
+  type ReadingBounds,
+  type ReadingTone,
+} from "./console/reading.js";
 export { startServer } from "./daemon/server.js";
 export {
   systemRunner,

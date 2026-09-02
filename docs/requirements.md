@@ -261,6 +261,12 @@ Parameter writes are vehicle commands. R-CMD applies to every requirement here.
 | R-UI-05 | Show the operator when a control has taken effect, not merely that it was sent | 2 |
 | R-UI-06 | Function on a link with hundreds of milliseconds of latency | 1 |
 | R-UI-07 | Provide **day and night themes as equal, operator-selectable modes**, defaulting to day. The choice persists across reboots and is never overridden by the host or the browser | 1 |
+| R-UI-08 | Compose every page from **one visual language, defined in one place**. A page that invents its own controls, spacing, type or colour is a defect in that page, not a variation | 2 |
+| R-UI-09 | **Show a bounded quantity against its bounds.** A reading whose meaning depends on a limit — temperature, memory, disk, signal — is drawn against that limit with its caution band and its ceiling marked. A bare number for such a value is not a reading | 2 |
+| R-UI-10 | **Size a control to what it says.** No action occupies the full width of the surface it sits on, except below a viewport too narrow for anything else. A page has at most one primary action | 2 |
+| R-UI-11 | **Show state as an indicator, not as coloured text.** The command-state tones reach the operator as a lit annunciator or an instrument mark, so state is legible without reading | 2 |
+| R-UI-12 | **Capture every page in both palettes on every build, and fail the build when a page changes shape unreviewed.** A console nobody looks at is a console nobody has checked | 2 |
+| R-UI-13 | **Generate interface material on the device.** Panel texture, instrument faces and indicator marks are drawn from stylesheet and vector rules, never shipped as raster assets, so they scale to any display and follow the palette without a second set of files | 3 |
 
 ---
 

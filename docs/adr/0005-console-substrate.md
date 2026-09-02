@@ -1,6 +1,6 @@
 # ADR-0005 — Dashboard 2.x as the console substrate, with a deliberate escape hatch
 
-**Status:** accepted · **Date:** 2026-08-31
+**Status:** accepted, amended by [ADR-0009](0009-console-visual-language.md) · **Date:** 2026-08-31
 
 ## Context
 
@@ -32,6 +32,10 @@ exception.
   widgets.
 - The cockpit is a **custom Vue component** delivered through a `ui-template` node.
 - The boundary is explicit: *settings are widgets, the cockpit is bespoke.*
+  **Superseded by [ADR-0009](0009-console-visual-language.md):** pages are composed from
+  Yonder's own components and stock widgets are the exception. The reason is recorded
+  there — a widget cannot be smaller than a row of its group, so this boundary made every
+  action a slab and every reading a row, and no stylesheet can reach that.
 
 ## Rationale
 
@@ -66,9 +70,11 @@ creation makes hardware-generated navigation (R-UI-03) straightforward.
   rejected states have to look and behave identically whether they come from a stock
   widget or a hand-written component. Implemented as shared CSS and a small component
   library used by both idioms, in M1, before there are many controls to retrofit.
-- Visual identity is settled in M1 to the level of palette, typography and the shell.
+- ~~Visual identity is settled in M1 to the level of palette, typography and the shell.
   Full polish waits for M8, when every section exists and we know what the UI actually
-  contains.
+  contains.~~ **Withdrawn by [ADR-0009](0009-console-visual-language.md).** M8 is
+  reproducible images and contains no interface work, so the deferral pointed at nothing.
+  Polish arriving after the pages means restyling every page built without it.
 - **Day and night are two first-class modes, not a theme and its inversion** (R-UI-07).
   Day is the default: in direct sunlight a dark screen becomes a mirror, which is why
   every electronic flight bag ships day-first. Night exists because the same aircraft gets

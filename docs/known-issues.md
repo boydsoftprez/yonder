@@ -477,3 +477,34 @@ something in it loses it at the next install, with no warning beyond a line in t
 installer's output. The shape of a fix is a separate flow file for an operator's own flows,
 which Node-RED does not offer directly, or a deliberate "keep mine" prompt the installer
 cannot ask on an unattended image build.
+
+### K-26 · The instrument widgets have never been rendered by Dashboard
+
+`node-red-dashboard-2-yonder` ships five widgets — gauge, tape, annunciator, data bar and
+soft keys — and **not one of them has been drawn by Dashboard 2.x.** What is verified is
+the half that runs in Node-RED: the nodes register, they read their editor forms, they
+register with their group, and a malformed field makes a node error rather than a throw
+(21 tests). What is *not* verified is everything on the page.
+
+Specifically unproven:
+
+- That the `node-red-dashboard-2` manifest is discovered at all. Dashboard finds
+  third-party widgets by the package name `node-red-dashboard-2-*` and reads `output` and
+  `component` from that block; the package is named for it and the manifest is written to
+  the documented shape, but nothing here has watched Dashboard load one.
+- That `vue` and `vuex` resolve to Dashboard's own copies at runtime. Both are external in
+  the bundle, so a mismatch shows up as a component that mounts and reads an empty store —
+  drawing an empty instrument on a page where everything else works.
+- That the injected `$socket` and `$dataTracker` behave as the components assume, and that
+  `widget-action` from the soft keys arrives as a node output.
+- That the CSS folded into each bundle survives Dashboard's own styling, and that the
+  `--yonder-*` custom properties from the generated stylesheet reach a scoped component.
+
+The rendering was checked in a browser against a standalone reproduction of the same
+markup and CSS, which is why the layout and the palette are worth anything at all — but a
+reproduction is not the runtime, and this entry exists so nobody mistakes one for the
+other.
+
+**Closes when** a board serves these widgets on a real page and `scripts/verify-pages.sh`
+captures them in both palettes, which is the gate R-UI-12 asks for and which does not yet
+exist.

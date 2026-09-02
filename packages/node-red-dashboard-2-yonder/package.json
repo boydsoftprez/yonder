@@ -1,0 +1,49 @@
+{
+  "name": "node-red-dashboard-2-yonder",
+  "version": "0.1.0",
+  "license": "GPL-3.0-or-later",
+  "description": "Yonder's instrument objects for Dashboard 2.x — engine bars, tapes, annunciators, data bars and soft keys. The console's visual language, built once (ADR-0009).",
+  "keywords": [
+    "node-red",
+    "node-red-dashboard-2",
+    "yonder"
+  ],
+  "node-red": {
+    "version": ">=5.0.0",
+    "nodes": {
+      "ui-yonder-gauge": "dist/gauge.js",
+      "ui-yonder-tape": "dist/tape.js",
+      "ui-yonder-annunciator": "dist/annunciator.js",
+      "ui-yonder-databar": "dist/databar.js",
+      "ui-yonder-softkeys": "dist/softkeys.js"
+    }
+  },
+  "node-red-dashboard-2": {
+    "version": "1.0.0",
+    "widgets": {
+      "ui-yonder-gauge": { "output": "ui-yonder-gauge.umd.js", "component": "YonderGauge" },
+      "ui-yonder-tape": { "output": "ui-yonder-tape.umd.js", "component": "YonderTape" },
+      "ui-yonder-annunciator": { "output": "ui-yonder-annunciator.umd.js", "component": "YonderAnnunciator" },
+      "ui-yonder-databar": { "output": "ui-yonder-databar.umd.js", "component": "YonderDataBar" },
+      "ui-yonder-softkeys": { "output": "ui-yonder-softkeys.umd.js", "component": "YonderSoftKeys" }
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node ../../scripts/copy-node-html.mjs && node scripts/build-widgets.mjs",
+    "build:nodes": "tsc -p tsconfig.json && node ../../scripts/copy-node-html.mjs",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "yonder-core": "^0.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "@vitejs/plugin-vue": "^5.1.0",
+    "typescript": "^5.6.0",
+    "vite": "^5.4.0",
+    "vue": "^3.5.0"
+  },
+  "engines": {
+    "node": ">=22.12"
+  }
+}

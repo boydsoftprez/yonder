@@ -16,6 +16,9 @@ export default defineConfig({
   test: { environment: "node" },
   resolve: {
     alias: {
+      "yonder-core/presentation": fileURLToPath(
+        new URL("../yonder-core/src/console/presentation.ts", import.meta.url),
+      ),
       "yonder-core": fileURLToPath(new URL("../yonder-core/src/index.ts", import.meta.url)),
     },
   },

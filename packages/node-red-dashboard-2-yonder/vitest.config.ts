@@ -3,14 +3,9 @@ import { defineConfig } from "vitest/config";
 import { fileURLToPath } from "node:url";
 
 /**
- * `yonder-core` resolved from source, not from `dist/`.
- *
- * At runtime on a device these nodes require the built package through
- * node_modules, which is what the installer arranges. In a test that would
- * mean the suite could only run after a build — and CI runs the tests first,
- * deliberately, so a compile error is found by `npm run build` rather than
- * hidden behind a stale `dist/`. Pointing the alias at the TypeScript removes
- * the ordering question entirely.
+ * `yonder-core` from source, for the reason its sibling packages do: CI runs
+ * the tests before the build, so resolving through `dist/` would either fail
+ * on a clean checkout or pass against something stale.
  */
 export default defineConfig({
   test: { environment: "node" },

@@ -1,0 +1,73 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!--
+  The editor half of the engine bar.
+
+  Node-RED finds this by basename beside the node's .js. Without it the widget
+  registers at runtime and shows as "unknown node" in the flow editor. It is a
+  form and a registration and nothing else: no behaviour (CLAUDE.md rule 2),
+  and no asset fetched from anywhere (R-UI-01).
+-->
+<script type="text/html" data-template-name="ui-yonder-gauge">
+  <div class="form-row"><label for="node-input-group"><i class="fa fa-table"></i> Group</label>
+    <input type="text" id="node-input-group" /></div>
+  <div class="form-row"><label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name" /></div>
+  <div class="form-row"><label for="node-input-label"><i class="fa fa-font"></i> Label</label>
+    <input type="text" id="node-input-label" placeholder="CPU TEMP" /></div>
+  <div class="form-row"><label for="node-input-unit"><i class="fa fa-thermometer-half"></i> Unit</label>
+    <input type="text" id="node-input-unit" placeholder="&deg;C" /></div>
+  <div class="form-row"><label for="node-input-min"><i class="fa fa-angle-down"></i> Min</label>
+    <input type="number" id="node-input-min" placeholder="0" /></div>
+  <div class="form-row"><label for="node-input-max"><i class="fa fa-angle-up"></i> Max</label>
+    <input type="number" id="node-input-max" placeholder="100" /></div>
+  <div class="form-row"><label for="node-input-caution"><i class="fa fa-exclamation-triangle"></i> Caution</label>
+    <input type="number" id="node-input-caution" placeholder="(none)" /></div>
+  <div class="form-row"><label for="node-input-limit"><i class="fa fa-ban"></i> Limit</label>
+    <input type="number" id="node-input-limit" placeholder="(none)" /></div>
+  <div class="form-row"><label for="node-input-limitLabel"><i class="fa fa-tag"></i> Limit label</label>
+    <input type="text" id="node-input-limitLabel" placeholder="THROTTLE" /></div>
+  <div class="form-row"><label for="node-input-precision"><i class="fa fa-hashtag"></i> Decimals</label>
+    <input type="number" id="node-input-precision" min="0" max="4" placeholder="1" /></div>
+  <div class="form-tips">
+    Leave Caution and Limit empty for a quantity nobody has set bands on. Such
+    a reading draws neutral rather than green &mdash; it has not been judged,
+    and saying it is healthy would be an answer we do not have (R-UI-09).
+  </div>
+</script>
+<script type="text/html" data-help-name="ui-yonder-gauge">
+<p>An engine bar: label, a track carrying the caution and limit bands, a
+pointer at the value, and the digital reading (R-UI-09).</p>
+<p>Send a number on <code>msg.payload</code>. The bands come from
+<code>reading()</code> in <code>yonder-core</code>, so a threshold means the
+same here as everywhere else on the console.</p>
+<p>The track is a fixed width and never stretches to its column. A bar that
+fills its container is the slab this language replaced (ADR-0009).</p>
+</script>
+<script type="text/javascript">
+  RED.nodes.registerType("ui-yonder-gauge", {
+    category: "dashboard 2",
+    color: "#c7e0d4",
+    defaults: {
+      name: { value: "" },
+      group: { type: "ui-group", required: true },
+      order: { value: 0 },
+      width: { value: 0 },
+      height: { value: 0 },
+      label: { value: "" },
+      unit: { value: "" },
+      min: { value: 0, validate: RED.validators.number(true) },
+      max: { value: 100, validate: RED.validators.number(true) },
+      caution: { value: "", validate: RED.validators.number(true) },
+      limit: { value: "", validate: RED.validators.number(true) },
+      limitLabel: { value: "" },
+      precision: { value: 1, validate: RED.validators.number(true) },
+      track: { value: 118, validate: RED.validators.number(true) },
+      series: { value: "" }
+    },
+    inputs: 1,
+    outputs: 0,
+    icon: "font-awesome/fa-tachometer",
+    paletteLabel: "yonder gauge",
+    label: function () { return this.name || this.label || "yonder gauge"; }
+  });
+</script>

@@ -35,7 +35,8 @@ A `function` node is JavaScript serialised into `flows.json` alongside wire coor
 pull request against it is unreadable, so it cannot be reviewed, so it cannot be merged.
 
 - Behaviour goes in `packages/node-red-contrib-yonder-*` — real npm packages, real source
-  files, real tests.
+  files, real tests. **Presentation too:** instruments are Vue components in
+  `node-red-dashboard-2-yonder`, never markup pasted into a `ui-template`.
 - Files in `flows/` are **wiring only**.
 - `functionExternalModules` is off and the `function` node type is not enabled in the
   shipped profile.
@@ -76,6 +77,7 @@ the access-point fallback, not around it. `R-NET-07` and `R-CFG-03` are load-bea
 | GPL-3.0, DCO sign-off, no CLA | [ADR-0002](docs/adr/0002-licence-gplv3.md) |
 | mediamtx for all media serving, not Janus | [ADR-0003](docs/adr/0003-mediamtx-not-janus.md) |
 | ZeroTier primary, Tailscale second | [ADR-0004](docs/adr/0004-zerotier-primary-mesh-vpn.md) |
+| Console visual language: a glass display in a carbon panel | [ADR-0009](docs/adr/0009-console-visual-language.md) |
 
 Reopen only with new evidence, and say what changed.
 
@@ -88,14 +90,18 @@ Reopen only with new evidence, and say what changed.
 | `docs/roadmap.md` | M0–M9, each with its requirement IDs and an exit criterion |
 | `docs/configuration.md` | `config.yaml` reference |
 | `docs/adr/` | Decision records |
-| `packages/` | Node packages — where logic lives |
+| `packages/` | Node packages — where logic and presentation live |
 | `flows/` | Shipped flows — wiring only |
 | `installer/` | `install.sh` is the single source of truth; images are built from it |
 
 ## Conventions
 
 - Node packages are published **unscoped** as `node-red-contrib-yonder-*` so Node-RED's
-  palette manager finds them. `yonder-core` is a plain library.
+  palette manager finds them. `yonder-core` is a plain library. **One exception:**
+  Dashboard 2.x discovers third-party widgets by the package name
+  `node-red-dashboard-2-*`, so the instrument library is `node-red-dashboard-2-yonder`.
+  The convention's purpose — a name the host discovers — is served by a different
+  discoverer ([ADR-0009](docs/adr/0009-console-visual-language.md)).
 - Config lives at `/etc/yonder/config.yaml`; secrets at `/etc/yonder/secrets.yaml`, mode
   `0600`, never in an image or a support bundle.
 - One declarative file is the only writer. Everything else — mavlink-router config,

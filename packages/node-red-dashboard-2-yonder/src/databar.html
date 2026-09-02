@@ -1,0 +1,47 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!--
+  The editor half of the data bar. Node-RED finds this by basename beside the
+  node's .js; without it the widget registers and shows as "unknown node".
+  A form and a registration, nothing else (CLAUDE.md rule 2, R-UI-01).
+-->
+<script type="text/html" data-template-name="ui-yonder-databar">
+  <div class="form-row"><label for="node-input-group"><i class="fa fa-table"></i> Group</label>
+    <input type="text" id="node-input-group" /></div>
+  <div class="form-row"><label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name" /></div>
+  <div class="form-row"><label for="node-input-label"><i class="fa fa-font"></i> Label</label>
+    <input type="text" id="node-input-label" placeholder="(none)" /></div>
+  <div class="form-row"><label for="node-input-cells"><i class="fa fa-th"></i> Cells</label></div>
+  <div class="form-row">
+    <textarea id="node-input-cells" rows="7" style="width:100%;font-family:monospace"
+      placeholder='[{"key":"board","label":"BOARD"},{"key":"host","label":"HOST","kind":"id"}]'></textarea>
+  </div>
+  <div class="form-tips">
+    One cell per fact, each naming a property of <code>msg.payload</code>.
+    Use <code>"kind":"id"</code> for something compared character by character
+    &mdash; an SSID, an address, a version &mdash; which is set in the mono face.
+    A key that is absent draws as an em dash: not known and nothing are
+    different answers.
+  </div>
+</script>
+<script type="text/html" data-help-name="ui-yonder-databar">
+<p>A row of label-and-value cells. Six facts in the height a stock widget
+spends on one string (ADR-0009).</p>
+<p>Send an object on <code>msg.payload</code>; each cell reads one of its
+properties.</p>
+</script>
+<script type="text/javascript">
+  RED.nodes.registerType("ui-yonder-databar", {
+    category: "dashboard 2", color: "#c7e0d4",
+    defaults: {
+      name: { value: "" },
+      group: { type: "ui-group", required: true },
+      order: { value: 0 }, width: { value: 0 }, height: { value: 0 },
+      label: { value: "" }, cells: { value: "" }
+    },
+    inputs: 1, outputs: 0,
+    icon: "font-awesome/fa-th",
+    paletteLabel: "yonder data bar",
+    label: function () { return this.name || this.label || "yonder data bar"; }
+  });
+</script>

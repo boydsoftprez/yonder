@@ -1,0 +1,45 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!--
+  The editor half of the annunciator. Node-RED finds this by basename beside the
+  node's .js; without it the widget registers and shows as "unknown node".
+  A form and a registration, nothing else (CLAUDE.md rule 2, R-UI-01).
+-->
+<script type="text/html" data-template-name="ui-yonder-annunciator">
+  <div class="form-row"><label for="node-input-group"><i class="fa fa-table"></i> Group</label>
+    <input type="text" id="node-input-group" /></div>
+  <div class="form-row"><label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name" /></div>
+  <div class="form-row"><label for="node-input-label"><i class="fa fa-font"></i> Label</label>
+    <input type="text" id="node-input-label" placeholder="(from the status)" /></div>
+  <div class="form-row"><label for="node-input-source"><i class="fa fa-sign-in"></i> Read from</label>
+    <select id="node-input-source">
+      <option value="yonder">msg.yonder &mdash; the shared command state</option>
+      <option value="payload">msg.payload</option>
+    </select></div>
+  <div class="form-tips">
+    Every node in both Yonder packages puts a command status on
+    <code>msg.yonder</code>, which is what makes a control mean the same thing
+    on every page (ADR-0005). Prefer it.
+  </div>
+</script>
+<script type="text/html" data-help-name="ui-yonder-annunciator">
+<p>The four command-state tones as a lit caption (R-UI-11), so a state is
+legible before it is read.</p>
+<p>The words and the tone both come from <code>presentation()</code> in
+<code>yonder-core</code>; this widget chooses neither.</p>
+</script>
+<script type="text/javascript">
+  RED.nodes.registerType("ui-yonder-annunciator", {
+    category: "dashboard 2", color: "#c7e0d4",
+    defaults: {
+      name: { value: "" },
+      group: { type: "ui-group", required: true },
+      order: { value: 0 }, width: { value: 0 }, height: { value: 0 },
+      label: { value: "" }, source: { value: "yonder" }
+    },
+    inputs: 1, outputs: 0,
+    icon: "font-awesome/fa-circle",
+    paletteLabel: "yonder annunciator",
+    label: function () { return this.name || this.label || "yonder annunciator"; }
+  });
+</script>

@@ -1,0 +1,46 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!--
+  The editor half of the soft keys. Node-RED finds this by basename beside the
+  node's .js; without it the widget registers and shows as "unknown node".
+  A form and a registration, nothing else (CLAUDE.md rule 2, R-UI-01).
+-->
+<script type="text/html" data-template-name="ui-yonder-softkeys">
+  <div class="form-row"><label for="node-input-group"><i class="fa fa-table"></i> Group</label>
+    <input type="text" id="node-input-group" /></div>
+  <div class="form-row"><label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name" /></div>
+  <div class="form-row"><label for="node-input-keys"><i class="fa fa-bars"></i> Keys</label></div>
+  <div class="form-row">
+    <textarea id="node-input-keys" rows="8" style="width:100%;font-family:monospace"
+      placeholder='[{"label":"STATUS","action":"status","active":true},{"label":"REFRESH","action":"refresh","tone":"act"}]'></textarea>
+  </div>
+  <div class="form-tips">
+    <b>R-UI-10: no action lives anywhere else on the page.</b> Tones are
+    <code>plain</code>, <code>act</code> for a command, and <code>warn</code>
+    for one that takes the page away from the operator &mdash; of which there
+    is at most one per page.
+  </div>
+</script>
+<script type="text/html" data-help-name="ui-yonder-softkeys">
+<p>Every action on a page, in one rail along the foot of the display
+(R-UI-10).</p>
+<p>Pressing a key sends its <code>action</code> on <code>msg.payload</code>.</p>
+<p>Actions are here rather than in the page because a stock widget is a whole
+row of its group and cannot be smaller than one &mdash; which is why a button
+was half the page, and why shrinking it only added empty space (ADR-0009).</p>
+</script>
+<script type="text/javascript">
+  RED.nodes.registerType("ui-yonder-softkeys", {
+    category: "dashboard 2", color: "#c7e0d4",
+    defaults: {
+      name: { value: "" },
+      group: { type: "ui-group", required: true },
+      order: { value: 0 }, width: { value: 0 }, height: { value: 0 },
+      keys: { value: "" }
+    },
+    inputs: 1, outputs: 1,
+    icon: "font-awesome/fa-bars",
+    paletteLabel: "yonder soft keys",
+    label: function () { return this.name || "yonder soft keys"; }
+  });
+</script>

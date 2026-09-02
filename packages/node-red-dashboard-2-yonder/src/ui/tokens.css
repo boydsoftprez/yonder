@@ -1,0 +1,34 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * Fallbacks only.
+ *
+ * The real values are generated on the device by yonder-core's ConsoleRenderer
+ * from `ui.theme`, and reach the page as custom properties on :root — that is
+ * how day and night stay one design in two materials rather than two designs
+ * (R-UI-07, ADR-0009). Every rule in these components reads
+ * `var(--yonder-*, <fallback>)`, and these are those fallbacks: what an
+ * instrument looks like if the stylesheet has not arrived yet.
+ *
+ * Night values, deliberately. A component that flashed white before the theme
+ * loaded would be the one thing you must not put in front of a dark-adapted
+ * eye, and the console defaults to day — so the failure mode of a missing
+ * stylesheet is a dim instrument, never a bright one.
+ */
+:root {
+  --yonder-display: #04060a;
+  --yonder-pane: #090d12;
+  --yonder-divider: #2b333c;
+  --yonder-label: #7f8a95;
+  --yonder-value: #ffffff;
+  --yonder-track: #161b21;
+  --yonder-cyan: #2ad4f0;
+  --yonder-magenta: #f03fce;
+  --yonder-neutral: #7d7869;
+  --yonder-waiting: #ffcf28;
+  --yonder-good: #35d06a;
+  --yonder-bad: #ff4034;
+  --yonder-font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --yonder-font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+}
