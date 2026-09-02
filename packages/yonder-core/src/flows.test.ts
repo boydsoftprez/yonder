@@ -250,39 +250,20 @@ describe("flows/flows.json", () => {
    * explanation down to something readable broke the tests without changing
    * anything they were actually there to protect.
    */
-  it("warns, before the operator submits, what joining a network does", () => {
-    const warning = flows.find((n) => n.id === "warning-join");
-    expect(warning, "the Wi-Fi form has no warning on it").toBeDefined();
-    const content = String(warning?.content ?? "").toLowerCase();
-
-    // 1. the page goes away
-    expect(content).toMatch(/lose this page|lose the page/);
-    // 2. where to find the device afterwards, and a way that needs no name
-    expect(content).toContain("yonder.local");
-    expect(content).toMatch(/router|client list/);
-    // 3. a wrong password costs nothing
-    expect(content).toMatch(/wrong|did not|cannot join/);
-    expect(content).toMatch(/by itself|on its own|returns|comes back/);
-
-    // What it no longer says is anything about how many radios this board
-    // has. That was the device's problem leaking onto the operator's screen,
-    // and it is in docs/configuration.md where somebody can go and read it.
-    expect(content).not.toMatch(/one radio|single radio|channel/);
-  });
-
   /**
-   * `<hostname>.local` has not been verified on hardware for this build, so
-   * the page may not send an operator to it as the only way back.
-   *
-   * The hedge is the fallback, not a sentence about mDNS support matrices.
-   * Naming the router's client list beside the name is what keeps this honest
-   * — an operator who cannot resolve `yonder.local` still has somewhere to go,
-   * which is the whole point, and it costs four words instead of forty.
+   * The page carries no prose at all now, so the four facts an operator needs
+   * before the console disappears travel on the toast instead — delivered at
+   * the moment they matter rather than sitting permanently above a form
+   * nobody reads twice. `applyStatus` composes that message; `node.test.ts`
+   * asserts its content.
    */
-  it("never offers the device's name without a way that does not need it", () => {
-    const warning = String(flows.find((n) => n.id === "warning-join")?.content ?? "");
-    expect(warning).toMatch(/yonder\.local/i);
-    expect(warning).toMatch(/router|client list/i);
+  it("carries no prose on the page that joins a network", () => {
+    const page = flows.find((n) => n.type === "ui-page" && n.name === "Network");
+    const groups = new Set(
+      flows.filter((n) => n.type === "ui-group" && n.page === page?.id).map((n) => n.id),
+    );
+    const prose = flows.filter((n) => n.type === "ui-markdown" && groups.has(String(n.group)));
+    expect(prose.map((n) => n.id)).toEqual([]);
   });
 
   /**
@@ -512,7 +493,8 @@ describe("flows/flows.json join controls", () => {
       .filter((n) => n.group === "group-net-join")
       .sort((a, b) => Number(a.order) - Number(b.order))
       .map((n) => n.id);
-    expect(inGroup).toEqual(["warning-join", "button-scan", "join-ssid", "join-psk", "join-go"]);
+    // Access point or Wi-Fi, then choose, then the passphrase, then go.
+    expect(inGroup).toEqual(["button-leave", "button-scan", "join-ssid", "join-psk", "join-go"]);
   });
 
   it("has no leftover panel that held only the table", () => {
@@ -616,9 +598,11 @@ describe("flows/flows.json network page", () => {
     const groups = flows.filter((n) => n.type === "ui-group" && n.page === page?.id);
     const ids = new Set(groups.map((g) => g.id));
     const readouts = flows.filter((n) => ids.has(String(n.group)) && n.type === "ui-text");
+    // One line that says what the radio is doing, rather than two raw
+    // configuration fields the operator has to reconcile themselves.
     const values = readouts.map((n) => String(n.value));
-    expect(values).toContain("payload.network.client.ssid");
-    expect(values).toContain("payload.network.ap.ssid");
+    expect(values).toContain("payload.summary");
+    expect(values).toContain("payload.address");
   });
 
   it("puts what you are connected to above the controls that change it", () => {

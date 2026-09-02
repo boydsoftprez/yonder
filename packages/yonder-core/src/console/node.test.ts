@@ -178,3 +178,35 @@ describe("confirmStatus", () => {
     expect(confirmStatus(unreachable, 0, "abc").state).toBe("rejected");
   });
 });
+
+/**
+ * The page that joins a network carries no prose, so everything an operator
+ * needs before the console disappears travels on this message.
+ */
+describe("what a radio move tells the operator", () => {
+  const moving = { ok: true, status: 200, body: { id: "a1", expiresAt: 1, movesRadio: true } };
+
+  it("says the page is going", () => {
+    expect(applyStatus(moving as never, 0).message).toMatch(/about to go|lose this page/i);
+  });
+
+  it("says where to find the device, and a way that needs no name to resolve", () => {
+    const m = applyStatus(moving as never, 0).message;
+    expect(m).toMatch(/yonder\.local/i);
+    expect(m).toMatch(/router|client list/i);
+  });
+
+  it("says a failure costs nothing", () => {
+    expect(applyStatus(moving as never, 0).message).toMatch(/access point comes back|comes back/i);
+  });
+
+  /**
+   * And asks for nothing. The words used to say "confirm it to keep it" for a
+   * change nobody can confirm from a console that is about to go off the air,
+   * which sends an operator hunting for a button that is not there.
+   */
+  it("asks the operator for nothing", () => {
+    const m = applyStatus(moving as never, 0).message;
+    expect(m).not.toMatch(/confirm/i);
+  });
+});

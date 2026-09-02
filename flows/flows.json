@@ -235,12 +235,12 @@
     {
         "id": "group-net-now",
         "type": "ui-group",
-        "name": "Where this device is now",
+        "name": "",
         "page": "page-network",
         "width": 6,
         "height": 1,
         "order": 1,
-        "showTitle": true,
+        "showTitle": false,
         "className": "",
         "visible": true,
         "disabled": false,
@@ -249,7 +249,7 @@
     {
         "id": "group-net-join",
         "type": "ui-group",
-        "name": "Join a network",
+        "name": "Wi-Fi",
         "page": "page-network",
         "width": 6,
         "height": 1,
@@ -607,7 +607,7 @@
         "z": "yonder-console",
         "group": "group-net-now",
         "order": 1,
-        "width": 6,
+        "width": 3,
         "height": 1,
         "label": "Refresh",
         "tooltip": "",
@@ -635,7 +635,8 @@
         "y": 570,
         "wires": [
             [
-                "read-config"
+                "read-config",
+                "netstate"
             ]
         ]
     },
@@ -647,99 +648,8 @@
         "x": 500,
         "y": 540,
         "wires": [
-            [
-                "text-client-ssid",
-                "text-ap-ssid",
-                "text-hostname"
-            ]
+            []
         ]
-    },
-    {
-        "id": "text-client-ssid",
-        "type": "ui-text",
-        "z": "yonder-console",
-        "group": "group-net-now",
-        "order": 2,
-        "width": 6,
-        "height": 1,
-        "name": "joined network",
-        "label": "Joined Wi-Fi network",
-        "format": "{{msg.payload}}",
-        "layout": "row-spread",
-        "style": false,
-        "font": "",
-        "fontSize": 16,
-        "color": "#717171",
-        "wrapText": false,
-        "className": "",
-        "x": 840,
-        "y": 540,
-        "wires": [],
-        "value": "payload.network.client.ssid",
-        "valueType": "msg"
-    },
-    {
-        "id": "text-ap-ssid",
-        "type": "ui-text",
-        "z": "yonder-console",
-        "group": "group-net-now",
-        "order": 3,
-        "width": 6,
-        "height": 1,
-        "name": "access point",
-        "label": "Access point",
-        "format": "{{msg.payload}}",
-        "layout": "row-spread",
-        "style": false,
-        "font": "",
-        "fontSize": 16,
-        "color": "#717171",
-        "wrapText": false,
-        "className": "",
-        "x": 840,
-        "y": 580,
-        "wires": [],
-        "value": "payload.network.ap.ssid",
-        "valueType": "msg"
-    },
-    {
-        "id": "text-hostname",
-        "type": "ui-text",
-        "z": "yonder-console",
-        "group": "group-net-now",
-        "order": 4,
-        "width": 6,
-        "height": 1,
-        "name": "hostname",
-        "label": "Name on the network",
-        "format": "{{msg.payload}}",
-        "layout": "row-spread",
-        "style": false,
-        "font": "",
-        "fontSize": 16,
-        "color": "#717171",
-        "wrapText": false,
-        "className": "",
-        "x": 840,
-        "y": 620,
-        "wires": [],
-        "value": "payload.system.hostname",
-        "valueType": "msg"
-    },
-    {
-        "id": "note-net-now",
-        "type": "ui-markdown",
-        "z": "yonder-console",
-        "group": "group-net-now",
-        "order": 5,
-        "width": 6,
-        "height": 2,
-        "name": "what a blank means",
-        "content": "Blank means no network joined, and the access point is running instead.",
-        "className": "",
-        "x": 200,
-        "y": 620,
-        "wires": []
     },
     {
         "id": "button-scan",
@@ -747,9 +657,9 @@
         "z": "yonder-console",
         "group": "group-net-join",
         "order": 2,
-        "width": 6,
+        "width": 3,
         "height": 1,
-        "label": "Scan for networks",
+        "label": "Scan",
         "tooltip": "",
         "color": "",
         "bgcolor": "",
@@ -792,21 +702,6 @@
                 "join-ssid"
             ]
         ]
-    },
-    {
-        "id": "warning-join",
-        "type": "ui-markdown",
-        "z": "yonder-console",
-        "group": "group-net-join",
-        "order": 1,
-        "width": 6,
-        "height": 6,
-        "name": "what is about to happen",
-        "content": "**You will lose this page while it joins.** Find the device again at **yonder.local:3000**, or in your router's client list.\n\nIf the password was wrong, the access point comes back by itself.",
-        "className": "yonder-warning",
-        "x": 200,
-        "y": 780,
-        "wires": []
     },
     {
         "id": "join",
@@ -1203,9 +1098,9 @@
         "z": "yonder-console",
         "group": "group-net-join",
         "name": "join",
-        "label": "Join this network",
+        "label": "Join",
         "order": 5,
-        "width": 6,
+        "width": 3,
         "height": 1,
         "tooltip": "",
         "color": "",
@@ -1254,12 +1149,12 @@
         "id": "button-leave",
         "type": "ui-button",
         "z": "yonder-console",
-        "group": "group-net-now",
+        "group": "group-net-join",
         "name": "leave",
-        "order": 6,
-        "width": 6,
+        "order": 1,
+        "width": 3,
         "height": 1,
-        "label": "Leave this network",
+        "label": "Use access point",
         "tooltip": "",
         "color": "",
         "bgcolor": "",
@@ -1279,6 +1174,138 @@
             [
                 "join"
             ]
+        ]
+    },
+    {
+        "id": "netstate",
+        "type": "yonder-netstate",
+        "z": "yonder-console",
+        "name": "state",
+        "x": 200,
+        "y": 60,
+        "wires": [
+            [
+                "text-netstate",
+                "text-netaddr"
+            ]
+        ]
+    },
+    {
+        "id": "text-netstate",
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-net-now",
+        "order": 2,
+        "width": 8,
+        "height": 1,
+        "name": "summary",
+        "label": "",
+        "format": "{{msg.payload}}",
+        "layout": "col-center",
+        "value": "payload.summary",
+        "valueType": "msg",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "wrapText": false,
+        "className": "",
+        "x": 460,
+        "y": 40,
+        "wires": []
+    },
+    {
+        "id": "text-netaddr",
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-net-now",
+        "order": 3,
+        "width": 4,
+        "height": 1,
+        "name": "address",
+        "label": "Address",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "value": "payload.address",
+        "valueType": "msg",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "wrapText": false,
+        "className": "",
+        "x": 460,
+        "y": 80,
+        "wires": []
+    },
+    {
+        "id": "group-net-activity",
+        "type": "ui-group",
+        "name": "Activity",
+        "page": "page-network",
+        "width": 12,
+        "height": 1,
+        "order": 3,
+        "showTitle": true,
+        "className": "",
+        "visible": true,
+        "disabled": false,
+        "groupType": "default"
+    },
+    {
+        "id": "net-activity",
+        "type": "yonder-activity",
+        "z": "yonder-console",
+        "name": "activity",
+        "interval": 3,
+        "x": 200,
+        "y": 140,
+        "wires": [
+            [
+                "table-net-activity"
+            ]
+        ]
+    },
+    {
+        "id": "table-net-activity",
+        "type": "ui-table",
+        "z": "yonder-console",
+        "group": "group-net-activity",
+        "name": "what the device is doing",
+        "label": "",
+        "order": 1,
+        "width": 12,
+        "height": 6,
+        "maxrows": 60,
+        "passthru": false,
+        "autocols": false,
+        "showSearch": false,
+        "selectionType": "none",
+        "deselect": true,
+        "action": "replace",
+        "mobileBreakpoint": "sm",
+        "mobileBreakpointType": "defaults",
+        "className": "",
+        "columns": [
+            {
+                "title": "Time",
+                "key": "time",
+                "type": "text",
+                "width": "",
+                "align": "start"
+            },
+            {
+                "title": "",
+                "key": "message",
+                "type": "text",
+                "width": "",
+                "align": "start"
+            }
+        ],
+        "x": 460,
+        "y": 140,
+        "wires": [
+            []
         ]
     }
 ]

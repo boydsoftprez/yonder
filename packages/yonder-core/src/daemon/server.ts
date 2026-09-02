@@ -17,6 +17,7 @@ import { NetworkRenderer } from "../net/renderer.js";
 import { HostnameRenderer } from "../system/hostname.js";
 import { FallbackWatchdog } from "../net/watchdog.js";
 import { joinSucceeded } from "../net/joined.js";
+import { networkState } from "../net/state.js";
 import { AP_CONNECTION, DEFAULT_AP_PASSPHRASE } from "../net/profiles.js";
 import { scanForNetworks } from "../net/scan.js";
 import { ping, reachable } from "../diag/probe.js";
@@ -406,6 +407,10 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
     // secret reference points at nothing.
     ...(built === undefined ? {} : {
       scan: () => scanForNetworks(client),
+      netState: async () => {
+        const [devices, addresses] = await Promise.all([client.devices(), client.activeIpv4()]);
+        return networkState(loadConfig(opts.configPath), devices, addresses);
+      },
       secrets: built.secrets,
     }),
     ...(onProvisioned === undefined ? {} : { onProvisioned }),

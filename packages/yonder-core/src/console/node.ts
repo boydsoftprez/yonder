@@ -128,8 +128,9 @@ export function applyStatus(reply: DaemonReply, now: number): CommandStatus {
   const movesRadio = body?.movesRadio === true;
   return pending(
     movesRadio
-      ? "Joining. This page is about to go away — the device checks the network itself "
-        + "and keeps the change if it works. If it does not, the access point comes back."
+      ? "Joining. This page is about to go away. The device checks the network itself and "
+        + "keeps the change if it works — find it again at yonder.local:3000 or in your "
+        + "router's client list. If it does not work, the access point comes back."
       : "Applied. Confirm it to keep it, or it reverts on its own.",
     {
       at: now,
