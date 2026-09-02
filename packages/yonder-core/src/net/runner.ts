@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { execFile } from "node:child_process";
+// One list of secret-bearing names, shared with the daemon routes. Two
+// lists is how one of them silently stops matching the other (R-SEC-10).
+import { SECRET_KEYS, REDACTED, redactValues } from "../secrets/redact.js";
 
 export interface CommandResult {
   code: number;
@@ -13,18 +16,6 @@ export interface CommandResult {
  * the exact argv and return canned output without a real NetworkManager.
  */
 export type CommandRunner = (argv: string[]) => Promise<CommandResult>;
-
-/** nmcli property names whose following argument is a secret. */
-const SECRET_KEYS = new Set([
-  "wifi-sec.psk",
-  "802-11-wireless-security.psk",
-  "wifi-sec.wep-key0",
-  "gsm.password",
-  "password",
-  "ppp.password",
-]);
-
-const REDACTED = "<redacted>";
 
 /**
  * The renderer logs what it ran so an operator can reproduce it by hand. That
@@ -58,9 +49,7 @@ function secretsIn(argv: string[]): string[] {
  * that can appear are the ones we just passed, and we know what they were.
  */
 export function redactText(text: string, argv: string[]): string {
-  let out = text;
-  for (const secret of secretsIn(argv)) out = out.split(secret).join(REDACTED);
-  return out;
+  return redactValues(text, secretsIn(argv));
 }
 
 /** Never rejects: a non-zero exit is a result, not an exception. */

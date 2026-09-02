@@ -6,6 +6,7 @@ import { pathToFileURL } from "node:url";
 import { ApplyEngine } from "../apply/engine.js";
 import { warn } from "../log.js";
 import { createRouter } from "./routes.js";
+import { AdminCredential } from "../console/credential.js";
 import { loadConfig } from "../config/load.js";
 import { seedConfigIfAbsent } from "../config/defaults.js";
 import { SecretStore } from "../secrets/store.js";
@@ -237,7 +238,13 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
     warn(`could not render the current configuration, serving anyway: ${(e as Error).message}`);
   }
 
-  const route = createRouter({ engine, configPath: opts.configPath });
+  // Undefined only when buildRenderers threw, which is a secrets.yaml this
+  // daemon could not read. That is *cannot tell*, not *no password*, and the
+  // router treats it as the former: it refuses the configuration routes
+  // rather than assuming a device with an unreadable secret store has no
+  // lock on it. GET /status is unaffected, so the fault is still visible.
+  const credential = built === undefined ? undefined : new AdminCredential(built.secrets);
+  const route = createRouter({ engine, configPath: opts.configPath, credential });
 
   const server: Server = createServer((req, res) => {
     const chunks: Buffer[] = [];

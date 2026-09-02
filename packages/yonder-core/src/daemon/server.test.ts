@@ -11,6 +11,8 @@ import { ApplyEngine } from "../apply/engine.js";
 import { saveConfig } from "../config/save.js";
 import { loadConfig } from "../config/load.js";
 import { SecretStore } from "../secrets/store.js";
+import { AdminCredential, ADMIN_PASSWORD_SECRET } from "../console/credential.js";
+import { hashPassword } from "../console/password.js";
 import { DEFAULT_CONFIG } from "../schema/config.js";
 import { DEFAULT_AP_PASSPHRASE } from "../net/profiles.js";
 import { NmcliError } from "../net/nmcli/client.js";
@@ -28,17 +30,43 @@ const frozenClock: Clock = { now: () => 0, setTimer: () => 1, clearTimer: () => 
 // never touch a real nmcli or write outside the sandbox.
 const noopRunner: CommandRunner = async () => ({ code: 0, stdout: "", stderr: "" });
 
+/**
+ * A device that already has an administrator password.
+ *
+ * Almost every test below is about the apply engine, the socket or the
+ * rollback, and none of those is a test of R-SEC-09's gate — but the gate now
+ * sits in front of GET /config, POST /apply and POST /confirm, so a device
+ * with no password answers 403 to all three. Seeding one here keeps each test
+ * about the thing it was written for. The gate itself is exercised
+ * deliberately, in routes.test.ts and in the tests here that deliberately use
+ * a secrets file of their own.
+ *
+ * Hashed once, at module load: scrypt is expensive on purpose, and paying for
+ * it in every beforeEach would put seconds on the suite for no coverage.
+ */
+const ADMIN_PASSWORD = "an operator's password";
+const ADMIN_HASH = hashPassword(ADMIN_PASSWORD);
+
+function provision(path: string): void {
+  new SecretStore(path).ensureValue(ADMIN_PASSWORD_SECRET, ADMIN_HASH);
+}
+
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "yonder-api-"));
   configPath = join(dir, "config.yaml");
   journalPath = join(dir, "apply.json");
   saveConfig(configPath, DEFAULT_CONFIG);
+  provision(join(dir, "secrets.yaml"));
 });
 afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
 
+function credential(): AdminCredential {
+  return new AdminCredential(new SecretStore(join(dir, "secrets.yaml")));
+}
+
 function router() {
   const engine = new ApplyEngine({ configPath, journalPath, renderers: [noopRenderer], clock: frozenClock });
-  return createRouter({ engine, configPath });
+  return createRouter({ engine, configPath, credential: credential() });
 }
 
 function changed(): Config {
@@ -115,7 +143,7 @@ describe("router", () => {
         },
       };
       const engine = new ApplyEngine({ configPath, journalPath, renderers: [leaky], clock: frozenClock });
-      const res = await createRouter({ engine, configPath })("POST", "/apply", changed());
+      const res = await createRouter({ engine, configPath, credential: credential() })("POST", "/apply", changed());
 
       expect(res.status).toBe(500);
       const text = JSON.stringify(res.body);
@@ -355,14 +383,18 @@ describe("startServer", () => {
   });
 
   it("seeds the access point passphrase but never an administrator password", async () => {
-    const secretsPath = join(dir, "secrets.yaml");
+    // A secrets file of its own, untouched by the fixture above: the whole
+    // point of this test is what a device that nobody has provisioned does
+    // not have.
+    const secretsPath = join(dir, "unprovisioned-secrets.yaml");
     const server = await startServer({ socketPath, configPath, journalPath, renderers: [noopRenderer], secretsPath, runner: noopRunner });
     try {
       const bag = new SecretStore(secretsPath);
       expect(bag.get("ap_psk")).toBe(DEFAULT_AP_PASSPHRASE);
-      // R-SEC-09: it does not exist until the operator sets it. That absence
-      // is what makes the console's first-run setup step mean anything.
+      // R-SEC-09: neither exists until the operator sets one. That absence is
+      // what makes the console's first-run setup step mean anything.
       expect(bag.get("editor_password")).toBeUndefined();
+      expect(bag.get(ADMIN_PASSWORD_SECRET)).toBeUndefined();
     } finally {
       await server.close();
     }
@@ -483,7 +515,7 @@ describe("startServer", () => {
       }
     });
 
-    it("refuses POST /apply with a clear reason instead of silently succeeding", async () => {
+    it("refuses POST /apply instead of silently succeeding", async () => {
       const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
       try {
         const server = await startDegraded();
@@ -491,10 +523,15 @@ describe("startServer", () => {
           const res = await call(socketPath, "POST", "/apply", changed());
           // It used to be 200 here, with config.yaml written and nothing
           // rendered. Refused instead, and config.yaml is untouched.
-          expect(res.status).toBe(400);
-          const body = res.body as { error: string };
-          expect(body.error).toMatch(/degraded/);
-          expect(body.error).toMatch(/network renderer could not be built/);
+          //
+          // 403 rather than the engine's own 400: the secrets.yaml that
+          // degraded the renderer set is the same file the administrator
+          // password lives in, so this daemon cannot tell whether the device
+          // has a lock on it, and a daemon that cannot tell refuses. The
+          // engine's degraded refusal is unchanged and tested directly in
+          // apply/engine.test.ts; the reason still reaches an operator
+          // through GET /status, above.
+          expect(res.status).toBe(403);
           expect(loadConfig(configPath).system.hostname).toBe("yonder");
         } finally {
           await server.close();
@@ -504,13 +541,19 @@ describe("startServer", () => {
       }
     });
 
-    it("keeps GET /config and GET /status answering so the device stays diagnosable", async () => {
+    it("keeps GET /status answering so the device stays diagnosable", async () => {
       const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
       try {
         const server = await startDegraded();
         try {
-          expect((await call(socketPath, "GET", "/config")).status).toBe(200);
+          // GET /status carries no configuration, so it stays in front of the
+          // gate and is what makes this state visible at all. GET /config
+          // does carry configuration, and R-SEC-09 does not let a device that
+          // cannot prove it has an administrator password hand it over.
           expect((await call(socketPath, "GET", "/status")).status).toBe(200);
+          const res = await call(socketPath, "GET", "/config");
+          expect(res.status).toBe(403);
+          expect((res.body as { error: string }).error).toMatch(/administrator password/);
         } finally {
           await server.close();
         }

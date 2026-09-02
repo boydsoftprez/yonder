@@ -72,3 +72,24 @@ export {
   SALT_BYTES,
   KEY_BYTES,
 } from "./console/password.js";
+export {
+  AdminCredential,
+  ADMIN_PASSWORD_SECRET,
+  MIN_PASSWORD_LENGTH,
+  type SetResult,
+  type SetRefusal,
+} from "./console/credential.js";
+export {
+  AttemptThrottle,
+  FAILURE_LIMIT,
+  LOCKOUT_MS,
+  type ThrottleDecision,
+  type ThrottleOptions,
+} from "./console/throttle.js";
+export {
+  SECRET_KEYS,
+  REDACTED,
+  isSecretKey,
+  secretValuesIn,
+  redactValues,
+} from "./secrets/redact.js";
