@@ -193,11 +193,97 @@ describe("the accounts the shipped units name", () => {
     }
   });
 
+  it("are checked by 30-console.sh before anything is enabled", () => {
+    const role = readFileSync(join(ROOT, "installer", "roles", "30-console.sh"), "utf8");
+    const checked = role.indexOf("assert_unit_accounts");
+    const enabled = role.indexOf("systemctl enable");
+    expect(checked).toBeGreaterThan(0);
+    expect(checked).toBeLessThan(enabled);
+  });
+
   it("are checked by 20-yonder-core.sh before anything is enabled", () => {
     const role = readFileSync(join(ROOT, "installer", "roles", "20-yonder-core.sh"), "utf8");
     const checked = role.indexOf("assert_unit_accounts");
     const enabled = role.indexOf("systemctl enable");
     expect(checked, "20-yonder-core.sh does not check the accounts its unit names").toBeGreaterThan(0);
     expect(checked, "the accounts are checked after the unit is enabled, which is too late").toBeLessThan(enabled);
+  });
+});
+
+/**
+ * The console unit, read rather than trusted.
+ *
+ * Every property below is one this milestone would otherwise only discover on
+ * hardware: a unit that takes the network daemon down with it, a console
+ * running as root, or an ExecStart naming a script that is not there.
+ */
+describe("systemd/yonder-console.service", () => {
+  const unit = readFileSync(join(SYSTEMD, "yonder-console.service"), "utf8");
+
+  /**
+   * Rule 6. A Requires= would make a console that cannot start able to stop
+   * yonder-core with it — and yonder-core is what renders the network and
+   * holds the access point up. A device whose console is broken must still be
+   * a device you can reach.
+   */
+  it("wants yonder-core rather than requiring it", () => {
+    expect(unit).toMatch(/^Wants=yonder-core\.service$/m);
+    expect(unit).not.toMatch(/^Requires=/m);
+    expect(unit).toMatch(/^After=.*yonder-core\.service/m);
+  });
+
+  it("runs unprivileged, as the account 10-base.sh creates", () => {
+    expect(unit).toMatch(/^User=yonder$/m);
+    expect(unit).toMatch(/^Group=yonder$/m);
+  });
+
+  it("starts red.js with the generated settings, through the installer's node link", () => {
+    const exec = /^ExecStart=(.*)$/m.exec(unit)?.[1] ?? "";
+    expect(exec.split(" ")[0]).toBe("/usr/local/bin/yonder-node");
+    expect(exec).toContain("node_modules/node-red/red.js");
+    expect(exec).toContain("-s /opt/yonder/console/settings.js");
+  });
+
+  it("comes back on its own, because a console nobody can reach is the failure", () => {
+    expect(unit).toMatch(/^Restart=always$/m);
+    expect(unit).toMatch(/^WantedBy=multi-user\.target$/m);
+  });
+
+  /**
+   * This is the internet-adjacent surface — it is what a browser talks to,
+   * over the access point and over a cell link.
+   */
+  it("is hardened, and can write only its own state directory", () => {
+    for (const setting of [
+      "NoNewPrivileges=true",
+      "PrivateTmp=true",
+      "ProtectSystem=strict",
+      "ProtectHome=true",
+      "ReadWritePaths=/var/lib/yonder/console",
+    ]) {
+      expect(unit, `${setting} is missing`).toContain(setting);
+    }
+    // Nothing under /etc/yonder is writable. The administrator password hash
+    // lives there and the console must not be able to read it, let alone
+    // write it (ADR-0007) — the comment in the unit says so, so the check has
+    // to be against the settings rather than against the text.
+    const writable = [...unit.matchAll(/^ReadWritePaths=(.*)$/gm)].map((m) => m[1] ?? "");
+    expect(writable).toEqual(["/var/lib/yonder/console"]);
+  });
+});
+
+/**
+ * The daemon's unit and the console's have to agree about the socket, or the
+ * console can never authenticate anyone and the device has no way in.
+ */
+describe("the two units together", () => {
+  it("put the socket where both of them can reach it", () => {
+    const core = readFileSync(join(SYSTEMD, "yonder-core.service"), "utf8");
+    // Group=yonder on the daemon is what makes /run/yonder root:yonder 0750
+    // and the socket group-writable; User=yonder on the console is what puts
+    // it in that group (K-01).
+    expect(core).toMatch(/^Group=yonder$/m);
+    expect(core).toMatch(/^RuntimeDirectory=yonder$/m);
+    expect(core).not.toMatch(/^User=/m);
   });
 });
