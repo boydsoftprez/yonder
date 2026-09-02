@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import type { Config } from "../schema/config.js";
+import { THEME_NAMES, type Config } from "../schema/config.js";
 
 /**
  * Turning "use the night theme" into a configuration (R-UI-07).
@@ -32,8 +32,16 @@ export type ThemeResult =
   | { ok: true; config: Config }
   | { ok: false; error: string };
 
-/** The two modes, and the only two. Both designed, both selectable (ADR-0005). */
-export const THEMES = ["day", "night"] as const;
+/**
+ * The modes, from the schema rather than beside it.
+ *
+ * This was its own literal, and the two lists drifted the moment R-UI-14
+ * added a third palette: the configuration accepted `sunlight`, this route
+ * refused it, and the console shipped a control that returned an error for
+ * one of the three things it offered. Re-exported rather than re-typed so
+ * there is nothing to keep in step.
+ */
+export const THEMES = THEME_NAMES;
 
 /**
  * The configuration this device should have in order to use that theme.

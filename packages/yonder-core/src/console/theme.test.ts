@@ -1,10 +1,20 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, it, expect } from "vitest";
 import { DEFAULT_THEME, PALETTES, themeCss, themeName, type ThemeName } from "./theme.js";
+import { THEMES as ROUTE_THEMES } from "../ui/theme.js";
 import { presentation, type CommandState } from "./command.js";
 import { DEFAULT_CONFIG } from "../schema/config.js";
 
-const THEMES: ThemeName[] = ["day", "night"];
+/**
+ * Every palette, not two of them.
+ *
+ * This was `["day", "night"]` and stayed that way when R-UI-14 added the
+ * sunlight mode, so every assertion below — the variables, the tones, the
+ * fetches-nothing check — silently stopped covering a third of the console.
+ * A hand-written list of the things under test is a list that goes stale
+ * without failing, which is the worst way for a test to be wrong.
+ */
+const THEMES = Object.keys(PALETTES) as ThemeName[];
 
 describe("the palettes", () => {
   /**
@@ -58,8 +68,30 @@ describe("the palettes", () => {
     }
   });
 
-  it("keeps the tones legible against the face in both", () => {
-    for (const t of ["day", "night"] as const) {
+  /**
+   * Sunlight is the page the other way up (R-UI-14).
+   *
+   * Day and night are light readings on a dark face. Sunlight is a dark
+   * reading on a light one, because in direct sun a dark screen is a mirror
+   * at any brightness. This is the one place the three modes genuinely
+   * differ, so it is the one thing asserted about it.
+   */
+  it("turns the page over for direct sunlight, and only there", () => {
+    expect(
+      luminance(PALETTES.sunlight.display),
+      "the sunlight face must be light",
+    ).toBeGreaterThan(luminance(PALETTES.day.display));
+    expect(
+      luminance(PALETTES.sunlight.value),
+      "the sunlight reading must be dark on its face",
+    ).toBeLessThan(luminance(PALETTES.sunlight.display));
+    // Near-white, never white: a page in sunlight should not be a light
+    // source of its own.
+    expect(luminance(PALETTES.sunlight.display)).toBeLessThan(luminance("#ffffff"));
+  });
+
+  it("keeps the tones legible against the face in all three", () => {
+    for (const t of ["day", "night", "sunlight"] as const) {
       for (const tone of ["good", "waiting", "bad", "select"] as const) {
         expect(
           Math.abs(luminance(PALETTES[t][tone]) - luminance(PALETTES[t].display)),
@@ -94,7 +126,7 @@ describe("themeName", () => {
 });
 
 describe("themeCss", () => {
-  it("produces every variable for both themes", () => {
+  it("produces every variable for every theme", () => {
     for (const theme of THEMES) {
       const css = themeCss(theme);
       for (const name of Object.keys(PALETTES[theme])) {
@@ -106,8 +138,9 @@ describe("themeCss", () => {
   });
 
   it("says which theme it is, so a page could tell", () => {
-    expect(themeCss("day")).toContain('--yonder-theme: "day"');
-    expect(themeCss("night")).toContain('--yonder-theme: "night"');
+    for (const theme of THEMES) {
+      expect(themeCss(theme), theme).toContain(`--yonder-theme: "${theme}"`);
+    }
   });
 
   it("carries the actual colours of the theme it was asked for", () => {
@@ -157,7 +190,10 @@ describe("themeCss", () => {
  * white, and touch targets sized for the device this runs on.
  */
 describe("themeCss ships a whole shell", () => {
-  const themes: ThemeName[] = ["day", "night"];
+  // Every palette, from the palettes. A shell rule that holds for two modes
+  // and not the third is a page that loses its type scale, its touch targets
+  // or its app bar the moment somebody steps into the sun.
+  const themes = THEMES;
 
   it("uses a system font stack and no webfont", () => {
     for (const t of themes) {
@@ -198,7 +234,7 @@ describe("themeCss ships a whole shell", () => {
    * is how the first attempt shipped — so this checks the contrast is real.
    */
   it("draws the carbon panel, in CSS, with a weave you can actually see", () => {
-    for (const t of themes) {
+    for (const t of ["day", "night"] as ThemeName[]) {
       const css = themeCss(t);
       expect(css, `${t}: no carbon`).toMatch(/repeating-linear-gradient/);
       const weave = /linear-gradient\(45deg,\s*(#[0-9a-f]{6})[^)]*\)/i.exec(css)?.[1];
@@ -218,6 +254,26 @@ describe("themeCss ships a whole shell", () => {
       expect(rule, `${t}: the carbon must state that it repeats`)
         .toMatch(/background-repeat:\s*repeat/);
     }
+  });
+
+  /**
+   * Sunlight is mounted in aluminium, not carbon (R-UI-14).
+   *
+   * Carbon is a dark material and the whole point of the third mode is that
+   * the page turns over, so the panel has to turn over with it. Same rule,
+   * same element, different material — and it still has to say it repeats.
+   */
+  it("mounts the sunlight palette in brushed aluminium instead", () => {
+    const css = themeCss("sunlight");
+    const rule = /\.nrdb-app,[\s\S]*?\}/.exec(css)?.[0] ?? "";
+    expect(rule, "no panel rule for sunlight").not.toBe("");
+    expect(rule, "sunlight must not be carbon").not.toMatch(/linear-gradient\(135deg/);
+    expect(rule, "aluminium is a vertical grain").toMatch(/repeating-linear-gradient\(90deg/);
+    expect(rule).toMatch(/background-repeat:\s*repeat/);
+    // A light panel, not a dark one wearing a light display.
+    const base = /background-color:\s*(#[0-9a-f]{6})/i.exec(rule)?.[1] ?? "#000000";
+    expect(parseInt(base.slice(1), 16), "the sunlight panel must be light")
+      .toBeGreaterThan(0x999999);
   });
 
   it("sizes anything hittable for a gloved finger", () => {
@@ -273,6 +329,27 @@ describe("themeCss ships a whole shell", () => {
  * prevent and the one nobody would notice in a lab at night. It shipped
  * exactly that way for one build.
  */
+/**
+ * The route, the schema and the palettes agree about what a mode is.
+ *
+ * Three lists existed for a while: the Zod enum, a literal in `ui/theme.ts`,
+ * and the `PALETTES` record. Adding R-UI-14's sunlight mode to the first two
+ * and not the third would ship a console that accepts a theme it cannot draw;
+ * adding it to the schema and not the route — which is what happened — ships a
+ * control that returns an error for one of the three things it offers.
+ */
+describe("one list of modes", () => {
+  it("the route accepts exactly the palettes that exist", () => {
+    expect([...ROUTE_THEMES].sort()).toEqual(Object.keys(PALETTES).sort());
+  });
+
+  it("every mode the route accepts renders a stylesheet", () => {
+    for (const t of ROUTE_THEMES) {
+      expect(themeCss(t as ThemeName), t).toMatch(/--yonder-theme: "/);
+    }
+  });
+});
+
 describe("themeCss carries the instrument roles (ADR-0009)", () => {
   const roles = [
     "display", "pane", "divider", "label", "value", "track", "select", "irreversible",

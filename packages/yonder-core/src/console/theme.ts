@@ -152,7 +152,52 @@ const NIGHT: Palette = {
   irreversible: "#f03fce",
 };
 
-export const PALETTES: Record<ThemeName, Palette> = { day: DAY, night: NIGHT };
+/**
+ * Sunlight — the page turned over (R-UI-14, ADR-0009).
+ *
+ * The third palette that ADR-0009 left open, and the reason it left it open:
+ * day and night are one display at two brightnesses, and **in direct sun a
+ * dark screen is a mirror at any brightness**. No amount of contrast recovers
+ * a reflection of the sky; the only answer is a light reading surface.
+ *
+ * So this is the same instrument in a different material. The display face
+ * goes to near-white rather than white, because a page in sunlight should not
+ * be a light source of its own, and the panel around it becomes brushed
+ * aluminium instead of carbon — a light machined surface, which is what a
+ * panel is when it is not carbon. Nothing moves. No element appears or
+ * disappears. An operator who steps out of the shade is looking at the
+ * console they already know.
+ *
+ * The tones are darkened rather than reused: #35d06a on white is a
+ * suggestion, not a reading.
+ */
+const SUNLIGHT: Palette = {
+  background: "#d8dade",
+  surface: "#f7f8f9",
+  border: "#a8aeb5",
+  text: "#0d1114",
+  muted: "#4b545c",
+  accent: "#14567f",
+  neutral: "#5c666e",
+  waiting: "#8a5a00",
+  good: "#136c3a",
+  bad: "#9c1f16",
+  onTone: "#ffffff",
+  display: "#f7f8f9",
+  pane: "#e9ebee",
+  divider: "#a8aeb5",
+  label: "#4b545c",
+  value: "#0d1114",
+  track: "#dcdfe3",
+  select: "#14567f",
+  irreversible: "#a3186f",
+};
+
+export const PALETTES: Record<ThemeName, Palette> = {
+  day: DAY,
+  night: NIGHT,
+  sunlight: SUNLIGHT,
+};
 
 /** Day, and this is the requirement rather than a preference. See above. */
 export const DEFAULT_THEME: ThemeName = "day";
@@ -166,7 +211,9 @@ export const DEFAULT_THEME: ThemeName = "day";
  * a console an operator cannot reach.
  */
 export function themeName(value: unknown): ThemeName {
-  return value === "night" ? "night" : DEFAULT_THEME;
+  if (value === "night") return "night";
+  if (value === "sunlight") return "sunlight";
+  return DEFAULT_THEME;
 }
 
 const HEADER = `/* SPDX-License-Identifier: GPL-3.0-or-later
@@ -186,6 +233,86 @@ const HEADER = `/* SPDX-License-Identifier: GPL-3.0-or-later
  * which is why a test asserts it about this text rather than a reviewer
  * asserting it about this comment.
  */`;
+
+/**
+ * The panel the display is mounted in (ADR-0009, R-UI-13).
+ *
+ * Carbon for day and night; brushed aluminium for sunlight, because carbon is
+ * a dark material and R-UI-14's whole point is that in direct sun the page
+ * turns over. Both are generated from gradients — nothing is fetched and
+ * nothing ships as raster, so the panel scales to any display and follows the
+ * palette instead of needing a file per theme.
+ *
+ * Two things about the carbon are worth keeping. The weave is 10px with its
+ * light tone close to the base: 16px at full contrast reads as a checkerboard
+ * across a full page rather than as fibre, and four tones within ten RGB
+ * values of each other render as nothing at all. Both have been shipped here.
+ * It is chrome — it should be felt and not read.
+ *
+ * And `background-repeat` is stated rather than left to the default. Vuetify's
+ * reset sets `no-repeat` on the element this lands on, so an unstated tile
+ * paints once, in the top-left corner, and the rest of the page looks flat.
+ */
+function panelCss(theme: ThemeName): string {
+  const carbon = `.nrdb-app,
+.v-application,
+.v-application__wrap {
+  background-color: #12151a;
+  background-image:
+    radial-gradient(120% 80% at 22% 0%, rgba(255,255,255,0.07), transparent 62%),
+    repeating-linear-gradient(45deg, rgba(255,255,255,0.03) 0 1px, transparent 1px 3px),
+    linear-gradient(45deg, #1e242b 25%, transparent 25%, transparent 75%, #1e242b 75%),
+    linear-gradient(45deg, #1e242b 25%, transparent 25%, transparent 75%, #1e242b 75%),
+    linear-gradient(135deg, #0d1014 25%, transparent 25%, transparent 75%, #0d1014 75%),
+    linear-gradient(135deg, #0d1014 25%, transparent 25%, transparent 75%, #0d1014 75%);
+  background-size: 100% 100%, 4px 4px, 10px 10px, 10px 10px, 10px 10px, 10px 10px;
+  background-position: 0 0, 0 0, 0 0, 5px 5px, 0 0, 5px 5px;
+  background-repeat: repeat;
+  background-attachment: fixed;
+}`;
+
+  /* Brushed aluminium: a fine vertical grain under a broad horizontal sheen.
+     The grain is 3px and low-contrast for the same reason the weave is 10px -
+     a panel you can read the texture of is a panel competing with the
+     instruments bolted to it. */
+  const aluminium = `.nrdb-app,
+.v-application,
+.v-application__wrap {
+  background-color: #d8dade;
+  background-image:
+    linear-gradient(180deg, rgba(255,255,255,0.55) 0%, rgba(255,255,255,0) 38%,
+                    rgba(0,0,0,0.05) 62%, rgba(255,255,255,0.35) 100%),
+    repeating-linear-gradient(90deg,
+      rgba(255,255,255,0.55) 0 1px,
+      rgba(0,0,0,0.045) 1px 2px,
+      transparent 2px 3px);
+  background-size: 100% 100%, 3px 3px;
+  background-position: 0 0, 0 0;
+  background-repeat: repeat;
+  background-attachment: fixed;
+}`;
+
+  return theme === "sunlight" ? aluminium : carbon;
+}
+
+/**
+ * Chrome that is not a palette colour: the machined edges.
+ *
+ * A bezel is a hard dark edge and a lit inner lip, and "lit" means white on a
+ * carbon panel and *dark* on an aluminium one — the light comes from the same
+ * place, but the surface it falls on is the other way up. These are derived
+ * per theme rather than added to `Palette`, because they are properties of the
+ * material rather than of the palette, and a reader looking for a colour
+ * should not find a shadow.
+ */
+function chromeCss(theme: ThemeName): string {
+  const dark = theme !== "sunlight";
+  return `  --yonder-bezel: ${dark ? "#000000" : "#8b9199"};
+  --yonder-lip: ${dark ? "rgba(255, 255, 255, 0.10)" : "rgba(255, 255, 255, 0.85)"};
+  --yonder-seat: ${dark ? "rgba(0, 0, 0, 0.55)" : "rgba(0, 0, 0, 0.16)"};
+  --yonder-raised: ${dark ? "rgba(255, 255, 255, 0.06)" : "rgba(0, 0, 0, 0.07)"};
+  --yonder-engraved: ${dark ? "rgba(0, 0, 0, 0.85)" : "rgba(255, 255, 255, 0.9)"};`;
+}
 
 /**
  * The whole palette as a stylesheet.
@@ -228,6 +355,9 @@ export function themeCss(theme: ThemeName): string {
   --yonder-track: ${p.track};
   --yonder-select: ${p.select};
   --yonder-irreversible: ${p.irreversible};
+
+  /* ---- machined chrome, per material -------------------------------- */
+${chromeCss(theme)}
 
   /* ---- type -------------------------------------------------------
      A system stack, never a webfont: R-UI-01 forbids fetching one, and a
@@ -280,50 +410,7 @@ html, body {
   -webkit-text-size-adjust: 100%;
 }
 
-/* ---- carbon -----------------------------------------------------------
-   The panel the display is mounted in (ADR-0009).
-
-   A 2x2 twill from four offset checker gradients, a raked sheen across the
-   whole surface, and a fine grain pass. **Generated, never fetched and never
-   shipped as an image** (R-UI-01, R-UI-13): it costs no request, it scales to
-   any display, and it follows the palette instead of needing a second file
-   per theme.
-
-   The weave is 10px and its light tone sits close to the base. 16px with a
-   strong light tone reads as a checkerboard across a full page rather than as
-   fibre - fine on the narrow bezel of a mockup, overpowering on 1280px of
-   console. Both ends of this have now been wrong: the first attempt used four
-   tones within ten RGB values of each other and rendered as nothing at all,
-   which is a way of being wrong that survives code review and dies the moment
-   somebody looks; the second was loud enough to compete with the instruments.
-   It is chrome. It should be felt and not read.
-
-   The sheen is a soft radial from the top left rather than a raking linear
-   one. A linear sheen across the whole page lit one corner and washed the
-   weave out of everywhere else - fine on a 200px swatch, wrong on a 1280px
-   panel, and only visible in a capture. */
-.nrdb-app,
-.v-application,
-.v-application__wrap {
-  background-color: #12151a;
-  background-image:
-    radial-gradient(120% 80% at 22% 0%, rgba(255,255,255,0.07), transparent 62%),
-    repeating-linear-gradient(45deg, rgba(255,255,255,0.03) 0 1px, transparent 1px 3px),
-    linear-gradient(45deg, #1e242b 25%, transparent 25%, transparent 75%, #1e242b 75%),
-    linear-gradient(45deg, #1e242b 25%, transparent 25%, transparent 75%, #1e242b 75%),
-    linear-gradient(135deg, #0d1014 25%, transparent 25%, transparent 75%, #0d1014 75%),
-    linear-gradient(135deg, #0d1014 25%, transparent 25%, transparent 75%, #0d1014 75%);
-  background-size: 100% 100%, 4px 4px, 10px 10px, 10px 10px, 10px 10px, 10px 10px;
-  background-position: 0 0, 0 0, 0 0, 5px 5px, 0 0, 5px 5px;
-  /* Stated, never inherited. Vuetify sets background-repeat: no-repeat
-     on .v-application__wrap, so leaving this to the CSS default painted
-     exactly one 16px tile in the top-left corner of the page and nothing
-     else. It looked like a flat background with a smudge, and the smudge was
-     the whole panel. A swatch in isolation renders correctly, which is what
-     made it convincing; this only fails inside the framework's reset. */
-  background-repeat: repeat;
-  background-attachment: fixed;
-}
+${panelCss(theme)}
 
 /* ---- the bar across the top -----------------------------------------
    Machined chrome, not a white slab. It carries the wordmark as a placard:
@@ -333,8 +420,8 @@ html, body {
 .v-app-bar.v-toolbar {
   background: transparent !important;
   color: var(--yonder-value) !important;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.6);
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.06) !important;
+  border-bottom: 1px solid var(--yonder-bezel);
+  box-shadow: 0 1px 0 var(--yonder-lip) !important;
 }
 
 .v-app-bar-title,
@@ -343,7 +430,7 @@ html, body {
   font-weight: 700;
   letter-spacing: 0.06em;
   color: var(--yonder-value);
-  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.85);
+  text-shadow: 0 1px 1px var(--yonder-engraved);
 }
 
 .v-app-bar-title::before {
@@ -351,8 +438,8 @@ html, body {
   display: inline-block;
   margin-right: var(--yonder-space-3);
   padding-right: var(--yonder-space-3);
-  border-right: 1px solid rgba(0, 0, 0, 0.5);
-  box-shadow: 1px 0 0 rgba(255, 255, 255, 0.07);
+  border-right: 1px solid var(--yonder-bezel);
+  box-shadow: 1px 0 0 var(--yonder-lip);
   font-size: 0.75rem;
   font-weight: 800;
   letter-spacing: 0.22em;
@@ -362,10 +449,10 @@ html, body {
 
 /* The navigation drawer is panel, not page. */
 .v-navigation-drawer {
-  background: rgba(6, 8, 11, 0.72) !important;
+  background: color-mix(in srgb, var(--yonder-display) 78%, transparent) !important;
   color: var(--yonder-label) !important;
-  border-right: 1px solid rgba(0, 0, 0, 0.6) !important;
-  box-shadow: 1px 0 0 rgba(255, 255, 255, 0.05);
+  border-right: 1px solid var(--yonder-bezel) !important;
+  box-shadow: 1px 0 0 var(--yonder-lip);
 }
 
 .v-navigation-drawer .v-list-item-title {
@@ -381,7 +468,7 @@ html, body {
 }
 
 .v-navigation-drawer .v-list-item--active {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--yonder-raised);
   box-shadow: inset 2px 0 0 var(--yonder-select);
 }
 
@@ -391,12 +478,12 @@ html, body {
    rather than drawn. */
 .nrdb-ui-group > .v-card {
   background: var(--yonder-display) !important;
-  border: 1px solid #000 !important;
+  border: 1px solid var(--yonder-bezel) !important;
   border-radius: 3px;
   box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.10),
-    inset 0 1px 0 rgba(255, 255, 255, 0.05),
-    0 6px 18px rgba(0, 0, 0, 0.55) !important;
+    0 0 0 1px var(--yonder-lip),
+    inset 0 1px 0 var(--yonder-lip),
+    0 6px 18px var(--yonder-seat) !important;
   color: var(--yonder-value);
 }
 
@@ -408,7 +495,7 @@ html, body {
   letter-spacing: 0.22em;
   text-transform: uppercase;
   color: var(--yonder-label);
-  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.8);
+  text-shadow: 0 1px 1px var(--yonder-engraved);
   padding: var(--yonder-space-3) var(--yonder-space-4);
   border-bottom: 1px solid var(--yonder-divider);
   margin-bottom: var(--yonder-space-2);
@@ -476,15 +563,15 @@ html, body {
 .v-btn--variant-flat {
   background: linear-gradient(180deg, rgba(255,255,255,0.10), rgba(0,0,0,0.28)),
               var(--yonder-select) !important;
-  color: #04060a !important;
-  border: 1px solid rgba(0, 0, 0, 0.55) !important;
+  color: var(--yonder-on-tone) !important;
+  border: 1px solid var(--yonder-bezel) !important;
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.28) !important;
 }
 
 .v-btn--variant-outlined {
   border: 1px solid var(--yonder-divider) !important;
   color: var(--yonder-value) !important;
-  background: rgba(255, 255, 255, 0.04) !important;
+  background: var(--yonder-raised) !important;
 }
 
 /* ---- inputs ---------------------------------------------------------- */
@@ -500,7 +587,7 @@ html, body {
 .nrdb-ui-text-field .v-field {
   background: var(--yonder-pane) !important;
   border-radius: 2px;
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.6);
+  box-shadow: inset 0 1px 3px var(--yonder-seat);
 }
 
 .nrdb-ui-form .v-field__outline,
@@ -658,10 +745,10 @@ html, body {
 /* The soft-key rail's group: part of the bezel, not another instrument. */
 .nrdb-ui-group.yonder-rail > .v-card,
 .yonder-rail > .v-card {
-  background: rgba(0, 0, 0, 0.35) !important;
+  background: color-mix(in srgb, var(--yonder-pane) 82%, transparent) !important;
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.07),
-    0 0 0 1px rgba(0, 0, 0, 0.7) !important;
+    inset 0 1px 0 var(--yonder-lip),
+    0 0 0 1px var(--yonder-bezel) !important;
 }
 
 .yonder-note {

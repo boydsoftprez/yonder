@@ -14,7 +14,7 @@
 # resolve `yonder-core` lives. None of those fails a unit test; all of them are
 # a console page that is silently missing a control.
 #
-# Since R-UI-12 it also captures every page in both palettes in a real browser,
+# Since R-UI-12 it also captures every page in every palette in a real browser,
 # checks that nothing is clipped and no action spans its surface, and fails when
 # a page changed shape without somebody accepting it.
 #
@@ -345,7 +345,7 @@ hits=$(grep -c "$PASSWORD" "$JOURNAL" || true)
 expect "the password appears nowhere in what either service printed" 0 "$hits"
 
 # ---------------------------------------------------------------------------
-say "R-UI-12: capture every page, in both palettes, and look at them"
+say "R-UI-12: capture every page, in every palette, and look at them"
 
 # The gate this repository did not have when 39% of the join warning shipped
 # behind a scrollbar. Every check above this line passed on that build.
@@ -372,28 +372,32 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
     # Night through the route an operator uses, not by writing the file: the
     # theme goes through the apply engine, so this also proves the palette a
     # page is captured in is one the device actually reached.
-    theme_reply=$(sock_post /ui/theme '{"theme":"night"}')
-    theme_id=$(printf '%s' "$theme_reply" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
-    if [ -n "$theme_id" ]; then
-        sock_post /confirm "{\"id\":\"$theme_id\"}" >/dev/null
-    fi
+    # Each palette through the route an operator uses, not by writing the
+    # file: this also proves the palette a page is captured in is one the
+    # device actually reached.
+    reach_theme() {
+        reply=$(sock_post /ui/theme "{\"theme\":\"$1\"}")
+        id=$(printf '%s' "$reply" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+        [ -n "$id" ] && sock_post /confirm "{\"id\":\"$id\"}" >/dev/null
+        i=0
+        while [ "$i" -lt "$TRIES" ]; do
+            grep -q -- "--yonder-theme: \"$1\"" "$CONSOLE/public/theme.css" 2>/dev/null && return 0
+            sleep "$POLL"; i=$((i + 1))
+        done
+        return 1
+    }
 
-    i=0
-    while [ "$i" -lt "$TRIES" ]; do
-        grep -q -- '--yonder-theme: "night"' "$CONSOLE/public/theme.css" 2>/dev/null && break
-        sleep "$POLL"; i=$((i + 1))
+    for palette in sunlight night; do
+        if reach_theme "$palette"; then
+            ok "the device reached the $palette palette through /ui/theme"
+            capture "$palette"
+        else
+            bad "the console never regenerated theme.css as $palette, so it was not captured"
+        fi
     done
-    if grep -q -- '--yonder-theme: "night"' "$CONSOLE/public/theme.css" 2>/dev/null; then
-        ok "the device reached the night palette through /ui/theme"
-        capture night
-    else
-        bad "the console never regenerated theme.css as night, so night was not captured"
-    fi
 
     # Back to the default, so a kept working directory is left as it was found.
-    back=$(sock_post /ui/theme '{"theme":"day"}')
-    back_id=$(printf '%s' "$back" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
-    [ -n "$back_id" ] && sock_post /confirm "{\"id\":\"$back_id\"}" >/dev/null
+    reach_theme day >/dev/null || true
 else
     printf '  SKIP  no browser: the pages were not captured and nobody looked\n'
     printf '        npm install --save-dev playwright && npx playwright install --with-deps chromium\n'

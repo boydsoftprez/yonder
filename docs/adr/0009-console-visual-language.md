@@ -133,10 +133,35 @@ command-state language remains built once in `yonder-core` and shared.
   against a browser on a desk. A tablet at arm's length in sunlight is the condition that
   matters, and it has not been tried.
 
+## Resolved — the third palette exists
+
+**Answered by building it.** Day stays a lifted version of the display, and a third mode,
+`sunlight`, was added for the condition the other two cannot cover: in direct sun a dark
+screen is a mirror at *any* brightness, and no amount of contrast recovers a reflection of
+the sky.
+
+It is the same instrument in a different material, and that is the whole of it. The
+reading surface goes to near-white — never white, because a page in sunlight should not be
+a light source of its own — and the panel becomes brushed aluminium instead of carbon,
+since carbon is a dark material and the point of the mode is that the page turns over.
+Nothing moves. No element appears or disappears. An operator stepping out of the shade is
+looking at the console they already know.
+
+Recorded as **R-UI-14**, and `ui.theme` now takes `day`, `night` or `sunlight`. The
+capture gate photographs all three on every run.
+
+Two things this exposed, both worth keeping in mind for the next mode:
+
+- **The list of valid themes existed twice** — once as the schema enum, once as a literal
+  in `ui/theme.ts`. Adding the third to the schema alone shipped a console that offered a
+  control the route refused. There is now one list, in the schema, re-exported.
+- **A test's own list of themes went stale without failing.** `theme.test.ts` held
+  `["day", "night"]`, so every assertion in it silently stopped covering a third of the
+  console. It derives the list from `PALETTES` now. A hand-written list of the things
+  under test is a list that rots quietly.
+
 ## Open
 
-Whether day can stay a lifted version of the display rather than becoming a genuinely
-light palette. A real multi-function display is readable at noon because it is a
-high-brightness transflective panel; a browser on a consumer tablet is not. If the field
-says otherwise, the answer is a third palette — the layout does not change — and this ADR
-does not need reopening to add one.
+Nothing outstanding in this decision. What remains is not a design question but an
+unverified one: none of these three palettes has been read on a board, in the light it is
+named for.

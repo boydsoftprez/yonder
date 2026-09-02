@@ -93,14 +93,16 @@ export default {
 
 .y-keys__key.on {
     color: var(--yonder-value, #fff);
-    background: rgba(255, 255, 255, 0.06);
+    /* A raised state is lighter on a dark panel and darker on a light one, so
+       it comes from the theme rather than from an assumption about which. */
+    background: var(--yonder-raised, rgba(255, 255, 255, 0.06));
     box-shadow: inset 0 2px 0 var(--yonder-select, #2ad4f0);
 }
 
 .tone-act { color: var(--yonder-select, #2ad4f0); }
 .tone-warn { color: var(--yonder-irreversible, #f03fce); }
 
-.y-keys__key:hover { background: rgba(255, 255, 255, 0.04); }
+.y-keys__key:hover { background: var(--yonder-raised, rgba(255, 255, 255, 0.04)); }
 .y-keys__key:focus-visible {
     outline: 2px solid var(--yonder-select, #2ad4f0);
     outline-offset: -2px;
