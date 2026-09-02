@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
-import { ReachMonitor, pathDevices, pathInUse } from "./monitor.js";
+import { ReachMonitor, pathDevices, pathInUse, pathsHolding } from "./monitor.js";
 import { FAILURES_TO_STAND_DOWN, Standing, type PathName } from "./standing.js";
 import { DEFAULT_CONFIG, type Config } from "../../schema/config.js";
 import type { DeviceInfo } from "../nmcli/client.js";
@@ -28,6 +28,8 @@ interface Built {
 function build(opts: {
   devices?: Partial<Record<PathName, string>>;
   inUse?: PathName | null;
+  /** Every path holding an address. Defaults to just `inUse`. */
+  holding?: PathName[];
   order?: PathName[];
   reaches?: (device: string) => boolean;
   probeThrows?: boolean;
@@ -52,9 +54,11 @@ function build(opts: {
       return opts.devices ?? { ethernet: "eth0", modem: "wwan0" };
     },
     order: () => opts.order ?? ["ethernet", "modem", "wifi_client"],
-    inUse: async () => {
+    holding: async () => {
       if (opts.inUseThrows === true) throw new Error("NetworkManager is not answering");
-      return opts.inUse === undefined ? "modem" : opts.inUse;
+      if (opts.holding !== undefined) return opts.holding;
+      const inUse = opts.inUse === undefined ? "modem" : opts.inUse;
+      return inUse === null ? [] : [inUse];
     },
     log: (l) => lines.push(l),
   });
@@ -203,6 +207,44 @@ describe("ReachMonitor.carrying", () => {
     expect(lines.join("\n")).toMatch(/cannot tell/);
   });
 
+  /**
+   * `ReachState.carrying` says "some path is carrying traffic", and the
+   * watchdog's own comment says a spurious access point costs an operator
+   * nothing. Both stop being true if this answers about the top path alone.
+   *
+   * The board: an operator on the device over Wi-Fi client (so no access
+   * point is up), and Ethernet plugged into a switch with no route out, which
+   * takes a DHCP address and outranks the radio. Judging only Ethernet
+   * answers false, the watchdog runs `nmcli connection up yonder-ap`, and one
+   * radio cannot be both — so the operator loses the link they were using, on
+   * a board that was reaching the internet the whole time.
+   */
+  it("is true while any path is reaching something, not only the top one", async () => {
+    const { monitor, standing } = build({
+      devices: { ethernet: "eth0", wifi_client: "wlan0" },
+      order: ["ethernet", "wifi_client"],
+      holding: ["ethernet", "wifi_client"],
+      reaches: (d) => d !== "eth0",
+    });
+    for (let i = 0; i < FAILURES_TO_STAND_DOWN; i++) await monitor.test("ethernet");
+    expect(standing.standingOf("ethernet")).toBe("no-route-out");
+    expect(await monitor.carrying()).toBe(true);
+    expect((await monitor.state()).carrying).toBe(true);
+  });
+
+  it("is false only once every path holding an address has been stood down", async () => {
+    const { monitor } = build({
+      devices: { ethernet: "eth0", wifi_client: "wlan0" },
+      order: ["ethernet", "wifi_client"],
+      holding: ["ethernet", "wifi_client"],
+      reaches: () => false,
+    });
+    for (let i = 0; i < FAILURES_TO_STAND_DOWN; i++) await monitor.test("ethernet");
+    expect(await monitor.carrying()).toBe(true);
+    for (let i = 0; i < FAILURES_TO_STAND_DOWN; i++) await monitor.test("wifi_client");
+    expect(await monitor.carrying()).toBe(false);
+  });
+
   it("has not been told anything before a probe has ever run", async () => {
     // A daemon assembled with a monitor nothing has driven yet must behave
     // exactly as one assembled without one. This is the property that stops
@@ -274,6 +316,34 @@ describe("pathDevices", () => {
     const joined = structuredClone(DEFAULT_CONFIG);
     joined.network.client.ssid = "HomeNetwork";
     expect(pathDevices(joined, devices()).wifi_client).toBe("wlan0");
+  });
+});
+
+describe("pathsHolding", () => {
+  it("names every path holding an address, in the operator's order", () => {
+    // `carrying` asks about all of them: a dead path at the head of the order
+    // must not be allowed to speak for a working one behind it.
+    expect(pathsHolding(
+      ["ethernet", "wifi_client", "modem"],
+      { ethernet: "eth0", wifi_client: "wlan0", modem: "wwan0" },
+      [
+        { device: "eth0", address: "192.168.1.40/24" },
+        { device: "wlan0", address: "192.168.8.22/24" },
+      ],
+      "192.168.77.1",
+    )).toEqual(["ethernet", "wifi_client"]);
+  });
+
+  it("is empty when only the access point and loopback hold addresses", () => {
+    expect(pathsHolding(
+      ["ethernet", "wifi_client"],
+      { ethernet: "eth0", wifi_client: "wlan0" },
+      [
+        { device: "lo", address: "127.0.0.1/8" },
+        { device: "wlan0", address: "192.168.77.1/24" },
+      ],
+      "192.168.77.1",
+    )).toEqual([]);
   });
 });
 

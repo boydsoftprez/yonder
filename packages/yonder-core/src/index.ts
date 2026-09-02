@@ -106,6 +106,7 @@ export {
   ReachMonitor,
   pathDevices,
   pathInUse,
+  pathsHolding,
   type ReachMonitorOptions,
 } from "./net/reach/monitor.js";
 export { ReachWatch, type ReachWatchOptions } from "./net/reach/watch.js";

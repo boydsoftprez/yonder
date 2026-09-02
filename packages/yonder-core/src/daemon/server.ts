@@ -17,7 +17,7 @@ import { MmcliClient } from "../net/modem/mmcli/client.js";
 import { modemState } from "../net/modem/state.js";
 import { Standing } from "../net/reach/standing.js";
 import { commandProbe } from "../net/reach/probe.js";
-import { ReachMonitor, pathDevices, pathInUse } from "../net/reach/monitor.js";
+import { ReachMonitor, pathDevices, pathsHolding } from "../net/reach/monitor.js";
 import { ReachWatch } from "../net/reach/watch.js";
 import type { PathName } from "../net/reach/standing.js";
 import { NetworkRenderer } from "../net/renderer.js";
@@ -454,12 +454,12 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
       return pathDevices(config, devices, net);
     },
     order: () => reachOrder(reachConfig()),
-    inUse: async () => {
+    holding: async () => {
       const config = reachConfig();
       const [devices, addresses, net] = await Promise.all([
         client.devices(), client.activeIpv4(), modemInterface(config),
       ]);
-      return pathInUse(
+      return pathsHolding(
         reachOrder(config),
         pathDevices(config, devices, net),
         addresses,

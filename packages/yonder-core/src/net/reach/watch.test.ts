@@ -42,6 +42,10 @@ interface Bench {
   clock: ReturnType<typeof fakeClock>;
   /** Set what the next counter reading for a device will be. */
   counters: Map<string, Counters>;
+  /** Move the default route to another path, between ticks. */
+  setInUse(path: PathName | null): void;
+  /** Rename the interface a path is on, between ticks. */
+  setDevices(devices: Partial<Record<PathName, string>>): void;
 }
 
 function bench(opts: {
@@ -64,6 +68,9 @@ function bench(opts: {
     return counters.get(device) ?? null;
   };
 
+  let devices = opts.devices ?? { ethernet: "eth0", modem: "wwan0" };
+  let inUse: PathName | null = opts.inUse === undefined ? "modem" : opts.inUse;
+
   const monitor = new ReachMonitor({
     standing,
     probe: async (device) => {
@@ -72,11 +79,11 @@ function bench(opts: {
       return opts.reaches === undefined ? true : opts.reaches(device);
     },
     counters: read,
-    devices: async () => opts.devices ?? { ethernet: "eth0", modem: "wwan0" },
+    devices: async () => devices,
     order: () => opts.order ?? ["ethernet", "modem"],
-    inUse: async () => {
+    holding: async () => {
       if (opts.inUseThrows === true) throw new Error("NetworkManager is not answering");
-      return opts.inUse === undefined ? "modem" : opts.inUse;
+      return inUse === null ? [] : [inUse];
     },
     log: (l) => lines.push(l),
   });
@@ -88,7 +95,11 @@ function bench(opts: {
     log: (l) => lines.push(l),
   });
 
-  return { watch, standing, probed, lines, clock, counters };
+  return {
+    watch, standing, probed, lines, clock, counters,
+    setInUse(path) { inUse = path; },
+    setDevices(next) { devices = next; },
+  };
 }
 
 /** Bytes moved both ways since the last reading. */
@@ -226,6 +237,64 @@ describe("ReachWatch", () => {
     }
     expect(b.standing.standingOf("modem")).toBe("no-route-out");
     expect(elapsed).toBeLessThan(90_000);
+  });
+
+  /**
+   * Counters are absolute numbers about one interface, and two of them are
+   * only a comparison when they came from the same one.
+   *
+   * The board: a busy but dead LAN (`eth0`, ~900 000 bytes each way) and an
+   * idle modem (`wwan0`, ~1 000), and nothing on it reaching anything. When
+   * the route moves from one to the other, the previous reading and the
+   * current one describe different devices — and subtracting them
+   * manufactures nearly a megabyte of traffic in both directions that never
+   * happened. That fabricated success skips the link-up probe R-CEL-09
+   * mandates, clears `no-route-out` outright (`SUCCESSES_TO_RETURN` is 1) and
+   * flips `carrying()` to true, which is exactly the answer that stops the
+   * fallback watchdog raising the access point on a board with no way out.
+   */
+  it("never reads one interface's counters as the other's traffic", async () => {
+    const b = bench({
+      devices: { ethernet: "eth0", modem: "wwan0" },
+      order: ["ethernet", "modem"],
+      inUse: "modem",
+      reaches: () => false,
+    });
+    b.counters.set("wwan0", { rx: 1_000, tx: 1_000 });
+    b.counters.set("eth0", { rx: 900_000, tx: 900_000 });
+    b.watch.start();
+    for (let i = 0; i < FAILURES_TO_STAND_DOWN; i++) await b.clock.advance(REACH_TICK_MS);
+    expect(b.standing.standingOf("ethernet")).toBe("no-route-out");
+
+    // The modem drops its address; ethernet becomes the path in use.
+    b.setInUse("ethernet");
+    const before = b.probed.length;
+    await b.clock.advance(REACH_TICK_MS);
+
+    expect(b.probed.length).toBeGreaterThan(before);
+    expect(b.standing.standingOf("ethernet")).toBe("no-route-out");
+  });
+
+  /**
+   * The same hazard under an unchanged path. A modem has two names: until
+   * `modemInterface` resolves, the map falls back to the control port
+   * NetworkManager lists (`cdc-wdm0`), and afterwards it is the ModemManager
+   * data port (`wwan0`) that holds the address and carries every byte. The
+   * path never changed, so keying the reset on the path alone would still
+   * compare one interface's counters with another's — and skip the link-up
+   * test on the interface that is actually carrying traffic.
+   */
+  it("tests again when the path in use changes interface underneath it", async () => {
+    const b = bench({ devices: { modem: "cdc-wdm0" }, order: ["modem"], inUse: "modem" });
+    b.counters.set("cdc-wdm0", { rx: 1_000, tx: 1_000 });
+    b.counters.set("wwan0", { rx: 50_000, tx: 50_000 });
+    b.watch.start();
+    await b.clock.advance(REACH_TICK_MS);
+    expect(b.probed).toEqual(["cdc-wdm0"]);
+
+    b.setDevices({ modem: "wwan0" });
+    await b.clock.advance(REACH_TICK_MS);
+    expect(b.probed).toContain("wwan0");
   });
 
   it("does nothing when no path is carrying traffic", async () => {

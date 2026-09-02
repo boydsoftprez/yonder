@@ -24,8 +24,15 @@ export interface ReachMonitorOptions {
   devices: () => Promise<Partial<Record<PathName, string>>>;
   /** The operator's order, from config.network.priority. */
   order: () => PathName[];
-  /** Which path traffic is actually leaving by, or null. */
-  inUse: () => Promise<PathName | null>;
+  /**
+   * Every path holding an address, in the operator's order.
+   *
+   * The first is the one carrying the default route — the metrics are
+   * generated from that same order, see `metricFor` — and the rest are paths
+   * that are up but not being used. Both halves are needed: the watch judges
+   * the first, and `carrying` asks about all of them.
+   */
+  holding: () => Promise<PathName[]>;
   log?: (line: string) => void;
 }
 
@@ -49,7 +56,7 @@ export class ReachMonitor {
   private readonly counters: CounterReader;
   private readonly devices: () => Promise<Partial<Record<PathName, string>>>;
   private readonly order: () => PathName[];
-  private readonly inUse: () => Promise<PathName | null>;
+  private readonly holding: () => Promise<PathName[]>;
   private readonly log: (line: string) => void;
 
   constructor(opts: ReachMonitorOptions) {
@@ -58,7 +65,7 @@ export class ReachMonitor {
     this.counters = opts.counters ?? systemCounters;
     this.devices = opts.devices;
     this.order = opts.order;
-    this.inUse = opts.inUse;
+    this.holding = opts.holding;
     this.log = opts.log ?? (() => {});
   }
 
@@ -113,7 +120,8 @@ export class ReachMonitor {
 
   /** The record GET /reach/state serves. */
   async state(): Promise<ReachState> {
-    const [devices, inUse] = await Promise.all([this.devices(), this.inUse()]);
+    const [devices, holding] = await Promise.all([this.devices(), this.holding()]);
+    const inUse = holding[0] ?? null;
     const order = this.order();
     // Every path, not only the configured ones. A page that listed only what
     // `network.priority` names would go quiet about the path an operator has
@@ -125,20 +133,28 @@ export class ReachMonitor {
     const paths = [...ALL_PATHS]
       .sort((a, b) => rank(a) - rank(b))
       .map((path) => this.report(path, devices[path] ?? null, inUse));
-    // From the reading already taken, not by asking again: `inUse` reaches
+    // From the reading already taken, not by asking again: `holding` reaches
     // NetworkManager, and a record that asked it twice would be a record
     // assembled from two different moments.
-    return { paths, inUse, carrying: this.carryingOn(inUse) };
+    return { paths, inUse, carrying: this.carryingOn(holding) };
   }
 
   /**
-   * The watchdog's question: is any path carrying traffic?
+   * The watchdog's question: is **some** path carrying traffic?
+   *
+   * **Some path, not the top one.** Asking only about the path holding the
+   * default route reads a dead Ethernet as "this board reaches nothing" while
+   * a Wi-Fi client link beside it is working — and the watchdog's answer to
+   * that is `nmcli connection up yonder-ap` on the one radio, which drops the
+   * client connection the operator is talking over. The watchdog's premise
+   * that "a spurious access point costs an operator nothing" holds only while
+   * this question is about every path (R-NET-07).
    *
    * **True on every doubt.** R-NET-07's guarantee is that a device can never
    * be configured into unreachability, and this answer feeds the one check
    * that decides whether the access point comes up. The two mistakes are not
    * symmetric: a false "no" raises an access point on a working device, which
-   * costs an operator nothing; a false "yes" leaves an unreachable aircraft
+   * costs an operator a moment; a false "yes" leaves an unreachable aircraft
    * unreachable. So a path that has never been probed, an address that
    * belongs to no path this monitor knows, and a question that could not be
    * asked at all all answer true — and the watchdog's own address check still
@@ -146,7 +162,7 @@ export class ReachMonitor {
    */
   async carrying(): Promise<boolean> {
     try {
-      return this.carryingOn(await this.inUse());
+      return this.carryingOn(await this.holding());
     } catch (e) {
       this.log(`network: cannot tell whether anything is carrying traffic (${(e as Error).message})`);
       return true;
@@ -172,7 +188,7 @@ export class ReachMonitor {
    * belong to a path that is no longer the one in use.
    */
   async inUseNow(): Promise<{ path: PathName; device: string } | null> {
-    const path = await this.inUse();
+    const path = (await this.holding())[0] ?? null;
     if (path === null) return null;
     const device = (await this.devices())[path];
     return device === undefined ? null : { path, device };
@@ -190,12 +206,12 @@ export class ReachMonitor {
     this.standing.record(path, true);
   }
 
-  /** The same answer, about a path already read. See carrying(). */
-  private carryingOn(inUse: PathName | null): boolean {
-    // An address on something this monitor has no path for — a USB gadget, a
+  /** The same answer, about a reading already taken. See carrying(). */
+  private carryingOn(holding: PathName[]): boolean {
+    // Addresses on things this monitor has no path for — a USB gadget, a
     // connection an operator added by hand. Not this check's to condemn.
-    if (inUse === null) return true;
-    return this.standing.standingOf(inUse) !== "no-route-out";
+    if (holding.length === 0) return true;
+    return holding.some((path) => this.standing.standingOf(path) !== "no-route-out");
   }
 
   /**
@@ -285,14 +301,14 @@ export function pathDevices(
 }
 
 /**
- * The path traffic is leaving by: the first in the operator's order that
- * holds an address.
+ * Every path holding an address, in the operator's order.
  *
- * Derived from `network.priority` rather than read out of a routing table
- * because the route metrics are *generated* from that order (see
- * `metricFor`), so the first path in it holding an address is the one
- * carrying the default route — from the same statement NetworkManager was
- * given, rather than from a second, parallel reading of the kernel.
+ * The whole list rather than only the head, because two different questions
+ * are asked of it. The watch judges *the path in use*, which is the head. The
+ * fallback watchdog asks whether **some** path is carrying traffic, and
+ * answering that from the head alone reads a dead Ethernet as a board with no
+ * way out while a working Wi-Fi client link sits beside it — then raises an
+ * access point on the one radio and drops the connection the operator is on.
  *
  * The access point's own address never counts. It is how an operator reaches
  * a device that has no way out, and counting it as a way out is how a board
@@ -304,13 +320,13 @@ export function pathDevices(
  * was asked, so both are accepted here rather than guessing; anywhere that
  * has to *act* on an interface uses the one `pathDevices` gives.
  */
-export function pathInUse(
+export function pathsHolding(
   order: PathName[],
   devices: Partial<Record<PathName, string>>,
   addresses: { device: string; address: string }[],
   apAddress: string,
   alsoKnownAs: Partial<Record<PathName, string>> = {},
-): PathName | null {
+): PathName[] {
   const holds = (device: string | undefined): boolean =>
     device !== undefined && addresses.some((a) =>
       a.device === device
@@ -318,8 +334,23 @@ export function pathInUse(
       && !a.address.startsWith("127.")
       && a.address.split("/")[0] !== apAddress);
 
-  for (const path of order) {
-    if (holds(devices[path]) || holds(alsoKnownAs[path])) return path;
-  }
-  return null;
+  return order.filter((path) => holds(devices[path]) || holds(alsoKnownAs[path]));
+}
+
+/**
+ * The path traffic is leaving by: the first of those, or null.
+ *
+ * Derived from `network.priority` rather than read out of a routing table
+ * because the route metrics are *generated* from that order (see
+ * `metricFor`, which writes one into every egress profile), so the first path
+ * in it holding an address is the one carrying the default route.
+ */
+export function pathInUse(
+  order: PathName[],
+  devices: Partial<Record<PathName, string>>,
+  addresses: { device: string; address: string }[],
+  apAddress: string,
+  alsoKnownAs: Partial<Record<PathName, string>> = {},
+): PathName | null {
+  return pathsHolding(order, devices, addresses, apAddress, alsoKnownAs)[0] ?? null;
 }

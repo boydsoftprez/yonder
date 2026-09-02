@@ -63,9 +63,23 @@ export class ReachWatch {
   private timer: unknown;
   private stopped = false;
 
-  /** The last counter reading for the device in use, and which path it was. */
+  /**
+   * The last counter reading, and the path and interface it was taken from.
+   *
+   * **The interface is part of the key, not only the path.** These are
+   * absolute numbers about one device; two of them are a comparison only when
+   * they came from the same one. Subtracting a busy dead LAN's counters from
+   * an idle modem's manufactures traffic in both directions that never
+   * happened — which reads as a success, skips the link-up probe R-CEL-09
+   * mandates, and clears `no-route-out` on evidence that does not exist.
+   *
+   * Keying on the path alone is not enough even for a single path: a modem
+   * has two names, and the map falls back to the control port NetworkManager
+   * lists (`cdc-wdm0`) until ModemManager resolves the data port (`wwan0`).
+   */
   private previous: Counters | null = null;
   private lastPath: PathName | null = null;
+  private lastDevice: string | null = null;
   /** Paths whose last test failed and which have not since succeeded. */
   private readonly failing = new Set<PathName>();
 
@@ -148,15 +162,20 @@ export class ReachWatch {
       // held from a previous path would be about a different interface.
       this.previous = null;
       this.lastPath = null;
+      this.lastDevice = null;
       return;
     }
 
     const { path, device } = now;
-    const before = this.previous;
+    // A reading of a different interface is not a reading of this one, so it
+    // is discarded rather than compared — and an interface that has just
+    // taken the route has, for this watch's purposes, just come up.
+    const cameUp = device !== this.lastDevice || path !== this.lastPath;
+    const before = cameUp ? null : this.previous;
     const current = this.read(device);
     this.previous = current;
-    const cameUp = path !== this.lastPath;
     this.lastPath = path;
+    this.lastDevice = device;
 
     const why = this.reason(path, cameUp, before, current);
     if (why === null) return;
