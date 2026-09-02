@@ -47,10 +47,12 @@ What it stages:
   One file, ~2.7 MB, depending only on `adduser`, `libstdc++6` and `openssl`, all
   of which a stock Debian board already has. Pinned, fingerprinted, and verified
   against ZeroTier's repository signature using `installer/keys/zerotier.gpg`.
+  Installed by role `40-zerotier`, which leaves it stopped and disabled until
+  a network is configured (R-VPN-05, R-VPN-08).
   Tailscale is **not** carried: it is 31 MB, pulls in `iptables` and two
   libraries that a board does not have, and switches four `update-alternatives`
-  entries. It is fetched over the network by the role that installs it, which
-  runs only when Tailscale is configured (R-VPN-08).
+  entries. It is fetched over the network and installed when Tailscale is
+  configured (R-VPN-08).
 
 Two things it does that a by-hand download does not:
 
