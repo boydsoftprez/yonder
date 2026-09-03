@@ -892,7 +892,7 @@ invisible from the outside: the capability is advertised, so every reasonable pe
 try it once. Revisit only if a kernel update changes the behaviour, and re-run the
 reproduction in that note rather than assuming.
 
-### K-34 · The development board browns out, and nothing in Yonder says so
+### K-41 · The development board browns out, and nothing in Yonder says so
 
 `vcgencmd get_throttled` on the Raspberry Pi 4 dev board returns `0x50000` — bit 16,
 under-voltage has occurred, and bit 18, throttling has occurred — with three undervoltage
