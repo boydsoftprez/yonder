@@ -1,0 +1,45 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!--
+  The editor half of the sparkline. Node-RED finds this by basename beside the
+  node's .js; without it the widget registers and shows as "unknown node".
+  A form and a registration, nothing else (CLAUDE.md rule 2, R-UI-01).
+-->
+<script type="text/html" data-template-name="ui-yonder-sparkline">
+  <div class="form-row"><label for="node-input-group"><i class="fa fa-table"></i> Group</label>
+    <input type="text" id="node-input-group" /></div>
+  <div class="form-row"><label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name" /></div>
+  <div class="form-row"><label for="node-input-label"><i class="fa fa-font"></i> Label</label>
+    <input type="text" id="node-input-label" placeholder="THROUGHPUT" /></div>
+  <div class="form-row"><label for="node-input-height2"><i class="fa fa-arrows-v"></i> Chart height</label>
+    <input type="number" id="node-input-height2" placeholder="48" /> px</div>
+  <div class="form-tips">
+    Send <code>{ rx: [...], tx: [...] }</code> on <code>msg.payload.series</code>
+    &mdash; two equal-length arrays, oldest first, in the same unit. Fewer than
+    two points draws nothing rather than a flat line that would say more than
+    is known.
+  </div>
+</script>
+<script type="text/html" data-help-name="ui-yonder-sparkline">
+<p>Two lines, receive and transmit, drawn from a rolling history &mdash; the
+console's own graph rather than a raster image (R-UI-13).</p>
+<p>Send <code>msg.payload.series = { rx: [...], tx: [...] }</code>, oldest
+first. Distinguished by line style as well as colour, so the two remain
+readable without colour alone.</p>
+</script>
+<script type="text/javascript">
+  RED.nodes.registerType("ui-yonder-sparkline", {
+    category: "dashboard 2", color: "#c7e0d4",
+    defaults: {
+      name: { value: "" },
+      group: { type: "ui-group", required: true },
+      order: { value: 0 }, width: { value: 0 }, height: { value: 0 },
+      label: { value: "" },
+      height2: { value: 48, validate: RED.validators.number(true) }
+    },
+    inputs: 1, outputs: 0,
+    icon: "font-awesome/fa-area-chart",
+    paletteLabel: "yonder sparkline",
+    label: function () { return this.name || this.label || "yonder sparkline"; }
+  });
+</script>
