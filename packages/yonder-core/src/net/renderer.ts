@@ -345,16 +345,51 @@ export class NetworkRenderer implements Renderer {
     // client, not both, so `radioPlan` decides which and in what order and
     // this loop carries it out. Nothing here is left to NetworkManager's
     // activation rules, which is the whole of the defect K-13 recorded.
+    //
+    // Its failure is held rather than thrown, and thrown at the end of the
+    // render instead. The ordering below is why it has to run first; sharing
+    // a failure path with the re-dial was never part of that reasoning, and
+    // on a board whose configured network is simply out of range it made the
+    // one recovery action M3a exists for unreachable — see K-37.
+    let radioFailure: { error: unknown } | undefined;
     if (ifaces.wifi !== null) {
-      await this.settleRadio(config, devices);
+      try {
+        await this.settleRadio(config, devices);
+      } catch (e) {
+        radioFailure = { error: e };
+      }
     }
 
     // Last, and after the radio has been arbitrated. A modem that will not
     // dial must not be able to skip the step that keeps the access point on
     // the air — that step is what R-NET-07 rests on, and this one can throw.
+    //
+    // *After*, and not *only if it succeeded*. These are two independent
+    // subsystems: a Wi-Fi client that cannot associate is a fact about what
+    // is in range, and it says nothing about whether the modem should be
+    // dialled on the APN the operator has just corrected (R-CEL-09). A board
+    // with an out-of-range network configured fails settleRadio on every
+    // single render, so a re-dial gated on its success is a re-dial that
+    // never happens.
     if (redial.length > 0) {
-      await this.redialModem(redial, devices);
+      try {
+        await this.redialModem(redial, devices);
+      } catch (e) {
+        // The radio's failure is the one that bears on whether this device
+        // can still be reached, so it is the one the caller gets. Losing it
+        // behind a modem that would not come back up would report the lesser
+        // problem and hide the greater.
+        if (radioFailure === undefined) throw e;
+        this.log(`network: the modem did not come back up either (${(e as Error).message})`);
+      }
     }
+
+    // A render that failed still fails. The apply engine's confirmation timer
+    // rolls the configuration back on exactly this rejection (R-CFG-03), and
+    // a render that returned quietly after the radio would not settle would
+    // leave the operator's changes standing on a device that could not carry
+    // them.
+    if (radioFailure !== undefined) throw radioFailure.error;
   }
 
   /**

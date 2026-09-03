@@ -111,6 +111,8 @@ interface HarnessOptions {
   fails?: Record<string, CommandResult>;
   /** Which paths have stopped reaching anything (R-NET-13). */
   standing?: StandingView;
+  /** Where the renderer's log lines go, for a test that asserts wording. */
+  log?: (line: string) => void;
   /**
    * What the modem connection is *already dialled on*, as nmcli would report
    * it before this render writes anything.
@@ -222,6 +224,7 @@ function harness(opts: HarnessOptions = {}) {
   const renderer = new NetworkRenderer({
     client: new NmcliClient(run),
     secrets,
+    log: opts.log,
     clock: opts.clock,
     radioWaitMs: opts.radioWaitMs,
     standing: opts.standing,
@@ -1043,6 +1046,154 @@ describe("NetworkRenderer and a modem whose settings changed", () => {
     await renderer.render(config);
     expect(calls.some((c) => c[1] === "-t" && c[6] === MODEM_CONNECTION)).toBe(false);
     expect(verbs(calls)).toEqual(["modify"]);
+  });
+});
+
+/**
+ * **A radio that will not settle must not take the modem down with it.**
+ *
+ * Measured on a board whose configured Wi-Fi network had simply moved out of
+ * range. Every render reached `settleRadio`, the client could not associate,
+ * the access point was raised again — R-NET-07 doing exactly its job — and
+ * the render threw. The re-dial sat after it and never ran, so a corrected
+ * APN was written into the profile and the modem stayed dialled on the old
+ * one: the recovery action the whole of M3a is built around, unreachable on
+ * any board with an out-of-range network configured. A compound of K-37.
+ *
+ * The ordering itself is still right, and stays: a modem that will not dial
+ * must not be able to skip the step that keeps the access point on the air.
+ * What was wrong is that two independent subsystems shared one failure path.
+ */
+describe("NetworkRenderer when the radio will not settle and the modem must be re-dialled", () => {
+  /** Both radios on one board: an access point on the air, a modem dialled. */
+  const RADIO_AND_MODEM = withApActive(
+    "wlan0:wifi:disconnected:\ncdc-wdm0:gsm:connected:yonder-modem\nlo:loopback:unmanaged:\n",
+  );
+
+  /** What the board says when the configured network is not in range. */
+  const NOT_IN_RANGE: CommandResult = {
+    code: 4,
+    stdout: "",
+    stderr: "Error: Connection activation failed: The Wi-Fi network could not be found",
+  };
+
+  /** What a modem says when it will not come back up. */
+  const MODEM_WONT_DIAL: CommandResult = {
+    code: 4,
+    stdout: "",
+    stderr: "Error: Connection activation failed: No suitable device found",
+  };
+
+  /** Joins a network that is not in range, and corrects the modem's APN. */
+  function joiningAndCorrectingApn(): Config {
+    const c: Config = structuredClone(DEFAULT_CONFIG);
+    c.network.client.ssid = "HomeNetwork";
+    c.network.client.psk = { secret: "wifi_psk" };
+    c.network.modem.enabled = true;
+    c.network.modem.apn = "nxtgenphone";
+    return c;
+  }
+
+  function board(fails: Record<string, CommandResult>, log?: (line: string) => void) {
+    const h = harness({
+      devices: RADIO_AND_MODEM,
+      connections: [AP_CONNECTION, ETHERNET_CONNECTION, MODEM_CONNECTION],
+      dialled: { "gsm.apn": "ereseller" },
+      fails,
+      log,
+    });
+    h.secrets.ensure("wifi_psk", "psk");
+    return h;
+  }
+
+  /** The verbs issued against the modem connection, in order. */
+  const verbs = (calls: string[][]): string[] =>
+    calls.filter((c) => c[1] === "connection" && c[3] === MODEM_CONNECTION).map((c) => c[2]!);
+
+  it("re-dials the modem even though the radio step threw", async () => {
+    const { renderer, calls } = board({
+      [`nmcli connection up ${CLIENT_CONNECTION}`]: NOT_IN_RANGE,
+    });
+
+    await expect(renderer.render(joiningAndCorrectingApn())).rejects.toThrow();
+
+    // The profile was rewritten and then actually dialled with the new APN.
+    expect(verbs(calls)).toEqual(["modify", "down", "up"]);
+    const modify = argvOf(calls, "modify", MODEM_CONNECTION)!;
+    expect(modify[modify.indexOf("gsm.apn") + 1]).toBe("nxtgenphone");
+  });
+
+  /**
+   * And the radio's failure is still a failure. A render that returned
+   * quietly because the modem afterwards went well would leave the apply
+   * engine's confirmation timer with nothing to roll back (R-CFG-03).
+   */
+  it("still reports the radio's failure to the caller after a re-dial that worked", async () => {
+    const { renderer, calls } = board({
+      [`nmcli connection up ${CLIENT_CONNECTION}`]: NOT_IN_RANGE,
+    });
+
+    await expect(renderer.render(joiningAndCorrectingApn()))
+      .rejects.toThrow(/The Wi-Fi network could not be found/);
+    // The rescue still ran, so the device is still reachable.
+    expect(calls.some((c) => c[2] === "up" && c[3] === AP_CONNECTION)).toBe(true);
+  });
+
+  /**
+   * Both failed. The radio's is the one bearing on whether anyone can still
+   * reach this device, so it is the one the caller is given; the modem's is
+   * logged rather than allowed to displace it.
+   */
+  it("gives the caller the radio's failure, not the modem's, when both fail", async () => {
+    const lines: string[] = [];
+    const { renderer } = board({
+      [`nmcli connection up ${CLIENT_CONNECTION}`]: NOT_IN_RANGE,
+      [`nmcli connection up ${MODEM_CONNECTION}`]: MODEM_WONT_DIAL,
+    }, (l) => lines.push(l));
+
+    const thrown = await renderer.render(joiningAndCorrectingApn()).then(
+      () => new Error("the render did not fail at all"),
+      (e: unknown) => e as Error,
+    );
+    expect(thrown.message).toMatch(/The Wi-Fi network could not be found/);
+    // Not merely "some error": the modem's must not have displaced it.
+    expect(thrown.message).not.toMatch(/No suitable device found/);
+    // And it is not lost either — it is written down where an operator reads.
+    expect(lines.some((l) => l.includes("the modem did not come back up"))).toBe(true);
+  });
+
+  /**
+   * And when the modem alone fails, its failure is the render's — nothing
+   * else has gone wrong to displace it.
+   */
+  it("reports the modem's failure when the radio settled", async () => {
+    const { renderer } = board({
+      [`nmcli connection up ${MODEM_CONNECTION}`]: MODEM_WONT_DIAL,
+    });
+    const c = joiningAndCorrectingApn();
+    c.network.client.ssid = "";
+    await expect(renderer.render(c)).rejects.toThrow(/No suitable device found/);
+  });
+
+  /**
+   * The ordering the comment in `render` is about, pinned for the case where
+   * both steps succeed: the radio is arbitrated first, and the modem is
+   * cycled after it. A modem that will not dial must never be able to skip
+   * the step that puts the access point back on the air (R-NET-07).
+   */
+  it("arbitrates the radio before it re-dials the modem", async () => {
+    const { renderer, calls } = board({});
+    await renderer.render(joiningAndCorrectingApn());
+
+    const activations = calls
+      .filter((c) => c[1] === "connection" && (c[2] === "up" || c[2] === "down"))
+      .map((c) => `${c[2]} ${c[3]}`);
+    expect(activations).toEqual([
+      `down ${AP_CONNECTION}`,
+      `up ${CLIENT_CONNECTION}`,
+      `down ${MODEM_CONNECTION}`,
+      `up ${MODEM_CONNECTION}`,
+    ]);
   });
 });
 

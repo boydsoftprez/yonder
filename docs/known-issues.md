@@ -826,6 +826,23 @@ a failed render. R-NET-12 already says the access point returns when a change
 leaves the radio on no network; that outcome should satisfy the renderer rather
 than fail it.
 
+**One compound of this is closed.** The network renderer arbitrates the radio
+and then re-dials the modem, and the two shared a failure path: `settleRadio`
+threw, so `redialModem` never ran. On a board with an out-of-range network
+configured that happened on *every* render, so a corrected APN was written into
+the modem's profile and never dialled — correcting a mistyped APN, the recovery
+action M3a is built around, could not be carried out at all. The radio step
+still runs first, for the reason it always did (its failure is what raises the
+access point, and R-NET-07 rests on that), but its error is now held, the
+re-dial runs, and the radio's error is then thrown. A re-dial that also fails is
+logged rather than allowed to displace it, and a render that failed still fails
+— the confirmation timer depends on that (R-CFG-03). Pinned by tests in
+`packages/yonder-core/src/net/renderer.test.ts` that fail against the old code.
+R-CEL-09, R-NET-07.
+
+The entry stays open: an out-of-range network still fails the render, and the
+fix direction above is still the fix.
+
 ### K-38 · A console deploy serves `Cannot GET /` for about half a minute
 
 `installer/roles/30-console.sh` replaces the console tree in place. Between
