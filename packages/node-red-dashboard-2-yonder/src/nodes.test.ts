@@ -197,6 +197,25 @@ describe("the widgets", () => {
     expect(props!.limit).toBeUndefined();
   });
 
+  it("passes the gauge a sense, defaulting to higher-is-worse", () => {
+    // Everything already drawn by this instrument — temperature, load, memory —
+    // is higher-is-worse, so an omitted sense must keep behaving exactly as it
+    // did before this property existed.
+    expect(build(gaugeNode as (RED: RED) => void, { label: "CPU TEMP", max: 100, caution: 60, limit: 80 }).props!.sense)
+      .toBe("higher-is-worse");
+    expect(build(gaugeNode as (RED: RED) => void, {
+      label: "SIGNAL", min: -120, max: -70, caution: -90, limit: -105, sense: "higher-is-better",
+    }).props!.sense).toBe("higher-is-better");
+  });
+
+  it("refuses a sense it does not have, rather than drawing an arbitrary one", () => {
+    // A typo in a flow must not silently pick a direction. Falling back to
+    // the default is the safe answer only because the default is the common
+    // case.
+    expect(build(gaugeNode as (RED: RED) => void, { label: "X", max: 100, sense: "sideways" }).props!.sense)
+      .toBe("higher-is-worse");
+  });
+
   it("tape carries its scale and divisions", () => {
     const { props } = build(tapeNode as (RED: RED) => void, { max: 85, caution: 60, limit: 80, divisions: 6, height2: 200 });
     expect(props).toMatchObject({ max: 85, caution: 60, limit: 80, divisions: 6, height: 200 });
