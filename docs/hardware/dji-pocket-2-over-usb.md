@@ -475,7 +475,7 @@ and the app's command table names them all. The honest status of each, as of thi
 | Video / photo mode | `camera/0x10` working mode | **proven** — state push toggles |
 | Record start / stop | `camera/0x02` record video | acknowledged; unconfirmable with no card |
 | Take a photo | `camera/0x01` take photo | id known, untried |
-| Exposure mode + ISO | `camera/0x1e` (2 bytes), `0x2a` ISO | **proven** — Manual + ISO change the picture; EV `0x2e`, shutter `0x28` under test |
+| Exposure mode, ISO, EV | `camera/0x1e` (2B), `0x2a` ISO, `0x2e` EV | **proven** — each changes the picture; shutter `0x28` untried |
 | White balance | `camera/0x2c` (2 bytes) | **proven** — push field changes per setting |
 | Zoom | `camera/0xb8` control zoom, `0x34` focus/zoom | ids known, untried |
 | Focus: AFC / AFS / spot | `camera/0x24` focus mode, `0x30` area, `0x32` spot | ids known, untried |
@@ -505,12 +505,25 @@ controls work, the effect visible in the decoded frame and mirrored in the statu
 | ISO (manual only) | `camera/0x2a` | 1 byte, 3 = ISO 100 … 8 = ISO 3200 | luminance 16 / 42 / 123 for ISO 100 / 400 / 3200, monotonic; push ISO field tracks |
 | White balance | `camera/0x2c` | **2 bytes** `{mode, temp}` | a push field changes per setting; luminance flat, as a colour change should be |
 
-The lesson is the one from the gimbal authority bit, twice over: on this link an
+Exposure compensation (`camera/0x2e`, one byte, index 16 = 0.0 EV) proved the same way:
+EV −2.0 dropped the frame from luminance 122 to 55 and moved the push's EV field 16 → 10;
+EV −4.0 gave the same, the camera clamping to −2.0 and reporting it honestly rather than
+overriding. Positive EV had no visible effect because the scene was already near full
+brightness — no exposure headroom to show. So the confirmed controls are now work mode,
+exposure mode, ISO, white balance and EV, each with a measured effect on the picture and a
+matching change in the state push. Record (`camera/0x02`) is acknowledged but
+unconfirmable with no card in the camera.
+
+The lesson is the one from the gimbal authority bit, several times over: on this link an
 acknowledgement (`status 0x01`) means the frame was well-formed, not that it did anything,
 and the difference between inert and working was a payload width read from the
-manufacturer's own source. Exposure compensation (`camera/0x2e`) and the live-view
-resolution shapes are under test with the same method; record (`camera/0x02`) is
-acknowledged but unconfirmable with no card in the camera.
+manufacturer's own source.
+
+Live-view **resolution** resisted. `camera/0xbd` — the message the SDK key
+`H1LiveViewResolutionFrameRate` seemed to name — was tried at one, two and four bytes
+across fifteen values; every one was acknowledged and the decoded frame stayed 1280×720.
+That message is not the live-view resolution control, or its payload is a structure no
+guess will hit. This is the row that sends us to the decompiler.
 
 ## Where the remaining knowledge lives
 
