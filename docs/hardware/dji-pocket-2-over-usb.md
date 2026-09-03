@@ -364,6 +364,17 @@ optimisation.
 A detail for the daemon: the camera emits about 1.3 frame records per frame (some access
 units are split), so the record count is not a frame count; the timestamps are.
 
+**Camera-side stream control is unproven, and not for want of trying.** Ten *get*
+requests — video-out parameters, video format, recording info, capability info, ISO,
+shutter, the I-frame request — every one answered with a single status byte and no data:
+on this link **a get returns nothing; the camera's state is what it pushes.** Twenty-two
+*set* payloads on `0x4c` video-out parameters, `0xbd` raw video format and `0x18` video
+format were each acknowledged with `0x01` and left the stream at 8.0 Mb/s and 720p. As
+with the gimbal's authority bit, an acknowledged frame with the wrong payload is a no-op,
+and the right payload is not derivable from the library — it has no symbol table, so the
+setters the SDK names cannot be traced to their wire structs without a decompiler. The
+board's transcode is the plan; this is the optimisation left on the table.
+
 ### The video frame record, decoded
 
 Every access unit on the video route is preceded by a 16-byte record. From 104 of them:
@@ -470,7 +481,7 @@ and the app's command table names them all. The honest status of each, as of thi
 | Focus: AFC / AFS / spot | `camera/0x24` focus mode, `0x30` area, `0x32` spot | ids known, untried |
 | Recording resolution and rate | `camera/0x18` video format | id known, untried |
 | Sensor 16 / 64 MP | `camera/0x12` photo size | id known, untried |
-| Stream resolution and bitrate | `camera/0x4c` video-out parameters | id known, untried — the one that matters for cellular |
+| Stream resolution and bitrate | `camera/0x4c` video-out parameters | tried, no effect with small payloads; **the board transcodes instead — proven at ~40% of one core** |
 | Colour, filters | `camera/0x3e` colour tone, `0x42` digital filter | ids known, untried |
 | Camera state readout: mode, rec time, battery | `camera/0x80`, `0x81`, `0x87`, `0x88` pushes | received at 10–20 Hz; **not yet decoded** |
 | Battery detail | `battery/0x02` dynamic info (set 13) | id known, untried |
@@ -529,7 +540,7 @@ board; the operator plugs one cable.
   camera, they should answer `0x01` the same way.
 - **What the general-set answers carry.** Ping, version and device info return status
   `0x01` and nothing else; the version is presumably elsewhere.
-- **Bitrate control.** The sustained stream is about 8 Mb/s at 720p; nothing yet sets it
-  lower. `camera/0x4c` set video-out parameters remains the candidate.
+- **The payload of `camera/0x4c`.** Acknowledged and ignored with every small payload tried;
+  the real struct needs a decompiler pass or a capture. Not needed while the board transcodes.
 - **Power draw** on the link. Not measured.
 - **The side port**, the phone adapter, and the original Osmo Pocket (`HG210`).
