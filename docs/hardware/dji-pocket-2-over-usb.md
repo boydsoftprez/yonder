@@ -235,6 +235,22 @@ Byte 10, refined: bit 1 lights at a yaw stop; bit 0 appeared once with it at the
 pose, so it is probably the pitch stop; bits 5 and 7 are on at rest and off during the
 over-the-top excursions, so they are status, not limits.
 
+### The video frame record, decoded
+
+Every access unit on the video route is preceded by a 16-byte record. From 104 of them:
+
+```
+00 00 01 ff | u16 length | u16 0x00ff | u32 varies | u32 timestamp
+```
+
+- `length` is the size of the H.264 that follows, to the byte (63,291 for the first
+  record, which held SPS, PPS and the IDR; 512–630 for ordinary P-frames).
+- `timestamp` advances 21–34 ms per record — a 30 fps clock in milliseconds.
+- the third field changes irregularly and is not yet understood; `0x00ff` never changes.
+
+So the daemon's job on this route is: read 16 bytes, read `length` bytes of Annex-B,
+repeat — and it has the presentation time for free.
+
 ### The pitch run, and what it cost
 
 The absolute-angle fields were identified cleanly: **field 0 is yaw, field 1 is roll,
@@ -316,9 +332,7 @@ board; the operator plugs one cable.
 
 ## What is not yet known
 
-- **The 16-byte video frame header.** `00 00 01 ff` then twelve bytes that change per
-  frame — timestamps or a frame counter, most likely. The decoder ignores them; a
-  clean stream should strip them.
+- **The third field of the frame record**, which changes irregularly.
 - **Resolution and bitrate control.** The stream arrived at 720p; `camera/0x4c` set
   video-out parameters is the candidate, untried.
 - **What `0x14` actually means.** The field order is known — yaw, roll, pitch — but a
