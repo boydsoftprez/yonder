@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
 import { messageFor } from "./state.js";
-import type { ModemState, ReachState } from "yonder-core";
+import type { ModemState, PathEvidence, ReachState } from "yonder-core";
 
 const MODEM: ModemState = {
   mode: "connected", summary: "Connected to Dark Star",
@@ -14,10 +14,19 @@ const MODEM: ModemState = {
 const REACH: ReachState = {
   inUse: "ethernet", carrying: true,
   paths: [
-    { path: "ethernet", device: "eth0", standing: "in-use", since: null, detail: "Carrying traffic" },
-    { path: "modem", device: "wwan0", standing: "standing-by", since: null, detail: "Ready — traffic is not going out over cellular" },
+    { path: "ethernet", device: "eth0", standing: "in-use", since: null, evidence: "reaching", detail: "Carrying traffic" },
+    { path: "modem", device: "wwan0", standing: "standing-by", since: null, evidence: "reaching", detail: "Ready — traffic is not going out over cellular" },
   ],
 };
+
+/** One standing-by path, with whatever the daemon knows about it. */
+const withModem = (evidence: PathEvidence): ReachState => ({
+  ...REACH,
+  paths: [
+    { path: "modem", device: "wwan0", standing: "standing-by", since: null, evidence,
+      detail: "whatever the sentence happens to say" },
+  ],
+});
 
 describe("messageFor", () => {
   it("carries the four signal numbers with their units", () => {
@@ -50,6 +59,36 @@ describe("messageFor", () => {
   it("gives Status one word for how the device is reachable", () => {
     expect(messageFor(MODEM, REACH).payload.reachableBy).toBe("ETHERNET");
     expect(messageFor(MODEM, { ...REACH, inUse: "modem" }).payload.reachableBy).toBe("CELLULAR");
+  });
+
+  it("draws a path that is reaching differently from one nobody has tested", () => {
+    // The regression. `standing-by` covers both, so a row coloured off
+    // `standing` alone gives a working path and an untested one the same lamp
+    // — in the one panel whose entire job is telling those apart (R-UI-11).
+    const reaching = messageFor(MODEM, withModem("reaching")).payload.paths[0];
+    const untested = messageFor(MODEM, withModem("untested")).payload.paths[0];
+    const failing = messageFor(MODEM, withModem("not-reaching")).payload.paths[0];
+
+    expect(reaching.tone).toBe("good");
+    expect(untested.tone).toBe("neutral");
+    expect(failing.tone).toBe("bad");
+    expect(new Set([reaching.tone, untested.tone, failing.tone]).size).toBe(3);
+  });
+
+  it("carries the evidence itself, not only the lamp it lit", () => {
+    expect(messageFor(MODEM, withModem("untested")).payload.paths[0].evidence).toBe("untested");
+  });
+
+  it("colours a row off evidence and never off the sentence beside it", () => {
+    // `detail` is prose for an operator and has been reworded once already.
+    // Nothing may parse it.
+    const p = messageFor(MODEM, withModem("reaching")).payload.paths[0];
+    expect(p.detail).toBe("whatever the sentence happens to say");
+    expect(p.tone).toBe("good");
+  });
+
+  it("shows the radio technology as an initialism", () => {
+    expect(messageFor(MODEM, REACH).payload.technology).toBe("LTE");
   });
 
   it("says so when nothing is carrying traffic at all", () => {

@@ -1,7 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
 import { reading } from "yonder-core";
-import { QUALITY_BOUNDS, SIGNAL_BOUNDS, formatDb, formatDbm, verdict } from "./format.js";
+import {
+  QUALITY_BOUNDS,
+  SIGNAL_BOUNDS,
+  formatDb,
+  formatDbm,
+  formatTechnology,
+  verdict,
+} from "./format.js";
 
 describe("the signal bounds", () => {
   it("are the standard cellular thresholds, higher-is-better", () => {
@@ -43,7 +50,7 @@ describe("formatting a measurement that may not exist", () => {
 describe("the verdict", () => {
   const path = (over = {}) => ({
     path: "modem" as const, device: "wwan0", standing: "standing-by" as const,
-    since: null, detail: "", ...over,
+    since: null, evidence: "reaching" as const, detail: "", ...over,
   });
 
   it("is carrying traffic when the modem is the path in use", () => {
@@ -61,13 +68,52 @@ describe("the verdict", () => {
   it("does not claim anything about a path nobody has tested", () => {
     // The distinction the fallback watchdog had to learn, at the display
     // layer: not yet condemned is not the same as working.
-    const v = verdict({ inUse: "ethernet", carrying: true, paths: [path({ detail: "untested" })] });
+    //
+    // Asked of `evidence` and never of `detail`. This used to be a substring
+    // match against the sentence an operator reads, which made that sentence
+    // impossible to reword without breaking the verdict above it.
+    const v = verdict({ inUse: "ethernet", carrying: true, paths: [path({ evidence: "untested" })] });
     expect(v.tone).toBe("neutral");
+    expect(v.text).toBe("NOT YET TESTED");
+  });
+
+  it("is not ready when the last probe reached nothing, condemned or not", () => {
+    // Still in the running — it has not run out FAILURES_TO_STAND_DOWN — but
+    // its last probe reached nothing, and the Way out row about the same path
+    // says exactly that. READY here would put the two in contradiction.
+    const v = verdict({ inUse: "ethernet", carrying: true, paths: [path({ evidence: "not-reaching" })] });
+    expect(v.tone).toBe("bad");
+  });
+
+  it("is ready only on evidence that something got through", () => {
+    const v = verdict({ inUse: "ethernet", carrying: true, paths: [path({ evidence: "reaching" })] });
+    expect(v.tone).toBe("good");
+    expect(v.text).toBe("READY");
+  });
+
+  it("reads no wording at all, so detail can be reworded freely", () => {
+    // The regression this field exists to prevent: the sentence changed once
+    // during this milestone and took the verdict with it.
+    const reworded = path({ evidence: "untested", detail: "Anything at all, in any words" });
+    expect(verdict({ inUse: "ethernet", carrying: true, paths: [reworded] }).text)
+      .toBe("NOT YET TESTED");
   });
 
   it("says a modem is absent rather than broken when there is none", () => {
     const v = verdict({ inUse: "ethernet", carrying: true, paths: [] });
     expect(v.tone).toBe("neutral");
     expect(v.text).toBe("NO MODEM");
+  });
+});
+
+describe("a radio technology", () => {
+  it("is shown as the initialism it is, not as the identifier mmcli reports", () => {
+    expect(formatTechnology("lte")).toBe("LTE");
+    expect(formatTechnology("5gnr")).toBe("5GNR");
+  });
+
+  it("stays absent when the modem did not say, rather than becoming an empty string", () => {
+    expect(formatTechnology(null)).toBeNull();
+    expect(formatTechnology("")).toBeNull();
   });
 });

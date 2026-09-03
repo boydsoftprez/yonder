@@ -3,6 +3,7 @@ import { PATH_WORDS, clientFor, fetched, pollIntervalMs, readFailure } from "yon
 import type {
   DaemonClient,
   ModemState,
+  PathEvidence,
   PathName,
   PathReport,
   PathStanding,
@@ -15,6 +16,7 @@ import {
   SIGNAL_BOUNDS,
   formatDb,
   formatDbm,
+  formatTechnology,
   pathDetail,
   verdict,
 } from "./format.js";
@@ -36,18 +38,30 @@ function pathName(path: PathName): string {
 }
 
 /**
- * How a Way out row is coloured, from `standing` alone.
+ * The lamp beside a Way out row (R-UI-11).
  *
- * Deliberately not from `detail`: `verdict()` reads the untested case off the
- * sentence because `PathReport` records it nowhere else, and one place doing
- * that is one too many already. A row that is merely standing by is drawn
- * neutral rather than good for the same reason — nothing here has established
- * that it reaches anything, and claiming otherwise is the mistake K-40 is
- * about.
+ * Three answers, because the panel exists to draw three states. `standing`
+ * alone cannot give them: `standing-by` covers a path that is reaching
+ * something, one whose probes are failing but which has not run out the three
+ * that condemn it, and one nothing has ever looked at — so this asks
+ * `evidence`, which the daemon fills from the same reading of `Standing` that
+ * writes the row's sentence.
+ *
+ * An untested path is neutral and never good. Nothing has established that it
+ * reaches anything, and a green lamp on the strength of nobody having shown
+ * otherwise is the mistake K-40 is about — a modem re-dialled onto a wrong
+ * APN, untested, lighting up as ready.
  */
-function pathTone(standing: PathStanding): "good" | "bad" | "neutral" {
-  if (standing === "in-use") return "good";
+function pathTone(standing: PathStanding, evidence: PathEvidence): "good" | "bad" | "neutral" {
+  // A path that is not on this board is not a fault. Asked before evidence,
+  // because an absent path has none either way.
+  if (standing === "absent") return "neutral";
   if (standing === "no-route-out") return "bad";
+  if (evidence === "reaching") return "good";
+  if (evidence === "not-reaching") return "bad";
+  // Untested, including the path currently holding the default route: holding
+  // it is not evidence that anything completes over it, which is the whole of
+  // what a wrong APN looks like from here (R-CEL-09).
   return "neutral";
 }
 
@@ -59,6 +73,14 @@ export interface PathRow {
   name: string;
   device: string | null;
   standing: PathStanding;
+  /**
+   * What is actually known about this path, as evidence and not as prose.
+   *
+   * Carried through to the page as well as used for `tone`, so an instrument
+   * that wants to say something the lamp cannot has the fact rather than a
+   * sentence to match against.
+   */
+  evidence: PathEvidence;
   /** True for the one path traffic is actually leaving by. */
   inUse: boolean;
   /** When it was stood down, epoch ms; null when it has not been. */
@@ -71,6 +93,7 @@ export interface StatePayload {
   mode: ModemState["mode"];
   summary: string;
   operator: string | null;
+  /** The radio technology as it is shown — `LTE`, not `lte`. See formatTechnology. */
   technology: string | null;
   registration: string | null;
   apn: string | null;
@@ -142,10 +165,11 @@ export function messageFor(modem: ModemState, reach: ReachState): { payload: Sta
     name: pathName(p.path),
     device: p.device,
     standing: p.standing,
+    evidence: p.evidence,
     inUse: p.path === reach.inUse,
     since: p.since,
     detail: pathDetail(p),
-    tone: pathTone(p.standing),
+    tone: pathTone(p.standing, p.evidence),
   }));
 
   // The in-use path's name, in the one word the Status panel has room for.
@@ -163,7 +187,7 @@ export function messageFor(modem: ModemState, reach: ReachState): { payload: Sta
       mode: modem.mode,
       summary: modem.summary,
       operator: modem.operator,
-      technology: modem.technology,
+      technology: formatTechnology(modem.technology),
       registration: modem.registration,
       apn: modem.apn,
       address: modem.address,

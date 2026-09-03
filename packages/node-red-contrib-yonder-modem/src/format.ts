@@ -44,23 +44,46 @@ export function formatDb(value: number | null): string {
  * working — the same distinction the fallback watchdog had to learn, at the
  * display layer (R-CEL-09).
  *
- * The untested case is read off `detail` rather than off `standing`, because
- * `standing-by` covers three different situations (a path that is reaching
- * something, one whose probes are failing but has not yet been condemned,
- * and one nothing has ever probed) and `PathReport` carries that distinction
- * nowhere else. `monitor.ts`'s `standingByDetail` writes "not yet tested"
- * for the untested case; both substrings are checked so a short fixture
- * ("untested") and the daemon's own sentence both land here.
+ * The untested case is read off `PathReport.evidence`, which the daemon fills
+ * from the same reading of `Standing` that writes the sentence in `detail`.
+ * It used to be recovered by matching substrings against that sentence,
+ * because `standing` collapses three situations into `standing-by` and the
+ * record carried the distinction nowhere else. That coupling made `detail` —
+ * prose written for an operator, and reworded once already — load-bearing for
+ * a verdict, and it is gone rather than kept as a fallback: a fallback would
+ * be an untested path through the one function whose job is not to overclaim.
+ *
+ * `not-reaching` is bad rather than READY for the same reason `standing-by`
+ * alone was never enough. A path whose last probe reached nothing is not
+ * ready, whether or not it has run out the three failures that condemn it —
+ * the only difference between those two is how much evidence there is, and
+ * the operator's answer to both is the same. Saying READY there would also
+ * put this line in contradiction with the `Way out` row about the same path.
  */
 export function verdict(reach: ReachState): { text: string; tone: "good" | "bad" | "neutral" } {
   const modem = reach.paths.find((p) => p.path === "modem");
   if (modem === undefined) return { text: "NO MODEM", tone: "neutral" };
   if (modem.standing === "no-route-out") return { text: "NO DATA GETTING THROUGH", tone: "bad" };
   if (modem.standing === "in-use") return { text: "CARRYING TRAFFIC", tone: "good" };
-  if (modem.detail.includes("not yet tested") || modem.detail.includes("untested")) {
-    return { text: "NOT YET TESTED", tone: "neutral" };
-  }
+  if (modem.evidence === "untested") return { text: "NOT YET TESTED", tone: "neutral" };
+  if (modem.evidence === "not-reaching") return { text: "NO DATA GETTING THROUGH", tone: "bad" };
   return { text: "READY", tone: "good" };
+}
+
+/**
+ * A radio technology as a page shows it.
+ *
+ * ModemManager reports an identifier — `lte`, `5gnr`, `umts` — and an
+ * identifier printed in a readout is a tell that nothing looked at it. These
+ * are initialisms, so they are shown as initialisms.
+ *
+ * It is here rather than in the node that builds the payload because this
+ * file is the one place in this package that decides how a value is written,
+ * and a second such place is how two surfaces end up disagreeing about the
+ * same modem.
+ */
+export function formatTechnology(value: string | null): string | null {
+  return value === null || value === "" ? null : value.toUpperCase();
 }
 
 /** The sentence under a path's name on the Way out panel. Already in Yonder's words. */

@@ -37,7 +37,10 @@ modem is doing.</p>
   <li><b>Cellular tab</b> — <code>{ mode, summary, verdict, operator, technology,
   registration, apn, address, mtu, ports, portSummary, reportsSignal }</code>.
   <code>verdict</code> is the line at the top of the tab, already judged:
-  <code>{ text, tone }</code>.</li>
+  <code>{ text, tone }</code>, and it reads the same <code>evidence</code> the
+  Way out lamps do, so the two pages cannot disagree about the modem.
+  <code>technology</code> is the initialism — <code>LTE</code>, not
+  <code>lte</code>.</li>
   <li><b>Signal readings</b> — <code>{ strength, quality, rssi, rsrq }</code> as
   strings with their units, for a databar, plus <code>gauges</code> with the same
   two readings as bare numbers and <code>bounds</code> with the scales to draw them
@@ -45,9 +48,15 @@ modem is doing.</p>
   databar prints a fact, and converting between them in a flow would need a
   <code>function</code> node.</li>
   <li><b>Way out rows</b> — one row per path, in the operator's order:
-  <code>{ path, name, device, standing, inUse, since, detail, tone }</code>.
+  <code>{ path, name, device, standing, evidence, inUse, since, detail, tone }</code>.
   <code>name</code> is Yonder's word — <code>Ethernet</code>,
-  <code>Cellular</code>, <code>Wi-Fi</code> — not the configuration's key.</li>
+  <code>Cellular</code>, <code>Wi-Fi</code> — not the configuration's key.
+  <code>tone</code> comes from <code>evidence</code> and never from
+  <code>detail</code>: <code>standing-by</code> covers a path that is reaching
+  something, one whose probes are failing but which has not been condemned, and
+  one nothing has ever tested, and the panel exists to draw those three
+  differently (R-UI-11). <code>detail</code> is the operator's sentence and
+  nothing parses it.</li>
   <li><b>Status summary</b> — <code>{ reachableBy, carrying, verdict, summary }</code>.
   <code>reachableBy</code> is one word: <code>ETHERNET</code>,
   <code>CELLULAR</code>, <code>WI-FI</code>, or <code>NOTHING</code> when no path
