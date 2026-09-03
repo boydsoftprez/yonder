@@ -79,7 +79,7 @@ Two things about the board that cost time and are worth knowing:
   The driver tolerates it and retries the accessory bind, which then succeeds first time.
 
 On header power the board reported `throttled=0x0` — not one brownout across the whole
-session — which is the first clean reading this board has given ([K-34](../known-issues.md#k-34)).
+session — which is the first clean reading this board has given ([K-41](../known-issues.md#k-41)).
 
 ## The link, as observed
 

@@ -159,7 +159,7 @@ run outside `dpkg`, so the client shipped enabled until the role's own post-cond
 caught it; and the renderer asked the client for its networks immediately after starting
 the service, which a first start — generating an identity keypair — is far too slow to
 answer, so the very first join on a fresh device failed and reverted the operator's network
-id. It also surfaced [K-33](known-issues.md), which predates this milestone.
+id. It also surfaced [K-40](known-issues.md), which predates this milestone.
 
 **The exit criterion is met.** On 2026-09-03 the console *and* `ssh` were reached over the
 mesh from a machine sharing no local network with the board, and later that day a fix was
