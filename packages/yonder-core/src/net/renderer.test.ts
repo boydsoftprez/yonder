@@ -111,6 +111,16 @@ interface HarnessOptions {
   fails?: Record<string, CommandResult>;
   /** Which paths have stopped reaching anything (R-NET-13). */
   standing?: StandingView;
+  /**
+   * What the modem connection is *already dialled on*, as nmcli would report
+   * it before this render writes anything.
+   *
+   * This is the state a fake cannot invent and a real board has: a bearer
+   * that came up on one APN and a `config.yaml` that now says another. It
+   * seeds the fake's memory of the connection, so a render that writes the
+   * same values back finds no difference and one that writes a new APN does.
+   */
+  dialled?: Record<string, string>;
 }
 
 /**
@@ -127,6 +137,23 @@ interface HarnessOptions {
 function harness(opts: HarnessOptions = {}) {
   const calls: string[][] = [];
   const names = new Set(opts.connections ?? []);
+  /**
+   * Every `setting.property` this fake has been told, per connection.
+   *
+   * Without it `connection show yonder-modem` can only replay a fixture, so a
+   * second identical render looks exactly like a changed APN — and the check
+   * that stops a working cellular link being cycled on every render could be
+   * deleted with the suite green.
+   */
+  const stored = new Map<string, Map<string, string>>();
+  const remember = (name: string, argv: string[], from: number): void => {
+    const kept = stored.get(name) ?? new Map<string, string>();
+    for (let i = from; i + 1 < argv.length; i += 2) kept.set(argv[i]!, argv[i + 1]!);
+    stored.set(name, kept);
+  };
+  if (opts.dialled !== undefined) {
+    stored.set(MODEM_CONNECTION, new Map(Object.entries(opts.dialled)));
+  }
   const sequence = opts.deviceSequence ?? [opts.devices ?? DEVICES];
   let step = 0;
   let raised = 0;
@@ -157,11 +184,20 @@ function harness(opts: HarnessOptions = {}) {
     if (key === "nmcli -t -f NAME,UUID,TYPE,DEVICE connection show") {
       return ok([...names].map((n) => `${n}:u-${n}:802-11-wireless:\n`).join(""));
     }
+    // `nmcli -t -f <props> connection show <name>`: one `property:value` line
+    // per field asked for, in the order asked, and an empty value for a
+    // property this connection has never been given.
+    if (argv[1] === "-t" && argv[4] === "connection" && argv[5] === "show") {
+      const kept = stored.get(argv[6]!) ?? new Map<string, string>();
+      return ok((argv[3] ?? "").split(",").map((f) => `${f}:${kept.get(f) ?? ""}\n`).join(""));
+    }
     if (argv[1] === "connection") {
-      // add is ["nmcli","connection","add","con-name",<name>,…]; the rest put
-      // the name at argv[3].
-      if (argv[2] === "add") names.add(argv[4]);
-      if (argv[2] === "delete") names.delete(argv[3]);
+      // add is ["nmcli","connection","add","con-name",<name>,"type",T,
+      // "ifname",I,…pairs]; the rest put the name at argv[3], and modify's
+      // pairs follow "connection.interface-name",I.
+      if (argv[2] === "add") { names.add(argv[4]); remember(argv[4]!, argv, 9); }
+      if (argv[2] === "modify") remember(argv[3]!, argv, 4);
+      if (argv[2] === "delete") { names.delete(argv[3]); stored.delete(argv[3]!); }
       // A profile can be written against a radio NetworkManager has not
       // finished with — the keyfile does not care — but it cannot be
       // *activated* on one. Modelling that is what makes a cold boot a real
@@ -836,6 +872,177 @@ describe("NetworkRenderer and a modem", () => {
     const added = calls.filter((c) => c.includes("add")).map((c) => c.join(" "));
     expect(added.some((c) => c.includes(MODEM_CONNECTION) && c.includes("gsm"))).toBe(true);
     expect(calls.some((c) => c.includes("delete") && c.includes(MODEM_CONNECTION))).toBe(false);
+  });
+});
+
+/**
+ * A written setting that only a dial reads is a setting that has not been
+ * applied (R-CEL-09).
+ *
+ * Measured on the board: connected on `ereseller`, `network.modem.apn`
+ * changed to `nxtgenphone`, the daemon restarted, the profile rewritten — and
+ * `GET /modem/state` went on reporting `apn: ereseller` and the same address.
+ * NetworkManager does not re-dial a bearer that is already up because the
+ * profile behind it changed, so correcting a mistyped APN from the console —
+ * the recovery action this whole milestone is built around — did nothing at
+ * all.
+ *
+ * No fake catches this by answering questions, because a fake re-dials on
+ * demand and reports whatever it is asked. What these pin is the **shape of
+ * what is asked**: a changed bearer setting produces a down and an up, and an
+ * unchanged one produces neither.
+ */
+describe("NetworkRenderer and a modem whose settings changed", () => {
+  const MODEM_DEVICES =
+    "wlan0:wifi:disconnected:\ncdc-wdm0:gsm:connected:yonder-modem\nlo:loopback:unmanaged:\n";
+  /** The same board with the bearer not up: nothing to cycle. */
+  const MODEM_DOWN =
+    "wlan0:wifi:disconnected:\ncdc-wdm0:gsm:disconnected:\nlo:loopback:unmanaged:\n";
+
+  function onApn(apn: string): Config {
+    const c: Config = structuredClone(DEFAULT_CONFIG);
+    c.network.modem.enabled = true;
+    c.network.modem.apn = apn;
+    return c;
+  }
+
+  /** The verbs issued against the modem connection, in order. */
+  const verbs = (calls: string[][]): string[] =>
+    calls.filter((c) => c[1] === "connection" && c[3] === MODEM_CONNECTION).map((c) => c[2]!);
+
+  it("brings a changed APN down and up so the new setting is dialled", async () => {
+    const { renderer, calls } = harness({
+      devices: MODEM_DEVICES,
+      connections: [AP_CONNECTION, ETHERNET_CONNECTION, MODEM_CONNECTION],
+      dialled: { "gsm.apn": "ereseller" },
+    });
+    await renderer.render(onApn("nxtgenphone"));
+
+    // The profile is rewritten, and then — because that alone changes
+    // nothing on a bearer that is up — the link is cycled, down before up.
+    expect(verbs(calls)).toEqual(["modify", "down", "up"]);
+    // And the value it is dialled with is the new one.
+    const modify = argvOf(calls, "modify", MODEM_CONNECTION)!;
+    expect(modify[modify.indexOf("gsm.apn") + 1]).toBe("nxtgenphone");
+  });
+
+  it("asks what the modem is dialled on before it overwrites the answer", async () => {
+    // The ordering that makes the comparison possible at all: once
+    // addOrModify has run the stored profile already says what was wanted,
+    // and a read after it can never find a difference.
+    const { renderer, calls } = harness({
+      devices: MODEM_DEVICES,
+      connections: [AP_CONNECTION, ETHERNET_CONNECTION, MODEM_CONNECTION],
+      dialled: { "gsm.apn": "ereseller" },
+    });
+    await renderer.render(onApn("nxtgenphone"));
+
+    const read = calls.findIndex((c) => c[1] === "-t" && c[5] === "show" && c[6] === MODEM_CONNECTION);
+    const write = calls.findIndex((c) => c[2] === "modify" && c[3] === MODEM_CONNECTION);
+    expect(read).toBeGreaterThanOrEqual(0);
+    expect(read).toBeLessThan(write);
+    // Only the settings a dial reads are asked about. A route metric is
+    // `device reapply`'s business and must never cycle a link.
+    expect(calls[read]![3]).toBe("gsm.apn");
+  });
+
+  it("leaves a working link alone when nothing about the bearer changed", async () => {
+    // A render happens for many reasons. Reactivating a working cellular
+    // link on every one of them is unacceptable on an aircraft.
+    const { renderer, calls } = harness({
+      devices: MODEM_DEVICES,
+      connections: [AP_CONNECTION, ETHERNET_CONNECTION, MODEM_CONNECTION],
+      dialled: { "gsm.apn": "ereseller" },
+    });
+    await renderer.render(onApn("ereseller"));
+    expect(verbs(calls)).toEqual(["modify"]);
+  });
+
+  it("does not cycle the link when only the route metric moved", async () => {
+    // `network.priority` edited, or a path stood down: the metric changes on
+    // every render that follows, and a bearer picks a metric up in place.
+    const config = onApn("ereseller");
+    config.network.priority = ["modem", "ethernet", "wifi_client"];
+    const { renderer, calls } = harness({
+      devices: MODEM_DEVICES,
+      connections: [AP_CONNECTION, ETHERNET_CONNECTION, MODEM_CONNECTION],
+      dialled: { "gsm.apn": "ereseller", "ipv4.route-metric": "700" },
+    });
+    await renderer.render(config);
+    const modify = argvOf(calls, "modify", MODEM_CONNECTION)!;
+    expect(Number(modify[modify.indexOf("ipv4.route-metric") + 1]))
+      .toBe(metricFor(config, "modem"));
+    expect(verbs(calls)).toEqual(["modify"]);
+  });
+
+  it("does not cycle the link on a second, identical render", async () => {
+    // The end-to-end version of the same property, through the fake's own
+    // memory of what the first render wrote.
+    const { renderer, calls } = harness({
+      devices: MODEM_DEVICES,
+      connections: [AP_CONNECTION, ETHERNET_CONNECTION, MODEM_CONNECTION],
+      dialled: { "gsm.apn": "ereseller" },
+    });
+    const config = onApn("ereseller");
+    await renderer.render(config);
+    calls.length = 0;
+    await renderer.render(config);
+    expect(verbs(calls)).toEqual(["modify"]);
+  });
+
+  it("does not cycle a bearer that is not up", async () => {
+    // Nothing to cycle, and `connection.autoconnect` will dial it with the
+    // new settings. Taking down what is already down and raising it here
+    // would be this renderer deciding to dial rather than following.
+    const { renderer, calls } = harness({
+      devices: MODEM_DOWN,
+      connections: [AP_CONNECTION, ETHERNET_CONNECTION, MODEM_CONNECTION],
+      dialled: { "gsm.apn": "ereseller" },
+    });
+    await renderer.render(onApn("nxtgenphone"));
+    expect(verbs(calls)).toEqual(["modify"]);
+  });
+
+  it("leaves the link alone when it cannot read what the modem is dialled on", async () => {
+    // A question that could not be asked is not a difference. Answering
+    // "changed" to it would cycle a working cellular link on the strength of
+    // nothing.
+    const { renderer, calls } = harness({
+      devices: MODEM_DEVICES,
+      connections: [AP_CONNECTION, ETHERNET_CONNECTION, MODEM_CONNECTION],
+      dialled: { "gsm.apn": "ereseller" },
+      fails: {
+        [`nmcli -t -f gsm.apn connection show ${MODEM_CONNECTION}`]:
+          { code: 10, stdout: "", stderr: "Error: yonder-modem - no such connection profile." },
+      },
+    });
+    await renderer.render(onApn("nxtgenphone"));
+    expect(verbs(calls)).toEqual(["modify"]);
+  });
+
+  it("never asks about a connection it is about to create", async () => {
+    // A profile that does not exist yet has nothing to compare against, and
+    // a freshly created one is dialled with the settings it was created
+    // with.
+    const { renderer, calls } = harness({ devices: MODEM_DEVICES });
+    await renderer.render(onApn("ereseller"));
+    expect(calls.some((c) => c[1] === "-t" && c[6] === MODEM_CONNECTION)).toBe(false);
+    expect(verbs(calls)).toEqual([]);
+  });
+
+  it("asks nothing extra of an appliance modem, which has no bearer to dial", async () => {
+    const config: Config = structuredClone(DEFAULT_CONFIG);
+    config.network.modem.enabled = true;
+    config.network.modem.mode = "appliance";
+    config.network.modem.interface = "usb0";
+    const { renderer, calls } = harness({
+      devices: "wlan0:wifi:disconnected:\nusb0:ethernet:connected:yonder-modem\n",
+      connections: [AP_CONNECTION, MODEM_CONNECTION],
+      dialled: { "ipv4.route-metric": "700" },
+    });
+    await renderer.render(config);
+    expect(calls.some((c) => c[1] === "-t" && c[6] === MODEM_CONNECTION)).toBe(false);
+    expect(verbs(calls)).toEqual(["modify"]);
   });
 });
 

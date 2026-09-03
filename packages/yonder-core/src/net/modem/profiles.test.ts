@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
 import { DEFAULT_CONFIG } from "../../schema/config.js";
-import { MODEM_CONNECTION, modemProfile } from "./profiles.js";
+import { MODEM_CONNECTION, bearerChanges, modemProfile, redialSettings } from "./profiles.js";
 
 const withModem = (over: Record<string, unknown>) => ({
   ...DEFAULT_CONFIG,
@@ -61,5 +61,58 @@ describe("modemProfile", () => {
     expect(p?.type).toBe("ethernet");
     expect(p?.ifname).toBe("usb0");
     expect(settings(p!)["ipv4.method"]).toBe("auto");
+  });
+});
+
+describe("redialSettings", () => {
+  it("keeps the bearer's settings and nothing else", () => {
+    // The narrowness is the safety property. A route metric changes whenever
+    // a path is stood down or `network.priority` is edited, and it is taken
+    // up in place — cycling a working cellular link over one is the thing
+    // that must not happen on an aircraft.
+    const p = modemProfile(
+      withModem({ enabled: true, apn: "ereseller", username: "u", dial: "*99#" }), "pw", "cdc-wdm0");
+    expect(redialSettings(p!.settings).map(([n]) => n).sort())
+      .toEqual(["gsm.apn", "gsm.number", "gsm.password", "gsm.username"]);
+  });
+
+  it("is empty for a modem that dials for itself", () => {
+    // An appliance is a network adapter to this board, so nothing here is
+    // ever cycled by the re-dial mechanism (R-CEL-11).
+    const p = modemProfile(
+      withModem({ enabled: true, mode: "appliance", interface: "usb0" }), null, "usb0");
+    expect(redialSettings(p!.settings)).toEqual([]);
+  });
+});
+
+describe("bearerChanges", () => {
+  it("names the setting a live bearer would not pick up", () => {
+    // The measured defect: dialled on `ereseller`, `config.yaml` now says
+    // `nxtgenphone`, and NetworkManager will not re-dial for a profile write.
+    expect(bearerChanges([["gsm.apn", "nxtgenphone"]], "gsm.apn:ereseller\n"))
+      .toEqual(["gsm.apn"]);
+  });
+
+  it("is empty when what is wanted is what is dialled", () => {
+    expect(bearerChanges([["gsm.apn", "ereseller"]], "gsm.apn:ereseller\n")).toEqual([]);
+  });
+
+  it("treats a value nmcli will not report as no difference", () => {
+    // `gsm.password` is not printed without `--show-secrets`, and reading a
+    // credential back to compare it puts it one accident away from a log
+    // line. Unreadable must mean "cannot tell": treating it as *changed*
+    // would cycle the link on every single render.
+    expect(bearerChanges(
+      [["gsm.apn", "ereseller"], ["gsm.password", "hunter2"]],
+      "gsm.apn:ereseller\ngsm.password:\n",
+    )).toEqual([]);
+    // Absent from the output entirely, and `--`, are the same answer.
+    expect(bearerChanges([["gsm.number", "*99#"]], "")).toEqual([]);
+    expect(bearerChanges([["gsm.number", "*99#"]], "gsm.number:--\n")).toEqual([]);
+  });
+
+  it("reads a value containing a colon as nmcli escaped it", () => {
+    expect(bearerChanges([["gsm.apn", "a:b"]], "gsm.apn:a\\:b\n")).toEqual([]);
+    expect(bearerChanges([["gsm.apn", "a:b"]], "gsm.apn:a\\:c\n")).toEqual(["gsm.apn"]);
   });
 });

@@ -135,3 +135,92 @@ export function modemProfile(
 
   return { name: MODEM_CONNECTION, type: "gsm", ifname: iface, settings };
 }
+
+/**
+ * The settings a bearer that is already dialled will not pick up.
+ *
+ * NetworkManager does not re-dial a bearer that is up because the profile
+ * behind it changed. Measured on the board: connected on `ereseller`,
+ * `network.modem.apn` changed to `nxtgenphone` in `config.yaml`, the daemon
+ * restarted, the profile rewritten — and `GET /modem/state` went on reporting
+ * `apn: ereseller` and the same address. So a written setting that only a
+ * dial reads is a setting that has not been applied, and correcting a wrong
+ * APN is *the* recovery action this milestone is built around (design spec
+ * §2, R-CEL-09): an operator fixing a mistyped APN from the console saw
+ * nothing happen at all.
+ *
+ * **Only the settings that define the bearer are in this list, and that
+ * narrowness is the safety property.** `ipv4.route-metric` changes every time
+ * a path is stood down or `network.priority` is edited, and `ipv4.method` and
+ * `connection.autoconnect` are taken up in place — none of them needs the
+ * link cycled, and cycling a working cellular link because its route metric
+ * moved is exactly the thing that must not happen on an aircraft. A metric is
+ * `device reapply`'s business; see `NetworkRenderer.remetric`.
+ *
+ * In `appliance` mode there are no such settings at all — the modem dials for
+ * itself and this board only speaks DHCP to it — so an appliance is never
+ * cycled by this mechanism, which is correct rather than an omission.
+ */
+export const REDIAL_SETTINGS: ReadonlySet<string> = new Set([
+  "gsm.apn",
+  "gsm.username",
+  "gsm.password",
+  "gsm.number",
+]);
+
+/** The subset of a profile's settings that a live bearer would not pick up. */
+export function redialSettings(settings: string[][]): string[][] {
+  return settings.filter(([name]) => name !== undefined && REDIAL_SETTINGS.has(name));
+}
+
+/**
+ * nmcli's terse `connection show` output, as a property → value map.
+ *
+ * One `property:value` line per field asked for, in the order asked. Values
+ * escape a colon or a backslash with a backslash, so they are unescaped here
+ * — an APN containing a colon is not a shape to be surprised by later.
+ */
+function reported(stdout: string): Map<string, string> {
+  const values = new Map<string, string>();
+  for (const line of stdout.split("\n")) {
+    const at = line.indexOf(":");
+    if (at === -1) continue;
+    const name = line.slice(0, at).trim();
+    if (name === "") continue;
+    values.set(name, line.slice(at + 1).replace(/\\(.)/g, "$1").trim());
+  }
+  return values;
+}
+
+/**
+ * Which of these settings NetworkManager reports differently from what is
+ * wanted — the difference that has to be dialled to take effect.
+ *
+ * **Silence is never a difference.** A property that is absent from the
+ * output, empty, or `--` is one this nmcli would not tell us about, and the
+ * commonest reason is that it is a secret: `gsm.password` is not printed
+ * without `--show-secrets`, and reading a credential back out of
+ * NetworkManager to compare it puts it one accident away from a log line.
+ * Treating unreadable as *changed* would cycle the link on every render — the
+ * outcome that is unacceptable on an aircraft — so unreadable is treated as
+ * "cannot tell", and the cost is recorded here: a modem password changed on
+ * its own takes effect when the bearer next dials rather than immediately. It
+ * also means a setting going from unset to set is not by itself a re-dial,
+ * which costs nothing in practice, because a bearer with no APN is not a
+ * bearer that came up.
+ *
+ * The comparison is made against what nmcli reports **before** the render
+ * writes the new profile. Afterwards the stored profile already says what was
+ * wanted, and there is nothing left to notice.
+ */
+export function bearerChanges(wanted: string[][], stdout: string): string[] {
+  const values = reported(stdout);
+  const changed: string[] = [];
+  for (const [name, value] of wanted) {
+    if (name === undefined) continue;
+    const now = values.get(name);
+    if (now === undefined || now === "" || now === "--") continue;
+    if (now !== value) changed.push(name);
+  }
+  return changed;
+}

@@ -7,8 +7,9 @@ import { enableWifiRadio, radioWanted } from "./radio.js";
 import {
   desiredProfiles, metricFor, radioPlan, wifiMode,
   AP_CONNECTION, CLIENT_CONNECTION, EGRESS_CONNECTIONS, ETHERNET_CONNECTION, MODEM_CONNECTION,
-  type Interfaces,
+  type DesiredProfile, type Interfaces,
 } from "./profiles.js";
+import { bearerChanges, redialSettings } from "./modem/profiles.js";
 import { NOTHING_STOOD_DOWN, type StandingView } from "./reach/standing.js";
 
 /** The only connection names this renderer will ever create or delete. */
@@ -317,14 +318,24 @@ export class NetworkRenderer implements Renderer {
     const desired = desiredProfiles(config, this.secrets, ifaces, this.standing);
     const wanted = new Set(desired.map((p) => p.name));
 
+    const connections = await this.client.connections();
+
     // Remove only what we own and no longer want. A connection created by
     // someone else is never touched.
-    for (const existing of await this.client.connections()) {
+    for (const existing of connections) {
       if (OWNED.has(existing.name) && !wanted.has(existing.name)) {
         this.log(`network: removing ${existing.name}`);
         await this.client.remove(existing.name);
       }
     }
+
+    // Asked **before** the profiles are written, and it can only be asked
+    // then: once addOrModify has run, the stored profile already says what
+    // was wanted and there is nothing left to compare against. This is the
+    // one moment at which what the modem is actually dialled on is knowable.
+    const redial = connections.some((c) => c.name === MODEM_CONNECTION)
+      ? await this.modemChangesNeedingRedial(desired)
+      : [];
 
     for (const profile of desired) {
       await this.client.addOrModify(profile.name, profile);
@@ -337,6 +348,92 @@ export class NetworkRenderer implements Renderer {
     if (ifaces.wifi !== null) {
       await this.settleRadio(config, devices);
     }
+
+    // Last, and after the radio has been arbitrated. A modem that will not
+    // dial must not be able to skip the step that keeps the access point on
+    // the air — that step is what R-NET-07 rests on, and this one can throw.
+    if (redial.length > 0) {
+      await this.redialModem(redial, devices);
+    }
+  }
+
+  /**
+   * Which of the modem's bearer settings NetworkManager reports differently
+   * from what the configuration now asks for.
+   *
+   * Read with `exec` rather than a method of `NmcliClient`, for the reason
+   * that method exists: this is one caller wanting a field set nothing else
+   * asks for, and the properties differ from render to render.
+   *
+   * Nothing is asked at all unless the profile has bearer settings — an
+   * `appliance` modem has none, and neither does a board with no modem — so
+   * this costs nothing on a board it cannot apply to.
+   *
+   * A read that fails is **not** a difference. It is a question that could
+   * not be asked, and answering "changed" to it would cycle a working
+   * cellular link on the strength of nothing.
+   */
+  private async modemChangesNeedingRedial(desired: DesiredProfile[]): Promise<string[]> {
+    const profile = desired.find((p) => p.name === MODEM_CONNECTION);
+    if (profile === undefined) return [];
+    const wanted = redialSettings(profile.settings);
+    if (wanted.length === 0) return [];
+
+    try {
+      const out = await this.client.exec([
+        "nmcli", "-t", "-f", wanted.map(([name]) => name).join(","),
+        "connection", "show", MODEM_CONNECTION,
+      ]);
+      return bearerChanges(wanted, out);
+    } catch (e) {
+      this.log(
+        `network: could not read what the modem is dialled on (${(e as Error).message}); `
+        + "leaving the link alone",
+      );
+      return [];
+    }
+  }
+
+  /**
+   * Make a changed APN — or username, password or dial string — actually take
+   * effect (R-CEL-09).
+   *
+   * NetworkManager does not re-dial a bearer that is already up because the
+   * profile behind it changed. Measured on the board: the APN was changed in
+   * `config.yaml`, the profile was rewritten, and the modem stayed on the old
+   * bearer with the old address. Correcting a wrong APN is the recovery
+   * action the whole of M3a is built around, so a rewrite that changes
+   * nothing is the defect and not a nicety.
+   *
+   * **Only on a real difference, and only while the connection is up.** A
+   * render happens for many reasons and reactivating a working cellular link
+   * on every one of them is unacceptable on an aircraft; a connection that is
+   * not up has nothing to cycle and will read the new settings when
+   * `connection.autoconnect` next dials it.
+   *
+   * The property names are logged and never their values — one of them is
+   * `gsm.password`.
+   *
+   * A failure to come back up is thrown, not swallowed. A modem configuration
+   * change is reachability-affecting, so it is already behind the
+   * confirmation timer and the rollback engine (R-CFG-03): a failed apply
+   * reverts to the settings that were dialling, and this same comparison then
+   * sees that difference and dials them again.
+   */
+  private async redialModem(changed: string[], devices: DeviceInfo[]): Promise<void> {
+    if (!devices.some((d) => d.connection === MODEM_CONNECTION)) {
+      this.log(
+        `network: the modem's ${changed.join(", ")} changed; it will be dialled with the new `
+        + "settings when the link next comes up",
+      );
+      return;
+    }
+    this.log(
+      `network: the modem's ${changed.join(", ")} changed; re-dialling so the new settings `
+      + "take effect",
+    );
+    await this.client.down(MODEM_CONNECTION);
+    await this.client.up(MODEM_CONNECTION);
   }
 
   /**
