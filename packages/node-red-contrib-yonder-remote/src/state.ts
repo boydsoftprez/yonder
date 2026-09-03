@@ -2,6 +2,12 @@
 import { clientFor, fetched, readFailure } from "yonder-core";
 import type { DaemonClient, RemoteState } from "yonder-core";
 import type { RED, RedNode } from "./red.js";
+import { formatBytes, formatLastHeard } from "./format.js";
+
+/** A CIDR-suffixed address, for the one-line summary that has no room for it. */
+function withoutPrefixLength(address: string): string {
+  return address.replace(/\/\d+$/, "");
+}
 
 /**
  * One object per state, so no widget has to know a client's vocabulary.
@@ -9,8 +15,12 @@ import type { RED, RedNode } from "./red.js";
  * `waiting` is its own field rather than a comparison the page makes, because
  * it is the state this whole surface is shaped around and it is neither a fault
  * nor a connection (R-VPN-06).
+ *
+ * `now` is a parameter, not a call to `Date.now()` in here, so `lastHeard`
+ * never makes a test race the wall clock — the default is only what a real
+ * node falls back on.
  */
-export function messageFor(state: RemoteState): {
+export function messageFor(state: RemoteState, now: number = Date.now()): {
   payload: {
     label: string;
     waiting: boolean;
@@ -18,6 +28,14 @@ export function messageFor(state: RemoteState): {
     deviceId: string | null;
     address: string | null;
     detail: string | null;
+    networkName: string | null;
+    /** In words, never a boolean a widget would have to translate (R-VPN-03). */
+    path: "Direct" | "Relayed" | null;
+    /** `null` when unknown - never "0 ms", which would report a measurement that was never taken. */
+    latency: string | null;
+    traffic: string | null;
+    lastHeard: string | null;
+    summary: string;
   };
 } {
   const label =
@@ -40,14 +58,47 @@ export function messageFor(state: RemoteState): {
                 ? "Authorised, not reaching the network"
                 : (state.detail ?? "Fault");
 
+  // R-VPN-03: direct or relayed, in words - never a boolean a widget would
+  // have to translate, and never guessed when the client did not say.
+  const path = state.relayed === false ? "Direct" : state.relayed === true ? "Relayed" : null;
+
+  // R-VPN-10's load-bearing distinction: an unmeasured latency and a measured
+  // zero are opposite facts, so `null` stays `null` all the way to the page
+  // rather than becoming "0 ms".
+  const latency = state.latencyMs === null ? null : `${String(state.latencyMs)} ms`;
+
+  const traffic =
+    state.rxBytes === null || state.txBytes === null
+      ? null
+      : `${formatBytes(state.rxBytes)} in · ${formatBytes(state.txBytes)} out`;
+
+  const address = state.addresses[0] ?? null;
+
+  // The Status page's one line. Nothing configured says so and nothing else;
+  // otherwise every part that is actually known joins in, in the order an
+  // operator would ask for it, and a part that is not known is left out
+  // rather than printed empty.
+  const summary =
+    state.phase === "off"
+      ? "not configured"
+      : ["zerotier", path?.toLowerCase() ?? null, latency, address === null ? null : withoutPrefixLength(address)]
+          .filter((part): part is string => part !== null)
+          .join(" · ");
+
   return {
     payload: {
       label,
       waiting: state.phase === "waiting-for-approval",
       networkId: state.networkId,
       deviceId: state.deviceId,
-      address: state.addresses[0] ?? null,
+      address,
       detail: state.detail,
+      networkName: state.networkName,
+      path,
+      latency,
+      traffic,
+      lastHeard: formatLastHeard(state.lastHeardMs, now),
+      summary,
     },
   };
 }
