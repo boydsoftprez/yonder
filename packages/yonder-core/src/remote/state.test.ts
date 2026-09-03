@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { ConfigSchema, type Config } from "../schema/config.js";
 import type { ZeroTierNetwork, ZeroTierPath, ZeroTierPeer } from "./zerotier/parse.js";
 import type { Traffic } from "./traffic.js";
+import type { Throughput } from "./sampler.js";
 import type { CommandResult, CommandRunner } from "../net/runner.js";
 import { ZeroTierCli } from "./zerotier/cli.js";
 import { readRemoteState, remoteState } from "./state.js";
@@ -227,6 +228,34 @@ describe("remoteState", () => {
     expect(withoutTraffic.txBytes).toBeNull();
   });
 
+  it("carries the throughput it was given, and empty when none was measured", () => {
+    const throughput: Throughput = {
+      rxBitsPerSecond: 1_400_000,
+      txBitsPerSecond: 300_000,
+      history: [{ rx: 1_200_000, tx: 280_000 }, { rx: 1_400_000, tx: 300_000 }],
+    };
+    const withThroughput = remoteState({
+      config: config("9fef8a3bf9000001"),
+      installed: true,
+      info,
+      networks: [net({ status: "OK" })],
+      throughput,
+    });
+    expect(withThroughput.rxBitsPerSecond).toBe(1_400_000);
+    expect(withThroughput.txBitsPerSecond).toBe(300_000);
+    expect(withThroughput.throughputHistory).toEqual(throughput.history);
+
+    const withoutThroughput = remoteState({
+      config: config("9fef8a3bf9000001"),
+      installed: true,
+      info,
+      networks: [net({ status: "OK" })],
+    });
+    expect(withoutThroughput.rxBitsPerSecond).toBeNull();
+    expect(withoutThroughput.txBitsPerSecond).toBeNull();
+    expect(withoutThroughput.throughputHistory).toEqual([]);
+  });
+
   // A configured network the client has not joined at all is not "connected",
   // and it is not silence either.
   it("is joining when the configured network is not in the client's list", () => {
@@ -399,5 +428,54 @@ describe("readRemoteState", () => {
     const s = await readRemoteState(config("9fef8a3bf9000001"), h.cli, { readTraffic });
     expect(s.phase).toBe("joining");
     expect(s.rxBytes).toBeNull();
+  });
+
+  // The same wiring as readTraffic above, and for the same reason: the
+  // sampler is asked about the interface the configured network actually
+  // has, not whatever the client happens to list first.
+  it("reads throughput for the interface of the configured network, once it is known", async () => {
+    const h = harness((argv) =>
+      argv.includes("info")
+        ? { code: 0, stdout: JSON.stringify({ address: "9fef8a3bf9", online: true, version: "1.16.2" }), stderr: "" }
+        : argv.includes("listnetworks")
+          ? {
+            code: 0,
+            stdout: JSON.stringify([{
+              nwid: "9fef8a3bf9000001",
+              name: "yonder-probe",
+              status: "OK",
+              portDeviceName: "ztly52ge2a",
+              assignedAddresses: ["10.147.20.26/24"],
+            }]),
+            stderr: "",
+          }
+          : { code: 0, stdout: "[]", stderr: "" },
+    );
+    const seen: string[] = [];
+    const s = await readRemoteState(config("9fef8a3bf9000001"), h.cli, {
+      throughput: (iface) => {
+        seen.push(iface);
+        return { rxBitsPerSecond: 1_400_000, txBitsPerSecond: 300_000, history: [{ rx: 1_400_000, tx: 300_000 }] };
+      },
+    });
+    expect(seen).toEqual(["ztly52ge2a"]);
+    expect(s.rxBitsPerSecond).toBe(1_400_000);
+    expect(s.txBitsPerSecond).toBe(300_000);
+    expect(s.throughputHistory).toEqual([{ rx: 1_400_000, tx: 300_000 }]);
+  });
+
+  it("never reads throughput when no network has been joined yet", async () => {
+    const h = harness((argv) =>
+      argv.includes("info")
+        ? { code: 0, stdout: JSON.stringify({ address: "9fef8a3bf9", online: true, version: "1.16.2" }), stderr: "" }
+        : { code: 0, stdout: "[]", stderr: "" },
+    );
+    const throughput = () => {
+      throw new Error("must not be called");
+    };
+    const s = await readRemoteState(config("9fef8a3bf9000001"), h.cli, { throughput });
+    expect(s.phase).toBe("joining");
+    expect(s.rxBitsPerSecond).toBeNull();
+    expect(s.throughputHistory).toEqual([]);
   });
 });

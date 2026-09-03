@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
-import { formatBytes, formatLastHeard } from "./format.js";
+import { formatBytes, formatLastHeard, formatRate } from "./format.js";
 
 /**
  * The kind of arithmetic that stays quietly wrong for years: nobody notices a
@@ -28,6 +28,51 @@ describe("formatBytes", () => {
   it("steps to GB at 1024 MB, with one decimal", () => {
     expect(formatBytes(1024 * 1024 * 1024)).toBe("1.0 GB");
     expect(formatBytes(2.5 * 1024 * 1024 * 1024)).toBe("2.5 GB");
+  });
+});
+
+/**
+ * Bits per second, at 1000 steps - not 1024. Bytes are 1024 because a byte
+ * count is a memory quantity; a bit rate is a network quantity, and every
+ * network standard from Ethernet to the ZeroTier link itself has always
+ * quoted its speed in decimal - a "1 Gbps" NIC moves 1,000,000,000 bits per
+ * second, not 2^30. Reusing formatBytes's divisor here would be the classic
+ * mistake, and it would be quiet: every reading would print a plausible
+ * number that was fractionally wrong until somebody compared it to a bill or
+ * a link's rated speed.
+ */
+describe("formatRate", () => {
+  it("is a whole number of bits per second below 1000", () => {
+    expect(formatRate(0)).toBe("0 bps");
+    expect(formatRate(999)).toBe("999 bps");
+  });
+
+  it("steps to kbps at 1000 bits per second, with no decimal", () => {
+    expect(formatRate(1000)).toBe("1 kbps");
+    // The mock's own reading: "340 kbps".
+    expect(formatRate(340_000)).toBe("340 kbps");
+  });
+
+  it("steps to Mbps at 1000 kbps, with one decimal", () => {
+    // The mock's own reading: "1.4 Mbps".
+    expect(formatRate(1_400_000)).toBe("1.4 Mbps");
+    expect(formatRate(1_000_000)).toBe("1.0 Mbps");
+  });
+
+  it("steps to Gbps at 1000 Mbps, with one decimal", () => {
+    expect(formatRate(1_000_000_000)).toBe("1.0 Gbps");
+    expect(formatRate(2_500_000_000)).toBe("2.5 Gbps");
+  });
+
+  it("is null for anything that is not a finite number, never a crash", () => {
+    // Same reason as formatBytes: this crosses a process boundary from a
+    // daemon that may be older than this console, and an unknown field must
+    // read as unknown rather than throw the console into a restart loop.
+    expect(formatRate(null)).toBeNull();
+    expect(formatRate(undefined)).toBeNull();
+    expect(formatRate("1400000")).toBeNull();
+    expect(formatRate(Number.NaN)).toBeNull();
+    expect(formatRate(Number.POSITIVE_INFINITY)).toBeNull();
   });
 });
 

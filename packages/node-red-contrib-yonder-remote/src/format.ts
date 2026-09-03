@@ -39,6 +39,40 @@ export function formatBytes(bytes: unknown): string | null {
   return `${value.toFixed(decimals)} ${BYTE_UNITS[unit]}`;
 }
 
+const BIT_UNITS = ["bps", "kbps", "Mbps", "Gbps"] as const;
+
+/**
+ * A rate, at 1000 steps - **not 1024**.
+ *
+ * `formatBytes` above steps at 1024 because a byte count is a memory
+ * quantity. This is a network quantity, and every network standard has
+ * always quoted its speed in decimal: a "1 Gbps" link moves 1,000,000,000
+ * bits per second, not 2^30. Reusing the byte divisor here is the classic
+ * mistake in this exact spot, and it is a quiet one - every reading still
+ * prints a plausible number, just one that drifts further from the truth as
+ * the rate climbs into Mbps and Gbps.
+ *
+ * Otherwise the same shape as `formatBytes`, for the same reason: no decimal
+ * below the first step so a whole rate reads at a glance, and exactly one
+ * from Mbps up so the tier never looks more precise than it is.
+ *
+ * `unknown` on purpose, and `null` for anything not a finite number - see
+ * `formatBytes`'s own comment for why: this value crosses a process boundary
+ * from a daemon that may be older than this console, and a field that daemon
+ * has never heard of must read as unknown rather than throw.
+ */
+export function formatRate(bitsPerSecond: unknown): string | null {
+  if (typeof bitsPerSecond !== "number" || !Number.isFinite(bitsPerSecond)) return null;
+  let value = bitsPerSecond;
+  let unit = 0;
+  while (Math.abs(value) >= 1000 && unit < BIT_UNITS.length - 1) {
+    value /= 1000;
+    unit += 1;
+  }
+  const decimals = unit >= 2 ? 1 : 0;
+  return `${value.toFixed(decimals)} ${BIT_UNITS[unit]}`;
+}
+
 /**
  * How long ago, in the words an operator reads rather than a millisecond
  * count (R-VPN-10: "when the device was last heard from").

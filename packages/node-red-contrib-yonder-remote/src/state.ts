@@ -2,7 +2,7 @@
 import { clientFor, fetched, readFailure } from "yonder-core";
 import type { DaemonClient, RemoteState } from "yonder-core";
 import type { RED, RedNode } from "./red.js";
-import { formatBytes, formatLastHeard } from "./format.js";
+import { formatBytes, formatLastHeard, formatRate } from "./format.js";
 
 /** A CIDR-suffixed address, for the one-line summary that has no room for it. */
 function withoutPrefixLength(address: string): string {
@@ -34,6 +34,10 @@ export function messageFor(state: RemoteState, now: number = Date.now()): {
     /** `null` when unknown - never "0 ms", which would report a measurement that was never taken. */
     latency: string | null;
     traffic: string | null;
+    /** R-NET-10: a rate, e.g. "1.4 Mbps down · 300 kbps up" - `traffic` above stays the running total. */
+    throughput: string | null;
+    /** What the sparkline draws: the same history, split into two plain arrays. */
+    series: { rx: number[]; tx: number[] };
     lastHeard: string | null;
     summary: string;
   };
@@ -79,6 +83,28 @@ export function messageFor(state: RemoteState, now: number = Date.now()): {
       ? null
       : `${String(formatBytes(state.rxBytes))} in · ${String(formatBytes(state.txBytes))} out`;
 
+  // R-NET-10: a rate, never the running total `traffic` already carries -
+  // "this link has carried 1.5 MB" and "it is doing 1.4 Mbps right now" are
+  // different questions, and both are shown. `formatRate` already treats
+  // anything that is not a finite number as unknown, which is what makes the
+  // upgrade window safe here too: a daemon older than this console never
+  // sent these fields, so they arrive `undefined`, and `formatRate` reads
+  // that the same way it reads `null` (see formatRate's own comment).
+  const throughput =
+    formatRate(state.rxBitsPerSecond) === null || formatRate(state.txBitsPerSecond) === null
+      ? null
+      : `${String(formatRate(state.rxBitsPerSecond))} down · ${String(formatRate(state.txBitsPerSecond))} up`;
+
+  // The sparkline's own shape: two parallel arrays rather than an array of
+  // {rx, tx} pairs, so the widget does not have to unzip one. Guarded with
+  // `Array.isArray` rather than trusted from the type, for the same upgrade
+  // reason as above - an older daemon's state has no `throughputHistory` at
+  // all, and a `.map` over `undefined` is exactly the shape of throw that
+  // crash-looped a board on formatBytes before this file guarded it.
+  const series = Array.isArray(state.throughputHistory)
+    ? { rx: state.throughputHistory.map((s) => s.rx), tx: state.throughputHistory.map((s) => s.tx) }
+    : { rx: [], tx: [] };
+
   const address = state.addresses[0] ?? null;
 
   // The Status page's one line. Nothing configured says so and nothing else;
@@ -104,6 +130,8 @@ export function messageFor(state: RemoteState, now: number = Date.now()): {
       path,
       latency,
       traffic,
+      throughput,
+      series,
       lastHeard: formatLastHeard(state.lastHeardMs, now),
       summary,
     },

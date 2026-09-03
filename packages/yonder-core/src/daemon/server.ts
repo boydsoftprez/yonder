@@ -22,6 +22,7 @@ import { readRemoteState } from "../remote/state.js";
 import { RemoteRenderer } from "../remote/renderer.js";
 import { ZeroTierCli } from "../remote/zerotier/cli.js";
 import { readTraffic } from "../remote/traffic.js";
+import { TrafficSampler } from "../remote/sampler.js";
 import { AP_CONNECTION, DEFAULT_AP_PASSPHRASE } from "../net/profiles.js";
 import { scanForNetworks } from "../net/scan.js";
 import { ping, reachable } from "../diag/probe.js";
@@ -274,6 +275,21 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
     // activity pane is where an operator looks for what their Join did.
     ?? new NmcliClient(opts.runner ?? systemRunner, trace);
 
+  // The one poll loop for the mesh's throughput, running on `clock` like
+  // every other timer this daemon owns. Started unconditionally — it costs
+  // nothing while no interface has been named (`forInterface` is only called
+  // from the /remote/state route below, which is itself only wired once
+  // `built` exists) — so a secrets.yaml this daemon could not read still
+  // leaves the sampler ready the moment a network is joined and the route
+  // comes back. On its own timer rather than sampled from inside the route
+  // handler (R-NET-10): two pollers share that route at different periods, so
+  // sampling "on request" would space the history unevenly, and a graph
+  // opened after the daemon had been running a while would have nothing
+  // before that first request. This is the only place this daemon samples
+  // traffic; readRemoteState only ever reads what the sampler already has.
+  const sampler = new TrafficSampler({ clock });
+  sampler.start();
+
   // No secret is ever printed. That mechanism existed to surface a random
   // per-device access-point passphrase and there is no longer one to surface
   // (ADR-0007). What an operator does need telling is that the device is
@@ -462,8 +478,13 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
       // measured empty (0 bytes) on a real board. This is the same call the
       // route already makes; readTraffic only ever runs once readRemoteState
       // has found the configured network's interface, so it costs nothing on
-      // every other phase.
-      remoteState: () => readRemoteState(loadConfig(opts.configPath), built.zerotier, { readTraffic }),
+      // every other phase. `throughput` hands the sampler the same interface
+      // name so its rate matches the byte counters beside it, and is the only
+      // way anything in this daemon reaches into the sampler.
+      remoteState: () => readRemoteState(loadConfig(opts.configPath), built.zerotier, {
+        readTraffic,
+        throughput: (iface) => sampler.forInterface(iface),
+      }),
     }),
     ...(onProvisioned === undefined ? {} : { onProvisioned }),
   });
@@ -556,6 +577,10 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
         // one still armed after close() would restart a console on behalf of
         // a process that has already let go of its socket.
         if (provisionTimer !== undefined) clock.clearTimer(provisionTimer);
+        // The fourth, and the newest: a sampler still ticking after close()
+        // would go on reading sysfs for an interface this process no longer
+        // answers questions about.
+        sampler.stop();
         server.close(() => {
           if (existsSync(opts.socketPath)) unlinkSync(opts.socketPath);
           resolve();

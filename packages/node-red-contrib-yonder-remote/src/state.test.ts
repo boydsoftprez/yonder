@@ -24,6 +24,9 @@ describe("messageFor", () => {
       peerCount: 0,
       rxBytes: null,
       txBytes: null,
+      rxBitsPerSecond: null,
+      txBitsPerSecond: null,
+      throughputHistory: [],
     });
     expect(msg.payload.label).toBe("Waiting for you to approve it");
     expect(msg.payload.deviceId).toBe("9fef8a3bf9");
@@ -46,6 +49,9 @@ describe("messageFor", () => {
       peerCount: 0,
       rxBytes: null,
       txBytes: null,
+      rxBitsPerSecond: null,
+      txBitsPerSecond: null,
+      throughputHistory: [],
     });
     expect(msg.payload.label).toBe("Connected");
     expect(msg.payload.address).toBe("10.147.20.26/24");
@@ -67,6 +73,9 @@ describe("messageFor", () => {
       peerCount: 0,
       rxBytes: null,
       txBytes: null,
+      rxBitsPerSecond: null,
+      txBitsPerSecond: null,
+      throughputHistory: [],
     });
     expect(msg.payload.label).toBe("Not configured");
     expect(msg.payload.waiting).toBe(false);
@@ -88,6 +97,9 @@ describe("messageFor", () => {
       peerCount: 0,
       rxBytes: null,
       txBytes: null,
+      rxBitsPerSecond: null,
+      txBitsPerSecond: null,
+      throughputHistory: [],
     });
     expect(msg.payload.label).toBe("PORT_ERROR");
   });
@@ -115,6 +127,9 @@ describe("a valid membership with no path", () => {
       peerCount: 0,
       rxBytes: 0,
       txBytes: 0,
+      rxBitsPerSecond: null,
+      txBitsPerSecond: null,
+      throughputHistory: [],
     });
     expect(msg.payload.label).toBe("Authorised, not reaching the network");
     expect(msg.payload.label).not.toMatch(/fault/i);
@@ -140,6 +155,9 @@ describe("a valid membership with no path", () => {
         peerCount: 0,
         rxBytes: null,
         txBytes: null,
+        rxBitsPerSecond: null,
+        txBitsPerSecond: null,
+        throughputHistory: [],
       },
       NOW,
     );
@@ -170,6 +188,9 @@ describe("the fields behind the connection state (R-VPN-10)", () => {
     peerCount: 1,
     rxBytes: 1_572_864, // 1.5 MiB
     txBytes: 414_720, // 405 KiB
+    rxBitsPerSecond: 1_400_000,
+    txBitsPerSecond: 300_000,
+    throughputHistory: [{ rx: 1_200_000, tx: 280_000 }, { rx: 1_400_000, tx: 300_000 }],
   };
 
   it("names a direct path in words, not a boolean", () => {
@@ -204,6 +225,32 @@ describe("the fields behind the connection state (R-VPN-10)", () => {
   it("has no traffic reading when either counter is unmeasured", () => {
     expect(messageFor({ ...connected, rxBytes: null }, NOW).payload.traffic).toBeNull();
     expect(messageFor({ ...connected, txBytes: null }, NOW).payload.traffic).toBeNull();
+  });
+
+  // R-NET-10: a rate, never the accumulated totals `traffic` above already
+  // shows. Both are kept - "this link has carried 1.5 MB" and "it is doing
+  // 1.4 Mbps right now" are different questions.
+  it("renders throughput as both rates, formatted and joined", () => {
+    expect(messageFor(connected, NOW).payload.throughput).toBe("1.4 Mbps down · 300 kbps up");
+  });
+
+  it("has no throughput reading when either rate is unmeasured", () => {
+    expect(messageFor({ ...connected, rxBitsPerSecond: null }, NOW).payload.throughput).toBeNull();
+    expect(messageFor({ ...connected, txBitsPerSecond: null }, NOW).payload.throughput).toBeNull();
+  });
+
+  // What the sparkline draws: the same history the daemon's sampler keeps,
+  // split into the two plain number arrays a chart wants rather than an
+  // array of {rx, tx} pairs a widget would have to unzip itself.
+  it("carries the throughput history as two plain arrays for the sparkline", () => {
+    expect(messageFor(connected, NOW).payload.series).toEqual({
+      rx: [1_200_000, 1_400_000],
+      tx: [280_000, 300_000],
+    });
+  });
+
+  it("has an empty series when there is no history yet", () => {
+    expect(messageFor({ ...connected, throughputHistory: [] }, NOW).payload.series).toEqual({ rx: [], tx: [] });
   });
 
   it("carries the network name through unchanged", () => {
@@ -250,6 +297,9 @@ describe("the fields behind the connection state (R-VPN-10)", () => {
         peerCount: 0,
         rxBytes: null,
         txBytes: null,
+        rxBitsPerSecond: null,
+        txBitsPerSecond: null,
+        throughputHistory: [],
       },
       NOW,
     );
@@ -286,6 +336,12 @@ describe("a state from a daemon older than this console", () => {
     expect(msg.payload.traffic).toBeNull();
     expect(msg.payload.latency).toBeNull();
     expect(msg.payload.lastHeard).toBeNull();
+    // R-NET-10's fields, added after this fixture's daemon shipped: absent
+    // rather than a crash. `throughputHistory` arrives `undefined`, not `[]`,
+    // and a `.map` over that is exactly the shape of throw that crash-looped
+    // a board on formatBytes before - see the comment above this describe.
+    expect(msg.payload.throughput).toBeNull();
+    expect(msg.payload.series).toEqual({ rx: [], tx: [] });
   });
 
   it("still produces a summary line for the status page", () => {

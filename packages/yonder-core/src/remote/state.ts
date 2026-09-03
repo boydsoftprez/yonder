@@ -1,8 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import type { Config } from "../schema/config.js";
 import type { Traffic } from "./traffic.js";
+import type { Throughput, ThroughputSample } from "./sampler.js";
 import type { ZeroTierCli } from "./zerotier/cli.js";
 import type { ZeroTierInfo, ZeroTierNetwork, ZeroTierPeer } from "./zerotier/parse.js";
+
+/** What `remoteState` reports when nobody measured a rate this time. */
+const NO_THROUGHPUT: Throughput = { rxBitsPerSecond: null, txBitsPerSecond: null, history: [] };
 
 /**
  * The states an operator can be in, as opposed to the states a client reports.
@@ -59,6 +63,11 @@ export interface RemoteState {
   peerCount: number;
   rxBytes: number | null;
   txBytes: number | null;
+  /** Bits per second (R-NET-10) — a rate, never the accumulated `rxBytes` above. `null` until two samples exist. */
+  rxBitsPerSecond: number | null;
+  txBitsPerSecond: number | null;
+  /** Oldest first, at most the sampler's history length — what the sparkline draws. */
+  throughputHistory: ThroughputSample[];
 }
 
 export function remoteState(input: {
@@ -68,10 +77,12 @@ export function remoteState(input: {
   networks: ZeroTierNetwork[];
   peers?: ZeroTierPeer[];
   traffic?: Traffic | null;
+  throughput?: Throughput;
 }): RemoteState {
   const { enabled, network_id } = input.config.remote.zerotier;
   const peers = input.peers ?? [];
   const traffic = input.traffic ?? null;
+  const throughput = input.throughput ?? NO_THROUGHPUT;
 
   const online = input.info?.online === true;
 
@@ -102,6 +113,9 @@ export function remoteState(input: {
     peerCount,
     rxBytes: null,
     txBytes: null,
+    rxBitsPerSecond: null,
+    txBitsPerSecond: null,
+    throughputHistory: [],
   };
 
   // Nothing configured is not a problem to report (R-VPN-05).
@@ -130,6 +144,9 @@ export function remoteState(input: {
     latencyMs: controller ? controller.latencyMs : null,
     rxBytes: traffic?.rxBytes ?? null,
     txBytes: traffic?.txBytes ?? null,
+    rxBitsPerSecond: throughput.rxBitsPerSecond,
+    txBitsPerSecond: throughput.txBitsPerSecond,
+    throughputHistory: throughput.history,
   };
 
   switch (net.status) {
@@ -153,23 +170,29 @@ export function remoteState(input: {
 /**
  * The same state, having asked a client for as little as it can get away with.
  *
- * The console polls this every five seconds for the life of the flight, so
- * what it costs is not a detail. Nothing configured, nothing asked. Otherwise
- * three calls — `info()`, `listNetworks()`, and `listPeers()` — plus, once a
- * network is found and authorised enough to have an interface, one read of
- * that interface's kernel byte counters. `installed` is what `info()` already
- * answered rather than a separate probe for it — the client that cannot say
- * who it is cannot list its networks or peers either.
+ * The console polls this every two to five seconds, depending on the page,
+ * for the life of the flight, so what it costs is not a detail. Nothing
+ * configured, nothing asked. Otherwise three calls — `info()`,
+ * `listNetworks()`, and `listPeers()` — plus, once a network is found and
+ * authorised enough to have an interface, one read of that interface's kernel
+ * byte counters and one look at the throughput sampler. `installed` is what
+ * `info()` already answered rather than a separate probe for it — the client
+ * that cannot say who it is cannot list its networks or peers either.
  *
- * `readTraffic` is not called from here directly with a default: it is the
- * one piece of I/O in this feature that is not a `zerotier-cli` invocation,
- * and this file has no reason to import `node:fs` merely to hold a fallback
- * nothing here would ever exercise. The daemon passes it in.
+ * `readTraffic` and `throughput` are not called from here directly with a
+ * default: they are the I/O in this feature that is not a `zerotier-cli`
+ * invocation — a sysfs read and a sampler with its own timer — and this file
+ * has no reason to import either merely to hold a fallback nothing here would
+ * ever exercise. The daemon passes both in.
  */
 export async function readRemoteState(
   config: Config,
   cli: ZeroTierCli,
-  opts: { readTraffic?: (iface: string) => Traffic | null } = {},
+  opts: {
+    readTraffic?: (iface: string) => Traffic | null;
+    /** `TrafficSampler.forInterface`, bound by the daemon to its one sampler instance. */
+    throughput?: (iface: string) => Throughput;
+  } = {},
 ): Promise<RemoteState> {
   const { enabled, network_id } = config.remote.zerotier;
   if (!enabled || network_id === null) {
@@ -182,7 +205,9 @@ export async function readRemoteState(
 
   const net = networks.find((n) => n.nwid === network_id);
   const iface = net?.portDeviceName;
-  const traffic = iface !== undefined && iface !== "" && opts.readTraffic ? opts.readTraffic(iface) : null;
+  const hasIface = iface !== undefined && iface !== "";
+  const traffic = hasIface && opts.readTraffic ? opts.readTraffic(iface) : null;
+  const throughput = hasIface && opts.throughput ? opts.throughput(iface) : undefined;
 
-  return remoteState({ config, installed: true, info, networks, peers, traffic });
+  return remoteState({ config, installed: true, info, networks, peers, traffic, throughput });
 }
