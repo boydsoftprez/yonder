@@ -105,8 +105,14 @@ class Session:
         #    the head was over the top folded it past the tilt stop and stalled the
         #    motor. Any limit bit, or a head far from level, means the operator puts
         #    it right by hand first.
+        # At a stop the camera raises a limit flag. A small INCREMENTAL step is the right
+        # way off it — that is what a joystick does at the end of travel — while recentre
+        # and absolute frames from a flagged pose are what folded the head past the tilt
+        # stop. So while flagged: incremental steps only.
         if self.last_limit:
-            return f"gimbal reports a limit (0x{self.last_limit:02x}); clear it by hand and recentre from the camera first"
+            is_incremental = cmdid in (0x14, 0x0A) and len(payload) >= 7 and not (payload[6] & 0x01)
+            if not is_incremental:
+                return f"gimbal reports a limit (0x{self.last_limit:02x}); only an incremental step away from it is allowed"
         # Pitch in the attitude push is gravity-referenced. A camera mounted on its side
         # reads ~90 degrees at rest, so "far from level" is not a fault. Limit bits are.
         # 2. Rate commands (0x0C custom speed, 0x01 motion control): yaw, roll, pitch in

@@ -361,6 +361,41 @@ phone, produced the handshake again with **no replug**. Reappearing within a sec
 two did not. So a daemon that restarts must wait before it returns, and a camera that
 loses its phone finds it again by itself — which is the property an airframe needs.
 
+## Parity, by message
+
+Everything the manufacturer's own app can do with this camera is a message on this link,
+and the app's command table names them all. The honest status of each, as of this note:
+
+| Ability | Message | Status |
+|---|---|---|
+| Live picture | `general/0x00` ping at 1 Hz | **proven** — 8 Mb/s, 720p, continuous |
+| Gimbal recentre | `gimbal/0x4C` `[02 01]` | **proven** |
+| Gimbal aim, incremental | `gimbal/0x14` mode `0x00` | **proven** — 0.2° repeatability, as mounted |
+| Gimbal aim, joystick (rate) | `gimbal/0x0C` custom speed, `gimbal/0x01` motion | id known, untried; guard boxes it at 20°/s |
+| Gimbal mode: follow / FPV / lock | `gimbal/0x44` work mode; `0x4C` mode byte | mode byte proven as part of recentre; standalone untried |
+| Selfie (turn to face the handle) | `gimbal/0x4C` with a different command byte, or `0x14` incremental ±180° | untried |
+| Gimbal attitude readout | `gimbal/0x05` push | **proven** — pitch, roll, yaw at 20 Hz |
+| Gimbal limit annunciator | `gimbal/0x05` byte 10, bits 0–2 | **proven** — yaw stop confirmed at both ends |
+| Video / photo mode | `camera/0x10` working mode | id known, untried |
+| Record start / stop | `camera/0x02` record video | id known, untried |
+| Take a photo | `camera/0x01` take photo | id known, untried |
+| Exposure: EV, ISO, shutter, mode | `camera/0x1e` mode, `0x2a` ISO, `0x28` shutter, `0x26` aperture | ids known, untried |
+| White balance | `camera/0x2c` | id known, untried |
+| Zoom | `camera/0xb8` control zoom, `0x34` focus/zoom | ids known, untried |
+| Focus: AFC / AFS / spot | `camera/0x24` focus mode, `0x30` area, `0x32` spot | ids known, untried |
+| Recording resolution and rate | `camera/0x18` video format | id known, untried |
+| Sensor 16 / 64 MP | `camera/0x12` photo size | id known, untried |
+| Stream resolution and bitrate | `camera/0x4c` video-out parameters | id known, untried — the one that matters for cellular |
+| Colour, filters | `camera/0x3e` colour tone, `0x42` digital filter | ids known, untried |
+| Camera state readout: mode, rec time, battery | `camera/0x80`, `0x81`, `0x87`, `0x88` pushes | received at 10–20 Hz; **not yet decoded** |
+| Battery detail | `battery/0x02` dynamic info (set 13) | id known, untried |
+| Reset the camera | `general/0x0b` reboot | id known, untried |
+
+Three columns of "untried" is the true state of parity: the map is complete, the
+territory is one evening old. The order to prove them in is the order a pilot needs them:
+rate-mode aim, then stream bitrate, then record, then exposure and white balance, then
+the readouts — each a camera-side message with no gimbal risk except the first.
+
 ## What Yonder would build
 
 A small daemon, `pocket2d`: present the phone identity, complete the AOA handshake, run
