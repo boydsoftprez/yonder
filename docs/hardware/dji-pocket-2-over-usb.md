@@ -208,6 +208,34 @@ the envelope with exactly this procedure once the camera is mounted, keeps the f
 angles it found, and clamps every aim command to them — with the camera's own flag as the
 backstop it should never reach.
 
+### Rate mode — the joystick
+
+A joystick is a stream of rate frames, not an angle. Bursts of twenty frames at 10 Hz,
+addressed to the gimbal, guard boxing every frame at 20°/s:
+
+| Message | Payload | Two seconds of it | Result |
+|---|---|---|---|
+| `gimbal/0x0C` custom speed | yaw +10°/s, flags `0x00` | — | nothing, either direction |
+| `gimbal/0x0C` custom speed | yaw +10°/s, **flags `0x80`** | −8.8° → +15.2° | **moves at the commanded rate** |
+| `gimbal/0x01` motion control | first stick +300 of 1024 | pitch 0 → +17.9° | **moves — but the first field is pitch** |
+| `gimbal/0x01` | first stick −300 | pitch back to −0.3° | |
+| `gimbal/0x01` | third stick +300, one second | yaw +10.7° | the third field is yaw |
+| `gimbal/0x01` | neutral | holds | |
+
+So both rate paths exist, and they differ:
+
+- **`0x0C` is the one to build on.** Yaw, roll, pitch in 0.1°/s — real units — and the
+  flags byte must carry `0x80`, which the manufacturer's public source names
+  *gimbal control authority*. With it clear the frames are accepted and ignored.
+- `0x01` takes three stick values centred on 1024, about 300 counts to 9°/s, in the
+  order **pitch, roll, yaw** — not the order the public dissector guessed. Usable, but
+  units are a stick, not a rate.
+
+In both, **the head moves while frames arrive and holds where it is when they stop** —
+which is the property a joystick needs and a network link makes valuable: lose the
+link, lose the frames, and the gimbal stays put rather than running on. Pitch under
+`0x0C`, single-frame behaviour and combined axes are in the confirmation run.
+
 ### The gimbal reports its limits
 
 The attitude push carries more than angles. Bytes 6–11 of `gimbal/0x05`, watched
@@ -397,7 +425,7 @@ and the app's command table names them all. The honest status of each, as of thi
 | Live picture | `general/0x00` ping at 1 Hz | **proven** — 8 Mb/s, 720p, continuous |
 | Gimbal recentre | `gimbal/0x4C` `[02 01]` | **proven** |
 | Gimbal aim, incremental | `gimbal/0x14` mode `0x00` | **proven** — 0.2° repeatability, as mounted |
-| Gimbal aim, joystick (rate) | `gimbal/0x0C` custom speed, `gimbal/0x01` motion | id known, untried; guard boxes it at 20°/s |
+| Gimbal aim, joystick (rate) | `gimbal/0x0C` custom speed (flags `0x80`); `gimbal/0x01` motion | **proven** — moves at the commanded rate, holds when frames stop |
 | Gimbal mode: follow / FPV / lock | `gimbal/0x44` work mode; `0x4C` mode byte | mode byte proven as part of recentre; standalone untried |
 | Selfie (turn to face the handle) | `gimbal/0x4C` with a different command byte, or `0x14` incremental ±180° | untried |
 | Gimbal attitude readout | `gimbal/0x05` push | **proven** — pitch, roll, yaw at 20 Hz |
@@ -462,8 +490,7 @@ board; the operator plugs one cable.
 - **The third field of the frame record**, which changes irregularly.
 - **Resolution and bitrate control.** The stream arrived at 720p; `camera/0x4c` set
   video-out parameters is the candidate, untried.
-- **The speed (rate) command**, `GimbalSpeedRotation` — the joystick form. Untried; the
-  guard boxes it at 20°/s.
+- **Roll under rate control**, and the remaining bits of the `0x0C` flags byte.
 - **Bit 2 of the limit byte** is presumably roll; roll has not been driven to a stop.
 - **The range in other gimbal modes.** YawFollow gives about ±60° of yaw; the far side of
   the manufacturer's −230° pan is presumably another mode's.
