@@ -190,8 +190,8 @@ hardware already does, and the bench measured it:
 
 That last property is the design. A held aim is a repeating rate command that expires. When
 a finger lifts, or the link drops mid-slew, the commands stop arriving and the gimbal stops
-because nothing is telling it to move. **That is the absence of a command, not Yonder
-deciding to stop**, and it stays the right side of R-CMD-04.
+because nothing is telling it to move. A joystick over a radio needs exactly that property,
+and here it comes free.
 
 **Tap-to-point is kept as a second gesture.** "Look at that thing over there" is one command
 rather than a stream of them, and being stale by 300 ms barely costs anything when the move
@@ -212,14 +212,13 @@ same link as the video. So the dial carries the travel as an arc and the stop as
 band, the pointer changes to the caution tone against a stop, and a limit annunciates over
 the picture (R-TEL-15). **A limit is never inferred from the shot.**
 
-### What must never resume
+### What does not resume
 
-On reconnection, **the commanded rate returns at zero and the dial returns centred.**
-Aiming is restarted by touching the control, never by a radio coming back. Resuming a
-*picture* honours a standing instruction; resuming *motion* would be Yonder deciding to move
-an aircraft's camera on the strength of a reconnection, and R-CMD-04 says that is not ours
-to decide. This is written down because it is exactly the kind of thing that arrives later
-as a convenience.
+On reconnection, **the commanded rate returns at zero and the dial returns centred.** The
+command *is* the pointer — a finger on the picture or a mouse on the dial — and on
+reconnection no pointer is down, so there is nothing to resume from. Aiming restarts when
+the control is touched. A picture resumes because the request for one still stands; a slew
+does not, because the input that was driving it is gone.
 
 ---
 
@@ -399,8 +398,8 @@ network, a carrier discarding UDP and a camera that has stopped producing frames
 as no picture, and only one of them is worth walking outside for. *Try live again* is on the
 rail, not a link inside a message.
 
-Falling back is not a decision about the aircraft — nothing is commanded and nothing changes
-on the board — so R-CMD-04 has no opinion, and the default should simply be the useful one.
+Falling back changes nothing on the aircraft — nothing is commanded and nothing changes on
+the board — so the default should simply be the useful one.
 
 **Off is not the link being down**, and must not look like it: the neutral tone rather than
 the fault tone, *not requested* rather than *no contact*, and the strip states that the
@@ -413,10 +412,10 @@ aircraft sends anyone else.
 
 ### Nothing on the aircraft changes
 
-The pipeline's state is what the operator last set it to. Losing a console link is not an
-instruction and under R-CMD-04 cannot be one. Capture, encode and the ground-station push
-continue. The browser's session ends because nothing is subscribed, which is the protocol
-behaving, not Yonder deciding.
+The pipeline's state is what the operator last set it to. The ground station's link is not
+the console's link, and the console losing its own is no reason to stop feeding anyone else.
+Capture, encode and the ground-station push continue. The browser's session ends because
+nothing is subscribed, which is the protocol behaving.
 
 So the only question is what the page does, and the hazard is a stale picture read as a live
 one.
@@ -478,7 +477,7 @@ rule. It also works the same on a tablet, where there is nothing to hover.
 R-VID-12 announces each camera, its stream and its storage on the MAVLink link Yonder already
 carries, so a ground station finds the picture with nothing typed in. R-CAM-16 accepts camera
 and gimbal commands arriving that way and relays them on the same terms as commands from the
-interface — carried, never originated.
+interface.
 
 Scheduled late. It is written down now because `CAMERA_INFORMATION` is a capability flagset,
 which is the same idea R-CAM-14 arrived at independently, and the capability model should be
@@ -490,7 +489,7 @@ named and shaped so it maps onto that without a translation layer.
 
 | ID | Requirement | P |
 |---|---|---|
-| R-CAM-16 | Accept camera and gimbal commands arriving over MAVLink and relay them to the camera on the same terms as commands from the interface. Yonder carries them; it originates none of them (R-CMD-04) | 2 |
+| R-CAM-16 | Accept camera and gimbal commands arriving over MAVLink and relay them to the camera on the same terms as commands from the interface | 2 |
 | R-CAM-17 | **Record to storage, wherever this camera can do it.** A camera with its own recorder records to its own medium at whatever it is capable of; a camera without one is recorded by the board from the running pipeline. The interface says which of the two is happening and shows the remaining time on the medium doing the work. Where the camera holds the file, Yonder says so rather than offering to manage a file it never sees | 2 |
 | R-CAM-18 | **Capture a still on demand**, by the same rule: the camera's own photo where it has one, a frame from the running pipeline where it does not. A still the board holds can be viewed, downloaded and deleted; one the camera holds is reported as the camera's | 2 |
 | R-VID-12 | Announce each camera, its stream and its storage on the MAVLink link Yonder already carries, so a ground station finds the picture without being configured by hand. R-VID-10 makes that configuration possible from the documentation; this makes it unnecessary | 2 |
@@ -605,8 +604,8 @@ source with a fuller capability set.
   without it.
 - **More than one viewer.** Two browsers is two subscriptions and twice the uplink, and
   R-VID-11 counts outputs rather than viewers, so the budget would under-report. If both
-  aim the gimbal, who wins is undesigned — and R-CMD-04 means Yonder cannot decide, so it
-  has to be something operators establish.
+  aim the gimbal, who wins is undesigned — last touch, or a claimed lock — and needs deciding
+  before a second browser is ever opened on a flying aircraft.
 
 ---
 
@@ -622,10 +621,13 @@ exception.
 
 **Where the travel arc comes from.** Section 3 draws the gimbal's travel as an arc and the
 stop as a band. The device reports the *at-limit flag*; the *range* was found on the bench
-by driving to the stop, once, under a guard. Yonder driving to a stop on its own to find a
-range would be Yonder moving the camera unasked (R-CMD-04). So the arc is either entered by
-the operator, or learned — drawn only as far as the operator has driven, growing each time
-the flag comes on at a new extreme — or not drawn until one of those has happened.
+by driving to each stop, once, under a guard that refused to push past one. The natural
+answer is a *Find range* key in Setup that does what the bench did, guarded the same way, on
+the ground — so the arc is complete before the first flight — with the arc also updating if
+a stop is met at a new angle in use, so a remount corrects itself. The alternatives are a
+range entered by the operator, which goes stale on a remount, or no arc until the stops have
+been met in use, which leaves the dial blank for the first flight. One precondition for any
+of them: the bench has not yet established which flag bit is which axis.
 
 ---
 
