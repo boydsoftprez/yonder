@@ -482,7 +482,7 @@ and the app's command table names them all. The honest status of each, as of thi
 | Recording resolution and rate | `camera/0x18` video format | id known, untried |
 | Sensor 16 / 64 MP | `camera/0x12` photo size | id known, untried |
 | Stream bitrate for cellular | — | **solved by the board's hardware transcode, ~40% of one core** |
-| Live-view resolution | `camera/0xbd`/`0x18`/`0x4c` | not recovered — inert at every payload tried; low value while the board transcodes |
+| Live-view resolution | — | **not controllable from the phone side**: the SDK's four H1 live-view handlers (resolution get/set, HD-live-view get/set) are stubs that never send; the camera chooses 720p and the app gets what we get |
 | Digital zoom | `camera/0x34` `09 00 00 <u16=(factor−1)/0.01>` | **payload recovered & confirmed digital-only**; accepted, but the 720p USB feed does not change → Yonder crops client-side |
 | Live-view quality / output format | `camera/0x1a`, `0x4c` | accepted, but the USB feed stays 720p ~8 Mb/s — the live-view is a fixed pipe |
 | Focus | `camera/0x24` | not tested — fixed lens, largely automatic |
@@ -538,7 +538,7 @@ different source:
 |---|---|---|
 | Which message does what — the ids | the manufacturer's app, native library, by name | complete |
 | Frame format, CRCs, addressing, gimbal payloads, exposure/ISO/EV/record payloads | **public** — the dji-firmware-tools dissector and the manufacturer's Onboard SDK source | in hand; gimbal proven, camera-side under test |
-| Live-view resolution and rate, stream bitrate, white balance, zoom, focus payloads | **compiled code** in the native library — the handlers that turn an SDK key such as `H1LiveViewResolutionFrameRate` into bytes on the wire | not reachable by reading strings: the library is stripped |
+| Zoom, live-view quality and output-format payloads | **compiled code** in the native library — read with a locally built decompiler (`scripts/pocket2/ghidra/`) by decompiling the named senders and their callers | recovered; live-view resolution turned out to have no sender at all |
 | Ground truth for anything | a capture of the manufacturer's app talking to the camera | needs an Android device; none on the bench |
 
 **Update — the decompiler was built and the dive continued.** Ghidra's decompiler
@@ -549,7 +549,8 @@ dynamic table — gave the wire structures:
 
 - **Live-view resolution** is a single `H1LiveViewResolutionFrameRate` enum value serialised
   as one `u32`, not a byte struct — which is exactly why the byte-shaped `0xbd` guesses were
-  inert. The enum-to-code mapping is the remaining piece.
+  inert. The enum-to-code mapping turned out to be moot: the setter that would carry
+  it is a stub (see below).
 - **Digital zoom** is `camera/0x34` (`set_focus_zoom_para`), payload `09 00 00` then a
   little-endian `u16` = `(factor − 1.0) / 0.01` for a factor of 1.0–10.0 (so 2× = 100,
   4× = 300, 10× = 900) — **not** the `0xb8` the id table's name suggested, and the step
@@ -566,9 +567,15 @@ dynamic table — gave the wire structures:
   zoom forms and the stride zoom are all accepted and none reshapes it. So zoom in the
   manufacturer's app preview is a client-side crop, and for Yonder the same holds — **zoom
   is a crop-and-scale of the decoded H.264, done on the board or in the browser**, which
-  needs no camera command and composes with the transcode. One path is left untested: the
-  H1 clip module's own `SetH1LiveViewResolutionFrameRate` on a different cmdset — but every
-  camera-cmdset attempt held 720p.
+  needs no camera command and composes with the transcode.
+
+  The last candidate closed by construction. The H1 clip module's
+  `SetH1LiveViewResolutionFrameRate` and `SetH1HDLiveViewEnabled` decompile to stubs — each
+  invokes its completion callback with "success" and returns, sending nothing — and the
+  matching getters return "unknown" and "false" without asking the camera. No other class
+  implements them. So the manufacturer's app never sets the USB live-view resolution; **the
+  camera chooses 720p and the app's preview is that same stream.** That is a stronger
+  finding than "untried": there is no lever, and none needs building.
 
 So the decompiler earned its build immediately: it corrected two ids that string-and-guess
 had wrong. What remains below is narrowed, not abandoned.
