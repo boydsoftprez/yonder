@@ -79,6 +79,7 @@ class Session:
         self.routes = {}
         self.last_att = 0.0
         self.last_yaw = None
+        self.centre_yaw = None
         os.makedirs(args.logdir, exist_ok=True)
         self.log = Log(os.path.join(args.logdir, "session.log"))
         self.raw = open(os.path.join(args.logdir, "session.from-camera.bin"), "ab", buffering=0)
@@ -99,12 +100,22 @@ class Session:
         if len(payload) < 2:
             return "no yaw field"
         yaw = struct.unpack_from("<h", payload, 0)[0] / 10.0
-        lo, hi = self.a.yaw_window
+        if self.a.yaw_window:                      # explicit absolute window wins
+            lo, hi = self.a.yaw_window
+        elif self.centre_yaw is not None:          # otherwise a window around centre
+            lo, hi = self.centre_yaw - self.a.yaw_reach, self.centre_yaw + self.a.yaw_reach
+        else:
+            return "centre unknown yet: recentre first (4:0x4c:0201:4) or pass --yaw-window"
         if not (lo <= yaw <= hi):
-            return f"yaw {yaw:.1f} outside the safe window {lo}..{hi}"
+            return f"yaw {yaw:.1f} outside the safe window {lo:.1f}..{hi:.1f} (centre {self.centre_yaw})"
         if self.last_yaw is not None and abs(yaw - self.last_yaw) > self.a.max_step:
             return f"yaw {yaw:.1f} is {abs(yaw - self.last_yaw):.0f} from current {self.last_yaw:.1f}; max step {self.a.max_step}"
         return None
+
+    def learn_centre(self):
+        if self.last_yaw is not None:
+            self.centre_yaw = self.last_yaw
+            self.log(f"gimbal centre learned: yaw {self.centre_yaw:.1f}; angle guard allows ±{self.a.yaw_reach:.0f} around it")
 
     def send(self, cmdset, cmdid, payload=b"", ack=1, note="", receiver=None, sender_idx=None):
         why = self.gimbal_guard(cmdset, cmdid, payload)
@@ -115,6 +126,8 @@ class Session:
             receiver = duml.DEV_GIMBAL if cmdset == 4 else duml.DEV_CAMERA
         if sender_idx is None:
             sender_idx = self.a.sender_idx
+        if cmdset == 4 and cmdid == 0x4C:
+            threading.Timer(2.5, self.learn_centre).start()
         frame = duml.encode(cmdset, cmdid, payload, seq=self.seq, ack=ack,
                             receiver=receiver, sender_idx=sender_idx)
         self.seq = (self.seq + 1) & 0xFFFF
@@ -251,8 +264,10 @@ if __name__ == "__main__":
     p.add_argument("--quiet", action="store_true", help="do not log the periodic status pushes")
     p.add_argument("--track-gimbal", action="store_true", help="log the gimbal attitude push twice a second")
     p.add_argument("--sender-idx", type=int, default=1, help="our app index in the sender byte (camera pushes to app0)")
-    p.add_argument("--yaw-window", type=float, nargs=2, default=(-150.0, -25.0), metavar=("MIN", "MAX"),
-                   help="absolute yaw the guard allows, in the camera's frame (bench: stops at about -22.5 and -156)")
+    p.add_argument("--yaw-window", type=float, nargs=2, default=None, metavar=("MIN", "MAX"),
+                   help="absolute yaw the guard allows; default is a window around the centre learned at each recentre")
+    p.add_argument("--yaw-reach", type=float, default=55.0,
+                   help="half-width of the default window around centre, degrees (the stops were at about 68 and 65)")
     p.add_argument("--max-step", type=float, default=45.0, help="largest yaw change one command may ask for, degrees")
     p.add_argument("--unsafe-gimbal", action="store_true", help="disable the angle guard (it clicked and spun without it)")
     Session(p.parse_args()).run()
