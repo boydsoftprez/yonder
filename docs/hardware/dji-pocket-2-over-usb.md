@@ -218,6 +218,12 @@ Three conclusions, and the first is a rule:
   under the head. On an aircraft the body is fixed and this goes away; on the bench, hold
   the handle.
 
+The manufacturer's specification gives the controllable pan range as −230° to +70° and
+the mechanical range as −250° to +90°, at up to 120°/s. The +68° stop matches the +70°
+side. The −65° stop does not match −230°: in YawFollow mode the head is held near the
+handle's heading, and the far side of the range is evidently reachable only in another
+mode, which is the next experiment.
+
 Byte 10, refined: bit 1 lights at a yaw stop; bit 0 appeared once with it at the 0/0/0
 pose, so it is probably the pitch stop; bits 5 and 7 are on at rest and off during the
 over-the-top excursions, so they are status, not limits.
