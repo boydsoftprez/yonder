@@ -205,6 +205,13 @@ each:
 | −180° | −155.8° | on | the stop that way, about 65° from centre in this mode |
 | −210° … −300° | pitch 88°, 89°, 97° | off / `03` | over the top again, twice, and once to a 0/0/0 pose with both limit bits |
 
+What "over the top" was, from the bench: **a mechanical click and a fast spin.** The yaw
+axis reached its stop, and the controller then took the head through the pitch axis at
+speed to satisfy the number. That is a way to damage a gimbal, and the sweep script asked
+for it four times. `scripts/pocket2/aoa_session.py` now refuses any absolute-angle
+command outside a yaw window and any single step over 45°, unless told
+`--unsafe-gimbal`; the window defaults to what this sweep found safe.
+
 Three conclusions, and the first is a rule:
 
 - **Clamp before sending.** An absolute angle the gimbal cannot reach in yaw is not

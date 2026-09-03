@@ -78,6 +78,7 @@ class Session:
         self.pushes = 0
         self.routes = {}
         self.last_att = 0.0
+        self.last_yaw = None
         os.makedirs(args.logdir, exist_ok=True)
         self.log = Log(os.path.join(args.logdir, "session.log"))
         self.raw = open(os.path.join(args.logdir, "session.from-camera.bin"), "ab", buffering=0)
@@ -87,7 +88,29 @@ class Session:
         self.env = Envelope()
         self.enabled = threading.Event()
 
+    # Absolute-angle commands the gimbal cannot satisfy in yaw are not refused by the
+    # camera: it reaches the number by whipping the head over the top through the pitch
+    # axis, and on the bench that was a mechanical click and a fast spin. So every angle
+    # command is checked here first, against the window the sweep found safe and a
+    # per-command step. Bypass only with --unsafe-gimbal, and only deliberately.
+    def gimbal_guard(self, cmdset, cmdid, payload):
+        if cmdset != 4 or cmdid not in (0x14, 0x0A) or self.a.unsafe_gimbal:
+            return None
+        if len(payload) < 2:
+            return "no yaw field"
+        yaw = struct.unpack_from("<h", payload, 0)[0] / 10.0
+        lo, hi = self.a.yaw_window
+        if not (lo <= yaw <= hi):
+            return f"yaw {yaw:.1f} outside the safe window {lo}..{hi}"
+        if self.last_yaw is not None and abs(yaw - self.last_yaw) > self.a.max_step:
+            return f"yaw {yaw:.1f} is {abs(yaw - self.last_yaw):.0f} from current {self.last_yaw:.1f}; max step {self.a.max_step}"
+        return None
+
     def send(self, cmdset, cmdid, payload=b"", ack=1, note="", receiver=None, sender_idx=None):
+        why = self.gimbal_guard(cmdset, cmdid, payload)
+        if why:
+            self.log(f"REFUSED {note or ''} {cmdset}/0x{cmdid:02x} {payload.hex(' ')}: {why}")
+            return
         if receiver is None:
             receiver = duml.DEV_GIMBAL if cmdset == 4 else duml.DEV_CAMERA
         if sender_idx is None:
@@ -134,6 +157,8 @@ class Session:
               for kind, item in self.split.feed(chunk):
                 if kind == "frame":
                     quiet = (not item.response) and (item.cmdset, item.cmdid) in self.PUSHES
+                    if (item.cmdset, item.cmdid) == (4, 0x05) and len(item.payload) >= 6:
+                        self.last_yaw = struct.unpack_from("<h", item.payload, 4)[0] / 10.0
                     if (item.cmdset, item.cmdid) == (4, 0x05) and self.a.track_gimbal:
                         now = time.monotonic()
                         if now - self.last_att >= 0.5:
@@ -226,4 +251,8 @@ if __name__ == "__main__":
     p.add_argument("--quiet", action="store_true", help="do not log the periodic status pushes")
     p.add_argument("--track-gimbal", action="store_true", help="log the gimbal attitude push twice a second")
     p.add_argument("--sender-idx", type=int, default=1, help="our app index in the sender byte (camera pushes to app0)")
+    p.add_argument("--yaw-window", type=float, nargs=2, default=(-150.0, -25.0), metavar=("MIN", "MAX"),
+                   help="absolute yaw the guard allows, in the camera's frame (bench: stops at about -22.5 and -156)")
+    p.add_argument("--max-step", type=float, default=45.0, help="largest yaw change one command may ask for, degrees")
+    p.add_argument("--unsafe-gimbal", action="store_true", help="disable the angle guard (it clicked and spun without it)")
     Session(p.parse_args()).run()
