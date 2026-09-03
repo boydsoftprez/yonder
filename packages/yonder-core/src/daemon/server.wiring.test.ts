@@ -10,6 +10,7 @@ import { AdminCredential, ADMIN_PASSWORD_SECRET } from "../console/credential.js
 import { hashPassword } from "../console/password.js";
 import type { Clock, Renderer } from "../apply/types.js";
 import { FAILURES_TO_STAND_DOWN, REACH_TICK_MS } from "../net/reach/standing.js";
+import { PROBE_ADDRESSES } from "../net/reach/probe.js";
 import type { CounterReader } from "../net/reach/counters.js";
 
 /**
@@ -547,8 +548,14 @@ describe("the daemon drives the reach watch", () => {
     });
     try {
       await hand.advance(REACH_TICK_MS);
+      // One probe, which is one *or more* requests: a probe tries a second
+      // address before it will call a path dead, so this dead link's single
+      // link-up probe costs up to PROBE_ADDRESSES.length of them. What this
+      // test is about is unchanged — that nothing probes *again* while the
+      // counters move.
       const afterLinkUp = seen.filter((a) => a[0] === "curl").length;
-      expect(afterLinkUp).toBe(1);
+      expect(afterLinkUp).toBeGreaterThan(0);
+      expect(afterLinkUp).toBeLessThanOrEqual(PROBE_ADDRESSES.length);
       for (let i = 0; i < FAILURES_TO_STAND_DOWN + 2; i++) await hand.advance(REACH_TICK_MS);
       expect(seen.filter((a) => a[0] === "curl").length).toBe(afterLinkUp);
 
