@@ -338,6 +338,15 @@ NAL units a second, continuously**; the other two gave a tail-off and nothing. S
 camera streams for roughly two seconds after each ping it accepts (status `0x01`), and
 **a 1 Hz ping is the whole of live view**. The session tool now sends it by default.
 
+Held for three minutes with nothing else sent, the picture never wavered: 8.08 to 8.32
+Mb/s in every fifteen-second window, 180 pings, 180 answers. A run that appeared to die
+at sixty seconds turned out to be the session tool, not the camera: a bulk write hit
+`EAGAIN` under backpressure and the thread that sends the pings died with it. Two
+seconds later the picture stopped, as it should; **eight seconds after that the camera
+dropped the link** — `Cannot send after transport endpoint shutdown` — which is the
+camera's own liveness rule, and a daemon must keep talking to stay connected. The tool
+now retries and never lets that thread die.
+
 The sustained rate matters for the product: at 720p this camera delivers about 8 Mb/s
 (8.23 Mb/s over 58 s of content, by the frame-record timestamps), not the 1.7 Mb/s the
 burst-and-silence average suggested. That is fine on Wi-Fi or Ethernet and is far more

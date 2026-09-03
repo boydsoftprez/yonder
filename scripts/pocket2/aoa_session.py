@@ -204,8 +204,21 @@ class Session:
         frame = duml.encode(cmdset, cmdid, payload, seq=self.seq, ack=ack,
                             receiver=receiver, sender_idx=sender_idx)
         self.seq = (self.seq + 1) & 0xFFFF
-        os.write(self.ep_in, self.wrap(frame))
+        self.write_in(self.wrap(frame))
         self.log(f"us -> camera  {note or ''} {duml.decode(frame)}  (route {self.route_bytes().hex()})")
+
+    def write_in(self, data):
+        """Bulk IN under backpressure returns EAGAIN; that once killed the talker thread,
+        the pings stopped, the picture stopped, and eight seconds later the camera dropped
+        the link. Retry briefly, then log and move on — never raise out of the talker."""
+        for attempt in range(50):
+            try:
+                os.write(self.ep_in, data); return True
+            except BlockingIOError:
+                time.sleep(0.01)
+            except OSError as e:
+                self.log(f"bulk IN write failed: {e}"); return False
+        self.log("bulk IN write: gave up after 0.5 s of EAGAIN"); return False
 
     def route_bytes(self):
         if self.a.route: return bytes.fromhex(self.a.route)
@@ -264,7 +277,7 @@ class Session:
                         rsp = duml.encode(item.cmdset, item.cmdid, b"\x00", seq=item.seq,
                                           sender=duml.DEV_APP, receiver=item.sender,
                                           receiver_idx=item.sender_idx, response=True, ack=0)
-                        os.write(self.ep_in, self.wrap(rsp))
+                        self.write_in(self.wrap(rsp))
                 else:
                     self.log(f"camera -> us  NOT-DUML {len(item)} B  {item[:32].hex(' ')}{' …' if len(item) > 32 else ''}")
 
@@ -285,6 +298,7 @@ class Session:
                 self.send(int(cs, 0), int(ci, 0), bytes.fromhex(hx), note="extra")
         inject = os.path.join(self.a.logdir, "inject.txt"); seen = 0
         while True:
+          try:
             time.sleep(1.0)
             self.send(0, 0x0E, ack=0, note="heartbeat")
             # general/0x00 ping is the live-view keep-alive: the camera streams video for
@@ -315,6 +329,8 @@ class Session:
                 except Exception as e:
                     self.log(f"inject {spec!r}: {e}")
             seen = len(lines)
+          except Exception as e:
+            self.log(f"talker: {e!r} — continuing")
 
     def run(self):
         ep0 = os.open(os.path.join(self.a.ffs, "ep0"), os.O_RDWR)
