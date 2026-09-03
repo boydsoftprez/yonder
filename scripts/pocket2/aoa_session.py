@@ -83,6 +83,7 @@ class Session:
         self.last_roll = None
         self.last_limit = 0
         self.centre_yaw = None
+        self.centre_pitch = None
         os.makedirs(args.logdir, exist_ok=True)
         self.log = Log(os.path.join(args.logdir, "session.log"))
         self.raw = open(os.path.join(args.logdir, "session.from-camera.bin"), "ab", buffering=0)
@@ -106,8 +107,8 @@ class Session:
         #    it right by hand first.
         if self.last_limit:
             return f"gimbal reports a limit (0x{self.last_limit:02x}); clear it by hand and recentre from the camera first"
-        if self.last_pitch is not None and abs(self.last_pitch) > 60:
-            return f"gimbal pitch is {self.last_pitch:.1f}: not a sane pose to command from"
+        # Pitch in the attitude push is gravity-referenced. A camera mounted on its side
+        # reads ~90 degrees at rest, so "far from level" is not a fault. Limit bits are.
         # 2. Rate commands (0x0C custom speed, 0x01 motion control): yaw, roll, pitch in
         #    0.1 deg/s. Boxed to a gentle rate; the gimbal stops when the rate stops.
         if cmdid in (0x0C, 0x01):
@@ -145,10 +146,10 @@ class Session:
                 lo, hi = self.centre_yaw - self.a.yaw_reach, self.centre_yaw + self.a.yaw_reach
                 if not (lo <= self.last_yaw + dy <= hi):
                     return f"incremental yaw would reach {self.last_yaw + dy:.1f}, outside {lo:.1f}..{hi:.1f}"
-            if self.last_pitch is not None:
-                plo, phi = self.a.pitch_window
-                if not (plo <= self.last_pitch + dp <= phi):
-                    return f"incremental pitch would reach {self.last_pitch + dp:.1f}, outside {plo}..{phi}"
+            if self.last_pitch is not None and self.centre_pitch is not None:
+                lo_p, hi_p = self.centre_pitch - self.a.pitch_reach, self.centre_pitch + self.a.pitch_reach
+                if not (lo_p <= self.last_pitch + dp <= hi_p):
+                    return f"incremental pitch would reach {self.last_pitch + dp:.1f}, outside {lo_p:.1f}..{hi_p:.1f} around the recentred pose"
             return None
         if self.a.yaw_window:
             lo, hi = self.a.yaw_window
@@ -172,8 +173,9 @@ class Session:
 
     def learn_centre(self):
         if self.last_yaw is not None:
-            self.centre_yaw = self.last_yaw
-            self.log(f"gimbal centre learned: yaw {self.centre_yaw:.1f}; angle guard allows ±{self.a.yaw_reach:.0f} around it")
+            self.centre_yaw, self.centre_pitch = self.last_yaw, self.last_pitch
+            self.log(f"gimbal centre learned: yaw {self.centre_yaw:.1f} pitch {self.centre_pitch:.1f}; "
+                     f"guard allows ±{self.a.yaw_reach:.0f} yaw and ±{self.a.pitch_reach:.0f} pitch around it")
 
     def send(self, cmdset, cmdid, payload=b"", ack=1, note="", receiver=None, sender_idx=None):
         why = self.gimbal_guard(cmdset, cmdid, payload)
@@ -337,6 +339,8 @@ if __name__ == "__main__":
                    help="absolute roll the guard allows (field 1 of 4/0x14)")
     p.add_argument("--pitch-window", type=float, nargs=2, default=(-30.0, 20.0), metavar=("MIN", "MAX"),
                    help="absolute pitch the guard allows (field 2 of 4/0x14); widen only with the camera upright and held")
+    p.add_argument("--pitch-reach", type=float, default=30.0,
+                   help="half-width of the pitch window around the recentred pose, degrees")
     p.add_argument("--yaw-reach", type=float, default=55.0,
                    help="half-width of the default window around centre, degrees (the stops were at about 68 and 65)")
     p.add_argument("--max-step", type=float, default=20.0, help="largest change in any axis one command may ask for, degrees")
