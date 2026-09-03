@@ -1,0 +1,45 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!--
+  The editor half of test a path now.
+
+  Node-RED finds this by basename beside the node's .js, and without it the
+  flow editor shows the node as "unknown" even though the runtime registered
+  it. It is a form and a registration, and deliberately nothing else: no
+  behaviour lives here (CLAUDE.md rule 2 in spirit — a diff has to be
+  readable), and no asset is fetched from anywhere (R-UI-01).
+-->
+<script type="text/html" data-template-name="yonder-reach-test">
+  <div class="form-row">
+    <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name" />
+  </div>
+</script>
+
+<script type="text/html" data-help-name="yonder-reach-test">
+<p>Takes a path name — <code>ethernet</code>, <code>modem</code> or
+<code>wifi_client</code> — on <code>msg.payload</code> and posts
+<code>{ path }</code> to <code>POST /reach/test</code>.</p>
+<p>The same reach monitor the automatic probes use answers this on request
+(R-CEL-09): there is no second way to decide whether a path works, only a
+second reason to ask it. It is not validated here — the daemon already
+refuses anything that is not one of the three, and a second copy of that list
+in this node is how the two stop agreeing.</p>
+<p>Emits <code>{ path, reached }</code> on <code>msg.payload</code>, and a
+<code>CommandStatus</code> on <code>msg.yonder</code>. This node's status is
+the only feedback an operator gets that TEST NOW did anything, since the
+result travels to the page as data rather than as words: grey while the probe
+is in flight, then green if it reached something and red if it did not —
+including when the daemon itself could not be asked.</p>
+</script>
+
+<script type="text/javascript">
+  RED.nodes.registerType("yonder-reach-test", {
+    category: "yonder",
+    color: "#c7d4e0",
+    defaults: { name: { value: "" } },
+    inputs: 1,
+    outputs: 1,
+    icon: "font-awesome/fa-crosshairs",
+    label: function () { return this.name || "test a path now"; },
+  });
+</script>
