@@ -891,3 +891,32 @@ Not ours to fix, and not worth working around further. It is recorded because it
 invisible from the outside: the capability is advertised, so every reasonable person will
 try it once. Revisit only if a kernel update changes the behaviour, and re-run the
 reproduction in that note rather than assuming.
+
+### K-34 · The development board browns out, and nothing in Yonder says so
+
+`vcgencmd get_throttled` on the Raspberry Pi 4 dev board returns `0x50000` — bit 16,
+under-voltage has occurred, and bit 18, throttling has occurred — with three undervoltage
+events logged in the first two minutes of a boot. The board carries a powered hub, an ELP
+USB camera, a Quectel EC25 and, briefly, a DJI camera. The EC25 pulls hard on transmit.
+
+It presents as spontaneous reboots. The board restarted at least twice during the M4
+brainstorming session and each time came back on a different address, which cost real time
+to chase and was initially mistaken for a wedged pipeline. The kernel also failed to read
+the DJI's USB descriptor four times and power-cycled the port twice before enumerating it
+on the eleventh attempt — what a marginal supply looks like from the bus side.
+
+Two separate things, and only the second is Yonder's:
+
+- **The bench supply is inadequate.** Not a defect in this repository. Recorded because
+  every measurement in
+  [`hardware/usb-camera-on-a-pi-4.md`](hardware/usb-camera-on-a-pi-4.md) was taken on a
+  board that was browning out, so those numbers are a floor rather than a clean reading,
+  and they should be retaken on a supply that holds.
+- **Yonder reports CPU temperature and says nothing about supply voltage.** R-SYS-01 covers
+  model, load, temperature, memory and uptime. The register that would have explained all
+  of the above is one call away and nothing reads it. On a desk a brownout is an
+  annoyance; in an airframe it is a reboot in flight, and it presents to the operator as an
+  aircraft that went quiet with nothing in any log to say why.
+
+Closed by **R-SYS-09**, added in M4 — encoding video is what pushes the draw up, so M4 is
+the milestone that provokes the fault it needs to report.

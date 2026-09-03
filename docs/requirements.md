@@ -87,12 +87,15 @@ Parameter writes are vehicle commands. R-CMD applies to every requirement here.
 | R-CAM-03 | Capture HDMI input via a CSI bridge, pushing an EDID to the bridge before capture | 2 |
 | R-CAM-04 | Capture from a network camera over RTSP | 3 |
 | R-CAM-05 | Enumerate cameras stably, so a camera keeps its identity across reboots and plug order | 1 |
-| R-CAM-06 | Select an encoder appropriate to the board, resolved at install time and recorded in configuration | 1 |
+| R-CAM-06 | *Withdrawn — superseded by R-CAM-13.* Resolving the encoder at install time and writing it into configuration fails twice over: the installer seeds `config.yaml` only when absent, so the value goes stale on upgrade, and image builds run the installer in a chroot on a build host, which would bake a build machine's answer into a board's image. R-HW-04 wants board-specific behaviour chosen at boot rather than at flash time | — |
 | R-CAM-07 | Use hardware encoding wherever the board provides it, and software encoding where it does not | 1 |
 | R-CAM-08 | Encode H.265 where the board's encoder supports it | 2 |
 | R-CAM-09 | Run one independent pipeline per camera, up to the board's capability | 1 |
 | R-CAM-10 | Refuse, with a clear message, a camera configuration the board cannot sustain | 2 |
 | R-CAM-11 | Control gimbal-equipped cameras: aim, mode, recentre, zoom, focus, exposure and white balance | 3 |
+| R-CAM-12 | Detect attached cameras on demand from the console, and report what was found, what was rejected and why | 1 |
+| R-CAM-13 | Select an encoder appropriate to the board by probing the hardware, not from a table of board names, and report the encoder in use. An operator may name one explicitly to bypass the probe | 1 |
+| R-CAM-14 | Build a camera's offered formats, resolutions, rates and controls from what the device answers, never from a stored list. **A capability the device advertises but does not answer is absent**, and is reported as advertised-but-unavailable rather than hidden | 1 |
 
 ## R-VID — Video transport
 
@@ -108,6 +111,7 @@ Parameter writes are vehicle commands. R-CMD applies to every requirement here.
 | R-VID-08 | Allow a fixed bitrate where the operator prefers determinism | 1 |
 | R-VID-09 | Give a late-joining receiver a decodable picture without waiting for the next natural keyframe | 3 |
 | R-VID-10 | Publish the exact receive-side pipeline for each codec, so a ground station can be configured from the documentation alone | 1 |
+| R-VID-11 | Report the egress bandwidth each running output consumes and their total, against the capacity of the path they leave by. R-VID-05 makes simultaneous outputs possible; this is what stops an operator oversubscribing a link without being told | 1 |
 
 ## R-CTL — Live camera control
 
@@ -201,6 +205,7 @@ Parameter writes are vehicle commands. R-CMD applies to every requirement here.
 | R-SYS-06 | Manage flight logs: list, download, delete | 3 |
 | R-SYS-07 | Provide an NTRIP client for RTK corrections | 3 |
 | R-SYS-08 | Support Remote ID where regulation requires it | 3 |
+| R-SYS-09 | Report supply-voltage state where the board exposes it, distinguishing *now* from *has happened since boot*, and record an occurrence in the log. An undervoltage event restarts the board, and a restart in flight presents as an aircraft that went quiet with nothing to explain it | 1 |
 
 ## R-CFG — Configuration
 
