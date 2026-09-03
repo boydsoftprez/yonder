@@ -1,0 +1,77 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!--
+  The editor half of cellular state.
+
+  Node-RED finds this by basename beside the node's .js, and without it the
+  flow editor shows the node as "unknown" even though the runtime registered
+  it. It is a form and a registration, and deliberately nothing else: no
+  behaviour lives here (CLAUDE.md rule 2 in spirit — a diff has to be
+  readable), and no asset is fetched from anywhere (R-UI-01).
+-->
+<script type="text/html" data-template-name="yonder-modem-state">
+  <div class="form-row">
+    <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-interval"><i class="fa fa-clock-o"></i> Interval</label>
+    <input type="number" id="node-input-interval" min="2" placeholder="5" /> seconds
+  </div>
+  <div class="form-tips">
+    Never faster than 2 seconds. The console has to work on a link with hundreds
+    of milliseconds of latency (R-UI-06), and the floor is enforced in
+    yonder-core whatever is entered here.
+  </div>
+</script>
+
+<script type="text/html" data-help-name="yonder-modem-state">
+<p>Reads <code>GET /modem/state</code> and <code>GET /reach/state</code> together,
+on a timer and whenever a message arrives, and fans one reading out over four
+outputs.</p>
+<p><b>One node, four outputs, on purpose.</b> Both routes are read once per tick,
+so the Cellular tab, the Way out panel and the Status panel are always
+describing the same moment. Four nodes polling separately would land on
+different ticks and the three surfaces would quietly disagree about what the
+modem is doing.</p>
+<ol>
+  <li><b>Cellular tab</b> — <code>{ mode, summary, verdict, operator, technology,
+  registration, apn, address, mtu, ports, portSummary, reportsSignal }</code>.
+  <code>verdict</code> is the line at the top of the tab, already judged:
+  <code>{ text, tone }</code>.</li>
+  <li><b>Signal readings</b> — <code>{ strength, quality, rssi, rsrq }</code> as
+  strings with their units, for a databar, plus <code>gauges</code> with the same
+  two readings as bare numbers and <code>bounds</code> with the scales to draw them
+  against (R-UI-09). Both forms are carried because a gauge places a pointer and a
+  databar prints a fact, and converting between them in a flow would need a
+  <code>function</code> node.</li>
+  <li><b>Way out rows</b> — one row per path, in the operator's order:
+  <code>{ path, name, device, standing, inUse, since, detail, tone }</code>.
+  <code>name</code> is Yonder's word — <code>Ethernet</code>,
+  <code>Cellular</code>, <code>Wi-Fi</code> — not the configuration's key.</li>
+  <li><b>Status summary</b> — <code>{ reachableBy, carrying, verdict, summary }</code>.
+  <code>reachableBy</code> is one word: <code>ETHERNET</code>,
+  <code>CELLULAR</code>, <code>WI-FI</code>, or <code>NOTHING</code> when no path
+  is carrying traffic.</li>
+</ol>
+<p>A reading that was not taken is an em dash in <code>signal</code> and
+<code>null</code> in <code>gauges</code>, never a zero: 0 dBm is a real and
+extraordinary value. An appliance modem reports <code>reportsSignal: false</code>,
+which a page says in words rather than drawing four dashes that read as a fault
+(R-CEL-11).</p>
+<p>If either read fails, all four outputs emit <code>payload: null</code> with a
+rejected <code>msg.yonder</code> — never a silent nothing, because a blank panel
+cannot be told from one that never loaded (R-UI-05).</p>
+</script>
+
+<script type="text/javascript">
+  RED.nodes.registerType("yonder-modem-state", {
+    category: "yonder",
+    color: "#c7d4e0",
+    defaults: { name: { value: "" }, interval: { value: 5, validate: RED.validators.number(true) } },
+    inputs: 1,
+    outputs: 4,
+    outputLabels: ["cellular tab", "signal", "way out", "status"],
+    icon: "font-awesome/fa-signal",
+    label: function () { return this.name || "cellular state"; },
+  });
+</script>
