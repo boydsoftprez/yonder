@@ -78,6 +78,7 @@ class Session:
         self.pushes = 0
         self.routes = {}
         self.last_att = 0.0
+        self.last_cam = {}
         self.last_yaw = None
         self.last_pitch = None
         self.last_roll = None
@@ -260,6 +261,11 @@ class Session:
                         pv, rv, yv = struct.unpack_from("<hhh", item.payload, 0)
                         self.last_pitch, self.last_roll, self.last_yaw = pv / 10.0, rv / 10.0, yv / 10.0
                         self.last_limit = item.payload[10] & 0x07      # bits 0-2: the limit flags
+                    if item.cmdset == 2 and item.cmdid in (0x80, 0x81, 0x87, 0x88) and self.a.track_camera:
+                        now = time.monotonic(); k = item.cmdid
+                        if now - self.last_cam.get(k, 0) >= 1.0:
+                            self.last_cam[k] = now
+                            self.log(f"camera/0x{k:02x} push  {item.payload.hex(' ')}")
                     if (item.cmdset, item.cmdid) == (4, 0x05) and self.a.track_gimbal:
                         now = time.monotonic()
                         if now - self.last_att >= 0.5:
@@ -367,6 +373,7 @@ if __name__ == "__main__":
     p.add_argument("--no-envelope", action="store_true", help="send bare DUML frames")
     p.add_argument("--quiet", action="store_true", help="do not log the periodic status pushes")
     p.add_argument("--track-gimbal", action="store_true", help="log the gimbal attitude push twice a second")
+    p.add_argument("--track-camera", action="store_true", help="log the camera status pushes 0x80/0x81/0x87/0x88 once a second")
     p.add_argument("--sender-idx", type=int, default=1, help="our app index in the sender byte (camera pushes to app0)")
     p.add_argument("--yaw-window", type=float, nargs=2, default=None, metavar=("MIN", "MAX"),
                    help="absolute yaw the guard allows; default is a window around the centre learned at each recentre")
