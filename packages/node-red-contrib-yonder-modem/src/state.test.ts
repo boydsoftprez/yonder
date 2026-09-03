@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
-import { fanOut, messageFor } from "./state.js";
+import { fanOut, messageFor, unreadableRows } from "./state.js";
 import type { ModemState, PathEvidence, ReachState } from "yonder-core";
 
 const MODEM: ModemState = {
@@ -48,6 +48,31 @@ describe("messageFor", () => {
     // report it" does not.
     const p = messageFor({ ...MODEM, reportsSignal: false }, REACH).payload;
     expect(p.reportsSignal).toBe(false);
+    expect(p.showsSignal, "an appliance has no gauge to draw").toBe(false);
+  });
+
+  /**
+   * The defect this field exists to stop, pinned as the two cases that
+   * differ.
+   *
+   * `reportsSignal` is a property of the *kind* of modem and is true whenever
+   * one is not an appliance — including on a board with no modem in it at
+   * all, which has no kind. A Status panel hiding its gauges on that field
+   * alone would draw two empty gauges on exactly the board §5 says must have
+   * none, and a gauge with no needle reads as a fault.
+   */
+  it("has no signal to show on a board with no modem, though the field says otherwise", () => {
+    const none = messageFor({ ...MODEM, mode: "absent", summary: "No modem found" }, REACH).payload;
+    expect(none.reportsSignal, "the field the panel must not bind to").toBe(true);
+    expect(none.showsSignal, "the one it does").toBe(false);
+  });
+
+  it("still draws the gauges for a modem that is present and not yet connected", () => {
+    // A radio that has not registered yet is reporting a signal it cannot use.
+    // That is a reading, and hiding it would hide the one number that says why.
+    for (const mode of ["unconfigured", "joining", "waiting", "connected", "failed"] as const) {
+      expect(messageFor({ ...MODEM, mode }, REACH).payload.showsSignal, mode).toBe(true);
+    }
   });
 
   it("names every path in the operator's order for the Way out panel", () => {
@@ -177,5 +202,105 @@ describe("fanOut", () => {
     expect(untested[0].status).toEqual({ state: "idle", message: "NOT YET TESTED", at: 4242 });
     const failing = outs(withModem("not-reaching"))[2].payload as { status: { state: string } }[];
     expect(failing[0].status).toEqual({ state: "rejected", message: "NOT REACHING", at: 4242 });
+  });
+
+  /**
+   * The `Reachable by` panel on Status is built in the idiom of `This board` —
+   * gauges over a labelled strip — so output 4 carries what a strip prints
+   * and what a gauge places, taken from the same reading the Cellular tab
+   * draws rather than read a second time.
+   */
+  it("gives Status the facts its strip prints and the numbers its gauges place", () => {
+    const p = outs()[3].payload as Record<string, unknown>;
+    expect(p.operator).toBe("Dark Star");
+    expect(p.technology).toBe("LTE");
+    expect(p.address).toBe("10.16.166.223");
+    expect(p.gauges).toEqual({ strength: -99, quality: 16 });
+    expect((p.bounds as { strength: { caution: number } }).strength.caution).toBe(-90);
+    expect(p.showsSignal).toBe(true);
+  });
+
+  /**
+   * The one-word answer is a lit lamp and not coloured text (R-UI-11), so it
+   * has to arrive as a `CommandStatus` — the same reason the Cellular tab's
+   * verdict does.
+   */
+  it("lights the one-word answer, and calls nothing at all a fault", () => {
+    expect(outs()[3].yonder).toEqual({ state: "confirmed", message: "ETHERNET", at: 4242 });
+
+    const dark: ReachState = { inUse: null, carrying: false, paths: [] };
+    expect(outs(dark)[3].yonder).toEqual({ state: "rejected", message: "NOTHING", at: 4242 });
+  });
+
+  /**
+   * The defect a capture found: a **green** lamp on the word `NOTHING`.
+   *
+   * `ReachState.carrying` is deliberately optimistic — it answers true when
+   * nothing holds an address at all, because an address on an interface the
+   * monitor has no path for is not its to condemn. The lamp was lit from it
+   * while the word was chosen from `carrying && inUse !== null`, so the two
+   * disagreed in exactly the state this harness is in.
+   */
+  it("never lights a green lamp on the word NOTHING", () => {
+    const nobodyHolding: ReachState = { ...REACH, inUse: null, carrying: true };
+    const out = outs(nobodyHolding)[3];
+    expect((out.payload as { reachableBy: string }).reachableBy).toBe("NOTHING");
+    expect(out.yonder).toEqual({ state: "rejected", message: "NOTHING", at: 4242 });
+  });
+
+  /**
+   * The line under the word. The modem's own `summary` is about the radio and
+   * said "Connected to Dark Star" under a lamp reading NOTHING; this says
+   * which path stood down and when, which is what the lamp cannot carry.
+   */
+  it("says what changed and when, under the word", () => {
+    expect((outs()[3].payload as { why: string }).why)
+      .toBe("Ethernet is carrying traffic, and nothing has stood down");
+    // And the modem's sentence still travels, for anything that wants it.
+    expect((outs()[3].payload as { summary: string }).summary).toBe("Connected to Dark Star");
+  });
+});
+
+/**
+ * A tick the daemon could not answer (R-UI-05).
+ *
+ * Without these rows a `Way out` lamp falls back to `presentation("idle")`,
+ * whose shared label is `Ready` — grey, claiming nothing, and wrong. The fix
+ * is in the package rather than as a conditional in a `change` node, because
+ * "if the daemon did not answer, say this instead" is a decision (CLAUDE.md
+ * rule 2).
+ */
+describe("unreadableRows", () => {
+  it("names every path and says nothing can be told about any of them", () => {
+    const rows = unreadableRows("the daemon is not answering", 4242);
+    expect(rows.map((r) => r.path)).toEqual(["ethernet", "modem", "wifi_client"]);
+    expect(rows.map((r) => r.name)).toEqual(["Ethernet", "Cellular", "Wi-Fi"]);
+    for (const row of rows) {
+      expect(row.status).toEqual({ state: "rejected", message: "CANNOT TELL", at: 4242 });
+      expect(row.detail).toBe("the daemon is not answering");
+    }
+  });
+
+  /**
+   * The word is the whole point of this. `Ready` is what the shared idle label
+   * says, and it is the one thing a console must not say about a link it
+   * cannot see.
+   */
+  it("never says Ready about a link it cannot see", () => {
+    for (const row of unreadableRows("gone", 1)) {
+      expect(row.status.message).not.toBe("Ready");
+      expect(row.status.state, "and it is not the neutral lamp either").toBe("rejected");
+    }
+  });
+
+  /**
+   * Picked by name in the flow, so a row that does not answer to
+   * `payload[path='wifi_client']` is a row that stays blank.
+   */
+  it("answers to the keys the panel picks rows by", () => {
+    const rows = unreadableRows("gone", 1);
+    for (const key of ["ethernet", "modem", "wifi_client"]) {
+      expect(rows.find((r) => r.path === key), key).toBeDefined();
+    }
   });
 });

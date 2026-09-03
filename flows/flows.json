@@ -195,7 +195,7 @@
         "type": "ui-group",
         "name": "This board",
         "page": "page-status",
-        "width": 8,
+        "width": 12,
         "height": 1,
         "order": 1,
         "showTitle": true,
@@ -205,11 +205,11 @@
         "groupType": "default"
     },
     {
-        "id": "group-appearance",
+        "id": "group-status-reach",
         "type": "ui-group",
-        "name": "Appearance",
+        "name": "Reachable by",
         "page": "page-status",
-        "width": 4,
+        "width": 12,
         "height": 1,
         "order": 2,
         "showTitle": true,
@@ -338,21 +338,6 @@
                 "pick-facts"
             ]
         ]
-    },
-    {
-        "id": "note-theme",
-        "type": "ui-markdown",
-        "z": "yonder-console",
-        "group": "group-appearance",
-        "order": 1,
-        "width": 6,
-        "height": 2,
-        "name": "what changing this costs",
-        "content": "**Day is the chart. Night is the display.**\n\nIn sunlight a dark screen is a mirror, so day is a light page. After dusk a light page costs dark adaptation, so night is the glass display in its panel.\n\nThe layout is the same in both. Only the material changes.",
-        "className": "",
-        "x": 200,
-        "y": 380,
-        "wires": []
     },
     {
         "id": "apply-config",
@@ -1565,7 +1550,7 @@
         "group": "group-board",
         "name": "cpu load",
         "order": 1,
-        "width": 8,
+        "width": 12,
         "height": 1,
         "label": "CPU LOAD",
         "unit": "",
@@ -1575,7 +1560,7 @@
         "limit": 3.8,
         "limitLabel": "",
         "precision": 2,
-        "track": 118,
+        "track": 430,
         "series": "",
         "x": 700,
         "y": 100,
@@ -1615,7 +1600,7 @@
         "group": "group-board",
         "name": "cpu temp",
         "order": 2,
-        "width": 8,
+        "width": 12,
         "height": 1,
         "label": "CPU TEMP",
         "unit": "°C",
@@ -1625,7 +1610,7 @@
         "limit": 80,
         "limitLabel": "THROTTLE",
         "precision": 1,
-        "track": 118,
+        "track": 430,
         "series": "",
         "x": 700,
         "y": 160,
@@ -1665,7 +1650,7 @@
         "group": "group-board",
         "name": "memory",
         "order": 3,
-        "width": 8,
+        "width": 12,
         "height": 1,
         "label": "MEMORY",
         "unit": "GB",
@@ -1675,7 +1660,7 @@
         "limit": 7.5,
         "limitLabel": "",
         "precision": 2,
-        "track": 118,
+        "track": 430,
         "series": "",
         "x": 700,
         "y": 220,
@@ -1715,7 +1700,7 @@
         "group": "group-board",
         "name": "board facts",
         "order": 4,
-        "width": 8,
+        "width": 12,
         "height": 1,
         "label": "",
         "cells": "[{\"key\":\"model\",\"label\":\"BOARD\"},{\"key\":\"uptime\",\"label\":\"UP FOR\"},{\"key\":\"yonder\",\"label\":\"YONDER\",\"kind\":\"id\"},{\"key\":\"os\",\"label\":\"SYSTEM\",\"kind\":\"id\"}]",
@@ -1873,7 +1858,13 @@
                 "pick-way-modem",
                 "pick-way-wifi"
             ],
-            []
+            [
+                "ann-reach",
+                "text-reach-why",
+                "bar-reach",
+                "pick-reach-strength",
+                "pick-reach-quality"
+            ]
         ]
     },
     {
@@ -2764,5 +2755,175 @@
         "wrapText": true,
         "x": 1000,
         "y": 2740
+    },
+    {
+        "id": "pick-reach-strength",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "RSRP, and whether there is a gauge to draw at all",
+        "rules": [
+            {
+                "t": "set",
+                "p": "visible",
+                "pt": "msg",
+                "to": "payload.showsSignal",
+                "tot": "jsonata"
+            },
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "payload.gauges.strength",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 700,
+        "y": 2900,
+        "wires": [
+            [
+                "gauge-reach-strength"
+            ]
+        ]
+    },
+    {
+        "id": "pick-reach-quality",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "SINR, and whether there is a gauge to draw at all",
+        "rules": [
+            {
+                "t": "set",
+                "p": "visible",
+                "pt": "msg",
+                "to": "payload.showsSignal",
+                "tot": "jsonata"
+            },
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "payload.gauges.quality",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 700,
+        "y": 2960,
+        "wires": [
+            [
+                "gauge-reach-quality"
+            ]
+        ]
+    },
+    {
+        "id": "ann-reach",
+        "type": "ui-yonder-annunciator",
+        "z": "yonder-console",
+        "group": "group-status-reach",
+        "name": "the one-word answer",
+        "order": 1,
+        "width": 12,
+        "height": 1,
+        "label": "",
+        "source": "yonder",
+        "x": 1020,
+        "y": 2780,
+        "wires": []
+    },
+    {
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-status-reach",
+        "height": 1,
+        "label": "",
+        "format": "{{msg.payload}}",
+        "valueType": "msg",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "className": "yonder-qualifier",
+        "wires": [],
+        "id": "text-reach-why",
+        "name": "what changed, and when",
+        "order": 2,
+        "width": 12,
+        "layout": "row-left",
+        "value": "payload.why",
+        "wrapText": true,
+        "x": 1020,
+        "y": 2840
+    },
+    {
+        "type": "ui-yonder-gauge",
+        "z": "yonder-console",
+        "group": "group-status-reach",
+        "height": 1,
+        "width": 12,
+        "sense": "higher-is-better",
+        "limitLabel": "",
+        "precision": 0,
+        "track": 430,
+        "series": "",
+        "wires": [],
+        "id": "gauge-reach-strength",
+        "name": "signal",
+        "order": 3,
+        "label": "SIGNAL",
+        "unit": "dBm",
+        "min": -120,
+        "max": -70,
+        "caution": -90,
+        "limit": -105,
+        "x": 1020,
+        "y": 2900
+    },
+    {
+        "type": "ui-yonder-gauge",
+        "z": "yonder-console",
+        "group": "group-status-reach",
+        "height": 1,
+        "width": 12,
+        "sense": "higher-is-better",
+        "limitLabel": "",
+        "precision": 0,
+        "track": 430,
+        "series": "",
+        "wires": [],
+        "id": "gauge-reach-quality",
+        "name": "quality",
+        "order": 4,
+        "label": "QUALITY",
+        "unit": "dB",
+        "min": -5,
+        "max": 25,
+        "caution": 13,
+        "limit": 0,
+        "x": 1020,
+        "y": 2960
+    },
+    {
+        "id": "bar-reach",
+        "type": "ui-yonder-databar",
+        "z": "yonder-console",
+        "group": "group-status-reach",
+        "name": "what identifies the link",
+        "order": 5,
+        "width": 12,
+        "height": 1,
+        "label": "",
+        "cells": "[{\"key\":\"operator\",\"label\":\"OPERATOR\"},{\"key\":\"technology\",\"label\":\"NETWORK\"},{\"key\":\"address\",\"label\":\"ADDRESS\",\"kind\":\"id\"}]",
+        "x": 1020,
+        "y": 3020,
+        "wires": []
     }
 ]

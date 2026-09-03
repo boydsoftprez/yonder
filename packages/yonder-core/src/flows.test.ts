@@ -1101,16 +1101,23 @@ describe("flows/flows.json Way out rows", () => {
  * where the aircraft's link stands.
  */
 describe("flows/flows.json status page remote line", () => {
+  /**
+   * Found by its label and then checked for its binding, not the other way
+   * round. Two panels on this page now say what a subsystem is doing out of a
+   * `payload.summary` — the mesh, and the link in `Reachable by` — so a
+   * search by binding would return whichever happened to be written into the
+   * file first and assert the other one's label.
+   */
   it("shows the mesh summary, labelled Remote", () => {
     const page = flows.find((n) => n.type === "ui-page" && n.name === "Status");
     const groups = new Set(
       flows.filter((n) => n.type === "ui-group" && n.page === page?.id).map((n) => n.id),
     );
     const line = flows.find(
-      (n) => n.type === "ui-text" && groups.has(String(n.group)) && n.value === "payload.summary",
+      (n) => n.type === "ui-text" && groups.has(String(n.group)) && n.label === "Remote",
     );
-    expect(line, "the Status page has no line bound to payload.summary").toBeDefined();
-    expect(line?.label).toBe("Remote");
+    expect(line, "the Status page has no line labelled Remote").toBeDefined();
+    expect(line?.value).toBe("payload.summary");
   });
 
   // The Status page reads independently of which Network tab is open, so it
@@ -1126,6 +1133,204 @@ describe("flows/flows.json status page remote line", () => {
     for (const inj of periodic) {
       expect(Number(inj.repeat) * 1000, `${String(inj.id)} repeats every ${String(inj.repeat)} s`)
         .toBeGreaterThanOrEqual(MIN_POLL_MS);
+    }
+  });
+});
+
+/**
+ * `Reachable by` on the Status page (R-UI-05, R-UI-09, R-UI-11, R-CEL-11).
+ *
+ * A sibling of `This board`, in that panel's idiom — gauges over a labelled
+ * strip — because it is the same kind of thing: a few live measurements and
+ * the facts that identify them. `Remote` is a one-line summary and is
+ * deliberately not the model here.
+ *
+ * Status is a `grid` page, not a `tabs` one, so a group here is a panel and
+ * not a tab. That is the whole difference from the Cellular tab and the
+ * `Way out` rows, both of which had to be built inside an existing group.
+ */
+describe("flows/flows.json Reachable by", () => {
+  const byId = (id: string) => flows.find((n) => n.id === id);
+  const inPanel = flows.filter((n) => n.group === "group-status-reach");
+
+  it("is a panel of its own, full width, directly under This board", () => {
+    const group = byId("group-status-reach");
+    expect(group?.type).toBe("ui-group");
+    expect(group?.page).toBe("page-status");
+    expect(group?.name).toBe("Reachable by");
+    // Full width is not decoration: it is what gives the gauge track the room
+    // the bands need to separate at a glance.
+    expect(group?.width).toBe(12);
+    expect(Number(group?.order)).toBeGreaterThan(Number(byId("group-board")?.order));
+    expect(Number(group?.order)).toBeLessThan(Number(byId("group-status-remote")?.order));
+  });
+
+  /**
+   * One node, four outputs, one tick. A second poller would have Status
+   * saying CELLULAR beside a Cellular tab that had not noticed yet — and the
+   * disagreement is the one thing an operator cannot check.
+   */
+  it("is fed by the state node's fourth output, and by nothing else", () => {
+    const state = flows.find((n) => n.type === "yonder-modem-state");
+    expect((state!.wires as string[][])[3]).toEqual([
+      "ann-reach", "text-reach-why", "bar-reach",
+      "pick-reach-strength", "pick-reach-quality",
+    ]);
+  });
+
+  /**
+   * R-UI-11: the lamp is read before the word. The one-word answer arrives as
+   * a `CommandStatus` on `msg.yonder`, built by `reachStatus()` in the modem
+   * package, so no `change` node here turns a state into a colour.
+   */
+  it("says how the aircraft is reachable as a lit lamp, not as coloured text", () => {
+    const lamp = byId("ann-reach");
+    expect(lamp?.type).toBe("ui-yonder-annunciator");
+    expect(lamp?.source).toBe("yonder");
+    // No label, so the lamp carries the daemon's own word.
+    expect(lamp?.label).toBe("");
+    expect(Number(lamp?.order)).toBe(1);
+  });
+
+  /**
+   * The line that says *why* the answer is that word — which path stood down,
+   * and when. It is `payload.why`, composed by `reachWhy()` in the modem
+   * package, and never the modem's own `summary`: that sentence is about the
+   * radio, and under a lamp reading `NOTHING` it said "Connected to Dark
+   * Star", which is the console contradicting itself on one line.
+   */
+  it("puts the sentence under it, as a qualifier and not as a reading", () => {
+    const line = byId("text-reach-why");
+    expect(line?.type).toBe("ui-text");
+    expect(line?.value).toBe("payload.why");
+    expect(line?.wrapText).toBe(true);
+    // `.nrdb-ui-text-value` is large, bold, tabular and right-aligned — right
+    // for an address, wrong for prose about one.
+    expect(line?.className).toBe("yonder-qualifier");
+    // Stacked, not side by side. The lamp hugs its caption, so reserving
+    // columns beside it leaves a gap the eye reads as a missing value.
+    expect(byId("ann-reach")?.width).toBe(12);
+    expect(line?.width).toBe(12);
+    expect(Number(line?.order)).toBeGreaterThan(Number(byId("ann-reach")?.order));
+  });
+
+  /**
+   * R-UI-09, and the sentence it gained: which direction is bad is a property
+   * of the quantity and is stated, never assumed. Getting `sense` wrong here
+   * draws a dying link as a full bar.
+   *
+   * The bounds are the Cellular tab's, to the number. Two scales for one
+   * quantity is two different answers to "is this signal usable", and the
+   * operator would have no way to tell which page was lying.
+   */
+  it.each([
+    { id: "gauge-reach-strength", label: "SIGNAL", unit: "dBm",
+      min: -120, max: -70, caution: -90, limit: -105, twin: "gauge-cell-strength" },
+    { id: "gauge-reach-quality", label: "QUALITY", unit: "dB",
+      min: -5, max: 25, caution: 13, limit: 0, twin: "gauge-cell-quality" },
+  ])("draws $label against the same scale the Cellular tab uses", (g) => {
+    const gauge = byId(g.id);
+    expect(gauge?.type).toBe("ui-yonder-gauge");
+    expect(gauge?.label).toBe(g.label);
+    expect(gauge?.unit).toBe(g.unit);
+    expect(gauge?.sense, "a dying link drawn as a full bar (R-UI-09)").toBe("higher-is-better");
+    for (const k of ["min", "max", "caution", "limit"] as const) {
+      expect(gauge?.[k], `${g.label} ${k}`).toBe(g[k]);
+      expect(gauge?.[k], `${g.label} ${k} differs from the Cellular tab`)
+        .toBe(byId(g.twin)?.[k]);
+    }
+  });
+
+  /**
+   * The reason for the full-width placement, stated as a number.
+   *
+   * At this track width the amber and green bands separate at a glance, which
+   * is the whole point of a banded gauge on a page that is glanced at. All
+   * four gauges on the page read at one scale, which is what `This board`
+   * going full width was for.
+   */
+  it("gives every gauge on the page the same, wider track", () => {
+    for (const id of ["gauge-load", "gauge-temp", "gauge-mem",
+                      "gauge-reach-strength", "gauge-reach-quality"]) {
+      expect(byId(id)?.track, id).toBe(430);
+      expect(byId(id)?.width, id).toBe(12);
+    }
+    // And the Cellular tab keeps its own, narrower one: it is half a tab wide.
+    expect(byId("gauge-cell-strength")?.track).toBe(118);
+  });
+
+  /**
+   * **It degrades rather than breaks.** On a board with no modem the gauges
+   * are absent, not empty — a gauge with no needle reads as a fault, and
+   * *there is no modem* is not a fault.
+   *
+   * The binding is a wire and not a decision: `showsSignal` is settled in the
+   * modem package, where it is tested, and the flow only carries it onto
+   * `msg.visible`. It is set before `payload` is replaced, because after that
+   * rule the field is gone.
+   */
+  it.each(["strength", "quality"])("hides the %s gauge rather than emptying it", (which) => {
+    const pick = byId(`pick-reach-${which}`);
+    expect(pick?.type).toBe("change");
+    const rules = pick?.rules as { t: string; p: string; to: string; tot: string }[];
+    expect(rules.map((r) => r.p)).toEqual(["visible", "payload"]);
+    expect(rules[0].to).toBe("payload.showsSignal");
+    // JSONata, not a plain property read: a failed tick sends `payload: null`
+    // and `null.showsSignal` throws in the latter.
+    for (const r of rules) {
+      expect(r.t).toBe("set");
+      expect(r.tot).toBe("jsonata");
+    }
+    // The gauge is fed the bare number; the strings are the databar's job.
+    expect(rules[1].to).toBe(`payload.gauges.${which}`);
+    expect((pick?.wires as string[][])[0]).toEqual([`gauge-reach-${which}`]);
+  });
+
+  /**
+   * The strip under the gauges: the facts that identify what is being
+   * measured, in the words the Cellular tab already uses for them.
+   *
+   * Status says `SIGNAL` and `QUALITY` where the tab says RSRP and SINR — a
+   * glance and a detail view — but the facts are the same facts and are
+   * labelled the same way.
+   */
+  it("names what is being measured, under the gauges", () => {
+    const bar = byId("bar-reach");
+    expect(bar?.type).toBe("ui-yonder-databar");
+    expect(bar?.width).toBe(12);
+    const cells = JSON.parse(String(bar?.cells)) as { key: string; label: string }[];
+    expect(cells.map((c) => c.key)).toEqual(["operator", "technology", "address"]);
+    expect(cells.map((c) => c.label)).toEqual(["OPERATOR", "NETWORK", "ADDRESS"]);
+    // The strip is the panel's floor and stays on a board with no modem, so
+    // its order is below both gauges.
+    for (const id of ["gauge-reach-strength", "gauge-reach-quality"]) {
+      expect(Number(bar?.order)).toBeGreaterThan(Number(byId(id)?.order));
+    }
+  });
+
+  /**
+   * `Appearance` explained why two palettes exist — an argument that lands
+   * once, on a page an operator returns to. The `Day`/`Night` rail it was
+   * explaining stays, in a different group.
+   */
+  it("no longer explains itself, and still lets the operator choose", () => {
+    expect(flows.find((n) => n.id === "group-appearance")).toBeUndefined();
+    expect(flows.find((n) => n.id === "note-theme")).toBeUndefined();
+    const page = flows.find((n) => n.type === "ui-page" && n.name === "Status");
+    const groups = new Set(
+      flows.filter((n) => n.type === "ui-group" && n.page === page?.id).map((n) => n.id),
+    );
+    expect(flows.filter((n) => n.type === "ui-markdown" && groups.has(String(n.group))))
+      .toEqual([]);
+    // The rail the panel was about.
+    expect(flows.find((n) => n.id === "keys-status")?.group).toBe("group-rail-status");
+  });
+
+  // CLAUDE.md rule 2, on the page that gained the most wiring in this change.
+  it("ships no function node", () => {
+    expect(inPanel.some((n) => n.type === "function")).toBe(false);
+    for (const id of ["pick-reach-strength", "pick-reach-quality"]) {
+      expect(byId(id)?.type).toBe("change");
     }
   });
 });

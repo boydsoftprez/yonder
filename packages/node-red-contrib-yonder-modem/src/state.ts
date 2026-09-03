@@ -15,11 +15,14 @@ import type { NodeMessage, RED, RedNode } from "./red.js";
 import {
   QUALITY_BOUNDS,
   SIGNAL_BOUNDS,
+  cannotTell,
   formatDb,
   formatDbm,
   formatTechnology,
   pathDetail,
   pathStatus,
+  reachStatus,
+  reachWhy,
   verdict,
   verdictStatus,
 } from "./format.js";
@@ -103,6 +106,51 @@ export interface ShownPathRow extends PathRow {
   status: CommandStatus;
 }
 
+/**
+ * A row for a panel whose tick failed: a name, a lamp and a sentence, and
+ * nothing that pretends to be a reading.
+ *
+ * It is a narrower type than `ShownPathRow` on purpose. A failed read knows
+ * no standing, no evidence and no device, and inventing plausible values for
+ * those so the shapes matched would put fiction where the panel expects fact.
+ * The three fields here are the three the row draws.
+ */
+export interface UnreadablePathRow {
+  path: PathName;
+  name: string;
+  detail: string;
+  status: CommandStatus;
+}
+
+/**
+ * Every path, saying that nothing can be told about it (R-UI-05).
+ *
+ * When a tick fails there is no list of paths to pick a row out of, and a
+ * `change` node picking from nothing removes `msg.yonder` — which drops each
+ * lamp to the shared idle label `Ready`, in grey, at the one moment an
+ * operator most needs the word to be true.
+ *
+ * The rows are rebuilt here rather than the flow being taught a conditional,
+ * because "if the daemon did not answer, say this instead" is a decision, and
+ * a decision serialised beside wire coordinates cannot be reviewed
+ * (CLAUDE.md rule 2). It is also the only fix that leaves the row's *name*
+ * on screen: a panel of three blank rows with three red lamps says less than
+ * three named paths that each say why they are blank.
+ *
+ * The path list comes from `PATH_WORDS` rather than from a second list
+ * written here — the same reason `pathName` derives its words from it.
+ * Naming a path is not a claim that this board has one; the whole message is
+ * that nothing is known either way.
+ */
+export function unreadableRows(message: string, at: number): UnreadablePathRow[] {
+  return (Object.keys(PATH_WORDS) as PathName[]).map((path) => ({
+    path,
+    name: pathName(path),
+    detail: message,
+    status: cannotTell(at),
+  }));
+}
+
 export interface StatePayload {
   mode: ModemState["mode"];
   summary: string;
@@ -125,6 +173,21 @@ export interface StatePayload {
    * rather than drawing four dashes, which read as a fault.
    */
   reportsSignal: boolean;
+  /**
+   * Whether there is a signal reading to draw at all (R-UI-05).
+   *
+   * **Not the same question as `reportsSignal`, and this is why both exist.**
+   * `reportsSignal` is a property of the *kind* of modem — false only for an
+   * appliance, which keeps its radio behind its own interface. A board with
+   * no modem in it at all has no kind, so `reportsSignal` there is true, and
+   * a panel that hid its gauges on that field alone would draw two empty
+   * gauges on exactly the board the design says must not have any.
+   *
+   * A gauge with no needle reads as a fault, and *there is no modem* is not a
+   * fault. So the Status panel asks this, which is both: a modem that can
+   * report a signal, and a modem that is there.
+   */
+  showsSignal: boolean;
   /** The one line at the top of the Cellular tab, already judged. */
   verdict: { text: string; tone: "good" | "bad" | "neutral" };
   /** The readings as a databar shows them: a number and its unit, or an em dash. */
@@ -150,6 +213,19 @@ export interface StatePayload {
    * One word for the Status panel: `ETHERNET`, `CELLULAR`, `WI-FI`, `NOTHING`.
    */
   reachableBy: string;
+  /**
+   * Whether a named path is actually carrying traffic — the fact
+   * `reachableBy` was chosen from, carried so that the lamp beside the word
+   * is lit from the same reading the word came out of.
+   *
+   * **Not `carrying`.** That one is the watchdog's question and is
+   * deliberately optimistic: it answers true when nothing holds an address at
+   * all, because an address on an interface the monitor has no path for is
+   * not its to condemn. Lighting the lamp from it drew a green `NOTHING`.
+   */
+  reachable: boolean;
+  /** What changed and when, for the line under that word. See `reachWhy`. */
+  why: string;
   /** True while some path is carrying traffic. The watchdog's question (K-40). */
   carrying: boolean;
 }
@@ -193,8 +269,13 @@ export function messageFor(modem: ModemState, reach: ReachState): { payload: Sta
   // monitor answers true on every doubt, so false is evidence rather than
   // absence of it (K-40, R-NET-07). A route that reaches nothing is not a
   // way the device is reachable.
-  const reachableBy =
-    !reach.carrying || reach.inUse === null ? "NOTHING" : pathName(reach.inUse).toUpperCase();
+  //
+  // One expression, two fields. The lamp on Status is lit from `reachable`
+  // and the word is chosen from it, so they cannot disagree — which they did:
+  // lighting the lamp from `carrying` alone put a green lamp on the word
+  // NOTHING, because `carrying` is also true when no path holds an address.
+  const reachable = reach.carrying && reach.inUse !== null;
+  const reachableBy = reachable ? pathName(reach.inUse as PathName).toUpperCase() : "NOTHING";
 
   return {
     payload: {
@@ -209,6 +290,9 @@ export function messageFor(modem: ModemState, reach: ReachState): { payload: Sta
       ports: modem.ports,
       portSummary: modem.ports.length === 0 ? null : modem.ports.join(" · "),
       reportsSignal: modem.reportsSignal,
+      // See `showsSignal` above. `mode` is the only field that says whether
+      // there is a modem at all; `reportsSignal` says what kind it is.
+      showsSignal: modem.reportsSignal && modem.mode !== "absent",
       verdict: verdict(reach),
       signal: {
         strength: formatDbm(strength),
@@ -220,6 +304,8 @@ export function messageFor(modem: ModemState, reach: ReachState): { payload: Sta
       bounds: { strength: SIGNAL_BOUNDS, quality: QUALITY_BOUNDS },
       paths,
       reachableBy,
+      reachable,
+      why: reachWhy(paths),
       carrying: reach.carrying,
     },
   };
@@ -280,14 +366,36 @@ export function fanOut(payload: StatePayload, at: number = Date.now()): NodeMess
     // tone into a command state is a decision (CLAUDE.md rule 2). A flow
     // picks one row and hands the widgets its fields; it works nothing out.
     { payload: payload.paths.map((p) => ({ ...p, status: pathStatus(p, at) })) },
-    // 4 — the Status panel: one word, and the same verdict the tab shows, so
-    // the two pages cannot disagree about the modem.
+    // 4 — the Status panel: one word, the facts that identify it, and the
+    // same readings the Cellular tab draws, so the two pages cannot disagree
+    // about one modem.
+    //
+    // `Reachable by` is built in the idiom of `This board` — gauges over a
+    // labelled strip — so it needs what a strip prints (`operator`,
+    // `technology`, `address`, already formatted) and what a gauge places
+    // (`gauges`, `bounds`, bare numbers). Both are taken from the fields
+    // above rather than recomputed: one reading, shown twice.
+    //
+    // `showsSignal` travels with them because the gauges are *absent* on a
+    // board with no modem rather than empty, and a flow binding a widget's
+    // `visible` to a field is a wire; working out which field that should be
+    // is a decision, and it is taken in `messageFor`.
     {
+      yonder: reachStatus(payload.reachableBy, payload.reachable, at),
       payload: {
         reachableBy: payload.reachableBy,
+        reachable: payload.reachable,
         carrying: payload.carrying,
+        why: payload.why,
         verdict: payload.verdict,
         summary: payload.summary,
+        operator: payload.operator,
+        technology: payload.technology,
+        address: payload.address,
+        gauges: payload.gauges,
+        bounds: payload.bounds,
+        reportsSignal: payload.reportsSignal,
+        showsSignal: payload.showsSignal,
       },
     },
   ];
@@ -341,10 +449,21 @@ export default function register(RED: RED): void {
       // One tick is one answer, so a failure on either route rejects the
       // whole tick on all four outputs. Half a record would leave one surface
       // showing a reading from a moment the others never saw.
+      //
+      // Output 3 is the exception in shape and not in meaning. Its widgets
+      // are picked out of a list by name, and a pick from a null payload
+      // removes `msg.yonder` — which drops a `Way out` lamp to the shared
+      // idle label `Ready`, in grey, on a tick where nothing is known at all.
+      // So the rows are rebuilt saying so. See `unreadableRows`.
       const reject = (message: string): void => {
         node.status({ fill: "red", shape: "ring", text: "not answering" });
-        const rejected: NodeMessage = { payload: null, yonder: readFailure(message, Date.now()) };
-        send([rejected, rejected, rejected, rejected]);
+        const at = Date.now();
+        const rejected: NodeMessage = { payload: null, yonder: readFailure(message, at) };
+        const rows: NodeMessage = {
+          payload: unreadableRows(message, at),
+          yonder: readFailure(message, at),
+        };
+        send([rejected, rejected, rows, rejected]);
       };
       // The modem's message first when both failed: it names the thing the
       // operator was looking at.

@@ -130,6 +130,112 @@ function lit(tone: Verdict["tone"], text: string, at: number): CommandStatus {
 }
 
 /**
+ * What a lamp says when the daemon did not answer at all.
+ *
+ * A tick that fails carries no row for a panel to draw, so a lamp finds
+ * nothing on `msg.yonder` and falls back to `presentation("idle")` — whose
+ * shared label is `Ready`. Nothing claims success there and the tone is
+ * neutral, but the word is wrong at exactly the moment words matter: an
+ * operator reading `Ready` beside a blank row has been told the link is fine
+ * by a console that has no idea whether it is.
+ *
+ * **`bad`, not neutral.** Neutral is the lamp `NOT YET TESTED` wears, which is
+ * an ordinary standing on a healthy board. A console that cannot reach its own
+ * daemon is a fault, and it is the same fault the Cellular tab already draws
+ * in red through `readFailure` — two surfaces describing one event have to
+ * agree about how bad it is.
+ *
+ * The words are the honest ones: nothing here says the path is down, only
+ * that nothing can be told about it.
+ */
+export function cannotTell(at: number): CommandStatus {
+  return lit("bad", "CANNOT TELL", at);
+}
+
+/**
+ * The Status page's one-word answer, as the annunciator reads it (R-UI-11).
+ *
+ * `reachableBy` is `ETHERNET`, `CELLULAR`, `WI-FI` or `NOTHING`, and
+ * `reachable` is the *same fact* that chose between them, settled once in
+ * `messageFor`. Both arrive here together for one reason, and it is a defect
+ * this had before a capture was looked at: the lamp was lit from
+ * `ReachState.carrying`, which is deliberately optimistic — it answers true
+ * when nothing holds an address at all, because addresses on interfaces this
+ * monitor has no path for are not its to condemn. So a board with no path in
+ * use drew a **green** lamp on the word `NOTHING`, which is a console
+ * disagreeing with itself in the two characters an operator reads first.
+ *
+ * Nothing here matches the word to work the tone out. Matching would be a
+ * second rule for what `NOTHING` means, and a second rule is the one that
+ * stops agreeing with the first.
+ *
+ * `NOTHING` is bad and not neutral. Nothing is getting off this board; the
+ * console being readable over the access point is not evidence that the
+ * aircraft is reachable, which is the whole question this panel answers.
+ */
+export function reachStatus(reachableBy: string, reachable: boolean, at: number): CommandStatus {
+  return lit(reachable ? "good" : "bad", reachableBy, at);
+}
+
+/**
+ * The device's own clock, to the minute.
+ *
+ * Local rather than UTC, and this is the one place in the project where that
+ * is right: every other timestamp Yonder writes goes into a log that may be
+ * read anywhere, and this one is read standing next to the aircraft by
+ * somebody whose watch says the same thing.
+ */
+function clockTime(at: number): string {
+  const d = new Date(at);
+  const pad = (n: number): string => String(n).padStart(2, "0");
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** What `reachWhy` reads. A `PathRow` satisfies it. */
+export interface ReachLine {
+  name: string;
+  standing: PathStanding;
+  /** When this path was stood down, epoch ms; null when it has not been. */
+  since: number | null;
+  inUse: boolean;
+}
+
+/**
+ * The line under the one-word answer: what changed, and when.
+ *
+ * It exists because the lamp alone answers the wrong half of the question. An
+ * operator reading `CELLULAR` knows *what* is carrying traffic and not *why
+ * it is not the wired port*, and that second half is the whole of what a
+ * fallback looks like from the outside.
+ *
+ * **The stood-down path first, and the most recent one**, because that is the
+ * event that moved the answer. `since` is non-null only while a path is
+ * currently stood down — the record is cleared when it comes back — so this
+ * never reports an old outage as news.
+ *
+ * The other branches are quieter on purpose. When nothing has been taken out
+ * of the running there is no event to report, and the honest line is what the
+ * board is doing instead. None of them restates the lamp on its own: each
+ * adds the fact the lamp cannot carry.
+ */
+export function reachWhy(paths: ReachLine[]): string {
+  // A path that is not on this board has no standing to report.
+  const present = paths.filter((p) => p.standing !== "absent");
+  if (present.length === 0) return "There is no way out on this board";
+
+  const down = present
+    .filter((p) => p.since !== null)
+    .sort((a, b) => (b.since as number) - (a.since as number));
+  if (down.length > 0) return `${down[0].name} stood down at ${clockTime(down[0].since as number)}`;
+
+  const carrying = present.find((p) => p.inUse);
+  if (carrying !== undefined) {
+    return `${carrying.name} is carrying traffic, and nothing has stood down`;
+  }
+  return "Nothing has stood down, and nothing is carrying traffic";
+}
+
+/**
  * What is written beside a `Way out` row's lamp: one path's standing, in a
  * word (R-UI-11).
  *

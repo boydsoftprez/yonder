@@ -4,11 +4,14 @@ import { reading } from "yonder-core";
 import {
   QUALITY_BOUNDS,
   SIGNAL_BOUNDS,
+  cannotTell,
   formatDb,
   formatDbm,
   formatTechnology,
   pathStanding,
   pathStatus,
+  reachStatus,
+  reachWhy,
   verdict,
   verdictStatus,
 } from "./format.js";
@@ -251,5 +254,137 @@ describe("the verdict, as the annunciator reads it", () => {
     for (const tone of ["good", "bad", "neutral"] as const) {
       expect(verdictStatus({ text: "NO MODEM", tone }, 1).message).toBe("NO MODEM");
     }
+  });
+});
+
+/**
+ * The Status page's one-word answer (R-UI-11).
+ *
+ * `reachableBy` is settled in `messageFor`; the only judgement here is the
+ * lamp beside it, and it comes off `carrying` rather than off matching the
+ * word — a second rule for what `NOTHING` means is the one that stops
+ * agreeing with the first.
+ */
+describe("how the aircraft is reachable, as the annunciator reads it", () => {
+  it("lights the path that is carrying traffic", () => {
+    expect(reachStatus("CELLULAR", true, 90)).toEqual({
+      state: "confirmed", message: "CELLULAR", at: 90,
+    });
+  });
+
+  /**
+   * Nothing getting off the board is a fault and is drawn as one. The console
+   * being readable over the access point is not evidence that the aircraft is
+   * reachable, which is the whole question this panel answers.
+   */
+  it("draws nothing at all as a fault, not as a quiet neutral", () => {
+    expect(reachStatus("NOTHING", false, 90)).toEqual({
+      state: "rejected", message: "NOTHING", at: 90,
+    });
+  });
+
+  it("never invents a word of its own", () => {
+    for (const word of ["ETHERNET", "CELLULAR", "WI-FI"]) {
+      expect(reachStatus(word, true, 1).message).toBe(word);
+    }
+  });
+});
+
+/**
+ * A lamp on a tick the daemon could not answer.
+ *
+ * The defect: with no status on `msg.yonder` the annunciator falls back to
+ * `presentation("idle")`, whose shared label is `Ready`. Nothing claims
+ * success and the tone is neutral, but the word is wrong at exactly the
+ * moment words matter.
+ */
+describe("a lamp that cannot tell", () => {
+  it("says so, and does not say Ready", () => {
+    const s = cannotTell(7);
+    expect(s.message).toBe("CANNOT TELL");
+    expect(s.message).not.toBe("Ready");
+    expect(s.at).toBe(7);
+  });
+
+  /**
+   * Red, and for one reason: the Cellular tab already draws this same failure
+   * red through `readFailure`. Two surfaces describing one event have to agree
+   * about how bad it is — and neutral is the lamp an ordinary `NOT YET TESTED`
+   * path wears on a perfectly healthy board.
+   */
+  it("agrees with the Cellular tab about how bad a daemon that stopped answering is", () => {
+    expect(cannotTell(7).state).toBe("rejected");
+    expect(cannotTell(7).state).not.toBe("idle");
+  });
+});
+
+/**
+ * The line under the one-word answer.
+ *
+ * The lamp says *what* is carrying traffic; this says *why it is not the
+ * other one*, which is the half a fallback is actually about. It replaced the
+ * modem's own `summary`, which said "Connected to Dark Star" under a lamp
+ * reading `NOTHING` — a console contradicting itself on one line.
+ */
+describe("what changed, and when", () => {
+  const row = (over: Partial<Parameters<typeof reachWhy>[0][number]>) => ({
+    name: "Ethernet", standing: "standing-by" as const, since: null, inUse: false, ...over,
+  });
+
+  /**
+   * A local time, built with the local-time constructor so this says the same
+   * thing on a laptop in London and a runner in UTC.
+   */
+  const at = (h: number, m: number) => new Date(2026, 8, 3, h, m).getTime();
+
+  it("names the path that stood down, and the minute it happened", () => {
+    expect(reachWhy([
+      row({ name: "Ethernet", standing: "no-route-out", since: at(14, 22) }),
+      row({ name: "Cellular", inUse: true }),
+    ])).toBe("Ethernet stood down at 14:22");
+  });
+
+  it("pads a single-digit hour and minute, so the column does not jump", () => {
+    expect(reachWhy([row({ standing: "no-route-out", since: at(9, 5) })]))
+      .toBe("Ethernet stood down at 09:05");
+  });
+
+  /**
+   * The event that moved the answer is the most recent one. An older outage
+   * on a second path is not the news.
+   */
+  it("reports the most recent one when two paths are down", () => {
+    expect(reachWhy([
+      row({ name: "Ethernet", standing: "no-route-out", since: at(14, 22) }),
+      row({ name: "Wi-Fi", standing: "no-route-out", since: at(15, 40) }),
+    ])).toBe("Wi-Fi stood down at 15:40");
+  });
+
+  it("says what is carrying traffic when nothing has been taken out of the running", () => {
+    expect(reachWhy([row({ name: "Cellular", standing: "in-use", inUse: true })]))
+      .toBe("Cellular is carrying traffic, and nothing has stood down");
+  });
+
+  /**
+   * The state this project's own capture harness is in: every path up, nothing
+   * tested, nothing holding a route. The lamp reads NOTHING and this says why
+   * without claiming a fault that has not happened.
+   */
+  it("says so when nothing has stood down and nothing is carrying either", () => {
+    expect(reachWhy([row({}), row({ name: "Cellular" })]))
+      .toBe("Nothing has stood down, and nothing is carrying traffic");
+  });
+
+  /**
+   * A path that is not on this board has no standing to report, so it cannot
+   * be the subject of this line — including when it is the only entry.
+   */
+  it("ignores a path this board does not have", () => {
+    expect(reachWhy([
+      row({ name: "Ethernet", standing: "absent" }),
+      row({ name: "Cellular", standing: "in-use", inUse: true }),
+    ])).toBe("Cellular is carrying traffic, and nothing has stood down");
+    expect(reachWhy([row({ standing: "absent" })])).toBe("There is no way out on this board");
+    expect(reachWhy([])).toBe("There is no way out on this board");
   });
 });

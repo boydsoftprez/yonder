@@ -189,7 +189,10 @@ moves the console off 18881. `ping`, `nmcli`, `mmcli`, `curl`, `hostnamectl`, `r
 modem control port, and a scan with a duplicated SSID so the folding in `scanForNetworks`
 has something real to fold. The `mmcli` one replays the fixtures `yonder-core`'s own parser
 tests are written against — a real EC25 on a live SIM — so the Cellular tab is captured
-showing what a board actually reported rather than a panel of em dashes. The config the
+showing what a board actually reported rather than a panel of em dashes. It answers a
+**second board** as well: a file holds 1 or 0 and is read on every call, and with 0 there
+are no modems at all, which is the board `Reachable by` on Status has to be photographed
+on. The config the
 daemon is given is the shipped default with the modem turned on, because with it off the
 daemon reports the cellular path absent and neither cellular page can be captured at all.
 
@@ -266,8 +269,21 @@ network-interfaces-not-reaching.day.png     every path probed, and reaching noth
 network-interfaces-reaching.day.png         every path probed, and reaching something
 ```
 
+**Status has two shapes and they are two different boards.** `Reachable by` is gauges over
+a labelled strip, and on a board with no modem the gauges are *absent* — a gauge with no
+needle reads as a fault, and there being no modem is not one. The second capture is driven
+by taking the modem out of the harness rather than by sending an empty reading, so what is
+photographed is the panel degrading rather than a panel with a hole in it:
+
+```
+status.day.png                              a board with a modem in it
+status-without-modem.day.png                the same board with nothing in the slot
+```
+
 `capture-pages.mjs --only <page> --as <name>` is what takes one of them, so a state capture
-is held to exactly the rules and the shape reference every other page is.
+is held to exactly the rules and the shape reference every other page is. The shape manifest
+is what proves the degradation rather than the picture: the two gauges appear in the
+without-modem reference carrying `d-none` and a zero box, and the panel is 120 px shorter.
 
 ```
 ./scripts/verify-pages.sh                    # capture, and gate
