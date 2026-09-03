@@ -10,8 +10,8 @@
   },
   "scripts": {
     "test": "npm run test --workspaces --if-present",
-    "build": "npm run build -w yonder-core && npm run build -w node-red-contrib-yonder-system && npm run build -w node-red-contrib-yonder-network && npm run build -w node-red-contrib-yonder-remote && npm run build -w node-red-dashboard-2-yonder",
-    "lint": "npm run build -w yonder-core && tsc --noEmit -p packages/yonder-core/tsconfig.json && tsc --noEmit -p packages/node-red-contrib-yonder-system/tsconfig.json && tsc --noEmit -p packages/node-red-contrib-yonder-network/tsconfig.json && tsc --noEmit -p packages/node-red-contrib-yonder-remote/tsconfig.json && tsc --noEmit -p packages/node-red-dashboard-2-yonder/tsconfig.json"
+    "build": "npm run build -w yonder-core && npm run build -w node-red-contrib-yonder-system && npm run build -w node-red-contrib-yonder-network && npm run build -w node-red-contrib-yonder-remote && npm run build -w node-red-contrib-yonder-modem && npm run build -w node-red-dashboard-2-yonder",
+    "lint": "npm run build -w yonder-core && tsc --noEmit -p packages/yonder-core/tsconfig.json && tsc --noEmit -p packages/node-red-contrib-yonder-system/tsconfig.json && tsc --noEmit -p packages/node-red-contrib-yonder-network/tsconfig.json && tsc --noEmit -p packages/node-red-contrib-yonder-remote/tsconfig.json && tsc --noEmit -p packages/node-red-contrib-yonder-modem/tsconfig.json && tsc --noEmit -p packages/node-red-dashboard-2-yonder/tsconfig.json"
   },
   "devDependencies": {
     "node-red": "^5.0.6",
