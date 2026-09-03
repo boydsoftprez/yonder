@@ -136,8 +136,12 @@ GStreamer: capture → convert → encode (board-specific encoder)
 ```
 
 A single-destination design forces a choice between watching in the browser and feeding
-your ground station. A `tee` costs almost nothing and removes the trade-off: **you get the
-browser preview and the ground-station feed at the same time.**
+your ground station. A `tee` costs almost nothing — measured at two points of one core —
+and removes the *encoding* trade-off: **you get the browser preview and the ground-station
+feed at the same time.** It does not remove the bandwidth one: each consumer that leaves
+over cellular costs its own bitrate, which is why the browser is served a separate, cheaper
+copy by default (R-VID-13) and why every output is reported against the uplink's capacity
+(R-VID-11).
 
 Encoder selection is per board, resolved at install time and recorded in config:
 

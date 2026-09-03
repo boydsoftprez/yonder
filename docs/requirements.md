@@ -98,6 +98,9 @@ Parameter writes are vehicle commands. R-CMD applies to every requirement here.
 | R-CAM-13 | Select an encoder appropriate to the board by probing the hardware, not from a table of board names, and report the encoder in use. An operator may name one explicitly to bypass the probe | 1 |
 | R-CAM-14 | Build a camera's offered formats, resolutions, rates and controls from what the device answers, never from a stored list. **A capability the device advertises but does not answer is absent**, and is reported as advertised-but-unavailable rather than hidden | 1 |
 | R-CAM-15 | Capture from a camera that is itself a USB host and expects a phone, by presenting the board as that phone and speaking the camera's own protocol. The picture and the gimbal, exposure and white-balance controls (R-CAM-11) arrive on the same link. Requires a board port that can act as a USB device, which on a Raspberry Pi 4 means header or PoE power | 3 |
+| R-CAM-16 | Accept camera and gimbal commands arriving over MAVLink and relay them to the camera on the same terms as commands from the interface | 2 |
+| R-CAM-17 | **Record to storage, wherever this camera can do it.** A camera with its own recorder records to its own medium at whatever it is capable of; a camera without one is recorded by the board from the running pipeline. The interface says which of the two is happening and shows the remaining time on the medium doing the work. Where the camera holds the file, Yonder says so rather than offering to manage a file it never sees | 2 |
+| R-CAM-18 | **Capture a still on demand**, by the same rule: the camera's own photo where it has one, a frame from the running pipeline where it does not. A still the board holds can be viewed, downloaded and deleted; one the camera holds is reported as the camera's | 2 |
 
 ## R-VID — Video transport
 
@@ -111,9 +114,13 @@ Parameter writes are vehicle commands. R-CMD applies to every requirement here.
 | R-VID-06 | Serve SRT for lossy links, with recovery | 2 |
 | R-VID-07 | Adapt encoder bitrate to measured link conditions, within an operator-set floor and ceiling | 2 |
 | R-VID-08 | Allow a fixed bitrate where the operator prefers determinism | 1 |
-| R-VID-09 | Give a late-joining receiver a decodable picture without waiting for the next natural keyframe | 3 |
+| R-VID-09 | Give a late-joining receiver a decodable picture without waiting for the next natural keyframe. Raised from 3: a browser reconnecting after a link drop is a late joiner, and without this it sees a grey rectangle for up to a GOP | 2 |
 | R-VID-10 | Publish the exact receive-side pipeline for each codec, so a ground station can be configured from the documentation alone | 1 |
 | R-VID-11 | Report the egress bandwidth each running output consumes and their total, against the capacity of the path they leave by. R-VID-05 makes simultaneous outputs possible; this is what stops an operator oversubscribing a link without being told | 1 |
+| R-VID-12 | Announce each camera, its stream and its storage on the MAVLink link Yonder already carries, so a ground station finds the picture without being configured by hand. R-VID-10 makes that configuration possible from the documentation; this makes it unnecessary | 2 |
+| R-VID-13 | **Serve the interface a separate, cheaper copy by default**, encoded from the frames already decoded for the main output, so watching in a browser costs a fraction of what a ground-station feed costs. The full-rate picture stays available on request, and the interface states what requesting it would cost before it is requested. R-VID-05 makes simultaneous outputs possible; this is what keeps them affordable on a cellular uplink | 1 |
+| R-VID-14 | **Where live video cannot be established, serve periodic stills instead**, at a stated cost and with the age of the current frame shown. The fall-back happens without being asked for and reports why it happened, and stills are also offered as a deliberate choice on a link that cannot carry video | 2 |
+| R-VID-15 | **Show the exact receive-side command in the interface**, generated from what the camera is doing at that moment and carrying the address the operator is actually reaching the device on. R-VID-10 makes a ground station configurable from the documentation; this removes the need to read it | 2 |
 
 ## R-CTL — Live camera control
 
@@ -246,6 +253,7 @@ Parameter writes are vehicle commands. R-CMD applies to every requirement here.
 | R-STO-03 | Survive loss of power at any moment without corrupting configuration | 1 |
 | R-STO-04 | Provide a read-only or overlay root option for operators who want it | 3 |
 | R-STO-05 | Ship no periodic background task that writes to the card without a stated reason | 2 |
+| R-STO-06 | **Recording on the device's own medium stops before it fills it.** A reserve is kept that recording may not consume, the remaining time is shown against that reserve, and recording ends by itself when it is reached rather than by exhausting the card. R-STO-02 bounds what logging may take; this bounds what video may | 2 |
 
 ## R-SEC — Security
 
@@ -282,6 +290,7 @@ Parameter writes are vehicle commands. R-CMD applies to every requirement here.
 | R-UI-12 | **Capture every page in both palettes on every build, and fail the build when a page changes shape unreviewed.** A console nobody looks at is a console nobody has checked. **A surface that hides part of itself is captured in each of those parts** — a page whose groups are tabs renders one tab at a time, so capturing it once would quietly narrow "every page" to whichever tab happens to be first | 2 |
 | R-UI-13 | **Generate interface material on the device.** Panel texture, instrument faces and indicator marks are drawn from stylesheet and vector rules, never shipped as raster assets, so they scale to any display and follow the palette without a second set of files | 3 |
 | R-UI-14 | *Withdrawn — folded into R-UI-07.* A third mode was added for direct sunlight while day was a dark display at daylight brightness. Day is the chart now, which is what R-UI-07 and ADR-0005 asked for, so the third mode had nothing left to be | — |
+| R-UI-15 | **Nothing is silently missing.** A capability the device does not have is stated as a fact where its control would have been — never drawn as a control that cannot be used, and never simply absent, because an operator must be able to tell *this camera cannot* from *this page failed*. A capability the device advertises and does not answer keeps its control, marked inoperative and carrying the reason (R-CAM-14). Actions are the exception: the soft-key rail carries only what can be done | 2 |
 
 ---
 
