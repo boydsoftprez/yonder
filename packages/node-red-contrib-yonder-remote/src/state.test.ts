@@ -354,3 +354,48 @@ describe("a state from a daemon older than this console", () => {
     expect(networkName).toBeNull();
   });
 });
+
+// R-UI-09: the sparkline fits itself to the tallest value in its own window,
+// so without the ceiling printed beside it a flat trace and a busy one are the
+// same picture. The board showed exactly that — a nearly flat line with one
+// bump and no way to tell whether it meant kilobits or megabits.
+describe("the sparkline's scale", () => {
+  const withHistory = (rx: number[], tx: number[]) =>
+    ({
+      phase: "connected",
+      networkId: "3b19b3a7166e5d31",
+      deviceId: "9c0589e413",
+      addresses: ["10.113.83.48/24"],
+      interface: "zttqh536rh",
+      detail: null,
+      networkName: "boyd",
+      online: true,
+      relayed: false,
+      latencyMs: 66,
+      lastHeardMs: NOW,
+      peerCount: 4,
+      rxBytes: 0,
+      txBytes: 0,
+      rxBitsPerSecond: rx[rx.length - 1] ?? 0,
+      txBitsPerSecond: tx[tx.length - 1] ?? 0,
+      throughputHistory: rx.map((v, i) => ({ rx: v, tx: tx[i] ?? 0 })),
+    }) as unknown as Parameters<typeof messageFor>[0];
+
+  it("names the ceiling as the tallest value across both series", () => {
+    const msg = messageFor(withHistory([1000, 2000, 1_400_000], [500, 900, 1200]), NOW);
+    expect(msg.payload.peak).toBe("1.4 Mbps");
+  });
+
+  it("says how much time the shape covers", () => {
+    const msg = messageFor(withHistory(new Array(60).fill(1000), new Array(60).fill(500)), NOW);
+    expect(msg.payload.span).toBe("last 2 min");
+  });
+
+  // Nothing to draw is not a ceiling of zero. A "0 bps" caption under an empty
+  // box reads as a measurement, and there has not been one.
+  it("has no ceiling and no span before there is a series", () => {
+    const msg = messageFor(withHistory([], []), NOW);
+    expect(msg.payload.peak).toBeNull();
+    expect(msg.payload.span).toBeNull();
+  });
+});

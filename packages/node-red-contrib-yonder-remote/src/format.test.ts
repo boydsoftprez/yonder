@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
-import { formatBytes, formatLastHeard, formatRate } from "./format.js";
+import { formatBytes, formatLastHeard, formatRate, formatSpan } from "./format.js";
 
 /**
  * The kind of arithmetic that stays quietly wrong for years: nobody notices a
@@ -113,5 +113,21 @@ describe("formatLastHeard", () => {
   it("counts days from one, with no ceiling", () => {
     expect(formatLastHeard(now - 24 * 60 * 60_000, now)).toBe("1 d ago");
     expect(formatLastHeard(now - 3 * 24 * 60 * 60_000, now)).toBe("3 d ago");
+  });
+});
+
+describe("formatSpan", () => {
+  it.each([
+    [2_000, "last 2 s"],
+    [30_000, "last 30 s"],
+    [120_000, "last 2 min"],
+    [600_000, "last 10 min"],
+    [7_200_000, "last 2 h"],
+  ])("renders %ims as %s", (ms, expected) => {
+    expect(formatSpan(ms)).toBe(expected);
+  });
+
+  it.each([null, undefined, 0, -1, Number.NaN, "2000"])("is null for %s", (bad) => {
+    expect(formatSpan(bad)).toBeNull();
   });
 });

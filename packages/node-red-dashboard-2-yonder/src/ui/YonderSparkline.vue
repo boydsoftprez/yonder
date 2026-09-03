@@ -17,6 +17,20 @@
             <span class="rx"><i />RX</span>
             <span class="tx"><i />TX</span>
         </span>
+
+        <!--
+            The scale, marked (R-UI-09). This chart fits itself to the tallest
+            value in its own window, so without a ceiling printed beside it a
+            flat trace and a busy one look identical, and a single spike
+            silently shrinks everything before it. The number is what makes the
+            shape readable; the span is what says how much time it covers.
+            Both arrive already formatted, so this instrument never has to
+            learn what a bit per second is.
+        -->
+        <span v-if="known" class="y-spark__scale">
+            <span class="y-spark__ceiling">{{ ceilingText }}</span>
+            <span v-if="spanText" class="y-spark__span">{{ spanText }}</span>
+        </span>
     </div>
 </template>
 
@@ -71,6 +85,24 @@ export default {
         state: { type: Object, default: () => ({}) }
     },
     computed: {
+        /**
+         * The ceiling this chart is drawn against, and the time it covers.
+         *
+         * Both arrive already formatted on the message, beside the series, so
+         * this instrument never learns what a bit per second is — the same
+         * reason the rest of the mesh tab is handed words rather than a
+         * client's vocabulary.
+         */
+        ceilingText () {
+            const payload = this.$store?.state?.data?.messages?.[this.id]?.payload
+            const peak = payload && typeof payload === 'object' ? payload.peak : null
+            return typeof peak === 'string' && peak !== '' ? peak : '—'
+        },
+        spanText () {
+            const payload = this.$store?.state?.data?.messages?.[this.id]?.payload
+            const span = payload && typeof payload === 'object' ? payload.span : null
+            return typeof span === 'string' ? span : ''
+        },
         series () {
             const payload = this.$store?.state?.data?.messages?.[this.id]?.payload
             const series = payload && typeof payload === 'object' ? payload.series : null
@@ -213,4 +245,15 @@ circle.tx { fill: var(--yonder-select, #2ad4f0); }
 .y-spark__key i { display: inline-block; width: 12px; height: 0; border-top-width: 2px; border-top-style: solid; }
 .y-spark__key .rx i { border-top-color: var(--yonder-value, #fff); }
 .y-spark__key .tx i { border-top-color: var(--yonder-select, #2ad4f0); border-top-style: dashed; }
+
+/* The scale sits with the key, quiet: it is what the trace is measured
+   against, not a reading in its own right. The ceiling carries the weight
+   because it is the number that makes the shape mean something. */
+.y-spark__scale { display: flex; align-items: baseline; gap: 10px; white-space: nowrap; }
+.y-spark__ceiling {
+  font-family: var(--yonder-font-mono, ui-monospace, monospace);
+  font-size: 0.75rem;
+  color: var(--yonder-value, #fff);
+}
+.y-spark__span { font-size: 0.6875rem; color: var(--yonder-label, #7f8a95); }
 </style>

@@ -2,7 +2,16 @@
 import { clientFor, fetched, readFailure } from "yonder-core";
 import type { DaemonClient, RemoteState } from "yonder-core";
 import type { RED, RedNode } from "./red.js";
-import { formatBytes, formatLastHeard, formatRate } from "./format.js";
+import { formatBytes, formatLastHeard, formatRate, formatSpan } from "./format.js";
+
+/**
+ * What one sample in the sparkline's series is worth, in milliseconds.
+ *
+ * The daemon's sampler owns the real interval; this mirrors it so the span can
+ * be stated in words. Named here rather than inferred from timestamps so that
+ * if the two ever disagree the span is wrong out loud rather than quietly.
+ */
+const SAMPLE_INTERVAL_MS = 2_000;
 
 /** A CIDR-suffixed address, for the one-line summary that has no room for it. */
 function withoutPrefixLength(address: string): string {
@@ -38,6 +47,10 @@ export function messageFor(state: RemoteState, now: number = Date.now()): {
     throughput: string | null;
     /** What the sparkline draws: the same history, split into two plain arrays. */
     series: { rx: number[]; tx: number[] };
+    /** The ceiling the sparkline is drawn against, already in words (R-UI-09). */
+    peak: string | null;
+    /** How much time the sparkline covers, already in words. */
+    span: string | null;
     lastHeard: string | null;
     summary: string;
   };
@@ -105,6 +118,16 @@ export function messageFor(state: RemoteState, now: number = Date.now()): {
     ? { rx: state.throughputHistory.map((s) => s.rx), tx: state.throughputHistory.map((s) => s.tx) }
     : { rx: [], tx: [] };
 
+  // R-UI-09: a bounded quantity is drawn against its bounds. The sparkline
+  // fits itself to the tallest value in its own window, so a flat trace and a
+  // busy one are the same picture unless the ceiling is printed beside it —
+  // and one spike quietly shrinks everything before it. The peak is that
+  // ceiling, formatted here so the instrument stays ignorant of units, and the
+  // span says how much time the shape covers.
+  const peakBits = Math.max(0, ...series.rx, ...series.tx);
+  const peak = series.rx.length === 0 ? null : formatRate(peakBits);
+  const span = series.rx.length === 0 ? null : formatSpan(series.rx.length * SAMPLE_INTERVAL_MS);
+
   const address = state.addresses[0] ?? null;
 
   // The Status page's one line. Nothing configured says so and nothing else;
@@ -132,6 +155,8 @@ export function messageFor(state: RemoteState, now: number = Date.now()): {
       traffic,
       throughput,
       series,
+      peak,
+      span,
       lastHeard: formatLastHeard(state.lastHeardMs, now),
       summary,
     },

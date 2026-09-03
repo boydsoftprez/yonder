@@ -95,3 +95,18 @@ export function formatLastHeard(lastHeardMs: unknown, now: number = Date.now()):
   const days = Math.floor(hours / 24);
   return `${String(days)} d ago`;
 }
+
+/**
+ * How long a stretch of samples covers, in the words a caption uses.
+ *
+ * Whole units only: a sparkline's span is context, not a measurement, and
+ * "last 2 min" is read at a glance where "last 1.97 min" is read twice.
+ */
+export function formatSpan(ms: unknown): string | null {
+  if (typeof ms !== "number" || !Number.isFinite(ms) || ms <= 0) return null;
+  const seconds = Math.round(ms / 1000);
+  if (seconds < 90) return `last ${String(seconds)} s`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 90) return `last ${String(minutes)} min`;
+  return `last ${String(Math.round(minutes / 60))} h`;
+}
