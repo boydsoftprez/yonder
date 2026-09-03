@@ -113,12 +113,14 @@ the value that worked was absent from it.
 
 ---
 
-## 4. The other two surfaces
+## 4. The Interfaces tab
 
-**`Way out`, on the Interfaces tab.** Every path in the operator's configured order, with
-its standing and a sentence saying why. It belongs on Interfaces rather than on Cellular
-because it is about all three paths, and Interfaces is the tab that already covers all
-three.
+**`Way out`** lists every path in the operator's configured order. Each row is the path's
+name, its standing as a **lit annunciator**, and a sentence saying why it is in that state.
+The annunciator rather than coloured text is R-UI-11: the lamp is read before the word.
+
+It belongs on Interfaces rather than on Cellular because it is about all three paths, and
+Interfaces is the tab that already covers all three.
 
 Its wording is what hardware forced, and it is three states rather than two:
 
@@ -132,15 +134,83 @@ The third is the one that matters. A path nobody has tested must not claim to be
 the same distinction between *not yet condemned* and *working* that the fallback watchdog
 had to learn, showing up at the display layer.
 
-**`Reachable by`, on the Status page.** Under `This board`, in that page's existing idiom:
-the same meter-and-value-box as CPU load and the same divided strip of small labelled
-values. One word for how the aircraft is reachable now, and a line for what changed and
-when. Status uses plain words — `SIGNAL`, `QUALITY` — where the tab uses RSRP and SINR. Same
-values; a glance and a detail view.
+The `Interfaces` panel beside it holds addresses and nothing else: the value column is an
+address, anything that is not one is a quiet qualifier under the interface name, and an
+interface with no address shows a dash rather than a sentence dressed as a value.
+`Hostname` is not an interface and sits below the divider as `NAME`.
 
 ---
 
-## 5. What the daemon gains
+## 5. The Status page
+
+This section is larger than "add a cellular panel", and two of the three things in it are
+not cellular at all. They are here because the page is being rebuilt anyway and doing that
+twice costs more than doing it once, and because designing the cellular panel is what
+surfaced them. Each carries its own requirement.
+
+### `REACHABLE BY`
+
+A sibling of `THIS BOARD`, in that panel's idiom — gauges over a labelled strip — because
+it is the same kind of thing: a few live measurements and the facts that identify them. It
+is **not** a sibling of `REMOTE`, which is a one-line summary.
+
+Full width, directly below `THIS BOARD`, so the page reads *the board → how you reach it →
+the mesh → the way back in*. The gauge track is twice its width on the Cellular tab, which
+is the reason for the full-width placement: at that size the amber and green bands separate
+at a glance, which is the whole point of a banded gauge on a page that is glanced at.
+
+**It degrades rather than breaks.** On a board with no modem the gauges are absent and the
+panel is an annunciator over a strip. Nothing shows an empty gauge or a dash where a signal
+would be: a gauge with no needle reads as a fault, and *there is no modem* is not a fault.
+
+Status uses plain words — `SIGNAL`, `QUALITY` — where the Cellular tab uses RSRP and SINR.
+Same values, a glance and a detail view.
+
+### `CHANGE PENDING`, and the page it is missing from
+
+The confirmation timer is what makes this device unbrickable (R-CFG-03). The apply engine
+tracks the pending change and its deadline, and the contrib nodes render it — **on the page
+where the change was made, and nowhere else.** Make a change on the Network page, navigate
+to Status, and nothing tells you that the configuration reverts in ninety seconds unless
+you confirm it.
+
+**A banner at the top of Status, present only when a change is pending**, carrying the
+countdown, what changed, and the two actions. `Confirm` takes the irreversible tone;
+reverting does not, because reverting is the safe direction.
+
+Its wording does not threaten the operator with the revert. The revert is the thing that
+rescues them, and the sentence says so: *if you do not confirm it, the device puts the
+previous configuration back by itself — which is what gets you back in if this change was
+the wrong one.*
+
+### `IF YOU LOSE THIS CONSOLE`
+
+The one thing an operator needs when nothing else on the page is true any more: which
+network to join, the passphrase, the address, the name. Status is the page they will be
+looking at while it goes wrong, so the way back in belongs on it.
+
+**The passphrase is printed only while it is the published default.**
+[ADR-0007](../../adr/0007-credential-boundary.md) makes the shipped passphrase deliberately
+public — a per-device one could only be read from the device you are locked out of, so it
+guarded nothing and locked out the legitimate operator. Once an operator changes it, it is
+theirs, and printing it would be a credential in an API response (R-SEC-10). The panel says
+it has been changed, and does not show it.
+
+### What is deliberately not added
+
+MAVLink streaming state, video status, autocast controls and telemetry endpoints are M5 and
+M4. Yonder has no flight-controller link and no video pipeline, and a panel for a subsystem
+that does not exist is a panel that will be wrong when it does. The layout leaves room, and
+`REMOTE` is already the worked example of a one-line summary of a subsystem.
+
+`APPEARANCE` is removed. It explained why two palettes exist, which is an argument that
+lands once, on a page an operator returns to. With it gone, everything on Status is about
+the aircraft. `THIS BOARD` becomes full width as a consequence and its gauges widen to
+match, so all four gauges on the page read at one scale.
+
+---
+
+## 6. What the daemon gains
 
 Two routes, in the shape M2a set:
 
@@ -164,13 +234,15 @@ Both are behind the administrator password like every other configuration route
 
 ---
 
-## 6. Requirements
+## 7. Requirements
 
-Rule 3: added to `docs/requirements.md` in the same change that implements them. R-CEL ends
-at R-CEL-11, R-UI at R-UI-14.
+Rule 3: added to `docs/requirements.md` in the same change that implements them. R-CEL ends at
+R-CEL-11, R-UI at R-UI-14, R-SEC and R-CFG at 12.
 
 | ID | Requirement | P |
 |---|---|---|
+| R-UI-15 | **A change that will revert is visible wherever the operator is, not only where it was made.** While a configuration change is in force and unconfirmed, every surface of the console shows that it is, how long remains before it reverts, and offers the means to confirm or revert it now. The confirmation timer is what makes the device unbrickable, and an operator who has navigated away from the page they changed something on is exactly the operator about to lose a working configuration to a timer they cannot see. The wording states the revert as the thing that recovers them, not as a threat | 1 |
+| R-UI-16 | **The device shows how to get back to it.** The console names the access point, its address and the name it answers to, on the page an operator looks at when something is wrong. **The access-point passphrase is shown only while it is the published default** — that value is deliberately public and is what makes a locked-out operator's way back in usable at all; one the operator has set is theirs, and the interface says it has been changed rather than printing it (R-SEC-01, R-SEC-10) | 2 |
 | R-CEL-12 | **The interface that reports a broken link is the one that can repair it.** Where the console shows that a cellular link is not carrying traffic, the settings that would fix it are editable from the same surface, and the change goes through the ordinary confirmation and rollback path so that a second wrong value is recoverable rather than fatal. Reporting a fault an operator must then leave the console to correct is most of the value of reporting it thrown away | 2 |
 
 **R-UI-09 gains a sentence rather than a new ID.** It requires a bounded quantity to be
@@ -185,7 +257,7 @@ quantity it already named.
 
 ---
 
-## 7. Shape of the code
+## 8. Shape of the code
 
 ```
 packages/node-red-contrib-yonder-modem/     # currently one .gitkeep
@@ -210,7 +282,7 @@ somewhere and invisible on a screenshot.
 
 ---
 
-## 8. What R-UI-12 requires of this
+## 9. What R-UI-12 requires of this
 
 Every tab captured in both palettes, and **the `Way out` panel captured in more than one
 state.** That is not a formality. Building these screens the first time surfaced a defect
@@ -219,6 +291,16 @@ because it had been given a class carrying `text-align: right`, which showed onl
 qualifier beneath it was the wider line. One capture in one state passed it.
 
 The three path states in §4 are three shapes. Capture them.
+
+**Status has two shapes of its own and both must be captured**, for the same reason: the
+pending banner exists only while a change is pending, and `REACHABLE BY` loses its gauges
+entirely on a board with no modem. A page captured only in its quiet, fully-populated state
+is a page whose other states nobody has looked at — and the pending banner is the one an
+operator sees exactly when something has gone wrong, which is the worst moment to discover
+it renders badly.
+
+That is five shapes across three surfaces, in two palettes. It is more capture than any
+milestone so far has added, and it is the cost of a milestone that is mostly interface.
 
 ---
 
@@ -229,3 +311,6 @@ Daemon routes read from `packages/yonder-core/src/daemon/routes.ts` at the same 
 Console layout read from the deployed `/var/lib/yonder/console/flows.json` on a Raspberry
 Pi 4, whose Network page carries `Interfaces | Wi-Fi | ZeroTier | Activity` and no mention
 of a modem. Signal figures from that board's own EC25-AF on a live SIM, 2026-09-03.
+Every screen in this document was rendered against the generated `theme.ts` stylesheet and
+the real instrument components before it was written down, in both palettes and in each
+state the panels have.
