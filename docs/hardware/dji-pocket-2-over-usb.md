@@ -235,6 +235,32 @@ Byte 10, refined: bit 1 lights at a yaw stop; bit 0 appeared once with it at the
 pose, so it is probably the pitch stop; bits 5 and 7 are on at rest and off during the
 over-the-top excursions, so they are status, not limits.
 
+### The pitch run, and what it cost
+
+The absolute-angle fields were identified cleanly: **field 0 is yaw, field 1 is roll,
+field 2 is pitch.** −20° in field 1 rolled the head −19.9°; −20° in field 2 pitched it
+−19.7°. Then a command to return to `[current yaw, 0, 0]` — the most innocent frame in the
+run — sent the head to pitch 82.9°, yaw −123°, with **all three limit bits set**. The guard
+then refused every following angle command, correctly. The run's final **recentre was not
+guarded**, and a recentre from that pose folded the head to pitch −175° past the tilt stop
+and left the motor stalled and buzzing. The camera was powered off by hand.
+
+Two failures of understanding, both now in the tools:
+
+- **A gimbal already in trouble must not be commanded at all** — not even recentred. Any
+  limit bit, or a head more than 60° from level, and the session tool refuses everything
+  on command set 4 until the operator has put it right by hand.
+- **`4/0x14` is not understood well enough to use.** A return-to-zero from a normal pose
+  produced an excursion; either the yaw field is not what it appears (absolute versus
+  relative to the handle), or the flags byte changes the meaning. Until a capture of the
+  manufacturer's own app shows how it drives this frame, the only gimbal commands with a
+  clean record are recentre from a sane pose and small yaw moves within the window.
+
+And a bench rule that should have been obvious: **the camera lay on its side on the
+desk** for every gimbal run. The head's mechanical envelope assumes an upright handle;
+on its side, "level" and "down" point into the desk and the body. Gimbal experiments are
+done with the handle upright and held.
+
 ### Across the camera's own power cycle
 
 With the accessory session up, the camera was switched off and on and ran its start-up
@@ -293,10 +319,11 @@ board; the operator plugs one cable.
   clean stream should strip them.
 - **Resolution and bitrate control.** The stream arrived at 720p; `camera/0x4c` set
   video-out parameters is the candidate, untried.
-- **The `0x14` absolute-angle field order.** The first field moved yaw; which fields are
-  pitch and roll, and what the two trailing bytes mean, needs one more round.
-- **Which limit bit is which axis** in byte 10 of the attitude push. Bit 1 is yaw; bit 0
-  is probably pitch; roll has not been driven to its stop.
+- **What `0x14` actually means.** The field order is known — yaw, roll, pitch — but a
+  return-to-zero produced a full excursion, so the frame's semantics (absolute or relative
+  yaw, the flags byte, the trailing byte) are not understood. Not to be used until they are.
+- **Which limit bit is which axis** in byte 10 of the attitude push. Bit 1 is yaw; all
+  three lit together in the excursion, so bits 0 and 2 are pitch and roll in some order.
 - **The reachable yaw range as the camera itself defines it**, so the clamp has a number.
   The sweep found about +68° and −65° from centre in YawFollow mode; the mechanical
   range is wider and mode-dependent.

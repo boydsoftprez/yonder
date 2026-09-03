@@ -79,6 +79,9 @@ class Session:
         self.routes = {}
         self.last_att = 0.0
         self.last_yaw = None
+        self.last_pitch = None
+        self.last_roll = None
+        self.last_limit = 0
         self.centre_yaw = None
         os.makedirs(args.logdir, exist_ok=True)
         self.log = Log(os.path.join(args.logdir, "session.log"))
@@ -95,14 +98,26 @@ class Session:
     # command is checked here first, against the window the sweep found safe and a
     # per-command step. Bypass only with --unsafe-gimbal, and only deliberately.
     def gimbal_guard(self, cmdset, cmdid, payload):
-        if cmdset != 4 or cmdid not in (0x14, 0x0A) or self.a.unsafe_gimbal:
+        if cmdset != 4 or self.a.unsafe_gimbal:
             return None
-        if len(payload) < 2:
-            return "no yaw field"
-        yaw = struct.unpack_from("<h", payload, 0)[0] / 10.0
-        if self.a.yaw_window:                      # explicit absolute window wins
+        # 1. Never command a gimbal that is already in trouble. A recentre sent while
+        #    the head was over the top folded it past the tilt stop and stalled the
+        #    motor. Any limit bit, or a head far from level, means the operator puts
+        #    it right by hand first.
+        if self.last_limit:
+            return f"gimbal reports a limit (0x{self.last_limit:02x}); clear it by hand and recentre from the camera first"
+        if self.last_pitch is not None and abs(self.last_pitch) > 60:
+            return f"gimbal pitch is {self.last_pitch:.1f}: not a sane pose to command from"
+        if cmdid not in (0x14, 0x0A):
+            return None
+        # 2. Absolute angle: field 0 yaw, field 1 ROLL, field 2 PITCH — identified on
+        #    the bench. Each is boxed, and each may move at most max_step per command.
+        if len(payload) < 6:
+            return "angle command needs yaw, roll and pitch"
+        yaw, roll, pitch = (v / 10.0 for v in struct.unpack_from("<hhh", payload, 0))
+        if self.a.yaw_window:
             lo, hi = self.a.yaw_window
-        elif self.centre_yaw is not None:          # otherwise a window around centre
+        elif self.centre_yaw is not None:
             lo, hi = self.centre_yaw - self.a.yaw_reach, self.centre_yaw + self.a.yaw_reach
         else:
             return "centre unknown yet: recentre first (4:0x4c:0201:4) or pass --yaw-window"
@@ -110,6 +125,14 @@ class Session:
             return f"yaw {yaw:.1f} outside the safe window {lo:.1f}..{hi:.1f} (centre {self.centre_yaw})"
         if self.last_yaw is not None and abs(yaw - self.last_yaw) > self.a.max_step:
             return f"yaw {yaw:.1f} is {abs(yaw - self.last_yaw):.0f} from current {self.last_yaw:.1f}; max step {self.a.max_step}"
+        rlo, rhi = self.a.roll_window
+        if not (rlo <= roll <= rhi):
+            return f"roll {roll:.1f} outside the roll window {rlo}..{rhi}"
+        plo, phi = self.a.pitch_window
+        if not (plo <= pitch <= phi):
+            return f"pitch {pitch:.1f} outside the pitch window {plo}..{phi}"
+        if self.last_pitch is not None and abs(pitch - self.last_pitch) > self.a.max_step:
+            return f"pitch {pitch:.1f} is {abs(pitch - self.last_pitch):.0f} from current {self.last_pitch:.1f}; max step {self.a.max_step}"
         return None
 
     def learn_centre(self):
@@ -170,8 +193,10 @@ class Session:
               for kind, item in self.split.feed(chunk):
                 if kind == "frame":
                     quiet = (not item.response) and (item.cmdset, item.cmdid) in self.PUSHES
-                    if (item.cmdset, item.cmdid) == (4, 0x05) and len(item.payload) >= 6:
-                        self.last_yaw = struct.unpack_from("<h", item.payload, 4)[0] / 10.0
+                    if (item.cmdset, item.cmdid) == (4, 0x05) and len(item.payload) >= 11:
+                        pv, rv, yv = struct.unpack_from("<hhh", item.payload, 0)
+                        self.last_pitch, self.last_roll, self.last_yaw = pv / 10.0, rv / 10.0, yv / 10.0
+                        self.last_limit = item.payload[10] & 0x07      # bits 0-2: the limit flags
                     if (item.cmdset, item.cmdid) == (4, 0x05) and self.a.track_gimbal:
                         now = time.monotonic()
                         if now - self.last_att >= 0.5:
@@ -266,8 +291,12 @@ if __name__ == "__main__":
     p.add_argument("--sender-idx", type=int, default=1, help="our app index in the sender byte (camera pushes to app0)")
     p.add_argument("--yaw-window", type=float, nargs=2, default=None, metavar=("MIN", "MAX"),
                    help="absolute yaw the guard allows; default is a window around the centre learned at each recentre")
+    p.add_argument("--roll-window", type=float, nargs=2, default=(-15.0, 15.0), metavar=("MIN", "MAX"),
+                   help="absolute roll the guard allows (field 1 of 4/0x14)")
+    p.add_argument("--pitch-window", type=float, nargs=2, default=(-30.0, 20.0), metavar=("MIN", "MAX"),
+                   help="absolute pitch the guard allows (field 2 of 4/0x14); widen only with the camera upright and held")
     p.add_argument("--yaw-reach", type=float, default=55.0,
                    help="half-width of the default window around centre, degrees (the stops were at about 68 and 65)")
-    p.add_argument("--max-step", type=float, default=45.0, help="largest yaw change one command may ask for, degrees")
+    p.add_argument("--max-step", type=float, default=20.0, help="largest change in any axis one command may ask for, degrees")
     p.add_argument("--unsafe-gimbal", action="store_true", help="disable the angle guard (it clicked and spun without it)")
     Session(p.parse_args()).run()
