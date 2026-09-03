@@ -31,7 +31,14 @@ export function messageFor(state: RemoteState): {
             ? "Waiting for you to approve it"
             : state.phase === "connected"
               ? "Connected"
-              : (state.detail ?? "Fault");
+              : // Authorised, and the client still holds a valid configuration for
+                // the network — it simply cannot reach anything right now. That is
+                // not a fault: it is what an aircraft looks like between one uplink
+                // and the next, and calling it a fault would send an operator
+                // looking for a broken configuration that is not broken (R-VPN-10).
+                state.phase === "no-path"
+                ? "Authorised, not reaching the network"
+                : (state.detail ?? "Fault");
 
   return {
     payload: {

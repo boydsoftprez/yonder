@@ -57,3 +57,32 @@ describe("messageFor", () => {
     expect(msg.payload.label).toBe("PORT_ERROR");
   });
 });
+
+// The phase R-VPN-10 introduced. Before this was handled it fell through to the
+// fault branch, and `detail` is null here, so a device that was merely between
+// uplinks announced itself as "Fault" — a worse lie than the "Connected" that
+// R-VPN-10 set out to fix, because it sends somebody looking for a broken
+// configuration that is not broken.
+describe("a valid membership with no path", () => {
+  it("is named, and is not a fault", () => {
+    const msg = messageFor({
+      phase: "no-path",
+      networkId: "9fef8a3bf9000001",
+      deviceId: "9fef8a3bf9",
+      addresses: ["10.147.20.26/24"],
+      interface: "ztuqliuo7y",
+      detail: null,
+      networkName: "somewhere",
+      online: false,
+      relayed: null,
+      latencyMs: null,
+      lastHeardMs: null,
+      peerCount: 0,
+      rxBytes: 0,
+      txBytes: 0,
+    });
+    expect(msg.payload.label).toBe("Authorised, not reaching the network");
+    expect(msg.payload.label).not.toMatch(/fault/i);
+    expect(msg.payload.waiting).toBe(false);
+  });
+});
