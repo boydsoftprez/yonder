@@ -539,7 +539,23 @@ different source:
 | Live-view resolution and rate, stream bitrate, white balance, zoom, focus payloads | **compiled code** in the native library — the handlers that turn an SDK key such as `H1LiveViewResolutionFrameRate` into bytes on the wire | not reachable by reading strings: the library is stripped |
 | Ground truth for anything | a capture of the manufacturer's app talking to the camera | needs an Android device; none on the bench |
 
-The third row was carried as far as it goes without more machinery. The library was
+**Update — the decompiler was built and the dive continued.** Ghidra's decompiler
+source ships in the public release; it built for arm64 with clang in one pass
+(`scripts/pocket2/ghidra/`, ~7 min), and the "no references" wall was the wrong target,
+not a dead end. Decompiling the *named* functions directly — the symbols survive in the
+dynamic table — gave the wire structures:
+
+- **Live-view resolution** is a single `H1LiveViewResolutionFrameRate` enum value serialised
+  as one `u32`, not a byte struct — which is exactly why the byte-shaped `0xbd` guesses were
+  inert. The enum-to-code mapping is the remaining piece.
+- **Digital zoom** is `camera/0x34` (`set_focus_zoom_para`), payload `09 00 00` then a
+  little-endian `u16` = `(factor − 1.0) / step` for a factor of 1.0–10.0 — **not** the
+  `0xb8` the id table's name suggested. Under test on the camera now.
+
+So the decompiler earned its build immediately: it corrected two ids that string-and-guess
+had wrong. What remains below is narrowed, not abandoned.
+
+The rest was carried as far as it goes without yet more machinery. The library was
 imported into Ghidra and fully analysed (`scripts/pocket2/ghidra/`), but two walls stand
 between that and the payloads:
 
