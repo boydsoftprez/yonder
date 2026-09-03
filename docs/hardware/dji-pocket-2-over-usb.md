@@ -243,7 +243,9 @@ field 2 is pitch.** −20° in field 1 rolled the head −19.9°; −20° in fie
 run — sent the head to pitch 82.9°, yaw −123°, with **all three limit bits set**. The guard
 then refused every following angle command, correctly. The run's final **recentre was not
 guarded**, and a recentre from that pose folded the head to pitch −175° past the tilt stop
-and left the motor stalled and buzzing. The camera was powered off by hand.
+and left the motor stalled and buzzing. The camera was powered off by hand; **on restart
+it passed its own gimbal check** and levelled quietly, so the excursion cost nothing
+lasting.
 
 Two failures of understanding, both now in the tools:
 
