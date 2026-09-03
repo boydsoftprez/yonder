@@ -145,6 +145,43 @@ still reach the board while you are breaking its cellular configuration.
 
 **Done when:** you open the console from a different network entirely, through the mesh.
 
+**M2a — ZeroTier — proven on a board, 2026-09-02.** Raspberry Pi 4 Model B, Debian 13
+trixie, aarch64, `zerotier-one` 1.16.2 installed from the offline payload with `apt`
+pointed at a dead proxy — `Need to get 0 B/2,807 kB of archives`, so R-CFG-07 holds — and
+left stopped and disabled. A join reached `waiting-for-approval` in four seconds carrying
+the address a human approves, **held that state unattended for seven and a half minutes
+with nothing reverting and nothing timing out** (R-VPN-07), and reached `connected` with an
+assigned address about twenty seconds after the device was authorised in a real ZeroTier
+controller. Every apply came back `confirmed` with no confirmation window.
+
+The board found two defects no test had, both since fixed: `deb-systemd-helper` refuses to
+run outside `dpkg`, so the client shipped enabled until the role's own post-condition
+caught it; and the renderer asked the client for its networks immediately after starting
+the service, which a first start — generating an identity keypair — is far too slow to
+answer, so the very first join on a fresh device failed and reverted the operator's network
+id. It also surfaced [K-33](known-issues.md), which predates this milestone.
+
+**The exit criterion is met.** On 2026-09-03 the console *and* `ssh` were reached over the
+mesh from a machine sharing no local network with the board, and later that day a fix was
+deployed to the aircraft over the mesh alone — unplanned, while both of the board's LAN
+addresses were unreachable from the machine doing the deploying. That is the milestone's
+own sentence happening by accident, which is the best kind of proof of it.
+
+**What the console shows.** The ZeroTier tab reports what backs the word "connected"
+(R-VPN-10): direct or relayed, latency, the assigned address, when the device was last
+heard from, and throughput as a live rate with a sparkline drawn on the device, its ceiling
+and span marked (R-NET-10, R-UI-09, R-UI-13). The Status page carries a one-line summary.
+
+**Five defects came out of using it on hardware and are recorded rather than fixed** —
+[K-35 to K-39](known-issues.md). Two of them compound and are worth reading together: a
+Wi-Fi network out of range fails *every* apply, and each failed attempt drops the access
+point for twenty-five seconds first. A device in that state is reachable, healthy, and
+impossible to change, while disconnecting anyone watching over the radio.
+
+**M2b — Tailscale — has not started.** R-VPN-02, R-VPN-03 for a second client, and R-VPN-09
+are outstanding; the design for all three is in
+[the spec](superpowers/specs/2026-09-02-remote-access-design.md).
+
 ---
 
 ## M3 — Cellular

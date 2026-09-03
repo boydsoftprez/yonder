@@ -656,6 +656,219 @@ The harness saw it too, once it stopped hiding: `verify-pages.sh` restored the d
 palette with `|| true` after capturing, so a run that failed to restore reported nothing
 and left a held console in the night palette.
 
+### K-33 · Changing the palette does nothing until the page is reloaded
+
+Pressing NIGHT reaches the device and takes effect: the daemon regenerates
+`theme.css`, the choice is written to `config.yaml`, and the apply comes back
+`confirmed` with no confirmation window (R-CFG-12). Watching the device from
+outside the browser while an operator pressed the key showed the palette change
+day → night within seconds.
+
+**The open page does not change.** `flows/flows.json` carries the stylesheet as a
+`ui-template` at `site:style` scope:
+
+```
+@import url("/yonder/theme.css");
+```
+
+That import runs once, when the page loads. Nothing re-fetches it when the
+palette changes, and the URL carries no cache-busting, so an operator who
+presses the key sees their console do nothing at all. The setting is not lost —
+it appears on the next reload — but R-UI-05 says show the operator when a
+control has taken effect, not merely that it was sent, and this shows them
+nothing.
+
+**Why nothing caught it.** `scripts/capture-pages.mjs` presses NIGHT and then
+*navigates* to capture the night palette. A fresh page load is exactly what
+hides this defect, so the gate that exists to look at both palettes cannot see
+it. The same shape of blind spot produced the tab-strip defect fixed in
+`d8dd994`: a check that only ever looks at a surface one way.
+
+Not introduced by M2a — the `style-link` template predates it. Found while
+proving M2a on a board, because that was the first time anyone pressed the key
+and then kept looking at the same page.
+
+**Fix direction:** make the palette's arrival at the page observable — a
+cache-busted stylesheet URL the theme change updates, or have the console
+re-request it — and give the capture gate a case that changes the palette
+*without* reloading, or this returns.
+
+### K-34 · ~~Every mesh join and leave failed on a board, and said the wrong thing about why~~ — CLOSED
+
+`POST /remote/join` and `POST /remote/leave` failed deterministically when driven through
+the daemon socket on a real board, while every reproduction of the same call by hand
+succeeded. Both reported the same sentence:
+
+```
+systemctl disable zerotier-one failed: Synchronizing state of zerotier-one.service
+with SysV service script with /usr/lib/systemd/systemd-sysv-install.
+```
+
+That sentence is a banner `systemctl` prints on a **successful** enable or disable of a
+unit that also ships a SysV init script, which is why the reports read as nonsense and why
+several days went into hunting a fault in `systemRunner` that was not there.
+
+**What was actually happening.** `yonder-core.service` runs under `ProtectSystem=strict`
+with `ReadWritePaths=/etc/yonder /var/lib/yonder`, so the rest of `/etc` is read-only in
+the daemon's own mount namespace. `systemctl enable`/`disable` does its unit-file symlink
+work in PID 1 over D-Bus, which the sandbox does not touch — but its SysV compatibility
+step runs **client-side**, in the calling process. The ZeroTier package ships
+`/etc/init.d/zerotier-one`, so `systemctl` also ran `/usr/lib/systemd/systemd-sysv-install`
+→ `update-rc.d`, which tried to write the `/etc/rc?.d` symlinks and got EROFS:
+
+```
+Synchronizing state of zerotier-one.service with SysV service script with /usr/lib/systemd/systemd-sysv-install.
+Executing: /usr/lib/systemd/systemd-sysv-install disable zerotier-one
+update-rc.d: error: Read-only file system
+```
+
+exit 1. `disable` failed every leave; `enable` failed every join that had to create those
+links. Reproduced in a transient unit given nothing but the same two sandbox settings, so
+it is the sandbox and not the daemon.
+
+**Why nothing caught it, and why the reports misled.** `said()` in
+`src/remote/renderer.ts` reported the **first** line of a command's output. The banner is
+line one and the reason is line three, so the one line that named the cause was thrown
+away at the point of failure. A diagnostic that keeps the noise and drops the reason is
+worse than none: it sent every reader to reproduce a command that works.
+
+Closed with `SYSTEMCTL_SKIP_SYSV=1` on the two `systemctl` calls that change unit files —
+Yonder does not manage SysV runlevels, this board boots systemd, and the generator that
+would make something of an init.d script skips one that has a unit of its own — so the
+step is skipped rather than the sandbox widened. `CommandRunner` grew an optional `env`,
+merged *over* the daemon's environment rather than replacing it. `said()` now reports
+every line. Both are pinned by tests in `src/remote/renderer.test.ts` and
+`src/net/runner.test.ts` that fail against the old code, so this no longer needs a board
+to see. R-VPN-01, R-VPN-07.
+
+### K-35 · `yonder-core` binds its socket only after its first render
+
+The daemon renders the whole configuration before it starts listening, so
+`/run/yonder/core.sock` does not exist until that render finishes. A render that
+takes a while therefore produces a device that systemd reports as healthy and
+that nothing can talk to:
+
+```
+core: active
+socket: ls: cannot access '/run/yonder/core.sock': No such file or directory
+journal: nmcli connection up yonder-wifi
+```
+
+Seen on a board whose configured Wi-Fi network was out of range: the client
+association blocks for about twenty-five seconds, and for all of it
+`systemctl is-active yonder-core` says `active` while the console gets
+connection refused and shows *the device's configuration service is not
+answering*.
+
+The ordering is not accidental — rendering first means a device comes up
+already in the state its configuration describes, rather than serving a console
+that briefly disagrees with the hardware. But it makes the socket's arrival
+depend on the slowest thing in the render, and the slowest thing in the render
+is a radio that may be somewhere else entirely.
+
+Worse on the boot where it matters most: the boot after an operator moved the
+aircraft, which is exactly when the radio situation has changed and when they
+most want the console to answer.
+
+**Fix direction:** bind the socket first and serve a state that says a render is
+in progress. The apply engine already distinguishes `applying` from `idle`, so
+the interface has somewhere to put that.
+
+### K-36 · The access point is dropped before the client is raised
+
+R-NET-12 is explicit that a client is raised *before* the access point is
+dropped, "because the operator submitting those credentials is reaching the
+device through the radio being retuned". A board does it the other way round:
+
+```
+network: taking the access point down
+nmcli connection down yonder-ap
+network: bringing the wifi client up
+nmcli connection up yonder-wifi
+```
+
+With a client that associates, the gap is short and nobody notices. With one
+that cannot — an SSID out of range, a changed passphrase — the access point is
+down for the whole association attempt, about twenty-five seconds, and then the
+apply fails and it comes back. An operator connected over that access point is
+disconnected by every attempt, including the attempt to fix the setting that is
+causing it.
+
+Found while pressing Join on a console reached over the very radio being
+retuned, which is the case R-NET-12's sentence was written about.
+
+### K-37 · A Wi-Fi network that is not in range fails every apply
+
+The network renderer runs before the others, so an SSID it cannot associate with
+fails the whole apply — including applies with nothing to do with Wi-Fi:
+
+```
+POST /remote/join failed: nmcli exited 4: Error: Connection activation failed:
+The Wi-Fi network could not be found
+```
+
+That request was a mesh join. The board was reachable on Ethernet, serving its
+access point, and perfectly healthy; it simply could not be configured at all,
+because one stanza of its configuration named a network that had moved out of
+range.
+
+The irony is the sharp end of it: the change being refused was the one that
+would have given the operator a second way in. A device is least configurable
+exactly when its network situation has changed, which is when configuring it
+matters.
+
+Note this is not the same as R-NET-07's fallback, which works: the access point
+does come back. The device stays *reachable*. What it stops being is
+*changeable*.
+
+**Fix direction:** a client that cannot associate is a fact about the world, not
+a failed render. R-NET-12 already says the access point returns when a change
+leaves the radio on no network; that outcome should satisfy the renderer rather
+than fail it.
+
+### K-38 · A console deploy serves `Cannot GET /` for about half a minute
+
+`installer/roles/30-console.sh` replaces the console tree in place. Between
+removing the old dashboard package and the console restarting on the new one,
+every request gets a 200 with `Cannot GET /`:
+
+```
+16:36:45  Error: ENOENT ... @flowfuse/node-red-dashboard/dist/index.html
+16:37:10  [ui-base:Yonder] Dashboard 2.0 (v1.31.0) started at /dashboard
+16:37:10  Started flows
+```
+
+An operator refreshing during that window sees a bare error page from a device
+that was working a moment ago, with nothing to say it is mid-upgrade. It
+recovers by itself and needs no action, which is precisely why it is worth
+fixing: the failure teaches the operator to distrust a console that was never
+broken.
+
+**Fix direction:** stage the new tree beside the old one and swap it in, so the
+window is a restart rather than a rebuild.
+
+### K-39 · `docs/configuration.md` promises boot-partition configuration that does not exist
+
+`docs/configuration.md:12` states, in the present tense:
+
+> Drop a `config.yaml` on the boot partition. It is read on first boot and moved
+> into place.
+
+Nothing implements this. R-CFG-05 is real and scheduled — `docs/roadmap.md:276`
+puts it in M8 — but no code reads `/boot/firmware/config.yaml` today, so an
+operator following the documentation gets a device that ignores the file.
+
+Found while trying to use it: an SD card was out of a board precisely because
+the board was unreachable, which is the exact situation the feature exists for,
+and it was not there.
+
+This is the second documentation divergence of the same kind — the first was a
+`remote.tailscale` example that the strict schema rejected, fixed in `f4469ef`.
+Both were written as descriptions of a finished system rather than of the one
+that exists.
+
+---
+
 ### K-40 · ~~The fallback watchdog accepts an address as proof of reachability~~ — CLOSED
 
 **Status:** Closed · **Requirement:** R-NET-07, R-CEL-09

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { createServer, type Server } from "node:http";
 import { unlinkSync, existsSync, mkdirSync, chmodSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { ApplyEngine } from "../apply/engine.js";
 import { warn, note, trace } from "../log.js";
@@ -26,6 +26,11 @@ import { HostnameRenderer } from "../system/hostname.js";
 import { FallbackWatchdog } from "../net/watchdog.js";
 import { joinSucceeded } from "../net/joined.js";
 import { networkState } from "../net/state.js";
+import { readRemoteState } from "../remote/state.js";
+import { RemoteRenderer } from "../remote/renderer.js";
+import { ZeroTierCli } from "../remote/zerotier/cli.js";
+import { readTraffic } from "../remote/traffic.js";
+import { TrafficSampler } from "../remote/sampler.js";
 import { AP_CONNECTION, DEFAULT_AP_PASSPHRASE } from "../net/profiles.js";
 import { scanForNetworks } from "../net/scan.js";
 import { ping, reachable } from "../diag/probe.js";
@@ -119,6 +124,13 @@ export interface BuildRenderersOptions {
    * production values come from consolePathsFromEnv(), in main().
    */
   console?: Partial<ConsolePaths>;
+  /**
+   * Where the remote renderer records the mesh it joined. **Given, never
+   * defaulted**, like `console` above and for the same reason: a path with a
+   * default is a path a test writes to by forgetting to override it, and this
+   * one would be `/var/lib/yonder`.
+   */
+  remoteStatePath: string;
 }
 
 /**
@@ -146,6 +158,9 @@ export function buildRenderers(opts: BuildRenderersOptions): {
   client: NmcliClient;
   /** ModemManager, read and never driven. See net/modem/mmcli/client.ts. */
   modemClient: MmcliClient;
+  /** Talks to the installed zerotier-cli, over the same runner as everything else. */
+  zerotier: ZeroTierCli;
+  remoteRenderer: RemoteRenderer;
   generated: string[];
 } {
   const log = opts.log ?? note;
@@ -170,6 +185,18 @@ export function buildRenderers(opts: BuildRenderersOptions): {
   const modemClient = new MmcliClient(opts.runner ?? systemRunner, opts.trace ?? trace);
   const renderer = new NetworkRenderer({
     client, secrets, log, clock: opts.clock, standing: opts.standing,
+  });
+
+  // After the network renderer: a mesh runs over whatever the network layer
+  // just brought up, so ordering it first would join over an interface that
+  // does not exist yet.
+  const zerotier = new ZeroTierCli(opts.runner ?? systemRunner, opts.trace ?? trace);
+  const remoteRenderer = new RemoteRenderer({
+    cli: zerotier,
+    run: opts.runner ?? systemRunner,
+    statePath: opts.remoteStatePath,
+    log,
+    clock: opts.clock,
   });
 
   // After the network renderer, deliberately. Renderers run in order, so this
@@ -201,13 +228,15 @@ export function buildRenderers(opts: BuildRenderersOptions): {
 
   return {
     renderers: consoleRenderer === undefined
-      ? [hostname, renderer]
-      : [hostname, renderer, consoleRenderer],
+      ? [hostname, renderer, remoteRenderer]
+      : [hostname, renderer, remoteRenderer, consoleRenderer],
     renderer,
     ...(consoleRenderer === undefined ? {} : { consoleRenderer }),
     secrets,
     client,
     modemClient,
+    zerotier,
+    remoteRenderer,
     generated,
   };
 }
@@ -347,6 +376,9 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
       runner: opts.runner,
       clock,
       standing,
+      // The same directory the apply journal already lives in — one state
+      // directory for this daemon, not a second one this renderer invented.
+      remoteStatePath: join(dirname(opts.journalPath), "remote.json"),
       ...(opts.console === undefined ? {} : { console: opts.console }),
     });
   } catch (e) {
@@ -408,6 +440,21 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
       }
     }
   };
+
+  // The one poll loop for the mesh's throughput, running on `clock` like
+  // every other timer this daemon owns. Started unconditionally — it costs
+  // nothing while no interface has been named (`forInterface` is only called
+  // from the /remote/state route below, which is itself only wired once
+  // `built` exists) — so a secrets.yaml this daemon could not read still
+  // leaves the sampler ready the moment a network is joined and the route
+  // comes back. On its own timer rather than sampled from inside the route
+  // handler (R-NET-10): two pollers share that route at different periods, so
+  // sampling "on request" would space the history unevenly, and a graph
+  // opened after the daemon had been running a while would have nothing
+  // before that first request. This is the only place this daemon samples
+  // traffic; readRemoteState only ever reads what the sampler already has.
+  const sampler = new TrafficSampler({ clock });
+  sampler.start();
 
   // No secret is ever printed. That mechanism existed to surface a random
   // per-device access-point passphrase and there is no longer one to surface
@@ -708,6 +755,17 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
         return modemState(config, modem, bearer, signal);
       },
       secrets: built.secrets,
+      // The interface's kernel byte counters, not ZeroTier's own /metrics —
+      // measured empty (0 bytes) on a real board. This is the same call the
+      // route already makes; readTraffic only ever runs once readRemoteState
+      // has found the configured network's interface, so it costs nothing on
+      // every other phase. `throughput` hands the sampler the same interface
+      // name so its rate matches the byte counters beside it, and is the only
+      // way anything in this daemon reaches into the sampler.
+      remoteState: () => readRemoteState(loadConfig(opts.configPath), built.zerotier, {
+        readTraffic,
+        throughput: (iface) => sampler.forInterface(iface),
+      }),
     }),
     // Not behind `built`: the reach monitor is assembled from the runner and
     // the nmcli client, neither of which depends on the secret store, so a
@@ -811,6 +869,10 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
         // one still armed after close() would restart a console on behalf of
         // a process that has already let go of its socket.
         if (provisionTimer !== undefined) clock.clearTimer(provisionTimer);
+        // The fourth, and the newest: a sampler still ticking after close()
+        // would go on reading sysfs for an interface this process no longer
+        // answers questions about.
+        sampler.stop();
         server.close(() => {
           if (existsSync(opts.socketPath)) unlinkSync(opts.socketPath);
           resolve();

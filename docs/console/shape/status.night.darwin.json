@@ -69,10 +69,28 @@
       }
     },
     {
-      "key": "nrdb-ui-group.yonder-rail",
+      "key": "nrdb-ui-group#2",
       "box": {
         "x": 268,
         "y": 405,
+        "w": 1000,
+        "h": 137
+      }
+    },
+    {
+      "key": "nrdb-ui-text.nrdb-ui-widget",
+      "box": {
+        "x": 285,
+        "y": 476,
+        "w": 966,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-group.yonder-rail",
+      "box": {
+        "x": 268,
+        "y": 553,
         "w": 1000,
         "h": 82
       }
@@ -81,7 +99,7 @@
       "key": "nrdb-ui-widget.nrdb-ui-yonder-softkeys",
       "box": {
         "x": 285,
-        "y": 422,
+        "y": 570,
         "w": 966,
         "h": 48
       }

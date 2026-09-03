@@ -1,0 +1,14 @@
+[
+  {
+    "id": "1234567890abcdef",
+    "nwid": "1234567890abcdef",
+    "mac": "ee:52:44:1a:43:af",
+    "name": "",
+    "status": "REQUESTING_CONFIGURATION",
+    "type": "PRIVATE",
+    "portDeviceName": "ztnksp3nl7",
+    "assignedAddresses": [],
+    "routes": [],
+    "netconfRevision": 0
+  }
+]

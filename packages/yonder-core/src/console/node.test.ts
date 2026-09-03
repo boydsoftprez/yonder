@@ -130,6 +130,35 @@ describe("applyStatus", () => {
     expect(status.expiresAt).toBe(300_000);
   });
 
+  /**
+   * The other half of the same mistake. R-CFG-12 keeps a change that cannot
+   * cost reachability rather than holding it, and the daemon says so with
+   * `expiresAt: null` on an apply it has already confirmed. A mesh join is
+   * one (R-VPN-07) and so is a change of palette. Telling that operator the
+   * change reverts on its own sends them looking for a confirm control that
+   * does not exist, and reasonably concluding the change did not take.
+   */
+  it("is confirmed, not pending, for an apply the device already kept", () => {
+    const status = applyStatus(
+      { ok: true, status: 200, body: { id: "abc", expiresAt: null } },
+      1_000,
+    );
+    expect(status.state).toBe("confirmed");
+    expect(status.id).toBe("abc");
+    expect(status.expiresAt).toBeUndefined();
+    expect(status.message).not.toMatch(/revert|confirm it/i);
+  });
+
+  /**
+   * Absent is not the same as null. A 200 that simply omits the field is an
+   * answer this console does not understand well enough to call finished, so
+   * it stays pending and the operator is still asked to confirm.
+   */
+  it("stays pending when the answer carries no expiry at all", () => {
+    const status = applyStatus({ ok: true, status: 200, body: { id: "abc" } }, 0);
+    expect(status.state).toBe("pending");
+  });
+
   it("is rejected when the daemon refused", () => {
     const status = applyStatus(
       { ok: true, status: 400, body: { error: "rejected: not a valid configuration" } },

@@ -116,6 +116,85 @@
           "additionalProperties": false,
           "default": {}
         },
+        "modem": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "auto",
+                "appliance"
+              ],
+              "default": "auto"
+            },
+            "interface": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "apn": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 100
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "username": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
+            "password": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "secret": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": [
+                    "secret"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "dial": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            }
+          },
+          "additionalProperties": false,
+          "default": {}
+        },
         "priority": {
           "type": "array",
           "items": {
@@ -240,6 +319,36 @@
         "timezone": {
           "type": "string",
           "default": "UTC"
+        }
+      },
+      "additionalProperties": false,
+      "default": {}
+    },
+    "remote": {
+      "type": "object",
+      "properties": {
+        "zerotier": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false
+            },
+            "network_id": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{16}$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            }
+          },
+          "additionalProperties": false,
+          "default": {}
         }
       },
       "additionalProperties": false,

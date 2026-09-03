@@ -50,8 +50,9 @@ describe("buildRenderers", () => {
     const { renderers } = buildRenderers({
       secretsPath: join(dir, "secrets.yaml"),
       runner: run,
+      remoteStatePath: join(dir, "remote.json"),
     });
-    expect(renderers.map((r) => r.name)).toEqual(["hostname", "network"]);
+    expect(renderers.map((r) => r.name)).toEqual(["hostname", "network", "remote"]);
   });
 
   /**
@@ -62,9 +63,13 @@ describe("buildRenderers", () => {
    */
   it("produces no console renderer when nobody said where the console is", () => {
     const run: CommandRunner = async () => ({ code: 0, stdout: "", stderr: "" });
-    const built = buildRenderers({ secretsPath: join(dir, "secrets.yaml"), runner: run });
+    const built = buildRenderers({
+      secretsPath: join(dir, "secrets.yaml"),
+      runner: run,
+      remoteStatePath: join(dir, "remote.json"),
+    });
     expect(built.consoleRenderer).toBeUndefined();
-    expect(built.renderers.map((r) => r.name)).toEqual(["hostname", "network"]);
+    expect(built.renderers.map((r) => r.name)).toEqual(["hostname", "network", "remote"]);
   });
 
   /**
@@ -79,9 +84,10 @@ describe("buildRenderers", () => {
     const built = buildRenderers({
       secretsPath: join(dir, "secrets.yaml"),
       runner: run,
+      remoteStatePath: join(dir, "remote.json"),
       console: { settings: join(dir, "console", "settings.js") },
     });
-    expect(built.renderers.map((r) => r.name)).toEqual(["hostname", "network", "console"]);
+    expect(built.renderers.map((r) => r.name)).toEqual(["hostname", "network", "remote", "console"]);
     expect(built.consoleRenderer).toBeDefined();
   });
 
@@ -98,6 +104,7 @@ describe("buildRenderers", () => {
     const built = buildRenderers({
       secretsPath: join(dir, "secrets.yaml"),
       runner: run,
+      remoteStatePath: join(dir, "remote.json"),
       console: { settings: join(dir, "console", "settings.js") },
     });
     expect(built.renderers[0]?.name).toBe("hostname");
@@ -154,7 +161,7 @@ describe("consolePathsFromEnv", () => {
     const secretsPath = join(dir, "secrets.yaml");
     const run: CommandRunner = async () => ({ code: 0, stdout: "", stderr: "" });
     const { secrets, generated } = buildRenderers({
-      secretsPath, runner: run,
+      secretsPath, runner: run, remoteStatePath: join(dir, "remote.json"),
     });
     expect(secrets.get("ap_psk")).toBe(DEFAULT_AP_PASSPHRASE);
     expect(generated).toContain("ap_psk");
@@ -162,8 +169,12 @@ describe("consolePathsFromEnv", () => {
 
   it("gives every device the same passphrase, not a random one each", () => {
     const run: CommandRunner = async () => ({ code: 0, stdout: "", stderr: "" });
-    const one = buildRenderers({ secretsPath: join(dir, "a.yaml"), runner: run });
-    const two = buildRenderers({ secretsPath: join(dir, "b.yaml"), runner: run });
+    const one = buildRenderers({
+      secretsPath: join(dir, "a.yaml"), runner: run, remoteStatePath: join(dir, "a-remote.json"),
+    });
+    const two = buildRenderers({
+      secretsPath: join(dir, "b.yaml"), runner: run, remoteStatePath: join(dir, "b-remote.json"),
+    });
     expect(one.secrets.get("ap_psk")).toBe(two.secrets.get("ap_psk"));
   });
 
@@ -176,7 +187,7 @@ describe("consolePathsFromEnv", () => {
     const secretsPath = join(dir, "secrets.yaml");
     const run: CommandRunner = async () => ({ code: 0, stdout: "", stderr: "" });
     const { secrets, generated } = buildRenderers({
-      secretsPath, runner: run,
+      secretsPath, runner: run, remoteStatePath: join(dir, "remote.json"),
     });
     expect(secrets.get("editor_password")).toBeUndefined();
     expect(generated).not.toContain("editor_password");
@@ -185,9 +196,9 @@ describe("consolePathsFromEnv", () => {
   it("does not re-seed a secret that already exists", () => {
     const secretsPath = join(dir, "secrets.yaml");
     const run: CommandRunner = async () => ({ code: 0, stdout: "", stderr: "" });
-    const first = buildRenderers({ secretsPath, runner: run });
+    const first = buildRenderers({ secretsPath, runner: run, remoteStatePath: join(dir, "remote.json") });
     const value = first.secrets.get("ap_psk");
-    const second = buildRenderers({ secretsPath, runner: run });
+    const second = buildRenderers({ secretsPath, runner: run, remoteStatePath: join(dir, "remote.json") });
     expect(second.secrets.get("ap_psk")).toBe(value);
     expect(second.generated).toEqual([]);
   });
@@ -197,7 +208,7 @@ describe("consolePathsFromEnv", () => {
     writeFileSync(secretsPath, "ap_psk: an-operator-chose-this\n", { mode: 0o600 });
     const run: CommandRunner = async () => ({ code: 0, stdout: "", stderr: "" });
     const { secrets, generated } = buildRenderers({
-      secretsPath, runner: run,
+      secretsPath, runner: run, remoteStatePath: join(dir, "remote.json"),
     });
     // The published default is a starting point, never something the daemon
     // reasserts over a choice the operator has already made.

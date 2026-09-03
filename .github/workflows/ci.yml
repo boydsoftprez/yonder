@@ -56,6 +56,12 @@ jobs:
           shellcheck installer/install.sh installer/lib/*.sh installer/roles/*.sh scripts/*.sh
       - name: Installer dry run
         run: ./installer/install.sh --dry-run
+      # The failure paths a dry run cannot reach. `run` short-circuits to a
+      # printf when DRY_RUN=1, so nothing above this line has ever executed a
+      # command that fails — which is how `run … || true`, two lines that
+      # could abort a whole install, passed every check in this file.
+      - name: The installer library, executed
+        run: ./scripts/verify-installer-lib.sh
 
   # R-UI-12: capture every page in both palettes, look at them, and fail when
   # one changed shape without somebody accepting it.

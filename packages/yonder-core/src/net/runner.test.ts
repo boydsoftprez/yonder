@@ -78,4 +78,33 @@ describe("systemRunner", () => {
     const r = await boundedRunner(50)(["sleep", "30"]);
     expect(r.code).not.toBe(0);
   });
+
+  /**
+   * A renderer that needs one variable set for one command must actually get
+   * it. `systemctl enable`/`disable` inside this daemon's sandbox is the case
+   * this exists for (see remote/renderer.ts) and it is not something a board
+   * should have to be borrowed to discover.
+   */
+  it("passes a caller's environment variable to the child", async () => {
+    const r = await systemRunner(
+      ["sh", "-c", "printf %s \"$YONDER_RUNNER_TEST\""],
+      { env: { YONDER_RUNNER_TEST: "set-by-the-caller" } },
+    );
+    expect(r.code).toBe(0);
+    expect(r.stdout).toBe("set-by-the-caller");
+  });
+
+  /**
+   * Laid *over* the daemon's environment, never replacing it. A child handed
+   * only the one variable loses PATH, and every renderer that names a binary
+   * rather than a path stops working.
+   */
+  it("leaves the rest of the environment in place when a variable is added", async () => {
+    const r = await systemRunner(
+      ["sh", "-c", "printf %s \"$PATH\""],
+      { env: { YONDER_RUNNER_TEST: "1" } },
+    );
+    expect(r.code).toBe(0);
+    expect(r.stdout).toBe(process.env.PATH ?? "");
+  });
 });

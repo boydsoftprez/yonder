@@ -19,6 +19,8 @@ import { setTheme, type ThemeRequest } from "../ui/theme.js";
 import type { ScanResult } from "../net/scan.js";
 import type { BoardFacts } from "../system/facts.js";
 import type { Versions } from "../system/versions.js";
+import { ZEROTIER_NETWORK_ID } from "../schema/config.js";
+import type { RemoteState } from "../remote/state.js";
 
 export interface RouterDeps {
   engine: ApplyEngine;
@@ -80,6 +82,8 @@ export interface RouterDeps {
   secrets?: { put(name: string, value: string): void };
   /** The buffer GET /log serves. Defaults to the one this process writes to. */
   activity?: ActivityLog;
+  /** The mesh join state. Absent on a daemon with no remote layer. */
+  remoteState?: () => Promise<RemoteState>;
 }
 
 /** What GET /system answers with. */
@@ -425,6 +429,47 @@ export function createRouter(deps: RouterDeps): Router {
           return { status: 503, body: { error: "this device cannot report its way out" } };
         }
         return { status: 200, body: await deps.reachState() };
+      }
+
+      // The same shape as /net/join: the router merges one field into the
+      // document and hands it to the engine. Nothing about a mesh is stored
+      // anywhere else, and a network id is not a secret - it is the name of a
+      // network, not a way into one - so it lives in config.yaml.
+      if (method === "POST" && path === "/remote/join") {
+        const wanted = (body as { networkId?: unknown } | undefined)?.networkId;
+        if (typeof wanted !== "string" || !ZEROTIER_NETWORK_ID.test(wanted)) {
+          return {
+            status: 400,
+            body: { error: "a ZeroTier network id is sixteen lowercase hexadecimal characters" },
+          };
+        }
+        const config = loadConfig(deps.configPath);
+        return {
+          status: 200,
+          body: await deps.engine.apply({
+            ...config,
+            remote: { ...config.remote, zerotier: { enabled: true, network_id: wanted } },
+          }),
+        };
+      }
+
+      if (method === "POST" && path === "/remote/leave") {
+        const config = loadConfig(deps.configPath);
+        return {
+          status: 200,
+          body: await deps.engine.apply({
+            ...config,
+            remote: { ...config.remote, zerotier: { enabled: false, network_id: null } },
+          }),
+        };
+      }
+
+      if (method === "GET" && path === "/remote/state") {
+        if (deps.remoteState === undefined) {
+          say("GET /remote/state: there is no remote layer on this daemon to ask");
+          return { status: 503, body: { error: "this device cannot report its mesh state" } };
+        }
+        return { status: 200, body: await deps.remoteState() };
       }
 
       if (method === "GET" && path === "/config") {

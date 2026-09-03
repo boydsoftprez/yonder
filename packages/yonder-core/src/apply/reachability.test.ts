@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
 import { affectsReachability } from "./reachability.js";
-import { DEFAULT_CONFIG, type Config } from "../schema/config.js";
+import { ConfigSchema, DEFAULT_CONFIG, type Config } from "../schema/config.js";
 
 const base = (): Config => structuredClone(DEFAULT_CONFIG);
 
@@ -66,5 +66,51 @@ describe("affectsReachability", () => {
     after.ui.theme = "night";
     after.network.client.ssid = "hangar-2g";
     expect(affectsReachability(base(), after)).toBe(true);
+  });
+
+  // A mesh join only ever adds a path. Measured on a board: joining installed one
+  // route for the mesh's own subnet, the default route and the LAN route were
+  // untouched, and a controller pushing 10.0.252.0/25 - overlapping the network
+  // the board was reached on - was refused by the client itself. So there is
+  // nothing for a confirmation window to guarantee (R-CFG-12, R-VPN-07).
+  it("does not hold a zerotier join", () => {
+    const before = ConfigSchema.parse({
+      version: 1,
+      network: { ap: { psk: { secret: "ap_psk" } } },
+      ui: { editor: {} },
+    });
+    const after = { ...before, remote: { zerotier: { enabled: true, network_id: "9fef8a3bf9000001" } } };
+    expect(affectsReachability(before, after)).toBe(false);
+  });
+
+  // Each mesh earns this separately. Everything is load-bearing until measured,
+  // and `tailscale up` installs packet-filter rules nobody has measured yet.
+  it("holds a change to any other part of remote", () => {
+    const before = ConfigSchema.parse({
+      version: 1,
+      network: { ap: { psk: { secret: "ap_psk" } } },
+      ui: { editor: {} },
+    });
+    const after = structuredClone(before) as Config & { remote: { tailscale?: unknown } };
+    after.remote.tailscale = { enabled: true };
+    expect(affectsReachability(before, after)).toBe(true);
+  });
+
+  // The exemption is two named fields, not the subtree they sit in. A field
+  // added under `remote.zerotier` next year - `allow_default` is the one that
+  // would actually hurt, because it is the knob that can replace the default
+  // route - must not inherit a kept-not-held apply from its neighbours with
+  // nobody deciding it should.
+  it("holds a field added under remote.zerotier that nobody has measured", () => {
+    const before = ConfigSchema.parse({
+      version: 1,
+      network: { ap: { psk: { secret: "ap_psk" } } },
+      ui: { editor: {} },
+    });
+    const after = structuredClone(before) as Config & {
+      remote: { zerotier: Record<string, unknown> };
+    };
+    after.remote.zerotier.allow_default = true;
+    expect(affectsReachability(before, after)).toBe(true);
   });
 });

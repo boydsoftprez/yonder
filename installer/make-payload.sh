@@ -35,6 +35,20 @@ REPO=$(CDPATH='' cd -- "$HERE/.." && pwd)
 NODE_VERSION=${NODE_VERSION:-24.20.0}
 NODE_DIST=${NODE_DIST:-https://nodejs.org/dist}
 
+# ZeroTier 1.16.2. Pinned and fingerprinted for the same reason Node is: a
+# payload whose contents depend on the day it was built is not a payload.
+#
+# Both halves are checked at build time and they do different jobs. The
+# recorded fingerprint is what a reviewer sees in a pull request when this
+# version is bumped, and what makes two payloads built a week apart identical.
+# The signature is what catches what a fingerprint cannot - the download site
+# itself being tampered with - since the fingerprint would have been read off
+# that same site when it was written down.
+ZEROTIER_VERSION=${ZEROTIER_VERSION:-1.16.2}
+ZEROTIER_REPO=${ZEROTIER_REPO:-https://download.zerotier.com/debian/trixie}
+ZEROTIER_SHA256_arm64=e6c71707d8db57dd9bc6d6a4d5d5b8343ad244f48ff1ebd288f5f588fbdb10a4
+ZEROTIER_SHA256_amd64=75589dbdc989546629e8676b186b1e7854b3fa3b5dac061b93f8c8e427af2b13
+
 ARCH=""
 OUT="$REPO/vendor"
 
@@ -80,8 +94,8 @@ step() { printf '\n== %s\n' "$*"; }
 # much as the other two: without it npm can pick neither the gnu nor the musl
 # variant and quietly installs neither.
 case "$ARCH" in
-    linux-arm64) NPM_OS=linux; NPM_CPU=arm64 ;;
-    linux-x64)   NPM_OS=linux; NPM_CPU=x64 ;;
+    linux-arm64) NPM_OS=linux; NPM_CPU=arm64; DEB_ARCH=arm64 ;;
+    linux-x64)   NPM_OS=linux; NPM_CPU=x64;   DEB_ARCH=amd64 ;;
     "") die "--arch is required (linux-arm64 for a Raspberry Pi or Radxa, linux-x64 for a PC)" ;;
     *)  die "unsupported architecture: $ARCH" ;;
 esac
@@ -147,6 +161,65 @@ tar -xJf "$WORK/$NODE_TARBALL" -C "$WORK/node" --strip-components 1 \
 [ -f "$WORK/node/bin/node" ] || die "the unpacked distribution has no bin/node"
 mv "$WORK/node" "$OUT/node"
 log "staged $OUT/node/bin/node"
+
+# ---------------------------------------------------------------------------
+step "zerotier $ZEROTIER_VERSION for $DEB_ARCH"
+
+command -v gpgv >/dev/null 2>&1 \
+    || die "gpgv is needed to verify ZeroTier's repository signature"
+
+ZT_DEB="zerotier-one_${ZEROTIER_VERSION}_${DEB_ARCH}.deb"
+eval "ZT_EXPECTED=\$ZEROTIER_SHA256_$DEB_ARCH"
+[ -n "$ZT_EXPECTED" ] || die "no recorded checksum for zerotier-one on $DEB_ARCH"
+
+log "fetching the signed repository index"
+curl -fsSL --retry 3 -o "$WORK/InRelease" "$ZEROTIER_REPO/dists/trixie/InRelease" \
+    || die "could not download ZeroTier's InRelease"
+
+log "verifying it against the key committed in installer/keys"
+gpgv --keyring "$HERE/keys/zerotier.gpg" "$WORK/InRelease" >/dev/null 2>&1 \
+    || die "ZeroTier's repository index is not signed by the key in installer/keys/zerotier.gpg"
+
+log "fetching the package list"
+curl -fsSL --retry 3 -o "$WORK/Packages" \
+    "$ZEROTIER_REPO/dists/trixie/main/binary-$DEB_ARCH/Packages" \
+    || die "could not download the package list for $DEB_ARCH"
+
+# The index states the list's checksum; check it before believing the list.
+# `awk` rather than `grep -A`: the SHA256 block is a fixed section of the
+# index, and matching the file name anywhere in the document would also match
+# the MD5Sum block above it.
+want=$(awk '/^SHA256:/{s=1;next} /^[A-Z]/{s=0} s && $3=="main/binary-'"$DEB_ARCH"'/Packages"{print $1}' "$WORK/InRelease")
+[ -n "$want" ] || die "the signed index does not list main/binary-$DEB_ARCH/Packages"
+printf '%s  %s\n' "$want" "Packages" > "$WORK/packages.sha256"
+( cd "$WORK" && $SHA_CHECK packages.sha256 ) >/dev/null \
+    || die "the package list does not match the checksum in the signed index"
+
+# And the list states the .deb's checksum. Matched on the exact file name so
+# the check cannot pass because some other stanza happened to verify.
+from_index=$(awk -v f="pool/main/z/zerotier-one/$ZT_DEB" '
+    $1=="Filename:" && $2==f {found=1} $1=="SHA256:" && found {print $2; exit}' "$WORK/Packages")
+[ -n "$from_index" ] || die "$ZT_DEB is not listed in the verified package list"
+[ "$from_index" = "$ZT_EXPECTED" ] \
+    || die "the signed index gives a different checksum for $ZT_DEB than this script records:
+  index:    $from_index
+  recorded: $ZT_EXPECTED
+if the version was bumped deliberately, update ZEROTIER_SHA256_$DEB_ARCH"
+
+log "fetching $ZT_DEB"
+curl -fsSL --retry 3 -o "$WORK/$ZT_DEB" \
+    "$ZEROTIER_REPO/pool/main/z/zerotier-one/$ZT_DEB" \
+    || die "could not download $ZT_DEB"
+
+printf '%s  %s\n' "$ZT_EXPECTED" "$ZT_DEB" > "$WORK/zt.sha256"
+( cd "$WORK" && $SHA_CHECK zt.sha256 ) >/dev/null \
+    || die "$ZT_DEB does not match its recorded checksum; refusing to stage it"
+log "signature and checksum both match"
+
+rm -rf "$OUT/zerotier"
+mkdir -p "$OUT/zerotier"
+mv "$WORK/$ZT_DEB" "$OUT/zerotier/$ZT_DEB"
+log "staged $OUT/zerotier/$ZT_DEB"
 
 # ---------------------------------------------------------------------------
 step "the console: node-red and the dashboard"
@@ -215,6 +288,7 @@ fi
 # ---------------------------------------------------------------------------
 step "done"
 log "node:    $OUT/node/bin/node"
+log "zerotier: $OUT/zerotier/$ZT_DEB"
 log "console: $OUT/console/node_modules/node-red/red.js"
 log ""
 log "vendor/ is git-ignored. Copy this whole repository, vendor/ included, to"

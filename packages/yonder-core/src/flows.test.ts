@@ -46,6 +46,7 @@ function contribTypes(): Set<string> {
   for (const pkg of [
     "node-red-contrib-yonder-system",
     "node-red-contrib-yonder-network",
+    "node-red-contrib-yonder-remote",
     "node-red-dashboard-2-yonder",
   ]) {
     const manifest = JSON.parse(
@@ -731,6 +732,144 @@ describe("flows/flows.json activity panes", () => {
       expect(t.action, `${String(t.id)} must append`).toBe("append");
       // And is bounded, or an append-only pane is a leak with a nice name.
       expect(Number(t.maxrows)).toBeGreaterThan(0);
+    }
+  });
+});
+
+/**
+ * The ZeroTier tab, against the artefact rather than a rendering (R-VPN-06).
+ */
+describe("flows/flows.json ZeroTier tab", () => {
+  it.each(["yonder-remote-state", "yonder-remote-join", "yonder-remote-leave"])(
+    "the shipped flows use %s",
+    (type) => {
+      expect(JSON.stringify(flows)).toContain(`"${type}"`);
+    },
+  );
+
+  // R-VPN-06: the identifier a person must approve is shown "with a means of
+  // copying it". The means is an instrument in
+  // node-red-dashboard-2-yonder, because Dashboard 1.31.0 has no clipboard
+  // path and CLAUDE.md rule 2 forbids the `function` node and the
+  // `ui-template` script that would otherwise have supplied one.
+  //
+  // R-VPN-10 gives the assigned address the same treatment - the mock hands
+  // it its own [copy] control - so this is two of the instrument now, told
+  // apart by which property of `msg.payload` each one reads.
+  it("shows the device id and the address through the instrument that can copy them", () => {
+    const shown = flows.filter(
+      (n) => n.group === "group-net-zerotier" && n.type === "ui-yonder-identity",
+    );
+    expect(shown).toHaveLength(2);
+    expect(shown.map((n) => n.key).sort()).toEqual(["address", "deviceId"]);
+  });
+
+  it("wires the mesh state to both, or one shows an em dash for ever", () => {
+    const state = flows.find((n) => n.type === "yonder-remote-state");
+    expect(state, "the tab has no state node").toBeDefined();
+    const wired = (state!.wires as string[][]).flat();
+    expect(wired).toContain("identity-zt-device");
+    expect(wired).toContain("identity-zt-address");
+  });
+
+  /**
+   * R-VPN-10: what backs "connected" is shown beside it - direct-or-relayed,
+   * latency, last heard, and traffic - each already formatted by
+   * `messageFor` so the tab needs no `function` node to read it.
+   */
+  it("shows what backs the connection state: path, latency, traffic and last heard", () => {
+    const zerotier = flows.filter((n) => n.group === "group-net-zerotier" && n.type === "ui-text");
+    const values = zerotier.map((n) => String(n.value));
+    expect(values).toContain("payload.path");
+    expect(values).toContain("payload.latency");
+    expect(values).toContain("payload.traffic");
+    expect(values).toContain("payload.lastHeard");
+    expect(values).toContain("payload.networkName");
+  });
+
+  /**
+   * R-NET-10: a rate, beside the running total the test above already checks
+   * for. Totals answer "how much has crossed this link"; this answers "how
+   * fast is it moving right now" - different questions, both on the tab.
+   */
+  it("shows the mesh throughput as a rate, not only as a total", () => {
+    const zerotier = flows.filter((n) => n.group === "group-net-zerotier" && n.type === "ui-text");
+    expect(zerotier.map((n) => String(n.value))).toContain("payload.throughput");
+  });
+
+  /**
+   * R-UI-13: the graph itself, generated on the device from the same message
+   * as every other reading on this tab - never a raster image, and never a
+   * `function` node reshaping `payload.series` for it (CLAUDE.md rule 2).
+   */
+  it("draws the throughput sparkline, wired to the same mesh state", () => {
+    const spark = flows.find((n) => n.group === "group-net-zerotier" && n.type === "ui-yonder-sparkline");
+    expect(spark, "the tab has no sparkline").toBeDefined();
+
+    const state = flows.find((n) => n.type === "yonder-remote-state");
+    const wired = (state!.wires as string[][]).flat();
+    expect(wired).toContain(spark!.id);
+  });
+
+  /**
+   * A control that says it will act and does not.
+   *
+   * The `Copy` button shipped with `"wires": [[]]` and a tooltip telling the
+   * operator to select the text above and copy it by hand — it cost them the
+   * ten seconds of trying before they worked that out, at an aircraft, with a
+   * laptop open. A dead control is worse than an absent one, and nothing but
+   * an assertion here can see one: the pages capture correctly, the node
+   * tests pass, and pressing it does nothing at all.
+   */
+  it("has no button on the tab that goes nowhere", () => {
+    const dead = flows.filter(
+      (n) =>
+        n.group === "group-net-zerotier"
+        && n.type === "ui-button"
+        && (n.wires as string[][] | undefined)?.flat().length === 0,
+    );
+    expect(dead.map((n) => n.id)).toEqual([]);
+  });
+
+  // CLAUDE.md rule 2: a function node is JavaScript serialised next to wire
+  // coordinates, so it cannot be reviewed, so it cannot be merged.
+  it("ships no function node", () => {
+    expect(flows.some((n) => n.type === "function")).toBe(false);
+  });
+});
+
+/**
+ * The Status page's own line for the mesh (R-VPN-10): everything that backs
+ * "connected" reduced to the words `messageFor` already built into
+ * `payload.summary`, so this page needs no arithmetic of its own to show
+ * where the aircraft's link stands.
+ */
+describe("flows/flows.json status page remote line", () => {
+  it("shows the mesh summary, labelled Remote", () => {
+    const page = flows.find((n) => n.type === "ui-page" && n.name === "Status");
+    const groups = new Set(
+      flows.filter((n) => n.type === "ui-group" && n.page === page?.id).map((n) => n.id),
+    );
+    const line = flows.find(
+      (n) => n.type === "ui-text" && groups.has(String(n.group)) && n.value === "payload.summary",
+    );
+    expect(line, "the Status page has no line bound to payload.summary").toBeDefined();
+    expect(line?.label).toBe("Remote");
+  });
+
+  // The Status page reads independently of which Network tab is open, so it
+  // carries its own state node and its own inject rather than depending on
+  // the ZeroTier tab's.
+  it("has its own state node, fed by its own poll no tighter than the floor (R-UI-06)", () => {
+    expect(flows.filter((n) => n.type === "yonder-remote-state").length).toBeGreaterThanOrEqual(2);
+
+    const periodic = flows.filter(
+      (n) => n.type === "inject" && typeof n.repeat === "string" && n.repeat !== "",
+    );
+    expect(periodic.length).toBeGreaterThan(0);
+    for (const inj of periodic) {
+      expect(Number(inj.repeat) * 1000, `${String(inj.id)} repeats every ${String(inj.repeat)} s`)
+        .toBeGreaterThanOrEqual(MIN_POLL_MS);
     }
   });
 });

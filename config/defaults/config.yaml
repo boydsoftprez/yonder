@@ -51,3 +51,7 @@ apply:
 system:
   hostname: yonder
   timezone: UTC
+remote:
+  zerotier:
+    enabled: false
+    network_id: null

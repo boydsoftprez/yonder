@@ -104,6 +104,13 @@ export function fetched(reply: DaemonReply): Fetched {
  * operator is told what is happening and asked for nothing. Anything else is
  * still theirs to confirm.
  *
+ * And a change that cannot cost reachability is not pending at all: R-CFG-12
+ * keeps it rather than holding it, so the daemon answers `expiresAt: null`,
+ * having already confirmed it. Telling that operator it reverts on its own is
+ * the same defect from the other side — a mesh join is exempt (R-VPN-07), the
+ * ZeroTier tab has no confirm control because none is needed, and an operator
+ * sent looking for one reasonably concludes the join did not take.
+ *
  * Saying "confirm it to keep it" for a change nobody can confirm, from a
  * console that is about to go off the air, is worse than saying nothing: it
  * leaves an operator hunting for a button that is not there.
@@ -125,6 +132,13 @@ export function applyStatus(reply: DaemonReply, now: number): CommandStatus {
       { at: now },
     );
   }
+  // `null`, not merely absent: the daemon says so explicitly for an apply it
+  // has already confirmed, and an answer that simply omits the field is one
+  // this console does not understand well enough to call finished.
+  if (body?.expiresAt === null) {
+    return confirmed("Applied, and kept. There is nothing to confirm.", { at: now, id });
+  }
+
   const movesRadio = body?.movesRadio === true;
   return pending(
     movesRadio
