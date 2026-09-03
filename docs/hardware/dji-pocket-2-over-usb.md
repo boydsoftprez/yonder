@@ -2,13 +2,14 @@
 
 The Pocket 2 is on the compatibility list and it is not a UVC camera. This note records
 what the device told us, what the manufacturer's own software told us about how to talk to
-it, and the procedure that will settle whether Yonder can. **Nothing below has produced a
-picture yet.** The sections are ordered from observed to inferred, and the last one says
-what remains unproven.
+it, and what happened when Yonder's board did. **The last section is a decoded frame.**
+The sections are ordered from observed to inferred; the final one says what remains
+unproven.
 
-Requirement: R-CAM-15. Milestone: M9, unless the bench moves it.
+Requirement: R-CAM-15. Milestone: M9 as written; the bench result below is the argument
+for moving it.
 
-## What the board saw
+## What the board saw as a host
 
 <!-- yonder:hardware-observed -->
 
@@ -25,111 +26,130 @@ camera's bottom USB-C port:
 | Video nodes | none |
 | Date | 2026-09-03 |
 
-Enumeration was untidy: four failed descriptor reads at full speed and two port power
-cycles before it came up at high speed on the eleventh attempt. The board was browning out
-at the time ([K-34](../known-issues.md#k-34)), so that is not evidence about the camera.
-
-The important reading is the first three rows. **This is not a camera presenting itself
-to a host; it is a stub.** One minimal interface, 100 mA, a SCSI implementation that claims
-nothing. It is what a device offers when it sees a host and has nothing to say to one.
+**This is not a camera presenting itself to a host; it is a stub.** One minimal
+interface, 100 mA, a SCSI implementation that claims nothing. It is what the device
+offers when it sees a host and has nothing to say to one.
 
 ## The camera is the host
 
-The Pocket 2 has two connectors: the bottom USB-C, and a side port that takes the
-manufacturer's phone adapter. The phone is what the camera is designed to talk to, and on
-that link **the camera is the USB host and the phone is the device.** That is Android Open
-Accessory (AOA), a published protocol ([source.android.com](https://source.android.com/docs/core/interaction/accessories/aoa)):
-
-1. The camera enumerates the attached device and sends vendor control request **51**
-   (`GET_PROTOCOL`); a phone answers with the AOA version it supports.
-2. The camera sends request **52** (`SEND_STRING`) six times — manufacturer, model,
-   description, version, URI, serial — naming the accessory it is.
-3. The camera sends request **53** (`START`). The phone drops off the bus and returns as
-   `18d1:2d00`, one interface with a bulk IN and a bulk OUT endpoint.
-4. The two now talk over those bulk pipes.
-
+The Pocket 2 talks to a phone, and on that link **the camera is the USB host and the
+phone is the device** — Android Open Accessory (AOA), a published protocol
+([source.android.com](https://source.android.com/docs/core/interaction/accessories/aoa)).
 Three facts from the manufacturer's Android application (DJI Mimo, the store release
-dated 2026-08-20, read statically) confirm this is the path the Pocket 2 uses:
+dated 2026-08-20, read statically) said so before anything was tried: its manifest
+declares the `android.hardware.usb.accessory` feature; its accessory filter accepts
+exactly manufacturer `DJI`, model `HG210` or `HG211`; and its native SDK has a
+`dji::core::AoaServicePort` feeding the same session manager that receives video.
 
-- Its manifest declares the `android.hardware.usb.accessory` feature and listens for
-  `USB_ACCESSORY_ATTACHED`.
-- Its accessory filter accepts exactly two accessories: manufacturer `DJI`, model
-  **`HG210`** or **`HG211`**. No other product in the application uses accessory mode.
-  The native library carries an `HG211CameraAbstraction` with lens-accessory and
-  microphone-accessory capability calls, which are Pocket 2 features; `HG210` is the
-  original Osmo Pocket.
-- Its native SDK has a `dji::core::AoaServicePort` — one of several link types — feeding
-  the same session manager whose methods include `OnRecvVideoData`. **Video arrives on
-  the accessory link**, in the same session as commands.
+### What the camera did when the board became a phone
 
-So the stub above is the camera answering the wrong question. Yonder has been asking "what
-device are you?" and the camera only knows how to ask that itself.
+With the Pi's USB-C port in device mode, presenting as an ordinary Android phone
+(`18d1:4ee1`), the camera — on its **bottom** port, with a plain USB-C cable — did this
+within 0.8 s of the gadget appearing, every time it was tried:
+
+```
+SETUP bmRequestType=0xc0 bRequest=51 wLength=2      GET_PROTOCOL  → answered 2
+SETUP bmRequestType=0x40 bRequest=52 wIndex=0       manufacturer = 'DJI'
+SETUP bmRequestType=0x40 bRequest=52 wIndex=1       model        = 'HG211'
+SETUP bmRequestType=0x40 bRequest=52 wIndex=2       description  = 'DJI Pocket'
+SETUP bmRequestType=0x40 bRequest=52 wIndex=3       version      = 'v0.0.0.1'
+SETUP bmRequestType=0x40 bRequest=52 wIndex=4       uri          = 'www.dji.com'
+SETUP bmRequestType=0x40 bRequest=52 wIndex=5       serial       = '000000000000000'
+SETUP bmRequestType=0x40 bRequest=53                START
+```
+
+`HG211` is the Pocket 2; `HG210` is the original Osmo Pocket. When the board then
+re-presented as an accessory (`18d1:2d00`, one bulk IN and one bulk OUT), the camera
+enumerated it and began talking at once.
 
 ### What that means for the board
 
 **Yonder's board must be a USB *device* on this link.** On a Raspberry Pi 4 the only
-peripheral-capable port is the USB-C — which is also the power input. So this camera
-imposes an installation constraint no other source does: **the Pi 4 must be powered from
-the GPIO header or a PoE HAT**, leaving USB-C for the camera. A Pi Zero 2 W or 3A+ has a
-separate OTG port and needs no such arrangement. This belongs in the hardware
-documentation the day the camera is supported, because a Pi 4 wired the ordinary way
-cannot do it at all.
+device-capable port is the USB-C, which is also the power input, so **the Pi 4 must be
+powered from the GPIO header or a PoE HAT** for this camera. A Pi Zero 2 W or 3A+ has a
+separate OTG port. This is an installation constraint no other camera imposes.
 
-The kernel side is already present on Raspberry Pi OS: `dwc2` is built in, and
-`libcomposite` with FunctionFS lets a userspace program answer control requests and own
-bulk endpoints. No out-of-tree module is needed for the accessory role.
+Two things about the board that cost time and are worth knowing:
 
-## The protocol on the pipe
+- Raspberry Pi OS ships `config.txt` with `dtoverlay=dwc2` lines under `[cm4]` and
+  `[cm5]` section filters. **Editing those does nothing on a Pi 4B.** The overlay must be
+  under `[all]`; `scripts/pocket2/enable-gadget-mode.sh` owns its own stanza there.
+- When the phone-stage process closes its FunctionFS endpoint, libcomposite unbinds the
+  gadget from the controller by itself. An explicit unbind afterwards reports `ENODEV`.
+  The driver tolerates it and retries the accessory bind, which then succeeds first time.
 
-DJI's device protocol is DUML, documented publicly by the
-[dji-firmware-tools](https://github.com/o-gs/dji-firmware-tools) project. The v1 frame:
+On header power the board reported `throttled=0x0` — not one brownout across the whole
+session — which is the first clean reading this board has given ([K-34](../known-issues.md#k-34)).
 
-| Offset | Field |
-|---|---|
-| 0 | `0x55` |
-| 1–2 | length (10 bits, low) and version (6 bits, high), little-endian |
-| 3 | CRC8 of bytes 0–2 — reflected polynomial `0x8C`, seed `0x77` |
-| 4 | sender: device type in bits 0–4, index in bits 5–7 |
-| 5 | receiver, same packing |
-| 6–7 | sequence number |
-| 8 | bit 7 response, bits 5–6 ack requested, bits 0–2 encryption |
-| 9 | command set |
-| 10 | command id |
-| 11… | payload — a response carries the status byte first |
-| last 2 | CRC16 of everything before it — reflected `0x1021`, seed `0x3692` |
+## The link, as observed
 
-Device types: 1 camera, 2 app, 4 gimbal. Command sets: 0 general, 2 camera, 4 gimbal.
+Everything on the accessory pipe is wrapped in an 8-byte envelope:
 
-The messages Yonder will need, by set and id, from the names the SDK gives them:
+```
+55 CC  r1 r2  <length, u32 little-endian>  <length bytes of payload>
+```
 
-| | Set / id | Message |
+Two routes were seen, and they are two channels:
+
+| Route | Carries | Observed |
 |---|---|---|
-| Handshake | 0 / `0x00` | ping |
-| | 0 / `0x01` | get version |
-| | 0 / `0xff` | get device info |
-| | 0 / `0x0e` | heartbeat |
-| **Picture** | **2 / `0x09`** | **live-view subscribe** — payload not yet known |
-| | 2 / `0xeb` | camera status subscribe |
-| | 2 / `0x4c` | set video-out parameters |
-| Controls | 2 / `0x02` | record |
-| | 2 / `0x1e` | exposure mode |
-| | 2 / `0x2c` | white balance |
-| | 2 / `0xb8` | zoom |
-| Gimbal | 4 / `0x01` | motion control |
-| | 4 / `0x0a` | set angle |
-| | 4 / `0x44` | work mode |
-| | 4 / `0x4c` | work mode and return to centre |
+| `49 57` | DUML command frames, several back to back | 2,676 envelopes, 14–562 bytes, in a 7 s session |
+| `4a 57` | **H.264 video** | 313 envelopes, almost all 8,192 bytes; 1.55 MB in 7 s |
 
-The controls and gimbal rows are R-CAM-11 — aim, recentre, zoom, exposure, white balance
-— arriving on the same link as the picture.
+Zero bytes fell outside an envelope in 2.2 MB of capture. The board sends on route
+`49 57`; the camera answered every frame sent that way.
+
+DUML itself is exactly as the public documentation describes it — `0x55`, a 10-bit length
+and 6-bit version, CRC8 (reflected `0x8C`, seed `0x77`), sender and receiver with the
+device type in the low five bits, sequence, a type byte with the response bit at the top
+and the ack request in bits 5–6, command set, command id, payload, CRC16 (reflected
+`0x1021`, seed `0x3692`). Every frame from the camera checked out. Device types seen: 1
+camera, 4 gimbal, addressed to 2, the app.
+
+### What the camera says unprompted
+
+Before the board says a word, the camera pushes, per second: gimbal attitude
+(`gimbal/0x05`, 45 bytes) ×20, gimbal `0x19` and `0x27` ×20, camera state
+(`camera/0x80`, 68 bytes) ×20, camera status blocks `0x81`, `0x87`, `0x88` ×10, `0xdc`
+×5, `0x8a` ×2, and a few slower housekeeping messages on sets 0, 5 and 238. None asks for
+an acknowledgement.
+
+### What it answered
+
+| Board sent | Camera answered |
+|---|---|
+| general `0x00` ping | response, status `0x01` |
+| general `0x01` get version | response, status `0x01` |
+| general `0xff` get device info | response, status `0x01` |
+| general `0x0e` heartbeat, once a second | response, status `0xe0`, every time |
+
+Addressed correctly, sequence numbers matched, within 20 ms. Status `0x01` on the three
+information requests is not yet understood — it may mean "not on this link", it may mean
+the payload was expected to carry something — and it did not matter for the picture.
+
+### The picture arrives on its own
+
+**No live-view subscribe was sent.** The video route began within a second of the
+accessory being enabled, and again on every subsequent run. Each video segment is preceded
+by a 16-byte record beginning `00 00 01 ff` — a frame header, contents not yet decoded —
+followed by Annex-B H.264 in 8 KB chunks. The stream carries an SPS (`67 64 00 28`:
+High profile, level 4.0), PPS, access-unit delimiters, SEI, and an IDR roughly every two
+seconds. Average rate about 1.7 Mb/s, with bursts to 8 Mb/s at a keyframe.
+
+Fed to GStreamer on the Pi — `filesrc ! h264parse ! avdec_h264` — the route `4a 57` bytes
+decode without complaint to **1280×720** frames. One of them is a room, a wall, and a
+lamp: the camera on the desk, pointing at the ceiling.
 
 ## What Yonder would build
 
-A small daemon, `pocket2d`, that presents the phone identity, completes the AOA handshake,
-runs the DUML session, and writes the H.264 it receives to a local UDP port. From there the
-M4 pipeline is unchanged: mediamtx serves it, the tee sends it to the ground station. To
-the rest of Yonder it is one more camera source, with a source type of its own and a
-control set that reaches the gimbal.
+A small daemon, `pocket2d`: present the phone identity, complete the AOA handshake, run
+the DUML session with a heartbeat, split the envelopes by route, and write route `4a 57`
+minus its frame headers to a local UDP port. From there the M4 pipeline is unchanged —
+mediamtx serves it, the tee sends it to the ground station. To the rest of Yonder it is
+one more camera source. The controls — gimbal `4/0x01` motion, `4/0x0a` angle, `4/0x4c`
+recentre, `4/0x44` work mode; camera `2/0x02` record, `2/0x1e` exposure, `2/0x2c` white
+balance, `2/0xb8` zoom — are frames on the same link, which is R-CAM-11 arriving from an
+unexpected direction.
 
 It is its own package, so a firmware change on the camera's side breaks one package and
 not the video path.
@@ -141,36 +161,35 @@ board; the operator plugs one cable.
 
 1. **Power the Pi from the GPIO header** — 5 V on pin 2 or 4, ground on pin 6, from a
    supply that holds 5.1 V at 3 A. The header has no protection; check polarity twice.
-2. Put the USB-C port in device mode and reboot:
-   `sudo scripts/pocket2/enable-gadget-mode.sh peripheral && sudo reboot`
-3. Start the emulator: `sudo scripts/pocket2/aoa-gadget.sh run`. It presents the Pi as an
-   Android phone and waits.
-4. Connect the camera's **bottom** port to the Pi's USB-C with a USB-C data cable, camera
-   powered on.
-5. Read `/var/tmp/aoa/phone.log`. The decisive line is a `SETUP` with `bRequest=51`. If
-   it arrives, the strings follow, then `START`, and the script re-presents the Pi as
-   `18d1:2d00` and hands over to `aoa_session.py`, which logs every frame decoded and
-   opens with ping, version, device info and a live-view subscribe.
-6. `sudo scripts/pocket2/enable-gadget-mode.sh host` and reboot to restore the port.
-
-`SESSION_ARGS='--listen-only'` in front of step 3 makes the accessory stage say nothing
-and only record, which is the right first run.
-
-The self-check for the codec is `python3 scripts/pocket2/duml.py`; its CRC tables were
-compared byte-for-byte against the reference implementation.
+2. `sudo scripts/pocket2/enable-gadget-mode.sh peripheral && sudo reboot`
+3. `sudo scripts/pocket2/aoa-gadget.sh run` — two gadgets are prepared; the phone one is
+   bound. `SESSION_ARGS='--listen-only'` in front makes the accessory stage only record;
+   `--quiet` hides the periodic pushes.
+4. Connect the camera's **bottom** port to the Pi's USB-C, camera powered on. If it is
+   already connected and silent, unplug and replug: the camera probes when a device
+   appears.
+5. `/var/tmp/aoa/phone.log` shows the handshake; `session.log` shows every command frame
+   decoded and the video rate per second; `route-4a57.bin` is the video.
+6. `gst-launch-1.0 filesrc location=/var/tmp/aoa/route-4a57.bin ! h264parse !
+   avdec_h264 ! videoconvert ! pngenc ! multifilesink location=frame-%03d.png` gives
+   frames.
+7. `sudo scripts/pocket2/enable-gadget-mode.sh host` and reboot to restore the port.
 
 ## What is not yet known
 
-- **Whether the camera issues AOA requests on the bottom port at all**, or only on the
-  side port. The bottom port is tried first because it needs one plain cable; the side
-  port needs the phone adapter plus a C-female/A-male and A-female/C-male pair.
-- **The live-view subscribe payload.** The first run sends it empty and reads the status
-  byte in the response. A non-zero status is information: the command was understood.
-- **How video is framed on the pipe** — as DUML frames on a video command id, or raw
-  after the subscribe. The session tool logs bytes that are not DUML separately so
-  neither case is lost.
-- **Power draw.** A phone is charged by this port; the Pi in device mode will draw from
-  the camera's battery unless told otherwise. Not measured.
+- **The 16-byte video frame header.** `00 00 01 ff` then twelve bytes that change per
+  frame — timestamps or a frame counter, most likely. The decoder ignores them; a
+  clean stream should strip them.
+- **Resolution and bitrate control.** The stream arrived at 720p; `camera/0x4c` set
+  video-out parameters is the candidate, untried.
+- **Every control.** Nothing but ping, version, device info and heartbeat has been sent.
+- **The meaning of status `0x01`** on the information requests.
+- **How long the stream runs**, and whether the camera keeps it up through a gimbal
+  movement, a recording, or a mode change.
+- **Behaviour across a camera power cycle** — whether the session resumes without a
+  replug. It re-probes when a device appears; it has not been watched across its own
+  restart.
+- **Power draw** on the link. Not measured.
+- **The side port** and the phone adapter. The bottom port worked and the side port was
+  not needed.
 - **The original Osmo Pocket** (`HG210`). Same path, same filter, never tried.
-- Whether the camera **restarts a session on its own after a power cycle**, which is what
-  decides if this is a camera that comes up with the aircraft or one that needs a hand.

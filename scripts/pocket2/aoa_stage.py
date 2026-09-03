@@ -53,7 +53,8 @@ def descriptors(stage):
         fs = iface(2, 0xFF, 0xFF, 0x00) + ep(0x81, 64)  + ep(0x01, 64)
         hs = iface(2, 0xFF, 0xFF, 0x00) + ep(0x81, 512) + ep(0x01, 512)
     flags = HAS_FS_DESC | HAS_HS_DESC | ALL_CTRL_RECIP | CONFIG0_SETUP
-    body = struct.pack("<II", 1, 1) + fs + hs      # fs_count, hs_count
+    n = 1 if stage == "phone" else 3               # descriptors per speed, not interfaces
+    body = struct.pack("<II", n, n) + fs + hs
     head = struct.pack("<III", DESCRIPTORS_MAGIC_V2, 12 + len(body), flags)
     return head + body
 
