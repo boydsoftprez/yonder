@@ -338,11 +338,22 @@ NAL units a second, continuously**; the other two gave a tail-off and nothing. S
 camera streams for roughly two seconds after each ping it accepts (status `0x01`), and
 **a 1 Hz ping is the whole of live view**. The session tool now sends it by default.
 
-The sustained rate matters for the product: at 720p this camera delivers about 8 Mb/s,
-not the 1.7 Mb/s the burst-and-silence average suggested. That is fine on Wi-Fi or
-Ethernet and is far more than a field cellular uplink carries, so this source needs the
-bitrate control (R-VID-11's readout, and whatever sets it) before it goes anywhere near
-the modem.
+The sustained rate matters for the product: at 720p this camera delivers about 8 Mb/s
+(8.23 Mb/s over 58 s of content, by the frame-record timestamps), not the 1.7 Mb/s the
+burst-and-silence average suggested. That is fine on Wi-Fi or Ethernet and is far more
+than a field cellular uplink carries.
+
+**The board can bring it down itself.** Unlike the USB camera's JPEG, this stream is
+H.264, and the Pi 4's hardware *decoder* (`v4l2h264dec`, the block that failed for JPEG)
+handles it: 58 s of the captured stream through hardware decode and hardware encode at a
+1.5 Mb/s target ran in 20 s at 114% of one core — **about 40% of one core in real time** —
+and the output measured 1.56 Mb/s. So whether or not the camera can be told to send less,
+Yonder can re-encode this source to whatever the link will carry, at a cost the board has
+room for. That is the cellular answer for this camera; asking the camera is an
+optimisation.
+
+A detail for the daemon: the camera emits about 1.3 frame records per frame (some access
+units are split), so the record count is not a frame count; the timestamps are.
 
 ### The video frame record, decoded
 
