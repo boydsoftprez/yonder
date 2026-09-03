@@ -65,12 +65,19 @@ export function messageFor(state: RemoteState, now: number = Date.now()): {
   // R-VPN-10's load-bearing distinction: an unmeasured latency and a measured
   // zero are opposite facts, so `null` stays `null` all the way to the page
   // rather than becoming "0 ms".
-  const latency = state.latencyMs === null ? null : `${String(state.latencyMs)} ms`;
+  // Checked for being a finite number rather than compared to `null`: a daemon
+  // older than this console omits these fields entirely, so they arrive
+  // `undefined`, and `=== null` waves that straight through. See formatBytes
+  // for what that cost on a board.
+  const latencyMs = typeof state.latencyMs === "number" && Number.isFinite(state.latencyMs)
+    ? state.latencyMs
+    : null;
+  const latency = latencyMs === null ? null : `${String(latencyMs)} ms`;
 
   const traffic =
-    state.rxBytes === null || state.txBytes === null
+    formatBytes(state.rxBytes) === null || formatBytes(state.txBytes) === null
       ? null
-      : `${formatBytes(state.rxBytes)} in · ${formatBytes(state.txBytes)} out`;
+      : `${String(formatBytes(state.rxBytes))} in · ${String(formatBytes(state.txBytes))} out`;
 
   const address = state.addresses[0] ?? null;
 
@@ -93,7 +100,7 @@ export function messageFor(state: RemoteState, now: number = Date.now()): {
       deviceId: state.deviceId,
       address,
       detail: state.detail,
-      networkName: state.networkName,
+      networkName: state.networkName ?? null,
       path,
       latency,
       traffic,

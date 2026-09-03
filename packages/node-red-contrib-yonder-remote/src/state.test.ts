@@ -256,3 +256,45 @@ describe("the fields behind the connection state (R-VPN-10)", () => {
     expect(msg.payload.summary).toBe("not configured");
   });
 });
+
+// The upgrade window, reproduced. A console newer than the daemon receives a
+// state without the fields R-VPN-10 added, so they arrive `undefined` rather
+// than `null`. The `=== null` guards waved them through into formatBytes and
+// `.toFixed` threw — Node-RED does not contain that, so it exited, systemd
+// restarted it, and the console crash-looped. Observed on a board, four
+// restarts deep, with the daemon still on the previous build.
+//
+// The interface may render "unknown". It may not disappear.
+describe("a state from a daemon older than this console", () => {
+  const old = {
+    phase: "connected",
+    networkId: "0cccb752f71441b7",
+    deviceId: "9c0589e413",
+    addresses: ["192.168.109.53/24"],
+    interface: "ztly52ge2a",
+    detail: null,
+  } as unknown as Parameters<typeof messageFor>[0];
+
+  it("does not throw", () => {
+    expect(() => messageFor(old)).not.toThrow();
+  });
+
+  it("renders the fields it does have, and reports the rest as unknown", () => {
+    const msg = messageFor(old);
+    expect(msg.payload.label).toBe("Connected");
+    expect(msg.payload.address).toBe("192.168.109.53/24");
+    expect(msg.payload.traffic).toBeNull();
+    expect(msg.payload.latency).toBeNull();
+    expect(msg.payload.lastHeard).toBeNull();
+  });
+
+  it("still produces a summary line for the status page", () => {
+    const { summary, networkName } = messageFor(old).payload;
+    expect(typeof summary).toBe("string");
+    expect(summary).not.toMatch(/undefined|NaN|null/);
+    // Absent, not undefined. The payload's own type says `string | null`, and a
+    // field that arrives from an older daemon must be normalised on the way in
+    // rather than handed to a widget as undefined.
+    expect(networkName).toBeNull();
+  });
+});

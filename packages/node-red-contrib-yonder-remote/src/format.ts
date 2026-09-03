@@ -18,7 +18,17 @@ const BYTE_UNITS = ["B", "KB", "MB", "GB"] as const;
  * exactly one from MB up, always, so `1048576` prints `1.0 MB` rather than
  * `1 MB`: the tier is not allowed to look more precise than it is.
  */
-export function formatBytes(bytes: number): string {
+export function formatBytes(bytes: unknown): string | null {
+  // Anything that is not a finite number is *unknown*, not zero. This takes
+  // `unknown` on purpose: the value crosses a process boundary from a daemon
+  // that may be older than this console, and a field that daemon has never
+  // heard of arrives as `undefined`. Reading `.toFixed` off that threw, and
+  // Node-RED does not contain the throw — it exits, systemd restarts it, and
+  // the console crash-loops. A board did exactly that, four restarts deep,
+  // during an upgrade window where the console was newer than the daemon.
+  // Nothing on this device may cost the operator the interface (CLAUDE.md
+  // rule 6, and the spirit of R-CFG-09).
+  if (typeof bytes !== "number" || !Number.isFinite(bytes)) return null;
   let value = bytes;
   let unit = 0;
   while (Math.abs(value) >= 1024 && unit < BYTE_UNITS.length - 1) {
@@ -39,8 +49,8 @@ export function formatBytes(bytes: number): string {
  * between them is exactly the kind of lie R-VPN-10 exists to stop (a `0 ms`
  * latency would be the same mistake).
  */
-export function formatLastHeard(lastHeardMs: number | null, now: number = Date.now()): string | null {
-  if (lastHeardMs === null) return null;
+export function formatLastHeard(lastHeardMs: unknown, now: number = Date.now()): string | null {
+  if (typeof lastHeardMs !== "number" || !Number.isFinite(lastHeardMs)) return null;
   const elapsedSeconds = Math.max(0, Math.floor((now - lastHeardMs) / 1000));
   if (elapsedSeconds < 10) return "just now";
   if (elapsedSeconds < 60) return `${String(elapsedSeconds)} s ago`;
