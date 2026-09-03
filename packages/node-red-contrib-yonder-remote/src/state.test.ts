@@ -175,12 +175,12 @@ describe("a valid membership with no path", () => {
 describe("the fields behind the connection state (R-VPN-10)", () => {
   const connected: Parameters<typeof messageFor>[0] = {
     phase: "connected",
-    networkId: "0cccb752f71441b7",
+    networkId: "a09acf02337b1e40",
     deviceId: "9c0589e413",
-    addresses: ["192.168.109.53/24"],
+    addresses: ["10.147.20.53/24"],
     interface: "ztabcdefgh",
     detail: null,
-    networkName: "boydsoftprez's 1st network",
+    networkName: "a mesh network",
     online: true,
     relayed: false,
     latencyMs: 66,
@@ -254,7 +254,7 @@ describe("the fields behind the connection state (R-VPN-10)", () => {
   });
 
   it("carries the network name through unchanged", () => {
-    expect(messageFor(connected, NOW).payload.networkName).toBe("boydsoftprez's 1st network");
+    expect(messageFor(connected, NOW).payload.networkName).toBe("a mesh network");
   });
 
   it("renders when the device was last heard from, relative to now", () => {
@@ -268,7 +268,7 @@ describe("the fields behind the connection state (R-VPN-10)", () => {
   // The Status page's one line: everything that backs "connected", in the
   // order an operator would ask for it.
   it("summarises the connection for the Status page", () => {
-    expect(messageFor(connected, NOW).payload.summary).toBe("zerotier · direct · 66 ms · 192.168.109.53");
+    expect(messageFor(connected, NOW).payload.summary).toBe("zerotier · direct · 66 ms · 10.147.20.53");
   });
 
   it("drops the subnet prefix from the address in the summary", () => {
@@ -318,9 +318,9 @@ describe("the fields behind the connection state (R-VPN-10)", () => {
 describe("a state from a daemon older than this console", () => {
   const old = {
     phase: "connected",
-    networkId: "0cccb752f71441b7",
+    networkId: "a09acf02337b1e40",
     deviceId: "9c0589e413",
-    addresses: ["192.168.109.53/24"],
+    addresses: ["10.147.20.53/24"],
     interface: "ztly52ge2a",
     detail: null,
   } as unknown as Parameters<typeof messageFor>[0];
@@ -332,7 +332,7 @@ describe("a state from a daemon older than this console", () => {
   it("renders the fields it does have, and reports the rest as unknown", () => {
     const msg = messageFor(old);
     expect(msg.payload.label).toBe("Connected");
-    expect(msg.payload.address).toBe("192.168.109.53/24");
+    expect(msg.payload.address).toBe("10.147.20.53/24");
     expect(msg.payload.traffic).toBeNull();
     expect(msg.payload.latency).toBeNull();
     expect(msg.payload.lastHeard).toBeNull();
@@ -363,9 +363,9 @@ describe("the sparkline's scale", () => {
   const withHistory = (rx: number[], tx: number[]) =>
     ({
       phase: "connected",
-      networkId: "3b19b3a7166e5d31",
+      networkId: "b71d4e9c02a55f18",
       deviceId: "9c0589e413",
-      addresses: ["10.113.83.48/24"],
+      addresses: ["10.147.21.48/24"],
       interface: "zttqh536rh",
       detail: null,
       networkName: "boyd",
