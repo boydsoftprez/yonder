@@ -16,7 +16,31 @@ export interface PathReport {
   standing: PathStanding;
   /** When this path was stood down, epoch ms. Null when it has not been. */
   since: number | null;
-  /** One sentence for an operator, in Yonder's words. */
+  /**
+   * What is actually known about this path, as evidence rather than as a
+   * sentence (see `PathEvidence` below).
+   *
+   * It is here because `standing` cannot carry it: `standing-by` covers a path
+   * that is reaching something, a path whose probes are failing but which has
+   * not run out the three that condemn it, and a path nothing has ever looked
+   * at. The console has to draw those three differently — that is what the
+   * `Way out` panel is for — and before this field existed the only way to
+   * recover the distinction from a `PathReport` was to match substrings
+   * against `detail`, which is prose written for an operator and has already
+   * been reworded once.
+   *
+   * `evidence` and `detail` are produced from one reading of `Standing` in
+   * `ReachMonitor.report`, deliberately: two computations of the same fact
+   * disagree eventually, and they disagree silently.
+   */
+  evidence: PathEvidence;
+  /**
+   * One sentence for an operator, in Yonder's words.
+   *
+   * Prose, and only prose. Nothing parses it — `evidence` above is the field
+   * to ask, and the whole point of adding it was that this sentence is free
+   * to be reworded without breaking a reader.
+   */
   detail: string;
 }
 

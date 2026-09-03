@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
 import { ReachMonitor, pathDevices, pathInUse, pathsHolding } from "./monitor.js";
-import { FAILURES_TO_STAND_DOWN, Standing, type PathName } from "./standing.js";
+import {
+  FAILURES_TO_STAND_DOWN,
+  Standing,
+  type PathName,
+  type PathReport,
+} from "./standing.js";
 import { DEFAULT_CONFIG, type Config } from "../../schema/config.js";
 import type { DeviceInfo } from "../nmcli/client.js";
 
@@ -213,6 +218,75 @@ describe("ReachMonitor.state", () => {
     expect(report.standing).toBe("standing-by");
     expect(report.detail).not.toMatch(/ready/i);
     expect(report.detail).toMatch(/reached nothing/i);
+  });
+
+  /**
+   * **The same three states, as a field rather than as a sentence.**
+   *
+   * `detail` is prose written for an operator, and the console used to
+   * recover the untested case by matching substrings against it — which made
+   * the wording load-bearing for a verdict drawn above it, and the wording
+   * changed once. `evidence` carries the distinction as data so nothing has
+   * to read the sentence, and the two are produced from **one** reading of
+   * `Standing` in `report()` so they cannot come to disagree.
+   */
+  const reportFor = async (monitor: ReachMonitor, path: PathName): Promise<PathReport> =>
+    (await monitor.state()).paths.find((p) => p.path === path)!;
+
+  it("records what is known about a path as evidence, not only as prose", async () => {
+    const { monitor } = build({ inUse: "ethernet" });
+    expect((await reportFor(monitor, "modem")).evidence).toBe("untested");
+
+    const reaching = build({ inUse: "ethernet", reaches: () => true });
+    await reaching.monitor.test("modem");
+    expect((await reportFor(reaching.monitor, "modem")).evidence).toBe("reaching");
+
+    const failing = build({ inUse: "ethernet", reaches: () => false });
+    await failing.monitor.test("modem");
+    expect((await reportFor(failing.monitor, "modem")).evidence).toBe("not-reaching");
+  });
+
+  it("keeps evidence and the sentence saying the same thing", async () => {
+    // One reading of `Standing` behind both. Two would drift, and drift
+    // silently: nothing would fail, a console would simply start colouring
+    // rows against the words beside them.
+    const cases: [boolean | null, RegExp][] = [
+      [true, /ready/i],
+      [false, /reached nothing/i],
+      [null, /not yet tested/i],
+    ];
+    for (const [reaches, wording] of cases) {
+      const { monitor } = build({ inUse: "ethernet", reaches: () => reaches === true });
+      if (reaches !== null) await monitor.test("modem");
+      const report = await reportFor(monitor, "modem");
+      const expected = reaches === null ? "untested" : reaches ? "reaching" : "not-reaching";
+      expect(report.evidence).toBe(expected);
+      expect(report.detail).toMatch(wording);
+    }
+  });
+
+  it("has no evidence about a path that is not on this board", async () => {
+    // Not even a record left over from before it was unplugged. A success
+    // from when the modem was present is not evidence about a board that no
+    // longer has one, and a row reading "reaching" beside "No cellular
+    // interface on this board" is two answers to one question.
+    const devices: Partial<Record<PathName, string>> = { ethernet: "eth0", modem: "wwan0" };
+    const { monitor } = build({ inUse: "ethernet", reaches: () => true, devices });
+    await monitor.test("modem");
+    expect((await reportFor(monitor, "modem")).evidence).toBe("reaching");
+
+    delete devices.modem;
+    const report = await reportFor(monitor, "modem");
+    expect(report.standing).toBe("absent");
+    expect(report.evidence).toBe("untested");
+  });
+
+  it("says a stood-down path is not reaching, and says it as evidence", async () => {
+    const { monitor } = build({ inUse: "ethernet", reaches: () => false });
+    for (let i = 0; i < FAILURES_TO_STAND_DOWN; i++) await monitor.test("modem");
+    const report = await reportFor(monitor, "modem");
+    expect(report.standing).toBe("no-route-out");
+    expect(report.evidence).toBe("not-reaching");
   });
 });
 

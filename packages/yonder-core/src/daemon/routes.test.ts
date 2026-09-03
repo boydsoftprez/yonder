@@ -923,8 +923,10 @@ describe("GET /reach/state", () => {
     inUse: "modem",
     carrying: true,
     paths: [
-      { path: "ethernet", device: "eth0", standing: "no-route-out", since: 1_000, detail: "Stood down" },
-      { path: "modem", device: "wwan0", standing: "in-use", since: null, detail: "Carrying traffic" },
+      { path: "ethernet", device: "eth0", standing: "no-route-out", since: 1_000,
+        evidence: "not-reaching", detail: "Stood down" },
+      { path: "modem", device: "wwan0", standing: "in-use", since: null,
+        evidence: "reaching", detail: "Carrying traffic" },
     ],
   };
 
@@ -934,6 +936,17 @@ describe("GET /reach/state", () => {
     );
     expect(res.status).toBe(200);
     expect((res.body as { inUse: string }).inUse).toBe("modem");
+  });
+
+  it("serves the evidence about each path, not only the sentence", async () => {
+    // The console draws three states from this and must not have to parse
+    // `detail` to get them. Serialised over the socket, so a field the router
+    // dropped would show up here.
+    const res = await provisioned({ reachState: async () => STATE })(
+      "GET", "/reach/state", undefined,
+    );
+    const paths = (res.body as ReachState).paths;
+    expect(paths.map((p) => p.evidence)).toEqual(["not-reaching", "reaching"]);
   });
 
   it("says so plainly when this daemon has no reach monitor to ask", async () => {

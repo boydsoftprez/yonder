@@ -283,22 +283,38 @@ export class ReachMonitor {
    * *not yet condemned* is not *working* — arriving at the display layer,
    * and it is the half of the observed defect an operator actually reads: a
    * modem re-dialled onto a wrong APN, untested, describing itself as ready.
+   *
+   * The record carries that distinction as `evidence` as well as in the
+   * sentence, so a console can draw the three states without reading prose.
    */
   private report(path: PathName, device: string | null, inUse: PathName | null): PathReport {
     const word = PATH_WORDS[path];
+
+    // Read once, and the only reading in this method. Both `evidence` and the
+    // sentence in `detail` come from this one value, so the field a console
+    // reads and the sentence an operator reads cannot drift apart — which is
+    // what they would do the first time somebody worked one of them out a
+    // second way.
+    //
+    // A path with no interface has no evidence about it, whatever a record
+    // left over from before it was unplugged still says: `test()` never
+    // records against a path it cannot find, and a success from before the
+    // modem was pulled is not evidence about a board that no longer has one.
+    const evidence: PathEvidence = device === null ? "untested" : this.standing.evidenceFor(path);
+
     if (device === null) {
-      return { path, device: null, standing: "absent", since: null,
+      return { path, device: null, standing: "absent", since: null, evidence,
         detail: `No ${word} interface on this board` };
     }
     if (this.standing.standingOf(path) === "no-route-out") {
-      return { path, device, standing: "no-route-out", since: this.standing.since(path),
+      return { path, device, standing: "no-route-out", since: this.standing.since(path), evidence,
         detail: "Reached nothing when tested and has been stood down" };
     }
     if (inUse === path) {
-      return { path, device, standing: "in-use", since: null, detail: "Carrying traffic" };
+      return { path, device, standing: "in-use", since: null, evidence, detail: "Carrying traffic" };
     }
-    return { path, device, standing: "standing-by", since: null,
-      detail: standingByDetail(this.standing.evidenceFor(path), word) };
+    return { path, device, standing: "standing-by", since: null, evidence,
+      detail: standingByDetail(evidence, word) };
   }
 }
 

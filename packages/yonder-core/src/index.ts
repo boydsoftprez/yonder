@@ -94,6 +94,7 @@ export {
   REACH_TICK_DEADLINE_MS,
   type PathName,
   type PathStanding,
+  type PathEvidence,
   type PathReport,
   type ReachState,
 } from "./net/reach/standing.js";
