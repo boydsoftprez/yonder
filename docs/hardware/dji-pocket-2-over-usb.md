@@ -235,16 +235,31 @@ Byte 10, refined: bit 1 lights at a yaw stop; bit 0 appeared once with it at the
 pose, so it is probably the pitch stop; bits 5 and 7 are on at rest and off during the
 over-the-top excursions, so they are status, not limits.
 
-### The stream is a burst, then silence
+### The ping is the live-view keep-alive
 
-Left alone after the handshake, the camera sent **1.63 MB of video in the first two
-seconds and then nothing** — ninety seconds of silence, heartbeats answered throughout.
-Every live-view subscribe payload tried on `camera/0x09`, and `camera/0xeb`, was answered
-with status `0xe0` and changed nothing. So the burst is a pre-roll — the camera's recent
-buffer, handed over on connection — and the command that keeps the picture coming is
-something else the app sends. The camera asks for it every second on the app command set
-(238): `0x01` and `0x03`, which the SDK's names put beside `dji_app_phone_camera_info_push`.
-Answering those is the next experiment.
+Left alone after the handshake, the camera sends about two seconds of video and stops.
+Every live-view subscribe payload tried on `camera/0x09` and `camera/0xeb`, and every
+message on the app command set, was refused with `0xe0` and changed nothing. The
+listen-only run — where the board said nothing at all — got **no video whatsoever**.
+
+The trigger is the plainest message there is. Sent once, and timed:
+
+| Sent once | Video in the next 5 s |
+|---|---|
+| general `0x00` ping | **1.62 MB** |
+| general `0x01` get version | 0 |
+| general `0xff` get device info | 0 |
+
+Repeated once a second for twenty seconds, the ping gave **20.2 MB — 8.1 Mb/s, about 200
+NAL units a second, continuously**; the other two gave a tail-off and nothing. So the
+camera streams for roughly two seconds after each ping it accepts (status `0x01`), and
+**a 1 Hz ping is the whole of live view**. The session tool now sends it by default.
+
+The sustained rate matters for the product: at 720p this camera delivers about 8 Mb/s,
+not the 1.7 Mb/s the burst-and-silence average suggested. That is fine on Wi-Fi or
+Ethernet and is far more than a field cellular uplink carries, so this source needs the
+bitrate control (R-VID-11's readout, and whatever sets it) before it goes anywhere near
+the modem.
 
 ### The video frame record, decoded
 
@@ -378,7 +393,7 @@ board; the operator plugs one cable.
   camera, they should answer `0x01` the same way.
 - **What the general-set answers carry.** Ping, version and device info return status
   `0x01` and nothing else; the version is presumably elsewhere.
-- **What keeps the stream alive.** It is a two-second pre-roll until the right message is
-  sent; the app set (238) is the candidate.
+- **Bitrate control.** The sustained stream is about 8 Mb/s at 720p; nothing yet sets it
+  lower. `camera/0x4c` set video-out parameters remains the candidate.
 - **Power draw** on the link. Not measured.
 - **The side port**, the phone adapter, and the original Osmo Pocket (`HG210`).

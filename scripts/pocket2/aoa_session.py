@@ -108,13 +108,48 @@ class Session:
             return f"gimbal reports a limit (0x{self.last_limit:02x}); clear it by hand and recentre from the camera first"
         if self.last_pitch is not None and abs(self.last_pitch) > 60:
             return f"gimbal pitch is {self.last_pitch:.1f}: not a sane pose to command from"
+        # 2. Rate commands (0x0C custom speed, 0x01 motion control): yaw, roll, pitch in
+        #    0.1 deg/s. Boxed to a gentle rate; the gimbal stops when the rate stops.
+        if cmdid in (0x0C, 0x01):
+            if len(payload) < 6:
+                return "rate command needs yaw, roll and pitch"
+            rates = [v / 10.0 for v in struct.unpack_from("<hhh", payload, 0)]
+            if max(abs(r) for r in rates) > self.a.max_rate:
+                return f"rate {rates} exceeds {self.a.max_rate} deg/s"
+            return None
         if cmdid not in (0x14, 0x0A):
             return None
-        # 2. Absolute angle: field 0 yaw, field 1 ROLL, field 2 PITCH — identified on
-        #    the bench. Each is boxed, and each may move at most max_step per command.
-        if len(payload) < 6:
-            return "angle command needs yaw, roll and pitch"
+        # 3. Angle frame, from the manufacturer's public Onboard SDK: yaw, roll, pitch in
+        #    0.1 deg; mode byte bit 0 = absolute (1) / incremental (0), bits 1-3 ignore
+        #    yaw/roll/pitch; duration in 0.1 s. Incremental frames are checked as deltas
+        #    from the current attitude; absolute frames must be explicitly allowed,
+        #    because their reference depends on the gimbal mode and that is what put the
+        #    head over the top.
+        if len(payload) < 8:
+            return "angle command needs yaw, roll, pitch, mode, duration"
         yaw, roll, pitch = (v / 10.0 for v in struct.unpack_from("<hhh", payload, 0))
+        mode, duration = payload[6], payload[7]
+        if mode & 0x01:
+            if not self.a.allow_absolute:
+                return "absolute angle frames are refused (their reference depends on the gimbal mode); use incremental, or --allow-absolute"
+        else:
+            # incremental: each field is a delta, ignored axes count as zero
+            dy = 0 if mode & 0x02 else yaw
+            dr = 0 if mode & 0x04 else roll
+            dp = 0 if mode & 0x08 else pitch
+            if max(abs(dy), abs(dr), abs(dp)) > self.a.max_step:
+                return f"incremental step {dy:.1f}/{dr:.1f}/{dp:.1f} exceeds {self.a.max_step} deg"
+            if duration < 5:
+                return f"duration {duration/10:.1f} s is too fast; 0.5 s or more"
+            if self.centre_yaw is not None and self.last_yaw is not None:
+                lo, hi = self.centre_yaw - self.a.yaw_reach, self.centre_yaw + self.a.yaw_reach
+                if not (lo <= self.last_yaw + dy <= hi):
+                    return f"incremental yaw would reach {self.last_yaw + dy:.1f}, outside {lo:.1f}..{hi:.1f}"
+            if self.last_pitch is not None:
+                plo, phi = self.a.pitch_window
+                if not (plo <= self.last_pitch + dp <= phi):
+                    return f"incremental pitch would reach {self.last_pitch + dp:.1f}, outside {plo}..{phi}"
+            return None
         if self.a.yaw_window:
             lo, hi = self.a.yaw_window
         elif self.centre_yaw is not None:
@@ -237,6 +272,10 @@ class Session:
         while True:
             time.sleep(1.0)
             self.send(0, 0x0E, ack=0, note="heartbeat")
+            # general/0x00 ping is the live-view keep-alive: the camera streams video for
+            # about two seconds after each one, and continuously while pinged at 1 Hz.
+            if not self.a.no_video:
+                self.send(0, 0x00, ack=1, note="ping (video keep-alive)")
             try:
                 lines = open(inject).read().splitlines()
             except FileNotFoundError:
@@ -282,6 +321,7 @@ if __name__ == "__main__":
     p.add_argument("--ffs", default="/dev/ffs-aoa")
     p.add_argument("--logdir", default="/var/tmp/aoa")
     p.add_argument("--listen-only", action="store_true", help="log only; send nothing")
+    p.add_argument("--no-video", action="store_true", help="do not send the 1 Hz ping that keeps the video coming")
     p.add_argument("--liveview-hex", default="", help="payload for camera/0x09 liveview subscribe")
     p.add_argument("--extra", action="append", help="cmdset:cmdid:hexpayload, may repeat")
     p.add_argument("--route", default="", help="envelope route bytes as hex; default mirrors the camera")
@@ -291,6 +331,8 @@ if __name__ == "__main__":
     p.add_argument("--sender-idx", type=int, default=1, help="our app index in the sender byte (camera pushes to app0)")
     p.add_argument("--yaw-window", type=float, nargs=2, default=None, metavar=("MIN", "MAX"),
                    help="absolute yaw the guard allows; default is a window around the centre learned at each recentre")
+    p.add_argument("--allow-absolute", action="store_true", help="permit absolute-mode angle frames (mode bit 0 set)")
+    p.add_argument("--max-rate", type=float, default=20.0, help="largest rate a speed command may ask for, deg/s")
     p.add_argument("--roll-window", type=float, nargs=2, default=(-15.0, 15.0), metavar=("MIN", "MAX"),
                    help="absolute roll the guard allows (field 1 of 4/0x14)")
     p.add_argument("--pitch-window", type=float, nargs=2, default=(-30.0, 20.0), metavar=("MIN", "MAX"),
