@@ -34,6 +34,8 @@ const configNode = (await import("./config.js")).default ?? await import("./conf
 const scanNode = (await import("./scan.js")).default ?? await import("./scan.js");
 const applyNode = (await import("./apply.js")).default ?? await import("./apply.js");
 const confirmNode = (await import("./confirm.js")).default ?? await import("./confirm.js");
+const revertNode = (await import("./revert.js")).default ?? await import("./revert.js");
+const pendingNode = (await import("./pending.js")).default ?? await import("./pending.js");
 const joinNode = (await import("./join.js")).default ?? await import("./join.js");
 
 const ok = (body: unknown): DaemonReply => ({ ok: true, status: 200, body });
@@ -43,6 +45,7 @@ const unreachable: DaemonReply = {
 
 interface Received {
   payload?: unknown;
+  topic?: unknown;
   yonder?: { state?: string; message?: string; id?: string; expiresAt?: number; movesRadio?: boolean };
 }
 
@@ -340,6 +343,117 @@ describe("yonder-join", () => {
       { topic: "ssid", payload: "HomeNetwork" },
       { topic: "join", payload: "" },
     ]);
+    expect(msg.yonder?.state).toBe("rejected");
+  });
+});
+
+describe("yonder-revert", () => {
+  it("puts back the apply the message names", async () => {
+    replies.push(ok({ state: "idle" }));
+    const msg = await send(revertNode, "yonder-revert", { yonder: { id: "abc" } });
+    // The operator's own command took effect and is staying. Reporting the
+    // change's fate here would light a red lamp on a control that did exactly
+    // what it was asked.
+    expect(msg.yonder?.state).toBe("confirmed");
+    expect(msg.yonder?.message).toContain("previous configuration");
+    expect(asked).toEqual([{ method: "POST", path: "/revert", body: { id: "abc" } }]);
+  });
+
+  it("takes the id from the payload as well, because a flow may carry it there", async () => {
+    replies.push(ok({ state: "idle" }));
+    await send(revertNode, "yonder-revert", { payload: { id: "def" } });
+    expect(asked[0]?.body).toEqual({ id: "def" });
+  });
+
+  it("refuses with a reason when there is nothing to put back, and calls nothing", async () => {
+    const msg = await send(revertNode, "yonder-revert", { payload: undefined });
+    expect(msg.yonder?.state).toBe("rejected");
+    expect(msg.yonder?.message).toContain("no change waiting");
+    expect(asked).toEqual([]);
+  });
+
+  it("reports a device that refused, so the key never silently does nothing", async () => {
+    replies.push({ ok: true, status: 400, body: { error: "nothing is pending confirmation" } });
+    const msg = await send(revertNode, "yonder-revert", { yonder: { id: "abc" } });
+    expect(msg.yonder?.state).toBe("rejected");
+    expect(msg.yonder?.message).toBe("nothing is pending confirmation");
+  });
+});
+
+/**
+ * **R-UI-15.** The banner that makes a pending change visible wherever the
+ * operator is, rather than only on the page it was made on.
+ */
+describe("yonder-pending", () => {
+  /**
+   * A polling node reads once on registration, so the sink may see that
+   * message before the one a `receive` produced. Every test here scripts the
+   * same reply twice and waits for the message it is actually about.
+   */
+  function fromPoller(
+    message: Record<string, unknown> | undefined,
+    want: (m: Received) => boolean = () => true,
+  ): Promise<Received> {
+    const flow = [
+      { id: "n1", type: "yonder-pending", interval: 2, wires: [["n2"]] },
+      { id: "n2", type: "helper" },
+    ];
+    return new Promise((resolve, reject) => {
+      void helper.load(pendingNode, flow, () => {
+        const sink = helper.getNode("n2") as unknown as {
+          on(event: string, fn: (msg: Received) => void): void;
+        };
+        sink.on("input", (msg) => { if (want(msg)) resolve(msg); });
+        if (message !== undefined) {
+          (helper.getNode("n1") as unknown as { receive(m: unknown): void }).receive(message);
+        }
+        setTimeout(() => { reject(new Error("no message from yonder-pending")); }, 4_000);
+      });
+    });
+  }
+
+  it("reads the apply state and says nothing is pending", async () => {
+    replies.push(ok({ state: "idle" }), ok({ state: "idle" }));
+    const msg = await fromPoller({});
+    expect(msg.payload).toEqual({ pending: false, id: "", what: "", why: "" });
+    expect(asked[0]).toEqual({ method: "GET", path: "/status" });
+  });
+
+  it("carries the countdown as words, and both lines, while one is pending", async () => {
+    const soon = { state: "pending", id: "a1", expiresAt: Date.now() + 92_000 };
+    replies.push(ok(soon), ok(soon));
+    const msg = await fromPoller({}, (m) => (m.payload as { pending?: boolean }).pending === true);
+    const payload = msg.payload as { pending: boolean; id: string; what: string; why: string };
+    expect(payload.pending).toBe(true);
+    expect(payload.id).toBe("a1");
+    expect(payload.what).not.toBe("");
+    expect(payload.why).toMatch(/gets you back in/);
+    // Already words. A clock ticking in a flow would be arithmetic in wiring.
+    expect(msg.yonder?.state).toBe("pending");
+    expect(msg.yonder?.message).toMatch(/^Reverts in 1:3\d$/);
+  });
+
+  /**
+   * The key's own action rides on `msg.topic`, and the read must not lose it:
+   * that is what lets one press be answered by a fresh read of `/status`, so
+   * the id the confirm and revert nodes act on is the one the device holds at
+   * that moment rather than one a flow cached.
+   */
+  it("keeps what the incoming message carried, so a key press survives the read", async () => {
+    const now = { state: "pending", id: "a1", expiresAt: Date.now() + 60_000 };
+    replies.push(ok(now), ok(now));
+    const msg = await fromPoller(
+      { payload: "revert", topic: "revert" },
+      (m) => m.topic === "revert",
+    );
+    expect(msg.topic).toBe("revert");
+    expect((msg.payload as { id: string }).id).toBe("a1");
+  });
+
+  it("leaves the banner down when the daemon does not answer, and says why", async () => {
+    replies.push(unreachable, unreachable);
+    const msg = await fromPoller({});
+    expect((msg.payload as { pending: boolean }).pending).toBe(false);
     expect(msg.yonder?.state).toBe("rejected");
   });
 });

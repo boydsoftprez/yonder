@@ -592,7 +592,7 @@ thermal sensor drew **0.0 °C**, which says *cold* rather than *not there*. `fac
 explicit that absent is null and never zero; the components were the other end of that rule
 and had it wrong.
 
-### K-30 · `yonder-confirm` is registered and used by nothing
+### K-30 · ~~`yonder-confirm` is registered and used by nothing~~ — CLOSED
 
 R-CFG-11 removed the operator confirmation: joining a network takes the access point off
 the air, so the console an operator would confirm from goes with it, and the device answers
@@ -605,9 +605,17 @@ it end to end, and the next person to need a confirmation step will find one tha
 been run since the flows stopped calling it. `scripts/verify-pages.sh` used to catch
 exactly this and stopped naming it in the same change, so nothing was watching either.
 
-**Closes when** either the node is removed with its route, or something uses it again — an
-apply that does not move the radio still goes through the engine's confirmation timer, so
-there may be a real caller here rather than a deletion.
+**Closed by the change that put a `Change pending` banner on Status — the second half of
+this entry's own guess.** The way out was a real caller and not a deletion: an apply that
+does not move the radio still goes through the engine's confirmation timer, and until
+R-UI-15 there was nowhere to see one except the page the change was made on. Status now
+carries a `Change pending` banner — the countdown, what is in force, and `CONFIRM` beside
+`REVERT NOW` — and `confirm-pending` in `flows/flows.json` is a `yonder-confirm`. It gained
+a twin in the same change, `yonder-revert`, because the banner offers both directions and a
+node with a mode would be a wiring diagram that no longer says which one a wire performs.
+
+`scripts/verify-pages.sh` names both again in the list of types the flows must use, so the
+thing that stopped watching is watching.
 
 ### K-31 · The network dropdown's label is red before anything is scanned
 

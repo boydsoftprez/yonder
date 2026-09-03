@@ -539,6 +539,16 @@ export function createRouter(deps: RouterDeps): Router {
         deps.engine.confirm(id);
         return { status: 200, body: deps.engine.status() };
       }
+      // The other half of the same decision (R-UI-15). A console that can only
+      // confirm leaves an operator who has already decided the change was
+      // wrong watching a timer — and reaching for the power instead, which is
+      // the one thing that turns a rollback into a recovery.
+      if (method === "POST" && path === "/revert") {
+        const id = (body as { id?: string } | undefined)?.id;
+        if (typeof id !== "string") return { status: 400, body: { error: "id is required" } };
+        await deps.engine.revertNow(id);
+        return { status: 200, body: deps.engine.status() };
+      }
       return { status: 404, body: { error: `no route for ${method} ${path}` } };
     } catch (e) {
       // A ConfigError is written for the operator: it says what is wrong with

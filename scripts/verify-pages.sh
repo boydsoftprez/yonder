@@ -399,13 +399,18 @@ else
     ok "the console logged no error at all"
 fi
 
-# yonder-confirm is deliberately absent. R-CFG-11 removed the operator
-# confirmation - joining takes the access point off the air, so the console
-# you would confirm from goes with it, and the device answers the real
-# question itself. The node is still registered by its package and is now used
-# by nothing; that is recorded as K-30 rather than hidden by leaving it in a
-# list nothing checks.
-for type in yonder-status yonder-activity yonder-diag yonder-config yonder-scan yonder-apply yonder-join; do
+# yonder-confirm is named again, and that is what closed K-30.
+#
+# R-CFG-11 removed the operator confirmation of a *join* - joining takes the
+# access point off the air, so the console you would confirm from goes with it
+# - and the wiring that used this node went with it while the node stayed.
+# R-UI-15 gave it a real caller: an apply that does not move the radio still
+# goes through the engine's confirmation timer, and Status now carries the
+# banner that shows one. `yonder-revert` is its twin, and `yonder-pending` is
+# what reads the state both act on. Naming them here is the half of K-30 that
+# stopped watching.
+for type in yonder-status yonder-activity yonder-diag yonder-config yonder-scan yonder-apply \
+            yonder-join yonder-pending yonder-confirm yonder-revert; do
     if grep -q "\"$type\"" "$USERDIR/flows.json" || grep -q "$type" "$REPO/flows/flows.json"; then
         ok "the flows use $type"
     else
@@ -599,6 +604,62 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
             '"mode":"absent"' "$(sock /modem/state)"
     }
 
+    # Status's third shape, and the one the confirmation timer exists for
+    # (R-UI-15, R-CFG-03). A change is applied and deliberately *not*
+    # confirmed, so the banner is up with a real countdown on it — then the
+    # gate presses `REVERT NOW` and asserts the device put the previous
+    # configuration back.
+    #
+    # `system.hostname` is the change: it affects reachability, so the apply
+    # goes pending rather than being kept (R-CFG-12); the hostname renderer
+    # cannot fail an apply by design; and there is nothing else on any page
+    # that draws it, so no other capture moves.
+    #
+    # The press is the point. A banner that renders correctly and whose keys
+    # do nothing is the exact failure `--press NIGHT` was added for — every
+    # soft key on every page shipped dead once, silently — and this is the
+    # only end-to-end proof that either half of this panel reaches the device.
+    capture_status_pending() {
+        sock /config > "$ROOT/config.json"
+        node -e '
+            const config = require(process.argv[1]);
+            config.system.hostname = "yonder-under-test";
+            process.stdout.write(JSON.stringify(config));
+        ' "$ROOT/config.json" > "$ROOT/pending.json"
+        applied=$(curl -s -H 'content-type: application/json' --data @"$ROOT/pending.json" \
+            --unix-socket "$SOCKET" http://localhost/apply)
+        expect_contains "the apply went pending rather than being kept" '"expiresAt"' "$applied"
+        expect_contains "and the daemon holds it, with a deadline" '"state":"pending"' "$(sock /status)"
+        # One poll of `yonder-pending`, so the page is showing the change and
+        # not the moment before it.
+        sleep 3
+        if node "$REPO/scripts/capture-pages.mjs" \
+                --base-url "http://127.0.0.1:$PORT" \
+                --password "$PASSWORD" \
+                --palette "$1" \
+                --only status \
+                --as status-pending \
+                --artifacts "$REPO/vendor/capture" \
+                --press "REVERT NOW" \
+                ${ACCEPT_SHAPE:+--accept}; then
+            ok "the $1 palette: Status with a change pending, and REVERT NOW to press"
+        else
+            bad "the $1 palette: Status with a change pending, see above"
+        fi
+        i=0
+        while [ "$i" -lt "$TRIES" ]; do
+            case "$(sock /status)" in *'"state":"idle"'*) break ;; esac
+            sleep "$POLL"; i=$((i + 1))
+        done
+        expect_contains "pressing REVERT NOW rolled the change back" \
+            '"outcome":"reverted"' "$(sock /status)"
+        expect_contains "and the device is running the previous configuration" \
+            '"hostname":"yonder"' "$(sock /config)"
+        # One more poll, so the banner is down before anything else is
+        # captured. Every other picture in this run is of a settled device.
+        sleep 3
+    }
+
     if reach_theme night; then
         ok "the device reached the night palette through /ui/theme"
         capture night
@@ -608,6 +669,7 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
         capture_state night 1 not-reaching
         capture_state night 0 reaching
         capture_status_without_modem night
+        capture_status_pending night
     else
         bad "the console never regenerated theme.css as night, so it was not captured"
     fi
@@ -620,6 +682,7 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
         capture_state day 1 not-reaching
         capture_state day 0 reaching
         capture_status_without_modem day
+        capture_status_pending day
     else
         bad "the console is still in the night palette; a held run will be wrong"
     fi

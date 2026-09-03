@@ -269,16 +269,30 @@ network-interfaces-not-reaching.day.png     every path probed, and reaching noth
 network-interfaces-reaching.day.png         every path probed, and reaching something
 ```
 
-**Status has two shapes and they are two different boards.** `Reachable by` is gauges over
-a labelled strip, and on a board with no modem the gauges are *absent* — a gauge with no
-needle reads as a fault, and there being no modem is not one. The second capture is driven
-by taking the modem out of the harness rather than by sending an empty reading, so what is
-photographed is the panel degrading rather than a panel with a hole in it:
+**Status has three shapes.** Two of them are two different boards: `Reachable by` is gauges
+over a labelled strip, and on a board with no modem the gauges are *absent* — a gauge with
+no needle reads as a fault, and there being no modem is not one. That capture is driven by
+taking the modem out of the harness rather than by sending an empty reading, so what is
+photographed is the panel degrading rather than a panel with a hole in it.
+
+The third is the same board holding a configuration change nobody has confirmed (R-UI-15).
+The gate applies one, does not confirm it, photographs the banner with a real countdown on
+it, and then **presses `REVERT NOW`** and asserts the device put the previous configuration
+back — which is the only end-to-end proof that either key on that panel reaches the device.
+A banner that renders correctly and whose keys do nothing is the failure `--press NIGHT` was
+added for.
 
 ```
 status.day.png                              a board with a modem in it
 status-without-modem.day.png                the same board with nothing in the slot
+status-pending.day.png                      the same board, holding an unconfirmed change
 ```
+
+The countdown is masked in the committed picture and only there: it is the one annunciator
+caption on this console that is a *reading*, so without masking that file would differ by a
+second or two on every run. The widget says so about itself with `className: "yonder-live"`,
+which is what the mask list matches — the lamp and its box are untouched, and the unmasked
+copy under `vendor/capture/` carries the digits.
 
 `capture-pages.mjs --only <page> --as <name>` is what takes one of them, so a state capture
 is held to exactly the rules and the shape reference every other page is. The shape manifest

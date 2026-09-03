@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, it, expect } from "vitest";
-import { CONSOLE_HOME, THEME_HREF } from "./console/settings.js";
 import { JOIN_TOPIC } from "./net/join.js";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { EXCLUDED_NODES, THEME_HREF } from "./console/settings.js";
+import { CONSOLE_HOME, EXCLUDED_NODES, THEME_HREF } from "./console/settings.js";
 import { MIN_POLL_MS } from "./console/node.js";
 
 /**
@@ -609,9 +608,20 @@ describe("flows/flows.json join controls", () => {
    * thrown away because somebody was slow. The device establishes for itself
    * whether the join took, so nothing is asked of the operator at all.
    */
-  it("asks the operator to confirm nothing", () => {
+  it("asks the operator to confirm nothing about the join", () => {
     expect(flows.find((n) => n.id === "group-net-confirm")).toBeUndefined();
-    expect(flows.find((n) => n.type === "yonder-confirm")).toBeUndefined();
+    // Narrowed, not weakened. R-UI-15 put a `yonder-confirm` back on Status,
+    // reached from a banner that any pending change raises — which closed
+    // K-30. What R-CFG-11 removed was a confirmation *of the join*, asked for
+    // from a page the join takes off the air. So the assertion is that the
+    // only confirm control in the flows is that one, and that nothing in the
+    // Wi-Fi panel reaches it.
+    expect(flows.filter((n) => n.type === "yonder-confirm").map((n) => n.id))
+      .toEqual(["confirm-pending"]);
+    const fromJoin = flows
+      .filter((n) => n.group === "group-net-join" || n.type === "yonder-join")
+      .flatMap((n) => (n.wires ?? []).flat());
+    expect(fromJoin).not.toContain("confirm-pending");
     const words = flows
       .filter((n) => n.type === "ui-markdown" || n.type === "ui-button")
       .map((n) => `${String(n.content ?? "")} ${String(n.label ?? "")}`.toLowerCase())
@@ -1331,6 +1341,198 @@ describe("flows/flows.json Reachable by", () => {
     expect(inPanel.some((n) => n.type === "function")).toBe(false);
     for (const id of ["pick-reach-strength", "pick-reach-quality"]) {
       expect(byId(id)?.type).toBe("change");
+    }
+  });
+});
+
+/**
+ * **`CHANGE PENDING` (R-UI-15).**
+ *
+ * The confirmation timer is what makes this device unbrickable (R-CFG-03).
+ * The apply engine has tracked the pending change and its deadline all along
+ * and the console drew it **only on the page the change was made on** — make
+ * a change on the Network page, walk to Status, and nothing said the
+ * configuration reverts in ninety seconds unless somebody confirms it.
+ *
+ * This is also what closed K-30: `yonder-confirm` had been registered and used
+ * by nothing since R-CFG-11 took away the wiring that called it.
+ */
+describe("flows/flows.json Change pending", () => {
+  const byId = (id: string) => flows.find((n) => n.id === id);
+  const inPanel = flows.filter((n) => n.group === "group-status-pending");
+  const wiresOf = (id: string) => (byId(id)?.wires ?? []) as string[][];
+
+  it("is the first panel on Status, above the board it is about to change", () => {
+    const group = byId("group-status-pending");
+    expect(group?.type).toBe("ui-group");
+    expect(group?.page).toBe("page-status");
+    expect(group?.name).toBe("Change pending");
+    expect(group?.width).toBe(12);
+    for (const other of ["group-board", "group-status-reach", "group-status-remote"]) {
+      expect(Number(group?.order)).toBeLessThan(Number(byId(other)?.order));
+    }
+  });
+
+  /**
+   * **Hidden in the shipped file, not merely at the first poll.**
+   *
+   * Dashboard reads a group with no `visible` as visible, and group
+   * visibility is server-side state that starts unset — so a console that had
+   * just started would draw an empty CHANGE PENDING panel until the first
+   * read said otherwise. A panel that is always there saying nothing is
+   * pending is noise on a page an operator glances at, and noise on that page
+   * is what makes the one time it matters invisible.
+   */
+  it("ships hidden, and is raised only while something is pending", () => {
+    expect(byId("group-status-pending")?.visible).toBe(false);
+
+    // The decision is a boolean the package computed. The flow routes it; it
+    // does not work it out (CLAUDE.md rule 2).
+    const gate = byId("route-pending-banner");
+    expect(gate?.type).toBe("switch");
+    expect(gate?.property).toBe("payload.pending");
+    expect((gate?.rules as { t: string }[]).map((r) => r.t)).toEqual(["true", "false"]);
+    expect(wiresOf("route-pending-banner"))
+      .toEqual([["show-pending-banner"], ["hide-pending-banner"]]);
+
+    // Two constants either side of it, never one conditional.
+    for (const [id, key] of [["show-pending-banner", "show"], ["hide-pending-banner", "hide"]]) {
+      const node = byId(id);
+      expect(node?.type).toBe("change");
+      const rules = node?.rules as { p: string; tot: string; to: string }[];
+      expect(rules).toHaveLength(1);
+      expect(rules[0].p).toBe("payload");
+      expect(rules[0].tot).toBe("json");
+      expect(JSON.parse(rules[0].to)).toEqual({ groups: { [key]: ["group-status-pending"] } });
+      expect(wiresOf(id)).toEqual([["control-pending"]]);
+    }
+    // Dashboard hides a *group* only through ui-control, which needs the base.
+    expect(byId("control-pending")?.type).toBe("ui-control");
+    expect(byId("control-pending")?.ui).toBe(flows.find((n) => n.type === "ui-base")?.id);
+  });
+
+  /**
+   * The countdown is text when it reaches the page. A clock ticking inside
+   * `flows.json` would be arithmetic in wiring — on the one number that
+   * decides whether an operator still has a device.
+   */
+  it("draws the time left as a lit caption, computed in the package", () => {
+    const poller = byId("poll-pending");
+    expect(poller?.type).toBe("yonder-pending");
+    expect(Number(poller?.interval) * 1000).toBeGreaterThanOrEqual(MIN_POLL_MS);
+    expect(wiresOf("poll-pending")[0]).toEqual([
+      "ann-pending", "text-pending-what", "text-pending-why",
+      "route-pending-banner", "route-pending-key",
+    ]);
+
+    const lamp = byId("ann-pending");
+    expect(lamp?.type).toBe("ui-yonder-annunciator");
+    expect(lamp?.group).toBe("group-status-pending");
+    // From the shared channel, with no label of its own, so the words are the
+    // ones `pendingChange()` wrote.
+    expect(lamp?.source).toBe("yonder");
+    expect(lamp?.label).toBe("");
+    expect(Number(lamp?.order)).toBe(1);
+    // The one annunciator on this console whose caption is a *reading* rather
+    // than a state word. Without saying so, the committed picture of this page
+    // would differ on every run by a second or two of countdown — which is the
+    // thing masking exists to stop.
+    expect(lamp?.className).toBe("yonder-live");
+  });
+
+  /**
+   * Both lines are sentences, so both are qualifiers. `.nrdb-ui-text-value`
+   * is `text-align: right` — the defect Task 8's capture found, on prose the
+   * console had put in a readout's slot.
+   */
+  it("says what is in force and what the revert is for, as prose", () => {
+    for (const [id, bound] of [["text-pending-what", "payload.what"], ["text-pending-why", "payload.why"]]) {
+      const line = byId(id);
+      expect(line?.type).toBe("ui-text");
+      expect(line?.group).toBe("group-status-pending");
+      expect(line?.value).toBe(bound);
+      expect(line?.valueType).toBe("msg");
+      expect(line?.wrapText).toBe(true);
+      expect(line?.className).toBe("yonder-qualifier");
+    }
+    expect(Number(byId("text-pending-what")?.order))
+      .toBeLessThan(Number(byId("text-pending-why")?.order));
+  });
+
+  /**
+   * **`CONFIRM` is the irreversible one, and `REVERT NOW` is not.**
+   *
+   * This is the opposite of what most interfaces do and it is deliberate.
+   * Confirming keeps a change nobody can take back automatically; reverting
+   * is the safe direction, and it is the thing that gets an operator back in.
+   */
+  it("marks confirming as the irreversible act, and reverting as the safe one", () => {
+    const keys = JSON.parse(String(byId("keys-pending")?.keys ?? "[]")) as
+      { label: string; action: string; tone: string }[];
+    expect(keys).toEqual([
+      { label: "CONFIRM", action: "confirm", tone: "warn" },
+      { label: "REVERT NOW", action: "revert", tone: "act" },
+    ]);
+    // R-UI-10: at most one control per page takes the irreversible tone, and
+    // Status's other rail is two palette keys.
+    const warnOnStatus = flows
+      .filter((n) => n.type === "ui-yonder-softkeys")
+      .filter((n) => String(n.group).includes("status") || n.group === "group-status-pending")
+      .flatMap((n) => JSON.parse(String(n.keys ?? "[]")) as { tone?: string }[])
+      .filter((k) => k.tone === "warn");
+    expect(warnOnStatus).toHaveLength(1);
+  });
+
+  /**
+   * A press is answered by a fresh read, so the id the two nodes act on is
+   * the one the device holds at that moment — never one a flow cached and may
+   * have watched expire. The key's own action rides on `msg.topic`, which the
+   * read does not overwrite.
+   */
+  it("reads the apply id at the moment the key is pressed, and caches none", () => {
+    expect(wiresOf("keys-pending")).toEqual([["tag-pending-key"]]);
+    const tag = byId("tag-pending-key");
+    expect(tag?.type).toBe("change");
+    expect(tag?.rules).toEqual([{ t: "set", p: "topic", pt: "msg", to: "payload", tot: "msg" }]);
+    expect(wiresOf("tag-pending-key")).toEqual([["poll-pending"]]);
+
+    const route = byId("route-pending-key");
+    expect(route?.type).toBe("switch");
+    expect(route?.property).toBe("topic");
+    expect((route?.rules as { v: string }[]).map((r) => r.v)).toEqual(["confirm", "revert"]);
+    expect(wiresOf("route-pending-key")).toEqual([["confirm-pending"], ["revert-pending"]]);
+
+    expect(byId("confirm-pending")?.type).toBe("yonder-confirm");
+    expect(byId("revert-pending")?.type).toBe("yonder-revert");
+    // Nothing here keeps state between one press and the next.
+    expect(JSON.stringify(inPanel)).not.toMatch(/"flow"|"global"/);
+  });
+
+  /**
+   * Whichever key was pressed, the operator is told what it did. Without
+   * this a confirm the daemon refused — "nothing is pending confirmation" —
+   * would be a key that did nothing and said nothing (R-UI-05).
+   */
+  it("says out loud what each key did", () => {
+    for (const id of ["confirm-pending", "revert-pending"]) {
+      expect(wiresOf(id)).toEqual([["say-pending"]]);
+    }
+    const say = byId("say-pending");
+    expect(say?.type).toBe("change");
+    expect((say?.rules as { to: string }[])[0].to).toBe("yonder.message");
+    expect(wiresOf("say-pending")[0]).toContain(flows.find((n) => n.type === "ui-notification")?.id);
+  });
+
+  // CLAUDE.md rule 2. The countdown is the thing most likely to be reached
+  // for with a function node, and it is in yonder-core.
+  it("ships no function node", () => {
+    const own = new Set([
+      "poll-pending", "tag-pending-key", "route-pending-key", "route-pending-banner",
+      "show-pending-banner", "hide-pending-banner", "control-pending",
+      "confirm-pending", "revert-pending", "say-pending",
+    ]);
+    for (const node of flows.filter((n) => own.has(n.id) || inPanel.includes(n))) {
+      expect(node.type, node.id).not.toBe("function");
     }
   });
 });

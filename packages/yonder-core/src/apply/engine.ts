@@ -426,6 +426,35 @@ export class ApplyEngine {
     this.lastResult = { id, outcome: "confirmed", at: this.clock.now() };
   }
 
+  /**
+   * The operator asking for the change to go back **now** (R-UI-15).
+   *
+   * The countdown already does this; this is the same rollback taken early.
+   * It exists because the window is up to five minutes long and an operator
+   * who has already decided the change was wrong should not have to sit and
+   * watch a timer to get their device back — which is the one situation where
+   * they are most likely to reach for a power cycle instead, and a power
+   * cycle during an unconfirmed apply is the case `recover()` has to clean up
+   * after.
+   *
+   * Guarded exactly as `confirm()` is, and for the same reason: an id that is
+   * not the pending one is a caller acting on a change that has already
+   * ended, and rolling back whatever happens to be pending instead would undo
+   * something nobody asked about.
+   *
+   * The countdown timer is disarmed first. `revert()` is idempotent by way of
+   * its own state check, so a timer left armed would be harmless — but a
+   * timer nobody cancelled is a timer that fires, and one that fires into a
+   * `return` is indistinguishable in a log from one that did the work.
+   */
+  async revertNow(id: string): Promise<void> {
+    if (this.state !== "pending") throw new ConfigError("nothing is pending confirmation");
+    if (id !== this.id) throw new ConfigError(`unknown apply id "${id}"`);
+    if (this.timer !== undefined) this.clock.clearTimer(this.timer);
+    this.timer = undefined;
+    await this.revert();
+  }
+
   /** Called at start-up. Reverts an apply the previous process never confirmed. */
   async recover(): Promise<void> {
     const entry = this.journal.read();

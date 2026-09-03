@@ -81,6 +81,14 @@ const LIVE = [
   ".y-gauge__value",
   ".y-bar__v",
   ".tape__box",
+  // An annunciator caption is normally a state word — NOTHING, CONNECTED —
+  // and those are exactly what somebody looking at these pictures needs to
+  // read, so the widget is not masked as a kind. `CHANGE PENDING`'s is the
+  // one that is a *reading*: a countdown, different on every run, which would
+  // leave that committed picture permanently dirty. The widget says so about
+  // itself with `yonder-live`, so nothing here has to know which page it is
+  // on. The lamp and its box are untouched; only the digits go.
+  ".yonder-live .y-ann__text",
 ];
 
 /** Fixed, so geometry means the same thing on a laptop and on a CI runner. */

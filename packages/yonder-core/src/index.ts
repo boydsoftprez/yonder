@@ -263,6 +263,7 @@ export {
   rejected,
   presentation,
   secondsRemaining,
+  countdown,
   type CommandState,
   type CommandStatus,
   type CommandPresentation,
@@ -275,11 +276,15 @@ export {
   fetched,
   applyStatus,
   confirmStatus,
+  pendingChange,
+  revertStatus,
   readFailure,
+  PENDING_WHY,
   MIN_POLL_MS,
   DEFAULT_POLL_MS,
   DEFAULT_SOCKET_PATH,
   type Fetched,
+  type PendingChange,
 } from "./console/node.js";
 export {
   displayFacts,

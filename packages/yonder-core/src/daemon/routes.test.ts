@@ -9,6 +9,7 @@ import type { ScanResult } from "../net/scan.js";
 import type { PingResult } from "../diag/probe.js";
 import { ApplyEngine } from "../apply/engine.js";
 import { saveConfig } from "../config/save.js";
+import { loadConfig } from "../config/load.js";
 import { SecretStore } from "../secrets/store.js";
 import { DEFAULT_CONFIG, type Config } from "../schema/config.js";
 import { AdminCredential } from "../console/credential.js";
@@ -198,6 +199,7 @@ describe("the gate in front of the configuration routes", () => {
     const r = router();
     expect((await r("POST", "/apply", changed())).status).toBe(403);
     expect((await r("POST", "/confirm", { id: "anything" })).status).toBe(403);
+    expect((await r("POST", "/revert", { id: "anything" })).status).toBe(403);
   });
 
   it("refuses an unknown route while unprovisioned rather than saying it is unknown", async () => {
@@ -1081,5 +1083,53 @@ describe("POST /reach/test", () => {
   it("says so plainly when this daemon has no reach monitor to ask", async () => {
     const res = await provisioned({})("POST", "/reach/test", { path: "modem" });
     expect(res.status).toBe(503);
+  });
+});
+
+/**
+ * **R-UI-15.** The other half of the confirmation decision. A console that
+ * could only confirm would leave an operator who has already decided the
+ * change was wrong watching a five-minute timer — and reaching for the power
+ * instead, which is the one thing that turns a rollback into a recovery.
+ */
+describe("POST /revert", () => {
+  it("puts the previous configuration back and returns to rest", async () => {
+    const r = provisioned();
+    const applied = await r("POST", "/apply", changed());
+    const id = (applied.body as { id: string }).id;
+    expect(loadConfig(configPath).system.hostname).toBe("changed");
+
+    const res = await r("POST", "/revert", { id });
+    expect(res.status).toBe(200);
+    expect((res.body as { state: string }).state).toBe("idle");
+    expect((res.body as { lastResult?: { outcome: string } }).lastResult?.outcome).toBe("reverted");
+    expect(loadConfig(configPath).system.hostname).toBe("yonder");
+  });
+
+  it("wants an id, and says so rather than reverting whatever is pending", async () => {
+    const r = provisioned();
+    await r("POST", "/apply", changed());
+    const res = await r("POST", "/revert", {});
+    expect(res.status).toBe(400);
+    expect(loadConfig(configPath).system.hostname).toBe("changed");
+  });
+
+  /**
+   * A ConfigError is written for the operator, so the console can say what
+   * happened rather than showing a key that did nothing.
+   */
+  it("refuses an id that is not the pending one, in words", async () => {
+    const r = provisioned();
+    await r("POST", "/apply", changed());
+    const res = await r("POST", "/revert", { id: "not-the-id" });
+    expect(res.status).toBe(400);
+    expect((res.body as { error: string }).error).toMatch(/unknown apply/);
+    expect(loadConfig(configPath).system.hostname).toBe("changed");
+  });
+
+  it("refuses when nothing is pending at all", async () => {
+    const res = await provisioned()("POST", "/revert", { id: "a1" });
+    expect(res.status).toBe(400);
+    expect((res.body as { error: string }).error).toMatch(/nothing is pending/);
   });
 });

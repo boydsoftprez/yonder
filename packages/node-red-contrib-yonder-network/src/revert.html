@@ -1,0 +1,38 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!--
+  The editor half of put the previous configuration back.
+
+  Node-RED finds this by basename beside the node's .js, and without it the
+  flow editor shows the node as "unknown" even though the runtime registered
+  it. It is a form and a registration, and deliberately nothing else: no
+  behaviour lives here (CLAUDE.md rule 2 in spirit — a diff has to be
+  readable), and no asset is fetched from anywhere (R-UI-01).
+-->
+<script type="text/html" data-template-name="yonder-revert">
+  <div class="form-row">
+    <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name" />
+  </div>
+</script>
+
+<script type="text/html" data-help-name="yonder-revert">
+<p>Posts <code>POST /revert</code> with the apply id, taken from
+<code>msg.yonder.id</code>, <code>msg.payload.id</code> or a bare
+<code>msg.payload</code> string.</p>
+<p>The countdown already does this. Taking it early is for the operator who has
+decided the change was wrong and should not have to watch a five-minute timer to
+get their device back — which is the wait during which somebody reaches for the
+power instead (R-UI-15, R-CFG-03).</p>
+</script>
+
+<script type="text/javascript">
+  RED.nodes.registerType("yonder-revert", {
+    category: "yonder",
+    color: "#c7d4e0",
+    defaults: { name: { value: "" } },
+    inputs: 1,
+    outputs: 1,
+    icon: "font-awesome/fa-undo",
+    label: function () { return this.name || "put the previous configuration back"; },
+  });
+</script>

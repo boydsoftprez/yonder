@@ -163,6 +163,54 @@ describe("ApplyEngine", () => {
     expect(loadConfig(configPath).system.hostname).toBe("yonder");
   });
 
+  /**
+   * **R-UI-15.** The countdown already does this; `revertNow` is the same
+   * rollback taken early, for the operator who has already decided the change
+   * was wrong. The window is up to five minutes, and that wait is when
+   * somebody reaches for the power instead — which is the case `recover()`
+   * has to clean up after.
+   */
+  it("puts the previous configuration back before the window runs out", async () => {
+    const { clock, advance } = fakeClock();
+    const r = renderer();
+    const e = new ApplyEngine({ configPath, journalPath, renderers: [r], clock, timeoutMs: 120_000 });
+    const { id } = await e.apply(changed());
+    expect(loadConfig(configPath).system.hostname).toBe("changed");
+
+    await e.revertNow(id!);
+    expect(loadConfig(configPath).system.hostname).toBe("yonder");
+    expect(e.status().state).toBe("idle");
+    expect(e.status().lastResult).toMatchObject({ id, outcome: "reverted" });
+    expect(existsSync(journalPath)).toBe(false);
+    expect(r.calls).toHaveLength(2);
+
+    // The countdown was disarmed with it. A timer left armed would fire into
+    // a `return`, which is indistinguishable in a log from one that worked.
+    advance(200_000);
+    expect(r.calls).toHaveLength(2);
+    expect(e.status().state).toBe("idle");
+  });
+
+  /**
+   * Guarded exactly as `confirm()` is. An id that is not the pending one is a
+   * caller acting on a change that has already ended, and rolling back
+   * whatever happens to be pending instead would undo something nobody asked
+   * about.
+   */
+  it("refuses to revert an id it does not recognise, or nothing at all", async () => {
+    const { clock } = fakeClock();
+    const e = new ApplyEngine({ configPath, journalPath, renderers: [renderer()], clock });
+    await expect(e.revertNow("a1")).rejects.toThrow(/nothing is pending/);
+
+    const { id } = await e.apply(changed());
+    await expect(e.revertNow("not-the-id")).rejects.toThrow(/unknown apply/);
+    expect(loadConfig(configPath).system.hostname).toBe("changed");
+    expect(e.status().state).toBe("pending");
+
+    e.confirm(id!);
+    await expect(e.revertNow(id!)).rejects.toThrow(/nothing is pending/);
+  });
+
   it("refuses a second apply while one is pending", async () => {
     const { clock } = fakeClock();
     const e = new ApplyEngine({ configPath, journalPath, renderers: [renderer()], clock });
