@@ -492,6 +492,31 @@ territory is one evening old. The order to prove them in is the order a pilot ne
 rate-mode aim, then stream bitrate, then record, then exposure and white balance, then
 the readouts — each a camera-side message with no gimbal risk except the first.
 
+## Where the remaining knowledge lives
+
+Every row of the parity table above is one of three kinds of fact, and each kind has a
+different source:
+
+| Kind of fact | Source | State |
+|---|---|---|
+| Which message does what — the ids | the manufacturer's app, native library, by name | complete |
+| Frame format, CRCs, addressing, gimbal payloads, exposure/ISO/EV/record payloads | **public** — the dji-firmware-tools dissector and the manufacturer's Onboard SDK source | in hand; gimbal proven, camera-side under test |
+| Live-view resolution and rate, stream bitrate, white balance, zoom, focus payloads | **compiled code** in the native library — the handlers that turn an SDK key such as `H1LiveViewResolutionFrameRate` into bytes on the wire | not reachable by reading strings: the library is stripped |
+| Ground truth for anything | a capture of the manufacturer's app talking to the camera | needs an Android device; none on the bench |
+
+The third row is the one that decides how far parity goes. The library has no symbol
+table, so its functions have no names, but they still reference the key-name strings —
+and a decompiler can walk from a string to the function that uses it and render that
+function as C. That is a deterministic procedure, not a guess: load the library, find the
+references to each key of interest, decompile, read the request struct off the code. It
+is legitimate ground for a GPL project — a protocol learned for interoperability and
+implemented afresh — and it is the next tool, not a phone.
+
+One correction to an earlier draft of this note: the live-view stream has only ever been
+observed at 1280×720, and that was written up as "the other resolutions are recording
+modes". **That is inference, and probably wrong**: the SDK key named above says the
+live view's resolution and rate are a setting on this family. Untested, not impossible.
+
 ## What Yonder would build
 
 A small daemon, `pocket2d`: present the phone identity, complete the AOA handshake, run
