@@ -198,7 +198,6 @@ network:
 
 remote:
   zerotier:  { enabled: false, network_id: null }   # primary — joins by network ID
-  tailscale: { enabled: false, auth_key: { secret: ts_authkey } }
 
 gpio:
   relays:
@@ -213,6 +212,36 @@ the field, fastest-last so a slow link is found before a fast one is guessed at.
 
 **`cameras[].outputs`** is a list, and every entry is active at once — browser preview and
 a ground-station feed are not a choice between two options (R-VID-05).
+
+**`remote.zerotier`** is the whole of the mesh configuration: a switch and a network ID.
+That is the point of choosing it first — a network ID is a value you can put in a file, and
+an interactive login is not ([ADR-0004](adr/0004-zerotier-primary-mesh-vpn.md)), so a device
+can be given remote access from the boot partition with no screen and no account on the
+device.
+
+`network_id` is **sixteen lowercase hexadecimal characters**, and it is validated for that
+shape before it is applied. That check earns its place: a network ID that is merely *wrong*
+produces no error from the mesh client at all — the device sits in `Joining…` indefinitely,
+exactly as it would if it had no route out — so the last chance to catch a mistyped one is
+before it is sent. Shape validation catches a dropped character, an extra one, and a letter
+past `f`. It cannot catch a well-formed ID for a network that does not exist.
+
+Joining does not go behind the confirmation window. A mesh join only ever *adds* a path to
+the device and cannot take away the one the operator is using, so under R-CFG-12 it is kept
+rather than held — see [the design note](superpowers/specs/2026-09-02-remote-access-design.md)
+for the measurements that earned that exemption. What a join *does* wait for is a person:
+the device joins in seconds and then sits in **waiting to be approved** until somebody
+authorises it in the controller. Nothing times out of that state and nothing is reverted
+while it lasts; a week there is a correct outcome.
+
+The mesh client is installed but **not started** until a network is configured. A client with
+no network joined still holds live sessions with its vendor's root servers, and a device
+should not be talking to anyone's infrastructure because software is merely present
+(R-VPN-08).
+
+**`remote.tailscale` does not exist yet.** The second mesh (R-VPN-02) lands in M2b, and until
+it does, the `remote` section accepts `zerotier` and nothing else — a configuration naming
+`tailscale` is rejected on load like any other key that is not a Yonder setting (R-CFG-09).
 
 **`network.priority`** replaces hand-tuned route metrics. Egress preference is stated once,
 in order, and the metrics are generated.
