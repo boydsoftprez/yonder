@@ -161,8 +161,26 @@ the service, which a first start — generating an identity keypair — is far t
 answer, so the very first join on a fresh device failed and reverted the operator's network
 id. It also surfaced [K-33](known-issues.md), which predates this milestone.
 
-Still outstanding for M2a: serving the console *over* the mesh from a machine sharing no
-local network with the board (R-VPN-04), which is the exit criterion above.
+**The exit criterion is met.** On 2026-09-03 the console *and* `ssh` were reached over the
+mesh from a machine sharing no local network with the board, and later that day a fix was
+deployed to the aircraft over the mesh alone — unplanned, while both of the board's LAN
+addresses were unreachable from the machine doing the deploying. That is the milestone's
+own sentence happening by accident, which is the best kind of proof of it.
+
+**What the console shows.** The ZeroTier tab reports what backs the word "connected"
+(R-VPN-10): direct or relayed, latency, the assigned address, when the device was last
+heard from, and throughput as a live rate with a sparkline drawn on the device, its ceiling
+and span marked (R-NET-10, R-UI-09, R-UI-13). The Status page carries a one-line summary.
+
+**Five defects came out of using it on hardware and are recorded rather than fixed** —
+[K-35 to K-39](known-issues.md). Two of them compound and are worth reading together: a
+Wi-Fi network out of range fails *every* apply, and each failed attempt drops the access
+point for twenty-five seconds first. A device in that state is reachable, healthy, and
+impossible to change, while disconnecting anyone watching over the radio.
+
+**M2b — Tailscale — has not started.** R-VPN-02, R-VPN-03 for a second client, and R-VPN-09
+are outstanding; the design for all three is in
+[the spec](superpowers/specs/2026-09-02-remote-access-design.md).
 
 ---
 

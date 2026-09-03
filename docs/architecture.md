@@ -167,6 +167,49 @@ network renderer is a deliberate, recorded exception: it drives NetworkManager t
 `nmcli`'s machine-readable mode behind an injected command runner, for the reasons in
 [ADR-0006](adr/0006-nmcli-not-dbus.md).
 
+### 3.4 Remote access
+
+```
+Operator ──► mesh VPN ──► aircraft behind carrier CGNAT
+                │
+yonder-core ────┼──► zerotier-cli   (join / leave / status, injected runner)
+                └──► /sys/class/net/<iface>/statistics  (throughput)
+```
+
+A mobile carrier puts the aircraft behind CGNAT, so nothing can reach it by address. A mesh
+VPN is how the operator gets in; ZeroTier is the one implemented first, because a network ID
+is a value that fits in a configuration file and a login is not
+([ADR-0004](adr/0004-zerotier-primary-mesh-vpn.md)).
+
+Three things about it are load-bearing and are easy to get wrong:
+
+**Joined is not authorised.** A device joins in about four seconds and then waits for a
+person to approve it in a controller — a minute, or a week. That is neither a failure nor a
+success, so it is a state of its own, and nothing times out of it (R-VPN-06).
+
+**A join is kept, not held.** It goes through the ordinary apply path but skips the
+confirmation window, because a join only ever *adds* a path and cannot take away the one the
+operator is using — measured on a board, where a controller pushing a route that overlapped
+the board's own network was refused by the client itself. R-CFG-12 says a change that cannot
+cost reachability is kept; `affectsReachability` exempts `remote.zerotier` by name, and
+nothing else. A second mesh earns its own exemption with its own evidence or does not get
+one (R-VPN-07).
+
+**Installed does not mean running.** A client with no network joined still holds live
+sessions with its vendor's root servers, so the installer leaves it stopped and disabled and
+`yonder-core` starts it only when a network is configured (R-VPN-08). A device carries no
+connection to anyone's infrastructure until it is asked for one.
+
+**And "connected" is a measurement, not a membership.** A client reports a network as
+configured long after it can reach anything, because that configuration is cached; an
+interface reading that field alone tells an operator their aircraft is reachable when it is
+not. So the word is backed by what the device measured — a live path, whether it is direct
+or relayed, its latency, when it was last heard from, and the traffic crossing it (R-VPN-10,
+R-NET-10).
+
+The reasoning behind each, with the board transcripts it was decided on, is in
+[the design note](superpowers/specs/2026-09-02-remote-access-design.md).
+
 ---
 
 ## 4. Configuration

@@ -8,8 +8,12 @@ from a web page, with nothing phoning home.
 
 > *yonder* — over there, in the distance, past where you can see.
 
-> **Status: pre-alpha.** The configuration engine and the network layer are built and
-> tested; the web console is the next milestone. See the [roadmap](docs/roadmap.md).
+> **Status: pre-alpha.** The configuration engine, the network layer, the console and
+> remote access over a mesh VPN are built, and each has been exercised on a Raspberry Pi 4
+> — including reaching the console over the mesh from a machine on another network. Video,
+> telemetry and cellular are not built yet, and no board has been cold-flashed from this
+> branch and left alone. See the [roadmap](docs/roadmap.md) and the
+> [known issues](docs/known-issues.md).
 
 ## What it does
 

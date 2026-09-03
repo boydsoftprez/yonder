@@ -9,10 +9,22 @@ Radxa board rides on the aircraft beside an ArduPilot flight controller and carr
 telemetry and video over the cell network to a browser and to a ground station. No cloud,
 no activation, no phone-home.
 
-Status: **pre-alpha**. Design and requirements are settled. M0 is complete — the
-configuration schema, the apply/rollback engine with its confirmation timer, per-device
-secrets, the `yonder-core` daemon and the installer's role runner. M1, the first-boot
-console, is next.
+Status: **pre-alpha**. Design and requirements are settled.
+
+- **M0 — done.** The configuration schema, the apply/rollback engine with its confirmation
+  timer, per-device secrets, the `yonder-core` daemon and the installer's role runner.
+- **M1 — the network layer and the console are built**, and their mechanisms have each been
+  seen working on a Raspberry Pi 4. **M1a is not finished**: a cold flash of a card built
+  from this branch, powered on and left alone, has still not happened. See the
+  [roadmap](docs/roadmap.md).
+- **M2a — ZeroTier — done and proven on hardware.** Installed from the offline payload with
+  no network, joined from the console, and the console reached over the mesh from a machine
+  sharing no local network with the board.
+- **M2b — Tailscale — not started.**
+
+Using it on hardware is where the defects came from: see
+[known-issues.md](docs/known-issues.md), particularly K-35 to K-39, all found by a person
+pressing buttons on a real board rather than by a test.
 
 ## Rules that are not negotiable
 
