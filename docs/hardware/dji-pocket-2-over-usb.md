@@ -182,6 +182,32 @@ mounts the camera however the airframe allows, never handle-up. The bench rule i
 "as mounted", and the range is found by stepping until the camera's own limit flag
 lights, never by commanding past it.
 
+### The range, as mounted — found by the flag, never by force
+
+Ten-degree incremental nudges in each direction until the camera raised its limit flag,
+then the same nudges back. Centre was yaw −8.8°, pitch 0.0°, with the camera lying as it
+will be mounted:
+
+| Direction | Stop | Flag | Steps back |
+|---|---|---|---|
+| yaw + | **+52.5°** — 61° from centre | bit 1 | 7, landing at −9.1° |
+| yaw − | **−68.9°** — 60° from centre | bit 1 | 7, landing at −8.6° |
+| pitch down | **−24.8°** | **bit 0** | 3, landing at 0.2° |
+| pitch up | **beyond +100°** — no flag; the guard's own window ended the search | — | 11, landing at −9.8° |
+
+Sixty moves, one refusal (the guard's window at +110°), every stop announced by the
+camera and every return exact. **Bit 0 of the limit byte is pitch; bit 1 is yaw.** Bit 5,
+on at rest, went off above 90° of pitch, so it is a "within normal range" status rather
+than a limit.
+
+The asymmetry is the mounting talking, not the gimbal: the manufacturer rates tilt at
+−100° to +50°, and here "down" found a stop at −25° because down is into the desk and
+the body, while "up" ran past +100° into open air. **The usable envelope is a property of
+the installation.** So the daemon does not carry the specification's numbers; it learns
+the envelope with exactly this procedure once the camera is mounted, keeps the four
+angles it found, and clamps every aim command to them — with the camera's own flag as the
+backstop it should never reach.
+
 ### The gimbal reports its limits
 
 The attitude push carries more than angles. Bytes 6–11 of `gimbal/0x05`, watched
@@ -438,11 +464,9 @@ board; the operator plugs one cable.
   video-out parameters is the candidate, untried.
 - **The speed (rate) command**, `GimbalSpeedRotation` — the joystick form. Untried; the
   guard boxes it at 20°/s.
-- **Which limit bit is which axis** in byte 10 of the attitude push. Bit 1 is yaw; all
-  three lit together in the excursion, so bits 0 and 2 are pitch and roll in some order.
-- **The reachable yaw range as the camera itself defines it**, so the clamp has a number.
-  The sweep found about +68° and −65° from centre in YawFollow mode; the mechanical
-  range is wider and mode-dependent.
+- **Bit 2 of the limit byte** is presumably roll; roll has not been driven to a stop.
+- **The range in other gimbal modes.** YawFollow gives about ±60° of yaw; the far side of
+  the manufacturer's −230° pan is presumably another mode's.
 - **Camera controls** — record, exposure, white balance, zoom — untried; addressed to the
   camera, they should answer `0x01` the same way.
 - **What the general-set answers carry.** Ping, version and device info return status
