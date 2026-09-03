@@ -235,6 +235,15 @@ Byte 10, refined: bit 1 lights at a yaw stop; bit 0 appeared once with it at the
 pose, so it is probably the pitch stop; bits 5 and 7 are on at rest and off during the
 over-the-top excursions, so they are status, not limits.
 
+### Across the camera's own power cycle
+
+With the accessory session up, the camera was switched off and on and ran its start-up
+gimbal check. From the board's side **nothing happened**: no disable, no re-enumeration,
+no second handshake; the attitude pushes and the sequence numbers ran on unbroken. Either
+the camera keeps its host port alive through its own restart or it re-attached quickly
+enough that the gadget saw no break. Either way a daemon that is up stays up through the
+camera restarting, which is the property an airframe needs.
+
 ### The camera re-probes on its own
 
 Tearing the accessory down and staying off the bus for 45 s, then reappearing as the
@@ -296,7 +305,5 @@ board; the operator plugs one cable.
 - **What the general-set answers carry.** Ping, version and device info return status
   `0x01` and nothing else; the version is presumably elsewhere.
 - **How long the stream runs** through a recording or a mode change.
-- **Behaviour across the camera's own power cycle.** It re-probes when a device
-  reappears after a gap; it has not been watched through its own restart.
 - **Power draw** on the link. Not measured.
 - **The side port**, the phone adapter, and the original Osmo Pocket (`HG210`).
