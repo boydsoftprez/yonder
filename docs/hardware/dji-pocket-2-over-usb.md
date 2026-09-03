@@ -235,6 +235,17 @@ Byte 10, refined: bit 1 lights at a yaw stop; bit 0 appeared once with it at the
 pose, so it is probably the pitch stop; bits 5 and 7 are on at rest and off during the
 over-the-top excursions, so they are status, not limits.
 
+### The stream is a burst, then silence
+
+Left alone after the handshake, the camera sent **1.63 MB of video in the first two
+seconds and then nothing** — ninety seconds of silence, heartbeats answered throughout.
+Every live-view subscribe payload tried on `camera/0x09`, and `camera/0xeb`, was answered
+with status `0xe0` and changed nothing. So the burst is a pre-roll — the camera's recent
+buffer, handed over on connection — and the command that keeps the picture coming is
+something else the app sends. The camera asks for it every second on the app command set
+(238): `0x01` and `0x03`, which the SDK's names put beside `dji_app_phone_camera_info_push`.
+Answering those is the next experiment.
+
 ### The video frame record, decoded
 
 Every access unit on the video route is preceded by a 16-byte record. From 104 of them:
@@ -262,6 +273,26 @@ guarded**, and a recentre from that pose folded the head to pitch −175° past 
 and left the motor stalled and buzzing. The camera was powered off by hand; **on restart
 it passed its own gimbal check** and levelled quietly, so the excursion cost nothing
 lasting.
+
+What the frame actually is — found afterwards in the manufacturer's public Onboard SDK
+source ([`dji_gimbal.hpp`](https://github.com/dji-sdk/Onboard-SDK/blob/master/osdk-core/api/inc/dji_gimbal.hpp)),
+whose gimbal angle command is this frame on a UART:
+
+```
+int16 yaw, roll, pitch     0.1°
+uint8 mode                 bit 0: 1 = absolute, 0 = incremental
+                           bit 1: ignore yaw   bit 2: ignore roll   bit 3: ignore pitch
+uint8 duration             0.1 s — 0x14 is "arrive in 2 s"
+```
+
+So every frame the sweeps sent was **absolute, all three axes commanded, two seconds** —
+and the source says of absolute mode that *the angle reference depends on the gimbal
+mode*, Follow, FPV or Free. That is the excursion: an "absolute" yaw is measured from a
+reference the attitude push does not report, so a command equal to the current reading is
+not a no-op once the body has turned under the head. **Incremental mode — bit 0 clear —
+has no reference to get wrong**, and a joystick does not use angles at all: the same
+source defines a speed command, yaw/roll/pitch in 0.1°/s, which the SDK carries as
+`GimbalSpeedRotation`. That is what R-CAM-11's aim control should be built on.
 
 Two failures of understanding, both now in the tools:
 
@@ -335,9 +366,9 @@ board; the operator plugs one cable.
 - **The third field of the frame record**, which changes irregularly.
 - **Resolution and bitrate control.** The stream arrived at 720p; `camera/0x4c` set
   video-out parameters is the candidate, untried.
-- **What `0x14` actually means.** The field order is known — yaw, roll, pitch — but a
-  return-to-zero produced a full excursion, so the frame's semantics (absolute or relative
-  yaw, the flags byte, the trailing byte) are not understood. Not to be used until they are.
+- **`0x14` in incremental mode and the speed command.** The layout is now known from the
+  public source; neither the incremental form nor the rate form has been tried. Both are
+  the safe ones, and both are tried upright, held, one degree at a time.
 - **Which limit bit is which axis** in byte 10 of the attitude push. Bit 1 is yaw; all
   three lit together in the excursion, so bits 0 and 2 are pitch and roll in some order.
 - **The reachable yaw range as the camera itself defines it**, so the clamp has a number.
@@ -347,6 +378,7 @@ board; the operator plugs one cable.
   camera, they should answer `0x01` the same way.
 - **What the general-set answers carry.** Ping, version and device info return status
   `0x01` and nothing else; the version is presumably elsewhere.
-- **How long the stream runs** through a recording or a mode change.
+- **What keeps the stream alive.** It is a two-second pre-roll until the right message is
+  sent; the app set (238) is the candidate.
 - **Power draw** on the link. Not measured.
 - **The side port**, the phone adapter, and the original Osmo Pocket (`HG210`).
