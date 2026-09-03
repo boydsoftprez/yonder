@@ -232,7 +232,12 @@ function fixture(name: string): string {
 }
 
 /** Talk to the daemon the way the console will: over the Unix socket. */
-function call(socketPath: string, method: string, path: string): Promise<{ status: number; body: unknown }> {
+function call(
+  socketPath: string,
+  method: string,
+  path: string,
+  body?: unknown,
+): Promise<{ status: number; body: unknown }> {
   return new Promise((resolve, reject) => {
     const req = request({ socketPath, method, path }, (res) => {
       const chunks: Buffer[] = [];
@@ -243,6 +248,7 @@ function call(socketPath: string, method: string, path: string): Promise<{ statu
       });
     });
     req.on("error", reject);
+    if (body !== undefined) req.write(typeof body === "string" ? body : JSON.stringify(body));
     req.end();
   });
 }
@@ -770,6 +776,33 @@ describe("the daemon drives the reach watch", () => {
     try {
       for (let i = 0; i < 5; i++) await hand.advance(REACH_TICK_MS);
       expect(seen.some((a) => a[0] === "curl")).toBe(false);
+    } finally {
+      await server.close();
+    }
+  });
+
+  /**
+   * `POST /reach/test`, at the socket — the wiring `testPath` exists for.
+   * This is not a unit test of the route handler, which would pass with
+   * `testPath` left disconnected in `server.ts`: it asserts that asking
+   * through the socket reaches the injected probe on the modem's own
+   * device, the same way the automatic loop above does.
+   */
+  it("reaches the injected probe for an operator-requested test of the modem", async () => {
+    withModem();
+    const seen: string[][] = [];
+    const hand = handClock();
+    const server = await startServer({
+      socketPath, configPath, journalPath, renderers: [noop], secretsPath,
+      runner: deadModemRunner(seen, () => true), clock: hand.clock, counters: noCounters,
+    });
+    try {
+      const res = await call(socketPath, "POST", "/reach/test", { path: "modem" });
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ path: "modem", reached: true });
+      // The net port, not the control port — see the automatic-probe test
+      // above for why that distinction is the one that matters here.
+      expect(probedInterfaces(seen)).toContain("wwan0");
     } finally {
       await server.close();
     }

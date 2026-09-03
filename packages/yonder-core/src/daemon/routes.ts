@@ -14,12 +14,12 @@ import { isProbeHost, type PingResult } from "../diag/probe.js";
 import { joinNetwork, leaveNetwork, type JoinRequest } from "../net/join.js";
 import type { NetworkState } from "../net/state.js";
 import type { ModemState } from "../net/modem/state.js";
-import type { ReachState } from "../net/reach/standing.js";
+import type { PathName, ReachState } from "../net/reach/standing.js";
 import { setTheme, type ThemeRequest } from "../ui/theme.js";
 import type { ScanResult } from "../net/scan.js";
 import type { BoardFacts } from "../system/facts.js";
 import type { Versions } from "../system/versions.js";
-import { ZEROTIER_NETWORK_ID } from "../schema/config.js";
+import { ConfigSchema, ZEROTIER_NETWORK_ID } from "../schema/config.js";
 import type { RemoteState } from "../remote/state.js";
 
 export interface RouterDeps {
@@ -84,6 +84,14 @@ export interface RouterDeps {
   activity?: ActivityLog;
   /** The mesh join state. Absent on a daemon with no remote layer. */
   remoteState?: () => Promise<RemoteState>;
+  /**
+   * Test one path now and answer when the result is known.
+   *
+   * R-CEL-09's "on request". Injected, so this router still knows no probe —
+   * and wired to the same ReachMonitor the automatic probes use, so a test an
+   * operator asked for and one the device ran itself are the same evidence.
+   */
+  testPath?: (path: PathName) => Promise<boolean>;
 }
 
 /** What GET /system answers with. */
@@ -115,6 +123,17 @@ export interface RouteResult {
 }
 
 export type Router = (method: string, path: string, body: unknown) => Promise<RouteResult>;
+
+/**
+ * What a form may send. A partial of the schema's own section rather than a
+ * second list of fields: a key added to the configuration is then accepted
+ * here without anybody remembering to add it twice.
+ *
+ * `network.modem` is declared as `Modem.default({})`, so the shape at this
+ * path is a `ZodDefault`, not the object itself — `.removeDefault()` is what
+ * gets back to the object `.partial()` can act on.
+ */
+const ModemRequest = ConfigSchema.shape.network.shape.modem.removeDefault().partial();
 
 /** The body shape both administrator routes take. */
 function submittedPassword(body: unknown): string | undefined {
@@ -429,6 +448,42 @@ export function createRouter(deps: RouterDeps): Router {
           return { status: 503, body: { error: "this device cannot report its way out" } };
         }
         return { status: 200, body: await deps.reachState() };
+      }
+
+      // The same shape as /net/join and /remote/join: the router merges one
+      // section into the document and hands the whole thing to the apply
+      // engine. Nothing about a modem is stored anywhere else, and the
+      // response is an apply status, not a configuration — R-SEC-10 says
+      // `gsm.password` never comes back out of this route, and an apply
+      // status is not a shape it could arrive in.
+      if (method === "POST" && path === "/modem/configure") {
+        const wanted = ModemRequest.safeParse(body);
+        if (!wanted.success) {
+          return { status: 400, body: { error: "that is not a modem configuration" } };
+        }
+        const config = loadConfig(deps.configPath);
+        return {
+          status: 200,
+          body: await deps.engine.apply({
+            ...config,
+            network: { ...config.network, modem: { ...config.network.modem, ...wanted.data } },
+          }),
+        };
+      }
+
+      // R-CEL-09's "on request", answered by the same ReachMonitor the
+      // automatic probes use — never a second way to decide whether a path
+      // works, only a second reason to ask it.
+      if (method === "POST" && path === "/reach/test") {
+        if (deps.testPath === undefined) {
+          say("POST /reach/test: there is no reach monitor on this daemon to ask");
+          return { status: 503, body: { error: "this device cannot test its way out" } };
+        }
+        const wanted = (body as { path?: unknown } | undefined)?.path;
+        if (wanted !== "ethernet" && wanted !== "modem" && wanted !== "wifi_client") {
+          return { status: 400, body: { error: "name one of: ethernet, modem, wifi_client" } };
+        }
+        return { status: 200, body: { path: wanted, reached: await deps.testPath(wanted) } };
       }
 
       // The same shape as /net/join: the router merges one field into the

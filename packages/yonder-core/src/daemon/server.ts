@@ -801,6 +801,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
     // board whose secrets.yaml is unreadable can still say which way out is
     // working — which is most of what an operator needs to fix it.
     reachState: () => reach.state(),
+    testPath: async (path) => reach.test(path),
     ...(onProvisioned === undefined ? {} : { onProvisioned }),
   });
 
