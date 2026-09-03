@@ -483,7 +483,8 @@ and the app's command table names them all. The honest status of each, as of thi
 | Sensor 16 / 64 MP | `camera/0x12` photo size | id known, untried |
 | Stream bitrate for cellular | — | **solved by the board's hardware transcode, ~40% of one core** |
 | Live-view resolution | `camera/0xbd`/`0x18`/`0x4c` | not recovered — inert at every payload tried; low value while the board transcodes |
-| Digital zoom, focus | `camera/0xb8`, `0x24` | not recovered — fixed lens, low value |
+| Digital zoom | `camera/0x34` `09 00 00 <u16>` | **payload recovered** (decompiler); accepted, but no effect on the live-view feed — likely recording-only |
+| Focus | `camera/0x24` | not tested — largely automatic on this lens |
 | Colour, filters | `camera/0x3e` colour tone, `0x42` digital filter | ids known, untried |
 | Camera state readout: mode, rec time, battery | `camera/0x80`, `0x81`, `0x87`, `0x88` pushes | received at 10–20 Hz; **not yet decoded** |
 | Battery detail | `battery/0x02` dynamic info (set 13) | id known, untried |
@@ -550,7 +551,10 @@ dynamic table — gave the wire structures:
   inert. The enum-to-code mapping is the remaining piece.
 - **Digital zoom** is `camera/0x34` (`set_focus_zoom_para`), payload `09 00 00` then a
   little-endian `u16` = `(factor − 1.0) / step` for a factor of 1.0–10.0 — **not** the
-  `0xb8` the id table's name suggested. Under test on the camera now.
+  `0xb8` the id table's name suggested. Correctly addressed to the camera it is accepted
+  (`status 0x01`), but **the live-view frame does not change** across the full u16 sweep:
+  on this camera digital zoom crops the recording, not the USB live-view feed, or it wants
+  `tap_zoom_enable` (`0xc4`) set first. Structure recovered; live effect absent.
 
 So the decompiler earned its build immediately: it corrected two ids that string-and-guess
 had wrong. What remains below is narrowed, not abandoned.
