@@ -325,50 +325,78 @@ export class RemoteRenderer implements Renderer {
       return;
     }
 
-    // The service first, because the two failures R-VPN-07 distinguishes —
-    // no client at all, and a client whose service will not start — are both
-    // reported here and they have different remedies.
-    const enable = await this.run(["systemctl", "enable", "--now", UNIT], { env: { ...SYSTEMCTL_ENV } });
-    if (enable.code !== 0) {
-      const reason = said(enable.stderr, enable.stdout, enable.code);
-      throw new Error(
-        // systemd says "does not exist" for a unit file that is not there,
-        // and a shell says "not found" for a binary that is not. Either is a
-        // client that was never installed; anything else is a client that is
-        // installed and would not start, and sending that operator away to
-        // rebuild a payload wastes a trip to the aircraft.
-        ABSENT.test(reason)
-          ? `zerotier is configured but the client is not installed on this device; ` +
-            `re-run the installer with a payload that carries it`
-          : `zerotier is configured but its service would not start: ${reason}`,
-      );
+    // Everything from starting the service to recording that we own it runs
+    // under one guard, because the rollback cannot clean up after it.
+    //
+    // `enable --now` starts the unit. If anything between there and the record
+    // then fails — the client never answers, leaving a previous network fails,
+    // the write itself fails — the apply engine re-renders the previous
+    // configuration, which asks for no mesh. That render reads the ownership
+    // record, finds none (it was never written), and correctly returns without
+    // touching the service: stopping a client it does not own is exactly the
+    // bug that took an operator's console away. So the rollback is right to do
+    // nothing, and the result is a client left running and enabled with no
+    // network — which is the state R-VPN-08 exists to prevent.
+    //
+    // Only when the service was not already ours. If `held` names a network we
+    // were on, the service was ours and running before this apply, and undoing
+    // an activation we did not perform would take the mesh down over a failure
+    // to change it.
+    const wasOurs = held !== null;
+    let joined: ZeroTierNetwork[];
+    try {
+      // The service first, because the two failures R-VPN-07 distinguishes —
+      // no client at all, and a client whose service will not start — are both
+      // reported here and they have different remedies.
+      const enable = await this.run(["systemctl", "enable", "--now", UNIT], { env: { ...SYSTEMCTL_ENV } });
+      if (enable.code !== 0) {
+        const reason = said(enable.stderr, enable.stdout, enable.code);
+        throw new Error(
+          // systemd says "does not exist" for a unit file that is not there,
+          // and a shell says "not found" for a binary that is not. Either is a
+          // client that was never installed; anything else is a client that is
+          // installed and would not start, and sending that operator away to
+          // rebuild a payload wastes a trip to the aircraft.
+          ABSENT.test(reason)
+            ? `zerotier is configured but the client is not installed on this device; ` +
+              `re-run the installer with a payload that carries it`
+            : `zerotier is configured but its service would not start: ${reason}`,
+        );
+      }
+
+      // Bounded, because `enable --now` returning does not mean the client is
+      // listening yet — see ZEROTIER_WAIT_MS above.
+      joined = await this.waitForClient();
+
+      // A network id that changed: leave the old one before joining the new, or
+      // the device sits on both and the configuration describes neither. Not
+      // best-effort — a leave that fails here is the same defect as the one
+      // above, and the state file still names the old network, so failing the
+      // apply is what lets the next one try again.
+      if (held !== null && held !== wanted && joined.some((n) => n.nwid === held)) {
+        this.log(`zerotier: leaving ${held}`);
+        await this.cli.leave(held);
+      }
+
+      // Written *before* the join, not after. The record exists so a daemon that
+      // dies between a join and a leave cannot strand the device, and a record
+      // written afterwards leaves exactly that window open: power is cut on an
+      // aircraft mid-apply, the membership is in the client's database and
+      // nothing on disk says Yonder put it there, so the next leave skips it for
+      // ever. The same window opens without a crash, because a write that throws
+      // (ENOSPC, EIO) fails the apply and the re-render of the previous
+      // configuration sees no record either. Recording a join that then fails
+      // costs one superfluous `leave` later, and leaving a network you are not
+      // on does nothing at all.
+      this.remember(wanted);
+    } catch (error) {
+      if (!wasOurs) {
+        this.log(`zerotier: the join failed, so stopping the client it started`);
+        await this.systemctl(["stop", UNIT], { absentIsFine: true }).catch(() => undefined);
+        await this.systemctl(["disable", UNIT], { absentIsFine: true }).catch(() => undefined);
+      }
+      throw error;
     }
-
-    // Bounded, because `enable --now` returning does not mean the client is
-    // listening yet — see ZEROTIER_WAIT_MS above.
-    const joined = await this.waitForClient();
-
-    // A network id that changed: leave the old one before joining the new, or
-    // the device sits on both and the configuration describes neither. Not
-    // best-effort — a leave that fails here is the same defect as the one
-    // above, and the state file still names the old network, so failing the
-    // apply is what lets the next one try again.
-    if (held !== null && held !== wanted && joined.some((n) => n.nwid === held)) {
-      this.log(`zerotier: leaving ${held}`);
-      await this.cli.leave(held);
-    }
-
-    // Written *before* the join, not after. The record exists so a daemon that
-    // dies between a join and a leave cannot strand the device, and a record
-    // written afterwards leaves exactly that window open: power is cut on an
-    // aircraft mid-apply, the membership is in the client's database and
-    // nothing on disk says Yonder put it there, so the next leave skips it for
-    // ever. The same window opens without a crash, because a write that throws
-    // (ENOSPC, EIO) fails the apply and the re-render of the previous
-    // configuration sees no record either. Recording a join that then fails
-    // costs one superfluous `leave` later, and leaving a network you are not
-    // on does nothing at all.
-    this.remember(wanted);
 
     if (!joined.some((n) => n.nwid === wanted)) {
       this.log(`zerotier: joining ${wanted}`);
