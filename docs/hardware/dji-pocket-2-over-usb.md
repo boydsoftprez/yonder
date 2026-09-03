@@ -481,7 +481,9 @@ and the app's command table names them all. The honest status of each, as of thi
 | Focus: AFC / AFS / spot | `camera/0x24` focus mode, `0x30` area, `0x32` spot | ids known, untried |
 | Recording resolution and rate | `camera/0x18` video format | id known, untried |
 | Sensor 16 / 64 MP | `camera/0x12` photo size | id known, untried |
-| Stream resolution and bitrate | `camera/0x4c` video-out parameters | tried, no effect with small payloads; **the board transcodes instead — proven at ~40% of one core** |
+| Stream bitrate for cellular | — | **solved by the board's hardware transcode, ~40% of one core** |
+| Live-view resolution | `camera/0xbd`/`0x18`/`0x4c` | not recovered — inert at every payload tried; low value while the board transcodes |
+| Digital zoom, focus | `camera/0xb8`, `0x24` | not recovered — fixed lens, low value |
 | Colour, filters | `camera/0x3e` colour tone, `0x42` digital filter | ids known, untried |
 | Camera state readout: mode, rec time, battery | `camera/0x80`, `0x81`, `0x87`, `0x88` pushes | received at 10–20 Hz; **not yet decoded** |
 | Battery detail | `battery/0x02` dynamic info (set 13) | id known, untried |
@@ -537,13 +539,29 @@ different source:
 | Live-view resolution and rate, stream bitrate, white balance, zoom, focus payloads | **compiled code** in the native library — the handlers that turn an SDK key such as `H1LiveViewResolutionFrameRate` into bytes on the wire | not reachable by reading strings: the library is stripped |
 | Ground truth for anything | a capture of the manufacturer's app talking to the camera | needs an Android device; none on the bench |
 
-The third row is the one that decides how far parity goes. The library has no symbol
-table, so its functions have no names, but they still reference the key-name strings —
-and a decompiler can walk from a string to the function that uses it and render that
-function as C. That is a deterministic procedure, not a guess: load the library, find the
-references to each key of interest, decompile, read the request struct off the code. It
-is legitimate ground for a GPL project — a protocol learned for interoperability and
-implemented afresh — and it is the next tool, not a phone.
+The third row was carried as far as it goes without more machinery. The library was
+imported into Ghidra and fully analysed (`scripts/pocket2/ghidra/`), but two walls stand
+between that and the payloads:
+
+- **The prebuilt Ghidra ships a decompiler for Linux and Windows only.** The Apple-Silicon
+  decompiler must be built from source that the public release does not bundle. (The
+  Python drivers hit a third wall first: Ghidra 12 dropped Jython, and JPype — PyGhidra's
+  bridge — crashes the JVM on the Java 26 that is installed. The Java `GhidraScript` runs,
+  which is why the analysis completed; only the decompile step has no native binary.)
+- **The key-name strings have no code references.** They are the SDK's value-name and JSON
+  strings, referenced through data tables the auto-analysis did not resolve to the
+  command-builder functions. So even a working decompiler would not reach the builders
+  from the strings; the reference to follow is the DUML command id as an immediate
+  (`0xbd`, `0x4c`), which is a hand pass, not a script.
+
+**This was stopped deliberately, on value.** The payloads still hidden are live-view
+resolution, stream bitrate, digital zoom and focus. Bitrate — the only one that gates
+cellular — is already solved by the board's hardware transcode. Resolution matters little
+when the board re-encodes anyway, and this camera's lens is fixed, so zoom is digital and
+focus is largely automatic. Weighed against building a decompiler and a manual
+cross-reference pass, or capturing the real app with an Android device, none of the four
+earns the cost right now. The scripts and the analysed project are kept so the pass can be
+finished when a decompiler or a phone is to hand.
 
 One correction to an earlier draft of this note: the live-view stream has only ever been
 observed at 1280×720, and that was written up as "the other resolutions are recording
