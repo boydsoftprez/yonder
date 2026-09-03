@@ -28,7 +28,7 @@ export interface ReachWatchOptions {
  *
  * **Nothing is tested on a schedule.** This ticks on a schedule; what it does
  * on a tick is read two numbers out of `/sys` and, almost always, stop. A
- * probe happens only for one of three reasons, and all three are events:
+ * probe happens only for one of four reasons, and all four are events:
  *
  *  - **The path has just started carrying traffic.** R-CEL-09's "tested with
  *    real traffic when it comes up". Without this the case the milestone is
@@ -44,6 +44,15 @@ export interface ReachWatchOptions {
  *    `FAILURES_TO_STAND_DOWN` in the field, and the demotion this whole
  *    mechanism exists for would never happen. This is the only one of the
  *    three that repeats, and it only ever runs while something is broken.
+ *  - **The renderer says a path was re-dialled** — `redialled()`, below.
+ *    Also R-CEL-09's "when it comes up", for the case the first reason
+ *    cannot see: a re-dial keeps the same interface name, so the device
+ *    comparison above notices nothing, and a cellular link that is not the
+ *    path in use moves no counters either. Measured on the board — the APN
+ *    was corrected to a wrong one, the modem moved onto a new bearer and a
+ *    new address, nothing tested it, and the console went on calling it
+ *    ready. This is the only reason that tests a path which is not the one
+ *    in use.
  *
  * Traffic moving both ways is folded in as a success, which costs nothing and
  * is how a path returns from being stood down without a probe running at all.
@@ -58,6 +67,9 @@ export interface ReachWatchOptions {
  * `REACH_TICK_DEADLINE_MS` and the tick abandoned, because a hang is not a
  * throw and a `catch` does not cover one.
  */
+/** Why a re-dialled path is being tested, in the words an operator reads. */
+const REDIALLED = "it has just been dialled again";
+
 export class ReachWatch {
   private readonly monitor: ReachMonitor;
   private readonly clock: Clock;
@@ -86,6 +98,18 @@ export class ReachWatch {
   private lastDevice: string | null = null;
   /** Paths whose last test failed and which have not since succeeded. */
   private readonly failing = new Set<PathName>();
+  /**
+   * Paths the renderer has said were re-dialled, waiting for the next tick.
+   *
+   * Held rather than probed on the spot, because the loop is chained
+   * precisely so that two `curl`s never land on the same interface and no
+   * tick reads the counters across another one's traffic. A re-dial arriving
+   * mid-tick would be exactly that. One tick is at most `REACH_TICK_MS`
+   * away, which is the same delay a link coming up any other way already
+   * waits, and the honest answer arrives that much later rather than racing
+   * a reading it would corrupt.
+   */
+  private redials = new Set<PathName>();
   /** Which tick owns the readings above. See schedule(). */
   private generation = 0;
 
@@ -165,7 +189,29 @@ export class ReachWatch {
   }
 
   /**
-   * Look at the path in use, and test only if something says to.
+   * A path has just been re-dialled and must be tested (R-CEL-09).
+   *
+   * The renderer's notification, and the only way into this watch from
+   * outside. It records and returns; the probe runs on the next tick, in the
+   * loop that already serialises probes against one another.
+   *
+   * **It cannot fail and it cannot block.** The caller is a render that has
+   * already succeeded — the operator's corrected APN is dialled and up — and
+   * a render turned into a failure here would be rolled back by the
+   * confirmation timer (R-CFG-03). So this does one set insertion and
+   * nothing else.
+   *
+   * A path named twice before the next tick is tested once: it is a set, and
+   * two re-dials in five seconds are still one link that needs one answer.
+   */
+  redialled(path: PathName): void {
+    if (this.stopped) return;
+    this.redials.add(path);
+  }
+
+  /**
+   * Look at the path in use, test only if something says to, and answer for
+   * anything that has just been re-dialled.
    *
    * Public so that the decision is testable one step at a time rather than
    * only through a timer, and so a future route could ask for the check R-CEL-09
@@ -180,6 +226,12 @@ export class ReachWatch {
     // by this question again.
     const stillMine = (): boolean => mine === this.generation;
 
+    // Taken and cleared before the first `await`, so a re-dial that lands
+    // while this tick is running belongs to the next one and is not silently
+    // dropped by the clear.
+    const redialled = this.redials;
+    this.redials = new Set();
+
     const now = await this.monitor.inUseNow();
     if (!stillMine()) return;
     if (now === null) {
@@ -189,6 +241,10 @@ export class ReachWatch {
       this.previous = null;
       this.lastPath = null;
       this.lastDevice = null;
+      // A re-dialled path still gets its answer. A board whose modem is the
+      // only path, dialled onto an APN that reaches nothing, may be holding
+      // no address at all — and that is exactly the board this exists for.
+      await this.testRedialled(redialled, null, stillMine);
       return;
     }
 
@@ -203,20 +259,26 @@ export class ReachWatch {
     this.lastPath = path;
     this.lastDevice = device;
 
-    const why = this.reason(path, cameUp, before, current);
-    if (why === null) return;
-
-    this.log(`network: testing ${PATH_WORDS[path]} because ${why}`);
-    // `stillMine` goes into the call as well as being asked after it: the
-    // recording happens inside `test`, so a guard only out here would let a
-    // stale answer reach standing before this line ever ran again.
-    const reached = await this.monitor.test(path, stillMine);
-    if (!stillMine()) return;
-    if (reached) {
-      this.failing.delete(path);
+    // A re-dial outranks the counters. They are absolute numbers about one
+    // interface, and a re-dial does not rename it — so a reading taken before
+    // the modem was dialled again is compared against one taken after, and
+    // traffic the old bearer carried would be read as evidence about the new
+    // one. There is only one honest answer for a link that has just come up,
+    // and it is a probe.
+    const why = redialled.has(path)
+      ? REDIALLED
+      : this.reason(path, cameUp, before, current);
+    if (why === null) {
+      await this.testRedialled(redialled, path, stillMine);
       return;
     }
-    this.failing.add(path);
+
+    const reached = await this.probe(path, why, stillMine);
+    if (!stillMine()) return;
+    if (reached) {
+      await this.testRedialled(redialled, path, stillMine);
+      return;
+    }
 
     // The path carrying traffic reached nothing. Test the others, so that
     // standing says which of them can take over rather than only naming the
@@ -224,9 +286,48 @@ export class ReachWatch {
     // not have, so a device with one interface pays nothing for this.
     for (const other of this.monitor.priority()) {
       if (other === path) continue;
+      // Already covered: this loop is testing it now, and one answer per
+      // path per tick is the whole of what a re-dial is owed.
+      redialled.delete(other);
       await this.monitor.test(other, stillMine);
       if (!stillMine()) return;
     }
+    // Anything re-dialled that the operator's order does not name — a path
+    // taken out of `network.priority` while its modem is still dialling.
+    await this.testRedialled(redialled, path, stillMine);
+  }
+
+  /**
+   * Test every path a re-dial named, except the one already tested this tick.
+   *
+   * **This is the only probe in this class that runs for a path which is not
+   * the one in use**, and it is why the defect it fixes existed: cellular is
+   * usually the standby path, so neither the device-name comparison above nor
+   * the byte counters ever had anything to say about it (R-CEL-09).
+   */
+  private async testRedialled(
+    paths: Set<PathName>,
+    done: PathName | null,
+    stillMine: () => boolean,
+  ): Promise<void> {
+    for (const path of paths) {
+      if (path === done) continue;
+      await this.probe(path, REDIALLED, stillMine);
+      if (!stillMine()) return;
+    }
+  }
+
+  /** One probe, said out loud, with the failing set kept in step. */
+  private async probe(path: PathName, why: string, stillMine: () => boolean): Promise<boolean> {
+    this.log(`network: testing ${PATH_WORDS[path]} because ${why}`);
+    // `stillMine` goes into the call as well as being asked after it: the
+    // recording happens inside `test`, so a guard only out here would let a
+    // stale answer reach standing before this line ever ran again.
+    const reached = await this.monitor.test(path, stillMine);
+    if (!stillMine()) return reached;
+    if (reached) this.failing.delete(path);
+    else this.failing.add(path);
+    return reached;
   }
 
   /** Why this path is about to be tested, or null for "it is not". */

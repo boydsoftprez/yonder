@@ -32,7 +32,7 @@ function movingCounters(): CounterReader {
 }
 import type { CommandResult } from "../net/runner.js";
 import {
-  AP_CONNECTION, MODEM_CONNECTION, DEFAULT_AP_PASSPHRASE, STOOD_DOWN_METRIC, metricFor,
+  AP_CONNECTION, ETHERNET_CONNECTION, MODEM_CONNECTION, DEFAULT_AP_PASSPHRASE, STOOD_DOWN_METRIC, metricFor,
 } from "../net/profiles.js";
 import { loadConfig } from "../config/load.js";
 import { saveConfig } from "../config/save.js";
@@ -647,6 +647,114 @@ describe("the daemon drives the reach watch", () => {
     const before = seen.length;
     await hand.advance(REACH_TICK_MS * 5);
     expect(seen.length).toBe(before);
+  });
+
+  /**
+   * **A re-dial is a link coming up, and it must be tested** (R-CEL-09).
+   *
+   * The wire from the renderer, which is the only component that knows a
+   * re-dial happened, to the watch that tests. Measured on the board: the
+   * APN was changed to a wrong one, the modem re-dialled correctly onto a
+   * new bearer and a new address, `curl --interface wwan0` came back exit 28
+   * — and no `testing cellular` line was ever written, because the interface
+   * name did not change and cellular was not the path carrying traffic.
+   *
+   * The board here is that one: ethernet in use, a modem standing by, and a
+   * profile dialled on an APN the configuration no longer asks for. The
+   * start-up render finds the difference and cycles the link.
+   */
+  function twoPathRunner(seen: string[][], dialled: string): CommandRunner {
+    const names = new Set<string>([ETHERNET_CONNECTION, MODEM_CONNECTION]);
+    return async (argv): Promise<CommandResult> => {
+      seen.push(argv);
+      // Ethernet works and the modem does not — the board in §2, one layer
+      // up. Ethernet reaching something is what keeps the alternatives loop
+      // out of this: any `curl` on wwan0 below is there because of a re-dial
+      // and for no other reason.
+      if (argv[0] === "curl") {
+        return { code: argv.includes("wwan0") ? 7 : 0, stdout: "", stderr: "" };
+      }
+      if (argv[0] === "mmcli" && argv[1] === "-L") return { code: 0, stdout: fixture("modem-list.txt"), stderr: "" };
+      if (argv[0] === "mmcli" && argv[1] === "-m") return { code: 0, stdout: fixture("modem-show.txt"), stderr: "" };
+      if (argv[0] === "nmcli" && argv.includes("NAME,UUID,TYPE,DEVICE")) {
+        return { code: 0, stdout: [...names].map((n) => `${n}:u-${n}:gsm:cdc-wdm0\n`).join(""), stderr: "" };
+      }
+      if (argv[0] === "nmcli" && argv[1] === "connection" && argv[2] === "add") names.add(argv[4]!);
+      if (argv[0] === "nmcli" && argv[1] === "connection" && argv[2] === "delete") names.delete(argv[3]!);
+      // What the modem is *already dialled on*, which is the one reading the
+      // renderer's comparison rests on.
+      if (argv[0] === "nmcli" && argv[1] === "-t" && argv[5] === "show" && argv[6] === MODEM_CONNECTION) {
+        return { code: 0, stdout: `gsm.apn:${dialled}\n`, stderr: "" };
+      }
+      if (argv[0] === "nmcli" && argv.includes("device") && argv.includes("status")) {
+        return {
+          code: 0,
+          stdout: `eth0:ethernet:connected:${ETHERNET_CONNECTION}\ncdc-wdm0:gsm:connected:${MODEM_CONNECTION}\n`,
+          stderr: "",
+        };
+      }
+      if (argv[0] === "nmcli" && argv.some((a) => a.includes("IP4.ADDRESS"))) {
+        return {
+          code: 0,
+          stdout: "GENERAL.DEVICE:eth0\nIP4.ADDRESS[1]:192.168.1.20/24\n"
+            + "GENERAL.DEVICE:wwan0\nIP4.ADDRESS[1]:10.230.244.138/30\n",
+          stderr: "",
+        };
+      }
+      return { code: 0, stdout: "", stderr: "" };
+    };
+  }
+
+  /** Which interfaces `curl` was pointed at, in order. */
+  const probedInterfaces = (seen: string[][]): string[] =>
+    seen.filter((a) => a[0] === "curl").map((a) => a[a.indexOf("--interface") + 1]!);
+
+  it("tests a re-dialled modem that is standing by rather than in use", async () => {
+    withModem();
+    const seen: string[][] = [];
+    const hand = handClock();
+    const server = await startServer({
+      socketPath, configPath, journalPath, renderers: [noop], secretsPath,
+      // Dialled on one APN, configured for another: the start-up render
+      // cycles the link, and that is the event nothing could see before.
+      runner: twoPathRunner(seen, "ereseller"), clock: hand.clock, counters: noCounters,
+    });
+    try {
+      expect(seen.some((a) => a[1] === "connection" && a[2] === "up" && a[3] === MODEM_CONNECTION))
+        .toBe(true);
+      await hand.advance(REACH_TICK_MS);
+      // The net port, which is where a modem's bytes go — and the path that
+      // is *not* carrying traffic, which is the whole of the defect.
+      expect(probedInterfaces(seen)).toContain("wwan0");
+
+      const res = await call(socketPath, "GET", "/reach/state");
+      const state = res.body as { inUse: string; paths: { path: string; detail: string }[] };
+      expect(state.inUse).toBe("ethernet");
+      expect(state.paths.find((p) => p.path === "modem")?.detail).not.toMatch(/ready/i);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("tests nothing extra when the render re-dialled nothing", async () => {
+    // The same board with the modem already dialled on what the
+    // configuration asks for. Ethernet is tested because it has just started
+    // carrying traffic; the modem is not tested at all.
+    withModem();
+    const seen: string[][] = [];
+    const hand = handClock();
+    const server = await startServer({
+      socketPath, configPath, journalPath, renderers: [noop], secretsPath,
+      runner: twoPathRunner(seen, "nxtgenphone"), clock: hand.clock, counters: noCounters,
+    });
+    try {
+      expect(seen.some((a) => a[1] === "connection" && a[2] === "up" && a[3] === MODEM_CONNECTION))
+        .toBe(false);
+      await hand.advance(REACH_TICK_MS);
+      expect(probedInterfaces(seen)).not.toContain("wwan0");
+    } finally {
+      await server.close();
+    }
   });
 
   it("spends nothing on a device that has no path in use", async () => {

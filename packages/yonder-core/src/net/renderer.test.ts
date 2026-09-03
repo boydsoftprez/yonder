@@ -123,6 +123,8 @@ interface HarnessOptions {
    * same values back finds no difference and one that writes a new APN does.
    */
   dialled?: Record<string, string>;
+  /** Told when a path has actually been re-dialled (R-CEL-09). */
+  onRedial?: (path: PathName) => void;
 }
 
 /**
@@ -228,6 +230,7 @@ function harness(opts: HarnessOptions = {}) {
     clock: opts.clock,
     radioWaitMs: opts.radioWaitMs,
     standing: opts.standing,
+    onRedial: opts.onRedial,
   });
   return { renderer, calls, secrets, names, raised: () => raised };
 }
@@ -1046,6 +1049,78 @@ describe("NetworkRenderer and a modem whose settings changed", () => {
     await renderer.render(config);
     expect(calls.some((c) => c[1] === "-t" && c[6] === MODEM_CONNECTION)).toBe(false);
     expect(verbs(calls)).toEqual(["modify"]);
+  });
+
+  /**
+   * **A re-dial is a link coming up, and the renderer is the only thing that
+   * knows one happened** (R-CEL-09).
+   *
+   * Measured on the board: the APN was changed to a wrong one, the modem
+   * re-dialled correctly onto a new bearer and a new address, and the link
+   * carried nothing — `curl --interface wwan0` exit 28, no ping returned.
+   * Nothing tested it, because a re-dial keeps the same interface name and
+   * because cellular was not the path in use, so no byte counter said
+   * anything either. The console went on calling the link ready.
+   */
+  it("says so when it has actually re-dialled a path", async () => {
+    const told: PathName[] = [];
+    const { renderer } = harness({
+      devices: MODEM_DEVICES,
+      connections: [AP_CONNECTION, ETHERNET_CONNECTION, MODEM_CONNECTION],
+      dialled: { "gsm.apn": "ereseller" },
+      onRedial: (path) => told.push(path),
+    });
+    await renderer.render(onApn("nxtgenphone"));
+    expect(told).toEqual(["modem"]);
+  });
+
+  it("says nothing when the render did not re-dial anything", async () => {
+    // A render happens for many reasons and almost none of them are a
+    // re-dial. Announcing one on every render would put a `curl` on a
+    // metered link every time an operator saved an unrelated setting.
+    const told: PathName[] = [];
+    const { renderer } = harness({
+      devices: MODEM_DEVICES,
+      connections: [AP_CONNECTION, ETHERNET_CONNECTION, MODEM_CONNECTION],
+      dialled: { "gsm.apn": "ereseller" },
+      onRedial: (path) => told.push(path),
+    });
+    await renderer.render(onApn("ereseller"));
+    expect(told).toEqual([]);
+  });
+
+  it("says nothing about a bearer it did not cycle because it was down", async () => {
+    // Nothing came up, so nothing came up to be tested. The link will be
+    // dialled with the new settings by `connection.autoconnect`, and the
+    // watch's own link-up reason covers it from there.
+    const told: PathName[] = [];
+    const { renderer } = harness({
+      devices: MODEM_DOWN,
+      connections: [AP_CONNECTION, ETHERNET_CONNECTION, MODEM_CONNECTION],
+      dialled: { "gsm.apn": "ereseller" },
+      onRedial: (path) => told.push(path),
+    });
+    await renderer.render(onApn("nxtgenphone"));
+    expect(told).toEqual([]);
+  });
+
+  it("does not let a listener that throws fail a render that worked", async () => {
+    // The re-dial succeeded: the operator's corrected APN is dialled and up.
+    // Throwing here would fail the render, and the apply engine's
+    // confirmation timer would roll that correction straight back out again
+    // (R-CFG-03) on the strength of a notification nobody was waiting for.
+    const lines: string[] = [];
+    const { renderer, calls } = harness({
+      devices: MODEM_DEVICES,
+      connections: [AP_CONNECTION, ETHERNET_CONNECTION, MODEM_CONNECTION],
+      dialled: { "gsm.apn": "ereseller" },
+      log: (l) => lines.push(l),
+      onRedial: () => { throw new Error("the watch has already stopped"); },
+    });
+    await expect(renderer.render(onApn("nxtgenphone"))).resolves.toBeUndefined();
+    // And it still re-dialled, and said what went wrong.
+    expect(verbs(calls)).toEqual(["modify", "down", "up"]);
+    expect(lines.some((l) => l.includes("could not pass on that cellular was re-dialled"))).toBe(true);
   });
 });
 

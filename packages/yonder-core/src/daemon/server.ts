@@ -118,6 +118,16 @@ export interface BuildRenderersOptions {
    */
   standing?: StandingView;
   /**
+   * Told when a path has actually been re-dialled (R-CEL-09).
+   *
+   * Wired to `ReachWatch.redialled`, which tests that path on its next tick.
+   * The renderer is the only component that knows a re-dial happened — the
+   * interface name does not change and, for a modem that is standing by
+   * rather than in use, neither do any byte counters the watch could read.
+   * Optional, so a renderer built without one behaves exactly as it did.
+   */
+  onRedial?: (path: PathName) => void;
+  /**
    * Where the console lives. **Given, never defaulted**: a ConsoleRenderer is
    * assembled only when a caller says where the console is, so nothing in a
    * test can write to /opt/yonder by forgetting to override a path. The
@@ -185,6 +195,7 @@ export function buildRenderers(opts: BuildRenderersOptions): {
   const modemClient = new MmcliClient(opts.runner ?? systemRunner, opts.trace ?? trace);
   const renderer = new NetworkRenderer({
     client, secrets, log, clock: opts.clock, standing: opts.standing,
+    ...(opts.onRedial === undefined ? {} : { onRedial: opts.onRedial }),
   });
 
   // After the network renderer: a mesh runs over whatever the network layer
@@ -360,6 +371,23 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
     }).catch(() => {});
   };
 
+  /**
+   * R-CEL-09's other half: **a link that has just come up is tested.**
+   *
+   * The watch is assembled a long way below this point — it needs the monitor,
+   * which needs the nmcli client `buildRenderers` returns — so the renderer is
+   * handed this indirection rather than the watch itself. Before the watch
+   * exists a re-dial is dropped, which is right: nothing has started ticking
+   * yet, and the watch's own first tick tests whatever is carrying traffic.
+   *
+   * Nothing here can throw. `redialled` records one path in a set, the
+   * renderer catches anything anyway, and a render that has successfully
+   * dialled the operator's corrected APN must not be failed — and rolled
+   * back — by the thing that only wanted to be told about it.
+   */
+  let reachWatch: ReachWatch | undefined;
+  const onRedial = (path: PathName): void => { reachWatch?.redialled(path); };
+
   // Built before the renderers, because the renderer reads it while
   // generating route metrics and a renderer holding a standing that arrived
   // later would generate the first render's metrics from nothing.
@@ -376,6 +404,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
       runner: opts.runner,
       clock,
       standing,
+      onRedial,
       // The same directory the apply journal already lives in — one state
       // directory for this daemon, not a second one this renderer invented.
       remoteStatePath: join(dirname(opts.journalPath), "remote.json"),
@@ -607,7 +636,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   //
   // The counters are the kernel's own and cost nothing to read, so a device
   // that is working spends nothing on establishing that (R-CEL-09, R-NET-13).
-  const reachWatch = new ReachWatch({
+  reachWatch = new ReachWatch({
     monitor: reach, clock, log: note,
     ...(opts.counters !== undefined ? { counters: opts.counters } : {}),
   });

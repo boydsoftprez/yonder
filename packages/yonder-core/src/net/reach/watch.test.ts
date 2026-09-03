@@ -524,3 +524,149 @@ describe("ReachWatch", () => {
     expect(b.clock.armed()).toBe(0);
   });
 });
+
+/**
+ * **A re-dial is a link coming up, and it must be tested** (R-CEL-09).
+ *
+ * The defect these were written against, measured on the board: the modem's
+ * APN was changed to a wrong one, the renderer re-dialled correctly — new
+ * bearer, new address — and the link carried nothing. Nothing tested it.
+ * Neither trigger this watch had could see it:
+ *
+ *  - the device-name comparison sees `wwan0` before and `wwan0` after, so a
+ *    re-dial does not read as "just came up"; and
+ *  - cellular was standing by rather than in use, so its byte counters were
+ *    never the ones being read.
+ *
+ * Between the two a cellular link can be re-dialled onto a broken APN and sit
+ * looking healthy indefinitely, which is precisely what R-CEL-09 forbids.
+ */
+describe("ReachWatch and a path the renderer has re-dialled", () => {
+  /** Ethernet carrying traffic, a modem standing by. The measured board. */
+  const standingBy = (opts: { reaches?: (device: string) => boolean } = {}): Bench =>
+    bench({
+      devices: { ethernet: "eth0", modem: "wwan0" },
+      order: ["ethernet", "modem"],
+      inUse: "ethernet",
+      ...(opts.reaches === undefined ? {} : { reaches: opts.reaches }),
+    });
+
+  it("tests a re-dialled path that is not the one in use", async () => {
+    const b = standingBy({ reaches: (d) => d !== "wwan0" });
+    b.counters.set("eth0", { rx: 1_000, tx: 1_000 });
+    b.counters.set("wwan0", { rx: 1_000, tx: 1_000 });
+    b.watch.start();
+    // Settle the first tick, which tests ethernet because it has just
+    // started carrying traffic. Nothing has looked at the modem.
+    await b.clock.advance(REACH_TICK_MS);
+    b.probed.length = 0;
+    carrying(b, "eth0");
+
+    b.watch.redialled("modem");
+    await b.clock.advance(REACH_TICK_MS);
+
+    expect(b.probed).toContain("wwan0");
+    expect(b.lines.some((l) => l.includes("testing cellular because"))).toBe(true);
+  });
+
+  it("stands a re-dialled modem down even though ethernet is healthy", async () => {
+    // The whole point of testing it: the record has to end up saying the
+    // link reaches nothing, not merely that nobody looked.
+    const b = standingBy({ reaches: (d) => d !== "wwan0" });
+    b.counters.set("eth0", { rx: 1_000, tx: 1_000 });
+    b.counters.set("wwan0", { rx: 1_000, tx: 1_000 });
+    b.watch.start();
+    for (let i = 0; i < FAILURES_TO_STAND_DOWN; i++) {
+      carrying(b, "eth0");
+      b.watch.redialled("modem");
+      await b.clock.advance(REACH_TICK_MS);
+    }
+    expect(b.standing.standingOf("modem")).toBe("no-route-out");
+    expect(b.standing.standingOf("ethernet")).not.toBe("no-route-out");
+  });
+
+  it("tests a re-dialled path that keeps the interface name it had", async () => {
+    // The half of the defect the device comparison cannot see. `wwan0`
+    // before and `wwan0` after, and it is the path in use throughout, with
+    // traffic moving both ways so the counters say "healthy".
+    const b = bench({
+      devices: { modem: "wwan0" }, order: ["modem"], inUse: "modem", reaches: () => false,
+    });
+    b.counters.set("wwan0", { rx: 1_000, tx: 1_000 });
+    b.watch.start();
+    await b.clock.advance(REACH_TICK_MS);
+    b.probed.length = 0;
+
+    // A re-dial does not rename the interface, and the counters do not reset
+    // — so both of the watch's other triggers stay silent.
+    carrying(b, "wwan0");
+    b.watch.redialled("modem");
+    await b.clock.advance(REACH_TICK_MS);
+    expect(b.probed).toEqual(["wwan0"]);
+  });
+
+  it("tests a re-dialled path on a board holding no address at all", async () => {
+    // Nothing is carrying traffic — a modem dialled onto an APN that reaches
+    // nothing, and no other path. That is the board this exists for, and the
+    // tick has no path in use to hang the question on.
+    const b = bench({
+      devices: { modem: "wwan0" }, order: ["modem"], inUse: null, reaches: () => false,
+    });
+    b.watch.start();
+    await b.clock.advance(REACH_TICK_MS);
+    b.probed.length = 0;
+
+    b.watch.redialled("modem");
+    await b.clock.advance(REACH_TICK_MS);
+    expect(b.probed).toEqual(["wwan0"]);
+  });
+
+  it("probes nothing extra on a tick nobody re-dialled anything on", async () => {
+    // A render happens for many reasons. Only a real re-dial costs a probe,
+    // and on a metered link that difference is the whole design.
+    const b = standingBy();
+    b.counters.set("eth0", { rx: 1_000, tx: 1_000 });
+    b.counters.set("wwan0", { rx: 1_000, tx: 1_000 });
+    b.watch.start();
+    await b.clock.advance(REACH_TICK_MS);
+    b.probed.length = 0;
+    for (let i = 0; i < 6; i++) {
+      carrying(b, "eth0");
+      await b.clock.advance(REACH_TICK_MS);
+    }
+    expect(b.probed).toEqual([]);
+  });
+
+  it("tests a re-dialled path once, however many times it was announced", async () => {
+    // Two re-dials inside one tick are still one link needing one answer.
+    const b = standingBy({ reaches: () => true });
+    b.counters.set("eth0", { rx: 1_000, tx: 1_000 });
+    b.counters.set("wwan0", { rx: 1_000, tx: 1_000 });
+    b.watch.start();
+    await b.clock.advance(REACH_TICK_MS);
+    b.probed.length = 0;
+    carrying(b, "eth0");
+
+    b.watch.redialled("modem");
+    b.watch.redialled("modem");
+    await b.clock.advance(REACH_TICK_MS);
+    expect(b.probed.filter((d) => d === "wwan0")).toEqual(["wwan0"]);
+
+    // And it is not carried into the tick after it.
+    carrying(b, "eth0");
+    b.probed.length = 0;
+    await b.clock.advance(REACH_TICK_MS);
+    expect(b.probed).toEqual([]);
+  });
+
+  it("takes no notice of a re-dial once it has stopped", async () => {
+    // The same reason stop() exists at all: nothing may run `curl` on
+    // somebody's metered link for a process that has closed its socket.
+    const b = standingBy();
+    b.watch.start();
+    b.watch.stop();
+    b.watch.redialled("modem");
+    await b.clock.advance(REACH_TICK_MS * 4);
+    expect(b.probed).toEqual([]);
+  });
+});

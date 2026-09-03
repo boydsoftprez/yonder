@@ -10,7 +10,7 @@ import {
   type DesiredProfile, type Interfaces,
 } from "./profiles.js";
 import { bearerChanges, redialSettings } from "./modem/profiles.js";
-import { NOTHING_STOOD_DOWN, type StandingView } from "./reach/standing.js";
+import { NOTHING_STOOD_DOWN, PATH_WORDS, type PathName, type StandingView } from "./reach/standing.js";
 
 /** The only connection names this renderer will ever create or delete. */
 const OWNED = new Set([AP_CONNECTION, CLIENT_CONNECTION, ETHERNET_CONNECTION, MODEM_CONNECTION]);
@@ -133,6 +133,27 @@ export interface NetworkRendererOptions {
    * alone generates.
    */
   standing?: StandingView;
+  /**
+   * Called once, after a path has actually been re-dialled (R-CEL-09).
+   *
+   * A link that has just been dialled again is a link that has *just come
+   * up*, and R-CEL-09 says such a link is tested with real traffic. Nothing
+   * downstream can work that out for itself: a re-dial keeps the same
+   * interface name — `wwan0` before and `wwan0` after — so a watch comparing
+   * device names sees no change, and a cellular link that is not the path in
+   * use moves no byte counters either. Between the two, a modem re-dialled
+   * onto a wrong APN sits looking healthy for ever. This renderer is the one
+   * component that *knows* a re-dial happened, so it says so rather than
+   * leaving it to be inferred from something that did not change.
+   *
+   * **Narrow, and deliberately so.** It is a notification, not a hook: it
+   * returns nothing, it cannot refuse a re-dial, and it cannot fail one — a
+   * throw out of it is caught and logged, because a render that has otherwise
+   * succeeded must not be turned into a failure by whoever wanted to be told
+   * about it. It fires only on a real re-dial, never on the many other
+   * reasons a render happens.
+   */
+  onRedial?: (path: PathName) => void;
 }
 
 export class NetworkRenderer implements Renderer {
@@ -144,6 +165,7 @@ export class NetworkRenderer implements Renderer {
   private readonly radioWaitMs: number;
   private readonly radioPollMs: number;
   private readonly standing: StandingView;
+  private readonly onRedial: (path: PathName) => void;
   private waitTimer: unknown;
   private wakeWait: (() => void) | undefined;
   private waitCancelled = false;
@@ -156,6 +178,7 @@ export class NetworkRenderer implements Renderer {
     this.radioWaitMs = opts.radioWaitMs ?? RADIO_WAIT_MS;
     this.radioPollMs = opts.radioPollMs ?? RADIO_POLL_MS;
     this.standing = opts.standing ?? NOTHING_STOOD_DOWN;
+    this.onRedial = opts.onRedial ?? (() => {});
   }
 
   private sleep(ms: number): Promise<void> {
@@ -469,6 +492,24 @@ export class NetworkRenderer implements Renderer {
     );
     await this.client.down(MODEM_CONNECTION);
     await this.client.up(MODEM_CONNECTION);
+    this.announceRedial("modem");
+  }
+
+  /**
+   * Say that a path has just been re-dialled, without letting that end a render.
+   *
+   * Only after the link is back up, so what is announced is a link that has
+   * come up rather than one that was asked to. A listener that throws gets a
+   * line and nothing more: the re-dial itself succeeded, and reporting it as
+   * a failed render would put the operator's corrected APN in front of the
+   * confirmation timer and roll it straight back out again (R-CFG-03).
+   */
+  private announceRedial(path: PathName): void {
+    try {
+      this.onRedial(path);
+    } catch (e) {
+      this.log(`network: could not pass on that ${PATH_WORDS[path]} was re-dialled (${(e as Error).message})`);
+    }
   }
 
   /**
