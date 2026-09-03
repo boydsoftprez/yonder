@@ -164,6 +164,24 @@ two-byte frame** to the gimbal: `55 0f 04 a2 02 04 <seq> 20 04 4c 02 01 <crc16>`
 `app→gimbal` in the address bytes, which `scripts/pocket2/duml.py` produces as
 `encode(4, 0x4C, b"\x02\x01", receiver=DEV_GIMBAL)`.
 
+### Incremental control, as mounted
+
+With the frame understood, the sweep was rerun in **incremental mode** — mode byte `0x00`,
+one second per move — with the camera lying as it will be mounted, and the guard judging
+faults rather than gravity:
+
+| Steps | Result |
+|---|---|
+| yaw +10° ×3, −10° ×6, +10° ×3 | −8.5 → 21.4 → −38.3 → −8.2: every step within 0.2° |
+| pitch −10° ×2, +10° ×3, −10° | 0.2 → −19.9 → 10.1 → 0.2: every step within 0.2° |
+| recentre before and after | clean, no limit flag at any point |
+
+Thirty moves, no refusal, no flag, no surprise. **Incremental angle control is exact and
+safe in the mounted orientation**, which is the orientation that matters: an aircraft
+mounts the camera however the airframe allows, never handle-up. The bench rule is now
+"as mounted", and the range is found by stepping until the camera's own limit flag
+lights, never by commanding past it.
+
 ### The gimbal reports its limits
 
 The attitude push carries more than angles. Bytes 6–11 of `gimbal/0x05`, watched
@@ -383,9 +401,8 @@ board; the operator plugs one cable.
 - **The third field of the frame record**, which changes irregularly.
 - **Resolution and bitrate control.** The stream arrived at 720p; `camera/0x4c` set
   video-out parameters is the candidate, untried.
-- **`0x14` in incremental mode and the speed command.** The layout is now known from the
-  public source; neither the incremental form nor the rate form has been tried. Both are
-  the safe ones, and both are tried upright, held, one degree at a time.
+- **The speed (rate) command**, `GimbalSpeedRotation` — the joystick form. Untried; the
+  guard boxes it at 20°/s.
 - **Which limit bit is which axis** in byte 10 of the attitude push. Bit 1 is yaw; all
   three lit together in the excursion, so bits 0 and 2 are pitch and roll in some order.
 - **The reachable yaw range as the camera itself defines it**, so the clamp has a number.
