@@ -265,6 +265,11 @@ code and unit tests and an explicit note that it has never run on hardware.
 - **Telemetry overlay on the video** — R-TEL-12
 - Moving map, fullscreen, and inset swap — R-TEL-11, R-TEL-13, R-TEL-14
 - MAVLink path verification — R-DIA-04
+- **A camera that is itself a USB host — the DJI Pocket 2** — R-CAM-15. Here rather than
+  in M9 because the bench settled it in an evening: with the board playing the phone, the
+  camera streams 720p H.264 unprompted and its gimbal is commands on the same link, which
+  is a real gimbal for the Cockpit this milestone builds. See
+  [`hardware/dji-pocket-2-over-usb.md`](hardware/dji-pocket-2-over-usb.md)
 
 **Done when:** a ground station has telemetry and video over cellular from beyond line of
 sight, with the HUD drawn over the picture.
@@ -345,7 +350,6 @@ can flash one and fly.
 | Read-only or overlay root | R-STO-04 |
 | TLS for the web console | R-SEC-08 |
 | PX4 | R-MAV-12 |
-| Cameras that are USB hosts and expect a phone — the DJI Pocket 2 — see [`hardware/dji-pocket-2-over-usb.md`](hardware/dji-pocket-2-over-usb.md) | R-CAM-15 |
 
 Ordered within M9 by value over effort. Adaptive bitrate and SRT come first: they are the
 difference between a stream that degrades and a stream that drops, and on a cellular link

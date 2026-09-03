@@ -6,8 +6,8 @@ it, and what happened when Yonder's board did. **The last section is a decoded f
 The sections are ordered from observed to inferred; the final one says what remains
 unproven.
 
-Requirement: R-CAM-15. Milestone: M9 as written; the bench result below is the argument
-for moving it.
+Requirement: R-CAM-15. Milestone: M5 — moved there from M9 on the strength of the bench
+result below.
 
 ## What the board saw as a host
 
