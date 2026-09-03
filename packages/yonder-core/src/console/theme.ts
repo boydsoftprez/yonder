@@ -450,6 +450,48 @@ ${panelCss(theme)}
   box-shadow: inset 2px 0 0 var(--yonder-select);
 }
 
+/* ---- the tab strip: a tab is a surface, not a word on the panel -------
+   A page whose groups are tabs draws its strip straight onto the carbon, and
+   Vuetify's own colours survive there because nothing had ever overridden
+   them: the label sat on bare weave with the texture running through the
+   letters, the selected tab's tint was a light-palette value that vanished on
+   a dark panel, and the slider marking the selection was a dark rule on a dark
+   ground. Three failures, and recolouring the text fixes none of them — a
+   lighter label on bare weave is still a label with no ground.
+
+   So a tab gets what a navigation item already has, twenty lines up: a seat in
+   the panel, a raised face when it is the one selected, and a lit edge. The
+   two controls do the same job — choose which surface you are looking at — and
+   they are read the same way. */
+.v-tabs {
+  background: color-mix(in srgb, var(--yonder-display) 78%, transparent) !important;
+  border-bottom: 1px solid var(--yonder-bezel);
+  box-shadow: inset 0 -1px 0 var(--yonder-lip);
+}
+
+.v-tab.v-tab {
+  font-family: var(--yonder-font-mono);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--yonder-label);
+  opacity: 1;
+}
+
+.v-tab.v-tab--selected {
+  background: var(--yonder-raised);
+  color: var(--yonder-value);
+  box-shadow: inset 0 -2px 0 var(--yonder-select);
+}
+
+/* Vuetify's own slider is a bar in the theme's primary colour, which is the
+   one thing on the strip we have not defined. The lit edge above says the
+   same thing, so this says it twice and in a colour nobody chose. */
+.v-tab .v-tab__slider {
+  display: none;
+}
+
 /* ---- groups: a display seated in the panel ----------------------------
    Not a white card. A dark display face inside a machined bezel: a hard dark
    outer edge, a lit inner lip, and a drop shadow so it reads as mounted

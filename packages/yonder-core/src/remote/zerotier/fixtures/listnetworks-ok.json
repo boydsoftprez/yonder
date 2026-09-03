@@ -1,0 +1,14 @@
+[
+  {
+    "id": "9fef8a3bf9000001",
+    "nwid": "9fef8a3bf9000001",
+    "mac": "02:9f:ef:73:00:73",
+    "name": "yonder-probe",
+    "status": "OK",
+    "type": "PRIVATE",
+    "portDeviceName": "ztuqliuo7y",
+    "assignedAddresses": ["10.147.20.26/24"],
+    "routes": [{ "target": "10.147.20.0/24", "via": null, "flags": 0, "metric": 0 }],
+    "netconfRevision": 4
+  }
+]

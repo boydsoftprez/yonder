@@ -1,0 +1,27 @@
+[
+  {
+    "address": "9fef8a3bf9",
+    "role": "PLANET",
+    "latency": 34,
+    "version": "0.0.0",
+    "tunneled": false,
+    "paths": [
+      {
+        "address": "1.2.3.4/9993",
+        "lastSend": 1788367038500,
+        "lastReceive": 1788367039031,
+        "active": true,
+        "expired": false,
+        "preferred": true
+      }
+    ]
+  },
+  {
+    "address": "abcdef0123",
+    "role": "LEAF",
+    "latency": -1,
+    "version": "1.16.2",
+    "tunneled": true,
+    "paths": []
+  }
+]

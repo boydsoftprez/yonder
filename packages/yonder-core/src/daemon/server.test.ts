@@ -1183,9 +1183,12 @@ describe("startServer, provisioning the console", () => {
       secretsPath: join(dir, "fresh-secrets.yaml"), runner, clock,
     });
     try {
-      // Nothing was written to the production path by default, and nothing
-      // was restarted. That is what keeps every other test in this file from
-      // touching /opt/yonder.
+      // Nothing was written to the production path by default, and no unit on
+      // this machine was touched at all. That is what keeps every other test
+      // in this file off the host's service manager, and it is only true
+      // because a renderer never acts on a service it has no record of having
+      // started: the remote renderer is assembled on every start-up and its
+      // first render is the not-configured one.
       expect(existsSync(settingsPath)).toBe(false);
       expect(calls.filter((argv) => argv[0] === "systemctl")).toEqual([]);
     } finally {

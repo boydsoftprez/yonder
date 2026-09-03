@@ -132,3 +132,48 @@ describe("apply", () => {
     }).success).toBe(false);
   });
 });
+
+describe("remote", () => {
+  it("defaults remote.zerotier to disabled with no network", () => {
+    const cfg = ConfigSchema.parse({ version: 1, network: { ap: { psk: { secret: "ap_psk" } } }, ui: { editor: {} } });
+    expect(cfg.remote.zerotier.enabled).toBe(false);
+    expect(cfg.remote.zerotier.network_id).toBeNull();
+  });
+
+  it("accepts a 16-hex network id", () => {
+    const cfg = ConfigSchema.parse({
+      version: 1,
+      network: { ap: { psk: { secret: "ap_psk" } } },
+      ui: { editor: {} },
+      remote: { zerotier: { enabled: true, network_id: "9fef8a3bf9000001" } },
+    });
+    expect(cfg.remote.zerotier.network_id).toBe("9fef8a3bf9000001");
+  });
+
+  // A wrong id draws no complaint from the client at all - it sits in
+  // REQUESTING_CONFIGURATION for ever - so this is the last chance to catch one.
+  it.each(["9FEF8A3BF9000001", "9fef8a3bf900000", "9fef8a3bf90000012", "9fef8a3bf900000g", ""])(
+    "rejects %s as a network id",
+    (bad) => {
+      expect(() =>
+        ConfigSchema.parse({
+          version: 1,
+          network: { ap: { psk: { secret: "ap_psk" } } },
+          ui: { editor: {} },
+          remote: { zerotier: { network_id: bad } },
+        }),
+      ).toThrow();
+    },
+  );
+
+  it("rejects a key that was never a Yonder setting", () => {
+    expect(() =>
+      ConfigSchema.parse({
+        version: 1,
+        network: { ap: { psk: { secret: "ap_psk" } } },
+        ui: { editor: {} },
+        remote: { zerotier: { netwrok_id: "9fef8a3bf9000001" } },
+      }),
+    ).toThrow();
+  });
+});

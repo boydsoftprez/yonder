@@ -13,6 +13,8 @@ const tapeNode = (await import("./tape.js")).default ?? await import("./tape.js"
 const annunciatorNode = (await import("./annunciator.js")).default ?? await import("./annunciator.js");
 const databarNode = (await import("./databar.js")).default ?? await import("./databar.js");
 const softkeysNode = (await import("./softkeys.js")).default ?? await import("./softkeys.js");
+const identityNode = (await import("./identity.js")).default ?? await import("./identity.js");
+const sparklineNode = (await import("./sparkline.js")).default ?? await import("./sparkline.js");
 
 /**
  * What is tested here, and what honestly cannot be.
@@ -200,6 +202,37 @@ describe("the widgets", () => {
     expect(props).toMatchObject({ max: 85, caution: 60, limit: 80, divisions: 6, height: 200 });
   });
 
+  it("sparkline carries its label and chart height", () => {
+    const { props, type } = build(sparklineNode as (RED: RED) => void, { label: "THROUGHPUT", height2: 64 });
+    expect(type).toBe("ui-yonder-sparkline");
+    expect(props).toMatchObject({ label: "THROUGHPUT", chartHeight: 64 });
+  });
+
+  it("sparkline defaults its chart height rather than collapsing to zero", () => {
+    // The same trap `num` exists to avoid: an unset height2 must not become
+    // a chart with no height at all.
+    expect(build(sparklineNode as (RED: RED) => void, {}).props!.chartHeight).toBe(48);
+  });
+
+  /**
+   * Dashboard reads `widgetConfig.height` off this exact merged object as the
+   * widget's *grid row count* (`nodes/config/ui_base.js`: `props:
+   * widgetConfig` and `layout.height: widgetConfig.height || 1` are the same
+   * object). A computed prop named `height` does not sit beside that field,
+   * it replaces it — this widget's own default would ask Dashboard for 48
+   * grid rows, not a 48px chart, and the console found that shape change in
+   * a real capture before this test existed to say why.
+   */
+  it("never names a prop 'height' - that key is Dashboard's grid row count", () => {
+    // `height: 1` here stands in for the grid-row field every real node
+    // instance carries. The assertion is that the computed props object
+    // leaves it alone rather than overwriting it with the chart's own pixel
+    // height, the way `ui-yonder-tape` still does.
+    const { props } = build(sparklineNode as (RED: RED) => void, { height: 1, height2: 64 });
+    expect(props!.height).toBe(1);
+    expect(props!.chartHeight).toBe(64);
+  });
+
   it("annunciator reads the shared command channel by default", () => {
     expect(build(annunciatorNode as (RED: RED) => void, {}).props!.source).toBe("yonder");
     expect(build(annunciatorNode as (RED: RED) => void, { source: "payload" }).props!.source).toBe("payload");
@@ -210,6 +243,19 @@ describe("the widgets", () => {
   it("data bar carries its cells", () => {
     const { props } = build(databarNode as (RED: RED) => void, { cells: '[{"key":"host","label":"HOST","kind":"id"}]' });
     expect(props!.cells).toEqual([{ key: "host", label: "HOST", kind: "id" }]);
+  });
+
+  it("identity names the payload property it shows", () => {
+    const { props, type } = build(identityNode as (RED: RED) => void, { label: "THIS DEVICE", key: "deviceId" });
+    expect(type).toBe("ui-yonder-identity");
+    expect(props).toMatchObject({ label: "THIS DEVICE", key: "deviceId" });
+  });
+
+  it("identity falls back to a key rather than to no key at all", () => {
+    // An unset field must not become `undefined`, which would read
+    // `payload[undefined]` and draw an em dash for ever with no clue why.
+    expect(build(identityNode as (RED: RED) => void, {}).props!.key).toBe("value");
+    expect(build(identityNode as (RED: RED) => void, { key: 7 }).props!.key).toBe("value");
   });
 
   it("soft keys carry their keys", () => {
@@ -233,7 +279,7 @@ describe("the widgets", () => {
 
   it("leaves onAction off the read-only instruments", () => {
     // A gauge that could emit is a gauge that could originate a command.
-    for (const mod of [gaugeNode, tapeNode, annunciatorNode, databarNode]) {
+    for (const mod of [gaugeNode, tapeNode, annunciatorNode, databarNode, identityNode, sparklineNode]) {
       const { events } = build(mod as (RED: RED) => void, {});
       expect(events?.onAction, "an instrument must not send").toBeUndefined();
     }

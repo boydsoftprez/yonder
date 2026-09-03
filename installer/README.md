@@ -27,18 +27,41 @@ a vendored Node runtime rather than reaching for the distro package,
 one, and `30-console.sh` copies a prebuilt console rather than fetching
 Node-RED. None of those is present in a checkout. This is how to make them.
 
-**Everything that is downloaded — the Node runtime and the console —
-comes from one script:**
+**Everything that is downloaded — the Node runtime, ZeroTier, and the
+console — comes from one script:**
 
 ```sh
 ./installer/make-payload.sh --arch linux-arm64     # a Raspberry Pi or Radxa
 ./installer/make-payload.sh --arch linux-x64       # a PC
 ```
 
-It stages `vendor/node/bin/node` and
+It stages `vendor/node/bin/node`,
+`vendor/zerotier/zerotier-one_<version>_<arch>.deb`, and
 `vendor/console/node_modules/node-red/red.js`, and it is re-runnable: each run
 replaces what the last one left. `vendor/` is downloaded binaries rather than
 source, so `.gitignore` keeps it out of the repository.
+
+What it stages:
+
+- `vendor/zerotier/zerotier-one_<version>_<arch>.deb` — the primary mesh client.
+  One file, ~2.7 MB, depending only on `adduser`, `libstdc++6` and `openssl`, all
+  of which a stock Debian board already has. Pinned, fingerprinted, and verified
+  against ZeroTier's repository signature using `installer/keys/zerotier.gpg`.
+  Installed by role `40-zerotier`, which leaves it stopped and disabled until
+  a network is configured (R-VPN-05, R-VPN-08). **Disabled offline**, with
+  `deb-systemd-helper` rather than `systemctl`: the package's `postinst`
+  enables the unit with `deb-systemd-helper enable`, which writes the `.wants`
+  symlink straight to the filesystem and so works perfectly well in a chroot,
+  while `systemctl disable` in that same chroot answers `Running in chroot,
+  ignoring request` and exits 0. An image built with the latter shipped the
+  client enabled, and nothing on the device would ever have turned it off —
+  `yonder-core` only stops a client it has a record of starting, and a fresh
+  image has none. The role asserts the result rather than assuming it, so a
+  build that cannot disable the unit fails where the message can be read.
+  Tailscale is **not** carried: it is 31 MB, pulls in `iptables` and two
+  libraries that a board does not have, and switches four `update-alternatives`
+  entries. It is fetched over the network and installed when Tailscale is
+  configured (R-VPN-08).
 
 Two things it does that a by-hand download does not:
 
