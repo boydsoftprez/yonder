@@ -155,8 +155,10 @@ The Setup deck holds:
   probe answered rather than what anyone picked (R-CAM-13).
 - **Outputs** — ground-station address and port, browser preview size, RTSP path, SRT.
 
-Two soft keys exist only here. *Re-probe* asks this one camera again what it can do, for a
-changed lens or new firmware. *Receive line* is section 8.
+Three soft keys exist only here. *Re-probe* asks this one camera again what it can do, for
+a changed lens or new firmware. *Find range* drives a gimbal to its stops so the dial can
+draw them (section 3), and is on the rail only for a camera that has one. *Receive line* is
+section 8.
 
 ### Reading back, never remembering
 
@@ -211,6 +213,14 @@ the head was held against the end of its yaw travel and off when released, at 20
 same link as the video. So the dial carries the travel as an arc and the stop as a marked
 band, the pointer changes to the caution tone against a stop, and a limit annunciates over
 the picture (R-TEL-15). **A limit is never inferred from the shot.**
+
+The flag says when the head is *at* a stop; it does not say where the stops are. **A *Find
+range* key in Setup finds them** — driving to each stop under the same guard the bench used,
+which refuses to push past one, on the ground — so the arc is complete before the first
+flight. The arc also updates if a stop is met at a new angle in use, so a remount corrects
+itself. Until the range has been found the dial says so, rather than drawing an arc that is
+not known. One precondition: the bench has not yet established which flag bit is which
+axis, and that is one more run before this can be built.
 
 ### What does not resume
 
@@ -362,12 +372,18 @@ nothing more. So four states:
 | State | Tone | Shown when |
 |---|---|---|
 | Not recording | neutral | Idle, medium present |
-| Recording | fault tone, with elapsed time | The camera's own status push reports a running recording |
+| Recording | *recording* tone, with elapsed time | The camera's own status push reports a running recording |
 | **Sent, not confirmed** | caution | Acknowledged, no recording time yet |
 | No medium | fault tone, key inoperative | Refused |
 
 The third is the reason this is an annunciator. A page that turned green on the
 acknowledgement would be lying, which is what R-UI-05 exists to prevent.
+
+**Recording has a tone of its own.** A red *REC* is the one camera convention strong enough
+that any other colour would confuse, and ADR-0009 names tones by role rather than by hue —
+so a *recording* role holding a red is consistent, where the *fault* role meaning "working
+as intended" would not be. One token in each palette and one line in ADR-0009, in the same
+change as the annunciator.
 
 ### Snapshot follows the same rule
 
@@ -561,7 +577,8 @@ already producing are the right shape for it.
 
 Presentation goes in `node-red-dashboard-2-yonder` as Vue components, never as markup in a
 `ui-template`: the picture pane with its overlays and gesture, the aim dial, the uplink
-budget track, the capability facts row. `flows/` stays wiring.
+budget track, the capability facts row. The *recording* tone is one token in each palette in
+`yonder-core`'s theme and its fallback in the widget library's tokens. `flows/` stays wiring.
 
 Two interaction primitives do not exist in the widget library today, and they are the
 riskiest interface work in this document: **a soft key that is held** — press and release,
@@ -611,23 +628,11 @@ source with a fuller capability set.
 
 ## Open
 
-Two decisions this document does not make, because each changes something outside it.
-
-**The recording tone.** Section 6 draws a running recording in the fault tone, because a red
-*REC* is the one camera convention strong enough that a green one would confuse. ADR-0009
-names tones by role, and red is a fault; a recording that is working is not one. Either
-recording earns a tone of its own, or it uses the *good* tone, or ADR-0009 records the one
-exception.
-
-**Where the travel arc comes from.** Section 3 draws the gimbal's travel as an arc and the
-stop as a band. The device reports the *at-limit flag*; the *range* was found on the bench
-by driving to each stop, once, under a guard that refused to push past one. The natural
-answer is a *Find range* key in Setup that does what the bench did, guarded the same way, on
-the ground — so the arc is complete before the first flight — with the arc also updating if
-a stop is met at a new angle in use, so a remount corrects itself. The alternatives are a
-range entered by the operator, which goes stale on a remount, or no arc until the stops have
-been met in use, which leaves the dial blank for the first flight. One precondition for any
-of them: the bench has not yet established which flag bit is which axis.
+Nothing outstanding in this design. Two questions it left open at first writing — the
+recording tone, and where the gimbal's travel arc comes from — are settled in sections 6
+and 3. What remains unverified is not a design question: every figure here was measured on
+a board that was browning out (K-41), and the two interaction primitives in section 11 have
+not been built.
 
 ---
 
