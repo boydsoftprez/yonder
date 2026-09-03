@@ -164,6 +164,29 @@ two-byte frame** to the gimbal: `55 0f 04 a2 02 04 <seq> 20 04 4c 02 01 <crc16>`
 `app→gimbal` in the address bytes, which `scripts/pocket2/duml.py` produces as
 `encode(4, 0x4C, b"\x02\x01", receiver=DEV_GIMBAL)`.
 
+### The gimbal reports its limits
+
+The attitude push carries more than angles. Bytes 6–11 of `gimbal/0x05`, watched
+across the run above:
+
+| Moment | byte 6 | byte 10 |
+|---|---|---|
+| Before any command | `42` | `a0` |
+| After `4/0x4C` reset, mode 2 | `82` (`a2` while moving) | `a0` |
+| Holding yaw at −30.8° after the angle command | `82` | **`a2`** — bit 1 set, on and off, for six seconds |
+| After recentre, and ever since | `82` | `a0` |
+
+Byte 6 bits 6–7 went from 1 to 2 the moment the reset-and-set-mode frame landed — that
+is the mode field, and it confirms the command took, independently of the movement.
+**Byte 10 bit 1 is a limit flag.** It came on only while the gimbal was being held
+against the end of its yaw travel, and went off when it was released. The public
+dissector names this byte "limit/status flags for pitch, roll, yaw"; which bit is which
+axis needs one more run, one axis at a time.
+
+So a limit is not something to infer from the picture. It arrives twenty times a second
+on the same link as the video, and it belongs on the overlay as an annunciator
+(R-TEL-15).
+
 ### The camera re-probes on its own
 
 Tearing the accessory down and staying off the bus for 45 s, then reappearing as the
@@ -215,6 +238,8 @@ board; the operator plugs one cable.
   video-out parameters is the candidate, untried.
 - **The `0x14` absolute-angle field order.** The first field moved yaw; which fields are
   pitch and roll, and what the two trailing bytes mean, needs one more round.
+- **Which limit bit is which axis** in byte 10 of the attitude push. Bit 1 lit during a
+  yaw hold; pitch and roll have not been driven to their stops.
 - **Camera controls** — record, exposure, white balance, zoom — untried; addressed to the
   camera, they should answer `0x01` the same way.
 - **What the general-set answers carry.** Ping, version and device info return status

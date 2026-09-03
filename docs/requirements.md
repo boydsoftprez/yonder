@@ -46,6 +46,7 @@ land later.
 | R-TEL-12 | Draw the telemetry set as an overlay on both the video and the map | 1 |
 | R-TEL-13 | Independent fullscreen for the video and map panes | 2 |
 | R-TEL-14 | Swap which of video and map is primary, the other becoming an inset | 2 |
+| R-TEL-15 | Show the attitude, mode and limit state of a camera's own gimbal beside the vehicle telemetry, with a reached limit shown as an annunciator on the video overlay (R-TEL-12, R-UI-11), not burned into the picture | 3 |
 
 ## R-CMD — Vehicle commanding
 
