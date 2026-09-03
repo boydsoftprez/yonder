@@ -131,10 +131,54 @@ crop that would rebuild the pipeline is implemented as a crop after capture inst
 zoom never restarts the picture on any camera.
 
 Configuration changes go through the apply engine and are validated and journalled like any
-other, but **they do not start a confirmation countdown**: `affectsReachability` gates that,
-and a camera change cannot cost the operator the ability to reach the device. So no camera
-control carries the irreversible tone, and *Apply* is the page's single primary action in
-the select tone.
+other. **Whether they start a confirmation countdown is decided leaf by leaf, and most of
+this section's fields do not get an exemption.**
+
+An earlier draft of this document claimed camera changes never start one, on the grounds
+that a camera cannot cost the operator the ability to reach the device. That was wrong twice
+over.
+
+It was wrong about the code. `apply/reachability.ts` works the other way round — *"Everything
+is reachable until proven otherwise. This compares the whole document with the parts that
+cannot affect reachability removed, rather than listing the parts that can. A field added to
+the schema next year is then treated as load-bearing by default."* `withoutCosmetics()`
+deletes exactly three leaves: `ui.theme`, `remote.zerotier.enabled` and
+`remote.zerotier.network_id`. **A `cameras:` section falls through to load-bearing on its
+first commit**, so as the earlier draft described it, every Setup apply would arm the 120 s
+window on a page drawing neither a countdown nor a confirm control, and the settings would
+quietly revert two minutes later. That is K-32 replayed on the camera page.
+
+And it was wrong on the merits, which section 4 proves: each consumer that leaves over
+cellular costs its own bitrate, and the console reaches a flying aircraft over that same
+uplink. An added output or a raised ceiling is spend on the path the operator is standing on.
+
+So:
+
+- **Exempt, named leaf by leaf** — `resolution`, `framerate`, `codec`, the preview's size and
+  rate, and the per-camera image controls. None of them changes what leaves the aircraft on
+  a path the console shares.
+- **Load-bearing, and keeping the window** — every entry in `outputs[]`, and bitrate. Both
+  are egress on the shared path. Nobody has yet measured what a saturated uplink does to a
+  console session on a board, and R-VPN-07 requires an exemption to be *earned by measurement
+  rather than by argument*, so these stay load-bearing until somebody measures.
+- **The Setup deck is designed for both.** A change touching only exempt leaves commits with
+  no countdown. A change touching an output or a bitrate arms the window, and the page draws
+  the countdown and the confirm control, in the irreversible tone — because that apply really
+  can take the page away.
+
+Two consequences to carry into the build. `BUSY` includes `pending`, so **an unconfirmed
+camera apply refuses every other apply for two minutes**, a network change included — which
+on a flying aircraft is the wrong thing to be locked out of, and is an argument for keeping
+the exempt set as wide as the measurements will honestly allow. And `withoutCosmetics()`
+deletes named leaves off a fixed object shape and explicitly refuses subtree exemptions, so
+a repeated structure like `cameras[]` has **no mechanism there at all**: array-aware
+exemption is new code in `yonder-core`, with its own tests, including one asserting that a
+newly added camera field falls through to load-bearing.
+
+One refusal belongs with them, because it is the class a confirmation window never catches:
+**an output's port may not equal `ui.port`.** Today's port-carrying outputs are UDP against a
+TCP console so nothing collides, but a bind race after a reboot is a configuration that
+confirms while it looks fine and bites on the next boot.
 
 ### Setup swaps the deck
 
@@ -156,9 +200,10 @@ The Setup deck holds:
 - **Outputs** — ground-station address and port, browser preview size, RTSP path, SRT.
 
 Three soft keys exist only here. *Re-probe* asks this one camera again what it can do, for
-a changed lens or new firmware. *Find range* drives a gimbal to its stops so the dial can
-draw them (section 3), and is on the rail only for a camera that has one. *Receive line* is
-section 8.
+a changed lens or new firmware. *Find range* drives a gimbal to its stops, per work mode, to
+learn the envelope every positional command is clamped to — the arc it draws is the lesser
+half of its job (section 3) — and is on the rail only for a camera that has a gimbal.
+*Receive line* is section 8.
 
 ### Reading back, never remembering
 
@@ -195,9 +240,22 @@ a finger lifts, or the link drops mid-slew, the commands stop arriving and the g
 because nothing is telling it to move. A joystick over a radio needs exactly that property,
 and here it comes free.
 
-**Tap-to-point is kept as a second gesture.** "Look at that thing over there" is one command
-rather than a stream of them, and being stale by 300 ms barely costs anything when the move
-is large.
+**Tap-to-point is kept as a second gesture, and it sends an incremental offset — never an
+absolute angle.** "Look at that thing over there" is one command rather than a stream of
+them, and being stale by 300 ms barely costs little when the move is large. But the wire
+command matters more than the gesture does. The bench is explicit that the absolute frame
+is not safe to build on:
+
+> `4/0x14` is not understood well enough to use. A return-to-zero from a normal pose
+> produced an excursion… the only gimbal commands with a clean record are recentre from a
+> sane pose and small yaw moves within the window.
+
+The cause is that an absolute angle is measured from a reference the attitude push does not
+report and which changes with the gimbal's work mode, so a command equal to the current
+reading is not a no-op. **Incremental mode — mode bit 0 clear — has no reference to get
+wrong**, is exact to 0.2° over thirty moves, and is what the note names as the thing
+R-CAM-11's aim control should be built on. A tap is therefore converted to an offset from
+the reported attitude at the moment of the tap, and sent as one.
 
 ### The dial
 
@@ -206,21 +264,78 @@ the commanded rate where you are pushing, and the reported attitude where the ca
 actually is. Over a cellular link those two are never the same, and drawing both makes the
 lag legible instead of something to fight.
 
-### Limits come from the device
+### Limits come from the device, and the range is a clamp before it is a drawing
 
-The gimbal reports them. `gimbal/0x05` byte 10 bit 1 is a limit flag, observed on only while
-the head was held against the end of its yaw travel and off when released, at 20 Hz on the
-same link as the video. So the dial carries the travel as an arc and the stop as a marked
-band, the pointer changes to the caution tone against a stop, and a limit annunciates over
-the picture (R-TEL-15). **A limit is never inferred from the shot.**
+The gimbal reports a limit flag in `gimbal/0x05` byte 10, at 20 Hz on the same link as the
+video: **bit 0 is pitch, bit 1 is yaw** — established by a sixty-move as-mounted range run,
+one refusal, every stop announced by the camera. Bit 2 is presumed roll and has never been
+driven to a stop. Bits 5 and 7 are on at rest and off during excursions, so they are status
+rather than limits. So a limit annunciates over the picture (R-TEL-15) and **is never
+inferred from the shot**.
+
+**Pitch and yaw are two envelopes, drawn and clamped independently.** As mounted, the bench
+found pitch down at −24.8° and pitch up *beyond +100° with no flag at all* — the guard's own
+window ended that search. One arc cannot honestly represent an axis bounded at one end and
+open at the other, and a drag that reaches an undrawn stop is the failure this section
+exists to prevent. A direction whose search ends on the **guard** rather than on the flag is
+recorded as *no stop found* and drawn open; the guard's ceiling is never presented as a
+limit.
 
 The flag says when the head is *at* a stop; it does not say where the stops are. **A *Find
-range* key in Setup finds them** — driving to each stop under the same guard the bench used,
-which refuses to push past one, on the ground — so the arc is complete before the first
-flight. The arc also updates if a stop is met at a new angle in use, so a remount corrects
-itself. Until the range has been found the dial says so, rather than drawing an arc that is
-not known. One precondition: the bench has not yet established which flag bit is which
-axis, and that is one more run before this can be built.
+range* key in Setup finds them** — driving to each stop on the ground, under the same guard
+the bench used, which refuses to push past one. The envelope it finds is a property of the
+installation, not of the camera: the manufacturer rates tilt at −100° to +50°, and this
+mount stopped at −25° because down is into the airframe.
+
+**What the envelope is for is the clamp, not the arc.** The bench's first conclusion is a
+rule:
+
+> **Clamp before sending.** An absolute angle the gimbal cannot reach in yaw is not
+> refused — the controller finds it by pitching over the top, which is a violent movement
+> and a lost picture. The daemon must know the reachable range and never command outside
+> it; the limit flag is the feedback for the edge, not a substitute for the clamp.
+
+So **every command that carries a position is clamped to the learned envelope in the daemon,
+below every entry point** — the console's gestures, and the MAVLink commands R-CAM-16 relays
+"on the same terms". A rule that lives in the page leaves the relayed path unguarded. The
+camera's own flag is the backstop it should never reach. Until a range has been found, the
+dial says so and positional commands are refused rather than sent unclamped; rate commands,
+which have no reference to get wrong, are unaffected.
+
+**The envelope is keyed to the gimbal's work mode.** In YawFollow the bench found about ±60°
+of yaw against a specification pan range of −230° to +70° — the far side is reachable only in
+another mode. A range learned in one mode is wrong by a factor of three in another, so a mode
+change invalidates the arc and the clamp until that mode's range is found.
+
+### Mode, recentre, and a gimbal that is already in trouble
+
+R-CAM-11 names aim, **mode**, **recentre**, zoom, focus, exposure and white balance;
+R-TEL-15 requires the gimbal's mode to be shown. So the Aim group carries a mode picker and
+the rail carries *Recentre*, both drawn from what the device reports.
+
+Both are subject to an **inhibit**, which is the bench's other rule:
+
+> **A gimbal already in trouble must not be commanded at all** — not even recentred. Any
+> limit bit, or a head more than 60° from level, and the session tool refuses everything on
+> command set 4 until the operator has put it right by hand.
+
+**Gimbal inhibited** is therefore a state of its own, drawn in the fault tone, refusing the
+whole gimbal command set including recentre. Its exit on a bench is a pair of hands. In
+flight there are none, and this document does not yet know what replaces them: recentre is
+proven to be the wrong answer, `general/0x0b` reboot is untried, and the 45 s re-probe has
+never been shown to clear a stalled head. **Until one of those is proven, the honest position
+is that an inhibited gimbal stays inhibited for the rest of the flight** — which is what
+raises the stakes on the clamp, whose whole job is to make the inhibit unreachable.
+
+### Stop
+
+**A *Stop* key is on the rail whenever a camera has a gimbal.** The half-second frame
+expiry is a property of the *rate* frame only. The positional frame carries a `duration`
+field — `0x14` is "arrive in 2 s" — and commits: it runs to completion after the link has
+gone, and the bench's only recovery from a bad move was powering the camera off by hand,
+which an aircraft does not offer because the board is the USB *device* and there is no port
+to power-cycle. Whether a rate frame with the authority flag pre-empts a positional move in
+progress is untested; if it does, that is what *Stop* sends.
 
 ### What does not resume
 
@@ -574,6 +689,21 @@ already producing are the right shape for it.
   branch. The composed pipeline is a value that can be asserted in a test without a camera.
 - **The receive-line renderer** — the same facts, four renderings (section 8). Pure, and
   therefore fully testable.
+- **The aim guard** — the learned envelope per work mode, the clamp every positional command
+  passes through, and the inhibit state (section 3). It sits **below** both entry points, so
+  a MAVLink command relayed under R-CAM-16 is clamped by the same code as a gesture. Pure
+  given an envelope and an attitude, so the rules that matter — never a positional command
+  outside the envelope in any state including before a range is found; never a rate frame
+  without the authority flag; motion ceases within 500 ms of the last pointer event — are
+  assertable without a gimbal.
+
+The guard's limits belong in **one checked-in file that both `scripts/pocket2/` and this
+package read**. The guard that saved the bench from four excursions currently exists only in
+a Python script that will never be on an aircraft, and a second copy would drift from it.
+
+One change lands outside this package: `withoutCosmetics()` in `yonder-core` has no
+mechanism for a repeated structure, so the leaf-by-leaf exemption in section 2 is new code
+there, with a test that a newly added camera field falls through to load-bearing.
 
 Presentation goes in `node-red-dashboard-2-yonder` as Vue components, never as markup in a
 `ui-template`: the picture pane with its overlays and gesture, the aim dial, the uplink
@@ -663,7 +793,11 @@ Everything cited above, with its source.
 | Rate aim | `gimbal/0x0C` with control-authority flag `0x80`; without it, accepted and ignored |
 | Rate accuracy | commanded 25° over 2.5 s, moved 24°, twice |
 | Frame validity | **~0.5 s** — one frame then silence moved 5° and stopped |
-| Limit flag | `gimbal/0x05` byte 10 bit 1, at 20 Hz; on only while held against the yaw stop |
+| Limit flag | `gimbal/0x05` byte 10, at 20 Hz. **Bit 0 pitch, bit 1 yaw**, from a sixty-move as-mounted run; bit 2 presumed roll, never driven to a stop; bits 5 and 7 are status, not limits |
+| Envelope, as mounted | yaw −65° to +68°; pitch −24.8° down, **no stop found** up to the guard's window past +100°. A property of the installation, and of the work mode: YawFollow gives ±60° of yaw against a specification pan range of −230° to +70° |
+| Positional frame | `int16 yaw, roll, pitch` at 0.1°, a mode byte whose bit 0 selects absolute, and a `duration` — `0x14` is "arrive in 2 s". **Commits**: it runs after the link is gone |
+| Absolute mode | **not safe to build on** — its reference depends on the work mode and is not in the attitude push; a return-to-zero from a normal pose produced an excursion |
+| Incremental mode | mode bit 0 clear; "has no reference to get wrong", exact to 0.2° over thirty moves |
 | Zoom | digital only; accepted, does not reshape the 720p feed — cropped by the receiver |
 | Live-view resolution | **not controllable**; fifteen values across three payload widths, all acknowledged, frame stayed 1280×720 |
 | Record | acknowledged with no card in the camera; `status 0x01` means well-formed, not effective |
