@@ -345,6 +345,7 @@ can flash one and fly.
 | Read-only or overlay root | R-STO-04 |
 | TLS for the web console | R-SEC-08 |
 | PX4 | R-MAV-12 |
+| Cameras that are USB hosts and expect a phone — the DJI Pocket 2 — see [`hardware/dji-pocket-2-over-usb.md`](hardware/dji-pocket-2-over-usb.md) | R-CAM-15 |
 
 Ordered within M9 by value over effort. Adaptive bitrate and SRT come first: they are the
 difference between a stream that degrades and a stream that drops, and on a cellular link

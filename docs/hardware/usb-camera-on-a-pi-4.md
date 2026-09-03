@@ -273,8 +273,9 @@ dmesg | grep 'Failed enabling i/p port'
 - **Any board other than this Pi 4.** Pi Zero 2 W, Pi 3, CM3 and CM4 share R-HW-01's claim
   of a hardware encoder and none has run this. The Pi 5 and CM5 software path has been
   measured only by proxy, above.
-- **Any camera other than this ELP.** The DJI Osmo is on the compatibility list and has
-  never been plugged in. It will enumerate differently, which is the argument for probing.
+- **Any camera other than this ELP.** The DJI Pocket 2 on the compatibility list has since
+  been plugged in and is not a UVC camera at all — it is a USB *host* that expects a phone.
+  See [`dji-pocket-2-over-usb.md`](dji-pocket-2-over-usb.md).
 - **Camera identity across reboots and plug order (R-CAM-05).** `/dev/v4l/by-id/` exists
   and resolves, but this camera reports the serial `01.00.00` — a generic string. Two
   identical modules would collide, so identity needs the USB topology path

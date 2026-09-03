@@ -96,6 +96,7 @@ Parameter writes are vehicle commands. R-CMD applies to every requirement here.
 | R-CAM-12 | Detect attached cameras on demand from the console, and report what was found, what was rejected and why | 1 |
 | R-CAM-13 | Select an encoder appropriate to the board by probing the hardware, not from a table of board names, and report the encoder in use. An operator may name one explicitly to bypass the probe | 1 |
 | R-CAM-14 | Build a camera's offered formats, resolutions, rates and controls from what the device answers, never from a stored list. **A capability the device advertises but does not answer is absent**, and is reported as advertised-but-unavailable rather than hidden | 1 |
+| R-CAM-15 | Capture from a camera that is itself a USB host and expects a phone, by presenting the board as that phone and speaking the camera's own protocol. The picture and the gimbal, exposure and white-balance controls (R-CAM-11) arrive on the same link. Requires a board port that can act as a USB device, which on a Raspberry Pi 4 means header or PoE power | 3 |
 
 ## R-VID — Video transport
 
