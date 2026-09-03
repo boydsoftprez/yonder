@@ -320,10 +320,12 @@ Two failures of understanding, both now in the tools:
   manufacturer's own app shows how it drives this frame, the only gimbal commands with a
   clean record are recentre from a sane pose and small yaw moves within the window.
 
-And a bench rule that should have been obvious: **the camera lay on its side on the
-desk** for every gimbal run. The head's mechanical envelope assumes an upright handle;
-on its side, "level" and "down" point into the desk and the body. Gimbal experiments are
-done with the handle upright and held.
+A bench rule, corrected once by the operator: the camera lay on its side on the desk for
+every gimbal run, and the first instinct was to demand it upright. **But an aircraft
+mounts it however the airframe allows, never handle-up.** So the gimbal is verified as
+it lies — the mounted orientation — with the incremental frames that have no reference to
+get wrong, one small step at a time, and *recentre* is understood for what it is:
+handle-relative, which on an airframe means "back to the mount's forward", not "level".
 
 ### Across the camera's own power cycle
 
