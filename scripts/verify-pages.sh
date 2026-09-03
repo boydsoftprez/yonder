@@ -50,6 +50,8 @@ command -v node >/dev/null 2>&1 || die "node is needed"
 [ -f "$CORE/dist/daemon/server.js" ] || die "no built daemon; run: npm run build"
 [ -f "$REPO/packages/node-red-contrib-yonder-system/dist/status.js" ] \
     || die "the contrib packages are not built; run: npm run build"
+[ -f "$REPO/packages/node-red-contrib-yonder-modem/dist/state.js" ] \
+    || die "the modem package is not built; run: npm run build"
 [ -f "$CONSOLE_TREE/node_modules/node-red/red.js" ] \
     || die "no console tree at $CONSOLE_TREE; run: ./installer/make-payload.sh --arch linux-arm64"
 [ -d "$CONSOLE_TREE/node_modules/@flowfuse/node-red-dashboard" ] \
@@ -90,6 +92,29 @@ case "$*" in
 esac
 exit 0
 FAKE
+# mmcli, replaying what a real EC25-AF on a live SIM answered. The fixtures are
+# the ones yonder-core's own parser tests are written against, so the Cellular
+# tab is captured showing what that board actually reported rather than a panel
+# of em dashes — and a page captured with nothing on it is a page nobody has
+# looked at, which is the failure R-UI-12 exists to prevent.
+MMCLI_FIXTURES="$REPO/packages/yonder-core/src/net/modem/mmcli/fixtures"
+cat > "$BIN/mmcli" <<FAKE
+#!/bin/sh
+F="$MMCLI_FIXTURES"
+case "\$*" in
+    *"-L"*)             cat "\$F/modem-list.txt" ;;
+    *"--signal-get"*)   cat "\$F/signal-get.txt" ;;
+    *"--signal-setup"*) : ;;
+    # Two bearers, and the connected one is not the first. The network's own
+    # initial bearer carries an APN nobody configured and is not connected;
+    # reading it is the mistake connectedBearer() exists to avoid.
+    *"-b "*Bearer/1*)   cat "\$F/bearer-connected.txt" ;;
+    *"-b "*)            cat "\$F/bearer-initial.txt" ;;
+    *"-m "*)            cat "\$F/modem-show.txt" ;;
+esac
+exit 0
+FAKE
+
 cat > "$BIN/rfkill" <<'FAKE'
 #!/bin/sh
 exit 0
@@ -104,7 +129,7 @@ printf 'PING\n3 packets transmitted, 3 received, 0%% packet loss, time 2003ms\n'
 printf 'rtt min/avg/max/mdev = 8.294/9.117/10.352/0.884 ms\n'
 exit 0
 FAKE
-chmod +x "$BIN/systemctl" "$BIN/nmcli" "$BIN/rfkill" "$BIN/hostnamectl" "$BIN/ping"
+chmod +x "$BIN/systemctl" "$BIN/nmcli" "$BIN/mmcli" "$BIN/rfkill" "$BIN/hostnamectl" "$BIN/ping"
 
 sed "s/^  port: .*/  port: $PORT/" "$REPO/config/defaults/config.yaml" > "$ETC/config.yaml"
 grep -q "port: $PORT" "$ETC/config.yaml" || die "could not set the console port in $ETC/config.yaml"
@@ -245,6 +270,7 @@ mkdir -p "$CONSOLE/node_modules"
 # rm then ln, never `ln -sfn`: -n is not POSIX, and without it `ln -sf` onto an
 # existing symlink-to-a-directory creates the link inside it.
 for pkg in node-red-contrib-yonder-system node-red-contrib-yonder-network \
+           node-red-contrib-yonder-remote node-red-contrib-yonder-modem \
            node-red-dashboard-2-yonder; do
     rm -f "$CONSOLE/node_modules/$pkg"
     ln -s "$REPO/packages/$pkg" "$CONSOLE/node_modules/$pkg"

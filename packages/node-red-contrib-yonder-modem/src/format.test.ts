@@ -8,6 +8,7 @@ import {
   formatDbm,
   formatTechnology,
   verdict,
+  verdictStatus,
 } from "./format.js";
 
 describe("the signal bounds", () => {
@@ -115,5 +116,41 @@ describe("a radio technology", () => {
   it("stays absent when the modem did not say, rather than becoming an empty string", () => {
     expect(formatTechnology(null)).toBeNull();
     expect(formatTechnology("")).toBeNull();
+  });
+});
+
+/**
+ * The verdict has to reach `ui-yonder-annunciator`, which renders a
+ * `CommandStatus` and nothing else. This is where the tone becomes a state,
+ * so that no `change` node in `flows.json` has to (CLAUDE.md rule 2).
+ */
+describe("the verdict, as the annunciator reads it", () => {
+  it("lights a link that is carrying traffic as good", () => {
+    const s = verdictStatus({ text: "CARRYING TRAFFIC", tone: "good" }, 1000);
+    expect(s.state).toBe("confirmed");
+    expect(s.message).toBe("CARRYING TRAFFIC");
+    expect(s.at).toBe(1000);
+  });
+
+  it("lights a link nothing is getting through as bad", () => {
+    expect(verdictStatus({ text: "NO DATA GETTING THROUGH", tone: "bad" }, 1).state)
+      .toBe("rejected");
+  });
+
+  /**
+   * An untested path is neutral and never good: a green lamp on the strength
+   * of nobody having shown otherwise is the mistake this verdict exists to
+   * avoid (R-CEL-09).
+   */
+  it("leaves an untested link neutral rather than claiming it works", () => {
+    const s = verdictStatus({ text: "NOT YET TESTED", tone: "neutral" }, 1);
+    expect(s.state).toBe("idle");
+    expect(s.message).toBe("NOT YET TESTED");
+  });
+
+  it("carries the verdict's own words, so the lamp does not say Confirmed", () => {
+    for (const tone of ["good", "bad", "neutral"] as const) {
+      expect(verdictStatus({ text: "NO MODEM", tone }, 1).message).toBe("NO MODEM");
+    }
   });
 });

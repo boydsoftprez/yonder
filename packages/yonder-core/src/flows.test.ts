@@ -47,6 +47,7 @@ function contribTypes(): Set<string> {
     "node-red-contrib-yonder-system",
     "node-red-contrib-yonder-network",
     "node-red-contrib-yonder-remote",
+    "node-red-contrib-yonder-modem",
     "node-red-dashboard-2-yonder",
   ]) {
     const manifest = JSON.parse(
@@ -835,6 +836,159 @@ describe("flows/flows.json ZeroTier tab", () => {
   // coordinates, so it cannot be reviewed, so it cannot be merged.
   it("ships no function node", () => {
     expect(flows.some((n) => n.type === "function")).toBe(false);
+  });
+});
+
+/**
+ * The Cellular tab, against the artefact rather than a rendering
+ * (R-CEL-09, R-CEL-12, R-UI-09).
+ */
+describe("flows/flows.json Cellular tab", () => {
+  const page = flows.find((n) => n.type === "ui-page" && n.name === "Network");
+  const tabs = flows
+    .filter((n) => n.type === "ui-group" && n.page === page?.id)
+    .sort((a, b) => Number(a.order) - Number(b.order));
+  const inTab = flows.filter((n) => n.group === "group-net-cellular");
+
+  /**
+   * A `ui-group` on a page whose layout is `tabs` **is** a tab — Dashboard's
+   * `LayoutTabs` renders one `v-tab` per group — so this is also the check
+   * that the tab exists at all, and where in the strip it is.
+   */
+  it("sits between ZeroTier and Activity in the strip", () => {
+    expect(page?.layout).toBe("tabs");
+    expect(tabs.map((g) => g.name))
+      .toEqual(["Interfaces", "Wi-Fi", "ZeroTier", "Cellular", "Activity"]);
+  });
+
+  it.each(["yonder-modem-state", "yonder-modem-configure", "yonder-reach-test"])(
+    "the shipped flows use %s",
+    (type) => {
+      expect(flows.some((n) => n.type === type)).toBe(true);
+    },
+  );
+
+  /**
+   * **The defect the gauge's second sense exists to prevent.**
+   *
+   * `ui-yonder-gauge` lays its bands good → caution → bad left to right and
+   * fills as the value climbs, which is right for temperature and backwards
+   * for signal. Without `sense`, a dying link draws as a full bar — the one
+   * reading an operator glances at, saying the opposite of the truth. The
+   * bounds are the standard cellular thresholds, so a number that looks
+   * alarming here looks alarming to a carrier's support desk too.
+   */
+  it("draws both signal gauges against their bands, the right way round", () => {
+    const gauges = inTab.filter((n) => n.type === "ui-yonder-gauge");
+    expect(gauges.map((g) => g.label).sort()).toEqual(["QUALITY", "SIGNAL"]);
+    for (const g of gauges) {
+      expect(g.sense, `${String(g.label)} would draw a dying link as a full bar`)
+        .toBe("higher-is-better");
+    }
+    const signal = gauges.find((g) => g.label === "SIGNAL");
+    expect([signal?.min, signal?.max, signal?.caution, signal?.limit])
+      .toEqual([-120, -70, -90, -105]);
+    expect(signal?.unit).toBe("dBm");
+    const quality = gauges.find((g) => g.label === "QUALITY");
+    expect([quality?.min, quality?.max, quality?.caution, quality?.limit])
+      .toEqual([-5, 25, 13, 0]);
+    expect(quality?.unit).toBe("dB");
+  });
+
+  /**
+   * A gauge places a pointer, so it needs a number. The state node computes
+   * both the number and the string beside it, and these move one into the
+   * message — a `function` node deriving one from the other is what
+   * CLAUDE.md rule 2 forbids.
+   */
+  it("feeds each gauge a number, from the output that carries them", () => {
+    const state = flows.find((n) => n.type === "yonder-modem-state");
+    const signals = (state!.wires as string[][])[1];
+    for (const id of ["pick-cell-strength", "pick-cell-quality", "bar-cell-signal"]) {
+      expect(signals).toContain(id);
+    }
+    for (const id of ["pick-cell-strength", "pick-cell-quality"]) {
+      const node = flows.find((n) => n.id === id);
+      const rules = node?.rules as { to: string; tot: string }[];
+      expect(rules[0].tot).toBe("jsonata");
+      expect(rules[0].to).toMatch(/^payload\.gauges\./);
+    }
+  });
+
+  /**
+   * **R-CEL-12.** The surface that reports a broken link is the one that
+   * repairs it. Four fields and a rail, on the same tab as the verdict — an
+   * operator told the APN is wrong must not have to leave the console to
+   * change it.
+   *
+   * **R-CEL-09:** no APN is suggested, completed or offered as a list. The
+   * published carrier database's first answer for the SIM this was built
+   * against was the value that failed.
+   */
+  it("carries the form that fixes what the verdict reports", () => {
+    const inputs = inTab.filter((n) => n.type === "ui-text-input");
+    expect(inputs.map((n) => n.topic).sort())
+      .toEqual(["apn", "dial", "password", "username"]);
+    const apn = inputs.find((n) => n.topic === "apn");
+    expect(apn?.type, "an APN is typed, never chosen from a list").toBe("ui-text-input");
+  });
+
+  /**
+   * R-SEC-10. `ui-form` renders nothing masked, so the password is its own
+   * `ui-text-input`; `passthru` would put what was typed back on an outgoing
+   * message.
+   */
+  it("masks the password and never echoes any field back", () => {
+    const inputs = inTab.filter((n) => n.type === "ui-text-input");
+    expect(inputs.find((n) => n.topic === "password")?.mode).toBe("password");
+    for (const n of inputs) expect(n.passthru ?? false, String(n.id)).toBe(false);
+  });
+
+  /**
+   * R-UI-10, and the one control on this tab that takes the link away from
+   * the operator. Changing the APN re-dials; asking for a test does not.
+   */
+  it("puts both actions on one rail, with CONNECT as the irreversible one", () => {
+    const rail = inTab.find((n) => n.type === "ui-yonder-softkeys");
+    const keys = JSON.parse(String(rail?.keys)) as { label: string; action: string; tone: string }[];
+    expect(keys).toEqual([
+      { label: "TEST NOW", action: "test", tone: "act" },
+      { label: "CONNECT", action: "connect", tone: "warn" },
+    ]);
+  });
+
+  it("routes each key to the node that answers it", () => {
+    const rail = inTab.find((n) => n.type === "ui-yonder-softkeys");
+    expect((rail?.wires as string[][])[0]).toEqual(["route-cell-key"]);
+    const route = flows.find((n) => n.id === "route-cell-key");
+    expect(route?.type).toBe("switch");
+    const wires = route?.wires as string[][];
+    const typeOf = (id: string) => flows.find((n) => n.id === id)?.type;
+    // TEST NOW asks the daemon to probe one path; CONNECT applies a section.
+    expect(typeOf(wires[0][0])).toBe("change");
+    expect(typeOf((flows.find((n) => n.id === wires[0][0])?.wires as string[][])[0][0]))
+      .toBe("yonder-reach-test");
+    expect(typeOf((flows.find((n) => n.id === wires[1][0])?.wires as string[][])[0][0]))
+      .toBe("yonder-modem-configure");
+  });
+
+  /**
+   * A control that says it will act and does not is worse than an absent one.
+   * Both keys end somewhere an operator can see the answer.
+   */
+  it("says out loud what each key did", () => {
+    const toast = flows.find((n) => n.type === "ui-notification");
+    for (const id of ["reach-test", "modem-configure"]) {
+      const out = (flows.find((n) => n.id === id)?.wires as string[][])[0];
+      expect(out.length, `${id} answers nowhere`).toBeGreaterThan(0);
+      const said = flows.find((n) => n.id === out[0]);
+      expect((said?.wires as string[][])[0]).toContain(toast?.id);
+    }
+  });
+
+  // CLAUDE.md rule 2, once more where it is easiest to break.
+  it("ships no function node", () => {
+    expect(inTab.some((n) => n.type === "function")).toBe(false);
   });
 });
 

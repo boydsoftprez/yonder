@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import type { ReadingBounds, ReachState, PathReport } from "yonder-core";
+import { confirmed, idle, rejected } from "yonder-core";
+import type { CommandStatus, ReadingBounds, ReachState, PathReport } from "yonder-core";
 
 /**
  * Where an operator is told to start worrying about signal strength.
@@ -37,6 +38,12 @@ export function formatDb(value: number | null): string {
   return value === null ? "—" : `${Math.round(value)} dB`;
 }
 
+/** The one line at the top of the Cellular tab, already judged. */
+export interface Verdict {
+  text: string;
+  tone: "good" | "bad" | "neutral";
+}
+
 /**
  * The one line at the top of the Cellular tab.
  *
@@ -60,7 +67,7 @@ export function formatDb(value: number | null): string {
  * the operator's answer to both is the same. Saying READY there would also
  * put this line in contradiction with the `Way out` row about the same path.
  */
-export function verdict(reach: ReachState): { text: string; tone: "good" | "bad" | "neutral" } {
+export function verdict(reach: ReachState): Verdict {
   const modem = reach.paths.find((p) => p.path === "modem");
   if (modem === undefined) return { text: "NO MODEM", tone: "neutral" };
   if (modem.standing === "no-route-out") return { text: "NO DATA GETTING THROUGH", tone: "bad" };
@@ -68,6 +75,31 @@ export function verdict(reach: ReachState): { text: string; tone: "good" | "bad"
   if (modem.evidence === "untested") return { text: "NOT YET TESTED", tone: "neutral" };
   if (modem.evidence === "not-reaching") return { text: "NO DATA GETTING THROUGH", tone: "bad" };
   return { text: "READY", tone: "good" };
+}
+
+/**
+ * The same verdict, in the language the annunciator reads (R-UI-11, ADR-0005).
+ *
+ * `ui-yonder-annunciator` renders a `CommandStatus` and decides nothing —
+ * that is what stops a lamp meaning one thing on the Network page and another
+ * on Status. A link verdict is not a command, but it is exactly the kind of
+ * thing that lamp exists for, so it is said in the language that already
+ * exists rather than given a second one.
+ *
+ * It is here, and not in a `change` node in `flows.json`, because mapping a
+ * tone onto a state is a decision, and a decision serialised beside wire
+ * coordinates cannot be reviewed (CLAUDE.md rule 2).
+ *
+ * `message` carries the verdict's own words, so the lamp says
+ * `CARRYING TRAFFIC` rather than `Confirmed`: the annunciator prefers the
+ * message over the state's generic label.
+ */
+export function verdictStatus(v: Verdict, at: number): CommandStatus {
+  if (v.tone === "good") return confirmed(v.text, { at });
+  if (v.tone === "bad") return rejected(v.text, { at });
+  // Neutral: nothing has established anything either way, which is exactly
+  // what `idle` means — never a green lamp on the strength of no evidence.
+  return idle(at, v.text);
 }
 
 /**

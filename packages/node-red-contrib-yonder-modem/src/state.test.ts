@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
-import { messageFor } from "./state.js";
+import { fanOut, messageFor } from "./state.js";
 import type { ModemState, PathEvidence, ReachState } from "yonder-core";
 
 const MODEM: ModemState = {
@@ -94,5 +94,61 @@ describe("messageFor", () => {
   it("says so when nothing is carrying traffic at all", () => {
     const p = messageFor(MODEM, { ...REACH, inUse: null, carrying: false }).payload;
     expect(p.reachableBy).toBe("NOTHING");
+  });
+});
+
+/**
+ * The four outputs, which is the whole reason this is one node: every surface
+ * that shows the modem is describing the same tick.
+ */
+describe("fanOut", () => {
+  const outs = (reach: ReachState = REACH) => fanOut(messageFor(MODEM, reach).payload, 4242);
+
+  it("gives the Cellular tab what the modem is and what it is doing", () => {
+    const p = outs()[0].payload as Record<string, unknown>;
+    expect(p.operator).toBe("Dark Star");
+    expect(p.technology).toBe("LTE");
+    expect(p.apn).toBe("ereseller");
+    expect(p.portSummary).toBe("cdc-wdm0 (mbim) · wwan0 (net)");
+  });
+
+  /**
+   * `ui-yonder-annunciator` renders a `CommandStatus` from `msg.yonder` and
+   * nothing else, so the verdict has to arrive in that shape. Without this the
+   * lamp on the Cellular tab reads "Ready" for ever, whatever the link is
+   * doing — and a flow mapping one shape to the other would be logic in
+   * `flows.json` (CLAUDE.md rule 2).
+   */
+  it("puts the verdict on the shared channel, in the shape the lamp reads", () => {
+    expect(outs()[0].yonder).toEqual({
+      state: "confirmed", message: "READY", at: 4242,
+    });
+  });
+
+  it("says nothing is getting through when nothing is", () => {
+    const dark: ReachState = {
+      inUse: null, carrying: false,
+      paths: [{ path: "modem", device: "wwan0", standing: "no-route-out", since: null,
+        evidence: "not-reaching", detail: "Reached nothing" }],
+    };
+    expect((outs(dark)[0].yonder as { state: string }).state).toBe("rejected");
+  });
+
+  /**
+   * The databar names keys in the object it is given, so the signal strings
+   * sit at the top level of output 2 rather than one level down — and the
+   * gauges' bare numbers travel beside them, because a gauge places a pointer
+   * and a databar prints a fact.
+   */
+  it("flattens the signal strings for the databar and keeps the numbers for the gauges", () => {
+    const p = outs()[1].payload as Record<string, unknown>;
+    expect(p.rssi).toBe("-71 dBm");
+    expect(p.rsrq).toBe("-12 dB");
+    expect(p.gauges).toEqual({ strength: -99, quality: 16 });
+  });
+
+  it("gives the Way out panel one row per path and Status one word", () => {
+    expect((outs()[2].payload as unknown[]).length).toBe(2);
+    expect((outs()[3].payload as { reachableBy: string }).reachableBy).toBe("ETHERNET");
   });
 });

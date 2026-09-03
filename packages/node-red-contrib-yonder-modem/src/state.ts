@@ -19,6 +19,7 @@ import {
   formatTechnology,
   pathDetail,
   verdict,
+  verdictStatus,
 } from "./format.js";
 
 /**
@@ -221,10 +222,18 @@ export function messageFor(modem: ModemState, reach: ReachState): { payload: Sta
  * given, so the signal output's strings sit at the top level of output 2
  * rather than nested one deeper.
  */
-export function fanOut(payload: StatePayload): NodeMessage[] {
+export function fanOut(payload: StatePayload, at: number = Date.now()): NodeMessage[] {
   return [
     // 1 — the Cellular tab: what the modem is and what it is doing.
+    //
+    // The verdict travels twice, and both are used: as `{ text, tone }` in the
+    // payload for anything that wants the words, and on `msg.yonder` as a
+    // `CommandStatus` for `ui-yonder-annunciator`, which renders that shape
+    // and only that shape. The alternative was a `change` node in the flows
+    // mapping one to the other, which is a decision serialised beside wire
+    // coordinates (CLAUDE.md rule 2).
     {
+      yonder: verdictStatus(payload.verdict, at),
       payload: {
         mode: payload.mode,
         summary: payload.summary,
@@ -325,7 +334,7 @@ export default function register(RED: RED): void {
 
       const shaped = messageFor(modem.value as ModemState, reach.value as ReachState);
       node.status({ fill: "green", shape: "dot", text: shaped.payload.mode });
-      send(fanOut(shaped.payload));
+      send(fanOut(shaped.payload, Date.now()));
     };
 
     // `void`, not `await`: this runs off a timer, and an unhandled rejection

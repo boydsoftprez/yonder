@@ -1449,13 +1449,27 @@
         ]
     },
     {
+        "id": "group-net-cellular",
+        "type": "ui-group",
+        "name": "Cellular",
+        "page": "page-network",
+        "width": 12,
+        "height": 1,
+        "order": 4,
+        "showTitle": true,
+        "className": "",
+        "visible": true,
+        "disabled": false,
+        "groupType": "default"
+    },
+    {
         "id": "group-net-activity",
         "type": "ui-group",
         "name": "Activity",
         "page": "page-network",
         "width": 12,
         "height": 1,
-        "order": 4,
+        "order": 5,
         "showTitle": true,
         "className": "",
         "visible": true,
@@ -1833,5 +1847,621 @@
         "x": 1220,
         "y": 1680,
         "wires": []
+    },
+    {
+        "id": "modem-state",
+        "type": "yonder-modem-state",
+        "z": "yonder-console",
+        "name": "the modem, and which way out is working",
+        "interval": 5,
+        "x": 260,
+        "y": 1720,
+        "wires": [
+            [
+                "ann-cell-verdict",
+                "text-cell-summary",
+                "bar-cell-facts",
+                "bar-cell-link"
+            ],
+            [
+                "pick-cell-strength",
+                "pick-cell-quality",
+                "bar-cell-signal"
+            ],
+            [],
+            []
+        ]
+    },
+    {
+        "id": "ann-cell-verdict",
+        "type": "ui-yonder-annunciator",
+        "z": "yonder-console",
+        "group": "group-net-cellular",
+        "name": "verdict",
+        "order": 1,
+        "width": 6,
+        "height": 1,
+        "label": "",
+        "source": "yonder",
+        "x": 700,
+        "y": 1660,
+        "wires": []
+    },
+    {
+        "id": "text-cell-summary",
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-net-cellular",
+        "order": 3,
+        "width": 6,
+        "height": 1,
+        "name": "summary",
+        "label": "",
+        "format": "{{msg.payload}}",
+        "layout": "row-left",
+        "value": "payload.summary",
+        "valueType": "msg",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "wrapText": false,
+        "className": "",
+        "x": 700,
+        "y": 1720,
+        "wires": []
+    },
+    {
+        "id": "bar-cell-facts",
+        "type": "ui-yonder-databar",
+        "z": "yonder-console",
+        "group": "group-net-cellular",
+        "name": "facts",
+        "order": 5,
+        "width": 6,
+        "height": 1,
+        "label": "",
+        "cells": "[{\"key\":\"operator\",\"label\":\"OPERATOR\"},{\"key\":\"technology\",\"label\":\"NETWORK\"},{\"key\":\"registration\",\"label\":\"REGISTERED\"},{\"key\":\"apn\",\"label\":\"APN\"}]",
+        "x": 700,
+        "y": 1780,
+        "wires": []
+    },
+    {
+        "id": "bar-cell-link",
+        "type": "ui-yonder-databar",
+        "z": "yonder-console",
+        "group": "group-net-cellular",
+        "name": "link",
+        "order": 7,
+        "width": 12,
+        "height": 1,
+        "label": "",
+        "cells": "[{\"key\":\"address\",\"label\":\"ADDRESS\",\"kind\":\"id\"},{\"key\":\"mtu\",\"label\":\"MTU\"},{\"key\":\"portSummary\",\"label\":\"COMPOSITION\"}]",
+        "x": 700,
+        "y": 1840,
+        "wires": []
+    },
+    {
+        "id": "pick-cell-strength",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "RSRP, as a number for the gauge",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "payload.gauges.strength",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 700,
+        "y": 1900,
+        "wires": [
+            [
+                "gauge-cell-strength"
+            ]
+        ]
+    },
+    {
+        "id": "gauge-cell-strength",
+        "type": "ui-yonder-gauge",
+        "z": "yonder-console",
+        "group": "group-net-cellular",
+        "name": "strength",
+        "order": 2,
+        "width": 6,
+        "height": 1,
+        "label": "SIGNAL",
+        "unit": "dBm",
+        "min": -120,
+        "max": -70,
+        "caution": -90,
+        "limit": -105,
+        "sense": "higher-is-better",
+        "limitLabel": "",
+        "precision": 0,
+        "track": 118,
+        "series": "",
+        "x": 1020,
+        "y": 1900,
+        "wires": []
+    },
+    {
+        "id": "pick-cell-quality",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "SINR, as a number for the gauge",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "payload.gauges.quality",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 700,
+        "y": 1960,
+        "wires": [
+            [
+                "gauge-cell-quality"
+            ]
+        ]
+    },
+    {
+        "id": "gauge-cell-quality",
+        "type": "ui-yonder-gauge",
+        "z": "yonder-console",
+        "group": "group-net-cellular",
+        "name": "quality",
+        "order": 4,
+        "width": 6,
+        "height": 1,
+        "label": "QUALITY",
+        "unit": "dB",
+        "min": -5,
+        "max": 25,
+        "caution": 13,
+        "limit": 0,
+        "sense": "higher-is-better",
+        "limitLabel": "",
+        "precision": 0,
+        "track": 118,
+        "series": "",
+        "x": 1020,
+        "y": 1960,
+        "wires": []
+    },
+    {
+        "id": "bar-cell-signal",
+        "type": "ui-yonder-databar",
+        "z": "yonder-console",
+        "group": "group-net-cellular",
+        "name": "signal",
+        "order": 6,
+        "width": 6,
+        "height": 1,
+        "label": "",
+        "cells": "[{\"key\":\"rssi\",\"label\":\"RSSI\"},{\"key\":\"rsrq\",\"label\":\"RSRQ\"}]",
+        "x": 700,
+        "y": 2020,
+        "wires": []
+    },
+    {
+        "id": "input-cell-apn",
+        "type": "ui-text-input",
+        "z": "yonder-console",
+        "group": "group-net-cellular",
+        "name": "apn",
+        "label": "APN",
+        "tooltip": "",
+        "order": 8,
+        "width": 6,
+        "height": 1,
+        "topic": "apn",
+        "topicType": "str",
+        "mode": "text",
+        "delay": 300,
+        "passthru": false,
+        "sendOnBlur": true,
+        "className": "",
+        "icon": "",
+        "iconPosition": "left",
+        "clearable": false,
+        "sendOnDelay": true,
+        "x": 260,
+        "y": 2080,
+        "wires": [
+            [
+                "remember-cell-apn"
+            ]
+        ]
+    },
+    {
+        "id": "remember-cell-apn",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "the typed apn, for Connect to read",
+        "rules": [
+            {
+                "t": "set",
+                "p": "modemApn",
+                "pt": "flow",
+                "to": "payload",
+                "tot": "msg"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 620,
+        "y": 2080,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "input-cell-dial",
+        "type": "ui-text-input",
+        "z": "yonder-console",
+        "group": "group-net-cellular",
+        "name": "dial",
+        "label": "Dial number",
+        "tooltip": "",
+        "order": 9,
+        "width": 6,
+        "height": 1,
+        "topic": "dial",
+        "topicType": "str",
+        "mode": "text",
+        "delay": 300,
+        "passthru": false,
+        "sendOnBlur": true,
+        "className": "",
+        "icon": "",
+        "iconPosition": "left",
+        "clearable": false,
+        "sendOnDelay": true,
+        "x": 260,
+        "y": 2140,
+        "wires": [
+            [
+                "remember-cell-dial"
+            ]
+        ]
+    },
+    {
+        "id": "remember-cell-dial",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "the typed dial, for Connect to read",
+        "rules": [
+            {
+                "t": "set",
+                "p": "modemDial",
+                "pt": "flow",
+                "to": "payload",
+                "tot": "msg"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 620,
+        "y": 2140,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "input-cell-username",
+        "type": "ui-text-input",
+        "z": "yonder-console",
+        "group": "group-net-cellular",
+        "name": "username",
+        "label": "Username",
+        "tooltip": "",
+        "order": 10,
+        "width": 6,
+        "height": 1,
+        "topic": "username",
+        "topicType": "str",
+        "mode": "text",
+        "delay": 300,
+        "passthru": false,
+        "sendOnBlur": true,
+        "className": "",
+        "icon": "",
+        "iconPosition": "left",
+        "clearable": false,
+        "sendOnDelay": true,
+        "x": 260,
+        "y": 2200,
+        "wires": [
+            [
+                "remember-cell-username"
+            ]
+        ]
+    },
+    {
+        "id": "remember-cell-username",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "the typed username, for Connect to read",
+        "rules": [
+            {
+                "t": "set",
+                "p": "modemUsername",
+                "pt": "flow",
+                "to": "payload",
+                "tot": "msg"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 620,
+        "y": 2200,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "input-cell-password",
+        "type": "ui-text-input",
+        "z": "yonder-console",
+        "group": "group-net-cellular",
+        "name": "password",
+        "label": "Password",
+        "tooltip": "",
+        "order": 11,
+        "width": 6,
+        "height": 1,
+        "topic": "password",
+        "topicType": "str",
+        "mode": "password",
+        "delay": 300,
+        "passthru": false,
+        "sendOnBlur": true,
+        "className": "",
+        "icon": "",
+        "iconPosition": "left",
+        "clearable": false,
+        "sendOnDelay": true,
+        "x": 260,
+        "y": 2260,
+        "wires": [
+            [
+                "remember-cell-password"
+            ]
+        ]
+    },
+    {
+        "id": "remember-cell-password",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "the typed password, for Connect to read",
+        "rules": [
+            {
+                "t": "set",
+                "p": "modemPassword",
+                "pt": "flow",
+                "to": "payload",
+                "tot": "msg"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 620,
+        "y": 2260,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "keys-cell",
+        "type": "ui-yonder-softkeys",
+        "z": "yonder-console",
+        "group": "group-net-cellular",
+        "name": "actions",
+        "order": 12,
+        "width": 12,
+        "height": 1,
+        "keys": "[{\"label\":\"TEST NOW\",\"action\":\"test\",\"tone\":\"act\"},{\"label\":\"CONNECT\",\"action\":\"connect\",\"tone\":\"warn\"}]",
+        "x": 260,
+        "y": 2320,
+        "wires": [
+            [
+                "route-cell-key"
+            ]
+        ]
+    },
+    {
+        "id": "route-cell-key",
+        "type": "switch",
+        "z": "yonder-console",
+        "name": "which key was pressed",
+        "property": "payload",
+        "propertyType": "msg",
+        "rules": [
+            {
+                "t": "eq",
+                "v": "test",
+                "vt": "str"
+            },
+            {
+                "t": "eq",
+                "v": "connect",
+                "vt": "str"
+            }
+        ],
+        "checkall": "true",
+        "repair": false,
+        "outputs": 2,
+        "x": 560,
+        "y": 2320,
+        "wires": [
+            [
+                "pick-cell-path"
+            ],
+            [
+                "gather-cell-form"
+            ]
+        ]
+    },
+    {
+        "id": "pick-cell-path",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "test this one path",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "modem",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 820,
+        "y": 2290,
+        "wires": [
+            [
+                "reach-test"
+            ]
+        ]
+    },
+    {
+        "id": "reach-test",
+        "type": "yonder-reach-test",
+        "z": "yonder-console",
+        "name": "test the way out",
+        "x": 1080,
+        "y": 2290,
+        "wires": [
+            [
+                "say-cell"
+            ]
+        ]
+    },
+    {
+        "id": "gather-cell-form",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "the four fields, as one section",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "{}",
+                "tot": "json"
+            },
+            {
+                "t": "set",
+                "p": "payload.apn",
+                "pt": "msg",
+                "to": "modemApn",
+                "tot": "flow"
+            },
+            {
+                "t": "set",
+                "p": "payload.dial",
+                "pt": "msg",
+                "to": "modemDial",
+                "tot": "flow"
+            },
+            {
+                "t": "set",
+                "p": "payload.username",
+                "pt": "msg",
+                "to": "modemUsername",
+                "tot": "flow"
+            },
+            {
+                "t": "set",
+                "p": "payload.password",
+                "pt": "msg",
+                "to": "modemPassword",
+                "tot": "flow"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 820,
+        "y": 2350,
+        "wires": [
+            [
+                "modem-configure"
+            ]
+        ]
+    },
+    {
+        "id": "modem-configure",
+        "type": "yonder-modem-configure",
+        "z": "yonder-console",
+        "name": "apply the modem section",
+        "x": 1080,
+        "y": 2350,
+        "wires": [
+            [
+                "say-cell"
+            ]
+        ]
+    },
+    {
+        "id": "say-cell",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "what happened, in words",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "yonder.message",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 1340,
+        "y": 2320,
+        "wires": [
+            [
+                "join-toast"
+            ]
+        ]
     }
 ]
