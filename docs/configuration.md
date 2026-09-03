@@ -9,8 +9,14 @@ makes rollback possible.
 
 ## Headless setup
 
-Drop a `config.yaml` on the boot partition. It is read on first boot and moved into place.
+Drop a `config.yaml` on the boot partition: it is read on first boot and moved into place.
 No imager, no cloud, no dialog.
+
+**Not built yet.** R-CFG-05 is real and lands in M8 ([roadmap](roadmap.md)); no code reads
+`/boot/firmware/config.yaml` today, so a file placed there is ignored. Said here rather than
+left to be discovered, because the moment an operator reaches for this is the moment a board
+is already unreachable — and finding out then is worse than knowing now. See
+[K-39](known-issues.md).
 
 ## Apply and rollback
 
