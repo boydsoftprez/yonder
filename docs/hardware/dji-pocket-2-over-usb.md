@@ -187,6 +187,41 @@ So a limit is not something to infer from the picture. It arrives twenty times a
 on the same link as the video, and it belongs on the overlay as an annunciator
 (R-TEL-15).
 
+### The yaw sweep
+
+Absolute yaw (`4/0x14`, first field) stepped in 30° increments from centre (−90.9° in
+the camera's frame), four seconds per step, reading the attitude and the limit byte after
+each:
+
+| Commanded | Reached | Limit bit 1 | What the gimbal did |
+|---|---|---|---|
+| −60° | −60.0° | off | exact |
+| −30° | −30.0° | off | exact |
+| 0° | **−22.5°** | **on** | stopped 68° from centre: the end of travel that way |
+| +30° | −89.8°, pitch 85.9° | off | **went over the top**: unreachable in yaw, so it pitched vertical |
+| +60° | +42.9°, pitch −38.3° | on | reached the number by combining pitch and yaw |
+| −120° | −120.0° | off | exact |
+| −150° | −144.9° | on | slowing into the stop |
+| −180° | −155.8° | on | the stop that way, about 65° from centre in this mode |
+| −210° … −300° | pitch 88°, 89°, 97° | off / `03` | over the top again, twice, and once to a 0/0/0 pose with both limit bits |
+
+Three conclusions, and the first is a rule:
+
+- **Clamp before sending.** An absolute angle the gimbal cannot reach in yaw is not
+  refused — the controller finds it by pitching over the top, which is a violent movement
+  and a lost picture. The daemon must know the reachable range and never command outside
+  it; the limit flag is the feedback for the edge, not a substitute for the clamp.
+- **Within range the response is exact**: −60, −30, −120 landed to the tenth of a degree
+  inside four seconds. Near a stop the gimbal slows.
+- **Centre moves when the body moves.** The final recentre came to rest 10° from the
+  first, because the camera was lying loose on the desk and the yaw motor turned the body
+  under the head. On an aircraft the body is fixed and this goes away; on the bench, hold
+  the handle.
+
+Byte 10, refined: bit 1 lights at a yaw stop; bit 0 appeared once with it at the 0/0/0
+pose, so it is probably the pitch stop; bits 5 and 7 are on at rest and off during the
+over-the-top excursions, so they are status, not limits.
+
 ### The camera re-probes on its own
 
 Tearing the accessory down and staying off the bus for 45 s, then reappearing as the
@@ -238,8 +273,11 @@ board; the operator plugs one cable.
   video-out parameters is the candidate, untried.
 - **The `0x14` absolute-angle field order.** The first field moved yaw; which fields are
   pitch and roll, and what the two trailing bytes mean, needs one more round.
-- **Which limit bit is which axis** in byte 10 of the attitude push. Bit 1 lit during a
-  yaw hold; pitch and roll have not been driven to their stops.
+- **Which limit bit is which axis** in byte 10 of the attitude push. Bit 1 is yaw; bit 0
+  is probably pitch; roll has not been driven to its stop.
+- **The reachable yaw range as the camera itself defines it**, so the clamp has a number.
+  The sweep found about +68° and −65° from centre in YawFollow mode; the mechanical
+  range is wider and mode-dependent.
 - **Camera controls** — record, exposure, white balance, zoom — untried; addressed to the
   camera, they should answer `0x01` the same way.
 - **What the general-set answers carry.** Ping, version and device info return status
