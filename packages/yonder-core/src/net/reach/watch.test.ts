@@ -248,7 +248,7 @@ describe("ReachWatch", () => {
   });
 
   /**
-   * R-CEL-09: tested with real traffic when it comes up. This is the K-33
+   * R-CEL-09: tested with real traffic when it comes up. This is the K-40
    * board — a modem with the wrong APN, no ethernet, no Wi-Fi — where nothing
    * ever transmits enough for the counters to say anything, so the counters
    * alone would never trigger and the access point would never come up.

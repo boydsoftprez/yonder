@@ -30,7 +30,7 @@ describe("looksDead", () => {
 
   it("is false when nothing is moving at all", () => {
     // An idle link is not a dead one. This is exactly the distinction the
-    // fallback watchdog could not make (K-33) and the reason it is drawn here
+    // fallback watchdog could not make (K-40) and the reason it is drawn here
     // rather than left to a caller.
     expect(looksDead({ rx: 100, tx: 100 }, { rx: 100, tx: 100 })).toBe(false);
   });

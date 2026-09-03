@@ -656,7 +656,7 @@ The harness saw it too, once it stopped hiding: `verify-pages.sh` restored the d
 palette with `|| true` after capturing, so a run that failed to restore reported nothing
 and left a held console in the night palette.
 
-### K-33 · ~~The fallback watchdog accepts an address as proof of reachability~~ — CLOSED
+### K-40 · ~~The fallback watchdog accepts an address as proof of reachability~~ — CLOSED
 
 **Status:** Closed · **Requirement:** R-NET-07, R-CEL-09
 

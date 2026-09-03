@@ -47,7 +47,7 @@ export interface FallbackWatchdogOptions {
    * cellular: a modem with a wrong APN registers, attaches, takes an address
    * and installs a route while completing no request. That satisfied the old
    * test, and a device configured that way from the boot partition with no
-   * other path never raised its access point (K-33).
+   * other path never raised its access point (K-40).
    *
    * **Absent means "nobody told me", and the answer is unchanged from before
    * this existed: an address is accepted.** A daemon assembled without a
@@ -64,7 +64,7 @@ export interface FallbackWatchdogOptions {
  * test — a connected but idle Ethernet link carries none and is perfectly
  * reachable — so the base test is "no interface other than the access point
  * itself holds an IPv4 address". Cellular breaks that reasoning: a modem
- * with a wrong APN can hold an address while carrying nothing (K-33), so an
+ * with a wrong APN can hold an address while carrying nothing (K-40), so an
  * address is necessary but, when a `carrying` reach monitor is wired in, no
  * longer sufficient on its own.
  *

@@ -364,7 +364,7 @@ configured wrong before first boot with nothing to fall back on.
 
 The requirement was right and the implementation compromised for a reason that no longer
 holds — the same signal that drives §2 and this section distinguishes *idle* from *dead*.
-**The watchdog is moved onto it.** Recorded as K-33; no requirement changes.
+**The watchdog is moved onto it.** Recorded as K-40; no requirement changes.
 
 ---
 
@@ -386,7 +386,7 @@ R-CFG-10 and R-CFG-11 already do for decisions of that kind.
 
 **R-CEL-04 is not implemented in M3** and is not withdrawn. It is correct and unbuilt.
 
-**One known issue is added.** K-33: the fallback watchdog accepts an interface that holds
+**One known issue is added.** K-40: the fallback watchdog accepts an interface that holds
 an address as proof of reachability, which a misconfigured cellular link satisfies while
 reaching nothing (§6).
 

@@ -256,7 +256,7 @@ describe("ReachMonitor.carrying", () => {
   });
 
   /**
-   * K-33 by a different route, and the reason "not yet condemned" is not
+   * K-40 by a different route, and the reason "not yet condemned" is not
    * "working".
    *
    * The board: a LAN cable into a switch with no route out, and an `auto`
