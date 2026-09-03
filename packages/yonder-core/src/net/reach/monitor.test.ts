@@ -173,6 +173,47 @@ describe("ReachMonitor.state", () => {
       expect(report.detail.length).toBeGreaterThan(0);
     }
   });
+
+  /**
+   * **A path nobody has tested must not claim to be ready.**
+   *
+   * The half of the observed defect an operator actually reads. On the board:
+   * the modem was re-dialled onto a wrong APN, nothing probed it, and
+   * `GET /reach/state` went on saying *"Ready — traffic is not going out over
+   * cellular"* about a link that completed no request. "Ready" is a claim
+   * about reachability, and `standing-by` covers three quite different
+   * situations — reaching, failing-but-not-yet-condemned, and never looked
+   * at. `evidenceFor` already tells them apart for the fallback watchdog
+   * (K-40); this is the same distinction arriving at the display layer.
+   */
+  const detailFor = async (monitor: ReachMonitor, path: PathName): Promise<string> =>
+    (await monitor.state()).paths.find((p) => p.path === path)!.detail;
+
+  it("does not call an untested standing-by path ready", async () => {
+    const { monitor } = build({ inUse: "ethernet" });
+    const detail = await detailFor(monitor, "modem");
+    expect(detail).not.toMatch(/ready/i);
+    // And it says what is actually true, rather than going quiet.
+    expect(detail).toMatch(/not yet tested/i);
+  });
+
+  it("calls a standing-by path ready once something has established that it is", async () => {
+    const { monitor } = build({ inUse: "ethernet", reaches: () => true });
+    await monitor.test("modem");
+    expect(await detailFor(monitor, "modem")).toBe("Ready — traffic is not going out over cellular");
+  });
+
+  it("says a standing-by path is failing before it has run out its failures", async () => {
+    // Evidence against, short of the three that condemn it. Not "ready", and
+    // not yet "stood down" either — the state between them has words of its
+    // own rather than borrowing either neighbour's.
+    const { monitor } = build({ inUse: "ethernet", reaches: () => false });
+    await monitor.test("modem");
+    const report = (await monitor.state()).paths.find((p) => p.path === "modem")!;
+    expect(report.standing).toBe("standing-by");
+    expect(report.detail).not.toMatch(/ready/i);
+    expect(report.detail).toMatch(/reached nothing/i);
+  });
 });
 
 describe("ReachMonitor.carrying", () => {

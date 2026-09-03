@@ -6,6 +6,7 @@ import { movement, systemCounters, type CounterReader } from "./counters.js";
 import type { Probe } from "./probe.js";
 import {
   PATH_WORDS,
+  type PathEvidence,
   type PathName,
   type PathReport,
   type ReachState,
@@ -272,6 +273,16 @@ export class ReachMonitor {
    * while completing no request. Reporting that as "in use — carrying
    * traffic" is a console reading healthy on a device that is not, which is
    * precisely what R-CEL-09 forbids.
+   *
+   * **And a path standing by only says it is ready if something established
+   * that it is.** "Ready" is a claim about reachability, and `standing-by`
+   * covers three quite different situations: a path whose last probe reached
+   * something, a path whose probes are failing but which has not yet run out
+   * the three that condemn it, and a path nothing has ever looked at. This is
+   * the same distinction `evidenceFor` draws for the fallback watchdog —
+   * *not yet condemned* is not *working* — arriving at the display layer,
+   * and it is the half of the observed defect an operator actually reads: a
+   * modem re-dialled onto a wrong APN, untested, describing itself as ready.
    */
   private report(path: PathName, device: string | null, inUse: PathName | null): PathReport {
     const word = PATH_WORDS[path];
@@ -287,7 +298,29 @@ export class ReachMonitor {
       return { path, device, standing: "in-use", since: null, detail: "Carrying traffic" };
     }
     return { path, device, standing: "standing-by", since: null,
-      detail: `Ready — traffic is not going out over ${word}` };
+      detail: standingByDetail(this.standing.evidenceFor(path), word) };
+  }
+}
+
+/**
+ * What a path that is up but not carrying traffic says about itself.
+ *
+ * Three answers, because there are three states and only one of them is
+ * "ready". Yonder does not report the indicators and leave the operator to
+ * conclude (R-CEL-09), and it does not claim a link works on the strength of
+ * nobody having shown that it does not.
+ */
+function standingByDetail(evidence: PathEvidence, word: string): string {
+  switch (evidence) {
+    case "reaching":
+      return `Ready — traffic is not going out over ${word}`;
+    case "not-reaching":
+      return "Reached nothing when it was last tested, and is still in the running";
+    // Not "ready". Nothing has sent a packet over this path, so nothing can
+    // say whether one would arrive — which is the whole of what a wrong APN
+    // looks like from here.
+    case "untested":
+      return "Up, and not yet tested — nothing has established that it reaches anything";
   }
 }
 
