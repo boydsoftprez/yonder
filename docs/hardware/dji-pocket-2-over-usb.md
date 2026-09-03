@@ -472,11 +472,11 @@ and the app's command table names them all. The honest status of each, as of thi
 | Selfie (turn to face the handle) | `gimbal/0x4C` with a different command byte, or `0x14` incremental ±180° | untried |
 | Gimbal attitude readout | `gimbal/0x05` push | **proven** — pitch, roll, yaw at 20 Hz |
 | Gimbal limit annunciator | `gimbal/0x05` byte 10, bits 0–2 | **proven** — yaw stop confirmed at both ends |
-| Video / photo mode | `camera/0x10` working mode | id known, untried |
-| Record start / stop | `camera/0x02` record video | id known, untried |
+| Video / photo mode | `camera/0x10` working mode | **proven** — state push toggles |
+| Record start / stop | `camera/0x02` record video | acknowledged; unconfirmable with no card |
 | Take a photo | `camera/0x01` take photo | id known, untried |
-| Exposure: EV, ISO, shutter, mode | `camera/0x1e` mode, `0x2a` ISO, `0x28` shutter, `0x26` aperture | ids known, untried |
-| White balance | `camera/0x2c` | id known, untried |
+| Exposure mode + ISO | `camera/0x1e` (2 bytes), `0x2a` ISO | **proven** — Manual + ISO change the picture; EV `0x2e`, shutter `0x28` under test |
+| White balance | `camera/0x2c` (2 bytes) | **proven** — push field changes per setting |
 | Zoom | `camera/0xb8` control zoom, `0x34` focus/zoom | ids known, untried |
 | Focus: AFC / AFS / spot | `camera/0x24` focus mode, `0x30` area, `0x32` spot | ids known, untried |
 | Recording resolution and rate | `camera/0x18` video format | id known, untried |
@@ -491,6 +491,26 @@ Three columns of "untried" is the true state of parity: the map is complete, the
 territory is one evening old. The order to prove them in is the order a pilot needs them:
 rate-mode aim, then stream bitrate, then record, then exposure and white balance, then
 the readouts — each a camera-side message with no gimbal risk except the first.
+
+### Camera controls — proven, once the payload size was right
+
+The first exposure pass changed nothing: one-byte payloads, all acknowledged, all ignored.
+The manufacturer's public Onboard SDK gave the real struct sizes, and with those the
+controls work, the effect visible in the decoded frame and mirrored in the status push:
+
+| Control | Message | Payload | Confirmed by |
+|---|---|---|---|
+| Work mode photo/video | `camera/0x10` | 1 byte, 0 / 1 | state push mode byte toggles 0↔1 |
+| Exposure mode | `camera/0x1e` | **2 bytes** `{mode, 0}`, 1 Program … 4 Manual | Manual drops mean luminance 122 → 14; Program restores it |
+| ISO (manual only) | `camera/0x2a` | 1 byte, 3 = ISO 100 … 8 = ISO 3200 | luminance 16 / 42 / 123 for ISO 100 / 400 / 3200, monotonic; push ISO field tracks |
+| White balance | `camera/0x2c` | **2 bytes** `{mode, temp}` | a push field changes per setting; luminance flat, as a colour change should be |
+
+The lesson is the one from the gimbal authority bit, twice over: on this link an
+acknowledgement (`status 0x01`) means the frame was well-formed, not that it did anything,
+and the difference between inert and working was a payload width read from the
+manufacturer's own source. Exposure compensation (`camera/0x2e`) and the live-view
+resolution shapes are under test with the same method; record (`camera/0x02`) is
+acknowledged but unconfirmable with no card in the camera.
 
 ## Where the remaining knowledge lives
 
