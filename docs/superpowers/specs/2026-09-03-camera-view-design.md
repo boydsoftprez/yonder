@@ -11,7 +11,7 @@ This document settles that they do not get their own pages. There is **one camer
 generated from what each camera answers about itself, and this is what it holds, how its
 controls behave, what it does when the link degrades, and where it lands in the console.
 
-Every number quoted here was measured on hardware and is cited to the note it came from:
+Every cited number was measured on hardware, and the citation is the note it came from:
 [`usb-camera-on-a-pi-4.md`](../../hardware/usb-camera-on-a-pi-4.md) for the pipeline,
 [`dji-pocket-2-over-usb.md`](../../hardware/dji-pocket-2-over-usb.md) for the accessory
 camera and its gimbal. Where a figure has no citation it is a placeholder for a
@@ -35,7 +35,7 @@ The cameras in the compatibility list really are different:
 | USB UVC | MJPEG, decoded and re-encoded by the board | none | none | board only |
 | CSI | raw, encoded by the board | none | none | board only |
 | HDMI via a CSI bridge | raw, after an EDID push | none | none | board only |
-| Accessory camera (R-CAM-15) | 720p H.264, fixed, ~8 Mb/s | pan and tilt, by rate | digital, cropped by the receiver | its own card, 4K |
+| Accessory camera (R-CAM-15) | 720p H.264, fixed, ~8 Mb/s | pan and tilt, by rate | digital, cropped by the receiver | its own card |
 
 Nothing in that table is a *kind of page*. Every row is a different set of answers to the
 same four questions.
@@ -53,18 +53,21 @@ Three implementations, one control, one name, one unit.
 
 ### The three states a capability can be in
 
-R-CAM-14 names two of these; the third is settled here.
+R-CAM-14 names *present* and *advertised, not answered*. The middle row is settled here —
+and named *not offered* rather than *absent*, because R-CAM-14's own text uses *absent* for
+the third state, and one word with two meanings across two documents is how this gets
+implemented wrong.
 
 | State | Meaning | How it draws |
 |---|---|---|
 | **Present** | The device answered and the control works | The control, live |
-| **Absent** | The device does not have it | **A stated fact where the control would have been.** One row of text. Never a control that cannot be used, and never silently nothing |
+| **Not offered** | The device does not have it | **A stated fact where the control would have been.** One row of text. Never a control that cannot be used, and never silently nothing |
 | **Advertised, not answered** | The device lists it, accepts the command, and does nothing | The control stays, drawn inoperative, **carrying the reason** |
 
 **Nothing is ever silently missing** (R-UI-15). An operator must be able to tell *this
 camera cannot* from *this page failed*, and an empty space says nothing about which.
 
-Absent is a fact rather than a dead control for two reasons. A dead control takes the room
+Not offered is a fact rather than a dead control for two reasons. A dead control takes the room
 of a control and carries the information of a label — on a fixed camera that is a dead aim
 dial, a dead zoom picker, dead focus and a dead record key, which pushes the live controls
 off a tablet. And it teaches an operator to stop reading muted styling, which then costs
@@ -73,7 +76,7 @@ us the *advertised-but-not-answered* state, whose whole job is to be noticed.
 The soft-key rail is the exception: it carries only actions that can be taken. A camera
 that cannot record has no Record key, and the fact that it cannot is stated in the deck.
 
-**Advertised-but-not-answered is a fault, not an absence**, and is drawn in the caution
+**Advertised-but-not-answered is a fault, not a feature the camera lacks**, and is drawn in the caution
 tone rather than the neutral one. Something is misreporting itself, and a firmware or
 kernel change may make it work. It is the state most likely to be got wrong in code,
 because on the wire it is indistinguishable from success — the accessory camera's
@@ -104,7 +107,7 @@ The picture is on top rather than beside the controls because that arrangement i
 at every width: three deck columns on a desk, two on a tablet, one on a phone. Nothing is
 rearranged and nothing is hidden — the columns wrap and the rail wraps with them, so there
 is one page to design and one page for the capture gate to photograph. A right-hand
-control rail would have to become this layout below about 900 px anyway, leaving two
+control rail would have to become this layout at tablet widths anyway, leaving two
 arrangements of one page to maintain.
 
 **The deck reflows on its own width, not the window's**, so it behaves identically embedded
@@ -121,6 +124,11 @@ three legends:
 | Image | *applies live* | Takes effect on the running stream | Exposure, white balance, colour treatment, brightness, aim, zoom |
 | Stream | *restarts the picture* | The pipeline is rebuilt; the picture drops and returns | Resolution, frame rate, codec |
 | Configuration | *config.yaml* | A write to the configuration document, through the apply engine | Source, device, outputs, addresses |
+
+Zoom is in the first row as a constraint on implementation, not as an observation: **every
+zoom backend applies live.** A UVC control and a receiver-side crop already do; a sensor
+crop that would rebuild the pipeline is implemented as a crop after capture instead, so that
+zoom never restarts the picture on any camera.
 
 Configuration changes go through the apply engine and are validated and journalled like any
 other, but **they do not start a confirmation countdown**: `affectsReachability` gates that,
@@ -253,8 +261,10 @@ doing work rather than reporting a number.
 
 Two consequences:
 
-- **The adaptive ceiling is capped to the measured uplink less whatever the preview is
-  taking**, so the two controls stop fighting.
+- **The adaptive ceiling is capped to the uplink less whatever the preview is taking**, so
+  the two controls stop fighting. *The uplink* here is the adaptive loop's own running
+  estimate (R-VID-07), not the on-demand measurement of R-DIA-03 — the on-demand figure is
+  a snapshot taken on the ground, and the cap has to move with the link in flight.
 - **The preview is visibly marked the whole time it is the cheap one.** An operator must
   never mistake a 640 px preview for the picture the aircraft is sending a ground station.
 
@@ -272,9 +282,10 @@ ceiling when adaptive. **The bar underneath stops being an input and becomes the
 what is actually leaving the aircraft**, which also removes an ambiguity a slider has: with
 a slider you cannot tell whether the bar shows what you asked for or what you are getting.
 
-Resolution is a picker of the modes **the camera actually reported**, which is also what
-lets a configuration the board cannot sustain be refused before anything is pressed
-(R-CAM-10).
+Resolution is a picker of the modes **the camera actually reported**, and codec is a picker
+of what **the board's encoder actually answered** (R-CAM-13) — which is also what lets a
+configuration the board cannot sustain be refused before anything is pressed (R-CAM-10),
+and what makes H.265 appear on its own when a board that encodes it arrives.
 
 ---
 
@@ -290,7 +301,9 @@ Under the picture is a **strip of the other cameras**. One tap switches; the thu
 what the others see.
 
 **Only the camera being watched is subscribed live.** The others are stills refreshed every
-few seconds — kilobits rather than megabits. A view that subscribed to three streams to
+few seconds — kilobits rather than megabits. A camera that is not streaming at all shows its
+last known frame with that frame's age, or its name on an empty tile if it has never
+produced one; a tile is never blank without saying why. A view that subscribed to three streams to
 show two pictures nobody is examining triples the uplink for nothing, and the strip's own
 readout says what the current arrangement costs.
 
@@ -304,12 +317,14 @@ why**, and a rejection has nowhere to live on a page belonging to a camera that 
 
 The Cameras page lists each camera with what its capability probe returned in one line —
 `aim: none · zoom: none` explains why that camera's page has no Aim group before anyone goes
-looking — and then lists what was seen and refused, with the reason. Both rejections this
-bench produces today belong there:
+looking — and then lists what was seen and refused, with the reason. One rejection this
+bench produces today belongs there, and one it would:
 
-- a camera offering raw frames only, whose fastest 1080p mode is 5 fps;
 - `/dev/video10`, which is the board's JPEG decoder, advertises MJPEG, cannot be started
-  (K-40), and looks like a camera to everything that asks.
+  (K-40), and looks like a camera to everything that asks — this bench produces it;
+- a camera offering raw frames only, at a rate too slow to fly — this bench does not have
+  one (its camera offers MJPEG at 90 fps beside raw at 5), but R-CAM-02's requirement for
+  compressed sources means the rejection exists.
 
 The board's encoding budget and the **total** uplink across all cameras live here rather
 than on any one camera's page, because both are shared. *Starting the gimbal would need
@@ -361,8 +376,12 @@ The camera's own photo where it has one, at full sensor resolution and untouched
 a frame from the running pipeline where it does not, which is lower resolution but is a file
 Yonder holds and can therefore show, hand over and delete (R-CAM-18).
 
-Pressing it confirms **at the moment of the press**, visibly on the picture. On a link with a
-third of a second of lag, a key that dims for 300 ms is not proof that anything happened.
+Two confirmations, and R-UI-05 is why they are kept apart. A flash on the picture at the
+moment of the press says the command was **sent** — on a link with a third of a second of
+lag, a key that dims for 300 ms says nothing at all. The fact line that follows — *photo
+taken · camera card · 4000 × 3000*, or *frame grabbed · board card* — arrives when the camera
+or the board reports it, and that is the only thing that says it **took effect**. The first
+must never be drawn in a way that could be read as the second.
 
 ### The picture has three settings
 
@@ -373,8 +392,9 @@ operator would choose — a still every second or two rather than a stream — a
 same mechanism that draws the strip. Its cost is a small fraction of the preview's, and like
 the preview's, the actual figure is unmeasured.
 
-**Falling back to stills happens without being asked**, after live video fails to establish,
-and the page reports **why** rather than only that it happened. A browser blocked by a
+**Falling back to stills happens without being asked**, twelve seconds after live video
+fails to establish — long enough for a slow negotiation to finish, short enough that nobody
+is left staring at nothing — and the page reports **why** rather than only that it happened. A browser blocked by a
 network, a carrier discarding UDP and a camera that has stopped producing frames all present
 as no picture, and only one of them is worth walking outside for. *Try live again* is on the
 rail, not a link inside a message.
@@ -423,7 +443,9 @@ Three things restart and one never does.
 - **The session reconnects on its own**, with backoff, showing the attempt count. No button:
   the operator asked for a live picture and never withdrew the request.
 - **A keyframe is requested on subscribe** rather than waiting for the next natural one
-  (R-VID-09). Without it a reconnection is a grey rectangle for up to a GOP.
+  (R-VID-09). Without it a reconnection is a grey rectangle for up to a GOP. R-VID-09 is
+  priority 3 today and this makes it load-bearing: it should rise to priority 2 in the same
+  change, or reconnection is acknowledged to be that grey rectangle until it does.
 - **Every setting is re-read from the aircraft** before being shown as current. K-41 records
   that the development board reboots by itself; a page redrawing remembered values would
   show a configuration nobody is running.
@@ -488,6 +510,15 @@ R-VID-15 adds to R-VID-10 rather than superseding it: a ground station can be co
 from the documentation before the device is in front of anyone, which is a different
 situation from standing at the console.
 
+**Where each lands.** Proposed here; the roadmap is where it is decided, and it is updated
+in the same change as the requirements.
+
+| Milestone | Requirements | Why there |
+|---|---|---|
+| M4 | R-VID-13, R-VID-14, R-VID-15, R-UI-15 | The cheap preview is what makes M4's exit criterion affordable on a field uplink; stills are its safety net; the receive line is how a ground station gets configured for that criterion; and the page cannot be built without the rule for what it draws |
+| M5 | R-CAM-17, R-CAM-18, R-STO-06 | The accessory camera is the first with its own recorder, and recording arrives with it |
+| M7 | R-VID-12, R-CAM-16 | M7 is commanding; a ground station commanding the camera over MAVLink belongs beside the rest of R-CMD |
+
 ---
 
 ## 10. Rules this exposed
@@ -533,6 +564,13 @@ Presentation goes in `node-red-dashboard-2-yonder` as Vue components, never as m
 `ui-template`: the picture pane with its overlays and gesture, the aim dial, the uplink
 budget track, the capability facts row. `flows/` stays wiring.
 
+Two interaction primitives do not exist in the widget library today, and they are the
+riskiest interface work in this document: **a soft key that is held** — press and release,
+for the full-quality preview — and **a pointer tracked across the picture** — for
+drag-to-slew and tap-to-point. ADR-0009 records that every soft key once shipped dead
+because a click handler was never registered. These are not clicks, and they are built and
+proven before anything that depends on them.
+
 The accessory camera's transport is its own package (`pocket2d` in
 [`dji-pocket-2-over-usb.md`](../../hardware/dji-pocket-2-over-usb.md)), so a firmware change
 on that camera breaks one package and not the video path. To the camera view it is one more
@@ -569,6 +607,25 @@ source with a fuller capability set.
   R-VID-11 counts outputs rather than viewers, so the budget would under-report. If both
   aim the gimbal, who wins is undesigned — and R-CMD-04 means Yonder cannot decide, so it
   has to be something operators establish.
+
+---
+
+## Open
+
+Two decisions this document does not make, because each changes something outside it.
+
+**The recording tone.** Section 6 draws a running recording in the fault tone, because a red
+*REC* is the one camera convention strong enough that a green one would confuse. ADR-0009
+names tones by role, and red is a fault; a recording that is working is not one. Either
+recording earns a tone of its own, or it uses the *good* tone, or ADR-0009 records the one
+exception.
+
+**Where the travel arc comes from.** Section 3 draws the gimbal's travel as an arc and the
+stop as a band. The device reports the *at-limit flag*; the *range* was found on the bench
+by driving to the stop, once, under a guard. Yonder driving to a stop on its own to find a
+range would be Yonder moving the camera unasked (R-CMD-04). So the arc is either entered by
+the operator, or learned — drawn only as far as the operator has driven, growing each time
+the flag comes on at a new extreme — or not drawn until one of those has happened.
 
 ---
 
