@@ -105,7 +105,7 @@ else
     ok "the role does not use 'run ... || true'"
 fi
 
-if grep -q '^try systemctl stop zerotier-one$' "$REPO/installer/roles/40-zerotier.sh"; then
+if grep -qE '^[[:space:]]*try systemctl stop zerotier-one$' "$REPO/installer/roles/40-zerotier.sh"; then
     ok "stop is asked for with try, so a chroot cannot abort the install"
 else
     bad "the role no longer stops the unit with try (R-VPN-08)"
@@ -119,11 +119,25 @@ else
     ok "the role does not disable with systemctl"
 fi
 
-if grep -q '^disable_unit_offline zerotier-one.service$' "$REPO/installer/roles/40-zerotier.sh" \
-    && grep -q '^assert_unit_disabled zerotier-one.service$' "$REPO/installer/roles/40-zerotier.sh"; then
+if grep -qE '^[[:space:]]*disable_unit_offline zerotier-one.service$' "$REPO/installer/roles/40-zerotier.sh" \
+    && grep -qE '^[[:space:]]*assert_unit_disabled zerotier-one.service$' "$REPO/installer/roles/40-zerotier.sh"; then
     ok "the role disables offline and then checks that it worked (R-VPN-05, R-VPN-08)"
 else
     bad "the role no longer disables the unit offline and asserts the result (R-VPN-05, R-VPN-08)"
+fi
+
+# Raised in review of PR #1: this installer is documented as idempotent and is
+# re-run to upgrade, and 20-yonder-core restarts the daemon before this role
+# runs. That daemon's start-up render enables and joins the configured mesh, so
+# a role that then unconditionally stops the unit takes the mesh away from the
+# operator upgrading over it — and nothing later re-renders. The ownership
+# record is the same source of truth the renderer uses.
+# shellcheck disable=SC2016  # the $zt_record is a literal to grep for, not a variable to expand
+if grep -q 'zt_record=/var/lib/yonder/remote.json' "$REPO/installer/roles/40-zerotier.sh" \
+    && grep -qE 'if \[ -f "\$zt_record" \]' "$REPO/installer/roles/40-zerotier.sh"; then
+    ok "the role leaves a mesh yonder-core owns alone on a re-run (R-VPN-05, R-VPN-08)"
+else
+    bad "the role stops the unit unconditionally, so re-running the installer over a mesh drops it"
 fi
 
 # Which command gets called, recorded by the command itself. Nothing here is

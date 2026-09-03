@@ -505,3 +505,54 @@ describe("leaving when the client cannot be asked", () => {
     expect(existsSync(h.statePath)).toBe(false);
   });
 });
+
+// Raised in review of PR #1, and confirmed against the code: `enable --now`
+// starts the unit, and the ownership record is written some way further down.
+// A failure in that gap used to leave a client running and enabled with no
+// network — and the rollback could not clean it up, because it re-renders a
+// configuration asking for no mesh, reads no ownership record, and correctly
+// declines to stop a service it does not own. R-VPN-08.
+describe("a first join that fails after starting the client", () => {
+  /** Answers `info` so the wait can begin, then never lists a network. */
+  const neverAnswers = (argv: string[]): CommandResult =>
+    argv[0] === "zerotier-cli" && argv.includes("listnetworks")
+      ? { code: 1, stdout: "", stderr: "not answering" }
+      : { code: 0, stdout: "{}", stderr: "" };
+
+  it("stops and disables the client it started", async () => {
+    const h = harness(neverAnswers, { zerotierWaitMs: 30, zerotierPollMs: 10 });
+    await expect(h.renderer.render(config("9fef8a3bf9000001"))).rejects.toThrow();
+    const sysctl = h.calls.filter((a) => a[0] === "systemctl").map((a) => a[1]);
+    expect(sysctl).toContain("stop");
+    expect(sysctl).toContain("disable");
+  });
+
+  it("writes no ownership record for a join that never happened", async () => {
+    const h = harness(neverAnswers, { zerotierWaitMs: 30, zerotierPollMs: 10 });
+    await h.renderer.render(config("9fef8a3bf9000001")).catch(() => undefined);
+    expect(existsSync(h.statePath)).toBe(false);
+  });
+
+  // The other half, and the one that matters more: a device already on a mesh
+  // must not lose it because a *change* failed. The service was ours and
+  // running before this apply; undoing an activation we did not perform would
+  // take the operator's own path away.
+  it("leaves a mesh it was already on alone when a change fails", async () => {
+    let answering = true;
+    const h = harness((argv) => {
+      if (argv[0] !== "zerotier-cli") return { code: 0, stdout: "", stderr: "" };
+      if (!answering) return { code: 1, stdout: "", stderr: "not answering" };
+      return argv.includes("listnetworks")
+        ? { code: 0, stdout: '[{"nwid":"9fef8a3bf9000001","name":"","status":"OK","portDeviceName":"zt0","assignedAddresses":[]}]', stderr: "" }
+        : { code: 0, stdout: "{}", stderr: "" };
+    }, { zerotierWaitMs: 30, zerotierPollMs: 10 });
+
+    await h.renderer.render(config("9fef8a3bf9000001"));
+    const before = h.calls.length;
+    answering = false;
+    await h.make().render(config("aaaaaaaaaaaaaaaa")).catch(() => undefined);
+
+    const sysctl = h.calls.slice(before).filter((a) => a[0] === "systemctl").map((a) => a[1]);
+    expect(sysctl).not.toContain("disable");
+  });
+});
