@@ -77,6 +77,7 @@ class Session:
         self.a = args
         self.pushes = 0
         self.routes = {}
+        self.last_att = 0.0
         os.makedirs(args.logdir, exist_ok=True)
         self.log = Log(os.path.join(args.logdir, "session.log"))
         self.raw = open(os.path.join(args.logdir, "session.from-camera.bin"), "ab", buffering=0)
@@ -86,8 +87,13 @@ class Session:
         self.env = Envelope()
         self.enabled = threading.Event()
 
-    def send(self, cmdset, cmdid, payload=b"", ack=1, note=""):
-        frame = duml.encode(cmdset, cmdid, payload, seq=self.seq, ack=ack)
+    def send(self, cmdset, cmdid, payload=b"", ack=1, note="", receiver=None, sender_idx=None):
+        if receiver is None:
+            receiver = duml.DEV_GIMBAL if cmdset == 4 else duml.DEV_CAMERA
+        if sender_idx is None:
+            sender_idx = self.a.sender_idx
+        frame = duml.encode(cmdset, cmdid, payload, seq=self.seq, ack=ack,
+                            receiver=receiver, sender_idx=sender_idx)
         self.seq = (self.seq + 1) & 0xFFFF
         os.write(self.ep_in, self.wrap(frame))
         self.log(f"us -> camera  {note or ''} {duml.decode(frame)}  (route {self.route_bytes().hex()})")
@@ -128,6 +134,12 @@ class Session:
               for kind, item in self.split.feed(chunk):
                 if kind == "frame":
                     quiet = (not item.response) and (item.cmdset, item.cmdid) in self.PUSHES
+                    if (item.cmdset, item.cmdid) == (4, 0x05) and self.a.track_gimbal:
+                        now = time.monotonic()
+                        if now - self.last_att >= 0.5:
+                            self.last_att = now
+                            w = struct.unpack_from("<8h", item.payload, 0) if len(item.payload) >= 16 else ()
+                            self.log(f"gimbal/0x05 attitude push  int16s={list(w)}  raw={item.payload[:24].hex(' ')}")
                     if quiet and self.a.quiet:
                         self.pushes += 1
                         continue
@@ -158,9 +170,26 @@ class Session:
             for spec in self.a.extra:          # cmdset:cmdid:hexpayload
                 cs, ci, hx = (spec.split(":") + [""])[:3]
                 self.send(int(cs, 0), int(ci, 0), bytes.fromhex(hx), note="extra")
+        inject = os.path.join(self.a.logdir, "inject.txt"); seen = 0
         while True:
             time.sleep(1.0)
             self.send(0, 0x0E, ack=0, note="heartbeat")
+            try:
+                lines = open(inject).read().splitlines()
+            except FileNotFoundError:
+                continue
+            for spec in lines[seen:]:
+                spec = spec.strip()
+                if not spec or spec.startswith("#"): continue
+                # cmdset:cmdid:hex[:receiver_type[:sender_idx]]
+                parts = (spec.split(":") + ["", "", ""])[:5]
+                cs, ci, hx, rx, sx = parts
+                try:
+                    self.send(int(cs, 0), int(ci, 0), bytes.fromhex(hx), note=f"inject[{spec}]",
+                              receiver=int(rx, 0) if rx else None, sender_idx=int(sx, 0) if sx else None)
+                except Exception as e:
+                    self.log(f"inject {spec!r}: {e}")
+            seen = len(lines)
 
     def run(self):
         ep0 = os.open(os.path.join(self.a.ffs, "ep0"), os.O_RDWR)
@@ -195,4 +224,6 @@ if __name__ == "__main__":
     p.add_argument("--route", default="", help="envelope route bytes as hex; default mirrors the camera")
     p.add_argument("--no-envelope", action="store_true", help="send bare DUML frames")
     p.add_argument("--quiet", action="store_true", help="do not log the periodic status pushes")
+    p.add_argument("--track-gimbal", action="store_true", help="log the gimbal attitude push twice a second")
+    p.add_argument("--sender-idx", type=int, default=1, help="our app index in the sender byte (camera pushes to app0)")
     Session(p.parse_args()).run()

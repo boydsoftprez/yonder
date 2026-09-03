@@ -140,6 +140,37 @@ Fed to GStreamer on the Pi — `filesrc ! h264parse ! avdec_h264` — the route 
 decode without complaint to **1280×720** frames. One of them is a room, a wall, and a
 lamp: the camera on the desk, pointing at the ceiling.
 
+### Moving the gimbal
+
+The attitude push (`gimbal/0x05`) decodes as three little-endian `int16` in 0.1°: pitch,
+roll, yaw. Pointing at the ceiling on the desk it read pitch 89.8°, roll −4.7°, yaw −90.6°.
+
+The first round of gimbal commands was addressed to the **camera** (device type 1). Every
+one was answered — `0x4C` with status `0x01`, the angle commands with `0xe0` — and nothing
+moved. Addressed to the **gimbal** (device type 4) the same bytes did this:
+
+| Sent to `gim0` | Payload | Attitude after |
+|---|---|---|
+| `4/0x4C` reset and set mode | `02 01` — YawFollow, reset | roll −4.7° → 0.0°, then **pitch 89.8° → 0.2°**: the camera swung from the ceiling to level |
+| `4/0x14` absolute angle | `d4 fe 00 00 00 00 01 14` — first field −30.0° | **yaw −90.4° → −30.8°**. The first field drove yaw, not pitch; the layout is not the dissector's guess |
+| `4/0x0A` extended control | −30.0°, speed 10 | no clear effect |
+| `4/0x01` control, three mid-range values | `52 03` ×3 | a drift of a degree — mid-range is a centred stick |
+| `4/0x4C` again | `02 01` | yaw −31.4° → −90.8°, pitch and roll to 0.0°, within half a second |
+
+Three things follow. **The receiver device type is the whole difference**; the sender
+index (`app0` or `app1`) changes nothing. **Status `0x01` is the camera's acceptance**,
+not a refusal — every command that moved the gimbal returned it. And **recentre is one
+two-byte frame** to the gimbal: `55 0f 04 a2 02 04 <seq> 20 04 4c 02 01 <crc16>` with
+`app→gimbal` in the address bytes, which `scripts/pocket2/duml.py` produces as
+`encode(4, 0x4C, b"\x02\x01", receiver=DEV_GIMBAL)`.
+
+### The camera re-probes on its own
+
+Tearing the accessory down and staying off the bus for 45 s, then reappearing as the
+phone, produced the handshake again with **no replug**. Reappearing within a second or
+two did not. So a daemon that restarts must wait before it returns, and a camera that
+loses its phone finds it again by itself — which is the property an airframe needs.
+
 ## What Yonder would build
 
 A small daemon, `pocket2d`: present the phone identity, complete the AOA handshake, run
@@ -182,14 +213,14 @@ board; the operator plugs one cable.
   clean stream should strip them.
 - **Resolution and bitrate control.** The stream arrived at 720p; `camera/0x4c` set
   video-out parameters is the candidate, untried.
-- **Every control.** Nothing but ping, version, device info and heartbeat has been sent.
-- **The meaning of status `0x01`** on the information requests.
-- **How long the stream runs**, and whether the camera keeps it up through a gimbal
-  movement, a recording, or a mode change.
-- **Behaviour across a camera power cycle** — whether the session resumes without a
-  replug. It re-probes when a device appears; it has not been watched across its own
-  restart.
+- **The `0x14` absolute-angle field order.** The first field moved yaw; which fields are
+  pitch and roll, and what the two trailing bytes mean, needs one more round.
+- **Camera controls** — record, exposure, white balance, zoom — untried; addressed to the
+  camera, they should answer `0x01` the same way.
+- **What the general-set answers carry.** Ping, version and device info return status
+  `0x01` and nothing else; the version is presumably elsewhere.
+- **How long the stream runs** through a recording or a mode change.
+- **Behaviour across the camera's own power cycle.** It re-probes when a device
+  reappears after a gap; it has not been watched through its own restart.
 - **Power draw** on the link. Not measured.
-- **The side port** and the phone adapter. The bottom port worked and the side port was
-  not needed.
-- **The original Osmo Pocket** (`HG210`). Same path, same filter, never tried.
+- **The side port**, the phone adapter, and the original Osmo Pocket (`HG210`).
