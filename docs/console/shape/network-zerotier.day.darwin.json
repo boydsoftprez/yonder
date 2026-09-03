@@ -47,7 +47,7 @@
         "x": 268,
         "y": 124,
         "w": 1000,
-        "h": 622
+        "h": 742
       }
     },
     {
@@ -150,10 +150,28 @@
       }
     },
     {
-      "key": "nrdb-ui-button.nrdb-ui-widget#1",
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-sparkline",
       "box": {
         "x": 285,
         "y": 681,
+        "w": 966,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-text.nrdb-ui-widget#7",
+      "box": {
+        "x": 285,
+        "y": 741,
+        "w": 966,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-button.nrdb-ui-widget#1",
+      "box": {
+        "x": 285,
+        "y": 801,
         "w": 233,
         "h": 48
       }

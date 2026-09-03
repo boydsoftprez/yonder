@@ -788,6 +788,30 @@ describe("flows/flows.json ZeroTier tab", () => {
   });
 
   /**
+   * R-NET-10: a rate, beside the running total the test above already checks
+   * for. Totals answer "how much has crossed this link"; this answers "how
+   * fast is it moving right now" - different questions, both on the tab.
+   */
+  it("shows the mesh throughput as a rate, not only as a total", () => {
+    const zerotier = flows.filter((n) => n.group === "group-net-zerotier" && n.type === "ui-text");
+    expect(zerotier.map((n) => String(n.value))).toContain("payload.throughput");
+  });
+
+  /**
+   * R-UI-13: the graph itself, generated on the device from the same message
+   * as every other reading on this tab - never a raster image, and never a
+   * `function` node reshaping `payload.series` for it (CLAUDE.md rule 2).
+   */
+  it("draws the throughput sparkline, wired to the same mesh state", () => {
+    const spark = flows.find((n) => n.group === "group-net-zerotier" && n.type === "ui-yonder-sparkline");
+    expect(spark, "the tab has no sparkline").toBeDefined();
+
+    const state = flows.find((n) => n.type === "yonder-remote-state");
+    const wired = (state!.wires as string[][]).flat();
+    expect(wired).toContain(spark!.id);
+  });
+
+  /**
    * A control that says it will act and does not.
    *
    * The `Copy` button shipped with `"wires": [[]]` and a tooltip telling the

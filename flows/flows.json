@@ -1014,7 +1014,7 @@
                 "p": "payload"
             }
         ],
-        "repeat": "5",
+        "repeat": "2",
         "crontab": "",
         "once": true,
         "onceDelay": "1",
@@ -1046,6 +1046,8 @@
                 "identity-zt-device",
                 "identity-zt-address",
                 "text-zt-traffic",
+                "text-zt-throughput",
+                "sparkline-zt-throughput",
                 "text-zt-lastheard"
             ]
         ]
@@ -1332,11 +1334,50 @@
         "wires": []
     },
     {
-        "id": "text-zt-lastheard",
+        "id": "text-zt-throughput",
         "type": "ui-text",
         "z": "yonder-console",
         "group": "group-net-zerotier",
         "order": 11,
+        "width": 12,
+        "height": 1,
+        "name": "throughput",
+        "label": "Throughput",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "value": "payload.throughput",
+        "valueType": "msg",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "wrapText": false,
+        "className": "",
+        "x": 1200,
+        "y": 1490,
+        "wires": []
+    },
+    {
+        "id": "sparkline-zt-throughput",
+        "type": "ui-yonder-sparkline",
+        "z": "yonder-console",
+        "group": "group-net-zerotier",
+        "order": 12,
+        "width": 12,
+        "height": 1,
+        "name": "throughput graph",
+        "label": "",
+        "height2": 48,
+        "x": 1210,
+        "y": 1500,
+        "wires": []
+    },
+    {
+        "id": "text-zt-lastheard",
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-net-zerotier",
+        "order": 13,
         "width": 12,
         "height": 1,
         "name": "last heard",
@@ -1352,7 +1393,7 @@
         "wrapText": false,
         "className": "",
         "x": 1200,
-        "y": 1500,
+        "y": 1520,
         "wires": []
     },
     {
@@ -1361,7 +1402,7 @@
         "z": "yonder-console",
         "group": "group-net-zerotier",
         "name": "leave",
-        "order": 12,
+        "order": 14,
         "width": 3,
         "height": 1,
         "label": "Leave",
