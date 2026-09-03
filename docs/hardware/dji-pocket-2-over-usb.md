@@ -231,10 +231,21 @@ So both rate paths exist, and they differ:
   order **pitch, roll, yaw** — not the order the public dissector guessed. Usable, but
   units are a stick, not a rate.
 
-In both, **the head moves while frames arrive and holds where it is when they stop** —
-which is the property a joystick needs and a network link makes valuable: lose the
-link, lose the frames, and the gimbal stays put rather than running on. Pitch under
-`0x0C`, single-frame behaviour and combined axes are in the confirmation run.
+The confirmation run, all under `0x0C` with `0x80`:
+
+| Sent | Result |
+|---|---|
+| pitch +10°/s for 1 s | pitch 0.0° → **−13.4°**: positive rate is nose-down on this camera |
+| pitch −10°/s for 1 s | back to +0.5° |
+| yaw −10°/s for 2 s | −9.0° → −33.0°: 24°, twice now |
+| **one frame**, yaw +10°/s, then silence | **+5° and stops**; unchanged two seconds later |
+| yaw +10°/s and pitch +5°/s together, 1 s | yaw +14°, pitch −7°: both axes at once |
+
+So **a frame is valid for about half a second.** Twenty frames over two seconds plus that
+tail is 2.5 s at 10°/s: 25°, and the head moved 24° — the rate is accurate. The daemon
+streams at 2 Hz or better to sustain motion, and **a lost link stops the gimbal within
+half a second**, which is the property a joystick over a radio needs and here comes free.
+The pitch sign is inverted relative to the attitude push; a convention, recorded.
 
 ### The gimbal reports its limits
 
