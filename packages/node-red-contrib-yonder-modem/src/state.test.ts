@@ -151,4 +151,31 @@ describe("fanOut", () => {
     expect((outs()[2].payload as unknown[]).length).toBe(2);
     expect((outs()[3].payload as { reachableBy: string }).reachableBy).toBe("ETHERNET");
   });
+
+  /**
+   * Each row arrives with its lamp already lit (R-UI-11).
+   *
+   * The panel draws one `ui-yonder-annunciator` per path, and that widget
+   * renders a `CommandStatus` and nothing else. A `change` node turning a
+   * tone into a state would be a decision serialised beside wire coordinates
+   * (CLAUDE.md rule 2), so the shape is built here and a flow only picks a
+   * row out of the list.
+   */
+  it("lights each Way out row, so no flow has to turn a tone into a state", () => {
+    const rows = outs()[2].payload as { name: string; status: unknown }[];
+    expect(rows.map((r) => r.name)).toEqual(["Ethernet", "Cellular"]);
+    expect(rows[0].status).toEqual({ state: "confirmed", message: "CARRYING TRAFFIC", at: 4242 });
+    expect(rows[1].status).toEqual({ state: "confirmed", message: "READY", at: 4242 });
+  });
+
+  /**
+   * The three states the panel exists to draw, on the row rather than only in
+   * the sentence — the distinction `evidence` was added for.
+   */
+  it("draws an untested path neutral and a failing one bad", () => {
+    const untested = outs(withModem("untested"))[2].payload as { status: { state: string } }[];
+    expect(untested[0].status).toEqual({ state: "idle", message: "NOT YET TESTED", at: 4242 });
+    const failing = outs(withModem("not-reaching"))[2].payload as { status: { state: string } }[];
+    expect(failing[0].status).toEqual({ state: "rejected", message: "NOT REACHING", at: 4242 });
+  });
 });

@@ -993,6 +993,108 @@ describe("flows/flows.json Cellular tab", () => {
 });
 
 /**
+ * The `Way out` rows on the Interfaces tab (R-NET-13, R-UI-11).
+ *
+ * They live *inside* the `Interfaces` group rather than in a group of their
+ * own for the reason the Cellular tab is one group: on a page whose layout is
+ * `tabs`, Dashboard's `LayoutTabs` renders one tab per `ui-group`, so a second
+ * group would have put the paths on a surface of their own instead of beside
+ * the addresses they explain.
+ */
+describe("flows/flows.json Way out rows", () => {
+  const inTab = flows.filter((n) => n.group === "group-net-now");
+  const byId = (id: string) => flows.find((n) => n.id === id);
+  const PATHS = [
+    { slug: "ethernet", key: "ethernet" },
+    { slug: "modem", key: "modem" },
+    { slug: "wifi", key: "wifi_client" },
+  ];
+
+  /**
+   * Output 3 of `yonder-modem-state` is the rows. Nothing else may feed them:
+   * a second poller would put the panel and the Cellular tab on different
+   * ticks, which is what one node with four outputs exists to prevent.
+   */
+  it("is fed by the state node's third output, and by nothing else", () => {
+    const state = flows.find((n) => n.type === "yonder-modem-state");
+    expect((state!.wires as string[][])[2])
+      .toEqual(["pick-way-ethernet", "pick-way-modem", "pick-way-wifi"]);
+  });
+
+  it.each(PATHS)("picks the $slug row by name, never by its place in the list", ({ slug, key }) => {
+    const pick = byId(`pick-way-${slug}`);
+    expect(pick?.type).toBe("change");
+    const rules = pick?.rules as { t: string; p: string; to: string; tot: string }[];
+    // The lamp first, while `payload` is still the list of rows.
+    expect(rules.map((r) => r.p)).toEqual(["yonder", "payload"]);
+    for (const r of rules) {
+      expect(r.t).toBe("set");
+      expect(r.tot).toBe("jsonata");
+      expect(r.to).toContain(`path='${key}'`);
+    }
+    expect(rules[0].to).toBe(`payload[path='${key}'].status`);
+  });
+
+  /**
+   * **R-UI-11: the lamp is read before the word.** A path's standing is a lit
+   * annunciator and never right-aligned coloured text — and the annunciator
+   * renders a `CommandStatus` from `msg.yonder`, which the row arrives
+   * carrying because `pathStatus()` in the modem package built it.
+   */
+  it.each(PATHS)("gives $slug a name, a lamp and a sentence, in that order", ({ slug }) => {
+    const row = [`name-way-${slug}`, `ann-way-${slug}`, `why-way-${slug}`];
+    expect((byId(`pick-way-${slug}`)?.wires as string[][])[0]).toEqual(row);
+
+    const name = byId(`name-way-${slug}`);
+    expect(name?.type).toBe("ui-text");
+    // The daemon's own word for the path, not a second copy of the vocabulary
+    // in the flows — `PATH_WORDS` is where an interface is named.
+    expect(name?.value).toBe("payload.name");
+
+    const lamp = byId(`ann-way-${slug}`);
+    expect(lamp?.type, "state is an indicator, not coloured text (R-UI-11)")
+      .toBe("ui-yonder-annunciator");
+    expect(lamp?.source).toBe("yonder");
+    // No label, so the lamp says the standing the daemon settled rather than
+    // a word chosen here.
+    expect(lamp?.label).toBe("");
+
+    const why = byId(`why-way-${slug}`);
+    expect(why?.type).toBe("ui-text");
+    expect(why?.value).toBe("payload.detail");
+    // The sentence is the wide line on the row, and it wraps rather than
+    // being cut off at the edge of a column.
+    expect(why?.width).toBe(6);
+    expect(why?.wrapText).toBe(true);
+    // Prose, not a reading. Without this the sentence is drawn by
+    // `.nrdb-ui-text-value` — bold, tabular and right-aligned — which is the
+    // class that right-aligned an interface name inside its own column.
+    expect(why?.className).toBe("yonder-qualifier");
+  });
+
+  /**
+   * Three rows above the addresses, in the order `network.priority` states by
+   * default. The order numbers are what Dashboard packs the group by, so this
+   * is the only statement of "above" there is.
+   */
+  it("puts the paths above the readouts that were already there", () => {
+    const order = (id: string) => Number(byId(id)?.order);
+    for (const slug of ["ethernet", "modem", "wifi"]) {
+      for (const part of ["name", "ann", "why"]) {
+        expect(order(`${part}-way-${slug}`)).toBeLessThan(order("button-reread"));
+      }
+    }
+    expect(order("name-way-ethernet")).toBeLessThan(order("name-way-modem"));
+    expect(order("name-way-modem")).toBeLessThan(order("name-way-wifi"));
+  });
+
+  // CLAUDE.md rule 2, on the tab that gained the most wiring in this change.
+  it("ships no function node", () => {
+    expect(inTab.some((n) => n.type === "function")).toBe(false);
+  });
+});
+
+/**
  * The Status page's own line for the mesh (R-VPN-10): everything that backs
  * "connected" reduced to the words `messageFor` already built into
  * `payload.summary`, so this page needs no arithmetic of its own to show

@@ -395,7 +395,7 @@
         "type": "ui-button",
         "z": "yonder-console",
         "group": "group-net-now",
-        "order": 1,
+        "order": 10,
         "width": 3,
         "height": 1,
         "label": "Refresh",
@@ -947,7 +947,7 @@
         "type": "ui-text",
         "z": "yonder-console",
         "group": "group-net-now",
-        "order": 2,
+        "order": 11,
         "width": 8,
         "height": 1,
         "name": "summary",
@@ -971,7 +971,7 @@
         "type": "ui-text",
         "z": "yonder-console",
         "group": "group-net-now",
-        "order": 3,
+        "order": 12,
         "width": 4,
         "height": 1,
         "name": "address",
@@ -1868,7 +1868,11 @@
                 "pick-cell-quality",
                 "bar-cell-signal"
             ],
-            [],
+            [
+                "pick-way-ethernet",
+                "pick-way-modem",
+                "pick-way-wifi"
+            ],
             []
         ]
     },
@@ -2463,5 +2467,302 @@
                 "join-toast"
             ]
         ]
+    },
+    {
+        "id": "pick-way-ethernet",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "the Ethernet row",
+        "rules": [
+            {
+                "t": "set",
+                "p": "yonder",
+                "pt": "msg",
+                "to": "payload[path='ethernet'].status",
+                "tot": "jsonata"
+            },
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "payload[path='ethernet']",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 700,
+        "y": 2420,
+        "wires": [
+            [
+                "name-way-ethernet",
+                "ann-way-ethernet",
+                "why-way-ethernet"
+            ]
+        ]
+    },
+    {
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-net-now",
+        "height": 1,
+        "label": "",
+        "format": "{{msg.payload}}",
+        "valueType": "msg",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "className": "",
+        "wires": [],
+        "id": "name-way-ethernet",
+        "name": "ethernet name",
+        "order": 1,
+        "width": 3,
+        "layout": "row-left",
+        "value": "payload.name",
+        "wrapText": false,
+        "x": 1000,
+        "y": 2380
+    },
+    {
+        "id": "ann-way-ethernet",
+        "type": "ui-yonder-annunciator",
+        "z": "yonder-console",
+        "group": "group-net-now",
+        "name": "ethernet standing",
+        "order": 2,
+        "width": 3,
+        "height": 1,
+        "label": "",
+        "source": "yonder",
+        "x": 1000,
+        "y": 2420,
+        "wires": []
+    },
+    {
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-net-now",
+        "height": 1,
+        "label": "",
+        "format": "{{msg.payload}}",
+        "valueType": "msg",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "className": "yonder-qualifier",
+        "wires": [],
+        "id": "why-way-ethernet",
+        "name": "why ethernet is",
+        "order": 3,
+        "width": 6,
+        "layout": "row-left",
+        "value": "payload.detail",
+        "wrapText": true,
+        "x": 1000,
+        "y": 2460
+    },
+    {
+        "id": "pick-way-modem",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "the Cellular row",
+        "rules": [
+            {
+                "t": "set",
+                "p": "yonder",
+                "pt": "msg",
+                "to": "payload[path='modem'].status",
+                "tot": "jsonata"
+            },
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "payload[path='modem']",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 700,
+        "y": 2560,
+        "wires": [
+            [
+                "name-way-modem",
+                "ann-way-modem",
+                "why-way-modem"
+            ]
+        ]
+    },
+    {
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-net-now",
+        "height": 1,
+        "label": "",
+        "format": "{{msg.payload}}",
+        "valueType": "msg",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "className": "",
+        "wires": [],
+        "id": "name-way-modem",
+        "name": "modem name",
+        "order": 4,
+        "width": 3,
+        "layout": "row-left",
+        "value": "payload.name",
+        "wrapText": false,
+        "x": 1000,
+        "y": 2520
+    },
+    {
+        "id": "ann-way-modem",
+        "type": "ui-yonder-annunciator",
+        "z": "yonder-console",
+        "group": "group-net-now",
+        "name": "modem standing",
+        "order": 5,
+        "width": 3,
+        "height": 1,
+        "label": "",
+        "source": "yonder",
+        "x": 1000,
+        "y": 2560,
+        "wires": []
+    },
+    {
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-net-now",
+        "height": 1,
+        "label": "",
+        "format": "{{msg.payload}}",
+        "valueType": "msg",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "className": "yonder-qualifier",
+        "wires": [],
+        "id": "why-way-modem",
+        "name": "why modem is",
+        "order": 6,
+        "width": 6,
+        "layout": "row-left",
+        "value": "payload.detail",
+        "wrapText": true,
+        "x": 1000,
+        "y": 2600
+    },
+    {
+        "id": "pick-way-wifi",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "the Wi-Fi row",
+        "rules": [
+            {
+                "t": "set",
+                "p": "yonder",
+                "pt": "msg",
+                "to": "payload[path='wifi_client'].status",
+                "tot": "jsonata"
+            },
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "payload[path='wifi_client']",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 700,
+        "y": 2700,
+        "wires": [
+            [
+                "name-way-wifi",
+                "ann-way-wifi",
+                "why-way-wifi"
+            ]
+        ]
+    },
+    {
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-net-now",
+        "height": 1,
+        "label": "",
+        "format": "{{msg.payload}}",
+        "valueType": "msg",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "className": "",
+        "wires": [],
+        "id": "name-way-wifi",
+        "name": "wifi name",
+        "order": 7,
+        "width": 3,
+        "layout": "row-left",
+        "value": "payload.name",
+        "wrapText": false,
+        "x": 1000,
+        "y": 2660
+    },
+    {
+        "id": "ann-way-wifi",
+        "type": "ui-yonder-annunciator",
+        "z": "yonder-console",
+        "group": "group-net-now",
+        "name": "wifi standing",
+        "order": 8,
+        "width": 3,
+        "height": 1,
+        "label": "",
+        "source": "yonder",
+        "x": 1000,
+        "y": 2700,
+        "wires": []
+    },
+    {
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-net-now",
+        "height": 1,
+        "label": "",
+        "format": "{{msg.payload}}",
+        "valueType": "msg",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "className": "yonder-qualifier",
+        "wires": [],
+        "id": "why-way-wifi",
+        "name": "why wifi is",
+        "order": 9,
+        "width": 6,
+        "layout": "row-left",
+        "value": "payload.detail",
+        "wrapText": true,
+        "x": 1000,
+        "y": 2740
     }
 ]

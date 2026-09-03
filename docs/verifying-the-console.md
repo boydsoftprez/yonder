@@ -184,9 +184,22 @@ npm run build
 ```
 
 Same conventions: one temporary directory, removed on exit unless `KEEP=1`, and `PORT=`
-moves the console off 18881. `ping`, `nmcli`, `hostnamectl`, `rfkill` and `systemctl` are
-stand-ins on `PATH`; the `nmcli` one reports a `wlan0` and a scan with a duplicated SSID, so
-the folding in `scanForNetworks` has something real to fold.
+moves the console off 18881. `ping`, `nmcli`, `mmcli`, `curl`, `hostnamectl`, `rfkill` and
+`systemctl` are stand-ins on `PATH`; the `nmcli` one reports a wired port, a radio and a
+modem control port, and a scan with a duplicated SSID so the folding in `scanForNetworks`
+has something real to fold. The `mmcli` one replays the fixtures `yonder-core`'s own parser
+tests are written against — a real EC25 on a live SIM — so the Cellular tab is captured
+showing what a board actually reported rather than a panel of em dashes. The config the
+daemon is given is the shipped default with the modem turned on, because with it off the
+daemon reports the cellular path absent and neither cellular page can be captured at all.
+
+The `curl` stand-in is the one the gate *drives*. It is what `commandProbe` runs to find out
+whether a path carries traffic, and it answers whatever the gate last wrote to a file — read
+on every call — which is how the `Way out` rows are photographed in each of their three
+states. Nothing else probes: no interface holds an address in this harness, so `ReachWatch`
+finds no path in use and every probe in the run is one the gate asked for through
+`POST /reach/test`. That is what makes the states reproducible instead of a race with a
+five-second timer.
 
 It checks that the daemon's five page routes answer over the socket and that the scan carries
 no key; that Node-RED starts the shipped flows with **no error at all** and no unregistered
@@ -237,6 +250,24 @@ its own instead of one enforcing and the rest printing a note nobody reads.
 readings — a load average changes between two runs and would leave the file permanently
 dirty — so what it records is the layout. The unmasked copy goes to `vendor/capture/`, which
 CI uploads as an artifact.
+
+**And a page in more than one state, where it has them.** R-UI-12 says a surface that hides
+part of itself is captured in each of those parts. A tabbed page hides its other tabs, which
+is why there is one capture per tab; a panel drawn from live state hides its other states the
+same way. The `Way out` rows have three — a path that is reaching something, one that reached
+nothing when it was last tested, and one nothing has looked at — and they are three different
+*shapes*, because the three sentences are different lengths. The base capture is the untested
+state, which is what a board that has just come up shows; the other two are driven and
+captured under names of their own:
+
+```
+network-interfaces.day.png                  every path up, and untested
+network-interfaces-not-reaching.day.png     every path probed, and reaching nothing
+network-interfaces-reaching.day.png         every path probed, and reaching something
+```
+
+`capture-pages.mjs --only <page> --as <name>` is what takes one of them, so a state capture
+is held to exactly the rules and the shape reference every other page is.
 
 ```
 ./scripts/verify-pages.sh                    # capture, and gate

@@ -7,6 +7,8 @@ import {
   formatDb,
   formatDbm,
   formatTechnology,
+  pathStanding,
+  pathStatus,
   verdict,
   verdictStatus,
 } from "./format.js";
@@ -104,6 +106,103 @@ describe("the verdict", () => {
     const v = verdict({ inUse: "ethernet", carrying: true, paths: [] });
     expect(v.tone).toBe("neutral");
     expect(v.text).toBe("NO MODEM");
+  });
+
+  /**
+   * The other way a board says it has no modem, and the one that was missed.
+   *
+   * The daemon omits the path only when configuration does not name a modem.
+   * When it names one and no interface is there, the path is *reported* with
+   * `standing: "absent"` — so a board with the modem enabled and nothing
+   * plugged in fell through to the evidence checks and read `NOT YET TESTED`,
+   * which promises that testing would tell you something. Visible in the
+   * console capture at the time it was written.
+   */
+  it("says the same when the path is reported and there is no interface", () => {
+    const gone = path({ standing: "absent" as const, device: null, evidence: "untested" as const });
+    const v = verdict({ inUse: "ethernet", carrying: true, paths: [gone] });
+    expect(v.tone).toBe("neutral");
+    expect(v.text).toBe("NO MODEM");
+  });
+});
+
+/**
+ * The word beside a `Way out` row's lamp (R-UI-11).
+ *
+ * `standing` alone cannot produce it — `standing-by` covers three quite
+ * different situations — which is the whole reason `evidence` exists.
+ */
+describe("a path's standing, in a word", () => {
+  it("names the three states the panel exists to tell apart", () => {
+    expect(pathStanding("standing-by", "reaching")).toBe("READY");
+    expect(pathStanding("standing-by", "not-reaching")).toBe("NOT REACHING");
+    expect(pathStanding("standing-by", "untested")).toBe("NOT YET TESTED");
+  });
+
+  /**
+   * An interface that is not on the board is not a fault, and it has no
+   * evidence either way — so it is answered before evidence is consulted,
+   * exactly as `pathTone` answers it.
+   */
+  it("says an interface is absent whatever the record still holds about it", () => {
+    for (const e of ["reaching", "not-reaching", "untested"] as const) {
+      expect(pathStanding("absent", e)).toBe("NO INTERFACE");
+    }
+  });
+
+  it("says a stood-down path is stood down, not merely not reaching", () => {
+    expect(pathStanding("no-route-out", "not-reaching")).toBe("STOOD DOWN");
+    expect(pathStanding("testing", "untested")).toBe("TESTING");
+  });
+
+  /**
+   * Carrying traffic is what the routing table says. It is said whether or
+   * not anything has tested the link; the lamp beside it is what stays
+   * neutral until something has (R-CEL-09).
+   */
+  it("says a path in use is carrying traffic even before anything tested it", () => {
+    expect(pathStanding("in-use", "untested")).toBe("CARRYING TRAFFIC");
+    expect(pathStanding("in-use", "reaching")).toBe("CARRYING TRAFFIC");
+  });
+});
+
+/**
+ * The same row, as `ui-yonder-annunciator` reads it. The tone is *taken* from
+ * the row rather than worked out again here: deciding it twice is how the
+ * lamp on this panel and the lamp on the Cellular tab end up disagreeing
+ * about one link.
+ */
+describe("a Way out row, as the annunciator reads it", () => {
+  it("lights a reaching path good, with the standing as its words", () => {
+    const s = pathStatus(
+      { standing: "standing-by", evidence: "reaching", tone: "good" }, 1000,
+    );
+    expect(s.state).toBe("confirmed");
+    expect(s.message).toBe("READY");
+    expect(s.at).toBe(1000);
+  });
+
+  it("lights a path that reached nothing bad", () => {
+    expect(pathStatus({ standing: "no-route-out", evidence: "not-reaching", tone: "bad" }, 1).state)
+      .toBe("rejected");
+  });
+
+  it("leaves an untested path neutral rather than claiming it works", () => {
+    const s = pathStatus({ standing: "standing-by", evidence: "untested", tone: "neutral" }, 1);
+    expect(s.state).toBe("idle");
+    // Never the shared idle label "Ready": nothing has established anything.
+    expect(s.message).toBe("NOT YET TESTED");
+  });
+
+  /**
+   * The tone is the row's, not a second reading of `standing`. If this ever
+   * re-derived it, a row whose tone the daemon had settled would be redrawn
+   * from a rule that had drifted from `pathTone`.
+   */
+  it("uses the tone it was given rather than deciding one for itself", () => {
+    const s = pathStatus({ standing: "in-use", evidence: "untested", tone: "neutral" }, 1);
+    expect(s.state).toBe("idle");
+    expect(s.message).toBe("CARRYING TRAFFIC");
   });
 });
 

@@ -150,6 +150,23 @@ const accept = has("accept");
  * console does anything.
  */
 const press = arg("press");
+/**
+ * One page, under a name of its own.
+ *
+ * R-UI-12 says a surface that hides part of itself is captured in each of
+ * those parts, and a panel drawn from live state hides its other states the
+ * same way a tab hides its siblings. The `Way out` rows have three — a path
+ * that is reaching something, one that reached nothing when it was last
+ * tested, and one nothing has looked at — and they are three different
+ * *shapes*, because the three sentences wrap differently.
+ *
+ * The alternative was a second mechanism that drove state and photographed it
+ * separately. This is the same one, told which page to take and what to call
+ * the file, so a state capture is enforced by exactly the rules and the shape
+ * reference every other page is.
+ */
+const only = arg("only");
+const as = arg("as");
 
 if (!password) {
   process.stderr.write("capture-pages: --password is required\n");
@@ -276,7 +293,15 @@ function measure(liveSelectors) {
 
 // ---------------------------------------------------------------------------
 
-const pages = pagesFromFlows();
+let pages = pagesFromFlows();
+if (only !== undefined) {
+  pages = pages.filter((p) => p.name === only);
+  if (pages.length === 0) {
+    process.stderr.write(`capture-pages: no page called "${only}" in the shipped flows\n`);
+    process.exit(2);
+  }
+  if (as !== undefined) pages = pages.map((p) => ({ ...p, name: as, title: as }));
+}
 mkdirSync(join(refs, "shape"), { recursive: true });
 mkdirSync(join(refs, "capture"), { recursive: true });
 mkdirSync(artifacts, { recursive: true });
@@ -484,7 +509,10 @@ await browser.close();
 
 // An accepted violation that no longer happens is a line to delete. Left in,
 // it would quietly re-accept the same defect if it ever came back.
-const stale = debt.entries.filter(
+// Only on a full pass. A run of one page has not been anywhere near the
+// entries about the others, and reporting them as fixed would be a lie that
+// deletes a real debt.
+const stale = only !== undefined ? [] : debt.entries.filter(
   (e) => !seen.has(e) && (e.palette === "*" || e.palette === palette),
 );
 for (const e of stale) {

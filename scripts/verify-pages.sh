@@ -81,11 +81,25 @@ cat > "$BIN/systemctl" <<'FAKE'
 printf '%s\n' "$*" >> "$SYSTEMCTL_LOG"
 exit 0
 FAKE
+# nmcli, reporting the board this project is built for: a wired port, the
+# radio, and the modem's control port. It used to list only `lo` and `wlan0`,
+# and the cost of that was invisible until the `Way out` panel existed — with
+# no ethernet and no gsm device the daemon called every path absent, so the
+# panel captured as three rows of "no interface on this board" and none of the
+# three states R-UI-12 asks to see could be reached at all.
+#
+# No address is reported by `device show`, deliberately: nothing holds the
+# default route, so `ReachWatch` finds no path in use and probes nothing on
+# its own. Every probe in this run is one the gate asked for, which is what
+# makes the three states below reproducible rather than a race with a timer.
 cat > "$BIN/nmcli" <<'FAKE'
 #!/bin/sh
 case "$*" in
     *"device status"*)
-        printf 'lo:loopback:connected:lo\nwlan0:wifi:disconnected:\n' ;;
+        printf 'lo:loopback:connected:lo\n'
+        printf 'eth0:ethernet:connected:Wired connection 1\n'
+        printf 'wlan0:wifi:disconnected:\n'
+        printf 'cdc-wdm0:gsm:connected:yonder-modem\n' ;;
     *"device wifi list"*)
         printf 'HomeNetwork:78:WPA2\nHomeNetwork:41:WPA2\nCafe:33:--\n' ;;
     *"connection show"*) : ;;
@@ -115,6 +129,20 @@ esac
 exit 0
 FAKE
 
+# curl, which is what `commandProbe` runs to find out whether a path carries
+# traffic. It answers whatever `$PROBE_ANSWER` holds at the moment it is run —
+# read on every call, never captured — so the gate can put the board's paths
+# into each of the three states R-UI-12 asks to see them in.
+#
+# Only the daemon has $BIN on its PATH, so this is not the curl every check in
+# this script uses to talk to the console.
+PROBE_ANSWER="$ROOT/probe-answer"
+echo 0 > "$PROBE_ANSWER"
+cat > "$BIN/curl" <<FAKE
+#!/bin/sh
+exit \$(cat "$PROBE_ANSWER")
+FAKE
+
 cat > "$BIN/rfkill" <<'FAKE'
 #!/bin/sh
 exit 0
@@ -129,10 +157,29 @@ printf 'PING\n3 packets transmitted, 3 received, 0%% packet loss, time 2003ms\n'
 printf 'rtt min/avg/max/mdev = 8.294/9.117/10.352/0.884 ms\n'
 exit 0
 FAKE
-chmod +x "$BIN/systemctl" "$BIN/nmcli" "$BIN/mmcli" "$BIN/rfkill" "$BIN/hostnamectl" "$BIN/ping"
+chmod +x "$BIN/systemctl" "$BIN/nmcli" "$BIN/mmcli" "$BIN/curl" "$BIN/rfkill" \
+    "$BIN/hostnamectl" "$BIN/ping"
 
-sed "s/^  port: .*/  port: $PORT/" "$REPO/config/defaults/config.yaml" > "$ETC/config.yaml"
+# The shipped defaults, with the console on this run's port and the modem
+# turned on. `network.modem.enabled` is false by default and that is right for
+# a board nobody has configured — but with it off `pathDevices` never names a
+# modem, so the daemon reports the cellular path absent and neither the
+# Cellular tab nor the `Way out` panel can be captured showing a modem at all.
+# The mmcli stand-in above is already replaying a real EC25; this is what lets
+# the pages see it.
+#
+# The range address is not decoration: `enabled: false` at that indent also
+# appears under `remote.zerotier`, and a substitution without one turns the
+# mesh on too — which would have this gate asking a `zerotier-cli` that does
+# not exist on a development machine.
+sed -e "s/^  port: .*/  port: $PORT/" \
+    -e "/^  modem:/,/^  priority:/ s/^    enabled: false/    enabled: true/" \
+    "$REPO/config/defaults/config.yaml" > "$ETC/config.yaml"
 grep -q "port: $PORT" "$ETC/config.yaml" || die "could not set the console port in $ETC/config.yaml"
+awk '/^  modem:/,/^  priority:/' "$ETC/config.yaml" | grep -q "enabled: true" \
+    || die "the modem is not enabled in $ETC/config.yaml; the defaults must have moved"
+awk '/^  zerotier:/,0' "$ETC/config.yaml" | grep -q "enabled: false" \
+    || die "the mesh was turned on by accident; there is no zerotier-cli here"
 
 DAEMON_PID=""
 CONSOLE_PID=""
@@ -399,6 +446,15 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
         fi
     }
 
+    # The base captures are the *untested* state, and this is what makes that
+    # a statement rather than an accident: nothing holds the default route in
+    # this harness, so `ReachWatch` finds no path in use and probes nothing on
+    # its own. Every path is up and nothing has established that any of them
+    # reaches anything — the state R-CEL-09 is about, and the one a console
+    # must not draw as ready.
+    expect_contains "nothing has been probed, so the base captures are the untested state" \
+        '"evidence":"untested"' "$(sock /reach/state)"
+
     capture day
 
     # Night through the route an operator uses, not by writing the file: the
@@ -447,9 +503,58 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
         bad "pressing NIGHT did nothing: the control is wired but dead"
     fi
 
+    # One page, in one state, under a name of its own.
+    #
+    # R-UI-12: a surface that hides part of itself is captured in each of
+    # those parts, and a panel drawn from live state hides its other states
+    # exactly the way a tab hides its siblings. The `Way out` rows have three,
+    # and they are three different *shapes* — the sentences are different
+    # lengths and wrap differently, which is how the defect this gate is for
+    # showed up in the first place: an interface name right-aligned in its own
+    # column, visible only when the qualifier beneath it was the wider line.
+    #
+    # The state is driven through `POST /reach/test`, the daemon's own route
+    # for R-CEL-09's "on request" and the one the TEST NOW key presses. Only
+    # what the gate asks for is ever probed, so the states are reproducible.
+    drive_paths() {
+        printf '%s\n' "$1" > "$PROBE_ANSWER"
+        for probe_path in ethernet modem wifi_client; do
+            sock_post /reach/test "{\"path\":\"$probe_path\"}" >/dev/null
+        done
+        # One poll of `yonder-modem-state`, so the page is showing the answer
+        # rather than the one before it. Dashboard replays the last message it
+        # holds for a widget when a browser connects, so capturing early would
+        # photograph the previous state under the new state's name.
+        sleep 7
+    }
+
+    capture_state() {
+        # $1 palette, $2 what curl answers, $3 the state that produces
+        drive_paths "$2"
+        expect_contains "every path this board has is now $3" \
+            "\"evidence\":\"$3\"" "$(sock /reach/state)"
+        if node "$REPO/scripts/capture-pages.mjs" \
+                --base-url "http://127.0.0.1:$PORT" \
+                --password "$PASSWORD" \
+                --palette "$1" \
+                --only network-interfaces \
+                --as "network-interfaces-$3" \
+                --artifacts "$REPO/vendor/capture" \
+                ${ACCEPT_SHAPE:+--accept}; then
+            ok "the $1 palette: the Way out rows with every path $3"
+        else
+            bad "the $1 palette: the Way out rows with every path $3, see above"
+        fi
+    }
+
     if reach_theme night; then
         ok "the device reached the night palette through /ui/theme"
         capture night
+        # After the base capture, never before: a path that has been probed
+        # has a record, and `untested` cannot be reached again without
+        # restarting the daemon.
+        capture_state night 1 not-reaching
+        capture_state night 0 reaching
     else
         bad "the console never regenerated theme.css as night, so it was not captured"
     fi
@@ -459,6 +564,8 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
     # the night palette while its own log claimed everything passed.
     if reach_theme day; then
         ok "the console was left in the default palette"
+        capture_state day 1 not-reaching
+        capture_state day 0 reaching
     else
         bad "the console is still in the night palette; a held run will be wrong"
     fi

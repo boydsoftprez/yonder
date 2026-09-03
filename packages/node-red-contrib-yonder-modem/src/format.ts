@@ -1,6 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { confirmed, idle, rejected } from "yonder-core";
-import type { CommandStatus, ReadingBounds, ReachState, PathReport } from "yonder-core";
+import type {
+  CommandStatus,
+  PathEvidence,
+  PathReport,
+  PathStanding,
+  ReachState,
+  ReadingBounds,
+} from "yonder-core";
 
 /**
  * Where an operator is told to start worrying about signal strength.
@@ -69,7 +76,14 @@ export interface Verdict {
  */
 export function verdict(reach: ReachState): Verdict {
   const modem = reach.paths.find((p) => p.path === "modem");
-  if (modem === undefined) return { text: "NO MODEM", tone: "neutral" };
+  // Both ways a board says it has no modem, and they are one answer. The
+  // daemon omits the path when configuration does not name one, and reports
+  // it `absent` when it does and no interface is there — reading only the
+  // first left a board with no modem saying NOT YET TESTED, which is a
+  // promise that a test would tell you something (K-40, R-CEL-09).
+  if (modem === undefined || modem.standing === "absent") {
+    return { text: "NO MODEM", tone: "neutral" };
+  }
   if (modem.standing === "no-route-out") return { text: "NO DATA GETTING THROUGH", tone: "bad" };
   if (modem.standing === "in-use") return { text: "CARRYING TRAFFIC", tone: "good" };
   if (modem.evidence === "untested") return { text: "NOT YET TESTED", tone: "neutral" };
@@ -95,11 +109,73 @@ export function verdict(reach: ReachState): Verdict {
  * message over the state's generic label.
  */
 export function verdictStatus(v: Verdict, at: number): CommandStatus {
-  if (v.tone === "good") return confirmed(v.text, { at });
-  if (v.tone === "bad") return rejected(v.text, { at });
-  // Neutral: nothing has established anything either way, which is exactly
-  // what `idle` means — never a green lamp on the strength of no evidence.
-  return idle(at, v.text);
+  return lit(v.tone, v.text, at);
+}
+
+/**
+ * A tone and some words, in the language the annunciator reads.
+ *
+ * One mapping, used by every lamp this package lights, so the Cellular tab's
+ * verdict and a `Way out` row about the same link cannot be drawn from two
+ * different rules.
+ *
+ * Neutral is `idle`: nothing has established anything either way, which is
+ * exactly what `idle` means — never a green lamp on the strength of no
+ * evidence.
+ */
+function lit(tone: Verdict["tone"], text: string, at: number): CommandStatus {
+  if (tone === "good") return confirmed(text, { at });
+  if (tone === "bad") return rejected(text, { at });
+  return idle(at, text);
+}
+
+/**
+ * What is written beside a `Way out` row's lamp: one path's standing, in a
+ * word (R-UI-11).
+ *
+ * The lamp is read before the word, so this is the confirmation rather than
+ * the message — the sentence in `detail` is what says *why*. It is here for
+ * the reason everything else in this file is: a second place that decides how
+ * a standing is written is the one that stops agreeing with the first.
+ *
+ * `standing` alone cannot produce it. `standing-by` covers a path that is
+ * reaching something, one whose probes are failing but which has not run out
+ * the three that condemn it, and one nothing has ever looked at — three
+ * states the panel exists to tell apart — so `evidence` is asked for those,
+ * exactly as `pathTone` does for the tone.
+ */
+export function pathStanding(standing: PathStanding, evidence: PathEvidence): string {
+  // A path that is not on this board is not a fault, and it has no evidence
+  // either way. Asked first, for the same reason `pathTone` asks it first.
+  if (standing === "absent") return "NO INTERFACE";
+  if (standing === "no-route-out") return "STOOD DOWN";
+  if (standing === "testing") return "TESTING";
+  // Carrying traffic is what the routing table says, and it is said whether
+  // or not anything has tested the link — the lamp beside it stays neutral
+  // until something has, which is the distinction R-CEL-09 is about.
+  if (standing === "in-use") return "CARRYING TRAFFIC";
+  if (evidence === "reaching") return "READY";
+  if (evidence === "not-reaching") return "NOT REACHING";
+  return "NOT YET TESTED";
+}
+
+/** Everything a lit `Way out` row needs, and nothing a flow has to work out. */
+export interface PathStandingView {
+  standing: PathStanding;
+  evidence: PathEvidence;
+  tone: Verdict["tone"];
+}
+
+/**
+ * One `Way out` row's lamp, as the annunciator reads it (R-UI-11, ADR-0005).
+ *
+ * **The tone is taken, not re-derived.** `pathTone` in `state.ts` decides it
+ * from `standing` and `evidence`; deciding it a second time here is how the
+ * lamp on this panel and the lamp on the Cellular tab end up disagreeing
+ * about one link. The only judgement made here is which words go beside it.
+ */
+export function pathStatus(row: PathStandingView, at: number): CommandStatus {
+  return lit(row.tone, pathStanding(row.standing, row.evidence), at);
 }
 
 /**

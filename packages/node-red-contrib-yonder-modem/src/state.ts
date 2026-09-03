@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { PATH_WORDS, clientFor, fetched, pollIntervalMs, readFailure } from "yonder-core";
 import type {
+  CommandStatus,
   DaemonClient,
   ModemState,
   PathEvidence,
@@ -18,6 +19,7 @@ import {
   formatDbm,
   formatTechnology,
   pathDetail,
+  pathStatus,
   verdict,
   verdictStatus,
 } from "./format.js";
@@ -88,6 +90,17 @@ export interface PathRow {
   since: number | null;
   detail: string;
   tone: "good" | "bad" | "neutral";
+}
+
+/**
+ * A row as the panel receives it: everything in `PathRow`, and the lamp.
+ *
+ * `status` is not on `PathRow` itself because `messageFor` is pure and takes
+ * no clock — a `CommandStatus` carries `at`, and inventing one inside a pure
+ * shaping function is how a test starts depending on the wall clock.
+ */
+export interface ShownPathRow extends PathRow {
+  status: CommandStatus;
 }
 
 export interface StatePayload {
@@ -259,8 +272,14 @@ export function fanOut(payload: StatePayload, at: number = Date.now()): NodeMess
         reportsSignal: payload.reportsSignal,
       },
     },
-    // 3 — the Way out panel: one row per path, in the operator's order.
-    { payload: payload.paths },
+    // 3 — the Way out panel: one row per path, in the operator's order, each
+    // carrying the lamp beside it already lit.
+    //
+    // The status is attached here rather than in `messageFor` because it
+    // needs `at`, and here rather than in a `change` node because turning a
+    // tone into a command state is a decision (CLAUDE.md rule 2). A flow
+    // picks one row and hands the widgets its fields; it works nothing out.
+    { payload: payload.paths.map((p) => ({ ...p, status: pathStatus(p, at) })) },
     // 4 — the Status panel: one word, and the same verdict the tab shows, so
     // the two pages cannot disagree about the modem.
     {

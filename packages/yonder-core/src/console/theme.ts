@@ -861,6 +861,23 @@ ${panelCss(theme)}
     0 0 0 1px var(--yonder-bezel) !important;
 }
 
+/* A sentence under an interface's name, and not a reading of it.
+
+   The value rule above styles every ui-text value as a reading: large, bold,
+   tabular and right-aligned. That is right for an address and wrong for prose
+   about one - and right-aligned prose is the defect this console's capture
+   gate was written after: an interface name pushed to the right edge of its
+   own column by that very class, visible only when the qualifier beneath it
+   happened to be the wider line. So a qualifier says that it is one. */
+.yonder-qualifier .nrdb-ui-text-value {
+  text-align: left;
+  font-size: var(--yonder-size-body);
+  font-weight: 400;
+  font-variant-numeric: normal;
+  color: var(--yonder-label);
+  line-height: 1.5;
+}
+
 .yonder-note {
   color: var(--yonder-label);
   line-height: 1.55;
