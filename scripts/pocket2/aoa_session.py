@@ -117,12 +117,19 @@ class Session:
         # reads ~90 degrees at rest, so "far from level" is not a fault. Limit bits are.
         # 2. Rate commands (0x0C custom speed, 0x01 motion control): yaw, roll, pitch in
         #    0.1 deg/s. Boxed to a gentle rate; the gimbal stops when the rate stops.
-        if cmdid in (0x0C, 0x01):
+        if cmdid == 0x0C:                              # yaw, roll, pitch in 0.1 deg/s
             if len(payload) < 6:
                 return "rate command needs yaw, roll and pitch"
             rates = [v / 10.0 for v in struct.unpack_from("<hhh", payload, 0)]
             if max(abs(r) for r in rates) > self.a.max_rate:
                 return f"rate {rates} exceeds {self.a.max_rate} deg/s"
+            return None
+        if cmdid == 0x01:                              # three stick values, 363..1685, 1024 centred
+            if len(payload) < 6:
+                return "motion control needs three stick values"
+            sticks = struct.unpack_from("<HHH", payload, 0)
+            if max(abs(v - 1024) for v in sticks) > self.a.max_stick:
+                return f"stick deflection {[v - 1024 for v in sticks]} exceeds {self.a.max_stick}"
             return None
         if cmdid not in (0x14, 0x0A):
             return None
@@ -291,12 +298,20 @@ class Session:
             for spec in lines[seen:]:
                 spec = spec.strip()
                 if not spec or spec.startswith("#"): continue
-                # cmdset:cmdid:hex[:receiver_type[:sender_idx]]
+                # cmdset:cmdid:hex[:receiver_type[:sender_idx]] [xN@MS]  — repeat N times every MS ms
+                repeat, every = 1, 0.0
+                if " x" in spec:
+                    spec, burst = spec.rsplit(" x", 1)
+                    n_str, ms_str = (burst.split("@") + ["100"])[:2]
+                    repeat, every = int(n_str), int(ms_str) / 1000.0
                 parts = (spec.split(":") + ["", "", ""])[:5]
                 cs, ci, hx, rx, sx = parts
                 try:
-                    self.send(int(cs, 0), int(ci, 0), bytes.fromhex(hx), note=f"inject[{spec}]",
-                              receiver=int(rx, 0) if rx else None, sender_idx=int(sx, 0) if sx else None)
+                    for i in range(repeat):
+                        self.send(int(cs, 0), int(ci, 0), bytes.fromhex(hx), ack=0 if repeat > 1 else 1,
+                                  note=f"inject[{spec}]" + (f" {i+1}/{repeat}" if repeat > 1 else ""),
+                                  receiver=int(rx, 0) if rx else None, sender_idx=int(sx, 0) if sx else None)
+                        if repeat > 1: time.sleep(every)
                 except Exception as e:
                     self.log(f"inject {spec!r}: {e}")
             seen = len(lines)
@@ -341,6 +356,7 @@ if __name__ == "__main__":
                    help="absolute yaw the guard allows; default is a window around the centre learned at each recentre")
     p.add_argument("--allow-absolute", action="store_true", help="permit absolute-mode angle frames (mode bit 0 set)")
     p.add_argument("--max-rate", type=float, default=20.0, help="largest rate a speed command may ask for, deg/s")
+    p.add_argument("--max-stick", type=int, default=400, help="largest stick deflection from 1024 a motion-control frame may carry")
     p.add_argument("--roll-window", type=float, nargs=2, default=(-15.0, 15.0), metavar=("MIN", "MAX"),
                    help="absolute roll the guard allows (field 1 of 4/0x14)")
     p.add_argument("--pitch-window", type=float, nargs=2, default=(-30.0, 20.0), metavar=("MIN", "MAX"),
