@@ -477,14 +477,15 @@ and the app's command table names them all. The honest status of each, as of thi
 | Take a photo | `camera/0x01` take photo | id known, untried |
 | Exposure mode, ISO, EV | `camera/0x1e` (2B), `0x2a` ISO, `0x2e` EV | **proven** — each changes the picture; shutter `0x28` untried |
 | White balance | `camera/0x2c` (2 bytes) | **proven** — push field changes per setting |
-| Zoom | `camera/0xb8` control zoom, `0x34` focus/zoom | ids known, untried |
+| Zoom | `camera/0x34` `09 00 00 <u16=(factor−1)/0.01>` | **digital only** (SDK: the Pocket 2 has no optical-zoom module), 1.0–10.0×; accepted but does not reshape the USB feed → crop client-side |
 | Focus: AFC / AFS / spot | `camera/0x24` focus mode, `0x30` area, `0x32` spot | ids known, untried |
 | Recording resolution and rate | `camera/0x18` video format | id known, untried |
 | Sensor 16 / 64 MP | `camera/0x12` photo size | id known, untried |
 | Stream bitrate for cellular | — | **solved by the board's hardware transcode, ~40% of one core** |
 | Live-view resolution | `camera/0xbd`/`0x18`/`0x4c` | not recovered — inert at every payload tried; low value while the board transcodes |
-| Digital zoom | `camera/0x34` `09 00 00 <u16>` | **payload recovered** (decompiler); accepted, but no effect on the live-view feed — likely recording-only |
-| Focus | `camera/0x24` | not tested — largely automatic on this lens |
+| Digital zoom | `camera/0x34` `09 00 00 <u16=(factor−1)/0.01>` | **payload recovered & confirmed digital-only**; accepted, but the 720p USB feed does not change → Yonder crops client-side |
+| Live-view quality / output format | `camera/0x1a`, `0x4c` | accepted, but the USB feed stays 720p ~8 Mb/s — the live-view is a fixed pipe |
+| Focus | `camera/0x24` | not tested — fixed lens, largely automatic |
 | Colour, filters | `camera/0x3e` colour tone, `0x42` digital filter | ids known, untried |
 | Camera state readout: mode, rec time, battery | `camera/0x80`, `0x81`, `0x87`, `0x88` pushes | received at 10–20 Hz; **not yet decoded** |
 | Battery detail | `battery/0x02` dynamic info (set 13) | id known, untried |
@@ -550,11 +551,24 @@ dynamic table — gave the wire structures:
   as one `u32`, not a byte struct — which is exactly why the byte-shaped `0xbd` guesses were
   inert. The enum-to-code mapping is the remaining piece.
 - **Digital zoom** is `camera/0x34` (`set_focus_zoom_para`), payload `09 00 00` then a
-  little-endian `u16` = `(factor − 1.0) / step` for a factor of 1.0–10.0 — **not** the
-  `0xb8` the id table's name suggested. Correctly addressed to the camera it is accepted
-  (`status 0x01`), but **the live-view frame does not change** across the full u16 sweep:
-  on this camera digital zoom crops the recording, not the USB live-view feed, or it wants
-  `tap_zoom_enable` (`0xc4`) set first. Structure recovered; live effect absent.
+  little-endian `u16` = `(factor − 1.0) / 0.01` for a factor of 1.0–10.0 (so 2× = 100,
+  4× = 300, 10× = 900) — **not** the `0xb8` the id table's name suggested, and the step
+  `0.01` was read from the decompiled constant. Correctly addressed to the camera (device
+  type 1, not the gimbal's type 4 that first sank the test) it is accepted (`status 0x01`),
+  but **the 720p USB live-view does not change** across the whole range.
+
+  Two facts settle what this means. First, **there is no optical zoom**: the Pocket 2
+  (`HG211`) overrides only `SetDigitalZoomFactor` and `SetDigitalZoomFactorByStride` in the
+  SDK and is wired to no optical-zoom module — those classes exist in the library only for
+  DJI's optical/hybrid-zoom cameras. The Pocket 2's advertised zoom (4× at 1080p, 3× at
+  2.7K, 2× at 4K) is a sensor crop, marketed as zoom. Second, **the USB live-view is a
+  fixed 720p ~8 Mb/s pipe**: live-view quality (`0x1a`), output format (`0x4c`), the two
+  zoom forms and the stride zoom are all accepted and none reshapes it. So zoom in the
+  manufacturer's app preview is a client-side crop, and for Yonder the same holds — **zoom
+  is a crop-and-scale of the decoded H.264, done on the board or in the browser**, which
+  needs no camera command and composes with the transcode. One path is left untested: the
+  H1 clip module's own `SetH1LiveViewResolutionFrameRate` on a different cmdset — but every
+  camera-cmdset attempt held 720p.
 
 So the decompiler earned its build immediately: it corrected two ids that string-and-guess
 had wrong. What remains below is narrowed, not abandoned.
