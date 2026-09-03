@@ -159,7 +159,7 @@ run outside `dpkg`, so the client shipped enabled until the role's own post-cond
 caught it; and the renderer asked the client for its networks immediately after starting
 the service, which a first start — generating an identity keypair — is far too slow to
 answer, so the very first join on a fresh device failed and reverted the operator's network
-id. It also surfaced [K-33](known-issues.md), which predates this milestone.
+id. It also surfaced [K-40](known-issues.md), which predates this milestone.
 
 **The exit criterion is met.** On 2026-09-03 the console *and* `ssh` were reached over the
 mesh from a machine sharing no local network with the board, and later that day a fix was
@@ -206,23 +206,46 @@ At this point Yonder does the thing its name is about, with nothing attached to 
 
 *The payload.*
 
-USB first, deliberately. It works on every board in the matrix, needs no libcamera stack,
-and many USB cameras emit H.264 already — so the first stream can be captured and
-repackaged **without touching the per-board encoder matrix at all.** That separates "get
-bytes moving over a cellular link" from "encode efficiently on each SoC", and those are two
-different problems that should not be debugged at the same time.
+USB first, deliberately: it works on every board in the matrix and needs no libcamera
+stack. **The original plan went further and was wrong.** It assumed many USB cameras emit
+H.264, so a first stream could be repackaged without touching the encoder at all. The
+cameras this project actually cares about emit MJPEG — a rapid burst of JPEGs, not video —
+so M4 cannot avoid encoding, and the separation that deferral bought does not exist. See
+[`hardware/usb-camera-on-a-pi-4.md`](hardware/usb-camera-on-a-pi-4.md), which is where every
+number below came from.
+
+So **the Raspberry Pi encoder work moves into M4** and multi-camera stays in M6. The
+encoder is a property of the board, not of how many cameras are attached; deferring it
+means shipping a video milestone that works on one board and revisiting every pipeline site
+later. Radxa stays out — it is P2 and needs the vendor BSP kernel, which makes it image-only
+until M8.
 
 - USB UVC capture, including cameras that emit compressed video — R-CAM-02
-- Pass-through or software path first; per-board encoder selection deferred to M6 — R-CAM-06
-- RTP/UDP H.264 to a ground station — R-VID-01, R-VID-10
+- **Detect cameras on demand, and say what was rejected and why** — R-CAM-12
+- **Capabilities built from what the device answers, never from a stored list** — R-CAM-14
+- Stable camera identity, so the detected camera is the configured one — R-CAM-05
+- **Encoder chosen by probing the board** — R-CAM-13, R-CAM-07
+- The Raspberry Pi family: hardware H.264, and software where the board has none — R-HW-01, R-HW-02
+- RTP/UDP H.264 to a ground station, and the document that configures one — R-VID-01, R-VID-10
 - WebRTC preview in the browser — R-VID-03
 - **Both simultaneously** — R-VID-05
+- **And what that costs on the uplink, so it can be chosen rather than discovered** — R-VID-11
 - RTSP output — R-VID-04
 - Stream controls: start, stop, resolution, bitrate, and a status readout — R-CTL-01 … R-CTL-03, R-CTL-10
+- **The rest of the camera controls** — image controls apply live, stream controls restart
+  the picture, and the page says which is which — R-CTL-04 … R-CTL-09
 - Fixed bitrate, for operators who want determinism — R-VID-08
+- **Supply-voltage reporting** — R-SYS-09. Here rather than with the other status readings
+  because encoding video is what pushes the draw up, so M4 is the milestone that provokes it
+
+Still M6: CSI capture (a different capture stack — the one M4 exists to avoid), HDMI,
+hardware-generated navigation, one pipeline per camera, H.265, Radxa, and per-board
+multi-camera limits.
 
 **Done when:** you watch usable video in a browser, over a cellular link, from another
-network — while a ground station receives the same feed.
+network — while a ground station receives the same feed. **On a Raspberry Pi 4**, which is
+the only board this can be shown on today. Every other board in R-HW-01 and R-HW-02 gets
+code and unit tests and an explicit note that it has never run on hardware.
 
 ---
 
@@ -242,6 +265,11 @@ network — while a ground station receives the same feed.
 - **Telemetry overlay on the video** — R-TEL-12
 - Moving map, fullscreen, and inset swap — R-TEL-11, R-TEL-13, R-TEL-14
 - MAVLink path verification — R-DIA-04
+- **A camera that is itself a USB host — the DJI Pocket 2** — R-CAM-15. Here rather than
+  in M9 because the bench settled it in an evening: with the board playing the phone, the
+  camera streams 720p H.264 unprompted and its gimbal is commands on the same link, which
+  is a real gimbal for the Cockpit this milestone builds. See
+  [`hardware/dji-pocket-2-over-usb.md`](hardware/dji-pocket-2-over-usb.md)
 
 **Done when:** a ground station has telemetry and video over cellular from beyond line of
 sight, with the HUD drawn over the picture.
@@ -250,15 +278,18 @@ sight, with the HUD drawn over the picture.
 
 ---
 
-## M6 — Multi-camera and the full board matrix
+## M6 — Multi-camera and the rest of the board matrix
 
-- Per-board encoder resolution at install — R-CAM-06, R-CAM-07, R-HW-01, R-HW-02
+*The Raspberry Pi encoder work left here for M4. What remains is a second camera, a second
+capture stack, and the boards M4 could not be shown on.*
+
 - CSI capture — R-CAM-01
-- Stable camera identity; hardware-generated navigation — R-CAM-05, R-UI-03
+- Hardware-generated navigation, now that there is more than one camera — R-UI-03
 - Independent pipeline per camera — R-CAM-09
 - Per-board limits enforced in validation — R-CAM-10, R-HW-05
 - HDMI input with EDID push — R-CAM-03
 - Rockchip boards: hardware H.264 and H.265 — R-HW-03, R-CAM-08, R-VID-02
+- The rest of R-HW-01 and R-HW-02 on real hardware — every Pi M4 could only unit-test
 - Second Ethernet and USB gadget — R-NET-04, R-NET-05
 - One image per board family, no overclocking by default — R-HW-04, R-HW-06
 
