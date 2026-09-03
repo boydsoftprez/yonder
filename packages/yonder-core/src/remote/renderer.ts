@@ -4,10 +4,19 @@ import { systemClock, type Clock, type Renderer } from "../apply/types.js";
 import { writeFileDurable, unlinkDurable } from "../fs/durable.js";
 import type { CommandRunner } from "../net/runner.js";
 import type { Config } from "../schema/config.js";
-import { ZeroTierCli } from "./zerotier/cli.js";
+import { ZeroTierCli, ZeroTierCliError } from "./zerotier/cli.js";
 import type { ZeroTierNetwork } from "./zerotier/parse.js";
 
 const UNIT = "zerotier-one";
+
+/**
+ * What `systemRunner` reports when it could not spawn the binary at all.
+ *
+ * The one exit code that means "there is no client here" rather than "the
+ * client did not answer" — a distinction this renderer has to make before it
+ * decides that nothing is joined.
+ */
+const ABSENT_EXIT = 127;
 
 /**
  * What `systemctl` needs to be told before it will enable or disable a unit
@@ -259,14 +268,42 @@ export class RemoteRenderer implements Renderer {
       // default device reaches this branch on every single apply.
       if (held === null) return;
 
-      // Leave only what we joined, then stop. A client that has gone
-      // (uninstalled, or never was) fails listNetworks the same way it would
-      // fail any other call, and there is nothing left to ask it to leave.
-      let joined: ZeroTierNetwork[] = [];
+      // Leave only what we joined — but first, find out whether we can ask at
+      // all, because "the client did not answer" is not "the device is not a
+      // member".
+      //
+      // **This cost an operator an afternoon.** The client was masked, so
+      // listNetworks failed, and this swallowed the failure and treated it as
+      // an empty list: no leave was issued, the record below was cleared, and
+      // ZeroTier's own membership file stayed on disk. The moment the client
+      // was unmasked it read that file, rejoined a network whose subnet
+      // collided with the board's LAN, and took the device off the air — the
+      // exact failure the operator had masked it to escape.
+      //
+      // The membership lives in the client's database, not in ours. Ours is
+      // only a note saying there is something to clean up, so throwing it away
+      // at the one moment we could not check is the worst possible time.
+      let joined: ZeroTierNetwork[];
       try {
         joined = await this.cli.listNetworks();
-      } catch {
-        /* no client to ask; nothing of ours can still be joined through it */
+      } catch (error) {
+        // A client that is not installed is the one case where "cannot ask" and
+        // "nothing joined" really are the same: there is no database to hold a
+        // membership. `systemRunner` reports a binary it could not spawn as
+        // 127, which is how that case is told apart from a client that is
+        // present and simply not running.
+        if (error instanceof ZeroTierCliError && error.code === ABSENT_EXIT) {
+          this.log(`zerotier: no client here, so ${held} cannot still be joined`);
+          joined = [];
+        } else {
+          throw new Error(
+            `zerotier should leave ${held}, but the client is not answering, so ` +
+              `whether this device is still a member cannot be established. The ` +
+              `membership lives in the client's own database and would take effect ` +
+              `again the moment it starts, so the configuration is left as it was ` +
+              `rather than reporting a departure that did not happen`,
+          );
+        }
       }
       // A `leave` that fails is not swallowed. The membership lives in the
       // client's own database, so a leave that did not happen leaves the

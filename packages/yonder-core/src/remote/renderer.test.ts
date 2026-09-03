@@ -435,3 +435,73 @@ describe("RemoteRenderer waiting for the client to answer", () => {
     expect(ZEROTIER_POLL_MS).toBeLessThan(ZEROTIER_WAIT_MS);
   });
 });
+
+// The bug that cost an operator an afternoon, and the SD card out of the board
+// twice. The client was masked, so listNetworks failed; the renderer treated
+// that as "nothing joined", issued no leave, and cleared its own record. The
+// membership stayed in ZeroTier's database, and the moment the client was
+// unmasked it rejoined a network whose subnet collided with the board's LAN.
+//
+// "Cannot ask" is not "not a member". The record is the only thing that knows
+// there is cleanup owing, so it must survive exactly the moment we could not
+// check.
+describe("leaving when the client cannot be asked", () => {
+  /**
+   * A client that answers normally, then goes quiet with `code` — the shape of
+   * the real failure, where a join succeeded and the client was later masked.
+   */
+  function goesQuiet(code: number) {
+    let quiet = false;
+    const reply = (argv: string[]): CommandResult => {
+      if (argv[0] !== "zerotier-cli") return { code: 0, stdout: "", stderr: "" };
+      if (!quiet) return { code: 0, stdout: "[]", stderr: "" };
+      return { code, stdout: "", stderr: "Please check that the service is running" };
+    };
+    const h = harness(reply);
+    return { ...h, hush: () => { quiet = true; } };
+  }
+
+  it("fails the apply rather than reporting a departure that did not happen", async () => {
+    const h = goesQuiet(1);
+    await h.renderer.render(config("9fef8a3bf9000001"));
+    h.hush();
+    await expect(h.make().render(config(null))).rejects.toThrow(/not answering/);
+  });
+
+  it("keeps the record, so the next apply tries again", async () => {
+    const h = goesQuiet(1);
+    await h.renderer.render(config("9fef8a3bf9000001"));
+    h.hush();
+    await h.make().render(config(null)).catch(() => undefined);
+    expect(readFileSync(h.statePath, "utf8")).toContain("9fef8a3bf9000001");
+  });
+
+  it("does not stop or disable a client it could not question", async () => {
+    const h = goesQuiet(1);
+    await h.renderer.render(config("9fef8a3bf9000001"));
+    h.hush();
+    const before = h.calls.length;
+    await h.make().render(config(null)).catch(() => undefined);
+    const after = h.calls.slice(before).filter((a) => a[0] === "systemctl").map((a) => a[1]);
+    expect(after).not.toContain("disable");
+  });
+
+  // The one case where "cannot ask" and "nothing joined" genuinely agree:
+  // there is no client, so there is no database to hold a membership. 127 is
+  // what systemRunner reports for a binary it could not spawn.
+  it("clears the record when there is no client at all", async () => {
+    let code = 0;
+    const h = harness((argv) =>
+      argv[0] === "zerotier-cli"
+        ? code === 0
+          ? { code: 0, stdout: "[]", stderr: "" }
+          : { code, stdout: "", stderr: "zerotier-cli: command not found" }
+        : { code: 0, stdout: "", stderr: "" },
+    );
+    await h.renderer.render(config("9fef8a3bf9000001"));
+    expect(existsSync(h.statePath)).toBe(true);
+    code = 127;
+    await h.make().render(config(null));
+    expect(existsSync(h.statePath)).toBe(false);
+  });
+});
