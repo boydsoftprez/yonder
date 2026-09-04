@@ -1,0 +1,10 @@
+total 0
+lrwxrwxrwx 1 root root 12 Sep  3 23:33 platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0 -> ../../video0
+lrwxrwxrwx 1 root root 12 Sep  3 23:33 platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index1 -> ../../video1
+lrwxrwxrwx 1 root root 12 Sep  3 23:33 platform-fd500000.pcie-pci-0000:01:00.0-usbv2-0:1.3:1.0-video-index0 -> ../../video0
+lrwxrwxrwx 1 root root 12 Sep  3 23:33 platform-fd500000.pcie-pci-0000:01:00.0-usbv2-0:1.3:1.0-video-index1 -> ../../video1
+lrwxrwxrwx 1 root root 13 Sep  3 23:33 platform-fe00b840.mailbox-video-index0 -> ../../video20
+lrwxrwxrwx 1 root root 13 Sep  3 23:33 platform-fe00b840.mailbox-video-index1 -> ../../video21
+lrwxrwxrwx 1 root root 13 Sep  3 23:33 platform-fe00b840.mailbox-video-index2 -> ../../video22
+lrwxrwxrwx 1 root root 13 Sep  3 23:33 platform-fe00b840.mailbox-video-index3 -> ../../video16
+lrwxrwxrwx 1 root root 13 Sep  3 23:33 platform-feb00000.codec-video-index0 -> ../../video19
