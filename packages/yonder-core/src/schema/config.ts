@@ -173,9 +173,18 @@ const Remote = z.object({ zerotier: ZeroTier.default({}) }).strict();
  *
  * **The device is held by port, not by enumeration number** (R-CAM-05).
  * `/dev/video0` is whichever camera the kernel probed first this boot; the
- * `by-path` name — `usb-0000:01:00.0-1.2` — is the socket it is plugged into,
- * so the configured camera is the detected one after a reboot and after a
+ * `by-path` name — for example
+ * `platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0` — is
+ * the entry under `/dev/v4l/by-path/` for the socket it is plugged into, so
+ * the configured camera is the detected one after a reboot and after a
  * plug-order change. `probe/camera.ts` resolves it to a node at run time.
+ *
+ * **Not the bus id.** `v4l2-ctl --list-devices` prints a bus id in
+ * parentheses after the card name — `usb-0000:01:00.0-1.3` on this same
+ * socket — and it is tempting to reach for because it is shorter. It will
+ * not work: the bus id has no entry under `/dev/v4l/by-path/`, so a
+ * configuration holding one resolves to nothing and the operator sees a
+ * gstreamer failure with no explanation why.
  *
  * **What is not here.** No capability is stored: R-CAM-14 requires formats,
  * rates and controls to come from what the device answers, and a stored copy

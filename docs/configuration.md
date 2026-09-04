@@ -160,7 +160,7 @@ cameras:
   - id: cam0
     name: Nose
     source: usb                    # usb only today — csi, hdmi and a second camera arrive later
-    device: usb-0000:01:00.0-1.2   # the socket, not /dev/videoN — survives a reboot (R-CAM-05)
+    device: platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0  # the by-path name (R-CAM-05) — not the bus id v4l2-ctl prints, which resolves to nothing
     enabled: true
     autostart: false               # off by default; video has no equivalent of R-MAV-08
     width: 1280
