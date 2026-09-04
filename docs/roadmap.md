@@ -236,7 +236,11 @@ until M8.
   the picture, and the page says which is which — R-CTL-04 … R-CTL-09
 - Fixed bitrate, for operators who want determinism — R-VID-08
 - **A separate, cheaper copy for the browser**, because the `tee` removes the encoding
-  trade-off and not the bandwidth one — R-VID-13
+  trade-off and not the bandwidth one — R-VID-13. **Entry gate:** its cost is measured on a
+  supply that holds before the milestone leans on it. The 11% standing in for it today is
+  the whole 640×480 pipeline including a JPEG decode this branch never performs, taken on a
+  board that was browning out (K-41). This is the only P1 in the camera set and the exit
+  criterion rests on it
 - Stills where live video cannot be established, and as a choice on a link that cannot
   carry video — R-VID-14
 - The receive command in the interface, generated from the running configuration — R-VID-15

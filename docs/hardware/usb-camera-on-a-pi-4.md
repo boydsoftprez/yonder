@@ -223,9 +223,19 @@ v4l2src device=<by-path>
   ! video/x-h264,level=(string)L     # L derived from W×H, not pinned (Defect 3)
   ! h264parse
   ! tee name=t
-      t. ! queue ! rtph264pay ! udpsink host=… port=…     # ground station, R-VID-01
-      t. ! queue ! rtspclientsink location=…              # mediamtx, R-VID-03/04
+      t. ! queue leaky=downstream max-size-time=200000000 max-size-buffers=0 max-size-bytes=0
+         ! rtph264pay ! udpsink host=… port=…             # ground station, R-VID-01
+      t. ! queue leaky=downstream max-size-time=200000000 max-size-buffers=0 max-size-bytes=0
+         ! rtspclientsink location=…                      # mediamtx, R-VID-03/04
 ```
+
+**The queues are bounded and leaky, and that is load-bearing rather than tidy.** A bare
+`queue` blocks when it fills. A ground station that stops reading, a stalled media server or
+a TCP connection gone quiet then back-pressures through the `tee`, stalls the shared encoder,
+and takes every other branch with it — the browser's included. Bounded by time and dropping
+the oldest, a slow consumer loses its own frames and nothing else notices. The sketch above
+was written before this was understood; it is corrected here rather than left for somebody to
+find in a field.
 
 No `v4l2convert`. No `videoconvert`. The decoder's output format is already the encoder's
 input format.

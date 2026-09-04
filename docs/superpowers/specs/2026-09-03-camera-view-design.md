@@ -385,14 +385,32 @@ sentence should be corrected in the same change as this work.
 
 ### Decision: the browser gets a separate, cheaper copy
 
-The expensive frames are already decoded. A second encode from those frames, scaled, costs
-about what 640×480 costs — 11% of one core, 3% of the board — and takes the browser's share
-of the uplink down by most of an order of magnitude (R-VID-13).
+The expensive frames are already decoded. A second encode from those frames, scaled, takes
+the browser's share of the uplink down by most of an order of magnitude (R-VID-13).
 
-**The preview's size and rate are not yet chosen.** 640×360 at 400 kb/s is the working
-assumption used in the mockups; it is a placeholder for a measurement nobody has taken, and
-the number that matters is what that costs on the board *and* what it looks like on a
-tablet at arm's length.
+**Its cost has not been measured, and the figure that looks like a measurement is not one.**
+The 11% of a core recorded for 640×480 is the *whole* pipeline at that size — dominated by a
+JPEG decode this branch does not perform, because it starts from frames the main path has
+already decoded, and containing no term at all for downscaling 1080p at 30 fps. It is a
+substitution from a different pipeline, and it is the cost of **the only P1 in this design**,
+on which M4's exit criterion rests. Treat it as unknown until somebody runs it.
+
+Two things to measure together, before the affordability argument is leaned on any further:
+
+- **The preview branch as it will actually be built** — scaled off the decoded frames, using
+  the board's own resizer rather than software, since that hardware sits idle once the ISP
+  converter is out of the main path. Expect materially less than 11%; expect to be surprised
+  either way.
+- **The preview's size and rate.** 640×360 at 400 kb/s is the working assumption from the
+  mockups. What matters is what it costs on the board *and* what it looks like on a tablet
+  at arm's length, and only one of those is a number.
+
+**Every figure is taken on a supply that holds, and the harness enforces it.** K-41 records
+the development board browning out, and every number in the Evidence table was measured on a
+board in that state. So the measurement harness reads the board's throttle register before
+and after each run and **refuses to record the result unless both reads are clean**, with the
+supply state carried as a column beside the figure. Retaking these numbers is already agreed;
+this is what stops them being retaken badly, and it gives R-SYS-09 its first consumer.
 
 **The full-rate picture stays available while the operator asks for it**, on a held soft
 key, and the interface states what asking would cost *before* it is asked. That is R-VID-11
@@ -747,6 +765,17 @@ already producing are the right shape for it.
   exceptions: a rejection with a reason is what the Cameras page renders (R-CAM-12).
 - **Pipeline composition** — one pipeline per camera, with the `tee` and the scaled preview
   branch. The composed pipeline is a value that can be asserted in a test without a camera.
+
+  **Every branch off the tee is bounded and drops rather than blocks.** The sketch this
+  design inherits uses a bare queue on each branch, and a bare queue *blocks* when it fills:
+  a ground station that stops reading, a media server that stalls, or a TCP connection that
+  goes quiet applies back-pressure through the tee, stalls the shared encoder, and takes
+  every other branch down with it — including the one the operator is watching. So each
+  branch queue is bounded by time and set to discard the oldest frames when it fills. This
+  is one property on each of three elements, and it is what makes section 7's central claim —
+  *capture, encode and the ground-station push continue* — true rather than assumed. **A
+  test asserts it on the composed pipeline**, because it is invisible until the day it
+  matters and then it presents as the whole video system dying for no reason.
 - **The receive-line renderer** — the same facts, four renderings (section 8). Pure, and
   therefore fully testable.
 - **The aim guard** — the learned envelope per work mode, the clamp every positional command
@@ -850,7 +879,7 @@ Everything cited above, with its source.
 |---|---|
 | 1920×1080p30, whole pipeline | 55% of one core, 14% of the board |
 | 1280×720p30 | 27% of one core, 7% of the board |
-| 640×480p30 | 11% of one core, 3% of the board |
+| 640×480p30 | 11% of one core, 3% of the board — **a whole pipeline including its own JPEG decode. Not the cost of the preview branch**, which starts from frames already decoded and adds a downscale; that has never been measured |
 | Capture only | 1% |
 | plus software JPEG decode | ~50% |
 | plus hardware H.264 encode | +4% |
