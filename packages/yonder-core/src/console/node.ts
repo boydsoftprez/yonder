@@ -284,6 +284,37 @@ export function pendingChange(
 export const AP_PASSPHRASE_CHANGED = "changed — the one you set";
 
 /**
+ * What the `PASSPHRASE` cell says when this device cannot tell (R-UI-18).
+ *
+ * The daemon answers with no passphrase at all when its secret store could
+ * not be read, which is a malformed or unreadable `secrets.yaml` — and that
+ * is exactly the sort of device this panel is on the page for. Neither of the
+ * other two answers is honest there: the published default is a passphrase
+ * that will not work on any device whose operator changed it, and "changed"
+ * asserts a thing nothing has established.
+ *
+ * So the cell says what is true, and the note below carries the part that is
+ * still useful. Nothing here sends anybody looking for the value: there is
+ * nowhere to look (ADR-0008).
+ */
+export const AP_PASSPHRASE_UNKNOWN = "not known — this device cannot read it";
+
+/**
+ * The sentence added to the note in that one state, and only in it.
+ *
+ * A panel that says "not known" and stops is honest and useless. The
+ * published default is a fact about this project rather than a claim about
+ * this device, so it can be said without asserting anything the device has
+ * not established — and it is what gets an operator who never changed it back
+ * in. The value itself is not repeated here; the README is where it is
+ * published, and a second copy in a string is a second copy to go stale.
+ */
+export const AP_PASSPHRASE_UNKNOWN_NOTE =
+  " This device cannot read its own secrets, so it cannot say which "
+  + "passphrase its access point is on. If you have never changed it, it is "
+  + "the published default this project ships with.";
+
+/**
  * The line under the bar.
  *
  * No scheme, no port and no URL in it, deliberately. The console's port is
@@ -303,13 +334,19 @@ export const WAY_BACK_IN_NOTE =
 export interface WayBackInView {
   /** The access point to join. */
   join: string;
-  /** The published passphrase, or AP_PASSPHRASE_CHANGED. Never the operator's. */
+  /**
+   * The published passphrase, `AP_PASSPHRASE_CHANGED`, or
+   * `AP_PASSPHRASE_UNKNOWN`. Never the operator's.
+   */
   passphrase: string;
   /** The access point's address. */
   at: string;
   /** The name the device answers to. */
   or: string;
-  /** WAY_BACK_IN_NOTE, so the flow binds a value rather than carrying prose. */
+  /**
+   * WAY_BACK_IN_NOTE, so the flow binds a value rather than carrying prose —
+   * plus `AP_PASSPHRASE_UNKNOWN_NOTE` in the one state that needs it.
+   */
   note: string;
 }
 
@@ -319,9 +356,10 @@ export interface WayBackInView {
  *
  * **The decision about the passphrase is not made here.** The daemon has
  * already made it — `publishableApPassphrase` in `net/profiles.ts` — and what
- * arrives is either the published value or `null`. This turns `null` into
- * words. A console that compared anything itself would be a second place the
- * rule lives, and the second copy is the one that stops matching.
+ * arrives is the published value, `null`, or nothing at all. This turns the
+ * second and third into words. A console that compared anything itself would
+ * be a second place the rule lives, and the second copy is the one that stops
+ * matching.
  *
  * **A failed read sends nothing, and that is deliberate.** Every other node
  * in this console raises a rejected state on a failed read, because a stale
@@ -354,18 +392,25 @@ export function wayBackInView(
     return { payload: undefined, yonder: idle(now) };
   }
 
+  // Three answers, kept apart. `null` is "the operator set their own"; an
+  // absent key is "this device cannot tell", which is what a daemon serving
+  // without a secret store says. Collapsing the two would put one of the two
+  // wrong sentences on the panel that exists for a device in that state.
+  const known = typeof back.passphrase === "string" && back.passphrase !== "";
+  const cannotTell = !known && back.passphrase !== null;
+
   return {
     // Field by field, never spread: a key added to the daemon's answer later
     // cannot reach a page by being carried along. This is the panel that
     // would carry a credential if anything did.
     payload: {
       join: back.ssid,
-      passphrase: typeof back.passphrase === "string" && back.passphrase !== ""
-        ? back.passphrase
-        : AP_PASSPHRASE_CHANGED,
+      passphrase: known
+        ? back.passphrase as string
+        : cannotTell ? AP_PASSPHRASE_UNKNOWN : AP_PASSPHRASE_CHANGED,
       at: back.address,
       or: back.hostname,
-      note: WAY_BACK_IN_NOTE,
+      note: cannotTell ? WAY_BACK_IN_NOTE + AP_PASSPHRASE_UNKNOWN_NOTE : WAY_BACK_IN_NOTE,
     },
     yonder: idle(now),
   };

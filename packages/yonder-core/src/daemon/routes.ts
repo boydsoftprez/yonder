@@ -152,11 +152,18 @@ export interface WayBackIn {
   /** The name it answers to, ready to type. */
   hostname: string;
   /**
-   * The published default while the device is still on it, and **null once
-   * the operator has set their own** (R-SEC-10). Never the stored value: this
-   * is either the constant in `net/profiles.ts` or nothing at all.
+   * The published default while the device is still on it, **null once the
+   * operator has set their own**, and **absent when this device cannot tell**
+   * (R-SEC-10). Never the stored value: this is either the constant in
+   * `net/profiles.ts` or no value at all.
+   *
+   * Three states, the same way `RouterDeps.credential` has three. A daemon
+   * serving without a secret store — a malformed `secrets.yaml` — does not
+   * know which passphrase its own access point is on, and saying "yonder1234"
+   * there names a value that will not work on any device whose operator
+   * changed it.
    */
-  passphrase: string | null;
+  passphrase?: string | null;
 }
 
 export interface RouteResult {
@@ -222,6 +229,10 @@ export function createRouter(deps: RouterDeps): Router {
       // line per poll would bury the reason the configuration will not load
       // under thousands of copies of the fact that it will not.
     }
+    // Spread rather than assigned, so *cannot tell* is an absent key rather
+    // than an explicit `undefined` — `null` already means something else here
+    // and the two must not be able to be confused by a reader of the body.
+    const passphrase = publishableApPassphrase(deps.secrets?.get?.("ap_psk"));
     return {
       ssid: config.network.ap.ssid,
       // Without the prefix length: an operator types this into a browser, and
@@ -230,7 +241,7 @@ export function createRouter(deps: RouterDeps): Router {
       // mDNS answers for `<hostname>.local`, and the panel prints what gets
       // typed rather than a name plus an instruction about what to add to it.
       hostname: `${config.system.hostname}.local`,
-      passphrase: publishableApPassphrase(deps.secrets?.get?.("ap_psk")),
+      ...(passphrase === undefined ? {} : { passphrase }),
     };
   };
 

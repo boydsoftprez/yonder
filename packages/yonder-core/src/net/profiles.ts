@@ -36,19 +36,33 @@ export const DEFAULT_AP_PASSPHRASE = "yonder1234";
  * that is merely absent, and this is that shape: no call site can obtain a
  * stored credential from this function whatever it passes in.
  *
- * `undefined` — no `ap_psk` row at all — answers with the published value.
- * The store seeds that row with this constant before anything serves, so on a
- * running device the row is always there and `undefined` means the store
- * could not be read. In that state nothing has an operator's passphrase to
- * leak, and the choice is between naming a value printed in the README and
- * telling an operator who never changed anything that their way back in is a
- * passphrase they have never seen. Only one of those leaves them able to
- * reach the device.
+ * **Three answers, not two.**
+ *
+ *   - the constant, when the row is still on it: print it;
+ *   - `null`, when it is something else: the operator's own, withheld;
+ *   - `undefined`, when there is no row to read: *cannot tell*.
+ *
+ * `undefined` — no `ap_psk` row at all — is its own answer and must not be
+ * collapsed into either of the others. The store seeds that row with this
+ * constant before anything serves, so on a running device the row is always
+ * there and `undefined` means the store could not be read at all. This used
+ * to answer with the published value, and the reasoning was about leaking,
+ * which was right: nothing in that state has an operator's passphrase to
+ * leak. It was wrong about being correct. On a device whose operator *has*
+ * set their own and whose `secrets.yaml` has since become unreadable, the
+ * access point on the air was rendered from their value — and naming
+ * `yonder1234` prints a passphrase that will not work, in the one failure
+ * mode this exists for. `null` would be just as wrong the other way: nothing
+ * has established that anything changed.
+ *
+ * `daemon/routes.ts` already treats *cannot tell* as its own answer
+ * everywhere else (`credential: undefined`, documented there). This is the
+ * same distinction, kept rather than flattened, and the console has words for
+ * it (`AP_PASSPHRASE_UNKNOWN`).
  */
-export function publishableApPassphrase(stored: string | undefined): string | null {
-  return stored === undefined || stored === DEFAULT_AP_PASSPHRASE
-    ? DEFAULT_AP_PASSPHRASE
-    : null;
+export function publishableApPassphrase(stored: string | undefined): string | null | undefined {
+  if (stored === undefined) return undefined;
+  return stored === DEFAULT_AP_PASSPHRASE ? DEFAULT_AP_PASSPHRASE : null;
 }
 
 export const AP_CONNECTION = "yonder-ap";

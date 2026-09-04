@@ -14,6 +14,8 @@ import {
   socketPathFrom,
   wayBackInView,
   AP_PASSPHRASE_CHANGED,
+  AP_PASSPHRASE_UNKNOWN,
+  AP_PASSPHRASE_UNKNOWN_NOTE,
   WAY_BACK_IN_NOTE,
 } from "./node.js";
 import type { DaemonReply } from "./client.js";
@@ -410,6 +412,57 @@ describe("wayBackInView", () => {
    */
   it("does not tell an operator to go and find it", () => {
     expect(AP_PASSPHRASE_CHANGED).not.toMatch(/secret|file|journal|log/i);
+  });
+
+  /**
+   * **The third answer, and the one the panel exists for.** A device whose
+   * `secrets.yaml` cannot be read does not know which passphrase its own
+   * access point is on — so it says that, rather than naming the published
+   * default at an operator who set their own and would be typing a
+   * passphrase that cannot work.
+   *
+   * "Changed" would be just as wrong in the other direction: this device has
+   * not established that anything changed.
+   */
+  it.each([
+    ["absent", { ...published, passphrase: undefined }],
+    ["not a string or null", { ...published, passphrase: 42 }],
+  ])("says the device cannot tell when the passphrase is %s", (_case, back) => {
+    const shaped = wayBackInView(answering({ state: "idle", wayBackIn: back }), 0);
+    expect(shaped.payload?.passphrase).toBe(AP_PASSPHRASE_UNKNOWN);
+    expect(shaped.payload?.passphrase).not.toBe(AP_PASSPHRASE_CHANGED);
+    // The rest of the panel is still true and still drawn: the SSID is
+    // beaconed and the address is what DHCP hands out, whatever the secret
+    // store is doing.
+    expect(shaped.payload?.join).toBe("yonder");
+    expect(shaped.payload?.at).toBe("192.168.77.1");
+  });
+
+  /**
+   * And it does not leave the operator with nothing. The published default is
+   * still the answer for anybody who never changed it — that is a fact about
+   * the project, not a claim about this device — so the note says so in the
+   * one state where the device cannot say it about itself.
+   */
+  it("points at the published default without claiming this device is on it", () => {
+    const shaped = wayBackInView(
+      answering({ state: "idle", wayBackIn: { ...published, passphrase: undefined } }), 0,
+    );
+    expect(shaped.payload?.note).toContain(WAY_BACK_IN_NOTE);
+    expect(shaped.payload?.note).toContain(AP_PASSPHRASE_UNKNOWN_NOTE);
+    // Never the value itself, in either half.
+    expect(shaped.payload?.note).not.toContain("yonder1234");
+  });
+
+  /** The ordinary states carry the ordinary note and nothing more. */
+  it.each([
+    ["published", "yonder1234"],
+    ["changed", null],
+  ])("adds nothing to the note when the passphrase is %s", (_case, passphrase) => {
+    const shaped = wayBackInView(
+      answering({ state: "idle", wayBackIn: { ...published, passphrase } }), 0,
+    );
+    expect(shaped.payload?.note).toBe(WAY_BACK_IN_NOTE);
   });
 
   /**

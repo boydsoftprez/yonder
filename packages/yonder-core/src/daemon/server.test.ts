@@ -566,23 +566,32 @@ describe("startServer", () => {
           expect((res.body as { error: string }).error).toMatch(/administrator password/);
 
           /**
-           * **And it still says how to get back to the device** (R-UI-18).
+           * **And it still says how to get back to the device** (R-UI-18) —
+           * without naming a passphrase it cannot vouch for.
            *
            * This is the state the way back in exists for, and it is also the
-           * one where the daemon cannot read `ap_psk` at all — the malformed
+           * one where the daemon cannot read `ap_psk` at all: the malformed
            * file that degraded the renderer set is the same file that row
-           * lives in. It names the published passphrase, which is the
-           * constant in `net/profiles.ts` and is public by construction; it
-           * cannot be a leak, because no stored value is ever copied into
-           * this field. Answering `null` here would tell an operator who has
-           * never changed anything that their way in is a passphrase they
-           * have never seen.
+           * lives in. This used to answer `yonder1234` here, and the
+           * reasoning was about leaking — correct, and beside the point. On a
+           * device whose operator *had* set their own passphrase, the access
+           * point on the air was rendered from their value, and the panel
+           * printed a passphrase that could not work in the one failure mode
+           * it exists for. `null` would be equally wrong: nothing here has
+           * established that anything changed.
+           *
+           * So there is no passphrase in the answer at all, and the console
+           * has words for that (`AP_PASSPHRASE_UNKNOWN`). The three fields
+           * that are public by construction — beaconed, handed out by DHCP,
+           * announced over mDNS — are still there, which is what keeps this
+           * panel useful on a device that has gone wrong.
            */
           const back = (status.body as { wayBackIn: WayBackIn }).wayBackIn;
           expect(back).toMatchObject({
             ssid: "yonder", address: "192.168.77.1", hostname: "yonder.local",
-            passphrase: DEFAULT_AP_PASSPHRASE,
           });
+          expect("passphrase" in back).toBe(false);
+          expect(JSON.stringify(status.body)).not.toContain(DEFAULT_AP_PASSPHRASE);
         } finally {
           await server.close();
         }

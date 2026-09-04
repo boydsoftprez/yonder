@@ -1285,14 +1285,45 @@ describe("the way back in", () => {
    * the leak unreachable rather than merely absent, which is the difference
    * R-SEC-10 asks for.
    */
-  it("returns the published constant, never the row it read", async () => {
+  it("returns the published constant, and never the row it read", async () => {
     const route = provisionedWithApPassphrase(DEFAULT_AP_PASSPHRASE);
     const res = await route("GET", "/status", undefined);
-    const back = (res.body as { wayBackIn: { passphrase: string | null } }).wayBackIn;
+    const back = (res.body as { wayBackIn: { passphrase?: string | null } }).wayBackIn;
     expect(back.passphrase).toBe(DEFAULT_AP_PASSPHRASE);
-    // Same characters, and provably the module's own string rather than a
-    // copy that travelled through secrets.yaml.
-    expect(back.passphrase === DEFAULT_AP_PASSPHRASE).toBe(true);
+    // This used to assert `back.passphrase === DEFAULT_AP_PASSPHRASE` as well,
+    // which is `toBe` written a second time: JavaScript string equality cannot
+    // tell the module's own string from a copy that travelled through
+    // secrets.yaml, so the docstring claimed a property the test could not
+    // express. The property is real and it is `publishableApPassphrase`'s —
+    // no argument produces an answer that is not the constant, null or
+    // nothing — and `profiles.test.ts` proves it by value across seven
+    // inputs including near misses. What is asserted *here* is the half this
+    // route owns: a value that is not the published one never reaches the
+    // body, whatever the store holds.
+    const theirs = "an-operators-own-passphrase";
+    const other = await provisionedWithApPassphrase(theirs)("GET", "/status", undefined);
+    expect(JSON.stringify(other.body)).not.toMatch(new RegExp(theirs));
+  });
+
+  /**
+   * **Cannot tell is its own answer** (I-3, R-UI-18).
+   *
+   * A daemon whose `secrets.yaml` could not be read is serving without a
+   * secret store — that is what `buildRenderers` throwing leaves behind, and
+   * it is the state this panel exists for. It used to print `yonder1234`
+   * unconditionally, which is a passphrase that will not work on any device
+   * whose operator had set their own: the panel named a value for the one
+   * failure mode it was written for, and the value was wrong.
+   */
+  it("prints no passphrase at all when it cannot read the store", async () => {
+    const route = provisioned({ secrets: undefined });
+    const res = await route("GET", "/status", undefined);
+    const back = (res.body as { wayBackIn: { passphrase?: string | null } }).wayBackIn;
+    expect("passphrase" in back).toBe(false);
+    expect(JSON.stringify(res.body)).not.toMatch(/yonder1234/);
+    // Everything that is public by construction is still there: this panel
+    // stays useful on a device that has gone wrong.
+    expect(back).toMatchObject({ ssid: "yonder", address: "192.168.77.1", hostname: "yonder.local" });
   });
 
   /**
@@ -1319,15 +1350,25 @@ describe("the way back in", () => {
    * else out of `config.yaml` may follow them onto this route.
    */
   it("carries the way back in and no other configuration", async () => {
+    // `client`, not `wifi_client`. The section is called `client` in the
+    // schema and `ConfigSchema` is `.strict()`, so the fixture this test used
+    // to write did not load at all: `wayBackIn()` caught the failure and fell
+    // back to DEFAULT_CONFIG, and the three operator values grepped for below
+    // had never been in a loaded configuration. The boundary this test exists
+    // to assert — that nothing else out of a *real* config.yaml follows
+    // `wayBackIn` onto an ungated route — was not being exercised.
     const secret: Config = {
       ...DEFAULT_CONFIG,
       network: {
         ...DEFAULT_CONFIG.network,
-        wifi_client: { ssid: "a-network-they-joined", psk: { secret: "wifi_psk" } },
+        client: { ssid: "a-network-they-joined", psk: { secret: "wifi_psk" } },
         modem: { ...DEFAULT_CONFIG.network.modem, apn: "an-apn-they-configured" },
       },
     };
     saveConfig(configPath, secret);
+    // The fixture really is what the daemon loads, which is what makes the
+    // rest of this test mean anything.
+    expect(loadConfig(configPath).network.client.ssid).toBe("a-network-they-joined");
     const body = JSON.stringify((await provisioned({})("GET", "/status", undefined)).body);
     // Not vacuous: the route did answer, and it did carry the panel.
     expect(body).toMatch(/"wayBackIn"/);

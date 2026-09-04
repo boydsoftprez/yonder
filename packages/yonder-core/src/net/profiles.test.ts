@@ -76,7 +76,7 @@ describe("publishableApPassphrase", () => {
       "an-operators-own-passphrase", undefined,
     ]) {
       const answer = publishableApPassphrase(stored);
-      expect(answer === DEFAULT_AP_PASSPHRASE || answer === null).toBe(true);
+      expect(answer === DEFAULT_AP_PASSPHRASE || answer === null || answer === undefined).toBe(true);
     }
   });
 
@@ -92,14 +92,31 @@ describe("publishableApPassphrase", () => {
   });
 
   /**
-   * No row at all means the store could not be read — the seeding in
-   * `daemon/server.ts` runs before anything serves, so a running device
-   * always has one. Nothing in that state has an operator's passphrase to
-   * leak, and answering `null` would tell an operator who has never changed
-   * anything that their way back in is a passphrase they have never seen.
+   * **No row at all is *cannot tell*, and it is its own answer.**
+   *
+   * `undefined` arises on exactly one condition: `buildRenderers` threw, so
+   * the secret store was never passed — which is an unreadable or malformed
+   * `secrets.yaml`. This used to answer with the published default, and the
+   * reasoning behind that was about leaking, which it was right about: there
+   * is nothing to leak in that state. It was wrong about being *correct*. On
+   * a device whose operator has set their own passphrase and whose
+   * `secrets.yaml` has since become unreadable, the access point on the air
+   * was rendered from their value, and the panel would tell them to join with
+   * `yonder1234` — a passphrase that will not work, printed in the one
+   * failure mode the panel exists for.
+   *
+   * The router already treats *cannot tell* as its own answer everywhere else
+   * (`credential: undefined`). This is the same distinction, kept rather than
+   * collapsed into "the default".
    */
-  it("names the published value when there is no row to read", () => {
-    expect(publishableApPassphrase(undefined)).toBe(DEFAULT_AP_PASSPHRASE);
+  it("says nothing at all when there is no row to read", () => {
+    expect(publishableApPassphrase(undefined)).toBeUndefined();
+  });
+
+  /** And still never the argument, in the branch that has one. */
+  it("never hands back the row it was given", () => {
+    const theirs = "an-operators-own-passphrase";
+    expect(publishableApPassphrase(theirs)).not.toBe(theirs);
   });
 });
 
