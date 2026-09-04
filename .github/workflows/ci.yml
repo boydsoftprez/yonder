@@ -2,9 +2,19 @@ name: CI
 on:
   push: { branches: [main] }
   pull_request:
+# Where these jobs run is a repository variable, not a line in this file.
+#
+# CI_RUNNER unset — a fresh clone, and this repository once it is public —
+# means ubuntu-latest, which is free for public repositories. Set to a runner
+# label, the jobs go to that runner instead, which is free for private ones.
+# So the day the repository opens, deleting the variable is the whole change;
+# nothing here has to be edited, and nothing here names a machine.
+#
+# Self-hosted is deliberately the private-only setting: a public repository
+# would run a fork's pull request on that hardware.
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
       # 24, not 20. Node-RED 5 refuses to start below 22.9, and the console's
@@ -41,7 +51,7 @@ jobs:
           git diff --exit-code config/defaults
 
   installer:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
       # The console role calls `require_node 22.12`, and require_node dies on a
@@ -50,9 +60,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
+      # shellcheck ships on the GitHub-hosted image and is installed once on a
+      # persistent runner, so the install is a fallback rather than a step: an
+      # `apt-get update` on every job is a minute spent re-proving a binary is
+      # already there. Still unconditional in effect — a runner without it
+      # installs it and the job passes, rather than failing on host state.
       - name: Lint shell
         run: |
-          sudo apt-get update && sudo apt-get install -y shellcheck
+          command -v shellcheck >/dev/null \
+            || { sudo apt-get update && sudo apt-get install -y shellcheck; }
           shellcheck installer/install.sh installer/lib/*.sh installer/roles/*.sh scripts/*.sh
       - name: Installer dry run
         run: ./installer/install.sh --dry-run
@@ -72,7 +88,7 @@ jobs:
   # dashboard and a real browser, which is why it is its own job rather than a
   # step in `test`.
   console-pages:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -85,8 +101,12 @@ jobs:
       # arm64 a Pi runs, because this runner has to execute it.
       - name: Stage the console tree
         run: ./installer/make-payload.sh --arch linux-x64
+      # --with-deps is an apt install under sudo. A GitHub-hosted VM is new
+      # every run and needs it; a persistent runner had those libraries
+      # installed once, so asking for them per job is sudo and bandwidth spent
+      # on a no-op. The browser itself is cached either way.
       - name: Install the browser the capture gate needs
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install ${{ runner.environment == 'github-hosted' && '--with-deps' || '' }} chromium
       - name: Verify the pages, and capture them
         run: ./scripts/verify-pages.sh
       # Geometry is per-platform — the system font stack resolves differently
@@ -121,6 +141,12 @@ jobs:
           name: console-pages
           path: vendor/capture/
           if-no-files-found: warn
+          # Storage is billed on a private repository no matter which runner
+          # produced it — a self-hosted runner saves minutes, not gigabytes.
+          # These are looked at while the pull request is open, and never
+          # again; 90 days of every run's captures is paying to keep pictures
+          # nobody opens.
+          retention-days: 7
 
   # yonder-core declares `engines.node >= 20` and `20-yonder-core.sh` calls
   # `require_node 20`, and that floor is load-bearing rather than decorative:
@@ -135,7 +161,7 @@ jobs:
   # running them here would assert something that was never true. Verified to
   # pass on 20.20.2 before this job was added, rather than added hopefully.
   core-on-its-floor:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

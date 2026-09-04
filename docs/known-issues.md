@@ -892,6 +892,62 @@ This is the second documentation divergence of the same kind — the first was a
 Both were written as descriptions of a finished system rather than of the one
 that exists.
 
+### K-40 · The Pi 4's hardware JPEG decoder advertises MJPEG and cannot be started
+
+`/dev/video10` (`bcm2835-codec-decode`) lists `MJPG` on its output side, so `v4l2jpegdec`
+negotiates against it happily. Streaming never starts. The pipeline stalls indefinitely —
+not slowly, permanently — and the kernel logs
+`bcm2835_codec_start_streaming: Failed enabling i/p port, ret -3` followed by a warning
+trace.
+
+This matters because USB cameras hand us compressed frames and nothing else worth flying
+with: at 1080p this camera offers MJPEG at 90 fps and raw at 5. Decoding those JPEGs in
+software is roughly 50% of one core at 1080p30, and it is the **entire** cost of the video
+pipeline — the hardware H.264 encoder beside it adds four points. So the whole of M4's CPU
+budget is a workaround for this.
+
+Characterised in [`hardware/usb-camera-on-a-pi-4.md`](hardware/usb-camera-on-a-pi-4.md), so
+that nobody looks at that 50% and reaches for the hardware decoder again: it is not a
+resolution limit (640×480 fails identically), not a missing parser (`jpegparse` in front
+fails faster, with `Internal data stream error`), and not a GStreamer fault — the element
+issues the ioctls correctly and the driver cannot enable the port.
+
+Not ours to fix, and not worth working around further. It is recorded because it is
+invisible from the outside: the capability is advertised, so every reasonable person will
+try it once. Revisit only if a kernel update changes the behaviour, and re-run the
+reproduction in that note rather than assuming.
+
+### K-41 · The development board browns out, and nothing in Yonder says so
+
+`vcgencmd get_throttled` on the Raspberry Pi 4 dev board returns `0x50000` — bit 16,
+under-voltage has occurred, and bit 18, throttling has occurred — with three undervoltage
+events logged in the first two minutes of a boot. The board carries a powered hub, an ELP
+USB camera, a Quectel EC25 and, briefly, a DJI camera. The EC25 pulls hard on transmit.
+
+It presents as spontaneous reboots. The board restarted at least twice during the M4
+brainstorming session and each time came back on a different address, which cost real time
+to chase and was initially mistaken for a wedged pipeline. The kernel also failed to read
+the DJI's USB descriptor four times and power-cycled the port twice before enumerating it
+on the eleventh attempt — what a marginal supply looks like from the bus side.
+
+Two separate things, and only the second is Yonder's:
+
+- **The bench supply is inadequate.** Not a defect in this repository. Recorded because
+  every measurement in
+  [`hardware/usb-camera-on-a-pi-4.md`](hardware/usb-camera-on-a-pi-4.md) was taken on a
+  board that was browning out, so those numbers are a floor rather than a clean reading,
+  and they should be retaken on a supply that holds.
+- **Yonder reports CPU temperature and says nothing about supply voltage.** R-SYS-01 covers
+  model, load, temperature, memory and uptime. The register that would have explained all
+  of the above is one call away and nothing reads it. On a desk a brownout is an
+  annoyance; in an airframe it is a reboot in flight, and it presents to the operator as an
+  aircraft that went quiet with nothing in any log to say why.
+
+Closed by **R-SYS-09**, added in M4 — encoding video is what pushes the draw up, so M4 is
+the milestone that provokes the fault it needs to report.
+
+---
+
 ---
 
 ### K-42 · ~~The fallback watchdog accepts an address as proof of reachability~~ — CLOSED
