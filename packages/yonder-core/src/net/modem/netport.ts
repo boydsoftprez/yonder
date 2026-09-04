@@ -1,6 +1,34 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import type { Clock } from "../../apply/types.js";
 import type { Config } from "../../schema/config.js";
+import { withDeadline } from "../deadline.js";
 import type { MmcliClient } from "./mmcli/client.js";
+
+/**
+ * How long the two ModemManager reads get before the last known answer is used.
+ *
+ * A hang is not a throw. The production runner kills a command after
+ * `RUN_TIMEOUT_MS` — two minutes — and a wedged ModemManager on a D-Bus call
+ * is an everyday failure mode for a USB modem that enumerated badly, so
+ * without a bound here every reachability reading waits that long: a
+ * `/reach/state` the console gives up on, a reach tick abandoned by its own
+ * deadline while its `mmcli` child lives on, another started five seconds
+ * later, and a fallback watchdog whose `carrying` question expires into
+ * raising the access point on a board where another path is working.
+ *
+ * Two seconds is far longer than the two local reads it covers — tens of
+ * milliseconds on the measured board — and small against both the things it
+ * sits inside: `REACH_TICK_MS` (5 s), so readings cannot pile up, and
+ * `CARRYING_DEADLINE_MS` (10 s), so interrogating the modem is never what
+ * makes the watchdog's question late.
+ */
+export const MODEM_READ_DEADLINE_MS = 2_000;
+
+/** A modem seen at a ModemManager path, and the net port it came up on. */
+interface SeenModem {
+  path: string;
+  net: string;
+}
 
 /**
  * The interface a modem's bytes actually go out of, asked of ModemManager.
@@ -11,26 +39,30 @@ import type { MmcliClient } from "./mmcli/client.js";
  * counting need the second one, and ModemManager is the only thing that knows
  * it. See `pathDevices`, which is where the name is used.
  *
- * **Two facts, and only one of them may be remembered (R-CEL-12).** A modem's
- * *port layout* is a property of the modem, so `mmcli -m` — the expensive read,
- * a screenful of keys — is asked once per modem and kept. That a modem
- * *exists* is a property of the moment, so `mmcli -L` is asked every time and
- * an empty answer forgets the name.
+ * **Read now, every time (R-CEL-12).** Nothing here is remembered in order to
+ * skip a reading. The defect this class was extracted to fix was a name kept
+ * for the life of the daemon: once a modem had been seen, an unplugged one
+ * went on being reported as `wwan0` whatever ModemManager and NetworkManager
+ * now said, `/reach/state` kept serving a cellular path on hardware that was
+ * gone, and the console drew a ready lamp over the words "No modem found".
  *
- * Remembering both is the defect this class was extracted to fix: once a modem
- * had been seen, an unplugged one went on being reported as `wwan0` whatever
- * ModemManager and NetworkManager now said, `/reach/state` kept serving a
- * cellular path on hardware that was gone, and the console drew a ready lamp
- * over the words "No modem found".
+ * Caching the port layout against the modem's ModemManager path would fix the
+ * unplugged case and leave a narrower one open: those paths are numbered per
+ * service run, so a ModemManager that restarts hands `…/Modem/0` to whatever
+ * is there next, and a stick swapped across that restart would inherit the
+ * departed one's port. The two reads cost two subprocesses alongside the
+ * `nmcli` ones the same reachability reading already spends, which is not
+ * worth an identity assumption that is wrong exactly when a modem has been
+ * changed.
  *
- * **A question that could not be asked is not an answer.** An `mmcli` that
- * fails keeps the remembered name rather than dropping to the control port:
- * probing `cdc-wdm0` fails on a perfectly good link, and three of those stand
- * a working modem down. Only ModemManager *answering* that it has no modem
- * clears the name — that is an answer, and this is the class of it. A board
- * where mmcli has never worked has nothing remembered and falls back to the
- * device NetworkManager lists, which is better than nothing where the two
- * coincide.
+ * **What is remembered is the answer to a reading that did not happen.** An
+ * `mmcli` that fails or hangs must not drop this to the control port: probing
+ * `cdc-wdm0` fails on a perfectly good link, and three of those stand a
+ * working modem down. So a failed or late reading answers with the last name
+ * actually observed, and only ModemManager *answering* that it has no modem
+ * clears it — that is an answer, and this is the class of it. A board where
+ * mmcli has never worked has nothing to fall back on and returns null, which
+ * puts `pathDevices` back on the device NetworkManager lists.
  *
  * Nothing here can reduce reachability (rule 6). A path with no interface is
  * reported absent, and absent paths are neither probed nor stood down; and the
@@ -39,17 +71,27 @@ import type { MmcliClient } from "./mmcli/client.js";
  */
 export class ModemNetPort {
   /**
-   * The last modem seen and the net port it came up on, or null.
+   * The last modem actually seen, or null. Read only when a reading fails.
    *
-   * Keyed by the modem's ModemManager path so that a *different* modem in the
-   * same socket is read again rather than inheriting the port layout of the
-   * one before it. Only ever holds a name that was found: a modem still coming
-   * up has no net port yet, and caching that absence would keep this asking
-   * NetworkManager for the control port for the life of the daemon.
+   * The path is kept alongside the name because the name is only an answer for
+   * the modem it was read from: a `mmcli -m` that fails against a path this
+   * has never seen has nothing to fall back on.
    */
-  private remembered: { path: string; net: string } | null = null;
+  private seen: SeenModem | null = null;
 
-  constructor(private readonly client: MmcliClient) {}
+  /**
+   * Which reading owns `seen`, so that one abandoned by the deadline cannot
+   * come back and overwrite what a newer one recorded. The same generation
+   * guard `ReachWatch.tick` keeps, for the same reason: the deadline abandons
+   * the *wait*, not the *work*.
+   */
+  private generation = 0;
+
+  constructor(
+    private readonly client: MmcliClient,
+    /** Injected, like every other timer in this daemon: nothing waits on the wall clock. */
+    private readonly clock: Clock,
+  ) {}
 
   /**
    * The net port, or null to fall back to the device NetworkManager lists.
@@ -62,33 +104,46 @@ export class ModemNetPort {
     const modem = config.network.modem;
     if (!modem.enabled || modem.mode !== "auto") return null;
 
+    const mine = ++this.generation;
+    const isCurrent = (): boolean => mine === this.generation;
+    return withDeadline(
+      this.clock,
+      MODEM_READ_DEADLINE_MS,
+      this.read(isCurrent),
+      // Late. Which of the two reads is stuck is not knowable from here, so
+      // this answers with the last name observed rather than with nothing.
+      () => this.seen?.net ?? null,
+    );
+  }
+
+  /** One reading, both reads, no bound of its own. See interfaceFor. */
+  private async read(isCurrent: () => boolean): Promise<string | null> {
     let paths: string[];
     try {
       paths = await this.client.modems();
     } catch {
-      // Could not ask. See the class comment: a doubt is not evidence that the
-      // modem has gone, and the cost of treating it as one is a working link
-      // probed on its control port and stood down.
-      return this.remembered?.net ?? null;
+      return this.seen?.net ?? null;
     }
 
     const path = paths[0];
     if (path === undefined) {
       // ModemManager answered, and the answer is that there is no modem.
-      this.remembered = null;
+      if (isCurrent()) this.seen = null;
       return null;
     }
-    if (this.remembered?.path === path) return this.remembered.net;
 
     try {
       const net = (await this.client.modem(path)).ports.net;
-      // Not remembered, so the next reading asks again: a modem that has just
-      // appeared can be claimed before its net port exists.
+      // A modem can be claimed before its net port exists. Nothing is recorded
+      // for that, so the next reading asks again rather than leaving this on
+      // the control port for the life of the daemon.
       if (net === null) return null;
-      this.remembered = { path, net };
+      if (isCurrent()) this.seen = { path, net };
       return net;
     } catch {
-      return null;
+      // Could not ask about this modem. A remembered name answers for the
+      // modem it was read from and for no other.
+      return this.seen?.path === path ? this.seen.net : null;
     }
   }
 }

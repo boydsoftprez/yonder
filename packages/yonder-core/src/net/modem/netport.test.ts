@@ -2,9 +2,10 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { ModemNetPort } from "./netport.js";
+import { ModemNetPort, MODEM_READ_DEADLINE_MS } from "./netport.js";
 import { MmcliClient } from "./mmcli/client.js";
 import type { CommandRunner } from "../runner.js";
+import type { Clock } from "../../apply/types.js";
 import type { Config } from "../../schema/config.js";
 import { DEFAULT_CONFIG } from "../../schema/config.js";
 
@@ -27,6 +28,30 @@ function withoutNetPort(show: string): string {
 }
 
 /**
+ * Time this daemon controls. Nothing here may wait on the wall clock, in
+ * production or in a test — and a deadline test that did would take seconds.
+ */
+function fakeClock() {
+  let now = 0;
+  let next = 1;
+  const timers = new Map<number, { at: number; fn: () => void }>();
+  const clock: Clock = {
+    now: () => now,
+    setTimer: (ms, fn) => { const h = next++; timers.set(h, { at: now + ms, fn }); return h; },
+    clearTimer: (h) => { timers.delete(h); },
+  };
+  return {
+    clock,
+    advance(ms: number) {
+      now += ms;
+      for (const [h, t] of [...timers]) {
+        if (t.at <= now) { timers.delete(h); t.fn(); }
+      }
+    },
+  };
+}
+
+/**
  * A board whose modem can be taken away between readings.
  *
  * The real `MmcliClient` on a fake runner, not a stub of the client: the point
@@ -34,25 +59,25 @@ function withoutNetPort(show: string): string {
  * would assert about the parse this file does not own. Nothing here reaches a
  * real command.
  */
-function board(present: () => string[]) {
+function board(present: () => string[], clock: Clock = fakeClock().clock) {
   const calls: string[][] = [];
   const runner: CommandRunner = async (argv) => {
     calls.push(argv);
     const ok = (stdout: string) => ({ code: 0, stdout, stderr: "" });
     if (argv[1] === "-L") return ok(listing(...present()));
     if (argv[1] === "-m") {
-      // Modem/1 is a second stick, up on a second net port.
       if (!present().includes(argv[2] ?? "")) {
         return { code: 1, stdout: "", stderr: "error: couldn't find modem" };
       }
-      return ok(argv[2] === MODEM_1
-        ? fixture("modem-show").replace(/wwan0/g, "wwan1")
-        : fixture("modem-show"));
+      // Every other stick on this bench came up on wwan1.
+      return ok(argv[2] === MODEM_0
+        ? fixture("modem-show")
+        : fixture("modem-show").replace(/wwan0/g, "wwan1"));
     }
     return ok("");
   };
   return {
-    port: new ModemNetPort(new MmcliClient(runner)),
+    port: new ModemNetPort(new MmcliClient(runner), clock),
     calls,
     reads: () => calls.filter((a) => a[1] === "-m").length,
     listings: () => calls.filter((a) => a[1] === "-L").length,
@@ -76,22 +101,25 @@ describe("ModemNetPort", () => {
     expect(await port.interfaceFor(AUTO)).toBe("wwan0");
   });
 
-  it("asks the modem for its port layout once, and not again", async () => {
-    // `mmcli -m` is a screenful of keys and the layout does not change under a
-    // modem that is still there. This is the half that may be remembered.
-    const { port, reads } = board(() => [MODEM_0]);
-    for (let i = 0; i < 5; i++) expect(await port.interfaceFor(AUTO)).toBe("wwan0");
-    expect(reads()).toBe(1);
-  });
-
-  it("asks whether the modem is still there on every reading", async () => {
-    const { port, listings } = board(() => [MODEM_0]);
-    for (let i = 0; i < 3; i++) await port.interfaceFor(AUTO);
+  /**
+   * R-CEL-12. Nothing is remembered in order to skip a reading — not that the
+   * modem exists, and not its port layout either.
+   *
+   * ModemManager numbers its object paths per service run, so a restart hands
+   * `…/Modem/0` to whatever is there next. A layout cached against that path
+   * would give a stick swapped across the restart the departed one's port,
+   * and the daemon would probe and count an interface that is not the one
+   * carrying traffic.
+   */
+  it("asks ModemManager both questions on every reading", async () => {
+    const { port, reads, listings } = board(() => [MODEM_0]);
+    for (let i = 0; i < 3; i++) expect(await port.interfaceFor(AUTO)).toBe("wwan0");
     expect(listings()).toBe(3);
+    expect(reads()).toBe(3);
   });
 
   /**
-   * R-CEL-12, and the defect this class was extracted for.
+   * The defect this class was extracted for.
    *
    * The old cache kept the name for the life of the daemon, so `pathDevices`
    * went on being handed `wwan0` after the modem was unplugged, `/reach/state`
@@ -107,21 +135,19 @@ describe("ModemNetPort", () => {
   });
 
   it("finds the modem again when it comes back", async () => {
-    // R-CEL-06: a disconnect and reconnect costs the operator nothing. The
-    // layout is read again because the absence cleared what was remembered.
+    // R-CEL-06: a disconnect and reconnect costs the operator nothing.
     let plugged = true;
-    const { port, reads } = board(() => (plugged ? [MODEM_0] : []));
+    const { port } = board(() => (plugged ? [MODEM_0] : []));
     expect(await port.interfaceFor(AUTO)).toBe("wwan0");
     plugged = false;
     expect(await port.interfaceFor(AUTO)).toBeNull();
     plugged = true;
     expect(await port.interfaceFor(AUTO)).toBe("wwan0");
-    expect(reads()).toBe(2);
   });
 
-  it("does not give a new modem the port layout of the one before it", async () => {
-    // Swapped sticks, same socket. A remembered layout keyed on nothing would
-    // report the departed modem's port for the new one's traffic.
+  it("does not give a modem the port layout of the one before it", async () => {
+    // A stick swapped across a ModemManager restart: the object path is
+    // numbered per service run, so the new modem answers to the old name.
     let paths = [MODEM_0];
     const { port } = board(() => paths);
     expect(await port.interfaceFor(AUTO)).toBe("wwan0");
@@ -139,7 +165,7 @@ describe("ModemNetPort", () => {
       if (argv[1] === "-L") return { code: 0, stdout: listing(MODEM_0), stderr: "" };
       return { code: 0, stdout: fixture("modem-show"), stderr: "" };
     };
-    const port = new ModemNetPort(new MmcliClient(runner));
+    const port = new ModemNetPort(new MmcliClient(runner), fakeClock().clock);
     expect(await port.interfaceFor(AUTO)).toBe("wwan0");
     mmcliWorks = false;
     expect(await port.interfaceFor(AUTO)).toBe("wwan0");
@@ -147,22 +173,99 @@ describe("ModemNetPort", () => {
 
   it("has nothing to fall back on when mmcli never worked", async () => {
     const runner: CommandRunner = async () => ({ code: 127, stdout: "", stderr: "not found" });
-    expect(await new ModemNetPort(new MmcliClient(runner)).interfaceFor(AUTO)).toBeNull();
+    const port = new ModemNetPort(new MmcliClient(runner), fakeClock().clock);
+    expect(await port.interfaceFor(AUTO)).toBeNull();
   });
 
-  it("keeps asking while a modem that has been claimed has no net port yet", async () => {
-    // A modem is claimed before it is ready. Remembering the absence would
-    // leave this asking NetworkManager for the control port for the life of
-    // the daemon, which is the failure the net port exists to avoid.
-    let ready = false;
+  it("does not answer for a modem it has never read", async () => {
+    // The remembered name belongs to the modem it was read from. A different
+    // path whose read fails has nothing to fall back on.
+    let path = MODEM_0;
     const runner: CommandRunner = async (argv) => {
-      if (argv[1] === "-L") return { code: 0, stdout: listing(MODEM_0), stderr: "" };
-      const show = fixture("modem-show");
-      return { code: 0, stderr: "", stdout: ready ? show : withoutNetPort(show) };
+      if (argv[1] === "-L") return { code: 0, stdout: listing(path), stderr: "" };
+      if (argv[2] === MODEM_0) return { code: 0, stdout: fixture("modem-show"), stderr: "" };
+      return { code: 1, stdout: "", stderr: "error: couldn't find modem" };
     };
-    const port = new ModemNetPort(new MmcliClient(runner));
+    const port = new ModemNetPort(new MmcliClient(runner), fakeClock().clock);
+    expect(await port.interfaceFor(AUTO)).toBe("wwan0");
+    path = MODEM_0.replace("/0", "/1");
     expect(await port.interfaceFor(AUTO)).toBeNull();
-    ready = true;
+  });
+
+  /**
+   * A hang is not a throw, and the `try`/`catch` above does not cover one.
+   *
+   * The production runner kills a command after two minutes, so an unbounded
+   * reading blocks `/reach/state` past the console's patience, leaves an
+   * `mmcli` child behind on every five-second tick, and lets the fallback
+   * watchdog's question expire into raising the access point on a board where
+   * another path is working.
+   */
+  it("answers within its deadline when ModemManager wedges", async () => {
+    const { clock, advance } = fakeClock();
+    let wedged = false;
+    const runner: CommandRunner = async (argv) => {
+      // Never settles, which is what `mmcli -L` does against a wedged
+      // ModemManager until the runner's own two-minute timeout kills it.
+      if (wedged) return new Promise(() => {});
+      if (argv[1] === "-L") return { code: 0, stdout: listing(MODEM_0), stderr: "" };
+      return { code: 0, stdout: fixture("modem-show"), stderr: "" };
+    };
+    const port = new ModemNetPort(new MmcliClient(runner), clock);
+    expect(await port.interfaceFor(AUTO)).toBe("wwan0");
+
+    wedged = true;
+    const late = port.interfaceFor(AUTO);
+    advance(MODEM_READ_DEADLINE_MS);
+    // The last name actually observed, not the control port: a reading that
+    // did not happen is not evidence that the modem has changed.
+    expect(await late).toBe("wwan0");
+  });
+
+  it("has nothing to answer with when the first reading is the one that wedges", async () => {
+    const { clock, advance } = fakeClock();
+    const runner: CommandRunner = async () => new Promise(() => {});
+    const port = new ModemNetPort(new MmcliClient(runner), clock);
+    const late = port.interfaceFor(AUTO);
+    advance(MODEM_READ_DEADLINE_MS);
+    expect(await late).toBeNull();
+  });
+
+  it("lets no abandoned reading overwrite what a newer one recorded", async () => {
+    // The deadline abandons the wait, not the work. A reading that answers
+    // after a newer one has been taken is about a moment that has passed.
+    const { clock, advance } = fakeClock();
+    type Answer = { code: number; stdout: string; stderr: string };
+    const show = (net: string): Answer =>
+      ({ code: 0, stdout: fixture("modem-show").replace(/wwan0/g, net), stderr: "" });
+    let release: ((v: Answer) => void) | null = null;
+    let mode: "stall" | "ok" | "broken" = "stall";
+
+    const runner: CommandRunner = async (argv) => {
+      if (mode === "broken") return { code: 1, stdout: "", stderr: "error: cannot connect to D-Bus" };
+      if (argv[1] === "-L") return { code: 0, stdout: listing(MODEM_0), stderr: "" };
+      if (mode === "stall") return new Promise<Answer>((res) => { release = res; });
+      return show("wwan0");
+    };
+    const port = new ModemNetPort(new MmcliClient(runner), clock);
+
+    // A reading whose `mmcli -m` never comes back, abandoned by the deadline.
+    const abandoned = port.interfaceFor(AUTO);
+    advance(MODEM_READ_DEADLINE_MS);
+    expect(await abandoned).toBeNull();
+
+    // A newer reading is taken, and records wwan0.
+    mode = "ok";
+    expect(await port.interfaceFor(AUTO)).toBe("wwan0");
+
+    // Only now does the abandoned one answer — with a different port, which is
+    // what makes the overwrite visible.
+    release?.(show("wwan9"));
+    await new Promise((r) => setImmediate(r));
+
+    // It is not what the next reading falls back on: that is still the name
+    // the newer reading recorded.
+    mode = "broken";
     expect(await port.interfaceFor(AUTO)).toBe("wwan0");
   });
 
@@ -187,5 +290,20 @@ describe("ModemNetPort", () => {
     const { port, calls } = board(() => [MODEM_0]);
     expect(await port.interfaceFor(appliance)).toBeNull();
     expect(calls).toHaveLength(0);
+  });
+
+  it("keeps asking while a modem that has been claimed has no net port yet", async () => {
+    // A modem is claimed before it is ready. Answering with the control port
+    // would probe cdc-wdm0, which fails on a link that is coming up fine.
+    let ready = false;
+    const runner: CommandRunner = async (argv) => {
+      if (argv[1] === "-L") return { code: 0, stdout: listing(MODEM_0), stderr: "" };
+      const show = fixture("modem-show");
+      return { code: 0, stderr: "", stdout: ready ? show : withoutNetPort(show) };
+    };
+    const port = new ModemNetPort(new MmcliClient(runner), fakeClock().clock);
+    expect(await port.interfaceFor(AUTO)).toBeNull();
+    ready = true;
+    expect(await port.interfaceFor(AUTO)).toBe("wwan0");
   });
 });

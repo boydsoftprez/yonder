@@ -569,7 +569,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   // is wiring, not a second place that decides what a modem is. What may be
   // remembered about a modem and what may not is R-CEL-12, stated there with
   // its tests.
-  const modemPort = new ModemNetPort(modemClient);
+  const modemPort = new ModemNetPort(modemClient, clock);
 
   // Which way out is working, assembled from the parts in net/reach/.
   //
