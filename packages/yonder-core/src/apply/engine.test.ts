@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ApplyEngine } from "./engine.js";
@@ -593,6 +593,113 @@ describe("ApplyEngine when the journal cannot be cleared", () => {
     await expect(e.apply(changed())).resolves.toBeTruthy();
   });
 });
+/**
+ * The rollback's own write can fail, and it is the one failure the engine had
+ * no answer for.
+ *
+ * `revert()` set `state = "reverting"` and then called `saveConfig` outside
+ * any `try` — while `journal.clear()` beside it was guarded and `renderAll`
+ * was `.catch`-ed. On a Pi whose rootfs the kernel has just remounted
+ * read-only after an I/O error, an operator pressing REVERT NOW got an error,
+ * and the engine was left in `"reverting"` — which is in `BUSY`, so every
+ * later apply was refused, `confirm()` and `revertNow()` both said "nothing
+ * is pending", and `revertNow` had already cleared the countdown. An
+ * unconfirmed change stayed in force with no rollback armed and no way to ask
+ * for one, silently, until somebody got a shell onto the device.
+ *
+ * The failure is reproduced the way the reviewer reproduced the journal's:
+ * the directory holding config.yaml is taken to mode 0555, so the temp file
+ * `writeFileDurable` creates cannot be written.
+ */
+describe("ApplyEngine when the configuration cannot be written back", () => {
+  /** Root ignores the mode bits, so there is nothing to reproduce as root. */
+  const asRoot = typeof process.getuid === "function" && process.getuid() === 0;
+
+  it.skipIf(asRoot)("stays pending with the countdown re-armed when a revert cannot write", async () => {
+    const { clock, advance } = fakeClock();
+    const r = renderer();
+    const e = new ApplyEngine({ configPath, journalPath, renderers: [r], clock, timeoutMs: 120_000 });
+    const { id } = await e.apply(changed());
+
+    chmodSync(dir, 0o555);
+    try {
+      await expect(e.revertNow(id!)).rejects.toThrow(/cannot write/);
+    } finally {
+      chmodSync(dir, 0o755);
+    }
+
+    // Not "reverting", which is terminal-looking and refuses every later
+    // apply: still pending, exactly as it was before the key was pressed.
+    expect(e.status().state).toBe("pending");
+    expect(e.status().id).toBe(id);
+    // And armed. The rollback is retried rather than lost, which is what
+    // makes the failure recoverable without a shell on the device.
+    expect(e.status().expiresAt).toBe(120_000);
+    // The journal still names the change, so a restart rolls it back too.
+    expect(existsSync(journalPath)).toBe(true);
+
+    advance(120_000);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(loadConfig(configPath).system.hostname).toBe("yonder");
+    expect(e.status().state).toBe("idle");
+  });
+
+  /** And the operator can simply press it again once the disk comes back. */
+  it.skipIf(asRoot)("accepts REVERT NOW again after the write failure clears", async () => {
+    const { clock } = fakeClock();
+    const e = new ApplyEngine({ configPath, journalPath, renderers: [renderer()], clock, timeoutMs: 120_000 });
+    const { id } = await e.apply(changed());
+
+    chmodSync(dir, 0o555);
+    try {
+      await expect(e.revertNow(id!)).rejects.toThrow(/cannot write/);
+    } finally {
+      chmodSync(dir, 0o755);
+    }
+
+    await e.revertNow(id!);
+    expect(loadConfig(configPath).system.hostname).toBe("yonder");
+    expect(e.status().state).toBe("idle");
+  });
+
+  /**
+   * The countdown's own path, which nothing awaits. A throw there used to be
+   * an unhandled rejection — the process exits under Node's default, systemd
+   * restarts it, and `recover()` rolls back off the journal. That is not a
+   * recovery when the reason the write failed is a read-only rootfs:
+   * `recover()` writes the same file with the same result, so the daemon
+   * restarts in a loop and the console an operator would use to fix it is
+   * down. Rule 6. The engine stays up, says so, and tries again.
+   */
+  it.skipIf(asRoot)("does not exit the process when the countdown's own write fails", async () => {
+    const { clock, advance } = fakeClock();
+    const e = new ApplyEngine({ configPath, journalPath, renderers: [renderer()], clock, timeoutMs: 120_000 });
+    await e.apply(changed());
+
+    const rejections: unknown[] = [];
+    const onUnhandledRejection = (reason: unknown) => rejections.push(reason);
+    process.on("unhandledRejection", onUnhandledRejection);
+    chmodSync(dir, 0o555);
+    try {
+      advance(120_000);
+      await new Promise((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
+    } finally {
+      chmodSync(dir, 0o755);
+      process.off("unhandledRejection", onUnhandledRejection);
+    }
+
+    expect(rejections).toEqual([]);
+    expect(e.status().state).toBe("pending");
+
+    // Re-armed for another window, and this time the write goes through.
+    advance(120_000);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(loadConfig(configPath).system.hostname).toBe("yonder");
+    expect(e.status().state).toBe("idle");
+  });
+});
+
 /**
  * A degraded renderer set (daemon/server.ts catching a malformed
  * secrets.yaml out of buildRenderers) used to leave apply() rendering
