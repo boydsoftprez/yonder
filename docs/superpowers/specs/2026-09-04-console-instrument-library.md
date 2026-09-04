@@ -1,11 +1,20 @@
 # The console's instrument library, and the camera pages built from it
 
-**Date:** 2026-09-04 · **Supersedes nothing** · **Extends**
-[the camera view design](2026-09-03-camera-view-design.md)
+**Date:** 2026-09-04 · **Revised** 2026-09-04, to the interactive blueprint ·
+**Extends** [the camera view design](2026-09-03-camera-view-design.md)
 
 The M4 camera view shipped working and looking like something else. This is the
-second pass: the instruments the design needs, the deck they compose into, and
-the five defects a person found by pressing buttons on a board.
+second pass: the instruments the design needs, the deck they compose into, the
+mechanisms that have to exist underneath for every control on the page to do
+what it says, and the five defects a person found by pressing buttons on a board.
+
+**The blueprint is the interactive mockup at
+[`docs/console/design/instrument-library/`](../../console/design/instrument-library/).**
+It is built from the real component code against the real generated theme, in
+the console's own shell, and it was settled by looking at it. Where this
+document and the blueprint disagree, the blueprint is right and this document
+is out of date. §7 enumerates every control it draws, and what must exist for
+each to work.
 
 ---
 
@@ -20,8 +29,7 @@ widgets. ADR-0009 exists to prevent exactly that.
 The Live deck's `APPLIES LIVE` group is **two Vuetify sliders carrying no value
 at all.** Not a bare number against its bounds, which R-UI-09 forbids — no
 number. The driver's real ranges are brightness −64…64 and contrast 0…95, so a
-handle position is not interpretable even in principle. Roughly 60% of the
-panel is empty.
+handle position is not interpretable even in principle.
 
 `NO CONTROL FOR THESE` carries eight rows, **four of which are the page
 confessing rather than camera facts.** Zoom, focus, exposure and white balance
@@ -29,469 +37,471 @@ each read *"offered, not on this page"* while the device reports all four with
 real ranges. That sentence is a fourth capability state the design does not
 have, and it means *unfinished*.
 
-**The picture is pillarboxed.** 726 px of video inside a 1230 px pane at a
-desktop width — about 250 px of dead black on each side. **Its own overlay is
-drawn behind it:** the cost line is legible over the black margin and
-disappears where the video begins.
-
-**The console paints in stock white Vuetify before the theme arrives.** Caught
-on the board: the first frame after a reload is a white admin panel with
-sentence-case group titles, the second is Yonder. The cause is at
-`flows/flows.json:320` — the theme is an `@import` inside a Dashboard
-`site:style` template, so the browser must boot Dashboard's JavaScript before
-the style exists at all, then fetch the stylesheet as a second request.
-
-**Setup is `ui-text` pairs with enormous gaps** — camera name, device identity
-and encoder spread down some 500 px where a readout row would take sixty.
-`RESTARTS THE PICTURE` carries about 300 px of dead space beneath its two
-inputs. A line of fine print renders as large right-aligned bold.
-
-**Truncation, found:** the GStreamer receive line ends `…encoding-name=H264,payloa…`.
+**The picture is pillarboxed** — 726 px of video inside a 1230 px pane — and
+**its own overlay is drawn behind it.** **The console paints in stock white
+Vuetify before the theme arrives**, because the theme is an `@import` inside a
+Dashboard `site:style` template (`flows/flows.json:320`): the browser must boot
+Dashboard's JavaScript before the style exists, then fetch it as a second
+request. **Setup is `ui-text` pairs with enormous gaps.** **The GStreamer
+receive line truncates.**
 
 ### The root cause, so the plan does not repeat it
 
-The M4 spec described the deck's *behaviour* — three legends, which control
-applies live — and never said *"every control is an instrument, and here is the
-list."* The plan inherited the gap and filled it with what Dashboard shipped.
+The M4 spec described the deck's *behaviour* and never said *"every control is
+an instrument, and here is the list."* Underneath that, **Dashboard's grid
+makes every widget occupy whole rows** (ADR-0009, context 3), so twelve
+controls wired as twelve widgets can never be a three-column deck. The
+implementer reached for stock widgets partly because the layout model left
+nowhere else to go.
 
-Underneath that sits a structural cause the plan could not have argued its way
-out of. **Dashboard's grid makes every widget occupy whole rows** (ADR-0009,
-context 3). Twelve controls wired as twelve widgets cannot be a three-column
-deck; they are twelve slabs. The implementer reached for stock widgets partly
-because the layout model left nowhere else to go.
+This document answers both: the list is §7, and the deck is one widget (§6).
 
 ---
 
-## 2 · What the device actually offers
+## 2 · What the devices actually offer
 
-The bench camera is a global-shutter USB camera. `v4l2-ctl --list-ctrls`
-returns **eighteen** controls, against the eleven `CAPABILITY_KEYS` models and
-the three `config.yaml` carries.
+**The bench camera** is a global-shutter USB camera. `v4l2-ctl --list-ctrls`
+returns eighteen controls, against the eleven `CAPABILITY_KEYS` models and the
+three `config.yaml` carries.
 
 | Control | Range | Kind | Note |
 |---|---|---|---|
-| `auto_exposure` | 4 modes | list | now *Aperture Priority* |
+| `auto_exposure` | 4 modes | list | |
 | `exposure_time_absolute` | 1…10000 | range | **inactive** — auto exposure has it |
-| `gain` | 0…1023 | range | the other half of exposure |
+| `gain` | 0…1023 | range | |
 | `backlight_compensation` | 36…160 | range | ground against sky |
 | `white_balance_automatic` | on/off | switch | |
 | `white_balance_temperature` | 2800…6500 | range | **inactive** — auto has it |
 | `focus_automatic_continuous` | on/off | switch | |
 | `focus_absolute` | 0…1023 | range | **inactive** — autofocus has it |
 | `zoom_absolute` | 0…60 | range | digital crop |
-| `brightness` | −64…64 | range | |
-| `contrast` | 0…95 | range | |
-| `gamma` | 64…300 | range | midtones |
-| `sharpness` | 0…7 | range | over-sharpening wastes bitrate |
-| `saturation` | 0…255 | range | |
-| `hue` | ±2000 | range | |
-| `power_line_frequency` | 3 modes | list | indoor flicker |
-| `pan_absolute` | ±648000 step 3600 | range | **advertised. There is no motor.** |
-| `tilt_absolute` | ±648000 step 3600 | range | **advertised. There is no motor.** |
+| `brightness`, `contrast`, `gamma`, `sharpness`, `saturation`, `hue` | ranges | range | |
+| `power_line_frequency` | 3 modes | list | |
+| `pan_absolute`, `tilt_absolute` | ±648000 step 3600 | range | **advertised. There is no motor.** |
 
-Three consequences decide much of this document.
+**The accessory camera** — the DJI Pocket 2 — is documented command by command
+in [`docs/hardware/dji-pocket-2-over-usb.md`](../../hardware/dji-pocket-2-over-usb.md),
+with a proven / untried column against each. Proven on the bench: rate-mode
+aim, attitude at 20 Hz with a limit byte, recentre, video/photo mode,
+exposure mode, ISO, EV, white balance, and that zoom is digital-only and does
+not reshape the USB feed. Acknowledged but unconfirmable without a card:
+record. Ids known, untried: take photo, shutter, focus mode, record format,
+sensor size. **Live-view resolution is not controllable** — the SDK's handlers
+are stubs — so on this camera it is a stated fact, not a picker.
 
-**The bench can exercise the whole component set today.** Two real menus for
-the picker, two real switches for the segmented control, ten real ranges with
-real bounds and steps for the set bar. Nothing has to be faked to see a
-component work.
-
-**The advertised-but-not-answered state is provable on this desk.** The camera
-claims a ±180° pan and tilt range it has no motor for, accepts the write, and
-does not move. `CONTROL_MAP` in `video/probe/camera.ts:143` has no
-`pan_absolute` entry, which is why the Cameras page currently reports
-`aim: none` for a camera that advertises aim. Adding the mapping produces the
-state the M4 spec calls *the one most likely to be got wrong in code*, on
-hardware, for free.
-
-**There is a state nothing has drawn.** `flags=inactive` is none of the three.
-Shutter time is real, settable and in range — but only once auto exposure is
-off. A control that another control has taken charge of is not absent, not
-advertised-and-lying, and not simply present. It needs its own drawing.
+Three consequences decide much of this document. **The bench can exercise the
+whole component set today.** **The advertised-but-not-answered state is
+provable on the bench** — the ELP claims ±180° of pan and tilt it has no motor
+for, and `CONTROL_MAP` has no entry for it, which is why the page currently
+says `aim: none`. **There is a state nothing had drawn:** `flags=inactive`.
 
 ---
 
-## 3 · Decisions taken in this session
+## 3 · Decisions
+
+Every one of these was taken by looking at the blueprint, and the blueprint
+carries them.
 
 | | |
 |---|---|
-| **Scope** | Both camera pages, plus the five defects seen on the board |
-| **The deck** | Drawn as one piece, composing itself from the capability report — not one framework row per control |
-| **Continuous values** | A **set bar**: one track, two marks — where the camera is, and what was asked for |
-| **How many controls** | All sixteen live ones — the eighteen of §2 less pan and tilt, which have no motor. Omitting a control the camera offers only moves the *"not on this page"* lie |
-| **Where they live** | The flying set on Live; **every** control on Setup, grouped |
-| **The Pocket 2** | R-CAM-15 pulled forward out of M5 — the accessory camera arrives with this work |
-| **Aim** | Built and proven against the DJI Pocket 2, which is in hand |
-| **Outputs** | An **Outputs group**: every output with its state, its cost and its reachability, each with an On/Off beside it |
-| **An unreachable output** | The console **says so and does not act.** Stopping it is the operator's press |
-
-### What "the flying set" means
-
-**Live** carries what is reached for with an aircraft up: auto exposure and
-shutter, gain, backlight compensation, auto white balance and temperature,
-zoom, and — where the camera has them — aim and record. **Setup** carries every
-control the device reports, grouped as *exposure · colour · rendering · optics ·
-housekeeping*. A control on both pages is one value shown twice, never two.
+| **Scope** | Both camera pages, the five defects, the mechanisms every control needs, and the accessory camera |
+| **The deck** | One widget that composes itself from the capability report. Not one framework row per control |
+| **Every control the camera has is on Live.** | Setup adds only four bench-only items: the camera's name, mains frequency, what the card records at, and sensor size. Nothing is removed for simplicity |
+| **Layout** | Picture with the **Aim panel beside it** where there is room, below it where there is not; the strip; the deck as groups **flowing into balanced columns**; outputs as one line; the rail. Notebook first, a tablet second |
+| **Continuous values** | A **set bar**: one track, two marks — where the device is, what was asked for. Snaps to the device's own step |
+| **Two encodes, each with a mode** | `STREAM · to the ground station`, Fixed by default. `PREVIEW · to this browser`, Adaptive by default, with a floor, a ceiling, and a Size whose `Auto` steps down a ladder with the link and whose other rungs hold |
+| **The picture wears its own state** | Mode, size, rate, bitrate, pinned-at-floor, stills, full-rate — as an overlay, because in Cockpit the picture is there and the deck is not. A step shows a brief line |
+| **One shutter key** | `○ RECORD` in Video mode, `PHOTO` in Photo mode; `● RECORDING 00:13:47` while it runs. Beneath it, where a recording lands: the camera's card, or this board (R-CAM-17) |
+| **Actions beside their object** | Record with Capture; Recentre with Aim. The rail carries `LIVE · SETUP · STREAM ADDRESS`, `APPLY` on Setup, and `FULL RATE`. A deliberate exception to R-UI-10 |
+| **Aim** | Rate control, drag on the pad or on the picture, release stops. Reported position drawn against its bounds; commanded rate as its own block; the pad in the adopted idiom — one ring, a crosshair, a haloed puck |
+| **The Pocket 2** | R-CAM-15 pulled forward: it is in hand, and aim is built against a gimbal that moves |
+| **Outputs** | Each output with its state, its cost and its reachability; an On/Off each on Setup. An unreachable output is stated, never stopped by the console |
+| **Names** | `Cam 1`, `Cam 2` by default; the operator's to change; shown everywhere the camera is named |
+| **More than one camera** | One page per camera in the sidebar (R-UI-03), and a strip under the picture with the others as periodic stills, with the cost of all of it |
+| **"Receive line"** | Is **Stream address** |
+| **Sizing** | 36 px keys, 220 px tracks with a hit zone a finger can land on, 10.5 px labels. Touch is in mind; it is not the law |
 
 ---
 
 ## 4 · The four states a capability can be in
 
-The M4 spec settled three. The board found a fourth.
-
 | State | Meaning | How it draws |
 |---|---|---|
 | **Present** | The device answered and the control works | The control, live |
-| **Not offered** | The device does not have it | A stated fact where the control would have been. One row of text. Never a control that cannot be used, and never silently nothing |
-| **Advertised, not answered** | It lists it, accepts the command, does nothing | The control stays, drawn inoperative in the caution tone, **carrying the reason** |
-| **Gated** *(new)* | Real and in range, but another control has charge of it | The control stays, drawn inert in the neutral tone, **naming the control that has it** — *"while auto exposure is on"*. Turning that control off makes this one live |
+| **Not offered** | The device does not have it | A stated fact where the control would have been. One row of text, in sentence case. Never a control that cannot be used, never silently nothing |
+| **Advertised, not answered** | It lists it, accepts the command, does nothing | The control stays, inoperative, in the caution tone, **carrying the reason** |
+| **Gated** | Real and in range, but another control has charge of it | The control stays, inert, in the neutral tone, **naming the way back** in the operator's words — *while exposure is program*, never *while exposure is 1* |
 
-**Gated is not a fault and must not look like one.** Advertised-not-answered is
-something misreporting itself and its whole job is to be noticed, so it is
-drawn in caution. Gated is the camera working correctly — an operator chose
-automatic — so it is neutral, and it carries the way back rather than a
-complaint. Drawing them alike would spend the caution tone on a normal
-condition, which is how an operator learns to stop reading it.
-
-`R-UI-21` is added for this state. `R-UI-20` is unchanged.
-
-**The soft-key rail remains the exception**: it carries only actions that can
-be taken.
+Gated is not a fault and must not look like one. Spending the caution tone on
+a camera behaving correctly is how an operator learns to stop reading it.
+`R-UI-21`. The soft-key rail remains the exception: it carries only actions
+that can be taken.
 
 ---
 
-## 5 · The component set
+## 5 · The surfaces
 
-Two new Dashboard nodes, one reworked, and the parts they are built from.
+The same components, the same behaviour, on every surface they appear on.
+"Works" means works on all of them.
 
-### 5.1 The deck — `ui-yonder-deck`
+| Surface | What is on it | What it must do |
+|---|---|---|
+| **Camera · Live** | Picture and Aim panel; strip; every control the camera has, in groups; outputs in one line; the rail | Everything in §7 |
+| **Camera · Setup** | The same, plus the four bench-only controls, the name, and the outputs table with On/Off | Apply with the confirmation window where a change is load-bearing; never from the Live deck |
+| **Cameras** | Camera rows, rejection rows, the board's encode budget and the uplink | Rows open their camera; Detect again; Add by address |
+| **Cockpit / mission control** (M5) | **The picture, its state overlay, and the Aim panel** — the deck is not there | The picture and the aim must not depend on the deck for anything. The state overlay is on the picture for this reason |
+| **A notebook** | The primary surface. Live fits without scrolling at 1440×900 with the sidebar open | |
+| **A tablet, landscape** | Aim drops below the picture at ≤1100 px; groups flow to fewer columns | Everything still reachable with a finger |
+| **The capture gate** | Every page above, in both palettes, in every capability state, at notebook and tablet widths | A page that changes shape fails until somebody looks (R-UI-12) |
 
-One node per group. It receives the camera's capability report and its current
-values, and draws its own columns. **Which controls exist is decided by the
-report, not by wiring.**
+---
 
-This is the piece that makes the rest possible, and it is the fix for the root
-cause rather than a workaround for it:
+## 6 · The component set
 
-- Three columns on a desk, two on a tablet, one on a phone — rewrapped, never
-  rearranged, so there is one page to design and one page for the gate to
-  photograph (layout B, `page-anatomy-v2.html`).
-- The four capability states are expressible, because the deck decides what to
-  draw. Static wiring cannot express *"this row is a fact on that camera and a
-  control on this one."*
-- **There is no group left for a stock widget to be dropped into.** The next
-  implementer under time pressure cannot repeat this.
+Three Dashboard nodes, and the parts they are built from.
 
-Props: the capability report, the current values, the column grouping, and
-which of Live or Setup it is. It emits one action per control change. It
-computes nothing about what a value *means* — bands come from `reading()` in
-`yonder-core`, as `YonderGauge` already does.
+**`ui-yonder-deck`** — one node per camera page. Receives the capability
+report and the current values; draws its own groups, flowing into columns;
+decides what exists from the report. Emits one action per control change.
+Live and Setup are one component in two modes. **There is no group left for a
+stock widget to be dropped into.**
 
-### 5.2 The camera index — `ui-yonder-index`
+**`ui-yonder-index`** — the Cameras page: camera rows, rejection rows.
 
-One node for the Cameras page, replacing two `ui-table`s.
+**`ui-yonder-picture`** — reworked: overlays in front of the video, never
+behind; the pane is the shape of the picture and never taller than it needs;
+the drag-to-slew layer (orb only, measured from where the finger landed); **the
+state overlay**; the REC pill; `LINK · DROP` bottom-right; the thumbnail strip
+of the other cameras beneath.
 
-- A **camera row**: thumbnail, name and bus, one line of what the probe got
-  back, a state annunciator with its rate, and a chevron to that camera's page.
-- A **rejection row**: device path, card, and the reason in a sentence.
-- Beneath, the two engine bars the mockup draws — encoding used on this board,
-  and uplink across all cameras — both of which `YonderGauge` and
-  `YonderBudget` already provide.
+**`ui-yonder-aim`** — the Aim panel as its own node, because Cockpit embeds it
+without the deck: the pad, reported position against bounds, commanded rate,
+gimbal mode with its sentence, Recentre gimbal, the limit annunciator, and the
+dead state with its reason.
 
-`cameras-index-day-v2.html` is the target. This is not a table: a table gives
-every column equal weight, and on this page one column is a camera and one is
-the reason a device was refused.
-
-### 5.3 The picture — `ui-yonder-picture`, reworked
-
-Additions:
-
-- **Overlays**, in front of the video and never behind it: the `REC` pill, the
-  corner box (`LINK` / `DROP`, or `SLEW` / `TILT` while aiming), the foot strip
-  (`ZOOM · TILT · EV`), the hint line, and the stills countdown ring.
-- **The pane is the shape of the picture.** It takes the video's aspect ratio
-  and stops. The dead band is not styling — it is a pane sized to a container
-  rather than to its contents.
-- **A drag layer** for aim: drag sets a *rate*, release stops. Absolute
-  pointing is rejected — `aim-and-bitrate.html` records why, and 300 ms of lag
-  is the reason.
-
-### 5.4 The parts inside them
-
-Vue components with their own tests, not separately registered Dashboard
-nodes. ADR-0009 requires instruments to be components; it does not require
-every component to be a node.
+The parts inside them — Vue components with their own tests, not separately
+registered nodes:
 
 | Part | For | Rules |
 |---|---|---|
-| **Picker** | One value from what the device answered — resolution, codec, bitrate, mains frequency, exposure mode | Options come from the probe, never a stored list (R-CAM-14). Carries all four states |
-| **Segmented control** | Two or three exclusive choices — `Fixed \| Adaptive`, `Normal \| Mono \| Sat`, `Live \| Stills \| Off`, an auto switch | **A maximum width. It never stretches to its container** — the same rule ADR-0009 gives the engine bar's track |
-| **Set bar** | A bounded continuous value — shutter, gain, backlight, brightness, contrast, gamma, sharpness, saturation, hue, zoom, focus, white-balance temperature | One track. Two marks: **where the device is**, and **what was commanded**. Drag or tap to set; steps by the driver's own step. Fixed width. This is also the bitrate bar, so *commanded versus actual* has one shape everywhere |
-| **Readout row** | Label, value, unit, stacked vertically inside a column | Tabular figures. **A unit is never uppercased** — `Mb/s`, not `MB/S`, which would say megabytes. Carries an optional fine-print line beneath |
-| **Column** | A titled group inside the deck | Legend in letterspaced caps, with an optional right-hand qualifier — *"rate"*, *"measured 3.2 Mb/s"*, *"restarts the picture"* |
-| **Placard** | The panel header — `CAMERA · NOSE` and `USB · H.264 · 1920×1080P30` | Panel chrome, above the display |
-| **Aim dial** | Pan and tilt | White mark where the gimbal is, cyan where it is being pushed. An axis that will not answer stays on the dial, struck and labelled, so a gimbal that half works is not read as one that does |
+| **Picker** | One value from what the device answered | Options from the probe. A real `<select>` beneath the drawn control. All four states. Capped width |
+| **Segmented control** | Two or three exclusive choices | **A maximum width; never stretches** |
+| **Set bar** | A bounded continuous value | Two marks. Snaps to the device's step. Fixed width. In Adaptive it is a readout, `GOING OUT` |
+| **Readout row** | Label · value · unit, stacked | Unit never uppercased. Capped width |
+| **Column** | A titled group with a right-hand qualifier — *to the ground station*, *rate control* | |
+| **Placard** | `CAMERA · CAM 2` and `ACCESSORY · H.264 · 1280×720p30` | |
+| **Text field** | The camera's name | Defaults `Cam N`; 24 characters |
+| **Aim pad** | One ring, a crosshair, axis labels, a haloed puck; a struck axis for one that will not answer | Drag sets a rate; release stops; pointer capture; stops on cancel and leave |
+| **Position gauge** | Pan or tilt against its bounds | R-UI-09 |
+| **Shutter key** | Record or Photo, following the mode | Red ring; lit and counting while recording; the destination beneath |
+| **State overlay** | What the picture is, now | On the picture; tone follows the state |
+| **Thumb strip** | The other cameras as stills, and the cost | One press switches |
 
-### 5.5 The Outputs group
+`YonderGauge`, `YonderDataBar`, `YonderAnnunciator`, `YonderSoftKeys`,
+`YonderHoldKey`, `YonderBudget`, `YonderFacts`, `YonderIdentity`, `YonderTape`
+and `YonderSparkline` stand. The gallery found three of them clipping
+(`DataBar`, `SoftKeys`, `Budget`); those are fixed first.
 
-The mockups draw outputs as a **readout** on the flying page — `RTSP — no
-client`, `SRT — off` in `uplink-budget-v2.html`, `RTSP :8554/nose` as a fact
-under the picture — and as a picker buried in Setup. **There is no way to stop
-an output with the aircraft up.** That is a gap in the design and not only in
-the build.
+---
 
-The Outputs group closes it. Every output, on both decks, carries four things
-on one row: **what it is**, **its state**, **what it is costing right now**,
-and **whether anything can reach it** — with an On/Off beside it. The state and
-the cost sit together because the cost is the argument for the press.
+## 7 · Every control, and what it needs underneath
 
-**Outputs divide by direction, and the console has never said so.**
+**This is the section the first pass did not have.** A control on the page is
+a promise; each row names what has to exist for the promise to be kept — the
+model key, the config field, the probe, the write path, and the daemon
+behaviour — and whether the bench has proven the device answers.
 
-| Output | Direction | Over bare cellular | Over the mesh |
+*Kinds:* bar = set bar · pick = picker · seg = segmented · key · fact.
+*Proven:* the bench has driven it and seen the effect.
+
+### Stream · to the ground station
+
+| Control | Kind | Model / config | Mechanism | Proven |
+|---|---|---|---|---|
+| Bitrate mode `Fixed \| Adaptive` | seg | `cameras[].stream.mode` (new) | **The rate controller** (§8.1). Fixed by default | — |
+| Bitrate | bar | `bitrate_kbps` (exists) | Encoder reconfigure; restarts the picture; **Apply** on Setup, never on blur | yes |
+| Going out | readout | egress measured per output (R-VID-11, exists) | | yes |
+| Resolution | pick | `width`/`height`/`framerate` (exist), options from the probe's formats | Pipeline respawn on Apply | yes |
+| Live-view resolution (Pocket 2) | fact | `formats` not-offered | | yes — the handlers are stubs |
+
+### Preview · to this browser
+
+| Control | Kind | Model / config | Mechanism | Proven |
+|---|---|---|---|---|
+| Bitrate mode `Adaptive \| Fixed` | seg | `preview.mode` (new) | The rate controller. Adaptive by default | — |
+| Going out | readout | measured | | yes |
+| Size `Auto \| 1280×720 \| 854×480 \| 640×360` | pick | `preview.size` (new: `auto` or a rung); ladder bounded by `preview.ladder_top/bottom` (new) | **Resolution stepping** (§8.1): step down when pinned at the floor, up when there is headroom. A chosen rung holds | — |
+| Rate | pick | `preview.framerate` (exists) | Reconfigure | yes |
+| Floor · Ceiling | pick | `preview.floor_kbps`, `preview.ceiling_kbps` (new) | Bounds for the controller; shown only in Adaptive | — |
+| `FULL RATE` (rail) | hold key | exists (R-VID-13) | Full-quality stream while held; cost stated | yes |
+
+### Exposure · Colour · Optics · Rendering — the ELP
+
+Each is one V4L2 control, probed by `CONTROL_MAP`, written by
+`CONTROL_NAMES`, live on the running stream, never a respawn, never the apply
+window (`controls` is exempt). All proven — the bench lists every one.
+
+| Control | Kind | V4L2 | Gates |
 |---|---|---|---|
-| **Ground station** — `rtp`, a `udpsink` | Outbound; the board dials out | **Works.** This is the flight path | Works |
-| **RTSP** | Inbound listener | **Cannot work.** Nothing can dial in | Works |
-| **SRT** | Inbound listener | **Cannot work** | Works |
+| Auto exposure `Auto \| Manual` | seg | `auto_exposure` | shutter |
+| Shutter (µs) | bar | `exposure_time_absolute` | gated by auto exposure |
+| Gain · Backlight | bar | `gain` · `backlight_compensation` | |
+| White balance `Auto \| Manual` | seg | `white_balance_automatic` | temperature |
+| Temperature (K) | bar | `white_balance_temperature` | gated |
+| Brightness · Contrast | bar | `brightness` · `contrast` | |
+| Focus `Auto \| Manual` | seg | `focus_automatic_continuous` | focus |
+| Focus | bar | `focus_absolute` | gated |
+| Zoom (×) | bar | `zoom_absolute` | |
+| Gamma · Sharpness · Saturation · Hue | bar | as named | |
+| Mains frequency — *Setup only* | pick | `power_line_frequency` | |
 
-`schema/config.ts:278` already records the fact — *"`rtsp` and `srt` are
-listeners on this device"* — and nothing on the page uses it. Behind carrier
-NAT nothing can dial in, so the console today prints a receive line the
-operator cannot use, for a stream nothing can reach, on the link where bytes
-are the scarce thing. Over ZeroTier the same output works, because the mesh
-gives the board an address a peer can reach — which M2a proved on hardware.
+Model: `CameraCapabilities` gains ten keys; `CameraControls` gains their
+fields, `null` meaning *leave the camera alone*; `flags=inactive` becomes the
+gated state carrying the gating control's operator-facing name.
 
-So the sentence is per **path**, not per output, and the device already knows
-which paths it has.
+### Exposure · Colour · Optics · Capture — the Pocket 2
 
-**The console says so and does not act** (R-CMD-04, and rule 4 of this
-project). An unreachable output stays configured and drawn, carrying a plain
-sentence — *nothing can reach this over cellular; it works on the mesh* — and
-its receive line is marked unusable rather than offered as though it worked.
-Yonder does not stop it: an operator may have a mesh coming up or be about to
-land, and a device that turns an output off on its own is the aircraft
-deciding.
+Each is a DUML command on the accessory link (§9).
 
-### 5.6 What already exists and is right
+| Control | Kind | Command | Proven |
+|---|---|---|---|
+| Exposure `Program … Manual` | pick | `camera/0x1e` (2 B) | yes — gates ISO and shutter |
+| ISO | bar | `0x2a` | yes |
+| Shutter (µs) | bar | `0x28` | **no** |
+| EV (±3, thirds) | bar | `0x2e` (index 16 = 0.0) | yes |
+| White balance `Auto · Sunny · Cloudy · …` | pick | `0x2c` (2 B) | yes |
+| Zoom 1.0–10.0× | bar | `0x34` | yes — **digital, and the feed does not change; the browser crops**, which the fine print says |
+| Focus `AFC \| AFS \| Spot` | seg | `0x24`, `0x30`, `0x32` | **no** |
+| Mode `Video \| Photo` | seg | `camera/0x10` | yes |
+| Shutter key — Record / Photo | key | `camera/0x02` · `camera/0x01` | record acknowledged, unconfirmable with no card; photo **no** |
+| Sensor `16 \| 64 MP` — *Setup only* | seg | `camera/0x12` | **no** |
+| Records at — *Setup only* | pick | `camera/0x18` | **no** |
+| Battery · Card · Sensor | readouts | `camera/0x80…0x88` pushes | received; **not yet decoded** |
 
-`YonderGauge` is the zoned engine bar with a fixed track. `YonderDataBar` is
-the horizontal label/value strip under the picture. `YonderAnnunciator`,
-`YonderSoftKeys`, `YonderHoldKey`, `YonderBudget`, `YonderFacts`,
-`YonderIdentity`, `YonderTape` and `YonderSparkline` stand unchanged. The set
-bar shares its track geometry with `YonderGauge` rather than inventing a
-second one.
+**Nothing marked *no* ships as a live control until the bench has driven it.**
+Until then it is drawn as the report says, and the plan's first task on the
+accessory camera is to drive each and record the effect the way the hardware
+note does. The gallery's *mark unproven* switch is that list.
 
----
+### Aim
 
-## 6 · The accessory camera — R-CAM-15
+| Control | Kind | Mechanism | Proven |
+|---|---|---|---|
+| The pad, and drag on the picture | rate | `gimbal/0x0C`, flags `0x80`, streamed at ≥2 Hz while pushed, nothing when released; **a lost link stops the gimbal inside half a second, for free** | yes |
+| Reported position, against bounds | gauge | `gimbal/0x05` push at 20 Hz | yes |
+| At the limit | annunciator | byte 10 of the push (R-TEL-15) | yes — yaw stop, both ends |
+| Gimbal mode `Follow \| Tilt lock \| FPV` | seg | `gimbal/0x44`; mode byte in `0x4C` | mode byte proven as part of recentre; standalone **untried** |
+| Recentre gimbal | key | `gimbal/0x4C` `02 01` | yes |
+| Roll — struck | state | no answer on the third axis | the mockup's drawing; the bench has one axis-by-axis run left |
+| **Clamp before sending** | rule | the daemon never commands an absolute angle outside the reachable window; the bench saw the head go over the top when asked to | yes — and it is a rule, not a feature |
 
-Pulled forward from M5 because the gimbal is in hand and because a component
-nothing can exercise is how `YonderPicture` and the SRT output both shipped
-broken.
+On the ELP the whole panel is drawn dead, in the caution tone, with the reason,
+because it advertises pan and tilt and has no motor.
 
-The bench work in `scripts/pocket2/` has already settled the protocol: DUML
-encode and decode against the published dissector, an AOA session with the
-board presenting as the phone, **rate** control confirmed on all axes with its
-stop-when-silent behaviour measured, recentre, and attitude returning
-pitch/roll/yaw with a limit byte. What does not exist is any of it inside
-`yonder-core`.
+### Capture destination
 
-This work brings across:
+| | Mechanism | Proven |
+|---|---|---|
+| *to the camera's card* | the camera's own recorder | acknowledged; no card on the bench |
+| *to this board* | **Board recording** (§8.3, R-CAM-17): a bounded file on the board's card, `R-STO-06` | **unbuilt** |
+| the line under the key | free space, or *no card in the camera* | needs the state push decoded |
 
-- An accessory camera source: the AOA session, the picture, and the command
-  path on the same link.
-- Aim as a real capability — rate commands out, attitude back, the limit byte
-  surfacing as the annunciator R-TEL-15 asks for.
-- Its own recorder and digital zoom as capabilities.
+### Outputs
 
-**This is a large piece of work with its own failure modes**, which is why §12
-gives it its own plan rather than folding it into the widget rewrite.
+| | Mechanism |
+|---|---|
+| State, cost | R-VID-11, exists |
+| Reachability | `outputReach(kind, paths)` (§8.4): outbound works everywhere; a listener works on the LAN or the mesh and never behind carrier NAT |
+| On / Off | `CameraOutput.enabled` (new); a stopped output keeps its port, path and secret |
+| *stop or start them on Setup ›* | the one-liner on Live links to the table on Setup |
 
----
+### The picture
 
-## 7 · The five defects
+| Overlay | Source |
+|---|---|
+| State — `ADAPTIVE · 1280×720 · 15 fps · 1.8 Mb/s · 1.8 of 0.3–2.0` / `AT THE FLOOR · … · 1.2 s round trip` / `HELD` / `FULL RATE` / `STILLS · every 2 s` | **a preview-state message from the daemon** (§8.2) |
+| The brief step line | the same message, on a change of rung |
+| `LINK · DROP` | WebRTC stats in the browser |
+| `PAN · TILT · ZOOM · EV` foot strip | attitude push; the camera's own exposure control |
+| `REC 00:13:47` | the state push |
+| The thumbnail strip: the others as *Still · 4 s*, and *Downlink now* | R-VID-14's stills mechanism, one per non-active camera; the cost is the sum |
 
-**1 · A confirmation window arms from the Live deck.** `controls` is in
-`CAMERA_EXEMPT_LEAVES` (`apply/reachability.ts:63`), so a live control cannot
-be the cause. The leading hypothesis, to be confirmed and not assumed: Live and
-Setup are groups on **one** Dashboard page, so Setup's `Bitrate (kb/s)`
-`ui-number-input` is on screen while the Live deck is in use, and review
-finding S13 records that it posts an apply on blur. While pending, `BUSY`
-refuses every other apply for two minutes — a network change included, which on
-a flying aircraft is the wrong thing to be locked out of.
+### Names, navigation, stream address
 
-Settled by the deck: a control posts on an explicit press, never on blur, and
-the Live deck's controls never enter the apply path at all.
-
-**2 · Readouts truncate.** Replaced by the readout row, which is specified with
-the widest value each field can honestly hold, and measured by the gate (§11).
-
-**3 · The flash of unstyled content.** The theme moves from an `@import` inside
-a Dashboard `site:style` template into a plain `<link>` in the served document,
-before any script runs. Two serialised delays become none.
-
-**4 · The picture pane is not the shape of the picture.** §5.3.
-
-**5 · The capture gate saw neither 2 nor 4.** §11.
-
----
-
-## 8 · What the config and the model have to grow
-
-Presentation is the smaller half. Before a control can be drawn it must be
-modelled, stored, probed and written.
-
-- **`CameraCapabilities`** — `CAPABILITY_KEYS` carries eleven. It needs gain,
-  backlight compensation, gamma, sharpness, saturation, hue, mains frequency,
-  and the auto switches for exposure, white balance and focus.
-- **`CONTROL_MAP`** (`video/probe/camera.ts:143`) — seven entries. It needs the
-  new controls, and `pan_absolute`/`tilt_absolute` → `aim`, which is what makes
-  the advertised state real on the bench.
-- **`flags=inactive`** — parsed today and discarded. It becomes the *gated*
-  state, carrying the name of the control that has charge.
-- **`config.yaml`** — `CameraControls` (`schema/config.ts:326`) carries
-  `brightness`, `contrast`, `rotation`. Every other control needs a field, a
-  bound, and a null default meaning *leave the camera alone*.
-- **`video/controls.ts`** — the write path, whose `CONTROL_NAMES` is
-  cross-checked against `CONTROL_MAP` by an existing test. That check must keep
-  holding across the additions.
-- **`CameraOutput`** (`schema/config.ts:296`) — an output is on because it is
-  in the array. Stopping one by deleting it would throw away its port, path and
-  secret, so each output gains `enabled`, defaulting true, and a stopped output
-  keeps everything that made it work. The reachability sentence is derived from
-  the device's live paths, never stored.
+| | Mechanism |
+|---|---|
+| Name | `cameras[].name` (exists); the text field writes it; the placard, the sidebar, the index, the strip and the stream address read it |
+| One sidebar entry per camera | Dashboard's dynamic pages from detection (R-UI-03, exists) |
+| Stream address | R-VID-15's receive line, renamed; a panel with the four receivers |
 
 ---
 
-## 9 · Requirements to add
+## 8 · The mechanisms that do not exist yet
 
-IDs are stable and never renumbered. Current highest: `R-CTL-10`, `R-UI-20`,
-`R-VID-15`, `R-CAM-18`, `K-45`.
+These are what "implemented completely" means. Each is a phase of the plan and
+each has a requirement.
+
+### 8.1 The rate controller — R-VID-07, R-VID-17
+
+Measures the link, moves the encoder inside the operator's envelope, and
+reports what it did. Inputs: round-trip time and loss from the browser's
+WebRTC statistics for the preview; egress against measured capacity for the
+stream. Rules: never outside floor and ceiling; the stream comes first when
+both cannot fit; step the preview's size down one rung when the bitrate has
+been pinned at the floor, and up one rung when there has been headroom — with
+hysteresis, so it does not hunt. A held size never steps. Fixed mode does
+nothing. **It reports every change**: that is the message the picture wears.
+
+### 8.2 The preview-state message — R-VID-18
+
+One message, published whenever it changes, carrying: mode, size, rate,
+bitrate going out, floor, ceiling, pinned, held, full-rate, stills with their
+interval, and the last step with its reason. The picture draws it; nothing else
+computes it.
+
+### 8.3 Board recording — R-CAM-17, R-STO-06
+
+A camera with no recorder of its own records to this board: a bounded file,
+the free space stated, and the same shutter key. The line under the key says
+where.
+
+### 8.4 Output reachability — R-UI-24
+
+`outputReach(kind, paths)` in `yonder-core`, from the device's live paths. It
+returns a sentence and never an action.
+
+### 8.5 The camera state push — decoded
+
+`camera/0x80`, `0x81`, `0x87`, `0x88` arrive at 10–20 Hz and are not yet
+decoded. Battery, card, mode and record time come from them; the readouts and
+the REC pill wait on this.
+
+### 8.6 The stills fallback, per camera — R-VID-14
+
+Exists in design for one picture; the strip needs one per non-active camera at
+a stated interval, and their cost summed into *Downlink now*.
+
+---
+
+## 9 · The accessory camera — R-CAM-15
+
+Pulled forward from M5. The bench work in `scripts/pocket2/` settled the
+protocol: DUML against the published dissector, an AOA session with the board
+presenting as the phone, rate control on all axes with stop-when-silent
+measured, recentre, attitude with a limit byte. None of it is in `yonder-core`.
+This work brings across the session, the command path, aim as a real
+capability, the recorder, digital zoom, and the state push. Every command
+marked *untried* in §7 is driven and recorded before its control goes live.
+
+---
+
+## 10 · The five defects
+
+1. **A confirmation window arms from the Live deck.** `controls` is exempt in
+   `apply/reachability.ts`, so a live control cannot be the cause. Hypothesis
+   from review finding S13, unconfirmed: Live and Setup are groups on one page,
+   and Setup's `ui-number-input` posts an apply on blur. Settled by the deck: a
+   control posts on a press, never on blur, and the Live deck never enters the
+   apply path. **Verified on the board, not assumed.**
+2. **Readouts truncate.** The readout row, specified with the widest honest
+   value, and the gate measures overflow (§13).
+3. **The flash of unstyled content.** The theme moves into the served
+   document's head, before any script. R-UI-22.
+4. **The picture pane is not the shape of the picture.** §6.
+5. **The gate saw neither 2 nor 4.** §13.
+
+---
+
+## 11 · What the config and the model grow
+
+- `CameraCapabilities` — ten new keys; `Capability<T>` gains `gated`, carrying
+  the gating control's name.
+- `CONTROL_MAP` — the new controls, and `pan_absolute`/`tilt_absolute` → `aim`.
+- `parseControls` — reads `flags=inactive`.
+- `CameraControls` — a field per control, `null` meaning leave it alone.
+- `CameraOutput.enabled`.
+- **New:** `stream.mode`; `preview.mode`, `preview.size` (`auto` or a rung),
+  `preview.ladder_top`, `preview.ladder_bottom`, `preview.floor_kbps`,
+  `preview.ceiling_kbps`.
+- The published schema regenerated; `docs/configuration.md` updated.
+
+---
+
+## 12 · Requirements to add
+
+IDs are stable. Current highest: `R-CTL-10`, `R-UI-20`, `R-VID-15`, `R-CAM-18`,
+`K-45`.
 
 | New | Text |
 |---|---|
 | **R-CTL-11** | Set exposure — the automatic mode, and where the camera allows it the shutter time, the gain and the backlight compensation, each against the bounds the device reports |
 | **R-CTL-12** | Set white balance — automatic, or a colour temperature within the device's own range |
 | **R-CTL-13** | Set focus — automatic, or a position within the device's own range |
-| **R-CTL-14** | Set zoom within the device's own range, and state whether it is optical or a digital crop |
-| **R-UI-21** | **A control another setting has charge of stays on the page, drawn inert, naming the setting that has it.** It is not a fault and is not drawn as one: the caution tone belongs to a capability that misreports itself, and spending it on a camera behaving correctly is how an operator learns to stop reading it |
-| **R-UI-22** | **The interface's first paint carries its own theme.** The generated stylesheet is in the document before any script runs, so no palette but Yonder's is ever drawn |
-| **R-UI-23** | **The capture gate photographs readings, not masks.** Every field renders a fixed specimen — the widest value it can honestly hold — so a reading that does not fit its field changes the page's shape and fails the build |
-| **R-UI-25** | **The instrument library is rendered whole, from source, in both palettes, on every build.** Every component in every state on one captured page, so a gap in the set is visible before a page is built from it and a component that changes shape fails the build |
-| **R-VID-16** | **Start and stop each output independently from the console, and show what each one is costing while it runs.** An output is stopped where its cost is stated, because the cost is the reason to stop it |
-| **R-UI-24** | **An output nothing can reach is drawn as unreachable, and its receive line is marked unusable rather than offered.** The console states which of the device's current paths can carry an output — an inbound listener works on the mesh and never behind carrier NAT — and **it does not act on it**: stopping an output is the operator's press (R-CMD-04) |
+| **R-CTL-14** | Set zoom within the device's own range, and state whether it is optical or a digital crop, and whether it reaches the picture the operator is looking at |
+| **R-UI-21** | **A control another setting has charge of stays on the page, drawn inert, naming the setting that has it** in the operator's words. It is not a fault and is not drawn as one |
+| **R-UI-22** | **The interface's first paint carries its own theme.** The generated stylesheet is in the document before any script runs |
+| **R-UI-23** | **The capture gate photographs readings, not masks.** Every field renders its widest honest specimen, and the gate measures clipped text |
+| **R-UI-24** | **An output nothing can reach is drawn as unreachable, and its stream address marked unusable rather than offered.** The console states which of the device's paths can carry it, and does not act |
+| **R-UI-25** | **The instrument library is rendered whole, from source, in both palettes, in every state, on every build** |
+| **R-UI-26** | **An action lives beside the thing it acts on where that thing is on the page** — Record with Capture, Recentre with Aim. The rail carries the page's own actions. Amends R-UI-10 |
+| **R-UI-27** | **A camera's name is the operator's.** It defaults to `Cam N`, is edited on the camera's own page, and is shown everywhere the camera is named |
+| **R-UI-28** | **The picture and the aim panel work without the deck.** They are shown on the Cockpit, and depend on nothing the camera page draws around them |
+| **R-VID-16** | **Start and stop each output independently from the console, and show what each is costing while it runs** |
+| **R-VID-17** | **Adapt the preview's size as well as its bitrate**, down a ladder when pinned at the floor and up when there is headroom, within an operator-set top and bottom; a chosen size holds |
+| **R-VID-18** | **The picture states what it is** — mode, size, rate, bitrate, and whether it is pinned, held, at full rate or on stills — on itself, and announces a step with its reason |
 
-Known issues to file for what was observed: the confirmation window arming from
-the Live deck, the flash of unstyled content, the pillarboxed picture pane, the
-overlay drawn behind the video, and the truncated receive line — `K-46` … `K-50`.
-
----
-
-## 10 · The rules this work is held to
-
-- **Logic and presentation live in node packages.** No `function` node, no
-  markup in a `ui-template`. `flows/` is wiring only. Review finding S11 shows
-  `flows.test.ts` enforces the behaviour half and not the presentation half —
-  a `ui-template` carrying markup passes 80 of 80 today. This work closes that:
-  the only permitted `ui-template` is `style-link`, and after R-UI-22 there may
-  be none at all.
-- **Both palettes.** Every component reads `var(--yonder-*, fallback)`. No
-  hard-coded colour, anywhere.
-- **A unit is never uppercased.** `Mb/s`, not `MB/S`.
-- **`emitsActions` is load-bearing.** Dashboard silently drops a
-  `widget-action` from a widget that did not register `onAction` — every soft
-  key once shipped dead this way, with no error anywhere. Every control the
-  deck and the index emit through is covered by a test that presses it.
-- **No credential in a committed capture** (R-SEC-10). The receive line renders
-  the stream password on screen, correctly; the gate must mask it and the plan
-  verifies that it does.
-- **The repository is self-contained.** No board address in a committed file.
+Known issues to file: the confirmation window from the Live deck, the flash of
+unstyled content, the pillarboxed pane, the overlay behind the video, the
+truncated receive line — `K-46` … `K-50`.
 
 ---
 
-## 11 · Testing, and the gate
+## 13 · Testing, and the gate
 
-**Every component has tests.** `holdkey.component.test.ts` is the worked
-example; the harness — DOM environment, `@vitejs/plugin-vue`,
-`@vue/test-utils` — already exists.
+**Every component has tests; every guard is mutation-checked** — delete it,
+watch a named test go red, restore. Five guards on this branch had no coverage
+behind a green suite.
 
-**Every guard is mutation-checked.** On this branch five separate guards turned
-out to have no coverage behind a fully green suite. For each guard: delete it,
-confirm a test goes red, restore it. A guard that stays green when deleted is
-not a guard.
+**The gallery is the blueprint and the gate captures it** (R-UI-25): every
+component, every state, both palettes, notebook and tablet widths. The gate
+renders specimens rather than masks (R-UI-23) and fails on clipped text.
 
-**The capture gate renders specimens rather than masks.** Today it covers live
-readings with grey rectangles and checks geometry, so a clipped value is
-invisible to it — underneath the rectangle. Instead each field renders a fixed,
-deliberately awkward specimen: `1280 × 720 · 30 fps`, `5.17 Mb/s at I-frame`,
-`−180.0°`, `2800 K`. The photographs stay identical build to build because the
-values never change, so the gate works exactly as it does now — but a field too
-narrow for its own contents shows up in the photograph. It also forces the
-question *how wide must this field be* to be answered once, in writing, rather
-than on a board.
+**The states the gate must photograph, on a page:** present, not offered,
+advertised, gated; adaptive, at the floor, held, full rate, stills; recording,
+sent-not-confirmed, no card; an aim that answers and one that does not; one
+camera and two.
 
-**The states the gate must photograph.** Present, not offered, advertised, and
-gated, on one page, in both palettes — because the four are a page's most
-likely defect and the only one no unit test can see.
+**On the board, before the branch is done:** every control in §7 marked
+*proven* is moved from the console and its effect seen; the confirmation
+window is shown not to arm from Live; the gimbal pans from the console and
+stops on release; the picture steps down a rung on a throttled link and says
+so.
 
 ---
 
-## 12 · The gallery
+## 14 · How this is staged
 
-**A page that mounts every component, in every state, in both palettes, built
-from the real sources against the real generated `theme.css`.** It is a
-deliverable of this work and not a side-effect, for a reason the M4 build
-demonstrates: a component library nobody can look at whole is a library whose
-gaps are invisible until a page is built from it and somebody says *that isn't
-what we drew*. The absence of a picker would have been obvious on one screen.
+One plan, one branch, in phases that are its review checkpoints:
 
-It earned that place before this document was finished. A first cut, built to
-settle the layout, found four defects standing alone — with no page, no
-Node-RED and no board:
+1. **The model** — capabilities, gated, the probe map, the schema, the write
+   path, output reachability. `yonder-core` only.
+2. **The library and the gallery** — the three clipping fixes; the parts; the
+   four nodes; the gallery growing with them. **Shown to the operator before 3.**
+3. **The pages and the defects** — both camera pages rebuilt; the five defects;
+   the gate moved to specimens; per-camera navigation and the strip.
+4. **The mechanisms** — the rate controller, the preview-state message, board
+   recording, the stills strip.
+5. **The accessory camera** — the session, the command path, aim, the state
+   push decoded, every untried command driven.
+6. **The Cockpit surface** — the picture and the aim panel embedded without the
+   deck, proven to work there. The Cockpit page itself is M5.
 
-| Found in the gallery | What it is |
-|---|---|
-| `1280 × …`, `3000 kb…`, and two cells past the edge | **`YonderDataBar` truncates in the component**, not because a page was narrow. This is the observed defect, reproduced in isolation |
-| The soft-key rail runs off its own edge | Six keys do not fit and the rail neither wraps nor scrolls; three keys were simply not drawn |
-| `IN USE0.0 of 3.2 Mb/s` | `YonderBudget` has no space between label and value |
-| `3Mb/s`, `0×` | A leading space inside a tag is collapsed. Written and caught within the minute, because it was rendered beside eleven other things |
-
-Requirements: it renders from `src/`, never from a built bundle, so it cannot
-show something the package does not contain. It carries the four capability
-states for every control. It is captured by the gate in both palettes, so a
-component that changes shape fails the build the same way a page does.
-
-## 13 · How this is staged
-
-**One plan, one branch.** The three parts below are its phases and its review
-checkpoints, not separate branches.
-
-**Phase 1 — the model.** `CameraCapabilities`, `CONTROL_MAP` (including
-`pan_absolute`/`tilt_absolute` → `aim`), the `inactive` flag becoming the gated
-state, `CameraControls`, `CameraOutput.enabled`, and the write path. All in
-`yonder-core`, all tested, all mutation-checked. Nothing is drawn yet.
-
-**Phase 2 — the library and the gallery.** Picker, segmented control, set bar,
-readout row, column, placard, aim dial. Then `ui-yonder-deck` and
-`ui-yonder-index`. The gallery grows with them and is the review surface at
-this checkpoint.
-
-**Phase 3 — the pages, the defects and the accessory camera.** Both camera
-pages rebuilt. The Outputs group. The picture reworked — overlays, aspect,
-z-order. The five defects. The gate moved to specimens. Then R-CAM-15: the AOA
-source, the DUML command path, aim as a real capability, the recorder and
-digital zoom, with the dial and the drag layer wired to a gimbal that moves.
-
-**Exit:** the Live deck carries every flying control the bench camera offers,
-states the two it advertises and cannot honour, stops an output on a press, and
-pans the Pocket 2 — seen on the board, in both palettes.
+**Exit:** every control the blueprint draws does what it says, on the board,
+on both cameras, in both palettes, on the camera page and on the Cockpit.
 
 ---
 
-## 14 · Open
+## 15 · Open
 
-**Whether the deck should be one node or one per group per camera.** Layout B
-draws one deck; a multi-camera page may want one per camera. Deferred to M6
-rather than guessed at now.
-
-**Nothing else.** The visual questions were settled by the mockups, and the
-material ones by the board.
+Nothing outstanding in the design. Two things the bench still owes: which limit
+bit is which axis, and the standalone gimbal work-mode command.
