@@ -101,6 +101,17 @@ export interface ComposeOptions {
 const LINK = "!";
 
 /**
+ * The RTP payload type this project's own H.264 stream uses.
+ *
+ * RFC 3551 reserves 96–127 for a payload with no static assignment, which
+ * H.264 has none of; any number in that range would interoperate equally
+ * well. Fixed here, once, so `rtph264pay`'s `pt=` on this, the sending side,
+ * and the `payload=` a receiver built from `receive.ts` puts in its caps
+ * cannot drift into two different answers to the same question.
+ */
+export const RTP_PAYLOAD_TYPE = 96;
+
+/**
  * The capsfilter every `v4l2h264enc` needs, and the evidence that it does.
  *
  * Without it the element builds, links, reaches PLAYING, and then dies on the
@@ -155,7 +166,7 @@ function sink(output: CameraOutput, rtspBase: string): string[] {
       // config-interval=-1 sends SPS/PPS with every keyframe. Without it a
       // ground station started after the stream never gets the parameter sets
       // and shows nothing, with no error, for ever.
-      return ["rtph264pay", "config-interval=-1", "pt=96", LINK,
+      return ["rtph264pay", "config-interval=-1", `pt=${RTP_PAYLOAD_TYPE}`, LINK,
         "udpsink", `host=${output.host}`, `port=${output.port}`, "sync=false"];
     case "rtsp":
       return ["rtspclientsink", `location=${rtspBase}/${output.path}`, "latency=0"];
