@@ -21,6 +21,10 @@ import { networkState } from "../net/state.js";
 import { readRemoteState } from "../remote/state.js";
 import { RemoteRenderer } from "../remote/renderer.js";
 import { MediaRenderer, MEDIA_CONFIG_PATH } from "../media/renderer.js";
+import { Supervisor, systemSpawner } from "../video/supervisor.js";
+import { detectCameras, probeCamera } from "../video/probe/camera.js";
+import { probeEncoder } from "../video/probe/encoder.js";
+import { readSupply } from "../system/supply.js";
 import { ZeroTierCli } from "../remote/zerotier/cli.js";
 import { readTraffic } from "../remote/traffic.js";
 import { TrafficSampler } from "../remote/sampler.js";
@@ -142,6 +146,19 @@ export function buildRenderers(opts: BuildRenderersOptions): {
   remoteRenderer: RemoteRenderer;
   /** Present only when `opts.mediaConfigPath` said where the file goes. */
   mediaRenderer?: MediaRenderer;
+  /**
+   * The one supervisor this process owns, for the whole of its life.
+   *
+   * Built here, beside the renderers, and deliberately not inside a Node-RED
+   * node: a redeploy destroys and recreates every node, so a supervisor in one
+   * would drop every camera's pipeline the moment somebody edited a flow —
+   * including, on a flying aircraft, the feed a ground station is watching.
+   *
+   * Not a renderer. Starting and stopping a stream is a runtime action that
+   * survives no apply and no reboot (R-CTL-01), so it has no place in a
+   * sequence whose whole purpose is to make a configuration true.
+   */
+  supervisor: Supervisor;
   generated: string[];
 } {
   const log = opts.log ?? note;
@@ -214,6 +231,13 @@ export function buildRenderers(opts: BuildRenderersOptions): {
   // hostname on the DHCP request the network render is about to make.
   const hostname = new HostnameRenderer({ runner: opts.runner ?? systemRunner, log });
 
+  // Nothing is spawned by constructing it: a Supervisor holds no process
+  // until something calls start(), which only POST /cameras/:id/run does.
+  const supervisor = new Supervisor({
+    spawner: systemSpawner,
+    ...(opts.clock === undefined ? {} : { clock: opts.clock }),
+  });
+
   const renderers: Renderer[] = [hostname, renderer, remoteRenderer];
   if (consoleRenderer !== undefined) renderers.push(consoleRenderer);
   if (mediaRenderer !== undefined) renderers.push(mediaRenderer);
@@ -227,6 +251,7 @@ export function buildRenderers(opts: BuildRenderersOptions): {
     zerotier,
     remoteRenderer,
     ...(mediaRenderer === undefined ? {} : { mediaRenderer }),
+    supervisor,
     generated,
   };
 }
@@ -502,6 +527,10 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
     configPath: opts.configPath,
     credential,
     diag,
+    // Outside the block below on purpose: reading the supply register needs no
+    // secret store, and a board whose secrets.yaml is unreadable is exactly the
+    // one whose brownouts an operator wants recorded (R-SYS-09).
+    supply: () => readSupply({ runner: probeRunner }),
     // Absent when buildRenderers threw. GET /net/scan then says this device
     // cannot scan, which is true, rather than reporting an empty air; and
     // POST /net/join refuses rather than applying a configuration whose
@@ -524,6 +553,35 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
         readTraffic,
         throughput: (iface) => sampler.forInterface(iface),
       }),
+      // The camera layer, over the same runner as everything else — so a test
+      // injecting a fake runner gets a fake v4l2-ctl for free, and nothing
+      // reaches a real one by omission.
+      cameras: {
+        detect: () => detectCameras({ runner: probeRunner }),
+        probe: (node, card) => probeCamera(node, card, { runner: probeRunner }),
+      },
+      encoder: () => probeEncoder({ runner: probeRunner }),
+      // One supervisor, for the process's lifetime. See buildRenderers.
+      supervisor: built.supervisor,
+      // The one value this router can reach in the secret store, and the one
+      // route that spends it is GET /cameras/:id/receive-line (R-SEC-10).
+      // Absent until the media server has been configured once, which the
+      // rendering says in words rather than printing a URL that would not work.
+      rtspPassword: () => built.secrets.get("rtsp_password") ?? null,
+      // Every address this device answers on: what the radio holds, then what
+      // the mesh assigned. The receive line names one of these and lists the
+      // rest beneath it, because a board on a mesh has several and only one of
+      // them is the one the operator is actually reaching it on (R-VID-15).
+      addresses: async () => {
+        const [local, mesh] = await Promise.all([
+          client.activeIpv4(),
+          readRemoteState(loadConfig(opts.configPath), built.zerotier, { readTraffic }),
+        ]);
+        return [
+          ...local.map((a) => a.address.split("/")[0] ?? a.address),
+          ...mesh.addresses.map((a) => a.split("/")[0] ?? a),
+        ].filter((a) => a !== "");
+      },
     }),
     ...(onProvisioned === undefined ? {} : { onProvisioned }),
   });

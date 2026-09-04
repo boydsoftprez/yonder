@@ -245,7 +245,7 @@ mkdir -p "$CONSOLE/node_modules"
 # rm then ln, never `ln -sfn`: -n is not POSIX, and without it `ln -sf` onto an
 # existing symlink-to-a-directory creates the link inside it.
 for pkg in node-red-contrib-yonder-system node-red-contrib-yonder-network \
-           node-red-dashboard-2-yonder; do
+           node-red-contrib-yonder-video node-red-dashboard-2-yonder; do
     rm -f "$CONSOLE/node_modules/$pkg"
     ln -s "$REPO/packages/$pkg" "$CONSOLE/node_modules/$pkg"
 done

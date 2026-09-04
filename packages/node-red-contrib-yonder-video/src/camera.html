@@ -1,0 +1,38 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!--
+  The editor half of read camera. A form and a registration, nothing else.
+-->
+<script type="text/html" data-template-name="yonder-camera">
+  <div class="form-row">
+    <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-camera"><i class="fa fa-video-camera"></i> Camera</label>
+    <input type="text" id="node-input-camera" placeholder="cam0" />
+  </div>
+</script>
+
+<script type="text/html" data-help-name="yonder-camera">
+<p>Reads <code>GET /cameras/&lt;id&gt;</code> when a message arrives and emits
+the camera, its capabilities as the device answers them now, and the run state
+the daemon observed.</p>
+<p>A read only. Settings shown here are read back from the device, never echoed
+from what was sent — changing one goes through <code>yonder-apply</code>, so it
+inherits the confirmation window.</p>
+<p>Set <code>msg.topic</code> to <code>probe</code> to re-read that one device.
+The camera is taken from <code>msg.camera</code> if the message carries one,
+otherwise from the id set on this node.</p>
+</script>
+
+<script type="text/javascript">
+  RED.nodes.registerType("yonder-camera", {
+    category: "yonder",
+    color: "#c7d4e0",
+    defaults: { name: { value: "" }, camera: { value: "" } },
+    inputs: 1,
+    outputs: 1,
+    icon: "font-awesome/fa-video-camera",
+    label: function () { return this.name || this.camera || "read camera"; },
+  });
+</script>

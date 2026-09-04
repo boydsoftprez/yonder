@@ -227,6 +227,29 @@ describe("consolePathsFromEnv", () => {
     expect(second.generated).toEqual([]);
   });
 
+  /**
+   * The supervisor is built here, and it is not a renderer.
+   *
+   * Here, because a Node-RED redeploy destroys and recreates every node: a
+   * supervisor inside one would drop every camera's pipeline the moment
+   * somebody edited a flow — including, on a flying aircraft, the feed a
+   * ground station is watching.
+   *
+   * Not a renderer, because starting and stopping a stream is a runtime action
+   * that survives no apply and no reboot (R-CTL-01), and the renderer sequence
+   * exists to make a configuration true.
+   */
+  it("builds one supervisor, and does not put it in the renderer sequence", () => {
+    const run: CommandRunner = async () => ({ code: 0, stdout: "", stderr: "" });
+    const built = buildRenderers({
+      secretsPath: join(dir, "secrets.yaml"),
+      runner: run,
+      remoteStatePath: join(dir, "remote.json"),
+    });
+    expect(built.supervisor.all()).toEqual([]);
+    expect(built.renderers.map((r) => r.name)).not.toContain("supervisor");
+  });
+
   it("keeps a passphrase the operator has changed", () => {
     const secretsPath = join(dir, "secrets.yaml");
     writeFileSync(secretsPath, "ap_psk: an-operator-chose-this\n", { mode: 0o600 });

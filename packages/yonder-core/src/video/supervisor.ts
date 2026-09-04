@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import { spawn } from "node:child_process";
 import { systemClock, type Clock } from "../apply/types.js";
 
 /**
@@ -42,6 +43,29 @@ export interface SpawnedProcess {
  * back its output — it runs until something stops it.
  */
 export type ProcessSpawner = (argv: string[]) => SpawnedProcess;
+
+/**
+ * The real one, and the only place in this package that starts a pipeline.
+ *
+ * **stdout discarded, stderr inherited.** `gst-launch-1.0 -q` says nothing on
+ * stdout worth keeping and everything worth keeping on stderr: the encoder
+ * fault `pipeline.ts` records — `Failed to process frame`, on the first frame,
+ * after everything looked well — is printed there and nowhere else. Inheriting
+ * sends it to the daemon's own stderr, which systemd hands to the journal: the
+ * diagnostic half, exactly where `trace()` puts an nmcli command line, and
+ * deliberately not the activity pane an operator reads.
+ *
+ * **Untested, and it has to be.** Nothing in this repository's suite spawns a
+ * process — that is what `ProcessSpawner` exists for — so this function is the
+ * seam's far side. It is four lines for exactly that reason.
+ */
+export const systemSpawner: ProcessSpawner = (argv) => {
+  const child = spawn(argv[0], argv.slice(1), { stdio: ["ignore", "ignore", "inherit"] });
+  return {
+    kill: (signal) => { child.kill(signal as NodeJS.Signals | undefined); },
+    on: (event, fn) => { child.on(event, (arg: unknown) => { fn(arg); }); },
+  };
+};
 
 /** How long a pipeline must hold before it counts as running (R-UI-05). */
 const SETTLE_MS = 2_000;

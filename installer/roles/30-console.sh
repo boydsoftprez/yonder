@@ -88,7 +88,8 @@ fi
 # console with the nodes and without the bundles registers every widget and
 # draws none of them.
 for pkg in node-red-contrib-yonder-system node-red-contrib-yonder-network \
-           node-red-contrib-yonder-remote node-red-dashboard-2-yonder; do
+           node-red-contrib-yonder-remote node-red-contrib-yonder-video \
+           node-red-dashboard-2-yonder; do
     pkg_src="$YONDER_SRC/packages/$pkg"
     pkg_dest="$con_dest/node_modules/$pkg"
     if [ ! -d "$pkg_src/dist" ] && [ "$DRY_RUN" != "1" ]; then

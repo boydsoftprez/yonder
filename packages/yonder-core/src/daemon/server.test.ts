@@ -1246,7 +1246,7 @@ describe("the page routes, as the daemon assembles them", () => {
       expect(res.status).toBe(200);
       // The shape, not the values: this machine has no /proc, so every fact
       // is legitimately null here and the record still has to be whole.
-      expect(Object.keys(res.body as object).sort()).toEqual(["display", "facts", "versions"]);
+      expect(Object.keys(res.body as object).sort()).toEqual(["display", "facts", "supply", "versions"]);
       // Formatted here, not in a page: a widget binds a string and cannot
       // divide bytes by 1024 twice. On a machine with no /proc every one of
       // them is legitimately "unknown", which is the point — a blank cell

@@ -47,6 +47,7 @@ function contribTypes(): Set<string> {
     "node-red-contrib-yonder-system",
     "node-red-contrib-yonder-network",
     "node-red-contrib-yonder-remote",
+    "node-red-contrib-yonder-video",
     "node-red-dashboard-2-yonder",
   ]) {
     const manifest = JSON.parse(
