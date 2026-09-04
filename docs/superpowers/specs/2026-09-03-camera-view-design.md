@@ -879,7 +879,12 @@ Everything cited above, with its source.
 |---|---|
 | 1920×1080p30, whole pipeline | 55% of one core, 14% of the board |
 | 1280×720p30 | 27% of one core, 7% of the board |
-| 640×480p30 | 11% of one core, 3% of the board — **a whole pipeline including its own JPEG decode. Not the cost of the preview branch**, which starts from frames already decoded and adds a downscale; that has never been measured |
+| 640×480p30 | 11% of one core, 3% of the board — **a whole pipeline including its own JPEG decode. Not the cost of the preview branch**, which starts from frames already decoded and adds a downscale. It was standing in for that branch until 2026-09-04; the two rows below are the measurement |
+| **The preview branch (R-VID-13)** | **12% of one core, 3% of the board.** 640×360p15 off frames the main path already decoded, as the difference between the composed pipeline with the branch and without it. It cannot be run alone — it has no source, and giving it one would make it pay a second decode — and the marginal cost is in any case the question an operator is deciding. The 11% substitution was near enough by accident: right in magnitude, from a pipeline sharing almost no term with it |
+| **The whole composed pipeline, both encodes** | **43% of one core, 11% of the board.** 1280×720p30 at 2 Mb/s published over RTSP, plus the preview branch. The full-rate branch alone is 31%; the four points over the direct-path 27% are the `tee`, the queues and an RTSP publish |
+| Uplink, the point of R-VID-13 | 1,888 kb/s on the main path against 374 kb/s on the preview, over twenty seconds — **the browser's copy costs about a fifth of a ground-station feed** |
+| Rates held | 300 frames off the main path and 150 off the preview in 11.1 s each, RTSP setup included: 30 and 15 fps. The figures above are real work, not dropped frames |
+| Supply, for the two rows above | `throttled=0x0` read before **and** after every run by `scripts/measure-pipeline.sh`, which refuses to print a figure otherwise. The older rows in this table were not checked per run — see K-41 |
 | Capture only | 1% |
 | plus software JPEG decode | ~50% |
 | plus hardware H.264 encode | +4% |
@@ -910,6 +915,8 @@ Everything cited above, with its source.
 - **K-40** — `/dev/video10` advertises MJPEG and cannot be started, so software JPEG decode
   is the floor and is the entire cost of the pipeline.
 - **K-41** — the development board browns out: `get_throttled=0x50000`, three undervoltage
-  events in the first two minutes of a boot, and spontaneous reboots. **Every figure in the
-  pipeline table was measured on a board in that state, so they are a floor rather than a
-  clean reading**, and should be retaken on a supply that holds.
+  events in the first two minutes of a boot, and spontaneous reboots. The older figures in
+  the pipeline table were not qualified per run, so they are a floor rather than a clean
+  reading. The two R-VID-13 rows were taken on a supply verified clean either side of every
+  run; the rest still want retaking. Nothing is measured unqualified any more —
+  `scripts/measure-pipeline.sh` refuses to print a figure it cannot vouch for.
