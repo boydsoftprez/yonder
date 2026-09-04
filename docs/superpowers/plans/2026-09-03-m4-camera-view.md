@@ -299,7 +299,7 @@ In `packages/yonder-core/src/schema/config.ts`, above `ConfigSchema`:
  *
  * **The device is held by port, not by enumeration number** (R-CAM-05).
  * `/dev/video0` is whichever camera the kernel probed first this boot; the
- * `by-path` name — `usb-0000:01:00.0-1.2` — is the socket it is plugged into,
+ * `by-path` name — `usb-0000:01:00.0-1.3` — is the socket it is plugged into,
  * so the configured camera is the detected one after a reboot and after a
  * plug-order change. `probe/camera.ts` resolves it to a node at run time.
  *
