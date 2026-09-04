@@ -1005,6 +1005,76 @@ describe("flows/flows.json Cellular tab", () => {
   });
 
   /**
+   * **R-UI-17.** The defect an operator found on a board: the fact cell read
+   * `APN ereseller` and the four boxes under it were empty on every load, so
+   * one page gave two answers to the same question and the form implied a
+   * modem nobody had configured while it was plainly connected.
+   *
+   * The boxes are seeded from the **configuration** — `network.modem`, through
+   * the `/config` read that was already in the flows and whose output went
+   * nowhere — and never from the modem's state. They are different questions:
+   * while an apply is pending the configuration says one APN and the connected
+   * bearer is still on the previous one, and the fact cell above keeps
+   * reading the bearer.
+   */
+  it("seeds the form from the configuration, so it says what is set", () => {
+    const read = flows.find((n) => n.id === "read-config");
+    expect(read?.type).toBe("yonder-config");
+    const seed = flows.find((n) => n.id === (read?.wires as string[][])[0][0]);
+    expect(seed?.type, "the /config read still goes nowhere").toBe("yonder-modem-form");
+    const outs = seed?.wires as string[][];
+    // One output per box, in the order the node documents.
+    expect(outs.length).toBe(4);
+    for (const [i, box] of ["apn", "dial", "username", "password"].entries()) {
+      expect(outs[i], `the ${box} box is not fed`).toContain(`input-cell-${box}`);
+    }
+  });
+
+  /**
+   * A seeded box that CONNECT cannot see is worse than an empty one: the
+   * operator reads `ereseller`, presses CONNECT and is told the modem needs an
+   * APN. `gather-cell-form` reads `flow.modemApn` and the widgets do not pass
+   * their input through, so the same seed has to reach the `remember` nodes.
+   */
+  it("seeds what CONNECT reads, so an untouched form applies what is on screen", () => {
+    const seed = flows.find((n) => n.type === "yonder-modem-form");
+    const outs = seed?.wires as string[][];
+    const gather = flows.find((n) => n.id === "gather-cell-form");
+    const gathered = gather?.rules as { p: string; to: string; tot: string }[];
+    for (const [i, box] of ["apn", "dial", "username"].entries()) {
+      expect(outs[i], `CONNECT cannot see the seeded ${box}`).toContain(`remember-cell-${box}`);
+      // The whole path, end to end, and not merely that a wire exists: the
+      // seed sets a flow key, and CONNECT reads a flow key. Asserting only the
+      // wire would pass with the two naming different keys, which is a form
+      // that shows a value and applies nothing.
+      const remember = flows.find((n) => n.id === `remember-cell-${box}`);
+      const rules = remember?.rules as { p: string; pt: string; to: string; tot: string }[];
+      expect(rules).toHaveLength(1);
+      expect(rules[0].pt).toBe("flow");
+      expect(rules[0].to).toBe("payload");
+      const read = gathered.find((r) => r.p === `payload.${box}`);
+      expect(read?.tot).toBe("flow");
+      expect(read?.to, `the seed writes ${rules[0].p} and CONNECT reads ${String(read?.to)}`)
+        .toBe(rules[0].p);
+    }
+  });
+
+  /**
+   * **R-SEC-10, and the one box that is never seeded.**
+   * `network.modem.password` is a reference into secrets.yaml. Neither the
+   * credential nor the reference to it goes anywhere near a form value, so the
+   * password output feeds the box (to say *whether* one is set) and nothing
+   * that CONNECT reads — an untouched password box must keep meaning "leave
+   * the stored credential alone".
+   */
+  it("never seeds the password box, and never puts one where CONNECT reads", () => {
+    const seed = flows.find((n) => n.type === "yonder-modem-form");
+    const outs = seed?.wires as string[][];
+    expect(outs[3]).toEqual(["input-cell-password"]);
+    for (const out of outs) expect(out).not.toContain("remember-cell-password");
+  });
+
+  /**
    * R-SEC-10. `ui-form` renders nothing masked, so the password is its own
    * `ui-text-input`; `passthru` would put what was typed back on an outgoing
    * message.

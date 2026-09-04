@@ -206,26 +206,76 @@ FAKE
 chmod +x "$BIN/systemctl" "$BIN/nmcli" "$BIN/mmcli" "$BIN/curl" "$BIN/rfkill" \
     "$BIN/hostnamectl" "$BIN/ping"
 
-# The shipped defaults, with the console on this run's port and the modem
-# turned on. `network.modem.enabled` is false by default and that is right for
-# a board nobody has configured — but with it off `pathDevices` never names a
-# modem, so the daemon reports the cellular path absent and neither the
-# Cellular tab nor the `Way out` panel can be captured showing a modem at all.
-# The mmcli stand-in above is already replaying a real EC25; this is what lets
-# the pages see it.
+# The modem password this run puts on the device, and the one string that must
+# never come back out of it (R-SEC-10).
 #
-# The range address is not decoration: `enabled: false` at that indent also
-# appears under `remote.zerotier`, and a substitution without one turns the
-# mesh on too — which would have this gate asking a `zerotier-cli` that does
-# not exist on a development machine.
-sed -e "s/^  port: .*/  port: $PORT/" \
-    -e "/^  modem:/,/^  priority:/ s/^    enabled: false/    enabled: true/" \
-    "$REPO/config/defaults/config.yaml" > "$ETC/config.yaml"
+# Distinctive on purpose, the way `$PASSWORD` is: the checks below grep the
+# journal, the dashboard and every route the console serves for it, and a
+# value like "secret" would match by accident. It goes into secrets.yaml
+# because that is where a credential lives — config.yaml carries only the
+# *name* of the row — and the Cellular tab's password box is the one field on
+# this console that is deliberately never seeded from either.
+MODEM_PASSWORD='verify-pages-modem-Jv7Hs2Bn'
+
+# The shipped defaults, with the console on this run's port and the modem
+# turned on and configured. `network.modem.enabled` is false by default and
+# that is right for a board nobody has configured — but with it off
+# `pathDevices` never names a modem, so the daemon reports the cellular path
+# absent and neither the Cellular tab nor the `Way out` panel can be captured
+# showing a modem at all. The mmcli stand-in above is already replaying a real
+# EC25; this is what lets the pages see it.
+#
+# **The rest of the modem block is configured because R-UI-17 made it visible.**
+# The Cellular tab's four boxes are seeded from `network.modem`, so a capture
+# taken against `apn: null` would photograph the defect it was taken to prove
+# fixed. `apn` is the value the bearer fixture is dialled on, which is the
+# ordinary state of a working device: the form and the fact cell above it agree.
+# `dial` is deliberately left unset — an empty box beside two filled ones is
+# what "not configured" has to look like, and it is the honest value besides
+# (R-CEL-02 asks for the field; no modem measured has needed it). `password` is
+# a reference into secrets.yaml, so the box can be photographed saying a
+# credential is on file without one ever reaching a page.
+#
+# awk rather than another `sed -e`, because the password substitution turns one
+# line into two and `\n` in a replacement is a GNU extension this script cannot
+# rely on — it runs on macOS and on a CI runner.
+#
+# The range is not decoration: `enabled: false` at that indent also appears
+# under `remote.zerotier`, and a substitution without one turns the mesh on too
+# — which would have this gate asking a `zerotier-cli` that does not exist on a
+# development machine.
+sed -e "s/^  port: .*/  port: $PORT/" "$REPO/config/defaults/config.yaml" \
+  | awk '
+      /^  modem:/    { modem = 1 }
+      /^  priority:/ { modem = 0 }
+      modem && /^    enabled:/  { print "    enabled: true";      next }
+      modem && /^    apn:/      { print "    apn: ereseller";     next }
+      modem && /^    username:/ { print "    username: sim-user"; next }
+      modem && /^    password:/ { print "    password:"; print "      secret: modem_password"; next }
+      { print }
+    ' > "$ETC/config.yaml"
 grep -q "port: $PORT" "$ETC/config.yaml" || die "could not set the console port in $ETC/config.yaml"
-awk '/^  modem:/,/^  priority:/' "$ETC/config.yaml" | grep -q "enabled: true" \
-    || die "the modem is not enabled in $ETC/config.yaml; the defaults must have moved"
+modem_block=$(awk '/^  modem:/,/^  priority:/' "$ETC/config.yaml")
+for setting in "enabled: true" "apn: ereseller" "username: sim-user" "secret: modem_password"; do
+    case "$modem_block" in
+        *"$setting"*) ;;
+        *) die "the modem block in $ETC/config.yaml has no '$setting'; the defaults must have moved" ;;
+    esac
+done
+case "$modem_block" in
+    *"dial: null"*) ;;
+    *) die "the modem's dial is no longer unset; the empty box in the capture is not empty" ;;
+esac
 awk '/^  zerotier:/,0' "$ETC/config.yaml" | grep -q "enabled: false" \
     || die "the mesh was turned on by accident; there is no zerotier-cli here"
+
+# The credential the reference above names. Written before the daemon starts,
+# because the renderer resolves `network.modem.password` when it builds the
+# gsm profile and a reference to a row that is not there fails the first apply.
+# The store adds `ap_psk` to this file itself on the way past.
+umask 077
+printf 'modem_password: %s\n' "$MODEM_PASSWORD" > "$ETC/secrets.yaml"
+umask 022
 
 DAEMON_PID=""
 CONSOLE_PID=""
@@ -473,6 +523,37 @@ say "R-SEC-10: the password is nowhere in the journal"
 
 hits=$(grep -c "$PASSWORD" "$JOURNAL" || true)
 expect "the password appears nowhere in what either service printed" 0 "$hits"
+
+# ---------------------------------------------------------------------------
+say "R-SEC-10: the modem's credential never comes back off the device"
+
+# The half a unit test cannot make. `modemForm` is asserted not to seed the
+# password, and this is the same claim made against a running daemon, a running
+# console and a configuration that really does have a credential in it — the
+# one arrangement in which a leak could actually happen.
+expect "the modem password is nowhere in what either service printed" 0 \
+    "$(grep -c "$MODEM_PASSWORD" "$JOURNAL" || true)"
+expect_missing "and nowhere in the configuration the console is served" \
+    "$MODEM_PASSWORD" "$(sock /config)"
+expect_missing "nor in the modem state every surface is drawn from" \
+    "$MODEM_PASSWORD" "$(sock /modem/state)"
+expect_missing "nor in the dashboard the browser is handed" "$MODEM_PASSWORD" "$dash"
+
+# What `GET /config` *does* carry is the name of the row, not the row. Stated
+# as an assertion rather than left implicit, because it is the thing the seed
+# node is handed and deliberately does not pass on: if this ever stops being
+# true the leak has moved upstream of anything the console can prevent.
+expect_contains "the configuration names the secret and does not contain it" \
+    '"secret":"modem_password"' "$(sock /config)"
+
+# Every file either service wrote, not only the log. secrets.yaml is the one
+# place it belongs, and mode 0600 is what makes that acceptable.
+leaked=$(grep -rl "$MODEM_PASSWORD" "$ROOT" 2>/dev/null | grep -v "etc/yonder/secrets.yaml" || true)
+if [ -z "$leaked" ]; then
+    ok "and in no file under the temporary root but secrets.yaml"
+else
+    bad "the modem password is in: $leaked"
+fi
 
 # ---------------------------------------------------------------------------
 say "R-UI-12: capture every page, in both palettes, and look at them"

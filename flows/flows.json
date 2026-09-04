@@ -422,7 +422,9 @@
         "x": 500,
         "y": 540,
         "wires": [
-            []
+            [
+                "seed-cell-form"
+            ]
         ]
     },
     {
@@ -2066,6 +2068,31 @@
         "x": 700,
         "y": 2020,
         "wires": []
+    },
+    {
+        "id": "seed-cell-form",
+        "type": "yonder-modem-form",
+        "z": "yonder-console",
+        "name": "what the configuration says these boxes hold",
+        "x": 260,
+        "y": 2020,
+        "wires": [
+            [
+                "input-cell-apn",
+                "remember-cell-apn"
+            ],
+            [
+                "input-cell-dial",
+                "remember-cell-dial"
+            ],
+            [
+                "input-cell-username",
+                "remember-cell-username"
+            ],
+            [
+                "input-cell-password"
+            ]
+        ]
     },
     {
         "id": "input-cell-apn",

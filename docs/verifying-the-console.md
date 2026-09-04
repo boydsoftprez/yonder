@@ -196,6 +196,18 @@ on. The config the
 daemon is given is the shipped default with the modem turned on, because with it off the
 daemon reports the cellular path absent and neither cellular page can be captured at all.
 
+The rest of `network.modem` is **configured** rather than left at its defaults, because
+R-UI-17 made it visible: the Cellular tab's four boxes are seeded from that section, so a
+capture taken against `apn: null` would photograph the defect it was taken to prove fixed.
+The APN is the value the bearer fixture is dialled on — the ordinary state of a working
+device, where the form and the fact cell above it agree — and the dial number is
+deliberately left unset, because an empty box beside two filled ones is what *not
+configured* has to look like. The password is a reference into a `secrets.yaml` the gate
+writes before starting the daemon, so the box can be photographed saying a credential is
+on file; the value behind that reference is then grepped for in the journal, in every route
+the console serves, in the dashboard it hands a browser, and in every file under the
+temporary root but `secrets.yaml` itself (R-SEC-10).
+
 The `curl` stand-in is the one the gate *drives*. It is what `commandProbe` runs to find out
 whether a path carries traffic, and it answers whatever the gate last wrote to a file — read
 on every call — which is how the `Way out` rows are photographed in each of the states a probe

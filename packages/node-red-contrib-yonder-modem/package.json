@@ -2,13 +2,14 @@
   "name": "node-red-contrib-yonder-modem",
   "version": "0.1.0",
   "license": "GPL-3.0-or-later",
-  "description": "Yonder console nodes for the cellular link: modem and reach state, configure, test. Thin adapters over the yonder-core daemon socket; every decision lives in yonder-core.",
+  "description": "Yonder console nodes for the cellular link: modem and reach state, seed the connection form, configure, test. Thin adapters over the yonder-core daemon socket; every decision lives in yonder-core.",
   "keywords": ["node-red", "yonder"],
   "node-red": {
     "version": ">=5.0.0",
     "nodes": {
       "yonder-modem-state": "dist/state.js",
       "yonder-modem-configure": "dist/configure.js",
+      "yonder-modem-form": "dist/form.js",
       "yonder-reach-test": "dist/test.js"
     }
   },

@@ -13,10 +13,10 @@ import type { RED, RedNode } from "./red.js";
  * between reading a page and sending what it read.
  */
 export interface ModemFields {
-  apn?: string;
-  username?: string;
-  password?: string;
-  dial?: string;
+  apn?: string | null;
+  username?: string | null;
+  password?: string | null;
+  dial?: string | null;
 }
 
 /** The body `POST /modem/configure` merges into `network.modem`. */
@@ -43,11 +43,32 @@ export interface ModemRequestBody {
  *    report success, and change nothing at all — the worst kind of feedback,
  *    because it looks like it worked.
  *
+ * **What R-UI-17 changed, and what it did not.** The boxes are now seeded from
+ * `network.modem` when the page opens, so an *untouched* box holds the current
+ * value rather than being empty, and the ordinary CONNECT restates the
+ * configuration rather than sending three-quarters of it. Rule 1 is unchanged
+ * and still right for the password, which `modemForm` never seeds: an empty
+ * masked box means the operator did not enter one, and the stored credential
+ * stays.
+ *
+ * For the three seeded boxes the rule now has an edge it did not have before.
+ * An operator who *deliberately clears* a username they can see is asking for
+ * it to be removed, and rule 1 drops the field instead, so the setting
+ * survives and the form says it did not. Reading that intention needs the node
+ * to know what it seeded — which is a decision about what an empty box means,
+ * not a bug to fix quietly. It is recorded rather than guessed at; nothing
+ * here has changed behaviour for it.
+ *
+ * `apn` is checked for being a string rather than for being `undefined` or
+ * `""`, because a seed from an unconfigured device is `null` in the
+ * configuration and `null` is neither. `modemForm` converts it to `""` on the
+ * way out for the same reason; this is the second lock on the same door.
+ *
  * Pure, and exported for that reason: this is the one decision in the node
  * worth testing on its own, without a Node-RED and without a daemon.
  */
 export function modemRequest(fields: ModemFields): ModemRequestBody {
-  if (fields.apn === undefined || fields.apn === "") {
+  if (typeof fields.apn !== "string" || fields.apn === "") {
     throw new Error("the modem needs an APN before there is anything to configure");
   }
   const body: ModemRequestBody = { enabled: true, apn: fields.apn };

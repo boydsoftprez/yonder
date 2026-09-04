@@ -27,6 +27,14 @@ with it. A form submitted with no APN throws rather than sending anything:
 applying a document identical to the one already in force would report
 success and change nothing, which is the worst kind of feedback because it
 looks like it worked.</p>
+<p>The boxes are seeded from the configuration when the page opens
+(<code>yonder-modem-form</code>, R-UI-17), so an <i>untouched</i> box now holds
+the current value rather than being empty and the ordinary press restates the
+configuration. The rule above is unchanged and still right for the password,
+which is never seeded. For the three boxes that are, an operator who
+deliberately <i>clears</i> one is asking for that setting to be removed and the
+rule drops the field instead — recorded rather than guessed at, because what an
+empty box means is a decision and not a defect.</p>
 <p>The daemon merges these fields into the whole configuration and applies it,
 so what comes back is a <b>pending</b> command state, not a confirmation that
 the modem has taken the new settings — the same rule <code>yonder-apply</code>
