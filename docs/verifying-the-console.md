@@ -317,7 +317,7 @@ network-interfaces-reaching.day.png         every path probed, and reaching some
 network-interfaces-down.day.png             the wired port down, and saying so
 ```
 
-**Status has four shapes.** Two of them are two different boards: `Reachable by` is gauges
+**Status has five shapes.** Two of them are two different boards: `Reachable by` is gauges
 over a labelled strip, and on a board with no modem the gauges are *absent* — a gauge with
 no needle reads as a fault, and there being no modem is not one. That capture is driven by
 taking the modem out of the harness rather than by sending an empty reading, so what is
@@ -344,7 +344,28 @@ status-pending.day.png                      the banner on a page whose groups ar
 network-cellular-pending.day.png            the same change, on a tab
 ```
 
-The fourth is `If you lose this console` in its other state (R-UI-18). That panel prints the
+The fourth is **the same banner over a change that moved the Wi-Fi radio**, and it is a
+different panel: it offers no `CONFIRM`. That confirmation is the device's (R-CFG-11) —
+the console an operator would press it from goes off the air with the access point, so a
+press is either pointless or made by somebody who cannot see that the device is already
+fine, and it ends the device's own check early. The countdown is still there, the two lines
+say who is confirming, and `REVERT NOW` is still there because deciding you do not want the
+change is still a real thing to want. **The gate presses it**, for the same reason it presses
+the other one: that key is now the operator's only control over this apply, and a picture of
+a key nobody pressed is a picture of a key that might be dead.
+
+Two things make it capturable. The join never lands on this harness — nothing here issues an
+address — so `$JOIN_DELAY` holds the verifier's first `nmcli` poll open rather than letting
+its twenty-second grace run out mid-screenshot; the delay is zero for every other capture in
+the run. And beside the picture the gate reads what Dashboard would replay into the soft-key
+rail, so the artefact is not the only evidence of which keys were on it.
+
+```
+status-pending.day.png                      a change the operator confirms
+status-pending-radio.day.png                a change the device confirms — no CONFIRM key
+```
+
+The fifth is `If you lose this console` in its other state (R-UI-18). That panel prints the
 access-point passphrase **only while it is the published default** — ADR-0007 makes that
 value deliberately public, and it is the only thing that makes a locked-out operator's way
 back in usable at all — and says it has been changed once the operator has set their own.
@@ -363,6 +384,7 @@ there. Dashboard's own `_debug/datastore/<widget id>` is that value.
 status.day.png                              a board with a modem in it
 status-without-modem.day.png                the same board with nothing in the slot
 status-pending.day.png                      the same board, holding an unconfirmed change
+status-pending-radio.day.png                and one only the device can confirm
 status-psk-changed.day.png                  the same board, on a passphrase the operator set
 ```
 

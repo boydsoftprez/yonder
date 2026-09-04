@@ -110,6 +110,26 @@ echo 1 > "$MODEM_PRESENT"
 ETH_STATE="$ROOT/eth-state"
 echo connected > "$ETH_STATE"
 
+# How long `nmcli device show` takes to answer the *join check* — the one
+# query that carries IP4.GATEWAY, which is `joinSucceeded` asking whether the
+# radio landed anywhere (R-CFG-11).
+#
+# It exists so a radio-moving apply can be photographed while it is still
+# pending. A join on this board never lands: nothing here issues an address,
+# so the verifier polls until its 20-second grace runs out and then reverts —
+# and 20 seconds is not long enough to start a browser, sign in, load a page
+# and screenshot it twice. Holding the *first* poll open holds the pending
+# state without touching production code and without pretending the join
+# worked; a real board's DHCP taking its time is exactly what that poll is
+# written for.
+#
+# 0 for every other capture in this run, so nothing else waits on it. Only
+# this query is delayed: `device status`, `connection show` and the
+# GENERAL.DEVICE,IP4.ADDRESS form of `device show` — which is the fallback
+# watchdog's own probe — answer immediately as they always did.
+JOIN_DELAY="$ROOT/join-delay"
+echo 0 > "$JOIN_DELAY"
+
 # nmcli, reporting the board this project is built for: a wired port, the
 # radio, and the modem's control port. It used to list only `lo` and `wlan0`,
 # and the cost of that was invisible until the `Way out` panel existed — with
@@ -124,6 +144,11 @@ echo connected > "$ETH_STATE"
 cat > "$BIN/nmcli" <<FAKE
 #!/bin/sh
 case "\$*" in
+    # joinSucceeded's poll. See \$JOIN_DELAY above: it answers with nothing,
+    # which is a radio that has not landed, after however long it is told to
+    # take about it.
+    *IP4.GATEWAY*)
+        sleep "\$(cat "$JOIN_DELAY")" ;;
     *"device status"*)
         printf 'lo:loopback:connected:lo\n'
         printf 'eth0:ethernet:%s:Wired connection 1\n' "\$(cat "$ETH_STATE")"
@@ -884,6 +909,24 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
         # not the other, so the committed picture depended on where a timer
         # happened to fall.
         sleep 7
+        # What Dashboard would replay into the soft-key rail — the same read
+        # the credential checks above use, and for the same reason: the SPA
+        # shell carries no widget value, and a picture proves the keys were
+        # drawn but not what decided them. An ordinary change is the
+        # operator's to keep, so both keys are on the rail (R-UI-15).
+        rail=$(body "/dashboard/_debug/datastore/keys-pending")
+        expect_contains "the rail is offered CONFIRM for a change the operator can confirm" \
+            '"action":"confirm"' "$rail"
+        expect_contains "and REVERT NOW beside it" '"action":"revert"' "$rail"
+        # **And the message stopped there.** The rail's output goes to the node
+        # that re-reads `/status` and feeds the rail, so a widget that
+        # forwarded its input would turn one poll into an endless loop of
+        # them. `ui-yonder-softkeys` declares `passthru: false` to stop that,
+        # and this is the observable: a message that went round would arrive
+        # back with `tag-pending-key` having set `topic` to the whole payload
+        # *object*, where a press sets it to the action string.
+        expect_missing "and stopped there rather than going round the rail again" \
+            '"topic":{' "$rail"
         # **The banner on a tab, which is the half that was missing** (R-UI-15).
         # A `ui-group` belongs to one page and Dashboard's tabs layout draws
         # one group per tab, so the four widgets live inside each tab instead
@@ -930,6 +973,86 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
         # One more poll of the slowest panel, so the banner is down *and* the
         # way back in has the reverted hostname before anything else is
         # captured. Every other picture in this run is of a settled device.
+        sleep 7
+    }
+
+    # Status's fifth shape, and the one with a decision in it (R-CFG-11).
+    #
+    # The same banner over a change that moved the Wi-Fi radio. **It offers no
+    # `CONFIRM`**, because that confirmation is the device's: the console an
+    # operator would press it from goes off the air with the access point, so
+    # a press either does nothing useful or is made by somebody who cannot see
+    # that the device is already fine — and it ends the device's own check
+    # early. The countdown is still there, the prose says who is confirming,
+    # and `REVERT NOW` is still there because deciding you do not want the
+    # change is still a real thing to want.
+    #
+    # Two things make this capturable at all. The join never lands on this
+    # board — nothing here issues an address — so `$JOIN_DELAY` holds the
+    # verifier's first poll open rather than letting its 20-second grace run
+    # out mid-screenshot. And the press at the end is the proof that matters:
+    # `REVERT NOW` is the operator's only remaining control over this apply,
+    # so a picture of it that nobody pressed would be a picture of a key that
+    # might be dead.
+    capture_pending_radio() {
+        echo 90 > "$JOIN_DELAY"
+        sock /config > "$ROOT/config.json"
+        node -e '
+            const config = require(process.argv[1]);
+            config.network.client.ssid = "HomeNetwork";
+            process.stdout.write(JSON.stringify(config));
+        ' "$ROOT/config.json" > "$ROOT/joining.json"
+        joined=$(curl -s -H 'content-type: application/json' --data @"$ROOT/joining.json" \
+            --unix-socket "$SOCKET" http://localhost/apply)
+        expect_contains "the join went pending, on the longer window" '"movesRadio":true' "$joined"
+        pending_status=$(sock /status)
+        expect_contains "and GET /status says the pending change moved the radio" \
+            '"movesRadio":true' "$pending_status"
+        expect_contains "with the change still in force while the device checks" \
+            '"state":"pending"' "$pending_status"
+        sleep 7
+        # **The decision, read where the browser reads it.** The rail's keys
+        # are computed by `pendingChange()` in yonder-core and travel on the
+        # same payload as the countdown; this is what Dashboard replays into
+        # the widget. A picture shows one key rather than two — this says
+        # *which* key, and that the other one is not merely off screen.
+        rail=$(body "/dashboard/_debug/datastore/keys-pending")
+        expect_contains "the rail still offers REVERT NOW for a radio move" \
+            '"action":"revert"' "$rail"
+        expect_missing "and offers no CONFIRM, because the device is confirming" \
+            '"action":"confirm"' "$rail"
+        expect_contains "and the words say who is confirming" \
+            "confirming it for itself" "$(body "/dashboard/_debug/datastore/text-pending-what")"
+        expect_missing "with the message stopping at the rail, as above" '"topic":{' "$rail"
+        if node "$REPO/scripts/capture-pages.mjs" \
+                --base-url "http://127.0.0.1:$PORT" \
+                --password "$PASSWORD" \
+                --palette "$1" \
+                --only status \
+                --as status-pending-radio \
+                --artifacts "$REPO/vendor/capture" \
+                --press "REVERT NOW" \
+                ${ACCEPT_SHAPE:+--accept}; then
+            ok "the $1 palette: Status with a radio move pending, and only REVERT NOW to press"
+        else
+            bad "the $1 palette: Status with a radio move pending, see above"
+        fi
+        i=0
+        while [ "$i" -lt "$TRIES" ]; do
+            case "$(sock /status)" in *'"state":"idle"'*) break ;; esac
+            sleep "$POLL"; i=$((i + 1))
+        done
+        # **The point of the press.** `REVERT NOW` is the only control this
+        # banner still offers, so a rail that drew it and could not act on it
+        # would be worse than the confirm control it replaced.
+        expect_contains "pressing REVERT NOW undid the radio move" \
+            '"outcome":"reverted"' "$(sock /status)"
+        expect_contains "and the device is back on its access point" \
+            '"ssid":null' "$(sock /config)"
+        # The verifier's poll is still asleep and will answer into a state
+        # that is no longer pending, where the engine ignores it. Let go of it
+        # for the rest of the run.
+        echo 0 > "$JOIN_DELAY"
         sleep 7
     }
 
@@ -993,6 +1116,7 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
         capture_without_modem night
         capture_unplugged night
         capture_status_pending night
+        capture_pending_radio night
     else
         bad "the console never regenerated theme.css as night, so it was not captured"
     fi
@@ -1007,6 +1131,7 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
         capture_without_modem day
         capture_unplugged day
         capture_status_pending day
+        capture_pending_radio day
     else
         bad "the console is still in the night palette; a held run will be wrong"
     fi
