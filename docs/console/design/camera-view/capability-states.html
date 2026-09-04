@@ -1,0 +1,170 @@
+<style>
+  .y-wrap { --display:#04060a; --divider:#2b333c; --label:#7f8a95; --value:#e8ecf0;
+            --track:#161b21; --select:#2ad4f0; --good:#35d06a; --waiting:#ffcf28;
+            --bad:#ff4034; --neutral:#6b7580; max-width:1000px;
+            font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif }
+  .y-panel {
+    background-color:#12151a;
+    background-image:
+      radial-gradient(120% 80% at 22% 0%, rgba(255,255,255,0.07), transparent 62%),
+      repeating-linear-gradient(45deg, rgba(255,255,255,0.03) 0 1px, transparent 1px 3px),
+      linear-gradient(45deg,#1e242b 25%,transparent 25%,transparent 75%,#1e242b 75%),
+      linear-gradient(45deg,#1e242b 25%,transparent 25%,transparent 75%,#1e242b 75%),
+      linear-gradient(135deg,#0d1014 25%,transparent 25%,transparent 75%,#0d1014 75%),
+      linear-gradient(135deg,#0d1014 25%,transparent 25%,transparent 75%,#0d1014 75%);
+    background-size:100% 100%,4px 4px,10px 10px,10px 10px,10px 10px,10px 10px;
+    background-position:0 0,0 0,0 0,5px 5px,0 0,5px 5px;
+    padding:16px 17px 17px; border-radius:5px; position:relative;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 12px 30px rgba(0,0,0,.5) }
+  .y-fastener { position:absolute; width:7px; height:7px; border-radius:50%;
+    background:radial-gradient(circle at 35% 30%, #6a737d, #23282e 70%) }
+  .y-fastener.tl{top:5px;left:5px}.y-fastener.tr{top:5px;right:5px}
+  .y-fastener.bl{bottom:5px;left:5px}.y-fastener.br{bottom:5px;right:5px}
+  .y-placard { font-size:9.5px; letter-spacing:.19em; text-transform:uppercase;
+    color:#8b949e; margin:0 2px 10px; display:flex; justify-content:space-between }
+  .y-placard b { color:#ccd4dc; font-weight:600; letter-spacing:.19em }
+  .y-display { background:var(--display); border:1px solid var(--divider); border-radius:3px; overflow:hidden }
+
+  .grid { display:grid; grid-template-columns:112px 1fr 1fr 1fr }
+  .grid > * { border-left:1px solid var(--divider); border-top:1px solid var(--divider);
+    padding:13px 14px; min-width:0 }
+  .grid > .r0 { border-left:0 }
+  .grid > .t0 { border-top:0 }
+  .hdr { font-size:9px; letter-spacing:.17em; text-transform:uppercase; color:var(--label) }
+  .hdr.a { color:#8fd6a0 } .hdr.b { color:#7f8a95 } .hdr.c { color:#ffcf28 }
+  .hdr small { display:block; text-transform:none; letter-spacing:.01em; font-size:10px;
+    color:#5f6a74; margin-top:5px; line-height:1.5 }
+  .rowlbl { font-size:10px; letter-spacing:.13em; text-transform:uppercase; color:#c6ced6;
+    display:flex; align-items:center }
+
+  .lbl { display:block; color:var(--label); font-size:9px; letter-spacing:.13em;
+    text-transform:uppercase; margin:0 0 5px }
+  .pick { border:1px solid var(--divider); background:rgba(255,255,255,.02); border-radius:2px;
+    padding:7px 9px; font-size:11.5px; color:var(--value); display:flex;
+    justify-content:space-between; align-items:center; gap:8px; font-variant-numeric:tabular-nums }
+  .pick .car { color:var(--select); font-size:9px }
+  .pick.na { border-style:dashed; border-color:#5a4a12; color:#9a8a55; background:rgba(255,207,40,.04) }
+  .seg { display:flex; gap:4px; max-width:210px }
+  .seg b { flex:1; text-align:center; font-size:10px; font-weight:500; padding:6px 0;
+    border:1px solid var(--divider); color:var(--label); border-radius:2px }
+  .seg b.on { border-color:var(--select); color:var(--select); background:rgba(42,212,240,.1) }
+  .seg.na b { border-style:dashed; border-color:#5a4a12; color:#9a8a55 }
+  .key { display:inline-block; font-size:10px; font-weight:600; letter-spacing:.09em;
+    text-transform:uppercase; padding:9px 15px; border:1px solid var(--select);
+    color:var(--select); background:rgba(42,212,240,.07); border-radius:2px }
+  .key.na { border-style:dashed; border-color:#5a4a12; color:#9a8a55; background:rgba(255,207,40,.04) }
+  .why { font-size:10px; color:#c0a24a; line-height:1.55; margin-top:8px }
+  .why b { color:#ffcf28; font-weight:600 }
+  .ghost { border:1px dashed #232a31; border-radius:2px; padding:16px 10px; text-align:center;
+    color:#404a53; font-size:10px; letter-spacing:.1em; text-transform:uppercase }
+  .ghost em { display:block; font-style:normal; text-transform:none; letter-spacing:0;
+    font-size:10px; color:#39424a; margin-top:6px }
+
+  .ann { display:inline-flex; align-items:center; gap:6px; font-size:9px;
+    letter-spacing:.12em; text-transform:uppercase; padding:4px 9px; border-radius:2px;
+    border:1px solid var(--waiting); color:var(--waiting); background:rgba(255,207,40,.11);
+    margin-top:9px }
+  .ann i{width:5px;height:5px;border-radius:50%;background:var(--waiting);display:block}
+  .y-note { font-size:13.5px; color:var(--text-secondary); margin:15px 2px 0; line-height:1.6; max-width:1000px }
+</style>
+
+<h2>Present, absent, and advertised&nbsp;— but not answered</h2>
+<p class="subtitle" style="max-width:1000px">R&#8209;CAM&#8209;14's third state, across four kinds of control. It is the one most likely to be got wrong in code, because on the wire it looks exactly like success: the device lists the capability, accepts the command, returns <em>ok</em>, and does nothing.</p>
+
+<div class="y-wrap"><div class="y-panel">
+  <i class="y-fastener tl"></i><i class="y-fastener tr"></i><i class="y-fastener bl"></i><i class="y-fastener br"></i>
+  <div class="y-placard"><span><b>Capability</b> · how each state draws</span><span>Night palette</span></div>
+  <div class="y-display">
+    <div class="grid">
+      <div class="r0 t0"></div>
+      <div class="t0 hdr a">Present<small>the device answered, the control works</small></div>
+      <div class="t0 hdr b">Absent<small>the device does not have it</small></div>
+      <div class="t0 hdr c">Advertised, not answered<small>listed, accepted, does nothing</small></div>
+
+      <!-- picker -->
+      <div class="r0 rowlbl">A picker</div>
+      <div>
+        <span class="lbl">Live-view resolution</span>
+        <div class="pick">1920×1080 · 30 fps <span class="car">▾</span></div>
+      </div>
+      <div>
+        <div class="ghost">Nothing is drawn<em>the row does not exist on the page</em></div>
+      </div>
+      <div>
+        <span class="lbl">Live-view resolution</span>
+        <div class="pick na">1280×720 · 30 fps</div>
+        <div class="why"><b>Fixed by this camera.</b> Fifteen values sent, every one acknowledged, the frame stayed 720p.</div>
+      </div>
+
+      <!-- switch -->
+      <div class="r0 rowlbl">A switch</div>
+      <div>
+        <span class="lbl">HDR</span>
+        <div class="seg"><b>Off</b><b class="on">On</b></div>
+      </div>
+      <div>
+        <div class="ghost">Nothing is drawn<em>the row does not exist on the page</em></div>
+      </div>
+      <div>
+        <span class="lbl">HDR</span>
+        <div class="seg na"><b>Off</b><b>On</b></div>
+        <div class="why"><b>The sensor lists it; the driver will not start it.</b></div>
+      </div>
+
+      <!-- dial axis -->
+      <div class="r0 rowlbl">A dial axis</div>
+      <div>
+        <span class="lbl">Aim</span>
+        <svg width="104" height="104" viewBox="0 0 118 118">
+          <circle cx="59" cy="59" r="52" fill="#0b1015" stroke="#2b333c" stroke-width="1"/>
+          <path d="M 22.2 26.4 A 44 44 0 1 1 95.8 26.4" fill="none" stroke="#1f6b3d" stroke-width="3"/>
+          <g stroke="#3a444e" stroke-width="1.5"><path d="M59 7v7 M59 104v7 M7 59h7 M104 59h7"/></g>
+          <circle cx="59" cy="59" r="13" fill="none" stroke="#2b333c" stroke-width="1" stroke-dasharray="3 3"/>
+          <g transform="rotate(18 59 59)"><path d="M59 15 l-5 9 h10 z" fill="#e8ecf0"/></g>
+          <line x1="59" y1="59" x2="90" y2="43" stroke="#2ad4f0" stroke-width="3"/>
+          <circle cx="90" cy="43" r="11" fill="#2ad4f0" fill-opacity=".2" stroke="#2ad4f0" stroke-width="2"/>
+        </svg>
+        <div style="font-size:10px;color:#7f8a95;margin-top:5px">pan · tilt · roll</div>
+      </div>
+      <div>
+        <div class="ghost">Nothing is drawn<em>a fixed mount has no Aim group at all</em></div>
+      </div>
+      <div>
+        <span class="lbl">Aim</span>
+        <svg width="104" height="104" viewBox="0 0 118 118">
+          <circle cx="59" cy="59" r="52" fill="#0b1015" stroke="#2b333c" stroke-width="1"/>
+          <path d="M 22.2 26.4 A 44 44 0 1 1 95.8 26.4" fill="none" stroke="#1f6b3d" stroke-width="3"/>
+          <g stroke="#3a444e" stroke-width="1.5"><path d="M59 7v7 M59 104v7 M7 59h7 M104 59h7"/></g>
+          <circle cx="59" cy="59" r="13" fill="none" stroke="#2b333c" stroke-width="1" stroke-dasharray="3 3"/>
+          <g transform="rotate(18 59 59)"><path d="M59 15 l-5 9 h10 z" fill="#e8ecf0"/></g>
+          <line x1="59" y1="59" x2="90" y2="43" stroke="#2ad4f0" stroke-width="3"/>
+          <circle cx="90" cy="43" r="11" fill="#2ad4f0" fill-opacity=".2" stroke="#2ad4f0" stroke-width="2"/>
+          <!-- the axis that will not answer, struck through on its own arc -->
+          <path d="M 30 88 A 44 44 0 0 0 88 88" fill="none" stroke="#5a4a12" stroke-width="3" stroke-dasharray="4 4"/>
+          <text x="59" y="112" text-anchor="middle" font-size="9" fill="#9a8a55"
+                font-family="ui-sans-serif,system-ui" letter-spacing="1">ROLL —</text>
+        </svg>
+        <div class="why" style="margin-top:4px"><b>Pan and tilt answer. Roll does not.</b> The axis stays on the dial, marked, so a gimbal that half works is not mistaken for one that does.</div>
+      </div>
+
+      <!-- soft key -->
+      <div class="r0 rowlbl">A soft key</div>
+      <div>
+        <span class="lbl">Record</span>
+        <span class="key">Record</span>
+        <div style="font-size:10px;color:#7f8a95;margin-top:9px">card present · 42 min free</div>
+      </div>
+      <div>
+        <div class="ghost">The key is not on the rail<em>and the Record group is not in the deck</em></div>
+      </div>
+      <div>
+        <span class="lbl">Record</span>
+        <span class="key na">Record</span>
+        <span class="ann"><i></i>Sent, not confirmed</span>
+        <div class="why"><b>Acknowledged with no card in the camera.</b> The key stays, because it will work the moment a card is in — but it never turns green on the acknowledgement alone.</div>
+      </div>
+    </div>
+  </div>
+</div></div>
+
+<p class="y-note"><b>Absent means gone.</b> No greyed row, no disabled control, no explanation — a fixed camera simply has no Aim group, and a camera with no recorder has no Record key on the rail. Anything else trains an operator to read grey as "not now" when it means "not ever".<br><br><b>Advertised-but-not-answered is amber and dashed, and it always carries the reason.</b> Amber rather than grey because it is a fault, not an absence — something is lying to us, and on a different firmware or a different kernel it may start working. Dashed because it must never be mistaken for a control you can reach. And the reason line is not decoration: <em>fifteen values sent, every one acknowledged, the frame stayed 720p</em> is the difference between a defect somebody can act on and a mystery.<br><br>The soft key is the interesting one. It stays on the rail rather than disappearing, because <em>no card</em> is a condition that changes when you put a card in — so the key is real, the annunciator carries the truth, and <b>an acknowledgement never turns the indicator green on its own.</b></p>

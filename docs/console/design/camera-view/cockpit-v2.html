@@ -1,0 +1,237 @@
+<style>
+  .y-wrap { --display:#04060a; --divider:#2b333c; --label:#7f8a95; --value:#e8ecf0;
+            --select:#2ad4f0; --good:#35d06a; --waiting:#ffcf28; --bad:#ff4034; --neutral:#6b7580;
+            max-width:1000px; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif }
+  .y-panel {
+    background-color:#12151a;
+    background-image:
+      radial-gradient(120% 80% at 22% 0%, rgba(255,255,255,0.07), transparent 62%),
+      repeating-linear-gradient(45deg, rgba(255,255,255,0.03) 0 1px, transparent 1px 3px),
+      linear-gradient(45deg,#1e242b 25%,transparent 25%,transparent 75%,#1e242b 75%),
+      linear-gradient(45deg,#1e242b 25%,transparent 25%,transparent 75%,#1e242b 75%),
+      linear-gradient(135deg,#0d1014 25%,transparent 25%,transparent 75%,#0d1014 75%),
+      linear-gradient(135deg,#0d1014 25%,transparent 25%,transparent 75%,#0d1014 75%);
+    background-size:100% 100%,4px 4px,10px 10px,10px 10px,10px 10px,10px 10px;
+    background-position:0 0,0 0,0 0,5px 5px,0 0,5px 5px;
+    padding:15px 16px 16px; border-radius:5px; position:relative;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 12px 30px rgba(0,0,0,.5) }
+  .y-fastener { position:absolute; width:7px; height:7px; border-radius:50%;
+    background:radial-gradient(circle at 35% 30%, #6a737d, #23282e 70%) }
+  .y-fastener.tl{top:5px;left:5px}.y-fastener.tr{top:5px;right:5px}
+  .y-fastener.bl{bottom:5px;left:5px}.y-fastener.br{bottom:5px;right:5px}
+  .y-placard { font-size:9.5px; letter-spacing:.19em; text-transform:uppercase;
+    color:#8b949e; margin:0 2px 9px; display:flex; justify-content:space-between }
+  .y-placard b { color:#ccd4dc; font-weight:600; letter-spacing:.19em }
+  .y-placard u { text-decoration:none; text-transform:none; letter-spacing:.02em }
+  .y-display { background:var(--display); border:1px solid var(--divider); border-radius:3px; overflow:hidden }
+
+  .y-vid { position:relative; overflow:hidden; background:#0a0d12 }
+  .y-sky { position:absolute; left:0; right:0; top:0; height:30%;
+    background:linear-gradient(to bottom,#6f9dc6 0%,#9dbcd4 60%,#c8d4d8 100%) }
+  .y-gnd { position:absolute; left:0; right:0; top:30%; bottom:0;
+    background-color:#7a8550;
+    background-image:
+      linear-gradient(to bottom, rgba(206,214,204,.75) 0, rgba(206,214,204,0) 8%),
+      radial-gradient(135% 95% at 50% 132%, transparent 28%, rgba(0,0,0,.48)),
+      repeating-linear-gradient(104deg, rgba(122,134,80,.68) 0 52px, rgba(168,156,104,.56) 52px 96px, rgba(82,98,58,.62) 96px 140px),
+      repeating-linear-gradient(21deg, rgba(66,56,32,.2) 0 66px, transparent 66px 170px) }
+  .y-gnd.down { top:0; background-image:
+      radial-gradient(135% 95% at 50% 50%, transparent 40%, rgba(0,0,0,.4)),
+      repeating-linear-gradient(63deg, rgba(122,134,80,.7) 0 38px, rgba(158,148,100,.6) 38px 70px, rgba(90,104,62,.66) 70px 104px) }
+  .y-gnd.tele { background-image:
+      linear-gradient(to bottom, rgba(212,218,210,.55) 0, rgba(212,218,210,0) 26%),
+      repeating-linear-gradient(96deg, rgba(132,142,92,.6) 0 78px, rgba(172,160,112,.5) 78px 142px, rgba(96,110,70,.55) 142px 206px) }
+
+  /* ---- TAPE: scale, fill, marked limits, bug with a boxed reading (ADR-0009) ---- */
+  .tp { position:absolute; top:16px; bottom:16px; width:74px }
+  .tp .body { position:absolute; inset:0; background:rgba(3,5,8,.80);
+    border:1px solid rgba(255,255,255,.22); border-radius:2px;
+    box-shadow:0 2px 12px rgba(0,0,0,.5) }
+  .tp .hd { position:absolute; top:0; left:0; right:0; height:18px; line-height:18px;
+    text-align:center; font-size:8.5px; letter-spacing:.18em; color:#dbe3ea;
+    background:rgba(255,255,255,.09); border-bottom:1px solid rgba(255,255,255,.16) }
+  .tp .ft { position:absolute; bottom:0; left:0; right:0; height:15px; line-height:15px;
+    text-align:center; font-size:8px; letter-spacing:.1em; color:#9aa6b0;
+    border-top:1px solid rgba(255,255,255,.1) }
+  .tp .sc { position:absolute; top:18px; bottom:15px; left:0; right:0; overflow:hidden }
+  .tp .fill { position:absolute; left:0; right:0; bottom:0; background:rgba(42,212,240,.16);
+    border-top:1px solid rgba(42,212,240,.5) }
+  /* the marked limits, drawn on the scale itself */
+  .tp .band { position:absolute; left:0; width:7px }
+  .tp .band.cau { background:repeating-linear-gradient(0deg, #d3a41c 0 4px, #8a6a12 4px 8px) }
+  .tp .band.lim { background:repeating-linear-gradient(0deg, #e0483c 0 4px, #8c231c 4px 8px) }
+  .tp .tick { position:absolute; left:8px; right:9px; height:1px; background:rgba(255,255,255,.42) }
+  .tp .tick.min { left:8px; right:20px; background:rgba(255,255,255,.22) }
+  .tp .tick span { position:absolute; right:1px; top:-7px; font-size:9px; color:#e2e9ee;
+    font-variant-numeric:tabular-nums; text-shadow:0 1px 2px #000 }
+  .tp .bug { position:absolute; left:-6px; right:-6px; height:22px; margin-top:-11px;
+    background:#04060a; border:1px solid #2ad4f0; border-radius:2px;
+    display:flex; align-items:center; justify-content:center;
+    font-size:13px; font-weight:700; color:#fff; font-variant-numeric:tabular-nums;
+    box-shadow:0 2px 8px rgba(0,0,0,.7) }
+
+  .y-osd { position:absolute; font-size:10.5px; letter-spacing:.05em; color:#fff;
+    background:rgba(3,5,8,.80); border:1px solid rgba(255,255,255,.22);
+    border-radius:2px; padding:6px 9px; line-height:1.85; font-variant-numeric:tabular-nums;
+    box-shadow:0 2px 12px rgba(0,0,0,.5) }
+  .y-osd .k{color:#a9b5bf; margin-right:10px}
+  .y-ann { display:inline-flex; align-items:center; gap:6px; font-size:9.5px;
+    letter-spacing:.13em; text-transform:uppercase; padding:5px 10px; border-radius:2px;
+    border:1px solid var(--good); color:#8af0ae; background:rgba(3,5,8,.82);
+    box-shadow:0 2px 10px rgba(0,0,0,.6); font-weight:600 }
+  .y-ann i{width:6px;height:6px;border-radius:50%;background:var(--good);display:block;
+    box-shadow:0 0 6px var(--good)}
+  .y-ann.wait{border-color:var(--waiting);color:#ffdd6e}
+  .y-ann.wait i{background:var(--waiting);box-shadow:0 0 6px var(--waiting)}
+
+  .y-pip { position:absolute; right:100px; bottom:14px; width:230px; height:146px;
+    border:1px solid rgba(255,255,255,.34); border-radius:2px; overflow:hidden;
+    box-shadow:0 6px 20px rgba(0,0,0,.6) }
+  .y-map { position:absolute; inset:0; background-color:#6f7a52;
+    background-image:
+      repeating-linear-gradient(0deg, rgba(255,255,255,.05) 0 1px, transparent 1px 26px),
+      repeating-linear-gradient(90deg, rgba(255,255,255,.05) 0 1px, transparent 1px 26px),
+      repeating-linear-gradient(58deg, rgba(126,138,86,.85) 0 30px, rgba(158,150,104,.75) 30px 56px, rgba(96,110,68,.8) 56px 88px) }
+  .y-map .road { position:absolute; background:rgba(232,228,216,.6) }
+  .y-map .trk { position:absolute; border-left:2px dashed rgba(255,207,40,.95) }
+  .y-plane { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%) rotate(28deg);
+    color:#ffcf28; font-size:21px; line-height:1; text-shadow:0 0 5px rgba(0,0,0,.85) }
+  .y-pip .cap { position:absolute; left:0; right:0; bottom:0; font-size:8px; letter-spacing:.12em;
+    text-transform:uppercase; background:rgba(3,5,8,.82); color:#c9d2da; padding:4px 7px;
+    display:flex; justify-content:space-between }
+  .y-pip .cap b { text-transform:none; letter-spacing:0; color:#fff }
+
+  .y-strip { display:flex; gap:9px; padding:9px 13px; border-top:1px solid var(--divider); align-items:center }
+  .y-thumb { flex:0 0 104px; height:60px; border:1px solid var(--divider); border-radius:2px;
+    position:relative; overflow:hidden }
+  .y-thumb.on { border-color:var(--select); box-shadow:0 0 0 1px var(--select) }
+  .y-thumb .tag { position:absolute; left:0; right:0; bottom:0; font-size:8px; letter-spacing:.11em;
+    background:rgba(4,6,10,.8); color:#c9d2da; padding:3px 5px; text-transform:uppercase;
+    display:flex; justify-content:space-between }
+  .y-thumb .tag em { font-style:normal; color:#6b7580 }
+  .y-thumb.on .tag em { color:var(--good) }
+  .y-fact { font-size:9.5px; letter-spacing:.11em; color:var(--label); text-transform:uppercase }
+  .y-fact b { color:var(--value); font-weight:600; font-variant-numeric:tabular-nums;
+    margin-left:5px; text-transform:none; letter-spacing:0 }
+
+  .y-keys { display:flex; gap:7px; border-top:1px solid var(--divider); padding:10px 13px;
+    background:rgba(255,255,255,.015); flex-wrap:wrap }
+  .y-keys b { font-size:10px; font-weight:600; letter-spacing:.09em; text-transform:uppercase;
+    padding:9px 14px; border:1px solid var(--divider); color:var(--neutral); border-radius:2px }
+  .y-keys b.live { border-color:var(--select); color:var(--select); background:rgba(42,212,240,.07) }
+  .y-keys .sp { flex:1 }
+  .y-cap2 { font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:#8b949e; margin:0 0 8px 2px }
+</style>
+
+<h2>The Cockpit, second pass</h2>
+<p class="subtitle" style="max-width:1000px">First version's tapes read as scrollbars — no fill, no marked limits, and pinned to the bezel. These are the instrument ADR&#8209;0009 actually specifies: a scale with a fill, the limits drawn <em>on</em> the scale, and a boxed reading at the bug. Annunciators and readouts now sit on a solid scrim so they hold against a bright sky.</p>
+
+<div class="y-wrap"><div class="y-panel">
+  <i class="y-fastener tl"></i><i class="y-fastener tr"></i><i class="y-fastener bl"></i><i class="y-fastener br"></i>
+  <div class="y-placard"><span><b>Cockpit</b></span><span>Nose &nbsp;·&nbsp; <u>1.9 Mb/s</u> &nbsp;·&nbsp; RTL</span></div>
+  <div class="y-display">
+    <div class="y-vid" style="height:412px">
+      <div class="y-sky"></div><div class="y-gnd"></div>
+
+      <!-- airspeed -->
+      <div class="tp" style="left:16px">
+        <div class="body"></div>
+        <div class="hd">IAS</div>
+        <div class="sc">
+          <div class="band lim" style="top:0; height:11%"></div>
+          <div class="band cau" style="top:11%; height:12%"></div>
+          <div class="band cau" style="bottom:9%; height:11%"></div>
+          <div class="band lim" style="bottom:0; height:9%"></div>
+          <div class="tick" style="top:11%"><span>24</span></div>
+          <div class="tick min" style="top:23%"></div>
+          <div class="tick" style="top:35%"><span>18</span></div>
+          <div class="tick min" style="top:47%"></div>
+          <div class="tick" style="top:59%"><span>13</span></div>
+          <div class="tick min" style="top:71%"></div>
+          <div class="tick" style="top:80%"><span>9</span></div>
+          <div class="fill" style="height:47%"></div>
+          <div class="bug" style="top:53%">14.7</div>
+        </div>
+        <div class="ft">m/s</div>
+      </div>
+
+      <!-- altitude -->
+      <div class="tp" style="right:16px">
+        <div class="body"></div>
+        <div class="hd">ALT</div>
+        <div class="sc">
+          <div class="band cau" style="bottom:0; height:14%"></div>
+          <div class="tick" style="top:10%"><span>440</span></div>
+          <div class="tick min" style="top:22%"></div>
+          <div class="tick" style="top:34%"><span>390</span></div>
+          <div class="tick min" style="top:46%"></div>
+          <div class="tick" style="top:58%"><span>330</span></div>
+          <div class="tick min" style="top:70%"></div>
+          <div class="tick" style="top:82%"><span>270</span></div>
+          <div class="fill" style="height:52%"></div>
+          <div class="bug" style="top:48%">348</div>
+        </div>
+        <div class="ft">m AGL</div>
+      </div>
+
+      <!-- annunciators -->
+      <div style="position:absolute; top:14px; left:104px; display:flex; gap:8px">
+        <span class="y-ann"><i></i>Armed</span>
+        <span class="y-ann wait"><i></i>RTL</span>
+        <span class="y-ann"><i></i>DGPS 28</span>
+      </div>
+
+      <!-- facts -->
+      <div class="y-osd" style="left:104px; bottom:14px">
+        <span class="k">GND SPD</span>19.4 m/s<br>
+        <span class="k">BATT</span>96 % &nbsp; 24.37 V<br>
+        <span class="k">EFF</span>143 mAh/km
+      </div>
+      <div class="y-osd" style="right:104px; top:14px; text-align:right">
+        <span class="k">PAN</span>+04.5°<br>
+        <span class="k">TILT</span>−18.0°<br>
+        <span class="k">ZOOM</span>1.0×
+      </div>
+
+      <!-- boresight -->
+      <svg viewBox="0 0 962 412" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%">
+        <g stroke="#04060a" stroke-opacity=".55" stroke-width="4.5" fill="none" stroke-linecap="round">
+          <path d="M457 206 h-26 M505 206 h26 M481 182 v-26 M481 230 v26"/>
+        </g>
+        <g stroke="#ffffff" stroke-opacity=".95" stroke-width="2" fill="none" stroke-linecap="round">
+          <path d="M457 206 h-26 M505 206 h26 M481 182 v-26 M481 230 v26"/>
+        </g>
+        <circle cx="481" cy="206" r="2.6" fill="#fff"/>
+      </svg>
+
+      <!-- map -->
+      <div class="y-pip">
+        <div class="y-map">
+          <div class="road" style="left:0;right:0;top:58%;height:3px;transform:rotate(-9deg)"></div>
+          <div class="road" style="left:34%;top:0;bottom:0;width:2px;transform:rotate(6deg)"></div>
+          <div class="trk" style="left:52%;top:12%;height:60%"></div>
+          <div class="y-plane">✈</div>
+        </div>
+        <div class="cap"><span>Map</span><span><b>tap to swap</b></span></div>
+      </div>
+    </div>
+
+    <div class="y-strip">
+      <div class="y-thumb on"><div class="y-sky"></div><div class="y-gnd"></div>
+        <div class="tag"><span>Nose</span><em>Live</em></div></div>
+      <div class="y-thumb"><div class="y-gnd down"></div>
+        <div class="tag"><span>Belly</span><em>Still 4 s</em></div></div>
+      <div class="y-thumb"><div class="y-sky"></div><div class="y-gnd tele"></div>
+        <div class="tag"><span>Gimbal</span><em>Still 4 s</em></div></div>
+      <div style="margin-left:auto; display:flex; gap:18px; align-items:center">
+        <span class="y-fact">Zoom<b>1.0×</b></span>
+        <span class="y-fact">Uplink<b>2.4 of 3.2 Mb/s</b></span>
+      </div>
+    </div>
+
+    <div class="y-keys">
+      <b class="live">Swap map</b><b>Zoom −</b><b>Zoom +</b><b>Recentre</b><b>Record</b>
+      <span class="sp"></span><b>Camera page</b>
+    </div>
+  </div>
+</div></div>
