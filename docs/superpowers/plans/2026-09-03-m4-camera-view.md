@@ -111,8 +111,8 @@ packages/yonder-core/src/
     │   ├── encoder.ts   R-CAM-13: which encoder this board actually has          (Task 5)
     │   ├── encoder.test.ts
     │   └── fixtures/    recorded real output, committed                          (Task 4 Step 0)
-    │       ├── list-formats-ext-c920.txt
-    │       ├── list-ctrls-menus-c920.txt
+    │       ├── list-formats-ext-globalshutter.txt
+    │       ├── list-ctrls-menus-globalshutter.txt
     │       ├── list-formats-out-video11.txt
     │       ├── list-formats-video10.txt    the K-40 decoder that looks like a camera
     │       └── list-devices.txt
@@ -145,7 +145,7 @@ installer/
 scripts/
 ├── measure-pipeline.sh              throttle-gated measurement harness           (Task 11)
 ├── capture-pages.mjs                + the synthetic camera source                (Task 16)
-└── fixtures/camera-c920.json        checked-in capability fixture                (Task 16)
+└── fixtures/camera-globalshutter.json        checked-in capability fixture                (Task 16)
 
 flows/flows.json                     + Cameras index page, one camera page        (Task 16)
 ```
@@ -209,7 +209,7 @@ it("defaults cameras to an empty list", () => {
 it("fills a camera's defaults from its identity alone", () => {
   const cfg = ConfigSchema.parse({
     version: 1, network: { ap: { psk: { secret: "ap_psk" } } }, ui: { editor: {} },
-    cameras: [{ id: "cam0", name: "Nose", source: "usb", device: "usb-0000:01:00.0-1.2" }],
+    cameras: [{ id: "cam0", name: "Nose", source: "usb", device: "usb-0000:01:00.0-1.3" }],
   });
   const cam = cfg.cameras[0];
   expect(cam).toMatchObject({
@@ -495,7 +495,7 @@ import { affectsReachability, CAMERA_EXEMPT_LEAVES, CAMERA_LEAVES } from "./reac
 import { ConfigSchema, type Config } from "../schema/config.js";
 
 const CAMERA = {
-  id: "cam0", name: "Nose", source: "usb" as const, device: "usb-0000:01:00.0-1.2",
+  id: "cam0", name: "Nose", source: "usb" as const, device: "usb-0000:01:00.0-1.3",
 };
 function withCamera(overrides: Record<string, unknown> = {}): Config {
   return ConfigSchema.parse({
@@ -978,20 +978,45 @@ export function probeCamera(byPath: string, opts?): Promise<Detection | Rejectio
 
 **No `v4l2-ctl` output exists anywhere in this repository.** The hardware note gives the commands; nobody has recorded an answer. Writing a parser against remembered format is how this task fails silently.
 
-On the development board, with the USB camera attached:
+On the development board, with the USB camera attached. **Its address moves between networks** — the controller dispatching this task supplies the current one; do not hardcode it here or in any committed file.
 
 ```bash
-ssh yonder@10.0.252.246 'v4l2-ctl --list-devices' > /tmp/list-devices.txt
-ssh yonder@10.0.252.246 'v4l2-ctl -d /dev/video0 --list-formats-ext' > /tmp/list-formats-ext-c920.txt
-ssh yonder@10.0.252.246 'v4l2-ctl -d /dev/video0 --list-ctrls-menus' > /tmp/list-ctrls-menus-c920.txt
-ssh yonder@10.0.252.246 'v4l2-ctl -d /dev/video10 --list-formats' > /tmp/list-formats-video10.txt
-ssh yonder@10.0.252.246 'v4l2-ctl -d /dev/video11 --list-formats-out' > /tmp/list-formats-out-video11.txt
-ssh yonder@10.0.252.246 'ls -l /dev/v4l/by-path/' > /tmp/by-path.txt
+B=yonder@<address the controller gave you>
+F=packages/yonder-core/src/video/probe/fixtures
+mkdir -p "$F"
+ssh $B 'v4l2-ctl --list-devices'                        > "$F/list-devices.txt"
+ssh $B 'v4l2-ctl -d /dev/video0 --list-formats-ext'     > "$F/list-formats-ext-globalshutter.txt"
+ssh $B 'v4l2-ctl -d /dev/video0 --list-ctrls-menus'     > "$F/list-ctrls-menus-globalshutter.txt"
+ssh $B 'v4l2-ctl -d /dev/video1 --list-formats-ext'     > "$F/list-formats-ext-video1.txt"
+ssh $B 'v4l2-ctl -d /dev/video10 --list-formats'        > "$F/list-formats-video10.txt"
+ssh $B 'v4l2-ctl -d /dev/video11 --list-formats-out'    > "$F/list-formats-out-video11.txt"
+ssh $B 'v4l2-ctl -d /dev/video19 --list-formats-ext'    > "$F/list-formats-ext-video19.txt"
+ssh $B 'ls -l /dev/v4l/by-path/'                        > "$F/by-path.txt"
 ```
 
-Copy each into `packages/yonder-core/src/video/probe/fixtures/` under the names in the File Structure above, with the `by-path` listing as `by-path.txt`. **Commit them in this task**, exactly as `remote/zerotier/fixtures/` holds recorded ZeroTier output. If the board is unreachable, stop and say so — do not proceed to Step 1.
+`/dev/video1` and `/dev/video19` are in that list because of what the board actually reports — see Step 0b.
 
-Rename the fixtures after the card the board actually reports if it is not a C920; the names in this plan describe the bench's camera, not a requirement.
+**Commit them in this task**, exactly as `remote/zerotier/fixtures/` holds recorded ZeroTier output. If the board is unreachable, stop and say so — do not proceed to Step 1.
+
+- [ ] **Step 0b: read what the board actually reports, because it changes two rules**
+
+`v4l2-ctl --list-devices` on this board returns **five cards, sixteen nodes**, and only one of them is a camera:
+
+```
+bcm2835-codec-decode (platform:bcm2835-codec):   /dev/video10 …12, 18, 31
+bcm2835-isp (platform:bcm2835-isp):              /dev/video13 …16, 20 …23
+rpi-hevc-dec (platform:rpi-hevc-dec):            /dev/video19
+Global Shutter Camera: Global S (usb-0000:01:00.0-1.3):  /dev/video0, /dev/video1
+bcm2835-codec (vchiq:bcm2835-codec):             (media node only)
+```
+
+Two things follow, and both are corrections to what this task would otherwise have built:
+
+1. **`rpi-hevc-dec` matches neither `codec` nor `decoder` nor `isp`.** A card pattern of `/codec|decoder|isp/i` lets `/dev/video19` through to format probing. It happens to be caught by the compressed-format check — it offers only raw `Nc12`/`NC12` planes — but the reason an operator would then read is *"this camera offers only raw frames"*, which invites them to go looking for a camera setting on a hardware HEVC decoder. **The pattern is `/codec|decode|encode|isp|hevc/i`.**
+
+2. **The real camera owns two nodes, and the second offers nothing.** `/dev/video1` answers `Type: Video Capture` with no formats beneath it — it is the metadata node every UVC camera has. Probing it node-by-node produces a rejection row sitting beside the camera that was just found, which on the Cameras page reads as *something went wrong with your camera* when nothing did. **So a card yields at most one row: if any node under it was accepted, its siblings are not rejections.** R-UI-15 is about capabilities on a camera's page, not about every `/dev` node the kernel created.
+
+The camera itself answers `MJPG` at 1920×1080, 1920×1200 and 1600×1200, at 90, 60, 30, 25, 20, 15, 10 and 5 fps — so the rate parser's *parenthesised figure, not 1/interval* rule has real output to prove itself against, and `refuse()` in Task 6 has a real list of offered modes. Its `by-path` is `usb-0000:01:00.0-1.3`.
 
 - [ ] **Step 1: Write the failing parser tests**
 
@@ -1008,7 +1033,7 @@ const fixture = (name: string) =>
   readFileSync(join(import.meta.dirname, "fixtures", name), "utf8");
 
 describe("parseFormats", () => {
-  const formats = parseFormats(fixture("list-formats-ext-c920.txt"));
+  const formats = parseFormats(fixture("list-formats-ext-globalshutter.txt"));
 
   it("reads every discrete size under every pixel format", () => {
     // Replace with the counts your fixture actually contains.
@@ -1037,7 +1062,7 @@ describe("parseFormats", () => {
 });
 
 describe("parseControls", () => {
-  const controls = parseControls(fixture("list-ctrls-menus-c920.txt"));
+  const controls = parseControls(fixture("list-ctrls-menus-globalshutter.txt"));
 
   it("reads a range control's bounds and its current value", () => {
     const b = controls.get("brightness");
@@ -1213,8 +1238,8 @@ function benchRunner(overrides: Record<string, string> = {}): CommandRunner {
     }
     if (key.includes("--list-devices")) return { code: 0, stdout: fixture("list-devices.txt"), stderr: "" };
     if (key.includes("/dev/video10")) return { code: 0, stdout: fixture("list-formats-video10.txt"), stderr: "" };
-    if (key.includes("--list-formats-ext")) return { code: 0, stdout: fixture("list-formats-ext-c920.txt"), stderr: "" };
-    if (key.includes("--list-ctrls-menus")) return { code: 0, stdout: fixture("list-ctrls-menus-c920.txt"), stderr: "" };
+    if (key.includes("--list-formats-ext")) return { code: 0, stdout: fixture("list-formats-ext-globalshutter.txt"), stderr: "" };
+    if (key.includes("--list-ctrls-menus")) return { code: 0, stdout: fixture("list-ctrls-menus-globalshutter.txt"), stderr: "" };
     return { code: 1, stdout: "", stderr: "no such device" };
   };
 }
@@ -1233,7 +1258,27 @@ describe("detectCameras", () => {
     const r = await detectCameras({ runner: benchRunner() });
     const decoder = r.rejected.find((x) => x.device.includes("video10"));
     expect(decoder).toBeDefined();
-    expect(decoder!.reason).toContain("decoder");
+    expect(decoder!.reason).toContain("hardware codec");
+  });
+
+  it("rejects the board's HEVC decoder by its card, not by its formats", async () => {
+    // rpi-hevc-dec matches neither "codec" nor "decoder" nor "isp". Before the
+    // pattern was widened it reached format probing and was rejected for
+    // offering only raw frames — a true sentence that sends an operator
+    // looking for a camera setting on a hardware decoder.
+    const r = await detectCameras({ runner: benchRunner() });
+    const hevc = r.rejected.find((x) => x.card.includes("hevc"));
+    expect(hevc).toBeDefined();
+    expect(hevc!.reason).toContain("hardware codec");
+  });
+
+  it("reports one row per card, so a camera's metadata node is not a rejection", async () => {
+    // A UVC camera owns two nodes and the second answers no formats. A
+    // rejection sitting beside the camera that was just found reads as
+    // "something went wrong with your camera" when nothing did.
+    const r = await detectCameras({ runner: benchRunner() });
+    const cameraCard = r.found[0].card;
+    expect(r.rejected.some((x) => x.card === cameraCard)).toBe(false);
   });
 
   it("rejects a camera that offers no compressed format", async () => {
@@ -1260,7 +1305,7 @@ describe("detectCameras", () => {
     // boot; the by-path name is the socket it is plugged into.
     const r = await detectCameras({
       runner: benchRunner(),
-      readLink: (p) => (p.includes("video0") ? "usb-0000:01:00.0-1.2-video-index0" : null),
+      readLink: (p) => (p.includes("video0") ? "usb-0000:01:00.0-1.3-video-index0" : null),
     });
     expect(r.found[0].byPath).toContain("usb-");
   });
@@ -1348,11 +1393,20 @@ export async function detectCameras(opts: ProbeOptions = {}): Promise<DetectResu
   }
 
   for (const device of parseDevices(listed.stdout)) {
+    // **A card yields at most one row.** A UVC camera owns two nodes — the
+    // capture node and a metadata node that answers `Type: Video Capture` with
+    // no formats beneath it. Probing node by node puts a rejection beside the
+    // camera that was just found, which on the Cameras page reads as
+    // "something went wrong with your camera" when nothing did. R-UI-15 is
+    // about capabilities on a camera's page, not about every /dev node the
+    // kernel created.
+    const outcomes: (Detection | Rejection)[] = [];
     for (const node of device.nodes) {
-      const outcome = await probeNode(node, device.card, runner, opts.readLink);
-      if ("capabilities" in outcome) found.push(outcome);
-      else rejected.push(outcome);
+      outcomes.push(await probeNode(node, device.card, runner, opts.readLink));
     }
+    const accepted = outcomes.find((o): o is Detection => "capabilities" in o);
+    if (accepted) found.push(accepted);
+    else if (outcomes.length > 0) rejected.push(outcomes[0] as Rejection);
   }
   return { found, rejected };
 }
@@ -1364,12 +1418,18 @@ async function probeNode(
   readLink?: (path: string) => string | null,
 ): Promise<Detection | Rejection> {
   // K-40, checked by card rather than by node number: the decoder is
-  // /dev/video10 on this board and need not be on another, but it always
-  // announces itself as a codec.
-  if (/codec|decoder|isp/i.test(card)) {
+  // /dev/video10 on this board and need not be on another, but a codec always
+  // announces itself as one.
+  //
+  // `decode|encode|hevc` and not `decoder`: this board carries an
+  // `rpi-hevc-dec` card that matches none of the obvious words, and letting it
+  // through means an operator reads "this camera offers only raw frames" about
+  // a hardware HEVC decoder — a true sentence that sends them looking for a
+  // camera setting that does not exist.
+  if (/codec|decode|encode|isp|hevc/i.test(card)) {
     return {
       device: node, card,
-      reason: "this is the board's own JPEG decoder, not a camera; it advertises MJPEG and cannot be started (K-40)",
+      reason: `${card} is a hardware codec on this board, not a camera; it advertises formats it cannot capture (K-40)`,
     };
   }
 
@@ -1699,7 +1759,7 @@ import { present, noCapabilities } from "./capability.js";
 import type { Camera } from "../schema/config.js";
 
 const CAMERA: Camera = {
-  id: "cam0", name: "Nose", source: "usb", device: "usb-0000:01:00.0-1.2",
+  id: "cam0", name: "Nose", source: "usb", device: "usb-0000:01:00.0-1.3",
   enabled: true, autostart: false,
   width: 1280, height: 720, framerate: 30, codec: "h264", bitrate_kbps: 2000,
   preview: { width: 640, height: 360, framerate: 15, bitrate_kbps: 400 },
@@ -2434,7 +2494,7 @@ import { renderReceive, type ReceiveFacts } from "./receive.js";
 import type { Camera } from "../schema/config.js";
 
 const CAMERA: Camera = {
-  id: "cam0", name: "Nose", source: "usb", device: "usb-0000:01:00.0-1.2",
+  id: "cam0", name: "Nose", source: "usb", device: "usb-0000:01:00.0-1.3",
   enabled: true, autostart: false,
   width: 1280, height: 720, framerate: 30, codec: "h264", bitrate_kbps: 2000,
   preview: { width: 640, height: 360, framerate: 15, bitrate_kbps: 400 },
@@ -4721,7 +4781,7 @@ describe("the camera routes", () => {
     expect(r.status).toBe(200);
     const body = r.body as { found: unknown[]; rejected: { reason: string }[] };
     expect(body.found).toHaveLength(1);
-    expect(body.rejected[0].reason).toContain("decoder");
+    expect(body.rejected[0].reason).toContain("hardware codec");
   });
 
   it("starts and stops a camera, and answers the run state", async () => {
@@ -4978,7 +5038,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 **Files:**
 - Modify: `flows/flows.json`
 - Modify: `scripts/capture-pages.mjs`
-- Create: `scripts/fixtures/camera-c920.json`
+- Create: `scripts/fixtures/camera-globalshutter.json`
 - Modify: `docs/roadmap.md` (tick M4's entry gate)
 
 **Interfaces:**
@@ -4989,14 +5049,14 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 - [ ] **Step 1: Write the checked-in capability fixture**
 
-`scripts/fixtures/camera-c920.json` — the shape `detectCameras` returns, recorded from the board in Task 4 and pinned here:
+`scripts/fixtures/camera-globalshutter.json` — the shape `detectCameras` returns, recorded from the board in Task 4 and pinned here:
 
 ```json
 {
   "found": [{
     "device": "/dev/video0",
-    "card": "HD Pro Webcam C920",
-    "byPath": "usb-0000:01:00.0-1.2",
+    "card": "Global Shutter Camera: Global S",
+    "byPath": "usb-0000:01:00.0-1.3",
     "capabilities": {
       "formats": { "state": "present", "value": [
         { "fourcc": "MJPG", "width": 1920, "height": 1080, "rates": [30] },
@@ -5017,7 +5077,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
   "rejected": [{
     "device": "/dev/video10",
     "card": "bcm2835-codec-decode",
-    "reason": "this is the board's own JPEG decoder, not a camera; it advertises MJPEG and cannot be started (K-40)"
+    "reason": "bcm2835-codec-decode is a hardware codec on this board, not a camera; it advertises formats it cannot capture (K-40)"
   }]
 }
 ```
@@ -5043,7 +5103,7 @@ Wiring only (CLAUDE.md rule 2). Two `ui-page` entries:
 
 - [ ] **Step 3: Give the capture gate a camera**
 
-In `scripts/capture-pages.mjs`, add a synthetic source: when `--synthetic-cameras <fixture>` is passed, seed the daemon's camera detection from `scripts/fixtures/camera-c920.json` instead of probing, so the camera pages exist and are photographed.
+In `scripts/capture-pages.mjs`, add a synthetic source: when `--synthetic-cameras <fixture>` is passed, seed the daemon's camera detection from `scripts/fixtures/camera-globalshutter.json` instead of probing, so the camera pages exist and are photographed.
 
 Then add the assertion R-SEC-10 needs. `capture-pages.mjs` already masks live readings; add a **check** rather than a mask:
 
@@ -5066,9 +5126,9 @@ if (secret && html.includes(secret)) {
 ```bash
 npm run build && ./scripts/verify-pages.sh
 node scripts/capture-pages.mjs --base-url http://localhost:3000 --password "$PW" \
-  --palette day --synthetic-cameras scripts/fixtures/camera-c920.json
+  --palette day --synthetic-cameras scripts/fixtures/camera-globalshutter.json
 node scripts/capture-pages.mjs --base-url http://localhost:3000 --password "$PW" \
-  --palette night --synthetic-cameras scripts/fixtures/camera-c920.json --accept
+  --palette night --synthetic-cameras scripts/fixtures/camera-globalshutter.json --accept
 ```
 
 Expected: both camera pages captured in both palettes, no clipping, no action spanning its container, no sideways scroll, and the credential check passing. **Look at the images.** The Network page's join warning was 706 px of text in a 372 px widget with every unit test passing, and nothing in this repository had ever looked at one.
