@@ -296,6 +296,33 @@ describe("the widgets", () => {
     expect(events, "soft keys must register onAction").toMatchObject({ onAction: true });
   });
 
+  /**
+   * **A message drawn on the rail must not come back out of it.**
+   *
+   * The CHANGE PENDING banner's rails are fed by the same poll that draws the
+   * countdown, because R-CFG-11 decides in `yonder-core` which keys a state
+   * offers. Dashboard's default input handling ends in `send(msg)` unless the
+   * widget's configuration carries `passthru: false` — and this rail's output
+   * goes to the node that re-reads `/status` and feeds the rail. Without this
+   * one poll would become an endless loop of them, at socket speed, on the
+   * panel that exists to say a device is about to roll back.
+   *
+   * `false`, and *present*: Dashboard checks `hasProperty(config, 'passthru')`
+   * before reading it, so an absent key means pass it on.
+   */
+  it("draws what it is sent without forwarding it, or the banner loops", () => {
+    const { props } = build(softkeysNode as (RED: RED) => void, { keys: "[]" });
+    expect(Object.prototype.hasOwnProperty.call(props!, "passthru")).toBe(true);
+    expect(props!.passthru).toBe(false);
+  });
+
+  /** A press is a `widget-action` and does not go through that switch at all. */
+  it("still sends a press with passthrough off", () => {
+    const { events, props } = build(softkeysNode as (RED: RED) => void, { keys: "[]" });
+    expect(props!.passthru).toBe(false);
+    expect(events).toMatchObject({ onAction: true });
+  });
+
   it("leaves onAction off the read-only instruments", () => {
     // A gauge that could emit is a gauge that could originate a command.
     for (const mod of [gaugeNode, tapeNode, annunciatorNode, databarNode, identityNode, sparklineNode]) {

@@ -200,7 +200,67 @@ export interface PendingChange {
   what: string;
   /** Why the revert is on the operator's side. Empty when nothing is pending. */
   why: string;
+  /**
+   * The keys the rail offers for **this** change, in order.
+   *
+   * A soft-key rail's own configuration is static, and for most of this
+   * console that is right — a page's actions do not depend on what the device
+   * is doing. This one does: R-CFG-11 takes the confirmation of a radio move
+   * away from the operator, so the banner over that change must not offer a
+   * control to do it. The decision is made here, where it can be tested and
+   * where the words beside it are written, and never in the flows.
+   *
+   * A rail handed no list falls back to the one in its own configuration,
+   * which offers both keys. That is the direction to fail in: an operator who
+   * cannot confirm an ordinary change loses a working configuration to a
+   * timer.
+   */
+  keys: readonly PendingKey[];
 }
+
+/**
+ * One key of the banner's rail.
+ *
+ * The same three fields `ui-yonder-softkeys` reads out of its editor form,
+ * because it is the same rail — this is that configuration for a state the
+ * editor cannot know about, not a second kind of key.
+ */
+export interface PendingKey {
+  label: string;
+  action: string;
+  /**
+   * `warn` is the irreversible tone, and CONFIRM wears it while REVERT NOW
+   * does not. That is the opposite of most interfaces and it is deliberate:
+   * confirming keeps a change nothing will take back, and reverting is the
+   * direction that gets an operator back in.
+   */
+  tone: "plain" | "act" | "warn";
+}
+
+/**
+ * Keep the change. Absent for a radio move — the device does it (R-CFG-11).
+ *
+ * Frozen, as every list below is: these are module constants that travel into
+ * a payload on every poll, and one caller mutating what it was handed would
+ * change what every surface of the console offers, for ever, silently.
+ */
+export const CONFIRM_KEY: PendingKey = Object.freeze({ label: "CONFIRM", action: "confirm", tone: "warn" });
+
+/**
+ * Put the previous configuration back now.
+ *
+ * On every pending change, including the one nobody can confirm. Deciding
+ * that a change is not wanted is still a real thing to want, and for a radio
+ * move this is the operator's only control over the apply — so it is the last
+ * key that may ever be taken away.
+ */
+export const REVERT_KEY: PendingKey = Object.freeze({ label: "REVERT NOW", action: "revert", tone: "act" });
+
+/** An ordinary change: the operator's to keep or to undo. */
+export const PENDING_KEYS: readonly PendingKey[] = Object.freeze([CONFIRM_KEY, REVERT_KEY]);
+
+/** A change that moved the radio: the device confirms, the operator may revert. */
+export const PENDING_KEYS_RADIO: readonly PendingKey[] = Object.freeze([REVERT_KEY]);
 
 /**
  * The sentence under the countdown, and the reason this task exists.
@@ -216,6 +276,37 @@ export const PENDING_WHY =
   + "configuration back by itself — which is what gets you back in if this "
   + "change was the wrong one.";
 
+/** What the banner says a change is, when the daemon has not said which. */
+export const PENDING_WHAT =
+  "A configuration change is in force on this device and has not been confirmed.";
+
+/**
+ * The same line for a change that moved the Wi-Fi radio (R-CFG-11).
+ *
+ * It says who is confirming, because that is the fact that explains the
+ * missing key. A countdown with nothing to press and no explanation reads as
+ * a console that has lost a control, which is worse than the control being
+ * there.
+ */
+export const PENDING_WHAT_RADIO =
+  "A change that moved the Wi-Fi radio is in force on this device, and the "
+  + "device is confirming it for itself.";
+
+/**
+ * And the sentence under it (R-CFG-11).
+ *
+ * Reassuring rather than alarming, because the behaviour it describes is the
+ * one that protects the operator: the device holds an address on the new
+ * network and reaches its gateway, or it puts the previous configuration back
+ * without being asked. What is left for the operator is the decision that
+ * they do not want the change — so the revert is named, and nothing sends
+ * them looking for a confirm control that is deliberately not there.
+ */
+export const PENDING_WHY_RADIO =
+  "There is nothing for you to confirm: the device keeps the change once it "
+  + "holds an address on the new network, and puts the previous configuration "
+  + "back by itself if it does not. Revert it now if you have decided against it.";
+
 /**
  * `GET /status`, as the banner on every page reads it (R-UI-15).
  *
@@ -223,6 +314,17 @@ export const PENDING_WHY =
  * What was missing was anywhere to see it except the page the change was made
  * on: make a change on the Network page, walk to Status, and nothing said the
  * configuration reverts in ninety seconds unless somebody confirms it.
+ *
+ * **A change that moved the Wi-Fi radio is not the operator's to confirm**
+ * (R-CFG-11). The banner is the same banner — it appears, it counts down, and
+ * it offers `REVERT NOW` — but the rail carries no `CONFIRM`, and both lines
+ * of prose say instead that the device is establishing for itself whether the
+ * change worked. An operator pressing CONFIRM there is on a network that only
+ * exists because the change already took, so the press is either pointless or
+ * made by somebody who cannot see that the device is already fine; and it
+ * ends the device's own verification early, which is the judgement R-CFG-11
+ * took away. The daemon says which kind of change it is holding — it is the
+ * only thing that knows — and this reads it rather than working it out again.
  *
  * **A read that fails leaves the banner down.** That is the one place this
  * module departs from "never a silent nothing", and deliberately: every field
@@ -236,19 +338,31 @@ export function pendingChange(
   reply: DaemonReply,
   now: number,
 ): { payload: PendingChange; yonder: CommandStatus } {
-  const nothing: PendingChange = { pending: false, id: "", what: "", why: "" };
+  // The keys of a banner that is not up are the ordinary pair, not none: the
+  // rail keeps whatever it was last given, and "nothing pending" is not a
+  // reason to have taken a control off it.
+  const nothing: PendingChange = {
+    pending: false, id: "", what: "", why: "", keys: PENDING_KEYS,
+  };
   const result = fetched(reply);
   if (!result.ok) return { payload: nothing, yonder: readFailure(result.message, now) };
 
   const body = result.value as {
-    state?: unknown; id?: unknown; expiresAt?: unknown;
+    state?: unknown; id?: unknown; expiresAt?: unknown; movesRadio?: unknown;
   } | undefined;
   if (body?.state !== "pending") return { payload: nothing, yonder: idle(now) };
 
+  // `=== true`, so anything else is an ordinary change: a daemon too old to
+  // report the field, or one that reported something this console does not
+  // understand, leaves CONFIRM on the rail. Taking an operator's confirmation
+  // away on a guess costs them a working configuration to a timer; leaving it
+  // there when it was not needed costs a key that does nothing.
+  const movesRadio = body.movesRadio === true;
   const status = pending("", {
     at: now,
     ...(typeof body.id === "string" ? { id: body.id } : {}),
     ...(typeof body.expiresAt === "number" ? { expiresAt: body.expiresAt } : {}),
+    ...(movesRadio ? { movesRadio: true } : {}),
   });
   const left = countdown(status, now);
   return {
@@ -256,11 +370,16 @@ export function pendingChange(
       pending: true,
       id: typeof body.id === "string" ? body.id : "",
       // What the daemon knows, and no more. `GET /status` carries an apply
-      // state, an id and a deadline; it does not say which settings moved,
-      // and a line inventing one would be the console's only sentence about
-      // this that nothing on the device could check.
-      what: "A configuration change is in force on this device and has not been confirmed.",
-      why: PENDING_WHY,
+      // state, an id, a deadline and whether the change moved the radio; it
+      // does not say which settings moved, and a line inventing one would be
+      // the console's only sentence about this that nothing on the device
+      // could check.
+      what: movesRadio ? PENDING_WHAT_RADIO : PENDING_WHAT,
+      why: movesRadio ? PENDING_WHY_RADIO : PENDING_WHY,
+      // **The decision R-CFG-11 makes, made once, here.** The rail draws what
+      // it is given; a `switch` in the flows choosing between two rails would
+      // be the same judgement written where it cannot be tested.
+      keys: movesRadio ? PENDING_KEYS_RADIO : PENDING_KEYS,
     },
     // The lamp's caption. `Reverting now` rather than `0:00` for a window that
     // has run out: the rollback is already happening, and a countdown frozen

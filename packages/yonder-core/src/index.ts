@@ -281,7 +281,14 @@ export {
   revertStatus,
   readFailure,
   wayBackInView,
+  PENDING_WHAT,
   PENDING_WHY,
+  PENDING_WHAT_RADIO,
+  PENDING_WHY_RADIO,
+  PENDING_KEYS,
+  PENDING_KEYS_RADIO,
+  CONFIRM_KEY,
+  REVERT_KEY,
   WAY_BACK_IN_NOTE,
   AP_PASSPHRASE_CHANGED,
   AP_PASSPHRASE_UNKNOWN,
@@ -291,6 +298,7 @@ export {
   DEFAULT_SOCKET_PATH,
   type Fetched,
   type PendingChange,
+  type PendingKey,
   type WayBackInView,
 } from "./console/node.js";
 export {

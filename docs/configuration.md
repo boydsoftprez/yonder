@@ -360,6 +360,15 @@ This replaced a confirmation the operator had to give by hand, inside a window,
 from a console that had just disappeared — which meant a **working**
 configuration was discarded whenever somebody was slow finding the device again.
 
+**So the console does not offer a confirm control for one.** The `CHANGE
+PENDING` banner is still there, still counting down, and it says that the device
+is confirming for itself. A console still on the air after a radio move is one
+the change already worked for, so a `CONFIRM` there would either do nothing
+useful or be pressed by somebody who cannot see that the device is already fine
+— and pressing it ends the device's own check early, which is exactly the
+judgement R-CFG-11 took away. `REVERT NOW` stays: deciding you do not want the
+change is still yours, and it is the only control over that apply you have.
+
 What the device cannot establish is whether *you* can reach it. A network that
 isolates its clients will satisfy every check above and still hide the board from
 the laptop beside it. R-CFG-11 states that trade rather than leaving it as a

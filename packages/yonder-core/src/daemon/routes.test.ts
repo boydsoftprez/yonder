@@ -772,6 +772,42 @@ describe("POST /net/join", () => {
     expect(result.body).toMatchObject({ movesRadio: true });
   });
 
+  /**
+   * **And says it again on `GET /status`, which is where a page reads it.**
+   *
+   * `POST /net/join`'s answer reaches one browser once. The CHANGE PENDING
+   * banner is on eight surfaces, is polled, and survives a reload — so
+   * everything it draws comes from `/status`. Until this was carried there,
+   * the banner offered `CONFIRM` for a join, and R-CFG-11 gives that
+   * confirmation to the device: a press moves the engine to `confirmed`, and
+   * the device's own verification then returns early on the state check.
+   */
+  it("keeps saying so on GET /status for as long as the join is pending", async () => {
+    const route = provisioned({ secrets: secretSink() });
+    await route("POST", "/net/join", { ssid: "HomeNetwork", psk: "a-passphrase" });
+    const status = (await route("GET", "/status", undefined)).body as
+      { state: string; movesRadio?: boolean };
+    expect(status.state).toBe("pending");
+    expect(status.movesRadio).toBe(true);
+  });
+
+  /**
+   * An ordinary apply says nothing about the radio, and **absent is what the
+   * console reads as "the operator confirms this one"**. A `/status` that
+   * omitted the field for a join would leave `CONFIRM` on the banner; one
+   * that claimed it for a hostname change would take a control away from an
+   * operator who needs it.
+   */
+  it("says nothing about the radio on GET /status for an ordinary apply", async () => {
+    const route = provisioned({ secrets: secretSink() });
+    await route("POST", "/apply", changed());
+    const status = (await route("GET", "/status", undefined)).body as
+      { state: string; movesRadio?: boolean };
+    expect(status.state).toBe("pending");
+    expect(status.movesRadio).toBeUndefined();
+    expect(JSON.stringify(status)).not.toMatch(/movesRadio/);
+  });
+
   it("is 400 for a passphrase no access point would accept, and stores nothing", async () => {
     const secrets = secretSink();
     const result = await provisioned({ secrets })("POST", "/net/join", { ssid: "HomeNetwork", psk: "short" });

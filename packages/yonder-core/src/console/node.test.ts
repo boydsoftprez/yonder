@@ -5,6 +5,11 @@ import {
   DEFAULT_SOCKET_PATH,
   MIN_POLL_MS,
   PENDING_WHY,
+  PENDING_WHAT,
+  PENDING_WHY_RADIO,
+  PENDING_WHAT_RADIO,
+  PENDING_KEYS,
+  PENDING_KEYS_RADIO,
   applyStatus,
   confirmStatus,
   fetched,
@@ -260,7 +265,13 @@ describe("pendingChange", () => {
 
   it("says nothing is pending when the engine is at rest", () => {
     const shaped = pendingChange(answering({ state: "idle" }), 1_000);
-    expect(shaped.payload).toEqual({ pending: false, id: "", what: "", why: "" });
+    // `keys` is in the payload even here, and it is the ordinary pair. The
+    // rail draws the last list it was given, so a banner that is down must
+    // not leave a control removed behind it — and the pair is the safe answer
+    // in any case.
+    expect(shaped.payload).toEqual({
+      pending: false, id: "", what: "", why: "", keys: PENDING_KEYS,
+    });
     expect(shaped.yonder.state).toBe("idle");
   });
 
@@ -282,8 +293,12 @@ describe("pendingChange", () => {
     );
     expect(shaped.payload.pending).toBe(true);
     expect(shaped.payload.id).toBe("a1");
-    expect(shaped.payload.what).not.toBe("");
+    expect(shaped.payload.what).toBe(PENDING_WHAT);
     expect(shaped.payload.why).toBe(PENDING_WHY);
+    expect(shaped.payload.keys).toEqual([
+      { label: "CONFIRM", action: "confirm", tone: "warn" },
+      { label: "REVERT NOW", action: "revert", tone: "act" },
+    ]);
     // The lamp's caption, already words and in the waiting tone.
     expect(shaped.yonder.state).toBe("pending");
     expect(shaped.yonder.message).toBe("Reverts in 1:32");
@@ -327,6 +342,110 @@ describe("pendingChange", () => {
     expect(shaped.yonder.message).toMatch(/not answering/);
   });
 
+  /**
+   * **R-CFG-11: a change that moved the radio is not the operator's to
+   * confirm, and the banner stops offering it.**
+   *
+   * The console cannot work this out for itself — `GET /status` carries an
+   * apply state, an id and a deadline, and which settings moved is not among
+   * them — so the daemon says, and this reads what it said. Before it did,
+   * `CONFIRM` was offered for every pending apply including a Wi-Fi join, and
+   * pressing it moved the engine to `confirmed`, which makes the device's own
+   * verification return early: an operator reachable over Ethernet or
+   * cellular could keep a join the device never confirmed.
+   */
+  it("offers no CONFIRM for a change that moved the radio", () => {
+    const shaped = pendingChange(
+      answering({ state: "pending", id: "a1", expiresAt: 212_000, movesRadio: true }),
+      120_000,
+    );
+    expect(shaped.payload.pending).toBe(true);
+    expect(shaped.payload.keys).toEqual([{ label: "REVERT NOW", action: "revert", tone: "act" }]);
+    expect(shaped.payload.keys.map((k) => k.action)).not.toContain("confirm");
+    // The countdown is unchanged: the change still reverts if it does not
+    // take, and the operator still has to be able to see how long is left.
+    expect(shaped.yonder.message).toBe("Reverts in 1:32");
+    expect(shaped.yonder.movesRadio).toBe(true);
+  });
+
+  /**
+   * **`REVERT NOW` survives, and it is the whole of what is left.**
+   *
+   * Deciding you do not want the change is still a real thing to want, and
+   * for this apply it is the operator's only control over it. Losing it would
+   * be worse than the problem this fixes.
+   */
+  it("keeps REVERT NOW on the rail for a radio move", () => {
+    const shaped = pendingChange(
+      answering({ state: "pending", id: "a1", expiresAt: 1_000, movesRadio: true }),
+      0,
+    );
+    expect(shaped.payload.keys).toHaveLength(1);
+    expect(shaped.payload.keys[0]).toEqual(PENDING_KEYS_RADIO[0]);
+    expect(shaped.payload.id).toBe("a1");
+  });
+
+  /**
+   * **An ordinary change still offers both.** The other half of the same
+   * assertion: this is not a control that quietly went away for everyone.
+   */
+  it("still offers CONFIRM for a change that did not move the radio", () => {
+    const shaped = pendingChange(
+      answering({ state: "pending", id: "a1", expiresAt: 1_000, movesRadio: false }),
+      0,
+    );
+    expect(shaped.payload.keys).toEqual(PENDING_KEYS);
+    expect(shaped.payload.what).toBe(PENDING_WHAT);
+    expect(shaped.payload.why).toBe(PENDING_WHY);
+  });
+
+  /**
+   * **Absent means an ordinary change, never a radio move.**
+   *
+   * A daemon that does not report the flag — an older one, or a path that
+   * forgot to set it — must leave `CONFIRM` offered. Removing an operator's
+   * ability to confirm an ordinary change costs them a working configuration
+   * to a timer; offering it where it was not needed costs a key that does
+   * nothing. Fail toward offering it, including for a value that is not a
+   * boolean at all.
+   */
+  it("leaves CONFIRM offered when the daemon says nothing about the radio", () => {
+    for (const body of [
+      { state: "pending", id: "a1", expiresAt: 1_000 },
+      { state: "pending", id: "a1", expiresAt: 1_000, movesRadio: "true" },
+      { state: "pending", id: "a1", expiresAt: 1_000, movesRadio: 1 },
+      { state: "pending", id: "a1", expiresAt: 1_000, movesRadio: null },
+    ]) {
+      const shaped = pendingChange(answering(body), 0);
+      expect(shaped.payload.keys, JSON.stringify(body)).toEqual(PENDING_KEYS);
+      expect(shaped.payload.why, JSON.stringify(body)).toBe(PENDING_WHY);
+    }
+  });
+
+  /**
+   * **The words change with the keys.** A countdown with nothing to press and
+   * no explanation is worse than the control being there: it reads as a
+   * console that has lost one. Both lines say instead that the device is
+   * confirming for itself, which is R-CFG-11's actual behaviour and is
+   * reassuring rather than alarming.
+   */
+  it("says the device is confirming for itself, and names the revert", () => {
+    const shaped = pendingChange(
+      answering({ state: "pending", id: "a1", expiresAt: 1_000, movesRadio: true }),
+      0,
+    );
+    expect(shaped.payload.what).toBe(PENDING_WHAT_RADIO);
+    expect(shaped.payload.why).toBe(PENDING_WHY_RADIO);
+    expect(shaped.payload.what).toMatch(/device is confirming it for itself/);
+    // It does not send an operator looking for a control that is not there.
+    expect(shaped.payload.why).not.toMatch(/\bConfirm it\b/);
+    expect(shaped.payload.why).toMatch(/nothing for you to confirm/i);
+    // And it still names the one key that is there.
+    expect(shaped.payload.why).toMatch(/[Rr]evert it now/);
+    // Not a threat, the same rule the ordinary sentence is held to.
+    expect(shaped.payload.why).not.toMatch(/lose|warning|danger|will be lost/i);
+  });
+
   it("does not fall over on an answer that is not this daemon's", () => {
     for (const body of [undefined, null, "ok", { state: "pending" }]) {
       const shaped = pendingChange(answering(body), 0);
@@ -335,6 +454,10 @@ describe("pendingChange", () => {
     }
     // Pending with no deadline: still pending, and it says so without a clock.
     expect(pendingChange(answering({ state: "pending" }), 0).yonder.message).toBe("Reverting now");
+    // And a rail always has something on it, whatever arrived.
+    for (const body of [undefined, null, "ok", { state: "pending" }]) {
+      expect(pendingChange(answering(body), 0).payload.keys.length).toBeGreaterThan(0);
+    }
   });
 });
 

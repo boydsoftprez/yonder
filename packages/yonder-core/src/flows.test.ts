@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { CONSOLE_HOME, EXCLUDED_NODES, THEME_HREF } from "./console/settings.js";
-import { MIN_POLL_MS } from "./console/node.js";
+import { MIN_POLL_MS, PENDING_KEYS } from "./console/node.js";
 
 /**
  * The shipped flows, asserted against the artefact.
@@ -1621,16 +1621,24 @@ describe("flows/flows.json Change pending", () => {
     }
   });
 
-  /** One read feeds them all, so no two surfaces can disagree about the time. */
-  it("feeds every copy from the one poll", () => {
+  /**
+   * One read feeds them all, so no two surfaces can disagree about the time.
+   *
+   * **The rails are fed too, and that is new.** They used to be a source and
+   * not a sink, because a rail's keys were static configuration — and static
+   * configuration is exactly why `CONFIRM` was offered for a change that
+   * moved the Wi-Fi radio, which R-CFG-11 says the device confirms and the
+   * operator does not. Which keys a state offers is decided in
+   * `pendingChange()` and travels on the same payload as the words beside
+   * them, so the two cannot drift apart.
+   */
+  it("feeds every copy from the one poll, the rails included", () => {
     const fed = wiresOf("poll-pending")[0];
     for (const { suffix } of SURFACES) {
       const ids = banner(suffix);
-      for (const id of [ids.lamp, ids.what, ids.why]) {
+      for (const id of Object.values(ids)) {
         expect(fed, `${id} is drawn from nothing`).toContain(id);
       }
-      // The keys are static configuration and are a *source*, not a sink.
-      expect(fed).not.toContain(ids.keys);
       expect(wiresOf(ids.keys)).toEqual([["tag-pending-key"]]);
     }
   });
@@ -1788,10 +1796,10 @@ describe("flows/flows.json Change pending", () => {
     for (const { suffix } of SURFACES) {
       const keys = JSON.parse(String(byId(banner(suffix).keys)?.keys ?? "[]")) as
         { label: string; action: string; tone: string }[];
-      expect(keys).toEqual([
-        { label: "CONFIRM", action: "confirm", tone: "warn" },
-        { label: "REVERT NOW", action: "revert", tone: "act" },
-      ]);
+      // The rail's own configuration, which is what it draws when nothing has
+      // told it otherwise — and it offers both keys, because that is the
+      // direction to fail in (R-UI-15).
+      expect(keys).toEqual(PENDING_KEYS);
     }
     // R-UI-10: at most one control per page takes the irreversible tone, and
     // Status's other rail is two palette keys.
@@ -1801,6 +1809,30 @@ describe("flows/flows.json Change pending", () => {
       .flatMap((n) => JSON.parse(String(n.keys ?? "[]")) as { tone?: string }[])
       .filter((k) => k.tone === "warn");
     expect(warnOnStatus).toHaveLength(1);
+  });
+
+  /**
+   * **The rail decides nothing, and the flow decides nothing either.**
+   *
+   * R-CFG-11 takes the confirmation of a radio move away from the operator,
+   * so the banner over one must not offer a key to do it. That judgement is
+   * `pendingChange()`'s, in `yonder-core`, where it is tested — not a
+   * `switch` here choosing between two rails, and not a `function` node
+   * (CLAUDE.md rule 2). What the flows carry is a wire.
+   */
+  it("lets the package say which keys each state offers", () => {
+    for (const { suffix } of SURFACES) {
+      const rail = byId(banner(suffix).keys);
+      // Static configuration is the fallback, not the decision: the component
+      // draws the list on the message when it is given one.
+      expect(rail?.type).toBe("ui-yonder-softkeys");
+      expect(wiresOf("poll-pending")[0]).toContain(String(rail?.id));
+    }
+    // Nothing between the poll and the rail that could rewrite the list.
+    expect(byId("poll-pending")?.type).toBe("yonder-pending");
+    for (const node of flows.filter((n) => inPanel.includes(n))) {
+      expect(node.type, node.id).not.toBe("function");
+    }
   });
 
   /**

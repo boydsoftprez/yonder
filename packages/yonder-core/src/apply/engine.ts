@@ -143,6 +143,16 @@ export class ApplyEngine {
    * `revert()`.
    */
   private window?: number;
+  /**
+   * Whether the pending apply moved the Wi-Fi radio (R-CFG-11).
+   *
+   * Kept rather than recomputed, so `status()` reports the same answer the
+   * apply was measured by. The console decides whether to offer a confirm
+   * control from this, and a second reading of `touchesWifiClient` against a
+   * configuration that has since been written would be a second opinion on a
+   * question that already has one.
+   */
+  private movesRadio = false;
   private lastResult?: ApplyResult;
   /** An in-flight rollback render. A new apply waits for it rather than racing it. */
   private settling?: Promise<void>;
@@ -166,6 +176,10 @@ export class ApplyEngine {
       expiresAt: this.expiresAt,
       lastResult: this.lastResult,
       degraded: this.degraded,
+      // Absent, not `false`, for an ordinary change: the field says only that
+      // this one is the radio case, and a console reads its absence as the
+      // ordinary one either way.
+      ...(this.movesRadio ? { movesRadio: true as const } : {}),
     };
   }
 
@@ -375,6 +389,11 @@ export class ApplyEngine {
 
     this.state = "pending";
     this.window = window;
+    // The same answer the window above was chosen by, kept so `status()` can
+    // report it. R-CFG-11 took the confirmation of this change away from the
+    // operator, and until now nothing outside this method knew which change
+    // it was — so the console offered a confirm control for every one.
+    this.movesRadio = movesRadio;
     this.expiresAt = this.clock.now() + window;
     this.timer = this.clock.setTimer(window, () => { this.revertInBackground("the countdown"); });
 
@@ -430,6 +449,11 @@ export class ApplyEngine {
     this.state = "confirmed";
     this.timer = undefined;
     this.expiresAt = undefined;
+    // With the window, because it describes the window: nothing is pending
+    // any more, and a flag left set here would still be set when the next
+    // apply is kept outright under R-CFG-12 — which never touches the radio
+    // and never reaches finish() either.
+    this.movesRadio = false;
     this.lastResult = { id, outcome: "confirmed", at: this.clock.now() };
   }
 
@@ -620,5 +644,6 @@ export class ApplyEngine {
     this.timer = undefined;
     this.expiresAt = undefined;
     this.window = undefined;
+    this.movesRadio = false;
   }
 }

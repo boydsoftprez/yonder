@@ -878,6 +878,78 @@ describe("the confirmation window", () => {
     expect(result.movesRadio).toBeUndefined();
   });
 
+  /**
+   * **The same fact on `status()`, which is the only thing the console reads.**
+   *
+   * `POST /apply`'s answer reaches exactly one page, once. Everything that
+   * draws the CHANGE PENDING banner — on eight surfaces, after a reload, on a
+   * second browser — polls `GET /status`, and until this was carried there the
+   * banner could not tell a radio move from a hostname change. So it offered
+   * `CONFIRM` for both, and R-CFG-11 says the operator does not confirm this
+   * one.
+   *
+   * Not recomputed on the way out: it is the answer this apply was measured
+   * by, so the window that was armed, the verifier that was started and the
+   * key the banner offers cannot disagree about what kind of change it is.
+   */
+  it("says on /status that the pending change moved the radio", async () => {
+    const { clock } = fakeClock();
+    const engine = engineWithWindows(clock);
+    await engine.apply(joining());
+    const status = engine.status();
+    expect(status.state).toBe("pending");
+    expect(status.movesRadio).toBe(true);
+    expect(status.expiresAt).toBe(300_000);
+  });
+
+  /**
+   * **Absent, not `false`, for an ordinary change** — and absent is what a
+   * console reads as "the operator confirms this one". The direction matters:
+   * a status that said nothing would leave `CONFIRM` offered, which is the
+   * safe way to be wrong.
+   */
+  it("says nothing about the radio for an ordinary change", async () => {
+    const { clock } = fakeClock();
+    const engine = engineWithWindows(clock);
+    const c = structuredClone(DEFAULT_CONFIG);
+    c.system.hostname = "renamed";
+    await engine.apply(c);
+    expect(engine.status().state).toBe("pending");
+    expect(engine.status().movesRadio).toBeUndefined();
+    expect(JSON.parse(JSON.stringify(engine.status()))).not.toHaveProperty("movesRadio");
+  });
+
+  /** It describes the window, so it goes when the window does. */
+  it("stops saying so once the change is no longer pending", async () => {
+    const { clock, advance } = fakeClock();
+    const engine = engineWithWindows(clock);
+    await engine.apply(joining());
+    expect(engine.status().movesRadio).toBe(true);
+    advance(300_001);
+    expect(engine.status().state).toBe("idle");
+    expect(engine.status().movesRadio).toBeUndefined();
+  });
+
+  /**
+   * A confirm does not call `finish()`, and a change kept outright under
+   * R-CFG-12 does not either — so without clearing it here, a palette change
+   * applied after a join would have been reported as a radio move.
+   */
+  it("stops saying so after a confirm, including for the apply after it", async () => {
+    const { clock } = fakeClock();
+    const engine = engineWithWindows(clock);
+    const applied = await engine.apply(joining());
+    engine.confirm(applied.id);
+    expect(engine.status().movesRadio).toBeUndefined();
+
+    const themed = joining();
+    themed.ui.theme = "night";
+    const kept = await engine.apply(themed);
+    expect(kept.expiresAt).toBeNull();
+    expect(engine.status().state).toBe("confirmed");
+    expect(engine.status().movesRadio).toBeUndefined();
+  });
+
   it("actually reverts on the widened deadline, not before it", async () => {
     const { clock, advance } = fakeClock();
     const engine = engineWithWindows(clock);

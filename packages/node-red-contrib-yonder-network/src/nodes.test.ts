@@ -416,8 +416,41 @@ describe("yonder-pending", () => {
   it("reads the apply state and says nothing is pending", async () => {
     replies.push(ok({ state: "idle" }), ok({ state: "idle" }));
     const msg = await fromPoller({});
-    expect(msg.payload).toEqual({ pending: false, id: "", what: "", why: "" });
+    // `keys` joined this payload when R-CFG-11 made the rail's contents
+    // depend on which change is pending: a radio move is confirmed by the
+    // device, so the banner over one offers no CONFIRM. With nothing pending
+    // the list is the ordinary pair, which is what the rail's own
+    // configuration says too.
+    expect(msg.payload).toEqual({
+      pending: false, id: "", what: "", why: "",
+      keys: [
+        { label: "CONFIRM", action: "confirm", tone: "warn" },
+        { label: "REVERT NOW", action: "revert", tone: "act" },
+      ],
+    });
     expect(asked[0]).toEqual({ method: "GET", path: "/status" });
+  });
+
+  /**
+   * **The rail's keys reach the page, and the radio case reaches it whole.**
+   *
+   * The decision is `pendingChange()`'s and it is tested in `yonder-core`;
+   * what this asserts is that it survives the node — the payload the banner's
+   * soft-key rail is drawn from carries only `REVERT NOW` for a change the
+   * device is confirming for itself, and the prose beside it says so.
+   */
+  it("carries only REVERT NOW for a change that moved the radio", async () => {
+    const moving = {
+      state: "pending", id: "a1", expiresAt: Date.now() + 92_000, movesRadio: true,
+    };
+    replies.push(ok(moving), ok(moving));
+    const msg = await fromPoller({}, (m) => (m.payload as { pending?: boolean }).pending === true);
+    const payload = msg.payload as
+      { keys: { label: string; action: string }[]; what: string; why: string };
+    expect(payload.keys).toEqual([{ label: "REVERT NOW", action: "revert", tone: "act" }]);
+    expect(payload.keys.map((k) => k.action)).not.toContain("confirm");
+    expect(payload.what).toMatch(/confirming it for itself/);
+    expect(msg.yonder?.movesRadio).toBe(true);
   });
 
   it("carries the countdown as words, and both lines, while one is pending", async () => {
@@ -429,6 +462,9 @@ describe("yonder-pending", () => {
     expect(payload.id).toBe("a1");
     expect(payload.what).not.toBe("");
     expect(payload.why).toMatch(/gets you back in/);
+    // An ordinary change is still the operator's to keep, and the rail says so.
+    expect((payload as unknown as { keys: { action: string }[] }).keys.map((k) => k.action))
+      .toEqual(["confirm", "revert"]);
     // Already words. A clock ticking in a flow would be arithmetic in wiring.
     expect(msg.yonder?.state).toBe("pending");
     expect(msg.yonder?.message).toMatch(/^Reverts in 1:3\d$/);
