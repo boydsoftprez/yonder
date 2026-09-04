@@ -122,8 +122,23 @@ three legends:
 | Kind | Legend | Behaviour | Examples |
 |---|---|---|---|
 | Image | *applies live* | Takes effect on the running stream | Exposure, white balance, colour treatment, brightness, aim, zoom |
-| Stream | *restarts the picture* | The pipeline is rebuilt; the picture drops and returns | Resolution, frame rate, codec |
+| Stream | *restarts the picture* | The pipeline is rebuilt; the picture drops and returns | Resolution, frame rate, codec, **bitrate** |
 | Configuration | *config.yaml* | A write to the configuration document, through the apply engine | Source, device, outputs, addresses |
+
+**Bitrate restarts the picture, and that is a decision rather than a limitation.** Nothing
+in M4 holds a handle on a running pipeline — the pipeline is spawned and supervised, which
+is all a fixed bitrate needs. Only R-VID-07's adaptive loop needs to change a rate without
+dropping the picture, and that is M9; the control surface it requires is named in section 11
+as its prerequisite rather than built now. Section 7 removes the other thing that would have
+forced it early.
+
+**Each camera also has a run state, and it is on the rail.** *Start* and *Stop* are
+R-CTL-01 — P1, and in M4 — and they are the only controls on this page that stop the
+aircraft sending. They are not the same as section 6's *Off*, which ends the browser's own
+view and changes nothing on the board: an operator watching the uplink track go past its
+mark, which sections 4 and 5 exist to make them do, needs something that actually stops an
+output. Stopping is a runtime action, not a configuration write, so it survives no apply and
+no reboot — a camera configured to autostart comes back streaming.
 
 Zoom is in the first row as a constraint on implementation, not as an observation: **every
 zoom backend applies live.** A UVC control and a receiver-side crop already do; a sensor
@@ -572,10 +587,17 @@ Three things restart and one never does.
 
 - **The session reconnects on its own**, with backoff, showing the attempt count. No button:
   the operator asked for a live picture and never withdrew the request.
-- **A keyframe is requested on subscribe** rather than waiting for the next natural one
-  (R-VID-09). Without it a reconnection is a grey rectangle for up to a GOP. R-VID-09 is
-  priority 3 today and this makes it load-bearing: it should rise to priority 2 in the same
-  change, or reconnection is acknowledged to be that grey rectangle until it does.
+- **The picture returns immediately, and it costs nothing to arrange.** A reconnecting
+  browser is a late joiner, and without a keyframe it watches a grey rectangle for up to a
+  whole group of pictures. Rather than asking the media server to demand one from the
+  encoder — which would need a control channel M4 does not have, over an interface nobody
+  has exercised — **the cheap preview branch simply runs a short keyframe interval of its
+  own while the ground-station branch keeps a long one.** Section 4 has already made those
+  two separate encodes, so this costs a few tens of kb/s on a branch running at a few
+  hundred, and it is the only branch where a person is watching the rectangle. That is
+  R-VID-09 satisfied on the path that matters, with no dependency outside the pipeline. A
+  late-joining *ground station* is the case still wanting the control channel, and it waits
+  for one.
 - **Every setting is re-read from the aircraft** before being shown as current. K-41 records
   that the development board reboots by itself; a page redrawing remembered values would
   show a configuration nobody is running.
@@ -603,6 +625,43 @@ beneath it rather than guessing.
 a page, and a copy control floating in a panel corner is the small exception that ends the
 rule. It also works the same on a tablet, where there is nothing to hover.
 
+### Who may receive it
+
+The media server listens on its own ports. The interface's password is checked by the
+console on the console's port, and **nothing in that path touches the media server** — so
+without a decision here, M4's exit criterion (*"from another network"*, meaning over the
+mesh) is met by a picture anyone on the overlay can watch without logging in. Each listener
+gets its own answer, because they serve different things.
+
+**The browser's picture is behind the interface's own credential.** Setting up a WebRTC
+stream begins with one small HTTP exchange, and the keys that encrypt the video are carried
+in it. The console proxies **that exchange** — not the video, which continues to flow
+directly and stays fast — so somebody who cannot log in never obtains the keys and cannot
+watch. One authenticated route in front of one request, and no second credential anywhere.
+
+**RTSP keeps a credential of its own**, because Mission Planner and QGroundControl cannot
+hold a console session. It is per device and generated, exactly as the access point's
+passphrase is: the configuration holds a *reference*, `password: { secret: rtsp_password }`;
+the value is generated once on first render into `/etc/yonder/secrets.yaml` at mode `0600`;
+and the operator never types it, because the receive line (above) resolves it and hands them
+the whole URL to copy. One credential per device rather than one per camera — a set of them
+buys the ability to hand out one camera and not another, which is not a thing anyone has
+asked for.
+
+**The RTP push needs nothing.** It is outbound to a configured address with no listener to
+protect.
+
+**RTMP and HLS are off.** The media server offers them; nothing in this design uses them,
+and a listener that exists for no reason is a listener nobody is watching.
+
+Two things follow that are easy to lose. The generated credential inherits R-SEC-01 (no
+shared default), R-SEC-07 (never in a published image) and R-SEC-10 (never in a log, an
+error, or a support bundle) without further work. But **R-UI-12 photographs every page in
+both palettes on every build and commits the images**, and the receive-line page shows a
+resolved credential — so the captured fixture carries a visibly fake value, and a test
+asserts that no captured page contains the real one. That is the same shape as K-32: a rule
+nobody notices is broken until it already is.
+
 ### And over MAVLink
 
 R-VID-12 announces each camera, its stream and its storage on the MAVLink link Yonder already
@@ -628,6 +687,7 @@ named and shaped so it maps onto that without a translation layer.
 | R-VID-14 | **Where live video cannot be established, serve periodic stills instead**, at a stated cost and with the age of the current frame shown. The fall-back happens without being asked for and reports why it happened, and stills are also offered as a deliberate choice on a link that cannot carry video | 2 |
 | R-VID-15 | **Show the exact receive-side command in the interface**, generated from what the camera is doing at that moment and carrying the address the operator is actually reaching the device on. R-VID-10 makes a ground station configurable from the documentation; this removes the need to read it | 2 |
 | R-STO-06 | **Recording on the device's own medium stops before it fills it.** A reserve is kept that recording may not consume, the remaining time is shown against that reserve, and recording ends by itself when it is reached rather than by exhausting the card. R-STO-02 bounds what logging may take; this bounds what video may | 2 |
+| R-SEC-13 | **Every media listener has a stated posture, and none is reachable by default without one.** The picture the interface serves is behind the interface's own credential; a listener a ground station needs, which cannot hold an interface session, carries a generated per-device credential of its own and never a shared default (R-SEC-01); an outbound push has no listener to protect; and a protocol nothing in the configuration uses is not listening at all. R-SEC-04 governs write paths to the vehicle; this governs who may read what the aircraft sends | 1 |
 | R-UI-15 | **Nothing is silently missing.** A capability the device does not have is stated as a fact where its control would have been — never drawn as a control that cannot be used, and never simply absent, because an operator must be able to tell *this camera cannot* from *this page failed*. A capability the device advertises and does not answer keeps its control, marked inoperative and carrying the reason (R-CAM-14). Actions are the exception: the soft-key rail carries only what can be done | 2 |
 
 R-VID-13 is the only P1 in the set. R-VID-05 — every configured output delivered at once —
@@ -645,7 +705,7 @@ in the same change as the requirements.
 
 | Milestone | Requirements | Why there |
 |---|---|---|
-| M4 | R-VID-13, R-VID-14, R-VID-15, R-UI-15 | The cheap preview is what makes M4's exit criterion affordable on a field uplink; stills are its safety net; the receive line is how a ground station gets configured for that criterion; and the page cannot be built without the rule for what it draws |
+| M4 | R-VID-13, R-VID-14, R-VID-15, R-UI-15, **R-SEC-13** | The cheap preview is what makes M4's exit criterion affordable on a field uplink; stills are its safety net; the receive line is how a ground station gets configured for that criterion; the page cannot be built without the rule for what it draws; and M4's exit criterion is *from another network*, which is the moment an unguarded listener becomes reachable by anyone on the mesh |
 | M5 | R-CAM-17, R-CAM-18, R-STO-06 | The accessory camera is the first with its own recorder, and recording arrives with it |
 | M7 | R-VID-12, R-CAM-16 | M7 is commanding; a ground station commanding the camera over MAVLink belongs beside the rest of R-CMD |
 
@@ -701,9 +761,23 @@ The guard's limits belong in **one checked-in file that both `scripts/pocket2/` 
 package read**. The guard that saved the bench from four excursions currently exists only in
 a Python script that will never be on an aircraft, and a second copy would drift from it.
 
-One change lands outside this package: `withoutCosmetics()` in `yonder-core` has no
-mechanism for a repeated structure, so the leaf-by-leaf exemption in section 2 is new code
-there, with a test that a newly added camera field falls through to load-bearing.
+**Pipelines are spawned and supervised, and that is the whole runtime surface in M4.** Start,
+stop and run state per camera (R-CTL-01) are process lifecycle; resolution, codec and bitrate
+are a respawn; a keyframe on reconnect is arranged in the pipeline rather than commanded
+(section 7). **What M4 therefore does not build is a control channel into a running
+pipeline** — and R-VID-07's adaptive bitrate in M9 cannot be built without one, so it carries
+that cost rather than this milestone paying it early. Whether that channel turns out to be an
+in-process media application with a socket, or something narrower — the hardware encoder's
+own controls are settable while it streams, which would need no extra process at all — is
+decided when something needs it. Nobody in this repository has yet enumerated a V4L2 control,
+so that is a bench question, not a design one.
+
+Two changes land outside this package. `withoutCosmetics()` in `yonder-core` has no mechanism
+for a repeated structure, so the leaf-by-leaf exemption in section 2 is new code there, with
+a test that a newly added camera field falls through to load-bearing. And the console's
+authenticated proxy for the browser's stream setup (section 8) is a route in the console, not
+in this package — a media server that the console cannot start, stop or reconfigure, so
+R-SEC-12 holds.
 
 Presentation goes in `node-red-dashboard-2-yonder` as Vue components, never as markup in a
 `ui-template`: the picture pane with its overlays and gesture, the aim dial, the uplink

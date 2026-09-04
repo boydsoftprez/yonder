@@ -241,6 +241,10 @@ until M8.
   carry video — R-VID-14
 - The receive command in the interface, generated from the running configuration — R-VID-15
 - Nothing silently missing: a capability the camera lacks is stated, never blank — R-UI-15
+- **A stated posture for every media listener** — the browser's picture behind the console's
+  own credential, a per-device credential for the ground-station listener, and the protocols
+  nothing uses switched off. Here because *from another network* is this milestone's exit
+  criterion — R-SEC-13
 - **Supply-voltage reporting** — R-SYS-09. Here rather than with the other status readings
   because encoding video is what pushes the draw up, so M4 is the milestone that provokes it
 
