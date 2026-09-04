@@ -24,7 +24,25 @@ import type { BudgetSegment } from "../shapes.js";
 function mountBudget(capacityKbps: number, segments: BudgetSegment[], label = "Uplink") {
   return mount(YonderBudget, {
     props: { id: "n1", props: { label, capacityKbps, segments } },
-    global: { provide: { $dataTracker: () => {} } },
+    // `$store: undefined` rather than omitted: Dashboard always installs one,
+    // and a track read before any message has arrived is the case these mounts
+    // stand for. Declaring it absent exercises that path without Vue warning
+    // about a property that was never defined.
+    global: { provide: { $dataTracker: () => {} }, mocks: { $store: undefined } },
+  });
+}
+
+/** The same track with a message on it, the way Dashboard delivers one. */
+function mountWithMessage(
+  configured: { capacityKbps: number; segments: BudgetSegment[] },
+  payload: unknown,
+) {
+  return mount(YonderBudget, {
+    props: { id: "n1", props: { label: "Uplink", ...configured } },
+    global: {
+      provide: { $dataTracker: () => {} },
+      mocks: { $store: { state: { data: { messages: { n1: { payload } } } } } },
+    },
   });
 }
 
@@ -98,5 +116,48 @@ describe("the unit token", () => {
   it("names the layer without uppercasing the unit — Mb/s uppercased says megabytes", () => {
     const wrapper = mountBudget(2067, [{ label: "cam0", kbps: 2003 }]);
     expect(wrapper.get(".y-budget__total").text()).toContain("Mb/s");
+  });
+});
+
+/**
+ * **What arrived, in preference to what was configured.**
+ *
+ * A track written into `flows.json` states the bitrates somebody typed there
+ * once, and the first operator to change a camera's bitrate or add an output
+ * reads a picture of the old configuration. `uplinkBudget()` in yonder-core
+ * builds these from the configuration in force and the daemon sends them on
+ * `payload.budget`.
+ */
+describe("the live answer", () => {
+  it("draws the configuration in force rather than the one the flow was written with", () => {
+    const wrapper = mountWithMessage(
+      { capacityKbps: 5000, segments: [{ label: "stale", kbps: 100 }] },
+      { budget: { capacityKbps: 4000, segments: [{ label: "front · rtp", kbps: 2067 }] } },
+    );
+    expect(wrapper.findAll(".y-budget__key").map((n) => n.text()))
+      .toEqual(["front · rtp 2.1 Mb/s"]);
+    expect(wrapper.find(".y-budget__total").text()).toBe("2.1 of 4.0 Mb/s");
+  });
+
+  it("keeps the configured track until the first message arrives", () => {
+    const wrapper = mountWithMessage(
+      { capacityKbps: 5000, segments: [{ label: "preview", kbps: 413 }] },
+      undefined,
+    );
+    expect(wrapper.find(".y-budget__total").text()).toBe("0.4 of 5.0 Mb/s");
+  });
+
+  it("hatches a live segment past the mark, exactly as it hatches a configured one", () => {
+    const wrapper = mountWithMessage(
+      { capacityKbps: 5000, segments: [] },
+      {
+        budget: {
+          capacityKbps: 2000,
+          segments: [{ label: "a", kbps: 2067 }, { label: "b", kbps: 2067 }],
+        },
+      },
+    );
+    const over = wrapper.findAll(".y-budget__seg").filter((n) => n.classes().includes("over"));
+    expect(over).toHaveLength(1);
   });
 });

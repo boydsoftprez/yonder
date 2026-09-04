@@ -21,7 +21,12 @@ import { ZEROTIER_NETWORK_ID, type Camera } from "../schema/config.js";
 import type { RemoteState } from "../remote/state.js";
 import { compose, refuse } from "../video/pipeline.js";
 import { noCapabilities, summarise, type CameraCapabilities } from "../video/capability.js";
+import {
+  cameraStrip, capabilityFacts, identityWords, uplinkBudget,
+  type CameraStrip, type CapabilityFact,
+} from "../video/present.js";
 import { CONTROL_NAMES, type ApplyControlsOptions, type ApplyControlsResult } from "../video/controls.js";
+import { setCameraSettings, type CameraSettings } from "../video/settings.js";
 import { renderReceive, type Rendering } from "../video/receive.js";
 import type { CameraRun, Supervisor } from "../video/supervisor.js";
 import type { Detection, DetectResult, Rejection } from "../video/probe/camera.js";
@@ -181,6 +186,21 @@ export interface CameraView {
   encoder: Encoder;
   /** Why a start would be refused (R-CAM-10), or null. */
   refusal: string | null;
+  /**
+   * The same facts as strings the readout strip binds — see `video/present.ts`
+   * and `displayFacts` beside it. A page binds a widget to a key and cannot
+   * compose `1280 × 720`; doing that in a `function` node is CLAUDE.md rule 2
+   * and doing it in a `change` node's JSONata is the same rule wearing a
+   * different hat. Anything that wants the raw values still has them above.
+   */
+  display: CameraStrip;
+  /**
+   * What this camera cannot do (R-UI-15), computed from the capabilities
+   * beside it rather than listed in the flows — a stored list is a stale list
+   * the first time a different camera is plugged in, which is the whole of
+   * R-CAM-14.
+   */
+  facts: CapabilityFact[];
 }
 
 /** What GET /system answers with. */
@@ -290,7 +310,7 @@ const CAMERA_ID = /^[a-z0-9][a-z0-9-]{0,31}$/;
  * matching at all. The difference is not cosmetic: a guard nothing can reach
  * is a guard no test can prove.
  */
-const CAMERA_ROUTE = /^\/cameras\/(.+?)(?:\/(run|probe|receive-line|controls))?$/;
+const CAMERA_ROUTE = /^\/cameras\/(.+?)(?:\/(run|probe|receive-line|controls|settings))?$/;
 
 /**
  * Where a pipeline publishes: mediamtx, on loopback.
@@ -409,15 +429,34 @@ export function createRouter(deps: RouterDeps): Router {
       const found = answer !== undefined && "capabilities" in answer ? answer : undefined;
       const rejection = answer !== undefined && !("capabilities" in answer) ? answer : undefined;
       const encoder = await readEncoder();
+      const run = supervisor.state(id);
+      const device = answer?.device ?? null;
+      const byPathStable = found?.byPathStable ?? false;
+      const capabilities = found?.capabilities ?? null;
       return {
         camera,
-        run: supervisor.state(id),
-        device: answer?.device ?? null,
+        run,
+        device,
         card: answer?.card ?? null,
-        byPathStable: found?.byPathStable ?? false,
-        capabilities: found?.capabilities ?? null,
+        byPathStable,
+        capabilities,
         reason: rejection?.reason ?? null,
         encoder,
+        display: cameraStrip({
+          camera, run, device, byPathStable, encoder,
+          refusal: refuse({
+            camera,
+            capabilities: capabilities ?? noCapabilities(),
+            encoder,
+            rtspBase: RTSP_BASE,
+            knownDevices: known,
+          }),
+        }),
+        // From what the device answered a moment ago, never from a list. A
+        // camera that answered nothing yields every row, which is the honest
+        // reading: an operator has to be able to tell *this camera cannot*
+        // from *this page failed*.
+        facts: capabilityFacts(capabilities ?? noCapabilities()),
         // Answered on the page rather than only on the start, so an operator
         // reads which of their settings this camera does not offer before
         // they press anything (R-CAM-10). `knownDevices` comes from the sweep
@@ -534,6 +573,27 @@ export function createRouter(deps: RouterDeps): Router {
       const current = "capabilities" in after ? after.capabilities : null;
 
       return { status: 200, body: { applied, refused, clamped, current } };
+    }
+
+    /**
+     * R-CTL-02, R-CTL-03: the stream settings, through the apply engine.
+     *
+     * **Never a write to config.yaml from here.** The engine is what makes a
+     * change reversible: it snapshots the document, renders it, and either
+     * keeps it or arms the confirmation window — and it decides which from
+     * `apply/reachability.ts` and `CAMERA_EXEMPT_LEAVES`, not from anything
+     * this route knows. So the Setup deck draws a countdown exactly where one
+     * armed, because it is drawing the engine's own answer rather than a
+     * prediction of it.
+     *
+     * Deliberately unlike `run` and `controls` above, which are runtime and
+     * take effect at once: those change what the device is *doing*, this
+     * changes what it *is*.
+     */
+    if (method === "POST" && verb === "settings") {
+      const next = setCameraSettings(config, id, body as CameraSettings);
+      if (!next.ok) return { status: 400, body: { error: next.error } };
+      return { status: 200, body: await deps.engine.apply(next.config) };
     }
 
     // The credential leaves the daemon on exactly one route. Everything else
@@ -725,11 +785,22 @@ export function createRouter(deps: RouterDeps): Router {
               // no Aim group before anyone goes looking for one — R-UI-15
               // applied a level up from the page it governs.
               summary: summarise(detected.capabilities),
+              // R-CAM-05 in words. Nothing rendered `byPathStable` until this
+              // page did, and until something does, the stable-identity work
+              // stops at the type: an operator never learns whether the camera
+              // they configured will still be the one this name means after a
+              // reboot.
+              identity: identityWords(detected.byPath, detected.byPathStable),
               // Null where nothing is configured for this socket yet: a
               // detected camera with no id has no page to open (R-UI-03).
               id: config.cameras.find((c) => c.device === detected.byPath)?.id ?? null,
             })),
             rejected,
+            // Both totals live here rather than on any one camera's page,
+            // because both are shared: *starting the second camera would need
+            // 2.1 Mb/s more* is a sentence no single camera's page can say
+            // (R-VID-11).
+            budget: uplinkBudget(config.cameras),
           },
         };
       }

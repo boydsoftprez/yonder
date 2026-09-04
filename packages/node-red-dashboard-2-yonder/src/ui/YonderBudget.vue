@@ -3,21 +3,21 @@
     <div class="y-budget">
         <div class="y-budget__head">
             <span class="y-budget__label">{{ props.label }}</span>
-            <span class="y-budget__total">{{ mbps(total) }} of {{ mbps(props.capacityKbps) }} Mb/s</span>
+            <span class="y-budget__total">{{ mbps(total) }} of {{ mbps(capacity) }} Mb/s</span>
         </div>
         <div class="y-budget__track">
             <div
-                v-for="(seg, i) in props.segments"
+                v-for="(seg, i) in segments"
                 :key="seg.label + i"
                 class="y-budget__seg"
                 :class="{ over: startsPast(i) }"
                 :style="{ width: pct(seg.kbps), left: pct(before(i)) }"
                 :title="seg.label + ' — ' + mbps(seg.kbps) + ' Mb/s'"
             ></div>
-            <div class="y-budget__mark" :style="{ left: pct(props.capacityKbps) }"></div>
+            <div class="y-budget__mark" :style="{ left: pct(capacity) }"></div>
         </div>
         <div class="y-budget__legend">
-            <span v-for="(seg, i) in props.segments" :key="'l' + i" class="y-budget__key">
+            <span v-for="(seg, i) in segments" :key="'l' + i" class="y-budget__key">
                 {{ seg.label }} {{ mbps(seg.kbps) }} Mb/s
             </span>
         </div>
@@ -46,17 +46,43 @@ export default {
     },
     created () { this.$dataTracker(this.id) },
     computed: {
-        total () { return (this.props.segments || []).reduce((n, s) => n + (s.kbps || 0), 0) },
+        /**
+         * **What arrived, in preference to what was configured.**
+         *
+         * A track written into the flows would state the bitrates somebody
+         * typed there once, and the first operator to change a camera's
+         * bitrate or add an output would be reading a picture of the old
+         * configuration. `uplinkBudget()` in yonder-core builds these from the
+         * configuration in force and the daemon sends them on
+         * `payload.budget`; the configured pair stays as the fallback, so the
+         * track draws something honest before the first message arrives rather
+         * than looking like it failed.
+         *
+         * Through `$store` rather than vuex's `mapState`, for the reason
+         * YonderDataBar records.
+         */
+        budget () {
+            const live = this.$store?.state?.data?.messages?.[this.id]?.payload?.budget
+            return live && typeof live === 'object' ? live : {}
+        },
+        segments () {
+            return Array.isArray(this.budget.segments) ? this.budget.segments : (this.props.segments || [])
+        },
+        capacity () {
+            const live = this.budget.capacityKbps
+            return typeof live === 'number' ? live : (this.props.capacityKbps || 0)
+        },
+        total () { return this.segments.reduce((n, s) => n + (s.kbps || 0), 0) },
         // The track is scaled to whichever is larger, so an oversubscribed
         // uplink still fits on screen and the mark moves left instead of the
         // bar running off the end.
-        scale () { return Math.max(this.total, this.props.capacityKbps || 0) || 1 }
+        scale () { return Math.max(this.total, this.capacity) || 1 }
     },
     methods: {
         mbps (kbps) { return ((kbps || 0) / 1000).toFixed(1) },
         pct (kbps) { return `${Math.min(100, (100 * (kbps || 0)) / this.scale).toFixed(2)}%` },
-        before (i) { return (this.props.segments || []).slice(0, i).reduce((n, s) => n + (s.kbps || 0), 0) },
-        startsPast (i) { return this.before(i) >= (this.props.capacityKbps || Infinity) }
+        before (i) { return this.segments.slice(0, i).reduce((n, s) => n + (s.kbps || 0), 0) },
+        startsPast (i) { return this.before(i) >= (this.capacity || Infinity) }
     }
 }
 </script>

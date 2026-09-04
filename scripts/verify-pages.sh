@@ -36,6 +36,15 @@ REPO=$(CDPATH='' cd -- "$HERE/.." && pwd)
 CORE="$REPO/packages/yonder-core"
 CONSOLE_TREE=${CONSOLE_TREE:-$REPO/vendor/console}
 PORT=${PORT:-18881}
+# The camera CI does not have.
+#
+# R-UI-03 builds navigation from detected hardware and R-UI-12 photographs
+# every page on every build, so with no camera attached there is no camera page
+# and this gate covers none of the camera work — without complaining, because
+# from its point of view there is nothing there. So the daemon is started
+# through scripts/synthetic-daemon.mjs with a capability set recorded off a
+# Raspberry Pi 4, and the camera pages exist to be photographed.
+CAMERAS=${CAMERAS:-$REPO/scripts/fixtures/camera-globalshutter.json}
 
 pass=0
 fail=0
@@ -66,7 +75,12 @@ JOURNAL="$ROOT/journal.log"
 BIN="$ROOT/bin"
 SYSTEMCTL_LOG="$ROOT/systemctl.log"
 
-mkdir -p "$ETC" "$RUN" "$STATE" "$CONSOLE" "$USERDIR" "$BIN"
+# `etc/mediamtx` as well as `etc/yonder`: with a camera configured, the media
+# renderer writes the media server's configuration on every apply, and a
+# missing directory is not a media failure — it fails the *whole* apply, so the
+# next theme change reports "the control is wired but dead". The installer's
+# 50-mediamtx.sh makes this directory on a board; this is the harness's copy.
+mkdir -p "$ETC" "$ROOT/etc/mediamtx" "$RUN" "$STATE" "$CONSOLE" "$USERDIR" "$BIN"
 : > "$JOURNAL"
 : > "$SYSTEMCTL_LOG"
 
@@ -109,6 +123,21 @@ chmod +x "$BIN/systemctl" "$BIN/nmcli" "$BIN/rfkill" "$BIN/hostnamectl" "$BIN/pi
 sed "s/^  port: .*/  port: $PORT/" "$REPO/config/defaults/config.yaml" > "$ETC/config.yaml"
 grep -q "port: $PORT" "$ETC/config.yaml" || die "could not set the console port in $ETC/config.yaml"
 
+# The fixture's camera, into the configuration the daemon loads. Written by the
+# schema's own serialiser rather than by appending YAML here, so a schema change
+# breaks this loudly instead of producing a document that parses and means
+# something else.
+[ -f "$CAMERAS" ] || die "no camera fixture at $CAMERAS"
+CONFIG_PATH="$ETC/config.yaml" FIXTURE_PATH="$CAMERAS" REPO_PATH="$REPO" node -e '
+const { readFileSync, writeFileSync } = require("node:fs");
+const { parse, stringify } = require(process.env.REPO_PATH + "/node_modules/yaml");
+const path = process.env.CONFIG_PATH;
+const config = parse(readFileSync(path, "utf8"));
+config.cameras = [JSON.parse(readFileSync(process.env.FIXTURE_PATH, "utf8")).camera];
+writeFileSync(path, stringify(config));
+' || die "could not put the fixture's camera into $ETC/config.yaml"
+grep -q "^cameras:" "$ETC/config.yaml" || die "the fixture's camera did not reach $ETC/config.yaml"
+
 DAEMON_PID=""
 CONSOLE_PID=""
 cleanup() {
@@ -140,8 +169,10 @@ start_daemon() {
     YONDER_CONSOLE_USERDIR="$USERDIR" \
     YONDER_CONSOLE_CORE_TREE="$CORE" \
     YONDER_CONSOLE_UNIT="yonder-console.service" \
+    YONDER_CAMERAS_FIXTURE="$CAMERAS" \
+    YONDER_MEDIA_CONFIG="$ROOT/etc/mediamtx/mediamtx.yml" \
     PATH="$BIN:$PATH" \
-        node "$CORE/dist/daemon/server.js" >>"$JOURNAL" 2>&1 &
+        node "$REPO/scripts/synthetic-daemon.mjs" >>"$JOURNAL" 2>&1 &
     DAEMON_PID=$!
 }
 
@@ -221,6 +252,49 @@ check "and it is the day palette, which is the default" \
 
 # ---------------------------------------------------------------------------
 say "the routes the pages read, over the socket"
+
+expect_contains "GET /cameras finds the fixture's camera" '"card":"Global Shutter Camera' "$(sock /cameras)"
+expect_contains "and says whether its identity survives a reboot" 'survives a reboot' "$(sock /cameras)"
+expect_contains "and reports what was rejected, with a reason"    '"reason"' "$(sock /cameras)"
+expect_contains "GET /cameras/front reads the device, not a form" '"capabilities"' "$(sock /cameras/front)"
+expect_contains "and states what this camera cannot do"           '"facts"' "$(sock /cameras/front)"
+
+# A camera in the configuration means the media server has one too, before
+# anything tries to publish to it: mediamtx started with no paths accepts none,
+# and a pipeline publishing to it dies with 400 Bad Request.
+check "the media server's configuration was written for it" \
+    test -f "$ROOT/etc/mediamtx/mediamtx.yml"
+expect_contains "with a path for the picture the browser watches" \
+    "front-preview" "$(cat "$ROOT/etc/mediamtx/mediamtx.yml" 2>/dev/null)"
+# Asserted before it is used: a check against an empty needle matches
+# everything, so a secrets.yaml with no RTSP password would turn the two lines
+# below into a guard that always passes.
+check "the device generated its own RTSP credential" \
+    grep -q '^rtsp_password:' "$ETC/secrets.yaml"
+RTSP_SECRET=$(sed -n 's/^rtsp_password: //p' "$ETC/secrets.yaml" 2>/dev/null | tr -d '"')
+expect_missing "and it is in nothing either service printed" "$RTSP_SECRET" "$(cat "$JOURNAL")"
+
+# R-CFG-12 against R-CFG-03, on the two kinds of camera setting. This is what
+# the Setup deck's countdown is drawn from, so it is asserted here rather than
+# inferred from the page.
+kept=$(sock_post /cameras/front/settings '{"framerate":25}')
+expect_contains "a picture setting is kept, with nothing to confirm" '"expiresAt":null' "$kept"
+armed=$(sock_post /cameras/front/settings '{"bitrate_kbps":2500}')
+expect_missing "a bitrate change arms the confirmation window" '"expiresAt":null' "$armed"
+# Confirmed, and then put back and confirmed again — an apply left pending
+# blocks every apply behind it, including the theme change the capture gate
+# makes to reach the second palette. That is not hypothetical: it is how this
+# script first reported "pressing NIGHT did nothing: the control is wired but
+# dead", and the control was fine.
+confirm_apply() {
+    id=$(printf '%s' "$1" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+    [ -n "$id" ] && sock_post /confirm "{\"id\":\"$id\"}" >/dev/null
+}
+confirm_apply "$armed"
+confirm_apply "$(sock_post /cameras/front/settings '{"bitrate_kbps":2000,"framerate":30}')"
+expect_contains "and the document really changed, not only the answer" \
+    '"bitrate_kbps":2000' "$(sock /config)"
+
 
 expect_contains "GET /system reports a board"        '"display"'   "$(sock /system)"
 expect_contains "GET /net/scan folds the mesh"       '"ssid":"HomeNetwork"' "$(sock /net/scan)"
@@ -309,13 +383,17 @@ else
     ok "the console logged no error at all"
 fi
 
-# yonder-confirm is deliberately absent. R-CFG-11 removed the operator
-# confirmation - joining takes the access point off the air, so the console
-# you would confirm from goes with it, and the device answers the real
-# question itself. The node is still registered by its package and is now used
-# by nothing; that is recorded as K-30 rather than hidden by leaving it in a
-# list nothing checks.
-for type in yonder-status yonder-activity yonder-diag yonder-config yonder-scan yonder-apply yonder-join; do
+# yonder-confirm is here again, and K-30 is closed with it. R-CFG-11 removed
+# the operator confirmation from *joining a network* — that change takes the
+# access point off the air, so the console you would confirm from goes with it,
+# and the device answers the real question itself. It removed nothing from
+# R-CFG-03: a camera's bitrate is spend on the path the console is standing on,
+# nobody has measured what a saturated uplink does to a console session, and
+# that apply arms a window somebody has to confirm. So the camera page uses the
+# node the network page stopped using.
+for type in yonder-status yonder-activity yonder-diag yonder-config yonder-scan \
+            yonder-apply yonder-join yonder-confirm \
+            yonder-cameras yonder-camera yonder-stream yonder-receive-line; do
     if grep -q "\"$type\"" "$USERDIR/flows.json" || grep -q "$type" "$REPO/flows/flows.json"; then
         ok "the flows use $type"
     else
@@ -366,6 +444,8 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
                 --password "$PASSWORD" \
                 --palette "$1" \
                 --artifacts "$REPO/vendor/capture" \
+                --synthetic-cameras "$CAMERAS" \
+                --secrets "$ETC/secrets.yaml" \
                 ${ACCEPT_SHAPE:+--accept}; then
             ok "the $1 palette: every page captured, and none changed shape"
         else

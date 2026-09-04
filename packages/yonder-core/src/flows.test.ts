@@ -273,10 +273,13 @@ describe("flows/flows.json", () => {
     expect(base?.navigationStyle, "default collapses the pane at every width").toBe("fixed");
   });
 
-  it("serves the four pages this milestone is for", () => {
+  it("serves the pages these milestones are for", () => {
     const pages = flows.filter((n) => n.type === "ui-page");
+    // Cameras and the camera page came with M4. They sit above Log and
+    // Diagnostics because the payload is what an operator came to the console
+    // for, and the log is what they reach for when it is not working.
     expect(pages.map((p) => p.name).sort())
-      .toEqual(["Diagnostics", "Log", "Network", "Status"]);
+      .toEqual(["Camera", "Cameras", "Diagnostics", "Log", "Network", "Status"]);
 
     const groups = flows.filter((n) => n.type === "ui-group");
     for (const page of pages) {
@@ -611,7 +614,20 @@ describe("flows/flows.json join controls", () => {
    */
   it("asks the operator to confirm nothing", () => {
     expect(flows.find((n) => n.id === "group-net-confirm")).toBeUndefined();
-    expect(flows.find((n) => n.type === "yonder-confirm")).toBeUndefined();
+    // On *this* page. R-CFG-11 removed the confirmation for joining a network,
+    // because that change takes the console away from the operator and the
+    // device can establish for itself whether the join took. It did not remove
+    // R-CFG-03: a camera's bitrate is spend on the path the console is
+    // standing on, nobody has measured what a saturated uplink does to a
+    // console session, and that apply arms a window somebody has to confirm.
+    // So `yonder-confirm` is used again — on the camera page, and nowhere near
+    // this one.
+    const networkPage = flows.find((n) => n.type === "ui-page" && n.name === "Network");
+    const network = new Set(
+      flows.filter((n) => n.type === "ui-group" && n.page === networkPage?.id).map((n) => n.id),
+    );
+    expect(flows.filter((n) => n.type === "yonder-confirm" && network.has(String(n.group))))
+      .toEqual([]);
     const words = flows
       .filter((n) => n.type === "ui-markdown" || n.type === "ui-button")
       .map((n) => `${String(n.content ?? "")} ${String(n.label ?? "")}`.toLowerCase())
@@ -872,5 +888,335 @@ describe("flows/flows.json status page remote line", () => {
       expect(Number(inj.repeat) * 1000, `${String(inj.id)} repeats every ${String(inj.repeat)} s`)
         .toBeGreaterThanOrEqual(MIN_POLL_MS);
     }
+  });
+});
+
+/**
+ * The camera pages (M4).
+ *
+ * Asserted against the artefact rather than a rendering, for the reason every
+ * other block here is: the capture gate checks how these look in a browser,
+ * and this checks that they are wired to the things they claim to draw. A page
+ * bound to a property nothing sends renders an em dash for ever and no
+ * screenshot can tell you why.
+ */
+describe("flows/flows.json camera pages", () => {
+  const cameras = flows.find((n) => n.type === "ui-page" && n.name === "Cameras");
+  const camera = flows.find((n) => n.type === "ui-page" && n.name === "Camera");
+  const groupsOn = (page: FlowNode | undefined): FlowNode[] =>
+    flows.filter((n) => n.type === "ui-group" && n.page === page?.id);
+  const on = (page: FlowNode | undefined): FlowNode[] => {
+    const ids = new Set(groupsOn(page).map((g) => g.id));
+    return flows.filter((n) => ids.has(String(n.group)));
+  };
+
+  it("has both", () => {
+    expect(cameras, "there is no Cameras index").toBeDefined();
+    expect(camera, "there is no camera page").toBeDefined();
+  });
+
+  /**
+   * R-CAM-05 in words, and the thing nothing in this repository rendered.
+   *
+   * `byPathStable` was resolved, typed and tested from Task 4 onwards and no
+   * surface showed it — so an operator never learned whether the camera they
+   * configured would still be the one that name means after a reboot. It is a
+   * column here and a line on the camera page, both fed from
+   * `identityWords()`, which is where the sentence lives.
+   */
+  it("shows each camera's identity, not only its /dev node", () => {
+    const table = flows.find((n) => n.id === "table-cameras");
+    const columns = (table?.columns as { key: string }[] | undefined) ?? [];
+    expect(columns.map((c) => c.key)).toContain("identity");
+    expect(columns.map((c) => c.key)).toContain("summary");
+
+    const line = on(camera).find((n) => n.value === "payload.display.identity");
+    expect(line, "the camera page never shows its identity").toBeDefined();
+  });
+
+  /** R-CAM-12: a rejection is a value with a reason, and the page shows both. */
+  it("shows what was rejected, and why", () => {
+    const table = flows.find((n) => n.id === "table-cameras-rejected");
+    expect((table?.columns as { key: string }[]).map((c) => c.key)).toContain("reason");
+  });
+
+  /**
+   * R-VID-11. Both totals are on the index and not on any one camera's page,
+   * because both are shared: *starting the second camera would need 2.1 Mb/s
+   * more* is a sentence no single camera's page can say.
+   */
+  it("puts the uplink budget on the index, where the total means something", () => {
+    const budget = flows.find((n) => n.type === "ui-yonder-budget");
+    expect(budget, "there is no uplink track").toBeDefined();
+    expect(groupsOn(cameras).map((g) => g.id)).toContain(String(budget?.group));
+    // Fed by the sweep, or it draws the fallback for ever.
+    const sweep = flows.find((n) => n.type === "yonder-cameras");
+    expect((sweep?.wires as string[][])[0]).toContain(budget?.id);
+  });
+
+  /**
+   * R-UI-03: navigation from detected hardware, so a camera that is not
+   * present has no section. The flows cannot create a page, so the page is
+   * hidden — and the decision is a switch on what the sweep found, never a
+   * guess made once when the file was written.
+   */
+  it("hides the camera page when nothing is attached", () => {
+    const decide = flows.find((n) => n.id === "cameras-present");
+    expect(decide?.type).toBe("switch");
+    expect(decide?.property).toBe("payload.found");
+    const [present, absent] = decide?.wires as string[][];
+    expect(present).toEqual(["cameras-show-page"]);
+    expect(absent).toEqual(["cameras-hide-page"]);
+    for (const id of ["cameras-show-page", "cameras-hide-page"]) {
+      expect((flows.find((n) => n.id === id)?.wires as string[][])[0]).toEqual(["console-control"]);
+    }
+  });
+
+  /**
+   * **Picture, strip, deck, rail — and the deck is the only part that moves.**
+   *
+   * Not a panel over the frame: on a camera you are aiming, a panel over the
+   * frame hides the part of the shot you are aiming at. Asserted by order: the
+   * picture and the strip come first, the decks are in the middle, and both
+   * rails sit at the foot.
+   */
+  it("puts the picture on top, the strip under it and the rail at the foot", () => {
+    const ordered = groupsOn(camera).sort((a, b) => Number(a.order) - Number(b.order));
+    expect(ordered[0]?.id).toBe("group-cam-picture");
+    expect(ordered[1]?.id).toBe("group-cam-readout");
+    expect(ordered.at(-2)?.id).toBe("group-cam-rail-live");
+    expect(ordered.at(-1)?.id).toBe("group-cam-rail-setup");
+  });
+
+  /**
+   * The deck is what Live and Setup exchange, and the page starts on Live.
+   *
+   * A page that came up with both decks drawn would be twice the height it
+   * should be, and one that came up on Setup would show an operator the
+   * settings when they asked for the picture.
+   */
+  it("starts on the Live deck, with Setup drawn nowhere", () => {
+    const live = groupsOn(camera).filter((g) => String(g.className).includes("yonder-deck-live"));
+    const setup = groupsOn(camera).filter((g) => String(g.className).includes("yonder-deck-setup"));
+    expect(live.length).toBeGreaterThan(0);
+    expect(setup.length).toBeGreaterThan(0);
+    for (const g of live) expect(g.visible, `${String(g.id)} must start visible`).toBe(true);
+    for (const g of setup) expect(g.visible, `${String(g.id)} must start hidden`).toBe(false);
+  });
+
+  it("exchanges exactly those two sets, and touches neither the picture nor the strip", () => {
+    const swap = (id: string): { show: string[]; hide: string[] } =>
+      (JSON.parse(String((flows.find((n) => n.id === id)?.rules as { to: string }[])[0].to)) as {
+        groups: { show: string[]; hide: string[] };
+      }).groups;
+    const setup = swap("deck-setup");
+    const live = swap("deck-live");
+    expect(setup.show.sort()).toEqual(live.hide.sort());
+    expect(setup.hide.sort()).toEqual(live.show.sort());
+    for (const named of [...setup.show, ...setup.hide]) {
+      expect(ids.has(named), `${named} is swapped but does not exist`).toBe(true);
+      expect(named).not.toBe("group-cam-picture");
+      expect(named).not.toBe("group-cam-readout");
+    }
+  });
+
+  /**
+   * **The three legends.** An operator has to know which kind of control they
+   * are touching: one that reaches the sensor now, one that respawns the
+   * pipeline, and one that edits the document the device boots from.
+   */
+  it("gives every deck group a header that says which kind of control it holds", () => {
+    const named = (id: string): string => String(flows.find((n) => n.id === id)?.name);
+    expect(named("group-cam-live")).toBe("Applies live");
+    expect(named("group-cam-restarts")).toBe("Restarts the picture");
+    expect(named("group-cam-stored")).toContain("config.yaml");
+  });
+
+  /**
+   * **A countdown only where one will actually arm.**
+   *
+   * The page does not decide that and must not: `apply/reachability.ts` does,
+   * from `CAMERA_EXEMPT_LEAVES`, and `applyStatus` turns the daemon's answer
+   * into `pending` exactly when a deadline came back. So the toast carrying a
+   * countdown and a confirm control is reached by routing on that state — a
+   * page promising a confirm control that never comes, or omitting one that
+   * does, is K-32 on the camera page.
+   */
+  it("routes the countdown on the engine's answer, never on which field was touched", () => {
+    const route = flows.find((n) => n.id === "cam-apply-route");
+    expect(route?.type).toBe("switch");
+    expect(route?.property).toBe("yonder.state");
+    expect((route?.rules as { v?: string }[])[0]?.v).toBe("pending");
+
+    const [armed, kept] = route?.wires as string[][];
+    const toastFor = (chain: string[]): FlowNode | undefined => {
+      const step = flows.find((n) => n.id === chain[0]);
+      return flows.find((n) => n.id === (step?.wires as string[][])[0][0]);
+    };
+    const pending = toastFor(armed);
+    const settled = toastFor(kept);
+    expect(pending?.allowConfirm, "an armed window needs a way to keep it").toBe(true);
+    expect(pending?.showCountdown).toBe(true);
+    expect(settled?.allowConfirm, "a kept apply must not offer a confirm that does nothing")
+      .toBe(false);
+  });
+
+  /**
+   * A dismiss and a timeout leave the same output as the confirm. Only one of
+   * them is the operator saying they can still reach the device (R-CFG-03), so
+   * only one of them may reach `yonder-confirm`.
+   */
+  it("confirms only on the confirm, never on a dismiss or a timeout", () => {
+    const gate = flows.find((n) => n.id === "cam-confirm-gate");
+    expect(gate?.type).toBe("switch");
+    expect((gate?.rules as { v?: string }[])[0]?.v).toBe("confirm_clicked");
+    expect((gate?.wires as string[][])[0]).toEqual(["cam-confirm"]);
+    expect(flows.find((n) => n.id === "cam-confirm")?.type).toBe("yonder-confirm");
+  });
+
+  /**
+   * R-VID-13. The full rate is *held*, never toggled: an operator who forgot
+   * they had left it on would be spending most of a field uplink on a picture
+   * nobody was looking at, and would have no reason to suspect it.
+   */
+  it("reaches the full rate by holding a key, and says what holding it costs", () => {
+    const hold = flows.find((n) => n.type === "ui-yonder-holdkey");
+    expect(hold, "there is no full-rate key").toBeDefined();
+    expect(String(hold?.cost)).toMatch(/Mb\/s/);
+    // Never uppercased: `MB/S` says megabytes.
+    expect(String(hold?.cost)).not.toMatch(/MB\/S/);
+
+    const edge = flows.find((n) => n.id === "cam-hold-edge");
+    expect((hold?.wires as string[][])[0]).toEqual(["cam-hold-edge"]);
+    const [down, up] = edge?.wires as string[][];
+    expect(down).toEqual(["cam-rate-full"]);
+    expect(up).toEqual(["cam-rate-preview"]);
+    // And both reach the picture, or the key is a control that does nothing.
+    for (const id of ["cam-rate-full", "cam-rate-preview"]) {
+      expect((flows.find((n) => n.id === id)?.wires as string[][])[0]).toEqual(["pic-camera"]);
+    }
+  });
+
+  /**
+   * **The picture's own output must never come back to it.** `setMode` emits
+   * `mode:<mode>` when the operator changes it, so a flow that looped that
+   * back would be a picture commanding itself.
+   */
+  it("never wires the picture's output into the picture", () => {
+    const picture = flows.find((n) => n.type === "ui-yonder-picture");
+    expect((picture?.wires as string[][]).flat()).toEqual([]);
+  });
+
+  /**
+   * R-UI-15: the facts row draws what the device answered, on `payload.facts`,
+   * and the list in this file is only the fallback before the first read. A
+   * capability list written into the flows would be a stored list, which is
+   * the whole of what R-CAM-14 forbids.
+   */
+  it("feeds the facts row from the camera read rather than from a list in here", () => {
+    const facts = flows.find((n) => n.type === "ui-yonder-facts");
+    expect(JSON.parse(String(facts?.facts))).toEqual([]);
+    const read = flows.find((n) => n.id === "camera-read");
+    expect((read?.wires as string[][])[0]).toContain(facts?.id);
+  });
+
+  /**
+   * R-CTL-10: the sliders take their range and their position from the device,
+   * not from what this file guessed. A slider pinned to a range the camera
+   * does not have is a control that reports a value it never sent.
+   */
+  it("takes each image control's range and current value from the device", () => {
+    for (const key of ["brightness", "contrast"]) {
+      const from = flows.find((n) => n.id === `cam-${key}-range`);
+      const rules = from?.rules as { p: string; to: string }[];
+      expect(rules[0]?.p).toBe("ui_update");
+      expect(rules[0]?.to).toContain(`capabilities.${key}.value.min`);
+      expect(rules[1]?.to).toBe(`payload.capabilities.${key}.value.current`);
+      expect((from?.wires as string[][])[0]).toEqual([`slider-cam-${key}`]);
+    }
+  });
+
+  /** A slider that echoed would post a control change on every read. */
+  it("lets no input on either deck echo what arrived", () => {
+    for (const n of on(camera).filter((w) => /ui-(slider|number-input|text-input)/.test(w.type))) {
+      expect(n.passthru ?? false, `${String(n.id)} echoes`).toBe(false);
+    }
+  });
+
+  /**
+   * R-VID-15, and the reason the capture gate checks every committed page for
+   * the device's real credential: this line carries a resolved one.
+   */
+  it("shows the receive line with a means of copying it", () => {
+    const rtsp = flows.find((n) => n.id === "identity-cam-rtsp");
+    expect(rtsp?.type).toBe("ui-yonder-identity");
+    const line = flows.find((n) => n.type === "yonder-receive-line");
+    expect((line?.wires as string[][])[0]).toEqual(["pick-cam-receive"]);
+    expect((flows.find((n) => n.id === "pick-cam-receive")?.wires as string[][])[0])
+      .toContain("identity-cam-rtsp");
+  });
+
+  /**
+   * R-CAM-10: why Start would be refused, before it is pressed — and in words
+   * that say so either way. A row labelled "cannot start" with nothing after
+   * it reads as *this camera cannot start*, which is the opposite of what a
+   * null refusal means.
+   */
+  it("says what would stop a start, and says it when nothing would", () => {
+    const row = on(camera).find((n) => n.value === "payload.display.startCheck");
+    expect(row, "the page never shows the start check").toBeDefined();
+    expect(String(row?.label)).not.toMatch(/^cannot/i);
+  });
+
+  /** R-UI-10: every action on this page is on the rail, and only there. */
+  it("puts no action anywhere but the rail", () => {
+    const rails = new Set(
+      groupsOn(camera).filter((g) => String(g.className).includes("yonder-rail")).map((g) => g.id),
+    );
+    const actions = on(camera).filter(
+      (n) => n.type === "ui-button" || n.type === "ui-yonder-softkeys" || n.type === "ui-yonder-holdkey",
+    );
+    expect(actions.length).toBeGreaterThan(0);
+    for (const a of actions) {
+      expect(rails.has(String(a.group)), `${String(a.id)} is an action off the rail`).toBe(true);
+    }
+  });
+
+  /** And each rail carries only what can be done from the deck it belongs to. */
+  it("gives each deck the keys that deck can act on", () => {
+    const keysOf = (id: string): string[] =>
+      (JSON.parse(String(flows.find((n) => n.id === id)?.keys)) as { action: string }[])
+        .map((k) => k.action);
+    expect(keysOf("keys-cam-live")).toEqual(["start", "stop", "setup"]);
+    expect(keysOf("keys-cam-setup")).toEqual(["live", "probe", "receive"]);
+  });
+
+  /**
+   * A key that reached `yonder-stream` with anything but start or stop would
+   * spend a round trip to be told so, and the operator would read the daemon's
+   * refusal about the deck key they pressed.
+   */
+  it("sends only start and stop to the pipeline", () => {
+    const route = flows.find((n) => n.id === "cam-live-keys");
+    const [setup, rest] = route?.wires as string[][];
+    // Setup also fetches the receive line: the deck an operator opens to find
+    // it should already have it, and the committed capture of that deck is
+    // what makes the gate's credential check bite (R-SEC-10).
+    expect(setup).toEqual(["deck-setup", "receive-camera"]);
+    expect(rest).toEqual(["stream-camera"]);
+    expect(flows.find((n) => n.id === "stream-camera")?.type).toBe("yonder-stream");
+  });
+
+  /**
+   * Every camera node on these pages names the same camera. One that named
+   * none would answer "this control is not pointed at a camera" from a page
+   * built around one.
+   */
+  it("points every camera node at the camera the page is about", () => {
+    const nodes = flows.filter(
+      (n) => ["yonder-camera", "yonder-stream", "yonder-receive-line"].includes(n.type),
+    );
+    expect(nodes.length).toBeGreaterThan(0);
+    for (const n of nodes) expect(n.camera, `${String(n.id)} names no camera`).toBe("front");
   });
 });

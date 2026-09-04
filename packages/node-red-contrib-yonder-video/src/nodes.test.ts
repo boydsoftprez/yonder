@@ -123,6 +123,46 @@ describe("yonder-camera", () => {
     expect((msg.payload as { applied: Record<string, number> }).applied).toEqual({ brightness: 64 });
   });
 
+  /**
+   * R-CTL-02, R-CTL-03. A different thing again from `controls`: this changes
+   * what the camera *is* rather than what it is doing, so it goes through the
+   * apply engine and comes back as an apply — which is why the status is
+   * `applyStatus`'s and not a flat "confirmed".
+   *
+   * **This is what lets the Setup deck draw a countdown only where one arms.**
+   * The page renders the engine's own answer, so it cannot promise a confirm
+   * control that never comes or omit one that does.
+   */
+  it("posts a settings change, and reports a kept apply as confirmed", async () => {
+    replies.push(ok({ id: "a1", expiresAt: null }));
+    const msg = await send(cameraNode, "yonder-camera", {
+      topic: "settings", payload: { framerate: 25 }, camera: "cam0",
+    });
+    expect(asked).toEqual([
+      { method: "POST", path: "/cameras/cam0/settings", body: { framerate: 25 } },
+    ]);
+    expect(msg.yonder?.state).toBe("confirmed");
+    expect(msg.yonder?.message).toContain("nothing to confirm");
+  });
+
+  it("reports an apply that armed the window as pending, never as done", async () => {
+    replies.push(ok({ id: "a2", expiresAt: Date.now() + 120_000 }));
+    const msg = await send(cameraNode, "yonder-camera", {
+      topic: "settings", payload: { bitrate_kbps: 3000 }, camera: "cam0",
+    });
+    expect(msg.yonder?.state).toBe("pending");
+    expect((msg.yonder as { id?: string }).id).toBe("a2");
+  });
+
+  it("refuses a settings message whose payload is not an object, and calls nothing", async () => {
+    for (const payload of ["25", 25, null, undefined, [1, 2]]) {
+      const msg = await send(cameraNode, "yonder-camera", { topic: "settings", payload, camera: "cam0" });
+      expect(msg.yonder?.state, JSON.stringify(payload)).toBe("rejected");
+      await helper.unload();
+    }
+    expect(asked).toEqual([]);
+  });
+
   it("refuses a controls message whose payload is not an object, and calls nothing", async () => {
     for (const payload of ["bright", 100, null, undefined, [1, 2]]) {
       const msg = await send(cameraNode, "yonder-camera", { topic: "controls", payload, camera: "cam0" });

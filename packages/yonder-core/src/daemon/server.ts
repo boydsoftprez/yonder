@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { ApplyEngine } from "../apply/engine.js";
 import { warn, note, trace } from "../log.js";
-import { createRouter, type DiagProbes } from "./routes.js";
+import { createRouter, type CameraProbes, type DiagProbes } from "./routes.js";
 import { AdminCredential } from "../console/credential.js";
 import { ConsoleRenderer } from "../console/renderer.js";
 import { consolePaths, type ConsolePaths } from "../console/settings.js";
@@ -23,7 +23,7 @@ import { RemoteRenderer } from "../remote/renderer.js";
 import { MediaRenderer, MEDIA_CONFIG_PATH } from "../media/renderer.js";
 import { Supervisor, systemSpawner } from "../video/supervisor.js";
 import { detectCameras, probeCamera } from "../video/probe/camera.js";
-import { probeEncoder } from "../video/probe/encoder.js";
+import { probeEncoder, type Encoder } from "../video/probe/encoder.js";
 import { applyControls } from "../video/controls.js";
 import { readSupply } from "../system/supply.js";
 import { ZeroTierCli } from "../remote/zerotier/cli.js";
@@ -81,6 +81,39 @@ export interface ServerOptions {
    * production value.
    */
   mediaConfigPath?: string;
+  /**
+   * The camera layer, given whole instead of probed for.
+   *
+   * **Test-only, exactly like `runner` and `clock` above, and `main()` never
+   * supplies it.** There is no environment variable for it and there must not
+   * be: a switch that makes this daemon report the cameras a file names rather
+   * than the ones the board has is a device lying about its own hardware, and
+   * an aircraft is the wrong place to discover that somebody set it.
+   * Supplying it takes writing a different program, which is what
+   * `scripts/synthetic-daemon.mjs` is.
+   *
+   * It exists because the capture gate (R-UI-12) has no camera. With none
+   * attached there is no camera page, so the gate covers none of the camera
+   * work and does not complain — from its point of view there is nothing
+   * there. Given whole rather than as a fake `runner`, because
+   * `detectCameras` reads `/dev/v4l/by-path` as well as running `v4l2-ctl`,
+   * and a machine with no `/dev/v4l` answers `byPathStable: false` — which is
+   * the one thing the Cameras page exists to report honestly (R-CAM-05).
+   */
+  cameraLayer?: CameraLayer;
+}
+
+/**
+ * Everything about cameras this daemon would otherwise ask the board for.
+ *
+ * All three together, not one at a time: a probe that answered from a fixture
+ * beside an encoder read off the host would be a view no device has ever had.
+ */
+export interface CameraLayer {
+  cameras: CameraProbes;
+  encoder: () => Promise<Encoder>;
+  /** What `GET /cameras/:id/receive-line` resolves. See ServerOptions.cameraLayer. */
+  rtspPassword: () => string | null;
 }
 
 export interface BuildRenderersOptions {
@@ -587,6 +620,13 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
           ...mesh.addresses.map((a) => a.split("/")[0] ?? a),
         ].filter((a) => a !== "");
       },
+    }),
+    // Last, so it wins over the real probes above rather than sitting beside
+    // them. Absent in production: main() never sets it (ServerOptions.cameraLayer).
+    ...(opts.cameraLayer === undefined ? {} : {
+      cameras: opts.cameraLayer.cameras,
+      encoder: opts.cameraLayer.encoder,
+      rtspPassword: opts.cameraLayer.rtspPassword,
     }),
     ...(onProvisioned === undefined ? {} : { onProvisioned }),
   });

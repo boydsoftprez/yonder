@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import { applyStatus, confirmed } from "yonder-core";
 import { cameraId, registerAdapter, NO_CAMERA } from "./adapter.js";
 import type { RED } from "./red.js";
 
@@ -48,6 +49,18 @@ export = function register(RED: RED): void {
         }
         return { method: "POST", path: `/cameras/${id}/controls`, body: controls };
       }
+      // R-CTL-02, R-CTL-03. A different thing again from `controls` above:
+      // this changes what the camera *is* rather than what it is doing, so it
+      // goes through the apply engine and inherits the confirmation window and
+      // the rollback — which is why the answer is an apply's, and why the
+      // Setup deck's countdown is the engine's own and not a guess.
+      if (msg.topic === "settings") {
+        const settings = msg.payload;
+        if (settings === null || typeof settings !== "object" || Array.isArray(settings)) {
+          return { refuse: "this control needs an object naming a setting to change" };
+        }
+        return { method: "POST", path: `/cameras/${id}/settings`, body: settings };
+      }
       return msg.topic === "probe"
         ? { method: "POST", path: `/cameras/${id}/probe` }
         : { method: "GET", path: `/cameras/${id}` };
@@ -63,6 +76,16 @@ export = function register(RED: RED): void {
       // The controls route answers a different shape — `applied`/`refused`,
       // no `camera` or `run` — so the badge is composed from those instead of
       // falling through to "camera: unknown".
+      // An apply's answer, from the settings route: it carries an id and a
+      // deadline, not a camera. Reported as what it is, so a node badge does
+      // not read "camera: unknown" for a change that worked.
+      if (typeof (body as { id?: unknown } | undefined)?.id === "string"
+        && body?.camera === undefined && body?.run === undefined) {
+        const expiresAt = (body as { expiresAt?: unknown }).expiresAt;
+        return expiresAt === null
+          ? "applied, and kept"
+          : "applied, waiting to be confirmed";
+      }
       if (body?.applied !== undefined || body?.refused !== undefined) {
         const applied = typeof body?.applied === "object" && body.applied !== null
           ? Object.entries(body.applied as Record<string, unknown>).map(([k, v]) => `${k}: ${v}`)
@@ -80,6 +103,21 @@ export = function register(RED: RED): void {
       // A refusal is named on the badge, because it is the thing an operator
       // has to fix before Start will do anything at all (R-CAM-10).
       return typeof body?.refusal === "string" ? `${id}: ${body.refusal}` : `${id}: ${state}`;
+    },
+    /**
+     * A settings change is an apply, and an apply may be *pending*.
+     *
+     * `applyStatus` is the same function `yonder-apply` uses, so the wording,
+     * the tone and the deadline are the ones every other apply on this console
+     * produces — and the Setup deck's countdown is therefore the engine's own
+     * answer rather than a prediction of it. Everything else this node asks
+     * for is a question, and a question answered is confirmed.
+     */
+    (value, said, at) => {
+      const body = value as { id?: unknown } | undefined;
+      return typeof body?.id === "string"
+        ? applyStatus({ ok: true, status: 200, body: value }, at)
+        : confirmed(said, { at });
     },
   );
 };

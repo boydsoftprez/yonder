@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { clientFor, confirmed, fetched, readFailure } from "yonder-core";
-import type { DaemonClient } from "yonder-core";
+import type { CommandStatus, DaemonClient } from "yonder-core";
 import type { NodeMessage, RED, RedNode } from "./red.js";
 
 /**
@@ -54,6 +54,19 @@ export function registerAdapter(
   ask: (msg: NodeMessage, config: Record<string, unknown>) => Ask,
   /** One line about the answer, for the node's status badge and the message. */
   describe: (value: unknown) => string,
+  /**
+   * What state that answer puts the control in, when *read* is the wrong word
+   * for it.
+   *
+   * Every route in this package but one answers a question, and a question
+   * answered is `confirmed` — which is the default below. The exception is a
+   * settings change: it goes through the apply engine, so its answer may be a
+   * change that is **in force and will revert unless it is confirmed**
+   * (R-CFG-03). Reporting that as `confirmed` would be the page saying a thing
+   * is done while a timer runs to undo it, in the tone that means it is
+   * staying — so the one route that can arm a window supplies its own status.
+   */
+  status?: (value: unknown, said: string, at: number) => CommandStatus,
 ): void {
   RED.nodes.registerType(type, function registered(this: RedNode, config) {
     RED.nodes.createNode(this, config);
@@ -91,8 +104,14 @@ export function registerAdapter(
         }
 
         const said = describe(result.value);
-        node.status({ fill: "green", shape: "dot", text: said });
-        send({ payload: result.value, yonder: confirmed(said, { at: Date.now() }) });
+        const at = Date.now();
+        const state = status?.(result.value, said, at) ?? confirmed(said, { at });
+        node.status({
+          fill: state.state === "pending" ? "yellow" : "green",
+          shape: "dot",
+          text: said,
+        });
+        send({ payload: result.value, yonder: state });
         done();
       })();
     });

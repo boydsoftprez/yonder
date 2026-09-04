@@ -29,9 +29,24 @@
 //      would make the file dirty forever — so what it records is the layout.
 //      The unmasked copy goes to an artifact directory for the full view.
 //
+//   4. **A camera.** R-UI-03 builds navigation from detected hardware, so with
+//      none attached there is no camera page — and this gate then covers none
+//      of the camera work and does not complain, because from its point of
+//      view there is nothing there. `--synthetic-cameras` names the fixture the
+//      harness seeded the daemon from, and this checks that those pages really
+//      were photographed rather than quietly skipped.
+//   5. **A credential check**, which is the one thing here that is not a mask.
+//      The receive-line surface shows a *resolved* RTSP password (R-VID-15) and
+//      these images are committed, so a capture taken against a real device
+//      would put a real secret in the repository for ever. R-SEC-10 says never
+//      in a log, an error, or a support bundle; a committed page is all three.
+//      Same shape as K-32: a rule nobody notices is broken until it already is.
+//
 // Usage:
 //   node scripts/capture-pages.mjs --base-url URL --password PW --palette day
 //   node scripts/capture-pages.mjs ... --accept     # adopt the new shape
+//   node scripts/capture-pages.mjs ... --synthetic-cameras scripts/fixtures/camera-globalshutter.json
+//   node scripts/capture-pages.mjs ... --secrets /etc/yonder/secrets.yaml
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join, dirname, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -62,7 +77,44 @@ function pagesFromFlows() {
         });
       }
     } else {
-      out.push({ name: slug, title: p.name, url });
+      // A page whose deck is exchanged shows one deck at a time, so capturing
+      // it once would quietly narrow "every page" to whichever deck the page
+      // comes up on — the same hole a tabbed page has, reached a different
+      // way. A deck is a `yonder-deck-<name>` in a group's className, and the
+      // key that reveals it is the soft key whose action is that name.
+      const decks = [];
+      for (const g of flows.filter((n) => n.type === "ui-group" && n.page === p.id)
+        .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))) {
+        const named = /yonder-deck-([a-z0-9-]+)/.exec(String(g.className ?? ""));
+        if (named && !decks.includes(named[1])) decks.push(named[1]);
+      }
+      if (decks.length < 2) {
+        out.push({ name: slug, title: p.name, url });
+        continue;
+      }
+      const label = (action) => {
+        for (const rail of flows.filter((n) => n.type === "ui-yonder-softkeys")) {
+          for (const key of JSON.parse(String(rail.keys ?? "[]"))) {
+            if (key.action === action) return key.label;
+          }
+        }
+        return null;
+      };
+      for (const [i, deck] of decks.entries()) {
+        out.push({
+          name: `${slug}-${deck}`,
+          title: `${p.name} · ${deck}`,
+          url,
+          // The first deck is the one the page comes up on, so it is captured
+          // as found; every other one is reached by pressing its key.
+          ...(i === 0 ? {} : { press: label(deck) }),
+          // Group visibility lives in the daemon's state store, so it is
+          // shared and it persists: a run that left the console on Setup would
+          // photograph the next page's Live deck as Setup. The last deck puts
+          // it back.
+          ...(i === decks.length - 1 ? { restore: label(decks[0]) } : {}),
+        });
+      }
     }
   }
   return out;
@@ -150,10 +202,57 @@ const accept = has("accept");
  * console does anything.
  */
 const press = arg("press");
+/**
+ * The fixture the harness seeded the daemon's camera layer from.
+ *
+ * Given here as well as to the daemon so that this can check the camera pages
+ * were actually photographed. A page that renders nothing still produces a
+ * picture, and "the camera pages are captured" is the whole claim this flag
+ * exists to make true.
+ */
+const syntheticCameras = arg("synthetic-cameras");
+/**
+ * The device's own secret store, for the check below.
+ *
+ * Not a mask. A mask would paint over a leak and commit the picture anyway;
+ * this fails the build.
+ */
+const secretsPath = arg("secrets");
 
 if (!password) {
   process.stderr.write("capture-pages: --password is required\n");
   process.exit(2);
+}
+
+/**
+ * The value that must never appear in a captured page.
+ *
+ * R-VID-15 puts a *resolved* RTSP URL on the receive-line surface, R-UI-12
+ * commits these images, and R-SEC-10 says a credential belongs in none of a
+ * log, an error or a support bundle — a committed page image is all three at
+ * once. So the fixture the harness seeds carries a visibly fake password and
+ * this reads the device's real one and asserts it is nowhere.
+ *
+ * Absent when no `--secrets` was given, and then the check says so rather than
+ * passing silently: a guard that cannot tell "nothing to find" from "did not
+ * look" is not a guard.
+ */
+function deviceSecret(name) {
+  if (secretsPath === undefined) return null;
+  try {
+    const bag = parseYaml(readFileSync(secretsPath, "utf8")) ?? {};
+    const value = bag[name];
+    return typeof value === "string" && value !== "" ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+let parseYaml;
+try {
+  ({ parse: parseYaml } = await import("yaml"));
+} catch {
+  parseYaml = () => ({});
 }
 
 let chromium;
@@ -303,6 +402,8 @@ if (!login.ok()) {
 
 let failures = 0;
 let changed = 0;
+/** What every captured page rendered, for the whole-run checks at the end. */
+const seenText = [];
 const note = (s) => process.stdout.write(s + "\n");
 
 for (const page of pages) {
@@ -314,16 +415,38 @@ for (const page of pages) {
   // blank. Console errors and failed requests are collected so the gate can
   // say what happened instead of leaving a picture of nothing.
   const noise = [];
+  // A stream negotiation for a camera that is not running is not a page
+  // defect — it is the case R-VID-14 exists for, and the component says so in
+  // words on the frame. The browser logs it as a console error anyway, so the
+  // filter is on the resource it names rather than on the words, which are the
+  // browser's and not ours. A 404 on a widget bundle still fails, which is
+  // what this check was written for.
+  const aboutTheStream = (url) => /\/whep(\?|$)/.test(String(url ?? ""));
   tab.on("console", (m) => {
-    if (m.type() === "error") noise.push(`console: ${m.text().slice(0, 200)}`);
+    if (m.type() !== "error") return;
+    if (aboutTheStream(m.location()?.url)) return;
+    noise.push(`console: ${m.text().slice(0, 200)}`);
   });
   tab.on("pageerror", (e) => noise.push(`uncaught: ${String(e.message).slice(0, 200)}`));
-  tab.on("requestfailed", (r) => noise.push(`request failed: ${r.url().slice(-90)}`));
+  tab.on("requestfailed", (r) => {
+    if (aboutTheStream(r.url())) return;
+    noise.push(`request failed: ${r.url().slice(-90)}`);
+  });
   tab.on("response", (r) => {
+    // The picture negotiating a stream for a camera that is not running is not
+    // a page defect — it is the case R-VID-14 exists for, and the component
+    // says so in words on the frame ("this camera is not streaming; start it
+    // on the rail"). A 404 on a widget bundle still fails, which is what this
+    // check was written for.
+    if (aboutTheStream(r.url())) return;
     if (r.status() >= 400) noise.push(`HTTP ${r.status()}: ${r.url().slice(-90)}`);
   });
 
-  await tab.goto(baseUrl + page.url, { waitUntil: "networkidle" });
+  // `load`, not `networkidle`. A page carrying a live picture never goes idle:
+  // the WHEP session reconnects with backoff for as long as it is open, so
+  // waiting for silence on a camera page is waiting for something that will
+  // not happen. The widget wait below is what actually says the page is drawn.
+  await tab.goto(baseUrl + page.url, { waitUntil: "load" });
   // The dashboard renders its widgets after the socket connects, so waiting on
   // the network alone captures an empty page.
   await tab.waitForSelector('[class*="nrdb-ui-widget"], [class*="nrdb-ui-group"]', { timeout: 15000 })
@@ -347,6 +470,21 @@ for (const page of pages) {
     }
   }
 
+  // The deck this entry is for, reached by pressing its key. Unlike a tab,
+  // which the browser owns, a deck is exchanged by the *device*: the press
+  // goes to Node-RED, the flow answers with a ui-control message, and the
+  // groups appear. So this is also the only proof that path works at all.
+  if (page.press) {
+    const key = tab.locator("button", { hasText: page.press }).first();
+    if (await key.count()) {
+      await key.click();
+      await tab.waitForTimeout(900);
+    } else {
+      note(`  FAIL  ${page.title} (${palette}) has no key labelled "${page.press}" to reach it`);
+      failures += 1;
+    }
+  }
+
   const shape = await tab.evaluate(measure, LIVE);
   const stem = `${page.name}.${palette}`;
 
@@ -366,6 +504,24 @@ for (const page of pages) {
     maskColor: "#8b8f94",
   });
   await tab.screenshot({ path: join(artifacts, `${stem}.png`), fullPage: true });
+
+  // ---- R-SEC-10, and this one is a check rather than a mask ----
+  //
+  // The receive-line surface shows a resolved credential. R-UI-12 commits
+  // these images, so a captured page carrying the real one would put a secret
+  // in the repository for ever — and R-SEC-10 says never in a log, an error,
+  // or a support bundle. The fixture carries a visibly fake value; this is
+  // what proves the real one never got in.
+  //
+  // Same shape as K-32: a rule nobody notices is broken until it already is.
+  const html = await tab.content();
+  seenText.push(html);
+  const secret = deviceSecret("rtsp_password");
+  if (secret !== null && html.includes(secret)) {
+    note(`  FAIL  ${page.title} (${palette}) contains the resolved RTSP credential`);
+    note("          capture with --synthetic-cameras so the pages render the fixture value");
+    failures += 1;
+  }
 
   // ---- rules ----
   // A finding on the debt list is reported and not counted; anything else
@@ -453,6 +609,20 @@ for (const page of pages) {
     }
   }
 
+  // Group visibility is the daemon's, so it is shared and it persists. A run
+  // that walked off leaving the console on Setup would photograph the next
+  // run's Live deck as Setup, and the shape reference would drift with it.
+  if (page.restore) {
+    const key = tab.locator("button", { hasText: page.restore }).first();
+    if (await key.count()) {
+      await key.click();
+      await tab.waitForTimeout(700);
+    } else {
+      note(`  FAIL  ${page.title} (${palette}) has no "${page.restore}" key to put the deck back`);
+      failures += 1;
+    }
+  }
+
   await tab.close();
 }
 
@@ -461,7 +631,7 @@ if (press) {
   let pressed = false;
   for (const page of pages) {
     const tab = await context.newPage();
-    await tab.goto(baseUrl + page.url, { waitUntil: "networkidle" });
+    await tab.goto(baseUrl + page.url, { waitUntil: "load" });
     await tab.waitForTimeout(500);
     const key = tab.locator("button", { hasText: press }).first();
     if (await key.count()) {
@@ -491,6 +661,34 @@ for (const e of stale) {
   note(`  FAIL  ${e.page} (${e.palette}) no longer has the accepted "${e.rule}" on "${e.key}"`);
   note(`          it is fixed — delete that entry from ${join(refs, "accepted-violations.json")}`);
   failures += 1;
+}
+
+/**
+ * The claim `--synthetic-cameras` exists to make true.
+ *
+ * The fixture is only worth having if the camera pages were actually
+ * photographed. Without this, a fixture that stopped being read — a renamed
+ * key, a daemon started without it — would leave the camera pages rendering
+ * nothing and every check above would still pass, because a page with no
+ * camera on it is a page, and this gate would say so cheerfully.
+ */
+if (syntheticCameras !== undefined) {
+  const fixture = JSON.parse(readFileSync(syntheticCameras, "utf8"));
+  const wanted = String(fixture.camera?.name ?? "");
+  const captured = pages.filter((p) => p.name.startsWith("camera"));
+  if (captured.length === 0) {
+    note("  FAIL  --synthetic-cameras was given and no camera page was captured");
+    failures += 1;
+  }
+  if (secretsPath === undefined) {
+    note("  FAIL  --synthetic-cameras without --secrets: nothing checked the real credential");
+    note("          the receive line resolves one, and these images are committed (R-SEC-10)");
+    failures += 1;
+  }
+  if (!seenText.some((t) => t.includes(wanted))) {
+    note(`  FAIL  no captured page names "${wanted}", so the fixture reached no page`);
+    failures += 1;
+  }
 }
 
 note("");

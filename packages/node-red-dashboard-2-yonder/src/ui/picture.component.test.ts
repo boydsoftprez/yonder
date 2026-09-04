@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { mount, type VueWrapper } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { nextTick } from "vue";
+import { nextTick, reactive } from "vue";
 import YonderPicture from "./YonderPicture.vue";
 
 /**
@@ -108,9 +108,42 @@ function mountPicture(props: Record<string, unknown> = {}) {
     },
     global: {
       provide: { $socket: { emit }, $dataTracker: () => {} },
+      // Dashboard always installs a store; declaring it absent is the state
+      // before any message has arrived, and stops Vue warning about a property
+      // that was never defined.
+      mocks: { $store: undefined },
     },
   });
   return { wrapper, emit };
+}
+
+/**
+ * The same picture with the rail's message on it.
+ *
+ * A soft key's press travels to Node-RED and comes back as a message — the
+ * only path a *separate* widget has to this one. `store.state.data.messages`
+ * is where Dashboard puts it, so a test that set a prop instead would be
+ * testing a path the console does not have.
+ */
+function mountWithRail(payload?: unknown) {
+  const emit = vi.fn();
+  // Reactive, because Dashboard's own store is: a plain object here would
+  // never re-run the watcher and the test would pass or fail for a reason that
+  // has nothing to do with the component.
+  const messages = reactive<Record<string, { payload?: unknown }>>({ n1: { payload } });
+  const wrapper = mount(YonderPicture, {
+    props: { id: "n1", props: { path: PATH, label: LABEL, stillsAfterMs: 12_000 } },
+    global: {
+      provide: { $socket: { emit }, $dataTracker: () => {} },
+      mocks: { $store: { state: { data: { messages } } } },
+    },
+  });
+  const press = async (value: unknown): Promise<void> => {
+    messages.n1 = { payload: value };
+    await nextTick();
+    await settle();
+  };
+  return { wrapper, emit, press };
 }
 
 /**
@@ -514,3 +547,70 @@ describe("teardown", () => {
 function setMode(wrapper: VueWrapper, mode: string): void {
   (wrapper.vm as unknown as { setMode(mode: string): void }).setMode(mode);
 }
+
+/**
+ * **The rail, reaching the picture.**
+ *
+ * Every mode this component owns, and the whole of the held full-rate key,
+ * were reachable from a unit test and from nowhere else on the page: `setMode`
+ * had no caller in the template and no caller in any flow. A control that
+ * cannot be reached is a control that shipped dead, which is the failure
+ * ADR-0009 was written after.
+ */
+describe("what the soft-key rail sends it", () => {
+  it("takes the full rate off the preview path while the key is held", async () => {
+    const { press } = mountWithRail();
+    await settle();
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/video/cam0-preview/whep");
+
+    await press("rate:full");
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("/video/cam0/whep");
+  });
+
+  it("goes straight back to the cheap copy when the key is let go", async () => {
+    const { press } = mountWithRail();
+    await settle();
+    await press("rate:full");
+    await press("rate:preview");
+    expect(fetchMock.mock.calls[2]?.[0]).toBe("/video/cam0-preview/whep");
+  });
+
+  it("says which copy is on screen, because a cost nobody can see is not stated", async () => {
+    const { wrapper, press } = mountWithRail();
+    await settle();
+    expect(wrapper.find(".y-pic__badge").text()).toBe("live · preview");
+    await press("rate:full");
+    expect(wrapper.find(".y-pic__badge").text()).toBe("live · full rate");
+  });
+
+  it("does not renegotiate when the rate it is sent is the one it is already on", async () => {
+    const { press } = mountWithRail();
+    await settle();
+    await press("rate:preview");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("changes mode from the rail, which is what Off and Stills are reached by", async () => {
+    const { wrapper, press } = mountWithRail();
+    await settle();
+    await press("mode:off");
+    expect(wrapper.find(".y-pic__badge").text()).toBe("off");
+    await press("mode:live");
+    expect(wrapper.find(".y-pic__badge").text()).toBe("live · preview");
+  });
+
+  /**
+   * Ignored rather than guessed at: a picture that acted on a message it did
+   * not understand would be originating behaviour nobody asked for
+   * (R-CMD-04).
+   */
+  it("ignores anything that is not one of the two vocabularies", async () => {
+    const { wrapper, press } = mountWithRail();
+    await settle();
+    for (const junk of ["mode:sideways", "rate:cheap", "start", 42, null, { mode: "off" }]) {
+      await press(junk);
+      expect(wrapper.find(".y-pic__badge").text(), JSON.stringify(junk)).toBe("live · preview");
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});

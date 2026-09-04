@@ -34,3 +34,20 @@ export {
   type ReadingBounds,
   type ReadingTone,
 } from "./reading.js";
+
+/**
+ * The two shapes the camera page's instruments draw.
+ *
+ * **Types only**, so nothing at runtime follows this line: `video/present.ts`
+ * imports the schema, and the schema imports zod, which is exactly the kind of
+ * thing this entry point exists to keep out of a browser bundle. `export type`
+ * emits nothing at all.
+ *
+ * They are here rather than declared a second time in
+ * `node-red-dashboard-2-yonder/src/shapes.ts` because `capabilityFacts()` and
+ * `uplinkBudget()` produce them and those components draw them — which is this
+ * file's own rule for what belongs in it: something both a node and a
+ * component have to agree about, so it gets decided once rather than twice
+ * and drifting.
+ */
+export type { CapabilityFact, BudgetSegment } from "../video/present.js";

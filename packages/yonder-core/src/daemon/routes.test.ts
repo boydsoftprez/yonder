@@ -1097,6 +1097,7 @@ describe("the camera routes", () => {
     expect((await r("POST", "/cameras/cam0/run", { action: "start" })).status).toBe(403);
     expect((await r("GET", "/cameras/cam0/receive-line", undefined)).status).toBe(403);
     expect((await r("POST", "/cameras/cam0/controls", { brightness: 10 })).status).toBe(403);
+    expect((await r("POST", "/cameras/cam0/settings", { framerate: 25 })).status).toBe(403);
     expect(spawned).toEqual([]);
     expect(controlsCalls).toEqual([]);
   });
@@ -1310,12 +1311,68 @@ describe("the camera routes", () => {
       ["POST", "/cameras/cam0/run", { action: "start" }],
       ["POST", "/cameras/cam0/run", { action: "stop" }],
       ["POST", "/cameras/cam0/controls", { brightness: 10 }],
+      ["POST", "/cameras/cam0/settings", { framerate: 25 }],
       ["GET", "/config", undefined],
       ["GET", "/system", undefined],
     ] as [string, string, unknown][]) {
       const answer = await r(method, path, body);
       expect(JSON.stringify(answer.body), `${method} ${path}`).not.toContain(RTSP_PASSWORD);
     }
+  });
+
+  /**
+   * **The Setup deck can only promise a confirmation window where one really
+   * arms, because it draws the engine's own answer.**
+   *
+   * `apply/reachability.ts` decides that from `CAMERA_EXEMPT_LEAVES`, against
+   * the document this route produces — so a change to a picture setting is
+   * kept the instant it is made (`expiresAt: null`, R-CFG-12) and a change to
+   * the bitrate arms the window. A page promising a confirm control that never
+   * comes, or omitting one that does, is K-32 on the camera page.
+   */
+  describe("POST /cameras/:id/settings", () => {
+    it("keeps a change that cannot cost reachability, with nothing to confirm", async () => {
+      const r = provisioned({ cameras: fixtureDetection() });
+      const out = await r("POST", "/cameras/cam0/settings", { framerate: 25 });
+      expect(out.status).toBe(200);
+      expect((out.body as { expiresAt: number | null }).expiresAt).toBeNull();
+      // And it really changed the document, not merely reported that it had.
+      const config = (await r("GET", "/config", undefined)).body as Config;
+      expect(config.cameras[0]?.framerate).toBe(25);
+    });
+
+    it("arms the window for a change to what leaves the aircraft", async () => {
+      const r = provisioned({ cameras: fixtureDetection() });
+      const out = await r("POST", "/cameras/cam0/settings", { bitrate_kbps: 3000 });
+      expect(out.status).toBe(200);
+      expect(typeof (out.body as { expiresAt: number | null }).expiresAt).toBe("number");
+    });
+
+    it("keeps a preview change, because the schema bounds what the preview can spend", async () => {
+      const r = provisioned({ cameras: fixtureDetection() });
+      const out = await r("POST", "/cameras/cam0/settings", { preview_bitrate_kbps: 300 });
+      expect((out.body as { expiresAt: number | null }).expiresAt).toBeNull();
+    });
+
+    it("refuses a setting nobody offers, and never writes the document", async () => {
+      const r = provisioned({ cameras: fixtureDetection() });
+      const out = await r("POST", "/cameras/cam0/settings", { device: "/dev/video9" });
+      expect(out.status).toBe(400);
+      const config = (await r("GET", "/config", undefined)).body as Config;
+      expect(config.cameras[0]?.device).toBe(CAMERA_BY_PATH);
+    });
+
+    it("refuses a value the schema will not take, with the schema's own reasons", async () => {
+      const r = provisioned({ cameras: fixtureDetection() });
+      // 60000 kb/s is past the schema's max(20000).
+      const out = await r("POST", "/cameras/cam0/settings", { bitrate_kbps: 60000 });
+      expect(out.status).toBe(400);
+    });
+
+    it("404s for a camera that is not configured, like every other camera route", async () => {
+      const r = provisioned({ cameras: fixtureDetection() });
+      expect((await r("POST", "/cameras/cam9/settings", { framerate: 25 })).status).toBe(404);
+    });
   });
 
   /** R-VID-15: the command carries the address the operator is reaching this device on. */

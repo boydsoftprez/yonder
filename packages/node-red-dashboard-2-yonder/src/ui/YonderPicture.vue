@@ -95,10 +95,46 @@ export default {
             stillSrc: '',
             stillsTimer: null,
             retryTimer: null,
-            tick: null
+            tick: null,
+            /**
+             * `preview` or `full`.
+             *
+             * **The cheap copy is the default, always** (R-VID-13). A component
+             * that defaulted to the full-rate stream would spend most of a
+             * field uplink the moment somebody opened a page, and the operator
+             * would have no reason to suspect it. The full rate is reached by
+             * *holding* a key — held, not toggled, so nobody leaves it on.
+             */
+            rate: 'preview'
         }
     },
     computed: {
+        /**
+         * What the operator's rail last sent this picture.
+         *
+         * Read from the store rather than a prop, because a soft key's press
+         * travels to Node-RED and comes back as a message — which is the only
+         * path a *separate* widget has to this one. Without it every mode key
+         * on the rail would be a control that reaches nothing: the four
+         * `setMode` states and the whole of the held full-rate key were
+         * reachable from a unit test and from nowhere else on the page.
+         */
+        command () {
+            return this.$store?.state?.data?.messages?.[this.id]?.payload
+        },
+        /**
+         * The path this session negotiates against.
+         *
+         * `path` from the editor is the camera's own name, and the widget
+         * appends `-preview` to it — so the *default* cannot be the expensive
+         * one by anybody's oversight (picture.ts does the same on the way in).
+         * Holding the full-rate key is what takes it off.
+         */
+        streamPath () {
+            const path = this.props.path || ''
+            const base = path.endsWith('-preview') ? path.slice(0, -8) : path
+            return this.rate === 'full' ? base : `${base}-preview`
+        },
         staleFor () {
             if (this.mode !== 'live' || this.lastFrameAt === null) return 0
             return Math.max(0, Math.floor((this.now - this.lastFrameAt) / 1000) - 2)
@@ -121,11 +157,40 @@ export default {
             if (this.mode === 'off') return 'off'
             if (this.mode === 'stills') return 'stills'
             if (this.staleFor > 0) return 'no contact'
-            return this.attempt > 0 ? `reconnecting · attempt ${this.attempt}` : 'live · preview'
+            if (this.attempt > 0) return `reconnecting · attempt ${this.attempt}`
+            // Named, never implied. An operator who cannot tell which copy
+            // they are watching cannot tell what it is costing them.
+            return this.rate === 'full' ? 'live · full rate' : 'live · preview'
         },
         ageText () {
             const s = this.staleFor
             return s < 60 ? `${s} s ago` : `${Math.floor(s / 60)} min ${s % 60} s ago`
+        }
+    },
+    watch: {
+        /**
+         * A key on the rail, arriving as a message.
+         *
+         * Two vocabularies and nothing else: `mode:live|stills|off` and
+         * `rate:full|preview`. Anything else is ignored rather than guessed at
+         * — a picture that acted on a message it did not understand would be
+         * originating behaviour nobody asked for (R-CMD-04).
+         *
+         * **Never wire this widget's own output back into it.** `setMode`
+         * emits `mode:<mode>` when the operator changes it, so a flow that
+         * looped that back would be a picture commanding itself.
+         */
+        command (value) {
+            if (typeof value !== 'string') return
+            if (value.startsWith('mode:')) {
+                const mode = value.slice(5)
+                if (['live', 'stills', 'off'].includes(mode)) this.setMode(mode)
+                return
+            }
+            if (value.startsWith('rate:')) {
+                const rate = value.slice(5)
+                if (rate === 'full' || rate === 'preview') this.setRate(rate)
+            }
         }
     },
     created () {
@@ -203,7 +268,7 @@ export default {
                 // server: the exchange carries the keys that encrypt the video,
                 // and it is what puts the picture behind the interface's
                 // credential (R-SEC-13).
-                const answer = await fetch(`/video/${this.props.path}/whep`, {
+                const answer = await fetch(`/video/${this.streamPath}/whep`, {
                     method: 'POST',
                     headers: { 'content-type': 'application/sdp' },
                     body: offer.sdp
@@ -237,6 +302,25 @@ export default {
             // withdrew the request.
             this.retryTimer = setTimeout(() => this.connect(), wait)
         },
+        /**
+         * Full rate while the key is held, and the cheap copy the moment it is
+         * let go (R-VID-11, R-VID-13).
+         *
+         * It renegotiates, because the two rates are two paths on the media
+         * server — the preview is a second encode of frames already decoded,
+         * not a re-scale of the first. The gap is short: the preview branch
+         * runs a keyframe interval of its own, so coming back is a late
+         * joiner's wait rather than a group of pictures.
+         *
+         * Nothing is emitted back to Node-RED here. The key that sent this
+         * already told the device what the operator asked for, and a second
+         * message would be this widget reporting somebody else's press.
+         */
+        setRate (rate) {
+            if (rate === this.rate) return
+            this.rate = rate
+            if (this.mode === 'live') this.requestLive()
+        },
         setMode (mode) {
             this.mode = mode
             if (mode === 'live') {
@@ -257,7 +341,16 @@ export default {
 </script>
 
 <style scoped>
-.y-pic { position: relative; background: var(--yonder-display, #04060a); aspect-ratio: 16 / 9; overflow: hidden; }
+/* **Fills the box the page gave it, and never sets its own height.**
+   `aspect-ratio: 16/9` looked right and was not: the widget's height is a
+   whole number of grid rows, the width is a fraction of the viewport, and the
+   two agree at exactly one window size. Everywhere else the frame was taller
+   than its widget and spilled over what followed — 543 px of picture in a
+   468 px box, with the reason for the missing picture among the 75 px that
+   escaped. The video letterboxes itself inside whatever box it gets
+   (`object-fit: contain`), so the aspect ratio was never this element's to
+   hold. */
+.y-pic { position: relative; background: var(--yonder-display, #04060a); height: 100%; min-height: 160px; overflow: hidden; }
 .y-pic__video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; transition: filter 1s linear; }
 /* The hatch is the third of four signals, and the one that cannot be mistaken
    for a dark scene or a badly exposed shot. */

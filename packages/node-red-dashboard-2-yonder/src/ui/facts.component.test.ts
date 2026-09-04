@@ -22,7 +22,28 @@ import type { CapabilityFact } from "../shapes.js";
 function mountFacts(facts: CapabilityFact[], title = "") {
   return mount(YonderFacts, {
     props: { id: "n1", props: { title, facts } },
-    global: { provide: { $dataTracker: () => {} } },
+    // `$store: undefined` rather than omitted: Dashboard always installs one,
+    // and a component read before any message has arrived is the case these
+    // mounts stand for. Declaring it absent exercises that path without Vue
+    // warning about a property that was never defined.
+    global: { provide: { $dataTracker: () => {} }, mocks: { $store: undefined } },
+  });
+}
+
+/**
+ * The same component with a message on it, the way Dashboard delivers one.
+ *
+ * `$store` and not a prop, because that is where Dashboard actually puts an
+ * incoming payload — see the note in YonderDataBar about why vuex cannot be
+ * imported here.
+ */
+function mountWithMessage(configured: CapabilityFact[], payload: unknown) {
+  return mount(YonderFacts, {
+    props: { id: "n1", props: { title: "", facts: configured } },
+    global: {
+      provide: { $dataTracker: () => {} },
+      mocks: { $store: { state: { data: { messages: { n1: { payload } } } } } },
+    },
   });
 }
 
@@ -78,5 +99,44 @@ describe("the two states, side by side", () => {
     expect(notOffered!.find(".y-facts__state").text())
       .not.toBe(advertised!.find(".y-facts__state").text());
     expect(notOffered!.classes()).not.toEqual(advertised!.classes());
+  });
+});
+
+/**
+ * **What arrived, in preference to what was configured.**
+ *
+ * A capability list written into `flows.json` is a *stored* list, and R-CAM-14
+ * exists because a stored list is a stale list the first time a lens, a
+ * firmware or the camera itself changes: a page confidently telling an
+ * operator their camera cannot record, about a camera that can. The daemon
+ * computes these from what the device answered a moment ago and sends them on
+ * `payload.facts`.
+ */
+describe("the live answer", () => {
+  it("draws what the device answered rather than what the flow was configured with", () => {
+    const wrapper = mountWithMessage(
+      [{ label: "Aim", state: "not-offered" }],
+      { facts: [{ label: "Recording", state: "not-offered" }] },
+    );
+    const labels = wrapper.findAll(".y-facts__label").map((n) => n.text());
+    expect(labels).toEqual(["Recording"]);
+  });
+
+  it("draws the configured list until the first message arrives, so an empty page is not mistaken for a failed one", () => {
+    const wrapper = mountWithMessage([{ label: "Aim", state: "not-offered" }], undefined);
+    expect(wrapper.findAll(".y-facts__label").map((n) => n.text())).toEqual(["Aim"]);
+  });
+
+  it("ignores a payload carrying no facts at all rather than blanking the row", () => {
+    const wrapper = mountWithMessage(
+      [{ label: "Aim", state: "not-offered" }],
+      { camera: { id: "front" } },
+    );
+    expect(wrapper.findAll(".y-facts__label").map((n) => n.text())).toEqual(["Aim"]);
+  });
+
+  it("draws an empty row when the device answered every capability, and says nothing", () => {
+    const wrapper = mountWithMessage([{ label: "Aim", state: "not-offered" }], { facts: [] });
+    expect(wrapper.findAll(".y-facts__row")).toHaveLength(0);
   });
 });
