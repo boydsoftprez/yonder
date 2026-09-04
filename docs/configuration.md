@@ -149,6 +149,46 @@ path, because a key silently ignored is a setting you believe is in force and is
 |---|---|
 | `network.ap.dhcp` | The access point's DHCP range is not configurable; NetworkManager derives it from `network.ap.address`, so this key decided nothing (K-15) |
 
+### Cameras
+
+**Schema only, so far.** A `cameras:` list validates, gets its defaults, and goes through
+apply and rollback like any other section today; nothing yet turns it into a running
+stream — that lands through M4 ([roadmap](roadmap.md)).
+
+```yaml
+cameras:
+  - id: cam0
+    name: Nose
+    source: usb                    # usb only today — csi, hdmi and a second camera arrive later
+    device: usb-0000:01:00.0-1.2   # the socket, not /dev/videoN — survives a reboot (R-CAM-05)
+    enabled: true
+    autostart: false               # off by default; video has no equivalent of R-MAV-08
+    width: 1280
+    height: 720
+    framerate: 30
+    codec: h264                    # h264 only today
+    bitrate_kbps: 2000
+    preview:                       # the cheap copy the interface watches (R-VID-13)
+      width: 640
+      height: 360
+      framerate: 15
+      bitrate_kbps: 400
+    controls:
+      brightness: null
+      contrast: null
+      rotation: 0                  # 0 | 90 | 180 | 270
+    outputs:                       # simultaneous, not exclusive (R-VID-05)
+      - { kind: rtp,  host: 192.168.2.10, port: 5604 }
+      - { kind: rtsp, path: cam0, password: { secret: cam0_rtsp } }
+      - { kind: srt,  port: 8890 }
+```
+
+Up to 8 cameras, each with up to 8 outputs. Resolution, frame rate, codec, the preview and
+the image controls are cosmetic enough that changing them does not arm the confirmation
+window; everything else about a camera does, including its bitrate and its outputs — both
+share the uplink the console itself is reached over, so a change to either is held until you
+confirm it (R-CFG-03, R-VPN-07).
+
 ### Sections that arrive with later milestones
 
 Designed, and rejected by the schema until the code that reads them lands — the loader
@@ -167,32 +207,6 @@ mavlink:
     - { name: gcs0, host: 192.168.2.10, port: 14550 }
   tcp_server: { enabled: true, port: 5760 }
   autocast: true                # start telemetry at boot without operator action
-
-cameras:
-  - id: cam0
-    source:
-      type: csi                 # csi | usb | hdmi | rtsp
-      device: auto
-    encoder: auto               # auto resolves per board; or v4l2h264 | x264 | rkmpp
-    codec: h264                 # h264 | h265
-    resolution: 1280x720
-    framerate: 30
-    bitrate:
-      mode: adaptive            # adaptive | fixed
-      min: 500k
-      target: 2M
-      max: 6M
-    controls:
-      contrast: normal
-      brightness: normal
-      flip_horizontal: 0        # 0 | 180
-      flip_vertical: 0
-      hdr: false
-    outputs:                    # simultaneous, not exclusive
-      - { type: rtp,    host: 192.168.2.10, port: 5604 }
-      - { type: webrtc }
-      - { type: rtsp,   path: /cam0 }
-      - { type: srt,    port: 8890 }
 
 network:
   modem:
