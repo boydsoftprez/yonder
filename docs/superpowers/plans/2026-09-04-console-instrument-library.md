@@ -108,7 +108,11 @@ p = Gst.parse_launch(
     # spike decodes, exactly as the daemon does (video/pipeline.ts).
     "v4l2src device=/dev/video0 ! image/jpeg,width=1280,height=720,framerate=30/1 "
     "! jpegdec ! videoconvert "
-    "! v4l2h264enc name=enc extra-controls=controls,video_bitrate=1000000,h264_level=11 "
+    # The level capsfilter is what pipeline.ts welds onto every encode: without
+    # it the encoder fixates level=(string)1, which cannot carry 720p, and the
+    # driver refuses to start. Match encode() in video/pipeline.ts exactly.
+    "! v4l2h264enc name=enc extra-controls=controls,video_bitrate=1000000 "
+    "! video/x-h264,level=(string)4 "
     "! h264parse ! identity name=tap ! fakesink sync=false")
 tap, enc = p.get_by_name("tap"), p.get_by_name("enc")
 bytes_seen, last_pts, gaps = [0], [None], [0]
