@@ -24,14 +24,28 @@ const holdkeyNode = (await import("./holdkey.js")).default ?? await import("./ho
  * registration with the Dashboard group, and the reading of an editor form.
  * That is the part that runs in Node-RED and the part a flow depends on.
  *
- * The Vue halves are not exercised. Rendering them needs Dashboard's own
- * runtime — the `$socket` and `$dataTracker` it injects, and its Vuex store —
- * and a mock of those would assert that our mock behaves like our mock. What
- * the components draw is checked where it can be checked honestly: `reading()`
- * is tested in `yonder-core`, and the pages get captured in both palettes by
+ * Seven of the eight widgets' Vue halves are not exercised here, and that is
+ * still correct: a gauge, a tape, an annunciator, a data bar, an identity, a
+ * sparkline and a soft-key rail all draw what they are given and decide
+ * nothing, so mounting one against a mocked `$socket`, `$dataTracker` and
+ * Vuex store would only assert that our mock behaves like our mock. What
+ * they draw is checked where it can be checked honestly: `reading()` is
+ * tested in `yonder-core`, and the pages get captured in both palettes by
  * the gate R-UI-12 asks for. Until that gate exists and this has run on a
  * board, the rendering is unverified, and `docs/known-issues.md` says so
  * rather than this file implying otherwise.
+ *
+ * `YonderHoldKey` is the eighth, and it is not exempt. It carries a state
+ * machine — four release paths and two duplicate-collapse guards — so what
+ * it does with an event is a decision, not a drawing. Its behaviour is
+ * tested directly in `./ui/holdkey.component.test.ts`: mounted for real
+ * with `@vue/test-utils` against jsdom, with only `$socket.emit` and
+ * `$dataTracker` stubbed — the whole of the Dashboard surface it touches.
+ * That is honest for the same reason the exemption above is honest: the
+ * assertion is on a call our own code makes, not on a mock echoing what it
+ * was told to say. Mutation-testing is why the line moved here: deleting
+ * `pointercancel`, and separately deleting `pointerleave`, each once left
+ * this package's suite fully green. Neither can happen unnoticed now.
  */
 
 interface Registered {
