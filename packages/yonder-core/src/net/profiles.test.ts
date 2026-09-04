@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  apProfile, clientProfile, ethernetProfile, desiredProfiles, radioPlan, wifiMode,
+  apProfile, clientProfile, ethernetProfile, configuredConnections, desiredProfiles, radioPlan, wifiMode,
   AP_CONNECTION, CLIENT_CONNECTION, ETHERNET_CONNECTION, DEFAULT_AP_PASSPHRASE,
   publishableApPassphrase,
 } from "./profiles.js";
@@ -520,5 +520,59 @@ describe("desiredProfiles with a modem", () => {
       wifi: "wlan0", ethernet: "eth0", modem: null,
     }).map((p) => p.name);
     expect(names).not.toContain(MODEM_CONNECTION);
+  });
+});
+
+/**
+ * The set `render()`'s removal loop is built from (R-NET-16). Deliberately
+ * has no `Interfaces` parameter to pass in the first place: unlike
+ * `desiredProfiles`, whether a device is visible on this particular render
+ * must never be able to change the answer.
+ */
+describe("configuredConnections", () => {
+  it("wants the access point and the wired profile unconditionally", () => {
+    const names = configuredConnections(DEFAULT_CONFIG);
+    expect(names.has(AP_CONNECTION)).toBe(true);
+    expect(names.has(ETHERNET_CONNECTION)).toBe(true);
+  });
+
+  it("does not want the wifi client or the modem by default", () => {
+    const names = configuredConnections(DEFAULT_CONFIG);
+    expect(names.has(CLIENT_CONNECTION)).toBe(false);
+    expect(names.has(MODEM_CONNECTION)).toBe(false);
+  });
+
+  it("wants the wifi client once an ssid is configured", () => {
+    const config = structuredClone(DEFAULT_CONFIG);
+    config.network.client.ssid = "HomeNetwork";
+    expect(configuredConnections(config).has(CLIENT_CONNECTION)).toBe(true);
+  });
+
+  it("wants the modem once it is enabled, whichever mode it is in", () => {
+    const config = structuredClone(DEFAULT_CONFIG);
+    config.network.modem.enabled = true;
+    expect(configuredConnections(config).has(MODEM_CONNECTION)).toBe(true);
+  });
+
+  /**
+   * The exact property R-NET-16 exists for. `desiredProfiles`'s output
+   * shrinks when a device disappears from `Interfaces`; `configuredConnections`
+   * cannot shrink the same way, because it never receives an `Interfaces`
+   * argument to shrink against. A modem enabled in configuration is wanted
+   * whether or not this particular render can currently see it — which is
+   * the difference the boot race on the board turned on: `desiredProfiles`
+   * correctly generated nothing for a modem not yet enumerated, and the old
+   * code then made the mistake of reading that as "not wanted" too.
+   */
+  it("keeps wanting the modem even when desiredProfiles has no device to write it against", () => {
+    const config = structuredClone(DEFAULT_CONFIG);
+    config.network.modem.enabled = true;
+    config.network.modem.apn = "ereseller";
+
+    expect(configuredConnections(config).has(MODEM_CONNECTION)).toBe(true);
+
+    const generated = desiredProfiles(config, fakeSecrets(), { wifi: "wlan0", ethernet: "eth0", modem: null })
+      .map((p) => p.name);
+    expect(generated).not.toContain(MODEM_CONNECTION);
   });
 });

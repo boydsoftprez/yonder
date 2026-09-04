@@ -5,7 +5,7 @@ import type { SecretStore } from "../secrets/store.js";
 import { NmcliClient, type DeviceInfo } from "./nmcli/client.js";
 import { enableWifiRadio, radioWanted } from "./radio.js";
 import {
-  desiredProfiles, metricFor, radioPlan, wifiMode,
+  configuredConnections, desiredProfiles, metricFor, radioPlan, wifiMode,
   AP_CONNECTION, CLIENT_CONNECTION, EGRESS_CONNECTIONS, ETHERNET_CONNECTION, MODEM_CONNECTION,
   type DesiredProfile, type Interfaces,
 } from "./profiles.js";
@@ -339,7 +339,15 @@ export class NetworkRenderer implements Renderer {
     // superseded — which is what "a full render does not undo a demotion"
     // means (R-NET-13).
     const desired = desiredProfiles(config, this.secrets, ifaces, this.standing);
-    const wanted = new Set(desired.map((p) => p.name));
+
+    // What is *wanted*, for the removal loop below, is deliberately not read
+    // off `desired`. `desired` answers "what can be generated for the
+    // interfaces this render can see", and a modem a second from finishing
+    // enumeration answers that question "no" — correctly, there being
+    // nothing to write yet — but that is not the same as the operator having
+    // turned cellular off. Removal is decided from the configuration alone,
+    // with no device list in the sentence at all (R-NET-16).
+    const wanted = configuredConnections(config);
 
     const connections = await this.client.connections();
 

@@ -1038,3 +1038,67 @@ fails on a perfectly good link and three of those stand a working modem down. Th
 is bounded at `MODEM_READ_DEADLINE_MS` for the reason `net/deadline.ts` was written: a
 wedged ModemManager answers nothing at all, and asking it on every reading rather than once
 is what made that worth bounding.
+
+---
+
+### K-44 · ~~The boot race that deleted the cellular profile~~ — CLOSED
+
+**Status:** Closed · **Requirement:** R-NET-16
+
+Measured on a board: the operator power-cycled a Raspberry Pi with a working cellular
+link and correct settings in `/etc/yonder/config.yaml`. Cellular did not come back. It
+stayed down until they re-entered the settings by hand from the console.
+
+The boot, from `journalctl -b -u yonder-core -u ModemManager`:
+
+```
+15:10:56  systemd: Starting ModemManager.service
+15:11:01  yonder-node: network: wifi=wlan0 ethernet=eth0
+15:11:01  yonder-node: network: removing yonder-modem        <-- the defect
+15:11:02  ModemManager: [modem0] state changed (unknown -> disabled)
+15:11:02  ModemManager: [modem0] state changed (disabled -> enabling -> enabled)
+15:11:03  ModemManager: [modem0] 3GPP registration state changed (idle -> home)
+15:11:03  ModemManager: [modem0] 3GPP packet service state changed (detached -> attached)
+...
+15:13:15  yonder-node: network: wifi=wlan0 ethernet=eth0     <-- operator re-applies
+15:13:16  ModemManager: [modem0] state changed (registered -> connecting)
+15:13:17  ModemManager: [modem0] state changed (connecting -> connected)
+```
+
+`yonder-core` rendered one second before ModemManager finished probing the modem. A
+Quectel EC25 on USB takes several seconds to enumerate and be probed; the daemon does not
+wait for it and should not have to.
+
+Verified on the same board afterwards: `nmcli -t -f NAME,TYPE,AUTOCONNECT connection
+show` gave `yonder-modem:gsm:yes`, and `connection.autoconnect-retries` was `-1`.
+NetworkManager would have dialled the modem by itself at 15:11:03 had the profile still
+existed. Nothing else was wrong — the SIM, the APN, the signal and the daemon were all
+fine. There is no periodic re-render in this daemon — `setInterval` appears nowhere in
+`yonder-core/src` — so once the profile was deleted at boot, nothing restored it until a
+human applied a configuration change.
+
+`packages/yonder-core/src/net/renderer.ts` conflated two different questions: *is this
+profile wanted*, a question about the operator's configuration, and *can this profile be
+generated right now*, a question about hardware. `render()` read "wanted" straight off
+`desiredProfiles`'s own output, which gates every profile on a device being present this
+instant — so "no modem plugged in this millisecond" was read as "the operator does not
+want cellular", and the render deleted their profile. The same hazard reached every
+connection this renderer owns, not only the modem — the modem is only where it was
+measured, being the one interface that appears seconds after the others.
+
+**Closed by:** this commit, which adds R-NET-16 and gives `render()`'s removal loop a
+"wanted" set built from `configuredConnections`, a new function in `net/profiles.ts` that
+answers from `config.yaml` alone and takes no `Interfaces` argument to read a device list
+from at all. `desiredProfiles` keeps deciding what gets *generated*, still correctly
+gated on the interfaces a render can see — only *removal* changed. A profile whose device
+is missing is now left exactly as it stands, and NetworkManager's own
+`connection.autoconnect yes` with unlimited `connection.autoconnect-retries` — already set
+by `modemProfile` for R-CEL-06 — does the rest once the device appears. No wait, no
+retry, no timer: the fix is that the daemon stops deleting the profile, not that it tries
+to time the deletion any better.
+
+**One gap remains, and this does not close it.** If the modem profile has *never* been
+created — a board whose modem was not visible for a single render while cellular was
+enabled — nothing generates it until a render happens with the modem present. That is a
+real but smaller hole than the one above: it needs a first apply rather than surviving a
+reboot, and it is left for a future change.

@@ -253,6 +253,50 @@ export function radioPlan(config: Config): RadioStep[] {
 }
 
 /**
+ * Which of the four connections this renderer owns the *configuration*
+ * currently asks for — answered without looking at a single device.
+ *
+ * `render()`'s removal loop is the only caller, and the reason this exists
+ * apart from `desiredProfiles` is R-NET-16. A Quectel EC25 on USB takes
+ * several seconds to enumerate; a render that lands in that window sees no
+ * `gsm` device and, if "wanted" were read off `desiredProfiles`'s own
+ * hardware-gated output, would take the absence as the operator having
+ * turned cellular off and delete `yonder-modem` — measured on a board, where
+ * it stayed down until the operator re-entered the settings by hand, because
+ * nothing re-renders on its own and `connection.autoconnect` had nothing
+ * left to dial. `network.modem.enabled: true` is a durable statement of
+ * intent; a modem a few seconds from finishing enumeration is a fact about
+ * timing, and the two must never be read as the same question.
+ *
+ * The same hazard reaches every profile in `OWNED`, not only the modem — the
+ * modem is only where it was measured, being the one interface that appears
+ * seconds after the others — so every one of the four is decided here, each
+ * on the piece of configuration that actually governs it, and none of them
+ * on `Interfaces`:
+ *
+ * - the access point and the wired profile carry no configuration switch of
+ *   their own — R-NET-07 needs the access point's profile to exist whatever
+ *   `ap.enabled` says, and nothing in the schema declines wired Ethernet at
+ *   all — so both are wanted unconditionally, exactly as `desiredProfiles`
+ *   already treats them once a device exists to write them against;
+ * - the wifi client is wanted exactly when an SSID is configured, the same
+ *   test `clientProfile` makes;
+ * - the modem is wanted exactly when `network.modem.enabled` is, the same
+ *   test `modemDevice` makes before it ever looks at the device list.
+ *
+ * A profile added to `OWNED` next year has to be given its own line above —
+ * there is no catch-all branch here for a name this function does not
+ * recognise — rather than silently inheriting either answer.
+ */
+export function configuredConnections(config: Config): Set<string> {
+  const wanted = new Set<string>([AP_CONNECTION, ETHERNET_CONNECTION]);
+  const { client, modem } = config.network;
+  if (client.ssid !== null && client.ssid !== "") wanted.add(CLIENT_CONNECTION);
+  if (modem.enabled) wanted.add(MODEM_CONNECTION);
+  return wanted;
+}
+
+/**
  * Everything the config asks for, for the interfaces this board actually has.
  *
  * The access point's profile is written on any board with a radio, including
@@ -261,6 +305,14 @@ export function radioPlan(config: Config): RadioStep[] {
  * because raising it is the only move the fallback watchdog has and a
  * watchdog whose one action names a profile nothing created is not a
  * watchdog (R-NET-07, K-16).
+ *
+ * **This is a question about generation, not about removal.** It answers
+ * "what can be written for the interfaces visible this instant", and stays
+ * gated on `Interfaces` because there is genuinely no profile to write for a
+ * modem that has not enumerated yet. Whether an *existing* profile this
+ * renderer owns should be deleted is a different question, with a different
+ * answer — see `configuredConnections` — and `render()` is the only place
+ * the two are meant to meet (R-NET-16).
  */
 export function desiredProfiles(
   config: Config,

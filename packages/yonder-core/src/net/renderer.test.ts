@@ -947,6 +947,91 @@ describe("NetworkRenderer and a modem", () => {
 });
 
 /**
+ * The boot race measured on a Raspberry Pi 4: `yonder-modem` already existed
+ * from an earlier, working boot, and this render's `device status` read came
+ * back one second before ModemManager finished probing the modem — no `gsm`
+ * device in the list. The old code read "wanted" off `desiredProfiles`'s own
+ * hardware-gated output, so that one reading looked exactly like an operator
+ * who had turned cellular off, and the render deleted the profile.
+ * `connection.autoconnect yes` with unlimited `connection.autoconnect-retries`
+ * — set by `modemProfile` for R-CEL-06 — would otherwise have dialled the
+ * modem the instant it appeared; instead cellular stayed down until the
+ * operator re-entered the settings by hand, because nothing in this daemon
+ * re-renders on its own (K-44).
+ *
+ * The same conflation reached every profile this renderer owns, not only the
+ * modem — the modem is only where it was measured, being the one interface
+ * that shows up seconds after the others — so this covers the others too.
+ */
+describe("NetworkRenderer and a connection whose device has not appeared yet (R-NET-16)", () => {
+  it("leaves the modem profile untouched when cellular is enabled but no modem is visible", async () => {
+    const config: Config = structuredClone(DEFAULT_CONFIG);
+    config.network.modem.enabled = true;
+    config.network.modem.apn = "ereseller";
+    // The harness default device list, DEVICES, lists no gsm device — the
+    // exact reading measured on the board, one second before ModemManager
+    // finished probing the modem.
+    const { renderer, calls } = harness({
+      connections: [AP_CONNECTION, ETHERNET_CONNECTION, MODEM_CONNECTION],
+    });
+    await renderer.render(config);
+    expect(argvOf(calls, "delete", MODEM_CONNECTION)).toBeUndefined();
+    expect(argvOf(calls, "modify", MODEM_CONNECTION)).toBeUndefined();
+    expect(calls.some((c) => c[1] === "connection" && c[2] === "add" && c[4] === MODEM_CONNECTION)).toBe(false);
+  });
+
+  it("still removes the modem profile when cellular is disabled, exactly as before", async () => {
+    const { renderer, calls } = harness({
+      connections: [AP_CONNECTION, ETHERNET_CONNECTION, MODEM_CONNECTION],
+    });
+    // DEFAULT_CONFIG.network.modem.enabled is false, and the harness default
+    // device list has no gsm device either — the profile is unwanted twice
+    // over, and removed exactly as it was before this change.
+    await renderer.render(DEFAULT_CONFIG);
+    expect(argvOf(calls, "delete", MODEM_CONNECTION)).toBeDefined();
+  });
+
+  it("still writes the modem profile normally when the modem is visible", async () => {
+    const config: Config = structuredClone(DEFAULT_CONFIG);
+    config.network.modem.enabled = true;
+    config.network.modem.apn = "ereseller";
+    const { renderer, calls } = harness({
+      devices: "eth0:ethernet:connected:yonder-eth\nwlan0:wifi:disconnected:\ncdc-wdm0:gsm:disconnected:\n",
+    });
+    await renderer.render(config);
+    expect(calls.some((c) => c[1] === "connection" && c[2] === "add" && c[4] === MODEM_CONNECTION)).toBe(true);
+    expect(argvOf(calls, "delete", MODEM_CONNECTION)).toBeUndefined();
+  });
+
+  /**
+   * The same protection, for a profile with nothing modem-specific about it.
+   * A cable pulled — or a USB Ethernet adapter a few seconds slower to
+   * enumerate than the interfaces `harness()` lists by default — must not
+   * cost the operator a working wired profile either.
+   */
+  it("leaves the ethernet profile untouched when its device is missing but the connection exists", async () => {
+    const { renderer, calls } = harness({
+      devices: "wlan0:wifi:disconnected:\nlo:loopback:unmanaged:\n",
+      connections: [AP_CONNECTION, ETHERNET_CONNECTION],
+    });
+    await renderer.render(DEFAULT_CONFIG);
+    expect(argvOf(calls, "delete", ETHERNET_CONNECTION)).toBeUndefined();
+  });
+
+  it("leaves the access point and wifi client profiles untouched when no wifi radio is listed at all", async () => {
+    const config: Config = structuredClone(DEFAULT_CONFIG);
+    config.network.client.ssid = "HomeNetwork";
+    const { renderer, calls } = harness({
+      devices: "eth0:ethernet:connected:yonder-eth\nlo:loopback:unmanaged:\n",
+      connections: [AP_CONNECTION, CLIENT_CONNECTION, ETHERNET_CONNECTION],
+    });
+    await renderer.render(config);
+    expect(argvOf(calls, "delete", AP_CONNECTION)).toBeUndefined();
+    expect(argvOf(calls, "delete", CLIENT_CONNECTION)).toBeUndefined();
+  });
+});
+
+/**
  * A written setting that only a dial reads is a setting that has not been
  * applied (R-CEL-09).
  *
@@ -1304,12 +1389,14 @@ describe("NetworkRenderer and a profile that no longer matches the configuration
       devices: MODEM_DEVICES,
       connections: [AP_CONNECTION, ETHERNET_CONNECTION, MODEM_CONNECTION],
     });
-    // The access point and the modem, on every render, for ever. `yonder-eth`
-    // is a different question and a settled one: this board lists no ethernet
-    // device, so the ownership loop removes a profile nothing wants.
+    // All three, on every render, for ever. `yonder-eth` used to be carved
+    // out of this assertion, because this board lists no ethernet device and
+    // the ownership loop used to read that absence as "no longer wanted" —
+    // the same defect R-NET-16 closed for the modem. Removal is decided from
+    // configuration alone now, so all three belong in one assertion.
     const replaced = (): string[][] =>
       calls.filter((c) => c[2] === "delete"
-        && (c[3] === AP_CONNECTION || c[3] === MODEM_CONNECTION));
+        && (c[3] === AP_CONNECTION || c[3] === ETHERNET_CONNECTION || c[3] === MODEM_CONNECTION));
     await renderer.render(auto());
     expect(replaced()).toEqual([]);
     await renderer.render(auto());
