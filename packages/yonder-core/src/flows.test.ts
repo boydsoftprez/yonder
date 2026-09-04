@@ -39,20 +39,47 @@ const flows = JSON.parse(readFileSync(FLOWS, "utf8")) as FlowNode[];
 const text = readFileSync(FLOWS, "utf8");
 const ids = new Set(flows.map((n) => n.id));
 
-/** The node types each Yonder contrib package registers, from its manifest. */
+const CONSOLE_ROLE = join(ROOT, "installer", "roles", "30-console.sh");
+
+/**
+ * The packages a real install puts into the console tree, **read from the
+ * role that does it** rather than restated here.
+ *
+ * Restating them is the defect this function exists to close. The list used to
+ * be a literal in this file, and it named every package this project has —
+ * while `installer/roles/30-console.sh` named four of the five. So the flows
+ * were checked against packages that a device installed the shipped way never
+ * received: `yonder-modem-state`, `yonder-modem-configure`, `yonder-modem-form`
+ * and `yonder-reach-test` all resolved here and none of them existed on a
+ * board. The Cellular tab, the `Way out` panel's data source and the Status
+ * page's reachability line were dead on every installed device, and every test
+ * passed, because each half was right about itself.
+ *
+ * Two facts that only mean something together, so they are read from one
+ * place: what the flows use, and what the installer installs.
+ */
+function installedPackages(): string[] {
+  // Backslash continuations joined first, so the loop is one line however it
+  // is wrapped — the same reading installer.test.ts does of 10-base.sh.
+  const role = readFileSync(CONSOLE_ROLE, "utf8").replaceAll("\\\n", " ");
+  const loop = /^for pkg in (.+?); do$/m.exec(role);
+  expect(
+    loop,
+    `${CONSOLE_ROLE} no longer has a 'for pkg in ...; do' loop. That loop is how the `
+    + "console gets its Yonder packages, and this file reads it to check the flows "
+    + "against what a real install actually provides.",
+  ).not.toBeNull();
+  return (loop?.[1] ?? "").trim().split(/\s+/).filter(Boolean);
+}
+
+/** The node types each installed Yonder package registers, from its manifest. */
 function contribTypes(): Set<string> {
   const types = new Set<string>();
-  for (const pkg of [
-    "node-red-contrib-yonder-system",
-    "node-red-contrib-yonder-network",
-    "node-red-contrib-yonder-remote",
-    "node-red-contrib-yonder-modem",
-    "node-red-dashboard-2-yonder",
-  ]) {
+  for (const pkg of installedPackages()) {
     const manifest = JSON.parse(
       readFileSync(join(ROOT, "packages", pkg, "package.json"), "utf8"),
-    ) as { "node-red": { nodes: Record<string, string> } };
-    for (const type of Object.keys(manifest["node-red"].nodes)) types.add(type);
+    ) as { "node-red": { nodes?: Record<string, string> } };
+    for (const type of Object.keys(manifest["node-red"].nodes ?? {})) types.add(type);
   }
   return types;
 }
@@ -162,10 +189,14 @@ describe("flows/flows.json", () => {
   /**
    * A type nobody registers is a node that loads as "unknown" and does
    * nothing, which on a console is a page that is silently missing a control.
-   * Checked against the packages' own manifests, so renaming a node in a
-   * package and forgetting the flows fails here.
+   *
+   * **Checked against the packages the installer installs**, not against every
+   * package in this repository (R-UI-19). Those are two different claims and
+   * only the second one matters to a device: a node that exists in
+   * `packages/` and is never copied into the console tree is exactly as absent
+   * as one nobody wrote. See `installedPackages`.
    */
-  it("uses only Yonder node types that a package actually registers", () => {
+  it("uses only Yonder node types a package the installer installs registers", () => {
     const registered = contribTypes();
     // `ui-yonder-` as well as `yonder-`: the instrument widgets are Dashboard
     // widget types, and leaving them out of this check was how a renamed one
@@ -175,8 +206,39 @@ describe("flows/flows.json", () => {
     );
     expect(used.size).toBeGreaterThan(0);
     for (const type of used) {
-      expect(registered.has(type), `${type} is used in the flows but no package registers it`).toBe(true);
+      expect(
+        registered.has(type),
+        `${type} is used in flows/flows.json and no package installed by `
+        + "installer/roles/30-console.sh registers it. On a device installed the shipped "
+        + "way that node loads as 'unknown' and the page it sits on is dead. Either add "
+        + "the package to that role's `for pkg in` loop, or take the node out of the flows.",
+      ).toBe(true);
     }
+  });
+
+  /**
+   * The capture gate stages its own console tree, and it had its own list of
+   * packages to stage. That second list is why nothing noticed the first one
+   * was short: `scripts/verify-pages.sh` linked all five, so every page it
+   * photographed had every node it needed, on a tree no device ever gets.
+   *
+   * A gate that exercises a different console from the one the installer
+   * builds is a gate that proves nothing about the installed device, so the
+   * two lists are held equal here (R-UI-19).
+   */
+  it("is photographed on the same set of packages the installer installs", () => {
+    const gate = readFileSync(join(ROOT, "scripts", "verify-pages.sh"), "utf8")
+      .replaceAll("\\\n", " ");
+    const loop = /^for pkg in (.+?); do$/m.exec(gate);
+    expect(loop, "scripts/verify-pages.sh no longer stages packages with a 'for pkg in' loop")
+      .not.toBeNull();
+    const staged = (loop?.[1] ?? "").trim().split(/\s+/).filter(Boolean);
+    expect(
+      [...staged].sort(),
+      "the capture gate and installer/roles/30-console.sh stage different packages. "
+      + "Whichever of the two is short, the pages the gate photographs are not the pages "
+      + "an installed device serves.",
+    ).toEqual([...installedPackages()].sort());
   });
 
   /**
