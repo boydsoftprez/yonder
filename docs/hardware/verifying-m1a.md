@@ -187,6 +187,8 @@ unproven, and it is load-bearing.
 | What to confirm | Command | Why it matters |
 |---|---|---|
 | That `connection modify` rejects add-only options | `nmcli connection modify yonder-ap type wifi` | `type` and `ifname` belong to `connection add`. If `modify` accepted them the code would be over-cautious; if it rejects them, as expected, every render after the first would have failed had they still been sent. |
+| That an empty value resets a property rather than storing one | `nmcli connection modify yonder-modem gsm.apn ""` then `nmcli -t -f gsm.apn connection show yonder-modem` | This is how a setting an operator has cleared is removed from the device rather than left dialling (R-CFG-13). If the property comes back empty, the mechanism is right. If it comes back as a literal empty string the bearer then tries to use, the profile has to be recreated instead. Written from the documentation; no nmcli has run it. |
+| What `connection show` prints in its TYPE column | `nmcli -t -f NAME,UUID,TYPE,DEVICE connection show` | `addOrModify` compares that column against the type it is about to write, and replaces the profile when they differ — which is the only way to change a `yonder-modem` from `gsm` to ethernet. The map from nmcli's two spellings (`wifi` in, `802-11-wireless` out) is written from the documentation, and a spelling not in it is deliberately read as "cannot tell" so the access point is never dropped on a guess. |
 
 **M1b-2 added three things that are unproven on hardware and cheap to check while a board is
 on the bench.** Each is written as an assumption in the code that makes it, and each has a

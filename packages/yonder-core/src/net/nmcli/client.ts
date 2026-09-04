@@ -35,6 +35,15 @@ export interface ConnectionSpec {
    * value to reset, and `connection add` is where the shipped behaviour of a
    * modem with no APN was measured — sending it an empty one would be a
    * change to something that works, for no gain.
+   *
+   * ASSUMED, NOT OBSERVED: that `nmcli connection modify <name> gsm.apn ""`
+   * resets the property rather than storing an empty string. It is nmcli's
+   * documented idiom and the only one it offers for a plain string property,
+   * and there was no nmcli on the machine this was written on. It is safe to
+   * be wrong about in one direction only, which is why nothing in this list is
+   * a whole *setting*: removing `802-11-wireless-security` is a different
+   * operation with a different verb, and a half-cleared security setting on
+   * the one radio an operator is joined over is not a thing to guess at.
    */
   clear?: string[];
 }
