@@ -334,6 +334,95 @@ describe("the daemon serves what M3a assembles", () => {
   });
 
   /**
+   * R-CEL-13, at the socket rather than in the unit that decides it.
+   *
+   * The daemon used to remember the modem's net port for the life of the
+   * process, so a board whose modem had been unplugged went on being handed
+   * `wwan0` — a name NetworkManager never reports — and `/reach/state` kept
+   * serving a cellular path standing by on hardware that was gone. A console
+   * reading that path drew a ready lamp over the words "No modem found".
+   *
+   * This is here as well as in netport.test.ts because the defect was in the
+   * *wiring*: the unit can be right while the daemon holds the answer.
+   */
+  it("stops reporting a cellular path once the modem is unplugged", async () => {
+    let plugged = true;
+    const seen: string[][] = [];
+    const withModem = boardRunner(seen);
+    const unpluggable: CommandRunner = async (argv) => {
+      if (plugged) return withModem(argv);
+      seen.push(argv);
+      // Both tools agree the modem has gone: ModemManager claims none, and
+      // NetworkManager lists no `gsm` device. `wwan0` can then only come from
+      // something the daemon is remembering.
+      if (argv[0] === "mmcli" && argv[1] === "-L") {
+        return { code: 0, stdout: "modem-list.length   : 0\n", stderr: "" };
+      }
+      if (argv[0] === "nmcli" && argv.includes("device") && argv.includes("status")) {
+        return { code: 0, stdout: "eth0:ethernet:connected:yonder-eth\n", stderr: "" };
+      }
+      return { code: 0, stdout: "", stderr: "" };
+    };
+    saveConfig(configPath, {
+      ...DEFAULT_CONFIG,
+      network: {
+        ...DEFAULT_CONFIG.network,
+        modem: { ...DEFAULT_CONFIG.network.modem, enabled: true, mode: "auto", apn: "ereseller" },
+      },
+    });
+    const server = await startServer({
+      socketPath, configPath, journalPath,
+      renderers: [noop], secretsPath, runner: unpluggable, counters: noCounters,
+    });
+    try {
+      const modemPath = async () => {
+        const res = await call(socketPath, "GET", "/reach/state");
+        const state = res.body as { paths: { path: string; device: string | null; standing: string }[] };
+        return state.paths.find((p) => p.path === "modem");
+      };
+
+      // The net port, not the control port NetworkManager binds: probing
+      // cdc-wdm0 fails on a working link and stands the modem down.
+      expect(await modemPath()).toMatchObject({ device: "wwan0", standing: "standing-by" });
+
+      plugged = false;
+      // No interface, so nothing to probe and nothing to stand down — the
+      // path is absent, which is what the board is.
+      expect(await modemPath()).toMatchObject({ device: null, standing: "absent" });
+    } finally {
+      await server.close();
+    }
+  });
+
+  /**
+   * Rule 6, asserted rather than reasoned about. Forgetting the modem must not
+   * make the board less likely to raise its access point: `carrying` is a
+   * question about paths *holding addresses*, and a departed modem holds none
+   * either way — so the answer cannot move in the direction that leaves an
+   * unreachable aircraft unreachable.
+   */
+  it("still answers that something is carrying traffic once the modem has gone", async () => {
+    const seen: string[][] = [];
+    const gone: CommandRunner = async (argv) => {
+      seen.push(argv);
+      if (argv[0] === "mmcli" && argv[1] === "-L") {
+        return { code: 0, stdout: "modem-list.length   : 0\n", stderr: "" };
+      }
+      return { code: 0, stdout: "", stderr: "" };
+    };
+    const server = await startServer({
+      socketPath, configPath, journalPath,
+      renderers: [noop], secretsPath, runner: gone, counters: noCounters,
+    });
+    try {
+      const res = await call(socketPath, "GET", "/reach/state");
+      expect((res.body as { carrying: boolean }).carrying).toBe(true);
+    } finally {
+      await server.close();
+    }
+  });
+
+  /**
    * The defect, at the socket, on the board it was found on (R-NET-14).
    *
    * `eth0` in `unavailable`: no carrier, no address, nothing plugged into it.

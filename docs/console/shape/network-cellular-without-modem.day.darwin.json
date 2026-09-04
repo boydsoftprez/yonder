@@ -327,7 +327,7 @@
     },
     {
       "key": "nrdb-ui-text.nrdb-ui-widget.yonder-fixed.yonder-qualifier#1",
-      "text": "Ready — traffic is not going out over cellular"
+      "text": "No cellular interface on this board"
     },
     {
       "key": "nrdb-ui-text.nrdb-ui-widget.yonder-fixed#2",

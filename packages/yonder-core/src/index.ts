@@ -85,6 +85,7 @@ export {
   type SignalReading,
 } from "./net/modem/mmcli/client.js";
 export { modemState, type ModemState, type ModemMode } from "./net/modem/state.js";
+export { ModemNetPort, MODEM_READ_DEADLINE_MS } from "./net/modem/netport.js";
 export { MODEM_CONNECTION, modemProfile, metricFor } from "./net/modem/profiles.js";
 export {
   Standing,

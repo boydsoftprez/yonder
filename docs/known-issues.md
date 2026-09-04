@@ -973,9 +973,9 @@ that raises its access point on a working device.
 
 ---
 
-### K-43 · The modem's interface name is remembered for the life of the daemon
+### K-43 · ~~The modem's interface name is remembered for the life of the daemon~~ — CLOSED
 
-**Status:** Open · **Requirement:** R-CEL-09, R-NET-14
+**Status:** Closed · **Requirement:** R-CEL-09, R-CEL-13, R-NET-14
 
 `modemInterface` in `packages/yonder-core/src/daemon/server.ts` caches the net port
 ModemManager reports — `if (modemNet !== null) return modemNet;` — because a modem's port
@@ -997,3 +997,21 @@ and nothing is claimed. Fixing this means deciding what a daemon should do when 
 hardware under a cached reading disappears — re-read on every call, invalidate on a
 ModemManager signal, or expire the cache — and that changes reach behaviour, which is a
 decision of its own rather than a consequence of this one.
+
+**Closed by:** this commit, which takes the first of those three and states it as R-CEL-13.
+`ModemNetPort` in `net/modem/netport.ts` asks ModemManager both questions on every reading
+and remembers nothing in order to skip one — not that a modem exists, and not its port
+layout either, because those object paths are numbered per run of the service and a stick
+swapped across a ModemManager restart would inherit the departed one's port.
+
+Reach behaviour moves in one direction only, and it is the direction rule 6 allows. A path
+with no interface is reported `absent`, and an absent path is neither probed nor stood
+down — so the old behaviour was *inventing* failure evidence against a `wwan0` that was not
+there. `carrying` is a question about paths holding addresses, which a departed modem does
+not hold either way, so the fallback watchdog's answer cannot move at all. What is kept is
+only the answer to a reading that *did not happen*: a failed or late one falls back to the
+last interface actually observed, never to the control port, because probing `cdc-wdm0`
+fails on a perfectly good link and three of those stand a working modem down. The reading
+is bounded at `MODEM_READ_DEADLINE_MS` for the reason `net/deadline.ts` was written: a
+wedged ModemManager answers nothing at all, and asking it on every reading rather than once
+is what made that worth bounding.

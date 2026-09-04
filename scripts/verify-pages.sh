@@ -88,17 +88,6 @@ FAKE
 # It used to be read only by `mmcli`, so with 0 the fixture set described a
 # board that cannot exist: no modem, and a connected `cdc-wdm0` anyway.
 # Unplugging a modem takes its control port away from NetworkManager too.
-#
-# **That alone does not make the no-modem pages read `NO MODEM`, and the
-# reason is a defect in the daemon rather than in this file (K-41).** `modemInterface`
-# in daemon/server.ts remembers the modem's net interface for the life of the
-# process — `if (modemNet !== null) return modemNet;` — so once a modem has
-# been seen, `pathDevices` keeps being handed `wwan0` whatever ModemManager
-# and NetworkManager now say, and `/reach/state` keeps reporting a cellular
-# path on an interface that is gone. The Cellular tab therefore draws a green
-# `READY` lamp over the words "No modem found" in the captures below. That is
-# recorded, not accepted; on a board that never had a modem — which is what
-# the hardware this was found on did — the tab reads `NO MODEM` correctly.
 MODEM_PRESENT="$ROOT/modem-present"
 echo 1 > "$MODEM_PRESENT"
 
@@ -801,12 +790,9 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
         sleep 7
         expect_contains "the harness board has nothing in the modem slot" \
             '"mode":"absent"' "$(sock /modem/state)"
-        # Read the lamp in these two pictures knowing what is behind it: it
-        # says READY, and it should say NO MODEM. `/reach/state` is still
-        # naming `wwan0` here because the daemon caches that name for the life
-        # of the process — K-41, and see $MODEM_PRESENT above. Everything else on the
-        # pages is what this capture is for, and the gauges are the part that
-        # had to be looked at.
+        # The lamp reads NO MODEM. `/reach/state` reports the cellular path as
+        # absent once ModemManager says there is no modem to read (R-CEL-13,
+        # K-41), so these two pictures are the board they claim to be.
         for without in status:status network-cellular:network-cellular; do
             if node "$REPO/scripts/capture-pages.mjs" \
                     --base-url "http://127.0.0.1:$PORT" \

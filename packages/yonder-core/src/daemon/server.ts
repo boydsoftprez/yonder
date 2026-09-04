@@ -15,6 +15,7 @@ import { SecretStore } from "../secrets/store.js";
 import { NmcliClient } from "../net/nmcli/client.js";
 import { MmcliClient } from "../net/modem/mmcli/client.js";
 import { modemState } from "../net/modem/state.js";
+import { ModemNetPort } from "../net/modem/netport.js";
 import { Standing, type StandingView } from "../net/reach/standing.js";
 import { commandProbe } from "../net/reach/probe.js";
 import { ReachMonitor, pathDevices, pathsDown, pathsHolding } from "../net/reach/monitor.js";
@@ -562,6 +563,14 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   // K-17, along with why it cannot simply be assigned earlier.
   let radioSettled: Promise<void> = Promise.resolve();
 
+  // The interface the modem's bytes actually go out of, read from
+  // ModemManager because it is the only thing that knows it. Its own unit
+  // rather than a closure here, for the reason pathDevices records: this file
+  // is wiring, not a second place that decides what a modem is. What may be
+  // remembered about a modem and what may not is R-CEL-13, stated there with
+  // its tests.
+  const modemPort = new ModemNetPort(modemClient, clock);
+
   // Which way out is working, assembled from the parts in net/reach/.
   //
   // Built here, from the same NmcliClient and the same CommandRunner as
@@ -572,42 +581,13 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   //
   // Every input is read fresh on each call rather than captured — see
   // reachConfig, above, which is where that is done and why.
-  /**
-   * The interface the modem's bytes actually go out of.
-   *
-   * A modem has two names and neither answers both questions: the connection
-   * is bound to the control port `cdc-wdm0`, which is what NetworkManager
-   * lists, and `wwan0` is what holds the address and carries the traffic.
-   * Probing and counting need the second one, and ModemManager is the only
-   * thing that knows it.
-   *
-   * Asked only when configuration says there is an automatic modem, so a
-   * board without one spends nothing; remembered once found, because a
-   * modem's port layout is a property of the modem; and null on any failure,
-   * which falls back to the name NetworkManager lists rather than costing the
-   * whole reading.
-   */
-  let modemNet: string | null = null;
-  const modemInterface = async (config: Config): Promise<string | null> => {
-    const modem = config.network.modem;
-    if (!modem.enabled || modem.mode !== "auto") return null;
-    if (modemNet !== null) return modemNet;
-    try {
-      const paths = await modemClient.modems();
-      if (paths.length === 0) return null;
-      modemNet = (await modemClient.modem(paths[0])).ports.net;
-      return modemNet;
-    } catch {
-      return null;
-    }
-  };
   const reach = new ReachMonitor({
     standing,
     probe: commandProbe(opts.runner ?? systemRunner),
     ...(opts.counters !== undefined ? { counters: opts.counters } : {}),
     devices: async () => {
       const config = reachConfig();
-      const [devices, net] = await Promise.all([client.devices(), modemInterface(config)]);
+      const [devices, net] = await Promise.all([client.devices(), modemPort.interfaceFor(config)]);
       return pathDevices(config, devices, net);
     },
     // What NetworkManager says about the interfaces themselves, so a port
@@ -617,14 +597,14 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
     // `cdc-wdm0` and has no entry at all for the `wwan0` the bytes go out of.
     down: async () => {
       const config = reachConfig();
-      const [devices, net] = await Promise.all([client.devices(), modemInterface(config)]);
+      const [devices, net] = await Promise.all([client.devices(), modemPort.interfaceFor(config)]);
       return pathsDown(devices, pathDevices(config, devices, net), pathDevices(config, devices));
     },
     order: () => reachOrder(reachConfig()),
     holding: async () => {
       const config = reachConfig();
       const [devices, addresses, net] = await Promise.all([
-        client.devices(), client.activeIpv4(), modemInterface(config),
+        client.devices(), client.activeIpv4(), modemPort.interfaceFor(config),
       ]);
       return pathsHolding(
         reachOrder(config),
