@@ -209,7 +209,7 @@ it("defaults cameras to an empty list", () => {
 it("fills a camera's defaults from its identity alone", () => {
   const cfg = ConfigSchema.parse({
     version: 1, network: { ap: { psk: { secret: "ap_psk" } } }, ui: { editor: {} },
-    cameras: [{ id: "cam0", name: "Nose", source: "usb", device: "usb-0000:01:00.0-1.3" }],
+    cameras: [{ id: "cam0", name: "Nose", source: "usb", device: "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0" }],
   });
   const cam = cfg.cameras[0];
   expect(cam).toMatchObject({
@@ -298,10 +298,18 @@ In `packages/yonder-core/src/schema/config.ts`, above `ConfigSchema`:
  * A camera's identity, source and settings.
  *
  * **The device is held by port, not by enumeration number** (R-CAM-05).
- * `/dev/video0` is whichever camera the kernel probed first this boot; the
- * `by-path` name — `usb-0000:01:00.0-1.3` — is the socket it is plugged into,
- * so the configured camera is the detected one after a reboot and after a
- * plug-order change. `probe/camera.ts` resolves it to a node at run time.
+ * `/dev/video0` is whichever camera the kernel probed first this boot. The
+ * `by-path` name — `platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0`
+ * — is the socket it is plugged into, so the configured camera is the detected
+ * one after a reboot and after a plug-order change. `probe/bypath.ts` resolves
+ * it to a node at run time.
+ *
+ * **Not the bus id.** `v4l2-ctl --list-devices` prints `usb-0000:01:00.0-1.3`
+ * in parentheses after the card name, which looks like an answer and is a
+ * different identifier: nothing in `/dev/v4l/by-path/` is named that, so a
+ * configuration holding it resolves to nothing and the operator gets a
+ * gstreamer failure with no explanation. Task 6's `refuse()` is what turns
+ * that into a sentence.
  *
  * **What is not here.** No capability is stored: R-CAM-14 requires formats,
  * rates and controls to come from what the device answers, and a stored copy
@@ -495,7 +503,7 @@ import { affectsReachability, CAMERA_EXEMPT_LEAVES, CAMERA_LEAVES } from "./reac
 import { ConfigSchema, type Config } from "../schema/config.js";
 
 const CAMERA = {
-  id: "cam0", name: "Nose", source: "usb" as const, device: "usb-0000:01:00.0-1.3",
+  id: "cam0", name: "Nose", source: "usb" as const, device: "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0",
 };
 function withCamera(overrides: Record<string, unknown> = {}): Config {
   return ConfigSchema.parse({
@@ -532,7 +540,7 @@ describe("camera leaves", () => {
   it("keeps identity, device, enabled and autostart load-bearing", () => {
     const before = withCamera();
     expect(affectsReachability(before, withCamera({ name: "Tail" }))).toBe(true);
-    expect(affectsReachability(before, withCamera({ device: "usb-0000:01:00.0-1.3" }))).toBe(true);
+    expect(affectsReachability(before, withCamera({ device: "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0" }))).toBe(true);
     expect(affectsReachability(before, withCamera({ enabled: false }))).toBe(true);
     expect(affectsReachability(before, withCamera({ autostart: true }))).toBe(true);
   });
@@ -1305,7 +1313,7 @@ describe("detectCameras", () => {
     // boot; the by-path name is the socket it is plugged into.
     const r = await detectCameras({
       runner: benchRunner(),
-      readLink: (p) => (p.includes("video0") ? "usb-0000:01:00.0-1.3-video-index0" : null),
+      readLink: (p) => (p.includes("video0") ? "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0" : null),
     });
     expect(r.found[0].byPath).toContain("usb-");
   });
@@ -1523,7 +1531,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - Test: `packages/yonder-core/src/video/probe/encoder.test.ts`
 
 **Interfaces:**
-- Consumes: `CommandRunner`; `parseFormats` (Task 4).
+- Consumes: `CommandRunner` only. **Not `parseFormats`** — it needs a `Size:` line to flush a format, and `--list-formats` / `--list-formats-out` never emit one. This probe matches the fourcc directly.
 - Produces:
 
 ```ts
@@ -1759,7 +1767,7 @@ import { present, noCapabilities } from "./capability.js";
 import type { Camera } from "../schema/config.js";
 
 const CAMERA: Camera = {
-  id: "cam0", name: "Nose", source: "usb", device: "usb-0000:01:00.0-1.3",
+  id: "cam0", name: "Nose", source: "usb", device: "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0",
   enabled: true, autostart: false,
   width: 1280, height: 720, framerate: 30, codec: "h264", bitrate_kbps: 2000,
   preview: { width: 640, height: 360, framerate: 15, bitrate_kbps: 400 },
@@ -2494,7 +2502,7 @@ import { renderReceive, type ReceiveFacts } from "./receive.js";
 import type { Camera } from "../schema/config.js";
 
 const CAMERA: Camera = {
-  id: "cam0", name: "Nose", source: "usb", device: "usb-0000:01:00.0-1.3",
+  id: "cam0", name: "Nose", source: "usb", device: "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0",
   enabled: true, autostart: false,
   width: 1280, height: 720, framerate: 30, codec: "h264", bitrate_kbps: 2000,
   preview: { width: 640, height: 360, framerate: 15, bitrate_kbps: 400 },
@@ -5056,7 +5064,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
   "found": [{
     "device": "/dev/video0",
     "card": "Global Shutter Camera: Global S",
-    "byPath": "usb-0000:01:00.0-1.3",
+    "byPath": "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0",
     "capabilities": {
       "formats": { "state": "present", "value": [
         { "fourcc": "MJPG", "width": 1920, "height": 1080, "rates": [30] },
