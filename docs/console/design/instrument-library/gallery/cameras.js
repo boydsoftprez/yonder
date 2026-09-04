@@ -12,6 +12,22 @@ export const ELP = {
   aim: { state: "advertised", proven: true,
     reason: "Listed ±180° in 1° steps. Fifteen values sent, every one acknowledged, the frame never moved." },
   controls: {
+    streamMode: { state: "present", proven: true, kind: "seg", label: "Bitrate", column: "stream",
+      options: ["Fixed", "Adaptive"], value: "Fixed" },
+    previewMode: { state: "present", proven: true, kind: "seg", label: "Bitrate", column: "preview",
+      options: ["Adaptive", "Fixed"], value: "Adaptive" },
+    previewSize: { state: "present", proven: true, kind: "pick", label: "Size", column: "preview",
+      value: "auto", options: [
+        { value: "auto", label: "Auto — steps with the link" },
+        { value: "1280x720", label: "1280×720 — hold" },
+        { value: "854x480", label: "854×480 — hold" },
+        { value: "640x360", label: "640×360 — hold" }] },
+    previewRate: { state: "present", proven: true, kind: "pick", label: "Rate", column: "preview",
+      value: "15", options: [{ value: "30", label: "30 fps" }, { value: "15", label: "15 fps" }, { value: "10", label: "10 fps" }] },
+    previewFloor: { state: "present", proven: true, kind: "pick", label: "Floor", column: "preview",
+      value: "300", options: [{ value: "150", label: "150 kb/s" }, { value: "300", label: "300 kb/s" }, { value: "500", label: "500 kb/s" }] },
+    previewCeiling: { state: "present", proven: true, kind: "pick", label: "Ceiling", column: "preview",
+      value: "2000", options: [{ value: "1000", label: "1.0 Mb/s" }, { value: "2000", label: "2.0 Mb/s" }, { value: "4000", label: "4.0 Mb/s" }] },
     resolution: { state: "present", proven: true, kind: "pick", label: "Resolution", column: "stream",
       value: "1280x720", options: [
         { value: "1920x1080", label: "1920×1080 · 30 fps" },
@@ -65,6 +81,22 @@ export const POCKET2 = {
   name: "Cam 2", bus: "USB accessory", spec: "Accessory · H.264 · 1280×720p30",
   aim: { state: "present", proven: true, reason: "" },
   controls: {
+    streamMode: { state: "present", proven: true, kind: "seg", label: "Bitrate", column: "stream",
+      options: ["Fixed", "Adaptive"], value: "Fixed" },
+    previewMode: { state: "present", proven: true, kind: "seg", label: "Bitrate", column: "preview",
+      options: ["Adaptive", "Fixed"], value: "Adaptive" },
+    previewSize: { state: "present", proven: true, kind: "pick", label: "Size", column: "preview",
+      value: "auto", options: [
+        { value: "auto", label: "Auto — steps with the link" },
+        { value: "1280x720", label: "1280×720 — hold" },
+        { value: "854x480", label: "854×480 — hold" },
+        { value: "640x360", label: "640×360 — hold" }] },
+    previewRate: { state: "present", proven: true, kind: "pick", label: "Rate", column: "preview",
+      value: "15", options: [{ value: "30", label: "30 fps" }, { value: "15", label: "15 fps" }, { value: "10", label: "10 fps" }] },
+    previewFloor: { state: "present", proven: true, kind: "pick", label: "Floor", column: "preview",
+      value: "300", options: [{ value: "150", label: "150 kb/s" }, { value: "300", label: "300 kb/s" }, { value: "500", label: "500 kb/s" }] },
+    previewCeiling: { state: "present", proven: true, kind: "pick", label: "Ceiling", column: "preview",
+      value: "2000", options: [{ value: "1000", label: "1.0 Mb/s" }, { value: "2000", label: "2.0 Mb/s" }, { value: "4000", label: "4.0 Mb/s" }] },
     // The SDK's four live-view handlers are stubs that never send. The feed is
     // a fixed pipe, and saying so is more use than a picker that does nothing.
     resolution: { state: "not-offered", proven: true, label: "Live-view resolution", column: "stream",

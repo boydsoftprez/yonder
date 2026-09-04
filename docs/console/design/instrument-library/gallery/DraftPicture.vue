@@ -7,6 +7,14 @@
        @pointerup="up" @pointercancel="up" @pointerleave="up">
     <div class="d-sky" /><div class="d-gnd" />
     <div v-if="recording" class="d-rec"><i />REC 00:13:47</div>
+    <!-- what this picture is, right now. On the picture and not in the strip,
+         because in Cockpit the picture is there and the deck is not. -->
+    <div v-if="preview" class="d-state" :class="'tone-' + preview.tone" :style="{ top: recording ? '48px' : '10px' }">
+      <b>{{ preview.head }}</b>
+      <span>{{ preview.size }}<template v-if="preview.rate"> · {{ preview.rate }} fps</template> · {{ preview.mbps.toFixed(preview.mbps < 0.1 ? 3 : 1) }} Mb/s</span>
+      <em v-if="preview.detail">{{ preview.detail }}</em>
+    </div>
+    <div v-if="preview && preview.step" class="d-step">{{ preview.step }}</div>
 
     <svg v-if="aimable" class="d-hud" viewBox="0 0 940 300" preserveAspectRatio="none">
       <!-- the orb, and only the orb: where you are pushing, how hard -->
@@ -46,7 +54,8 @@ export default {
     pan: { type: Number, default: 0 }, tilt: { type: Number, default: 0 },
     slewPan: { type: Number, default: 0 }, slewTilt: { type: Number, default: 0 },
     aimable: { type: Boolean, default: false },
-    recording: { type: Boolean, default: false }
+    recording: { type: Boolean, default: false },
+    preview: { type: Object, default: null }
   },
   emits: ['slew', 'stop'],
   data: () => ({ pushing: false, hx: 470, hy: 150, k: 0, ox: 470, oy: 150 }),
@@ -98,11 +107,24 @@ export default {
   background:rgba(4,6,10,.78); border:1px solid var(--yonder-bad,#ff4034);
   color: var(--yonder-bad,#ff4034); pointer-events:none; }
 .d-rec i { width:7px; height:7px; border-radius:50%; background: var(--yonder-bad,#ff4034); }
+.d-state { position:absolute; z-index:6; left:10px; display:flex; flex-direction:column; gap:2px;
+  padding:7px 10px; border-radius:2px; background:rgba(4,6,10,.8); border:1px solid rgba(255,255,255,.12);
+  font-size:11.5px; font-variant-numeric:tabular-nums; color:#fff; pointer-events:none; max-width:360px; }
+.d-state b { font-size:10px; letter-spacing:.14em; }
+.d-state em { font-style:normal; font-size:10.5px; color:rgba(255,255,255,.62); }
+.d-state.tone-waiting { border-color: var(--yonder-waiting,#ffcf28); } .d-state.tone-waiting b { color: var(--yonder-waiting,#ffcf28); }
+.d-state.tone-bad { border-color: var(--yonder-bad,#ff4034); } .d-state.tone-bad b { color: var(--yonder-bad,#ff4034); }
+.d-state.tone-select { border-color: var(--yonder-select,#2ad4f0); } .d-state.tone-select b { color: var(--yonder-select,#2ad4f0); }
+.d-state.tone-label b { color:rgba(255,255,255,.7); }
+/* the brief line when it steps */
+.d-step { position:absolute; z-index:6; right:10px; top:10px; padding:6px 12px;
+  border-radius:2px; font-size:11.5px; color:#fff; background:rgba(4,6,10,.82);
+  border:1px solid var(--yonder-waiting,#ffcf28); pointer-events:none; white-space:nowrap; }
 .d-hud { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; }
 .d-osd { position:absolute; z-index:5; background:rgba(4,6,10,.78); border:1px solid rgba(255,255,255,.12);
   border-radius:2px; padding:7px 10px; font-size:12.5px; font-variant-numeric:tabular-nums;
   color:#fff; pointer-events:none; }
-.d-osd.tr { top:10px; right:10px; } .d-osd.bl { left:10px; bottom:10px; }
+.d-osd.tr { bottom:10px; right:10px; } .d-osd.bl { left:10px; bottom:10px; }
 .d-osd .k { font-size:10px; letter-spacing:.12em; color:rgba(255,255,255,.55); margin-right:6px; }
 .d-osd .k.sp { margin-left:14px; }
 .d-hint, .d-note { position:absolute; z-index:5; left:50%; transform:translateX(-50%);

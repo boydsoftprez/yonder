@@ -43,7 +43,7 @@ page is the harness — palette, page and camera switches — not the design.
 | `gallery/DraftIndex.vue` | The Cameras page: camera rows and rejection rows |
 | `gallery/cameras.js` | The two capability reports, with `proven` recording what the bench has actually driven |
 | `gallery/deck.js` | The deck. Composes columns from the report; Live and Setup are one component in two modes |
-| `live.pocket2.*.png`, `live.elp.night.png`, `setup.elp.night.png`, `cameras.night.png` | The renders |
+| `live.pocket2.night.png`, `live.pocket2.poor.png`, `live.pocket2.day.png`, `live.elp.night.png`, `setup.elp.night.png`, `cameras.night.png`, `stage.poor.1512.png` | The renders. `poor` is the link degraded: the picture at the floor, the step line showing |
 
 ## Decisions the mockup carries that the spec does not yet
 
@@ -65,14 +65,24 @@ predates these and must be brought up to them:
   finger can still land on, 10.5 px labels. Not 44 px everywhere.
 - **Groups flow into balanced columns** rather than a grid, so a short group
   packs under a shorter one and nothing is stranded on a second row.
+- **Two encodes, each with a mode.** `STREAM · to the ground station` is Fixed
+  by default; `PREVIEW · to this browser` is Adaptive by default, with a floor,
+  a ceiling, and a Size picker whose `Auto` steps down the ladder with the link
+  and whose other rungs hold a size while the bitrate keeps adapting
+  (R-VID-07, R-VID-08, R-VID-13). In Adaptive the bar is a readout, `GOING OUT`.
+- **The picture wears its own state** — `ADAPTIVE`, `AT THE FLOOR`, `HELD`,
+  `FULL RATE`, `STILLS` — as an overlay, not in the strip beneath it, because
+  in Cockpit the picture is there and the deck is not. A step down the ladder
+  shows a brief line, top-right. `LINK · DROP` moved to the bottom-right corner.
+- **`FULL RATE` is back**, a hold-key at the right of the rail (R-VID-13).
+- **The strip's uplink counts both encodes** and turns to caution when over:
+  `3.3 of 3.2 Mb/s · over — the ground station's stream comes first` (R-VID-11).
+- The harness has a **link** switch — good / poor / lost — so the states can
+  be seen. **Nothing measures the link yet**: R-VID-07 is unbuilt, and the
+  round-trip figure is typed in.
 
 ## Known gaps in the mockup
 
-- **The browser preview has no controls.** Its size, rate and bitrate are in
-  `config.yaml` and were settable on the old Setup page; here it is a readout.
-  The stream's bitrate bar does not say which of the two encodes it is.
-- **`FULL RATE` is missing** — the hold-key that shows the full-quality stream
-  while held, built and proven on the board, is not on the rail.
 - The Cameras page's uplink bar is over capacity and drawn in the select tone.
 - Several Pocket 2 controls are drawn from command ids the bench has not
   driven: sensor size, record format, focus mode, shutter. Press **mark

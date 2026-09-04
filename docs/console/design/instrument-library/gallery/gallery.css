@@ -24,12 +24,6 @@ body { margin:0; background: var(--yonder-background, #0a0c0f); color: var(--yon
   font-size:10px; letter-spacing:.2em; text-transform:uppercase; color: var(--yonder-label,#7f8a95); }
 .d-placard b { color: var(--yonder-value,#fff); font-weight:600; }
 .d-display { background: var(--yonder-display,#04060a); border-top:1px solid var(--yonder-divider,#2b333c); }
-.d-osd { position:absolute; background:rgba(4,6,10,.78); border:1px solid rgba(255,255,255,.12);
-  border-radius:2px; padding:6px 9px; font-size:11px; font-variant-numeric:tabular-nums;
-  color:#fff; letter-spacing:.02em; }
-.d-osd.tr { top:10px; right:10px; } .d-osd.bl { left:10px; bottom:10px; }
-.d-osd .k { font-size:9px; letter-spacing:.12em; color:rgba(255,255,255,.55); margin-right:6px; }
-.d-osd .k.sp { margin-left:14px; }
 .d-strip { display:flex; gap:22px; align-items:center; flex-wrap:wrap; padding:9px 15px;
   border-top:1px solid var(--yonder-divider,#2b333c); }
 .d-cols { display:flex; border-top:1px solid var(--yonder-divider,#2b333c); }
@@ -171,3 +165,14 @@ body { margin:0; background: var(--yonder-background, #0a0c0f); color: var(--yon
   padding:0 16px; min-height:34px; border-radius:3px; cursor:pointer; background:transparent;
   border:1px solid var(--yonder-divider,#2b333c); color: var(--yonder-value,#fff); }
 .d-recentre:hover { border-color: var(--yonder-select,#2ad4f0); color: var(--yonder-select,#2ad4f0); }
+
+.d-fact2.over b { color: var(--yonder-waiting,#ffcf28); }
+.d-fact2 em { font-style:normal; text-transform:none; letter-spacing:0; font-size:11px; color: var(--yonder-waiting,#ffcf28); }
+.d-rail--two { display:flex; gap:14px; align-items:stretch; }
+.d-rail--two > :first-child { flex:1; }
+.d-hold { flex:0 0 auto; display:flex; flex-direction:column; justify-content:center; gap:3px; padding:6px 16px;
+  border:1px dashed var(--yonder-divider,#2b333c); border-radius:3px; cursor:pointer; user-select:none; touch-action:none; }
+.d-hold b { font-size:11px; letter-spacing:.14em; text-transform:uppercase; color: var(--yonder-value,#fff); }
+.d-hold span { font-size:10.5px; color: var(--yonder-label,#7f8a95); font-variant-numeric:tabular-nums; }
+.d-hold.on { border-style:solid; border-color: var(--yonder-select,#2ad4f0); }
+.d-hold.on b { color: var(--yonder-select,#2ad4f0); }

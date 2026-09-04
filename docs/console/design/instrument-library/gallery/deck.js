@@ -8,6 +8,7 @@ import AimDial from "./DraftAimDial.vue";
 import Picture from "./DraftPicture.vue";
 import SoftKeys from "../../../../packages/node-red-dashboard-2-yonder/src/ui/YonderSoftKeys.vue";
 import Annunciator from "../../../../packages/node-red-dashboard-2-yonder/src/ui/YonderAnnunciator.vue";
+import HoldKey from "../../../../packages/node-red-dashboard-2-yonder/src/ui/YonderHoldKey.vue";
 import TextField from "./DraftTextField.vue";
 import { ELP, POCKET2 } from "./cameras.js";
 
@@ -21,7 +22,7 @@ function palette () {
 }
 
 const COLUMNS = [
-  ["stream", "Stream"], ["exposure", "Exposure"], ["colour", "Colour"],
+  ["stream", "Stream"], ["preview", "Preview"], ["exposure", "Exposure"], ["colour", "Colour"],
   ["optics", "Optics"], ["rendering", "Rendering"], ["capture", "Capture"],
   ["housekeeping", "Housekeeping"], ["aim", "Aim"],
 ];
@@ -32,7 +33,7 @@ const COLUMNS = [
 export const DraftDeck = defineComponent({
   name: "DraftDeck",
   props: { camera: { type: String, default: "elp" }, mode: { type: String, default: "live" },
-           showUnproven: { type: Boolean, default: false } },
+           showUnproven: { type: Boolean, default: false }, link: { type: String, default: "good" } },
   setup (props) {
     const cam = props.camera === "pocket2" ? POCKET2 : ELP;
     const v = reactive(Object.fromEntries(
@@ -40,13 +41,38 @@ export const DraftDeck = defineComponent({
     const aim = reactive({ pan: 0, tilt: 0, slewPan: 0, slewTilt: 0 });
     const outputs = reactive({ rtp: "On", rtsp: "On", srt: "Off" });
     const bitrate = ref(3.0), commanded = ref(3.4), recording = ref(false);
-    const name = ref(cam.name); const flash = ref(0);
+    const name = ref(cam.name); const flash = ref(0); const fullRate = ref(false);
     const pal = ref(palette());
-    return { cam, v, aim, outputs, bitrate, commanded, recording, name, flash, pal,
+    return { cam, v, aim, outputs, bitrate, commanded, recording, name, flash, fullRate, pal,
              refresh: () => { pal.value = palette(); } };
   },
   mounted () { this.refresh(); },
   watch: { theme () { this.$nextTick(this.refresh); } },
+  computed: {
+    preview () {
+      const v = this.v, link = this.link;
+      const held = v.previewSize && v.previewSize !== "auto";
+      const floor = Number(v.previewFloor) / 1000, ceil = Number(v.previewCeiling) / 1000;
+      if (this.fullRate) return { tone: "select", head: "FULL RATE", size: "1280×720", rate: 30, mbps: 3.1,
+        detail: "while held", step: "" };
+      if (link === "lost") return { tone: "bad", head: "STILLS", size: "640×360", rate: 0, mbps: 0.012,
+        detail: "every 2 s · live video could not be kept up", step: "fell back to stills — no frame for 6 s" };
+      if (v.previewMode === "Fixed") return { tone: "label", head: "FIXED", size: held ? v.previewSize.replace("x", "×") : "640×360",
+        rate: Number(v.previewRate), mbps: 0.4, detail: "", step: "" };
+      if (held) return { tone: link === "poor" ? "waiting" : "label", head: "HELD", size: v.previewSize.replace("x", "×"),
+        rate: Number(v.previewRate), mbps: link === "poor" ? floor : Math.min(ceil, 1.2),
+        detail: link === "poor" ? `at the floor · ${floor.toFixed(1)} of ${floor.toFixed(1)}–${ceil.toFixed(1)} Mb/s · 1.2 s round trip` : `size held · bitrate adapting ${floor.toFixed(1)}–${ceil.toFixed(1)}`, step: "" };
+      if (link === "poor") return { tone: "waiting", head: "AT THE FLOOR", size: "640×360", rate: Number(v.previewRate),
+        mbps: floor, detail: `${floor.toFixed(1)} of ${floor.toFixed(1)}–${ceil.toFixed(1)} Mb/s · 1.2 s round trip`,
+        step: "dropped to 640×360 — the link could not carry 720p" };
+      return { tone: "label", head: "ADAPTIVE", size: "1280×720", rate: Number(v.previewRate), mbps: Math.min(ceil, 1.8),
+        detail: `${Math.min(ceil, 1.8).toFixed(1)} of ${floor.toFixed(1)}–${ceil.toFixed(1)} Mb/s`, step: "" };
+    },
+    uplink () {
+      const total = this.bitrate + this.preview.mbps;
+      return { total, cap: 3.2, over: total > 3.2 };
+    },
+  },
   methods: {
     /* A control whose gate is not on Manual is gated by it (R-UI-21). */
     stateOf (key, c) {
@@ -131,7 +157,7 @@ export const DraftDeck = defineComponent({
 
     const [expLabel, expValue] = cam.exposureReadout ? cam.exposureReadout(this.v) : ["", ""];
     const picture = h(Picture, {
-      zoom: this.v.zoom ?? 0, expLabel, expValue,
+      zoom: this.v.zoom ?? 0, expLabel, expValue, preview: this.preview,
       pan: this.aim.pan, tilt: this.aim.tilt,
       slewPan: this.aim.slewPan, slewTilt: this.aim.slewTilt, aimable: aimLive,
       recording: this.recording,
@@ -143,10 +169,13 @@ export const DraftDeck = defineComponent({
       h(Annunciator, { id: "deck-ann", props: { source: "payload" } }),
       h("span", { class: "d-fact2" }, ["Browser ", h("b", "1 viewer")]),
       h("span", { class: "d-fact2" }, ["Ground station ", h("b", "10.50.x.x:5600")]),
-      h("span", { class: "d-fact2" }, ["Uplink ", h("b", "3.0 of 3.2 Mb/s")]),
+      h("span", { class: ["d-fact2", { over: this.uplink.over }] }, ["Uplink ",
+        h("b", `${this.uplink.total.toFixed(1)} of ${this.uplink.cap.toFixed(1)} Mb/s`),
+        this.uplink.over ? h("em", " · over — the ground station's stream comes first") : null]),
     ]);
 
-    const bitrate = h(SetBar, { label: "Bitrate", unit: "Mb/s", min: 0.5, max: 8, step: 0.1, precision: 1,
+    const bitrate = h(SetBar, { label: this.v.streamMode === "Adaptive" ? "Going out" : "Bitrate",
+      unit: "Mb/s", min: 0.5, max: 8, step: 0.1, precision: 1,
       actual: this.bitrate, commanded: this.commanded,
       fine: `going out ${this.bitrate.toFixed(1)} · asked for ${this.commanded.toFixed(1)}`,
       onSet: (x) => { this.commanded = x; } });
@@ -165,15 +194,25 @@ export const DraftDeck = defineComponent({
     const cols = COLUMNS.filter(([id]) => id !== "aim").map(([id, title]) => {
       const entries = Object.entries(cam.controls)
         .filter(([, c]) => c.column === id && (setup || !c.setup));
-      if (id === "stream") entries.unshift(["__bitrate", { kind: "__bitrate" }]);
+      if (id === "stream") entries.splice(1, 0, ["__bitrate", { kind: "__bitrate" }]);
+      if (id === "preview") {
+        const adaptive = this.v.previewMode === "Adaptive";
+        const keep = entries.filter(([k]) => adaptive || (k !== "previewFloor" && k !== "previewCeiling"));
+        entries.length = 0; entries.push(...keep);
+        entries.splice(1, 0, ["__pbar", { kind: "__pbar" }]);
+      }
       if (id === "stream" && setup) entries.unshift(["__name", { kind: "__name" }]);
       if (!entries.length) return null;
-      return h(Column, { title }, () => [
+      const note = id === "stream" ? "to the ground station" : id === "preview" ? "to this browser" : "";
+      return h(Column, { title, note, noteTone: "label" }, () => [
         ...entries.map(([k, c]) => k === "__name"
           ? h(TextField, { label: "Name", modelValue: this.name, placeholder: "Cam 1", max: 24,
               hint: "shown on this page, in the camera list and on the stream address",
               "onUpdate:modelValue": (x) => { this.name = x; } })
-          : k === "__bitrate" ? bitrate : this.draw(k, c)),
+          : k === "__bitrate" ? bitrate
+          : k === "__pbar" ? h(SetBar, { label: "Going out", unit: "Mb/s", min: 0, max: 4, step: 0.1, precision: 1,
+              actual: this.preview.mbps, fine: `${this.preview.head.toLowerCase()} · ${this.preview.size} · ${this.preview.rate || "—"} fps` })
+          : this.draw(k, c)),
         id === "capture" && cam.readouts ? h(Readout, { rows: cam.readouts }) : null,
       ]);
     }).filter(Boolean);
@@ -210,7 +249,14 @@ export const DraftDeck = defineComponent({
            h("div", { class: "d-rail" }, [h(SoftKeys, { id: "deck-keys", props: { passthru: false, keys } })])]
         : [h("div", { class: "d-stage" }, [h("div", { class: "d-stage__pic" }, [picture]), aimPanel]),
            strip, h("div", { class: "d-cols" }, cols.map((c) => h("div", {}, [c]))), outLine,
-           h("div", { class: "d-rail" }, [h(SoftKeys, { id: "deck-keys", props: { passthru: false, keys } })])]),
+           h("div", { class: "d-rail d-rail--two" }, [
+             h(SoftKeys, { id: "deck-keys", props: { passthru: false, keys } }),
+             h("div", { class: ["d-hold", { on: this.fullRate }],
+               onPointerdown: () => { this.fullRate = true; }, onPointerup: () => { this.fullRate = false; },
+               onPointerleave: () => { this.fullRate = false; } }, [
+               h("b", "Full rate"), h("span", this.fullRate ? "1280×720 · 3.1 Mb/s · release to drop back" : "3.1 Mb/s while held"),
+             ]),
+           ])]),
     ]);
   },
 });

@@ -38,6 +38,7 @@ const App = defineComponent({
     const camera = ref("elp");
     const page = ref("camera-live");
     const unproven = ref(false);
+    const link = ref("good");
     const setTheme = (t) => {
       theme.value = t;
       let link = document.getElementById("theme");
@@ -73,6 +74,8 @@ const App = defineComponent({
           ].map(([k, lbl]) => h("button", {
             class: { on: camera.value === k }, onClick: () => { camera.value = k; },
           }, lbl))),
+          h("div", { class: "g-switch" }, [["good", "link good"], ["poor", "link poor"], ["lost", "link lost"]].map(([k, lbl]) =>
+            h("button", { class: { on: link.value === k }, onClick: () => { link.value = k; } }, lbl))),
           h("div", { class: "g-switch" }, [h("button", {
             class: { on: unproven.value }, onClick: () => { unproven.value = !unproven.value },
           }, "mark unproven")]),
@@ -112,7 +115,7 @@ const App = defineComponent({
             key: camera.value + page.value,
             theme: theme.value, camera: camera.value,
             mode: page.value === "camera-setup" ? "setup" : "live",
-            showUnproven: unproven.value,
+            showUnproven: unproven.value, link: link.value,
           })]),
     ]);
   },
