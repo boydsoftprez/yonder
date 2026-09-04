@@ -92,6 +92,18 @@ does not, Task 30 isolates a preview-branch restart and the main stream's
 bitrate stays Apply-with-respawn, stated on the page. Establish this before
 anything is built on it.
 
+**The pipeline must be the daemon's, element for element.** The spike exists to
+de-risk Task 30, which will drive `extra-controls` on the pipeline
+`video/pipeline.ts` composes. A spike that measures a different element graph
+de-risks nothing. Read `compose()` and `encode()` in that file and match the
+full-rate branch: `v4l2src` with `io-mode=4`, the MJPG capsfilter, `jpegdec`,
+the leaky queue from `QUEUE`, `v4l2h264enc`, and the `H264_LEVEL` capsfilter
+that keeps the encoder off level 1. There is no converter in that branch. The
+one difference the spike may keep is opening `/dev/video0` directly where the
+daemon opens the same node through `/dev/v4l/by-path/` — that is how the daemon
+holds a camera's identity stable across replugs, and it is not a difference the
+encoder can observe. Say so in the note rather than leaving it unremarked.
+
 - [ ] **Step 1: Write the spike**
 
 ```python
@@ -103,22 +115,26 @@ import gi, sys, time
 gi.require_version("Gst", "1.0")
 from gi.repository import Gst
 Gst.init(None)
+# The full-rate branch of compose()/encode() in video/pipeline.ts. The level
+# capsfilter is not decoration: without it the encoder fixates level 1, which
+# cannot carry 720p, and the driver refuses to start on the first frame.
 p = Gst.parse_launch(
-    # The camera offers MJPG at 1280x720/30 and YUYV only at 10 fps, so the
-    # spike decodes, exactly as the daemon does (video/pipeline.ts).
-    "v4l2src device=/dev/video0 ! image/jpeg,width=1280,height=720,framerate=30/1 "
-    "! jpegdec ! videoconvert "
-    # The level capsfilter is what pipeline.ts welds onto every encode: without
-    # it the encoder fixates level=(string)1, which cannot carry 720p, and the
-    # driver refuses to start. Match encode() in video/pipeline.ts exactly.
+    "v4l2src device=/dev/video0 io-mode=4 "
+    "! image/jpeg,width=1280,height=720,framerate=30/1 ! jpegdec "
+    "! queue leaky=downstream max-size-time=200000000 max-size-buffers=0 max-size-bytes=0 "
     "! v4l2h264enc name=enc extra-controls=controls,video_bitrate=1000000 "
     "! video/x-h264,level=(string)4 "
     "! h264parse ! identity name=tap ! fakesink sync=false")
 tap, enc = p.get_by_name("tap"), p.get_by_name("enc")
-bytes_seen, last_pts, gaps = [0], [None], [0]
+start = time.monotonic()
+bytes_seen, last_pts, gaps = [0], [None], []
 def probe(pad, info):
     buf = info.get_buffer(); bytes_seen[0] += buf.get_size()
-    if last_pts[0] is not None and buf.pts - last_pts[0] > 3 * Gst.SECOND / 30: gaps[0] += 1
+    # When each gap happened, not merely how many. A gap that precedes the
+    # retune call cannot have been caused by it, and a bare count cannot say
+    # so — which is the whole question this spike turns on.
+    if last_pts[0] is not None and buf.pts - last_pts[0] > 3 * Gst.SECOND / 30:
+        gaps.append(time.monotonic() - start)
     last_pts[0] = buf.pts; return Gst.PadProbeReturn.OK
 tap.get_static_pad("src").add_probe(Gst.PadProbeType.BUFFER, probe)
 p.set_state(Gst.State.PLAYING)
@@ -126,25 +142,46 @@ def rate(seconds):
     bytes_seen[0] = 0; time.sleep(seconds); return bytes_seen[0] * 8 / seconds / 1e6
 before = rate(10)
 s = Gst.Structure.new_empty("controls"); s.set_value("video_bitrate", 3000000)
+retune_at = time.monotonic() - start
 enc.set_property("extra-controls", s)             # the runtime path under test
 after = rate(10)
 p.set_state(Gst.State.NULL)
-print(f"before {before:.2f} Mb/s  after {after:.2f} Mb/s  timestamp gaps {gaps[0]}")
-sys.exit(0 if after > before * 2 and gaps[0] == 0 else 1)
+late = [g for g in gaps if g > retune_at]
+print(f"before {before:.2f} Mb/s  after {after:.2f} Mb/s  "
+      f"retune at {retune_at:.2f}s  gaps at {['%.2fs' % g for g in gaps]}  "
+      f"after the retune {len(late)}")
+sys.exit(0 if after > before * 2 and not late else 1)
 ```
 
 - [ ] **Step 2: Run it on the board three times; record all three**
 
 `python3-gi` and `gir1.2-gstreamer-1.0` may need installing on the board;
-say so before installing. A gap count above zero is a restart.
+say so before installing.
+
+A gap **after the retune call** is a restart, and is the finding that would
+settle the question against runtime retuning. A gap before it is not evidence
+either way: the queue is `leaky=downstream` exactly as the daemon's is, so it
+drops under pressure by design, and a cold pipeline settles in its first
+second. Report every gap with its timestamp, and let the position carry the
+argument rather than the count.
+
+If `io-mode=4` will not negotiate with this camera, drop it, run without it,
+and record that it was dropped and why — do not silently substitute a
+pipeline that differs from the daemon's without saying so.
 
 - [ ] **Step 3: Record the answer and the decision**
 
 `docs/hardware/runtime-encoder-control.md`: the command, the three readings,
-whether timestamps were continuous, and the **decision**: runtime retune is
-available (Task 30 uses `extra-controls` at runtime), or it is not (Task 30
-restarts the preview branch only; the main stream's bitrate is
+where each gap fell relative to the retune, and the **decision**: runtime
+retune is available (Task 30 uses `extra-controls` at runtime), or it is not
+(Task 30 restarts the preview branch only; the main stream's bitrate is
 Apply-with-respawn and the page says *restarts the picture*).
+
+Every fact in the note's conditions table must be observed in this session and
+its command recorded — board model and revision, kernel, architecture, and
+which device node backs `v4l2h264enc`. An identifier copied from an older note
+under today's date is a number that was not observed, and this board's history
+of brownouts and USB dropouts is exactly why that rule is not a formality.
 
 - [ ] **Step 4: Commit**
 
