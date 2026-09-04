@@ -23,6 +23,23 @@ export interface ReachMonitorOptions {
   counters?: CounterReader;
   /** Which config path maps to which interface name, read fresh each time. */
   devices: () => Promise<Partial<Record<PathName, string>>>;
+  /**
+   * Which paths have an interface that is present and **not up**.
+   *
+   * Required, and deliberately so. Its absence is what let a board with an
+   * unplugged ethernet port describe that port as "Up, and not yet tested"
+   * (R-NET-14): `devices()` answers *whether there is an interface*, which is
+   * a different question from *whether it is up*, and a monitor with only the
+   * first has to guess at the second. An optional reading defaulting to "none
+   * are down" would put that guess back, silently, for whoever next builds
+   * one of these.
+   *
+   * It says only what has been established. `pathsDown` names a path only
+   * when NetworkManager lists its interface in a state it knows to be not-up,
+   * so a state word it does not recognise leaves the path exactly where it
+   * was rather than being called down on a guess.
+   */
+  down: () => Promise<PathName[]>;
   /** The operator's order, from config.network.priority. */
   order: () => PathName[];
   /**
@@ -56,6 +73,7 @@ export class ReachMonitor {
   private readonly probe: Probe;
   private readonly counters: CounterReader;
   private readonly devices: () => Promise<Partial<Record<PathName, string>>>;
+  private readonly down: () => Promise<PathName[]>;
   private readonly order: () => PathName[];
   private readonly holding: () => Promise<PathName[]>;
   private readonly log: (line: string) => void;
@@ -65,6 +83,7 @@ export class ReachMonitor {
     this.probe = opts.probe;
     this.counters = opts.counters ?? systemCounters;
     this.devices = opts.devices;
+    this.down = opts.down;
     this.order = opts.order;
     this.holding = opts.holding;
     this.log = opts.log ?? (() => {});
@@ -139,7 +158,12 @@ export class ReachMonitor {
 
   /** The record GET /reach/state serves. */
   async state(): Promise<ReachState> {
-    const [devices, holding] = await Promise.all([this.devices(), this.holding()]);
+    // One moment, three readings, taken together. A device map fetched before
+    // a separate reading of which interfaces are up describes a board that
+    // existed between the two.
+    const [devices, holding, down] = await Promise.all([
+      this.devices(), this.holding(), this.down(),
+    ]);
     const inUse = holding[0] ?? null;
     const order = this.order();
     // Every path, not only the configured ones. A page that listed only what
@@ -151,7 +175,7 @@ export class ReachMonitor {
     };
     const paths = [...ALL_PATHS]
       .sort((a, b) => rank(a) - rank(b))
-      .map((path) => this.report(path, devices[path] ?? null, inUse));
+      .map((path) => this.report(path, devices[path] ?? null, inUse, down.includes(path)));
     // From the reading already taken, not by asking again: `holding` reaches
     // NetworkManager, and a record that asked it twice would be a record
     // assembled from two different moments.
@@ -286,8 +310,21 @@ export class ReachMonitor {
    *
    * The record carries that distinction as `evidence` as well as in the
    * sentence, so a console can draw the three states without reading prose.
+   *
+   * **And a path only says it is up if it is.** `standing-by` used to be
+   * reached by any path with an interface, so a board with an ethernet port
+   * and no cable — NetworkManager reporting it `unavailable`, no carrier, no
+   * address — described itself as "Up, and not yet tested". Its condition was
+   * not unknown; it was known and unavailable, which is what `down` says now
+   * (R-NET-14). Three conditions that were two: no interface, an interface
+   * that is not up, and an interface that is up and untested.
    */
-  private report(path: PathName, device: string | null, inUse: PathName | null): PathReport {
+  private report(
+    path: PathName,
+    device: string | null,
+    inUse: PathName | null,
+    down: boolean,
+  ): PathReport {
     const word = PATH_WORDS[path];
 
     // Read once, and the only reading in this method. Both `evidence` and the
@@ -300,11 +337,25 @@ export class ReachMonitor {
     // left over from before it was unplugged still says: `test()` never
     // records against a path it cannot find, and a success from before the
     // modem was pulled is not evidence about a board that no longer has one.
-    const evidence: PathEvidence = device === null ? "untested" : this.standing.evidenceFor(path);
+    //
+    // A path whose interface is down is in the same position for the same
+    // reason: a success recorded while the cable was in says nothing about a
+    // port that now has no carrier.
+    const evidence: PathEvidence =
+      device === null || down ? "untested" : this.standing.evidenceFor(path);
 
     if (device === null) {
       return { path, device: null, standing: "absent", since: null, evidence,
         detail: `No ${word} interface on this board` };
+    }
+    // Before every question about reaching anything, because none of them
+    // applies: an interface that is not up is not carrying traffic, is not
+    // standing by, and has not been tested. It is not a fault either — an
+    // aircraft flies with its ethernet unplugged — so this says what is true
+    // and stops (R-NET-14).
+    if (down) {
+      return { path, device, standing: "down", since: null, evidence,
+        detail: "Down — the interface is there and it has no connection on it" };
     }
     if (this.standing.standingOf(path) === "no-route-out") {
       return { path, device, standing: "no-route-out", since: this.standing.since(path), evidence,
@@ -327,6 +378,10 @@ export class ReachMonitor {
  * nobody having shown that it does not.
  */
 function standingByDetail(evidence: PathEvidence, word: string): string {
+  // Every branch here is about a path that is **up**. A path whose interface
+  // is not up never reaches this function — see the `down` branch in
+  // `report` — which is what makes "Up, and not yet tested" true again.
+
   switch (evidence) {
     case "reaching":
       return `Ready — traffic is not going out over ${word}`;
@@ -396,6 +451,71 @@ export function pathDevices(
   }
 
   return found;
+}
+
+/**
+ * The device states NetworkManager reports for an interface that is not up.
+ *
+ * A list of what is recognised, rather than "anything that is not
+ * `connected`", and the difference is the whole of the safety here. A state
+ * word this does not know — a NetworkManager that grew one, an nmcli
+ * answering in a language nobody here read — leaves a path exactly where it
+ * was. Being wrong in that direction costs the old sentence; being wrong the
+ * other way would print `DOWN` beside a working ethernet port.
+ *
+ * Two words, and each is chosen because it is unambiguous. `unavailable` is
+ * a device that cannot carry a connection — no carrier, rfkilled, no SIM — and
+ * is what a real board reported for an `eth0` with nothing plugged into it.
+ * `disconnected` is a device that could and has none.
+ *
+ * Three words are deliberately not here. `connecting` and `deactivating` are
+ * transitions rather than conditions, and an interface caught mid-dial is not
+ * a port with no cable in it. `unmanaged` is a device NetworkManager is not
+ * looking after, which says nothing about whether it works — an address
+ * configured outside NetworkManager is still an address — so it is left
+ * exactly where it was rather than being described from a tool that has
+ * disclaimed it.
+ */
+const NOT_UP = ["unavailable", "disconnected"];
+
+/**
+ * Which paths have an interface that is present and not up (R-NET-14).
+ *
+ * Pure, and separate from the monitor for the same reason `pathDevices` is:
+ * the decision about what NetworkManager's words mean is testable without an
+ * nmcli, and `daemon/server.ts` stays wiring.
+ *
+ * **A path is named here only on positive evidence.** It has to have an
+ * interface, that interface has to be one NetworkManager lists, and the state
+ * it lists has to be one of `NOT_UP`. A path whose interface NetworkManager
+ * does not list at all is not called down — it is not established either way,
+ * and this file does not invent the difference.
+ *
+ * `alsoKnownAs` is the second name a path answers to, exactly as in
+ * `pathsHolding`: a modem carries its bytes on `wwan0`, which NetworkManager
+ * has no entry for, while the connection is bound to the control port
+ * `cdc-wdm0`, which is the one it reports a state for. Looking up only the
+ * first name would find nothing, and a working modem would be reported down
+ * on every board where the two differ — which is every board this was
+ * measured on. Either name being connected is enough.
+ */
+export function pathsDown(
+  devices: DeviceInfo[],
+  found: Partial<Record<PathName, string>>,
+  alsoKnownAs: Partial<Record<PathName, string>> = {},
+): PathName[] {
+  const stateOf = (device: string | undefined): string | undefined =>
+    device === undefined ? undefined : devices.find((d) => d.device === device)?.state;
+
+  const out: PathName[] = [];
+  for (const path of Object.keys(found) as PathName[]) {
+    const states = [stateOf(found[path]), stateOf(alsoKnownAs[path])]
+      .filter((s): s is string => s !== undefined);
+    if (states.length === 0) continue;
+    if (states.some((s) => !NOT_UP.includes(s))) continue;
+    out.push(path);
+  }
+  return out;
 }
 
 /**

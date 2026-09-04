@@ -84,6 +84,12 @@ export function verdict(reach: ReachState): Verdict {
   if (modem === undefined || modem.standing === "absent") {
     return { text: "NO MODEM", tone: "neutral" };
   }
+  // A modem whose interface is not up: there is one, and it is not dialled.
+  // Neutral, because that is a condition and not a failure — a board that has
+  // not been asked to connect yet is in it. Without this the line fell to the
+  // evidence checks and read NOT YET TESTED about a link that is not there to
+  // test (R-NET-14).
+  if (modem.standing === "down") return { text: "NOT CONNECTED", tone: "neutral" };
   if (modem.standing === "no-route-out") return { text: "NO DATA GETTING THROUGH", tone: "bad" };
   if (modem.standing === "in-use") return { text: "CARRYING TRAFFIC", tone: "good" };
   if (modem.evidence === "untested") return { text: "NOT YET TESTED", tone: "neutral" };
@@ -254,6 +260,13 @@ export function pathStanding(standing: PathStanding, evidence: PathEvidence): st
   // A path that is not on this board is not a fault, and it has no evidence
   // either way. Asked first, for the same reason `pathTone` asks it first.
   if (standing === "absent") return "NO INTERFACE";
+  // Known, and not a fault. The interface is on the board and it is not up —
+  // an unplugged wired port, a radio that has not associated. Asked here for
+  // the same reason `absent` is: none of the questions below it applies to a
+  // path that is not up, and the answer they used to fall through to was
+  // NOT YET TESTED, which promised that a test would tell you something
+  // (R-NET-14).
+  if (standing === "down") return "DOWN";
   if (standing === "no-route-out") return "STOOD DOWN";
   if (standing === "testing") return "TESTING";
   // Carrying traffic is what the routing table says, and it is said whether

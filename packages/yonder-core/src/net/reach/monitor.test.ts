@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
-import { ReachMonitor, pathDevices, pathInUse, pathsHolding } from "./monitor.js";
+import { ReachMonitor, pathDevices, pathInUse, pathsDown, pathsHolding } from "./monitor.js";
 import {
   FAILURES_TO_STAND_DOWN,
   Standing,
@@ -32,6 +32,8 @@ interface Built {
  */
 function build(opts: {
   devices?: Partial<Record<PathName, string>>;
+  /** Paths whose interface is present and not up. None, unless a test says. */
+  down?: PathName[];
   inUse?: PathName | null;
   /** Every path holding an address. Defaults to just `inUse`. */
   holding?: PathName[];
@@ -58,6 +60,7 @@ function build(opts: {
       if (opts.devicesThrows === true) throw new Error("NetworkManager is not answering");
       return opts.devices ?? { ethernet: "eth0", modem: "wwan0" };
     },
+    down: async () => opts.down ?? [],
     order: () => opts.order ?? ["ethernet", "modem", "wifi_client"],
     holding: async () => {
       if (opts.inUseThrows === true) throw new Error("NetworkManager is not answering");
@@ -278,6 +281,63 @@ describe("ReachMonitor.state", () => {
     delete devices.modem;
     const report = await reportFor(monitor, "modem");
     expect(report.standing).toBe("absent");
+    expect(report.evidence).toBe("untested");
+  });
+
+  /**
+   * The defect this was written against, in the words it was reported in.
+   *
+   * `GET /reach/state` on a board whose eth0 NetworkManager had in
+   * `unavailable` — no carrier, no address — answered:
+   *
+   *     {"path":"ethernet","device":"eth0","standing":"standing-by",
+   *      "evidence":"untested",
+   *      "detail":"Up, and not yet tested — nothing has established that it
+   *                reaches anything"}
+   *
+   * It was not up, and the sentence said it was (R-NET-14).
+   */
+  it("says a path whose interface is down is down, and never that it is up", async () => {
+    const { monitor } = build({ devices: { ethernet: "eth0" }, down: ["ethernet"], inUse: null });
+    const report = await reportFor(monitor, "ethernet");
+    expect(report.standing).toBe("down");
+    expect(report.detail).not.toMatch(/\bUp\b/);
+    expect(report.detail).not.toMatch(/not yet tested/);
+    // Not `absent`: the interface is there, and saying it is not is the other
+    // untruth. The three conditions stay three.
+    expect(report.device).toBe("eth0");
+  });
+
+  it("keeps no interface, an interface that is down, and one that is up apart", async () => {
+    const { monitor } = build({
+      devices: { ethernet: "eth0", modem: "wwan0" },
+      down: ["ethernet"],
+      inUse: null,
+      order: ["ethernet", "modem", "wifi_client"],
+    });
+    const by = new Map((await monitor.state()).paths.map((p) => [p.path, p]));
+    expect(by.get("wifi_client")?.standing).toBe("absent");
+    expect(by.get("ethernet")?.standing).toBe("down");
+    expect(by.get("modem")?.standing).toBe("standing-by");
+    expect(by.get("modem")?.detail).toMatch(/Up, and not yet tested/);
+    // Three sentences, none of them shared.
+    const said = [...by.values()].map((p) => p.detail);
+    expect(new Set(said).size).toBe(said.length);
+  });
+
+  it("has no evidence about a path whose interface is down", async () => {
+    // A success from while the cable was in is not evidence about a port with
+    // no carrier — the same reasoning as an unplugged modem, above.
+    const { monitor } = build({ devices: { ethernet: "eth0" }, inUse: null, reaches: () => true });
+    await monitor.test("ethernet");
+    expect((await reportFor(monitor, "ethernet")).evidence).toBe("reaching");
+
+    const unplugged = build({
+      devices: { ethernet: "eth0" }, down: ["ethernet"], inUse: null, reaches: () => true,
+    });
+    await unplugged.monitor.test("ethernet");
+    const report = await reportFor(unplugged.monitor, "ethernet");
+    expect(report.standing).toBe("down");
     expect(report.evidence).toBe("untested");
   });
 
@@ -574,5 +634,58 @@ describe("pathInUse", () => {
       [{ device: "lo", address: "127.0.0.1/8" }],
       "10.42.0.1",
     )).toBeNull();
+  });
+});
+
+describe("pathsDown", () => {
+  /** The board the defect was measured on: a wired port with no cable in it. */
+  const board: DeviceInfo[] = [
+    { device: "lo", type: "loopback", state: "connected (externally)", connection: "lo" },
+    { device: "eth0", type: "ethernet", state: "unavailable", connection: "" },
+    { device: "wlan0", type: "wifi", state: "connected", connection: "yonder-ap" },
+    { device: "cdc-wdm0", type: "gsm", state: "connected", connection: "yonder-modem" },
+  ];
+
+  it("names a path whose interface NetworkManager has in a state that is not up", () => {
+    expect(pathsDown(board, { ethernet: "eth0", wifi_client: "wlan0" })).toEqual(["ethernet"]);
+  });
+
+  it("accepts either of a path's two names, so a working modem is not called down", () => {
+    // `wwan0` carries the bytes and NetworkManager has no entry for it; the
+    // connection is bound to the control port, which is the one with a state.
+    // Looking up only the first name finds nothing.
+    expect(pathsDown(board, { modem: "wwan0" }, { modem: "cdc-wdm0" })).toEqual([]);
+  });
+
+  it("says nothing about a path NetworkManager does not list at all", () => {
+    // An appliance modem on an adapter NetworkManager is not managing. Not
+    // established either way, so not claimed either way.
+    expect(pathsDown(board, { modem: "usb0" })).toEqual([]);
+  });
+
+  it("leaves a state word it does not recognise alone", () => {
+    // Being wrong this way costs the old sentence. Being wrong the other way
+    // prints DOWN beside a working port.
+    const odd: DeviceInfo[] = [{ device: "eth0", type: "ethernet", state: "asleep", connection: "" }];
+    expect(pathsDown(odd, { ethernet: "eth0" })).toEqual([]);
+  });
+
+  it("says nothing about a device NetworkManager has disclaimed", () => {
+    // `unmanaged` says NetworkManager is not looking after it, not that it
+    // does not work: an address configured outside NetworkManager is still an
+    // address. Not established, so not claimed.
+    const disclaimed: DeviceInfo[] = [
+      { device: "eth0", type: "ethernet", state: "unmanaged", connection: "" },
+    ];
+    expect(pathsDown(disclaimed, { ethernet: "eth0" })).toEqual([]);
+  });
+
+  it("does not call a device that is mid-connection down", () => {
+    // `connecting` is a transition, not a condition. A modem caught dialling
+    // is not a port with no cable in it.
+    const dialling: DeviceInfo[] = [
+      { device: "cdc-wdm0", type: "gsm", state: "connecting (getting IP configuration)", connection: "yonder-modem" },
+    ];
+    expect(pathsDown(dialling, { modem: "wwan0" }, { modem: "cdc-wdm0" })).toEqual([]);
   });
 });

@@ -194,6 +194,16 @@ describe("a path's standing, in a word", () => {
     }
   });
 
+  it("says a path whose interface is down is down, not NOT YET TESTED", () => {
+    // The lamp beside the row an operator actually read: a wired port with
+    // nothing plugged into it, in a board that promised a test would say
+    // something about it (R-NET-14). Whatever a record still holds, for the
+    // same reason `absent` is answered before evidence.
+    for (const e of ["reaching", "not-reaching", "untested"] as const) {
+      expect(pathStanding("down", e)).toBe("DOWN");
+    }
+  });
+
   it("says a stood-down path is stood down, not merely not reaching", () => {
     expect(pathStanding("no-route-out", "not-reaching")).toBe("STOOD DOWN");
     expect(pathStanding("testing", "untested")).toBe("TESTING");

@@ -198,9 +198,9 @@ daemon reports the cellular path absent and neither cellular page can be capture
 
 The `curl` stand-in is the one the gate *drives*. It is what `commandProbe` runs to find out
 whether a path carries traffic, and it answers whatever the gate last wrote to a file — read
-on every call — which is how the `Way out` rows are photographed in each of their three
-states. Nothing else probes: no interface holds an address in this harness, so `ReachWatch`
-finds no path in use and every probe in the run is one the gate asked for through
+on every call — which is how the `Way out` rows are photographed in each of the states a probe
+can put them in. Nothing else probes: no interface holds an address in this harness, so
+`ReachWatch` finds no path in use and every probe in the run is one the gate asked for through
 `POST /reach/test`. That is what makes the states reproducible instead of a race with a
 five-second timer.
 
@@ -269,16 +269,22 @@ CI uploads as an artifact.
 **And a page in more than one state, where it has them.** R-UI-12 says a surface that hides
 part of itself is captured in each of those parts. A tabbed page hides its other tabs, which
 is why there is one capture per tab; a panel drawn from live state hides its other states the
-same way. The `Way out` rows have three — a path that is reaching something, one that reached
-nothing when it was last tested, and one nothing has looked at — and they are three different
-*shapes*, because the three sentences are different lengths. The base capture is the untested
-state, which is what a board that has just come up shows; the other two are driven and
-captured under names of their own:
+same way. The `Way out` rows have four — a path that is reaching something, one that reached
+nothing when it was last tested, one nothing has looked at, and one whose interface is down —
+and they are four different *shapes*, because the sentences are different lengths. The base
+capture is the untested state, which is what a board that has just come up shows; the others
+are driven and captured under names of their own. The last of them is a different *board*
+rather than a different reading — a wired port with nothing plugged into it — and it is
+driven the way the no-modem board is, by a file the `nmcli` stand-in reads on every call.
+That row used to read "Up, and not yet tested — nothing has established that it reaches
+anything" about an `eth0` NetworkManager had in `unavailable` with no carrier and no
+address (R-NET-14).
 
 ```
 network-interfaces.day.png                  every path up, and untested
 network-interfaces-not-reaching.day.png     every path probed, and reaching nothing
 network-interfaces-reaching.day.png         every path probed, and reaching something
+network-interfaces-down.day.png             the wired port down, and saying so
 ```
 
 **Status has three shapes.** Two of them are two different boards: `Reachable by` is gauges

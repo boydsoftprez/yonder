@@ -914,3 +914,30 @@ check to `FallbackWatchdogOptions` and requires it — when wired in — to agre
 `check()` treats an address as reachability. Absent, behaviour is unchanged: an address
 alone is still accepted, so a daemon assembled without a reach monitor does not become one
 that raises its access point on a working device.
+
+---
+
+### K-41 · The modem's interface name is remembered for the life of the daemon
+
+**Status:** Open · **Requirement:** R-CEL-09, R-NET-14
+
+`modemInterface` in `packages/yonder-core/src/daemon/server.ts` caches the net port
+ModemManager reports — `if (modemNet !== null) return modemNet;` — because a modem's port
+layout is a property of the modem. It is not a property of the *slot*. Once a modem has
+been seen, `pathDevices` goes on being handed `wwan0` whatever ModemManager and
+NetworkManager now say, so `/reach/state` keeps reporting a cellular path on an interface
+that has been unplugged, and the Cellular tab draws a green `READY` lamp over the words
+"No modem found".
+
+Visible in `docs/console/capture/network-cellular-without-modem.*.png`, which is why those
+two pictures are read with this entry beside them. On a board that never had a modem — the
+hardware this was found on — the tab reads `NO MODEM` correctly, so it is a defect about
+hardware being *removed* rather than about hardware being absent.
+
+R-NET-14 did not close it, and deliberately. `pathsDown` names a path down only when
+NetworkManager lists its interface in a state it knows to be not-up; when a modem is
+unplugged neither `wwan0` nor `cdc-wdm0` is listed at all, so nothing has been established
+and nothing is claimed. Fixing this means deciding what a daemon should do when the
+hardware under a cached reading disappears — re-read on every call, invalidate on a
+ModemManager signal, or expire the cache — and that changes reach behaviour, which is a
+decision of its own rather than a consequence of this one.

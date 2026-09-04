@@ -110,6 +110,10 @@ function bench(opts: {
     },
     counters: read,
     devices: async () => devices,
+    // The watch never asks — `state()` is the only caller — and a bench that
+    // answered anything else would be describing a board this file is not
+    // about.
+    down: async () => [],
     order: () => opts.order ?? ["ethernet", "modem"],
     holding: async () => {
       if (opts.inUseThrows === true) throw new Error("NetworkManager is not answering");

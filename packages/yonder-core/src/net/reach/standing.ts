@@ -8,7 +8,27 @@ export type PathStanding =
   | "standing-by"   // works, but something above it in the order is in use
   | "testing"       // stopped receiving; being tested right now
   | "no-route-out"  // stood down: reached nothing when tested
+  | "down"          // the interface is there and it is not up
   | "absent";       // no such interface on this board
+
+/**
+ * Why `down` is not `absent`, and why it is not `standing-by` either.
+ *
+ * Three conditions, and until this existed two of them shared a sentence. A
+ * board with an ethernet port and no cable reported `standing-by` with
+ * evidence `untested`, which the console drew as "Up, and not yet tested —
+ * nothing has established that it reaches anything". Every word of that is
+ * wrong about a port NetworkManager has in `unavailable` with no carrier and
+ * no address: it is not up, and its condition is not unknown. It was measured
+ * saying exactly that on a real board (R-NET-14).
+ *
+ *  - `absent` — there is no such interface. Nothing to say about it at all.
+ *  - `down` — there is one, and it is not up. **Known**, and not a fault: an
+ *    aircraft flies with its ethernet unplugged.
+ *  - `standing-by` with evidence `untested` — it is up, and nothing has
+ *    established whether anything completes over it. That sentence was
+ *    written for this case and now only ever means it.
+ */
 
 export interface PathReport {
   path: PathName;

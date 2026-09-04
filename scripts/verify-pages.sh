@@ -90,7 +90,7 @@ FAKE
 # Unplugging a modem takes its control port away from NetworkManager too.
 #
 # **That alone does not make the no-modem pages read `NO MODEM`, and the
-# reason is a defect in the daemon rather than in this file.** `modemInterface`
+# reason is a defect in the daemon rather than in this file (K-41).** `modemInterface`
 # in daemon/server.ts remembers the modem's net interface for the life of the
 # process — `if (modemNet !== null) return modemNet;` — so once a modem has
 # been seen, `pathDevices` keeps being handed `wwan0` whatever ModemManager
@@ -101,6 +101,14 @@ FAKE
 # the hardware this was found on did — the tab reads `NO MODEM` correctly.
 MODEM_PRESENT="$ROOT/modem-present"
 echo 1 > "$MODEM_PRESENT"
+
+# What NetworkManager says about the wired port, read on every call the way
+# $MODEM_PRESENT is, so the gate can photograph a board with nothing plugged
+# into it. `unavailable` is the word a real board reported for an eth0 with no
+# carrier, and it is the state the `Way out` panel described as "Up, and not
+# yet tested" until R-NET-14.
+ETH_STATE="$ROOT/eth-state"
+echo connected > "$ETH_STATE"
 
 # nmcli, reporting the board this project is built for: a wired port, the
 # radio, and the modem's control port. It used to list only `lo` and `wlan0`,
@@ -118,7 +126,7 @@ cat > "$BIN/nmcli" <<FAKE
 case "\$*" in
     *"device status"*)
         printf 'lo:loopback:connected:lo\n'
-        printf 'eth0:ethernet:connected:Wired connection 1\n'
+        printf 'eth0:ethernet:%s:Wired connection 1\n' "\$(cat "$ETH_STATE")"
         printf 'wlan0:wifi:disconnected:\n'
         # The control port goes with the modem. See \$MODEM_PRESENT above.
         [ "\$(cat "$MODEM_PRESENT")" = "1" ] \\
@@ -550,9 +558,11 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
     #
     # R-UI-12: a surface that hides part of itself is captured in each of
     # those parts, and a panel drawn from live state hides its other states
-    # exactly the way a tab hides its siblings. The `Way out` rows have three,
-    # and they are three different *shapes* — the sentences are different
-    # lengths and wrap differently, which is how the defect this gate is for
+    # exactly the way a tab hides its siblings. The `Way out` rows have four —
+    # three of them driven here by probing, and the fourth by taking the wired
+    # port down; see capture_unplugged below. Each is a different *shape* —
+    # the sentences are different lengths and wrap differently, and the lamp
+    # captions are different widths — which is how the defect this gate is for
     # showed up in the first place: an interface name right-aligned in its own
     # column, visible only when the qualifier beneath it was the wider line.
     #
@@ -616,7 +626,7 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
         # Read the lamp in these two pictures knowing what is behind it: it
         # says READY, and it should say NO MODEM. `/reach/state` is still
         # naming `wwan0` here because the daemon caches that name for the life
-        # of the process — see $MODEM_PRESENT above. Everything else on the
+        # of the process — K-41, and see $MODEM_PRESENT above. Everything else on the
         # pages is what this capture is for, and the gauges are the part that
         # had to be looked at.
         for without in status:status network-cellular:network-cellular; do
@@ -639,6 +649,49 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
         sleep 7
         expect_missing "the modem is back for the rest of the run" \
             '"mode":"absent"' "$(sock /modem/state)"
+    }
+
+    # The `Way out` panel's fourth row shape: a wired port with nothing
+    # plugged into it (R-NET-14, R-UI-12).
+    #
+    # This is the state an operator found on a real board, where the panel
+    # said "Up, and not yet tested — nothing has established that it reaches
+    # anything" about an eth0 NetworkManager had in `unavailable` with no
+    # carrier and no address. The sentence asserted a condition the daemon had
+    # not established, and the condition was in the device list it had already
+    # read.
+    #
+    # It is a different *shape* as well as a different sentence — DOWN is a
+    # shorter lamp caption than NOT YET TESTED and the qualifier beneath it
+    # wraps differently — which is exactly what R-UI-12 asks to see a picture
+    # of.
+    capture_unplugged() {
+        echo unavailable > "$ETH_STATE"
+        # One poll of `yonder-modem-state`, so the panel is showing this board
+        # and not the one before it.
+        sleep 7
+        expect_contains "the wired port reports itself down, not up and untested" \
+            '"standing":"down"' "$(sock /reach/state)"
+        expect_missing "and nothing on this board claims to be up" \
+            "Up, and not yet tested" "$(sock /reach/state)"
+        if node "$REPO/scripts/capture-pages.mjs" \
+                --base-url "http://127.0.0.1:$PORT" \
+                --password "$PASSWORD" \
+                --palette "$1" \
+                --only network-interfaces \
+                --as network-interfaces-down \
+                --artifacts "$REPO/vendor/capture" \
+                ${ACCEPT_SHAPE:+--accept}; then
+            ok "the $1 palette: the Way out rows with the wired port unplugged"
+        else
+            bad "the $1 palette: the Way out rows with the wired port unplugged, see above"
+        fi
+        # Plug it back in before anything else is captured: every other page in
+        # this run describes a board whose wired port is up.
+        echo connected > "$ETH_STATE"
+        sleep 7
+        expect_missing "the wired port is back for the rest of the run" \
+            '"standing":"down"' "$(sock /reach/state)"
     }
 
     # Status's third shape, and the one the confirmation timer exists for
@@ -706,6 +759,7 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
         capture_state night 1 not-reaching
         capture_state night 0 reaching
         capture_without_modem night
+        capture_unplugged night
         capture_status_pending night
     else
         bad "the console never regenerated theme.css as night, so it was not captured"
@@ -719,6 +773,7 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
         capture_state day 1 not-reaching
         capture_state day 0 reaching
         capture_without_modem day
+        capture_unplugged day
         capture_status_pending day
     else
         bad "the console is still in the night palette; a held run will be wrong"

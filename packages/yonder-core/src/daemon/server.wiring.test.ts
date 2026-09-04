@@ -334,6 +334,47 @@ describe("the daemon serves what M3a assembles", () => {
   });
 
   /**
+   * The defect, at the socket, on the board it was found on (R-NET-14).
+   *
+   * `eth0` in `unavailable`: no carrier, no address, nothing plugged into it.
+   * What `GET /reach/state` answered was
+   *
+   *     "standing":"standing-by","evidence":"untested",
+   *     "detail":"Up, and not yet tested — nothing has established that it
+   *               reaches anything"
+   *
+   * — a sentence asserting a state the daemon had not established, about an
+   * interface whose condition it could read directly from the device list it
+   * had already fetched.
+   */
+  it("does not say a port with no cable in it is up", async () => {
+    const seen: string[][] = [];
+    const unplugged: CommandRunner = async (argv) => {
+      if (argv[0] === "nmcli" && argv.includes("device") && argv.includes("status")) {
+        seen.push(argv);
+        return { code: 0, stdout: "eth0:ethernet:unavailable:\n", stderr: "" };
+      }
+      return boardRunner(seen)(argv);
+    };
+    const server = await startServer({
+      socketPath, configPath, journalPath,
+      renderers: [noop], secretsPath, runner: unplugged, counters: noCounters,
+    });
+    try {
+      const res = await call(socketPath, "GET", "/reach/state");
+      const state = res.body as { paths: { path: string; device: string | null; standing: string; detail: string }[] };
+      const ethernet = state.paths.find((p) => p.path === "ethernet");
+      expect(ethernet?.standing).toBe("down");
+      expect(ethernet?.detail).not.toMatch(/\bUp\b/);
+      // And still not `absent`: the port is on the board. The three
+      // conditions are three.
+      expect(ethernet?.device).toBe("eth0");
+    } finally {
+      await server.close();
+    }
+  });
+
+  /**
    * R-CEL-10. Without this the modem reports only a coarse quality
    * percentage, which on the measured board read 60 and then 29 while the
    * real numbers moved three dB — so a page bound to it would show a signal

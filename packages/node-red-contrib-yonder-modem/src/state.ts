@@ -63,6 +63,11 @@ function pathTone(standing: PathStanding, evidence: PathEvidence): "good" | "bad
   // A path that is not on this board is not a fault. Asked before evidence,
   // because an absent path has none either way.
   if (standing === "absent") return "neutral";
+  // Also neutral, and for the same reason: an aircraft flies with its
+  // ethernet unplugged. A path that is not up is a known condition, not a
+  // fault, and a red lamp on every flight would teach an operator to ignore
+  // the row (R-NET-14).
+  if (standing === "down") return "neutral";
   if (standing === "no-route-out") return "bad";
   if (evidence === "reaching") return "good";
   if (evidence === "not-reaching") return "bad";

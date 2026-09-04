@@ -1,0 +1,126 @@
+{
+  "platform": "darwin",
+  "viewport": {
+    "w": 1280,
+    "h": 900
+  },
+  "widgets": [
+    {
+      "key": "nrdb-ui-group",
+      "box": {
+        "x": 268,
+        "y": 124,
+        "w": 1000,
+        "h": 562
+      }
+    },
+    {
+      "key": "nrdb-ui-text.nrdb-ui-widget#0",
+      "box": {
+        "x": 285,
+        "y": 141,
+        "w": 477,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-annunciator#0",
+      "box": {
+        "x": 774,
+        "y": 141,
+        "w": 477,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-text.nrdb-ui-widget.yonder-qualifier#0",
+      "box": {
+        "x": 285,
+        "y": 201,
+        "w": 966,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-text.nrdb-ui-widget#1",
+      "box": {
+        "x": 285,
+        "y": 261,
+        "w": 477,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-annunciator#1",
+      "box": {
+        "x": 774,
+        "y": 261,
+        "w": 477,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-text.nrdb-ui-widget.yonder-qualifier#1",
+      "box": {
+        "x": 285,
+        "y": 321,
+        "w": 966,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-text.nrdb-ui-widget#2",
+      "box": {
+        "x": 285,
+        "y": 381,
+        "w": 477,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-annunciator#2",
+      "box": {
+        "x": 774,
+        "y": 381,
+        "w": 477,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-text.nrdb-ui-widget.yonder-qualifier#2",
+      "box": {
+        "x": 285,
+        "y": 441,
+        "w": 966,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-button.nrdb-ui-widget",
+      "box": {
+        "x": 285,
+        "y": 501,
+        "w": 477,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-text.nrdb-ui-widget#3",
+      "box": {
+        "x": 285,
+        "y": 561,
+        "w": 966,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-text.nrdb-ui-widget#4",
+      "box": {
+        "x": 285,
+        "y": 621,
+        "w": 640,
+        "h": 48
+      }
+    }
+  ]
+}

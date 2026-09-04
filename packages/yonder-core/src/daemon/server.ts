@@ -17,7 +17,7 @@ import { MmcliClient } from "../net/modem/mmcli/client.js";
 import { modemState } from "../net/modem/state.js";
 import { Standing, type StandingView } from "../net/reach/standing.js";
 import { commandProbe } from "../net/reach/probe.js";
-import { ReachMonitor, pathDevices, pathsHolding } from "../net/reach/monitor.js";
+import { ReachMonitor, pathDevices, pathsDown, pathsHolding } from "../net/reach/monitor.js";
 import { ReachWatch } from "../net/reach/watch.js";
 import type { CounterReader } from "../net/reach/counters.js";
 import type { PathName } from "../net/reach/standing.js";
@@ -609,6 +609,16 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
       const config = reachConfig();
       const [devices, net] = await Promise.all([client.devices(), modemInterface(config)]);
       return pathDevices(config, devices, net);
+    },
+    // What NetworkManager says about the interfaces themselves, so a port
+    // with no cable in it is reported as down rather than as up and untested
+    // (R-NET-14). The control port is passed as the modem's second name for
+    // the same reason `holding` passes it: NetworkManager reports a state for
+    // `cdc-wdm0` and has no entry at all for the `wwan0` the bytes go out of.
+    down: async () => {
+      const config = reachConfig();
+      const [devices, net] = await Promise.all([client.devices(), modemInterface(config)]);
+      return pathsDown(devices, pathDevices(config, devices, net), pathDevices(config, devices));
     },
     order: () => reachOrder(reachConfig()),
     holding: async () => {
