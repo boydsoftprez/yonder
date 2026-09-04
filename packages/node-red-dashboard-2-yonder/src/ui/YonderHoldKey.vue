@@ -80,9 +80,18 @@ export default {
          * figure that cannot move is the requirement failing rather than a
          * cosmetic slip. The prop stays as the fall-back, so the key says
          * something before the first read arrives.
+         *
+         * **"not known yet" when neither says anything.** The shipped wiring
+         * configures no fall-back cost — the editor field is `""` — so an
+         * empty string used to reach `v-if="cost"` and draw nothing at all: a
+         * key with no cost on it, drawn exactly like one with nothing wrong.
+         * That is a different fact from "this camera has no full-rate
+         * stream", which `holdCost` states in this same slot once it is
+         * known, and the two must read as different sentences.
          */
         cost () {
-            return typeof this.sent.cost === 'string' ? this.sent.cost : this.props.cost
+            if (typeof this.sent.cost === 'string') return this.sent.cost
+            return this.props.cost || 'not known yet'
         },
         /**
          * Whether there is anything to hold.
@@ -97,9 +106,18 @@ export default {
          * Drawn and disabled rather than hidden, because a key that vanishes
          * leaves an operator wondering where it went, and `cost` is where the
          * answer goes.
+         *
+         * **Fails closed before the first message.** `sent.available` is
+         * `undefined` until `payload.display.fullRate` has been read at least
+         * once — a couple of seconds on an ordinary board, and until then
+         * `!== false` read the gap as available, with `cost` showing nothing
+         * either: a camera with no RTSP output was briefly pressable, and
+         * looked exactly like one that was ready. "Not known yet" and "this
+         * camera cannot" are different facts, and only `=== true` keeps the
+         * key from being pressed on the strength of the first one.
          */
         available () {
-            return this.sent.available !== false
+            return this.sent.available === true
         }
     },
     created () {

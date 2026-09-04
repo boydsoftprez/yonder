@@ -93,6 +93,37 @@ describe("mounting", () => {
  * stream it asks for exists.
  */
 describe("the cost, and whether there is anything to hold", () => {
+  /**
+   * **Both defaults used to fail open.** `sent.available !== false` read
+   * `undefined` as available, and an empty configured cost meant
+   * `v-if="cost"` drew nothing at all — so for the couple of seconds before
+   * the first read, a camera with no RTSP output was pressable and looked
+   * exactly like one that was ready. "Not known yet" and "this camera
+   * cannot" are different facts; only the second one means pressing is a 404
+   * waiting to happen, and the honest state before either is known is
+   * unavailable.
+   */
+  it("is disabled, and says 'not known yet', before any message has arrived", () => {
+    const { wrapper, emit } = mountKey();
+    expect(wrapper.attributes("disabled")).toBeDefined();
+    expect(wrapper.find(".y-hold__cost").text()).toBe("not known yet");
+
+    // Belt as well as the attribute, as the known-unavailable case below
+    // does: this component must not be relying on the browser alone.
+    fire(wrapper, "pointerdown");
+    fire(wrapper, "pointerup");
+    expect(emit).not.toHaveBeenCalled();
+  });
+
+  it("is enabled with its cost once a message names both", () => {
+    const { wrapper, emit } = mountKey({ available: true, cost: "2.07 Mb/s while held" });
+    expect(wrapper.attributes("disabled")).toBeUndefined();
+    expect(wrapper.find(".y-hold__cost").text()).toBe("2.07 Mb/s while held");
+
+    fire(wrapper, "pointerdown");
+    expect(emit).toHaveBeenCalledTimes(1);
+  });
+
   it("draws the configured cost before a message has arrived", () => {
     const { wrapper } = mountKey(undefined, { cost: "2.07 Mb/s while held" });
     expect(wrapper.find(".y-hold__cost").text()).toBe("2.07 Mb/s while held");
@@ -132,16 +163,20 @@ describe("the cost, and whether there is anything to hold", () => {
   });
 });
 
+// `{ available: true }` throughout this file from here on: these tests are
+// about the press/release state machine, not about R-UI-15's guard, and the
+// guard above now fails closed by default — a bare `mountKey()` would leave
+// every `down()` below a no-op.
 describe("one press, one release", () => {
   it("a press emits exactly one down, with the action:down payload", () => {
-    const { wrapper, emit } = mountKey();
+    const { wrapper, emit } = mountKey({ available: true });
     fire(wrapper, "pointerdown");
     expect(emit).toHaveBeenCalledTimes(1);
     expect(emit).toHaveBeenCalledWith("widget-action", "n1", { payload: "fullrate:down", topic: LABEL });
   });
 
   it("pointerup releases, with the action:up payload", () => {
-    const { wrapper, emit } = mountKey();
+    const { wrapper, emit } = mountKey({ available: true });
     fire(wrapper, "pointerdown");
     fire(wrapper, "pointerup");
     expect(emit).toHaveBeenCalledTimes(2);
@@ -149,7 +184,7 @@ describe("one press, one release", () => {
   });
 
   it("pointercancel releases — the browser taking the gesture away", () => {
-    const { wrapper, emit } = mountKey();
+    const { wrapper, emit } = mountKey({ available: true });
     fire(wrapper, "pointerdown");
     fire(wrapper, "pointercancel");
     expect(emit).toHaveBeenCalledTimes(2);
@@ -157,7 +192,7 @@ describe("one press, one release", () => {
   });
 
   it("pointerleave releases — a finger or cursor dragged off the key while held", () => {
-    const { wrapper, emit } = mountKey();
+    const { wrapper, emit } = mountKey({ available: true });
     fire(wrapper, "pointerdown");
     fire(wrapper, "pointerleave");
     expect(emit).toHaveBeenCalledTimes(2);
@@ -165,7 +200,7 @@ describe("one press, one release", () => {
   });
 
   it("a genuine visibilitychange to hidden releases, with no explicit release", () => {
-    const { wrapper, emit } = mountKey();
+    const { wrapper, emit } = mountKey({ available: true });
     fire(wrapper, "pointerdown");
     goHidden();
     expect(emit).toHaveBeenCalledTimes(2);
@@ -175,7 +210,7 @@ describe("one press, one release", () => {
 
 describe("duplicate edges collapse", () => {
   it("two release events for one press emit exactly one up", () => {
-    const { wrapper, emit } = mountKey();
+    const { wrapper, emit } = mountKey({ available: true });
     fire(wrapper, "pointerdown");
     fire(wrapper, "pointerleave");
     // The browser can still deliver the pointerup a moment after a
@@ -187,7 +222,7 @@ describe("duplicate edges collapse", () => {
   });
 
   it("a second down with no release between does not emit twice", () => {
-    const { wrapper, emit } = mountKey();
+    const { wrapper, emit } = mountKey({ available: true });
     fire(wrapper, "pointerdown");
     fire(wrapper, "pointerdown");
     expect(emit).toHaveBeenCalledTimes(1);
@@ -197,7 +232,7 @@ describe("duplicate edges collapse", () => {
 
 describe("teardown", () => {
   it("a component torn down mid-hold still releases", () => {
-    const { wrapper, emit } = mountKey();
+    const { wrapper, emit } = mountKey({ available: true });
     fire(wrapper, "pointerdown");
     wrapper.unmount();
     expect(emit).toHaveBeenCalledTimes(2);
