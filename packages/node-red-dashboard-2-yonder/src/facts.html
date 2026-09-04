@@ -1,0 +1,55 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!--
+  The editor half of the facts row. Node-RED finds this by basename beside the
+  node's .js; without it the widget registers and shows as "unknown node".
+  A form and a registration, nothing else (CLAUDE.md rule 2, R-UI-01).
+-->
+<script type="text/html" data-template-name="ui-yonder-facts">
+  <div class="form-row"><label for="node-input-group"><i class="fa fa-table"></i> Group</label>
+    <input type="text" id="node-input-group" /></div>
+  <div class="form-row"><label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name" /></div>
+  <div class="form-row"><label for="node-input-title"><i class="fa fa-font"></i> Title</label>
+    <input type="text" id="node-input-title" placeholder="(none)" /></div>
+  <div class="form-row"><label for="node-input-facts"><i class="fa fa-list"></i> Facts</label></div>
+  <div class="form-row">
+    <textarea id="node-input-facts" rows="7" style="width:100%;font-family:monospace"
+      placeholder='[{"label":"aim","state":"not-offered"},{"label":"zoom","state":"advertised","reason":"accepted, does not reshape the feed"}]'></textarea>
+  </div>
+  <div class="form-tips">
+    <b>R-UI-15: nothing is silently missing.</b> One row per capability this
+    camera does not answer. <code>not-offered</code> draws a stated fact in
+    the neutral tone: the camera does not have it, and nothing is wrong.
+    <code>advertised</code> draws a fault in the caution tone and should
+    carry a <code>reason</code> &mdash; the device lists the capability,
+    accepts the command, and does nothing. Actions are the exception this row
+    does not carry: a camera with no Record has no Record key, stated on the
+    soft-key rail instead.
+  </div>
+</script>
+<script type="text/html" data-help-name="ui-yonder-facts">
+<p>What this camera cannot do, stated where the control would have been
+(R-UI-15).</p>
+<p><code>not-offered</code> is a fact in the neutral tone. <code>advertised</code>
+is a fault in the caution tone, carrying its <code>reason</code>: the device
+lists the capability, accepts the command, and does nothing &mdash; it is the
+state most likely to be got wrong in code, because on the wire it is
+indistinguishable from success.</p>
+<p>Read-only: this widget has no output, because a facts row that could emit
+is a facts row that could originate a command.</p>
+</script>
+<script type="text/javascript">
+  RED.nodes.registerType("ui-yonder-facts", {
+    category: "dashboard 2", color: "#c7e0d4",
+    defaults: {
+      name: { value: "" },
+      group: { type: "ui-group", required: true },
+      order: { value: 0 }, width: { value: 0 }, height: { value: 0 },
+      title: { value: "" }, facts: { value: "" }
+    },
+    inputs: 1, outputs: 0,
+    icon: "font-awesome/fa-list",
+    paletteLabel: "yonder facts",
+    label: function () { return this.name || this.title || "yonder facts"; }
+  });
+</script>

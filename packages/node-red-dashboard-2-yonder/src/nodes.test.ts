@@ -17,6 +17,8 @@ const identityNode = (await import("./identity.js")).default ?? await import("./
 const sparklineNode = (await import("./sparkline.js")).default ?? await import("./sparkline.js");
 const holdkeyNode = (await import("./holdkey.js")).default ?? await import("./holdkey.js");
 const pictureNode = (await import("./picture.js")).default ?? await import("./picture.js");
+const factsNode = (await import("./facts.js")).default ?? await import("./facts.js");
+const budgetNode = (await import("./budget.js")).default ?? await import("./budget.js");
 
 /**
  * What is tested here, and what honestly cannot be.
@@ -384,5 +386,45 @@ describe("the picture", () => {
       .toMatchObject({ stillsUrl: "/stills/cam0.jpg" });
     expect(build(pictureNode as (RED: RED) => void, { path: "cam0" }).props)
       .toMatchObject({ stillsUrl: "" });
+  });
+});
+
+describe("the facts row and the budget", () => {
+  it("registers both without onAction, because both are read-only", () => {
+    // A facts row that could emit is a facts row that could originate a
+    // command. Read-only instruments leave it off, as every other one does.
+    expect(build(factsNode as (RED: RED) => void, { facts: "[]" }).events).toEqual({});
+    expect(build(budgetNode as (RED: RED) => void, { segments: "[]" }).events).toEqual({});
+  });
+
+  it("draws nothing, and says so, when the facts list is malformed", () => {
+    // A widget that cannot render its own configuration must not stop the
+    // console starting — a console that will not start is a device the
+    // operator cannot reach. `list()` already has this behaviour; this is the
+    // assertion that these two widgets use it rather than JSON.parse.
+    const { node, props } = build(factsNode as (RED: RED) => void, { facts: "{not json" });
+    expect(node.error).toHaveBeenCalledTimes(1);
+    expect(props).toMatchObject({ facts: [] });
+  });
+
+  it("reads a facts list from the editor form", () => {
+    const facts = JSON.stringify([
+      { label: "aim", state: "not-offered" },
+      { label: "zoom", state: "advertised", reason: "accepted, does not reshape the feed" },
+    ]);
+    const { props } = build(factsNode as (RED: RED) => void, { title: "This camera has no", facts });
+    expect(props!.facts).toHaveLength(2);
+    expect((props!.facts as { state: string }[])[1].state).toBe("advertised");
+  });
+
+  it("takes the uplink capacity as the mark the segments are drawn against", () => {
+    const { props } = build(budgetNode as (RED: RED) => void, { label: "Uplink", capacityKbps: "5000", segments: "[]" });
+    expect(props).toMatchObject({ capacityKbps: 5000 });
+  });
+
+  it("has no capacity rather than a false one when the field is blank", () => {
+    // Zero is the honest answer: nothing has measured this path yet, and a
+    // made-up ceiling is a mark an operator would trust.
+    expect(build(budgetNode as (RED: RED) => void, { segments: "[]" }).props).toMatchObject({ capacityKbps: 0 });
   });
 });

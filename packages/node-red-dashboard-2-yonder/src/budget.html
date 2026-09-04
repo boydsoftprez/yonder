@@ -1,0 +1,59 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!--
+  The editor half of the uplink budget track. Node-RED finds this by basename
+  beside the node's .js; without it the widget registers and shows as "unknown
+  node". A form and a registration, nothing else (CLAUDE.md rule 2, R-UI-01).
+-->
+<script type="text/html" data-template-name="ui-yonder-budget">
+  <div class="form-row"><label for="node-input-group"><i class="fa fa-table"></i> Group</label>
+    <input type="text" id="node-input-group" /></div>
+  <div class="form-row"><label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name" /></div>
+  <div class="form-row"><label for="node-input-label"><i class="fa fa-font"></i> Label</label>
+    <input type="text" id="node-input-label" placeholder="Uplink" /></div>
+  <div class="form-row"><label for="node-input-capacityKbps"><i class="fa fa-arrows-h"></i> Capacity (kb/s)</label>
+    <input type="number" id="node-input-capacityKbps" placeholder="(none measured)" /></div>
+  <div class="form-row"><label for="node-input-segments"><i class="fa fa-bar-chart"></i> Segments</label></div>
+  <div class="form-row">
+    <textarea id="node-input-segments" rows="6" style="width:100%;font-family:monospace"
+      placeholder='[{"label":"cam0 preview","kbps":374},{"label":"cam0 full rate","kbps":1888}]'></textarea>
+  </div>
+  <div class="form-tips">
+    <b>R-VID-11, R-UI-09.</b> One segment per output leaving over this path;
+    the total is drawn against Capacity, and anything past it is hatched in
+    the fault tone. Leave Capacity blank for a path nothing has measured yet
+    &mdash; zero is the honest answer, never a made-up ceiling an operator
+    would trust.
+    <br/>Figures are kb/s <b>at IP</b>, the layer this path actually carries:
+    an 8&nbsp;s steady-state capture put one 2000&nbsp;kb/s stream at
+    2003&nbsp;kb/s of elementary stream, 2022&nbsp;kb/s once RTP framing is
+    added, and roughly 2067&nbsp;kb/s at IP and UDP.
+  </div>
+</script>
+<script type="text/html" data-help-name="ui-yonder-budget">
+<p>What is leaving, against what the path can carry (R-VID-11, R-UI-09).</p>
+<p>One track: a segment per output, a mark at Capacity, and anything past the
+mark hatched in the fault tone. A readout, not an input &mdash; with a slider
+you cannot tell whether the bar shows what you asked for or what you are
+getting, so bitrate is chosen with a control beside it.</p>
+<p>Figures are kb/s at IP. Rate control itself lands within 0.2% of a
+configured target; the gap between that figure and this track is framing, not
+the encoder missing its mark.</p>
+</script>
+<script type="text/javascript">
+  RED.nodes.registerType("ui-yonder-budget", {
+    category: "dashboard 2", color: "#c7e0d4",
+    defaults: {
+      name: { value: "" },
+      group: { type: "ui-group", required: true },
+      order: { value: 0 }, width: { value: 0 }, height: { value: 0 },
+      label: { value: "" },
+      capacityKbps: { value: "", validate: RED.validators.number(true) },
+      segments: { value: "" }
+    },
+    inputs: 1, outputs: 0,
+    icon: "font-awesome/fa-bar-chart",
+    paletteLabel: "yonder budget",
+    label: function () { return this.name || this.label || "yonder budget"; }
+  });
+</script>

@@ -41,3 +41,34 @@ export interface SoftKey {
   /** Marks the key for the page currently shown. */
   active?: boolean;
 }
+
+/**
+ * One row of the facts row (R-UI-15).
+ *
+ * Only the two states of `Capability<T>` (`capability.ts`, yonder-core) that
+ * are *not* `present` ever become one of these — a capability the camera
+ * answered gets a real control, not a row here. `not-offered` and
+ * `advertised` keep those names on purpose, so the vocabulary a control
+ * checks and the vocabulary this row draws are the same union rather than a
+ * translation of it.
+ */
+export interface CapabilityFact {
+  label: string;
+  /**
+   * `not-offered` is a fact in the neutral tone: the camera does not have
+   * this, and nothing is wrong. `advertised` is a fault in the caution
+   * tone: the device lists the capability, accepts the command, and does
+   * nothing — carried in `reason`, because on the wire it is
+   * indistinguishable from success.
+   */
+  state: "not-offered" | "advertised";
+  /** Required in spirit for `advertised`; the component draws its absence. */
+  reason?: string;
+}
+
+/** One output leaving over the path the budget track measures (R-VID-11). */
+export interface BudgetSegment {
+  label: string;
+  /** At IP, the layer an uplink actually carries — see `budget.ts`. */
+  kbps: number;
+}
