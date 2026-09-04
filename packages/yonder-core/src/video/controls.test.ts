@@ -15,8 +15,8 @@ const NODE = "/dev/video0";
 const BENCH_CAPS: CameraCapabilities = {
   formats: notOffered(), zoom: notOffered(), focus: notOffered(), exposure: notOffered(),
   whiteBalance: notOffered(),
-  brightness: present({ min: -64, max: 64, step: 1, default: 0, current: 0 }),
-  contrast: present({ min: 0, max: 95, step: 1, default: 0, current: 0 }),
+  brightness: present({ min: -64, max: 64, step: 1, default: 0, current: 0, inactive: false }),
+  contrast: present({ min: 0, max: 95, step: 1, default: 0, current: 0, inactive: false }),
   rotation: notOffered(),
   aim: notOffered(), recording: notOffered(), stills: notOffered(),
 };
@@ -127,7 +127,7 @@ describe("applyControls", () => {
     const store = { rotate: 0 };
     const caps: CameraCapabilities = {
       ...BENCH_CAPS,
-      rotation: present({ min: 0, max: 270, step: 90, default: 0, current: 0 }),
+      rotation: present({ min: 0, max: 270, step: 90, default: 0, current: 0, inactive: false }),
     };
     const result = await applyControls({
       node: NODE,

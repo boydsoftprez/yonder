@@ -34,7 +34,7 @@ function camera(over: Partial<Camera> = {}): Camera {
   } as Camera;
 }
 
-const range = { min: 0, max: 100, step: 1, default: 50, current: 50 };
+const range = { min: 0, max: 100, step: 1, default: 50, current: 50, inactive: false };
 
 describe("atIp", () => {
   /**

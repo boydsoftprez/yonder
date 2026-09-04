@@ -72,6 +72,25 @@ export interface ControlRange {
   readonly default: number;
   /** What the device says it is *now* — never what was last sent. */
   readonly current: number;
+  /**
+   * Whether another setting has this one gated right now (R-UI-21).
+   * **Not a fault** — the device still answers a range for it, so the page
+   * draws it inert and names the setting that has charge of it, rather than
+   * hiding it or drawing a control nothing will move. Non-optional and
+   * `false` when nothing gates it, so a caller never has to tell "not gated"
+   * apart from "the parser did not look".
+   */
+  readonly inactive: boolean;
+  /**
+   * The entries a `(menu)` control actually offers, in the device's own
+   * order (R-CAM-14) — never widened to fill `min…max`: the bench camera's
+   * `auto_exposure` reports `min=0 max=3` but lists only ids 1 and 3, and
+   * expanding the range would put two modes on the page it does not have.
+   * Absent for a control that is not a menu, and for a menu whose entry
+   * lines did not parse — an empty array would claim the device offers a
+   * menu with nothing in it, which is a different and false claim.
+   */
+  readonly menu?: readonly { id: number; label: string }[];
 }
 
 /** What a gimbal can reach. M5 fills it; M4 always reports `not-offered`. */

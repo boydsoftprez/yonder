@@ -119,7 +119,7 @@ function fixtureCapabilities(): CameraCapabilities {
     formats: present(FORMATS),
     // `current` is what the device says it is *now*, and the route hands it
     // straight back: R-CTL-10 is a read-back, never a form default.
-    brightness: present({ min: 0, max: 255, step: 1, default: 128, current: 96 }),
+    brightness: present({ min: 0, max: 255, step: 1, default: 128, current: 96, inactive: false }),
   };
 }
 
@@ -1679,7 +1679,7 @@ describe("the camera routes", () => {
       ...detection.found[0],
       capabilities: {
         ...fixtureCapabilities(),
-        brightness: present({ min: 0, max: 255, step: 1, default: 128, current: 201 }),
+        brightness: present({ min: 0, max: 255, step: 1, default: 128, current: 201, inactive: false }),
       },
     };
     const r = await provisioned({ cameras: detection, reprobed })(
@@ -1976,7 +1976,7 @@ describe("POST /cameras/:id/controls", () => {
       ...detection.found[0],
       capabilities: {
         ...fixtureCapabilities(),
-        brightness: present({ min: 0, max: 255, step: 1, default: 128, current: 64 }),
+        brightness: present({ min: 0, max: 255, step: 1, default: 128, current: 64, inactive: false }),
       },
     };
     const r = provisioned({

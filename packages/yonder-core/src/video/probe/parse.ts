@@ -74,14 +74,33 @@ export function parseFormats(stdout: string): VideoFormat[] {
   return out;
 }
 
-const CONTROL_LINE = /^\s*(\w+)\s+0x[0-9a-f]+\s+\((?:int|menu|bool)\)\s*:\s*(.*)$/;
+const CONTROL_LINE = /^\s*(\w+)\s+0x[0-9a-f]+\s+\((int|menu|bool)\)\s*:\s*(.*)$/;
+
+/**
+ * `1: Manual Mode`, indented beneath a `(menu)` control. Never confused with
+ * one: `CONTROL_LINE` needs a hex id and a parenthesised type, which no menu
+ * entry line carries, so the two patterns never compete for the same line —
+ * a heading or a blank line matches neither and simply ends the run of
+ * entries below.
+ */
+const MENU_ENTRY_LINE = /^\s+(\d+):\s+(.+)$/;
+
+/**
+ * `flags=inactive, has-min-max`. Captured whole so the value can be split on
+ * commas and matched *word* for word — `flags=deactivated` shares no word
+ * with `inactive` and must read as ungated, which a substring test on the
+ * raw line would get wrong.
+ */
+const FLAGS_LINE = /\bflags=([\w\-, ]+)/;
 
 export function parseControls(stdout: string): Map<string, ControlRange> {
   const out = new Map<string, ControlRange>();
-  for (const line of stdout.split("\n")) {
-    const m = CONTROL_LINE.exec(line);
+  const lines = stdout.split("\n");
+
+  for (let i = 0; i < lines.length; i++) {
+    const m = CONTROL_LINE.exec(lines[i]);
     if (!m) continue;
-    const [, name, rest] = m;
+    const [, name, kind, rest] = m;
     const field = (key: string): number | null => {
       const f = new RegExp(`\\b${key}=(-?\\d+)`).exec(rest);
       return f ? Number(f[1]) : null;
@@ -91,12 +110,39 @@ export function parseControls(stdout: string): Map<string, ControlRange> {
     // default would be showing a form default by another name.
     const current = field("value");
     if (current === null) continue;
+
+    // R-UI-21: a control another control has charge of still answers its
+    // own range — it is gated, not a fault. `exposure_time_absolute` and
+    // `white_balance_temperature` both report this on the bench camera,
+    // gated by `auto_exposure` and `white_balance_automatic` respectively.
+    const flagsValue = FLAGS_LINE.exec(rest)?.[1];
+    const inactive = flagsValue !== undefined
+      && flagsValue.split(",").map((flag) => flag.trim()).includes("inactive");
+
+    // A `(menu)` control's entries are the indented lines that follow it,
+    // consumed here rather than left for a caller. R-CAM-14: kept only if
+    // the device actually listed them, never widened from min..max — see
+    // the field comment on `ControlRange.menu`.
+    let menu: { id: number; label: string }[] | undefined;
+    if (kind === "menu") {
+      const entries: { id: number; label: string }[] = [];
+      while (i + 1 < lines.length) {
+        const entry = MENU_ENTRY_LINE.exec(lines[i + 1]);
+        if (!entry) break;
+        entries.push({ id: Number(entry[1]), label: entry[2] });
+        i++;
+      }
+      if (entries.length > 0) menu = entries;
+    }
+
     out.set(name, {
       min: field("min") ?? 0,
       max: field("max") ?? 1,
       step: field("step") ?? 1,
       default: field("default") ?? current,
       current,
+      inactive,
+      menu,
     });
   }
   return out;

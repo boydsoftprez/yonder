@@ -119,13 +119,13 @@ describe("parseControls", () => {
     expect(b).toBeDefined();
     expect(b!.min).toBeLessThan(b!.max);
     expect(b!.step).toBeGreaterThan(0);
-    expect(b).toEqual({ min: -64, max: 64, step: 1, default: 0, current: 0 });
+    expect(b).toEqual({ min: -64, max: 64, step: 1, default: 0, current: 0, inactive: false });
   });
 
   it("reads a negative bound as negative", () => {
     // pan_absolute runs to -648000. A digits-only bound regex reads 648000.
     expect(controls.get("pan_absolute")).toEqual({
-      min: -648000, max: 648000, step: 3600, default: 0, current: 0,
+      min: -648000, max: 648000, step: 3600, default: 0, current: 0, inactive: false,
     });
   });
 
@@ -146,13 +146,50 @@ describe("parseControls", () => {
     // A bool prints only default= and value=. It is a control, not a parse
     // failure, and dropping it would hide a switch the camera offers.
     expect(controls.get("white_balance_automatic")).toEqual({
-      min: 0, max: 1, step: 1, default: 1, current: 1,
+      min: 0, max: 1, step: 1, default: 1, current: 1, inactive: false,
     });
   });
 
   it("returns an empty map rather than throwing on unreadable output", () => {
     expect(parseControls("").size).toBe(0);
     expect(parseControls("VIDIOC_QUERYCTRL: failed: Inappropriate ioctl").size).toBe(0);
+  });
+});
+
+describe("a control another control has charge of", () => {
+  it("reads flags=inactive as gated", () => {
+    const c = parseControls(
+      "         exposure_time_absolute 0x009a0902 (int)    : min=1 max=10000 step=1 default=156 value=156 flags=inactive, has-min-max");
+    expect(c.get("exposure_time_absolute")?.inactive).toBe(true);
+  });
+  it("a control with other flags, or none, is not gated", () => {
+    expect(parseControls("                     brightness 0x00980900 (int)    : min=-64 max=64 step=1 default=0 value=0 flags=has-min-max")
+      .get("brightness")?.inactive).toBe(false);
+    expect(parseControls("        white_balance_automatic 0x0098090c (bool)   : default=1 value=1")
+      .get("white_balance_automatic")?.inactive).toBe(false);
+  });
+  it("matches the flag as a whole word", () => {
+    expect(parseControls("                          gamma 0x00980910 (int)    : min=64 max=300 step=1 default=110 value=110 flags=deactivated")
+      .get("gamma")?.inactive).toBe(false);
+  });
+});
+
+describe("a menu keeps the entries the device offers", () => {
+  // The ELP offers exposure IDs 1 and 3. Expanding min…max into 0,1,2,3 would
+  // put two modes on the page the camera does not have.
+  it("keeps only the listed entries, with their labels", () => {
+    const c = parseControls([
+      "                  auto_exposure 0x009a0901 (menu)   : min=0 max=3 default=3 value=3",
+      "\t\t\t\t1: Manual Mode",
+      "\t\t\t\t3: Aperture Priority Mode",
+    ].join("\n"));
+    expect(c.get("auto_exposure")?.menu).toEqual([
+      { id: 1, label: "Manual Mode" }, { id: 3, label: "Aperture Priority Mode" },
+    ]);
+  });
+  it("a range control has no menu", () => {
+    expect(parseControls("                     brightness 0x00980900 (int)    : min=-64 max=64 step=1 default=0 value=0 flags=has-min-max")
+      .get("brightness")?.menu).toBeUndefined();
   });
 });
 

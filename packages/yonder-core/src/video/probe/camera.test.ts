@@ -92,7 +92,9 @@ describe("detectCameras", () => {
     }
     expect(caps.focus).toEqual({
       state: "present",
-      value: { min: 0, max: 1023, step: 1, default: 0, current: 348 },
+      // The fixture's focus_absolute line carries flags=inactive, has-min-max
+      // — still a reading, not a fault (R-UI-21).
+      value: { min: 0, max: 1023, step: 1, default: 0, current: 348, inactive: true },
     });
     // M5 fills these; M4 answers them honestly rather than guessing from the
     // pan_absolute and tilt_absolute this camera happens to list.
@@ -118,7 +120,7 @@ describe("detectCameras", () => {
     const r = await bench({ runner: benchRunner({ "--list-ctrls-menus": withRotate }) });
     expect(r.found[0].capabilities.rotation).toEqual({
       state: "present",
-      value: { min: 0, max: 270, step: 90, default: 0, current: 90 },
+      value: { min: 0, max: 270, step: 90, default: 0, current: 90, inactive: false },
     });
   });
 
