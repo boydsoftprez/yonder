@@ -1138,7 +1138,7 @@ its `theme.day.css` / `theme.night.css` were generated with
 Create `packages/node-red-dashboard-2-yonder/gallery/gallery.test.ts`:
 
 ```ts
-import { readdirSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { SPECIMENS } from "./specimens.js";
 
