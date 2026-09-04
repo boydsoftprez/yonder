@@ -104,7 +104,10 @@ gi.require_version("Gst", "1.0")
 from gi.repository import Gst
 Gst.init(None)
 p = Gst.parse_launch(
-    "v4l2src device=/dev/video0 ! video/x-raw,width=1280,height=720,framerate=30/1 "
+    # The camera offers MJPG at 1280x720/30 and YUYV only at 10 fps, so the
+    # spike decodes, exactly as the daemon does (video/pipeline.ts).
+    "v4l2src device=/dev/video0 ! image/jpeg,width=1280,height=720,framerate=30/1 "
+    "! jpegdec ! videoconvert "
     "! v4l2h264enc name=enc extra-controls=controls,video_bitrate=1000000,h264_level=11 "
     "! h264parse ! identity name=tap ! fakesink sync=false")
 tap, enc = p.get_by_name("tap"), p.get_by_name("enc")
