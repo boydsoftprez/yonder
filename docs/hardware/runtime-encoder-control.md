@@ -1,12 +1,17 @@
 # Whether `v4l2h264enc` retunes its bitrate at runtime
 
 Spec §8.1 needs a runtime encoder control channel: bitrate updates that do not respawn the
-camera pipeline. This note measures whether the Pi 4's hardware H.264 encoder honours a
-bitrate change made while it is running, on the exact pipeline shape the daemon uses
-(`video/pipeline.ts`: MJPG capture, software JPEG decode, hardware encode). It does not
-answer that question — the pipeline this spike was asked to test did not produce a single
-encoded frame in any of its three runs, on this board, today. What follows is what was
-measured and what it rules in and out.
+camera pipeline. **It does.** On the exact pipeline shape the daemon uses
+(`packages/yonder-core/src/video/pipeline.ts`: MJPG capture, software JPEG decode, a
+`level=(string)4` capsfilter, hardware encode), setting `video_bitrate` on `v4l2h264enc`
+through `extra-controls` while the pipeline is playing moves the encoder from one target
+bitrate to another, with no gap in the stream across the change. Three runs agree exactly.
+
+An earlier attempt at this measurement used a pipeline that omitted the `level=(string)4`
+capsfilter `pipeline.ts` welds onto every encode. That pipeline never produced a frame at
+all, at any bitrate — a measurement of a broken pipeline, not evidence about retuning. That
+attempt and its full diagnosis are preserved in this file's git history and referenced
+below; this revision replaces its conclusion with the real answer.
 
 Requirement: R-VID-07. Spec: §8.1 (console-instrument-library).
 
@@ -25,12 +30,14 @@ Requirement: R-VID-07. Spec: §8.1 (console-instrument-library).
 | Date | 2026-09-04 |
 
 Script: [`scripts/spikes/retune-bitrate.py`](../../scripts/spikes/retune-bitrate.py).
-Pipeline under test:
+Pipeline under test — matched to `encode()` in `video/pipeline.ts` exactly, including the
+capsfilter that function welds onto every encode rather than adding at its call sites:
 
 ```
 v4l2src device=/dev/video0 ! image/jpeg,width=1280,height=720,framerate=30/1 \
   ! jpegdec ! videoconvert \
-  ! v4l2h264enc name=enc extra-controls=controls,video_bitrate=1000000,h264_level=11 \
+  ! v4l2h264enc name=enc extra-controls=controls,video_bitrate=1000000 \
+  ! video/x-h264,level=(string)4 \
   ! h264parse ! identity name=tap ! fakesink sync=false
 ```
 
@@ -42,8 +49,7 @@ Before testing, `/dev/video0` and `/dev/video11` were confirmed idle (`sudo fuse
 clean on both, and `/proc/<pid>/fd` for `yonder-core`'s main PID carried no video file
 descriptor at all). The camera's own formats were independently re-confirmed with
 `v4l2-ctl --device=/dev/video0 --list-formats-ext`: MJPG at 1280×720 up to 90 fps (90, 60,
-30, 25, 20, 15, 10, 5), YUYV at 1280×720 only at 10 and 5 fps — matching the facts this
-task was given, not rediscovering them from nothing.
+30, 25, 20, 15, 10, 5), YUYV at 1280×720 only at 10 and 5 fps.
 
 ## The three runs
 
@@ -52,113 +58,115 @@ was read immediately before and immediately after each one:
 
 | Run | Before | `before` Mb/s | `after` Mb/s | Gaps | Exit | After |
 |---|---|---|---|---|---|---|
-| 1 | `throttled=0x0` | 0.00 | 0.00 | 0 | 1 | `throttled=0x0` |
-| 2 | `throttled=0x0` | 0.00 | 0.00 | 0 | 1 | `throttled=0x0` |
-| 3 | `throttled=0x0` | 0.00 | 0.00 | 0 | 1 | `throttled=0x0` |
+| 1 | `throttled=0x0` | 0.97 | 3.01 | 1 | 1 | `throttled=0x0` |
+| 2 | `throttled=0x0` | 0.97 | 3.01 | 1 | 1 | `throttled=0x0` |
+| 3 | `throttled=0x0` | 0.97 | 3.01 | 1 | 1 | `throttled=0x0` |
 
-All six power readings are clean. None of the three runs brackets a non-zero
-`get_throttled` value, so none is disqualified on power grounds — the board that gave a
-brownout history an hour earlier (48 USB enumeration failures on GPIO header power) held a
-clean supply through all three runs on USB-C power. The camera was confirmed present on the
-bus (`lsusb`, `ls /dev/video0`) after every run and every diagnostic pipeline run below —
-it never disappeared.
+All six power readings are clean; none of the three runs brackets a non-zero
+`get_throttled` value. The camera was confirmed present on the bus (`lsusb`,
+`ls /dev/video0`) after every run — it never disappeared.
 
-**The identical readings are not three confirmations of "no retuning."** `gaps` is 0 in
-every run because `last_pts` never advances past `None` — the pad probe on `tap` never
-fires at all, in either the 10 s "before" window or the 10 s "after" window. Zero bytes
-before `extra-controls` was ever touched, and zero after, means no encoded frame reached
-the tap point at any time during any run. That is a pipeline that never started producing
-output, not an encoder that produced output at a steady rate and declined to change it.
+**The bitrate change is real and lands on target.** `before` sits at 0.97 Mb/s against a
+configured 1,000,000 bps, and `after` sits at 3.01 Mb/s against a configured 3,000,000 bps
+— both within the overhead of H.264/RTP-style framing and measurement rounding, in all
+three independent runs. `extra-controls` reached the running encoder and moved it.
 
-## What actually happens when this pipeline runs
+**The gap count is 1 in every run, and it is not the retune.** The script's own heuristic
+(`sys.exit(0 if after > before * 2 and gaps[0] == 0 else 1)`) fails on this, and the exit
+code is 1 for all three runs — but per this task's own instruction, the number is recorded
+and explained rather than deferred to the exit code. A timing-instrumented copy of the
+identical pipeline (diagnostic only, never the deliverable script, deleted after use) located
+the one gap precisely:
 
-The Python script has no bus watch, so it cannot say why nothing arrived — it just samples
-byte counts. Running the identical element graph through `gst-launch-1.0 -v` (read-only,
-`fakesink`, nothing left on the board) shows the reason directly. Caps negotiate cleanly
-all the way to the encoder's output — `v4l2src` produces MJPG 1280×720, `jpegdec` produces
-`I420`, `videoconvert` passes it through unchanged, and `v4l2h264enc` even fixates its own
-src caps (`video/x-h264, level=(string)1, profile=(string)baseline, width=1280, height=720`)
-— and then fails on the first buffer handed to it:
+```
+first buffer at wall t=0.00s (pts=149544039)
+GAP #1 at wall t=0.01s  pts_delta=144.0ms
+retune call at wall t=9.66s
+before 0.97 Mb/s  after 3.01 Mb/s  timestamp gaps 1
+```
+
+The gap sits between the pipeline's first and second encoded buffers — 144 ms apart against
+an expected ~33 ms at 30 fps — 9.65 seconds **before** `extra-controls` is ever touched, and
+the "after" window that follows the retune call contributes no further gaps at all. This is
+a pipeline-startup transient (buffer allocation and the encoder's first-frame latency), not
+a restart triggered by the bitrate change. Timestamps are continuous across the retune
+itself; they are not perfectly continuous from cold start, which is a different fact than
+the one this spike exists to establish.
+
+## Why the first attempt measured nothing
+
+Read-only `gst-launch-1.0 -v` against the first attempt's pipeline (no downstream level
+constraint) showed caps negotiating cleanly end-to-end, with `v4l2h264enc` fixating its own
+src caps at `video/x-h264, level=(string)1, profile=(string)baseline, width=1280,
+height=720` — and then failing on the first buffer handed to it:
 
 ```
 ERROR: from element /GstPipeline:pipeline0/v4l2h264enc:enc: Failed to process frame.
-Additional debug info:
-../sys/v4l2/gstv4l2videoenc.c(898): gst_v4l2_video_enc_handle_frame (): /GstPipeline:pipeline0/v4l2h264enc:enc:
+../sys/v4l2/gstv4l2videoenc.c(898): gst_v4l2_video_enc_handle_frame ()
 Maybe be due to not enough memory or failing driver
 ```
 
-with the kernel recording the driver-level cause at the same moment:
-
 ```
 bcm2835-codec bcm2835-codec: bcm2835_codec_start_streaming: Failed enabling i/p port, ret -3
-WARNING: CPU: 2 PID: 13881 at drivers/media/common/videobuf2/videobuf2-core.c:1803 vb2_start_streaming+0xec/0x188 [videobuf2_common]
 ```
 
-`v4l2h264enc`'s sink side — its input port — refuses to start streaming, on the very first
-frame, every time. This is not the JPEG-decoder defect already on record
-(`usb-camera-on-a-pi-4.md`, Defect 1, `/dev/video10` advertising MJPEG and failing to
-enable): `jpegdec` here is the software decoder, never touches `/dev/video10`, and the
-failure is on the **encode** side, `/dev/video11`.
+**This is now a settled mechanism, not an open mystery.** H.264 level 1.0 permits at most 99
+macroblocks per frame. 1280×720 is 80×45 = 3,600 macroblocks — the encoder fixated a level
+that cannot describe the frame size it was being asked to carry, and `bcm2835-codec`
+refused to enable streaming rather than encode something it could not legally label.
+`video/pipeline.ts` already knows this — its own comment, at the point it welds
+`video/x-h264,level=(string)4` onto every encode, says exactly why:
 
-## Isolating the failure
+> The capsfilter is welded on here rather than added at the two call sites, because an
+> encoder that reaches one of them without it does not survive its first frame.
 
-None of this touched the deliverable script, which stays exactly as the spec brief wrote
-it. These were read-only `gst-launch-1.0` probes, run to find out whether the zero
-readings above meant anything about runtime retuning, or meant the measurement itself
-never started. Each was confirmed not to disturb the camera (`lsusb`, `ls /dev/video0`
-after every one) or the supply (`vcgencmd get_throttled` clean throughout).
+The first attempt's spike pipeline omitted that capsfilter, so it reproduced precisely the
+failure the daemon's own code was written to avoid. The daemon was never at risk; the
+spike's reconstruction of its shape was incomplete.
+
+### Isolating the failure (from the first attempt, preserved because it is still correct)
+
+These read-only `gst-launch-1.0` probes (never the deliverable script) were run to
+characterise the first attempt's zero readings before concluding anything:
 
 | Pipeline (capture → decode → encode) | `extra-controls` | Result |
 |---|---|---|
-| 1280×720, `jpegdec ! videoconvert`, downstream caps unconstrained | `video_bitrate=1000000, h264_level=11` (the brief's script) | **Fails**, first frame |
+| 1280×720, `jpegdec ! videoconvert`, downstream caps unconstrained | `video_bitrate=1000000, h264_level=11` | **Fails**, first frame |
 | 1280×720, `jpegdec ! videoconvert`, downstream caps unconstrained | `video_bitrate=1000000` only | **Fails**, first frame — rules out `h264_level` as the cause |
 | 1280×720, `jpegdec` only, downstream caps unconstrained | `video_bitrate=1000000` only | **Fails**, first frame — rules out `videoconvert` as the cause |
 | 1920×1080, `jpegdec` only, capsfilter forces `level=(string)4` downstream | `video_bitrate=2000000` | **Succeeds** — reproduces the working pipeline already on record in `usb-camera-on-a-pi-4.md` |
 | 1280×720, `jpegdec` only, capsfilter forces `level=(string)4` downstream, `num-buffers=100` | `video_bitrate=2000000` | **Succeeds** |
 
-So: not the `h264_level` control, not `videoconvert`, and not the resolution alone — 720p
-can run. What is not isolated is which of the three remaining differences between the last
-row and the brief's script is what matters: a downstream capsfilter forcing the output
-level, the bitrate value itself (2,000,000 against 1,000,000), or a bounded `num-buffers`
-against none. Separating those three is pipeline engineering, not this spike's question,
-and was not attempted — the brief is explicit that the question is what this encoder does,
-not how to make it do what we hoped.
-
-Resource contention was checked and ruled out before any of this: `sudo fuser -v` on
-`/dev/video0`, `/dev/video1`, `/dev/video10`, `/dev/video11` and `/dev/video12` was clean
-throughout, and a scan of every process's open file descriptors found none open against
-`/dev/video10` or `/dev/video11` — `yonder-core` included.
+At the time this table was first written, three things separated the last row from the
+first (a downstream level capsfilter, the bitrate value, and a bounded `num-buffers`) and
+none had been isolated from the others. That is now resolved: the level capsfilter is the
+one that matters, for the macroblock-count reason above. The bitrate value and the bounded
+buffer count were both incidental to the rows they appeared in.
 
 ## The decision
 
-**Runtime retune is unproven, and this pipeline shape cannot currently be used to prove
-it.** This is a stronger finding than "the control does not take" — the pipeline the
-daemon actually uses at 1280×720 did not encode a single frame, three times, so there is no
-running encoder in any of the three runs for `extra-controls` to have retuned or failed to
-retune. Nothing here shows the control itself is inert; nothing here shows it works either.
+**Runtime retune is available. Task 30 uses `extra-controls` at runtime for the main
+stream's bitrate.** Three independent runs each moved the encoder from ~1 Mb/s to ~3 Mb/s
+on request, with zero timestamp discontinuities across the retune itself. The one gap
+recorded in every run is a fixed pipeline-startup transient, 9.65 s before any retune call
+and contributing nothing to the post-retune window — characterised above, not hand-waved.
 
-Per the brief's decision branches, this is treated as the "not available" side, because
-Task 30 cannot be built on a control path that has never been observed running once:
-**Task 30 must isolate a preview-branch restart rather than assume `extra-controls` retunes
-the main stream live.** The main stream's bitrate stays Apply-with-respawn, and the page
-states plainly that changing it restarts the picture. This should be revisited — not
-guessed around — once a pipeline shape at 1280×720 is confirmed to run continuously on this
-board; the last row of the table above is a candidate starting point for that, not a fix
-applied here.
+One caveat for Task 30 to carry forward, not a reason to withhold the "available" answer:
+a freshly started pipeline shows a single-frame-scale timing gap immediately after reaching
+`PLAYING`, before settling. That is a property of pipeline start-up in general — relevant to
+whatever Task 30 does when a preview branch or a whole pipeline restarts — not a property of
+the bitrate retune path this spike was asked to answer for.
 
 ## What this does not settle
 
-- **Which of {downstream level capsfilter, bitrate value, bounded buffer count} makes the
-  difference at 720p.** Three candidates, not separated.
-- **Whether `video/pipeline.ts`'s actual runtime pipeline (as opposed to this spike's
-  reconstruction of it) hits the same failure.** This spike built its own `gst-launch`
-  graph from the shape described in the brief; it did not read or execute the daemon's own
-  pipeline-construction code.
-- **Whether this is new.** `usb-camera-on-a-pi-4.md` measured 1280×720 encoding
-  successfully on 2026-09-02, on a board later found to be browning out (K-41). Whether
-  something changed between then and now, or whether that measurement used a pipeline
-  shape closer to the working rows above than to the brief's script, was not checked.
-- **Runtime retune itself**, on any pipeline — the question this spike exists to answer.
+- **Preview-only size/rate reconfiguration**, which spec §8.1 also asks for — this spike
+  only exercised `video_bitrate`. `h264_level`, resolution and framerate changes at runtime
+  were not tested and should not be assumed to behave the same way.
+- **Sustained behaviour under a longer or repeated retune sequence.** Each run here changes
+  bitrate exactly once. Task 30's real controller will step up and down repeatedly with
+  hysteresis (§8.1); whether repeated retunes ever produce a gap was not tested.
+- **The startup transient's cause**, precisely — not chased further here, since it sits
+  entirely outside the retune window this spike exists to measure.
 
 ## Reproducing this
 
@@ -167,7 +175,8 @@ scp scripts/spikes/retune-bitrate.py yonder@yonder.local:/tmp/retune-bitrate.py
 ssh yonder@yonder.local 'vcgencmd get_throttled; python3 /tmp/retune-bitrate.py; echo exit:$?; vcgencmd get_throttled'
 ```
 
-The diagnostic pipelines above, for the failing case:
+The diagnostic pipeline that reproduces the first attempt's failure (no downstream level
+constraint):
 
 ```bash
 ssh yonder@yonder.local 'gst-launch-1.0 -v v4l2src device=/dev/video0 \
@@ -176,7 +185,7 @@ ssh yonder@yonder.local 'gst-launch-1.0 -v v4l2src device=/dev/video0 \
   ! h264parse ! fakesink sync=false'
 ```
 
-and for the working 720p case:
+and the working case, matching `video/pipeline.ts`:
 
 ```bash
 ssh yonder@yonder.local 'gst-launch-1.0 -q v4l2src device=/dev/video0 num-buffers=100 \
