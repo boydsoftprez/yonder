@@ -239,8 +239,20 @@ that build. Nothing in this repository had ever looked at a page.
 It does three separate things.
 
 **Rules that fail on their own.** Nothing clipped inside a box, no action spanning the
-surface it sits on (R-UI-10), no page scrolling sideways, no page rendering nothing at all.
-These are relative comparisons within one rendering, so they hold on any machine.
+surface it sits on (R-UI-10), no page scrolling sideways, no control whose text cannot be
+read against what is behind it (R-UI-16), no page rendering nothing at all. These are
+relative comparisons within one rendering, so they hold on any machine.
+
+The legibility rule is the one a picture could not make. An operator reported that in the
+night palette the text in the entry fields was *"not able to be read by human eyes"*, and
+every check above had passed: the shape was unchanged and the committed capture showed the
+words — at 1.05:1 against their own recess, which is a picture of the defect that looks like
+a picture of an empty field. So it is measured rather than looked at: each control's own
+computed colour is composited over everything painted behind it, with alpha and the
+accumulated `opacity` of its ancestors folded in, and anything under 4.5:1 fails. Folding
+opacity in is the point — what made those labels unreadable was the interface framework
+drawing black at 60%, which a rule reading `color` alone would have called black and passed
+in the day palette for the same reason it failed at night.
 
 **A shape manifest**, committed and diffed — every widget's geometry, so a page that moves
 fails until somebody accepts it. Geometry rather than pixels, because *shape* is what the
