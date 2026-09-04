@@ -73,6 +73,26 @@
  * negotiation cancelled its own reconnect, and a camera that answers in a
  * millisecond — the case the fall-back exists for — never reached the
  * deadline at all.
+ *
+ * **`lastFrameAt` is a frame, and only ever a frame.** It used to be set in
+ * `ontrack`, which is a *negotiation* event: it fires once, when the remote
+ * description adds the track, before any media flows. Nothing then updated it
+ * again, so the age above counted from the handshake and a perfectly healthy
+ * picture read "no contact" three seconds after it connected and was an
+ * unreadable dark rectangle a minute later. That is this component's own
+ * hazard inverted, and worse than it: an operator who sees all four degrade
+ * signals fire on every good session learns inside one flight to ignore them.
+ * It also broke the fall-back, because `lastFrameAt === null` is how the
+ * twelve-second deadline knows no media ever arrived — a handshake that
+ * completed over TCP while the carrier discarded the UDP is exactly the case
+ * R-VID-14 exists for, and it would never have fallen back.
+ *
+ * The signal is the video element's `timeupdate`: the media clock advancing,
+ * which is what "a frame arrived" means, fired by every browser as the
+ * picture paints and stopping the moment the picture does.
+ * `requestVideoFrameCallback` is not in every browser, and polling
+ * `getStats()` for `framesDecoded` needs a timer of its own and reports the
+ * decoder rather than the thing on screen.
  */
 const BACKOFF_MS = [1000, 2000, 4000, 8000, 15000]
 
@@ -88,6 +108,17 @@ export default {
         return {
             mode: 'live',
             pc: null,
+            /** Aborts the handshake in flight, when nobody wants it any more. */
+            abort: null,
+            /**
+             * Which attempt is the current one.
+             *
+             * A number rather than the peer connection itself: `data` is
+             * reactive, so `this.pc` hands back a proxy and `this.pc === pc`
+             * is false against the object `connect()` is holding. A counter
+             * compares by value and cannot be fooled by the framework.
+             */
+            session: 0,
             attempt: 0,
             lastFrameAt: null,
             now: Date.now(),
@@ -198,17 +229,69 @@ export default {
     },
     mounted () {
         this.tick = setInterval(() => { this.now = Date.now() }, 1000)
+        // The media clock, which is the only honest source for the age this
+        // component draws. See the note on `lastFrameAt` above.
+        if (this.$refs.video) this.$refs.video.addEventListener('timeupdate', this.onFrame)
         this.requestLive()
     },
     beforeUnmount () {
         clearInterval(this.tick)
         clearTimeout(this.retryTimer)
         clearTimeout(this.stillsTimer)
+        if (this.$refs.video) this.$refs.video.removeEventListener('timeupdate', this.onFrame)
         this.teardown()
     },
     methods: {
+        /**
+         * A frame reached the screen (R-VID-03).
+         *
+         * This is the whole of what stands the degrade down, and it clears the
+         * attempt count and the reason with it: a picture that is *painting*
+         * is the only evidence that the session came back. A handshake that
+         * completes and delivers nothing keeps counting, which is what the
+         * fall-back to stills is waiting to hear.
+         */
+        onFrame () {
+            this.lastFrameAt = Date.now()
+            this.attempt = 0
+            this.reason = ''
+        },
+        /**
+         * Nothing in flight: the session, and the handshake that was setting
+         * it up.
+         *
+         * **The picture is deliberately left alone.** A reconnect tears down
+         * and rebuilds, and blanking here would delete the last frame between
+         * attempts — the one thing still held, and what "holds the picture
+         * rather than blanking it" means. `blank()` is the other half, and it
+         * is called only where the operator has actually left live video.
+         */
         teardown () {
+            // Anything still in flight belongs to nobody from here on.
+            this.session += 1
+            if (this.abort) { this.abort.abort(); this.abort = null }
             if (this.pc) { this.pc.close(); this.pc = null }
+        },
+        /**
+         * Let go of the last live frame.
+         *
+         * **Closing a peer connection does not clear the screen.** It ends the
+         * tracks, and a media element holding an ended stream goes on painting
+         * its last decoded frame indefinitely — so `off` used to leave a
+         * frozen live frame up, in the *neutral* tone, captioned "off", with
+         * the age pinned to zero by `staleFor`: no hatch, no count, no
+         * degrade. Identically in `stills` mode with no stills source, which
+         * `picture.ts` records as the normal state today, where the frozen
+         * frame showed through the `v-if`'d-away `<img>` under a badge reading
+         * "stills" in the *waiting* tone.
+         *
+         * A frozen frame with nothing saying it is frozen is the hazard this
+         * whole component exists for, and both of those drew it in a tone
+         * meaning nothing is wrong.
+         */
+        blank () {
+            if (this.$refs.video) this.$refs.video.srcObject = null
+            this.lastFrameAt = null
         },
         /**
          * The operator asking for a live picture: on mount, and whenever the
@@ -243,27 +326,58 @@ export default {
             // Nothing is watching the session now, and a track arriving after
             // this would be live video under a badge reading 'stills'.
             this.teardown()
+            this.blank()
         },
+        /**
+         * One handshake, and the rule that it may only ever speak for itself.
+         *
+         * **A session check after every await, and an `AbortController` on
+         * the fetch.** A handshake nobody is waiting for any more still
+         * finishes: holding FULL RATE closes the preview session and opens the
+         * full-rate one, and the abandoned preview exchange then resolved into
+         * `pc0.setRemoteDescription()`, which rejects with `InvalidStateError`
+         * on a closed connection. That became a *reason* on screen and a
+         * `retry()`, and the backoff then tore down the good full-rate
+         * session: the key dropped the picture it was pressed for. The same
+         * path put "this browser could not negotiate a stream" underneath the
+         * "off" panel, which contradicts this component's own rule that off
+         * must not look like the link being down.
+         *
+         * The abort stops the request; the session check is what makes an answer
+         * that arrives anyway belong to nobody — and one of them always can,
+         * because `abort()` cannot recall a response already delivered.
+         *
+         * The check is at every await rather than only the interesting one:
+         * the fetch is the boundary a test can hold open and the only one long
+         * enough for an operator to act inside, but "the session may have
+         * changed while we were away" is true of all of them, and a rule
+         * applied at three awaits out of five is a rule nobody can rely on.
+         */
         async connect () {
             this.teardown()
+            const session = this.session
+            const mine = () => this.session === session
             const pc = new RTCPeerConnection()
+            const abort = new AbortController()
             this.pc = pc
+            this.abort = abort
             pc.addTransceiver('video', { direction: 'recvonly' })
             pc.ontrack = (e) => {
+                if (!mine()) return
+                // Negotiation, not media: `lastFrameAt` is deliberately not
+                // set here. The track exists; nothing has painted yet, and
+                // `onFrame` is what says otherwise.
                 if (this.$refs.video) this.$refs.video.srcObject = e.streams[0]
-                // The deadline reads this and stands down: a picture that has
-                // arrived and then goes stale is the degrade's, which holds
-                // the last frame rather than replacing it with a still.
-                this.lastFrameAt = Date.now()
-                this.attempt = 0
-                this.reason = ''
             }
             pc.onconnectionstatechange = () => {
+                if (!mine()) return
                 if (['failed', 'disconnected', 'closed'].includes(pc.connectionState)) this.retry()
             }
             try {
                 const offer = await pc.createOffer()
+                if (!mine()) return
                 await pc.setLocalDescription(offer)
+                if (!mine()) return
                 // Through the console's own route, not straight at the media
                 // server: the exchange carries the keys that encrypt the video,
                 // and it is what puts the picture behind the interface's
@@ -271,8 +385,10 @@ export default {
                 const answer = await fetch(`/video/${this.streamPath}/whep`, {
                     method: 'POST',
                     headers: { 'content-type': 'application/sdp' },
-                    body: offer.sdp
+                    body: offer.sdp,
+                    signal: abort.signal
                 })
+                if (!mine()) return
                 if (!answer.ok) {
                     // Distinguished deliberately. Only one of these is worth
                     // walking outside for.
@@ -284,8 +400,14 @@ export default {
                     this.retry()
                     return
                 }
-                await pc.setRemoteDescription({ type: 'answer', sdp: await answer.text() })
+                const sdp = await answer.text()
+                if (!mine()) return
+                await pc.setRemoteDescription({ type: 'answer', sdp })
             } catch (e) {
+                // An abandoned handshake is not a fault, and must not report
+                // one: this is the branch that used to draw a reason under the
+                // "off" panel and reconnect over a working session.
+                if (!mine()) return
                 this.reason = `this browser could not negotiate a stream (${e.name || 'error'})`
                 this.retry()
             }
@@ -329,6 +451,7 @@ export default {
                 clearTimeout(this.retryTimer)
                 clearTimeout(this.stillsTimer)
                 this.teardown()
+                this.blank()
                 // A mode the operator chose is not a failure, and carries no
                 // reason: 'off' is 'not requested', never 'no contact'.
                 this.reason = ''

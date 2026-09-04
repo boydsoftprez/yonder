@@ -32,12 +32,34 @@ const ANSWER = "v=0\r\no=- 2 2 IN IP4 0.0.0.0\r\n(answer)\r\n";
 const PATH = "cam0-preview";
 const LABEL = "Nose";
 
-/** What the media server is answering with on the next negotiation. */
-let reply: { status: number; sdp?: string } | "throws" = { status: 201, sdp: ANSWER };
+/**
+ * What the media server is answering with on the next negotiation.
+ *
+ * `"gated"` answers nothing until a test says so, which is the only way to
+ * hold a handshake open across the thing that abandons it.
+ */
+let reply: { status: number; sdp?: string } | "throws" | "gated" = { status: 201, sdp: ANSWER };
 
-const fetchMock = vi.fn(async (_url: string, _init: unknown) => {
+/** Handshakes the media server has not answered yet, in the order they were made. */
+const gates: ((answer: { status: number; sdp?: string }) => void)[] = [];
+
+const fetchMock = vi.fn(async (_url: string, init: unknown) => {
   if (reply === "throws") throw new TypeError("Failed to fetch");
-  const { status, sdp } = reply;
+  // A gated request answers when a test says so — or rejects with
+  // `AbortError`, which is what a real `fetch` does the moment its signal is
+  // aborted, and which lands in `connect()`'s catch.
+  const signal = (init as { signal?: AbortSignal } | undefined)?.signal;
+  const answered = reply === "gated"
+    ? await new Promise<{ status: number; sdp?: string }>((resolve, reject) => {
+      gates.push(resolve);
+      signal?.addEventListener("abort", () => {
+        const aborted = new Error("The user aborted a request.");
+        aborted.name = "AbortError";
+        reject(aborted);
+      });
+    })
+    : reply;
+  const { status, sdp } = answered;
   return {
     ok: status >= 200 && status < 300,
     status,
@@ -79,6 +101,14 @@ class FakePeerConnection {
   }
 
   async setRemoteDescription(description: unknown): Promise<void> {
+    // A real one rejects with `InvalidStateError` once it has been closed, and
+    // that rejection is what an abandoned handshake used to turn into a fault
+    // on screen and a reconnect over the session that replaced it.
+    if (this.closed) {
+      const error = new Error("cannot set remote description on a closed connection");
+      error.name = "InvalidStateError";
+      throw error;
+    }
     this.remote = description;
   }
 
@@ -87,7 +117,13 @@ class FakePeerConnection {
     this.connectionState = "closed";
   }
 
-  /** The video actually starting to flow. */
+  /**
+   * The *negotiation* adding the track, which is all `ontrack` is.
+   *
+   * It fires before any media flows, and a browser that never receives a
+   * frame fires it exactly the same way — which is why this alone must not
+   * make the picture look alive. `frames()` below is the other half.
+   */
   deliverTrack(stream: unknown = { id: "stream-1" }): void {
     this.ontrack?.({ streams: [stream] });
   }
@@ -167,6 +203,27 @@ function badge(wrapper: VueWrapper): string {
   return wrapper.find(".y-pic__badge").text();
 }
 
+/**
+ * The picture actually painting.
+ *
+ * `timeupdate` is the media clock advancing, which every browser fires as a
+ * playing `<video>` renders and stops firing the moment it stops. It is the
+ * component's only source for *when the last frame arrived*, and the reason
+ * this helper exists at all: the suite used to mistake `deliverTrack()` — a
+ * negotiation event — for a picture, and the passage of time for the loss of
+ * one.
+ */
+function frames(wrapper: VueWrapper, count = 1): void {
+  for (let i = 0; i < count; i += 1) {
+    wrapper.find("video").element.dispatchEvent(new Event("timeupdate"));
+  }
+}
+
+/** What the `<video>` is holding, if anything. */
+function painted(wrapper: VueWrapper): unknown {
+  return (wrapper.find("video").element as HTMLVideoElement & { srcObject: unknown }).srcObject;
+}
+
 function pc(index = 0): FakePeerConnection {
   const made = FakePeerConnection.made[index];
   if (!made) throw new Error(`no peer connection ${index} was made`);
@@ -182,6 +239,7 @@ function reasonText(wrapper: VueWrapper): string {
 beforeEach(() => {
   vi.useFakeTimers();
   FakePeerConnection.made.length = 0;
+  gates.length = 0;
   fetchMock.mockClear();
   reply = { status: 201, sdp: ANSWER };
   vi.stubGlobal("RTCPeerConnection", FakePeerConnection);
@@ -280,9 +338,13 @@ describe("why there is no picture", () => {
 
 describe("the twelve-second fall-back to stills", () => {
   it("falls back when the negotiation succeeded and no frame ever arrived", async () => {
-    // The carrier discarding UDP: the handshake completes over TCP and the
-    // media never comes.
+    // **The carrier discarding UDP**: the handshake completes over TCP, the
+    // track is negotiated, and the media never comes. `ontrack` fires exactly
+    // as it does on a working session, so a component that took it for a
+    // picture would sit here for ever — which is what it did.
     const { wrapper } = mountPicture();
+    await settle();
+    pc().deliverTrack();
     await settle();
 
     await advance(11_999);
@@ -318,9 +380,11 @@ describe("the twelve-second fall-back to stills", () => {
     await settle();
     await advance(1_000);
     pc().deliverTrack();
+    frames(wrapper);
     await settle();
 
-    await advance(30_000);
+    // Frames keep arriving, as they do on a working link.
+    for (let i = 0; i < 30; i += 1) { await advance(1_000); frames(wrapper); }
     expect(badge(wrapper)).not.toBe("stills");
   });
 
@@ -387,10 +451,30 @@ describe("reconnecting", () => {
     reply = { status: 201, sdp: ANSWER };
     await advance(2_000);
     pc(2).deliverTrack();
+    frames(wrapper);
     await settle();
 
     expect(badge(wrapper)).toBe("live · preview");
     expect(reasonText(wrapper)).toBe("");
+  });
+
+  it("does not blank the picture it is reconnecting to replace", async () => {
+    // A reconnect tears the session down and builds another. Letting go of
+    // the `<video>` on the way through would delete the last frame between
+    // attempts — the one thing still held, and the reason going black was
+    // rejected in the first place. The age keeps running across it, because
+    // the frame on screen is still as old as it was.
+    const { wrapper } = mountPicture(noFallback);
+    await settle();
+    pc().deliverTrack();
+    frames(wrapper);
+    await settle();
+
+    pc().goes("failed");
+    await advance(5_000);
+
+    expect(painted(wrapper)).toEqual({ id: "stream-1" });
+    expect(wrapper.find(".y-pic__age").text()).toBe("3 s ago");
   });
 
   it("does not reconnect a picture that is off", async () => {
@@ -423,13 +507,59 @@ describe("reconnecting", () => {
 });
 
 describe("the degrade, when contact goes", () => {
+  /**
+   * A picture that is negotiated **and painting**.
+   *
+   * The distinction is the whole of M1: every test in this block used to
+   * deliver a track and then let the clock run, believing it was simulating
+   * contact loss. It was simulating a working picture — and the component
+   * agreed, because it counted from the handshake rather than from a frame. So
+   * a healthy session read "no contact" at three seconds and was an
+   * unreadable dark rectangle at a minute, and this suite asserted that as
+   * correct.
+   */
   async function live() {
     const mounted = mountPicture();
     await settle();
     pc().deliverTrack();
+    frames(mounted.wrapper);
     await settle();
     return mounted;
   }
+
+  /** Frames arriving once a second, which is what a working link looks like. */
+  async function watching(wrapper: VueWrapper, seconds: number): Promise<void> {
+    for (let i = 0; i < seconds; i += 1) {
+      await advance(1_000);
+      frames(wrapper);
+    }
+    await settle();
+  }
+
+  it("does not degrade a picture that is still arriving", async () => {
+    // The one this component exists to get right, and the one it had wrong:
+    // all four signals fired on every healthy session, which teaches an
+    // operator to ignore all four inside a single flight.
+    const { wrapper } = await live();
+    await watching(wrapper, 90);
+
+    expect(badge(wrapper)).toBe("live · preview");
+    expect(wrapper.find(".y-pic__hatch").exists()).toBe(false);
+    expect(wrapper.find(".y-pic__age").exists()).toBe(false);
+    expect(wrapper.find("video").attributes("style")).toContain("filter: none");
+  });
+
+  it("starts counting from the last frame, not from the handshake", async () => {
+    // Two minutes of good video, then the picture stops. The age is measured
+    // from where it stopped, so an operator reads how long ago they lost it
+    // rather than how long ago they opened the page.
+    const { wrapper } = await live();
+    await watching(wrapper, 120);
+    await advance(5_000);
+
+    expect(badge(wrapper)).toBe("no contact");
+    expect(wrapper.find(".y-pic__age").text()).toBe("3 s ago");
+  });
 
   it("holds the picture rather than blanking it", async () => {
     // Going black cannot be misread, and that is the whole of its appeal. It
@@ -437,10 +567,8 @@ describe("the degrade, when contact goes", () => {
     // what was in shot, where the horizon was.
     const { wrapper } = await live();
     await advance(90_000);
-    const video = wrapper.find("video");
-    expect(video.exists()).toBe(true);
-    expect((video.element as HTMLVideoElement & { srcObject: unknown }).srcObject)
-      .toEqual({ id: "stream-1" });
+    expect(wrapper.find("video").exists()).toBe(true);
+    expect(painted(wrapper)).toEqual({ id: "stream-1" });
   });
 
   it("does not flinch at a two-second hiccup", async () => {
@@ -509,6 +637,44 @@ describe("off is not the link being down", () => {
     expect(pc().closed).toBe(true);
   });
 
+  it("lets go of the last live frame, rather than freezing it under 'off'", async () => {
+    // **Closing a peer connection does not clear the screen.** It ends the
+    // tracks, and a media element holding an ended stream goes on painting its
+    // last decoded frame — so this left a frozen live picture up, in the
+    // neutral tone, captioned "off", with no hatch, no age and no degrade,
+    // because `staleFor` is zero outside live mode. A frozen frame with
+    // nothing saying it is frozen is this component's whole hazard.
+    const { wrapper } = mountPicture();
+    await settle();
+    pc().deliverTrack();
+    frames(wrapper);
+    await settle();
+    expect(painted(wrapper)).toEqual({ id: "stream-1" });
+
+    setMode(wrapper, "off");
+    await settle();
+    expect(painted(wrapper)).toBeNull();
+  });
+
+  it("lets go of it for stills too, which is where there is nothing to draw", async () => {
+    // `picture.ts` records that nothing in this repository serves stills yet,
+    // so the `<img>` is `v-if`'d away and the stale live frame showed through
+    // it — badged "stills", in the *waiting* tone.
+    const { wrapper } = mountPicture();
+    await settle();
+    pc().deliverTrack();
+    frames(wrapper);
+    await settle();
+
+    await advance(30_000);
+    expect(badge(wrapper)).not.toBe("stills");
+
+    setMode(wrapper, "stills");
+    await settle();
+    expect(wrapper.find("img").exists()).toBe(false);
+    expect(painted(wrapper)).toBeNull();
+  });
+
   it("asking for live again starts the whole thing over", async () => {
     const { wrapper } = mountPicture();
     await settle();
@@ -519,6 +685,95 @@ describe("off is not the link being down", () => {
     await settle();
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(badge(wrapper)).toBe("live · preview");
+  });
+});
+
+/**
+ * **A handshake nobody is waiting for still finishes.**
+ *
+ * `connect()` captured its peer connection in a local and never looked at it
+ * again, and the fetch carried no `AbortController` — so an exchange that had
+ * been abandoned came back, called `setRemoteDescription()` on a closed
+ * connection, and turned the `InvalidStateError` into a reason on screen and a
+ * reconnect. The reconnect then tore down whatever session had replaced it.
+ */
+describe("a handshake that was abandoned while it was in flight", () => {
+  it("does not tear down the session that replaced it", async () => {
+    // Hold FULL RATE: the preview session is closed and the full-rate one
+    // opens. The abandoned preview exchange answers afterwards, which is the
+    // ordinary case — the key dropped the very picture it was pressed for.
+    reply = "gated";
+    const { wrapper, press } = mountWithRail();
+    await settle();
+    expect(gates).toHaveLength(1);
+
+    await press("rate:full");
+    expect(gates).toHaveLength(2);
+    gates[1]({ status: 201, sdp: ANSWER });
+    await settle();
+    pc(1).deliverTrack();
+    frames(wrapper);
+    await settle();
+    expect(badge(wrapper)).toBe("live · full rate");
+
+    // Now the handshake nobody is waiting for finally answers.
+    gates[0]({ status: 201, sdp: ANSWER });
+    await advance(30_000);
+
+    expect(reasonText(wrapper)).toBe("");
+    expect(pc(1).closed).toBe(false);
+    // No third negotiation: the backoff never armed.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("is not drawn as a fault under the off panel", async () => {
+    // "Off is not the link being down, and must not look like it" — and this
+    // path put *this browser could not negotiate a stream* underneath the
+    // panel that says nothing is wrong.
+    reply = "gated";
+    const { wrapper } = mountPicture();
+    await settle();
+
+    setMode(wrapper, "off");
+    gates[0]({ status: 201, sdp: ANSWER });
+    await advance(30_000);
+
+    expect(badge(wrapper)).toBe("off");
+    expect(reasonText(wrapper)).toBe("");
+    expect(wrapper.text()).not.toMatch(/no contact|could not negotiate/i);
+  });
+
+  it("ignores an answer that was already in hand when the operator let go", async () => {
+    // **The abort cannot recall an answer already delivered.** The response
+    // arrives, its continuation is queued, and the operator presses OFF before
+    // it runs — so the check after the `await` is the only thing standing
+    // between a 404 for a stream nobody wants any more and the words "this
+    // camera is not streaming" printed under the panel that says nothing is
+    // wrong.
+    reply = "gated";
+    const { wrapper } = mountPicture();
+    await settle();
+
+    gates[0]({ status: 404 });
+    setMode(wrapper, "off");
+    await advance(30_000);
+
+    expect(badge(wrapper)).toBe("off");
+    expect(reasonText(wrapper)).toBe("");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("aborts the request rather than leaving it in flight", async () => {
+    // The identity check above is what makes a late answer harmless; this is
+    // what stops the request being made at all once nobody wants it.
+    reply = "gated";
+    const { wrapper } = mountPicture();
+    await settle();
+    const [, init] = fetchMock.mock.calls[0] as [string, { signal: AbortSignal }];
+    expect(init.signal.aborted).toBe(false);
+
+    setMode(wrapper, "off");
+    expect(init.signal.aborted).toBe(true);
   });
 });
 
