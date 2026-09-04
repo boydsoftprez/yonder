@@ -97,6 +97,15 @@ interface HarnessOptions {
   deviceSequence?: string[];
   /** Connection names NetworkManager already holds when the render starts. */
   connections?: string[];
+  /**
+   * What nmcli reports in the TYPE column for a connection this board already
+   * holds, overriding the kind its name implies.
+   *
+   * The one way to express an operator changing what kind of modem they have:
+   * `yonder-modem` exists, it is a `gsm` connection, and `config.yaml` now
+   * asks for an ethernet one on a named adapter.
+   */
+  connectionTypes?: Record<string, string>;
   /** Replaces the result of `device status`, to make it fail. */
   deviceStatus?: CommandResult;
   /** Drives waitForRadio's bounded wait. */
@@ -113,6 +122,16 @@ interface HarnessOptions {
   standing?: StandingView;
   /** Where the renderer's log lines go, for a test that asserts wording. */
   log?: (line: string) => void;
+  /**
+   * Where the nmcli client's own lines go — every command it runs, redacted.
+   *
+   * A second sink rather than `log`, because that is what the daemon does:
+   * `note` for what the device did and `trace` for the commands it ran, so
+   * the activity pane does not fill with `device status` twice a tick. The
+   * fake used to pass neither, which meant no test could see the argv the
+   * renderer actually sent.
+   */
+  trace?: (line: string) => void;
   /**
    * What the modem connection is *already dialled on*, as nmcli would report
    * it before this render writes anything.
@@ -138,9 +157,41 @@ interface HarnessOptions {
  * immediately recreate it — with every test still green. Here an add adds and
  * a delete deletes, so a second identical render is a real assertion.
  */
+/**
+ * What `nmcli connection show` reports in its TYPE column, per profile.
+ *
+ * The fake used to answer `802-11-wireless` for everything, and that single
+ * untruth is why nothing noticed that a connection's type was never compared
+ * against the one now wanted: with every profile reported as the same kind,
+ * both the old code that ignored the question and the new code that asks it
+ * behave identically. A fake that answers one thing about every subject
+ * cannot test a decision made about the difference between subjects.
+ *
+ * The values are the setting names nmcli actually prints — `802-3-ethernet`,
+ * not `ethernet` — which is the whole reason `typeDiffers` needs a map.
+ */
+const REPORTED_TYPE: Record<string, string> = {
+  [AP_CONNECTION]: "802-11-wireless",
+  [CLIENT_CONNECTION]: "802-11-wireless",
+  [ETHERNET_CONNECTION]: "802-3-ethernet",
+  [MODEM_CONNECTION]: "gsm",
+};
+
+/** The same map from the other side: what `connection add` was given. */
+const REPORTED_FOR_ADDED: Record<string, string> = {
+  wifi: "802-11-wireless",
+  ethernet: "802-3-ethernet",
+  gsm: "gsm",
+};
+
 function harness(opts: HarnessOptions = {}) {
   const calls: string[][] = [];
   const names = new Set(opts.connections ?? []);
+  /** The TYPE column, kept in step with adds and deletes. */
+  const types = new Map<string, string>();
+  for (const name of opts.connections ?? []) {
+    types.set(name, opts.connectionTypes?.[name] ?? REPORTED_TYPE[name] ?? "802-11-wireless");
+  }
   /**
    * Every `setting.property` this fake has been told, per connection.
    *
@@ -186,7 +237,9 @@ function harness(opts: HarnessOptions = {}) {
       return ok(text);
     }
     if (key === "nmcli -t -f NAME,UUID,TYPE,DEVICE connection show") {
-      return ok([...names].map((n) => `${n}:u-${n}:802-11-wireless:\n`).join(""));
+      return ok([...names]
+        .map((n) => `${n}:u-${n}:${types.get(n) ?? ""}:\n`)
+        .join(""));
     }
     // `nmcli -t -f <props> connection show <name>`: one `property:value` line
     // per field asked for, in the order asked, and an empty value for a
@@ -199,9 +252,17 @@ function harness(opts: HarnessOptions = {}) {
       // add is ["nmcli","connection","add","con-name",<name>,"type",T,
       // "ifname",I,…pairs]; the rest put the name at argv[3], and modify's
       // pairs follow "connection.interface-name",I.
-      if (argv[2] === "add") { names.add(argv[4]); remember(argv[4]!, argv, 9); }
+      if (argv[2] === "add") {
+        names.add(argv[4]);
+        types.set(argv[4]!, REPORTED_FOR_ADDED[argv[6]!] ?? argv[6]!);
+        remember(argv[4]!, argv, 9);
+      }
       if (argv[2] === "modify") remember(argv[3]!, argv, 4);
-      if (argv[2] === "delete") { names.delete(argv[3]); stored.delete(argv[3]!); }
+      if (argv[2] === "delete") {
+        names.delete(argv[3]);
+        types.delete(argv[3]!);
+        stored.delete(argv[3]!);
+      }
       // A profile can be written against a radio NetworkManager has not
       // finished with — the keyfile does not care — but it cannot be
       // *activated* on one. Modelling that is what makes a cold boot a real
@@ -224,7 +285,7 @@ function harness(opts: HarnessOptions = {}) {
   const secrets = new SecretStore(join(dir, "secrets.yaml"));
   secrets.ensureValue("ap_psk", OPERATOR_PSK);
   const renderer = new NetworkRenderer({
-    client: new NmcliClient(run),
+    client: new NmcliClient(run, opts.trace),
     secrets,
     log: opts.log,
     clock: opts.clock,
@@ -949,7 +1010,17 @@ describe("NetworkRenderer and a modem whose settings changed", () => {
     expect(read).toBeLessThan(write);
     // Only the settings a dial reads are asked about. A route metric is
     // `device reapply`'s business and must never cycle a link.
-    expect(calls[read]![3]).toBe("gsm.apn");
+    //
+    // All four of them, not only the one the configuration holds: this board
+    // has no username, password or dial string, so those are being *cleared*,
+    // and a bearer setting being removed is a change to the bearer exactly as
+    // one being altered is. `gsm.password` is asked about and answers nothing
+    // — nmcli does not print a secret without `--show-secrets` — which
+    // `bearerChanges` reads as "cannot tell" rather than as a difference, so
+    // the question costs nothing and reads nothing (R-SEC-10).
+    const asked = (calls[read]![3] ?? "").split(",");
+    expect(asked.sort()).toEqual(["gsm.apn", "gsm.number", "gsm.password", "gsm.username"]);
+    expect(asked.some((f) => f.includes("route-metric"))).toBe(false);
   });
 
   it("leaves a working link alone when nothing about the bearer changed", async () => {
@@ -1018,7 +1089,8 @@ describe("NetworkRenderer and a modem whose settings changed", () => {
       connections: [AP_CONNECTION, ETHERNET_CONNECTION, MODEM_CONNECTION],
       dialled: { "gsm.apn": "ereseller" },
       fails: {
-        [`nmcli -t -f gsm.apn connection show ${MODEM_CONNECTION}`]:
+        [`nmcli -t -f gsm.apn,gsm.username,gsm.password,gsm.number `
+          + `connection show ${MODEM_CONNECTION}`]:
           { code: 10, stdout: "", stderr: "Error: yonder-modem - no such connection profile." },
       },
     });
@@ -1044,6 +1116,9 @@ describe("NetworkRenderer and a modem whose settings changed", () => {
     const { renderer, calls } = harness({
       devices: "wlan0:wifi:disconnected:\nusb0:ethernet:connected:yonder-modem\n",
       connections: [AP_CONNECTION, MODEM_CONNECTION],
+      // A board already running an appliance: `yonder-modem` is the ethernet
+      // connection this mode writes, not the `gsm` one the name would suggest.
+      connectionTypes: { [MODEM_CONNECTION]: "802-3-ethernet" },
       dialled: { "ipv4.route-metric": "700" },
     });
     await renderer.render(config);
@@ -1123,6 +1198,216 @@ describe("NetworkRenderer and a modem whose settings changed", () => {
     expect(lines.some((l) => l.includes("could not pass on that cellular was re-dialled"))).toBe(true);
   });
 });
+
+/**
+ * **What is generated matches the configuration, including what the
+ * configuration no longer says** (R-CFG-13).
+ *
+ * Two ways a profile can stop describing the document it was generated from,
+ * and both were silent. A connection's *type* cannot be changed, so an
+ * operator moving between the two kinds of modem wrote ethernet properties
+ * onto a profile that stayed `gsm`. And `nmcli connection modify` writes only
+ * what it is given, so a setting cleared in `config.yaml` was simply omitted
+ * and the stored value went on being dialled — with the file saying one thing
+ * and the bearer doing another, and nothing anywhere saying which was true.
+ */
+describe("NetworkRenderer and a profile that no longer matches the configuration", () => {
+  const MODEM_DEVICES =
+    "wlan0:wifi:disconnected:\ncdc-wdm0:gsm:connected:yonder-modem\nlo:loopback:unmanaged:\n";
+  const APPLIANCE_DEVICES =
+    "wlan0:wifi:disconnected:\nusb0:ethernet:connected:yonder-modem\nlo:loopback:unmanaged:\n";
+
+  const verbs = (calls: string[][]): string[] =>
+    calls.filter((c) => c[1] === "connection" && c[3] === MODEM_CONNECTION).map((c) => c[2]!);
+  const added = (calls: string[][]): string[] | undefined =>
+    calls.find((c) => c[2] === "add" && c[4] === MODEM_CONNECTION);
+  const modified = (calls: string[][]): string[] | undefined =>
+    calls.find((c) => c[2] === "modify" && c[3] === MODEM_CONNECTION);
+
+  function auto(apn: string | null = "ereseller"): Config {
+    const c: Config = structuredClone(DEFAULT_CONFIG);
+    c.network.modem.enabled = true;
+    c.network.modem.mode = "auto";
+    c.network.modem.apn = apn;
+    return c;
+  }
+
+  function appliance(): Config {
+    const c: Config = structuredClone(DEFAULT_CONFIG);
+    c.network.modem.enabled = true;
+    c.network.modem.mode = "appliance";
+    c.network.modem.interface = "usb0";
+    return c;
+  }
+
+  it("replaces the modem's profile when the operator changes what kind of modem it is", async () => {
+    // Both modes write a connection called `yonder-modem`, so this is a
+    // profile that exists, keeps its name, and has to become a different kind
+    // of thing. NetworkManager offers no way to do that but delete and create.
+    const { renderer, calls } = harness({
+      devices: APPLIANCE_DEVICES,
+      connections: [AP_CONNECTION, MODEM_CONNECTION],
+      connectionTypes: { [MODEM_CONNECTION]: "gsm" },
+    });
+    await renderer.render(appliance());
+
+    expect(verbs(calls)).toEqual(["delete"]);
+    const add = added(calls);
+    expect(add, "the modem's profile was deleted and never created again").toBeDefined();
+    expect(add?.[add.indexOf("type") + 1]).toBe("ethernet");
+    expect(add?.[add.indexOf("ifname") + 1]).toBe("usb0");
+    // And nothing was written onto the old profile on the way past.
+    expect(modified(calls)).toBeUndefined();
+  });
+
+  it("replaces it the other way too, when an appliance becomes a modem the system finds", async () => {
+    const { renderer, calls } = harness({
+      devices: MODEM_DEVICES,
+      connections: [AP_CONNECTION, MODEM_CONNECTION],
+      connectionTypes: { [MODEM_CONNECTION]: "802-3-ethernet" },
+    });
+    await renderer.render(auto());
+
+    expect(verbs(calls)).toEqual(["delete"]);
+    const add = added(calls);
+    expect(add?.[add.indexOf("type") + 1]).toBe("gsm");
+    expect(add?.[add.indexOf("ifname") + 1]).toBe("cdc-wdm0");
+  });
+
+  it("says which kind it found and which kind it now wants", async () => {
+    const lines: string[] = [];
+    const { renderer } = harness({
+      devices: APPLIANCE_DEVICES,
+      connections: [AP_CONNECTION, MODEM_CONNECTION],
+      connectionTypes: { [MODEM_CONNECTION]: "gsm" },
+      log: (l) => lines.push(l),
+    });
+    await renderer.render(appliance());
+    const said = lines.find((l) => l.includes("created again"));
+    expect(said, "nothing an operator reads says the modem's profile was remade").toBeDefined();
+    expect(said).toContain(MODEM_CONNECTION);
+    expect(said).toContain("ethernet");
+  });
+
+  /**
+   * **The half that must never fire.** This decision deletes a profile, and
+   * one of the profiles it is asked about is the access point an operator may
+   * be joined to over the one radio. A profile whose type has not changed is
+   * modified in place, on every render, for ever.
+   */
+  it("replaces nothing whose type is what it always was", async () => {
+    const { renderer, calls } = harness({
+      devices: MODEM_DEVICES,
+      connections: [AP_CONNECTION, ETHERNET_CONNECTION, MODEM_CONNECTION],
+    });
+    // The access point and the modem, on every render, for ever. `yonder-eth`
+    // is a different question and a settled one: this board lists no ethernet
+    // device, so the ownership loop removes a profile nothing wants.
+    const replaced = (): string[][] =>
+      calls.filter((c) => c[2] === "delete"
+        && (c[3] === AP_CONNECTION || c[3] === MODEM_CONNECTION));
+    await renderer.render(auto());
+    expect(replaced()).toEqual([]);
+    await renderer.render(auto());
+    expect(replaced()).toEqual([]);
+  });
+
+  /**
+   * A TYPE column this project does not recognise is a question that could not
+   * be asked, and the answer to that is never "different". Being wrong the
+   * other way drops every station on the radio.
+   */
+  it("leaves a connection alone when it cannot tell what kind it is", async () => {
+    const { renderer, calls } = harness({
+      devices: MODEM_DEVICES,
+      connections: [AP_CONNECTION, MODEM_CONNECTION],
+      connectionTypes: { [MODEM_CONNECTION]: "" },
+    });
+    await renderer.render(auto());
+    expect(verbs(calls)).toEqual(["modify"]);
+  });
+
+  /**
+   * **An emptied setting is removed from the device, not left standing.**
+   *
+   * The measured shape of the defect: `gsm.apn` was omitted from the desired
+   * profile when the configuration held none, `nmcli connection modify` wrote
+   * only what it was given, and the modem went on dialling `ereseller` while
+   * `config.yaml` said there was no APN at all.
+   */
+  it("resets a bearer setting the configuration no longer holds", async () => {
+    const { renderer, calls } = harness({
+      devices: MODEM_DEVICES,
+      connections: [AP_CONNECTION, MODEM_CONNECTION],
+      dialled: { "gsm.apn": "ereseller" },
+    });
+    await renderer.render(auto(null));
+
+    const modify = modified(calls);
+    expect(modify).toBeDefined();
+    const at = modify!.indexOf("gsm.apn");
+    expect(at, "the profile does not mention the APN it is meant to be clearing")
+      .toBeGreaterThan(0);
+    expect(modify![at + 1]).toBe("");
+  });
+
+  it("re-dials, because a bearer setting being removed is a change to the bearer", async () => {
+    // The comparison could not see this before: a property absent from the
+    // desired profile is a property `bearerChanges` never asks nmcli about, so
+    // clearing an APN wrote a reset and left the modem on the old bearer.
+    const { renderer, calls } = harness({
+      devices: MODEM_DEVICES,
+      connections: [AP_CONNECTION, MODEM_CONNECTION],
+      dialled: { "gsm.apn": "ereseller" },
+    });
+    await renderer.render(auto(null));
+    expect(verbs(calls)).toEqual(["modify", "down", "up"]);
+  });
+
+  it("clears the credential the same way, and never writes one into a line", async () => {
+    const lines: string[] = [];
+    const { renderer, calls } = harness({
+      devices: MODEM_DEVICES,
+      connections: [AP_CONNECTION, MODEM_CONNECTION],
+      dialled: { "gsm.apn": "ereseller", "gsm.username": "sim-user" },
+      trace: (l) => lines.push(l),
+    });
+    // A configuration with no password at all: `password: null` is the file's
+    // own word for "there is no credential", and it has to reach the device.
+    await renderer.render(auto(null));
+
+    const modify = modified(calls)!;
+    for (const property of ["gsm.apn", "gsm.username", "gsm.password", "gsm.number"]) {
+      expect(modify[modify.indexOf(property) + 1], `${property} was not reset`).toBe("");
+    }
+    // R-SEC-10. The line that *writes* the property shows `<redacted>` where
+    // the value would be, and the redaction covers the empty one exactly as it
+    // covers any other — so nothing in the journal can be read as a password,
+    // and nothing says whether this device has one. The other line carrying
+    // the word is the field list of the bearer read, `-f gsm.apn,…`, which has
+    // no value in it at all.
+    const written = lines.filter((l) => l.includes("connection modify") && l.includes("gsm.password"));
+    expect(written.length).toBeGreaterThan(0);
+    for (const line of written) expect(line).toContain("gsm.password <redacted>");
+  });
+
+  /**
+   * **Nothing is reset on a profile being created.** There is no stored value
+   * to remove, and `connection add` with no APN is the shipped path a board
+   * was measured on — sending it an empty one would be a change to something
+   * that works, for nothing.
+   */
+  it("sends no empty property when it is creating the profile", async () => {
+    const { renderer, calls } = harness({ devices: MODEM_DEVICES });
+    await renderer.render(auto(null));
+    const add = added(calls);
+    expect(add).toBeDefined();
+    expect(add).not.toContain("gsm.apn");
+    expect(add).not.toContain("gsm.password");
+    expect(add?.includes("")).toBe(false);
+  });
+});
+
 
 /**
  * **A radio that will not settle must not take the modem down with it.**

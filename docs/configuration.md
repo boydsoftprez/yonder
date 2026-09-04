@@ -272,6 +272,14 @@ as deleting its settings. This is a rule between two fields, so it is not expres
 `config/schema/yonder.schema.json` — an editor validating against that file will not catch
 it, and the device will.
 
+**Clearing a modem setting clears it on the device.** `apn`, `username`, `password` and
+`dial` set to `null` are removed from the connection profile, not merely left out of the
+next write — and because a bearer setting being removed is a change to the bearer, the modem
+is dialled again so the removal takes effect (R-CFG-13, R-CEL-09). Changing `mode` between
+`auto` and `appliance` replaces the profile rather than editing it: the two modes are
+different kinds of NetworkManager connection sharing one name, and a connection's kind
+cannot be changed.
+
 **`network.modem.apn`** has no default and is never guessed. Debian's carrier database
 lists `NXTGENPHONE` first for the SIM this was measured against, which is the value that
 attached and carried nothing, and the value that worked is absent from the file entirely.

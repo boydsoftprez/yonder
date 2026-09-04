@@ -123,17 +123,39 @@ export function modemProfile(
     ["ipv6.route-metric", metric],
     ["connection.autoconnect", "yes"],
   ];
+  /**
+   * The bearer settings the configuration does not hold, named so they are
+   * **removed** rather than left behind (R-CFG-13).
+   *
+   * Omitting them is what a profile used to do, and `nmcli connection modify`
+   * writes only what it is given — so an operator who cleared an APN went on
+   * dialling on the old one, with `config.yaml` saying otherwise and nothing
+   * anywhere saying which was true. `null` in this file is the configuration's
+   * word for *there is no such setting*, and this is that word reaching the
+   * device.
+   *
+   * `password` is null only when `network.modem.password` is null: a reference
+   * that names a row the store does not have throws out of `resolve` and fails
+   * the render, so a missing secret can never arrive here as "clear it"
+   * (R-SEC-10 is why the value itself never appears in a line — an empty one
+   * is redacted the same as any other).
+   */
+  const clear: string[] = [];
   // No default APN, ever. Guessing one is what R-CEL-09 forbids, and the
   // measured cost of guessing wrong is a link that reports success and moves
   // nothing.
   if (modem.apn !== null) settings.unshift(["gsm.apn", modem.apn]);
+  else clear.push("gsm.apn");
   if (modem.username !== null) settings.push(["gsm.username", modem.username]);
+  else clear.push("gsm.username");
   if (password !== null) settings.push(["gsm.password", password]);
+  else clear.push("gsm.password");
   // Only when configured. A QMI or MBIM bearer has no dial step and the link
   // that worked had this empty.
   if (modem.dial !== null) settings.push(["gsm.number", modem.dial]);
+  else clear.push("gsm.number");
 
-  return { name: MODEM_CONNECTION, type: "gsm", ifname: iface, settings };
+  return { name: MODEM_CONNECTION, type: "gsm", ifname: iface, settings, clear };
 }
 
 /**
@@ -168,9 +190,19 @@ export const REDIAL_SETTINGS: ReadonlySet<string> = new Set([
   "gsm.number",
 ]);
 
-/** The subset of a profile's settings that a live bearer would not pick up. */
-export function redialSettings(settings: string[][]): string[][] {
-  return settings.filter(([name]) => name !== undefined && REDIAL_SETTINGS.has(name));
+/**
+ * The subset of a profile's settings that a live bearer would not pick up.
+ *
+ * `cleared` is folded in as an empty value, because a setting being *removed*
+ * is a change to the bearer exactly as a setting being altered is — and it is
+ * the one the comparison could not see. A property absent from `wanted` is a
+ * property `bearerChanges` never asks nmcli about, so clearing an APN wrote
+ * the reset and left the modem dialled on the old bearer, which is the same
+ * defect R-CEL-09 was written for arriving by a different road.
+ */
+export function redialSettings(settings: string[][], cleared: string[] = []): string[][] {
+  return [...settings, ...cleared.map((name) => [name, ""])]
+    .filter(([name]) => name !== undefined && REDIAL_SETTINGS.has(name));
 }
 
 /**

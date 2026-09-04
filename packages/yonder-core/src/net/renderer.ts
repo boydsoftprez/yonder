@@ -361,7 +361,20 @@ export class NetworkRenderer implements Renderer {
       : [];
 
     for (const profile of desired) {
-      await this.client.addOrModify(profile.name, profile);
+      // A profile whose *type* has changed cannot be modified into the new
+      // one — both modem modes write a connection called `yonder-modem`, and
+      // an operator moving between them used to have ethernet properties
+      // written onto a profile that stayed `gsm` and went on dialling as it
+      // had. `addOrModify` replaces it, and says so here rather than only in
+      // the journal: an operator who has just changed what kind of modem this
+      // board has should see that the profile was made again (R-CFG-13).
+      const wrote = await this.client.addOrModify(profile.name, profile);
+      if (wrote === "replaced") {
+        this.log(
+          `network: ${profile.name} was a different kind of connection and has been `
+          + `created again as a ${profile.type} one`,
+        );
+      }
     }
 
     // The radio, arbitrated (K-13). One radio can be an access point or a
@@ -434,7 +447,7 @@ export class NetworkRenderer implements Renderer {
   private async modemChangesNeedingRedial(desired: DesiredProfile[]): Promise<string[]> {
     const profile = desired.find((p) => p.name === MODEM_CONNECTION);
     if (profile === undefined) return [];
-    const wanted = redialSettings(profile.settings);
+    const wanted = redialSettings(profile.settings, profile.clear ?? []);
     if (wanted.length === 0) return [];
 
     try {

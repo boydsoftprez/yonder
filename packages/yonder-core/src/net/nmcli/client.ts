@@ -15,12 +15,75 @@ export interface AccessPointInfo { ssid: string; signal: number; security: strin
  * to `connection modify` — see addOrModify.
  */
 export interface ConnectionSpec {
-  /** nmcli connection type: `wifi`, `ethernet`. Sent only when creating. */
+  /** nmcli connection type: `wifi`, `ethernet`, `gsm`. Sent only when creating. */
   type: string;
   /** The interface to bind. `ifname` when creating, `connection.interface-name` when modifying. */
   ifname: string;
   /** Fully-qualified `setting.property value` pairs. Never a bare property name. */
   settings: string[][];
+  /**
+   * Properties this profile wants **unset**, sent as `property ""`.
+   *
+   * A setting the configuration no longer holds has to be said, not omitted.
+   * `nmcli connection modify` only writes what it is given, so a profile that
+   * simply left `gsm.apn` out left the stored APN in place and in use: an
+   * operator who cleared the field kept dialling on the old value, and the
+   * `config.yaml` that is meant to be the single source of every generated
+   * file no longer described the profile it had generated (R-CFG-13).
+   *
+   * Only on the modify path. A connection that is being created has no stored
+   * value to reset, and `connection add` is where the shipped behaviour of a
+   * modem with no APN was measured — sending it an empty one would be a
+   * change to something that works, for no gain.
+   */
+  clear?: string[];
+}
+
+/**
+ * What nmcli calls a connection's type in the two places it is named.
+ *
+ * `connection add` takes the alias — `wifi`, `ethernet`, `gsm` — and
+ * `connection show` reports the setting name in its TYPE column:
+ * `802-11-wireless`, `802-3-ethernet`, `gsm`. They are the same fact spelled
+ * two ways, and comparing one against the other without this map would call
+ * every profile mistyped and recreate the access point on every render.
+ */
+const REPORTED_TYPE: Record<string, string> = {
+  wifi: "802-11-wireless",
+  ethernet: "802-3-ethernet",
+  gsm: "gsm",
+};
+
+/**
+ * Whether an existing connection is definitely not the kind now wanted.
+ *
+ * **Only on positive evidence, and that is the whole of the safety here.** The
+ * answer decides whether a profile is deleted and created again, and one of
+ * the profiles this is asked about is the access point an operator may be
+ * joined to. A type nobody here recognises, or a TYPE column nmcli left empty,
+ * answers `false` — modify it in place, exactly as before — because being
+ * wrong in that direction costs a stale property and being wrong the other way
+ * drops every station on the radio. The same shape `pathsDown` takes about
+ * NetworkManager's state words and `bearerChanges` about an unreadable
+ * property: silence is never a difference.
+ *
+ * Both spellings are accepted for the wanted type, so an nmcli that reports
+ * the alias rather than the setting name is not read as a mismatch either.
+ */
+/**
+ * What `addOrModify` did, so the caller can say the half an operator reads.
+ *
+ * `replaced` is the one that matters: a profile was deleted and created again
+ * because a connection's type cannot be changed. The client says it to the
+ * journal in nmcli's own words; the renderer says it to the activity pane in
+ * Yonder's.
+ */
+export type ConnectionWrite = "added" | "modified" | "replaced";
+
+export function typeDiffers(reported: string, wanted: string): boolean {
+  const expected = REPORTED_TYPE[wanted];
+  if (expected === undefined || reported === "") return false;
+  return reported !== expected && reported !== wanted;
 }
 
 /**
@@ -136,27 +199,59 @@ export class NmcliClient {
    * under its real property name, `connection.interface-name`, on the modify
    * path.
    *
+   * **A connection whose type has changed is replaced, not modified.** The
+   * paragraph above says a type cannot be changed and this method used to
+   * modify anyway: both modem modes use the name `yonder-modem`, so an
+   * operator moving from `auto` to `appliance` had every ethernet property
+   * written onto a profile that was still `gsm` and stayed one. Nothing
+   * failed, nothing was logged, and the modem went on dialling as it had.
+   * Deleting and creating again is the only way NetworkManager offers, and it
+   * happens only on positive evidence — see `typeDiffers`.
+   *
    * ASSUMED, NOT OBSERVED: there was no nmcli on the machine this was written
    * on. Confirming that `nmcli connection modify yonder-ap type wifi` is
    * rejected — and that `connection.interface-name` is accepted — is Step 1 of
    * docs/hardware/verifying-m1a.md.
    */
-  async addOrModify(name: string, spec: ConnectionSpec): Promise<void> {
+  async addOrModify(name: string, spec: ConnectionSpec): Promise<ConnectionWrite> {
     const existing = await this.connections();
     const properties = spec.settings.flat();
-    if (existing.some((c) => c.name === name)) {
+    const found = existing.find((c) => c.name === name);
+
+    if (found !== undefined && !typeDiffers(found.type, spec.type)) {
+      // `clear` last, so a property that is both written and reset — which
+      // nothing generates today — ends unset rather than depending on
+      // argument order inside nmcli.
       await this.exec([
         "nmcli", "connection", "modify", name,
         "connection.interface-name", spec.ifname,
         ...properties,
+        ...(spec.clear ?? []).flatMap((property) => [property, ""]),
       ]);
-    } else {
-      await this.exec([
-        "nmcli", "connection", "add", "con-name", name,
-        "type", spec.type, "ifname", spec.ifname,
-        ...properties,
-      ]);
+      return "modified";
     }
+
+    if (found !== undefined) {
+      // The journal, not the console's activity pane: this line names both
+      // nmcli spellings and is diagnostic. The caller is told what happened
+      // and says the operator's version of it — see `NetworkRenderer.render`.
+      this.log(
+        `${name} is a ${found.type} connection and the configuration now asks for a `
+        + `${spec.type} one; a connection's type cannot be changed, so it is being replaced`,
+      );
+      await this.remove(name);
+    }
+
+    // Created: either it was never there, or it has just been removed because
+    // it was the wrong kind. `clear` has nothing to do here — a new profile
+    // holds no value to reset — and sending an empty property on `add` would
+    // be a change to the one path a board was measured on.
+    await this.exec([
+      "nmcli", "connection", "add", "con-name", name,
+      "type", spec.type, "ifname", spec.ifname,
+      ...properties,
+    ]);
+    return found === undefined ? "added" : "replaced";
   }
 
   /**

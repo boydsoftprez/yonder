@@ -55,6 +55,35 @@ describe("modemProfile", () => {
     expect(settings(dialed!)["gsm.number"]).toBe("*99#");
   });
 
+  /**
+   * **A setting the configuration no longer holds is named for removal**
+   * (R-CFG-13). Omitting it is what a profile used to do, and
+   * `nmcli connection modify` writes only what it is given — so a cleared APN
+   * left the stored one in place and dialling, with `config.yaml` saying there
+   * was none.
+   */
+  it("names every bearer setting the configuration does not hold", () => {
+    const p = modemProfile(withModem({ enabled: true }), null, "cdc-wdm0");
+    expect(p?.clear?.slice().sort())
+      .toEqual(["gsm.apn", "gsm.number", "gsm.password", "gsm.username"]);
+  });
+
+  it("names for removal only what it is not also writing", () => {
+    const p = modemProfile(
+      withModem({ enabled: true, apn: "ereseller", username: "u", dial: "*99#" }), "pw", "cdc-wdm0");
+    expect(p?.clear).toEqual([]);
+  });
+
+  it("clears the credential when the configuration says there is none", () => {
+    // `password: null` is the file's own word for "there is no credential",
+    // and `resolve` throws on a reference to a row the store does not have —
+    // so a null arriving here can only ever mean the configuration said so,
+    // never that a secret went missing.
+    const p = modemProfile(withModem({ enabled: true, apn: "a", username: "u" }), null, "cdc-wdm0");
+    expect(p?.clear).toContain("gsm.password");
+    expect(p?.clear).not.toContain("gsm.username");
+  });
+
   it("builds an ethernet connection for a modem the operator named", () => {
     const p = modemProfile(
       withModem({ enabled: true, mode: "appliance", interface: "usb0" }), null, "usb0");
@@ -76,12 +105,28 @@ describe("redialSettings", () => {
       .toEqual(["gsm.apn", "gsm.number", "gsm.password", "gsm.username"]);
   });
 
+  /**
+   * A bearer setting being **removed** is a change to the bearer exactly as
+   * one being altered is, and it is the one the comparison could not see: a
+   * property absent from the desired profile is a property `bearerChanges`
+   * never asks nmcli about, so clearing an APN wrote the reset and left the
+   * modem dialled on the old bearer (R-CEL-09).
+   */
+  it("counts a setting being cleared as a setting to dial again", () => {
+    const p = modemProfile(withModem({ enabled: true }), null, "cdc-wdm0");
+    expect(redialSettings(p!.settings, p!.clear).map(([n]) => n).sort())
+      .toEqual(["gsm.apn", "gsm.number", "gsm.password", "gsm.username"]);
+    // With an empty value, which is what makes `bearerChanges` see a stored
+    // `ereseller` as a difference rather than never asking about it.
+    expect(redialSettings(p!.settings, p!.clear).every(([, v]) => v === "")).toBe(true);
+  });
+
   it("is empty for a modem that dials for itself", () => {
     // An appliance is a network adapter to this board, so nothing here is
     // ever cycled by the re-dial mechanism (R-CEL-11).
     const p = modemProfile(
       withModem({ enabled: true, mode: "appliance", interface: "usb0" }), null, "usb0");
-    expect(redialSettings(p!.settings)).toEqual([]);
+    expect(redialSettings(p!.settings, p!.clear ?? [])).toEqual([]);
   });
 });
 
