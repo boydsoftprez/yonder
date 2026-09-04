@@ -61,6 +61,31 @@ function splitPort(entry: string): [string, string] {
   return m === null ? [entry.trim(), ""] : [m[1], m[2]];
 }
 
+/**
+ * The port a connection is bound to, and the mode it came up in (R-CEL-03).
+ *
+ * `at` is a control port too, but only as the fallback a modem with no data
+ * port ends up on — which is the arrangement the install role exists to
+ * prevent, not one to configure. So the two kinds here are the two that give
+ * a working data path, and a modem showing neither has no mode to report.
+ *
+ * Exported, and read from a plain port list rather than from a `ModemInfo`,
+ * because the console has to answer R-CEL-03's *"say which it chose"* from
+ * what `/modem/state` carries — which is the list and not the parsed record.
+ * A second copy of this rule written there is the copy that stops matching
+ * this one, and then the console names a mode the connection was not built
+ * on.
+ *
+ * Null, never a guess: an unknown mode is shown as unknown.
+ */
+export function controlPort(portList: string[]): { name: string; kind: string } | null {
+  for (const entry of portList) {
+    const [name, kind] = splitPort(entry);
+    if (kind === "mbim" || kind === "qmi") return { name, kind };
+  }
+  return null;
+}
+
 /** A number, or null for mmcli's absent. Never a zero standing in for unknown. */
 function num(value: string | null | undefined): number | null {
   if (value === null || value === undefined || value === "") return null;
@@ -100,15 +125,13 @@ export class MmcliClient {
     const ports: ModemPorts = { control: null, net: null };
     for (const entry of portList) {
       const [name, kind] = splitPort(entry);
-      // The kinds that matter. `at` is a control port too, but only as the
-      // fallback a modem with no data port ends up on — which is the
-      // arrangement the install role exists to prevent, not one to configure.
       if (kind === "net") ports.net = name;
-      else if (kind === "mbim" || kind === "qmi") ports.control = name;
     }
     // The primary port is the control port when mmcli named one, which it does
-    // for every modem that has a data path.
-    ports.control = ports.control ?? r["modem.generic.primary-port"] ?? null;
+    // for every modem that has a data path. `controlPort` holds the rule for
+    // which kind that is, once, because the console answers the same question
+    // off the same list.
+    ports.control = controlPort(portList)?.name ?? r["modem.generic.primary-port"] ?? null;
     return {
       path,
       manufacturer: r["modem.generic.manufacturer"] ?? null,

@@ -81,6 +81,27 @@ cat > "$BIN/systemctl" <<'FAKE'
 printf '%s\n' "$*" >> "$SYSTEMCTL_LOG"
 exit 0
 FAKE
+# Which board this run is describing: 1 with a modem in the slot, 0 without.
+#
+# It is read on every call by both `nmcli` and `mmcli` below, the way
+# `$PROBE_ANSWER` is, because it names a *board* and not one command's answer.
+# It used to be read only by `mmcli`, so with 0 the fixture set described a
+# board that cannot exist: no modem, and a connected `cdc-wdm0` anyway.
+# Unplugging a modem takes its control port away from NetworkManager too.
+#
+# **That alone does not make the no-modem pages read `NO MODEM`, and the
+# reason is a defect in the daemon rather than in this file.** `modemInterface`
+# in daemon/server.ts remembers the modem's net interface for the life of the
+# process — `if (modemNet !== null) return modemNet;` — so once a modem has
+# been seen, `pathDevices` keeps being handed `wwan0` whatever ModemManager
+# and NetworkManager now say, and `/reach/state` keeps reporting a cellular
+# path on an interface that is gone. The Cellular tab therefore draws a green
+# `READY` lamp over the words "No modem found" in the captures below. That is
+# recorded, not accepted; on a board that never had a modem — which is what
+# the hardware this was found on did — the tab reads `NO MODEM` correctly.
+MODEM_PRESENT="$ROOT/modem-present"
+echo 1 > "$MODEM_PRESENT"
+
 # nmcli, reporting the board this project is built for: a wired port, the
 # radio, and the modem's control port. It used to list only `lo` and `wlan0`,
 # and the cost of that was invisible until the `Way out` panel existed — with
@@ -92,14 +113,16 @@ FAKE
 # default route, so `ReachWatch` finds no path in use and probes nothing on
 # its own. Every probe in this run is one the gate asked for, which is what
 # makes the three states below reproducible rather than a race with a timer.
-cat > "$BIN/nmcli" <<'FAKE'
+cat > "$BIN/nmcli" <<FAKE
 #!/bin/sh
-case "$*" in
+case "\$*" in
     *"device status"*)
         printf 'lo:loopback:connected:lo\n'
         printf 'eth0:ethernet:connected:Wired connection 1\n'
         printf 'wlan0:wifi:disconnected:\n'
-        printf 'cdc-wdm0:gsm:connected:yonder-modem\n' ;;
+        # The control port goes with the modem. See \$MODEM_PRESENT above.
+        [ "\$(cat "$MODEM_PRESENT")" = "1" ] \\
+            && printf 'cdc-wdm0:gsm:connected:yonder-modem\n' ;;
     *"device wifi list"*)
         printf 'HomeNetwork:78:WPA2\nHomeNetwork:41:WPA2\nCafe:33:--\n' ;;
     *"connection show"*) : ;;
@@ -112,15 +135,13 @@ FAKE
 # of em dashes — and a page captured with nothing on it is a page nobody has
 # looked at, which is the failure R-UI-12 exists to prevent.
 #
-# It also answers a second board. `$MODEM_PRESENT` holds 1 or 0 and is read on
-# every call, the way `$PROBE_ANSWER` below is: with 0 there are no modems and
-# the daemon reports `mode: absent`, which is the board `Reachable by` on
-# Status has to be captured on. That panel drops its two gauges entirely
-# there — a gauge with no needle reads as a fault, and *there is no modem* is
-# not a fault — so it is a second shape of the page and R-UI-12 asks for it.
+# It also answers the second board. With `$MODEM_PRESENT` at 0 there are no
+# modems and the daemon reports `mode: absent`, which is the board both
+# `Reachable by` on Status and the whole Cellular tab have to be captured on.
+# Each drops its two gauges entirely there — a gauge with no needle reads as a
+# fault, and *there is no modem* is not a fault — so it is a second shape of
+# each page and R-UI-12 asks for both.
 MMCLI_FIXTURES="$REPO/packages/yonder-core/src/net/modem/mmcli/fixtures"
-MODEM_PRESENT="$ROOT/modem-present"
-echo 1 > "$MODEM_PRESENT"
 cat > "$BIN/mmcli" <<FAKE
 #!/bin/sh
 F="$MMCLI_FIXTURES"
@@ -569,33 +590,49 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
         fi
     }
 
-    # Status's own second shape, and it is a different *board* rather than a
-    # different reading. `Reachable by` is gauges over a labelled strip, and on
-    # a board with no modem the gauges are absent and the panel is the strip
-    # alone. Nothing draws an empty gauge there: a gauge with no needle reads
-    # as a fault, and there being no modem is not one.
+    # The second shape of the two pages that draw a modem, and it is a
+    # different *board* rather than a different reading. Both draw signal as
+    # gauges, and on a board with no modem both drop them entirely: a gauge
+    # with no needle reads as a fault, and there being no modem is not one.
     #
-    # Taken by the same `--only`/`--as` mechanism the Way out states use, so it
-    # is held to exactly the rules and the shape reference every other page is.
-    capture_status_without_modem() {
+    # **Both pages, in one flip.** The Cellular tab shipped drawing two empty
+    # gauge tracks on this board — the defect was found in a browser and not
+    # here, because Status was the only page this state was ever captured on.
+    # A page that hides part of itself is captured in each of those parts
+    # (R-UI-12), and the tab hides its gauges exactly the way the panel does.
+    # It also happens to be the only board on which `COMPOSITION` has nothing
+    # to say, which is the other thing worth a picture.
+    #
+    # Taken by the same `--only`/`--as` mechanism the Way out states use, so
+    # each is held to exactly the rules and the shape reference every other
+    # page is.
+    capture_without_modem() {
         echo 0 > "$MODEM_PRESENT"
-        # One poll of `yonder-modem-state`, so the page is showing this board
+        # One poll of `yonder-modem-state`, so the pages are showing this board
         # and not the one before it.
         sleep 7
         expect_contains "the harness board has nothing in the modem slot" \
             '"mode":"absent"' "$(sock /modem/state)"
-        if node "$REPO/scripts/capture-pages.mjs" \
-                --base-url "http://127.0.0.1:$PORT" \
-                --password "$PASSWORD" \
-                --palette "$1" \
-                --only status \
-                --as status-without-modem \
-                --artifacts "$REPO/vendor/capture" \
-                ${ACCEPT_SHAPE:+--accept}; then
-            ok "the $1 palette: Status on a board with no modem"
-        else
-            bad "the $1 palette: Status on a board with no modem, see above"
-        fi
+        # Read the lamp in these two pictures knowing what is behind it: it
+        # says READY, and it should say NO MODEM. `/reach/state` is still
+        # naming `wwan0` here because the daemon caches that name for the life
+        # of the process — see $MODEM_PRESENT above. Everything else on the
+        # pages is what this capture is for, and the gauges are the part that
+        # had to be looked at.
+        for without in status:status network-cellular:network-cellular; do
+            if node "$REPO/scripts/capture-pages.mjs" \
+                    --base-url "http://127.0.0.1:$PORT" \
+                    --password "$PASSWORD" \
+                    --palette "$1" \
+                    --only "${without%%:*}" \
+                    --as "${without#*:}-without-modem" \
+                    --artifacts "$REPO/vendor/capture" \
+                    ${ACCEPT_SHAPE:+--accept}; then
+                ok "the $1 palette: ${without#*:} on a board with no modem"
+            else
+                bad "the $1 palette: ${without#*:} on a board with no modem, see above"
+            fi
+        done
         # Put it back before anything else is captured: every other page in
         # this run describes a board that has one.
         echo 1 > "$MODEM_PRESENT"
@@ -668,7 +705,7 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
         # restarting the daemon.
         capture_state night 1 not-reaching
         capture_state night 0 reaching
-        capture_status_without_modem night
+        capture_without_modem night
         capture_status_pending night
     else
         bad "the console never regenerated theme.css as night, so it was not captured"
@@ -681,7 +718,7 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
         ok "the console was left in the default palette"
         capture_state day 1 not-reaching
         capture_state day 0 reaching
-        capture_status_without_modem day
+        capture_without_modem day
         capture_status_pending day
     else
         bad "the console is still in the night palette; a held run will be wrong"

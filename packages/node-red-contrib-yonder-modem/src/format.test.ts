@@ -5,6 +5,7 @@ import {
   QUALITY_BOUNDS,
   SIGNAL_BOUNDS,
   cannotTell,
+  composition,
   formatDb,
   formatDbm,
   formatTechnology,
@@ -15,6 +16,46 @@ import {
   verdict,
   verdictStatus,
 } from "./format.js";
+
+/**
+ * The six ports a real EC25-AF came up on, in mmcli's order.
+ *
+ * The whole list is the shape that produced the defect: printed as one line
+ * it is `cdc-wdm0 (mbim) · ttyUSB0 (ignored) · ttyUSB1 (gp…` in the cell's
+ * third of a row, and four of the six ports say nothing an operator wants —
+ * one is ignored, one is the GPS, two are AT.
+ */
+const EC25 = [
+  "cdc-wdm0 (mbim)", "ttyUSB0 (ignored)", "ttyUSB1 (gps)",
+  "ttyUSB2 (at)", "ttyUSB3 (at)", "wwan0 (net)",
+];
+
+/**
+ * R-CEL-03: *detect which mode a connected modem needs, and say which it
+ * chose.* One word, and the answer to that question — not an enumeration of
+ * every port the modem happens to expose, which is a different question
+ * nobody asked on a page that is glanced at.
+ */
+describe("composition", () => {
+  it("is the one word the modem came up in, not its list of ports", () => {
+    expect(composition(EC25)).toBe("MBIM");
+  });
+
+  it("reads QMI the same way, because both are control ports", () => {
+    expect(composition(["cdc-wdm0 (qmi)", "wwan0 (net)"])).toBe("QMI");
+  });
+
+  /**
+   * Never a guess. A modem that came up with no data port at all — the
+   * arrangement the install role's udev re-trigger exists to prevent — has
+   * no mode to report, and the cell shows a dash like every other unknown
+   * fact rather than naming a mode the connection was not built on.
+   */
+  it("is nothing at all when no control port says which mode it is", () => {
+    expect(composition(["ttyUSB2 (at)", "wwan0 (ignored)"])).toBeNull();
+    expect(composition([])).toBeNull();
+  });
+});
 
 describe("the signal bounds", () => {
   it("are the standard cellular thresholds, higher-is-better", () => {

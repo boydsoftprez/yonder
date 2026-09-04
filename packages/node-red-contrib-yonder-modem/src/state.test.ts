@@ -11,6 +11,23 @@ const MODEM: ModemState = {
   ports: ["cdc-wdm0 (mbim)", "wwan0 (net)"], reportsSignal: true,
 };
 
+/**
+ * The same modem as it actually came up on the board — six ports, of which
+ * one is ignored, one is the GPS and two are AT.
+ *
+ * `MODEM` above keeps its two-port list because most of these tests are about
+ * signal and verdicts and a shorter list reads better in them. This one is
+ * here because a six-port modem is the shape that broke the Cellular tab, and
+ * a fixture that never has one is a fixture that cannot catch it again.
+ */
+const SIX_PORT: ModemState = {
+  ...MODEM,
+  ports: [
+    "cdc-wdm0 (mbim)", "ttyUSB0 (ignored)", "ttyUSB1 (gps)",
+    "ttyUSB2 (at)", "ttyUSB3 (at)", "wwan0 (net)",
+  ],
+};
+
 const REACH: ReachState = {
   inUse: "ethernet", carrying: true,
   paths: [
@@ -138,6 +155,25 @@ describe("fanOut", () => {
   });
 
   /**
+   * **The defect a capture found on a real six-port EC25.**
+   *
+   * `COMPOSITION` was bound to `portSummary` and ran off the right of the
+   * viewport as `cdc-wdm0 (mbim) · ttyUSB0 (ignored) · ttyUSB1 (gp…`. The cell
+   * was not too narrow — it was showing the wrong thing. R-CEL-03 asks which
+   * mode the modem needs and which was chosen, and the answer to that is one
+   * word taken from the kind of the control port. The other five ports are
+   * diagnostic detail and stay in the payload; they are not a fact an
+   * operator glances at.
+   */
+  it("names the mode a six-port modem came up in, not its six ports", () => {
+    const p = fanOut(messageFor(SIX_PORT, REACH).payload, 4242)[0].payload as
+      Record<string, unknown>;
+    expect(p.composition).toBe("MBIM");
+    // The list is still carried; it is only no longer what the cell shows.
+    expect((p.ports as string[]).length).toBe(6);
+  });
+
+  /**
    * `ui-yonder-annunciator` renders a `CommandStatus` from `msg.yonder` and
    * nothing else, so the verdict has to arrive in that shape. Without this the
    * lamp on the Cellular tab reads "Ready" for ever, whatever the link is
@@ -170,6 +206,31 @@ describe("fanOut", () => {
     expect(p.rssi).toBe("-71 dBm");
     expect(p.rsrq).toBe("-12 dB");
     expect(p.gauges).toEqual({ strength: -99, quality: 16 });
+  });
+
+  /**
+   * **The defect a capture found on a board with the modem unplugged.**
+   *
+   * The Cellular tab drew a `NO MODEM` lamp, "No modem found" and a dash in
+   * every fact — and then two gauge tracks with their coloured bands and no
+   * needle. A gauge with no needle reads as a fault, and *there is no modem*
+   * is not a fault.
+   *
+   * The Cellular tab was built before `showsSignal` existed, so output 2
+   * carried only `reportsSignal` — which is a property of the *kind* of
+   * modem, true whenever one is not an appliance, and therefore true on a
+   * board that has no modem to have a kind. Binding the gauges' `visible` to
+   * it would have hidden nothing. This is the exact combination that produced
+   * the bug: `reportsSignal` true, `mode` absent.
+   */
+  it("tells the Cellular tab's gauges there is no modem, not merely a kind", () => {
+    const none = fanOut(messageFor({ ...MODEM, mode: "absent" }, REACH).payload, 4242);
+    const p = none[1].payload as Record<string, unknown>;
+    expect(p.reportsSignal, "the field the tab must not bind to").toBe(true);
+    expect(p.showsSignal, "the one it does").toBe(false);
+    // And the numbers are still absent rather than zero, so a gauge that did
+    // draw would draw nothing rather than a perfect signal.
+    expect(outs()[1].payload).toHaveProperty("showsSignal", true);
   });
 
   it("gives the Way out panel one row per path and Status one word", () => {

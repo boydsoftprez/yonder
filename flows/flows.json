@@ -1931,7 +1931,7 @@
         "width": 12,
         "height": 1,
         "label": "",
-        "cells": "[{\"key\":\"address\",\"label\":\"ADDRESS\",\"kind\":\"id\"},{\"key\":\"mtu\",\"label\":\"MTU\"},{\"key\":\"portSummary\",\"label\":\"COMPOSITION\"}]",
+        "cells": "[{\"key\":\"address\",\"label\":\"ADDRESS\",\"kind\":\"id\"},{\"key\":\"mtu\",\"label\":\"MTU\"},{\"key\":\"composition\",\"label\":\"COMPOSITION\"}]",
         "x": 700,
         "y": 1840,
         "wires": []
@@ -1940,8 +1940,15 @@
         "id": "pick-cell-strength",
         "type": "change",
         "z": "yonder-console",
-        "name": "RSRP, as a number for the gauge",
+        "name": "RSRP, and whether there is a gauge to draw at all",
         "rules": [
+            {
+                "t": "set",
+                "p": "visible",
+                "pt": "msg",
+                "to": "payload.showsSignal",
+                "tot": "jsonata"
+            },
             {
                 "t": "set",
                 "p": "payload",
@@ -1991,8 +1998,15 @@
         "id": "pick-cell-quality",
         "type": "change",
         "z": "yonder-console",
-        "name": "SINR, as a number for the gauge",
+        "name": "SINR, and whether there is a gauge to draw at all",
         "rules": [
+            {
+                "t": "set",
+                "p": "visible",
+                "pt": "msg",
+                "to": "payload.showsSignal",
+                "tot": "jsonata"
+            },
             {
                 "t": "set",
                 "p": "payload",

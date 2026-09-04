@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { confirmed, idle, rejected } from "yonder-core";
+import { confirmed, controlPort, idle, rejected } from "yonder-core";
 import type {
   CommandStatus,
   PathEvidence,
@@ -298,6 +298,31 @@ export function pathStatus(row: PathStandingView, at: number): CommandStatus {
  */
 export function formatTechnology(value: string | null): string | null {
   return value === null || value === "" ? null : value.toUpperCase();
+}
+
+/**
+ * The mode the modem came up in — `MBIM`, `QMI` — or nothing (R-CEL-03).
+ *
+ * R-CEL-03 asks Yonder to detect which mode a connected modem needs and to
+ * **say which it chose**, and the answer to that is one word taken from the
+ * kind of the control port. It is not the port list. That list was what the
+ * `COMPOSITION` cell showed, and on the six-port EC25 this was built against
+ * it ran off the right of the viewport as
+ * `cdc-wdm0 (mbim) · ttyUSB0 (ignored) · ttyUSB1 (gp…` — four of the six
+ * ports answering a question nobody asked, one of them the GPS. The cell was
+ * not too narrow; it was showing the wrong thing, and a wider cell would have
+ * kept the wrong thing and made it fit.
+ *
+ * Which port carries the answer is `controlPort`'s rule and comes from
+ * `yonder-core`, where the connection is actually bound to it. Deciding that
+ * again here is how a console names a mode the connection was not built on.
+ *
+ * Null, and therefore a dash like every other unknown fact, for a modem whose
+ * ports say nothing about which mode it is. Never a guess.
+ */
+export function composition(ports: string[]): string | null {
+  const port = controlPort(ports);
+  return port === null ? null : port.kind.toUpperCase();
 }
 
 /** The sentence under a path's name on the Way out panel. Already in Yonder's words. */

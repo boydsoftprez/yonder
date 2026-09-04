@@ -919,10 +919,71 @@ describe("flows/flows.json Cellular tab", () => {
     }
     for (const id of ["pick-cell-strength", "pick-cell-quality"]) {
       const node = flows.find((n) => n.id === id);
-      const rules = node?.rules as { to: string; tot: string }[];
-      expect(rules[0].tot).toBe("jsonata");
-      expect(rules[0].to).toMatch(/^payload\.gauges\./);
+      const rules = node?.rules as { p: string; to: string; tot: string }[];
+      // Found by what it sets rather than by where it sits: this pick also
+      // carries `msg.visible`, and which rule is written first is settled by
+      // the test below for the reason it has to be.
+      const onto = rules.find((r) => r.p === "payload");
+      expect(onto?.tot).toBe("jsonata");
+      expect(onto?.to).toMatch(/^payload\.gauges\./);
     }
+  });
+
+  /**
+   * **The defect a capture found with the modem unplugged.** The tab showed a
+   * `NO MODEM` lamp, "No modem found" and a dash in every fact — and then two
+   * gauge tracks with their coloured bands and no needle. A gauge with no
+   * needle reads as a fault, and *there is no modem* is not a fault, so the
+   * gauges are **absent** rather than empty.
+   *
+   * The binding is `showsSignal` and never `reportsSignal`. That one is a
+   * property of the *kind* of modem and is true whenever one is not an
+   * appliance — including on a board with no modem in it at all, which has no
+   * kind — so binding to it would have hidden nothing. The distinction is
+   * settled in the modem package, where it is tested; the flow only carries
+   * it onto `msg.visible`.
+   *
+   * `visible` is set **before** `payload` is replaced, because after that rule
+   * the field is gone. This is the same wiring the `Reachable by` panel on
+   * Status uses, deliberately: two surfaces drawing one modem's gauges must
+   * disappear on the same board.
+   */
+  it.each(["strength", "quality"])("hides the %s gauge rather than emptying it", (which) => {
+    const pick = flows.find((n) => n.id === `pick-cell-${which}`);
+    const rules = pick?.rules as { t: string; p: string; to: string; tot: string }[];
+    expect(rules.map((r) => r.p)).toEqual(["visible", "payload"]);
+    expect(rules[0].to).toBe("payload.showsSignal");
+    // JSONata, not a plain property read: a failed tick sends `payload: null`
+    // and `null.showsSignal` throws in the latter.
+    for (const r of rules) {
+      expect(r.t).toBe("set");
+      expect(r.tot).toBe("jsonata");
+    }
+    expect(rules[1].to).toBe(`payload.gauges.${which}`);
+    expect((pick?.wires as string[][])[0]).toEqual([`gauge-cell-${which}`]);
+  });
+
+  /**
+   * **The other defect the same capture found:** `COMPOSITION` ran off the
+   * right of the viewport as
+   * `cdc-wdm0 (mbim) · ttyUSB0 (ignored) · ttyUSB1 (gp…`.
+   *
+   * The cell was not too narrow. It was showing the wrong thing: R-CEL-03 asks
+   * which mode a connected modem needs and which was chosen, and the answer is
+   * one word — `MBIM` — taken from the kind of the control port. An
+   * enumeration of every port including the ignored one and the GPS answers a
+   * different question, and not on a page an operator glances at.
+   *
+   * The fix is the key, not the width. Widening the cell, wrapping it or
+   * shrinking the type would each have kept the wrong answer and made it fit.
+   */
+  it("says which mode the modem came up in, not every port it exposes", () => {
+    const bar = flows.find((n) => n.id === "bar-cell-link");
+    const cells = JSON.parse(String(bar?.cells)) as { key: string; label: string }[];
+    const cell = cells.find((c) => c.label === "COMPOSITION");
+    expect(cell?.key).toBe("composition");
+    expect(cells.some((c) => c.key === "portSummary"), "the port list is not a fact cell")
+      .toBe(false);
   });
 
   /**

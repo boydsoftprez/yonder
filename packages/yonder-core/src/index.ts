@@ -78,6 +78,7 @@ export { FallbackWatchdog, CARRYING_DEADLINE_MS, type FallbackWatchdogOptions } 
 export {
   MmcliClient,
   MmcliError,
+  controlPort,
   type ModemInfo,
   type ModemPorts,
   type BearerInfo,

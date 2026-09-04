@@ -35,7 +35,11 @@ different ticks and the three surfaces would quietly disagree about what the
 modem is doing.</p>
 <ol>
   <li><b>Cellular tab</b> — <code>{ mode, summary, verdict, operator, technology,
-  registration, apn, address, mtu, ports, portSummary, reportsSignal }</code>.
+  registration, apn, address, mtu, composition, ports, portSummary,
+  reportsSignal }</code>. <code>composition</code> is the one word the modem came
+  up in — <code>MBIM</code>, <code>QMI</code>, or nothing when its ports do not
+  say (R-CEL-03); that is the fact the tab shows, and <code>ports</code> beside
+  it is diagnostic detail rather than a fact cell.
   <code>verdict</code> is the line at the top of the tab, already judged:
   <code>{ text, tone }</code>, and it reads the same <code>evidence</code> the
   Way out lamps do, so the two pages cannot disagree about the modem.
@@ -46,7 +50,11 @@ modem is doing.</p>
   two readings as bare numbers and <code>bounds</code> with the scales to draw them
   against (R-UI-09). Both forms are carried because a gauge places a pointer and a
   databar prints a fact, and converting between them in a flow would need a
-  <code>function</code> node.</li>
+  <code>function</code> node. <code>showsSignal</code> travels with them and is
+  what a gauge's <code>visible</code> binds to: on a board with no modem the
+  gauges are <em>absent</em> rather than empty, because a gauge with no needle
+  reads as a fault and there being no modem is not one. It is not
+  <code>reportsSignal</code>, which is true on such a board.</li>
   <li><b>Way out rows</b> — one row per path, in the operator's order:
   <code>{ path, name, device, standing, evidence, inUse, since, detail, tone }</code>.
   <code>name</code> is Yonder's word — <code>Ethernet</code>,

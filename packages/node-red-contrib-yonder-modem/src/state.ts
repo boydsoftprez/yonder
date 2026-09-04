@@ -16,6 +16,7 @@ import {
   QUALITY_BOUNDS,
   SIGNAL_BOUNDS,
   cannotTell,
+  composition,
   formatDb,
   formatDbm,
   formatTechnology,
@@ -161,9 +162,23 @@ export interface StatePayload {
   apn: string | null;
   address: string | null;
   mtu: number | null;
-  /** Every port with its kind, as the modem came up (R-CEL-03). */
+  /**
+   * Which mode the modem came up in — `MBIM`, `QMI` — or null (R-CEL-03).
+   *
+   * This is the fact `COMPOSITION` shows, and `ports` below is not. See
+   * `composition` in format.ts for what the port list did to that cell.
+   */
+  composition: string | null;
+  /**
+   * Every port with its kind, as the modem came up.
+   *
+   * Diagnostic detail, and deliberately still carried: it is the raw material
+   * `composition` is read from, and the thing to look at when a modem came up
+   * in an arrangement nobody expected. It is not a fact cell on a page an
+   * operator glances at.
+   */
   ports: string[];
-  /** The same list as one line, so no flow has to join an array. */
+  /** The same list as one line, so nothing reading it has to join an array. */
   portSummary: string | null;
   /**
    * Whether this kind of modem reports signal at all (R-CEL-11).
@@ -287,6 +302,7 @@ export function messageFor(modem: ModemState, reach: ReachState): { payload: Sta
       apn: modem.apn,
       address: modem.address,
       mtu: modem.mtu,
+      composition: composition(modem.ports),
       ports: modem.ports,
       portSummary: modem.ports.length === 0 ? null : modem.ports.join(" · "),
       reportsSignal: modem.reportsSignal,
@@ -343,6 +359,7 @@ export function fanOut(payload: StatePayload, at: number = Date.now()): NodeMess
         apn: payload.apn,
         address: payload.address,
         mtu: payload.mtu,
+        composition: payload.composition,
         ports: payload.ports,
         portSummary: payload.portSummary,
         reportsSignal: payload.reportsSignal,
@@ -350,12 +367,21 @@ export function fanOut(payload: StatePayload, at: number = Date.now()): NodeMess
     },
     // 2 — the signal readings: strings for the databar at the top level,
     // numbers and scales beside them for the gauges.
+    //
+    // `showsSignal` travels with them for the same reason it travels on
+    // output 4: the Cellular tab's gauges are *absent* on a board with no
+    // modem rather than empty. This output carried only `reportsSignal` when
+    // the tab was built, which is a property of the kind of modem and true on
+    // a board that has none — so the tab drew two gauge tracks with their
+    // bands and no needle beside a `NO MODEM` lamp. A gauge with no needle
+    // reads as a fault, and there being no modem is not one.
     {
       payload: {
         ...payload.signal,
         gauges: payload.gauges,
         bounds: payload.bounds,
         reportsSignal: payload.reportsSignal,
+        showsSignal: payload.showsSignal,
       },
     },
     // 3 — the Way out panel: one row per path, in the operator's order, each
