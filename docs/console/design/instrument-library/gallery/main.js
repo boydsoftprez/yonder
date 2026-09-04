@@ -35,8 +35,9 @@ const REJECTED = [
 const App = defineComponent({
   setup () {
     const theme = ref("night");
-    const camera = ref("elp");
-    const page = ref("camera-live");
+    const page = ref("camera:elp");
+    const setup = ref(false);
+    const camera = { get value () { return page.value.startsWith("camera:") ? page.value.slice(7) : "elp"; } };
     const unproven = ref(false);
     const link = ref("good");
     const setTheme = (t) => {
@@ -51,12 +52,11 @@ const App = defineComponent({
       document.documentElement.setAttribute("data-theme", t);
     };
     setTheme("night");
-    window.addEventListener("yonder-go", (e) => { page.value = e.detail; });
+    window.addEventListener("yonder-mode", (e) => { setup.value = e.detail === "setup"; });
 
-    const TITLES = {
-      "cameras": "Cameras", "camera-live": "Camera", "camera-setup": "Camera",
-      "status": "Status", "network": "Network", "log": "Log", "diagnostics": "Diagnostics",
-    };
+    const CAMS = [{ id: "elp", name: "Cam 1" }, { id: "pocket2", name: "Cam 2" }];
+    const TITLES = { cameras: "Cameras", status: "Status", network: "Network", log: "Log", diagnostics: "Diagnostics" };
+    const title = () => page.value.startsWith("camera:") ? "Camera" : (TITLES[page.value] ?? "");
 
     return () => h("div", { class: "g-root" }, [
       h("div", { class: "g-bar" }, [
@@ -64,16 +64,8 @@ const App = defineComponent({
         h("div", { class: "g-bar__c" }, [
           h("div", { class: "g-switch" }, ["night", "day"].map((t) =>
             h("button", { class: { on: theme.value === t }, onClick: () => setTheme(t) }, t))),
-          h("div", { class: "g-switch" }, [
-            ["cameras", "Cameras"], ["camera-live", "Camera · Live"], ["camera-setup", "Camera · Setup"],
-          ].map(([k, lbl]) => h("button", {
-            class: { on: page.value === k }, onClick: () => { page.value = k; },
-          }, lbl))),
-          h("div", { class: "g-switch" }, [
-            ["elp", "ELP — aim advertised"], ["pocket2", "Pocket 2 — aim live"],
-          ].map(([k, lbl]) => h("button", {
-            class: { on: camera.value === k }, onClick: () => { camera.value = k; },
-          }, lbl))),
+          h("div", { class: "g-switch" }, [["live", "Live"], ["setup", "Setup"]].map(([k, lbl]) =>
+            h("button", { class: { on: setup.value === (k === "setup") }, onClick: () => { setup.value = k === "setup"; } }, lbl))),
           h("div", { class: "g-switch" }, [["good", "link good"], ["poor", "link poor"], ["lost", "link lost"]].map(([k, lbl]) =>
             h("button", { class: { on: link.value === k }, onClick: () => { link.value = k; } }, lbl))),
           h("div", { class: "g-switch" }, [h("button", {
@@ -82,12 +74,11 @@ const App = defineComponent({
         ]),
       ]),
       h(Shell, {
-        page: page.value.startsWith("camera-") && page.value !== "cameras" ? "camera-live" : page.value,
-        title: TITLES[page.value] ?? "",
-        onGo: (p) => { page.value = p === "camera-live" ? "camera-live" : p; },
+        page: page.value, title: title(), cameras: CAMS,
+        onGo: (p) => { page.value = p; },
       }, () => page.value === "cameras"
         ? [
-            h(Index, { cameras: CAMERAS, rejected: REJECTED, onOpen: () => { page.value = "camera-live"; } }),
+            h(Index, { cameras: CAMERAS, rejected: REJECTED, onOpen: (id) => { page.value = "camera:" + (id === "cam0" ? "elp" : "pocket2"); } }),
             h("div", { class: "d-panel", style: "margin-top:16px" }, [
               h("div", { class: "d-display d-two" }, [
                 h("div", { class: "d-half" }, [
@@ -111,12 +102,13 @@ const App = defineComponent({
               ] } })]),
             ]),
           ]
-        : [h(DraftDeck, {
-            key: camera.value + page.value,
+        : page.value.startsWith("camera:") ? [h(DraftDeck, {
+            key: camera.value + (setup.value ? "setup" : "live"),
             theme: theme.value, camera: camera.value,
-            mode: page.value === "camera-setup" ? "setup" : "live",
+            mode: setup.value ? "setup" : "live",
             showUnproven: unproven.value, link: link.value,
-          })]),
+            cameras: CAMS, onGo: (p) => { page.value = p; },
+          })] : [h("div", { class: "g-blank" }, TITLES[page.value] + " — not part of this mockup")]),
     ]);
   },
 });
@@ -128,8 +120,8 @@ app.provide("$dataTracker", () => {});
 app.provide("$socket", { on () {}, off () {},
   emit (event, id, msg) {
     if (event !== "widget-action") return;
-    const go = { live: "camera-live", setup: "camera-setup" }[msg?.payload];
-    if (go) window.dispatchEvent(new CustomEvent("yonder-go", { detail: go }));
+    if (msg?.payload === "live" || msg?.payload === "setup")
+      window.dispatchEvent(new CustomEvent("yonder-mode", { detail: msg.payload }));
   } });
 app
   .mixin({ computed: { $store: () => store } })

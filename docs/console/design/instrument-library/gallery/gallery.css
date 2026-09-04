@@ -176,3 +176,24 @@ body { margin:0; background: var(--yonder-background, #0a0c0f); color: var(--yon
 .d-hold span { font-size:10.5px; color: var(--yonder-label,#7f8a95); font-variant-numeric:tabular-nums; }
 .d-hold.on { border-style:solid; border-color: var(--yonder-select,#2ad4f0); }
 .d-hold.on b { color: var(--yonder-select,#2ad4f0); }
+
+/* the other cameras, under the picture */
+.d-thumbs { display:flex; align-items:center; gap:12px; padding:10px 18px;
+  border-top:1px solid var(--yonder-divider,#2b333c); }
+.d-thumb { display:flex; flex-direction:column; gap:5px; padding:4px; background:transparent; border:1px solid transparent;
+  border-radius:3px; cursor:pointer; font:inherit; text-align:left; }
+.d-thumb.on { border-color: var(--yonder-select,#2ad4f0); cursor:default; }
+.d-thumb:not(.on):hover { border-color: var(--yonder-divider,#2b333c); }
+.d-thumb__pic { display:block; width:112px; height:63px; border-radius:2px;
+  background:linear-gradient(#8fb4d0 0 38%, #7d8a4e 38% 100%); }
+.d-thumb:not(.on) .d-thumb__pic { filter:saturate(.5) brightness(.85); }
+.d-thumb__pic.tele { background:linear-gradient(#9dbdd6 0 30%, #8b9a5e 30% 100%); }
+.d-thumb__tag { display:flex; justify-content:space-between; gap:8px; font-size:10.5px; padding:0 2px; }
+.d-thumb__tag b { color: var(--yonder-value,#fff); font-weight:600; }
+.d-thumb__tag em { font-style:normal; color: var(--yonder-label,#7f8a95); }
+.d-thumb.on .d-thumb__tag em { color: var(--yonder-good,#35d06a); }
+.d-thumbs__cost { margin-left:auto; text-align:right; font-size:12px; color: var(--yonder-label,#7f8a95); }
+.d-thumbs__cost em { font-style:normal; font-size:10px; letter-spacing:.12em; text-transform:uppercase; display:block; }
+.d-thumbs__cost b { color: var(--yonder-value,#fff); font-variant-numeric:tabular-nums; }
+.d-thumbs__cost span em { display:inline; letter-spacing:0; text-transform:none; font-size:12px; }
+.g-blank { padding:40px; color: var(--yonder-label,#7f8a95); font-size:13px; }

@@ -77,6 +77,12 @@ predates these and must be brought up to them:
 - **`FULL RATE` is back**, a hold-key at the right of the rail (R-VID-13).
 - **The strip's uplink counts both encodes** and turns to caution when over:
   `3.3 of 3.2 Mb/s · over — the ground station's stream comes first` (R-VID-11).
+- **One sidebar entry per camera** under a `Cameras` heading — `Cam 1`,
+  `Cam 2` — and a **strip under the picture** with the other cameras as
+  periodic stills and the cost of all of it (`multi-camera-v2.html` option 1,
+  R-UI-03). A press on a thumbnail switches; the sidebar follows.
+- **Capacity follows the link** in the strip's uplink reading, and the reading
+  says when the encodes exceed it (R-VID-11).
 - The harness has a **link** switch — good / poor / lost — so the states can
   be seen. **Nothing measures the link yet**: R-VID-07 is unbuilt, and the
   round-trip figure is typed in.

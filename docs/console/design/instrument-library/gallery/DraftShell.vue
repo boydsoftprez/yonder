@@ -9,12 +9,14 @@
     </header>
     <div class="d-body">
       <nav class="v-navigation-drawer d-nav">
-        <button v-for="p in pages" :key="p.id" type="button"
-                class="v-list-item d-nav__i" :class="{ 'v-list-item--active': p.id === page }"
-                @click="$emit('go', p.id)">
-          <span class="d-nav__ico" v-html="p.icon" />
-          <span class="v-list-item-title">{{ p.label }}</span>
-        </button>
+        <template v-for="p in pages" :key="p.id">
+          <div v-if="p.section" class="d-nav__sect">{{ p.section }}</div>
+          <button type="button" class="v-list-item d-nav__i" :class="{ 'v-list-item--active': p.id === page, sub: p.sub }"
+                  @click="$emit('go', p.id)">
+            <span class="d-nav__ico" v-html="p.icon" />
+            <span class="v-list-item-title">{{ p.label }}</span>
+          </button>
+        </template>
       </nav>
       <main class="d-main"><slot /></main>
     </div>
@@ -31,16 +33,23 @@ const I = {
 };
 export default {
   name: 'DraftShell',
-  props: { page: { type: String, default: 'camera-live' }, title: { type: String, default: '' } },
+  props: { page: { type: String, default: 'camera-live' }, title: { type: String, default: '' },
+           cameras: { type: Array, default: () => [] } },
   emits: ['go'],
-  data: () => ({ pages: [
-    { id: 'status', label: 'Status', icon: I.status },
-    { id: 'network', label: 'Network', icon: I.network },
-    { id: 'cameras', label: 'Cameras', icon: I.cameras },
-    { id: 'camera-live', label: 'Camera', icon: I.camera },
-    { id: 'log', label: 'Log', icon: I.log },
-    { id: 'diagnostics', label: 'Diagnostics', icon: I.diag },
-  ] })
+  computed: {
+    // Navigation is built from detected hardware: one entry per camera the
+    // probe found, under the index. Unplug one and its entry is gone (R-UI-03).
+    pages () {
+      return [
+        { id: 'status', label: 'Status', icon: I.status },
+        { id: 'network', label: 'Network', icon: I.network },
+        { id: 'cameras', label: 'Cameras', icon: I.cameras, section: 'Cameras' },
+        ...this.cameras.map((c) => ({ id: 'camera:' + c.id, label: c.name, icon: I.camera, sub: true })),
+        { id: 'log', label: 'Log', icon: I.log, section: 'System' },
+        { id: 'diagnostics', label: 'Diagnostics', icon: I.diag },
+      ]
+    }
+  }
 }
 </script>
 <style scoped>
@@ -53,5 +62,8 @@ export default {
   color: var(--yonder-label,#7f8a95); }
 .d-nav__i:hover { color: var(--yonder-value,#fff); }
 .d-nav__ico { display:flex; opacity:.85; }
+.d-nav__sect { font-size:9.5px; letter-spacing:.2em; text-transform:uppercase; color: var(--yonder-label,#7f8a95);
+  opacity:.7; padding:16px 22px 6px; }
+.d-nav__i.sub { padding-left:34px; }
 .d-main { flex:1; min-width:0; padding:16px; }
 </style>

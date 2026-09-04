@@ -33,7 +33,9 @@ const COLUMNS = [
 export const DraftDeck = defineComponent({
   name: "DraftDeck",
   props: { camera: { type: String, default: "elp" }, mode: { type: String, default: "live" },
-           showUnproven: { type: Boolean, default: false }, link: { type: String, default: "good" } },
+           showUnproven: { type: Boolean, default: false }, link: { type: String, default: "good" },
+           cameras: { type: Array, default: () => [] } },
+  emits: ["go"],
   setup (props) {
     const cam = props.camera === "pocket2" ? POCKET2 : ELP;
     const v = reactive(Object.fromEntries(
@@ -68,9 +70,12 @@ export const DraftDeck = defineComponent({
       return { tone: "label", head: "ADAPTIVE", size: "1280×720", rate: Number(v.previewRate), mbps: Math.min(ceil, 1.8),
         detail: `${Math.min(ceil, 1.8).toFixed(1)} of ${floor.toFixed(1)}–${ceil.toFixed(1)} Mb/s`, step: "" };
     },
+    // Measured capacity of the path the encodes leave by (R-VID-11). The
+    // harness moves it with the link switch; the daemon will measure it.
     uplink () {
+      const cap = { good: 5.0, poor: 3.2, lost: 0.5 }[this.link] ?? 5.0;
       const total = this.bitrate + this.preview.mbps;
-      return { total, cap: 3.2, over: total > 3.2 };
+      return { total, cap, over: total > cap };
     },
   },
   methods: {
@@ -165,6 +170,23 @@ export const DraftDeck = defineComponent({
       onStop: () => { this.aim.slewPan = 0; this.aim.slewTilt = 0; },
     });
 
+    // The other cameras, as periodic stills, so they can be seen without paying
+    // for their video; one press switches. The cost of all of it, stated.
+    const thumbs = this.cameras.length > 1 ? h("div", { class: "d-thumbs" }, [
+      ...this.cameras.map((c) => {
+        const on = c.id === this.camera;
+        return h("button", { type: "button", class: ["d-thumb", { on }],
+          onClick: () => { if (!on) this.$emit("go", "camera:" + c.id); } }, [
+          h("span", { class: ["d-thumb__pic", c.id === "pocket2" ? "tele" : ""] }),
+          h("span", { class: "d-thumb__tag" }, [h("b", c.name), h("em", on ? "Live" : "Still · 4 s")]),
+        ]);
+      }),
+      h("div", { class: "d-thumbs__cost" }, [
+        h("em", "Downlink now"),
+        h("span", [h("b", `${this.preview.mbps.toFixed(1)} Mb/s`), " + ", h("b", "12 kb/s"), h("em", " of stills")]),
+      ]),
+    ]) : null;
+
     const strip = h("div", { class: "d-strip" }, [
       h(Annunciator, { id: "deck-ann", props: { source: "payload" } }),
       h("span", { class: "d-fact2" }, ["Browser ", h("b", "1 viewer")]),
@@ -248,7 +270,7 @@ export const DraftDeck = defineComponent({
         ? [picture, strip, h("div", { class: "d-cols" }, cols.map((c) => h("div", {}, [c]))), outTable,
            h("div", { class: "d-rail" }, [h(SoftKeys, { id: "deck-keys", props: { passthru: false, keys } })])]
         : [h("div", { class: "d-stage" }, [h("div", { class: "d-stage__pic" }, [picture]), aimPanel]),
-           strip, h("div", { class: "d-cols" }, cols.map((c) => h("div", {}, [c]))), outLine,
+           thumbs, strip, h("div", { class: "d-cols" }, cols.map((c) => h("div", {}, [c]))), outLine,
            h("div", { class: "d-rail d-rail--two" }, [
              h(SoftKeys, { id: "deck-keys", props: { passthru: false, keys } }),
              h("div", { class: ["d-hold", { on: this.fullRate }],
