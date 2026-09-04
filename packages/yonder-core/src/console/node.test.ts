@@ -12,6 +12,9 @@ import {
   pollIntervalMs,
   revertStatus,
   socketPathFrom,
+  wayBackInView,
+  AP_PASSPHRASE_CHANGED,
+  WAY_BACK_IN_NOTE,
 } from "./node.js";
 import type { DaemonReply } from "./client.js";
 
@@ -360,5 +363,107 @@ describe("revertStatus", () => {
 
   it("says so when the daemon did not answer at all", () => {
     expect(revertStatus(malformed, 5, "a1").state).toBe("rejected");
+  });
+});
+
+/**
+ * `IF YOU LOSE THIS CONSOLE` — the panel an operator reads when nothing else
+ * on the page is true any more (R-UI-18).
+ */
+describe("wayBackInView", () => {
+  const answering = (body: unknown): DaemonReply => ({ ok: true, status: 200, body });
+  const published = {
+    ssid: "yonder", address: "192.168.77.1", hostname: "yonder.local",
+    passphrase: "yonder1234",
+  };
+
+  it("names the network, the passphrase and both ways to reach the device", () => {
+    const shaped = wayBackInView(answering({ state: "idle", wayBackIn: published }), 0);
+    expect(shaped.payload).toEqual({
+      join: "yonder",
+      passphrase: "yonder1234",
+      at: "192.168.77.1",
+      or: "yonder.local",
+      note: WAY_BACK_IN_NOTE,
+    });
+    expect(shaped.yonder.state).toBe("idle");
+  });
+
+  /**
+   * R-SEC-10, on the console's side of the socket. The daemon answers `null`
+   * once the operator has set their own, and the cell says so in words rather
+   * than drawing the em dash that means *not known*: the device knows
+   * perfectly well what the passphrase is, and is declining to print it.
+   */
+  it("says the passphrase has been changed rather than printing one", () => {
+    const shaped = wayBackInView(
+      answering({ state: "idle", wayBackIn: { ...published, passphrase: null } }), 0,
+    );
+    expect(shaped.payload?.passphrase).toBe(AP_PASSPHRASE_CHANGED);
+    expect(shaped.payload?.join).toBe("yonder");
+  });
+
+  /**
+   * The wording never invites a reader to look the value up somewhere on the
+   * device. There is nowhere to look: `secrets.yaml` is `0600 root` and the
+   * console cannot read it (ADR-0008).
+   */
+  it("does not tell an operator to go and find it", () => {
+    expect(AP_PASSPHRASE_CHANGED).not.toMatch(/secret|file|journal|log/i);
+  });
+
+  /**
+   * **A read that fails leaves the panel exactly as it was**, and this is the
+   * one node in the console that does that deliberately.
+   *
+   * Everywhere else a failed read raises a rejected state, because a stale
+   * reading is a lie — `pendingChange` takes its banner down for precisely
+   * that reason. Here there is no reading. Which network to join and what
+   * address to open does not stop being true because the daemon missed a
+   * poll, and blanking the panel would remove the one thing on the page that
+   * still helps at the moment the daemon has gone quiet. The failure still
+   * travels on `msg.yonder`, so the node says so in its own status.
+   */
+  it("sends nothing at all when the daemon does not answer", () => {
+    for (const reply of [unreachable, malformed]) {
+      const shaped = wayBackInView(reply, 5_000);
+      expect(shaped.payload).toBeUndefined();
+      expect(shaped.yonder.state).toBe("rejected");
+    }
+  });
+
+  /**
+   * An older daemon has no `wayBackIn` in its `/status`. That is a reply this
+   * console cannot draw a panel from, and it is not a failure either — so it
+   * takes the same road as a failed read: send nothing, leave what is on
+   * screen alone.
+   */
+  it("sends nothing when the answer does not carry a way back in", () => {
+    expect(wayBackInView(answering({ state: "idle" }), 0).payload).toBeUndefined();
+    expect(wayBackInView(answering({ state: "idle", wayBackIn: null }), 0).payload).toBeUndefined();
+    expect(wayBackInView(answering({ state: "idle", wayBackIn: { ssid: 7 } }), 0).payload)
+      .toBeUndefined();
+  });
+
+  /**
+   * Field by field out of the reply, never spread from it. A key added to
+   * `WayBackIn` later cannot reach a page by being carried along — which is
+   * the rule `modemForm` was written to after R-UI-17, applied to the panel
+   * that would carry a credential if anything did.
+   */
+  it("carries nothing the panel does not draw", () => {
+    const shaped = wayBackInView(
+      answering({ state: "idle", wayBackIn: { ...published, somethingNew: "hunter2" } }), 0,
+    );
+    expect(JSON.stringify(shaped.payload)).not.toMatch(/hunter2/);
+    expect(Object.keys(shaped.payload ?? {}).sort())
+      .toEqual(["at", "join", "note", "or", "passphrase"]);
+  });
+
+  /** The line under the bar says what to do with it, and stays true whatever
+   *  port and palette the console is on. */
+  it("explains what the panel is for without inventing a URL", () => {
+    expect(WAY_BACK_IN_NOTE).toMatch(/photograph/i);
+    expect(WAY_BACK_IN_NOTE).not.toMatch(/http|:\d{2,5}/);
   });
 });

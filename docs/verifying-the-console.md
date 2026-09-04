@@ -299,7 +299,7 @@ network-interfaces-reaching.day.png         every path probed, and reaching some
 network-interfaces-down.day.png             the wired port down, and saying so
 ```
 
-**Status has three shapes.** Two of them are two different boards: `Reachable by` is gauges
+**Status has four shapes.** Two of them are two different boards: `Reachable by` is gauges
 over a labelled strip, and on a board with no modem the gauges are *absent* — a gauge with
 no needle reads as a fault, and there being no modem is not one. That capture is driven by
 taking the modem out of the harness rather than by sending an empty reading, so what is
@@ -312,10 +312,23 @@ back — which is the only end-to-end proof that either key on that panel reache
 A banner that renders correctly and whose keys do nothing is the failure `--press NIGHT` was
 added for.
 
+The fourth is `If you lose this console` in its other state (R-UI-18). That panel prints the
+access-point passphrase **only while it is the published default** — ADR-0007 makes that
+value deliberately public, and it is the only thing that makes a locked-out operator's way
+back in usable at all — and says it has been changed once the operator has set their own.
+Every other picture in the run is of the first state, so the second is captured under a name
+of its own. There is no route that changes that passphrase yet, so the gate does what an
+operator would have to do today: stops the daemon, edits `secrets.yaml`, starts it again.
+Around that capture it greps the journal, `GET /config`, `GET /status`, the dashboard the
+browser is handed, and every file under the temporary root for the value it set — which is
+the same claim made against the modem credential, applied to the other secret this device
+holds.
+
 ```
 status.day.png                              a board with a modem in it
 status-without-modem.day.png                the same board with nothing in the slot
 status-pending.day.png                      the same board, holding an unconfirmed change
+status-psk-changed.day.png                  the same board, on a passphrase the operator set
 ```
 
 The countdown is masked in the committed picture and only there: it is the one annunciator
@@ -323,6 +336,13 @@ caption on this console that is a *reading*, so without masking that file would 
 second or two on every run. The widget says so about itself with `className: "yonder-live"`,
 which is what the mask list matches — the lamp and its box are untouched, and the unmasked
 copy under `vendor/capture/` carries the digits.
+
+`className: "yonder-fixed"` is the mirror of that, and `If you lose this console` is the
+only thing wearing it. Data-bar cells and text values are masked as *kinds*, because most
+of them carry readings; that panel's four carry none — an SSID, an address, a hostname, and
+either the published passphrase or the sentence that stands in for a changed one. Masked,
+its two states would be the same picture, which is most of the reason for taking the second
+one.
 
 `capture-pages.mjs --only <page> --as <name>` is what takes one of them, so a state capture
 is held to exactly the rules and the shape reference every other page is. The shape manifest

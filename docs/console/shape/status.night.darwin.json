@@ -123,10 +123,37 @@
       }
     },
     {
-      "key": "nrdb-ui-group.yonder-rail",
+      "key": "nrdb-ui-group#3",
       "box": {
         "x": 268,
         "y": 942,
+        "w": 1000,
+        "h": 197
+      }
+    },
+    {
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-databar.yonder-fixed",
+      "box": {
+        "x": 285,
+        "y": 1013,
+        "w": 966,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-text.nrdb-ui-widget.yonder-fixed.yonder-qualifier",
+      "box": {
+        "x": 285,
+        "y": 1073,
+        "w": 966,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-group.yonder-rail",
+      "box": {
+        "x": 268,
+        "y": 1150,
         "w": 1000,
         "h": 82
       }
@@ -135,7 +162,7 @@
       "key": "nrdb-ui-widget.nrdb-ui-yonder-softkeys",
       "box": {
         "x": 285,
-        "y": 959,
+        "y": 1167,
         "w": 966,
         "h": 48
       }

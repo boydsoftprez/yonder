@@ -270,6 +270,108 @@ export function pendingChange(
 }
 
 /**
+ * What the `PASSPHRASE` cell says once the operator has set their own.
+ *
+ * Words, not the em dash a data bar draws for a key it has not been given.
+ * The em dash means *not known*, and this device knows perfectly well what
+ * its access-point passphrase is — it is declining to print it (R-SEC-10).
+ * Those are different answers and only one of them is honest.
+ *
+ * It also does not send anybody looking. There is nowhere to look:
+ * `secrets.yaml` is `0600 root` and the console runs unprivileged, so it
+ * could not read the value even if this said to (ADR-0008).
+ */
+export const AP_PASSPHRASE_CHANGED = "changed — the one you set";
+
+/**
+ * The line under the bar.
+ *
+ * No scheme, no port and no URL in it, deliberately. The console's port is
+ * configuration (`ui.port`), so a sentence with `:3000` in it is wrong on any
+ * device somebody has moved it on — and the operator reading this is looking
+ * at the console right now, with its address in front of them. What they do
+ * not have is the two names that still work once the network they are on has
+ * gone, which is what the bar above carries.
+ */
+export const WAY_BACK_IN_NOTE =
+  "Join that network from a phone or a laptop and open this console at either "
+  + "address above, on the port you are using now. Worth photographing before "
+  + "you change anything: it is what gets you back in when this page stops "
+  + "answering.";
+
+/** The four cells of the way back in, plus the line beneath them. */
+export interface WayBackInView {
+  /** The access point to join. */
+  join: string;
+  /** The published passphrase, or AP_PASSPHRASE_CHANGED. Never the operator's. */
+  passphrase: string;
+  /** The access point's address. */
+  at: string;
+  /** The name the device answers to. */
+  or: string;
+  /** WAY_BACK_IN_NOTE, so the flow binds a value rather than carrying prose. */
+  note: string;
+}
+
+/**
+ * `GET /status`'s `wayBackIn`, as the panel at the bottom of Status reads it
+ * (R-UI-18).
+ *
+ * **The decision about the passphrase is not made here.** The daemon has
+ * already made it — `publishableApPassphrase` in `net/profiles.ts` — and what
+ * arrives is either the published value or `null`. This turns `null` into
+ * words. A console that compared anything itself would be a second place the
+ * rule lives, and the second copy is the one that stops matching.
+ *
+ * **A failed read sends nothing, and that is deliberate.** Every other node
+ * in this console raises a rejected state on a failed read, because a stale
+ * *reading* is a lie. There is no reading here. Which network to join and
+ * what address to open does not stop being true because the daemon missed a
+ * poll — and this is the one panel on the page whose whole purpose is to
+ * still be useful when things have gone wrong, so blanking it at the first
+ * sign of trouble would be exactly backwards. The failure still travels on
+ * `msg.yonder`, so the node says so in its own status and the panels beside
+ * it already report a daemon that has gone quiet.
+ */
+export function wayBackInView(
+  reply: DaemonReply,
+  now: number,
+): { payload: WayBackInView | undefined; yonder: CommandStatus } {
+  const result = fetched(reply);
+  if (!result.ok) return { payload: undefined, yonder: readFailure(result.message, now) };
+
+  const back = (result.value as { wayBackIn?: unknown } | undefined)?.wayBackIn as {
+    ssid?: unknown; address?: unknown; hostname?: unknown; passphrase?: unknown;
+  } | undefined | null;
+  // A daemon older than this panel has no `wayBackIn`. Not a failure, and not
+  // something to draw a half-empty bar from: leave what is on screen alone.
+  if (
+    back === null || typeof back !== "object"
+    || typeof back.ssid !== "string"
+    || typeof back.address !== "string"
+    || typeof back.hostname !== "string"
+  ) {
+    return { payload: undefined, yonder: idle(now) };
+  }
+
+  return {
+    // Field by field, never spread: a key added to the daemon's answer later
+    // cannot reach a page by being carried along. This is the panel that
+    // would carry a credential if anything did.
+    payload: {
+      join: back.ssid,
+      passphrase: typeof back.passphrase === "string" && back.passphrase !== ""
+        ? back.passphrase
+        : AP_PASSPHRASE_CHANGED,
+      at: back.address,
+      or: back.hostname,
+      note: WAY_BACK_IN_NOTE,
+    },
+    yonder: idle(now),
+  };
+}
+
+/**
  * `POST /revert`'s answer.
  *
  * `confirmed`, not `rejected`, and the distinction is worth stating: this is

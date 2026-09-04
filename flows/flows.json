@@ -233,6 +233,20 @@
         "groupType": "default"
     },
     {
+        "id": "group-status-wayback",
+        "type": "ui-group",
+        "name": "If you lose this console",
+        "page": "page-status",
+        "width": 12,
+        "height": 1,
+        "order": 5,
+        "showTitle": true,
+        "className": "",
+        "visible": true,
+        "disabled": false,
+        "groupType": "default"
+    },
+    {
         "id": "group-net-now",
         "type": "ui-group",
         "name": "Interfaces",
@@ -3293,5 +3307,60 @@
                 "join-toast"
             ]
         ]
+    },
+    {
+        "id": "poll-wayback",
+        "type": "yonder-wayback",
+        "z": "yonder-console",
+        "name": "how to get back to this device",
+        "interval": 5,
+        "x": 700,
+        "y": 3570,
+        "wires": [
+            [
+                "bar-wayback",
+                "text-wayback-note"
+            ]
+        ]
+    },
+    {
+        "id": "bar-wayback",
+        "type": "ui-yonder-databar",
+        "z": "yonder-console",
+        "group": "group-status-wayback",
+        "name": "the network, the passphrase and both names",
+        "order": 1,
+        "width": 12,
+        "height": 1,
+        "label": "",
+        "cells": "[{\"key\":\"join\",\"label\":\"JOIN\",\"kind\":\"id\"},{\"key\":\"passphrase\",\"label\":\"PASSPHRASE\"},{\"key\":\"at\",\"label\":\"AT\",\"kind\":\"id\"},{\"key\":\"or\",\"label\":\"OR\",\"kind\":\"id\"}]",
+        "x": 1020,
+        "y": 3540,
+        "wires": [],
+        "className": "yonder-fixed"
+    },
+    {
+        "id": "text-wayback-note",
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-status-wayback",
+        "name": "what to do with it",
+        "order": 2,
+        "width": 12,
+        "height": 1,
+        "label": "",
+        "format": "{{msg.payload}}",
+        "layout": "row-left",
+        "value": "payload.note",
+        "valueType": "msg",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "wrapText": true,
+        "className": "yonder-qualifier yonder-fixed",
+        "x": 1020,
+        "y": 3600,
+        "wires": []
     }
 ]

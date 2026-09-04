@@ -255,7 +255,7 @@ export {
   type ActivityLogOptions,
 } from "./log/activity.js";
 export { scanForNetworks, type ScanResult } from "./net/scan.js";
-export type { DiagProbes, SystemReport } from "./daemon/routes.js";
+export type { DiagProbes, SystemReport, WayBackIn } from "./daemon/routes.js";
 export { HostnameRenderer, HOSTNAME_FILE, type HostnameRendererOptions } from "./system/hostname.js";
 export {
   idle,
@@ -280,12 +280,16 @@ export {
   pendingChange,
   revertStatus,
   readFailure,
+  wayBackInView,
   PENDING_WHY,
+  WAY_BACK_IN_NOTE,
+  AP_PASSPHRASE_CHANGED,
   MIN_POLL_MS,
   DEFAULT_POLL_MS,
   DEFAULT_SOCKET_PATH,
   type Fetched,
   type PendingChange,
+  type WayBackInView,
 } from "./console/node.js";
 export {
   displayFacts,

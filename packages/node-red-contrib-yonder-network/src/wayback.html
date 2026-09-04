@@ -1,0 +1,54 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!--
+  The editor half of the way-back-in poller.
+
+  Node-RED finds this by basename beside the node's .js, and without it the
+  flow editor shows the node as "unknown" even though the runtime registered
+  it. It is a form and a registration, and deliberately nothing else: no
+  behaviour lives here (CLAUDE.md rule 2 in spirit — a diff has to be
+  readable), and no asset is fetched from anywhere (R-UI-01).
+-->
+<script type="text/html" data-template-name="yonder-wayback">
+  <div class="form-row">
+    <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-interval"><i class="fa fa-clock-o"></i> Every</label>
+    <input type="number" id="node-input-interval" min="2" step="1" /> seconds
+  </div>
+</script>
+
+<script type="text/html" data-help-name="yonder-wayback">
+<p>Reads <code>GET /status</code> on a timer and reports how to get back to
+this device: which access point to join, its passphrase, its address, and the
+name it answers to (R-UI-18).</p>
+<p><code>msg.payload</code> carries <code>join</code>,
+<code>passphrase</code>, <code>at</code>, <code>or</code> and the line beneath
+them, all as strings a widget binds directly.</p>
+<p><b>The access-point passphrase is reported only while it is the published
+default.</b> That value is deliberately public (ADR-0007) and is what makes a
+locked-out operator's way back in usable at all; one the operator has set is
+theirs, and the daemon answers <code>null</code> rather than returning it
+(R-SEC-10). The comparison happens in <code>yonder-core</code>, never here and
+never in a flow.</p>
+<p>A read that fails sends nothing and leaves the panel as it is. That is
+deliberate and unlike every other node in this package: which network to join
+does not stop being true because the daemon missed a poll, and this is the one
+panel whose purpose is to still help when things have gone wrong. The node's
+status pill says the read failed.</p>
+<p>The floor on the interval is two seconds (R-UI-06) and is enforced in
+<code>yonder-core</code>, not here.</p>
+</script>
+
+<script type="text/javascript">
+  RED.nodes.registerType("yonder-wayback", {
+    category: "yonder",
+    color: "#c7d4e0",
+    defaults: { name: { value: "" }, interval: { value: 5 } },
+    inputs: 1,
+    outputs: 1,
+    icon: "font-awesome/fa-life-ring",
+    label: function () { return this.name || "how to get back to this device"; },
+  });
+</script>

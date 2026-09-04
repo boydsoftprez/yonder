@@ -168,10 +168,37 @@
       }
     },
     {
-      "key": "nrdb-ui-group.yonder-rail",
+      "key": "nrdb-ui-group#4",
       "box": {
         "x": 268,
         "y": 1270,
+        "w": 1000,
+        "h": 197
+      }
+    },
+    {
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-databar.yonder-fixed",
+      "box": {
+        "x": 285,
+        "y": 1342,
+        "w": 966,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-text.nrdb-ui-widget.yonder-fixed.yonder-qualifier",
+      "box": {
+        "x": 285,
+        "y": 1402,
+        "w": 966,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-group.yonder-rail",
+      "box": {
+        "x": 268,
+        "y": 1479,
         "w": 1000,
         "h": 82
       }
@@ -180,7 +207,7 @@
       "key": "nrdb-ui-widget.nrdb-ui-yonder-softkeys",
       "box": {
         "x": 285,
-        "y": 1287,
+        "y": 1496,
         "w": 966,
         "h": 48
       }

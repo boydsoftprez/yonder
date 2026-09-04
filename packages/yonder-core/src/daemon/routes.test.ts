@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtempSync, rmSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync, existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRouter, type DiagProbes, type Router, type SystemReport } from "./routes.js";
@@ -11,6 +11,7 @@ import { ApplyEngine } from "../apply/engine.js";
 import { saveConfig } from "../config/save.js";
 import { loadConfig } from "../config/load.js";
 import { SecretStore } from "../secrets/store.js";
+import { DEFAULT_AP_PASSPHRASE } from "../net/profiles.js";
 import { DEFAULT_CONFIG, type Config } from "../schema/config.js";
 import { AdminCredential } from "../console/credential.js";
 import { AttemptThrottle, FAILURE_LIMIT, LOCKOUT_MS } from "../console/throttle.js";
@@ -1131,5 +1132,136 @@ describe("POST /revert", () => {
     const res = await provisioned()("POST", "/revert", { id: "a1" });
     expect(res.status).toBe(400);
     expect((res.body as { error: string }).error).toMatch(/nothing is pending/);
+  });
+});
+
+/**
+ * `GET /status`'s `wayBackIn` — the way back into a device an operator has
+ * lost the console to (R-UI-18).
+ *
+ * The rule this exists to get right: **the passphrase is returned only while
+ * it is the published default.** ADR-0007 makes that value deliberately
+ * public — a per-device one could only be read from the device you are locked
+ * out of, so it guarded nothing and locked out the legitimate operator — and
+ * one the operator has set is theirs, which makes returning it a credential
+ * in an API response (R-SEC-10).
+ */
+describe("the way back in", () => {
+  /** The same router, with `ap_psk` seeded to a value the operator chose. */
+  function provisionedWithApPassphrase(psk: string): Router {
+    new SecretStore(secretsPath).ensureValue("ap_psk", psk);
+    new AdminCredential(new SecretStore(secretsPath)).set(GOOD);
+    return router({ secrets: new SecretStore(secretsPath) });
+  }
+
+  it("names the access point, its address and the hostname", async () => {
+    const res = await provisioned({})("GET", "/status", undefined);
+    const back = (res.body as {
+      wayBackIn: { ssid: string; address: string; hostname: string };
+    }).wayBackIn;
+    expect(back.ssid).toBe("yonder");
+    expect(back.address).toBe("192.168.77.1");
+    expect(back.hostname).toBe("yonder.local");
+  });
+
+  it("gives the passphrase while it is the published default", async () => {
+    // ADR-0007: published, documented, the same on every device, and the only
+    // thing that makes a locked-out operator's way back in usable.
+    const route = provisionedWithApPassphrase(DEFAULT_AP_PASSPHRASE);
+    const res = await route("GET", "/status", undefined);
+    expect((res.body as { wayBackIn: { passphrase: string | null } }).wayBackIn.passphrase)
+      .toBe("yonder1234");
+  });
+
+  it("withholds it once the operator has set their own", async () => {
+    // R-SEC-10. Theirs, not ours, and not for an API response.
+    const route = provisionedWithApPassphrase("something-they-chose");
+    const res = await route("GET", "/status", undefined);
+    expect((res.body as { wayBackIn: { passphrase: string | null } }).wayBackIn.passphrase)
+      .toBeNull();
+    expect(JSON.stringify(res.body)).not.toMatch(/something-they-chose/);
+  });
+
+  /**
+   * The stored value is never copied into the response — not even when it is
+   * equal to the published one.
+   *
+   * Comparing and then returning `stored` would be correct today and one edit
+   * away from being a leak: change the comparison and the operator's own
+   * passphrase goes out on an ungated route. Returning the *constant* makes
+   * the leak unreachable rather than merely absent, which is the difference
+   * R-SEC-10 asks for.
+   */
+  it("returns the published constant, never the row it read", async () => {
+    const route = provisionedWithApPassphrase(DEFAULT_AP_PASSPHRASE);
+    const res = await route("GET", "/status", undefined);
+    const back = (res.body as { wayBackIn: { passphrase: string | null } }).wayBackIn;
+    expect(back.passphrase).toBe(DEFAULT_AP_PASSPHRASE);
+    // Same characters, and provably the module's own string rather than a
+    // copy that travelled through secrets.yaml.
+    expect(back.passphrase === DEFAULT_AP_PASSPHRASE).toBe(true);
+  });
+
+  /**
+   * It answers while unprovisioned, like the rest of `/status`.
+   *
+   * The panel is what an operator reads when the console has stopped being
+   * useful, and every field in it is already public: the SSID is beaconed,
+   * the address is handed to every client that joins, the hostname is
+   * announced over mDNS, and the passphrase — when it is returned at all — is
+   * the one printed in the README.
+   */
+  it("answers in front of the administrator-password gate", async () => {
+    const res = await router()("GET", "/status", undefined);
+    expect(res.status).toBe(200);
+    expect((res.body as { wayBackIn: { ssid: string } }).wayBackIn.ssid).toBe("yonder");
+  });
+
+  /**
+   * The boundary this route keeps, stated as a test rather than as a comment.
+   *
+   * `GET /status` is in front of the gate, and until now it carried no
+   * configuration at all. `wayBackIn` is the one exception, and it is a
+   * narrow one: three fields that are already public by construction. Nothing
+   * else out of `config.yaml` may follow them onto this route.
+   */
+  it("carries the way back in and no other configuration", async () => {
+    const secret: Config = {
+      ...DEFAULT_CONFIG,
+      network: {
+        ...DEFAULT_CONFIG.network,
+        wifi_client: { ssid: "a-network-they-joined", psk: { secret: "wifi_psk" } },
+        modem: { ...DEFAULT_CONFIG.network.modem, apn: "an-apn-they-configured" },
+      },
+    };
+    saveConfig(configPath, secret);
+    const body = JSON.stringify((await provisioned({})("GET", "/status", undefined)).body);
+    // Not vacuous: the route did answer, and it did carry the panel.
+    expect(body).toMatch(/"wayBackIn"/);
+    expect(body).not.toMatch(/a-network-they-joined/);
+    expect(body).not.toMatch(/an-apn-they-configured/);
+    expect(body).not.toMatch(/wifi_psk/);
+    expect(body).not.toMatch(/"secret"/);
+  });
+
+  /**
+   * A configuration that will not load must not take the way back in with it.
+   *
+   * This panel exists for a device that has gone wrong, and an unreadable
+   * config.yaml is one of the ways it goes wrong. The shipped defaults are
+   * what a device in that state is actually reachable on, because the
+   * access-point profile it is running was rendered from them.
+   */
+  it("falls back to the shipped defaults when config.yaml will not load", async () => {
+    writeFileSync(configPath, "network: [this is not a configuration]\n");
+    const res = await provisioned({})("GET", "/status", undefined);
+    expect(res.status).toBe(200);
+    expect((res.body as { wayBackIn: { ssid: string; address: string; hostname: string } }).wayBackIn)
+      .toMatchObject({ ssid: "yonder", address: "192.168.77.1", hostname: "yonder.local" });
+  });
+
+  it("keeps the apply state it has always carried", async () => {
+    const res = await provisioned({})("GET", "/status", undefined);
+    expect((res.body as { state: string }).state).toBe("idle");
   });
 });

@@ -16,6 +16,7 @@
       "yonder-confirm": "dist/confirm.js",
       "yonder-revert": "dist/revert.js",
       "yonder-pending": "dist/pending.js",
+      "yonder-wayback": "dist/wayback.js",
       "yonder-join": "dist/join.js"
     }
   },

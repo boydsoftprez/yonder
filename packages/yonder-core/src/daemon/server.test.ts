@@ -5,7 +5,7 @@ import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createRouter } from "./routes.js";
+import { createRouter, type WayBackIn } from "./routes.js";
 import { startServer, PROVISION_RESTART_DELAY_MS } from "./server.js";
 import { ApplyEngine } from "../apply/engine.js";
 import { saveConfig } from "../config/save.js";
@@ -555,14 +555,34 @@ describe("startServer", () => {
       try {
         const server = await startDegraded();
         try {
-          // GET /status carries no configuration, so it stays in front of the
-          // gate and is what makes this state visible at all. GET /config
-          // does carry configuration, and R-SEC-09 does not let a device that
-          // cannot prove it has an administrator password hand it over.
-          expect((await call(socketPath, "GET", "/status")).status).toBe(200);
+          // GET /status stays in front of the gate and is what makes this
+          // state visible at all. GET /config does carry configuration, and
+          // R-SEC-09 does not let a device that cannot prove it has an
+          // administrator password hand it over.
+          const status = await call(socketPath, "GET", "/status");
+          expect(status.status).toBe(200);
           const res = await call(socketPath, "GET", "/config");
           expect(res.status).toBe(403);
           expect((res.body as { error: string }).error).toMatch(/administrator password/);
+
+          /**
+           * **And it still says how to get back to the device** (R-UI-18).
+           *
+           * This is the state the way back in exists for, and it is also the
+           * one where the daemon cannot read `ap_psk` at all — the malformed
+           * file that degraded the renderer set is the same file that row
+           * lives in. It names the published passphrase, which is the
+           * constant in `net/profiles.ts` and is public by construction; it
+           * cannot be a leak, because no stored value is ever copied into
+           * this field. Answering `null` here would tell an operator who has
+           * never changed anything that their way in is a passphrase they
+           * have never seen.
+           */
+          const back = (status.body as { wayBackIn: WayBackIn }).wayBackIn;
+          expect(back).toMatchObject({
+            ssid: "yonder", address: "192.168.77.1", hostname: "yonder.local",
+            passphrase: DEFAULT_AP_PASSPHRASE,
+          });
         } finally {
           await server.close();
         }

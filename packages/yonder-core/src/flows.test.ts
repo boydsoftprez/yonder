@@ -1667,3 +1667,107 @@ describe("flows/flows.json Change pending", () => {
     }
   });
 });
+
+/**
+ * **R-UI-18.** `IF YOU LOSE THIS CONSOLE` — the one thing an operator needs
+ * when nothing else on the page is true any more.
+ */
+describe("flows/flows.json If you lose this console", () => {
+  const byId = (id: string) => flows.find((n) => n.id === id);
+  const inPanel = flows.filter((n) => n.group === "group-status-wayback");
+  const wiresOf = (id: string) => (byId(id)?.wires ?? []) as string[][];
+
+  /**
+   * Below the mesh, so the page reads *the board → how you reach it → the
+   * mesh → the way back in*. Full width, because a bar of four cells at a
+   * third of the page would ellipsise the thing it exists to print.
+   */
+  it("is the last panel on Status, and the full width of it", () => {
+    const group = byId("group-status-wayback");
+    expect(group?.type).toBe("ui-group");
+    expect(group?.page).toBe("page-status");
+    expect(group?.name).toBe("If you lose this console");
+    expect(group?.width).toBe(12);
+    for (const above of ["group-status-pending", "group-board", "group-status-reach", "group-status-remote"]) {
+      expect(Number(group?.order)).toBeGreaterThan(Number(byId(above)?.order));
+    }
+    // Always there. Unlike the pending banner, this is not news — it is the
+    // recovery card, and a card that appears only once things have gone wrong
+    // is one nobody has read before they needed it.
+    expect(group?.visible).toBe(true);
+  });
+
+  it("names the network, the passphrase, the address and the name", () => {
+    const bar = byId("bar-wayback");
+    expect(bar?.type).toBe("ui-yonder-databar");
+    expect(bar?.group).toBe("group-status-wayback");
+    expect(bar?.width).toBe(12);
+    // The gate does not mask these: they are the same on every run, and a
+    // committed picture with them behind a grey box is a picture of the panel
+    // with its content removed.
+    expect(bar?.className).toBe("yonder-fixed");
+    const cells = JSON.parse(String(bar?.cells ?? "[]")) as
+      { key: string; label: string; kind?: string }[];
+    expect(cells.map((c) => [c.key, c.label]))
+      .toEqual([["join", "JOIN"], ["passphrase", "PASSPHRASE"], ["at", "AT"], ["or", "OR"]]);
+    /**
+     * The three cells that are typed verbatim take the identifier tone; the
+     * passphrase does not, because that cell holds a sentence — *changed —
+     * the one you set* — whenever the operator has set their own, and a
+     * sentence in the colour reserved for names reads as a name.
+     */
+    expect(cells.filter((c) => c.kind === "id").map((c) => c.key)).toEqual(["join", "at", "or"]);
+    expect(cells.find((c) => c.key === "passphrase")?.kind).toBeUndefined();
+  });
+
+  /**
+   * The line beneath is prose, so it is a qualifier. `.nrdb-ui-text-value` is
+   * `text-align: right` — Task 8's defect, on a sentence the console had put
+   * in a readout's slot.
+   */
+  it("carries the line that says what to do with it, as prose", () => {
+    const note = byId("text-wayback-note");
+    expect(note?.type).toBe("ui-text");
+    expect(note?.group).toBe("group-status-wayback");
+    expect(note?.value).toBe("payload.note");
+    expect(note?.valueType).toBe("msg");
+    expect(note?.wrapText).toBe(true);
+    // `yonder-qualifier` is the prose class. `yonder-fixed` is what the
+    // capture gate reads: this sentence is a constant, so masking it would
+    // commit a picture of the panel with its explanation removed.
+    expect(String(note?.className).split(/\s+/).sort())
+      .toEqual(["yonder-fixed", "yonder-qualifier"]);
+    expect(Number(note?.order)).toBeGreaterThan(Number(byId("bar-wayback")?.order));
+  });
+
+  it("is fed by one poller, and feeds both halves of the panel", () => {
+    const poller = byId("poll-wayback");
+    expect(poller?.type).toBe("yonder-wayback");
+    expect(Number(poller?.interval) * 1000).toBeGreaterThanOrEqual(MIN_POLL_MS);
+    expect(wiresOf("poll-wayback")[0]).toEqual(["bar-wayback", "text-wayback-note"]);
+  });
+
+  /**
+   * **The decision about the passphrase is not in this file, and this is what
+   * asserts that.**
+   *
+   * Nothing on this page compares anything, routes on anything or holds a
+   * literal passphrase. The daemon decides whether the value may be printed
+   * (`publishableApPassphrase`) and yonder-core turns the withheld case into
+   * words (`wayBackInView`); the flow carries what came back. A `switch` on
+   * the passphrase here would be the rule living in wiring — where an
+   * operator can edit it in the flow editor without knowing they have.
+   */
+  it("decides nothing about the passphrase, and holds none", () => {
+    const wiring = JSON.stringify([...inPanel, byId("poll-wayback")]);
+    expect(wiring).not.toMatch(/yonder1234/);
+    expect(wiring).not.toMatch(/passphrase.*(changed|default)/i);
+    for (const node of [...inPanel, byId("poll-wayback")]) {
+      expect(node?.type, node?.id).not.toBe("function");
+      expect(node?.type, node?.id).not.toBe("switch");
+    }
+    // And nothing anywhere in the shipped flows carries the published value,
+    // which would be a second copy of it going stale beside profiles.ts.
+    expect(text).not.toMatch(/yonder1234/);
+  });
+});

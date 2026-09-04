@@ -6,6 +6,7 @@ import { join } from "node:path";
 import {
   apProfile, clientProfile, ethernetProfile, desiredProfiles, radioPlan, wifiMode,
   AP_CONNECTION, CLIENT_CONNECTION, ETHERNET_CONNECTION, DEFAULT_AP_PASSPHRASE,
+  publishableApPassphrase,
 } from "./profiles.js";
 import { MODEM_CONNECTION, STOOD_DOWN_METRIC, metricFor, modemProfile } from "./modem/profiles.js";
 import type { PathName, StandingView } from "./reach/standing.js";
@@ -46,6 +47,59 @@ describe("DEFAULT_AP_PASSPHRASE", () => {
 
   it("is the value the documentation publishes", () => {
     expect(DEFAULT_AP_PASSPHRASE).toBe("yonder1234");
+  });
+});
+
+/**
+ * The one rule R-UI-18 turns on: an operator's passphrase is theirs, and the
+ * published one is not a secret at all (ADR-0007, R-SEC-10).
+ */
+describe("publishableApPassphrase", () => {
+  it("publishes the default while the device is still on it", () => {
+    expect(publishableApPassphrase(DEFAULT_AP_PASSPHRASE)).toBe(DEFAULT_AP_PASSPHRASE);
+  });
+
+  it("withholds one the operator has set", () => {
+    expect(publishableApPassphrase("something-they-chose")).toBeNull();
+  });
+
+  /**
+   * The property that makes a leak unreachable rather than merely absent: no
+   * argument produces an answer that is not either the module's own constant
+   * or null. A caller cannot get a stored credential out of this function by
+   * passing one in — which is what "redaction happens where the value is
+   * captured" means when the value is a comparison rather than a log line.
+   */
+  it("answers with the constant or with nothing, whatever it is given", () => {
+    for (const stored of [
+      DEFAULT_AP_PASSPHRASE, "yonder1235", "", " yonder1234", "YONDER1234",
+      "an-operators-own-passphrase", undefined,
+    ]) {
+      const answer = publishableApPassphrase(stored);
+      expect(answer === DEFAULT_AP_PASSPHRASE || answer === null).toBe(true);
+    }
+  });
+
+  /**
+   * A near miss is not the default. Case, whitespace and one wrong character
+   * are all passphrases somebody chose, and each of them would join a
+   * different access point.
+   */
+  it("treats a near miss as the operator's own", () => {
+    for (const near of ["yonder1234 ", " yonder1234", "Yonder1234", "yonder123", ""]) {
+      expect(publishableApPassphrase(near)).toBeNull();
+    }
+  });
+
+  /**
+   * No row at all means the store could not be read — the seeding in
+   * `daemon/server.ts` runs before anything serves, so a running device
+   * always has one. Nothing in that state has an operator's passphrase to
+   * leak, and answering `null` would tell an operator who has never changed
+   * anything that their way back in is a passphrase they have never seen.
+   */
+  it("names the published value when there is no row to read", () => {
+    expect(publishableApPassphrase(undefined)).toBe(DEFAULT_AP_PASSPHRASE);
   });
 });
 

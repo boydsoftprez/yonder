@@ -93,6 +93,27 @@ const LIVE = [
   ".yonder-live .y-ann__text",
 ];
 
+/**
+ * The exception to the list above: a widget that has said its values are the
+ * same on every run.
+ *
+ * The kinds in `LIVE` are masked because *most* instances of them carry a
+ * reading — a board's uptime, a load average, a countdown. `IF YOU LOSE THIS
+ * CONSOLE` is the first panel whose values carry none: an SSID, an address, a
+ * hostname, and either the published passphrase or the sentence that stands
+ * in for a changed one. Masking those would commit a picture of the panel
+ * with its content removed — and the two states R-UI-18 has to be seen in
+ * would be indistinguishable in the artefact, which is most of the reason for
+ * capturing the second one.
+ *
+ * The widget says so about itself, the mirror of the `yonder-live` the
+ * pending countdown wears, so nothing here has to know which page it is on.
+ * Nothing else may wear it: a value that moves and claims not to leaves a
+ * committed picture dirty on every run, which is the failure the masking
+ * exists to prevent.
+ */
+const FIXED = ".yonder-fixed";
+
 /** Fixed, so geometry means the same thing on a laptop and on a CI runner. */
 const VIEWPORT = { width: 1280, height: 900 };
 
@@ -200,7 +221,7 @@ try {
  * Runs in the browser, so it can only use what is on the page. Returns plain
  * data; every judgement about it is made out here where it can be read.
  */
-function measure(liveSelectors) {
+function measure([liveSelectors, fixedSelector]) {
   const round = (n) => Math.round(n);
   const boxOf = (el) => {
     const r = el.getBoundingClientRect();
@@ -382,9 +403,22 @@ function measure(liveSelectors) {
     });
   }
 
+  /**
+   * What the committed picture masks, decided here and marked on the page.
+   *
+   * Marked rather than returned, because the caller needs Playwright locators
+   * and this needs an ancestor test — "not inside a widget that declared
+   * itself fixed" — which CSS has no combinator for and `element.closest`
+   * does in one call. One attribute, set once, and the screenshot masks
+   * exactly the elements this decided on.
+   */
   const live = new Set();
   for (const sel of liveSelectors) {
-    for (const el of document.querySelectorAll(sel)) live.add(el);
+    for (const el of document.querySelectorAll(sel)) {
+      if (el.closest(fixedSelector)) continue;
+      live.add(el);
+      el.setAttribute("data-yonder-mask", "");
+    }
   }
 
   return {
@@ -479,13 +513,17 @@ for (const page of pages) {
     }
   }
 
-  const shape = await tab.evaluate(measure, LIVE);
+  const shape = await tab.evaluate(measure, [LIVE, FIXED]);
   const stem = `${page.name}.${palette}`;
 
   // The picture. Masked for the committed copy — a load average changes
   // between two runs and would leave the file permanently dirty — and whole
   // for the artifact a person actually looks at.
-  const masks = LIVE.map((s) => tab.locator(s));
+  //
+  // The elements were marked by `measure()` a moment ago rather than selected
+  // again here, so there is one decision about what is live rather than the
+  // same list applied twice by two mechanisms that can drift.
+  const masks = [tab.locator("[data-yonder-mask]")];
   await tab.screenshot({
     path: join(refs, "capture", `${stem}.png`),
     fullPage: true,

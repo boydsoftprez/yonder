@@ -23,6 +23,34 @@ export { MODEM_CONNECTION, STOOD_DOWN_METRIC, metricFor };
  */
 export const DEFAULT_AP_PASSPHRASE = "yonder1234";
 
+/**
+ * The access-point passphrase a device is allowed to print, or `null` when it
+ * must not print one at all (R-UI-18, R-SEC-10).
+ *
+ * Two values are public: the constant above, and nothing else. **What comes
+ * back is always the constant itself, never the string that was read** — the
+ * argument is compared and then discarded. Comparing and returning `stored`
+ * would be correct today and one edit away from putting an operator's own
+ * passphrase on a route that is deliberately in front of the administrator
+ * password gate. R-SEC-10 asks for a leak that is unreachable rather than one
+ * that is merely absent, and this is that shape: no call site can obtain a
+ * stored credential from this function whatever it passes in.
+ *
+ * `undefined` — no `ap_psk` row at all — answers with the published value.
+ * The store seeds that row with this constant before anything serves, so on a
+ * running device the row is always there and `undefined` means the store
+ * could not be read. In that state nothing has an operator's passphrase to
+ * leak, and the choice is between naming a value printed in the README and
+ * telling an operator who never changed anything that their way back in is a
+ * passphrase they have never seen. Only one of those leaves them able to
+ * reach the device.
+ */
+export function publishableApPassphrase(stored: string | undefined): string | null {
+  return stored === undefined || stored === DEFAULT_AP_PASSPHRASE
+    ? DEFAULT_AP_PASSPHRASE
+    : null;
+}
+
 export const AP_CONNECTION = "yonder-ap";
 export const CLIENT_CONNECTION = "yonder-wifi";
 export const ETHERNET_CONNECTION = "yonder-eth";

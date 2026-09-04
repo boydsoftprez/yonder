@@ -19,7 +19,8 @@ import { setTheme, type ThemeRequest } from "../ui/theme.js";
 import type { ScanResult } from "../net/scan.js";
 import type { BoardFacts } from "../system/facts.js";
 import type { Versions } from "../system/versions.js";
-import { ConfigSchema, ZEROTIER_NETWORK_ID } from "../schema/config.js";
+import { ConfigSchema, DEFAULT_CONFIG, ZEROTIER_NETWORK_ID } from "../schema/config.js";
+import { publishableApPassphrase } from "../net/profiles.js";
 import type { RemoteState } from "../remote/state.js";
 
 export interface RouterDeps {
@@ -78,8 +79,19 @@ export interface RouterDeps {
    * store could not be read, which is the same condition that leaves
    * `credential` undefined — so the route refuses rather than applying a
    * configuration whose secret reference points at nothing.
+   *
+   * **`get` is here for exactly one question**: whether the access point is
+   * still on the passphrase this project publishes (R-UI-18). It is optional
+   * because the answer is allowed to be *cannot tell* — see
+   * `publishableApPassphrase`, which never hands back what it was given. No
+   * route reads any other row through this, and none should: a value out of
+   * this store is a credential unless something has established that it is
+   * not.
    */
-  secrets?: { put(name: string, value: string): void };
+  secrets?: {
+    put(name: string, value: string): void;
+    get?(name: string): string | undefined;
+  };
   /** The buffer GET /log serves. Defaults to the one this process writes to. */
   activity?: ActivityLog;
   /** The mesh join state. Absent on a daemon with no remote layer. */
@@ -115,6 +127,35 @@ export interface SystemReport {
 export interface DiagProbes {
   ping(host: string, count: number | undefined): Promise<PingResult>;
   reachable(): Promise<PingResult>;
+}
+
+/**
+ * How to get back to this device when the console has stopped being one
+ * (R-UI-18).
+ *
+ * Every field here is public by construction, which is what makes it
+ * acceptable on a route that sits in front of the administrator-password
+ * gate. The SSID is beaconed continuously; the address is what the access
+ * point's own DHCP hands to every client that joins it; the hostname is
+ * announced over mDNS. None of the three is knowledge somebody in radio range
+ * lacks, and all three are useless without a way past the console's login.
+ *
+ * The passphrase is the one that needed a rule, and it has one: see
+ * `publishableApPassphrase`.
+ */
+export interface WayBackIn {
+  /** The access point to join. */
+  ssid: string;
+  /** Its address, without the prefix length — what a browser is pointed at. */
+  address: string;
+  /** The name it answers to, ready to type. */
+  hostname: string;
+  /**
+   * The published default while the device is still on it, and **null once
+   * the operator has set their own** (R-SEC-10). Never the stored value: this
+   * is either the constant in `net/profiles.ts` or nothing at all.
+   */
+  passphrase: string | null;
 }
 
 export interface RouteResult {
@@ -170,6 +211,38 @@ export function createRouter(deps: RouterDeps): Router {
     // wants the numbers still has them.
     return { facts, versions, display: displayFacts(facts, versions) };
   });
+
+  /**
+   * The way back in, assembled from the configuration and one secret row
+   * (R-UI-18).
+   *
+   * **It cannot throw.** `GET /status` is what answers on a device that has
+   * gone wrong, and an unreadable config.yaml is one of the ways a device
+   * goes wrong — so a configuration that will not load falls back to the
+   * shipped defaults rather than taking the panel down. Those defaults are
+   * also what such a device is genuinely reachable on: they are what the
+   * access-point profile it is running was rendered from.
+   */
+  const wayBackIn = (): WayBackIn => {
+    let config = DEFAULT_CONFIG;
+    try {
+      config = loadConfig(deps.configPath);
+    } catch {
+      // Not logged. This route is polled by a page every few seconds, and a
+      // line per poll would bury the reason the configuration will not load
+      // under thousands of copies of the fact that it will not.
+    }
+    return {
+      ssid: config.network.ap.ssid,
+      // Without the prefix length: an operator types this into a browser, and
+      // `192.168.77.1/24` is not an address a browser can be given.
+      address: config.network.ap.address.split("/")[0],
+      // mDNS answers for `<hostname>.local`, and the panel prints what gets
+      // typed rather than a name plus an instruction about what to add to it.
+      hostname: `${config.system.hostname}.local`,
+      passphrase: publishableApPassphrase(deps.secrets?.get?.("ap_psk")),
+    };
+  };
 
   return async (method, rawPath, body) => {
     // `req.url` carries the query string, and every comparison below is an
@@ -267,14 +340,21 @@ export function createRouter(deps: RouterDeps): Router {
         return { status: 200, body: { ok } };
       }
 
-      // Deliberately in front of the gate below. GET /status carries no
-      // configuration — an apply state, an expiry, and the reason the
-      // renderer set could not be assembled — and it is the one thing that
-      // makes a device whose secrets.yaml is unreadable diagnosable at all.
-      // Gating it would mean a board that can only say "403" about a fault
-      // an operator has to be on the device to fix anyway.
+      // Deliberately in front of the gate below. It carries an apply state,
+      // an expiry, the reason the renderer set could not be assembled, and
+      // the way back into the device — and it is the one thing that makes a
+      // board whose secrets.yaml is unreadable diagnosable at all. Gating it
+      // would mean a device that can only say "403" about a fault an operator
+      // has to be on the device to fix anyway.
+      //
+      // **`wayBackIn` is the only configuration this route carries, and it is
+      // meant to stay that way** (R-UI-18). Three fields that are beaconed,
+      // handed out by DHCP and announced over mDNS anyway, plus a passphrase
+      // that is either the published one or nothing. A test asserts that
+      // nothing else out of config.yaml follows them here; if a future field
+      // needs the gate, it belongs on a route that has one.
       if (method === "GET" && path === "/status") {
-        return { status: 200, body: deps.engine.status() };
+        return { status: 200, body: { ...deps.engine.status(), wayBackIn: wayBackIn() } };
       }
 
       // ---- everything else is behind the administrator password ---------

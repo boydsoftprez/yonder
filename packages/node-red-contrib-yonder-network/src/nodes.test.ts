@@ -36,6 +36,7 @@ const applyNode = (await import("./apply.js")).default ?? await import("./apply.
 const confirmNode = (await import("./confirm.js")).default ?? await import("./confirm.js");
 const revertNode = (await import("./revert.js")).default ?? await import("./revert.js");
 const pendingNode = (await import("./pending.js")).default ?? await import("./pending.js");
+const waybackNode = (await import("./wayback.js")).default ?? await import("./wayback.js");
 const joinNode = (await import("./join.js")).default ?? await import("./join.js");
 
 const ok = (body: unknown): DaemonReply => ({ ok: true, status: 200, body });
@@ -455,5 +456,85 @@ describe("yonder-pending", () => {
     const msg = await fromPoller({});
     expect((msg.payload as { pending: boolean }).pending).toBe(false);
     expect(msg.yonder?.state).toBe("rejected");
+  });
+});
+
+/**
+ * **R-UI-18.** The way back into a device an operator has lost the console to.
+ *
+ * The one property worth a node test: the passphrase rule holds through a
+ * real Node-RED, not just in the pure function. What reaches a widget is the
+ * published value or the words *changed* — never anything the device stores.
+ */
+describe("yonder-wayback", () => {
+  const PUBLISHED = {
+    ssid: "yonder", address: "192.168.77.1", hostname: "yonder.local",
+    passphrase: "yonder1234",
+  };
+
+  /**
+   * A polling node reads once on registration, so the sink may see that
+   * message before the one a `receive` produced. Every test here scripts the
+   * same reply twice and waits for the message it is actually about.
+   */
+  function fromPoller(
+    message: Record<string, unknown> | undefined,
+    want: (m: Received) => boolean = () => true,
+  ): Promise<Received> {
+    const flow = [
+      { id: "n1", type: "yonder-wayback", interval: 2, wires: [["n2"]] },
+      { id: "n2", type: "helper" },
+    ];
+    return new Promise((resolve, reject) => {
+      void helper.load(waybackNode, flow, () => {
+        const sink = helper.getNode("n2") as unknown as {
+          on(event: string, fn: (msg: Received) => void): void;
+        };
+        sink.on("input", (msg) => { if (want(msg)) resolve(msg); });
+        if (message !== undefined) {
+          (helper.getNode("n1") as unknown as { receive(m: unknown): void }).receive(message);
+        }
+        setTimeout(() => { reject(new Error("no message from yonder-wayback")); }, 4_000);
+      });
+    });
+  }
+
+  it("reads /status and names the network, its address and the hostname", async () => {
+    const body = { state: "idle", wayBackIn: PUBLISHED };
+    replies.push(ok(body), ok(body));
+    const msg = await fromPoller({});
+    expect(asked[0]).toEqual({ method: "GET", path: "/status" });
+    expect(msg.payload).toMatchObject({
+      join: "yonder", at: "192.168.77.1", or: "yonder.local", passphrase: "yonder1234",
+    });
+  });
+
+  /**
+   * R-SEC-10, end to end through a runtime. The daemon answered `null`; what
+   * arrives at the widget is a sentence, and the operator's own passphrase is
+   * nowhere on the message — including on `msg.yonder`, which a widget also
+   * reads.
+   */
+  it("says the passphrase was changed, and carries no passphrase at all", async () => {
+    const body = { state: "idle", wayBackIn: { ...PUBLISHED, passphrase: null } };
+    replies.push(ok(body), ok(body));
+    const msg = await fromPoller({});
+    expect((msg.payload as { passphrase: string }).passphrase).toMatch(/^changed/);
+    expect(JSON.stringify(msg)).not.toMatch(/yonder1234/);
+  });
+
+  /**
+   * A daemon that has gone quiet must not take the way back in off the page.
+   * Nothing is sent, so the last good message stays on screen — the opposite
+   * of `yonder-pending`, whose banner has to come down because a stale
+   * countdown is a lie. There is no reading here to go stale.
+   */
+  it("sends nothing when the daemon does not answer, so the panel stays up", async () => {
+    // Two failures — the read on registration and the one `receive` asks
+    // for — then a poll that succeeds. Only the third produces a message.
+    replies.push(unreachable, unreachable, ok({ state: "idle", wayBackIn: PUBLISHED }));
+    const msg = await fromPoller({}, (m) => (m.payload as { join?: string }).join === "yonder");
+    // The only message that arrived is the one from the reply that succeeded.
+    expect((msg.payload as { join: string }).join).toBe("yonder");
   });
 });

@@ -217,6 +217,19 @@ chmod +x "$BIN/systemctl" "$BIN/nmcli" "$BIN/mmcli" "$BIN/curl" "$BIN/rfkill" \
 # this console that is deliberately never seeded from either.
 MODEM_PASSWORD='verify-pages-modem-Jv7Hs2Bn'
 
+# The access-point passphrase this run has the operator change it to, late in
+# the run, and the second string that must never come back out of the device
+# (R-SEC-10, R-UI-18).
+#
+# It is the *other* half of the one rule the way-back panel exists to get
+# right. While the device is on the published default that value is printed on
+# the page deliberately — ADR-0007 makes it public, and it is the only thing
+# that makes a locked-out operator's way back in usable at all. The moment the
+# operator sets their own it becomes a credential like any other, and the
+# panel says it has been changed rather than showing it. Both halves are
+# captured below, and this string is what proves the second one.
+AP_PASSPHRASE='verify-pages-ap-Tq9Lm3Vx'
+
 # The shipped defaults, with the console on this run's port and the modem
 # turned on and configured. `network.modem.enabled` is false by default and
 # that is right for a board nobody has configured — but with it off
@@ -556,6 +569,29 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+say "R-UI-18: the way back in, while the access point is on the published default"
+
+# The half of the rule that is about *printing* the value, and it is the
+# unusual direction: this is a passphrase the device is supposed to hand out.
+# ADR-0007 makes it public because a per-device one could only be read from the
+# device you are locked out of, so it guarded nothing and locked out the
+# legitimate operator. Withholding it here would be as much of a defect as
+# leaking a changed one.
+back=$(sock /status)
+expect_contains "the panel names the access point"  '"ssid":"yonder"' "$back"
+expect_contains "and its address, without the prefix length" '"address":"192.168.77.1"' "$back"
+expect_contains "and the name it answers to" '"hostname":"yonder.local"' "$back"
+expect_contains "and prints the published passphrase" '"passphrase":"yonder1234"' "$back"
+
+# The boundary this route keeps. /status is deliberately in front of the
+# administrator-password gate, and `wayBackIn` is the only configuration it
+# carries: three facts that are beaconed, handed out by DHCP and announced
+# over mDNS anyway. Nothing else out of config.yaml may follow them here.
+expect_missing "and carries no other configuration onto an ungated route" \
+    "ereseller" "$back"
+expect_missing "nor any reference to a stored credential" '"secret"' "$back"
+
+# ---------------------------------------------------------------------------
 say "R-UI-12: capture every page, in both palettes, and look at them"
 
 # The gate this repository did not have when 39% of the join warning shipped
@@ -801,9 +837,14 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
             --unix-socket "$SOCKET" http://localhost/apply)
         expect_contains "the apply went pending rather than being kept" '"expiresAt"' "$applied"
         expect_contains "and the daemon holds it, with a deadline" '"state":"pending"' "$(sock /status)"
-        # One poll of `yonder-pending`, so the page is showing the change and
-        # not the moment before it.
-        sleep 3
+        # One poll of the *slowest* thing on this page, so every panel is
+        # showing the change and not the moment before it. `yonder-pending`
+        # runs at 2 s; `yonder-wayback` runs at 5, and it draws the hostname —
+        # which this change moves. Three seconds photographed the banner up
+        # and the way back in still naming the old name, in one palette and
+        # not the other, so the committed picture depended on where a timer
+        # happened to fall.
+        sleep 7
         if node "$REPO/scripts/capture-pages.mjs" \
                 --base-url "http://127.0.0.1:$PORT" \
                 --password "$PASSWORD" \
@@ -826,9 +867,59 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
             '"outcome":"reverted"' "$(sock /status)"
         expect_contains "and the device is running the previous configuration" \
             '"hostname":"yonder"' "$(sock /config)"
-        # One more poll, so the banner is down before anything else is
+        # One more poll of the slowest panel, so the banner is down *and* the
+        # way back in has the reverted hostname before anything else is
         # captured. Every other picture in this run is of a settled device.
-        sleep 3
+        sleep 7
+    }
+
+    # ---- the way back in, once the operator has set their own -------------
+    #
+    # **There is no route that changes the access-point passphrase.**
+    # ADR-0007 asks the console to notice the default and offer to change it,
+    # and nothing has built that yet — so this does what an operator would
+    # have to do today: stop the daemon, edit `secrets.yaml`, start it again.
+    # `SecretStore` reads that file once, in its constructor, so a change
+    # while the daemon is up would not be seen.
+    #
+    # A restart is a bigger hammer than any other state in this gate reaches
+    # for, and it is the honest one. The alternative — a second daemon on a
+    # second socket — would photograph a console that is not the console.
+    change_ap_passphrase() {
+        kill "$DAEMON_PID" 2>/dev/null || true
+        i=0
+        while [ "$i" -lt "$TRIES" ]; do
+            kill -0 "$DAEMON_PID" 2>/dev/null || break
+            sleep "$POLL"; i=$((i + 1))
+        done
+        umask 077
+        sed "s/^ap_psk: .*/ap_psk: $AP_PASSPHRASE/" "$ETC/secrets.yaml" > "$ETC/secrets.next"
+        mv "$ETC/secrets.next" "$ETC/secrets.yaml"
+        umask 022
+        grep -q "^ap_psk: $AP_PASSPHRASE$" "$ETC/secrets.yaml" \
+            || die "the ap_psk row is not where this expected it; the store's format has moved"
+        start_daemon
+        wait_for_socket
+        # Long enough for every poller on Status to have asked again after the
+        # socket came back. Without it the page would be photographed still
+        # showing the answer from before the restart — which is the published
+        # passphrase, under the name of the state that does not print one.
+        sleep 8
+    }
+
+    capture_psk_changed() {
+        if node "$REPO/scripts/capture-pages.mjs" \
+                --base-url "http://127.0.0.1:$PORT" \
+                --password "$PASSWORD" \
+                --palette "$1" \
+                --only status \
+                --as status-psk-changed \
+                --artifacts "$REPO/vendor/capture" \
+                ${ACCEPT_SHAPE:+--accept}; then
+            ok "the $1 palette: Status with a passphrase the operator set"
+        else
+            bad "the $1 palette: Status with a passphrase the operator set, see above"
+        fi
     }
 
     if reach_theme night; then
@@ -858,6 +949,58 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
         capture_status_pending day
     else
         bad "the console is still in the night palette; a held run will be wrong"
+    fi
+
+    # ---------------------------------------------------------------------
+    # Status's fourth shape, and the one with the credential rule in it
+    # (R-UI-18, R-SEC-10).
+    #
+    # This is the state nobody would look at again. Everything above was
+    # photographed with the access point on its published passphrase, which is
+    # the state the panel *prints* a value in; this is the other one, and it
+    # is the one where getting it wrong is a credential leak rather than a
+    # missing convenience. Last in the run, because a daemon restart is what
+    # reaches it and every other picture describes the device before that.
+    say "R-UI-18: the way back in, once the operator has set their own passphrase"
+
+    change_ap_passphrase
+    changed=$(sock /status)
+    expect_contains "the panel still names the access point" '"ssid":"yonder"' "$changed"
+    expect_contains "and says there is no passphrase to print" '"passphrase":null' "$changed"
+    expect_missing  "the published default is no longer offered" \
+        '"passphrase":"yonder1234"' "$changed"
+    expect_missing  "and the passphrase the operator set is not in the answer" \
+        "$AP_PASSPHRASE" "$changed"
+
+    # The same claim as the modem credential's, against the other secret this
+    # device holds. A unit test can assert a pure function; this is a running
+    # daemon, a running console, and a real value in a real secrets.yaml.
+    expect "the operator's passphrase is nowhere in what either service printed" 0 \
+        "$(grep -c "$AP_PASSPHRASE" "$JOURNAL" || true)"
+    expect_missing "nor in the configuration the console is served" \
+        "$AP_PASSPHRASE" "$(sock /config)"
+    expect_contains "which names the row and does not contain it" \
+        '"secret":"ap_psk"' "$(sock /config)"
+    expect_missing "nor in the dashboard the browser is handed" \
+        "$AP_PASSPHRASE" "$(body /dashboard/)"
+    leaked=$(grep -rl "$AP_PASSPHRASE" "$ROOT" 2>/dev/null \
+        | grep -v "etc/yonder/secrets.yaml" || true)
+    if [ -z "$leaked" ]; then
+        ok "and in no file under the temporary root but secrets.yaml"
+    else
+        bad "the operator's access-point passphrase is in: $leaked"
+    fi
+
+    capture_psk_changed day
+    if reach_theme night; then
+        capture_psk_changed night
+        if reach_theme day; then
+            ok "the console was left in the default palette"
+        else
+            bad "the console is still in the night palette; a held run will be wrong"
+        fi
+    else
+        bad "the console never reached the night palette for the changed-passphrase capture"
     fi
 else
     printf '  SKIP  no browser: the pages were not captured and nobody looked\n'
