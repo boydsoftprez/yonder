@@ -26,11 +26,50 @@ export function affectsReachability(previous: Config, next: Config): boolean {
   return JSON.stringify(withoutCosmetics(previous)) !== JSON.stringify(withoutCosmetics(next));
 }
 
+/**
+ * Every key on a camera. Not derived — written down, so that adding a field to
+ * the schema fails a test rather than silently acquiring a default.
+ */
+export const CAMERA_LEAVES = [
+  "id", "name", "source", "device", "enabled", "autostart",
+  "width", "height", "framerate", "codec", "bitrate_kbps",
+  "preview", "controls", "outputs",
+] as const;
+
+/**
+ * The camera leaves that cannot cost the operator their way back to the
+ * device.
+ *
+ * The test for membership is not "is this cosmetic" but **"does changing this
+ * alter what leaves the aircraft on the path the console is standing on"**.
+ * The console reaches a flying aircraft over the same cellular uplink the
+ * video leaves by, so an added output or a raised ceiling is spend on that
+ * path — and nobody has yet measured what a saturated uplink does to a console
+ * session on a board. R-VPN-07 requires an exemption to be earned by
+ * measurement rather than by argument, so `bitrate_kbps` and `outputs` stay
+ * load-bearing until somebody measures.
+ *
+ * `preview` is the one entry here that *is* egress on that path, and it is
+ * exempt because the schema bounds it: `max(2000)` kb/s and `max(1280)` px
+ * mean no reachable setting of it can saturate a link. The exemption is safe
+ * because the range is. Widening either bound means removing `preview` from
+ * this list in the same change — `reachability.test.ts` asserts the bound so
+ * the two cannot drift apart quietly.
+ *
+ * Everything absent falls through to load-bearing, which is this file's whole
+ * design: `id`, `name`, `device`, `enabled` and `autostart` all change what
+ * the aircraft is doing or which hardware it is doing it with.
+ */
+export const CAMERA_EXEMPT_LEAVES = [
+  "width", "height", "framerate", "codec", "preview", "controls",
+] as const;
+
 /** The document with the fields that cannot affect reachability removed. */
 function withoutCosmetics(config: Config): unknown {
   const copy = structuredClone(config) as {
     ui: Record<string, unknown>;
     remote?: { zerotier?: Record<string, unknown> };
+    cameras?: Record<string, unknown>[];
   };
   delete copy.ui.theme;
   // Joining a mesh only ever *adds* a path to this device; it cannot take away
@@ -62,6 +101,17 @@ function withoutCosmetics(config: Config): unknown {
   if (zerotier !== undefined) {
     delete zerotier.enabled;
     delete zerotier.network_id;
+  }
+  // Named leaf by leaf, on each element, for the reason the ZeroTier note
+  // above gives: `delete copy.cameras` would hand the exemption to every
+  // field added under a camera later, with nobody deciding it should have
+  // one and nothing in this file changing for a reviewer to look at.
+  //
+  // The array itself stays. Adding a camera, removing one, or reordering the
+  // list is load-bearing: each is a different set of pipelines running on the
+  // aircraft, and the count is what the uplink is shared between.
+  for (const camera of copy.cameras ?? []) {
+    for (const leaf of CAMERA_EXEMPT_LEAVES) delete camera[leaf];
   }
   return copy;
 }

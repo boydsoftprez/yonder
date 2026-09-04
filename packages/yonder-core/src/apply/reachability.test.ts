@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
-import { affectsReachability } from "./reachability.js";
+import { affectsReachability, CAMERA_EXEMPT_LEAVES, CAMERA_LEAVES } from "./reachability.js";
 import { ConfigSchema, DEFAULT_CONFIG, type Config } from "../schema/config.js";
 
 const base = (): Config => structuredClone(DEFAULT_CONFIG);
@@ -112,5 +112,82 @@ describe("affectsReachability", () => {
     };
     after.remote.zerotier.allow_default = true;
     expect(affectsReachability(before, after)).toBe(true);
+  });
+});
+
+const CAMERA = {
+  id: "cam0", name: "Nose", source: "usb" as const, device: "usb-0000:01:00.0-1.3",
+};
+function withCamera(overrides: Record<string, unknown> = {}): Config {
+  return ConfigSchema.parse({
+    version: 1, network: { ap: { psk: { secret: "ap_psk" } } }, ui: { editor: {} },
+    cameras: [{ ...CAMERA, ...overrides }],
+  });
+}
+
+describe("camera leaves", () => {
+  it("exempts resolution, rate, codec, preview and image controls", () => {
+    const before = withCamera();
+    expect(affectsReachability(before, withCamera({ width: 1920, height: 1080 }))).toBe(false);
+    expect(affectsReachability(before, withCamera({ framerate: 15 }))).toBe(false);
+    expect(affectsReachability(before, withCamera({ codec: "h264" }))).toBe(false);
+    expect(affectsReachability(before, withCamera({ preview: { width: 320, bitrate_kbps: 200 } }))).toBe(false);
+    expect(affectsReachability(before, withCamera({ controls: { brightness: 20 } }))).toBe(false);
+  });
+
+  it("keeps bitrate and outputs load-bearing — they are egress on the console's own path", () => {
+    const before = withCamera();
+    expect(affectsReachability(before, withCamera({ bitrate_kbps: 8000 }))).toBe(true);
+    expect(affectsReachability(before, withCamera({
+      outputs: [{ kind: "rtp", host: "192.168.1.50", port: 5600 }],
+    }))).toBe(true);
+  });
+
+  it("keeps adding and removing a camera load-bearing", () => {
+    const none = ConfigSchema.parse({
+      version: 1, network: { ap: { psk: { secret: "ap_psk" } } }, ui: { editor: {} },
+    });
+    expect(affectsReachability(none, withCamera())).toBe(true);
+  });
+
+  it("keeps identity, device, enabled and autostart load-bearing", () => {
+    const before = withCamera();
+    expect(affectsReachability(before, withCamera({ name: "Tail" }))).toBe(true);
+    expect(affectsReachability(before, withCamera({ device: "usb-0000:01:00.0-1.4" }))).toBe(true);
+    expect(affectsReachability(before, withCamera({ enabled: false }))).toBe(true);
+    expect(affectsReachability(before, withCamera({ autostart: true }))).toBe(true);
+  });
+
+  // The K-32 prevention, and the whole reason this file lists leaves rather
+  // than subtrees. A field added to Camera next year is load-bearing by
+  // default — which is right — but nobody would have *decided* that. This
+  // fails the moment the shape changes, and the fix is to add the new key to
+  // one of the two lists on purpose.
+  it("forces a decision when the camera schema grows a field", () => {
+    expect([...CAMERA_LEAVES].sort()).toEqual([
+      "autostart", "bitrate_kbps", "codec", "controls", "device", "enabled",
+      "framerate", "height", "id", "name", "outputs", "preview", "source", "width",
+    ]);
+    expect(Object.keys(withCamera().cameras[0]).sort()).toEqual([...CAMERA_LEAVES].sort());
+    expect([...CAMERA_EXEMPT_LEAVES].sort()).toEqual([
+      "codec", "controls", "framerate", "height", "preview", "width",
+    ]);
+  });
+
+  // The preview's exemption is earned by its bound, not by argument. If the
+  // ceiling moves, this fails and `preview` has to leave the exempt list.
+  it("holds the preview to the bound its exemption rests on", () => {
+    const tooFast = ConfigSchema.safeParse({
+      version: 1, network: { ap: { psk: { secret: "ap_psk" } } }, ui: { editor: {} },
+      cameras: [{ ...CAMERA, preview: { bitrate_kbps: 2001 } }],
+    });
+    expect(tooFast.success).toBe(false);
+  });
+
+  it("refuses a subtree exemption for cameras", () => {
+    // `delete copy.cameras` would hand the exemption to every field added
+    // later, with nobody deciding it should have one. The proof it was not
+    // done that way: a load-bearing leaf still registers.
+    expect(affectsReachability(withCamera(), withCamera({ bitrate_kbps: 3000 }))).toBe(true);
   });
 });
