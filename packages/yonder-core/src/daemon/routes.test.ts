@@ -12,6 +12,7 @@ import { saveConfig } from "../config/save.js";
 import { loadConfig } from "../config/load.js";
 import { SecretStore } from "../secrets/store.js";
 import { DEFAULT_AP_PASSPHRASE } from "../net/profiles.js";
+import { MODEM_PASSWORD_SECRET } from "../net/modem/configure.js";
 import { DEFAULT_CONFIG, type Config } from "../schema/config.js";
 import { AdminCredential } from "../console/credential.js";
 import { AttemptThrottle, FAILURE_LIMIT, LOCKOUT_MS } from "../console/throttle.js";
@@ -87,7 +88,7 @@ interface RouterOptions {
   throttle?: AttemptThrottle;
   scan?: () => Promise<ScanResult>;
   diag?: DiagProbes;
-  secrets?: { put(name: string, value: string): void };
+  secrets?: { put(name: string, value: string): void; get?(name: string): string | undefined };
   activity?: ActivityLog;
   system?: () => SystemReport;
   modemState?: () => Promise<ModemState>;
@@ -1059,10 +1060,102 @@ describe("POST /modem/configure", () => {
     expect(res.status).toBe(400);
   });
 
-  it("never returns the modem password", async () => {
-    // R-SEC-10. The response is an apply status, not a configuration.
-    const res = await provisioned({})("POST", "/modem/configure", { enabled: true, apn: "a", password: "hunter2" });
+  /**
+   * R-CEL-02, priority 1: a modem that needs a credential can be given one
+   * from the console.
+   *
+   * The body a form sends carries a **typed string**, and the configuration
+   * holds a `SecretRef` — so the two shapes are different on purpose and the
+   * route is what stands between them, exactly as `POST /net/join` does for a
+   * Wi-Fi passphrase. This asserts the whole journey: accepted, stored in
+   * `secrets.yaml`, referenced by name from `config.yaml`, and the APN that
+   * travelled with it applied rather than discarded.
+   */
+  it("accepts a typed password, and applies the APN that travelled with it", async () => {
+    const store = new SecretStore(secretsPath);
+    const route = provisioned({ secrets: store });
+    const res = await route("POST", "/modem/configure", {
+      enabled: true, apn: "ereseller", username: "sim-user", password: "hunter2",
+    });
+    expect(res.status).toBe(200);
+    const config = (await route("GET", "/config", undefined)).body as Config;
+    expect(config.network.modem.apn).toBe("ereseller");
+    expect(config.network.modem.username).toBe("sim-user");
+    expect(config.network.modem.password).toEqual({ secret: MODEM_PASSWORD_SECRET });
+    expect(store.get(MODEM_PASSWORD_SECRET)).toBe("hunter2");
+  });
+
+  /**
+   * The credential goes to the one file that is `0600 root`, and nowhere near
+   * the one that is world-readable and travels in a support bundle.
+   */
+  it("puts the password in secrets.yaml and never in config.yaml", async () => {
+    const route = provisioned({ secrets: new SecretStore(secretsPath) });
+    await route("POST", "/modem/configure", { enabled: true, apn: "a", password: "hunter2" });
+    expect(readFileSync(configPath, "utf8")).not.toMatch(/hunter2/);
+    expect(readFileSync(secretsPath, "utf8")).toMatch(/hunter2/);
+  });
+
+  /**
+   * Rule 1 of `modemRequest`, held on this side of the socket too: an
+   * untouched password box must never overwrite a working credential. A body
+   * with no `password` key leaves the reference exactly where it was.
+   */
+  it("leaves a stored credential alone when no password is sent", async () => {
+    const store = new SecretStore(secretsPath);
+    const route = provisioned({ secrets: store });
+    const first = await route("POST", "/modem/configure", { enabled: true, apn: "a", password: "hunter2" });
+    // Confirmed, so the second apply is not refused for arriving while the
+    // first is still pending — this test is about the password, not the
+    // engine's reservation.
+    await route("POST", "/confirm", { id: (first.body as { id: string }).id });
+    await route("POST", "/modem/configure", { enabled: true, apn: "another" });
+    const config = (await route("GET", "/config", undefined)).body as Config;
+    expect(config.network.modem.apn).toBe("another");
+    expect(config.network.modem.password).toEqual({ secret: MODEM_PASSWORD_SECRET });
+    expect(store.get(MODEM_PASSWORD_SECRET)).toBe("hunter2");
+  });
+
+  /** No secret store, nothing to store it in — and the route says so. */
+  it("refuses rather than applying a reference to a row it could not write", async () => {
+    const res = await provisioned({ secrets: undefined })(
+      "POST", "/modem/configure", { enabled: true, apn: "a", password: "hunter2" },
+    );
+    expect(res.status).toBe(503);
     expect(JSON.stringify(res.body)).not.toMatch(/hunter2/);
+  });
+
+  /**
+   * R-SEC-10, asserted against the **whole serialised body** rather than one
+   * field — the shape `form.test.ts` uses, and the reason it is right: a key
+   * added to this response later cannot carry the credential out past an
+   * assertion that only looked at the field it expected.
+   *
+   * The status assertion is what stops this passing vacuously. It used to
+   * read `not.toMatch(/hunter2/)` on a `400` the route produced before the
+   * engine was ever reached, so it would have gone on passing if the route
+   * had started echoing the whole configuration on success.
+   */
+  it("never returns the modem password", async () => {
+    const res = await provisioned({ secrets: new SecretStore(secretsPath) })(
+      "POST", "/modem/configure", { enabled: true, apn: "a", password: "hunter2" },
+    );
+    expect(res.status).toBe(200);
+    expect(JSON.stringify(res.body)).not.toMatch(/hunter2/);
+    expect(JSON.stringify(res.body)).not.toMatch(/password/i);
+  });
+
+  /**
+   * Nor in the journal. The router redacts by value at the point the body is
+   * captured (R-SEC-10), so no branch below it has to remember.
+   */
+  it("never writes the modem password to the log", async () => {
+    const store = new SecretStore(secretsPath);
+    const route = provisioned({ secrets: store });
+    const printed = await captureLog(async () => {
+      await route("POST", "/modem/configure", { enabled: true, apn: "a", password: "hunter2" });
+    });
+    expect(printed).not.toMatch(/hunter2/);
   });
 });
 

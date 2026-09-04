@@ -1075,6 +1075,33 @@ describe("flows/flows.json Cellular tab", () => {
   });
 
   /**
+   * **R-SEC-10, and the pattern `yonder-join` already sets.** The Wi-Fi
+   * passphrase is dropped the instant the body is built — "a passphrase that
+   * has been sent has no reason to still be in this process". The modem
+   * password used to do the opposite: written to flow context and never
+   * cleared, so it survived for the life of the deployment, was re-sent on
+   * every later CONNECT (including after a reload that shows the box empty),
+   * and was readable in the flow editor's context sidebar.
+   *
+   * Asserted as *order within the one node*: the value is copied onto the
+   * message and then the key is deleted, in that sequence, so CONNECT still
+   * sends what was typed and nothing keeps it afterwards.
+   */
+  it("forgets the typed password once CONNECT has read it", () => {
+    const gather = flows.find((n) => n.id === "gather-cell-form");
+    const rules = gather?.rules as { t: string; p: string; pt: string; to?: string; tot?: string }[];
+    const read = rules.findIndex((r) => r.t === "set" && r.p === "payload.password");
+    const forget = rules.findIndex((r) => r.t === "delete" && r.p === "modemPassword" && r.pt === "flow");
+    expect(read, "CONNECT no longer reads the typed password").toBeGreaterThanOrEqual(0);
+    expect(forget, "the typed password is left in flow context").toBeGreaterThanOrEqual(0);
+    expect(forget, "the key is cleared before CONNECT reads it").toBeGreaterThan(read);
+    // And no other node puts it back.
+    const writers = flows.filter((n) => (n.rules as { p?: string; pt?: string }[] | undefined)
+      ?.some((r) => r.pt === "flow" && r.p === "modemPassword" && (r as { t?: string }).t !== "delete"));
+    expect(writers.map((n) => n.id)).toEqual(["remember-cell-password"]);
+  });
+
+  /**
    * R-SEC-10. `ui-form` renders nothing masked, so the password is its own
    * `ui-text-input`; `passthru` would put what was typed back on an outgoing
    * message.

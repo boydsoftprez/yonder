@@ -316,6 +316,12 @@ export {
   type JoinResult,
   type SecretSink,
 } from "./net/join.js";
+export {
+  configureModem,
+  MODEM_PASSWORD_SECRET,
+  ModemRequest,
+  type ModemConfigureResult,
+} from "./net/modem/configure.js";
 export { setTheme, THEMES, type ThemeRequest, type ThemeResult } from "./ui/theme.js";
 export { ssidOptions, type DropdownOption } from "./net/scan.js";
 export { joinSucceeded, type JoinedResult } from "./net/joined.js";

@@ -2423,7 +2423,7 @@
         "id": "gather-cell-form",
         "type": "change",
         "z": "yonder-console",
-        "name": "the four fields, as one section",
+        "name": "the four fields, as one section; the password is not kept",
         "rules": [
             {
                 "t": "set",
@@ -2459,6 +2459,11 @@
                 "pt": "msg",
                 "to": "modemPassword",
                 "tot": "flow"
+            },
+            {
+                "t": "delete",
+                "p": "modemPassword",
+                "pt": "flow"
             }
         ],
         "action": "",

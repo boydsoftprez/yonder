@@ -12,6 +12,7 @@ import { readVersions } from "../system/versions.js";
 import { displayFacts, type BoardDisplay } from "../system/format.js";
 import { isProbeHost, type PingResult } from "../diag/probe.js";
 import { joinNetwork, leaveNetwork, type JoinRequest } from "../net/join.js";
+import { configureModem } from "../net/modem/configure.js";
 import type { NetworkState } from "../net/state.js";
 import type { ModemState } from "../net/modem/state.js";
 import type { PathName, ReachState } from "../net/reach/standing.js";
@@ -19,7 +20,7 @@ import { setTheme, type ThemeRequest } from "../ui/theme.js";
 import type { ScanResult } from "../net/scan.js";
 import type { BoardFacts } from "../system/facts.js";
 import type { Versions } from "../system/versions.js";
-import { ConfigSchema, DEFAULT_CONFIG, ZEROTIER_NETWORK_ID } from "../schema/config.js";
+import { DEFAULT_CONFIG, ZEROTIER_NETWORK_ID } from "../schema/config.js";
 import { publishableApPassphrase } from "../net/profiles.js";
 import type { RemoteState } from "../remote/state.js";
 
@@ -164,17 +165,6 @@ export interface RouteResult {
 }
 
 export type Router = (method: string, path: string, body: unknown) => Promise<RouteResult>;
-
-/**
- * What a form may send. A partial of the schema's own section rather than a
- * second list of fields: a key added to the configuration is then accepted
- * here without anybody remembering to add it twice.
- *
- * `network.modem` is declared as `Modem.default({})`, so the shape at this
- * path is a `ZodDefault`, not the object itself — `.removeDefault()` is what
- * gets back to the object `.partial()` can act on.
- */
-const ModemRequest = ConfigSchema.shape.network.shape.modem.removeDefault().partial();
 
 /** The body shape both administrator routes take. */
 function submittedPassword(body: unknown): string | undefined {
@@ -536,19 +526,29 @@ export function createRouter(deps: RouterDeps): Router {
       // response is an apply status, not a configuration — R-SEC-10 says
       // `gsm.password` never comes back out of this route, and an apply
       // status is not a shape it could arrive in.
+      //
+      // **The password takes the same road the Wi-Fi passphrase does.** The
+      // operator types a string; `config.yaml` holds a reference to a row in
+      // `secrets.yaml`. `configureModem` is the one thing that converts
+      // between them, exactly as `joinNetwork` is for `network.client.psk` —
+      // and it is why this route needs a secret store rather than being pure
+      // schema validation. Without one there is nowhere to put the
+      // credential, and applying a reference to a row that was never written
+      // would take the modem off the air while reporting success.
+      //
+      // The submitted password is redacted at the top of this function like
+      // every other body, so nothing below can log it (R-SEC-10).
       if (method === "POST" && path === "/modem/configure") {
-        const wanted = ModemRequest.safeParse(body);
-        if (!wanted.success) {
-          return { status: 400, body: { error: "that is not a modem configuration" } };
+        if (deps.secrets === undefined) {
+          say("POST /modem/configure: the secret store could not be read, so nothing can be stored in it");
+          return {
+            status: 503,
+            body: { error: "the device's secrets could not be read; see the device journal" },
+          };
         }
-        const config = loadConfig(deps.configPath);
-        return {
-          status: 200,
-          body: await deps.engine.apply({
-            ...config,
-            network: { ...config.network, modem: { ...config.network.modem, ...wanted.data } },
-          }),
-        };
+        const wanted = configureModem(loadConfig(deps.configPath), body, deps.secrets);
+        if (!wanted.ok) return { status: 400, body: { error: wanted.error } };
+        return { status: 200, body: await deps.engine.apply(wanted.config) };
       }
 
       // R-CEL-09's "on request", answered by the same ReachMonitor the

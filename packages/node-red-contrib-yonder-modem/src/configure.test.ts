@@ -44,4 +44,18 @@ describe("modemRequest", () => {
     expect(modemRequest({ apn: "ereseller", dial: "*99#", username: "sim-user", password: "" }))
       .toEqual({ enabled: true, apn: "ereseller", username: "sim-user", dial: "*99#" });
   });
+
+  /**
+   * **R-CEL-02, priority 1: the case that had no test at all.**
+   *
+   * Every case above passes `password: ""`, which is dropped — so nothing
+   * here ever exercised a modem password being sent, and the daemon route
+   * that refused one went unnoticed. The body carries the operator's typed
+   * string; `POST /modem/configure` is what turns it into a row in
+   * `secrets.yaml` and a reference in the configuration.
+   */
+  it("sends a typed password, because a SIM that needs one cannot be used without it", () => {
+    expect(modemRequest({ apn: "ereseller", username: "sim-user", password: "hunter2" }))
+      .toEqual({ enabled: true, apn: "ereseller", username: "sim-user", password: "hunter2" });
+  });
 });

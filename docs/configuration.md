@@ -117,7 +117,7 @@ network:
     interface: null
     apn: null
     username: null
-    password: null                             # then { secret: modem_psk }
+    password: null                             # then { secret: modem_password }
     dial: null
   priority: [ethernet, modem, wifi_client]     # egress preference, highest first
 
@@ -323,6 +323,13 @@ Network page rather than by hand. The console posts the network name and passphr
 daemon, which puts the passphrase in `secrets.yaml`, writes `{ secret: wifi_psk }` here, and
 applies the whole document — so the passphrase never lands in this file, which is
 world-readable on the device.
+
+**`network.modem.password`** takes the same road, from the Network page's Cellular tab. The
+console posts what the operator typed; the daemon stores it as `modem_password` in
+`secrets.yaml`, writes `{ secret: modem_password }` here, and applies the whole document
+(R-CEL-02). An **empty password box means "leave the stored credential alone"**, not "clear
+it" — so an operator who came to the page to change an APN does not lose a working SIM
+credential by not retyping it. Clearing the credential is `password: null` in this file.
 
 On a board with one Wi-Fi radio, setting these takes the access point down: one radio serves
 one mode at a time, the configured client wins, and the client is raised before the access
