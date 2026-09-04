@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { detectCameras, probeCamera, type ProbeOptions } from "./camera.js";
+import { detectCameras, isHardwareCodec, probeCamera, type ProbeOptions } from "./camera.js";
 import type { ByPathEntry } from "./bypath.js";
 import type { CommandRunner } from "../../net/runner.js";
 
@@ -144,6 +144,20 @@ describe("detectCameras", () => {
     expect(hevc!.reason).not.toContain("raw frames");
   });
 
+  it("rejects the board's ISP by its card, and says which it is", async () => {
+    // `bcm2835-isp` is a codec block. Left to reach format probing it is
+    // rejected too, and for a more confusing reason — this asserts the reason
+    // an operator actually reads, which is the half R-CAM-12 is about. `isp`
+    // was one of the two alternatives no test exercised.
+    const r = await bench();
+    const isp = r.rejected.find((x) => x.card === "bcm2835-isp");
+    expect(isp).toBeDefined();
+    expect(isp!.reason).toContain("hardware codec");
+    // Not "could not read this device's formats", which is what it falls to
+    // when the card test misses it — true, and about the wrong thing.
+    expect(isp!.reason).not.toContain("could not read");
+  });
+
   it("reports one row per card, so a camera's metadata node is not a rejection", async () => {
     // A UVC camera owns two nodes and the second answers no formats. A
     // rejection sitting beside the camera that was just found reads as
@@ -203,6 +217,53 @@ describe("detectCameras", () => {
     const r = await bench({ byPath: () => [] });
     expect(r.found[0].byPath).toBe("/dev/video0");
     expect(r.found[0].byPathStable).toBe(false);
+  });
+});
+
+/**
+ * **The card test decides whether a camera exists at all**, so both directions
+ * matter and one of them is worse: a codec let through reaches format probing
+ * and is rejected there with a true sentence, while a camera rejected here is
+ * invisible and the operator is told, falsely, that it is a hardware codec —
+ * which sends them looking in the wrong place entirely (R-CAM-12's "and why").
+ */
+describe("telling a codec block from a camera by its card (K-40)", () => {
+  it("knows the board's own codec blocks", () => {
+    // The first four are recorded from this board's `v4l2-ctl --list-devices`
+    // and sit in the fixture beside this file; the rest are the same shape —
+    // a driver name one of whose words is the function it performs.
+    for (const card of [
+      "bcm2835-codec-decode", "bcm2835-isp", "rpi-hevc-dec", "bcm2835-codec",
+      "bcm2835-codec-encode", "rpi-video-decoder", "some-encoder", "unicam-isp",
+    ]) {
+      expect(isHardwareCodec(card), card).toBe(true);
+    }
+  });
+
+  it("accepts a camera whose name merely contains those letters", () => {
+    // Every one of these was rejected *as a codec*, with that reason, by the
+    // unanchored substring pattern this replaced. `Display` contains `isp`.
+    for (const card of [
+      "Studio Display", "LG Display Camera", "Dell Display Camera",
+      "USB Camera (H.264 Encoder)", "HD Pro Webcam C920",
+      "Global Shutter Camera: Global S",
+      // The CSI capture node on Rockchip — the Radxa boards the roadmap names.
+      "rkisp1_mainpath", "rkisp1-statistics",
+    ]) {
+      expect(isHardwareCodec(card), card).toBe(false);
+    }
+  });
+
+  it("lets a whole camera through the probe, not just the predicate", async () => {
+    // The predicate is where the rule lives; this is the rule reaching the
+    // page. A card with a space in it is a product name whatever letters it
+    // carries, so it goes on to be probed like any other camera.
+    for (const card of ["USB Camera (H.264 Encoder)", "Studio Display"]) {
+      const out = await probeCamera("/dev/video0", card, {
+        runner: benchRunner(), byPath: recordedByPath,
+      });
+      expect("capabilities" in out, card).toBe(true);
+    }
   });
 });
 

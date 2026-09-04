@@ -56,6 +56,44 @@ describe("parseFormats", () => {
     expect(parseFormats(fixture("list-formats-ext-video1.txt"))).toEqual([]);
   });
 
+  /**
+   * **A fourcc is four bytes, and several real ones end in a space.**
+   * `'Y16 '`, `'Y12 '`, `'Y10 '` are what a thermal or greyscale camera
+   * reports. `\w{4}` matched none of them, so the block was skipped whole —
+   * and its sizes stayed in `pending` for the next format that parsed to
+   * collect, which is how a 160x120 *greyscale* mode reached the operator's
+   * picker labelled MJPG, passed the compressed-format filter as flyable, and
+   * was accepted by `refuse()` as a size this camera offers. The only report
+   * a start then gave was `Internal data stream error`.
+   */
+  const greyscaleThenMjpeg = [
+    "ioctl: VIDIOC_ENUM_FMT",
+    "\tType: Video Capture",
+    "",
+    "\t[0]: 'Y16 ' (16-bit Greyscale)",
+    "\t\tSize: Discrete 160x120",
+    "\t\t\tInterval: Discrete 0.111s (9.000 fps)",
+    "\t[1]: 'MJPG' (Motion-JPEG, compressed)",
+    "\t\tSize: Discrete 640x480",
+    "\t\t\tInterval: Discrete 0.033s (30.000 fps)",
+  ].join("\n");
+
+  it("reads a fourcc with a trailing space, rather than skipping the format", () => {
+    expect(parseFormats(greyscaleThenMjpeg)).toEqual([
+      { fourcc: "Y16 ", width: 160, height: 120, rates: [9] },
+      { fourcc: "MJPG", width: 640, height: 480, rates: [30] },
+    ]);
+  });
+
+  it("never lends one format's sizes to the next one", () => {
+    // The same input with a fourcc nothing could read: its sizes belong to no
+    // format and are dropped, rather than arriving under the format below.
+    const unreadable = greyscaleThenMjpeg.replace("'Y16 '", "'ABC'");
+    expect(parseFormats(unreadable)).toEqual([
+      { fourcc: "MJPG", width: 640, height: 480, rates: [30] },
+    ]);
+  });
+
   it("returns an empty list for formats listed with no size beneath them", () => {
     // The HEVC decoder lists four pixel formats and no size under any of them.
     // A format with no size is not a capture mode.

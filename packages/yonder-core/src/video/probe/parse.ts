@@ -14,7 +14,20 @@ import type { ControlRange, VideoFormat } from "../capability.js";
  * fixture, from the board, and let the test tell you what changed.
  */
 
-const FORMAT_LINE = /^\s*\[\d+\]:\s*'(\w{4})'/;
+/**
+ * `[0]: 'MJPG' (Motion-JPEG, compressed)`.
+ *
+ * **Four bytes, not four word characters.** A V4L2 fourcc is four *bytes* and
+ * several real ones carry a trailing space — `'Y16 '` (16-bit greyscale),
+ * `'Y12 '`, `'Y10 '`, which is what a thermal or greyscale camera reports.
+ * `\w{4}` did not match those, so the whole format block was skipped and its
+ * sizes were left in `pending` for the next format that did parse to collect:
+ * a 160x120 greyscale mode arrived at the operator's picker as an MJPG mode,
+ * passed `camera.ts`'s compressed-format filter as flyable, and `refuse()`
+ * accepted a size the camera cannot deliver at that fourcc. The only report
+ * was `Internal data stream error`.
+ */
+const FORMAT_LINE = /^\s*\[\d+\]:\s*'(.{4})'/;
 const SIZE_LINE = /^\s*Size:\s*Discrete\s+(\d+)x(\d+)/;
 const INTERVAL_LINE = /\(([\d.]+)\s*fps\)/;
 
@@ -24,7 +37,10 @@ export function parseFormats(stdout: string): VideoFormat[] {
   let pending: { width: number; height: number; rates: number[] } | null = null;
 
   const flush = (): void => {
-    if (fourcc === null || pending === null) return;
+    // `pending` first, and not only on the way out: sizes collected under a
+    // fourcc this parser could not read belong to no format, and leaving them
+    // here donates them to the next format that parses. See FORMAT_LINE.
+    if (fourcc === null || pending === null) { pending = null; return; }
     out.push({
       fourcc,
       width: pending.width,

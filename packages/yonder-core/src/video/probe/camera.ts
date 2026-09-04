@@ -76,6 +76,46 @@ export interface ProbeOptions {
 /** Formats that carry compressed video, and are therefore flyable (R-CAM-02). */
 const COMPRESSED = new Set(["MJPG", "JPEG", "H264", "HEVC"]);
 
+/** Words a driver uses for a codec function. Whole words only — see below. */
+const CODEC_WORD = /^(codec|decoder?|encoder?|isp|hevc)$/i;
+
+/**
+ * Whether this card is one of the board's own codec blocks rather than a
+ * camera (K-40).
+ *
+ * A hardware codec advertises formats it cannot capture, so it looks like a
+ * camera to everything that asks, cannot be started, and without a stated
+ * reason simply would not appear — sending an operator to look for the camera
+ * that vanished (R-CAM-12).
+ *
+ * **Two conditions, and the second is what makes it safe.** A codec's card is
+ * a *driver name*: `bcm2835-codec-decode`, `bcm2835-isp`, `rpi-hevc-dec`, all
+ * recorded from this board. A camera's card is a *product name* somebody
+ * wrote for a person to read, and it has spaces in it. So a card carrying
+ * whitespace is a camera whatever letters are in it, and a driver name is a
+ * codec only when one of its whole words is one — `bcm2835-isp` splits to
+ * `bcm` and `isp`, and `rkisp1_mainpath` to `rkisp` and `mainpath`.
+ *
+ * The pattern this replaces was an unanchored substring list, and it rejected
+ * genuine cameras **as codecs**, with a reason that was actively false:
+ *
+ *   - `Studio Display`, `LG Display Camera` — D-**isp**-lay
+ *   - `USB Camera (H.264 Encoder)` — a camera advertising its own encoder,
+ *     which is precisely the compressed source R-CAM-02 wants
+ *   - `rkisp1_mainpath` — the CSI capture node on Rockchip, which is the
+ *     Radxa boards the roadmap names as a target
+ *
+ * **The two error directions are not symmetric, and that is why this errs
+ * towards letting a card through.** A codec wrongly accepted reaches format
+ * probing and is rejected there with a true sentence — it offers no capture
+ * format, or only raw ones. A camera wrongly rejected is invisible, and the
+ * operator is told a false reason for it.
+ */
+export function isHardwareCodec(card: string): boolean {
+  if (/\s/.test(card)) return false;
+  return card.split(/[^A-Za-z]+/).some((word) => CODEC_WORD.test(word));
+}
+
 /**
  * The by-path map for one sweep: the injected listing, or the real directory.
  *
@@ -154,15 +194,10 @@ async function probeNode(
   byPath: ReadonlyMap<string, string>,
 ): Promise<Detection | Rejection> {
   // K-40, checked by card rather than by node number: the decoder is
-  // /dev/video10 on this board and need not be on another, but a codec always
-  // announces itself as one.
-  //
-  // `decode|encode|hevc` and not `decoder`: this board carries an
-  // `rpi-hevc-dec` card that matches none of the obvious words, and letting it
-  // through means an operator reads "this camera offers only raw frames" about
-  // a hardware HEVC decoder — a true sentence that sends them looking for a
-  // camera setting that does not exist.
-  if (/codec|decode|encode|isp|hevc/i.test(card)) {
+  // /dev/video10 on this board and need not be on another, but a codec
+  // announces itself as one in its driver name. `isHardwareCodec` above holds
+  // the rule and the evidence for it.
+  if (isHardwareCodec(card)) {
     return {
       device: node, card,
       reason: `${card} is a hardware codec on this board, not a camera; it advertises formats it cannot capture (K-40)`,
