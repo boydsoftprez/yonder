@@ -157,15 +157,17 @@ Browser ──HTTP/WS──► Node-RED ──► custom nodes ──┬──�
                                                   ├──► mediamtx       (HTTP control API)
                                                   ├──► GStreamer      (spawn / supervise)
                                                   ├──► NetworkManager (D-Bus)
-                                                  ├──► ModemManager   (D-Bus)
+                                                  ├──► ModemManager   (mmcli)
                                                   └──► libgpiod       (relays)
 ```
 
 Components talk to system services over their real interfaces — an HTTP API for mediamtx,
 D-Bus where it is the right fit — rather than shelling out and parsing text by default. The
-network renderer is a deliberate, recorded exception: it drives NetworkManager through
-`nmcli`'s machine-readable mode behind an injected command runner, for the reasons in
-[ADR-0006](adr/0006-nmcli-not-dbus.md).
+network layer is a deliberate, recorded exception: the renderer drives NetworkManager
+through `nmcli`'s machine-readable mode behind an injected command runner, and the modem is
+read the same way, with `mmcli --output-keyvalue` behind that same runner, for the reasons
+in [ADR-0006](adr/0006-nmcli-not-dbus.md). Those reasons were written about NetworkManager
+and carry over to ModemManager unchanged.
 
 ### 3.4 Remote access
 
@@ -242,7 +244,7 @@ cameras:
 network:
   ap:     { ssid: yonder, psk: { secret: ap_psk }, address: 192.168.77.1/24 }
   client: { ssid: null, psk: { secret: wifi_psk } }
-  modem:  { mode: auto, apn: null }
+  modem:  { enabled: false, mode: auto, apn: null, password: { secret: modem_password } }
   priority: [ethernet, modem, wifi_client]
 ```
 

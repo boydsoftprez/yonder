@@ -197,6 +197,25 @@ describe("the widgets", () => {
     expect(props!.limit).toBeUndefined();
   });
 
+  it("passes the gauge a sense, defaulting to higher-is-worse", () => {
+    // Everything already drawn by this instrument — temperature, load, memory —
+    // is higher-is-worse, so an omitted sense must keep behaving exactly as it
+    // did before this property existed.
+    expect(build(gaugeNode as (RED: RED) => void, { label: "CPU TEMP", max: 100, caution: 60, limit: 80 }).props!.sense)
+      .toBe("higher-is-worse");
+    expect(build(gaugeNode as (RED: RED) => void, {
+      label: "SIGNAL", min: -120, max: -70, caution: -90, limit: -105, sense: "higher-is-better",
+    }).props!.sense).toBe("higher-is-better");
+  });
+
+  it("refuses a sense it does not have, rather than drawing an arbitrary one", () => {
+    // A typo in a flow must not silently pick a direction. Falling back to
+    // the default is the safe answer only because the default is the common
+    // case.
+    expect(build(gaugeNode as (RED: RED) => void, { label: "X", max: 100, sense: "sideways" }).props!.sense)
+      .toBe("higher-is-worse");
+  });
+
   it("tape carries its scale and divisions", () => {
     const { props } = build(tapeNode as (RED: RED) => void, { max: 85, caution: 60, limit: 80, divisions: 6, height2: 200 });
     expect(props).toMatchObject({ max: 85, caution: 60, limit: 80, divisions: 6, height: 200 });
@@ -275,6 +294,33 @@ describe("the widgets", () => {
   it("registers onAction for the soft keys, or every press is dropped", () => {
     const { events } = build(softkeysNode as (RED: RED) => void, { keys: "[]" });
     expect(events, "soft keys must register onAction").toMatchObject({ onAction: true });
+  });
+
+  /**
+   * **A message drawn on the rail must not come back out of it.**
+   *
+   * The CHANGE PENDING banner's rails are fed by the same poll that draws the
+   * countdown, because R-CFG-11 decides in `yonder-core` which keys a state
+   * offers. Dashboard's default input handling ends in `send(msg)` unless the
+   * widget's configuration carries `passthru: false` — and this rail's output
+   * goes to the node that re-reads `/status` and feeds the rail. Without this
+   * one poll would become an endless loop of them, at socket speed, on the
+   * panel that exists to say a device is about to roll back.
+   *
+   * `false`, and *present*: Dashboard checks `hasProperty(config, 'passthru')`
+   * before reading it, so an absent key means pass it on.
+   */
+  it("draws what it is sent without forwarding it, or the banner loops", () => {
+    const { props } = build(softkeysNode as (RED: RED) => void, { keys: "[]" });
+    expect(Object.prototype.hasOwnProperty.call(props!, "passthru")).toBe(true);
+    expect(props!.passthru).toBe(false);
+  });
+
+  /** A press is a `widget-action` and does not go through that switch at all. */
+  it("still sends a press with passthrough off", () => {
+    const { events, props } = build(softkeysNode as (RED: RED) => void, { keys: "[]" });
+    expect(props!.passthru).toBe(false);
+    expect(events).toMatchObject({ onAction: true });
   });
 
   it("leaves onAction off the read-only instruments", () => {

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtempSync, rmSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync, existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRouter, type DiagProbes, type Router, type SystemReport } from "./routes.js";
@@ -9,11 +9,16 @@ import type { ScanResult } from "../net/scan.js";
 import type { PingResult } from "../diag/probe.js";
 import { ApplyEngine } from "../apply/engine.js";
 import { saveConfig } from "../config/save.js";
+import { loadConfig } from "../config/load.js";
 import { SecretStore } from "../secrets/store.js";
+import { DEFAULT_AP_PASSPHRASE } from "../net/profiles.js";
+import { MODEM_PASSWORD_SECRET } from "../net/modem/configure.js";
 import { DEFAULT_CONFIG, type Config } from "../schema/config.js";
 import { AdminCredential } from "../console/credential.js";
 import { AttemptThrottle, FAILURE_LIMIT, LOCKOUT_MS } from "../console/throttle.js";
 import type { Clock, Renderer } from "../apply/types.js";
+import type { ModemState } from "../net/modem/state.js";
+import type { PathName, ReachState } from "../net/reach/standing.js";
 import type { RemoteState } from "../remote/state.js";
 
 /**
@@ -83,11 +88,15 @@ interface RouterOptions {
   throttle?: AttemptThrottle;
   scan?: () => Promise<ScanResult>;
   diag?: DiagProbes;
-  secrets?: { put(name: string, value: string): void };
+  secrets?: { put(name: string, value: string): void; get?(name: string): string | undefined };
   activity?: ActivityLog;
   system?: () => SystemReport;
+  modemState?: () => Promise<ModemState>;
+  reachState?: () => Promise<ReachState>;
   /** The mesh join state. Undefined, as in production, unless a test says otherwise. */
   remoteState?: () => Promise<RemoteState>;
+  /** Tests one path now, over the same ReachMonitor the automatic probes use. */
+  testPath?: (path: PathName) => Promise<boolean>;
 }
 
 function router(opts: RouterOptions = {}): Router {
@@ -112,7 +121,10 @@ function router(opts: RouterOptions = {}): Router {
       : { secrets: { put: () => {} } }),
     ...(opts.activity === undefined ? {} : { activity: opts.activity }),
     ...(opts.throttle === undefined ? {} : { throttle: opts.throttle }),
+    ...(opts.modemState === undefined ? {} : { modemState: opts.modemState }),
+    ...(opts.reachState === undefined ? {} : { reachState: opts.reachState }),
     ...(opts.remoteState === undefined ? {} : { remoteState: opts.remoteState }),
+    ...(opts.testPath === undefined ? {} : { testPath: opts.testPath }),
   });
 }
 
@@ -189,6 +201,7 @@ describe("the gate in front of the configuration routes", () => {
     const r = router();
     expect((await r("POST", "/apply", changed())).status).toBe(403);
     expect((await r("POST", "/confirm", { id: "anything" })).status).toBe(403);
+    expect((await r("POST", "/revert", { id: "anything" })).status).toBe(403);
   });
 
   it("refuses an unknown route while unprovisioned rather than saying it is unknown", async () => {
@@ -759,6 +772,42 @@ describe("POST /net/join", () => {
     expect(result.body).toMatchObject({ movesRadio: true });
   });
 
+  /**
+   * **And says it again on `GET /status`, which is where a page reads it.**
+   *
+   * `POST /net/join`'s answer reaches one browser once. The CHANGE PENDING
+   * banner is on eight surfaces, is polled, and survives a reload — so
+   * everything it draws comes from `/status`. Until this was carried there,
+   * the banner offered `CONFIRM` for a join, and R-CFG-11 gives that
+   * confirmation to the device: a press moves the engine to `confirmed`, and
+   * the device's own verification then returns early on the state check.
+   */
+  it("keeps saying so on GET /status for as long as the join is pending", async () => {
+    const route = provisioned({ secrets: secretSink() });
+    await route("POST", "/net/join", { ssid: "HomeNetwork", psk: "a-passphrase" });
+    const status = (await route("GET", "/status", undefined)).body as
+      { state: string; movesRadio?: boolean };
+    expect(status.state).toBe("pending");
+    expect(status.movesRadio).toBe(true);
+  });
+
+  /**
+   * An ordinary apply says nothing about the radio, and **absent is what the
+   * console reads as "the operator confirms this one"**. A `/status` that
+   * omitted the field for a join would leave `CONFIRM` on the banner; one
+   * that claimed it for a hostname change would take a control away from an
+   * operator who needs it.
+   */
+  it("says nothing about the radio on GET /status for an ordinary apply", async () => {
+    const route = provisioned({ secrets: secretSink() });
+    await route("POST", "/apply", changed());
+    const status = (await route("GET", "/status", undefined)).body as
+      { state: string; movesRadio?: boolean };
+    expect(status.state).toBe("pending");
+    expect(status.movesRadio).toBeUndefined();
+    expect(JSON.stringify(status)).not.toMatch(/movesRadio/);
+  });
+
   it("is 400 for a passphrase no access point would accept, and stores nothing", async () => {
     const secrets = secretSink();
     const result = await provisioned({ secrets })("POST", "/net/join", { ssid: "HomeNetwork", psk: "short" });
@@ -856,6 +905,103 @@ describe("POST /ui/theme", () => {
 });
 
 /**
+ * What M3b's contrib nodes read, and the two records this daemon is the only
+ * source of. Both are injected — this router knows no mmcli and no probe.
+ */
+describe("GET /modem/state", () => {
+  const CONNECTED: ModemState = {
+    mode: "connected",
+    summary: "Connected to Dark Star",
+    operator: "Dark Star",
+    technology: "lte",
+    registration: "home",
+    apn: "ereseller",
+    address: "10.31.95.33",
+    mtu: 1430,
+    signal: { rssi: -71, rsrq: -9, rsrp: -100, snr: 19 },
+    ports: ["cdc-wdm0 (mbim)", "wwan0 (net)"],
+    reportsSignal: true,
+  };
+
+  it("serves the modem state", async () => {
+    const res = await provisioned({ modemState: async () => CONNECTED })(
+      "GET", "/modem/state", undefined,
+    );
+    expect(res.status).toBe(200);
+    expect((res.body as { operator: string }).operator).toBe("Dark Star");
+  });
+
+  it("says so plainly when this daemon has no modem layer to ask", async () => {
+    // The same shape /net/state uses: a 503 naming the absence, never an empty
+    // body a page would render as "no signal".
+    const res = await provisioned({})("GET", "/modem/state", undefined);
+    expect(res.status).toBe(503);
+    expect((res.body as { error: string }).error).toMatch(/cannot report a modem/);
+  });
+
+  it("never puts the modem password in a response", async () => {
+    // R-SEC-10. The modem state is assembled from the device, not the config,
+    // and this asserts the boundary rather than trusting it.
+    const res = await provisioned({
+      modemState: async () => ({ ...CONNECTED, operator: null, address: null, mtu: null }),
+    })("GET", "/modem/state", undefined);
+    expect(JSON.stringify(res.body)).not.toMatch(/password|secret/i);
+  });
+
+  it("is behind the administrator password like every other configuration read", async () => {
+    // R-SEC-09. A modem's operator, technology and address are function, and
+    // a device with no password set offers none.
+    const res = await router({ modemState: async () => CONNECTED })(
+      "GET", "/modem/state", undefined,
+    );
+    expect(res.status).toBe(403);
+  });
+});
+
+describe("GET /reach/state", () => {
+  const STATE: ReachState = {
+    inUse: "modem",
+    carrying: true,
+    paths: [
+      { path: "ethernet", device: "eth0", standing: "no-route-out", since: 1_000,
+        evidence: "not-reaching", detail: "Stood down" },
+      { path: "modem", device: "wwan0", standing: "in-use", since: null,
+        evidence: "reaching", detail: "Carrying traffic" },
+    ],
+  };
+
+  it("serves which way out is in use", async () => {
+    const res = await provisioned({ reachState: async () => STATE })(
+      "GET", "/reach/state", undefined,
+    );
+    expect(res.status).toBe(200);
+    expect((res.body as { inUse: string }).inUse).toBe("modem");
+  });
+
+  it("serves the evidence about each path, not only the sentence", async () => {
+    // The console draws three states from this and must not have to parse
+    // `detail` to get them. Serialised over the socket, so a field the router
+    // dropped would show up here.
+    const res = await provisioned({ reachState: async () => STATE })(
+      "GET", "/reach/state", undefined,
+    );
+    const paths = (res.body as ReachState).paths;
+    expect(paths.map((p) => p.evidence)).toEqual(["not-reaching", "reaching"]);
+  });
+
+  it("says so plainly when this daemon has no reach monitor to ask", async () => {
+    const res = await provisioned({})("GET", "/reach/state", undefined);
+    expect(res.status).toBe(503);
+    expect((res.body as { error: string }).error).toMatch(/cannot report its way out/);
+  });
+
+  it("is behind the administrator password", async () => {
+    const res = await router({ reachState: async () => STATE })("GET", "/reach/state", undefined);
+    expect(res.status).toBe(403);
+  });
+});
+
+/**
  * The mesh routes: GET /remote/state, POST /remote/join, POST /remote/leave.
  *
  * The join and leave routes do nothing zerotier-cli would recognise — each
@@ -920,5 +1066,372 @@ describe("the remote routes", () => {
     expect(res.status).toBe(200);
     const config = (await route("GET", "/config", undefined)).body as Config;
     expect(config.remote.zerotier).toEqual({ enabled: false, network_id: null });
+  });
+});
+
+describe("POST /modem/configure", () => {
+  it("merges the fields into the configuration and applies the whole document", async () => {
+    // The same shape /net/join and /remote/join use: the router merges one
+    // section and hands the engine a complete document. Nothing about a modem
+    // is stored anywhere else.
+    const route = provisioned({});
+    const res = await route("POST", "/modem/configure", { enabled: true, apn: "ereseller" });
+    expect(res.status).toBe(200);
+    const config = (await route("GET", "/config", undefined)).body as Config;
+    expect(config.network.modem.enabled).toBe(true);
+    expect(config.network.modem.apn).toBe("ereseller");
+  });
+
+  it("leaves the rest of the configuration alone", async () => {
+    const route = provisioned({});
+    const before = (await route("GET", "/config", undefined)).body as Config;
+    await route("POST", "/modem/configure", { enabled: true, apn: "ereseller" });
+    const after = (await route("GET", "/config", undefined)).body as Config;
+    expect(after.network.ap).toEqual(before.network.ap);
+    expect(after.network.client).toEqual(before.network.client);
+  });
+
+  it("refuses a body that is not a modem configuration", async () => {
+    const res = await provisioned({})("POST", "/modem/configure", { apn: 42 });
+    expect(res.status).toBe(400);
+  });
+
+  /**
+   * R-CEL-02, priority 1: a modem that needs a credential can be given one
+   * from the console.
+   *
+   * The body a form sends carries a **typed string**, and the configuration
+   * holds a `SecretRef` — so the two shapes are different on purpose and the
+   * route is what stands between them, exactly as `POST /net/join` does for a
+   * Wi-Fi passphrase. This asserts the whole journey: accepted, stored in
+   * `secrets.yaml`, referenced by name from `config.yaml`, and the APN that
+   * travelled with it applied rather than discarded.
+   */
+  it("accepts a typed password, and applies the APN that travelled with it", async () => {
+    const store = new SecretStore(secretsPath);
+    const route = provisioned({ secrets: store });
+    const res = await route("POST", "/modem/configure", {
+      enabled: true, apn: "ereseller", username: "sim-user", password: "hunter2",
+    });
+    expect(res.status).toBe(200);
+    const config = (await route("GET", "/config", undefined)).body as Config;
+    expect(config.network.modem.apn).toBe("ereseller");
+    expect(config.network.modem.username).toBe("sim-user");
+    expect(config.network.modem.password).toEqual({ secret: MODEM_PASSWORD_SECRET });
+    expect(store.get(MODEM_PASSWORD_SECRET)).toBe("hunter2");
+  });
+
+  /**
+   * The credential goes to the one file that is `0600 root`, and nowhere near
+   * the one that is world-readable and travels in a support bundle.
+   */
+  it("puts the password in secrets.yaml and never in config.yaml", async () => {
+    const route = provisioned({ secrets: new SecretStore(secretsPath) });
+    await route("POST", "/modem/configure", { enabled: true, apn: "a", password: "hunter2" });
+    expect(readFileSync(configPath, "utf8")).not.toMatch(/hunter2/);
+    expect(readFileSync(secretsPath, "utf8")).toMatch(/hunter2/);
+  });
+
+  /**
+   * Rule 1 of `modemRequest`, held on this side of the socket too: an
+   * untouched password box must never overwrite a working credential. A body
+   * with no `password` key leaves the reference exactly where it was.
+   */
+  it("leaves a stored credential alone when no password is sent", async () => {
+    const store = new SecretStore(secretsPath);
+    const route = provisioned({ secrets: store });
+    const first = await route("POST", "/modem/configure", { enabled: true, apn: "a", password: "hunter2" });
+    // Confirmed, so the second apply is not refused for arriving while the
+    // first is still pending — this test is about the password, not the
+    // engine's reservation.
+    await route("POST", "/confirm", { id: (first.body as { id: string }).id });
+    await route("POST", "/modem/configure", { enabled: true, apn: "another" });
+    const config = (await route("GET", "/config", undefined)).body as Config;
+    expect(config.network.modem.apn).toBe("another");
+    expect(config.network.modem.password).toEqual({ secret: MODEM_PASSWORD_SECRET });
+    expect(store.get(MODEM_PASSWORD_SECRET)).toBe("hunter2");
+  });
+
+  /** No secret store, nothing to store it in — and the route says so. */
+  it("refuses rather than applying a reference to a row it could not write", async () => {
+    const res = await provisioned({ secrets: undefined })(
+      "POST", "/modem/configure", { enabled: true, apn: "a", password: "hunter2" },
+    );
+    expect(res.status).toBe(503);
+    expect(JSON.stringify(res.body)).not.toMatch(/hunter2/);
+  });
+
+  /**
+   * R-SEC-10, asserted against the **whole serialised body** rather than one
+   * field — the shape `form.test.ts` uses, and the reason it is right: a key
+   * added to this response later cannot carry the credential out past an
+   * assertion that only looked at the field it expected.
+   *
+   * The status assertion is what stops this passing vacuously. It used to
+   * read `not.toMatch(/hunter2/)` on a `400` the route produced before the
+   * engine was ever reached, so it would have gone on passing if the route
+   * had started echoing the whole configuration on success.
+   */
+  it("never returns the modem password", async () => {
+    const res = await provisioned({ secrets: new SecretStore(secretsPath) })(
+      "POST", "/modem/configure", { enabled: true, apn: "a", password: "hunter2" },
+    );
+    expect(res.status).toBe(200);
+    expect(JSON.stringify(res.body)).not.toMatch(/hunter2/);
+    expect(JSON.stringify(res.body)).not.toMatch(/password/i);
+  });
+
+  /**
+   * Nor in the journal. The router redacts by value at the point the body is
+   * captured (R-SEC-10), so no branch below it has to remember.
+   */
+  it("never writes the modem password to the log", async () => {
+    const store = new SecretStore(secretsPath);
+    const route = provisioned({ secrets: store });
+    const printed = await captureLog(async () => {
+      await route("POST", "/modem/configure", { enabled: true, apn: "a", password: "hunter2" });
+    });
+    expect(printed).not.toMatch(/hunter2/);
+  });
+});
+
+describe("POST /reach/test", () => {
+  it("tests the path it is given and answers with the result", async () => {
+    const asked: string[] = [];
+    const route = provisioned({ testPath: async (p) => { asked.push(p); return true; } });
+    const res = await route("POST", "/reach/test", { path: "modem" });
+    expect(res.status).toBe(200);
+    expect(asked).toEqual(["modem"]);
+    expect((res.body as { reached: boolean }).reached).toBe(true);
+  });
+
+  it("refuses a path that is not one of the three", async () => {
+    const res = await provisioned({ testPath: async () => true })("POST", "/reach/test", { path: "carrier-pigeon" });
+    expect(res.status).toBe(400);
+  });
+
+  it("says so plainly when this daemon has no reach monitor to ask", async () => {
+    const res = await provisioned({})("POST", "/reach/test", { path: "modem" });
+    expect(res.status).toBe(503);
+  });
+});
+
+/**
+ * **R-UI-15.** The other half of the confirmation decision. A console that
+ * could only confirm would leave an operator who has already decided the
+ * change was wrong watching a five-minute timer — and reaching for the power
+ * instead, which is the one thing that turns a rollback into a recovery.
+ */
+describe("POST /revert", () => {
+  it("puts the previous configuration back and returns to rest", async () => {
+    const r = provisioned();
+    const applied = await r("POST", "/apply", changed());
+    const id = (applied.body as { id: string }).id;
+    expect(loadConfig(configPath).system.hostname).toBe("changed");
+
+    const res = await r("POST", "/revert", { id });
+    expect(res.status).toBe(200);
+    expect((res.body as { state: string }).state).toBe("idle");
+    expect((res.body as { lastResult?: { outcome: string } }).lastResult?.outcome).toBe("reverted");
+    expect(loadConfig(configPath).system.hostname).toBe("yonder");
+  });
+
+  it("wants an id, and says so rather than reverting whatever is pending", async () => {
+    const r = provisioned();
+    await r("POST", "/apply", changed());
+    const res = await r("POST", "/revert", {});
+    expect(res.status).toBe(400);
+    expect(loadConfig(configPath).system.hostname).toBe("changed");
+  });
+
+  /**
+   * A ConfigError is written for the operator, so the console can say what
+   * happened rather than showing a key that did nothing.
+   */
+  it("refuses an id that is not the pending one, in words", async () => {
+    const r = provisioned();
+    await r("POST", "/apply", changed());
+    const res = await r("POST", "/revert", { id: "not-the-id" });
+    expect(res.status).toBe(400);
+    expect((res.body as { error: string }).error).toMatch(/unknown apply/);
+    expect(loadConfig(configPath).system.hostname).toBe("changed");
+  });
+
+  it("refuses when nothing is pending at all", async () => {
+    const res = await provisioned()("POST", "/revert", { id: "a1" });
+    expect(res.status).toBe(400);
+    expect((res.body as { error: string }).error).toMatch(/nothing is pending/);
+  });
+});
+
+/**
+ * `GET /status`'s `wayBackIn` — the way back into a device an operator has
+ * lost the console to (R-UI-18).
+ *
+ * The rule this exists to get right: **the passphrase is returned only while
+ * it is the published default.** ADR-0007 makes that value deliberately
+ * public — a per-device one could only be read from the device you are locked
+ * out of, so it guarded nothing and locked out the legitimate operator — and
+ * one the operator has set is theirs, which makes returning it a credential
+ * in an API response (R-SEC-10).
+ */
+describe("the way back in", () => {
+  /** The same router, with `ap_psk` seeded to a value the operator chose. */
+  function provisionedWithApPassphrase(psk: string): Router {
+    new SecretStore(secretsPath).ensureValue("ap_psk", psk);
+    new AdminCredential(new SecretStore(secretsPath)).set(GOOD);
+    return router({ secrets: new SecretStore(secretsPath) });
+  }
+
+  it("names the access point, its address and the hostname", async () => {
+    const res = await provisioned({})("GET", "/status", undefined);
+    const back = (res.body as {
+      wayBackIn: { ssid: string; address: string; hostname: string };
+    }).wayBackIn;
+    expect(back.ssid).toBe("yonder");
+    expect(back.address).toBe("192.168.77.1");
+    expect(back.hostname).toBe("yonder.local");
+  });
+
+  it("gives the passphrase while it is the published default", async () => {
+    // ADR-0007: published, documented, the same on every device, and the only
+    // thing that makes a locked-out operator's way back in usable.
+    const route = provisionedWithApPassphrase(DEFAULT_AP_PASSPHRASE);
+    const res = await route("GET", "/status", undefined);
+    expect((res.body as { wayBackIn: { passphrase: string | null } }).wayBackIn.passphrase)
+      .toBe("yonder1234");
+  });
+
+  it("withholds it once the operator has set their own", async () => {
+    // R-SEC-10. Theirs, not ours, and not for an API response.
+    const route = provisionedWithApPassphrase("something-they-chose");
+    const res = await route("GET", "/status", undefined);
+    expect((res.body as { wayBackIn: { passphrase: string | null } }).wayBackIn.passphrase)
+      .toBeNull();
+    expect(JSON.stringify(res.body)).not.toMatch(/something-they-chose/);
+  });
+
+  /**
+   * The stored value is never copied into the response — not even when it is
+   * equal to the published one.
+   *
+   * Comparing and then returning `stored` would be correct today and one edit
+   * away from being a leak: change the comparison and the operator's own
+   * passphrase goes out on an ungated route. Returning the *constant* makes
+   * the leak unreachable rather than merely absent, which is the difference
+   * R-SEC-10 asks for.
+   */
+  it("returns the published constant, and never the row it read", async () => {
+    const route = provisionedWithApPassphrase(DEFAULT_AP_PASSPHRASE);
+    const res = await route("GET", "/status", undefined);
+    const back = (res.body as { wayBackIn: { passphrase?: string | null } }).wayBackIn;
+    expect(back.passphrase).toBe(DEFAULT_AP_PASSPHRASE);
+    // This used to assert `back.passphrase === DEFAULT_AP_PASSPHRASE` as well,
+    // which is `toBe` written a second time: JavaScript string equality cannot
+    // tell the module's own string from a copy that travelled through
+    // secrets.yaml, so the docstring claimed a property the test could not
+    // express. The property is real and it is `publishableApPassphrase`'s —
+    // no argument produces an answer that is not the constant, null or
+    // nothing — and `profiles.test.ts` proves it by value across seven
+    // inputs including near misses. What is asserted *here* is the half this
+    // route owns: a value that is not the published one never reaches the
+    // body, whatever the store holds.
+    const theirs = "an-operators-own-passphrase";
+    const other = await provisionedWithApPassphrase(theirs)("GET", "/status", undefined);
+    expect(JSON.stringify(other.body)).not.toMatch(new RegExp(theirs));
+  });
+
+  /**
+   * **Cannot tell is its own answer** (I-3, R-UI-18).
+   *
+   * A daemon whose `secrets.yaml` could not be read is serving without a
+   * secret store — that is what `buildRenderers` throwing leaves behind, and
+   * it is the state this panel exists for. It used to print `yonder1234`
+   * unconditionally, which is a passphrase that will not work on any device
+   * whose operator had set their own: the panel named a value for the one
+   * failure mode it was written for, and the value was wrong.
+   */
+  it("prints no passphrase at all when it cannot read the store", async () => {
+    const route = provisioned({ secrets: undefined });
+    const res = await route("GET", "/status", undefined);
+    const back = (res.body as { wayBackIn: { passphrase?: string | null } }).wayBackIn;
+    expect("passphrase" in back).toBe(false);
+    expect(JSON.stringify(res.body)).not.toMatch(/yonder1234/);
+    // Everything that is public by construction is still there: this panel
+    // stays useful on a device that has gone wrong.
+    expect(back).toMatchObject({ ssid: "yonder", address: "192.168.77.1", hostname: "yonder.local" });
+  });
+
+  /**
+   * It answers while unprovisioned, like the rest of `/status`.
+   *
+   * The panel is what an operator reads when the console has stopped being
+   * useful, and every field in it is already public: the SSID is beaconed,
+   * the address is handed to every client that joins, the hostname is
+   * announced over mDNS, and the passphrase — when it is returned at all — is
+   * the one printed in the README.
+   */
+  it("answers in front of the administrator-password gate", async () => {
+    const res = await router()("GET", "/status", undefined);
+    expect(res.status).toBe(200);
+    expect((res.body as { wayBackIn: { ssid: string } }).wayBackIn.ssid).toBe("yonder");
+  });
+
+  /**
+   * The boundary this route keeps, stated as a test rather than as a comment.
+   *
+   * `GET /status` is in front of the gate, and until now it carried no
+   * configuration at all. `wayBackIn` is the one exception, and it is a
+   * narrow one: three fields that are already public by construction. Nothing
+   * else out of `config.yaml` may follow them onto this route.
+   */
+  it("carries the way back in and no other configuration", async () => {
+    // `client`, not `wifi_client`. The section is called `client` in the
+    // schema and `ConfigSchema` is `.strict()`, so the fixture this test used
+    // to write did not load at all: `wayBackIn()` caught the failure and fell
+    // back to DEFAULT_CONFIG, and the three operator values grepped for below
+    // had never been in a loaded configuration. The boundary this test exists
+    // to assert — that nothing else out of a *real* config.yaml follows
+    // `wayBackIn` onto an ungated route — was not being exercised.
+    const secret: Config = {
+      ...DEFAULT_CONFIG,
+      network: {
+        ...DEFAULT_CONFIG.network,
+        client: { ssid: "a-network-they-joined", psk: { secret: "wifi_psk" } },
+        modem: { ...DEFAULT_CONFIG.network.modem, apn: "an-apn-they-configured" },
+      },
+    };
+    saveConfig(configPath, secret);
+    // The fixture really is what the daemon loads, which is what makes the
+    // rest of this test mean anything.
+    expect(loadConfig(configPath).network.client.ssid).toBe("a-network-they-joined");
+    const body = JSON.stringify((await provisioned({})("GET", "/status", undefined)).body);
+    // Not vacuous: the route did answer, and it did carry the panel.
+    expect(body).toMatch(/"wayBackIn"/);
+    expect(body).not.toMatch(/a-network-they-joined/);
+    expect(body).not.toMatch(/an-apn-they-configured/);
+    expect(body).not.toMatch(/wifi_psk/);
+    expect(body).not.toMatch(/"secret"/);
+  });
+
+  /**
+   * A configuration that will not load must not take the way back in with it.
+   *
+   * This panel exists for a device that has gone wrong, and an unreadable
+   * config.yaml is one of the ways it goes wrong. The shipped defaults are
+   * what a device in that state is actually reachable on, because the
+   * access-point profile it is running was rendered from them.
+   */
+  it("falls back to the shipped defaults when config.yaml will not load", async () => {
+    writeFileSync(configPath, "network: [this is not a configuration]\n");
+    const res = await provisioned({})("GET", "/status", undefined);
+    expect(res.status).toBe(200);
+    expect((res.body as { wayBackIn: { ssid: string; address: string; hostname: string } }).wayBackIn)
+      .toMatchObject({ ssid: "yonder", address: "192.168.77.1", hostname: "yonder.local" });
+  });
+
+  it("keeps the apply state it has always carried", async () => {
+    const res = await provisioned({})("GET", "/status", undefined);
+    expect((res.body as { state: string }).state).toBe("idle");
   });
 });

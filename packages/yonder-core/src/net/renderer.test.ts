@@ -6,7 +6,12 @@ import { join } from "node:path";
 import { NetworkRenderer, deviceIsUsable } from "./renderer.js";
 import { NmcliClient } from "./nmcli/client.js";
 import { SecretStore } from "../secrets/store.js";
-import { AP_CONNECTION, CLIENT_CONNECTION, ETHERNET_CONNECTION, DEFAULT_AP_PASSPHRASE } from "./profiles.js";
+import {
+  AP_CONNECTION, CLIENT_CONNECTION, ETHERNET_CONNECTION, MODEM_CONNECTION, DEFAULT_AP_PASSPHRASE,
+  metricFor,
+} from "./profiles.js";
+import { STOOD_DOWN_METRIC } from "./modem/profiles.js";
+import type { PathName, StandingView } from "./reach/standing.js";
 import { RFKILL_UNBLOCK_WIFI, NMCLI_RADIO_WIFI_ON } from "./radio.js";
 import { DEFAULT_CONFIG } from "../schema/config.js";
 import type { Clock } from "../apply/types.js";
@@ -92,6 +97,15 @@ interface HarnessOptions {
   deviceSequence?: string[];
   /** Connection names NetworkManager already holds when the render starts. */
   connections?: string[];
+  /**
+   * What nmcli reports in the TYPE column for a connection this board already
+   * holds, overriding the kind its name implies.
+   *
+   * The one way to express an operator changing what kind of modem they have:
+   * `yonder-modem` exists, it is a `gsm` connection, and `config.yaml` now
+   * asks for an ethernet one on a named adapter.
+   */
+  connectionTypes?: Record<string, string>;
   /** Replaces the result of `device status`, to make it fail. */
   deviceStatus?: CommandResult;
   /** Drives waitForRadio's bounded wait. */
@@ -104,6 +118,32 @@ interface HarnessOptions {
    * missing executable as exit 127, so that is what the fake returns.
    */
   fails?: Record<string, CommandResult>;
+  /** Which paths have stopped reaching anything (R-NET-13). */
+  standing?: StandingView;
+  /** Where the renderer's log lines go, for a test that asserts wording. */
+  log?: (line: string) => void;
+  /**
+   * Where the nmcli client's own lines go — every command it runs, redacted.
+   *
+   * A second sink rather than `log`, because that is what the daemon does:
+   * `note` for what the device did and `trace` for the commands it ran, so
+   * the activity pane does not fill with `device status` twice a tick. The
+   * fake used to pass neither, which meant no test could see the argv the
+   * renderer actually sent.
+   */
+  trace?: (line: string) => void;
+  /**
+   * What the modem connection is *already dialled on*, as nmcli would report
+   * it before this render writes anything.
+   *
+   * This is the state a fake cannot invent and a real board has: a bearer
+   * that came up on one APN and a `config.yaml` that now says another. It
+   * seeds the fake's memory of the connection, so a render that writes the
+   * same values back finds no difference and one that writes a new APN does.
+   */
+  dialled?: Record<string, string>;
+  /** Told when a path has actually been re-dialled (R-CEL-09). */
+  onRedial?: (path: PathName) => void;
 }
 
 /**
@@ -117,9 +157,58 @@ interface HarnessOptions {
  * immediately recreate it — with every test still green. Here an add adds and
  * a delete deletes, so a second identical render is a real assertion.
  */
+/**
+ * What `nmcli connection show` reports in its TYPE column, per profile.
+ *
+ * The fake used to answer `802-11-wireless` for everything, and that single
+ * untruth is why nothing noticed that a connection's type was never compared
+ * against the one now wanted: with every profile reported as the same kind,
+ * both the old code that ignored the question and the new code that asks it
+ * behave identically. A fake that answers one thing about every subject
+ * cannot test a decision made about the difference between subjects.
+ *
+ * The values are the setting names nmcli actually prints — `802-3-ethernet`,
+ * not `ethernet` — which is the whole reason `typeDiffers` needs a map.
+ */
+const REPORTED_TYPE: Record<string, string> = {
+  [AP_CONNECTION]: "802-11-wireless",
+  [CLIENT_CONNECTION]: "802-11-wireless",
+  [ETHERNET_CONNECTION]: "802-3-ethernet",
+  [MODEM_CONNECTION]: "gsm",
+};
+
+/** The same map from the other side: what `connection add` was given. */
+const REPORTED_FOR_ADDED: Record<string, string> = {
+  wifi: "802-11-wireless",
+  ethernet: "802-3-ethernet",
+  gsm: "gsm",
+};
+
 function harness(opts: HarnessOptions = {}) {
   const calls: string[][] = [];
   const names = new Set(opts.connections ?? []);
+  /** The TYPE column, kept in step with adds and deletes. */
+  const types = new Map<string, string>();
+  for (const name of opts.connections ?? []) {
+    types.set(name, opts.connectionTypes?.[name] ?? REPORTED_TYPE[name] ?? "802-11-wireless");
+  }
+  /**
+   * Every `setting.property` this fake has been told, per connection.
+   *
+   * Without it `connection show yonder-modem` can only replay a fixture, so a
+   * second identical render looks exactly like a changed APN — and the check
+   * that stops a working cellular link being cycled on every render could be
+   * deleted with the suite green.
+   */
+  const stored = new Map<string, Map<string, string>>();
+  const remember = (name: string, argv: string[], from: number): void => {
+    const kept = stored.get(name) ?? new Map<string, string>();
+    for (let i = from; i + 1 < argv.length; i += 2) kept.set(argv[i]!, argv[i + 1]!);
+    stored.set(name, kept);
+  };
+  if (opts.dialled !== undefined) {
+    stored.set(MODEM_CONNECTION, new Map(Object.entries(opts.dialled)));
+  }
   const sequence = opts.deviceSequence ?? [opts.devices ?? DEVICES];
   let step = 0;
   let raised = 0;
@@ -148,13 +237,32 @@ function harness(opts: HarnessOptions = {}) {
       return ok(text);
     }
     if (key === "nmcli -t -f NAME,UUID,TYPE,DEVICE connection show") {
-      return ok([...names].map((n) => `${n}:u-${n}:802-11-wireless:\n`).join(""));
+      return ok([...names]
+        .map((n) => `${n}:u-${n}:${types.get(n) ?? ""}:\n`)
+        .join(""));
+    }
+    // `nmcli -t -f <props> connection show <name>`: one `property:value` line
+    // per field asked for, in the order asked, and an empty value for a
+    // property this connection has never been given.
+    if (argv[1] === "-t" && argv[4] === "connection" && argv[5] === "show") {
+      const kept = stored.get(argv[6]!) ?? new Map<string, string>();
+      return ok((argv[3] ?? "").split(",").map((f) => `${f}:${kept.get(f) ?? ""}\n`).join(""));
     }
     if (argv[1] === "connection") {
-      // add is ["nmcli","connection","add","con-name",<name>,…]; the rest put
-      // the name at argv[3].
-      if (argv[2] === "add") names.add(argv[4]);
-      if (argv[2] === "delete") names.delete(argv[3]);
+      // add is ["nmcli","connection","add","con-name",<name>,"type",T,
+      // "ifname",I,…pairs]; the rest put the name at argv[3], and modify's
+      // pairs follow "connection.interface-name",I.
+      if (argv[2] === "add") {
+        names.add(argv[4]);
+        types.set(argv[4]!, REPORTED_FOR_ADDED[argv[6]!] ?? argv[6]!);
+        remember(argv[4]!, argv, 9);
+      }
+      if (argv[2] === "modify") remember(argv[3]!, argv, 4);
+      if (argv[2] === "delete") {
+        names.delete(argv[3]);
+        types.delete(argv[3]!);
+        stored.delete(argv[3]!);
+      }
       // A profile can be written against a radio NetworkManager has not
       // finished with — the keyfile does not care — but it cannot be
       // *activated* on one. Modelling that is what makes a cold boot a real
@@ -177,10 +285,13 @@ function harness(opts: HarnessOptions = {}) {
   const secrets = new SecretStore(join(dir, "secrets.yaml"));
   secrets.ensureValue("ap_psk", OPERATOR_PSK);
   const renderer = new NetworkRenderer({
-    client: new NmcliClient(run),
+    client: new NmcliClient(run, opts.trace),
     secrets,
+    log: opts.log,
     clock: opts.clock,
     radioWaitMs: opts.radioWaitMs,
+    standing: opts.standing,
+    onRedial: opts.onRedial,
   });
   return { renderer, calls, secrets, names, raised: () => raised };
 }
@@ -704,15 +815,17 @@ describe("moving the radio", () => {
    * The board is now at its most exposed: the access point is down, the radio
    * is free, and the client did not associate. Nothing is on the air, and
    * putting the access point back is the only thing between the operator and
-   * a device they cannot reach.
+   * a device they cannot reach. Once it is back, the device is reachable, so
+   * the render resolves rather than rolling the operator's change back over
+   * a network that simply was not there (R-NET-15, K-37).
    */
-  it("puts the access point back when the client does not associate", async () => {
+  it("puts the access point back when the client does not associate, and resolves", async () => {
     const { renderer, calls, secrets } = harness({
       devices: withApActive(DEVICES),
       fails: { [`nmcli connection up ${CLIENT_CONNECTION}`]: ASSOCIATION_FAILED },
     });
     secrets.ensure("wifi_psk", "psk");
-    await expect(renderer.render(joining())).rejects.toThrow(/nmcli exited 4/);
+    await renderer.render(joining());
     expect(order(calls)).toEqual([
       `down ${AP_CONNECTION}`,
       `up ${CLIENT_CONNECTION}`,
@@ -744,7 +857,9 @@ describe("moving the radio", () => {
     });
     secrets.ensure("wifi_psk", "psk");
 
-    await expect(renderer.render(joining(false))).rejects.toThrow(/nmcli exited 4/);
+    // And the render resolves: the rescue put the device back on the air, so
+    // there is nothing left for a rollback to protect (R-NET-15).
+    await renderer.render(joining(false));
 
     // The access point came up, after the client's failure, and was never
     // taken down.
@@ -789,7 +904,7 @@ describe("moving the radio", () => {
       fails: { [`nmcli connection up ${CLIENT_CONNECTION}`]: ASSOCIATION_FAILED },
     });
     secrets.ensure("wifi_psk", "psk");
-    await expect(renderer.render(joining())).rejects.toThrow();
+    await renderer.render(joining());
     expect(order(calls).filter((o) => o === `up ${AP_CONNECTION}`)).toHaveLength(1);
   });
 
@@ -806,5 +921,943 @@ describe("moving the radio", () => {
     (logging as unknown as { secrets: SecretStore }).secrets.ensureValue("ap_psk", OPERATOR_PSK);
     await logging.render(DEFAULT_CONFIG);
     expect(lines).toContain("network: bringing the access point up");
+  });
+});
+
+describe("NetworkRenderer and a modem", () => {
+  it("creates the modem connection and never deletes a connection it does not own", async () => {
+    // OWNED is the list of connections this renderer will delete. A modem
+    // connection missing from it would be created and then removed on the
+    // very next render as a stray.
+    const config = {
+      ...DEFAULT_CONFIG,
+      network: {
+        ...DEFAULT_CONFIG.network,
+        modem: { ...DEFAULT_CONFIG.network.modem, enabled: true, apn: "ereseller" },
+      },
+    };
+    const { renderer, calls } = harness({
+      devices: "wlan0:wifi:disconnected:\ncdc-wdm0:gsm:disconnected:\n",
+    });
+    await renderer.render(config);
+    const added = calls.filter((c) => c.includes("add")).map((c) => c.join(" "));
+    expect(added.some((c) => c.includes(MODEM_CONNECTION) && c.includes("gsm"))).toBe(true);
+    expect(calls.some((c) => c.includes("delete") && c.includes(MODEM_CONNECTION))).toBe(false);
+  });
+});
+
+/**
+ * The boot race measured on a Raspberry Pi 4: `yonder-modem` already existed
+ * from an earlier, working boot, and this render's `device status` read came
+ * back one second before ModemManager finished probing the modem — no `gsm`
+ * device in the list. The old code read "wanted" off `desiredProfiles`'s own
+ * hardware-gated output, so that one reading looked exactly like an operator
+ * who had turned cellular off, and the render deleted the profile.
+ * `connection.autoconnect yes` with unlimited `connection.autoconnect-retries`
+ * — set by `modemProfile` for R-CEL-06 — would otherwise have dialled the
+ * modem the instant it appeared; instead cellular stayed down until the
+ * operator re-entered the settings by hand, because nothing in this daemon
+ * re-renders on its own (K-44).
+ *
+ * The same conflation reached every profile this renderer owns, not only the
+ * modem — the modem is only where it was measured, being the one interface
+ * that shows up seconds after the others — so this covers the others too.
+ */
+describe("NetworkRenderer and a connection whose device has not appeared yet (R-NET-16)", () => {
+  it("leaves the modem profile untouched when cellular is enabled but no modem is visible", async () => {
+    const config: Config = structuredClone(DEFAULT_CONFIG);
+    config.network.modem.enabled = true;
+    config.network.modem.apn = "ereseller";
+    // The harness default device list, DEVICES, lists no gsm device — the
+    // exact reading measured on the board, one second before ModemManager
+    // finished probing the modem.
+    const { renderer, calls } = harness({
+      connections: [AP_CONNECTION, ETHERNET_CONNECTION, MODEM_CONNECTION],
+    });
+    await renderer.render(config);
+    expect(argvOf(calls, "delete", MODEM_CONNECTION)).toBeUndefined();
+    expect(argvOf(calls, "modify", MODEM_CONNECTION)).toBeUndefined();
+    expect(calls.some((c) => c[1] === "connection" && c[2] === "add" && c[4] === MODEM_CONNECTION)).toBe(false);
+  });
+
+  it("still removes the modem profile when cellular is disabled, exactly as before", async () => {
+    const { renderer, calls } = harness({
+      connections: [AP_CONNECTION, ETHERNET_CONNECTION, MODEM_CONNECTION],
+    });
+    // DEFAULT_CONFIG.network.modem.enabled is false, and the harness default
+    // device list has no gsm device either — the profile is unwanted twice
+    // over, and removed exactly as it was before this change.
+    await renderer.render(DEFAULT_CONFIG);
+    expect(argvOf(calls, "delete", MODEM_CONNECTION)).toBeDefined();
+  });
+
+  it("still writes the modem profile normally when the modem is visible", async () => {
+    const config: Config = structuredClone(DEFAULT_CONFIG);
+    config.network.modem.enabled = true;
+    config.network.modem.apn = "ereseller";
+    const { renderer, calls } = harness({
+      devices: "eth0:ethernet:connected:yonder-eth\nwlan0:wifi:disconnected:\ncdc-wdm0:gsm:disconnected:\n",
+    });
+    await renderer.render(config);
+    expect(calls.some((c) => c[1] === "connection" && c[2] === "add" && c[4] === MODEM_CONNECTION)).toBe(true);
+    expect(argvOf(calls, "delete", MODEM_CONNECTION)).toBeUndefined();
+  });
+
+  /**
+   * The same protection, for a profile with nothing modem-specific about it.
+   * A cable pulled — or a USB Ethernet adapter a few seconds slower to
+   * enumerate than the interfaces `harness()` lists by default — must not
+   * cost the operator a working wired profile either.
+   */
+  it("leaves the ethernet profile untouched when its device is missing but the connection exists", async () => {
+    const { renderer, calls } = harness({
+      devices: "wlan0:wifi:disconnected:\nlo:loopback:unmanaged:\n",
+      connections: [AP_CONNECTION, ETHERNET_CONNECTION],
+    });
+    await renderer.render(DEFAULT_CONFIG);
+    expect(argvOf(calls, "delete", ETHERNET_CONNECTION)).toBeUndefined();
+  });
+
+  it("leaves the access point and wifi client profiles untouched when no wifi radio is listed at all", async () => {
+    const config: Config = structuredClone(DEFAULT_CONFIG);
+    config.network.client.ssid = "HomeNetwork";
+    const { renderer, calls } = harness({
+      devices: "eth0:ethernet:connected:yonder-eth\nlo:loopback:unmanaged:\n",
+      connections: [AP_CONNECTION, CLIENT_CONNECTION, ETHERNET_CONNECTION],
+    });
+    await renderer.render(config);
+    expect(argvOf(calls, "delete", AP_CONNECTION)).toBeUndefined();
+    expect(argvOf(calls, "delete", CLIENT_CONNECTION)).toBeUndefined();
+  });
+});
+
+/**
+ * A written setting that only a dial reads is a setting that has not been
+ * applied (R-CEL-09).
+ *
+ * Measured on the board: connected on `ereseller`, `network.modem.apn`
+ * changed to `nxtgenphone`, the daemon restarted, the profile rewritten — and
+ * `GET /modem/state` went on reporting `apn: ereseller` and the same address.
+ * NetworkManager does not re-dial a bearer that is already up because the
+ * profile behind it changed, so correcting a mistyped APN from the console —
+ * the recovery action this whole milestone is built around — did nothing at
+ * all.
+ *
+ * No fake catches this by answering questions, because a fake re-dials on
+ * demand and reports whatever it is asked. What these pin is the **shape of
+ * what is asked**: a changed bearer setting produces a down and an up, and an
+ * unchanged one produces neither.
+ */
+describe("NetworkRenderer and a modem whose settings changed", () => {
+  const MODEM_DEVICES =
+    "wlan0:wifi:disconnected:\ncdc-wdm0:gsm:connected:yonder-modem\nlo:loopback:unmanaged:\n";
+  /** The same board with the bearer not up: nothing to cycle. */
+  const MODEM_DOWN =
+    "wlan0:wifi:disconnected:\ncdc-wdm0:gsm:disconnected:\nlo:loopback:unmanaged:\n";
+
+  function onApn(apn: string): Config {
+    const c: Config = structuredClone(DEFAULT_CONFIG);
+    c.network.modem.enabled = true;
+    c.network.modem.apn = apn;
+    return c;
+  }
+
+  /** The verbs issued against the modem connection, in order. */
+  const verbs = (calls: string[][]): string[] =>
+    calls.filter((c) => c[1] === "connection" && c[3] === MODEM_CONNECTION).map((c) => c[2]!);
+
+  it("brings a changed APN down and up so the new setting is dialled", async () => {
+    const { renderer, calls } = harness({
+      devices: MODEM_DEVICES,
+      connections: [AP_CONNECTION, ETHERNET_CONNECTION, MODEM_CONNECTION],
+      dialled: { "gsm.apn": "ereseller" },
+    });
+    await renderer.render(onApn("nxtgenphone"));
+
+    // The profile is rewritten, and then — because that alone changes
+    // nothing on a bearer that is up — the link is cycled, down before up.
+    expect(verbs(calls)).toEqual(["modify", "down", "up"]);
+    // And the value it is dialled with is the new one.
+    const modify = argvOf(calls, "modify", MODEM_CONNECTION)!;
+    expect(modify[modify.indexOf("gsm.apn") + 1]).toBe("nxtgenphone");
+  });
+
+  it("asks what the modem is dialled on before it overwrites the answer", async () => {
+    // The ordering that makes the comparison possible at all: once
+    // addOrModify has run the stored profile already says what was wanted,
+    // and a read after it can never find a difference.
+    const { renderer, calls } = harness({
+      devices: MODEM_DEVICES,
+      connections: [AP_CONNECTION, ETHERNET_CONNECTION, MODEM_CONNECTION],
+      dialled: { "gsm.apn": "ereseller" },
+    });
+    await renderer.render(onApn("nxtgenphone"));
+
+    const read = calls.findIndex((c) => c[1] === "-t" && c[5] === "show" && c[6] === MODEM_CONNECTION);
+    const write = calls.findIndex((c) => c[2] === "modify" && c[3] === MODEM_CONNECTION);
+    expect(read).toBeGreaterThanOrEqual(0);
+    expect(read).toBeLessThan(write);
+    // Only the settings a dial reads are asked about. A route metric is
+    // `device reapply`'s business and must never cycle a link.
+    //
+    // All four of them, not only the one the configuration holds: this board
+    // has no username, password or dial string, so those are being *cleared*,
+    // and a bearer setting being removed is a change to the bearer exactly as
+    // one being altered is. `gsm.password` is asked about and answers nothing
+    // — nmcli does not print a secret without `--show-secrets` — which
+    // `bearerChanges` reads as "cannot tell" rather than as a difference, so
+    // the question costs nothing and reads nothing (R-SEC-10).
+    const asked = (calls[read]![3] ?? "").split(",");
+    expect(asked.sort()).toEqual(["gsm.apn", "gsm.number", "gsm.password", "gsm.username"]);
+    expect(asked.some((f) => f.includes("route-metric"))).toBe(false);
+  });
+
+  it("leaves a working link alone when nothing about the bearer changed", async () => {
+    // A render happens for many reasons. Reactivating a working cellular
+    // link on every one of them is unacceptable on an aircraft.
+    const { renderer, calls } = harness({
+      devices: MODEM_DEVICES,
+      connections: [AP_CONNECTION, ETHERNET_CONNECTION, MODEM_CONNECTION],
+      dialled: { "gsm.apn": "ereseller" },
+    });
+    await renderer.render(onApn("ereseller"));
+    expect(verbs(calls)).toEqual(["modify"]);
+  });
+
+  it("does not cycle the link when only the route metric moved", async () => {
+    // `network.priority` edited, or a path stood down: the metric changes on
+    // every render that follows, and a bearer picks a metric up in place.
+    const config = onApn("ereseller");
+    config.network.priority = ["modem", "ethernet", "wifi_client"];
+    const { renderer, calls } = harness({
+      devices: MODEM_DEVICES,
+      connections: [AP_CONNECTION, ETHERNET_CONNECTION, MODEM_CONNECTION],
+      dialled: { "gsm.apn": "ereseller", "ipv4.route-metric": "700" },
+    });
+    await renderer.render(config);
+    const modify = argvOf(calls, "modify", MODEM_CONNECTION)!;
+    expect(Number(modify[modify.indexOf("ipv4.route-metric") + 1]))
+      .toBe(metricFor(config, "modem"));
+    expect(verbs(calls)).toEqual(["modify"]);
+  });
+
+  it("does not cycle the link on a second, identical render", async () => {
+    // The end-to-end version of the same property, through the fake's own
+    // memory of what the first render wrote.
+    const { renderer, calls } = harness({
+      devices: MODEM_DEVICES,
+      connections: [AP_CONNECTION, ETHERNET_CONNECTION, MODEM_CONNECTION],
+      dialled: { "gsm.apn": "ereseller" },
+    });
+    const config = onApn("ereseller");
+    await renderer.render(config);
+    calls.length = 0;
+    await renderer.render(config);
+    expect(verbs(calls)).toEqual(["modify"]);
+  });
+
+  it("does not cycle a bearer that is not up", async () => {
+    // Nothing to cycle, and `connection.autoconnect` will dial it with the
+    // new settings. Taking down what is already down and raising it here
+    // would be this renderer deciding to dial rather than following.
+    const { renderer, calls } = harness({
+      devices: MODEM_DOWN,
+      connections: [AP_CONNECTION, ETHERNET_CONNECTION, MODEM_CONNECTION],
+      dialled: { "gsm.apn": "ereseller" },
+    });
+    await renderer.render(onApn("nxtgenphone"));
+    expect(verbs(calls)).toEqual(["modify"]);
+  });
+
+  it("leaves the link alone when it cannot read what the modem is dialled on", async () => {
+    // A question that could not be asked is not a difference. Answering
+    // "changed" to it would cycle a working cellular link on the strength of
+    // nothing.
+    const { renderer, calls } = harness({
+      devices: MODEM_DEVICES,
+      connections: [AP_CONNECTION, ETHERNET_CONNECTION, MODEM_CONNECTION],
+      dialled: { "gsm.apn": "ereseller" },
+      fails: {
+        [`nmcli -t -f gsm.apn,gsm.username,gsm.password,gsm.number `
+          + `connection show ${MODEM_CONNECTION}`]:
+          { code: 10, stdout: "", stderr: "Error: yonder-modem - no such connection profile." },
+      },
+    });
+    await renderer.render(onApn("nxtgenphone"));
+    expect(verbs(calls)).toEqual(["modify"]);
+  });
+
+  it("never asks about a connection it is about to create", async () => {
+    // A profile that does not exist yet has nothing to compare against, and
+    // a freshly created one is dialled with the settings it was created
+    // with.
+    const { renderer, calls } = harness({ devices: MODEM_DEVICES });
+    await renderer.render(onApn("ereseller"));
+    expect(calls.some((c) => c[1] === "-t" && c[6] === MODEM_CONNECTION)).toBe(false);
+    expect(verbs(calls)).toEqual([]);
+  });
+
+  it("asks nothing extra of an appliance modem, which has no bearer to dial", async () => {
+    const config: Config = structuredClone(DEFAULT_CONFIG);
+    config.network.modem.enabled = true;
+    config.network.modem.mode = "appliance";
+    config.network.modem.interface = "usb0";
+    const { renderer, calls } = harness({
+      devices: "wlan0:wifi:disconnected:\nusb0:ethernet:connected:yonder-modem\n",
+      connections: [AP_CONNECTION, MODEM_CONNECTION],
+      // A board already running an appliance: `yonder-modem` is the ethernet
+      // connection this mode writes, not the `gsm` one the name would suggest.
+      connectionTypes: { [MODEM_CONNECTION]: "802-3-ethernet" },
+      dialled: { "ipv4.route-metric": "700" },
+    });
+    await renderer.render(config);
+    expect(calls.some((c) => c[1] === "-t" && c[6] === MODEM_CONNECTION)).toBe(false);
+    expect(verbs(calls)).toEqual(["modify"]);
+  });
+
+  /**
+   * **A re-dial is a link coming up, and the renderer is the only thing that
+   * knows one happened** (R-CEL-09).
+   *
+   * Measured on the board: the APN was changed to a wrong one, the modem
+   * re-dialled correctly onto a new bearer and a new address, and the link
+   * carried nothing — `curl --interface wwan0` exit 28, no ping returned.
+   * Nothing tested it, because a re-dial keeps the same interface name and
+   * because cellular was not the path in use, so no byte counter said
+   * anything either. The console went on calling the link ready.
+   */
+  it("says so when it has actually re-dialled a path", async () => {
+    const told: PathName[] = [];
+    const { renderer } = harness({
+      devices: MODEM_DEVICES,
+      connections: [AP_CONNECTION, ETHERNET_CONNECTION, MODEM_CONNECTION],
+      dialled: { "gsm.apn": "ereseller" },
+      onRedial: (path) => told.push(path),
+    });
+    await renderer.render(onApn("nxtgenphone"));
+    expect(told).toEqual(["modem"]);
+  });
+
+  it("says nothing when the render did not re-dial anything", async () => {
+    // A render happens for many reasons and almost none of them are a
+    // re-dial. Announcing one on every render would put a `curl` on a
+    // metered link every time an operator saved an unrelated setting.
+    const told: PathName[] = [];
+    const { renderer } = harness({
+      devices: MODEM_DEVICES,
+      connections: [AP_CONNECTION, ETHERNET_CONNECTION, MODEM_CONNECTION],
+      dialled: { "gsm.apn": "ereseller" },
+      onRedial: (path) => told.push(path),
+    });
+    await renderer.render(onApn("ereseller"));
+    expect(told).toEqual([]);
+  });
+
+  it("says nothing about a bearer it did not cycle because it was down", async () => {
+    // Nothing came up, so nothing came up to be tested. The link will be
+    // dialled with the new settings by `connection.autoconnect`, and the
+    // watch's own link-up reason covers it from there.
+    const told: PathName[] = [];
+    const { renderer } = harness({
+      devices: MODEM_DOWN,
+      connections: [AP_CONNECTION, ETHERNET_CONNECTION, MODEM_CONNECTION],
+      dialled: { "gsm.apn": "ereseller" },
+      onRedial: (path) => told.push(path),
+    });
+    await renderer.render(onApn("nxtgenphone"));
+    expect(told).toEqual([]);
+  });
+
+  it("does not let a listener that throws fail a render that worked", async () => {
+    // The re-dial succeeded: the operator's corrected APN is dialled and up.
+    // Throwing here would fail the render, and the apply engine's
+    // confirmation timer would roll that correction straight back out again
+    // (R-CFG-03) on the strength of a notification nobody was waiting for.
+    const lines: string[] = [];
+    const { renderer, calls } = harness({
+      devices: MODEM_DEVICES,
+      connections: [AP_CONNECTION, ETHERNET_CONNECTION, MODEM_CONNECTION],
+      dialled: { "gsm.apn": "ereseller" },
+      log: (l) => lines.push(l),
+      onRedial: () => { throw new Error("the watch has already stopped"); },
+    });
+    await expect(renderer.render(onApn("nxtgenphone"))).resolves.toBeUndefined();
+    // And it still re-dialled, and said what went wrong.
+    expect(verbs(calls)).toEqual(["modify", "down", "up"]);
+    expect(lines.some((l) => l.includes("could not pass on that cellular was re-dialled"))).toBe(true);
+  });
+});
+
+/**
+ * **What is generated matches the configuration, including what the
+ * configuration no longer says** (R-CFG-13).
+ *
+ * Two ways a profile can stop describing the document it was generated from,
+ * and both were silent. A connection's *type* cannot be changed, so an
+ * operator moving between the two kinds of modem wrote ethernet properties
+ * onto a profile that stayed `gsm`. And `nmcli connection modify` writes only
+ * what it is given, so a setting cleared in `config.yaml` was simply omitted
+ * and the stored value went on being dialled — with the file saying one thing
+ * and the bearer doing another, and nothing anywhere saying which was true.
+ */
+describe("NetworkRenderer and a profile that no longer matches the configuration", () => {
+  const MODEM_DEVICES =
+    "wlan0:wifi:disconnected:\ncdc-wdm0:gsm:connected:yonder-modem\nlo:loopback:unmanaged:\n";
+  const APPLIANCE_DEVICES =
+    "wlan0:wifi:disconnected:\nusb0:ethernet:connected:yonder-modem\nlo:loopback:unmanaged:\n";
+
+  const verbs = (calls: string[][]): string[] =>
+    calls.filter((c) => c[1] === "connection" && c[3] === MODEM_CONNECTION).map((c) => c[2]!);
+  const added = (calls: string[][]): string[] | undefined =>
+    calls.find((c) => c[2] === "add" && c[4] === MODEM_CONNECTION);
+  const modified = (calls: string[][]): string[] | undefined =>
+    calls.find((c) => c[2] === "modify" && c[3] === MODEM_CONNECTION);
+
+  function auto(apn: string | null = "ereseller"): Config {
+    const c: Config = structuredClone(DEFAULT_CONFIG);
+    c.network.modem.enabled = true;
+    c.network.modem.mode = "auto";
+    c.network.modem.apn = apn;
+    return c;
+  }
+
+  function appliance(): Config {
+    const c: Config = structuredClone(DEFAULT_CONFIG);
+    c.network.modem.enabled = true;
+    c.network.modem.mode = "appliance";
+    c.network.modem.interface = "usb0";
+    return c;
+  }
+
+  it("replaces the modem's profile when the operator changes what kind of modem it is", async () => {
+    // Both modes write a connection called `yonder-modem`, so this is a
+    // profile that exists, keeps its name, and has to become a different kind
+    // of thing. NetworkManager offers no way to do that but delete and create.
+    const { renderer, calls } = harness({
+      devices: APPLIANCE_DEVICES,
+      connections: [AP_CONNECTION, MODEM_CONNECTION],
+      connectionTypes: { [MODEM_CONNECTION]: "gsm" },
+    });
+    await renderer.render(appliance());
+
+    expect(verbs(calls)).toEqual(["delete"]);
+    const add = added(calls);
+    expect(add, "the modem's profile was deleted and never created again").toBeDefined();
+    expect(add?.[add.indexOf("type") + 1]).toBe("ethernet");
+    expect(add?.[add.indexOf("ifname") + 1]).toBe("usb0");
+    // And nothing was written onto the old profile on the way past.
+    expect(modified(calls)).toBeUndefined();
+  });
+
+  it("replaces it the other way too, when an appliance becomes a modem the system finds", async () => {
+    const { renderer, calls } = harness({
+      devices: MODEM_DEVICES,
+      connections: [AP_CONNECTION, MODEM_CONNECTION],
+      connectionTypes: { [MODEM_CONNECTION]: "802-3-ethernet" },
+    });
+    await renderer.render(auto());
+
+    expect(verbs(calls)).toEqual(["delete"]);
+    const add = added(calls);
+    expect(add?.[add.indexOf("type") + 1]).toBe("gsm");
+    expect(add?.[add.indexOf("ifname") + 1]).toBe("cdc-wdm0");
+  });
+
+  it("says which kind it found and which kind it now wants", async () => {
+    const lines: string[] = [];
+    const { renderer } = harness({
+      devices: APPLIANCE_DEVICES,
+      connections: [AP_CONNECTION, MODEM_CONNECTION],
+      connectionTypes: { [MODEM_CONNECTION]: "gsm" },
+      log: (l) => lines.push(l),
+    });
+    await renderer.render(appliance());
+    const said = lines.find((l) => l.includes("created again"));
+    expect(said, "nothing an operator reads says the modem's profile was remade").toBeDefined();
+    expect(said).toContain(MODEM_CONNECTION);
+    expect(said).toContain("ethernet");
+  });
+
+  /**
+   * **The half that must never fire.** This decision deletes a profile, and
+   * one of the profiles it is asked about is the access point an operator may
+   * be joined to over the one radio. A profile whose type has not changed is
+   * modified in place, on every render, for ever.
+   */
+  it("replaces nothing whose type is what it always was", async () => {
+    const { renderer, calls } = harness({
+      devices: MODEM_DEVICES,
+      connections: [AP_CONNECTION, ETHERNET_CONNECTION, MODEM_CONNECTION],
+    });
+    // All three, on every render, for ever. `yonder-eth` used to be carved
+    // out of this assertion, because this board lists no ethernet device and
+    // the ownership loop used to read that absence as "no longer wanted" —
+    // the same defect R-NET-16 closed for the modem. Removal is decided from
+    // configuration alone now, so all three belong in one assertion.
+    const replaced = (): string[][] =>
+      calls.filter((c) => c[2] === "delete"
+        && (c[3] === AP_CONNECTION || c[3] === ETHERNET_CONNECTION || c[3] === MODEM_CONNECTION));
+    await renderer.render(auto());
+    expect(replaced()).toEqual([]);
+    await renderer.render(auto());
+    expect(replaced()).toEqual([]);
+  });
+
+  /**
+   * A TYPE column this project does not recognise is a question that could not
+   * be asked, and the answer to that is never "different". Being wrong the
+   * other way drops every station on the radio.
+   */
+  it("leaves a connection alone when it cannot tell what kind it is", async () => {
+    const { renderer, calls } = harness({
+      devices: MODEM_DEVICES,
+      connections: [AP_CONNECTION, MODEM_CONNECTION],
+      connectionTypes: { [MODEM_CONNECTION]: "" },
+    });
+    await renderer.render(auto());
+    expect(verbs(calls)).toEqual(["modify"]);
+  });
+
+  /**
+   * **An emptied setting is removed from the device, not left standing.**
+   *
+   * The measured shape of the defect: `gsm.apn` was omitted from the desired
+   * profile when the configuration held none, `nmcli connection modify` wrote
+   * only what it was given, and the modem went on dialling `ereseller` while
+   * `config.yaml` said there was no APN at all.
+   */
+  it("resets a bearer setting the configuration no longer holds", async () => {
+    const { renderer, calls } = harness({
+      devices: MODEM_DEVICES,
+      connections: [AP_CONNECTION, MODEM_CONNECTION],
+      dialled: { "gsm.apn": "ereseller" },
+    });
+    await renderer.render(auto(null));
+
+    const modify = modified(calls);
+    expect(modify).toBeDefined();
+    const at = modify!.indexOf("gsm.apn");
+    expect(at, "the profile does not mention the APN it is meant to be clearing")
+      .toBeGreaterThan(0);
+    expect(modify![at + 1]).toBe("");
+  });
+
+  it("re-dials, because a bearer setting being removed is a change to the bearer", async () => {
+    // The comparison could not see this before: a property absent from the
+    // desired profile is a property `bearerChanges` never asks nmcli about, so
+    // clearing an APN wrote a reset and left the modem on the old bearer.
+    const { renderer, calls } = harness({
+      devices: MODEM_DEVICES,
+      connections: [AP_CONNECTION, MODEM_CONNECTION],
+      dialled: { "gsm.apn": "ereseller" },
+    });
+    await renderer.render(auto(null));
+    expect(verbs(calls)).toEqual(["modify", "down", "up"]);
+  });
+
+  it("clears the credential the same way, and never writes one into a line", async () => {
+    const lines: string[] = [];
+    const { renderer, calls } = harness({
+      devices: MODEM_DEVICES,
+      connections: [AP_CONNECTION, MODEM_CONNECTION],
+      dialled: { "gsm.apn": "ereseller", "gsm.username": "sim-user" },
+      trace: (l) => lines.push(l),
+    });
+    // A configuration with no password at all: `password: null` is the file's
+    // own word for "there is no credential", and it has to reach the device.
+    await renderer.render(auto(null));
+
+    const modify = modified(calls)!;
+    for (const property of ["gsm.apn", "gsm.username", "gsm.password", "gsm.number"]) {
+      expect(modify[modify.indexOf(property) + 1], `${property} was not reset`).toBe("");
+    }
+    // R-SEC-10. The line that *writes* the property shows `<redacted>` where
+    // the value would be, and the redaction covers the empty one exactly as it
+    // covers any other — so nothing in the journal can be read as a password,
+    // and nothing says whether this device has one. The other line carrying
+    // the word is the field list of the bearer read, `-f gsm.apn,…`, which has
+    // no value in it at all.
+    const written = lines.filter((l) => l.includes("connection modify") && l.includes("gsm.password"));
+    expect(written.length).toBeGreaterThan(0);
+    for (const line of written) expect(line).toContain("gsm.password <redacted>");
+  });
+
+  /**
+   * **Nothing is reset on a profile being created.** There is no stored value
+   * to remove, and `connection add` with no APN is the shipped path a board
+   * was measured on — sending it an empty one would be a change to something
+   * that works, for nothing.
+   */
+  it("sends no empty property when it is creating the profile", async () => {
+    const { renderer, calls } = harness({ devices: MODEM_DEVICES });
+    await renderer.render(auto(null));
+    const add = added(calls);
+    expect(add).toBeDefined();
+    expect(add).not.toContain("gsm.apn");
+    expect(add).not.toContain("gsm.password");
+    expect(add?.includes("")).toBe(false);
+  });
+});
+
+
+/**
+ * **A radio that will not settle must not take the modem down with it.**
+ *
+ * Measured on a board whose configured Wi-Fi network had simply moved out of
+ * range. Every render reached `settleRadio`, the client could not associate,
+ * the access point was raised again — R-NET-07 doing exactly its job — and
+ * the render threw. The re-dial sat after it and never ran, so a corrected
+ * APN was written into the profile and the modem stayed dialled on the old
+ * one: the recovery action the whole of M3a is built around, unreachable on
+ * any board with an out-of-range network configured. A compound of K-37.
+ *
+ * The ordering itself is still right, and stays: a modem that will not dial
+ * must not be able to skip the step that keeps the access point on the air.
+ * What was wrong is that two independent subsystems shared one failure path.
+ */
+describe("NetworkRenderer when the radio will not settle and the modem must be re-dialled", () => {
+  /** Both radios on one board: an access point on the air, a modem dialled. */
+  const RADIO_AND_MODEM = withApActive(
+    "wlan0:wifi:disconnected:\ncdc-wdm0:gsm:connected:yonder-modem\nlo:loopback:unmanaged:\n",
+  );
+
+  /** What the board says when the configured network is not in range. */
+  const NOT_IN_RANGE: CommandResult = {
+    code: 4,
+    stdout: "",
+    stderr: "Error: Connection activation failed: The Wi-Fi network could not be found",
+  };
+
+  /** What a modem says when it will not come back up. */
+  const MODEM_WONT_DIAL: CommandResult = {
+    code: 4,
+    stdout: "",
+    stderr: "Error: Connection activation failed: No suitable device found",
+  };
+
+  /**
+   * What nmcli says when moving the access point itself — up or down,
+   * whichever a test is about — does not go the way it was asked. The
+   * message is deliberately unlike `NOT_IN_RANGE` and unlike the phrase
+   * `NmcliClient.down` tolerates ("is not an active connection"): what makes
+   * a test use this is *which command* it is attached to, never the words in
+   * it (R-NET-15 — this is never classified by parsing nmcli's English).
+   */
+  const AP_WONT_MOVE: CommandResult = {
+    code: 1,
+    stdout: "",
+    stderr: "Error: Device or resource busy",
+  };
+
+  /** Joins a network that is not in range, and corrects the modem's APN. */
+  function joiningAndCorrectingApn(): Config {
+    const c: Config = structuredClone(DEFAULT_CONFIG);
+    c.network.client.ssid = "HomeNetwork";
+    c.network.client.psk = { secret: "wifi_psk" };
+    c.network.modem.enabled = true;
+    c.network.modem.apn = "nxtgenphone";
+    return c;
+  }
+
+  function board(fails: Record<string, CommandResult>, log?: (line: string) => void) {
+    const h = harness({
+      devices: RADIO_AND_MODEM,
+      connections: [AP_CONNECTION, ETHERNET_CONNECTION, MODEM_CONNECTION],
+      dialled: { "gsm.apn": "ereseller" },
+      fails,
+      log,
+    });
+    h.secrets.ensure("wifi_psk", "psk");
+    return h;
+  }
+
+  /** The verbs issued against the modem connection, in order. */
+  const verbs = (calls: string[][]): string[] =>
+    calls.filter((c) => c[1] === "connection" && c[3] === MODEM_CONNECTION).map((c) => c[2]!);
+
+  /**
+   * R-NET-15. The client could not associate, but the access point came back
+   * up — R-NET-07 doing exactly its job — so the device was reachable
+   * throughout. That is the apply succeeding, not failing: the render
+   * resolves, and the corrected APN this whole scenario exists for is still
+   * re-dialled onto the modem (K-37).
+   */
+  it("resolves and still re-dials the modem, because the access point coming back keeps the device reachable", async () => {
+    const { renderer, calls } = board({
+      [`nmcli connection up ${CLIENT_CONNECTION}`]: NOT_IN_RANGE,
+    });
+
+    await renderer.render(joiningAndCorrectingApn());
+
+    // The rescue ran...
+    expect(calls.some((c) => c[2] === "up" && c[3] === AP_CONNECTION)).toBe(true);
+    // ...and the profile was rewritten and then actually dialled with the new APN.
+    expect(verbs(calls)).toEqual(["modify", "down", "up"]);
+    const modify = argvOf(calls, "modify", MODEM_CONNECTION)!;
+    expect(modify[modify.indexOf("gsm.apn") + 1]).toBe("nxtgenphone");
+  });
+
+  /**
+   * The other way the access point can be up when the client fails: taking
+   * it down is what did not work, so it was never down to begin with. This
+   * reaches reachability the same way and skips the rescue outright — which
+   * is the point of the test. Re-`up`ping a connection that is already live
+   * would drop every station joined to it, including the operator watching
+   * this apply, so nothing here re-issues `up` on one nmcli never actually
+   * took down.
+   */
+  it("resolves without re-raising the access point when it was never taken down", async () => {
+    const { renderer, calls } = board({
+      [`nmcli connection down ${AP_CONNECTION}`]: AP_WONT_MOVE,
+    });
+
+    await renderer.render(joiningAndCorrectingApn());
+
+    expect(calls.some((c) => c[2] === "up" && c[3] === AP_CONNECTION)).toBe(false);
+  });
+
+  /**
+   * Reachability is checked, not assumed. When the rescue itself fails,
+   * nothing has established that this device can still be reached, so
+   * R-NET-15 does not apply — the render rejects, and with the client's
+   * original failure rather than the rescue's, because that is the one that
+   * explains what an operator needs to fix.
+   */
+  it("rejects with the radio's original failure when raising the access point also fails", async () => {
+    const { renderer } = board({
+      [`nmcli connection up ${CLIENT_CONNECTION}`]: NOT_IN_RANGE,
+      [`nmcli connection up ${AP_CONNECTION}`]: AP_WONT_MOVE,
+    });
+
+    await expect(renderer.render(joiningAndCorrectingApn()))
+      .rejects.toThrow(/The Wi-Fi network could not be found/);
+  });
+
+  /**
+   * Once the radio has recovered there is no radio failure left for a modem
+   * failure to be measured against — so it is not displaced and it is not
+   * swallowed either. A modem that will not dial is still
+   * reachability-affecting and still belongs behind the confirmation timer
+   * (R-CEL-09, R-CFG-03); R-NET-15 only ever concerns the radio's own
+   * failure.
+   */
+  it("rejects with the modem's failure once the radio has recovered", async () => {
+    const { renderer } = board({
+      [`nmcli connection up ${CLIENT_CONNECTION}`]: NOT_IN_RANGE,
+      [`nmcli connection up ${MODEM_CONNECTION}`]: MODEM_WONT_DIAL,
+    });
+
+    await expect(renderer.render(joiningAndCorrectingApn()))
+      .rejects.toThrow(/No suitable device found/);
+  });
+
+  /**
+   * And when the modem alone fails, its failure is the render's — nothing
+   * else has gone wrong to displace it.
+   */
+  it("reports the modem's failure when the radio settled", async () => {
+    const { renderer } = board({
+      [`nmcli connection up ${MODEM_CONNECTION}`]: MODEM_WONT_DIAL,
+    });
+    const c = joiningAndCorrectingApn();
+    c.network.client.ssid = "";
+    await expect(renderer.render(c)).rejects.toThrow(/No suitable device found/);
+  });
+
+  /**
+   * The ordering the comment in `render` is about, pinned for the case where
+   * both steps succeed: the radio is arbitrated first, and the modem is
+   * cycled after it. A modem that will not dial must never be able to skip
+   * the step that puts the access point back on the air (R-NET-07).
+   */
+  it("arbitrates the radio before it re-dials the modem", async () => {
+    const { renderer, calls } = board({});
+    await renderer.render(joiningAndCorrectingApn());
+
+    const activations = calls
+      .filter((c) => c[1] === "connection" && (c[2] === "up" || c[2] === "down"))
+      .map((c) => `${c[2]} ${c[3]}`);
+    expect(activations).toEqual([
+      `down ${AP_CONNECTION}`,
+      `up ${CLIENT_CONNECTION}`,
+      `down ${MODEM_CONNECTION}`,
+      `up ${MODEM_CONNECTION}`,
+    ]);
+  });
+});
+
+/**
+ * R-NET-13's second half: **and traffic moves to the next path that works.**
+ *
+ * The renderer stays the only thing that writes a route metric; a change of
+ * standing changes what it writes and then makes the device take it up.
+ * `Standing` correctly worked out that a path had stopped reaching anything
+ * long before any of this existed — and nothing acted on it, so a stood-down
+ * ethernet kept its carrier, kept its winning metric and kept the default
+ * route indefinitely while the log line said traffic had moved.
+ */
+describe("NetworkRenderer moves traffic off a path that stopped working", () => {
+  const saying = (...down: PathName[]): StandingView => {
+    const set = new Set<PathName>(down);
+    return { isStoodDown: (path) => set.has(path) };
+  };
+
+  /** A board with all three paths configured, so every egress connection exists. */
+  function threePaths(): Config {
+    const c: Config = structuredClone(DEFAULT_CONFIG);
+    c.network.client.ssid = "HomeNetwork";
+    c.network.modem.enabled = true;
+    c.network.modem.apn = "ereseller";
+    return c;
+  }
+
+  const ALL_DEVICES =
+    "eth0:ethernet:connected:yonder-eth\nwlan0:wifi:connected:yonder-wifi\n"
+    + "cdc-wdm0:gsm:connected:yonder-modem\nlo:loopback:unmanaged:\n";
+
+  const metricIn = (calls: string[][], name: string): number | undefined => {
+    const call = calls.find((c) => c[1] === "connection" && c[2] === "modify" && c[3] === name);
+    const at = call?.indexOf("ipv4.route-metric") ?? -1;
+    return call === undefined || at === -1 ? undefined : Number(call[at + 1]);
+  };
+
+  it("writes the losing metric on a stood-down path and leaves the others alone", async () => {
+    const config = threePaths();
+    const { renderer, calls } = harness({
+      devices: ALL_DEVICES,
+      connections: [AP_CONNECTION, CLIENT_CONNECTION, ETHERNET_CONNECTION, MODEM_CONNECTION],
+      standing: saying("ethernet"),
+    });
+    await renderer.remetric(config);
+
+    expect(metricIn(calls, ETHERNET_CONNECTION))
+      .toBe(metricFor(config, "ethernet") + STOOD_DOWN_METRIC);
+    expect(metricIn(calls, MODEM_CONNECTION)).toBe(metricFor(config, "modem"));
+    expect(metricIn(calls, CLIENT_CONNECTION)).toBe(metricFor(config, "wifi_client"));
+    // The point of the number: the modem now wins.
+    expect(metricIn(calls, ETHERNET_CONNECTION)!)
+      .toBeGreaterThan(metricIn(calls, MODEM_CONNECTION)!);
+  });
+
+  it("gives the configured metric back when the path recovers", async () => {
+    const config = threePaths();
+    const { renderer, calls } = harness({
+      devices: ALL_DEVICES,
+      connections: [AP_CONNECTION, CLIENT_CONNECTION, ETHERNET_CONNECTION, MODEM_CONNECTION],
+      standing: saying(),
+    });
+    await renderer.remetric(config);
+    expect(metricIn(calls, ETHERNET_CONNECTION)).toBe(metricFor(config, "ethernet"));
+    expect(metricIn(calls, ETHERNET_CONNECTION)!)
+      .toBeLessThan(metricIn(calls, MODEM_CONNECTION)!);
+  });
+
+  it("writes the same metric on v6 as on v4", async () => {
+    // A board can hold a v6 default route as well as a v4 one, and moving
+    // traffic off a path that reaches nothing means moving all of it.
+    const config = threePaths();
+    const { renderer, calls } = harness({
+      devices: ALL_DEVICES,
+      connections: [ETHERNET_CONNECTION],
+      standing: saying("ethernet"),
+    });
+    await renderer.remetric(config);
+    const call = calls.find((c) => c[2] === "modify" && c[3] === ETHERNET_CONNECTION)!;
+    expect(call[call.indexOf("ipv6.route-metric") + 1])
+      .toBe(call[call.indexOf("ipv4.route-metric") + 1]);
+  });
+
+  it("makes the running device take the new metric up, without cycling it", async () => {
+    // `device reapply` re-applies the connection in place: the link is not
+    // taken down, the address is not released, and the on-link route stays —
+    // which is what makes this safe against a cable an operator is sitting on.
+    const config = threePaths();
+    const { renderer, calls } = harness({
+      devices: ALL_DEVICES,
+      connections: [ETHERNET_CONNECTION],
+      standing: saying("ethernet"),
+    });
+    await renderer.remetric(config);
+    expect(calls.some((c) => c.join(" ") === "nmcli device reapply eth0")).toBe(true);
+    expect(calls.some((c) => c[1] === "device" && c[2] === "disconnect")).toBe(false);
+    expect(calls.some((c) => c[1] === "connection" && c[2] === "down")).toBe(false);
+  });
+
+  it("never touches the access point, the radio, or anything it does not own", async () => {
+    // Rule 6. Re-issuing `up` on a live access point drops every station
+    // joined to it, including the operator; deleting a profile is how K-16
+    // left a board unreachable until a power cycle. A path stopping working
+    // is not a reason to do either.
+    // The radio is on the access point, which is how an operator reaches a
+    // board that has no way out — exactly the board this runs on.
+    const config = threePaths();
+    config.network.client.ssid = null;
+    const { renderer, calls, raised } = harness({
+      devices: "eth0:ethernet:connected:yonder-eth\nwlan0:wifi:connected:yonder-ap\n"
+        + "cdc-wdm0:gsm:connected:yonder-modem\nlo:loopback:unmanaged:\n",
+      connections: [AP_CONNECTION, ETHERNET_CONNECTION, MODEM_CONNECTION, "operator-vpn"],
+      standing: saying("ethernet"),
+    });
+    await renderer.remetric(config);
+
+    expect(calls.some((c) => c.includes(AP_CONNECTION))).toBe(false);
+    expect(calls.some((c) => c.includes("operator-vpn"))).toBe(false);
+    expect(calls.some((c) => c[1] === "connection" && (c[2] === "add" || c[2] === "delete"))).toBe(false);
+    expect(calls.some((c) => c[1] === "connection" && (c[2] === "up" || c[2] === "down"))).toBe(false);
+    // The radio, serving the access point, is not reapplied by any of this.
+    expect(calls.some((c) => c.join(" ") === "nmcli device reapply wlan0")).toBe(false);
+    expect(calls.some((c) => c[0] === "rfkill" || c.includes("radio"))).toBe(false);
+    expect(raised()).toBe(0);
+  });
+
+  it("writes nothing for a connection NetworkManager does not hold", async () => {
+    // Only what a render has already created. This can never be the thing
+    // that brings a profile into existence, and it can never reapply a device
+    // on behalf of one.
+    const config = threePaths();
+    const { renderer, calls } = harness({
+      devices: ALL_DEVICES, connections: [ETHERNET_CONNECTION], standing: saying("ethernet"),
+    });
+    await renderer.remetric(config);
+    expect(calls.some((c) => c.includes(MODEM_CONNECTION))).toBe(false);
+    expect(calls.some((c) => c.join(" ") === "nmcli device reapply cdc-wdm0")).toBe(false);
+  });
+
+  it("carries on when one connection will not take the metric", async () => {
+    // A modem whose metric could not be rewritten must not stop the
+    // ethernet's from being. There is nobody to report an error to here: the
+    // caller is a probe result folding into standing, not an apply.
+    const config = threePaths();
+    const { renderer, calls } = harness({
+      devices: ALL_DEVICES,
+      connections: [CLIENT_CONNECTION, ETHERNET_CONNECTION, MODEM_CONNECTION],
+      standing: saying("ethernet"),
+      fails: {
+        [`nmcli connection modify ${CLIENT_CONNECTION} ipv4.route-metric `
+          + `${metricFor(threePaths(), "wifi_client")} ipv6.route-metric `
+          + `${metricFor(threePaths(), "wifi_client")}`]:
+          { code: 1, stdout: "", stderr: "Error: unknown connection" },
+      },
+    });
+    await renderer.remetric(config);
+    expect(metricIn(calls, ETHERNET_CONNECTION))
+      .toBe(metricFor(config, "ethernet") + STOOD_DOWN_METRIC);
+    expect(metricIn(calls, MODEM_CONNECTION)).toBe(metricFor(config, "modem"));
+  });
+
+  it("does not undo a demotion on a full render", async () => {
+    // Profiles are written at render time and standing changes at runtime, so
+    // this is the half that could quietly put a dead path back at the head of
+    // the routing table on the next unrelated apply.
+    const config = threePaths();
+    const { renderer, calls } = harness({
+      devices: ALL_DEVICES,
+      connections: [AP_CONNECTION, CLIENT_CONNECTION, ETHERNET_CONNECTION, MODEM_CONNECTION],
+      standing: saying("ethernet"),
+    });
+    await renderer.render(config);
+    expect(metricIn(calls, ETHERNET_CONNECTION))
+      .toBe(metricFor(config, "ethernet") + STOOD_DOWN_METRIC);
+    expect(metricIn(calls, MODEM_CONNECTION)).toBe(metricFor(config, "modem"));
   });
 });

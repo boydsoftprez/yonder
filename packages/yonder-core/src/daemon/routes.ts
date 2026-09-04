@@ -12,12 +12,16 @@ import { readVersions } from "../system/versions.js";
 import { displayFacts, type BoardDisplay } from "../system/format.js";
 import { isProbeHost, type PingResult } from "../diag/probe.js";
 import { joinNetwork, leaveNetwork, type JoinRequest } from "../net/join.js";
+import { configureModem } from "../net/modem/configure.js";
 import type { NetworkState } from "../net/state.js";
+import type { ModemState } from "../net/modem/state.js";
+import type { PathName, ReachState } from "../net/reach/standing.js";
 import { setTheme, type ThemeRequest } from "../ui/theme.js";
 import type { ScanResult } from "../net/scan.js";
 import type { BoardFacts } from "../system/facts.js";
 import type { Versions } from "../system/versions.js";
-import { ZEROTIER_NETWORK_ID } from "../schema/config.js";
+import { DEFAULT_CONFIG, ZEROTIER_NETWORK_ID } from "../schema/config.js";
+import { publishableApPassphrase } from "../net/profiles.js";
 import type { RemoteState } from "../remote/state.js";
 
 export interface RouterDeps {
@@ -41,6 +45,10 @@ export interface RouterDeps {
   throttle?: AttemptThrottle;
   /** What the radio is doing. Injected, so this router still knows no nmcli. */
   netState?: () => Promise<NetworkState>;
+  /** What the modem says about itself. Injected, so this router knows no mmcli. */
+  modemState?: () => Promise<ModemState>;
+  /** Which way out is in use, and which paths have been stood down. */
+  reachState?: () => Promise<ReachState>;
   /**
    * Called after an administrator password is set, so the console can be
    * rewritten and restarted into its provisioned shape.
@@ -72,12 +80,31 @@ export interface RouterDeps {
    * store could not be read, which is the same condition that leaves
    * `credential` undefined — so the route refuses rather than applying a
    * configuration whose secret reference points at nothing.
+   *
+   * **`get` is here for exactly one question**: whether the access point is
+   * still on the passphrase this project publishes (R-UI-18). It is optional
+   * because the answer is allowed to be *cannot tell* — see
+   * `publishableApPassphrase`, which never hands back what it was given. No
+   * route reads any other row through this, and none should: a value out of
+   * this store is a credential unless something has established that it is
+   * not.
    */
-  secrets?: { put(name: string, value: string): void };
+  secrets?: {
+    put(name: string, value: string): void;
+    get?(name: string): string | undefined;
+  };
   /** The buffer GET /log serves. Defaults to the one this process writes to. */
   activity?: ActivityLog;
   /** The mesh join state. Absent on a daemon with no remote layer. */
   remoteState?: () => Promise<RemoteState>;
+  /**
+   * Test one path now and answer when the result is known.
+   *
+   * R-CEL-09's "on request". Injected, so this router still knows no probe —
+   * and wired to the same ReachMonitor the automatic probes use, so a test an
+   * operator asked for and one the device ran itself are the same evidence.
+   */
+  testPath?: (path: PathName) => Promise<boolean>;
 }
 
 /** What GET /system answers with. */
@@ -101,6 +128,42 @@ export interface SystemReport {
 export interface DiagProbes {
   ping(host: string, count: number | undefined): Promise<PingResult>;
   reachable(): Promise<PingResult>;
+}
+
+/**
+ * How to get back to this device when the console has stopped being one
+ * (R-UI-18).
+ *
+ * Every field here is public by construction, which is what makes it
+ * acceptable on a route that sits in front of the administrator-password
+ * gate. The SSID is beaconed continuously; the address is what the access
+ * point's own DHCP hands to every client that joins it; the hostname is
+ * announced over mDNS. None of the three is knowledge somebody in radio range
+ * lacks, and all three are useless without a way past the console's login.
+ *
+ * The passphrase is the one that needed a rule, and it has one: see
+ * `publishableApPassphrase`.
+ */
+export interface WayBackIn {
+  /** The access point to join. */
+  ssid: string;
+  /** Its address, without the prefix length — what a browser is pointed at. */
+  address: string;
+  /** The name it answers to, ready to type. */
+  hostname: string;
+  /**
+   * The published default while the device is still on it, **null once the
+   * operator has set their own**, and **absent when this device cannot tell**
+   * (R-SEC-10). Never the stored value: this is either the constant in
+   * `net/profiles.ts` or no value at all.
+   *
+   * Three states, the same way `RouterDeps.credential` has three. A daemon
+   * serving without a secret store — a malformed `secrets.yaml` — does not
+   * know which passphrase its own access point is on, and saying "yonder1234"
+   * there names a value that will not work on any device whose operator
+   * changed it.
+   */
+  passphrase?: string | null;
 }
 
 export interface RouteResult {
@@ -145,6 +208,42 @@ export function createRouter(deps: RouterDeps): Router {
     // wants the numbers still has them.
     return { facts, versions, display: displayFacts(facts, versions) };
   });
+
+  /**
+   * The way back in, assembled from the configuration and one secret row
+   * (R-UI-18).
+   *
+   * **It cannot throw.** `GET /status` is what answers on a device that has
+   * gone wrong, and an unreadable config.yaml is one of the ways a device
+   * goes wrong — so a configuration that will not load falls back to the
+   * shipped defaults rather than taking the panel down. Those defaults are
+   * also what such a device is genuinely reachable on: they are what the
+   * access-point profile it is running was rendered from.
+   */
+  const wayBackIn = (): WayBackIn => {
+    let config = DEFAULT_CONFIG;
+    try {
+      config = loadConfig(deps.configPath);
+    } catch {
+      // Not logged. This route is polled by a page every few seconds, and a
+      // line per poll would bury the reason the configuration will not load
+      // under thousands of copies of the fact that it will not.
+    }
+    // Spread rather than assigned, so *cannot tell* is an absent key rather
+    // than an explicit `undefined` — `null` already means something else here
+    // and the two must not be able to be confused by a reader of the body.
+    const passphrase = publishableApPassphrase(deps.secrets?.get?.("ap_psk"));
+    return {
+      ssid: config.network.ap.ssid,
+      // Without the prefix length: an operator types this into a browser, and
+      // `192.168.77.1/24` is not an address a browser can be given.
+      address: config.network.ap.address.split("/")[0],
+      // mDNS answers for `<hostname>.local`, and the panel prints what gets
+      // typed rather than a name plus an instruction about what to add to it.
+      hostname: `${config.system.hostname}.local`,
+      ...(passphrase === undefined ? {} : { passphrase }),
+    };
+  };
 
   return async (method, rawPath, body) => {
     // `req.url` carries the query string, and every comparison below is an
@@ -242,14 +341,21 @@ export function createRouter(deps: RouterDeps): Router {
         return { status: 200, body: { ok } };
       }
 
-      // Deliberately in front of the gate below. GET /status carries no
-      // configuration — an apply state, an expiry, and the reason the
-      // renderer set could not be assembled — and it is the one thing that
-      // makes a device whose secrets.yaml is unreadable diagnosable at all.
-      // Gating it would mean a board that can only say "403" about a fault
-      // an operator has to be on the device to fix anyway.
+      // Deliberately in front of the gate below. It carries an apply state,
+      // an expiry, the reason the renderer set could not be assembled, and
+      // the way back into the device — and it is the one thing that makes a
+      // board whose secrets.yaml is unreadable diagnosable at all. Gating it
+      // would mean a device that can only say "403" about a fault an operator
+      // has to be on the device to fix anyway.
+      //
+      // **`wayBackIn` is the only configuration this route carries, and it is
+      // meant to stay that way** (R-UI-18). Three fields that are beaconed,
+      // handed out by DHCP and announced over mDNS anyway, plus a passphrase
+      // that is either the published one or nothing. A test asserts that
+      // nothing else out of config.yaml follows them here; if a future field
+      // needs the gate, it belongs on a route that has one.
       if (method === "GET" && path === "/status") {
-        return { status: 200, body: deps.engine.status() };
+        return { status: 200, body: { ...deps.engine.status(), wayBackIn: wayBackIn() } };
       }
 
       // ---- everything else is behind the administrator password ---------
@@ -397,6 +503,80 @@ export function createRouter(deps: RouterDeps): Router {
         return { status: 200, body: await deps.netState() };
       }
 
+      // What the modem says about itself, and which way out is actually
+      // working. Two routes rather than one because they answer different
+      // questions and fail independently: a board can have a modem this
+      // daemon can read and no reach monitor, or the reverse.
+      //
+      // Absent means *this daemon has no such layer*, which is a 503 naming
+      // the absence — never an empty record, which a page would render as a
+      // modem with no signal on a board that has one.
+      if (method === "GET" && path === "/modem/state") {
+        if (deps.modemState === undefined) {
+          say("GET /modem/state: there is no modem layer on this daemon to ask");
+          return { status: 503, body: { error: "this device cannot report a modem" } };
+        }
+        // Never a credential. ModemState is assembled from what the device
+        // reports, not from the configuration, so the APN comes back off the
+        // connected bearer and `gsm.password` has no field to arrive in
+        // (R-SEC-10).
+        return { status: 200, body: await deps.modemState() };
+      }
+
+      if (method === "GET" && path === "/reach/state") {
+        if (deps.reachState === undefined) {
+          say("GET /reach/state: there is no reach monitor on this daemon to ask");
+          return { status: 503, body: { error: "this device cannot report its way out" } };
+        }
+        return { status: 200, body: await deps.reachState() };
+      }
+
+      // The same shape as /net/join and /remote/join: the router merges one
+      // section into the document and hands the whole thing to the apply
+      // engine. Nothing about a modem is stored anywhere else, and the
+      // response is an apply status, not a configuration — R-SEC-10 says
+      // `gsm.password` never comes back out of this route, and an apply
+      // status is not a shape it could arrive in.
+      //
+      // **The password takes the same road the Wi-Fi passphrase does.** The
+      // operator types a string; `config.yaml` holds a reference to a row in
+      // `secrets.yaml`. `configureModem` is the one thing that converts
+      // between them, exactly as `joinNetwork` is for `network.client.psk` —
+      // and it is why this route needs a secret store rather than being pure
+      // schema validation. Without one there is nowhere to put the
+      // credential, and applying a reference to a row that was never written
+      // would take the modem off the air while reporting success.
+      //
+      // The submitted password is redacted at the top of this function like
+      // every other body, so nothing below can log it (R-SEC-10).
+      if (method === "POST" && path === "/modem/configure") {
+        if (deps.secrets === undefined) {
+          say("POST /modem/configure: the secret store could not be read, so nothing can be stored in it");
+          return {
+            status: 503,
+            body: { error: "the device's secrets could not be read; see the device journal" },
+          };
+        }
+        const wanted = configureModem(loadConfig(deps.configPath), body, deps.secrets);
+        if (!wanted.ok) return { status: 400, body: { error: wanted.error } };
+        return { status: 200, body: await deps.engine.apply(wanted.config) };
+      }
+
+      // R-CEL-09's "on request", answered by the same ReachMonitor the
+      // automatic probes use — never a second way to decide whether a path
+      // works, only a second reason to ask it.
+      if (method === "POST" && path === "/reach/test") {
+        if (deps.testPath === undefined) {
+          say("POST /reach/test: there is no reach monitor on this daemon to ask");
+          return { status: 503, body: { error: "this device cannot test its way out" } };
+        }
+        const wanted = (body as { path?: unknown } | undefined)?.path;
+        if (wanted !== "ethernet" && wanted !== "modem" && wanted !== "wifi_client") {
+          return { status: 400, body: { error: "name one of: ethernet, modem, wifi_client" } };
+        }
+        return { status: 200, body: { path: wanted, reached: await deps.testPath(wanted) } };
+      }
+
       // The same shape as /net/join: the router merges one field into the
       // document and hands it to the engine. Nothing about a mesh is stored
       // anywhere else, and a network id is not a secret - it is the name of a
@@ -448,6 +628,16 @@ export function createRouter(deps: RouterDeps): Router {
         const id = (body as { id?: string } | undefined)?.id;
         if (typeof id !== "string") return { status: 400, body: { error: "id is required" } };
         deps.engine.confirm(id);
+        return { status: 200, body: deps.engine.status() };
+      }
+      // The other half of the same decision (R-UI-15). A console that can only
+      // confirm leaves an operator who has already decided the change was
+      // wrong watching a timer — and reaching for the power instead, which is
+      // the one thing that turns a rollback into a recovery.
+      if (method === "POST" && path === "/revert") {
+        const id = (body as { id?: string } | undefined)?.id;
+        if (typeof id !== "string") return { status: 400, body: { error: "id is required" } };
+        await deps.engine.revertNow(id);
         return { status: 200, body: deps.engine.status() };
       }
       return { status: 404, body: { error: `no route for ${method} ${path}` } };

@@ -1,0 +1,57 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!--
+  The editor half of seed the modem form.
+
+  Node-RED finds this by basename beside the node's .js, and without it the
+  flow editor shows the node as "unknown" even though the runtime registered
+  it. It is a form and a registration, and deliberately nothing else: no
+  behaviour lives here (CLAUDE.md rule 2 in spirit — a diff has to be
+  readable), and no asset is fetched from anywhere (R-UI-01).
+-->
+<script type="text/html" data-template-name="yonder-modem-form">
+  <div class="form-row">
+    <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name" />
+  </div>
+</script>
+
+<script type="text/html" data-help-name="yonder-modem-form">
+<p>Takes the device configuration on <code>msg.payload</code> — the answer
+<code>yonder-config</code> carries from <code>GET /config</code> — and shapes
+<code>network.modem</code> into one seed message per box of the Cellular tab's
+Connection group: <b>APN</b>, <b>dial number</b>, <b>username</b>,
+<b>password</b>, in that order on four outputs.</p>
+<p><b>The form says what is configured; the fact cell above it says what is in
+use.</b> They are different questions and they are allowed to differ — while an
+apply is pending the configuration carries the new APN and the connected bearer
+is still on the previous one — so this reads the configuration and never the
+modem's state.</p>
+<p><b>The password box is never seeded</b> (R-SEC-10).
+<code>network.modem.password</code> is a reference into
+<code>secrets.yaml</code>, and neither the credential nor the reference to it
+belongs in a form value. The password output carries no payload at all: only a
+label, which says <i>whether</i> a password is on file, so an operator can tell
+a stored credential from an absent one without the value ever leaving the
+device.</p>
+<p>A setting that is not configured seeds an <b>empty box</b>, never
+<code>null</code> — <code>yonder-modem-configure</code> refuses a form with no
+APN in it, and <code>null</code> is neither <code>undefined</code> nor the
+empty string.</p>
+<p>When the payload is not a configuration — a read that failed sends
+<code>payload: null</code> — <b>nothing is sent on any output</b>. Blanking a
+form on a lost socket looks exactly like a device that has forgotten its own
+settings.</p>
+</script>
+
+<script type="text/javascript">
+  RED.nodes.registerType("yonder-modem-form", {
+    category: "yonder",
+    color: "#c7d4e0",
+    defaults: { name: { value: "" } },
+    inputs: 1,
+    outputs: 4,
+    outputLabels: ["apn", "dial", "username", "password"],
+    icon: "font-awesome/fa-pencil-square-o",
+    label: function () { return this.name || "seed the modem form"; },
+  });
+</script>

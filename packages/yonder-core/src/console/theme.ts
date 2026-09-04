@@ -638,8 +638,49 @@ ${panelCss(theme)}
   background: var(--yonder-raised) !important;
 }
 
-/* ---- inputs ---------------------------------------------------------- */
-.nrdb-ui-text-field input,
+/* ---- inputs ----------------------------------------------------------
+
+   Addressed by what Vuetify builds a field out of, never by the Dashboard's
+   widget class, and this is the whole of R-UI-16 in one place.
+
+   Measured in the capture harness, in the night palette, on the real
+   Dashboard - see the "unreadable" rule in scripts/capture-pages.mjs. Every
+   one of these was black on a near-black recess:
+
+     nrdb-ui-dropdown       input            rgb(0,0,0)    on #04060a  1.03:1
+     nrdb-ui-table-wrapper  input            rgb(0,0,0)    on #04060a  1.03:1
+     nrdb-ui-text-field     v-field-label    rgb(0,0,0)    on #090d12  1.05:1
+     nrdb-ui-text-field     --floating       rgb(43,51,60) on #090d12  1.24:1
+
+   The cause is inheritance, and inheritance is why enumerating widget classes
+   kept missing cases. Vuetify draws a label with color: inherit, and what it
+   inherits is the field's colour, which resolves through
+   rgb(var(--v-theme-on-surface)). The Dashboard emits a theme block of its
+   own declaring .v-theme--nrdb { --v-theme-on-surface: 0,0,0 } and stamps
+   that class on the card, the input and the field - so the :root pointer at
+   --yonder-value set above is redeclared two elements before it reaches
+   anything, exactly the way the dropdown's --v-theme-error is further down.
+
+   The text an operator types was never overridden: it is named by a rule of
+   its own and measured 12.44:1 throughout. What was unreadable is everything
+   that was left to inherit.
+
+   So the field is given a colour and every part of it that inherits follows;
+   the label is then named separately, because it is quieter than a reading
+   and because the floating label sits inside the outline and would otherwise
+   inherit the hairline colour rather than the field's.
+
+   **No !important anywhere here, and that is measured too.** .v-input
+   .v-field is two classes against Vuetify's one, so it wins on specificity
+   rather than on load order or on force, and so does every selector below.
+   The one rule that still outranks these is Vuetify's error state, which is
+   meant to. */
+.v-input .v-field {
+  color: var(--yonder-value);
+}
+
+.v-input input,
+.v-input textarea,
 .nrdb-ui-form input {
   font-family: var(--yonder-font);
   font-size: var(--yonder-size-body);
@@ -660,10 +701,25 @@ ${panelCss(theme)}
   color: var(--yonder-divider);
 }
 
+/* The label a field carries, wherever Vuetify has put it: resting inside the
+   field before anything is typed, and floated into the notch in the outline
+   afterwards. Both are the same element, and until this rule reached them
+   only the one on a ui-form was ever given a colour — which is why the
+   Diagnostics form read correctly at 5.54:1 while the identical field on the
+   Cellular tab read at 1.05:1. The opacity is stated because Vuetify draws a
+   label at --v-medium-emphasis-opacity, and 60% of a colour chosen for a dim
+   panel is not the colour that was chosen.
+
+   The ui-form half of this rule carried !important and no longer does. Two
+   classes already outrank Vuetify's one, and the measurement says so: the
+   Diagnostics form's label reads 5.54:1 with the !important and 5.54:1
+   without it, in both palettes. */
+.v-input .v-label,
+.v-input label,
 .nrdb-ui-form label,
 .nrdb-ui-form .v-label {
-  color: var(--yonder-label) !important;
-  opacity: 1 !important;
+  color: var(--yonder-label);
+  opacity: 1;
 }
 
 /* Visible, and visible in both palettes. A field device gets driven by
@@ -859,6 +915,23 @@ ${panelCss(theme)}
   box-shadow:
     inset 0 1px 0 var(--yonder-lip),
     0 0 0 1px var(--yonder-bezel) !important;
+}
+
+/* A sentence under an interface's name, and not a reading of it.
+
+   The value rule above styles every ui-text value as a reading: large, bold,
+   tabular and right-aligned. That is right for an address and wrong for prose
+   about one - and right-aligned prose is the defect this console's capture
+   gate was written after: an interface name pushed to the right edge of its
+   own column by that very class, visible only when the qualifier beneath it
+   happened to be the wider line. So a qualifier says that it is one. */
+.yonder-qualifier .nrdb-ui-text-value {
+  text-align: left;
+  font-size: var(--yonder-size-body);
+  font-weight: 400;
+  font-variant-numeric: normal;
+  color: var(--yonder-label);
+  line-height: 1.5;
 }
 
 .yonder-note {

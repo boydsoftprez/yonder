@@ -592,7 +592,7 @@ thermal sensor drew **0.0 °C**, which says *cold* rather than *not there*. `fac
 explicit that absent is null and never zero; the components were the other end of that rule
 and had it wrong.
 
-### K-30 · `yonder-confirm` is registered and used by nothing
+### K-30 · ~~`yonder-confirm` is registered and used by nothing~~ — CLOSED
 
 R-CFG-11 removed the operator confirmation: joining a network takes the access point off
 the air, so the console an operator would confirm from goes with it, and the device answers
@@ -605,9 +605,17 @@ it end to end, and the next person to need a confirmation step will find one tha
 been run since the flows stopped calling it. `scripts/verify-pages.sh` used to catch
 exactly this and stopped naming it in the same change, so nothing was watching either.
 
-**Closes when** either the node is removed with its route, or something uses it again — an
-apply that does not move the radio still goes through the engine's confirmation timer, so
-there may be a real caller here rather than a deletion.
+**Closed in `00ba2ca`, by the second half of this entry's own guess.** The way out was a
+real caller and not a deletion: an apply that does not move the radio still goes through the
+engine's confirmation timer, and until R-UI-15 there was nowhere to see one except the page
+the change was made on. Status now carries a `Change pending` banner — the countdown, what
+is in force, and `CONFIRM` beside `REVERT NOW` — and `confirm-pending` in
+`flows/flows.json` is a `yonder-confirm`. It gained a twin in the same change,
+`yonder-revert`, because the banner offers both directions and a node with a mode would be a
+wiring diagram that no longer says which one a wire performs.
+
+`scripts/verify-pages.sh` names both again in the list of types the flows must use, so the
+thing that stopped watching is watching.
 
 ### K-31 · The network dropdown's label is red before anything is scanned
 
@@ -797,7 +805,9 @@ causing it.
 Found while pressing Join on a console reached over the very radio being
 retuned, which is the case R-NET-12's sentence was written about.
 
-### K-37 · A Wi-Fi network that is not in range fails every apply
+### K-37 · ~~A Wi-Fi network that is not in range fails every apply~~ — CLOSED
+
+**Status:** Closed · **Requirement:** R-NET-15
 
 The network renderer runs before the others, so an SSID it cannot associate with
 fails the whole apply — including applies with nothing to do with Wi-Fi:
@@ -821,10 +831,48 @@ Note this is not the same as R-NET-07's fallback, which works: the access point
 does come back. The device stays *reachable*. What it stops being is
 *changeable*.
 
-**Fix direction:** a client that cannot associate is a fact about the world, not
-a failed render. R-NET-12 already says the access point returns when a change
-leaves the radio on no network; that outcome should satisfy the renderer rather
-than fail it.
+**One compound of this was closed first.** The network renderer arbitrates the
+radio and then re-dials the modem, and the two shared a failure path:
+`settleRadio` threw, so `redialModem` never ran. On a board with an out-of-range
+network configured that happened on *every* render, so a corrected APN was
+written into the modem's profile and never dialled — correcting a mistyped APN,
+the recovery action M3a is built around, could not be carried out at all. The
+radio step still runs first, for the reason it always did (its failure is what
+raises the access point, and R-NET-07 rests on that), but its error is held, the
+re-dial runs, and the radio's error is then thrown. A re-dial that also fails is
+logged rather than allowed to displace it. Pinned by tests in
+`packages/yonder-core/src/net/renderer.test.ts` that fail against the old code.
+R-CEL-09, R-NET-07.
+
+**What that first fix did not touch: the render itself still failed.** Every
+apply on a board whose configured network had moved out of range still rolled
+back, because `settleRadio` rethrew once it had raised the access point again —
+a rethrow its own doc comment defended as correct. It measurably was not. An
+operator out of range of `Boyd_AP`, meaning to fly on cellular alone, entered a
+correct APN and pressed CONNECT; the render threw on the radio, the apply
+engine rolled the whole configuration back, and `yonder-modem` was removed.
+**The operator lost their cellular configuration to this and reported it as
+"the settings did not survive a power cycle"; they had, in fact, never been
+written at all.** Confirmed on the board throughout: `wlan0` was `connected` to
+`yonder-ap` — the access point had come back up, exactly as R-NET-07 requires —
+and the device was reachable the entire time. There was never anything for the
+rollback to protect.
+
+**Closed by R-NET-15.** `settleRadio` now decides the render's outcome on
+reachability rather than on whether the client associated: if the access point
+was never taken down, or raising it again succeeds, the failure is logged in
+plain language — that the client did not come up, that the access point is on
+the air, and that the change has been kept — and the render returns normally.
+Every other subsystem in the same apply stands, including a corrected APN,
+which is dialled immediately after. This is R-NET-12's own promise finally
+satisfied rather than fought: the access point returning when a change leaves
+the radio on no network is treated as the outcome it always claimed to be,
+instead of one the renderer failed anyway. Nothing here classifies the failure
+by parsing nmcli's error text; a wrong pre-shared key is treated exactly like
+an out-of-range SSID, because both are the same fact about the world and not
+about the device. Only when the access point itself cannot be confirmed up does
+the render still fail, exactly as before. Pinned by tests in
+`packages/yonder-core/src/net/renderer.test.ts` that fail against the old code.
 
 ### K-38 · A console deploy serves `Cannot GET /` for about half a minute
 
@@ -920,3 +968,137 @@ Two separate things, and only the second is Yonder's:
 
 Closed by **R-SYS-09**, added in M4 — encoding video is what pushes the draw up, so M4 is
 the milestone that provokes the fault it needs to report.
+
+---
+
+---
+
+### K-42 · ~~The fallback watchdog accepts an address as proof of reachability~~ — CLOSED
+
+**Status:** Closed · **Requirement:** R-NET-07, R-CEL-09
+
+`FallbackWatchdog.check()` asks whether any interface other than the access point holds an
+IPv4 address. R-NET-07's own text says "carries traffic"; the implementation weakened it
+deliberately, because a connected but idle Ethernet link carries none and is perfectly
+reachable, and its comment says so.
+
+Cellular breaks that reasoning. A modem with a wrong APN registers, attaches, takes an
+address and installs a route while completing no request — measured, and recorded in the
+M3 design's §2. That satisfies this check. A device configured that way from the boot
+partition, with no other path, never raises its access point and is unreachable until
+somebody pulls the card. Rule 6.
+
+**Closed by:** this commit (Task 8 of the M3a plan), which adds the optional `carrying`
+check to `FallbackWatchdogOptions` and requires it — when wired in — to agree before
+`check()` treats an address as reachability. Absent, behaviour is unchanged: an address
+alone is still accepted, so a daemon assembled without a reach monitor does not become one
+that raises its access point on a working device.
+
+---
+
+### K-43 · ~~The modem's interface name is remembered for the life of the daemon~~ — CLOSED
+
+**Status:** Closed · **Requirement:** R-CEL-09, R-CEL-13, R-NET-14
+
+`modemInterface` in `packages/yonder-core/src/daemon/server.ts` caches the net port
+ModemManager reports — `if (modemNet !== null) return modemNet;` — because a modem's port
+layout is a property of the modem. It is not a property of the *slot*. Once a modem has
+been seen, `pathDevices` goes on being handed `wwan0` whatever ModemManager and
+NetworkManager now say, so `/reach/state` keeps reporting a cellular path on an interface
+that has been unplugged, and the Cellular tab draws a green `READY` lamp over the words
+"No modem found".
+
+Visible in `docs/console/capture/network-cellular-without-modem.*.png`, which is why those
+two pictures are read with this entry beside them. On a board that never had a modem — the
+hardware this was found on — the tab reads `NO MODEM` correctly, so it is a defect about
+hardware being *removed* rather than about hardware being absent.
+
+R-NET-14 did not close it, and deliberately. `pathsDown` names a path down only when
+NetworkManager lists its interface in a state it knows to be not-up; when a modem is
+unplugged neither `wwan0` nor `cdc-wdm0` is listed at all, so nothing has been established
+and nothing is claimed. Fixing this means deciding what a daemon should do when the
+hardware under a cached reading disappears — re-read on every call, invalidate on a
+ModemManager signal, or expire the cache — and that changes reach behaviour, which is a
+decision of its own rather than a consequence of this one.
+
+**Closed by:** this commit, which takes the first of those three and states it as R-CEL-13.
+`ModemNetPort` in `net/modem/netport.ts` asks ModemManager both questions on every reading
+and remembers nothing in order to skip one — not that a modem exists, and not its port
+layout either, because those object paths are numbered per run of the service and a stick
+swapped across a ModemManager restart would inherit the departed one's port.
+
+Reach behaviour moves in one direction only, and it is the direction rule 6 allows. A path
+with no interface is reported `absent`, and an absent path is neither probed nor stood
+down — so the old behaviour was *inventing* failure evidence against a `wwan0` that was not
+there. `carrying` is a question about paths holding addresses, which a departed modem does
+not hold either way, so the fallback watchdog's answer cannot move at all. What is kept is
+only the answer to a reading that *did not happen*: a failed or late one falls back to the
+last interface actually observed, never to the control port, because probing `cdc-wdm0`
+fails on a perfectly good link and three of those stand a working modem down. The reading
+is bounded at `MODEM_READ_DEADLINE_MS` for the reason `net/deadline.ts` was written: a
+wedged ModemManager answers nothing at all, and asking it on every reading rather than once
+is what made that worth bounding.
+
+---
+
+### K-44 · ~~The boot race that deleted the cellular profile~~ — CLOSED
+
+**Status:** Closed · **Requirement:** R-NET-16
+
+Measured on a board: the operator power-cycled a Raspberry Pi with a working cellular
+link and correct settings in `/etc/yonder/config.yaml`. Cellular did not come back. It
+stayed down until they re-entered the settings by hand from the console.
+
+The boot, from `journalctl -b -u yonder-core -u ModemManager`:
+
+```
+15:10:56  systemd: Starting ModemManager.service
+15:11:01  yonder-node: network: wifi=wlan0 ethernet=eth0
+15:11:01  yonder-node: network: removing yonder-modem        <-- the defect
+15:11:02  ModemManager: [modem0] state changed (unknown -> disabled)
+15:11:02  ModemManager: [modem0] state changed (disabled -> enabling -> enabled)
+15:11:03  ModemManager: [modem0] 3GPP registration state changed (idle -> home)
+15:11:03  ModemManager: [modem0] 3GPP packet service state changed (detached -> attached)
+...
+15:13:15  yonder-node: network: wifi=wlan0 ethernet=eth0     <-- operator re-applies
+15:13:16  ModemManager: [modem0] state changed (registered -> connecting)
+15:13:17  ModemManager: [modem0] state changed (connecting -> connected)
+```
+
+`yonder-core` rendered one second before ModemManager finished probing the modem. A
+Quectel EC25 on USB takes several seconds to enumerate and be probed; the daemon does not
+wait for it and should not have to.
+
+Verified on the same board afterwards: `nmcli -t -f NAME,TYPE,AUTOCONNECT connection
+show` gave `yonder-modem:gsm:yes`, and `connection.autoconnect-retries` was `-1`.
+NetworkManager would have dialled the modem by itself at 15:11:03 had the profile still
+existed. Nothing else was wrong — the SIM, the APN, the signal and the daemon were all
+fine. There is no periodic re-render in this daemon — `setInterval` appears nowhere in
+`yonder-core/src` — so once the profile was deleted at boot, nothing restored it until a
+human applied a configuration change.
+
+`packages/yonder-core/src/net/renderer.ts` conflated two different questions: *is this
+profile wanted*, a question about the operator's configuration, and *can this profile be
+generated right now*, a question about hardware. `render()` read "wanted" straight off
+`desiredProfiles`'s own output, which gates every profile on a device being present this
+instant — so "no modem plugged in this millisecond" was read as "the operator does not
+want cellular", and the render deleted their profile. The same hazard reached every
+connection this renderer owns, not only the modem — the modem is only where it was
+measured, being the one interface that appears seconds after the others.
+
+**Closed by:** this commit, which adds R-NET-16 and gives `render()`'s removal loop a
+"wanted" set built from `configuredConnections`, a new function in `net/profiles.ts` that
+answers from `config.yaml` alone and takes no `Interfaces` argument to read a device list
+from at all. `desiredProfiles` keeps deciding what gets *generated*, still correctly
+gated on the interfaces a render can see — only *removal* changed. A profile whose device
+is missing is now left exactly as it stands, and NetworkManager's own
+`connection.autoconnect yes` with unlimited `connection.autoconnect-retries` — already set
+by `modemProfile` for R-CEL-06 — does the rest once the device appears. No wait, no
+retry, no timer: the fix is that the daemon stops deleting the profile, not that it tries
+to time the deletion any better.
+
+**One gap remains, and this does not close it.** If the modem profile has *never* been
+created — a board whose modem was not visible for a single render while cellular was
+enabled — nothing generates it until a render happens with the modem present. That is a
+real but smaller hole than the one above: it needs a first apply rather than surviving a
+reboot, and it is left for a future change.

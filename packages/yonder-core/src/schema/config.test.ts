@@ -2,6 +2,7 @@
 import { describe, it, expect } from "vitest";
 import { ConfigSchema, DEFAULT_CONFIG } from "./config.js";
 import { withoutRetiredKeys } from "./retired.js";
+import { formatIssues } from "../config/errors.js";
 
 /** A config.yaml as a build before the pool was removed would have written it. */
 function seededByAnEarlierBuild(): unknown {
@@ -130,6 +131,122 @@ describe("apply", () => {
       ...DEFAULT_CONFIG,
       apply: { timeout: 120, radioTimeoutSeconds: 300 },
     }).success).toBe(false);
+  });
+});
+
+describe("network.modem", () => {
+  it("is absent from a device that has not configured one", () => {
+    // R-CFG-08: a freshly flashed board is usable with no operator input, and
+    // that means no modem connection is attempted on a board with no modem.
+    expect(DEFAULT_CONFIG.network.modem.enabled).toBe(false);
+    expect(DEFAULT_CONFIG.network.modem.mode).toBe("auto");
+    expect(DEFAULT_CONFIG.network.modem.apn).toBeNull();
+  });
+
+  it("takes an APN, a user, a password reference and a dial string", () => {
+    const config = ConfigSchema.parse({
+      ...DEFAULT_CONFIG,
+      network: {
+        ...DEFAULT_CONFIG.network,
+        modem: {
+          enabled: true,
+          apn: "ereseller",
+          username: "user",
+          password: { secret: "modem_psk" },
+          dial: "*99#",
+        },
+      },
+    });
+    expect(config.network.modem.apn).toBe("ereseller");
+    expect(config.network.modem.password).toEqual({ secret: "modem_psk" });
+    expect(config.network.modem.dial).toBe("*99#");
+  });
+
+  it("names the adapter when the operator names the modem", () => {
+    const config = ConfigSchema.parse({
+      ...DEFAULT_CONFIG,
+      network: {
+        ...DEFAULT_CONFIG.network,
+        modem: { enabled: true, mode: "appliance", interface: "usb0" },
+      },
+    });
+    expect(config.network.modem.mode).toBe("appliance");
+    expect(config.network.modem.interface).toBe("usb0");
+  });
+
+  /**
+   * **An appliance is nothing but its name (R-CEL-11).**
+   *
+   * A modem that dials for itself is indistinguishable from any other network
+   * adapter, so `network.modem.interface` is the whole of how this device
+   * finds it. With that null and the modem enabled, `modemDevice` returns
+   * null, `desiredProfiles` writes no profile at all, nothing is ever dialled
+   * — and `modemState` reported the appliance as connected and said it was
+   * "using the named adapter", naming nothing. A configuration that describes
+   * a modem this device cannot possibly locate is not a configuration, and
+   * the place to say so is the schema (R-CFG-02).
+   */
+  it("refuses an appliance modem with no adapter named", () => {
+    const parsed = ConfigSchema.safeParse({
+      ...DEFAULT_CONFIG,
+      network: {
+        ...DEFAULT_CONFIG.network,
+        modem: { enabled: true, mode: "appliance", interface: null },
+      },
+    });
+    expect(parsed.success).toBe(false);
+    const issues = parsed.success ? [] : formatIssues(parsed.error);
+    expect(issues.join("\n")).toContain("network.modem.interface");
+  });
+
+  it("refuses an appliance modem that names no adapter at all", () => {
+    // The same configuration written by leaving the key out. `interface`
+    // defaults to null, so the two are the same document by the time anything
+    // reads it, and they have to fail the same way.
+    expect(ConfigSchema.safeParse({
+      ...DEFAULT_CONFIG,
+      network: {
+        ...DEFAULT_CONFIG.network,
+        modem: { enabled: true, mode: "appliance" },
+      },
+    }).success).toBe(false);
+  });
+
+  it("says nothing about the adapter while the modem is switched off", () => {
+    // `enabled: false` is a board with no modem configured, whatever else the
+    // section says. Refusing it would strand a device whose operator turned
+    // an appliance off rather than deleting its settings — and the shipped
+    // default is exactly that shape.
+    expect(ConfigSchema.safeParse({
+      ...DEFAULT_CONFIG,
+      network: {
+        ...DEFAULT_CONFIG.network,
+        modem: { enabled: false, mode: "appliance", interface: null },
+      },
+    }).success).toBe(true);
+  });
+
+  it("says nothing about the adapter for a modem the system finds itself", () => {
+    // `auto` is the modem ModemManager claims. It is located by asking, not
+    // by being named, and requiring a name here would refuse the commonest
+    // working configuration there is.
+    expect(ConfigSchema.safeParse({
+      ...DEFAULT_CONFIG,
+      network: {
+        ...DEFAULT_CONFIG.network,
+        modem: { enabled: true, mode: "auto", interface: null, apn: "ereseller" },
+      },
+    }).success).toBe(true);
+  });
+
+  it("refuses a mode it does not have", () => {
+    // `hilink` and `stick` were the sketch in configuration.md and are not
+    // what shipped. A misspelling silently accepted is a setting an operator
+    // believes is in force and is not.
+    expect(() => ConfigSchema.parse({
+      ...DEFAULT_CONFIG,
+      network: { ...DEFAULT_CONFIG.network, modem: { mode: "hilink" } },
+    })).toThrow();
   });
 });
 

@@ -4,9 +4,12 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  apProfile, clientProfile, ethernetProfile, desiredProfiles, radioPlan, wifiMode,
-  AP_CONNECTION, CLIENT_CONNECTION, DEFAULT_AP_PASSPHRASE,
+  apProfile, clientProfile, ethernetProfile, configuredConnections, desiredProfiles, radioPlan, wifiMode,
+  AP_CONNECTION, CLIENT_CONNECTION, ETHERNET_CONNECTION, DEFAULT_AP_PASSPHRASE,
+  publishableApPassphrase,
 } from "./profiles.js";
+import { MODEM_CONNECTION, STOOD_DOWN_METRIC, metricFor, modemProfile } from "./modem/profiles.js";
+import type { PathName, StandingView } from "./reach/standing.js";
 import { SecretStore } from "../secrets/store.js";
 import { DEFAULT_CONFIG } from "../schema/config.js";
 import type { Config } from "../schema/config.js";
@@ -17,6 +20,17 @@ afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
 
 function settingsOf(p: { settings: string[][] }): Record<string, string> {
   return Object.fromEntries(p.settings.map(([k, v]) => [k, v]));
+}
+
+/**
+ * A secret store good for exactly what `desiredProfiles` needs when a wifi
+ * interface is present: `ap_psk` always resolves, because the access point's
+ * profile is written whenever there is a radio, even in client mode.
+ */
+function fakeSecrets(): SecretStore {
+  const store = new SecretStore(join(dir, `secrets-${Math.random().toString(36).slice(2)}.yaml`));
+  store.ensureValue("ap_psk", "test-ap-psk");
+  return store;
 }
 
 describe("DEFAULT_AP_PASSPHRASE", () => {
@@ -33,6 +47,76 @@ describe("DEFAULT_AP_PASSPHRASE", () => {
 
   it("is the value the documentation publishes", () => {
     expect(DEFAULT_AP_PASSPHRASE).toBe("yonder1234");
+  });
+});
+
+/**
+ * The one rule R-UI-18 turns on: an operator's passphrase is theirs, and the
+ * published one is not a secret at all (ADR-0007, R-SEC-10).
+ */
+describe("publishableApPassphrase", () => {
+  it("publishes the default while the device is still on it", () => {
+    expect(publishableApPassphrase(DEFAULT_AP_PASSPHRASE)).toBe(DEFAULT_AP_PASSPHRASE);
+  });
+
+  it("withholds one the operator has set", () => {
+    expect(publishableApPassphrase("something-they-chose")).toBeNull();
+  });
+
+  /**
+   * The property that makes a leak unreachable rather than merely absent: no
+   * argument produces an answer that is not either the module's own constant
+   * or null. A caller cannot get a stored credential out of this function by
+   * passing one in — which is what "redaction happens where the value is
+   * captured" means when the value is a comparison rather than a log line.
+   */
+  it("answers with the constant or with nothing, whatever it is given", () => {
+    for (const stored of [
+      DEFAULT_AP_PASSPHRASE, "yonder1235", "", " yonder1234", "YONDER1234",
+      "an-operators-own-passphrase", undefined,
+    ]) {
+      const answer = publishableApPassphrase(stored);
+      expect(answer === DEFAULT_AP_PASSPHRASE || answer === null || answer === undefined).toBe(true);
+    }
+  });
+
+  /**
+   * A near miss is not the default. Case, whitespace and one wrong character
+   * are all passphrases somebody chose, and each of them would join a
+   * different access point.
+   */
+  it("treats a near miss as the operator's own", () => {
+    for (const near of ["yonder1234 ", " yonder1234", "Yonder1234", "yonder123", ""]) {
+      expect(publishableApPassphrase(near)).toBeNull();
+    }
+  });
+
+  /**
+   * **No row at all is *cannot tell*, and it is its own answer.**
+   *
+   * `undefined` arises on exactly one condition: `buildRenderers` threw, so
+   * the secret store was never passed — which is an unreadable or malformed
+   * `secrets.yaml`. This used to answer with the published default, and the
+   * reasoning behind that was about leaking, which it was right about: there
+   * is nothing to leak in that state. It was wrong about being *correct*. On
+   * a device whose operator has set their own passphrase and whose
+   * `secrets.yaml` has since become unreadable, the access point on the air
+   * was rendered from their value, and the panel would tell them to join with
+   * `yonder1234` — a passphrase that will not work, printed in the one
+   * failure mode the panel exists for.
+   *
+   * The router already treats *cannot tell* as its own answer everywhere else
+   * (`credential: undefined`). This is the same distinction, kept rather than
+   * collapsed into "the default".
+   */
+  it("says nothing at all when there is no row to read", () => {
+    expect(publishableApPassphrase(undefined)).toBeUndefined();
+  });
+
+  /** And still never the argument, in the branch that has one. */
+  it("never hands back the row it was given", () => {
+    const theirs = "an-operators-own-passphrase";
+    expect(publishableApPassphrase(theirs)).not.toBe(theirs);
   });
 });
 
@@ -155,6 +239,147 @@ describe("ethernetProfile", () => {
 });
 
 /**
+ * R-NET-06: `network.priority` is the operator's order, and route metrics are
+ * how it reaches the kernel.
+ *
+ * These are about the *relation* between the profiles rather than the
+ * literals, because the literals are NetworkManager's own defaults and the
+ * thing that has to hold is that a path earlier in `network.priority` sorts
+ * ahead of one later in it. `net/reach/monitor.ts` derives which path is
+ * carrying traffic from exactly this premise, so a profile without a metric
+ * is not untidiness — it makes `pathInUse` name the wrong interface, and the
+ * watch then reads the wrong device's counters.
+ */
+describe("route metrics follow network.priority", () => {
+  const eth = (c: Config) => settingsOf(ethernetProfile(c, "eth0"));
+  const wifi = (c: Config) => settingsOf(clientProfile(c, null, "wlan0")!);
+  const modem = (c: Config) => settingsOf(modemProfile(c, null, "cdc-wdm0")!);
+
+  function board(priority: Config["network"]["priority"]): Config {
+    const c: Config = structuredClone(DEFAULT_CONFIG);
+    c.network.priority = priority;
+    c.network.client.ssid = "HomeNetwork";
+    c.network.modem.enabled = true;
+    return c;
+  }
+
+  it("sorts every path the way the operator ordered it", () => {
+    const c = board(["ethernet", "modem", "wifi_client"]);
+    // The shipped default. Left alone, NetworkManager gives Wi-Fi 600 and the
+    // modem 700, so the radio outranks the modem while the configuration says
+    // the opposite.
+    expect(Number(eth(c)["ipv4.route-metric"]))
+      .toBeLessThan(Number(modem(c)["ipv4.route-metric"]));
+    expect(Number(modem(c)["ipv4.route-metric"]))
+      .toBeLessThan(Number(wifi(c)["ipv4.route-metric"]));
+  });
+
+  it("puts the modem ahead of ethernet when that is what was asked for", () => {
+    const c = board(["modem", "wifi_client", "ethernet"]);
+    expect(Number(modem(c)["ipv4.route-metric"]))
+      .toBeLessThan(Number(wifi(c)["ipv4.route-metric"]));
+    expect(Number(wifi(c)["ipv4.route-metric"]))
+      .toBeLessThan(Number(eth(c)["ipv4.route-metric"]));
+  });
+
+  it("gives ethernet and the Wi-Fi client the same metric on v4 and v6", () => {
+    const c = board(["ethernet", "modem", "wifi_client"]);
+    expect(eth(c)["ipv6.route-metric"]).toBe(String(metricFor(c, "ethernet")));
+    expect(wifi(c)["ipv6.route-metric"]).toBe(String(metricFor(c, "wifi_client")));
+  });
+
+  it("gives the access point no metric at all", () => {
+    // `ipv4.method shared` — the access point hands out addresses and
+    // masquerades for its clients. It is not a way out of this board, and a
+    // metric on it would enter it into an ordering it does not belong to.
+    const s = settingsOf(apProfile(DEFAULT_CONFIG, "p", "wlan0"));
+    expect(s["ipv4.route-metric"]).toBeUndefined();
+    expect(s["ipv6.route-metric"]).toBeUndefined();
+  });
+});
+
+/**
+ * R-NET-13's second half, at the layer that generates the numbers: **a path
+ * that stops reaching anything is stood down, and traffic moves to the next
+ * path that works.**
+ *
+ * The standing is an input to generating the metric, never a second writer of
+ * one. `network.priority` still says what outranks what; all a demotion does
+ * is push one path out of the running, which is why it is expressed as a
+ * number added to the generated metric rather than as a disconnect.
+ */
+describe("route metrics take standing into account", () => {
+  const saying = (...down: PathName[]): StandingView => {
+    const set = new Set<PathName>(down);
+    return { isStoodDown: (path) => set.has(path) };
+  };
+
+  function board(priority: Config["network"]["priority"]): Config {
+    const c: Config = structuredClone(DEFAULT_CONFIG);
+    c.network.priority = priority;
+    c.network.client.ssid = "HomeNetwork";
+    c.network.modem.enabled = true;
+    return c;
+  }
+
+  it("gives a stood-down path a metric no healthy path can lose to", () => {
+    // The case the milestone is named for, one layer down: a cable plugged
+    // into something with no route out keeps its carrier and its metric of
+    // 100 and wins, while a working cellular link sits at 700 doing nothing.
+    const c = board(["ethernet", "modem", "wifi_client"]);
+    const demoted = metricFor(c, "ethernet", saying("ethernet"));
+    expect(demoted).toBeGreaterThan(metricFor(c, "modem"));
+    expect(demoted).toBeGreaterThan(metricFor(c, "wifi_client"));
+    expect(demoted).toBeGreaterThanOrEqual(STOOD_DOWN_METRIC);
+  });
+
+  it("gives the configured metric straight back when the path recovers", () => {
+    const c = board(["ethernet", "modem", "wifi_client"]);
+    expect(metricFor(c, "ethernet", saying())).toBe(metricFor(c, "ethernet"));
+  });
+
+  it("does not disturb the paths that are still working", () => {
+    const c = board(["ethernet", "modem", "wifi_client"]);
+    const standing = saying("ethernet");
+    expect(metricFor(c, "modem", standing)).toBe(metricFor(c, "modem"));
+    expect(metricFor(c, "wifi_client", standing)).toBe(metricFor(c, "wifi_client"));
+  });
+
+  it("keeps the operator's order between two paths that are both stood down", () => {
+    // Otherwise they tie, the kernel breaks the tie however it likes, and
+    // `pathInUse`'s premise — that the metrics follow network.priority —
+    // stops holding on the board where it matters most.
+    const c = board(["ethernet", "modem", "wifi_client"]);
+    const standing = saying("ethernet", "modem");
+    expect(metricFor(c, "ethernet", standing))
+      .toBeLessThan(metricFor(c, "modem", standing));
+  });
+
+  it("writes the losing metric into the profile itself, on both families", () => {
+    const c = board(["ethernet", "modem", "wifi_client"]);
+    const standing = saying("ethernet");
+    const s = settingsOf(ethernetProfile(c, "eth0", standing));
+    expect(s["ipv4.route-metric"]).toBe(String(metricFor(c, "ethernet", standing)));
+    expect(s["ipv6.route-metric"]).toBe(s["ipv4.route-metric"]);
+    expect(Number(s["ipv4.route-metric"]))
+      .toBeGreaterThan(Number(settingsOf(modemProfile(c, null, "cdc-wdm0", standing)!)["ipv4.route-metric"]));
+  });
+
+  it("carries the demotion through desiredProfiles, and never onto the access point", () => {
+    // A full render must not undo a demotion, and must not touch the one
+    // connection an operator with no way out is reaching the board through.
+    const c = board(["ethernet", "modem", "wifi_client"]);
+    const standing = saying("ethernet");
+    const profiles = desiredProfiles(c, fakeSecrets(), { wifi: "wlan0", ethernet: "eth0", modem: "cdc-wdm0" }, standing);
+    const byName = Object.fromEntries(profiles.map((p) => [p.name, settingsOf(p)]));
+    expect(byName[ETHERNET_CONNECTION]?.["ipv4.route-metric"])
+      .toBe(String(metricFor(c, "ethernet", standing)));
+    expect(byName[AP_CONNECTION]?.["ipv4.route-metric"]).toBeUndefined();
+    expect(byName[AP_CONNECTION]?.["ipv6.route-metric"]).toBeUndefined();
+  });
+});
+
+/**
  * The arbitration K-13 says nothing used to do (Task 5 of M1b-2).
  *
  * One radio can be an access point or a client, not both. These tests are
@@ -268,9 +493,86 @@ describe("the access point's profile in client mode", () => {
     config.network.client.psk = { secret: "wifi_psk" };
     config.network.ap.enabled = false;
 
-    const names = desiredProfiles(config, store, { wifi: "wlan0", ethernet: null })
+    const names = desiredProfiles(config, store, { wifi: "wlan0", ethernet: null, modem: null })
       .map((p) => p.name);
     expect(names).toContain(AP_CONNECTION);
     expect(names).toContain(CLIENT_CONNECTION);
+  });
+});
+
+describe("desiredProfiles with a modem", () => {
+  it("writes the modem profile when a modem interface was found", () => {
+    const config = {
+      ...DEFAULT_CONFIG,
+      network: {
+        ...DEFAULT_CONFIG.network,
+        modem: { ...DEFAULT_CONFIG.network.modem, enabled: true, apn: "ereseller" },
+      },
+    };
+    const names = desiredProfiles(config, fakeSecrets(), {
+      wifi: "wlan0", ethernet: "eth0", modem: "cdc-wdm0",
+    }).map((p) => p.name);
+    expect(names).toContain(MODEM_CONNECTION);
+  });
+
+  it("writes nothing for a modem on a board that has none", () => {
+    const names = desiredProfiles(DEFAULT_CONFIG, fakeSecrets(), {
+      wifi: "wlan0", ethernet: "eth0", modem: null,
+    }).map((p) => p.name);
+    expect(names).not.toContain(MODEM_CONNECTION);
+  });
+});
+
+/**
+ * The set `render()`'s removal loop is built from (R-NET-16). Deliberately
+ * has no `Interfaces` parameter to pass in the first place: unlike
+ * `desiredProfiles`, whether a device is visible on this particular render
+ * must never be able to change the answer.
+ */
+describe("configuredConnections", () => {
+  it("wants the access point and the wired profile unconditionally", () => {
+    const names = configuredConnections(DEFAULT_CONFIG);
+    expect(names.has(AP_CONNECTION)).toBe(true);
+    expect(names.has(ETHERNET_CONNECTION)).toBe(true);
+  });
+
+  it("does not want the wifi client or the modem by default", () => {
+    const names = configuredConnections(DEFAULT_CONFIG);
+    expect(names.has(CLIENT_CONNECTION)).toBe(false);
+    expect(names.has(MODEM_CONNECTION)).toBe(false);
+  });
+
+  it("wants the wifi client once an ssid is configured", () => {
+    const config = structuredClone(DEFAULT_CONFIG);
+    config.network.client.ssid = "HomeNetwork";
+    expect(configuredConnections(config).has(CLIENT_CONNECTION)).toBe(true);
+  });
+
+  it("wants the modem once it is enabled, whichever mode it is in", () => {
+    const config = structuredClone(DEFAULT_CONFIG);
+    config.network.modem.enabled = true;
+    expect(configuredConnections(config).has(MODEM_CONNECTION)).toBe(true);
+  });
+
+  /**
+   * The exact property R-NET-16 exists for. `desiredProfiles`'s output
+   * shrinks when a device disappears from `Interfaces`; `configuredConnections`
+   * cannot shrink the same way, because it never receives an `Interfaces`
+   * argument to shrink against. A modem enabled in configuration is wanted
+   * whether or not this particular render can currently see it — which is
+   * the difference the boot race on the board turned on: `desiredProfiles`
+   * correctly generated nothing for a modem not yet enumerated, and the old
+   * code then made the mistake of reading that as "not wanted" too.
+   */
+  it("keeps wanting the modem even when desiredProfiles has no device to write it against", () => {
+    const config = structuredClone(DEFAULT_CONFIG);
+    config.network.modem.enabled = true;
+    config.network.modem.apn = "ereseller";
+
+    expect(configuredConnections(config).has(MODEM_CONNECTION)).toBe(true);
+
+    const generated = desiredProfiles(config, fakeSecrets(), { wifi: "wlan0", ethernet: "eth0", modem: null })
+      .map((p) => p.name);
+    expect(generated).not.toContain(MODEM_CONNECTION);
   });
 });

@@ -138,3 +138,22 @@ export function secondsRemaining(status: CommandStatus, now: number): number | n
   const left = Math.ceil((status.expiresAt - now) / 1000);
   return left > 0 ? left : null;
 }
+
+/**
+ * The same time as `m:ss`, for a page to draw — or null when there is none.
+ *
+ * Written here rather than wherever a countdown is shown, because it is the
+ * one number on this console that is *about* the rollback timer, and the
+ * rollback timer is what makes the device unbrickable (R-CFG-03, R-UI-15). A
+ * console that formatted it in a flow would be a console whose most
+ * load-bearing number lived in wiring (CLAUDE.md rule 2).
+ *
+ * `m:ss` rather than seconds: a two-minute window shown as "112 s" has to be
+ * divided before it means anything, and this is read by somebody deciding
+ * whether they have time to check something before it goes back.
+ */
+export function countdown(status: CommandStatus, now: number): string | null {
+  const left = secondsRemaining(status, now);
+  if (left === null) return null;
+  return `${String(Math.floor(left / 60))}:${String(left % 60).padStart(2, "0")}`;
+}

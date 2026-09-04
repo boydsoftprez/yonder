@@ -73,6 +73,19 @@ export default {
 <style scoped>
 .y-ann {
     display: inline-flex;
+    /* Sized to the lamp and its caption, wherever it is placed.
+
+       `inline-flex` is not enough: Dashboard's widget wrapper is a grid, and
+       a grid item stretches to its cell unless something says otherwise. So
+       the border drew a 475px box with a 5px lamp and one short word inside
+       it — on a page whose other half-width widgets are text fields, which is
+       exactly what it then looked like. A lamp that reads as an empty input
+       is not a lamp read before the word (R-UI-11).
+
+       Both axes, and both models: `justify-self`/`align-self` are what a grid
+       honours, and they are inert rather than wrong in a flex row. */
+    justify-self: start;
+    align-self: center;
     align-items: center;
     gap: 5px;
     padding: 2px 8px;

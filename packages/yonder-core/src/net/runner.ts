@@ -65,25 +65,52 @@ export function redactText(text: string, argv: string[]): string {
   return redactValues(text, secretsIn(argv));
 }
 
-/** Never rejects: a non-zero exit is a result, not an exception. */
-export const systemRunner: CommandRunner = (argv, opts) =>
-  new Promise((resolve) => {
-    const [cmd, ...args] = argv;
-    // `env: undefined` is execFile's own "inherit", so the common case pays
-    // nothing; a caller that asked for a variable gets the daemon's
-    // environment with that variable laid over it.
-    const env = opts?.env === undefined ? undefined : { ...process.env, ...opts.env };
-    execFile(cmd, args, { encoding: "utf8", maxBuffer: 8 << 20, env }, (err, stdout, stderr) => {
-      const code =
-        err && typeof (err as NodeJS.ErrnoException & { code?: number }).code === "number"
-          ? ((err as unknown as { code: number }).code)
-          : err
-            ? 127
-            : 0;
-      // execFile passes stdout/stderr as "" (not undefined) even when the
-      // spawn itself fails (e.g. ENOENT for a missing binary), so a ?? here
-      // would never reach the error message. Use || so an empty-but-defined
-      // stderr still falls back to the error when the process never ran.
-      resolve({ code, stdout: stdout ?? "", stderr: stderr || (err ? String(err.message) : "") });
+/**
+ * How long any one command is given before it is killed.
+ *
+ * A backstop, not a safety guarantee. A wedged ModemManager holds `mmcli` on
+ * a D-Bus call that never returns, and `execFile` with no `timeout` waits for
+ * it for the life of the process — so a caller that never bounded its own
+ * wait waited for ever too. Two minutes is above every legitimate command
+ * this daemon runs (NetworkManager's own `connection up` gives up at 90 s,
+ * and ApplyEngine bounds a renderer at 60), so this can only ever catch a
+ * process that is genuinely stuck.
+ *
+ * Anything whose *answer* is safety-relevant bounds itself far more tightly
+ * — see `CARRYING_DEADLINE_MS` in the fallback watchdog, and the probe's own
+ * `curl --max-time`. This is what stops a stuck process leaking; those are
+ * what stop it costing an aircraft its link.
+ */
+export const RUN_TIMEOUT_MS = 120_000;
+
+/**
+ * The system runner, with a bound of its own. Never rejects: a non-zero exit
+ * — a killed process included — is a result, not an exception.
+ */
+export function boundedRunner(timeoutMs: number): CommandRunner {
+  return (argv, opts) =>
+    new Promise((resolve) => {
+      const [cmd, ...args] = argv;
+      // `env: undefined` is execFile's own "inherit", so the common case pays
+      // nothing; a caller that asked for a variable gets the daemon's
+      // environment with that variable laid over it.
+      const env = opts?.env === undefined ? undefined : { ...process.env, ...opts.env };
+      const options = { encoding: "utf8" as const, maxBuffer: 8 << 20, timeout: timeoutMs, env };
+      execFile(cmd, args, options, (err, stdout, stderr) => {
+        const code =
+          err && typeof (err as NodeJS.ErrnoException & { code?: number }).code === "number"
+            ? ((err as unknown as { code: number }).code)
+            : err
+              ? 127
+              : 0;
+        // execFile passes stdout/stderr as "" (not undefined) even when the
+        // spawn itself fails (e.g. ENOENT for a missing binary), so a ?? here
+        // would never reach the error message. Use || so an empty-but-defined
+        // stderr still falls back to the error when the process never ran.
+        resolve({ code, stdout: stdout ?? "", stderr: stderr || (err ? String(err.message) : "") });
+      });
     });
-  });
+}
+
+/** Never rejects: a non-zero exit is a result, not an exception. */
+export const systemRunner: CommandRunner = boundedRunner(RUN_TIMEOUT_MS);

@@ -70,7 +70,7 @@ else
     fi
 fi
 
-# The console's two Yonder node packages.
+# The console's Yonder node packages.
 #
 # Copied rather than `npm install`ed: they are in this repository, they have no
 # runtime dependency but `yonder-core`, and a board has no registry to fetch
@@ -87,8 +87,19 @@ fi
 # finds them by reading this package's node-red-dashboard-2 manifest. A
 # console with the nodes and without the bundles registers every widget and
 # draws none of them.
+#
+# **Every package a node type in flows/flows.json comes from.** The list used
+# to be four of the five, and the console still installed, still started and
+# still served four pages — with the Cellular tab, the `Way out` panel's data
+# source and the Status page's reachability line loading as unknown nodes,
+# because `node-red-contrib-yonder-modem` was never copied. Nothing said so:
+# an unknown node is a hole in a page, not an error. It was invisible for as
+# long as it was, because every deployment during that work copied packages by
+# hand. `flows.test.ts` reads this loop now and fails when a type the shipped
+# flows use comes from a package this line does not name (R-UI-19).
 for pkg in node-red-contrib-yonder-system node-red-contrib-yonder-network \
-           node-red-contrib-yonder-remote node-red-dashboard-2-yonder; do
+           node-red-contrib-yonder-remote node-red-contrib-yonder-modem \
+           node-red-dashboard-2-yonder; do
     pkg_src="$YONDER_SRC/packages/$pkg"
     pkg_dest="$con_dest/node_modules/$pkg"
     if [ ! -d "$pkg_src/dist" ] && [ "$DRY_RUN" != "1" ]; then
@@ -299,6 +310,8 @@ if [ -f "$YONDER_SRC/systemd/yonder-console.service" ]; then
         node_modules/node-red-contrib-yonder-system/dist/status.js "$YONDER_NODE_LINK"
     assert_module_graph "$con_dest" \
         node_modules/node-red-contrib-yonder-network/dist/join.js "$YONDER_NODE_LINK"
+    assert_module_graph "$con_dest" \
+        node_modules/node-red-contrib-yonder-modem/dist/state.js "$YONDER_NODE_LINK"
 
     # The generated settings.js loads too, and this is not decoration: it
     # `require`s an ES module out of the daemon's tree, which needs a node new

@@ -32,6 +32,8 @@ export {
 export { startServer } from "./daemon/server.js";
 export {
   systemRunner,
+  boundedRunner,
+  RUN_TIMEOUT_MS,
   redactArgv,
   type CommandRunner,
   type CommandResult,
@@ -72,7 +74,52 @@ export {
   RFKILL_UNBLOCK_WIFI,
   NMCLI_RADIO_WIFI_ON,
 } from "./net/radio.js";
-export { FallbackWatchdog, type FallbackWatchdogOptions } from "./net/watchdog.js";
+export { FallbackWatchdog, CARRYING_DEADLINE_MS, type FallbackWatchdogOptions } from "./net/watchdog.js";
+export {
+  MmcliClient,
+  MmcliError,
+  controlPort,
+  type ModemInfo,
+  type ModemPorts,
+  type BearerInfo,
+  type SignalReading,
+} from "./net/modem/mmcli/client.js";
+export { modemState, type ModemState, type ModemMode } from "./net/modem/state.js";
+export { ModemNetPort, MODEM_READ_DEADLINE_MS } from "./net/modem/netport.js";
+export { MODEM_CONNECTION, modemProfile, metricFor } from "./net/modem/profiles.js";
+export {
+  Standing,
+  PATH_WORDS,
+  FAILURES_TO_STAND_DOWN,
+  SUCCESSES_TO_RETURN,
+  REACH_TICK_MS,
+  REACH_TICK_DEADLINE_MS,
+  type PathName,
+  type PathStanding,
+  type PathEvidence,
+  type PathReport,
+  type ReachState,
+} from "./net/reach/standing.js";
+export { commandProbe, type Probe } from "./net/reach/probe.js";
+export {
+  systemCounters,
+  countersFrom,
+  SYS_CLASS_NET,
+  movement,
+  looksDead,
+  type Counters,
+  type CounterReader,
+} from "./net/reach/counters.js";
+export {
+  ReachMonitor,
+  pathDevices,
+  activePath,
+  pathInUse,
+  pathsHolding,
+  type ReachMonitorOptions,
+} from "./net/reach/monitor.js";
+export { ReachWatch, type ReachWatchOptions } from "./net/reach/watch.js";
+export { withDeadline } from "./net/deadline.js";
 export {
   hashPassword,
   verifyPassword,
@@ -210,7 +257,7 @@ export {
   type ActivityLogOptions,
 } from "./log/activity.js";
 export { scanForNetworks, type ScanResult } from "./net/scan.js";
-export type { DiagProbes, SystemReport } from "./daemon/routes.js";
+export type { DiagProbes, SystemReport, WayBackIn } from "./daemon/routes.js";
 export { HostnameRenderer, HOSTNAME_FILE, type HostnameRendererOptions } from "./system/hostname.js";
 export {
   idle,
@@ -219,6 +266,7 @@ export {
   rejected,
   presentation,
   secondsRemaining,
+  countdown,
   type CommandState,
   type CommandStatus,
   type CommandPresentation,
@@ -231,11 +279,29 @@ export {
   fetched,
   applyStatus,
   confirmStatus,
+  pendingChange,
+  revertStatus,
   readFailure,
+  wayBackInView,
+  PENDING_WHAT,
+  PENDING_WHY,
+  PENDING_WHAT_RADIO,
+  PENDING_WHY_RADIO,
+  PENDING_KEYS,
+  PENDING_KEYS_RADIO,
+  CONFIRM_KEY,
+  REVERT_KEY,
+  WAY_BACK_IN_NOTE,
+  AP_PASSPHRASE_CHANGED,
+  AP_PASSPHRASE_UNKNOWN,
+  AP_PASSPHRASE_UNKNOWN_NOTE,
   MIN_POLL_MS,
   DEFAULT_POLL_MS,
   DEFAULT_SOCKET_PATH,
   type Fetched,
+  type PendingChange,
+  type PendingKey,
+  type WayBackInView,
 } from "./console/node.js";
 export {
   displayFacts,
@@ -262,6 +328,12 @@ export {
   type JoinResult,
   type SecretSink,
 } from "./net/join.js";
+export {
+  configureModem,
+  MODEM_PASSWORD_SECRET,
+  ModemRequest,
+  type ModemConfigureResult,
+} from "./net/modem/configure.js";
 export { setTheme, THEMES, type ThemeRequest, type ThemeResult } from "./ui/theme.js";
 export { ssidOptions, type DropdownOption } from "./net/scan.js";
 export { joinSucceeded, type JoinedResult } from "./net/joined.js";

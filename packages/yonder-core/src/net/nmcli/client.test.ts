@@ -103,6 +103,94 @@ describe("NmcliClient", () => {
     ]);
   });
 
+  /**
+   * **A connection's type cannot be changed, so a profile that has to become
+   * a different kind is replaced** (R-CFG-13).
+   *
+   * Both modem modes write a connection called `yonder-modem`: `auto` is a
+   * `gsm` one on the modem's control port, `appliance` an ethernet one on an
+   * adapter the operator named. Modifying across that boundary wrote every
+   * ethernet property onto a profile that stayed `gsm` and went on dialling
+   * exactly as it had, with nothing failing and nothing logged.
+   */
+  it("replaces a connection whose type is no longer the one wanted", async () => {
+    const { run, calls } = fake({
+      "nmcli -t -f NAME,UUID,TYPE,DEVICE connection show": ok("yonder-modem:u-1:gsm:\n"),
+    });
+    const wrote = await new NmcliClient(run).addOrModify("yonder-modem", {
+      type: "ethernet", ifname: "usb0", settings: [["ipv4.method", "auto"]],
+    });
+    expect(wrote).toBe("replaced");
+    // The read, the delete, the create — in that order and nothing else.
+    expect(calls.map((c) => c.slice(1, 3).join(" ")))
+      .toEqual(["-t -f", "connection delete", "connection add"]);
+    expect(calls.find((c) => c[2] === "modify")).toBeUndefined();
+    const add = calls.find((c) => c[2] === "add")!;
+    expect(add[add.indexOf("type") + 1]).toBe("ethernet");
+  });
+
+  /**
+   * **The half that must never fire.** This deletes a profile, and one of the
+   * profiles it is asked about is the access point an operator may be joined
+   * to over the one radio. nmcli spells a type two ways — `wifi` to `add`,
+   * `802-11-wireless` back from `show` — and reading those as a difference
+   * would drop every station on every render.
+   */
+  it("does not mistake nmcli's two spellings of a type for a change", async () => {
+    const { run, calls } = fake({
+      "nmcli -t -f NAME,UUID,TYPE,DEVICE connection show": ok("yonder-ap:u-1:802-11-wireless:\n"),
+    });
+    expect(await new NmcliClient(run).addOrModify("yonder-ap", AP_SPEC)).toBe("modified");
+    expect(calls.some((c) => c[2] === "delete")).toBe(false);
+  });
+
+  it("leaves a connection alone when nmcli reports no type for it", async () => {
+    // A question that could not be asked is not a difference — the same rule
+    // `pathsDown` takes about a state word it does not recognise.
+    const { run, calls } = fake({
+      "nmcli -t -f NAME,UUID,TYPE,DEVICE connection show": ok("yonder-modem:u-1::\n"),
+    });
+    expect(await new NmcliClient(run).addOrModify("yonder-modem", {
+      type: "ethernet", ifname: "usb0", settings: [["ipv4.method", "auto"]],
+    })).toBe("modified");
+    expect(calls.some((c) => c[2] === "delete")).toBe(false);
+  });
+
+  /**
+   * **A setting the configuration no longer holds is removed, not omitted**
+   * (R-CFG-13). `connection modify` writes only what it is given, so a
+   * property left out of the profile left the stored value in place and in
+   * use — an operator who cleared an APN went on dialling on the old one.
+   */
+  it("resets the properties a profile asks to have cleared", async () => {
+    const { run, calls } = fake({
+      "nmcli -t -f NAME,UUID,TYPE,DEVICE connection show": ok("yonder-modem:u-1:gsm:\n"),
+    });
+    await new NmcliClient(run).addOrModify("yonder-modem", {
+      type: "gsm", ifname: "cdc-wdm0",
+      settings: [["ipv4.method", "auto"]],
+      clear: ["gsm.apn", "gsm.password"],
+    });
+    const mod = calls.find((c) => c[2] === "modify")!;
+    expect(mod.slice(-4)).toEqual(["gsm.apn", "", "gsm.password", ""]);
+  });
+
+  it("resets nothing on a profile it is creating", async () => {
+    // There is no stored value to remove, and `connection add` with no APN is
+    // the path a board was measured on.
+    const { run, calls } = fake({
+      "nmcli -t -f NAME,UUID,TYPE,DEVICE connection show": ok(""),
+    });
+    expect(await new NmcliClient(run).addOrModify("yonder-modem", {
+      type: "gsm", ifname: "cdc-wdm0",
+      settings: [["ipv4.method", "auto"]],
+      clear: ["gsm.apn"],
+    })).toBe("added");
+    const add = calls.find((c) => c[2] === "add")!;
+    expect(add).not.toContain("gsm.apn");
+    expect(add).not.toContain("");
+  });
+
   it("never sends an add-only option to modify", async () => {
     const { run, calls } = fake({
       "nmcli -t -f NAME,UUID,TYPE,DEVICE connection show":

@@ -13,6 +13,15 @@ import { loadConfig } from "../config/load.js";
 import { seedConfigIfAbsent } from "../config/defaults.js";
 import { SecretStore } from "../secrets/store.js";
 import { NmcliClient } from "../net/nmcli/client.js";
+import { MmcliClient } from "../net/modem/mmcli/client.js";
+import { modemState } from "../net/modem/state.js";
+import { ModemNetPort } from "../net/modem/netport.js";
+import { Standing, type StandingView } from "../net/reach/standing.js";
+import { commandProbe } from "../net/reach/probe.js";
+import { ReachMonitor, pathDevices, pathsDown, pathsHolding } from "../net/reach/monitor.js";
+import { ReachWatch } from "../net/reach/watch.js";
+import type { CounterReader } from "../net/reach/counters.js";
+import type { PathName } from "../net/reach/standing.js";
 import { NetworkRenderer } from "../net/renderer.js";
 import { HostnameRenderer } from "../system/hostname.js";
 import { FallbackWatchdog } from "../net/watchdog.js";
@@ -41,6 +50,18 @@ import { DEFAULT_CONFIG, type Config } from "../schema/config.js";
  */
 export const PROVISION_RESTART_DELAY_MS = 1_500;
 
+/**
+ * How often ModemManager is asked to refresh the detailed signal numbers.
+ *
+ * R-CEL-10. Until this is set a modem reports only a coarse quality
+ * percentage, which on the measured board read 60 and then 29 while the real
+ * numbers moved three dB. Two seconds is the modem's own polling interval,
+ * not a rate anything here reads at: the readings are taken from the modem
+ * when a page asks, and arming this costs no bytes on the operator's link
+ * (R-CEL-09).
+ */
+export const SIGNAL_POLL_SECONDS = 2;
+
 export interface ServerOptions {
   socketPath: string;
   configPath: string;
@@ -63,6 +84,15 @@ export interface ServerOptions {
    */
   clock?: Clock;
   /**
+   * Where the byte counters are read from. Test-only, and for exactly the
+   * reason `runner` is: the default is `readFileSync("/sys/class/net/…")`,
+   * and a test that reaches the real one is asserting about whatever
+   * interfaces the machine running it happens to have. It passes today only
+   * because the fixture names do not exist on the host; a CI board with a
+   * `wwan0` or an `eth0` would take a different branch of `ReachWatch`.
+   */
+  counters?: CounterReader;
+  /**
    * Where the console lives, and whether there is one to render at all.
    * Absent means no ConsoleRenderer is assembled — see BuildRenderersOptions.
    */
@@ -81,6 +111,23 @@ export interface BuildRenderersOptions {
   trace?: (line: string) => void;
   /** Drives the network renderer's bounded wait for a radio. See waitForRadio. */
   clock?: Clock;
+  /**
+   * Which paths have stopped reaching anything, read by the network renderer
+   * while it generates route metrics (R-NET-13). Read-only, and an input to
+   * generating configuration rather than a second writer of it — see
+   * NetworkRendererOptions.standing.
+   */
+  standing?: StandingView;
+  /**
+   * Told when a path has actually been re-dialled (R-CEL-09).
+   *
+   * Wired to `ReachWatch.redialled`, which tests that path on its next tick.
+   * The renderer is the only component that knows a re-dial happened — the
+   * interface name does not change and, for a modem that is standing by
+   * rather than in use, neither do any byte counters the watch could read.
+   * Optional, so a renderer built without one behaves exactly as it did.
+   */
+  onRedial?: (path: PathName) => void;
   /**
    * Where the console lives. **Given, never defaulted**: a ConsoleRenderer is
    * assembled only when a caller says where the console is, so nothing in a
@@ -120,6 +167,8 @@ export function buildRenderers(opts: BuildRenderersOptions): {
   consoleRenderer?: ConsoleRenderer;
   secrets: SecretStore;
   client: NmcliClient;
+  /** ModemManager, read and never driven. See net/modem/mmcli/client.ts. */
+  modemClient: MmcliClient;
   /** Talks to the installed zerotier-cli, over the same runner as everything else. */
   zerotier: ZeroTierCli;
   remoteRenderer: RemoteRenderer;
@@ -138,7 +187,17 @@ export function buildRenderers(opts: BuildRenderersOptions): {
   // operator's view with `nmcli -t -f DEVICE,TYPE,STATE,CONNECTION device
   // status` twice a tick and buried what their Join actually did.
   const client = new NmcliClient(opts.runner ?? systemRunner, opts.trace ?? trace);
-  const renderer = new NetworkRenderer({ client, secrets, log, clock: opts.clock });
+  // The same runner as the nmcli client, deliberately, for the reason
+  // NmcliClient records about rfkill: two runners that must agree can stop
+  // agreeing, and the failure mode is a test reaching a real mmcli on the
+  // machine running it. The same two loggers apply too — an `mmcli` command
+  // line is diagnostic and belongs in the journal, not in the operator's
+  // activity pane.
+  const modemClient = new MmcliClient(opts.runner ?? systemRunner, opts.trace ?? trace);
+  const renderer = new NetworkRenderer({
+    client, secrets, log, clock: opts.clock, standing: opts.standing,
+    ...(opts.onRedial === undefined ? {} : { onRedial: opts.onRedial }),
+  });
 
   // After the network renderer: a mesh runs over whatever the network layer
   // just brought up, so ordering it first would join over an interface that
@@ -187,6 +246,7 @@ export function buildRenderers(opts: BuildRenderersOptions): {
     ...(consoleRenderer === undefined ? {} : { consoleRenderer }),
     secrets,
     client,
+    modemClient,
     zerotier,
     remoteRenderer,
     generated,
@@ -239,6 +299,22 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
     warn(`could not seed a default configuration, serving anyway: ${(e as Error).message}`);
   }
 
+  // The configuration, read fresh every time rather than captured: an apply
+  // can replace it under any of the callers below, and a monitor answering
+  // from the document that was in force at start-up would be answering about
+  // a device that no longer exists. Defined here because the standing below
+  // needs it, and the standing has to exist before the renderer that reads it.
+  const reachConfig = (): Config => {
+    try {
+      return loadConfig(opts.configPath);
+    } catch {
+      return DEFAULT_CONFIG;
+    }
+  };
+  /** `usb` is in the schema's interface list and no renderer writes one. */
+  const reachOrder = (config: Config): PathName[] =>
+    config.network.priority.filter((i): i is PathName => i !== "usb");
+
   // A malformed secrets.yaml throws out of the SecretStore constructor. That
   // must cost the network renderer, not the socket: without the socket there
   // is no way to post the corrected configuration either.
@@ -249,11 +325,87 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   // ApplyEngineOptions.degraded. GET /config and GET /status do not depend
   // on it, so the device stays reachable and diagnosable either way.
   let degraded: string | undefined;
+
+  /**
+   * R-NET-13's second half: **traffic moves to the next path that works.**
+   *
+   * Standing decides whether a path participates; the renderer generates the
+   * route metrics; this is the wire between them. On a change of standing —
+   * a demotion or a recovery, never a probe — the renderer recomputes the
+   * metrics for the egress connections it owns and writes them, which is what
+   * actually moves the default route.
+   *
+   * **It is not a second writer of configuration.** `config.yaml` still
+   * states preference, `metricFor` still generates the numbers from it, and
+   * the renderer is still the only thing that writes one. All that has
+   * changed is that one of the renderer's inputs can now move without an
+   * apply — so a demotion cannot sit unwritten until the next unrelated
+   * render, which is what "and traffic moves" would otherwise have meant in
+   * practice.
+   *
+   * Serialised against itself and swallowing every failure, because the
+   * caller is a probe result folding into standing: there is nobody to report
+   * an error to, nothing to roll back, and two overlapping passes writing the
+   * same three connections would be two nmcli commands racing for no gain.
+   */
+  let remetricing: Promise<void> = Promise.resolve();
+  let remetricStopped = false;
+  const remetric = (): void => {
+    remetricing = remetricing.then(async () => {
+      // Same reason the watchdog and the reach watch have stop(): a pass
+      // queued behind another one must not reconfigure NetworkManager on
+      // behalf of a process that has already let go of its socket.
+      if (remetricStopped) return;
+      const renderer = built?.renderer;
+      // Only when buildRenderers threw — an unreadable secrets.yaml. There is
+      // no renderer to write a metric with, and the fallback watchdog is what
+      // keeps that board reachable.
+      if (renderer === undefined) return;
+      try {
+        await renderer.remetric(reachConfig());
+      } catch (e) {
+        warn(`could not move traffic off a path that stopped working: ${(e as Error).message}`);
+      }
+      // Nothing above can reject, and the chain is guarded anyway: one
+      // rejected link would skip every pass queued behind it, which is a
+      // demotion that silently never reaches the routing table.
+    }).catch(() => {});
+  };
+
+  /**
+   * R-CEL-09's other half: **a link that has just come up is tested.**
+   *
+   * The watch is assembled a long way below this point — it needs the monitor,
+   * which needs the nmcli client `buildRenderers` returns — so the renderer is
+   * handed this indirection rather than the watch itself. Before the watch
+   * exists a re-dial is dropped, which is right: nothing has started ticking
+   * yet, and the watch's own first tick tests whatever is carrying traffic.
+   *
+   * Nothing here can throw. `redialled` records one path in a set, the
+   * renderer catches anything anyway, and a render that has successfully
+   * dialled the operator's corrected APN must not be failed — and rolled
+   * back — by the thing that only wanted to be told about it.
+   */
+  let reachWatch: ReachWatch | undefined;
+  const onRedial = (path: PathName): void => { reachWatch?.redialled(path); };
+
+  // Built before the renderers, because the renderer reads it while
+  // generating route metrics and a renderer holding a standing that arrived
+  // later would generate the first render's metrics from nothing.
+  const standing = new Standing({
+    clock,
+    log: note,
+    order: () => reachOrder(reachConfig()),
+    onChange: remetric,
+  });
+
   try {
     built = buildRenderers({
       secretsPath: opts.secretsPath ?? "/etc/yonder/secrets.yaml",
       runner: opts.runner,
       clock,
+      standing,
+      onRedial,
       // The same directory the apply journal already lives in — one state
       // directory for this daemon, not a second one this renderer invented.
       remoteStatePath: join(dirname(opts.journalPath), "remote.json"),
@@ -274,6 +426,50 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
     // `trace`, not `note`: an nmcli command line is diagnostic, and the
     // activity pane is where an operator looks for what their Join did.
     ?? new NmcliClient(opts.runner ?? systemRunner, trace);
+  // The same one buildRenderers made, so a test injecting a fake runner
+  // cannot reach a real mmcli, with the same fallback and for the same
+  // reason as the nmcli client above.
+  const modemClient = built?.modemClient
+    ?? new MmcliClient(opts.runner ?? systemRunner, trace);
+
+  /**
+   * Turn on ModemManager's detailed signal reporting, once per modem.
+   *
+   * R-CEL-10. A modem reports only a coarse quality percentage until this is
+   * set, and that percentage read 60 and then 29 on a board whose real
+   * numbers moved three dB.
+   *
+   * Here rather than in NetworkRenderer, deliberately. That class has no
+   * modem client and never raises the modem connection itself — the profile
+   * carries `connection.autoconnect yes` and NetworkManager brings the link
+   * up (R-CEL-06) — so there is no "after the modem came up" moment in the
+   * render path to hang this on. Manufacturing one would mean giving an
+   * mmcli dependency to the class that decides whether the device is
+   * reachable, to arm a page's detail. This is instead the first place that
+   * has the modem's ModemManager path in hand at all.
+   *
+   * **It can only ever log.** Failing to arm it costs detail on a page; the
+   * read it sits in front of still answers with whatever the modem does
+   * report, and a modem that has just appeared may simply not be ready yet —
+   * so a failure is retried on the next read and said once per modem, or a
+   * console polling every few seconds would fill the journal with it.
+   */
+  let armedModem: string | null = null;
+  let armFailedFor: string | null = null;
+  const armSignal = async (path: string): Promise<void> => {
+    if (armedModem === path) return;
+    try {
+      await modemClient.armSignal(path, SIGNAL_POLL_SECONDS);
+      armedModem = path;
+      armFailedFor = null;
+      note("modem: detailed signal reporting is on");
+    } catch (e) {
+      if (armFailedFor !== path) {
+        armFailedFor = path;
+        warn(`modem: could not turn on detailed signal reporting (${(e as Error).message})`);
+      }
+    }
+  };
 
   // The one poll loop for the mesh's throughput, running on `clock` like
   // every other timer this daemon owns. Started unconditionally — it costs
@@ -367,11 +563,90 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   // K-17, along with why it cannot simply be assigned earlier.
   let radioSettled: Promise<void> = Promise.resolve();
 
+  // The interface the modem's bytes actually go out of, read from
+  // ModemManager because it is the only thing that knows it. Its own unit
+  // rather than a closure here, for the reason pathDevices records: this file
+  // is wiring, not a second place that decides what a modem is. What may be
+  // remembered about a modem and what may not is R-CEL-13, stated there with
+  // its tests.
+  const modemPort = new ModemNetPort(modemClient, clock);
+
+  // Which way out is working, assembled from the parts in net/reach/.
+  //
+  // Built here, from the same NmcliClient and the same CommandRunner as
+  // everything else, so a test injecting a fake runner cannot reach a real
+  // `curl` — and built even when buildRenderers threw, because the watchdog
+  // below asks it a question and a board whose secret store is unreadable is
+  // exactly the board that must still raise its access point.
+  //
+  // Every input is read fresh on each call rather than captured — see
+  // reachConfig, above, which is where that is done and why.
+  const reach = new ReachMonitor({
+    standing,
+    probe: commandProbe(opts.runner ?? systemRunner),
+    ...(opts.counters !== undefined ? { counters: opts.counters } : {}),
+    devices: async () => {
+      const config = reachConfig();
+      const [devices, net] = await Promise.all([client.devices(), modemPort.interfaceFor(config)]);
+      return pathDevices(config, devices, net);
+    },
+    // What NetworkManager says about the interfaces themselves, so a port
+    // with no cable in it is reported as down rather than as up and untested
+    // (R-NET-14). The control port is passed as the modem's second name for
+    // the same reason `holding` passes it: NetworkManager reports a state for
+    // `cdc-wdm0` and has no entry at all for the `wwan0` the bytes go out of.
+    down: async () => {
+      const config = reachConfig();
+      const [devices, net] = await Promise.all([client.devices(), modemPort.interfaceFor(config)]);
+      return pathsDown(devices, pathDevices(config, devices, net), pathDevices(config, devices));
+    },
+    order: () => reachOrder(reachConfig()),
+    holding: async () => {
+      const config = reachConfig();
+      const [devices, addresses, net] = await Promise.all([
+        client.devices(), client.activeIpv4(), modemPort.interfaceFor(config),
+      ]);
+      return pathsHolding(
+        reachOrder(config),
+        pathDevices(config, devices, net),
+        addresses,
+        config.network.ap.address.split("/")[0] ?? "",
+        // The other name the same path answers to, so an address reported
+        // against the control port is not read as "the modem is not in use".
+        pathDevices(config, devices),
+      );
+    },
+    log: note,
+  });
+
+  // What decides when to probe. Without it the monitor above is only ever
+  // asked questions and never told anything: nothing would stand down, and
+  // `carrying` below would answer true for ever — which is the pre-Task-8
+  // behaviour wearing the new mechanism's clothes.
+  //
+  // The counters are the kernel's own and cost nothing to read, so a device
+  // that is working spends nothing on establishing that (R-CEL-09, R-NET-13).
+  reachWatch = new ReachWatch({
+    monitor: reach, clock, log: note,
+    ...(opts.counters !== undefined ? { counters: opts.counters } : {}),
+  });
+
   const watchdog = new FallbackWatchdog({
     client,
     clock,
     config: watchdogConfig,
     since: startedAt,
+    // K-42. An address is not a way back: a modem with the wrong APN
+    // registers, attaches, takes an address and installs a route while
+    // completing no request, and a device configured that way from the boot
+    // partition with no other path never raised its access point.
+    //
+    // The monitor answers true on every doubt — a path nothing has probed
+    // yet, an address belonging to no path it knows, a question it could not
+    // ask — so wiring this in can only ever make the fallback fire *more*
+    // readily than the address check alone, never less. That direction is the
+    // one rule 6 allows.
+    carrying: () => reach.carrying(),
     // The fallback's only action is `nmcli connection up yonder-ap`, and that
     // profile exists only because a render created it. On a cold boot the
     // render may still be waiting for the radio when the deadline lands —
@@ -391,6 +666,10 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
     log: note,
   });
   watchdog.start();
+  // Started with the watchdog, because the watchdog's question is the one it
+  // exists to be able to answer, and it needs the whole fallback window to
+  // gather consecutive evidence before that question is asked (K-42).
+  reachWatch.start();
 
   // Nothing else renders on a clean start. renderAll runs only from apply()
   // and from the two rollback paths, so a device nobody has ever posted an
@@ -473,6 +752,27 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
         const [devices, addresses] = await Promise.all([client.devices(), client.activeIpv4()]);
         return networkState(loadConfig(opts.configPath), devices, addresses);
       },
+      // What the modem says about itself, read from ModemManager and never
+      // from the configuration — the APN comes off the connected bearer, so
+      // this reports what the link is actually using rather than what was
+      // asked for, which is the pair that disagrees exactly when it matters.
+      modemState: async () => {
+        const config = loadConfig(opts.configPath);
+        const paths = await modemClient.modems();
+        // No modem is an ordinary answer, not a failure. A board without one
+        // is an ordinary board, and an appliance is a named adapter
+        // ModemManager will never have heard of — modemState says which of
+        // those this is, and the nulls are what "not measured" looks like.
+        // Never zeroes: 0 dBm is a real and extraordinary reading.
+        if (paths.length === 0) {
+          return modemState(config, null, null, { rssi: null, rsrq: null, rsrp: null, snr: null });
+        }
+        const modem = await modemClient.modem(paths[0]);
+        await armSignal(modem.path);
+        const bearer = await modemClient.connectedBearer(modem);
+        const signal = await modemClient.signal(modem.path);
+        return modemState(config, modem, bearer, signal);
+      },
       secrets: built.secrets,
       // The interface's kernel byte counters, not ZeroTier's own /metrics —
       // measured empty (0 bytes) on a real board. This is the same call the
@@ -486,6 +786,12 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
         throughput: (iface) => sampler.forInterface(iface),
       }),
     }),
+    // Not behind `built`: the reach monitor is assembled from the runner and
+    // the nmcli client, neither of which depends on the secret store, so a
+    // board whose secrets.yaml is unreadable can still say which way out is
+    // working — which is most of what an operator needs to fix it.
+    reachState: () => reach.state(),
+    testPath: async (path) => reach.test(path),
     ...(onProvisioned === undefined ? {} : { onProvisioned }),
   });
 
@@ -572,6 +878,12 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
         // would go on questioning NetworkManager — and could still reach a
         // render — on behalf of a process that has already closed.
         watchdog.stop();
+        // Stopped with it, and for the same reason one step further: a tick
+        // loop outliving its daemon would go on running `curl` on somebody's
+        // metered link on behalf of a process that has closed its socket.
+        reachWatch.stop();
+        // And with them, the re-metric the reach watch is the only caller of.
+        remetricStopped = true;
         built?.renderer.cancelRadioWait();
         // The third timer this daemon can own. Same reason as the other two:
         // one still armed after close() would restart a console on behalf of

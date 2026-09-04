@@ -8,10 +8,18 @@
             <i v-if="known" class="y-gauge__ptr" :style="{ left: pct(r.fraction) }" />
             <i v-if="r.limitAt !== undefined" class="y-gauge__redline" :style="{ left: pct(r.limitAt) }" />
             <span class="y-gauge__bands" aria-hidden="true">
-                <i class="band good" :style="bandStyle(0, r.cautionAt ?? r.limitAt ?? 1)" />
-                <i v-if="r.cautionAt !== undefined" class="band waiting"
-                   :style="bandStyle(r.cautionAt, r.limitAt ?? 1)" />
-                <i v-if="r.limitAt !== undefined" class="band bad" :style="bandStyle(r.limitAt, 1)" />
+                <template v-if="r.sense === 'higher-is-better'">
+                    <i v-if="r.limitAt !== undefined" class="band bad" :style="bandStyle(0, r.limitAt)" />
+                    <i v-if="r.cautionAt !== undefined" class="band waiting"
+                       :style="bandStyle(r.limitAt ?? 0, r.cautionAt)" />
+                    <i class="band good" :style="bandStyle(r.cautionAt ?? r.limitAt ?? 0, 1)" />
+                </template>
+                <template v-else>
+                    <i class="band good" :style="bandStyle(0, r.cautionAt ?? r.limitAt ?? 1)" />
+                    <i v-if="r.cautionAt !== undefined" class="band waiting"
+                       :style="bandStyle(r.cautionAt, r.limitAt ?? 1)" />
+                    <i v-if="r.limitAt !== undefined" class="band bad" :style="bandStyle(r.limitAt, 1)" />
+                </template>
             </span>
         </span>
 
@@ -73,7 +81,8 @@ export default {
                 min: this.props.min ?? 0,
                 max: this.props.max ?? 100,
                 caution: this.props.caution,
-                limit: this.props.limit
+                limit: this.props.limit,
+                sense: this.props.sense
             })
         },
         /** A value we do not have is drawn as absent, never as zero (R-UI-05). */
