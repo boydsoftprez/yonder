@@ -66,7 +66,7 @@ export interface ReachMonitorOptions {
  * It decides nothing about *preference*. `network.priority` is the only
  * statement of that and `config.yaml` remains its only writer (R-NET-13); all
  * this establishes is whether a path reaches anything, which is the question
- * an address cannot answer (K-40).
+ * an address cannot answer (K-42).
  */
 export class ReachMonitor {
   private readonly standing: Standing;
@@ -263,7 +263,7 @@ export class ReachMonitor {
    * with a dead LAN and a modem on a wrong APN answered "something is
    * carrying traffic" at the fallback deadline — and that deadline is checked
    * exactly once, so the answer was final and the board stayed unreachable
-   * (K-40, by a different route than the one this milestone closed).
+   * (K-42, by a different route than the one this milestone closed).
    *
    * So evidence may overturn the address test only where there is evidence:
    *

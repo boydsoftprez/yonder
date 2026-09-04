@@ -56,7 +56,7 @@ function pathName(path: PathName): string {
  *
  * An untested path is neutral and never good. Nothing has established that it
  * reaches anything, and a green lamp on the strength of nobody having shown
- * otherwise is the mistake K-40 is about — a modem re-dialled onto a wrong
+ * otherwise is the mistake K-42 is about — a modem re-dialled onto a wrong
  * APN, untested, lighting up as ready.
  */
 function pathTone(standing: PathStanding, evidence: PathEvidence): "good" | "bad" | "neutral" {
@@ -246,7 +246,7 @@ export interface StatePayload {
   reachable: boolean;
   /** What changed and when, for the line under that word. See `reachWhy`. */
   why: string;
-  /** True while some path is carrying traffic. The watchdog's question (K-40). */
+  /** True while some path is carrying traffic. The watchdog's question (K-42). */
   carrying: boolean;
 }
 
@@ -287,7 +287,7 @@ export function messageFor(modem: ModemState, reach: ReachState): { payload: Sta
   // `carrying` false is taken as NOTHING even when a path still holds the
   // default route, because `carrying` is deliberately optimistic — the
   // monitor answers true on every doubt, so false is evidence rather than
-  // absence of it (K-40, R-NET-07). A route that reaches nothing is not a
+  // absence of it (K-42, R-NET-07). A route that reaches nothing is not a
   // way the device is reachable.
   //
   // One expression, two fields. The lamp on Status is lit from `reachable`

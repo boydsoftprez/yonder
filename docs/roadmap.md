@@ -211,7 +211,7 @@ schedule, because a healthy aircraft should spend no data on health checks. A pa
 stops reaching anything is stood down and the renderer writes it a
 losing metric, so traffic moves to one that works; `network.priority` stays the only writer
 of preference and reachability decides only participation (R-NET-13). The fallback watchdog
-moved onto the same evidence, which closes K-40.
+moved onto the same evidence, which closes K-42.
 
 **M3b — the console: built.** A `Cellular` tab: the verdict as a lit annunciator, RSRP and
 SINR drawn against their bands, the facts the modem reports, and the form that repairs them
@@ -324,7 +324,7 @@ answered by `connection.autoconnect yes` — a modem that drops and returns is
 NetworkManager's business, not a loop of Yonder's — and no drop has been staged to watch it
 happen. **R-CEL-01 is built and has never been exercised:** there is no tethered-appliance
 modem on this bench, which is the reason such a modem is named in configuration rather than
-detected. K-30 and K-40 are closed; [K-41](known-issues.md) is opened by this work.
+detected. K-30 and K-42 are closed; [K-43](known-issues.md) is opened by this work.
 
 ---
 

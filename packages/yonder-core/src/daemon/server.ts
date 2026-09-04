@@ -656,7 +656,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
     clock,
     config: watchdogConfig,
     since: startedAt,
-    // K-40. An address is not a way back: a modem with the wrong APN
+    // K-42. An address is not a way back: a modem with the wrong APN
     // registers, attaches, takes an address and installs a route while
     // completing no request, and a device configured that way from the boot
     // partition with no other path never raised its access point.
@@ -688,7 +688,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   watchdog.start();
   // Started with the watchdog, because the watchdog's question is the one it
   // exists to be able to answer, and it needs the whole fallback window to
-  // gather consecutive evidence before that question is asked (K-40).
+  // gather consecutive evidence before that question is asked (K-42).
   reachWatch.start();
 
   // Nothing else renders on a clean start. renderAll runs only from apply()

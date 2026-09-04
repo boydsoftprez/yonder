@@ -72,7 +72,7 @@ export interface PathReport {
  * watchdog. "Not stood down" covers a path that is working, a path that has
  * failed twice of the three that condemn it, and a path nothing has ever
  * looked at; treating those as one is how a board with no way out reports
- * itself healthy (K-40).
+ * itself healthy (K-42).
  *
  *  - `reaching` — the most recent probe reached something.
  *  - `not-reaching` — it is stood down, or its recent probes have been
@@ -85,7 +85,7 @@ export type PathEvidence = "reaching" | "not-reaching" | "untested";
 export interface ReachState {
   paths: PathReport[];
   inUse: PathName | null;
-  /** True when some path is carrying traffic. The watchdog's question (K-40). */
+  /** True when some path is carrying traffic. The watchdog's question (K-42). */
   carrying: boolean;
 }
 
@@ -286,7 +286,7 @@ export class Standing implements StandingView {
    *
    * The fallback watchdog is the caller this exists for: it has one chance to
    * decide whether the access point comes up, and it must be able to tell a
-   * path that is failing from one nobody has looked at (K-40).
+   * path that is failing from one nobody has looked at (K-42).
    */
   evidenceFor(path: PathName): PathEvidence {
     const r = this.records.get(path);

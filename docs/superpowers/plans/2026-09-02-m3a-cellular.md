@@ -85,12 +85,12 @@ panel are M3b.
 | `packages/yonder-core/src/schema/config.ts` | `network.modem` |
 | `packages/yonder-core/src/net/profiles.ts` | `Interfaces.modem`, `MODEM_CONNECTION`, modem profiles in `desiredProfiles` |
 | `packages/yonder-core/src/net/renderer.ts` | `OWNED` gains the modem connection; interface detection finds it |
-| `packages/yonder-core/src/net/watchdog.ts` | Reachability means carrying traffic, not holding an address (K-40) |
+| `packages/yonder-core/src/net/watchdog.ts` | Reachability means carrying traffic, not holding an address (K-42) |
 | `packages/yonder-core/src/daemon/routes.ts` | `GET /modem/state`, `GET /reach/state` |
 | `packages/yonder-core/src/daemon/server.ts` | Build the modem client, the reach monitor, wire both |
 | `installer/roles/10-base.sh` | `ensure_pkgs modemmanager` |
 | `docs/requirements.md` | R-CEL-09, R-CEL-10, R-CEL-11, R-NET-13 |
-| `docs/known-issues.md` | K-40 |
+| `docs/known-issues.md` | K-42 |
 | `docs/configuration.md` | `network.modem`, and the retired sketch keys |
 | `docs/roadmap.md` | M3a status |
 
@@ -232,12 +232,12 @@ In `docs/requirements.md`, append to the R-CEL block after R-CEL-08, then R-NET-
 R-NET-12. Copy the four rows verbatim from §7 of the spec — they are written as
 requirement text and must not be paraphrased.
 
-- [ ] **Step 6: Add K-40**
+- [ ] **Step 6: Add K-42**
 
 In `docs/known-issues.md`, after K-32:
 
 ```markdown
-### K-40 · The fallback watchdog accepts an address as proof of reachability
+### K-42 · The fallback watchdog accepts an address as proof of reachability
 
 **Status:** Open · **Requirement:** R-NET-07, R-CEL-09
 
@@ -1529,7 +1529,7 @@ describe("looksDead", () => {
 
   it("is false when nothing is moving at all", () => {
     // An idle link is not a dead one. This is exactly the distinction the
-    // fallback watchdog could not make (K-40) and the reason it is drawn here
+    // fallback watchdog could not make (K-42) and the reason it is drawn here
     // rather than left to a caller.
     expect(looksDead({ rx: 100, tx: 100 }, { rx: 100, tx: 100 })).toBe(false);
   });
@@ -1609,7 +1609,7 @@ const ATTEMPT_BYTES = 1024;
  *
  * **An idle link is not a dead one**, and telling them apart is the whole
  * point: the fallback watchdog rejected byte counters for exactly that reason
- * (K-40), and the answer is not to look at one counter but at both. Nothing
+ * (K-42), and the answer is not to look at one counter but at both. Nothing
  * moving in either direction says nothing at all, and this returns false.
  */
 export function looksDead(before: Counters, after: Counters): boolean {
@@ -1862,7 +1862,7 @@ export interface PathReport {
 export interface ReachState {
   paths: PathReport[];
   inUse: PathName | null;
-  /** True when some path is carrying traffic. The watchdog's question (K-40). */
+  /** True when some path is carrying traffic. The watchdog's question (K-42). */
   carrying: boolean;
 }
 
@@ -1984,7 +1984,7 @@ Append to `packages/yonder-core/src/net/watchdog.test.ts`:
 
 ```ts
 it("raises the access point when the only interface holds an address and reaches nothing", async () => {
-  // K-40. A cellular link with a wrong APN registers, attaches, takes an
+  // K-42. A cellular link with a wrong APN registers, attaches, takes an
   // address and installs a route while completing no request — measured, and
   // the reason this check could not stay as it was.
   let raised = false;
@@ -2053,7 +2053,7 @@ In `packages/yonder-core/src/net/watchdog.ts`, add to `FallbackWatchdogOptions`:
    * cellular: a modem with a wrong APN registers, attaches, takes an address
    * and installs a route while completing no request. That satisfied the old
    * test, and a device configured that way from the boot partition with no
-   * other path never raised its access point (K-40).
+   * other path never raised its access point (K-42).
    *
    * **Absent means "nobody told me", and the answer is unchanged from before
    * this existed: an address is accepted.** A daemon assembled without a
@@ -2094,10 +2094,10 @@ Expected: PASS — the three new tests and **every pre-existing test, unchanged.
 existing test needed editing, stop: that means the watchdog became less willing to raise
 the access point, which is rule 6.
 
-- [ ] **Step 5: Close K-40**
+- [ ] **Step 5: Close K-42**
 
-In `docs/known-issues.md`, change K-40's heading to
-`### K-40 · ~~The fallback watchdog accepts an address as proof of reachability~~ — CLOSED`
+In `docs/known-issues.md`, change K-42's heading to
+`### K-42 · ~~The fallback watchdog accepts an address as proof of reachability~~ — CLOSED`
 and set **Status:** Closed, naming this commit.
 
 - [ ] **Step 6: Commit**
@@ -2105,7 +2105,7 @@ and set **Status:** Closed, naming this commit.
 ```bash
 npm test
 git add packages/yonder-core/src/net/watchdog.ts packages/yonder-core/src/net/watchdog.test.ts docs/known-issues.md
-git commit -s -m "fix(net): an address is not a way back — K-40, R-NET-07"
+git commit -s -m "fix(net): an address is not a way back — K-42, R-NET-07"
 ```
 
 ---
@@ -2459,7 +2459,7 @@ window Step 4 established, the log carries a sentence naming Ethernet, saying it
 nothing and was stood down, and traffic is going out over the modem. Unplug it; expected: a
 second sentence saying it is back.
 
-- [ ] **Step 6: Watch the watchdog do the thing K-40 was about**
+- [ ] **Step 6: Watch the watchdog do the thing K-42 was about**
 
 On a board with **no** Ethernet and **no** Wi-Fi client, boot with `apn: nxtgenphone`.
 Expected: the modem takes an address, nothing is reachable, and the access point comes up
@@ -2504,7 +2504,7 @@ git commit -s -m "docs(hardware): M3a on a board, with the hysteresis measured r
 | §5 signal armed, published, free | 3, 9 Step 5, 11 Step 7 |
 | §6 standing down, four constraints | 6, 7, 11 Step 4 |
 | §6 the R-NET-07 hole | 8 |
-| §7 requirements and K-40 | 1, 8 |
+| §7 requirements and K-42 | 1, 8 |
 | §8 where it goes in the console | **M3b — deliberately out of scope** |
 | §9 shape of the code | File Structure |
 | §10 split; R-NET-06 moved out | Scope; the metric helper in Task 5 is the modem's own, not the cross-renderer change |

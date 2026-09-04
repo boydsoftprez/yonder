@@ -473,7 +473,7 @@ describe("buildRenderers and the modem", () => {
  * Its own tests prove it decides correctly; these prove the daemon actually
  * starts it and actually stops it. A watch that is constructed and never
  * started is a green suite, a `/reach/state` that says `standing-by` for
- * ever, and the K-40 board still unreachable — which is precisely the class
+ * ever, and the K-42 board still unreachable — which is precisely the class
  * of defect this file exists to catch.
  */
 describe("the daemon drives the reach watch", () => {
@@ -558,7 +558,7 @@ describe("the daemon drives the reach watch", () => {
   }
 
   it("probes on its own, and stands a modem that reaches nothing down", async () => {
-    // K-40 end to end, through the socket: a link with an address, a route
+    // K-42 end to end, through the socket: a link with an address, a route
     // and no way out, and nothing but this loop to notice.
     withModem();
     const seen: string[][] = [];

@@ -64,7 +64,7 @@ const ATTEMPT_BYTES = 1024;
  *
  * **An idle link is not a dead one**, and telling them apart is the whole
  * point: the fallback watchdog rejected byte counters for exactly that reason
- * (K-40), and the answer is not to look at one counter but at both. Nothing
+ * (K-42), and the answer is not to look at one counter but at both. Nothing
  * moving in either direction says nothing at all, and this returns false.
  */
 export function looksDead(before: Counters, after: Counters): boolean {

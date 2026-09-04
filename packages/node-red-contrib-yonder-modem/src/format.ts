@@ -80,7 +80,7 @@ export function verdict(reach: ReachState): Verdict {
   // daemon omits the path when configuration does not name one, and reports
   // it `absent` when it does and no interface is there — reading only the
   // first left a board with no modem saying NOT YET TESTED, which is a
-  // promise that a test would tell you something (K-40, R-CEL-09).
+  // promise that a test would tell you something (K-42, R-CEL-09).
   if (modem === undefined || modem.standing === "absent") {
     return { text: "NO MODEM", tone: "neutral" };
   }

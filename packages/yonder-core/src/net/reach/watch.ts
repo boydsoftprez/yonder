@@ -35,7 +35,7 @@ export interface ReachWatchOptions {
  *    named for is missed entirely: a freshly booted board with a wrong APN,
  *    no Ethernet and no Wi-Fi transmits almost nothing, `looksDead` needs
  *    real bytes to have left, and so the counters would never say anything
- *    about the one link that is broken (K-40).
+ *    about the one link that is broken (K-42).
  *  - **The path stopped receiving** — bytes going out with nothing coming
  *    back, which is `looksDead`, and is §2's failure written in counters.
  *  - **The path failed its last test.** The hysteresis needs *consecutive*

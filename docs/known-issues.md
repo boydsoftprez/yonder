@@ -894,7 +894,7 @@ that exists.
 
 ---
 
-### K-40 · ~~The fallback watchdog accepts an address as proof of reachability~~ — CLOSED
+### K-42 · ~~The fallback watchdog accepts an address as proof of reachability~~ — CLOSED
 
 **Status:** Closed · **Requirement:** R-NET-07, R-CEL-09
 
@@ -917,7 +917,7 @@ that raises its access point on a working device.
 
 ---
 
-### K-41 · The modem's interface name is remembered for the life of the daemon
+### K-43 · The modem's interface name is remembered for the life of the daemon
 
 **Status:** Open · **Requirement:** R-CEL-09, R-NET-14
 

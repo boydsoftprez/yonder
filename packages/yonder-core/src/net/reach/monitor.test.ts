@@ -192,7 +192,7 @@ describe("ReachMonitor.state", () => {
    * about reachability, and `standing-by` covers three quite different
    * situations — reaching, failing-but-not-yet-condemned, and never looked
    * at. `evidenceFor` already tells them apart for the fallback watchdog
-   * (K-40); this is the same distinction arriving at the display layer.
+   * (K-42); this is the same distinction arriving at the display layer.
    */
   const detailFor = async (monitor: ReachMonitor, path: PathName): Promise<string> =>
     (await monitor.state()).paths.find((p) => p.path === path)!.detail;
@@ -431,7 +431,7 @@ describe("ReachMonitor.carrying", () => {
   });
 
   /**
-   * K-40 by a different route, and the reason "not yet condemned" is not
+   * K-42 by a different route, and the reason "not yet condemned" is not
    * "working".
    *
    * The board: a LAN cable into a switch with no route out, and an `auto`

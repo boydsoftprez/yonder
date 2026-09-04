@@ -205,7 +205,7 @@ describe("FallbackWatchdog", () => {
   });
 
   it("raises the access point when the only interface holds an address and reaches nothing", async () => {
-    // K-40. A cellular link with a wrong APN registers, attaches, takes an
+    // K-42. A cellular link with a wrong APN registers, attaches, takes an
     // address and installs a route while completing no request - measured on
     // hardware, and the reason this check could not stay as it was.
     const { wd, advance, raised } = harness(DEVICE_SHOW.ethernetUp, DEFAULT_CONFIG, undefined, async () => false);
