@@ -268,6 +268,11 @@ describe("a control another control has charge of", () => {
   it("matches the flag as a whole word", () => {
     expect(parseControls("                          gamma 0x00980910 (int)    : min=64 max=300 step=1 default=110 value=110 flags=deactivated")
       .get("gamma")?.inactive).toBe(false);
+    // `deactivated` does not contain `inactive` at all, so it cannot tell a
+    // whole-word match from a substring search — it passes either way. This
+    // one discriminates: a flag that *contains* the word is not the word.
+    expect(parseControls("                          gamma 0x00980910 (int)    : min=64 max=300 step=1 default=110 value=110 flags=co-inactive-extra, has-min-max")
+      .get("gamma")?.inactive).toBe(false);
   });
 });
 
