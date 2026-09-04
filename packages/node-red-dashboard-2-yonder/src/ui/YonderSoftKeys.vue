@@ -65,15 +65,18 @@ export default {
 }
 
 .y-keys__key {
-    /* Sized to its words, with a floor for a gloved finger — never `flex: 1`.
-       Two keys stretched across a 1256px rail are the slab this whole design
-       language replaced, wearing a rail for a hat. */
+    /* Sized to its words, never `flex: 1`. Two keys stretched across a 1256px
+       rail are the slab this whole design language replaced, wearing a rail
+       for a hat. */
     flex: 0 0 auto;
     min-width: 8rem;
     padding-inline: 1.25rem;
-    /* Deep enough for a gloved finger (R-UI-04) without becoming a slab: the
-       rail is the full width, a key within it never is. */
-    min-height: 34px;
+    /* A key is a control, so it takes the same floor every other control
+       takes. This was 34px, under a comment that justified it the same way
+       `--yonder-touch: 44px` was justified — so the two numbers disagreed
+       while their reasons matched, and the shared fiction is what kept that
+       invisible. The rail is the full width; a key within it never is. */
+    min-height: var(--yonder-touch, 44px);
     padding: 7px 6px;
     border: 0;
     border-right: 1px solid var(--yonder-divider, #2b333c);

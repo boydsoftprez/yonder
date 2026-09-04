@@ -320,7 +320,7 @@ describe("themeCss ships a whole shell", () => {
     }
   });
 
-  it("sizes anything hittable for a gloved finger", () => {
+  it("gives anything hittable the enhanced target size", () => {
     for (const t of themes) {
       const css = themeCss(t);
       expect(css, t).toContain("--yonder-touch: 44px");

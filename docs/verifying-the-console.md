@@ -273,5 +273,5 @@ debt list nobody prunes stops being a list of debts and becomes a list of excuse
   problem for the same reason.
 
 **What it still does not prove.** That a reading is legible in sunlight, that a target is
-big enough for a gloved finger, or that any of it works on a board. A headless browser at
-1280×900 is not a tablet on a wing.
+comfortable to hit, or that any of it works on a board. A headless browser at 1280×900 is
+one viewport on one machine, and no substitute for the screen somebody is holding.
