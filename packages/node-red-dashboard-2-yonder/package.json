@@ -2,7 +2,7 @@
   "name": "node-red-dashboard-2-yonder",
   "version": "0.1.0",
   "license": "GPL-3.0-or-later",
-  "description": "Yonder's instrument objects for Dashboard 2.x — engine bars, tapes, annunciators, data bars, identities, soft keys and sparklines. The console's visual language, built once (ADR-0009).",
+  "description": "Yonder's instrument objects for Dashboard 2.x — engine bars, tapes, annunciators, data bars, identities, soft keys, hold keys and sparklines. The console's visual language, built once (ADR-0009).",
   "keywords": [
     "node-red",
     "node-red-dashboard-2",
@@ -17,7 +17,8 @@
       "ui-yonder-databar": "dist/databar.js",
       "ui-yonder-softkeys": "dist/softkeys.js",
       "ui-yonder-identity": "dist/identity.js",
-      "ui-yonder-sparkline": "dist/sparkline.js"
+      "ui-yonder-sparkline": "dist/sparkline.js",
+      "ui-yonder-holdkey": "dist/holdkey.js"
     }
   },
   "node-red-dashboard-2": {
@@ -29,7 +30,8 @@
       "ui-yonder-databar": { "output": "ui-yonder-databar.umd.js", "component": "YonderDataBar" },
       "ui-yonder-softkeys": { "output": "ui-yonder-softkeys.umd.js", "component": "YonderSoftKeys" },
       "ui-yonder-identity": { "output": "ui-yonder-identity.umd.js", "component": "YonderIdentity" },
-      "ui-yonder-sparkline": { "output": "ui-yonder-sparkline.umd.js", "component": "YonderSparkline" }
+      "ui-yonder-sparkline": { "output": "ui-yonder-sparkline.umd.js", "component": "YonderSparkline" },
+      "ui-yonder-holdkey": { "output": "ui-yonder-holdkey.umd.js", "component": "YonderHoldKey" }
     }
   },
   "scripts": {

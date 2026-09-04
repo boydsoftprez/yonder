@@ -15,6 +15,7 @@ const databarNode = (await import("./databar.js")).default ?? await import("./da
 const softkeysNode = (await import("./softkeys.js")).default ?? await import("./softkeys.js");
 const identityNode = (await import("./identity.js")).default ?? await import("./identity.js");
 const sparklineNode = (await import("./sparkline.js")).default ?? await import("./sparkline.js");
+const holdkeyNode = (await import("./holdkey.js")).default ?? await import("./holdkey.js");
 
 /**
  * What is tested here, and what honestly cannot be.
@@ -288,6 +289,40 @@ describe("the widgets", () => {
   it("a malformed list field leaves the widget drawing nothing, not throwing", () => {
     const { node, props } = build(databarNode as (RED: RED) => void, { cells: "[[[" });
     expect(props!.cells).toEqual([]);
+    expect(node.error).toHaveBeenCalled();
+  });
+});
+
+describe("the hold key", () => {
+  it("registers as a widget that sends", () => {
+    // Dashboard drops a widget-action from a widget that did not register
+    // onAction — no error, no warning. Every soft key on this console once
+    // shipped dead this way.
+    const { type, events } = build(holdkeyNode as (RED: RED) => void, { label: "Full rate", action: "fullrate" });
+    expect(type).toBe("ui-yonder-holdkey");
+    expect(events).toMatchObject({ onAction: true });
+  });
+
+  it("carries the cost of holding it, so the page states it before it is asked", () => {
+    // R-VID-11: the interface states what asking would cost *before* it is
+    // asked. A held key with no cost on it is a key whose consequence is a
+    // surprise.
+    const { props } = build(holdkeyNode as (RED: RED) => void, { label: "Full rate", action: "fullrate", cost: "2.0 Mb/s" });
+    expect(props).toMatchObject({ label: "Full rate", action: "fullrate", cost: "2.0 Mb/s" });
+  });
+
+  it("keeps a unit in the case it was given", () => {
+    // Mb/s rendered as MB/S says megabytes. The component's stylesheet is
+    // where that is enforced; this is the half that can be asserted.
+    const { props } = build(holdkeyNode as (RED: RED) => void, { label: "Full rate", action: "fullrate", cost: "2.0 Mb/s" });
+    expect(props!.cost).toBe("2.0 Mb/s");
+  });
+
+  it("does not draw itself when it has no dashboard group", () => {
+    // A widget dragged onto a flow before it has a group is a normal
+    // intermediate state in the editor, not a fault. Node-RED must load the
+    // rest of the flow either way.
+    const { node } = build(holdkeyNode as (RED: RED) => void, { label: "Full rate", action: "fullrate" }, null);
     expect(node.error).toHaveBeenCalled();
   });
 });
