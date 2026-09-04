@@ -1747,10 +1747,12 @@ describe("compose", () => {
     // R-VID-09 on the path where a person is watching a grey rectangle. The
     // ground-station branch keeps a long GOP; asking the media server to
     // demand a keyframe would need a control channel M4 does not have.
-    const preview = text().split("tee name=main")[0];
     expect(text()).toContain("h264_i_frame_period=15");
     expect(text().match(/h264_i_frame_period/g)).toHaveLength(1);
-    void preview;
+    // ...and it is on the preview's encode, not the full-rate one: the short
+    // GOP appears after the branch that carries v4l2convert.
+    const previewBranch = text().slice(text().indexOf("v4l2convert"));
+    expect(previewBranch).toContain("h264_i_frame_period=15");
   });
 
   it("bounds every branch off both tees, and drops rather than blocks", () => {
