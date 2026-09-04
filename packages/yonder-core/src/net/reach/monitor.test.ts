@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
-import { ReachMonitor, pathDevices, pathInUse, pathsDown, pathsHolding } from "./monitor.js";
+import { ReachMonitor, activePath, pathDevices, pathInUse, pathsDown, pathsHolding } from "./monitor.js";
 import {
   FAILURES_TO_STAND_DOWN,
   Standing,
   type PathName,
   type PathReport,
+  type StandingView,
 } from "./standing.js";
 import { DEFAULT_CONFIG, type Config } from "../../schema/config.js";
 import type { DeviceInfo } from "../nmcli/client.js";
@@ -159,6 +160,74 @@ describe("ReachMonitor.state", () => {
     expect(state.inUse).toBe("modem");
     expect(state.paths.find((p) => p.path === "modem")?.standing).toBe("no-route-out");
     expect(state.carrying).toBe(false);
+  });
+
+  /**
+   * **The path named as in use is the one traffic is actually on.**
+   *
+   * The list of paths holding an address follows `network.priority`, and
+   * `NetworkRenderer.remetric` deliberately leaves a stood-down path's address
+   * exactly where it is — an operator may be sitting on that ethernet cable.
+   * So the demoted path stays at the head of that list for ever, and reading
+   * the head as "in use" named it as carrying traffic long after the default
+   * route had moved off it.
+   *
+   * What it cost was not only a wrong word on a page. `ReachWatch` asks the
+   * same question to decide whose byte counters to judge, so it watched the
+   * dead path, found it failing, probed it, and then probed every alternative
+   * — including a metered cellular link — every five seconds, on a board that
+   * was working perfectly (R-NET-13, R-CEL-09).
+   */
+  it("names the path traffic moved to, not the one it moved off", async () => {
+    const { monitor, standing } = build({
+      holding: ["ethernet", "modem"],
+      order: ["ethernet", "modem"],
+      reaches: () => false,
+    });
+    for (let i = 0; i < FAILURES_TO_STAND_DOWN; i++) await monitor.test("ethernet");
+    expect(standing.standingOf("ethernet")).toBe("no-route-out");
+
+    const state = await monitor.state();
+    expect(state.inUse).toBe("modem");
+    expect(state.paths.find((p) => p.path === "modem")?.standing).toBe("in-use");
+    expect(state.paths.find((p) => p.path === "ethernet")?.standing).toBe("no-route-out");
+  });
+
+  it("hands the watch the interface of the path traffic moved to", async () => {
+    const { monitor } = build({
+      holding: ["ethernet", "modem"],
+      order: ["ethernet", "modem"],
+      reaches: () => false,
+    });
+    for (let i = 0; i < FAILURES_TO_STAND_DOWN; i++) await monitor.test("ethernet");
+    expect(await monitor.inUseNow()).toEqual({ path: "modem", device: "wwan0" });
+  });
+
+  /**
+   * **A board whose every path has been stood down still names one.**
+   *
+   * A metric is not a disconnect: `STOOD_DOWN_METRIC` is *added* to the
+   * generated metric, so a board where everything is condemned keeps the same
+   * ordering between the condemned paths and the route stays where it was.
+   * Naming nothing here would be a lie about the routing table, and it would
+   * cost more than a word — the watch would stop looking at that path, so
+   * nothing would ever probe it and `SUCCESSES_TO_RETURN` could never be
+   * reached. The one path that must keep being tested is the one carrying an
+   * aircraft's telemetry badly.
+   */
+  it("still names the head path when every path holding an address is stood down", async () => {
+    const { monitor } = build({
+      holding: ["ethernet", "modem"],
+      order: ["ethernet", "modem"],
+      reaches: () => false,
+    });
+    for (let i = 0; i < FAILURES_TO_STAND_DOWN; i++) {
+      await monitor.test("ethernet");
+      await monitor.test("modem");
+    }
+    const state = await monitor.state();
+    expect(state.inUse).toBe("ethernet");
+    expect(await monitor.inUseNow()).toEqual({ path: "ethernet", device: "eth0" });
   });
 
   it("reports everything else as standing by", async () => {
@@ -571,6 +640,40 @@ describe("pathsHolding", () => {
   });
 });
 
+/**
+ * The arithmetic `metricFor` writes, read back.
+ *
+ * A metric is `rank + STOOD_DOWN_METRIC while stood down`, so the lowest one
+ * among the paths holding an address — the one the kernel picks — is the first
+ * path in the operator's order that is not stood down. These are the four
+ * shapes that has.
+ */
+describe("activePath", () => {
+  const stoodDown = (...paths: PathName[]): StandingView => ({
+    isStoodDown: (path) => paths.includes(path),
+  });
+
+  it("is the head of the list while nothing has been stood down", () => {
+    expect(activePath(["ethernet", "modem"], stoodDown())).toBe("ethernet");
+  });
+
+  it("skips a path that has been stood down", () => {
+    // The demoted path keeps its address — `remetric` raises a metric and
+    // takes nothing down — so it is still in this list and still first.
+    expect(activePath(["ethernet", "modem"], stoodDown("ethernet"))).toBe("modem");
+  });
+
+  it("keeps the head when every path holding an address is stood down", () => {
+    // STOOD_DOWN_METRIC is added, not substituted, so condemned paths keep
+    // their order and the route stays on the first of them.
+    expect(activePath(["ethernet", "modem"], stoodDown("ethernet", "modem"))).toBe("ethernet");
+  });
+
+  it("is null when nothing holds an address", () => {
+    expect(activePath([], stoodDown())).toBeNull();
+  });
+});
+
 describe("pathInUse", () => {
   const addresses = [
     { device: "lo", address: "127.0.0.1/8" },
@@ -587,6 +690,20 @@ describe("pathInUse", () => {
       addresses,
       "10.42.0.1",
     )).toBe("ethernet");
+  });
+
+  it("names the path traffic moved to once the first is stood down", () => {
+    // The default is a board where nothing has been stood down, so every
+    // caller that does not know about standing is unaffected — the same
+    // default `metricFor` takes.
+    expect(pathInUse(
+      ["ethernet", "modem", "wifi_client"],
+      { ethernet: "eth0", modem: "wwan0" },
+      addresses,
+      "10.42.0.1",
+      {},
+      { isStoodDown: (path) => path === "ethernet" },
+    )).toBe("modem");
   });
 
   it("follows the order the operator wrote", () => {

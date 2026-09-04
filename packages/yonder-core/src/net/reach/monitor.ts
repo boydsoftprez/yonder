@@ -5,12 +5,14 @@ import { wifiMode } from "../profiles.js";
 import { movement, systemCounters, type CounterReader } from "./counters.js";
 import type { Probe } from "./probe.js";
 import {
+  NOTHING_STOOD_DOWN,
   PATH_WORDS,
   type PathEvidence,
   type PathName,
   type PathReport,
   type ReachState,
   type Standing,
+  type StandingView,
 } from "./standing.js";
 
 /** The paths this daemon knows how to test. */
@@ -45,10 +47,12 @@ export interface ReachMonitorOptions {
   /**
    * Every path holding an address, in the operator's order.
    *
-   * The first is the one carrying the default route — the metrics are
-   * generated from that same order, see `metricFor` — and the rest are paths
-   * that are up but not being used. Both halves are needed: the watch judges
-   * the first, and `carrying` asks about all of them.
+   * **The whole list, and the head of it is not the answer to either
+   * question.** `carrying` asks about all of them — a dead ethernet must not
+   * read as a board with no way out while a Wi-Fi client link works beside it.
+   * `activePath` picks the one carrying the default route out of them, which
+   * needs standing as well as order: a stood-down path keeps its address, so
+   * the head of this list is the path traffic has moved off.
    */
   holding: () => Promise<PathName[]>;
   log?: (line: string) => void;
@@ -164,7 +168,9 @@ export class ReachMonitor {
     const [devices, holding, down] = await Promise.all([
       this.devices(), this.holding(), this.down(),
     ]);
-    const inUse = holding[0] ?? null;
+    // Not `holding[0]`. See `activePath`: a stood-down path keeps its address,
+    // so the head of this list is the path traffic moved *off*.
+    const inUse = activePath(holding, this.standing);
     const order = this.order();
     // Every path, not only the configured ones. A page that listed only what
     // `network.priority` names would go quiet about the path an operator has
@@ -234,9 +240,14 @@ export class ReachMonitor {
    * One call rather than two so that the watch judges a single moment: a
    * device name fetched after a separate reading of which path is in use can
    * belong to a path that is no longer the one in use.
+   *
+   * Standing is folded in here, not only in `state()`. The watch reads the
+   * counters of whatever this names and probes it when they stop moving, so
+   * naming a demoted path made a working board pay a `curl` per path per tick
+   * for as long as the dead cable stayed plugged in — see `activePath`.
    */
   async inUseNow(): Promise<{ path: PathName; device: string } | null> {
-    const path = (await this.holding())[0] ?? null;
+    const path = activePath(await this.holding(), this.standing);
     if (path === null) return null;
     const device = (await this.devices())[path];
     return device === undefined ? null : { path, device };
@@ -556,12 +567,46 @@ export function pathsHolding(
 }
 
 /**
- * The path traffic is leaving by: the first of those, or null.
+ * Which of the paths holding an address is carrying the default route.
  *
- * Derived from `network.priority` rather than read out of a routing table
- * because the route metrics are *generated* from that order (see
- * `metricFor`, which writes one into every egress profile), so the first path
- * in it holding an address is the one carrying the default route.
+ * Derived rather than read out of a routing table, because the metrics that
+ * decide it are *generated* here: `metricFor` gives each path a number from
+ * its rank in `network.priority`, and adds `STOOD_DOWN_METRIC` to it while the
+ * path is stood down. So the path with the lowest metric — the one the kernel
+ * picks — is the first path in the operator's order that is not stood down,
+ * and this is that same arithmetic read back.
+ *
+ * **Standing has to be in it.** Without it this was `holding[0]`, and the head
+ * of that list is exactly the path traffic has moved *off*: `remetric` raises
+ * a demoted path's metric and takes nothing down, deliberately, so that an
+ * operator sitting on a stood-down ethernet cable is not cut off. The address
+ * stays, the path stays at the head of the order, and reading the head named
+ * a dead cable as the one carrying traffic for as long as it was plugged in.
+ *
+ * **And when every path holding an address is stood down, the head is still
+ * the answer.** `STOOD_DOWN_METRIC` is *added* rather than substituted, so
+ * condemned paths keep their order relative to each other and the route stays
+ * on the first of them. Answering null there would be wrong about the routing
+ * table, and it would cost more than a word: the watch would stop looking at
+ * that path, so nothing would probe it, so `SUCCESSES_TO_RETURN` could never
+ * be reached and a board whose only link is bad would never notice it had
+ * come good.
+ *
+ * Pure, and separate from the monitor, for the reason everything else in this
+ * file is: the decision is testable without an nmcli.
+ */
+export function activePath(holding: PathName[], standing: StandingView): PathName | null {
+  return holding.find((path) => !standing.isStoodDown(path)) ?? holding[0] ?? null;
+}
+
+/**
+ * The path traffic is leaving by, from a reading of the addresses.
+ *
+ * `pathsHolding` and `activePath` in one call, for a caller that has the
+ * addresses rather than the list. The standing defaults to a board where
+ * nothing has been stood down — the same default `metricFor` takes, and for
+ * the same reason: a caller that does not know about standing gets exactly
+ * the answer `network.priority` alone has always given.
  */
 export function pathInUse(
   order: PathName[],
@@ -569,6 +614,7 @@ export function pathInUse(
   addresses: { device: string; address: string }[],
   apAddress: string,
   alsoKnownAs: Partial<Record<PathName, string>> = {},
+  standing: StandingView = NOTHING_STOOD_DOWN,
 ): PathName | null {
-  return pathsHolding(order, devices, addresses, apAddress, alsoKnownAs)[0] ?? null;
+  return activePath(pathsHolding(order, devices, addresses, apAddress, alsoKnownAs), standing);
 }

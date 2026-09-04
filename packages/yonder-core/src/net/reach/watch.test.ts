@@ -42,6 +42,16 @@ function fakeClock() {
 
 interface Bench {
   watch: ReachWatch;
+  /**
+   * The monitor the watch drives.
+   *
+   * Exposed so a test can ask it the watchdog's own question — `carrying()` —
+   * about the same board the watch has just been ticking over. That question
+   * and "which path is in use" are read from one list and must not answer the
+   * same way: one is about every path holding an address, the other about the
+   * one carrying the route.
+   */
+  monitor: ReachMonitor;
   standing: Standing;
   probed: string[];
   lines: string[];
@@ -50,6 +60,14 @@ interface Bench {
   counters: Map<string, Counters>;
   /** Move the default route to another path, between ticks. */
   setInUse(path: PathName | null): void;
+  /**
+   * Every path holding an address, when that is more than the one in use.
+   *
+   * The list, not the head: a path that has been stood down keeps its address
+   * — `remetric` raises its metric and takes nothing down — so on a real board
+   * this is longer than one whenever a failover has happened.
+   */
+  setHolding(paths: PathName[] | null): void;
   /** Rename the interface a path is on, between ticks. */
   setDevices(devices: Partial<Record<PathName, string>>): void;
   /** Make the reading of which path is in use never come back, or stop. */
@@ -73,6 +91,8 @@ function bench(opts: {
   countersThrow?: boolean;
   inUseThrows?: boolean;
   inUseHangs?: boolean;
+  /** Every path holding an address. Defaults to just the one in use. */
+  holding?: PathName[];
 } = {}): Bench {
   const clock = fakeClock();
   const lines: string[] = [];
@@ -92,6 +112,7 @@ function bench(opts: {
 
   let devices = opts.devices ?? { ethernet: "eth0", modem: "wwan0" };
   let inUse: PathName | null = opts.inUse === undefined ? "modem" : opts.inUse;
+  let holding: PathName[] | null = opts.holding ?? null;
   let hangs = opts.inUseHangs === true;
   const waiting: (() => void)[] = [];
   let probeHangs = false;
@@ -119,6 +140,7 @@ function bench(opts: {
       if (opts.inUseThrows === true) throw new Error("NetworkManager is not answering");
       // A wedged ModemManager: the promise settles only when the test says so.
       if (hangs) await new Promise<void>((resolve) => waiting.push(resolve));
+      if (holding !== null) return holding;
       return inUse === null ? [] : [inUse];
     },
     log: (l) => lines.push(l),
@@ -132,8 +154,9 @@ function bench(opts: {
   });
 
   return {
-    watch, standing, probed, lines, clock, counters, changes,
+    watch, monitor, standing, probed, lines, clock, counters, changes,
     setInUse(path) { inUse = path; },
+    setHolding(paths) { holding = paths; },
     setDevices(next) { devices = next; },
     setInUseHangs(next) { hangs = next; },
     releaseInUse() { while (waiting.length > 0) waiting.pop()?.(); },
@@ -257,6 +280,92 @@ describe("ReachWatch", () => {
    * ever transmits enough for the counters to say anything, so the counters
    * alone would never trigger and the access point would never come up.
    */
+  /**
+   * **A demotion must not turn into a probe on a metered link every five
+   * seconds.**
+   *
+   * The board: an ethernet cable into something with no route out, and a
+   * working modem. The ethernet is stood down and `remetric` moves the default
+   * route to the modem — and deliberately leaves the ethernet's address alone,
+   * because an operator may be sitting on that cable. So the ethernet stays at
+   * the head of the list of paths holding an address for ever.
+   *
+   * Reading that head as "the path in use" made every tick judge the dead
+   * ethernet's byte counters, find it in the failing set, probe it, watch it
+   * fail, and then probe **every alternative including the modem** — three
+   * `curl`s a tick on a device that is working, for as long as the cable is
+   * plugged in. §6 of the design says the opposite in as many words: a device
+   * that is working spends nothing on finding that out (R-CEL-09, R-NET-13).
+   */
+  it("stops probing once traffic has moved to a path that is working", async () => {
+    const b = bench({
+      devices: { ethernet: "eth0", modem: "wwan0" },
+      order: ["ethernet", "modem"],
+      holding: ["ethernet", "modem"],
+      reaches: (d) => d !== "eth0",
+    });
+    b.counters.set("eth0", { rx: 900, tx: 900 });
+    b.counters.set("wwan0", { rx: 500, tx: 500 });
+    b.watch.start();
+
+    // Ethernet is the head of the list and it reaches nothing, so it is
+    // probed, condemned, and traffic moves to the modem.
+    for (let i = 0; i < FAILURES_TO_STAND_DOWN; i++) {
+      shouting(b, "eth0");
+      carrying(b, "wwan0");
+      await b.clock.advance(REACH_TICK_MS);
+    }
+    expect(b.standing.standingOf("ethernet")).toBe("no-route-out");
+
+    // The handover itself is worth exactly one probe, of the path that has
+    // just started carrying traffic. R-CEL-09 asks for that one by name.
+    const handover = b.probed.length;
+    shouting(b, "eth0");
+    carrying(b, "wwan0");
+    await b.clock.advance(REACH_TICK_MS);
+    expect(b.probed.slice(handover)).toEqual(["wwan0"]);
+
+    // And from here nothing. The modem is carrying traffic both ways, the
+    // counters say so for free, and the dead cable is somebody else's problem.
+    const settled = b.probed.length;
+    for (let i = 0; i < 6; i++) {
+      shouting(b, "eth0");
+      carrying(b, "wwan0");
+      await b.clock.advance(REACH_TICK_MS);
+    }
+    expect(
+      b.probed.slice(settled),
+      "a working device went on probing after traffic had moved to a path that works",
+    ).toEqual([]);
+  });
+
+  /**
+   * The other half of the same reading, and the one that must not regress.
+   *
+   * `carrying()` is the fallback watchdog's question and it asks about
+   * **every** path holding an address, not the one carrying the route. A dead
+   * ethernet outranking a working Wi-Fi client link must not raise an access
+   * point on the one radio the operator is talking over (R-NET-07, K-42).
+   */
+  it("still tells the watchdog a stood-down path is not the whole board", async () => {
+    const b = bench({
+      devices: { ethernet: "eth0", modem: "wwan0" },
+      order: ["ethernet", "modem"],
+      holding: ["ethernet", "modem"],
+      reaches: (d) => d !== "eth0",
+    });
+    b.counters.set("eth0", { rx: 900, tx: 900 });
+    b.counters.set("wwan0", { rx: 500, tx: 500 });
+    b.watch.start();
+    for (let i = 0; i < FAILURES_TO_STAND_DOWN; i++) {
+      shouting(b, "eth0");
+      carrying(b, "wwan0");
+      await b.clock.advance(REACH_TICK_MS);
+    }
+    expect(b.standing.standingOf("ethernet")).toBe("no-route-out");
+    expect(await b.monitor.carrying()).toBe(true);
+  });
+
   it("tests a path that has just started carrying traffic", async () => {
     const b = bench({ devices: { modem: "wwan0" }, order: ["modem"], reaches: () => false });
     b.counters.set("wwan0", { rx: 0, tx: 0 });

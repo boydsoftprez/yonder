@@ -112,6 +112,7 @@ export {
 export {
   ReachMonitor,
   pathDevices,
+  activePath,
   pathInUse,
   pathsHolding,
   type ReachMonitorOptions,
