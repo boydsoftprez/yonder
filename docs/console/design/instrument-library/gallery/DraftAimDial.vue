@@ -18,6 +18,13 @@
         <path d="M22 22l5 5 M96 22l-5 5 M22 96l5-5 M96 96l-5-5"/>
       </g>
       <circle cx="59" cy="59" r="15" fill="none" :stroke="c.divider" stroke-width="1" stroke-dasharray="3 3"/>
+      <!-- axis labels, so the pad reads without instruction -->
+      <g :fill="c.label" font-size="7.5" font-family="ui-sans-serif,system-ui" letter-spacing=".8" text-anchor="middle">
+        <text x="59" y="30">TILT +</text><text x="59" y="94">PAN</text>
+        <text x="27" y="62">&#8722;</text><text x="91" y="62">+</text>
+      </g>
+      <!-- the puck, at rest at the centre -->
+      <circle v-if="!pushing" cx="59" cy="59" r="6" :fill="c.select" fill-opacity=".35" :stroke="c.select" stroke-width="1.5"/>
 
       <!-- an axis that will not answer stays on the dial, struck and labelled,
            so a gimbal that half works is not read as one that does -->
@@ -42,13 +49,22 @@
     </svg>
 
     <div class="d-aim__rows">
-      <div class="d-row"><span class="l">Pan</span><span class="v">{{ fmt(pan) }}&deg;</span></div>
-      <div class="d-row"><span class="l">Tilt</span><span class="v">{{ fmt(tilt) }}&deg;</span></div>
-      <div class="d-row">
-        <span class="l">Rate</span>
-        <span class="v" :class="{ pushing }">{{ rateShown }}<i>&deg;/s</i></span>
+      <div class="d-blk">
+        <span class="d-blk__h">Reported position</span>
+        <div v-for="ax in axesShown" :key="ax.key" class="d-pos" :class="{ dead: ax.state !== 'present' }">
+          <div class="d-row"><span class="l">{{ ax.label }}</span><span class="v">{{ ax.state === 'present' ? fmt(ax.value) + '°' : '——' }}</span></div>
+          <div class="d-pos__trk">
+            <i class="d-pos__zero" />
+            <i v-if="ax.state === 'present'" class="d-pos__ptr" :style="{ left: pct(ax.value, ax.min, ax.max) }" />
+          </div>
+          <div class="d-pos__b"><span>{{ ax.min }}&deg;</span><span>0&deg;</span><span>+{{ ax.max }}&deg;</span></div>
+        </div>
       </div>
-      <div class="d-fine">white &#9650; where it is<br>cyan where you push</div>
+      <div v-if="axes.pan === 'present' || axes.tilt === 'present'" class="d-blk">
+        <span class="d-blk__h">Commanded rate</span>
+        <div class="d-rate" :class="{ pushing }">{{ rateShown }}<i>&deg;/s</i></div>
+        <div class="d-pos__b"><span>0</span><span></span><span>{{ MAX }} &deg;/s</span></div>
+      </div>
       <div v-if="atLimit" class="d-limit"><i></i>At the limit</div>
     </div>
   </div>
@@ -71,12 +87,21 @@ export default {
   emits: ['slew', 'stop'],
   data: () => ({ pushing: false, px: 59, py: 59, rate: 0 }),
   computed: {
+    MAX: () => MAX_RATE,
     /* The gimbal's own heading, so the white mark points where it looks. */
     bearing () { return Math.max(-180, Math.min(180, this.pan)) },
-    rateShown () { return this.pushing ? this.rate.toFixed(0) : '0' }
+    rateShown () { return this.pushing ? this.rate.toFixed(0) : '0' },
+    /* R-UI-09: a bounded quantity is drawn against its bounds. */
+    axesShown () {
+      return [
+        { key: 'pan', label: 'Pan', value: this.pan, min: -180, max: 180, state: this.axes.pan },
+        { key: 'tilt', label: 'Tilt', value: this.tilt, min: -90, max: 90, state: this.axes.tilt },
+      ]
+    }
   },
   methods: {
     fmt (v) { return (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(1) },
+    pct (v, lo, hi) { return `${Math.max(0, Math.min(100, (100 * (v - lo)) / (hi - lo)))}%` },
     at (e) {
       const r = this.$el.querySelector('.d-aim__dial').getBoundingClientRect()
       const x = ((e.clientX - r.left) / r.width) * 118 - 59
@@ -115,7 +140,18 @@ export default {
 .d-aim { display:flex; gap:12px; align-items:flex-start; }
 .d-aim__dial { flex:0 0 auto; cursor:grab; touch-action:none; }
 .d-aim__dial.live { cursor:grabbing; }
-.d-aim__rows { flex:1; min-width:0; }
+.d-aim__rows { flex:1; min-width:0; display:flex; flex-direction:column; gap:12px; margin-bottom:6px; }
+.d-blk__h { display:block; font-size:10.5px; color: var(--yonder-label,#7f8a95); margin-bottom:6px; }
+.d-pos { margin-bottom:8px; }
+.d-pos.dead .d-pos__trk { border:1px dashed var(--yonder-divider,#2b333c); background:transparent; }
+.d-pos__trk { position:relative; height:6px; margin:4px 0 3px; border-radius:1px; background: var(--yonder-track,#161b21); }
+.d-pos__zero { position:absolute; left:50%; top:-2px; width:1px; height:10px; background: var(--yonder-divider,#2b333c); }
+.d-pos__ptr { position:absolute; top:-3px; width:2px; height:12px; margin-left:-1px; background: var(--yonder-value,#fff); }
+.d-pos__b { display:flex; justify-content:space-between; font-size:9.5px; font-variant-numeric:tabular-nums;
+  color: var(--yonder-label,#7f8a95); }
+.d-rate { font-size:22px; font-weight:600; font-variant-numeric:tabular-nums; color: var(--yonder-value,#fff); line-height:1.1; }
+.d-rate.pushing { color: var(--yonder-select,#2ad4f0); }
+.d-rate i { font-style:normal; font-weight:400; font-size:11px; text-transform:none; margin-left:4px; color: var(--yonder-label,#7f8a95); }
 .d-row { display:flex; align-items:baseline; justify-content:space-between; gap:10px; padding:3px 0; }
 .d-row .l { font-size:11px; letter-spacing:.1em; text-transform:uppercase;
   color: var(--yonder-label,#7f8a95); }

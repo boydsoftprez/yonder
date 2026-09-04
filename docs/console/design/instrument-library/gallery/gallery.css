@@ -197,3 +197,7 @@ body { margin:0; background: var(--yonder-background, #0a0c0f); color: var(--yon
 .d-thumbs__cost b { color: var(--yonder-value,#fff); font-variant-numeric:tabular-nums; }
 .d-thumbs__cost span em { display:inline; letter-spacing:0; text-transform:none; font-size:12px; }
 .g-blank { padding:40px; color: var(--yonder-label,#7f8a95); font-size:13px; }
+
+.d-modenote { font-size:11px; color: var(--yonder-label,#7f8a95); margin:-6px 0 0; }
+.q-label { color: var(--yonder-label,#7f8a95); }
+.d-aimpanel .d-aim { gap:8px; }

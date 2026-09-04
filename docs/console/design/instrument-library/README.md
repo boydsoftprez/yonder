@@ -83,6 +83,12 @@ predates these and must be brought up to them:
   R-UI-03). A press on a thumbnail switches; the sidebar follows.
 - **Capacity follows the link** in the strip's uplink reading, and the reading
   says when the encodes exceed it (R-VID-11).
+- **The Aim panel draws pan and tilt against their bounds** (R-UI-09) under a
+  *Reported position* heading, with *Commanded rate* as its own block, axis
+  labels on the pad, `RATE CONTROL` stated at the head, a sentence under the
+  gimbal mode saying what the mode does, and `Recentre gimbal`. Four of those
+  came from the alternative in `../instrument-library-alternative/`; the
+  heading mark and the struck axis for an advertised state stayed from here.
 - The harness has a **link** switch — good / poor / lost — so the states can
   be seen. **Nothing measures the link yet**: R-VID-07 is unbuilt, and the
   round-trip figure is typed in.

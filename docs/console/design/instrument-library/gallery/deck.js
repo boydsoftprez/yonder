@@ -144,8 +144,7 @@ export const DraftDeck = defineComponent({
 
     const aimPanel = hasAim ? h("div", { class: ["d-aimpanel", { dead: !aimLive }] }, [
       h("div", { class: "d-h" }, [h("span", "Aim"),
-        h("em", { class: aimLive ? "q-select" : "q-waiting" },
-          aimLive ? (this.aim.slewPan || this.aim.slewTilt ? "rate" : "") : "not answering")]),
+        h("em", { class: aimLive ? "q-label" : "q-waiting" }, aimLive ? "rate control" : "not answering")]),
       h(AimDial, {
         pan: this.aim.pan, tilt: this.aim.tilt, c: this.pal,
         atLimit: aimLive && Math.abs(this.aim.tilt) > 60,
@@ -155,8 +154,13 @@ export const DraftDeck = defineComponent({
         onStop: () => { this.aim.slewPan = 0; this.aim.slewTilt = 0; },
       }),
       ...Object.entries(cam.controls).filter(([, c]) => c.column === "aim").map(([k, c]) => this.draw(k, c)),
+      aimLive ? h("div", { class: "d-modenote" }, {
+        "Follow": "Pan and tilt follow the handle.",
+        "Tilt lock": "Tilt holds where you put it; pan follows the handle.",
+        "FPV": "Everything follows the handle, roll included.",
+      }[this.v.gimbalMode] ?? "") : null,
       aimLive ? h("button", { type: "button", class: "d-recentre",
-        onClick: () => { this.aim.pan = 0; this.aim.tilt = 0; } }, "Recentre") : null,
+        onClick: () => { this.aim.pan = 0; this.aim.tilt = 0; } }, "Recentre gimbal") : null,
       cam.aim.reason ? h("div", { class: "d-why why-advertised" }, cam.aim.reason) : null,
     ]) : null;
 
