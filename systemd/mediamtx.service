@@ -1,0 +1,49 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[Unit]
+Description=Yonder media server
+Documentation=https://github.com/boydsoftprez/yonder
+After=network.target
+
+[Service]
+Type=simple
+
+# Not root, and not the console's account either.
+#
+# This process listens on RTSP and, when something asks for it, SRT — it is
+# reachable from the mesh and from whatever network the aircraft is on, which
+# makes it the second internet-adjacent surface on the device after the
+# console. An account of its own is what keeps a compromise of it from being a
+# compromise of anything else: `yonder` is the group /run/yonder/core.sock is
+# owned by (K-01), so putting this process in it would hand a network-facing
+# server the daemon's control socket.
+#
+# installer/roles/10-base.sh creates the account and assert_unit_accounts
+# checks it before this unit is enabled; a User= or Group= naming an account
+# that does not exist is status=217/USER on every start.
+User=yonder-media
+Group=yonder-media
+
+# The generated configuration, and the whole reason it lives in a directory of
+# its own rather than in /etc/yonder with config.yaml. The file carries the
+# RTSP credential in clear, so it is 0640 root:yonder-media — readable by this
+# service and by nothing else on the device. /etc/yonder is 0750 root:root
+# because it holds secrets.yaml, so this account cannot traverse it at all.
+# See MEDIA_CONFIG_PATH in packages/yonder-core/src/media/renderer.ts.
+ExecStart=/usr/local/bin/mediamtx /etc/mediamtx/mediamtx.yml
+Restart=always
+RestartSec=2
+
+# Everything it does not need is off. It reads one file and serves what the
+# pipeline publishes to it over loopback; it writes nothing at all, which is
+# why ProtectSystem=strict names no ReadWritePaths. Every port it opens is
+# above 1024, so it needs no capability to bind them.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

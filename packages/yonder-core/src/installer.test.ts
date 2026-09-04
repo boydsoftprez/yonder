@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { DEFAULT_CONSOLE_PATHS } from "./console/settings.js";
+import { MEDIA_CONFIG_PATH } from "./media/renderer.js";
 
 /**
  * The installer's shell helpers, exercised rather than read.
@@ -209,6 +210,79 @@ describe("the accounts the shipped units name", () => {
     expect(checked, "20-yonder-core.sh does not check the accounts its unit names").toBeGreaterThan(0);
     expect(checked, "the accounts are checked after the unit is enabled, which is too late").toBeLessThan(enabled);
   });
+
+  it("are checked by 50-mediamtx.sh before it leaves the unit for the daemon", () => {
+    // This role never enables anything — MediaRenderer does, when a camera is
+    // configured — so the deadline is the daemon-reload that makes the unit
+    // startable at all.
+    const role = readFileSync(join(ROOT, "installer", "roles", "50-mediamtx.sh"), "utf8");
+    const checked = role.indexOf("assert_unit_accounts");
+    const loaded = role.indexOf("systemctl daemon-reload");
+    expect(checked, "50-mediamtx.sh does not check the accounts its unit names").toBeGreaterThan(0);
+    expect(checked, "the accounts are checked after the unit is loaded, which is too late").toBeLessThan(loaded);
+  });
+});
+
+/**
+ * The media server's role, read rather than trusted.
+ *
+ * Each of these is a property whose absence is invisible until a board is in
+ * an aircraft: a listener left running on a device nobody configured a camera
+ * on, a picture taken away from an operator upgrading over it, or a pipeline
+ * that cannot parse because one 41 kB package is missing.
+ */
+describe("installer/roles/50-mediamtx.sh", () => {
+  const role = readFileSync(join(ROOT, "installer", "roles", "50-mediamtx.sh"), "utf8");
+
+  it("installs the one GStreamer package every pipeline depends on", () => {
+    // rtspclientsink is on the full-rate branches and on the preview alike,
+    // and a pipeline naming an element GStreamer cannot resolve fails to
+    // parse rather than failing to connect — so a missing package here is
+    // every camera on the device, not one output.
+    expect(role).toMatch(/^ensure_pkgs gstreamer1\.0-rtsp$/m);
+  });
+
+  it("asks GStreamer to resolve the element, not dpkg whether a package is there", () => {
+    expect(role).toContain("gst-inspect-1.0 rtspclientsink");
+    expect(role.indexOf("die")).toBeGreaterThan(0);
+  });
+
+  it("skips a payload that carries no media server rather than failing the install", () => {
+    // R-CFG-08. A payload built without mediamtx is a valid payload — it is
+    // only needed by a device that will carry a camera — and a freshly
+    // flashed device must reach a usable state regardless.
+    expect(role).toMatch(/no mediamtx in the payload; skipping/);
+    expect(role).toMatch(/^\s*return 0$/m);
+  });
+
+  it("leaves the unit installed and off, and checks that it worked", () => {
+    // R-SEC-13: a media server present on a device with no camera configured
+    // is a listener nobody decided to open. `systemctl disable` is the wrong
+    // tool — it answers "Running in chroot, ignoring request" and exits 0 in
+    // the chroot an image is built in, which is how a unit ships enabled.
+    expect(role).toMatch(/^\s*try systemctl stop mediamtx$/m);
+    expect(role).toMatch(/^\s*disable_unit_offline mediamtx\.service$/m);
+    expect(role).toMatch(/^\s*assert_unit_disabled mediamtx\.service$/m);
+    expect(role).not.toMatch(/^\s*(try|run)\s+systemctl\s+disable/m);
+  });
+
+  it("leaves a running media server alone when yonder-core owns it", () => {
+    // The same defect 40-zerotier.sh was fixed for. This installer is re-run
+    // to upgrade, and 20-yonder-core restarts the daemon first — whose
+    // start-up render brings the media server up for the configured cameras.
+    // A role that then stopped it took the picture away from the operator
+    // upgrading a device while watching video over it, and nothing later
+    // re-renders. The generated configuration is the record: written with the
+    // first camera, removed with the last.
+    const guard = role.indexOf(`if [ -f "$mtx_etc/mediamtx.yml" ]`);
+    const stop = role.indexOf("try systemctl stop mediamtx");
+    expect(guard, "50-mediamtx.sh stops the unit unconditionally").toBeGreaterThan(0);
+    expect(guard).toBeLessThan(stop);
+  });
+
+  it("proves the daemon can write the file it is going to be asked to write", () => {
+    expect(role).toContain("assert_daemon_can_write");
+  });
 });
 
 /**
@@ -332,5 +406,72 @@ describe("the daemon can write everything the console renderer writes", () => {
     // would say so.
     const unit = readFileSync(join(ROOT, "systemd/yonder-console.service"), "utf8");
     expect(unit).toContain(`-s ${DEFAULT_CONSOLE_PATHS.settings}`);
+  });
+});
+
+/**
+ * The media server's unit, read rather than trusted.
+ *
+ * It is the second internet-adjacent surface on the device: RTSP is reachable
+ * from the mesh and from whatever network the aircraft is on. What it must not
+ * be is privileged, and what it must not have is the daemon's socket.
+ */
+describe("systemd/mediamtx.service", () => {
+  const unit = readFileSync(join(SYSTEMD, "mediamtx.service"), "utf8");
+
+  it("runs as an account of its own, and not the one that owns the daemon's socket", () => {
+    // Group=yonder owns /run/yonder/core.sock (K-01). A network-facing media
+    // server in that group could open the daemon's control socket, which is a
+    // far larger grant than the one file it actually needs.
+    expect(unit).toMatch(/^User=yonder-media$/m);
+    expect(unit).toMatch(/^Group=yonder-media$/m);
+    expect(unit).not.toMatch(/^(User|Group)=yonder$/m);
+  });
+
+  it("reads the file yonder-core writes, and not another one", () => {
+    // Two halves of a pair. A unit reading one configuration while the daemon
+    // rewrites another is a media server whose listeners never change, and
+    // nothing else would say so.
+    const exec = /^ExecStart=(.*)$/m.exec(unit)?.[1] ?? "";
+    expect(exec.split(" ")[0]).toBe("/usr/local/bin/mediamtx");
+    expect(exec).toContain(MEDIA_CONFIG_PATH);
+  });
+
+  it("is hardened, and can write nothing at all", () => {
+    for (const setting of [
+      "NoNewPrivileges=true",
+      "PrivateTmp=true",
+      "ProtectSystem=strict",
+      "ProtectHome=true",
+    ]) {
+      expect(unit, `${setting} is missing`).toContain(setting);
+    }
+    // It reads one file and serves what the pipeline publishes to it. Nothing
+    // it does is a write, so nothing is writable.
+    expect([...unit.matchAll(/^ReadWritePaths=(.*)$/gm)]).toEqual([]);
+  });
+});
+
+/**
+ * The same invariant the console taught us, for the media server's file.
+ *
+ * yonder-core is ProtectSystem=strict, so a path outside its ReadWritePaths is
+ * EROFS from inside the service and from nowhere else — the installer runs
+ * outside the sandbox, so an install would report success and the first camera
+ * an operator configured would fail to apply on hardware.
+ */
+describe("the daemon can write the media server's configuration", () => {
+  it("keeps MEDIA_CONFIG_PATH inside yonder-core's ReadWritePaths", () => {
+    const unit = readFileSync(join(ROOT, "systemd/yonder-core.service"), "utf8");
+    expect(unit).toContain("ProtectSystem=strict");
+    const roots = unit
+      .split("\n")
+      .filter((l) => l.startsWith("ReadWritePaths="))
+      .flatMap((l) => l.slice("ReadWritePaths=".length).trim().split(/\s+/))
+      .filter(Boolean);
+    expect(
+      roots.some((r) => MEDIA_CONFIG_PATH === r || MEDIA_CONFIG_PATH.startsWith(`${r}/`)),
+      `${MEDIA_CONFIG_PATH} must be inside one of: ${roots.join(" ")}`,
+    ).toBe(true);
   });
 });

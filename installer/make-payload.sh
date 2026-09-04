@@ -49,6 +49,37 @@ ZEROTIER_REPO=${ZEROTIER_REPO:-https://download.zerotier.com/debian/trixie}
 ZEROTIER_SHA256_arm64=e6c71707d8db57dd9bc6d6a4d5d5b8343ad244f48ff1ebd288f5f588fbdb10a4
 ZEROTIER_SHA256_amd64=75589dbdc989546629e8676b186b1e7854b3fa3b5dac061b93f8c8e427af2b13
 
+# mediamtx 1.20.1, and pinned harder than either of the two above.
+#
+# Node publishes a SHASUMS256.txt beside each release and ZeroTier publishes a
+# GPG-signed apt index; this project checks both, and the signature is what
+# catches the one thing a recorded fingerprint cannot - the download site
+# itself being tampered with, since the fingerprint would have been read off
+# that same site when it was written down. **mediamtx has no signed index and
+# no detached signature at all.** It publishes a checksums.sha256 asset beside
+# the tarballs, on the same host, so verifying the tarball against it proves
+# only that the two files agree.
+#
+# So these two constants are the entire trust anchor. They were read once, by
+# hand, on a machine with a network, and they are what a reviewer sees in a
+# pull request when this version is bumped. Bumping the version means
+# re-reading them - not editing the number and hoping:
+#
+#     curl -fsSL https://github.com/bluenviron/mediamtx/releases/download/v<version>/checksums.sha256 \
+#       | grep -E 'linux_(arm64|amd64)\.tar\.gz'
+#
+# 1.20.1 rather than something older for two reasons that are not taste. It is
+# the first line whose release carries a checksums.sha256 asset to check
+# against at all - 1.9.x published none, and its arm64 tarball is named
+# linux_arm64v8 rather than linux_arm64 - and its authentication model is the
+# one media/config.ts writes: readUser/readPass/publishIPs inside a path are
+# deprecated, warned about on every start, and their eventual removal would
+# leave an open listener rather than a broken configuration.
+MEDIAMTX_VERSION=${MEDIAMTX_VERSION:-1.20.1}
+MEDIAMTX_BASE=${MEDIAMTX_BASE:-https://github.com/bluenviron/mediamtx/releases/download}
+MEDIAMTX_SHA256_arm64=d1689f0bfefb1864e5ed3dcc8495eb2d7ec0a654f90bf3cd48980cb3bd08718a
+MEDIAMTX_SHA256_amd64=81b143f55a5d23d4a8c028d52869c14ea4a59919900528698fcc97a747fd69c6
+
 ARCH=""
 OUT="$REPO/vendor"
 
@@ -64,6 +95,7 @@ Usage: make-payload.sh --arch <linux-arm64|linux-x64> [--out DIR]
 Produces:
   DIR/node/bin/node                              the runtime both services use
   DIR/console/node_modules/node-red/red.js       the console
+  DIR/mediamtx/mediamtx                          the media server
 USAGE
 }
 
@@ -222,6 +254,63 @@ mv "$WORK/$ZT_DEB" "$OUT/zerotier/$ZT_DEB"
 log "staged $OUT/zerotier/$ZT_DEB"
 
 # ---------------------------------------------------------------------------
+step "mediamtx $MEDIAMTX_VERSION for $DEB_ARCH"
+
+# mediamtx names its Linux tarballs by the same two words Debian names its
+# architectures with - linux_arm64, linux_amd64 - so DEB_ARCH does for both.
+MTX_TARBALL="mediamtx_v${MEDIAMTX_VERSION}_linux_${DEB_ARCH}.tar.gz"
+eval "MTX_EXPECTED=\$MEDIAMTX_SHA256_$DEB_ARCH"
+[ -n "$MTX_EXPECTED" ] || die "no recorded checksum for mediamtx on $DEB_ARCH"
+
+log "fetching the published checksums"
+curl -fsSL --retry 3 -o "$WORK/mediamtx.sha256" \
+    "$MEDIAMTX_BASE/v$MEDIAMTX_VERSION/checksums.sha256" \
+    || die "could not download mediamtx's checksums.sha256 for v$MEDIAMTX_VERSION"
+
+# Matched on the exact file name, so the comparison cannot pass because some
+# other line in the list happened to. The published file writes its entries
+# `<sha>  *<name>`, the binary-mode form both sha256sum and shasum understand.
+from_release=$(awk -v f="*$MTX_TARBALL" '$2==f {print $1; exit}' "$WORK/mediamtx.sha256")
+[ -n "$from_release" ] || die "$MTX_TARBALL is not listed in the published checksums for v$MEDIAMTX_VERSION"
+
+# The published list and the constant in this script have to agree. They are
+# both read off the same host, so agreement proves nothing about the upstream
+# - what it proves is that nobody bumped MEDIAMTX_VERSION without re-reading
+# the checksum, which is the mistake this catches.
+[ "$from_release" = "$MTX_EXPECTED" ] \
+    || die "the published checksums give a different value for $MTX_TARBALL than this script records:
+  published: $from_release
+  recorded:  $MTX_EXPECTED
+if the version was bumped deliberately, update MEDIAMTX_SHA256_$DEB_ARCH"
+
+log "fetching $MTX_TARBALL"
+curl -fsSL --retry 3 -o "$WORK/$MTX_TARBALL" \
+    "$MEDIAMTX_BASE/v$MEDIAMTX_VERSION/$MTX_TARBALL" \
+    || die "could not download $MTX_TARBALL"
+
+printf '%s  %s\n' "$MTX_EXPECTED" "$MTX_TARBALL" > "$WORK/mtx.sha256"
+( cd "$WORK" && $SHA_CHECK mtx.sha256 ) >/dev/null \
+    || die "$MTX_TARBALL does not match its recorded checksum; refusing to stage it"
+log "checksum matches"
+
+rm -rf "$WORK/mediamtx" "$OUT/mediamtx"
+mkdir -p "$WORK/mediamtx"
+# The tarball holds the binary, its example configuration and a licence at the
+# top level, with no directory to strip.
+tar -xzf "$WORK/$MTX_TARBALL" -C "$WORK/mediamtx" \
+    || die "could not unpack $MTX_TARBALL"
+[ -f "$WORK/mediamtx/mediamtx" ] || die "the unpacked archive has no mediamtx binary"
+
+mkdir -p "$OUT/mediamtx"
+mv "$WORK/mediamtx/mediamtx" "$OUT/mediamtx/mediamtx"
+chmod 0755 "$OUT/mediamtx/mediamtx"
+# The licence travels with the binary; the example configuration does not.
+# Every listener this device opens is decided by media/config.ts, and a second
+# configuration on the disk is a second place somebody could turn one on.
+[ -f "$WORK/mediamtx/LICENSE" ] && mv "$WORK/mediamtx/LICENSE" "$OUT/mediamtx/LICENSE"
+log "staged $OUT/mediamtx/mediamtx"
+
+# ---------------------------------------------------------------------------
 step "the console: node-red and the dashboard"
 
 CONSOLE_SRC="$HERE/console"
@@ -289,6 +378,7 @@ fi
 step "done"
 log "node:    $OUT/node/bin/node"
 log "zerotier: $OUT/zerotier/$ZT_DEB"
+log "mediamtx: $OUT/mediamtx/mediamtx"
 log "console: $OUT/console/node_modules/node-red/red.js"
 log ""
 log "vendor/ is git-ignored. Copy this whole repository, vendor/ included, to"

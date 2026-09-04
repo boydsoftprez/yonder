@@ -20,6 +20,7 @@ import { joinSucceeded } from "../net/joined.js";
 import { networkState } from "../net/state.js";
 import { readRemoteState } from "../remote/state.js";
 import { RemoteRenderer } from "../remote/renderer.js";
+import { MediaRenderer, MEDIA_CONFIG_PATH } from "../media/renderer.js";
 import { ZeroTierCli } from "../remote/zerotier/cli.js";
 import { readTraffic } from "../remote/traffic.js";
 import { TrafficSampler } from "../remote/sampler.js";
@@ -67,6 +68,14 @@ export interface ServerOptions {
    * Absent means no ConsoleRenderer is assembled — see BuildRenderersOptions.
    */
   console?: Partial<ConsolePaths>;
+  /**
+   * Where the media server's generated configuration goes. **Given, never
+   * defaulted**, like `console`: absent means no MediaRenderer is assembled,
+   * so nothing in a test can write to — or delete from — a real
+   * /etc/mediamtx by forgetting to override a path. main() supplies the
+   * production value.
+   */
+  mediaConfigPath?: string;
 }
 
 export interface BuildRenderersOptions {
@@ -95,6 +104,14 @@ export interface BuildRenderersOptions {
    * one would be `/var/lib/yonder`.
    */
   remoteStatePath: string;
+  /**
+   * Where the media server's generated configuration goes. **Given, never
+   * defaulted**, for the same reason as `console` and `remoteStatePath`:
+   * absent means no MediaRenderer is assembled, and a path with a default is
+   * a path a test writes to by forgetting to override it — this one would be
+   * a real media server's configuration, credential and all.
+   */
+  mediaConfigPath?: string;
 }
 
 /**
@@ -123,6 +140,8 @@ export function buildRenderers(opts: BuildRenderersOptions): {
   /** Talks to the installed zerotier-cli, over the same runner as everything else. */
   zerotier: ZeroTierCli;
   remoteRenderer: RemoteRenderer;
+  /** Present only when `opts.mediaConfigPath` said where the file goes. */
+  mediaRenderer?: MediaRenderer;
   generated: string[];
 } {
   const log = opts.log ?? note;
@@ -167,6 +186,22 @@ export function buildRenderers(opts: BuildRenderersOptions): {
       log,
     });
 
+  // Last of all, and deliberately the opposite of the console's reasoning.
+  //
+  // Renderers run in sequence and a failure stops the ones behind it, so the
+  // question is what each one is allowed to prevent. A media server that will
+  // not start must not stop the console being re-rendered: the console is how
+  // an operator fixes a device, and video is not. Nothing is behind this one,
+  // so nothing is at risk from it.
+  const mediaRenderer = opts.mediaConfigPath === undefined
+    ? undefined
+    : new MediaRenderer({
+      path: opts.mediaConfigPath,
+      runner: opts.runner ?? systemRunner,
+      secrets,
+      log,
+    });
+
   // First, and deliberately.
   //
   // K-19: renderers run in sequence and a failure stops the ones behind it,
@@ -179,16 +214,19 @@ export function buildRenderers(opts: BuildRenderersOptions): {
   // hostname on the DHCP request the network render is about to make.
   const hostname = new HostnameRenderer({ runner: opts.runner ?? systemRunner, log });
 
+  const renderers: Renderer[] = [hostname, renderer, remoteRenderer];
+  if (consoleRenderer !== undefined) renderers.push(consoleRenderer);
+  if (mediaRenderer !== undefined) renderers.push(mediaRenderer);
+
   return {
-    renderers: consoleRenderer === undefined
-      ? [hostname, renderer, remoteRenderer]
-      : [hostname, renderer, remoteRenderer, consoleRenderer],
+    renderers,
     renderer,
     ...(consoleRenderer === undefined ? {} : { consoleRenderer }),
     secrets,
     client,
     zerotier,
     remoteRenderer,
+    ...(mediaRenderer === undefined ? {} : { mediaRenderer }),
     generated,
   };
 }
@@ -257,6 +295,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
       // The same directory the apply journal already lives in — one state
       // directory for this daemon, not a second one this renderer invented.
       remoteStatePath: join(dirname(opts.journalPath), "remote.json"),
+      ...(opts.mediaConfigPath === undefined ? {} : { mediaConfigPath: opts.mediaConfigPath }),
       ...(opts.console === undefined ? {} : { console: opts.console }),
     });
   } catch (e) {
@@ -599,6 +638,12 @@ async function main(): Promise<void> {
     // The one place production console paths are decided. Everywhere else
     // they are given, so nothing can write to /opt/yonder by default.
     console: consolePathsFromEnv(),
+    // The one place the production path is decided, as with the console
+    // above, so nothing else can reach a real /etc/mediamtx by default. No
+    // environment override, deliberately: mediamtx.service names this path
+    // literally, and a daemon writing somewhere else would be a media server
+    // whose listeners never change with the configuration.
+    mediaConfigPath: MEDIA_CONFIG_PATH,
   });
   note("yonder-core listening");
 }
