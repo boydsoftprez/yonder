@@ -5,7 +5,14 @@ import { createServer, request, type Server } from "node:http";
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { setupMiddleware, consoleMiddleware, cookieValue, SESSION_COOKIE, type Middleware } from "./middleware.js";
+import {
+  setupMiddleware,
+  consoleMiddleware,
+  cookieValue,
+  SESSION_COOKIE,
+  type ConsoleMiddlewareDeps,
+  type Middleware,
+} from "./middleware.js";
 import { DaemonClient, type Transport } from "./client.js";
 import { SessionStore } from "./session.js";
 import type { Clock } from "../apply/types.js";
@@ -61,7 +68,14 @@ interface Reply {
 function call(
   method: string,
   path: string,
-  opts: { form?: Record<string, string>; json?: unknown; cookie?: string; raw?: string } = {},
+  opts: {
+    form?: Record<string, string>;
+    json?: unknown;
+    cookie?: string;
+    raw?: string;
+    /** The content-type sent with `raw`. A form, unless something says otherwise. */
+    type?: string;
+  } = {},
 ): Promise<Reply> {
   return new Promise((resolve, reject) => {
     let payload: Buffer | undefined;
@@ -74,7 +88,7 @@ function call(
       headers["content-type"] = "application/json";
     } else if (opts.raw !== undefined) {
       payload = Buffer.from(opts.raw, "utf8");
-      headers["content-type"] = "application/x-www-form-urlencoded";
+      headers["content-type"] = opts.type ?? "application/x-www-form-urlencoded";
     }
     if (payload !== undefined) headers["content-length"] = String(payload.length);
     if (opts.cookie !== undefined) headers.cookie = opts.cookie;
@@ -239,15 +253,42 @@ function fakeClock(): Clock & { advance(ms: number): void } {
   };
 }
 
-function consoleWith(transport: Transport, sessions = new SessionStore({ clock: fakeClock() })): {
+function consoleWith(
+  transport: Transport,
+  sessions = new SessionStore({ clock: fakeClock() }),
+  whep?: ConsoleMiddlewareDeps["whep"],
+): {
   middleware: Middleware;
   sessions: SessionStore;
 } {
   return {
-    middleware: consoleMiddleware({ client: new DaemonClient({ transport }), sessions }),
+    middleware: consoleMiddleware({ client: new DaemonClient({ transport }), sessions, whep }),
     sessions,
   };
 }
+
+/** A stand-in for the stream handshake proxy, recording what reached it. */
+function recordingWhep(): {
+  handler: NonNullable<ConsoleMiddlewareDeps["whep"]>;
+  seen: Parameters<NonNullable<ConsoleMiddlewareDeps["whep"]>>[0][];
+} {
+  const seen: Parameters<NonNullable<ConsoleMiddlewareDeps["whep"]>>[0][] = [];
+  return {
+    seen,
+    handler: (req) => {
+      seen.push(req);
+      return Promise.resolve({
+        status: 201,
+        body: ANSWER,
+        headers: { "content-type": "application/sdp" },
+      });
+    },
+  };
+}
+
+/** An SDP offer, which is neither a form nor JSON and must survive as sent. */
+const OFFER = "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=-\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\n";
+const ANSWER = "v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\ns=-\r\n";
 
 /** The token out of a Set-Cookie header, or undefined. */
 function tokenFrom(res: Reply): string | undefined {
@@ -393,6 +434,54 @@ describe("consoleMiddleware", () => {
     expect((await call("GET", "/", { cookie })).body).toBe("behind the gate");
     clock.advance(2000);
     expect((await call("GET", "/", { cookie })).body).toContain("Sign in");
+  });
+
+  /**
+   * R-SEC-13, at the console's door. The media server's WebRTC listener is on
+   * loopback, so this route is the only way a browser reaches a stream, and
+   * what it is told about the session is the whole of the protection. The
+   * refusal itself is whep.ts's (and is proved end to end in wiring.test.ts);
+   * what this asserts is that the answer handed over is the truth.
+   */
+  it("tells the proxy there is no session, and reads no offer when there is none", async () => {
+    const proxy = recordingWhep();
+    await serve(consoleWith(answering(200, '{"ok":true}'), undefined, proxy.handler).middleware);
+    await call("POST", "/video/cam0-preview/whep", { raw: OFFER, type: "application/sdp" });
+    // An empty body, not the offer: the credential is checked before anything
+    // reads it, so an unauthenticated request cannot make this process do
+    // work either.
+    expect(proxy.seen).toEqual([{
+      method: "POST",
+      path: "/video/cam0-preview/whep",
+      body: "",
+      authenticated: false,
+    }]);
+    expect(passedThrough).toEqual([]);
+  });
+
+  it("hands an authenticated offer to the proxy byte for byte, and relays the answer", async () => {
+    // An SDP offer is neither a form nor JSON. Read as either, it arrives
+    // mangled and the picture fails with nothing in any log to say why.
+    const proxy = recordingWhep();
+    await serve(consoleWith(answering(200, '{"ok":true}'), undefined, proxy.handler).middleware);
+    const login = await call("POST", "/login", { form: { password: GOOD } });
+    const cookie = (login.headers["set-cookie"] as string[])[0]!.split(";")[0]!;
+
+    const res = await call("POST", "/video/cam0-preview/whep", {
+      raw: OFFER, type: "application/sdp", cookie,
+    });
+    expect(proxy.seen).toHaveLength(1);
+    expect(proxy.seen[0]).toEqual({
+      method: "POST",
+      path: "/video/cam0-preview/whep",
+      body: OFFER,
+      authenticated: true,
+    });
+    expect(res.status).toBe(201);
+    expect(res.body).toBe(ANSWER);
+    expect(res.headers["content-type"]).toBe("application/sdp");
+    // Not through to Node-RED: this route answers, it does not pass on.
+    expect(passedThrough).toEqual([]);
   });
 
   it("does not cache a page carrying a password field", async () => {

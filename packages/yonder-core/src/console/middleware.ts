@@ -4,6 +4,7 @@ import { renderPage } from "./assets.js";
 import { CONSOLE_HOME } from "./settings.js";
 import type { DaemonClient } from "./client.js";
 import type { SessionStore } from "./session.js";
+import { whepHandler, WHEP_PREFIX, type WhepRequest, type WhepResponse } from "./whep.js";
 
 /**
  * The gate on the front of the console.
@@ -37,6 +38,18 @@ export const SESSION_COOKIE = "yonder_session";
  * RAM buffer whatever an unauthenticated caller sends.
  */
 const MAX_BODY_BYTES = 8 * 1024;
+
+/**
+ * The most of a stream handshake this will read: 64 KiB.
+ *
+ * Its own bound rather than the one above, because an SDP offer is not a
+ * password: a browser listing every interface it has and every candidate it
+ * gathered writes several kilobytes, and a limit set for a login form would
+ * refuse a real offer and take the picture away for no reason a log would
+ * explain. Bounded all the same — this is a body, and no body on this device
+ * is read without a limit.
+ */
+const MAX_OFFER_BYTES = 64 * 1024;
 
 /** The path, without the query string, and never empty. */
 function pathOf(req: IncomingMessage): string {
@@ -86,64 +99,73 @@ export interface Submission {
 }
 
 /**
- * Read a form or JSON body into flat string fields.
+ * A request body, up to `limit` bytes, as text.
  *
- * Never rejects. A body that is truncated, aborted, or not what its
- * content-type claims comes back as no fields at all, which every caller
- * below treats as a failed submission — the same direction everything else in
- * this console fails.
+ * Never rejects. A body that is truncated or aborted comes back as no text at
+ * all, which every caller below treats as a failed submission — the same
+ * direction everything else in this console fails.
  *
  * An oversized body is told apart from an empty one, because the two deserve
  * different answers: an empty submission is an operator who pressed the
  * button too early, and an oversized one is not a login at all. The stream is
  * paused rather than drained, so nothing is gained by continuing to send.
+ *
+ * One collector, so those properties hold for a stream handshake exactly as
+ * they do for a login form rather than being written twice and drifting.
  */
-export function readFields(req: IncomingMessage): Promise<Submission> {
+function readBody(req: IncomingMessage, limit: number): Promise<{ text: string; tooLarge: boolean }> {
   return new Promise((resolve) => {
     const chunks: Buffer[] = [];
     let length = 0;
     let done = false;
-    const finish = (fields: Record<string, string>, tooLarge = false): void => {
+    const finish = (text: string, tooLarge = false): void => {
       if (done) return;
       done = true;
-      resolve({ fields, tooLarge });
+      resolve({ text, tooLarge });
     };
 
     req.on("data", (chunk: Buffer) => {
       length += chunk.length;
-      if (length > MAX_BODY_BYTES) {
+      if (length > limit) {
         req.pause();
-        finish({}, true);
+        finish("", true);
         return;
       }
       chunks.push(chunk);
     });
-    req.on("error", () => { finish({}); });
-    req.on("aborted", () => { finish({}); });
-    req.on("end", () => {
-      const text = Buffer.concat(chunks).toString("utf8");
-      const type = String(req.headers["content-type"] ?? "");
-      try {
-        if (type.includes("application/json")) {
-          const parsed: unknown = JSON.parse(text);
-          if (parsed === null || typeof parsed !== "object") { finish({}); return; }
-          const fields: Record<string, string> = {};
-          for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
-            if (typeof value === "string") fields[key] = value;
-          }
-          finish(fields);
-          return;
-        }
-        // Anything else is read as a form, because a form is what these
-        // pages send and a browser that omits the header must still work.
-        const fields: Record<string, string> = {};
-        for (const [key, value] of new URLSearchParams(text)) fields[key] = value;
-        finish(fields);
-      } catch {
-        finish({});
-      }
-    });
+    req.on("error", () => { finish(""); });
+    req.on("aborted", () => { finish(""); });
+    req.on("end", () => { finish(Buffer.concat(chunks).toString("utf8")); });
   });
+}
+
+/**
+ * Read a form or JSON body into flat string fields.
+ *
+ * A body that is not what its content-type claims comes back as no fields at
+ * all, which every caller below treats as a failed submission.
+ */
+export async function readFields(req: IncomingMessage): Promise<Submission> {
+  const { text, tooLarge } = await readBody(req, MAX_BODY_BYTES);
+  if (tooLarge) return { fields: {}, tooLarge: true };
+  const type = String(req.headers["content-type"] ?? "");
+  const fields: Record<string, string> = {};
+  try {
+    if (type.includes("application/json")) {
+      const parsed: unknown = JSON.parse(text);
+      if (parsed === null || typeof parsed !== "object") return { fields: {}, tooLarge: false };
+      for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+        if (typeof value === "string") fields[key] = value;
+      }
+      return { fields, tooLarge: false };
+    }
+    // Anything else is read as a form, because a form is what these pages
+    // send and a browser that omits the header must still work.
+    for (const [key, value] of new URLSearchParams(text)) fields[key] = value;
+    return { fields, tooLarge: false };
+  } catch {
+    return { fields: {}, tooLarge: false };
+  }
 }
 
 /**
@@ -199,6 +221,28 @@ function clearedCookie(): string {
 /** GET and HEAD are the only methods that get a page rather than a status. */
 function wantsPage(req: IncomingMessage): boolean {
   return req.method === "GET" || req.method === "HEAD";
+}
+
+/**
+ * Whether this request carries a live session, refreshing its idle timer.
+ *
+ * The one notion of "logged in" on this device. Every route that needs the
+ * answer asks this, so there is nowhere a second, weaker version of the
+ * question could grow.
+ */
+function hasSession(req: IncomingMessage, sessions: SessionStore): boolean {
+  const token = cookieValue(req.headers.cookie, SESSION_COOKIE);
+  return token !== undefined && sessions.check(token);
+}
+
+/** An answer relayed from the media server, or this console's refusal of one. */
+function sendProxied(res: ServerResponse, answer: WhepResponse): void {
+  res.writeHead(answer.status, {
+    "content-type": "text/plain; charset=utf-8",
+    ...answer.headers,
+    "cache-control": "no-store",
+  });
+  res.end(answer.body);
 }
 
 export interface SetupMiddlewareDeps {
@@ -268,6 +312,11 @@ export interface ConsoleMiddlewareDeps {
   client: DaemonClient;
   sessions: SessionStore;
   log?: (line: string) => void;
+  /**
+   * The stream handshake proxy (whep.ts). Injected so a test can reach this
+   * route without a media server and without opening a socket.
+   */
+  whep?: (req: WhepRequest) => Promise<WhepResponse>;
 }
 
 /**
@@ -280,6 +329,7 @@ export interface ConsoleMiddlewareDeps {
  */
 export function consoleMiddleware(deps: ConsoleMiddlewareDeps): Middleware {
   const log = deps.log ?? (() => {});
+  const whep = deps.whep ?? whepHandler();
 
   return (req, res, next) => {
     const path = pathOf(req);
@@ -317,8 +367,30 @@ export function consoleMiddleware(deps: ConsoleMiddlewareDeps): Middleware {
       return;
     }
 
-    const token = cookieValue(req.headers.cookie, SESSION_COOKIE);
-    if (token !== undefined && deps.sessions.check(token)) {
+    // The stream handshake, behind this console's own credential (R-SEC-13).
+    // Handed the answer rather than placed below the check further down: a
+    // route that is authenticated by where it sits in this function is a
+    // route that stops being authenticated the day the function is reordered.
+    if (path === WHEP_PREFIX || path.startsWith(`${WHEP_PREFIX}/`)) {
+      const authenticated = hasSession(req, deps.sessions);
+      void (async () => {
+        // Nothing reads the body until the credential has been checked, so an
+        // unauthenticated request cannot make this process do work either.
+        const offer = authenticated && req.method === "POST"
+          ? await readBody(req, MAX_OFFER_BYTES)
+          : { text: "", tooLarge: false };
+        if (offer.tooLarge) { tooLarge(res); return; }
+        sendProxied(res, await whep({
+          method: req.method ?? "",
+          path,
+          body: offer.text,
+          authenticated,
+        }));
+      })();
+      return;
+    }
+
+    if (hasSession(req, deps.sessions)) {
       next();
       return;
     }

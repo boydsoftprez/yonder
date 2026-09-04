@@ -14,7 +14,13 @@ import { setupMiddleware, consoleMiddleware, type Middleware } from "./middlewar
  *
  * Keeping the surface to two functions is also what keeps the module graph
  * small: nothing here reaches the configuration schema, so `settings.js`
- * loads without zod, yaml or anything else the daemon's own tree carries.
+ * loads without zod or anything else the validator's tree carries.
+ *
+ * Not free of everything, and the exception is stated rather than left to be
+ * discovered: the stream handshake route takes the media server's port from
+ * `media/config.ts`, which brings `yaml` with it. That is the price of the
+ * port being written down once instead of twice, and a port restated here
+ * would be a proxy dialling nothing the next time that file moves.
  */
 
 /** The username the flow editor's login expects. There is one administrator. */

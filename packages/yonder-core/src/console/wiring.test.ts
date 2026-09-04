@@ -22,7 +22,11 @@ afterEach(async () => {
   server = undefined;
 });
 
-function through(gate: ReturnType<typeof consoleGate>, path: string): Promise<{ status: number; body: string }> {
+function through(
+  gate: ReturnType<typeof consoleGate>,
+  path: string,
+  opts: { method?: string; body?: string; type?: string } = {},
+): Promise<{ status: number; body: string }> {
   return new Promise((resolve, reject) => {
     server = createServer((req, res) => {
       gate(req, res, () => {
@@ -32,7 +36,14 @@ function through(gate: ReturnType<typeof consoleGate>, path: string): Promise<{ 
     });
     server.listen(0, "127.0.0.1", () => {
       const port = (server?.address() as { port: number }).port;
-      const req = request({ host: "127.0.0.1", port, method: "GET", path }, (res) => {
+      const headers: Record<string, string> = {};
+      const payload = opts.body === undefined ? undefined : Buffer.from(opts.body, "utf8");
+      if (payload !== undefined) {
+        headers["content-type"] = opts.type ?? "application/x-www-form-urlencoded";
+        headers["content-length"] = String(payload.length);
+      }
+      const method = opts.method ?? "GET";
+      const req = request({ host: "127.0.0.1", port, method, path, headers }, (res) => {
         const chunks: Buffer[] = [];
         res.on("data", (c: Buffer) => chunks.push(c));
         res.on("end", () => {
@@ -40,6 +51,7 @@ function through(gate: ReturnType<typeof consoleGate>, path: string): Promise<{ 
         });
       });
       req.on("error", reject);
+      if (payload !== undefined) req.write(payload);
       req.end();
     });
   });
@@ -66,6 +78,32 @@ describe("consoleGate", () => {
     const res = await through(gate, "/dashboard");
     expect(res.status).toBe(200);
     expect(res.body).toContain("Sign in");
+    expect(res.body).not.toBe("behind the gate");
+  });
+
+  /**
+   * R-SEC-13, asserted where the routes are actually assembled.
+   *
+   * The stream handshake is the only way a browser reaches a picture — the
+   * media server's WebRTC listener is on loopback — so a caller with no
+   * session must not get one. Asserted here as well as in whep.test.ts
+   * because a route that is authenticated only because it happens to sit
+   * below a check is a route that stops being authenticated the day somebody
+   * reorders the table.
+   */
+  it("does not hand out a stream handshake to a caller with no session", async () => {
+    const gate = consoleGate({ socketPath: DEAD_SOCKET, provisioned: true, log: () => {} });
+    const res = await through(gate, "/video/cam0-preview/whep", {
+      method: "POST",
+      type: "application/sdp",
+      body: "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=-\r\n",
+    });
+    expect(res.status).toBe(401);
+    // The proxy's own refusal, not the gate's generic one: this is what says
+    // the route was assembled and refused, rather than never existing and
+    // being caught by whatever happens to sit below it.
+    expect(res.body).toContain("log in to watch this camera");
+    expect(res.body).not.toContain("v=0");
     expect(res.body).not.toBe("behind the gate");
   });
 
