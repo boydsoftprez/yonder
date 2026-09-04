@@ -18,7 +18,8 @@
       "ui-yonder-softkeys": "dist/softkeys.js",
       "ui-yonder-identity": "dist/identity.js",
       "ui-yonder-sparkline": "dist/sparkline.js",
-      "ui-yonder-holdkey": "dist/holdkey.js"
+      "ui-yonder-holdkey": "dist/holdkey.js",
+      "ui-yonder-picture": "dist/picture.js"
     }
   },
   "node-red-dashboard-2": {
@@ -31,7 +32,8 @@
       "ui-yonder-softkeys": { "output": "ui-yonder-softkeys.umd.js", "component": "YonderSoftKeys" },
       "ui-yonder-identity": { "output": "ui-yonder-identity.umd.js", "component": "YonderIdentity" },
       "ui-yonder-sparkline": { "output": "ui-yonder-sparkline.umd.js", "component": "YonderSparkline" },
-      "ui-yonder-holdkey": { "output": "ui-yonder-holdkey.umd.js", "component": "YonderHoldKey" }
+      "ui-yonder-holdkey": { "output": "ui-yonder-holdkey.umd.js", "component": "YonderHoldKey" },
+      "ui-yonder-picture": { "output": "ui-yonder-picture.umd.js", "component": "YonderPicture" }
     }
   },
   "scripts": {

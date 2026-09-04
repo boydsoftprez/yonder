@@ -16,6 +16,7 @@ const softkeysNode = (await import("./softkeys.js")).default ?? await import("./
 const identityNode = (await import("./identity.js")).default ?? await import("./identity.js");
 const sparklineNode = (await import("./sparkline.js")).default ?? await import("./sparkline.js");
 const holdkeyNode = (await import("./holdkey.js")).default ?? await import("./holdkey.js");
+const pictureNode = (await import("./picture.js")).default ?? await import("./picture.js");
 
 /**
  * What is tested here, and what honestly cannot be.
@@ -24,7 +25,7 @@ const holdkeyNode = (await import("./holdkey.js")).default ?? await import("./ho
  * registration with the Dashboard group, and the reading of an editor form.
  * That is the part that runs in Node-RED and the part a flow depends on.
  *
- * Seven of the eight widgets' Vue halves are not exercised here, and that is
+ * Seven of the nine widgets' Vue halves are not exercised here, and that is
  * still correct: a gauge, a tape, an annunciator, a data bar, an identity, a
  * sparkline and a soft-key rail all draw what they are given and decide
  * nothing, so mounting one against a mocked `$socket`, `$dataTracker` and
@@ -35,17 +36,22 @@ const holdkeyNode = (await import("./holdkey.js")).default ?? await import("./ho
  * board, the rendering is unverified, and `docs/known-issues.md` says so
  * rather than this file implying otherwise.
  *
- * `YonderHoldKey` is the eighth, and it is not exempt. It carries a state
- * machine — four release paths and two duplicate-collapse guards — so what
- * it does with an event is a decision, not a drawing. Its behaviour is
- * tested directly in `./ui/holdkey.component.test.ts`: mounted for real
- * with `@vue/test-utils` against jsdom, with only `$socket.emit` and
- * `$dataTracker` stubbed — the whole of the Dashboard surface it touches.
- * That is honest for the same reason the exemption above is honest: the
- * assertion is on a call our own code makes, not on a mock echoing what it
- * was told to say. Mutation-testing is why the line moved here: deleting
- * `pointercancel`, and separately deleting `pointerleave`, each once left
- * this package's suite fully green. Neither can happen unnoticed now.
+ * `YonderHoldKey` and `YonderPicture` are the other two, and neither is
+ * exempt. The hold key carries a state machine — four release paths and two
+ * duplicate-collapse guards — and the picture carries a larger one: a mode
+ * machine, a twelve-second deadline, a reconnect loop with backoff and a
+ * degrade that is a function of elapsed time. What either does with an event
+ * is a decision, not a drawing. Both are tested directly, in
+ * `./ui/holdkey.component.test.ts` and `./ui/picture.component.test.ts`:
+ * mounted for real with `@vue/test-utils` against jsdom, with only
+ * `$socket.emit`, `$dataTracker` and — for the picture — `fetch` and
+ * `RTCPeerConnection` stubbed, which is the whole of the surface either one
+ * touches. That is honest for the same reason the exemption above is
+ * honest: the assertion is on a call our own code makes, not on a mock
+ * echoing what it was told to say. Mutation-testing is why the line moved
+ * here: deleting `pointercancel`, and separately deleting `pointerleave`,
+ * each once left this package's suite fully green. Neither can happen
+ * unnoticed now.
  */
 
 interface Registered {
@@ -338,5 +344,45 @@ describe("the hold key", () => {
     // rest of the flow either way.
     const { node } = build(holdkeyNode as (RED: RED) => void, { label: "Full rate", action: "fullrate" }, null);
     expect(node.error).toHaveBeenCalled();
+  });
+});
+describe("the picture", () => {
+  it("registers as a widget that sends", () => {
+    // It sends: the mode changes and 'try live again' are actions.
+    const { type, events } = build(pictureNode as (RED: RED) => void, { path: "cam0" });
+    expect(type).toBe("ui-yonder-picture");
+    expect(events).toMatchObject({ onAction: true });
+  });
+
+  it("defaults to the cheap preview path, never the full-rate one", () => {
+    // R-VID-13 makes the cheap copy the default. A component that defaulted
+    // to the full stream would spend most of a field uplink the moment
+    // somebody opened a page, with no reason to suspect it.
+    expect(build(pictureNode as (RED: RED) => void, { path: "cam0" }).props)
+      .toMatchObject({ path: "cam0-preview" });
+  });
+
+  it("does not append -preview twice", () => {
+    expect(build(pictureNode as (RED: RED) => void, { path: "cam0-preview" }).props)
+      .toMatchObject({ path: "cam0-preview" });
+  });
+
+  it("falls back to twelve seconds when the field is blank", () => {
+    // Long enough for a slow negotiation to finish, short enough that nobody
+    // is left staring at nothing. `num` treats an empty string as absent, not
+    // as zero — a zero here would fall back to stills instantly.
+    expect(build(pictureNode as (RED: RED) => void, { path: "cam0", stillsAfterMs: "" }).props)
+      .toMatchObject({ stillsAfterMs: 12_000 });
+  });
+
+  it("carries the stills source, so the fall-back has somewhere to point", () => {
+    // R-VID-14's fall-back is only useful if it can draw something. Nothing
+    // in this repository serves stills yet, so this is configuration rather
+    // than a discovered URL, and an unset one leaves the fall-back drawing
+    // its reason and no picture.
+    expect(build(pictureNode as (RED: RED) => void, { path: "cam0", stillsUrl: "/stills/cam0.jpg" }).props)
+      .toMatchObject({ stillsUrl: "/stills/cam0.jpg" });
+    expect(build(pictureNode as (RED: RED) => void, { path: "cam0" }).props)
+      .toMatchObject({ stillsUrl: "" });
   });
 });
