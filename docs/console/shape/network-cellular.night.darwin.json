@@ -15,7 +15,43 @@
       }
     },
     {
-      "key": "nrdb-ui-text.nrdb-ui-widget#0",
+      "key": "d-none.nrdb-ui-widget.nrdb-ui-yonder-annunciator.yonder-live.yonder-pending",
+      "box": {
+        "x": 0,
+        "y": 0,
+        "w": 0,
+        "h": 0
+      }
+    },
+    {
+      "key": "d-none.nrdb-ui-text.nrdb-ui-widget.yonder-fixed.yonder-pending.yonder-qualifier#0",
+      "box": {
+        "x": 0,
+        "y": 0,
+        "w": 0,
+        "h": 0
+      }
+    },
+    {
+      "key": "d-none.nrdb-ui-text.nrdb-ui-widget.yonder-fixed.yonder-pending.yonder-qualifier#1",
+      "box": {
+        "x": 0,
+        "y": 0,
+        "w": 0,
+        "h": 0
+      }
+    },
+    {
+      "key": "d-none.nrdb-ui-widget.nrdb-ui-yonder-softkeys.yonder-pending",
+      "box": {
+        "x": 0,
+        "y": 0,
+        "w": 0,
+        "h": 0
+      }
+    },
+    {
+      "key": "nrdb-ui-text.nrdb-ui-widget.yonder-fixed#0",
       "box": {
         "x": 0,
         "y": 0,
@@ -33,7 +69,7 @@
       }
     },
     {
-      "key": "nrdb-ui-text.nrdb-ui-widget.yonder-qualifier#0",
+      "key": "nrdb-ui-text.nrdb-ui-widget.yonder-fixed.yonder-qualifier#0",
       "box": {
         "x": 0,
         "y": 0,
@@ -42,7 +78,7 @@
       }
     },
     {
-      "key": "nrdb-ui-text.nrdb-ui-widget#1",
+      "key": "nrdb-ui-text.nrdb-ui-widget.yonder-fixed#1",
       "box": {
         "x": 0,
         "y": 0,
@@ -60,7 +96,7 @@
       }
     },
     {
-      "key": "nrdb-ui-text.nrdb-ui-widget.yonder-qualifier#1",
+      "key": "nrdb-ui-text.nrdb-ui-widget.yonder-fixed.yonder-qualifier#1",
       "box": {
         "x": 0,
         "y": 0,
@@ -69,7 +105,7 @@
       }
     },
     {
-      "key": "nrdb-ui-text.nrdb-ui-widget#2",
+      "key": "nrdb-ui-text.nrdb-ui-widget.yonder-fixed#2",
       "box": {
         "x": 0,
         "y": 0,
@@ -87,7 +123,7 @@
       }
     },
     {
-      "key": "nrdb-ui-text.nrdb-ui-widget.yonder-qualifier#2",
+      "key": "nrdb-ui-text.nrdb-ui-widget.yonder-fixed.yonder-qualifier#2",
       "box": {
         "x": 0,
         "y": 0,
@@ -105,7 +141,7 @@
       }
     },
     {
-      "key": "nrdb-ui-text.nrdb-ui-widget#3",
+      "key": "nrdb-ui-text.nrdb-ui-widget#0",
       "box": {
         "x": 0,
         "y": 0,
@@ -114,7 +150,7 @@
       }
     },
     {
-      "key": "nrdb-ui-text.nrdb-ui-widget#4",
+      "key": "nrdb-ui-text.nrdb-ui-widget#1",
       "box": {
         "x": 0,
         "y": 0,
@@ -129,6 +165,42 @@
         "y": 124,
         "w": 1000,
         "h": 442
+      }
+    },
+    {
+      "key": "d-none.nrdb-ui-widget.nrdb-ui-yonder-annunciator.yonder-live.yonder-pending",
+      "box": {
+        "x": 0,
+        "y": 0,
+        "w": 0,
+        "h": 0
+      }
+    },
+    {
+      "key": "d-none.nrdb-ui-text.nrdb-ui-widget.yonder-fixed.yonder-pending.yonder-qualifier#0",
+      "box": {
+        "x": 0,
+        "y": 0,
+        "w": 0,
+        "h": 0
+      }
+    },
+    {
+      "key": "d-none.nrdb-ui-text.nrdb-ui-widget.yonder-fixed.yonder-pending.yonder-qualifier#1",
+      "box": {
+        "x": 0,
+        "y": 0,
+        "w": 0,
+        "h": 0
+      }
+    },
+    {
+      "key": "d-none.nrdb-ui-widget.nrdb-ui-yonder-softkeys.yonder-pending",
+      "box": {
+        "x": 0,
+        "y": 0,
+        "w": 0,
+        "h": 0
       }
     },
     {
@@ -238,6 +310,32 @@
         "w": 966,
         "h": 48
       }
+    }
+  ],
+  "fixed": [
+    {
+      "key": "nrdb-ui-text.nrdb-ui-widget.yonder-fixed#0",
+      "text": "Ethernet"
+    },
+    {
+      "key": "nrdb-ui-text.nrdb-ui-widget.yonder-fixed.yonder-qualifier#0",
+      "text": "Up, and not yet tested — nothing has established that it reaches anything"
+    },
+    {
+      "key": "nrdb-ui-text.nrdb-ui-widget.yonder-fixed#1",
+      "text": "Cellular"
+    },
+    {
+      "key": "nrdb-ui-text.nrdb-ui-widget.yonder-fixed.yonder-qualifier#1",
+      "text": "Up, and not yet tested — nothing has established that it reaches anything"
+    },
+    {
+      "key": "nrdb-ui-text.nrdb-ui-widget.yonder-fixed#2",
+      "text": "Wi-Fi"
+    },
+    {
+      "key": "nrdb-ui-text.nrdb-ui-widget.yonder-fixed.yonder-qualifier#2",
+      "text": "No Wi-Fi interface on this board"
     }
   ]
 }

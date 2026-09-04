@@ -167,5 +167,15 @@
         "h": 48
       }
     }
+  ],
+  "fixed": [
+    {
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-databar.yonder-fixed",
+      "text": "JOINyonderPASSPHRASEyonder1234AT192.168.77.1ORyonder.local"
+    },
+    {
+      "key": "nrdb-ui-text.nrdb-ui-widget.yonder-fixed.yonder-qualifier",
+      "text": "Join that network from a phone or a laptop and open this console at either address above, on the port you are using now. Worth photographing before you change anything: it is what gets you back in when this page stops answering."
+    }
   ]
 }

@@ -15,7 +15,7 @@
       }
     },
     {
-      "key": "nrdb-ui-widget.nrdb-ui-yonder-annunciator.yonder-live",
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-annunciator.yonder-live.yonder-pending",
       "box": {
         "x": 285,
         "y": 148,
@@ -24,7 +24,7 @@
       }
     },
     {
-      "key": "nrdb-ui-text.nrdb-ui-widget.yonder-qualifier#0",
+      "key": "nrdb-ui-text.nrdb-ui-widget.yonder-fixed.yonder-pending.yonder-qualifier#0",
       "box": {
         "x": 285,
         "y": 208,
@@ -33,7 +33,7 @@
       }
     },
     {
-      "key": "nrdb-ui-text.nrdb-ui-widget.yonder-qualifier#1",
+      "key": "nrdb-ui-text.nrdb-ui-widget.yonder-fixed.yonder-pending.yonder-qualifier#1",
       "box": {
         "x": 285,
         "y": 268,
@@ -42,7 +42,7 @@
       }
     },
     {
-      "key": "nrdb-ui-widget.nrdb-ui-yonder-softkeys",
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-softkeys.yonder-pending",
       "box": {
         "x": 285,
         "y": 328,
@@ -211,6 +211,24 @@
         "w": 966,
         "h": 48
       }
+    }
+  ],
+  "fixed": [
+    {
+      "key": "nrdb-ui-text.nrdb-ui-widget.yonder-fixed.yonder-pending.yonder-qualifier#0",
+      "text": "A configuration change is in force on this device and has not been confirmed."
+    },
+    {
+      "key": "nrdb-ui-text.nrdb-ui-widget.yonder-fixed.yonder-pending.yonder-qualifier#1",
+      "text": "Confirm it to keep it. If you do not, the device puts the previous configuration back by itself — which is what gets you back in if this change was the wrong one."
+    },
+    {
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-databar.yonder-fixed",
+      "text": "JOINyonderPASSPHRASEyonder1234AT192.168.77.1ORyonder-under-test.local"
+    },
+    {
+      "key": "nrdb-ui-text.nrdb-ui-widget.yonder-fixed.yonder-qualifier",
+      "text": "Join that network from a phone or a laptop and open this console at either address above, on the port you are using now. Worth photographing before you change anything: it is what gets you back in when this page stops answering."
     }
   ]
 }
