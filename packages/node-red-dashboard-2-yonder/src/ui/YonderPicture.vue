@@ -364,17 +364,28 @@ export default {
             this.lastFrameAt = null
         },
         /**
-         * The operator asking for a live picture: on mount, and whenever the
-         * mode is set back to live.
+         * The operator asking for a live picture: on mount, whenever the mode
+         * is set back to live, and whenever the `streamPath` watcher decides
+         * the session in hand is negotiated against the wrong camera.
          *
          * The deadline is armed here because it belongs to the request, not
          * to an attempt (R-VID-14).
+         *
+         * **A pending backoff must not survive into this request.** Without
+         * the line below, a retry armed by an earlier failed attempt kept
+         * running underneath a fresh one — and on an ordinary startup, not
+         * only behind an operator's key press: the daemon slow to answer, the
+         * first negotiation 503s, the first read then names the camera and
+         * this method connects and paints, and the stale timer fires into
+         * `connect()` a moment later and closes the session that just came
+         * up. Same bug shape as `Supervisor.start()`, same fix.
          */
         requestLive () {
             this.attempt = 0
             this.lastFrameAt = null
             this.reason = ''
             this.stillSrc = ''
+            clearTimeout(this.retryTimer)
             clearTimeout(this.stillsTimer)
             this.stillsTimer = setTimeout(() => {
                 // Twelve seconds: long enough for a slow negotiation to

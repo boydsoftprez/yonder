@@ -504,6 +504,43 @@ describe("reconnecting", () => {
     await advance(60_000);
     expect(fetchMock).toHaveBeenCalledTimes(attempts);
   });
+
+  /**
+   * **A stale backoff must not survive into the request that supersedes
+   * it.** This is M2's own headline failure — "the key dropped the picture
+   * it was pressed for" — reached by a different route: not an operator
+   * holding FULL RATE, but the ordinary case of a daemon slow to answer. A
+   * failed first negotiation arms a retry; before it fires, the first
+   * `camera-read` names the camera and the `streamPath` watcher calls
+   * `requestLive()`, which connects and paints — and then the retry armed by
+   * the *first* attempt fires anyway and tears the new session down.
+   */
+  it("does not let a stale backoff close the session the streamPath watcher just brought up", async () => {
+    reply = { status: 503 };
+    const { wrapper, press } = mountWithRail();
+    await settle();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(badge(wrapper)).toBe("reconnecting · attempt 1");
+
+    // Before the backoff above fires, the daemon's first read names the
+    // camera. Nothing has advanced the clock yet, so that backoff — a full
+    // 1000ms of it — is still pending underneath what happens next.
+    reply = { status: 201, sdp: ANSWER };
+    await press({ path: "nose" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    pc(1).deliverTrack();
+    frames(wrapper);
+    await settle();
+    expect(badge(wrapper)).toBe("live · preview");
+
+    await advance(1_000);
+
+    // Fixed: the stale timer was cleared, so it never fires, nothing tears
+    // the session down, and no third negotiation happens.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(pc(1).closed).toBe(false);
+    expect(badge(wrapper)).toBe("live · preview");
+  });
 });
 
 describe("the degrade, when contact goes", () => {
