@@ -171,7 +171,16 @@ function sink(output: CameraOutput, rtspBase: string): string[] {
     case "rtsp":
       return ["rtspclientsink", `location=${rtspBase}/${output.path}`, "latency=0"];
     case "srt":
-      return ["mpegtsmux", LINK, "srtsink", `uri=srt://:${output.port}`, "wait-for-connection=false"];
+      // **Unreachable, and it throws rather than composing.** `refuse()` below
+      // rejects an SRT output before anything is composed, and the daemon
+      // refuses the start on that refusal — so this line is what happens when
+      // somebody removes that guard without building SRT a posture first.
+      // Throwing is the safe direction to be wrong in: the alternative
+      // (`srtsink uri=srt://:<port>`) binds 0.0.0.0 with no passphrase, which
+      // is the failure R-SEC-13 exists to prevent, and it fails silently.
+      throw new Error(
+        "an SRT output has no stated posture yet and is refused before composition (R-SEC-13, R-VID-06)",
+      );
   }
 }
 
@@ -224,6 +233,25 @@ export function compose(opts: ComposeOptions): string[] {
  */
 export function refuse(opts: ComposeOptions): string | null {
   const { camera, capabilities, knownDevices } = opts;
+
+  // **First, because it is the one that cannot be fixed by looking at the
+  // camera.** `srtsink` binds `0.0.0.0:<port>` and leaves `passphrase` at its
+  // default of the empty string — no encryption and no authentication — and
+  // the socket is opened by this pipeline's own process rather than by the
+  // media server, so `media/config.ts`'s `authInternalUsers` is not in the
+  // path at all. Anyone who can reach this board, on the LAN, on the mesh or
+  // on a routable cellular address, would pull the full-rate H.264 with no
+  // credential: R-SEC-13 says every media listener has a stated posture, and
+  // this one has none and appears in none of them.
+  //
+  // R-VID-06 is the requirement that owns SRT and it is not built. The shape
+  // stays in the schema so a configuration already holding one still loads and
+  // can be read and corrected, and the milestone that serves SRT owes it a
+  // credential before this refusal comes out.
+  const srt = camera.outputs.find((o) => o.kind === "srt");
+  if (srt !== undefined) {
+    return `this device cannot serve SRT yet: the output on port ${srt.port} would listen with no password on it (R-VID-06). Remove it, or use an RTSP output, which carries this device's own credential`;
+  }
 
   // A `device` that resolves to nothing is the likeliest of these to be hit,
   // and today the only report of it is `Internal data stream error`.

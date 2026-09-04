@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { z } from "zod";
+import {
+  RTSP_PORT, SRT_PORT, WEBRTC_LOCAL_UDP_PORT, WEBRTC_PORT,
+} from "../media/ports.js";
 
 /**
  * A dotted-quad octet, 0–255. Pinned to the range an octet actually has
@@ -286,6 +289,29 @@ export type Camera = z.infer<typeof Camera>;
  * added here without that strands every device carrying a key an earlier
  * build wrote. `retired.test.ts` fails when a new call site appears.
  */
+/**
+ * Ports this device binds itself, and what holds each one.
+ *
+ * `ui.port` is the console's and is refused below beside these. The other four
+ * are the media server's, imported from `media/ports.ts` rather than restated:
+ * a number written twice is a number that moves once, and the symptom of the
+ * copy left behind is a media server that will not start.
+ *
+ * **mediamtx does not degrade when two of its servers want one port — it
+ * exits**, with the line `media/ports.ts` records verbatim, and every camera on
+ * the device goes off the air with it, including the one the browser is
+ * watching. `ports.ts`'s own worked example is 8890: it cost Task 9 a rewrite
+ * when WebRTC's media port was derived as `WEBRTC_PORT + 1`, and an output
+ * carrying the same number arrives at the same collision through a different
+ * door.
+ */
+const BOUND_ON_THIS_DEVICE: ReadonlyMap<number, string> = new Map([
+  [RTSP_PORT, "the media server's RTSP port"],
+  [WEBRTC_PORT, "the media server's WebRTC port"],
+  [WEBRTC_LOCAL_UDP_PORT, "the media server's WebRTC media port"],
+  [SRT_PORT, "the media server's SRT port"],
+]);
+
 export const ConfigSchema = z.object({
   version: z.literal(1),
   network: Network,
@@ -316,6 +342,21 @@ export const ConfigSchema = z.object({
           path: ["cameras", i, "outputs", j, "port"],
           message: `port ${out.port} is ui.port; the console and a stream cannot share one`,
         });
+      }
+      // **Only the kinds that bind here.** An `rtp` output names a port on the
+      // *ground station* — its `udpsink` binds nothing on this device — so
+      // refusing it one of these numbers would be refusing a configuration
+      // that works. `srt` is the one kind that opens a socket on this board,
+      // and it is refused these four because the media server has them.
+      if (out.kind === "srt") {
+        const held = BOUND_ON_THIS_DEVICE.get(out.port);
+        if (held !== undefined) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["cameras", i, "outputs", j, "port"],
+            message: `port ${out.port} is ${held}; a stream that binds it takes every camera on this device off the air`,
+          });
+        }
       }
     }
   }

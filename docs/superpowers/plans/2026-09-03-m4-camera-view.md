@@ -1703,7 +1703,7 @@ Expected: PASS, all five cases.
 - [ ] **Step 5: Verify against the board**
 
 ```bash
-ssh yonder@10.0.252.246 'for d in /dev/video1?; do echo "== $d"; v4l2-ctl -d $d --list-formats-out 2>&1 | head -4; v4l2-ctl -d $d --list-formats 2>&1 | head -4; done'
+ssh yonder@<board> 'for d in /dev/video1?; do echo "== $d"; v4l2-ctl -d $d --list-formats-out 2>&1 | head -4; v4l2-ctl -d $d --list-formats 2>&1 | head -4; done'
 ```
 
 Expected: `/dev/video11` shows raw on the output side and `H264` on the capture side. If a different node answers, the probe still finds it — that is the point — but record the board's answer in the commit message.
@@ -2515,7 +2515,7 @@ const CAMERA: Camera = {
 const FACTS: ReceiveFacts = {
   camera: CAMERA,
   address: "192.168.191.42",
-  alternatives: ["192.168.77.1", "10.0.252.246"],
+  alternatives: ["192.168.77.1", "198.51.100.20"],
   rtspPassword: "Kx7-mfPq-2Rn4",
   rtspPort: 8554,
 };
@@ -2541,7 +2541,7 @@ describe("renderReceive", () => {
     expect(url).not.toContain("192.168.77.1");
     const dialog = renderReceive(FACTS)[1].body;
     expect(dialog).toContain("192.168.77.1");
-    expect(dialog).toContain("10.0.252.246");
+    expect(dialog).toContain("198.51.100.20");
   });
 
   it("resolves the RTSP credential into the URL, so nobody types it", () => {

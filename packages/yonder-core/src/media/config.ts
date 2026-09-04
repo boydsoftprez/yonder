@@ -25,8 +25,13 @@ import { RTSP_PORT, SRT_PORT, WEBRTC_LOCAL_UDP_PORT, WEBRTC_PORT } from "./ports
  *     Planner and QGroundControl cannot hold a console session. Per device
  *     rather than per camera: a set of them buys the ability to hand out one
  *     camera and not another, which nobody has asked for.
- *   - **SRT** is off unless an output configures it, and carries the same
- *     credential when it is on.
+ *   - **SRT is off, always.** It was on whenever a camera carried an `srt`
+ *     output, and nothing ever published to it: the pipeline's `srtsink`
+ *     bound `0.0.0.0:<port>` itself, with no passphrase, outside this server
+ *     and outside the list below altogether. So this file opened a listener
+ *     for no reason while the credential it claimed to carry protected
+ *     nothing. `video/pipeline.ts` now refuses an `srt` output outright until
+ *     R-VID-06 builds SRT with a posture; this stays `false` until it does.
  *   - **RTMP, HLS and MoQ are off.** Nothing in this design uses them.
  *
  * Publishing is loopback-only. The pipeline publishes from this board; a
@@ -69,7 +74,6 @@ const LOOPBACK = ["127.0.0.1/32", "::1/128"];
 export function mediamtxConfig(facts: MediaFacts): string {
   const { config, rtspPassword } = facts;
   const cameras = config.cameras;
-  const anySrt = cameras.some((c) => c.outputs.some((o) => o.kind === "srt"));
 
   // `publisher`, never a URL: mediamtx will otherwise dial out for a source,
   // which would be the aircraft fetching video rather than serving it.
@@ -119,8 +123,12 @@ export function mediamtxConfig(facts: MediaFacts): string {
     webrtcAddress: `127.0.0.1:${WEBRTC_PORT}`,
     webrtcLocalUDPAddress: `:${WEBRTC_LOCAL_UDP_PORT}`,
 
-    // R-VID-06, and only where something asked for it.
-    srt: anySrt,
+    // R-VID-06, when it is built. Off unconditionally meanwhile: an `srt`
+    // output is refused by `video/pipeline.ts`, so nothing on this device can
+    // publish to this server, and a listener with nothing behind it is the
+    // thing the note below refuses to open. The address is stated anyway, for
+    // the reason `moq` gives — every listener named, none left to a default.
+    srt: false,
     srtAddress: `:${SRT_PORT}`,
 
     // Off. mediamtx offers them; nothing in this design uses them. MoQ is

@@ -184,4 +184,42 @@ describe("refuse", () => {
   it("says nothing about a configuration the board can sustain", () => {
     expect(refuse(opts)).toBeNull();
   });
+
+  /**
+   * **The listener this milestone would otherwise have opened** (R-SEC-13).
+   *
+   * `srtsink uri=srt://:<port>` binds 0.0.0.0 and leaves `passphrase` at its
+   * default of "" — no encryption, no authentication — and the socket belongs
+   * to the `gst-launch-1.0` process, not to mediamtx, so nothing in
+   * `media/config.ts`'s `authInternalUsers` is in the path at all. Verified on
+   * a board: `ss -lun` showed `UNCONN 0 0 0.0.0.0:9998`.
+   *
+   * R-VID-06 is not built. The refusal is what stands in for it.
+   */
+  const withSrt = { ...CAMERA, outputs: [{ kind: "srt" as const, port: 9998 }] };
+
+  it("refuses an SRT output, because SRT has no posture on this device yet", () => {
+    const refusal = refuse({ ...opts, camera: withSrt });
+    expect(refusal).toContain("SRT");
+    expect(refusal).toContain("9998");
+    // The two things an operator can do about it, rather than a bare refusal.
+    expect(refusal).toContain("RTSP");
+  });
+
+  it("refuses it before anything about the camera is even looked at", () => {
+    // A camera that answered nothing AND carries an SRT output is refused for
+    // the listener, not for the capabilities: the operator can plug the camera
+    // back in and the listener would still be open.
+    expect(refuse({ ...opts, camera: withSrt, capabilities: noCapabilities() }))
+      .toContain("SRT");
+  });
+
+  it("composes no srtsink at all, and will not be talked into one", () => {
+    // The guard above is what stops this being reached. If it is ever removed
+    // without SRT being given a credential, this throws rather than quietly
+    // opening a listener on every interface — the safe direction to be wrong
+    // in, and the one a reviewer can see.
+    expect(() => compose({ ...opts, camera: withSrt })).toThrow(/SRT/);
+    expect(text()).not.toContain("srtsink");
+  });
 });

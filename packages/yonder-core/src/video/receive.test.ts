@@ -16,8 +16,15 @@ const CAMERA: Camera = {
 };
 const FACTS: ReceiveFacts = {
   camera: CAMERA,
+  // **Never a real device's address.** These were copied off the bench board,
+  // which is usually the right instinct — recorded output beats invented
+  // output — and is the wrong one for a value that names somebody's actual
+  // network: it ships in the package and stays there for ever. Same class as
+  // the live ZeroTier network id in `node-red-contrib-yonder-remote`, fixed in
+  // a7a2ee2. 198.51.100.0/24 is RFC 5737's documentation range and resolves to
+  // nothing anywhere.
   address: "192.168.191.42",
-  alternatives: ["192.168.77.1", "10.0.252.246"],
+  alternatives: ["192.168.77.1", "198.51.100.20"],
   rtspPassword: "Kx7-mfPq-2Rn4",
   rtspPort: 8554,
 };
@@ -43,7 +50,7 @@ describe("renderReceive", () => {
     expect(url).not.toContain("192.168.77.1");
     const dialog = renderReceive(FACTS)[1].body;
     expect(dialog).toContain("192.168.77.1");
-    expect(dialog).toContain("10.0.252.246");
+    expect(dialog).toContain("198.51.100.20");
   });
 
   it("resolves the RTSP credential into the URL, so nobody types it", () => {

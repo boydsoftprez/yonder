@@ -2,6 +2,12 @@
 import { describe, it, expect } from "vitest";
 import { ConfigSchema, DEFAULT_CONFIG } from "./config.js";
 import { withoutRetiredKeys } from "./retired.js";
+// Imported rather than restated: the point of the guard under test is that
+// these four numbers have one home, so a test asserting literals would be the
+// second copy it exists to prevent.
+import {
+  RTSP_PORT, SRT_PORT, WEBRTC_LOCAL_UDP_PORT, WEBRTC_PORT,
+} from "../media/ports.js";
 
 /** A config.yaml as a build before the pool was removed would have written it. */
 function seededByAnEarlierBuild(): unknown {
@@ -242,6 +248,44 @@ describe("cameras", () => {
     });
     expect(r.success).toBe(false);
     expect(JSON.stringify(r.error?.issues)).toContain("ui.port");
+  });
+
+  it("refuses an output on a port the media server binds", () => {
+    // The same class as ui.port above, and the one that was open: mediamtx
+    // does not degrade when two of its servers want one port, it exits — so
+    // an SRT output on 8890 takes *every* camera on the device off the air,
+    // including the browser's, on a boot with nobody watching a countdown.
+    // 8890 was the branch's own fixture value.
+    const withPort = (port: number) => ConfigSchema.safeParse({
+      version: 1, network: { ap: { psk: { secret: "ap_psk" } } },
+      ui: { port: 1880, editor: {} },
+      cameras: [{
+        id: "cam0", name: "Nose", source: "usb", device: "usb-1",
+        outputs: [{ kind: "srt", port }],
+      }],
+    });
+    for (const port of [RTSP_PORT, WEBRTC_PORT, WEBRTC_LOCAL_UDP_PORT, SRT_PORT]) {
+      const r = withPort(port);
+      expect(r.success, `port ${port}`).toBe(false);
+      expect(JSON.stringify(r.error?.issues)).toContain("media server");
+    }
+    // And nothing else: a port the device does not bind is an operator's to
+    // choose, and a schema refusing one of those refuses a working device.
+    expect(withPort(9998).success).toBe(true);
+  });
+
+  it("leaves a ground station's own port alone, because nothing here binds it", () => {
+    // An `rtp` output names a port on the *other* machine — `udpsink` binds
+    // nothing on this device — so 8554 there is not this board's RTSP server
+    // and refusing it would refuse a configuration that works.
+    const r = ConfigSchema.safeParse({
+      version: 1, network: { ap: { psk: { secret: "ap_psk" } } }, ui: { editor: {} },
+      cameras: [{
+        id: "cam0", name: "Nose", source: "usb", device: "usb-1",
+        outputs: [{ kind: "rtp", host: "192.168.1.50", port: RTSP_PORT }],
+      }],
+    });
+    expect(r.success).toBe(true);
   });
 
   it("holds an RTSP password by reference, never inline", () => {

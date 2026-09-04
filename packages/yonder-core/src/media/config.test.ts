@@ -58,9 +58,14 @@ describe("mediamtxConfig", () => {
     expect(y.playback).toBe(false);
   });
 
-  it("turns SRT on only when an SRT output is configured", () => {
-    const y = yaml(withCamera({ outputs: [{ kind: "srt", port: 8890 }] }));
-    expect(y.srt).toBe(true);
+  it("never turns the SRT server on, not even for an SRT output (R-SEC-13)", () => {
+    // It used to, and the credential it claimed to carry protected nothing:
+    // the pipeline's own `srtsink` bound 0.0.0.0:<port> with no passphrase,
+    // outside this server and outside `authInternalUsers` altogether, so this
+    // file opened a second listener that nothing ever published to.
+    // `video/pipeline.ts` refuses the output until R-VID-06 gives SRT a
+    // posture; until then this server does not listen for it.
+    expect(yaml(withCamera({ outputs: [{ kind: "srt", port: 9998 }] })).srt).toBe(false);
   });
 
   it("binds WebRTC to loopback, because the console proxies its handshake", () => {
@@ -82,7 +87,7 @@ describe("mediamtxConfig", () => {
     // output. The signalling port is loopback and the media port is not, so
     // they are two separate numbers and neither may be derived from the other.
     expect(WEBRTC_LOCAL_UDP_PORT).not.toBe(SRT_PORT);
-    const y = yaml(withCamera({ outputs: [{ kind: "srt", port: 8890 }] }));
+    const y = yaml();
     expect(y.webrtcLocalUDPAddress).toBe(`:${WEBRTC_LOCAL_UDP_PORT}`);
     expect(y.srtAddress).toBe(`:${SRT_PORT}`);
     expect(y.webrtcLocalUDPAddress).not.toBe(y.srtAddress);
@@ -157,7 +162,7 @@ describe("mediamtxConfig", () => {
   it("spells every path out, rather than aliasing one back to another", () => {
     // The YAML writer turns a shared object into an anchor and an alias —
     // `cam0-preview: &a1` … `cam0: *a1`. mediamtx resolves those, but an
-    // operator reading /etc/yonder/mediamtx.yml cannot, and a parser that did
+    // operator reading /etc/mediamtx/mediamtx.yml cannot, and a parser that did
     // not would leave a path with no source at all.
     const text = mediamtxConfig({ config: withCamera(), rtspPassword: PASSWORD });
     expect(text).not.toMatch(/&\w+\n/);
