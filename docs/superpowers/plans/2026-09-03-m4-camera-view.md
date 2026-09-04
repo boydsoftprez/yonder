@@ -4789,6 +4789,8 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 | `POST /cameras/:id/run` | `{ action: "start" \| "stop" }`, through `Supervisor`; answers the run state (R-CTL-01) |
 | `GET /cameras/:id/receive-line` | the four renderings, with the RTSP credential resolved (R-VID-15) |
 
+**And close R-SYS-09's second half.** Task 11 built `system/supply.ts` and nothing consumes it, so the requirement's *"record an occurrence in the log"* is still open — which is the half that matters in flight, because an undervoltage restarts the board and a restart presents as an aircraft that went quiet with nothing to explain it. Sample the supply where the daemon already samples other system state, and write a log entry when a latched bit is set that was not set at the last read. Log the transition, not the state: a board that has been dirty since boot would otherwise fill the log with the same line. `log/activity.ts` is the existing writer — read it rather than inventing a second one.
+
 **The Supervisor lives in the daemon, for the process's lifetime.** `buildRenderers` is where it is constructed, beside the renderers. A Node-RED redeploy destroys and recreates every node; a supervisor inside one would drop every camera's pipeline the moment somebody edited a flow.
 
 - [ ] **Step 1: Write the failing route tests**
