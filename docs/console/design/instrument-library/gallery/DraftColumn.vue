@@ -12,10 +12,10 @@ export default {
 }
 </script>
 <style scoped>
-.d-col { padding:14px 15px; min-width:0; }
+.d-col { padding:14px 16px 4px; min-width:0; }
 .d-h { display:flex; align-items:baseline; justify-content:space-between; gap:10px;
-  font-size:9.5px; letter-spacing:.16em; text-transform:uppercase;
-  color: var(--yonder-label,#7f8a95); margin-bottom:11px; }
+  font-size:10.5px; letter-spacing:.16em; text-transform:uppercase;
+  color: var(--yonder-label,#7f8a95); margin-bottom:12px; }
 .d-h em { font-style:normal; letter-spacing:.1em; }
 .q-select { color: var(--yonder-select,#2ad4f0); }
 .q-waiting { color: var(--yonder-waiting,#ffcf28); }

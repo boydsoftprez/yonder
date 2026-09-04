@@ -1,0 +1,15 @@
+import { chromium } from "playwright";
+const b = await chromium.launch(); const p = await b.newPage({ viewport: { width: 1400, height: 900 } });
+const errs = []; p.on("pageerror", e => errs.push(e.message));
+await p.goto("http://127.0.0.1:18930/index.html", { waitUntil: "networkidle" });
+await p.getByRole("button", { name: /pocket 2/i }).click(); await p.waitForTimeout(300);
+console.log("rail:", (await p.locator(".d-rail").innerText()).replace(/\n/g," | "));
+console.log("shutter:", await p.locator(".d-shutter").innerText().then(t=>t.replace(/\n/g," / ")));
+await p.locator(".d-rail button", { hasText: /setup/i }).click(); await p.waitForTimeout(300);
+console.log("after SETUP key, name field present:", await p.locator(".d-tf").count());
+await p.locator(".d-rail button", { hasText: /^live$/i }).click(); await p.waitForTimeout(300);
+await p.locator(".d-shutter__b").click(); await p.waitForTimeout(100);
+console.log("after press:", await p.locator(".d-shutter").innerText().then(t=>t.replace(/\n/g," / ")));
+console.log("recentre in aim panel:", await p.locator(".d-aimpanel .d-recentre").count());
+console.log(errs.length ? "ERRORS: " + errs.join(" | ") : "no errors");
+await b.close();

@@ -1,0 +1,173 @@
+body { margin:0; background: var(--yonder-background, #0a0c0f); color: var(--yonder-value, #fff);
+       font-family: var(--yonder-font, ui-sans-serif, system-ui); }
+.g-page { padding: 22px 26px 60px; }
+.g-head h1 { font-size: 19px; margin: 0 0 4px; letter-spacing: .01em; }
+.g-head p { margin: 0 0 14px; color: var(--yonder-label, #7f8a95); font-size: 12.5px; max-width: 70ch; }
+.g-tabs { display:flex; gap:6px; margin-bottom: 22px; }
+.g-tab { background: transparent; color: var(--yonder-label, #7f8a95); font: inherit; font-size: 10px;
+  letter-spacing: .18em; text-transform: uppercase; padding: 7px 14px; cursor: pointer;
+  border: 1px solid var(--yonder-divider, #2b333c); border-radius: 2px; }
+.g-tab.on { color: var(--yonder-select, #2ad4f0); border-color: var(--yonder-select, #2ad4f0); }
+.g-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 16px; }
+.g-cell { border: 1px solid var(--yonder-divider, #2b333c); border-radius: 3px; overflow: hidden;
+  background: var(--yonder-pane, #090d12); }
+.g-cap { font-size: 9.5px; letter-spacing: .16em; text-transform: uppercase;
+  color: var(--yonder-label, #7f8a95); padding: 9px 13px 0; }
+.g-sub { font-size: 11px; color: var(--yonder-label, #7f8a95); opacity: .8; padding: 3px 13px 0; }
+.g-stage { padding: 15px 13px 17px; background: var(--yonder-display, #04060a); margin-top: 10px;
+  min-height: 62px; display: flex; align-items: center; }
+
+/* ---- the draft deck ------------------------------------------------ */
+.d-panel { border:1px solid var(--yonder-divider,#2b333c); border-radius:5px; overflow:hidden;
+  background: var(--yonder-background,#0a0c0f); }
+.d-placard { display:flex; justify-content:space-between; padding:10px 15px;
+  font-size:10px; letter-spacing:.2em; text-transform:uppercase; color: var(--yonder-label,#7f8a95); }
+.d-placard b { color: var(--yonder-value,#fff); font-weight:600; }
+.d-display { background: var(--yonder-display,#04060a); border-top:1px solid var(--yonder-divider,#2b333c); }
+.d-osd { position:absolute; background:rgba(4,6,10,.78); border:1px solid rgba(255,255,255,.12);
+  border-radius:2px; padding:6px 9px; font-size:11px; font-variant-numeric:tabular-nums;
+  color:#fff; letter-spacing:.02em; }
+.d-osd.tr { top:10px; right:10px; } .d-osd.bl { left:10px; bottom:10px; }
+.d-osd .k { font-size:9px; letter-spacing:.12em; color:rgba(255,255,255,.55); margin-right:6px; }
+.d-osd .k.sp { margin-left:14px; }
+.d-strip { display:flex; gap:22px; align-items:center; flex-wrap:wrap; padding:9px 15px;
+  border-top:1px solid var(--yonder-divider,#2b333c); }
+.d-cols { display:flex; border-top:1px solid var(--yonder-divider,#2b333c); }
+.d-cols > div { flex:1; min-width:0; border-left:1px solid var(--yonder-divider,#2b333c); }
+.d-cols > div:first-child { border-left:0; }
+.d-cols :deep(.d-field) { margin-bottom:13px; }
+.d-outs { border-top:1px solid var(--yonder-divider,#2b333c); }
+.d-out { display:grid; grid-template-columns: 118px 74px 1fr auto; gap:12px; align-items:center;
+  padding:7px 0; border-top:1px solid color-mix(in srgb, var(--yonder-divider,#2b333c) 55%, transparent); }
+.d-out:first-of-type { border-top:0; }
+.d-out .n { font-size:9.5px; letter-spacing:.1em; text-transform:uppercase; color: var(--yonder-label,#7f8a95); }
+.d-out .c { font-size:12px; font-weight:600; font-variant-numeric:tabular-nums; color: var(--yonder-value,#fff); }
+.d-out .r { font-size:10.5px; color: var(--yonder-label,#7f8a95); }
+.d-out .r.ok { color: var(--yonder-good,#35d06a); }
+.d-out .r.warn { color: var(--yonder-waiting,#ffcf28); }
+.d-rail { border-top:1px solid var(--yonder-divider,#2b333c); padding:10px 15px; }
+.d-wide { grid-column: 1 / -1; }
+.g-wide { grid-column: 1 / -1; margin-bottom: 16px; }
+.g-stage--deck { display:block; padding:0; background:transparent; }
+
+/* Columns are a fixed track, not a share of the pane. Equal thirds made the
+   Stream column half empty while Exposure overflowed, and a flex share put Aim
+   alone on a second row stretched across the whole width. */
+/* Groups flow top-to-bottom into as many columns as fit, and the browser
+   balances them. A grid stranded the last group alone on a second row; this
+   stacks a short group under a shorter one, which is what a panel does. */
+.d-cols { display:block; column-width:252px; column-gap:0;
+  column-rule:1px solid var(--yonder-divider,#2b333c); }
+.d-cols > div { break-inside:avoid; min-width:0; }
+.d-aim-dead { opacity:.62; filter:saturate(.4); pointer-events:none; }
+.d-why { font-size:10px; margin-top:6px; line-height:1.4; }
+.why-advertised { color: var(--yonder-waiting,#ffcf28); }
+.g-switch { display:flex; gap:6px; margin:0 0 14px; }
+.g-switch button { background:transparent; font:inherit; font-size:10px; letter-spacing:.16em;
+  text-transform:uppercase; padding:7px 14px; cursor:pointer; border-radius:2px;
+  border:1px solid var(--yonder-divider,#2b333c); color:var(--yonder-label,#7f8a95); }
+.g-switch button.on { color:var(--yonder-select,#2ad4f0); border-color:var(--yonder-select,#2ad4f0); }
+
+/* ---- the harness around the console --------------------------------- */
+.g-root { min-height:100vh; }
+.g-bar { display:flex; align-items:center; justify-content:space-between; gap:20px;
+  flex-wrap:wrap; padding:10px 16px; background:#0b0e12; border-bottom:1px solid #232a32; }
+.g-bar__t { font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:#6f7a85; }
+.g-bar__c { display:flex; gap:18px; flex-wrap:wrap; }
+.g-switch { display:flex; gap:5px; margin:0; }
+.d-two { display:flex; }
+.d-half { flex:1; padding:14px 16px; border-left:1px solid var(--yonder-divider,#2b333c); }
+.d-half:first-child { border-left:0; }
+.d-grp2 { font-size:9.5px; letter-spacing:.16em; text-transform:uppercase;
+  color: var(--yonder-label,#7f8a95); margin-bottom:12px; }
+.d-fine2 { font-size:10px; color: var(--yonder-label,#7f8a95); margin-top:9px; }
+
+/* R-UI-20's fact: a stated sentence where the control would have been. It
+   stacks, because a long reason right-aligned against a wrapping label is two
+   columns of text colliding. */
+.d-fact { max-width:230px; margin-bottom:13px; }
+.d-fact .l { display:block; font-size:9.5px; letter-spacing:.11em; text-transform:uppercase;
+  color: var(--yonder-label,#7f8a95); margin-bottom:4px; }
+.d-fact .v { display:block; font-size:12px; line-height:1.45;
+  color: var(--yonder-neutral,#7d7869); }
+.d-fact2 { font-size:9.5px; letter-spacing:.1em; text-transform:uppercase; color: var(--yonder-label,#7f8a95); }
+.d-fact2 b { color: var(--yonder-value,#fff); font-weight:600; letter-spacing:.02em;
+  text-transform:none; font-size:11.5px; margin-left:5px; }
+.d-capkey { margin-bottom:13px; }
+.d-capkey__b { font: inherit; font-size:10.5px; letter-spacing:.13em; text-transform:uppercase;
+  padding:9px 18px; border-radius:2px; cursor:pointer; background:transparent;
+  border:1px solid var(--yonder-divider,#2b333c); color: var(--yonder-value,#fff); }
+.d-capkey__b.rec { border-color: var(--yonder-bad,#ff4034); color: var(--yonder-bad,#ff4034); }
+.d-capkey__n { display:block; font-size:10px; margin-top:5px; color: var(--yonder-waiting,#ffcf28); }
+.d-wrapped { position:relative; }
+.d-unproven { position:absolute; right:0; top:0; font-size:8.5px; letter-spacing:.1em;
+  text-transform:uppercase; color:#ff5fa8; border:1px dashed #ff5fa8; padding:1px 5px; border-radius:2px; }
+
+/* the aim column's readouts belong beside the dial, not at the pane's edge */
+.d-cols .d-aim { max-width: 230px; }
+.d-capkey { margin-bottom:16px; }
+.d-capkey__n { max-width:230px; line-height:1.4; }
+.d-unproven { position:static; display:inline-block; margin-top:4px; }
+.d-wrapped { margin-bottom:16px; }
+.d-wrapped .d-field { margin-bottom:5px; }
+
+/* ---- Live: picture and aim side by side where there is room -------- */
+.d-stage { display:flex; align-items:stretch; }
+/* The Aim panel sets the row's height and the picture fills it at its own
+   aspect — so there is never a band above or below, only carbon beside it
+   when the row is taller than 16:9 allows. */
+.d-stage__pic { flex:1 1 auto; min-width:0; display:flex; align-items:stretch; justify-content:center;
+  background: var(--yonder-display,#04060a); }
+.d-stage__pic .d-vid { height:100%; width:auto; max-width:100%; max-height:none; aspect-ratio:16/9; }
+.d-aimpanel { flex:0 0 252px; padding:12px 16px 14px; border-left:1px solid var(--yonder-divider,#2b333c); }
+.d-aimpanel.dead .d-aim__dial { opacity:.55; filter:saturate(.3); pointer-events:none; }
+.d-aimpanel .d-h { display:flex; justify-content:space-between; font-size:11px; letter-spacing:.16em;
+  text-transform:uppercase; color: var(--yonder-label,#7f8a95); margin-bottom:14px; }
+.d-aimpanel .d-h em { font-style:normal; }
+.d-aimpanel .d-aim { flex-direction:column; align-items:center; gap:10px; }
+.d-aimpanel .d-aim__rows { width:100%; }
+@media (max-width: 1100px) {
+  .d-stage { flex-direction:column; }
+  .d-aimpanel { flex:none; border-left:0; border-top:1px solid var(--yonder-divider,#2b333c); }
+}
+.q-select { color: var(--yonder-select,#2ad4f0); } .q-waiting { color: var(--yonder-waiting,#ffcf28); }
+
+/* the flying row */
+.d-fly { display:flex; flex-wrap:wrap; gap:0 36px; padding:14px 18px 2px;
+  border-top:1px solid var(--yonder-divider,#2b333c); }
+.d-fly__i { flex:0 0 auto; }
+
+/* outputs, in one line on Live */
+.d-outline { display:flex; flex-wrap:wrap; align-items:baseline; gap:8px 26px; padding:12px 18px;
+  border-top:1px solid var(--yonder-divider,#2b333c); font-size:12.5px; }
+.d-outline .d-h { font-size:11px; letter-spacing:.16em; text-transform:uppercase; color: var(--yonder-label,#7f8a95); }
+.d-outline .o { color: var(--yonder-label,#7f8a95); }
+.d-outline .o b { color: var(--yonder-value,#fff); font-weight:600; }
+.d-outline .o.ok b { color: var(--yonder-good,#35d06a); }
+.d-outline .o.warn b { color: var(--yonder-waiting,#ffcf28); }
+.d-outline .o.goto { margin-left:auto; color: var(--yonder-select,#2ad4f0); }
+
+/* the strip and the rail, sized to match */
+.d-strip { gap:26px; padding:12px 18px; }
+.d-fact2 { font-size:11px; } .d-fact2 b { font-size:13px; }
+.d-rail { padding:12px 18px; }
+
+/* one shutter key, red when it is recording */
+.d-shutter { margin-bottom:13px; }
+.d-shutter__b { display:inline-flex; align-items:center; gap:9px; font:inherit; font-size:11.5px;
+  letter-spacing:.13em; text-transform:uppercase; padding:0 18px; min-height:38px; border-radius:3px;
+  cursor:pointer; background:transparent; border:1px solid var(--yonder-divider,#2b333c);
+  color: var(--yonder-value,#fff); }
+.d-shutter__dot { width:10px; height:10px; border-radius:50%; border:1.5px solid var(--yonder-bad,#ff4034);
+  background:transparent; }
+.d-shutter__b.rec { border-color: var(--yonder-bad,#ff4034); color: var(--yonder-bad,#ff4034);
+  font-variant-numeric:tabular-nums; }
+.d-shutter__b.rec .d-shutter__dot { background: var(--yonder-bad,#ff4034); box-shadow:0 0 8px var(--yonder-bad,#ff4034); }
+.d-shutter__b.photo { border-color: var(--yonder-select,#2ad4f0); color: var(--yonder-select,#2ad4f0); }
+.d-shutter__n { display:block; font-size:10.5px; margin-top:6px; max-width:230px; line-height:1.4;
+  color: var(--yonder-label,#7f8a95); }
+.d-shutter__n.warn { color: var(--yonder-waiting,#ffcf28); }
+.d-recentre { margin-top:12px; font:inherit; font-size:11px; letter-spacing:.13em; text-transform:uppercase;
+  padding:0 16px; min-height:34px; border-radius:3px; cursor:pointer; background:transparent;
+  border:1px solid var(--yonder-divider,#2b333c); color: var(--yonder-value,#fff); }
+.d-recentre:hover { border-color: var(--yonder-select,#2ad4f0); color: var(--yonder-select,#2ad4f0); }
