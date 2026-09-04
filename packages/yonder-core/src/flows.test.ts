@@ -588,6 +588,10 @@ describe("flows/flows.json join controls", () => {
   it("puts the whole task in one group, in the order it is done", () => {
     const inGroup = flows
       .filter((n) => n.group === "group-net-join")
+      // The CHANGE PENDING banner sits above every tab's own content
+      // (R-UI-15) and is not part of this task; what this asserts is the
+      // order of the join itself.
+      .filter((n) => !String(n.className ?? "").includes("yonder-pending"))
       .sort((a, b) => Number(a.order) - Number(b.order))
       .map((n) => n.id);
     // Access point or Wi-Fi, then choose, then the passphrase, then go.
@@ -1237,7 +1241,30 @@ describe("flows/flows.json Way out rows", () => {
     // Prose, not a reading. Without this the sentence is drawn by
     // `.nrdb-ui-text-value` — bold, tabular and right-aligned — which is the
     // class that right-aligned an interface name inside its own column.
-    expect(why?.className).toBe("yonder-qualifier");
+    expect(String(why?.className)).toContain("yonder-qualifier");
+  });
+
+  /**
+   * **The row declares that its values do not move between runs (R-UI-12).**
+   *
+   * Both halves of a row are `ui-text` values, so both render
+   * `.nrdb-ui-text-value` — which the capture gate masks *by kind*, because
+   * most instances of it carry a reading. These carry none: the interface
+   * name comes from a device list and the sentence is one of five fixed
+   * strings `report()` chooses between.
+   *
+   * Without `yonder-fixed` the three `Way out` state captures were three grey
+   * rectangles apiece. The exact sentence R-NET-14 was written to abolish —
+   * "Up, and not yet tested — nothing has established that it reaches
+   * anything" — was invisible in every committed reference, and so was the
+   * right-aligned interface name that the gate itself was written after.
+   * This is the third time on this branch that masking hid the very
+   * difference a state was captured to show; `yonder-fixed` is the same
+   * instrument Task 11 reached for on the way-back-in panel.
+   */
+  it.each(PATHS)("declares $slug's name and sentence fixed, so a capture shows them", ({ slug }) => {
+    expect(String(byId(`name-way-${slug}`)?.className)).toContain("yonder-fixed");
+    expect(String(byId(`why-way-${slug}`)?.className)).toContain("yonder-fixed");
   });
 
   /**
@@ -1514,11 +1541,99 @@ describe("flows/flows.json Reachable by", () => {
  *
  * This is also what closed K-30: `yonder-confirm` had been registered and used
  * by nothing since R-CFG-11 took away the wiring that called it.
+ *
+ * **On every surface, which is the whole of the requirement.** It shipped on
+ * Status alone, and R-UI-15's own worked example was inverted by that: the
+ * change is made on Network and only Status could see it. An operator who
+ * fixed an APN on the Cellular tab, watched the modem redial and stayed there
+ * lost the fix to a timer they could not see and had no key to stop.
  */
 describe("flows/flows.json Change pending", () => {
   const byId = (id: string) => flows.find((n) => n.id === id);
-  const inPanel = flows.filter((n) => n.group === "group-status-pending");
   const wiresOf = (id: string) => (byId(id)?.wires ?? []) as string[][];
+
+  /**
+   * Every surface of this console, and the banner on each.
+   *
+   * A `ui-group` belongs to one page, so there is one copy per page — and on
+   * the Network page one copy per *tab*, because Dashboard's tabs layout
+   * renders one `ui-group` per tab: a group there would be a tab that
+   * appears, which an operator on another tab would never see. R-UI-12 counts
+   * a tab as a surface for exactly this reason.
+   */
+  const SURFACES = [
+    { group: "group-status-pending", suffix: "", hidden: "group" },
+    { group: "group-log-pending", suffix: "-log", hidden: "group" },
+    { group: "group-diag-pending", suffix: "-diag", hidden: "group" },
+    { group: "group-net-now", suffix: "-interfaces", hidden: "widgets" },
+    { group: "group-net-join", suffix: "-wifi", hidden: "widgets" },
+    { group: "group-net-zerotier", suffix: "-zerotier", hidden: "widgets" },
+    { group: "group-net-cellular", suffix: "-cellular", hidden: "widgets" },
+    { group: "group-net-activity", suffix: "-activity", hidden: "widgets" },
+  ];
+  const banner = (s: string) => ({
+    lamp: `ann-pending${s}`,
+    what: `text-pending-what${s}`,
+    why: `text-pending-why${s}`,
+    keys: `keys-pending${s}`,
+  });
+  const inPanel = flows.filter((n) => String(n.className ?? "").includes("yonder-pending"));
+
+  /**
+   * **R-UI-15, priority 1: "every surface of the console shows that it is".**
+   *
+   * Counted against the pages the console actually serves and the tabs they
+   * are made of, rather than against a list beside them — a page added later
+   * fails this until it carries the banner too.
+   */
+  it("is on every page, and on every tab of the page that has them", () => {
+    const surfaces = new Set<string>();
+    for (const page of flows.filter((n) => n.type === "ui-page")) {
+      const groups = flows.filter((n) => n.type === "ui-group" && n.page === page.id);
+      // A tabs page hides every group but one, so each is its own surface. A
+      // grid page shows them all at once, so the page is the surface.
+      if (page.layout === "tabs") for (const g of groups) surfaces.add(String(g.id));
+      else surfaces.add(String(page.id));
+    }
+    for (const surface of surfaces) {
+      const carried = SURFACES.some((s) => s.group === surface
+        || byId(s.group)?.page === surface);
+      expect(carried, `${surface} has no CHANGE PENDING banner on it`).toBe(true);
+    }
+  });
+
+  /** And every one of them is the same four widgets, not a reduced copy. */
+  it.each(SURFACES)("draws the whole banner on $group", ({ group, suffix }) => {
+    const ids = banner(suffix);
+    expect(byId(ids.lamp)?.type).toBe("ui-yonder-annunciator");
+    expect(byId(ids.what)?.type).toBe("ui-text");
+    expect(byId(ids.why)?.type).toBe("ui-text");
+    expect(byId(ids.keys)?.type).toBe("ui-yonder-softkeys");
+    for (const id of Object.values(ids)) expect(byId(id)?.group).toBe(group);
+    // First on the surface. Dashboard packs by `order`, and reads `order ||
+    // MAX_SAFE_INTEGER` — so 0 would sort *last*, not first.
+    for (const id of Object.values(ids)) {
+      const order = Number(byId(id)?.order);
+      expect(order).toBeGreaterThan(0);
+      for (const other of flows.filter((n) => n.group === group && !Object.values(ids).includes(String(n.id)))) {
+        expect(order, `${id} is not above ${String(other.id)}`).toBeLessThan(Number(other.order));
+      }
+    }
+  });
+
+  /** One read feeds them all, so no two surfaces can disagree about the time. */
+  it("feeds every copy from the one poll", () => {
+    const fed = wiresOf("poll-pending")[0];
+    for (const { suffix } of SURFACES) {
+      const ids = banner(suffix);
+      for (const id of [ids.lamp, ids.what, ids.why]) {
+        expect(fed, `${id} is drawn from nothing`).toContain(id);
+      }
+      // The keys are static configuration and are a *source*, not a sink.
+      expect(fed).not.toContain(ids.keys);
+      expect(wiresOf(ids.keys)).toEqual([["tag-pending-key"]]);
+    }
+  });
 
   it("is the first panel on Status, above the board it is about to change", () => {
     const group = byId("group-status-pending");
@@ -1542,7 +1657,9 @@ describe("flows/flows.json Change pending", () => {
    * is what makes the one time it matters invisible.
    */
   it("ships hidden, and is raised only while something is pending", () => {
-    expect(byId("group-status-pending")?.visible).toBe(false);
+    for (const { group, hidden } of SURFACES) {
+      if (hidden === "group") expect(byId(group)?.visible, group).toBe(false);
+    }
 
     // The decision is a boolean the package computed. The flow routes it; it
     // does not work it out (CLAUDE.md rule 2).
@@ -1554,6 +1671,19 @@ describe("flows/flows.json Change pending", () => {
       .toEqual([["show-pending-banner"], ["hide-pending-banner"]]);
 
     // Two constants either side of it, never one conditional.
+    //
+    // A grid page's whole group goes down together, which is one id and no
+    // flash while a browser waits for the first poll. A tab's group cannot:
+    // hiding it would take the *tab* away and showing it would make one
+    // appear, so on the Network page the four widgets are hidden by id
+    // inside the tab they sit in.
+    const expected = (key: string) => ({
+      groups: { [key]: SURFACES.filter((x) => x.hidden === "group").map((x) => x.group) },
+      widgets: {
+        [key]: SURFACES.filter((x) => x.hidden === "widgets")
+          .flatMap((x) => Object.values(banner(x.suffix))),
+      },
+    });
     for (const [id, key] of [["show-pending-banner", "show"], ["hide-pending-banner", "hide"]]) {
       const node = byId(id);
       expect(node?.type).toBe("change");
@@ -1561,12 +1691,31 @@ describe("flows/flows.json Change pending", () => {
       expect(rules).toHaveLength(1);
       expect(rules[0].p).toBe("payload");
       expect(rules[0].tot).toBe("json");
-      expect(JSON.parse(rules[0].to)).toEqual({ groups: { [key]: ["group-status-pending"] } });
+      expect(JSON.parse(rules[0].to)).toEqual(expected(key));
       expect(wiresOf(id)).toEqual([["control-pending"]]);
     }
-    // Dashboard hides a *group* only through ui-control, which needs the base.
+    // Dashboard hides a group or a widget only through ui-control, which
+    // needs the base.
     expect(byId("control-pending")?.type).toBe("ui-control");
     expect(byId("control-pending")?.ui).toBe(flows.find((n) => n.type === "ui-base")?.id);
+  });
+
+  /**
+   * Nothing is raised or lowered that is not part of the banner.
+   *
+   * A ui-control list is a set of ids in a JSON string, which is the kind of
+   * thing that grows a typo. Every id in both lists has to be one of the
+   * banner's own widgets on a tab that cannot hide its group.
+   */
+  it("shows and hides the banner and nothing else", () => {
+    const own = new Set(SURFACES.flatMap((x) => Object.values(banner(x.suffix))));
+    const groups = new Set(SURFACES.map((x) => x.group));
+    for (const id of ["show-pending-banner", "hide-pending-banner"]) {
+      const payload = JSON.parse(String((byId(id)?.rules as { to: string }[])[0].to)) as
+        { groups: Record<string, string[]>; widgets: Record<string, string[]> };
+      for (const g of Object.values(payload.groups).flat()) expect(groups.has(g), g).toBe(true);
+      for (const w of Object.values(payload.widgets).flat()) expect(own.has(w), w).toBe(true);
+    }
   });
 
   /**
@@ -1578,24 +1727,24 @@ describe("flows/flows.json Change pending", () => {
     const poller = byId("poll-pending");
     expect(poller?.type).toBe("yonder-pending");
     expect(Number(poller?.interval) * 1000).toBeGreaterThanOrEqual(MIN_POLL_MS);
-    expect(wiresOf("poll-pending")[0]).toEqual([
-      "ann-pending", "text-pending-what", "text-pending-why",
-      "route-pending-banner", "route-pending-key",
-    ]);
+    expect(wiresOf("poll-pending")[0].slice(-2))
+      .toEqual(["route-pending-banner", "route-pending-key"]);
 
-    const lamp = byId("ann-pending");
-    expect(lamp?.type).toBe("ui-yonder-annunciator");
-    expect(lamp?.group).toBe("group-status-pending");
-    // From the shared channel, with no label of its own, so the words are the
-    // ones `pendingChange()` wrote.
-    expect(lamp?.source).toBe("yonder");
-    expect(lamp?.label).toBe("");
-    expect(Number(lamp?.order)).toBe(1);
-    // The one annunciator on this console whose caption is a *reading* rather
-    // than a state word. Without saying so, the committed picture of this page
-    // would differ on every run by a second or two of countdown — which is the
-    // thing masking exists to stop.
-    expect(lamp?.className).toBe("yonder-live");
+    for (const { group, suffix } of SURFACES) {
+      const lamp = byId(banner(suffix).lamp);
+      expect(lamp?.type).toBe("ui-yonder-annunciator");
+      expect(lamp?.group).toBe(group);
+      // From the shared channel, with no label of its own, so the words are
+      // the ones `pendingChange()` wrote.
+      expect(lamp?.source).toBe("yonder");
+      expect(lamp?.label).toBe("");
+      expect(Number(lamp?.order)).toBe(1);
+      // The one annunciator on this console whose caption is a *reading*
+      // rather than a state word. Without saying so, the committed picture of
+      // this page would differ on every run by a second or two of countdown —
+      // which is the thing masking exists to stop.
+      expect(String(lamp?.className)).toContain("yonder-live");
+    }
   });
 
   /**
@@ -1604,17 +1753,28 @@ describe("flows/flows.json Change pending", () => {
    * console had put in a readout's slot.
    */
   it("says what is in force and what the revert is for, as prose", () => {
-    for (const [id, bound] of [["text-pending-what", "payload.what"], ["text-pending-why", "payload.why"]]) {
-      const line = byId(id);
-      expect(line?.type).toBe("ui-text");
-      expect(line?.group).toBe("group-status-pending");
-      expect(line?.value).toBe(bound);
-      expect(line?.valueType).toBe("msg");
-      expect(line?.wrapText).toBe(true);
-      expect(line?.className).toBe("yonder-qualifier");
+    for (const { group, suffix } of SURFACES) {
+      const ids = banner(suffix);
+      for (const [id, bound] of [[ids.what, "payload.what"], [ids.why, "payload.why"]]) {
+        const line = byId(id);
+        expect(line?.type).toBe("ui-text");
+        expect(line?.group).toBe(group);
+        expect(line?.value).toBe(bound);
+        expect(line?.valueType).toBe("msg");
+        expect(line?.wrapText).toBe(true);
+        expect(String(line?.className)).toContain("yonder-qualifier");
+        // **And unmasked in the committed picture.** Both are `ui-text`
+        // values, so both render `.nrdb-ui-text-value` — masked by *kind*,
+        // because most instances of it carry a reading. These carry none:
+        // `what` is one fixed sentence and `why` is `PENDING_WHY`. Without
+        // `yonder-fixed` the only picture of this banner is a grey box over
+        // the words, which is the third defect of exactly this shape on this
+        // branch. The countdown above them is the reading, and it says so
+        // with `yonder-live`.
+        expect(String(line?.className)).toContain("yonder-fixed");
+      }
+      expect(Number(byId(ids.what)?.order)).toBeLessThan(Number(byId(ids.why)?.order));
     }
-    expect(Number(byId("text-pending-what")?.order))
-      .toBeLessThan(Number(byId("text-pending-why")?.order));
   });
 
   /**
@@ -1625,12 +1785,14 @@ describe("flows/flows.json Change pending", () => {
    * is the safe direction, and it is the thing that gets an operator back in.
    */
   it("marks confirming as the irreversible act, and reverting as the safe one", () => {
-    const keys = JSON.parse(String(byId("keys-pending")?.keys ?? "[]")) as
-      { label: string; action: string; tone: string }[];
-    expect(keys).toEqual([
-      { label: "CONFIRM", action: "confirm", tone: "warn" },
-      { label: "REVERT NOW", action: "revert", tone: "act" },
-    ]);
+    for (const { suffix } of SURFACES) {
+      const keys = JSON.parse(String(byId(banner(suffix).keys)?.keys ?? "[]")) as
+        { label: string; action: string; tone: string }[];
+      expect(keys).toEqual([
+        { label: "CONFIRM", action: "confirm", tone: "warn" },
+        { label: "REVERT NOW", action: "revert", tone: "act" },
+      ]);
+    }
     // R-UI-10: at most one control per page takes the irreversible tone, and
     // Status's other rail is two palette keys.
     const warnOnStatus = flows
@@ -1648,7 +1810,12 @@ describe("flows/flows.json Change pending", () => {
    * read does not overwrite.
    */
   it("reads the apply id at the moment the key is pressed, and caches none", () => {
-    expect(wiresOf("keys-pending")).toEqual([["tag-pending-key"]]);
+    // Whichever copy was pressed. Every rail on every surface goes to the one
+    // node that re-reads the id, so a key on the Cellular tab and a key on
+    // Status act on the same apply and cannot act on a stale one.
+    for (const { suffix } of SURFACES) {
+      expect(wiresOf(banner(suffix).keys)).toEqual([["tag-pending-key"]]);
+    }
     const tag = byId("tag-pending-key");
     expect(tag?.type).toBe("change");
     expect(tag?.rules).toEqual([{ t: "set", p: "topic", pt: "msg", to: "payload", tot: "msg" }]);
