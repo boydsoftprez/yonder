@@ -169,6 +169,18 @@ If `io-mode=4` will not negotiate with this camera, drop it, run without it,
 and record that it was dropped and why — do not silently substitute a
 pipeline that differs from the daemon's without saying so.
 
+**Bracket every run with the camera's USB device number as well as
+`vcgencmd get_throttled`.** `lsusb -d 32e4:0234` prints `Bus 001 Device NNN`,
+and that number changes whenever the camera re-enumerates. The dev board's
+camera has an intermittent connection: it disconnected and came back eight
+times in one 43-minute session, each time as a clean disconnect followed by a
+successful re-enumeration about 70 ms later, on a supply reading
+`throttled=0x0` throughout. A run whose device number differs at the end from
+the start had its camera pulled out from under it and is not a reading —
+discard it, say so, and run again. A bitrate that appears to fall to nothing
+mid-run is what that looks like from the inside, and it would otherwise be
+indistinguishable from an encoder that stopped.
+
 - [ ] **Step 3: Record the answer and the decision**
 
 `docs/hardware/runtime-encoder-control.md`: the command, the three readings,
