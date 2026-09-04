@@ -3094,7 +3094,11 @@ curl -fsSL https://github.com/bluenviron/mediamtx/releases/download/v1.9.3/check
 
 Paste the two hashes into the constants above. Bumping the version means re-running this, not editing the number.
 
-Stage into `vendor/mediamtx/`. Then `installer/roles/50-mediamtx.sh`, copying `40-zerotier.sh` line for line in structure — a missing payload is a log line and `return 0`, not an error (R-CFG-08) — installing the binary to `/usr/local/bin/mediamtx`, writing a unit that runs it as a dedicated `yonder-media` user with `ExecStart=/usr/local/bin/mediamtx /etc/yonder/mediamtx.yml`, and then:
+Stage into `vendor/mediamtx/`.
+
+**One package the board does not have.** `rtspclientsink` lives in `gstreamer1.0-rtsp`, which is **not installed** on the development board — verified in Task 6, where a pipeline carrying it failed to parse at all rather than merely failing to connect. Every RTSP branch in `pipeline.ts` depends on it, which is both full-rate consumers and the preview. Install it in this role alongside mediamtx, from the payload if the payload carries it and from `apt` otherwise, and fail loudly if it is absent afterwards — a missing element here takes the whole video path down, not one branch.
+
+Then `installer/roles/50-mediamtx.sh`, copying `40-zerotier.sh` line for line in structure — a missing payload is a log line and `return 0`, not an error (R-CFG-08) — installing the binary to `/usr/local/bin/mediamtx`, writing a unit that runs it as a dedicated `yonder-media` user with `ExecStart=/usr/local/bin/mediamtx /etc/yonder/mediamtx.yml`, and then:
 
 ```sh
 # Installed and off, for the reason 40-zerotier.sh is: a media server present
