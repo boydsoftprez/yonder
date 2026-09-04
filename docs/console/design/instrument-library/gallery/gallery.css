@@ -201,3 +201,14 @@ body { margin:0; background: var(--yonder-background, #0a0c0f); color: var(--yon
 .d-modenote { font-size:11px; color: var(--yonder-label,#7f8a95); margin:-6px 0 0; }
 .q-label { color: var(--yonder-label,#7f8a95); }
 .d-aimpanel .d-aim { gap:8px; }
+
+/* the alternative's badge: outlined, a square dot, small caps */
+.d-badge { display:inline-flex; align-items:center; gap:6px; font-size:9.5px; letter-spacing:.14em; text-transform:uppercase;
+  padding:3px 8px; border-radius:2px; border:1px solid var(--yonder-divider,#2b333c); color: var(--yonder-label,#7f8a95); }
+.d-badge i { width:5px; height:5px; border:1px solid currentColor; }
+.d-badge.warn { border-color: var(--yonder-waiting,#ffcf28); color: var(--yonder-waiting,#ffcf28); }
+.d-aimpanel .d-h em { font-style:normal; }
+/* sentence case for the panel's sub-labels */
+.d-aimpanel .d-lbl, .d-aimpanel .d-field .d-lbl { text-transform:none; letter-spacing:0; font-size:12px; }
+.d-modenote { font-size:12px; }
+.d-recentre--soft { text-transform:none; letter-spacing:0; font-size:13px; padding:0 18px; min-height:38px; border-radius:4px; }

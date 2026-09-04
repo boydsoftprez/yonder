@@ -5,47 +5,27 @@
      again. -->
 <template>
   <div class="d-aim">
-    <svg width="160" height="160" viewBox="0 0 118 118" class="d-aim__dial"
+    <svg width="132" height="132" viewBox="0 0 118 118" class="d-aim__dial"
          :class="{ live: pushing }"
          @pointerdown="down" @pointermove="move"
          @pointerup="up" @pointercancel="up" @pointerleave="up">
-      <circle cx="59" cy="59" r="52" :fill="c.display" :stroke="c.divider" stroke-width="1"/>
-      <circle cx="59" cy="59" r="44" fill="none" :stroke="c.track" stroke-width="1"/>
-      <g :stroke="c.label" stroke-width="1.5" stroke-opacity=".7">
-        <path d="M59 7v7 M59 104v7 M7 59h7 M104 59h7"/>
+      <circle cx="59" cy="59" r="54" fill="none" :stroke="c.divider" stroke-width="1"/>
+      <!-- crosshair, stopping short of the puck -->
+      <g :stroke="c.divider" stroke-width="1">
+        <path d="M59 8v37 M59 73v38 M8 59h37 M73 59h38"/>
       </g>
-      <g :stroke="c.divider" stroke-width="1.2">
-        <path d="M22 22l5 5 M96 22l-5 5 M22 96l5-5 M96 96l-5-5"/>
-      </g>
-      <circle cx="59" cy="59" r="15" fill="none" :stroke="c.divider" stroke-width="1" stroke-dasharray="3 3"/>
-      <!-- axis labels, so the pad reads without instruction -->
       <g :fill="c.label" font-size="7.5" font-family="ui-sans-serif,system-ui" letter-spacing=".8" text-anchor="middle">
-        <text x="59" y="30">TILT +</text><text x="59" y="94">PAN</text>
-        <text x="27" y="62">&#8722;</text><text x="91" y="62">+</text>
+        <text x="59" y="24">TILT +</text><text x="59" y="89">PAN</text>
+        <text x="22" y="62">&#8722;</text><text x="96" y="62">+</text>
       </g>
-      <!-- the puck, at rest at the centre -->
-      <circle v-if="!pushing" cx="59" cy="59" r="6" :fill="c.select" fill-opacity=".35" :stroke="c.select" stroke-width="1.5"/>
-
-      <!-- an axis that will not answer stays on the dial, struck and labelled,
-           so a gimbal that half works is not read as one that does -->
+      <!-- an axis that will not answer stays on the pad, struck and labelled -->
       <template v-if="axes.roll !== 'present'">
-        <path d="M 30 88 A 44 44 0 0 0 88 88" fill="none" :stroke="c.waiting"
-              stroke-opacity=".55" stroke-width="3" stroke-dasharray="4 4"/>
-        <text x="59" y="112" text-anchor="middle" font-size="8.5" :fill="c.waiting"
-              letter-spacing="1">ROLL &#8212;</text>
+        <path d="M 26 96 A 49 49 0 0 0 92 96" fill="none" :stroke="c.waiting" stroke-opacity=".5" stroke-width="2.5" stroke-dasharray="3 4"/>
+        <text x="59" y="116" text-anchor="middle" font-size="7.5" :fill="c.waiting" letter-spacing=".8" font-family="ui-sans-serif,system-ui">ROLL &#8212;</text>
       </template>
-
-      <!-- where the gimbal actually is -->
-      <g :transform="`rotate(${bearing} 59 59)`">
-        <path d="M59 15 l-5 9 h10 z" :fill="c.value"/>
-      </g>
-
-      <!-- where you are pushing -->
-      <template v-if="pushing">
-        <line x1="59" y1="59" :x2="px" :y2="py" :stroke="c.select" stroke-width="3"/>
-        <circle :cx="px" :cy="py" r="13" :fill="c.select" fill-opacity=".2" :stroke="c.select" stroke-width="2"/>
-        <circle :cx="px" :cy="py" r="3.5" :fill="c.select"/>
-      </template>
+      <!-- the puck: where you are pushing, or the centre at rest -->
+      <circle :cx="pushing ? px : 59" :cy="pushing ? py : 59" r="11" fill="none" :stroke="c.select" stroke-width="1" stroke-dasharray="2.5 2.5"/>
+      <circle :cx="pushing ? px : 59" :cy="pushing ? py : 59" r="6.5" :fill="c.select" :stroke="c.display" stroke-width="1.5"/>
     </svg>
 
     <div class="d-aim__rows">
@@ -63,7 +43,7 @@
       <div v-if="axes.pan === 'present' || axes.tilt === 'present'" class="d-blk">
         <span class="d-blk__h">Commanded rate</span>
         <div class="d-rate" :class="{ pushing }">{{ rateShown }}<i>&deg;/s</i></div>
-        <div class="d-pos__b"><span>0</span><span></span><span>{{ MAX }} &deg;/s</span></div>
+        <div class="d-pos__b d-pos__b--rate"><span>0</span><i></i><span>{{ MAX }} &deg;/s</span></div>
       </div>
       <div v-if="atLimit" class="d-limit"><i></i>At the limit</div>
     </div>
@@ -141,19 +121,21 @@ export default {
 .d-aim__dial { flex:0 0 auto; cursor:grab; touch-action:none; }
 .d-aim__dial.live { cursor:grabbing; }
 .d-aim__rows { flex:1; min-width:0; display:flex; flex-direction:column; gap:12px; margin-bottom:6px; }
-.d-blk__h { display:block; font-size:10.5px; color: var(--yonder-label,#7f8a95); margin-bottom:6px; }
+.d-blk__h { display:block; font-size:12px; color: var(--yonder-label,#7f8a95); margin-bottom:8px; }
+.d-pos__b--rate { justify-content:flex-start; gap:8px; align-items:center; }
+.d-pos__b--rate i { width:18px; height:1px; background: var(--yonder-divider,#2b333c); }
 .d-pos { margin-bottom:8px; }
 .d-pos.dead .d-pos__trk { border:1px dashed var(--yonder-divider,#2b333c); background:transparent; }
 .d-pos__trk { position:relative; height:6px; margin:4px 0 3px; border-radius:1px; background: var(--yonder-track,#161b21); }
 .d-pos__zero { position:absolute; left:50%; top:-2px; width:1px; height:10px; background: var(--yonder-divider,#2b333c); }
 .d-pos__ptr { position:absolute; top:-3px; width:2px; height:12px; margin-left:-1px; background: var(--yonder-value,#fff); }
-.d-pos__b { display:flex; justify-content:space-between; font-size:9.5px; font-variant-numeric:tabular-nums;
+.d-pos__b { display:flex; justify-content:space-between; font-size:10.5px; font-variant-numeric:tabular-nums;
   color: var(--yonder-label,#7f8a95); }
 .d-rate { font-size:22px; font-weight:600; font-variant-numeric:tabular-nums; color: var(--yonder-value,#fff); line-height:1.1; }
 .d-rate.pushing { color: var(--yonder-select,#2ad4f0); }
 .d-rate i { font-style:normal; font-weight:400; font-size:11px; text-transform:none; margin-left:4px; color: var(--yonder-label,#7f8a95); }
 .d-row { display:flex; align-items:baseline; justify-content:space-between; gap:10px; padding:3px 0; }
-.d-row .l { font-size:11px; letter-spacing:.1em; text-transform:uppercase;
+.d-row .l { font-size:12px; letter-spacing:.1em; text-transform:uppercase;
   color: var(--yonder-label,#7f8a95); }
 .d-row .v { font-size:14px; font-weight:600; font-variant-numeric: tabular-nums;
   color: var(--yonder-value,#fff); }
