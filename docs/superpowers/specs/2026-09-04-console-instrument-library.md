@@ -376,6 +376,7 @@ IDs are stable and never renumbered. Current highest: `R-CTL-10`, `R-UI-20`,
 | **R-UI-21** | **A control another setting has charge of stays on the page, drawn inert, naming the setting that has it.** It is not a fault and is not drawn as one: the caution tone belongs to a capability that misreports itself, and spending it on a camera behaving correctly is how an operator learns to stop reading it |
 | **R-UI-22** | **The interface's first paint carries its own theme.** The generated stylesheet is in the document before any script runs, so no palette but Yonder's is ever drawn |
 | **R-UI-23** | **The capture gate photographs readings, not masks.** Every field renders a fixed specimen — the widest value it can honestly hold — so a reading that does not fit its field changes the page's shape and fails the build |
+| **R-UI-25** | **The instrument library is rendered whole, from source, in both palettes, on every build.** Every component in every state on one captured page, so a gap in the set is visible before a page is built from it and a component that changes shape fails the build |
 | **R-VID-16** | **Start and stop each output independently from the console, and show what each one is costing while it runs.** An output is stopped where its cost is stated, because the cost is the reason to stop it |
 | **R-UI-24** | **An output nothing can reach is drawn as unreachable, and its receive line is marked unusable rather than offered.** The console states which of the device's current paths can carry an output — an inbound listener works on the mesh and never behind carrier NAT — and **it does not act on it**: stopping an output is the operator's press (R-CMD-04) |
 
@@ -434,35 +435,59 @@ likely defect and the only one no unit test can see.
 
 ---
 
-## 12 · How this is staged
+## 12 · The gallery
 
-One design; three plans, in order, each its own reviewable branch. The whole
-of it in one branch would be two milestones of change reviewed at once, and
-this repository's own evidence is that large branches hide their defects until
-somebody holds the board.
+**A page that mounts every component, in every state, in both palettes, built
+from the real sources against the real generated `theme.css`.** It is a
+deliverable of this work and not a side-effect, for a reason the M4 build
+demonstrates: a component library nobody can look at whole is a library whose
+gaps are invisible until a page is built from it and somebody says *that isn't
+what we drew*. The absence of a picker would have been obvious on one screen.
 
-**Plan 1 — the library and the model.** The capability model, the config
-schema, the probe map and the write path. Then the parts: picker, segmented
-control, set bar, readout row, column, placard. Then `ui-yonder-deck` and
-`ui-yonder-index`. Tests and mutation checks throughout. Nothing is wired yet.
+It earned that place before this document was finished. A first cut, built to
+settle the layout, found four defects standing alone — with no page, no
+Node-RED and no board:
 
-**Plan 2 — the pages and the defects.** Both camera pages rebuilt from the
-library. The Outputs group, with each output's cost and its reachability on the
-paths the device currently has. The picture reworked — overlays, aspect,
-z-order. The five defects. The gate moved to specimens. **Exit: the Live deck
-carries every flying control the bench camera offers and stops an output on a
-press, seen working on the board, in both palettes.**
+| Found in the gallery | What it is |
+|---|---|
+| `1280 × …`, `3000 kb…`, and two cells past the edge | **`YonderDataBar` truncates in the component**, not because a page was narrow. This is the observed defect, reproduced in isolation |
+| The soft-key rail runs off its own edge | Six keys do not fit and the rail neither wraps nor scrolls; three keys were simply not drawn |
+| `IN USE0.0 of 3.2 Mb/s` | `YonderBudget` has no space between label and value |
+| `3Mb/s`, `0×` | A leading space inside a tag is collapsed. Written and caught within the minute, because it was rendered beside eleven other things |
 
-**Plan 3 — the accessory camera.** R-CAM-15: the AOA source, the DUML command
-path, aim as a real capability, the recorder and digital zoom. The aim dial and
-the drag layer wired to a gimbal that moves. **Exit: pan and tilt driven from
-the console against the Pocket 2.**
+Requirements: it renders from `src/`, never from a built bundle, so it cannot
+show something the package does not contain. It carries the four capability
+states for every control. It is captured by the gate in both palettes, so a
+component that changes shape fails the build the same way a page does.
 
-Plan 1 is written next.
+## 13 · How this is staged
+
+**One plan, one branch.** The three parts below are its phases and its review
+checkpoints, not separate branches.
+
+**Phase 1 — the model.** `CameraCapabilities`, `CONTROL_MAP` (including
+`pan_absolute`/`tilt_absolute` → `aim`), the `inactive` flag becoming the gated
+state, `CameraControls`, `CameraOutput.enabled`, and the write path. All in
+`yonder-core`, all tested, all mutation-checked. Nothing is drawn yet.
+
+**Phase 2 — the library and the gallery.** Picker, segmented control, set bar,
+readout row, column, placard, aim dial. Then `ui-yonder-deck` and
+`ui-yonder-index`. The gallery grows with them and is the review surface at
+this checkpoint.
+
+**Phase 3 — the pages, the defects and the accessory camera.** Both camera
+pages rebuilt. The Outputs group. The picture reworked — overlays, aspect,
+z-order. The five defects. The gate moved to specimens. Then R-CAM-15: the AOA
+source, the DUML command path, aim as a real capability, the recorder and
+digital zoom, with the dial and the drag layer wired to a gimbal that moves.
+
+**Exit:** the Live deck carries every flying control the bench camera offers,
+states the two it advertises and cannot honour, stops an output on a press, and
+pans the Pocket 2 — seen on the board, in both palettes.
 
 ---
 
-## 13 · Open
+## 14 · Open
 
 **Whether the deck should be one node or one per group per camera.** Layout B
 draws one deck; a multi-camera page may want one per camera. Deferred to M6
