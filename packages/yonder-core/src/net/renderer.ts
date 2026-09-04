@@ -616,9 +616,22 @@ export class NetworkRenderer implements Renderer {
    * daemon start and may have spent its one shot hours ago (K-11), so relying
    * on it would make reachability depend on how long the device had been up.
    *
-   * The failure is still a failure. The access point coming back does not
-   * turn an apply that did not work into one that did, so the error is
-   * rethrown and the engine rolls the configuration back.
+   * **Measured on a board: `network.client.ssid` named a network that had
+   * moved out of range, every apply failed, and the access point came back up
+   * exactly as R-NET-07 requires — the device was reachable the entire time.**
+   * The apply had, in fact, worked: every profile was written, including a
+   * corrected APN. What did not happen is a network appearing that is not on
+   * the air, which is a fact about the world and not about the device. The
+   * confirmation window exists to catch a change that leaves nothing
+   * reachable (`packages/yonder-core/src/apply/reachability.ts`); with the
+   * access point up there is nothing for it to catch, and rolling back
+   * anyway only destroyed the operator's settings. They read the loss as a
+   * power cycle fault, because from the console nothing else had changed
+   * (K-37). So once the access point is confirmed up, the failure is logged
+   * rather than rethrown: the render completes, the apply stands, and the
+   * operator's change is kept (R-NET-15). Only when reachability is *not*
+   * established — the access point was down and did not come back up either
+   * — is the failure still a failure, and it is rethrown exactly as before.
    */
   private async settleRadio(config: Config, devices: DeviceInfo[]): Promise<void> {
     const active = new Set(devices.map((d) => d.connection).filter((c) => c !== ""));
@@ -642,21 +655,37 @@ export class NetworkRenderer implements Renderer {
     } catch (e) {
       // The ordinary shape of this failure, now that the access point comes
       // down first: the radio has been freed, the client did not associate,
-      // and nothing is on the air. Raising the access point again is the only
-      // thing standing between the operator and a board they cannot reach.
-      //
-      // Guarded on the access point not already being up, because re-issuing
-      // `up` on a live one drops every joined station and brings it back —
-      // including the operator watching this apply.
-      if (movingToClient && !active.has(AP_CONNECTION)) {
-        this.log(
-          "network: the wifi client did not come up; raising the access point so the device "
-          + "stays reachable",
-        );
-        // Best effort by construction. If this fails too there is nothing
-        // further this renderer can do, and the original failure is the one
-        // the operator needs to see.
-        await this.client.up(AP_CONNECTION).catch(() => {});
+      // and nothing is on the air. What this decides on is reachability, not
+      // the shape of nmcli's error — a wrong pre-shared key lands here
+      // exactly like an out-of-range SSID, and both get the same treatment
+      // (R-NET-15). Nothing below reads `e`'s message.
+      if (movingToClient) {
+        // The access point was never taken down, so nothing needs rescuing —
+        // and it is deliberately not re-`up`ped: re-issuing `up` on a live
+        // access point drops every joined station and brings it back,
+        // including the operator watching this apply.
+        let reachable = active.has(AP_CONNECTION);
+        if (!reachable) {
+          this.log(
+            "network: the wifi client did not come up; raising the access point so the device "
+            + "stays reachable",
+          );
+          try {
+            await this.client.up(AP_CONNECTION);
+            reachable = true;
+          } catch {
+            // Nothing further this renderer can do. The original failure —
+            // not this one — is what the operator needs to see, so it falls
+            // through to the `throw e` below rather than being reported here.
+          }
+        }
+        if (reachable) {
+          this.log(
+            "network: the wifi client did not come up, but the access point is on the air; "
+            + "the device is reachable, so the change has been kept",
+          );
+          return;
+        }
       }
       throw e;
     }

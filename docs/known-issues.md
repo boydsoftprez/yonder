@@ -805,7 +805,9 @@ causing it.
 Found while pressing Join on a console reached over the very radio being
 retuned, which is the case R-NET-12's sentence was written about.
 
-### K-37 · A Wi-Fi network that is not in range fails every apply
+### K-37 · ~~A Wi-Fi network that is not in range fails every apply~~ — CLOSED
+
+**Status:** Closed · **Requirement:** R-NET-15
 
 The network renderer runs before the others, so an SSID it cannot associate with
 fails the whole apply — including applies with nothing to do with Wi-Fi:
@@ -829,27 +831,48 @@ Note this is not the same as R-NET-07's fallback, which works: the access point
 does come back. The device stays *reachable*. What it stops being is
 *changeable*.
 
-**Fix direction:** a client that cannot associate is a fact about the world, not
-a failed render. R-NET-12 already says the access point returns when a change
-leaves the radio on no network; that outcome should satisfy the renderer rather
-than fail it.
-
-**One compound of this is closed.** The network renderer arbitrates the radio
-and then re-dials the modem, and the two shared a failure path: `settleRadio`
-threw, so `redialModem` never ran. On a board with an out-of-range network
-configured that happened on *every* render, so a corrected APN was written into
-the modem's profile and never dialled — correcting a mistyped APN, the recovery
-action M3a is built around, could not be carried out at all. The radio step
-still runs first, for the reason it always did (its failure is what raises the
-access point, and R-NET-07 rests on that), but its error is now held, the
+**One compound of this was closed first.** The network renderer arbitrates the
+radio and then re-dials the modem, and the two shared a failure path:
+`settleRadio` threw, so `redialModem` never ran. On a board with an out-of-range
+network configured that happened on *every* render, so a corrected APN was
+written into the modem's profile and never dialled — correcting a mistyped APN,
+the recovery action M3a is built around, could not be carried out at all. The
+radio step still runs first, for the reason it always did (its failure is what
+raises the access point, and R-NET-07 rests on that), but its error is held, the
 re-dial runs, and the radio's error is then thrown. A re-dial that also fails is
-logged rather than allowed to displace it, and a render that failed still fails
-— the confirmation timer depends on that (R-CFG-03). Pinned by tests in
+logged rather than allowed to displace it. Pinned by tests in
 `packages/yonder-core/src/net/renderer.test.ts` that fail against the old code.
 R-CEL-09, R-NET-07.
 
-The entry stays open: an out-of-range network still fails the render, and the
-fix direction above is still the fix.
+**What that first fix did not touch: the render itself still failed.** Every
+apply on a board whose configured network had moved out of range still rolled
+back, because `settleRadio` rethrew once it had raised the access point again —
+a rethrow its own doc comment defended as correct. It measurably was not. An
+operator out of range of `Boyd_AP`, meaning to fly on cellular alone, entered a
+correct APN and pressed CONNECT; the render threw on the radio, the apply
+engine rolled the whole configuration back, and `yonder-modem` was removed.
+**The operator lost their cellular configuration to this and reported it as
+"the settings did not survive a power cycle"; they had, in fact, never been
+written at all.** Confirmed on the board throughout: `wlan0` was `connected` to
+`yonder-ap` — the access point had come back up, exactly as R-NET-07 requires —
+and the device was reachable the entire time. There was never anything for the
+rollback to protect.
+
+**Closed by R-NET-15.** `settleRadio` now decides the render's outcome on
+reachability rather than on whether the client associated: if the access point
+was never taken down, or raising it again succeeds, the failure is logged in
+plain language — that the client did not come up, that the access point is on
+the air, and that the change has been kept — and the render returns normally.
+Every other subsystem in the same apply stands, including a corrected APN,
+which is dialled immediately after. This is R-NET-12's own promise finally
+satisfied rather than fought: the access point returning when a change leaves
+the radio on no network is treated as the outcome it always claimed to be,
+instead of one the renderer failed anyway. Nothing here classifies the failure
+by parsing nmcli's error text; a wrong pre-shared key is treated exactly like
+an out-of-range SSID, because both are the same fact about the world and not
+about the device. Only when the access point itself cannot be confirmed up does
+the render still fail, exactly as before. Pinned by tests in
+`packages/yonder-core/src/net/renderer.test.ts` that fail against the old code.
 
 ### K-38 · A console deploy serves `Cannot GET /` for about half a minute
 

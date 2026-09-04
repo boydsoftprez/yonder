@@ -815,15 +815,17 @@ describe("moving the radio", () => {
    * The board is now at its most exposed: the access point is down, the radio
    * is free, and the client did not associate. Nothing is on the air, and
    * putting the access point back is the only thing between the operator and
-   * a device they cannot reach.
+   * a device they cannot reach. Once it is back, the device is reachable, so
+   * the render resolves rather than rolling the operator's change back over
+   * a network that simply was not there (R-NET-15, K-37).
    */
-  it("puts the access point back when the client does not associate", async () => {
+  it("puts the access point back when the client does not associate, and resolves", async () => {
     const { renderer, calls, secrets } = harness({
       devices: withApActive(DEVICES),
       fails: { [`nmcli connection up ${CLIENT_CONNECTION}`]: ASSOCIATION_FAILED },
     });
     secrets.ensure("wifi_psk", "psk");
-    await expect(renderer.render(joining())).rejects.toThrow(/nmcli exited 4/);
+    await renderer.render(joining());
     expect(order(calls)).toEqual([
       `down ${AP_CONNECTION}`,
       `up ${CLIENT_CONNECTION}`,
@@ -855,7 +857,9 @@ describe("moving the radio", () => {
     });
     secrets.ensure("wifi_psk", "psk");
 
-    await expect(renderer.render(joining(false))).rejects.toThrow(/nmcli exited 4/);
+    // And the render resolves: the rescue put the device back on the air, so
+    // there is nothing left for a rollback to protect (R-NET-15).
+    await renderer.render(joining(false));
 
     // The access point came up, after the client's failure, and was never
     // taken down.
@@ -900,7 +904,7 @@ describe("moving the radio", () => {
       fails: { [`nmcli connection up ${CLIENT_CONNECTION}`]: ASSOCIATION_FAILED },
     });
     secrets.ensure("wifi_psk", "psk");
-    await expect(renderer.render(joining())).rejects.toThrow();
+    await renderer.render(joining());
     expect(order(calls).filter((o) => o === `up ${AP_CONNECTION}`)).toHaveLength(1);
   });
 
@@ -1444,6 +1448,20 @@ describe("NetworkRenderer when the radio will not settle and the modem must be r
     stderr: "Error: Connection activation failed: No suitable device found",
   };
 
+  /**
+   * What nmcli says when moving the access point itself — up or down,
+   * whichever a test is about — does not go the way it was asked. The
+   * message is deliberately unlike `NOT_IN_RANGE` and unlike the phrase
+   * `NmcliClient.down` tolerates ("is not an active connection"): what makes
+   * a test use this is *which command* it is attached to, never the words in
+   * it (R-NET-15 — this is never classified by parsing nmcli's English).
+   */
+  const AP_WONT_MOVE: CommandResult = {
+    code: 1,
+    stdout: "",
+    stderr: "Error: Device or resource busy",
+  };
+
   /** Joins a network that is not in range, and corrects the modem's APN. */
   function joiningAndCorrectingApn(): Config {
     const c: Config = structuredClone(DEFAULT_CONFIG);
@@ -1470,56 +1488,80 @@ describe("NetworkRenderer when the radio will not settle and the modem must be r
   const verbs = (calls: string[][]): string[] =>
     calls.filter((c) => c[1] === "connection" && c[3] === MODEM_CONNECTION).map((c) => c[2]!);
 
-  it("re-dials the modem even though the radio step threw", async () => {
+  /**
+   * R-NET-15. The client could not associate, but the access point came back
+   * up — R-NET-07 doing exactly its job — so the device was reachable
+   * throughout. That is the apply succeeding, not failing: the render
+   * resolves, and the corrected APN this whole scenario exists for is still
+   * re-dialled onto the modem (K-37).
+   */
+  it("resolves and still re-dials the modem, because the access point coming back keeps the device reachable", async () => {
     const { renderer, calls } = board({
       [`nmcli connection up ${CLIENT_CONNECTION}`]: NOT_IN_RANGE,
     });
 
-    await expect(renderer.render(joiningAndCorrectingApn())).rejects.toThrow();
+    await renderer.render(joiningAndCorrectingApn());
 
-    // The profile was rewritten and then actually dialled with the new APN.
+    // The rescue ran...
+    expect(calls.some((c) => c[2] === "up" && c[3] === AP_CONNECTION)).toBe(true);
+    // ...and the profile was rewritten and then actually dialled with the new APN.
     expect(verbs(calls)).toEqual(["modify", "down", "up"]);
     const modify = argvOf(calls, "modify", MODEM_CONNECTION)!;
     expect(modify[modify.indexOf("gsm.apn") + 1]).toBe("nxtgenphone");
   });
 
   /**
-   * And the radio's failure is still a failure. A render that returned
-   * quietly because the modem afterwards went well would leave the apply
-   * engine's confirmation timer with nothing to roll back (R-CFG-03).
+   * The other way the access point can be up when the client fails: taking
+   * it down is what did not work, so it was never down to begin with. This
+   * reaches reachability the same way and skips the rescue outright — which
+   * is the point of the test. Re-`up`ping a connection that is already live
+   * would drop every station joined to it, including the operator watching
+   * this apply, so nothing here re-issues `up` on one nmcli never actually
+   * took down.
    */
-  it("still reports the radio's failure to the caller after a re-dial that worked", async () => {
+  it("resolves without re-raising the access point when it was never taken down", async () => {
     const { renderer, calls } = board({
+      [`nmcli connection down ${AP_CONNECTION}`]: AP_WONT_MOVE,
+    });
+
+    await renderer.render(joiningAndCorrectingApn());
+
+    expect(calls.some((c) => c[2] === "up" && c[3] === AP_CONNECTION)).toBe(false);
+  });
+
+  /**
+   * Reachability is checked, not assumed. When the rescue itself fails,
+   * nothing has established that this device can still be reached, so
+   * R-NET-15 does not apply — the render rejects, and with the client's
+   * original failure rather than the rescue's, because that is the one that
+   * explains what an operator needs to fix.
+   */
+  it("rejects with the radio's original failure when raising the access point also fails", async () => {
+    const { renderer } = board({
       [`nmcli connection up ${CLIENT_CONNECTION}`]: NOT_IN_RANGE,
+      [`nmcli connection up ${AP_CONNECTION}`]: AP_WONT_MOVE,
     });
 
     await expect(renderer.render(joiningAndCorrectingApn()))
       .rejects.toThrow(/The Wi-Fi network could not be found/);
-    // The rescue still ran, so the device is still reachable.
-    expect(calls.some((c) => c[2] === "up" && c[3] === AP_CONNECTION)).toBe(true);
   });
 
   /**
-   * Both failed. The radio's is the one bearing on whether anyone can still
-   * reach this device, so it is the one the caller is given; the modem's is
-   * logged rather than allowed to displace it.
+   * Once the radio has recovered there is no radio failure left for a modem
+   * failure to be measured against — so it is not displaced and it is not
+   * swallowed either. A modem that will not dial is still
+   * reachability-affecting and still belongs behind the confirmation timer
+   * (R-CEL-09, R-CFG-03); R-NET-15 only ever concerns the radio's own
+   * failure.
    */
-  it("gives the caller the radio's failure, not the modem's, when both fail", async () => {
-    const lines: string[] = [];
+  it("rejects with the modem's failure once the radio has recovered", async () => {
     const { renderer } = board({
       [`nmcli connection up ${CLIENT_CONNECTION}`]: NOT_IN_RANGE,
       [`nmcli connection up ${MODEM_CONNECTION}`]: MODEM_WONT_DIAL,
-    }, (l) => lines.push(l));
+    });
 
-    const thrown = await renderer.render(joiningAndCorrectingApn()).then(
-      () => new Error("the render did not fail at all"),
-      (e: unknown) => e as Error,
-    );
-    expect(thrown.message).toMatch(/The Wi-Fi network could not be found/);
-    // Not merely "some error": the modem's must not have displaced it.
-    expect(thrown.message).not.toMatch(/No suitable device found/);
-    // And it is not lost either — it is written down where an operator reads.
-    expect(lines.some((l) => l.includes("the modem did not come back up"))).toBe(true);
+    await expect(renderer.render(joiningAndCorrectingApn()))
+      .rejects.toThrow(/No suitable device found/);
   });
 
   /**
