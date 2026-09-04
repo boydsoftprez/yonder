@@ -262,6 +262,16 @@ replace the `hilink`/`stick` sketch that appeared in this reference before M3a: 
 was never implemented and never shipped, so no device in the field can be carrying either
 value.
 
+**An enabled appliance must name its adapter.** `interface` is the whole of how this device
+locates one, so `enabled: true` with `mode: appliance` and no `interface` is refused —
+loading such a file fails and applying such a change is rejected before anything is written.
+It used to be accepted, and what it produced was a device that dialled nothing while the
+Cellular tab reported the appliance as connected on "the named adapter", naming nothing.
+`enabled: false` says nothing about the adapter: switching an appliance off is not the same
+as deleting its settings. This is a rule between two fields, so it is not expressible in
+`config/schema/yonder.schema.json` — an editor validating against that file will not catch
+it, and the device will.
+
 **`network.modem.apn`** has no default and is never guessed. Debian's carrier database
 lists `NXTGENPHONE` first for the SIM this was measured against, which is the value that
 attached and carried nothing, and the value that worked is absent from the file entirely.

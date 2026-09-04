@@ -99,7 +99,7 @@ const AccessPoint = z.object({
  * measured: a QMI or MBIM bearer has no dial step, and `gsm.number` was empty
  * on the link that worked. It applies to a serial connection only.
  */
-const Modem = z.object({
+export const ModemSettings = z.object({
   enabled: z.boolean().default(false),
   mode: z.enum(["auto", "appliance"]).default("auto"),
   interface: z.string().min(1).nullable().default(null),
@@ -108,6 +108,42 @@ const Modem = z.object({
   password: SecretRef.nullable().default(null),
   dial: z.string().nullable().default(null),
 }).strict();
+
+/**
+ * The one thing about this section that no single field can say.
+ *
+ * **An appliance is nothing but its name.** `auto` is found by asking
+ * ModemManager; an appliance presents as an ordinary network adapter and is
+ * indistinguishable from one, so `interface` is the whole of how this device
+ * locates it (R-CEL-11). With it null and the modem enabled, `modemDevice`
+ * returns null, `desiredProfiles` writes no profile, nothing is ever dialled —
+ * and `modemState` still reported the appliance as connected and said it was
+ * "using the named adapter", naming nothing. Every field was individually
+ * valid and the document as a whole described a modem that cannot exist.
+ *
+ * Only while it is **enabled**. `enabled: false` is a board with no modem
+ * configured whatever else this section says, and refusing that would strand
+ * a device whose operator switched an appliance off rather than deleting its
+ * settings — and would refuse the shipped default besides.
+ *
+ * A cross-field rule rather than a discriminated union, because the union
+ * would change the shape every reader of `network.modem` sees for a rule that
+ * applies to one field in one mode. The cost is that `Modem` is a
+ * `ZodEffects` and not an object any more, which is why `ModemSettings` above
+ * is exported: `net/modem/configure.ts` derives the shape a form may send from
+ * it, and `.partial()` is an object's method.
+ */
+const Modem = ModemSettings.superRefine((modem, ctx) => {
+  if (!modem.enabled || modem.mode !== "appliance") return;
+  if (modem.interface !== null && modem.interface !== "") return;
+  ctx.addIssue({
+    code: z.ZodIssueCode.custom,
+    path: ["interface"],
+    message:
+      "an appliance modem is found by name and nothing else, so name the adapter it "
+      + "appears as — for example usb0 (R-CEL-11)",
+  });
+});
 
 const Network = z.object({
   ap: AccessPoint,

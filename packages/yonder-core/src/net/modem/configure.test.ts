@@ -119,3 +119,41 @@ describe("configureModem", () => {
     expect(secrets.stored).toEqual({});
   });
 });
+
+/**
+ * Where the cross-field rule bites, and where it deliberately does not.
+ *
+ * `ModemRequest` is a **patch**: a form is entitled to send one field, and a
+ * request that only sets `mode: "appliance"` merges into a configuration that
+ * may already name an adapter. So the rule that an enabled appliance must name
+ * one cannot be checked against the request — only against the merged
+ * document, which is exactly what the apply engine validates (R-CEL-11,
+ * R-CFG-02).
+ */
+describe("an appliance the operator has not named", () => {
+  it("is accepted as a patch and refused as a configuration", () => {
+    const result = configureModem(
+      DEFAULT_CONFIG,
+      { enabled: true, mode: "appliance" },
+      sink(),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // The merged document is what POST /modem/configure hands the engine, and
+    // this is the answer it gets: refused, with nothing applied and nothing
+    // rendered, rather than a modem nothing can find reporting itself
+    // connected on "the named adapter".
+    expect(ConfigSchema.safeParse(result.config).success).toBe(false);
+  });
+
+  it("is a configuration again the moment the adapter is named", () => {
+    const result = configureModem(
+      DEFAULT_CONFIG,
+      { enabled: true, mode: "appliance", interface: "usb0" },
+      sink(),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(ConfigSchema.safeParse(result.config).success).toBe(true);
+  });
+});

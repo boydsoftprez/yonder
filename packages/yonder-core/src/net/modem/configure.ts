@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { z } from "zod";
-import { ConfigSchema, type Config } from "../../schema/config.js";
+import { ModemSettings, type Config } from "../../schema/config.js";
 import type { SecretSink } from "../join.js";
 
 /**
@@ -46,12 +46,17 @@ const MAX_PASSWORD = 256;
  * this boundary it is the operator's typed string, not the reference the file
  * holds. `configureModem` is what converts one into the other.
  *
- * `network.modem` is declared as `Modem.default({})`, so the shape at this
- * path is a `ZodDefault`, not the object itself — `.removeDefault()` is what
- * gets back to the object `.partial()` can act on.
+ * `ModemSettings` rather than a walk down `ConfigSchema.shape`: what sits at
+ * `network.modem` is that object wrapped in the cross-field rule that an
+ * enabled appliance must name its adapter, and a `ZodEffects` has no
+ * `.partial()`. That rule is not lost by deriving from the object — **it
+ * cannot be checked here at all.** This is a patch, not a document: a request
+ * that only sets `mode: "appliance"` merges into a configuration that may
+ * already name an adapter, and a form is entitled to send one field. The
+ * merged document is what the apply engine validates, which is where the rule
+ * belongs and where it bites (R-CFG-02).
  */
-export const ModemRequest = ConfigSchema.shape.network.shape.modem
-  .removeDefault()
+export const ModemRequest = ModemSettings
   .partial()
   .extend({ password: z.string().max(MAX_PASSWORD).nullable().optional() });
 
