@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { WEBRTC_PORT } from "../media/config.js";
+import { WEBRTC_PORT } from "../media/ports.js";
 
 /**
  * The browser's picture, behind the interface's own credential (R-SEC-13).
@@ -86,11 +86,13 @@ export function whepHandler(opts: WhepOptions = {}): (req: WhepRequest) => Promi
         body: req.body,
       });
     } catch {
-      // The reason matters: a camera that is configured but not started, a
-      // media server that is not running, and a browser blocked by a network
-      // all present as no picture, and only one of them is worth walking
-      // outside for.
-      return { status: 503, body: "the media server is not answering; is the camera started?" };
+      // Nothing about the camera here, deliberately. A camera that is
+      // configured but not started is the 404 below — the media server
+      // answered, and said that path has no publisher. This is the case where
+      // it did not answer at all, and an operator sent to look at a camera
+      // that is fine has been sent the wrong way: of the two, only this one
+      // is worth walking outside for.
+      return { status: 503, body: "the media server did not answer" };
     }
 
     return {

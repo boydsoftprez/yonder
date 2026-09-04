@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { stringify } from "yaml";
 import type { Config } from "../schema/config.js";
+import { RTSP_PORT, SRT_PORT, WEBRTC_LOCAL_UDP_PORT, WEBRTC_PORT } from "./ports.js";
 
 /**
  * The media server's configuration, generated from Yonder's (R-SEC-13).
@@ -44,32 +45,6 @@ export interface MediaFacts {
   /** Resolved from secrets.yaml. Never logged, never in a support bundle. */
   readonly rtspPassword: string;
 }
-
-/** Where mediamtx listens. The console proxies WebRTC from loopback. */
-export const RTSP_PORT = 8554;
-export const WEBRTC_PORT = 8889;
-export const SRT_PORT = 8890;
-
-/**
- * Where WebRTC's *media* arrives, which is not where its handshake does.
- *
- * The handshake is loopback because the console proxies it; the media is UDP
- * straight to the browser, so this port is on every interface and is protected
- * by the ICE credentials that handshake carried rather than by an address.
- *
- * **A separate constant rather than `WEBRTC_PORT + 1`, and a board proved why.**
- * That arithmetic lands on 8890, which is SRT's, and both are UDP. mediamtx
- * does not degrade when two of its servers want one port — it exits:
- *
- *     INF [WebRTC] started with listeners on 127.0.0.1:8889 (TCP/HTTP), :8890 (UDP/ICE)
- *     ERR listen: listen udp :8890: bind: address already in use
- *     INF [WebRTC] closing
- *
- * so the first apply that added an `srt` output would have taken every camera
- * off the air, including the browser's. 8189 is mediamtx's own default for
- * this and collides with nothing here.
- */
-export const WEBRTC_LOCAL_UDP_PORT = 8189;
 
 /**
  * The account a ground station is given. One per device (R-SEC-13); the

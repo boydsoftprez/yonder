@@ -44,10 +44,16 @@ const MAX_BODY_BYTES = 8 * 1024;
  *
  * Its own bound rather than the one above, because an SDP offer is not a
  * password: a browser listing every interface it has and every candidate it
- * gathered writes several kilobytes, and a limit set for a login form would
- * refuse a real offer and take the picture away for no reason a log would
- * explain. Bounded all the same — this is a body, and no body on this device
- * is read without a limit.
+ * gathered is comfortably into the kilobytes, and a limit set for a login
+ * form would refuse a legitimate offer. That failure is worth naming — it
+ * presents as "video does not work in this browser", on some machines and not
+ * others, with nothing in any log to say why.
+ *
+ * **The figure is chosen, not measured.** No real browser's offer has been
+ * put through this board yet. It is roughly an order of magnitude above the
+ * largest offer expected, which is the right side to be wrong on: what it
+ * protects against is an authenticated caller making this device buffer
+ * whatever it likes, and no body on this device is read without a limit.
  */
 const MAX_OFFER_BYTES = 64 * 1024;
 

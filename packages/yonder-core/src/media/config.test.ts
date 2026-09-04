@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
-import { mediamtxConfig, SRT_PORT, WEBRTC_LOCAL_UDP_PORT } from "./config.js";
+import { mediamtxConfig } from "./config.js";
+import { SRT_PORT, WEBRTC_LOCAL_UDP_PORT } from "./ports.js";
 import { ConfigSchema } from "../schema/config.js";
 
 const base = {

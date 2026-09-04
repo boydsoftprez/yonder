@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it, vi } from "vitest";
 import { whepHandler, WHEP_PREFIX } from "./whep.js";
-import { WEBRTC_PORT } from "../media/config.js";
+import { WEBRTC_PORT } from "../media/ports.js";
 
 const OFFER = "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=-\r\n";
 const ANSWER = "v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\ns=-\r\n";
@@ -87,6 +87,11 @@ describe("the WHEP proxy", () => {
     );
     expect(r.status).toBe(503);
     expect(r.body).toContain("media server");
+    // And nothing about the camera. A camera that is configured but not
+    // started is the 404 below, where the server answered and said so; an
+    // operator sent to check a camera that is fine, while the media server is
+    // down, has been sent the one way that cannot help.
+    expect(r.body).not.toMatch(/camera/i);
   });
 
   it("passes a 404 from mediamtx through as a 404", async () => {
