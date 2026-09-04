@@ -134,12 +134,19 @@ jobs:
             exit 1
           fi
       # The unmasked pictures, so a reviewer can look at what the run saw
-      # rather than at a description of it.
+      # rather than at a description of it — and the shape this run recorded,
+      # because the step above tells a reviewer to download this artifact and
+      # commit that shape, and for as long as only the pictures were in here
+      # that instruction could not be followed. It is the first-run case that
+      # needs it: a platform with no reference at all records thirty-odd new
+      # files and there is nowhere else to get them from.
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: console-pages
-          path: vendor/capture/
+          path: |
+            vendor/capture/
+            docs/console/shape/
           if-no-files-found: warn
           # Storage is billed on a private repository no matter which runner
           # produced it — a self-hosted runner saves minutes, not gigabytes.
