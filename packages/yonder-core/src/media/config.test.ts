@@ -2,8 +2,10 @@
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
 import { mediamtxConfig } from "./config.js";
-import { SRT_PORT, WEBRTC_LOCAL_UDP_PORT } from "./ports.js";
+import { RTSP_PORT, SRT_PORT, WEBRTC_LOCAL_UDP_PORT } from "./ports.js";
 import { ConfigSchema } from "../schema/config.js";
+import { compose } from "../video/pipeline.js";
+import { noCapabilities } from "../video/capability.js";
 
 const base = {
   version: 1, network: { ap: { psk: { secret: "ap_psk" } } }, ui: { port: 3000, editor: {} },
@@ -12,7 +14,7 @@ const withCamera = (extra: Record<string, unknown> = {}) => ConfigSchema.parse({
   ...base,
   cameras: [{
     id: "cam0", name: "Nose", source: "usb", device: "usb-1",
-    outputs: [{ kind: "rtsp", path: "cam0", password: { secret: "rtsp_password" } }],
+    outputs: [{ kind: "rtsp", password: { secret: "rtsp_password" } }],
     ...extra,
   }],
 });
@@ -143,6 +145,40 @@ describe("mediamtxConfig", () => {
   it("declares a path for the cheap preview as well as the full stream", () => {
     const y = yaml();
     expect(Object.keys(y.paths).sort()).toEqual(["cam0", "cam0-preview"]);
+  });
+
+  /**
+   * **The one assertion the old shape could not carry.**
+   *
+   * The path mediamtx declares and the path the pipeline publishes to were
+   * composed in two files out of two different fields — `camera.id` here,
+   * `output.path` there — and the fixture gave both the same value, so
+   * swapping one for the other left the whole suite green. Where they differed
+   * the server refused the ANNOUNCE with `400`, `gst-launch-1.0` exited, and
+   * the browser preview went with it, because both branches are one process.
+   *
+   * So this holds the composed argv against the declared keys rather than
+   * against a string, and the fixture's id is deliberately not "cam0". Neither
+   * file can move without the other now.
+   */
+  it("declares exactly the paths the pipeline publishes to, and no others", () => {
+    const cfg = withCamera({ id: "nose" });
+    const rtspBase = `rtsp://127.0.0.1:${RTSP_PORT}`;
+    const argv = compose({
+      camera: cfg.cameras[0],
+      capabilities: noCapabilities(),
+      encoder: {
+        element: "v4l2h264enc", device: "/dev/video11", hardware: true,
+        codec: "h264", detail: "hardware H.264 on /dev/video11",
+      },
+      rtspBase,
+    });
+    const publishedTo = argv
+      .filter((token) => token.startsWith("location="))
+      .map((token) => token.slice(`location=${rtspBase}/`.length));
+
+    expect(publishedTo.sort()).toEqual(["nose", "nose-preview"]);
+    expect(Object.keys(yaml(cfg).paths).sort()).toEqual(publishedTo.sort());
   });
 
   it("declares no catch-all path, so nothing may invent one", () => {

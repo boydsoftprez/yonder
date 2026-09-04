@@ -24,7 +24,7 @@ const CFG = ConfigSchema.parse({
   version: 1, network: { ap: { psk: { secret: "ap_psk" } } }, ui: { editor: {} },
   cameras: [{
     id: "cam0", name: "Nose", source: "usb", device: "usb-1",
-    outputs: [{ kind: "rtsp", path: "cam0", password: { secret: "rtsp_password" } }],
+    outputs: [{ kind: "rtsp", password: { secret: "rtsp_password" } }],
   }],
 });
 const NO_CAMERA = ConfigSchema.parse({

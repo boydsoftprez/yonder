@@ -250,6 +250,23 @@ describe("cameras", () => {
     expect(JSON.stringify(r.error?.issues)).toContain("ui.port");
   });
 
+  it("refuses two cameras that would publish to one media path", () => {
+    // Unique ids are not enough: a camera's preview is served at its id plus
+    // `-preview`, so `nose` and `nose-preview` both want `nose-preview`.
+    // mediamtx takes one publisher per path, so the second pipeline's ANNOUNCE
+    // is refused with 400 and that camera dies while the first goes on
+    // working — the hardest shape of fault to read off a page.
+    const r = ConfigSchema.safeParse({
+      version: 1, network: { ap: { psk: { secret: "ap_psk" } } }, ui: { editor: {} },
+      cameras: [
+        { id: "nose", name: "A", source: "usb", device: "usb-1" },
+        { id: "nose-preview", name: "B", source: "usb", device: "usb-2" },
+      ],
+    });
+    expect(r.success).toBe(false);
+    expect(JSON.stringify(r.error?.issues)).toContain("nose-preview");
+  });
+
   it("refuses an output on a port the media server binds", () => {
     // The same class as ui.port above, and the one that was open: mediamtx
     // does not degrade when two of its servers want one port, it exits — so
@@ -293,7 +310,7 @@ describe("cameras", () => {
       version: 1, network: { ap: { psk: { secret: "ap_psk" } } }, ui: { editor: {} },
       cameras: [{
         id: "cam0", name: "Nose", source: "usb", device: "usb-1",
-        outputs: [{ kind: "rtsp", path: "cam0", password: { secret: "rtsp_password" } }],
+        outputs: [{ kind: "rtsp", password: { secret: "rtsp_password" } }],
       }],
     });
     expect(ok.success).toBe(true);
@@ -301,7 +318,7 @@ describe("cameras", () => {
       version: 1, network: { ap: { psk: { secret: "ap_psk" } } }, ui: { editor: {} },
       cameras: [{
         id: "cam0", name: "Nose", source: "usb", device: "usb-1",
-        outputs: [{ kind: "rtsp", path: "cam0", password: "hunter2" }],
+        outputs: [{ kind: "rtsp", password: "hunter2" }],
       }],
     });
     expect(inline.success).toBe(false);

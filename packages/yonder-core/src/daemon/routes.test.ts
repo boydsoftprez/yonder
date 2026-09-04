@@ -158,7 +158,7 @@ function cameraConfig(overrides: Partial<Camera> = {}): Config {
       device: CAMERA_BY_PATH,
       outputs: [
         { kind: "rtp", host: "192.168.1.50", port: 5600 },
-        { kind: "rtsp", path: "cam0", password: { secret: "rtsp_password" } },
+        { kind: "rtsp", password: { secret: "rtsp_password" } },
       ],
       ...overrides,
     }],

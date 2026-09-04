@@ -12,7 +12,7 @@ const CAMERA: Camera = {
   controls: { brightness: null, contrast: null, rotation: 0 },
   outputs: [
     { kind: "rtp", host: "192.168.1.50", port: 5600 },
-    { kind: "rtsp", path: "cam0", password: { secret: "rtsp_password" } },
+    { kind: "rtsp", password: { secret: "rtsp_password" } },
   ],
 };
 const CAPS = {

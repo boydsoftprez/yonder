@@ -84,6 +84,16 @@ export function mediamtxConfig(facts: MediaFacts): string {
   // every parser resolves. What it would cost is a path with no source at all.
   const fedByThisBoard = (): Record<string, unknown> => ({ source: "publisher" });
 
+  // **These two names are the only ones a camera has**, and every file that
+  // names a stream derives them the same way: `video/pipeline.ts` publishes
+  // here, `console/whep.ts` proxies the browser here, `video/receive.ts`
+  // prints the RTSP URL from here. An RTSP output used to carry a `path` of
+  // its own, so the pipeline published to one name while this file declared
+  // another; they agreed only in a configuration where somebody had typed the
+  // same string twice, and where they did not, mediamtx refused the ANNOUNCE
+  // with 400 and the whole pipeline exited — preview included, because both
+  // branches are one process. `config.test.ts` now holds every location
+  // `compose()` produces against the keys declared here.
   const paths: Record<string, unknown> = {};
   for (const camera of cameras) {
     // The preview always has a path: it is how the browser reaches the

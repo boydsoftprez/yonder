@@ -125,6 +125,76 @@ describe("Supervisor", () => {
     expect(s.state("cam0").state).toBe("stopped");
   });
 
+  /**
+   * **Start, on a camera that has just failed, is the ordinary case** — it is
+   * the state the page invites it in — and a failed camera has a retry armed
+   * for between one and thirty seconds. A `start()` that did not cancel it
+   * spawned one pipeline, the backoff spawned a second, and `entry.proc` then
+   * held only the second: the first was a live `gst-launch-1.0` the supervisor
+   * had lost the handle to, holding the camera's `/dev/video*` node open. Every
+   * later start got `EBUSY` from `v4l2src`, and mediamtx refused it as a second
+   * publisher on the same path, so from the console the camera was permanently
+   * unstartable until somebody rebooted the board. Verified on hardware.
+   */
+  it("cancels a pending retry, so Start on a failed camera orphans nothing", () => {
+    const { spawner, spawned } = fakeSpawner();
+    const { clock, advance } = fakeClock();
+    const s = new Supervisor({ spawner, clock });
+
+    s.start("cam0", ARGV);
+    advance(500);
+    spawned[0].exit(1);
+    expect(s.state("cam0").state).toBe("failed");
+
+    // The operator presses Start while the backoff is still pending.
+    s.start("cam0", ARGV);
+    expect(spawned).toHaveLength(2);
+    advance(30_000);
+    // The retry that was armed before the press does not spawn a third.
+    expect(spawned).toHaveLength(2);
+
+    // And the one process there is, is the one stop() kills.
+    s.stop("cam0");
+    expect(spawned[1].proc.kill).toHaveBeenCalled();
+  });
+
+  it("ignores Start on a camera that is already starting or running", () => {
+    // This is what makes the entry `start()` inherits incapable of holding a
+    // live process: the only states that reach the body are `stopped`, where
+    // `stop()` has already killed and nulled, and `failed`, where `ended`
+    // nulled before it armed the retry the test above cancels.
+    const { spawner, spawned } = fakeSpawner();
+    const { clock, advance } = fakeClock();
+    const s = new Supervisor({ spawner, clock });
+
+    s.start("cam0", ARGV);
+    s.start("cam0", ARGV);
+    expect(spawned).toHaveLength(1);
+    advance(3_000);
+    expect(s.state("cam0").state).toBe("running");
+    s.start("cam0", ARGV);
+    expect(spawned).toHaveLength(1);
+  });
+
+  it("does not settle a new pipeline on the old one's timer", () => {
+    // The settle timer says "this pipeline has held for two seconds". Left
+    // armed across a restart it belongs to a process that is gone, and the
+    // page turns green on the strength of a dead one.
+    const { spawner, spawned } = fakeSpawner();
+    const { clock, advance } = fakeClock();
+    const s = new Supervisor({ spawner, clock });
+
+    s.start("cam0", ARGV);
+    advance(1_500);
+    spawned[0].exit(1);
+    s.start("cam0", ARGV);
+    // 500 ms short of this spawn's own settle, and 500 ms past the first's.
+    advance(1_500);
+    expect(s.state("cam0").state).toBe("starting");
+    advance(500);
+    expect(s.state("cam0").state).toBe("running");
+  });
+
   it("keeps each camera's state apart", () => {
     const { spawner } = fakeSpawner();
     const { clock, advance } = fakeClock();

@@ -160,7 +160,18 @@ function encode(encoder: Encoder, kbps: number, shortGop: boolean): string[] {
   ];
 }
 
-function sink(output: CameraOutput, rtspBase: string): string[] {
+/**
+ * Where one output goes.
+ *
+ * **The RTSP location is built from the camera's id, and nothing else may name
+ * it.** `media/config.ts` declares `paths[camera.id]`, `console/whep.ts`
+ * proxies the browser to the same name, and `receive.ts` prints it: an output
+ * carrying a path of its own gave four files three answers, agreeing only
+ * where the same string had been typed twice. `media/config.test.ts` holds
+ * every location this function composes against the paths that file declares,
+ * so the two cannot drift apart again without a test going red.
+ */
+function sink(output: CameraOutput, rtspBase: string, cameraId: string): string[] {
   switch (output.kind) {
     case "rtp":
       // config-interval=-1 sends SPS/PPS with every keyframe. Without it a
@@ -169,7 +180,7 @@ function sink(output: CameraOutput, rtspBase: string): string[] {
       return ["rtph264pay", "config-interval=-1", `pt=${RTP_PAYLOAD_TYPE}`, LINK,
         "udpsink", `host=${output.host}`, `port=${output.port}`, "sync=false"];
     case "rtsp":
-      return ["rtspclientsink", `location=${rtspBase}/${output.path}`, "latency=0"];
+      return ["rtspclientsink", `location=${rtspBase}/${cameraId}`, "latency=0"];
     case "srt":
       // **Unreachable, and it throws rather than composing.** `refuse()` below
       // rejects an SRT output before anything is composed, and the daemon
@@ -200,7 +211,7 @@ export function compose(opts: ComposeOptions): string[] {
   push("raw.", LINK, ...QUEUE, LINK, ...encode(encoder, camera.bitrate_kbps, false), LINK,
     "h264parse", LINK, "tee", "name=main");
   for (const output of camera.outputs) {
-    push("main.", LINK, ...QUEUE, LINK, ...sink(output, rtspBase));
+    push("main.", LINK, ...QUEUE, LINK, ...sink(output, rtspBase, camera.id));
   }
 
   // The cheap copy the interface watches (R-VID-13), always published, always

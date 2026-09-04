@@ -151,9 +151,9 @@ path, because a key silently ignored is a setting you believe is in force and is
 
 ### Cameras
 
-**Schema only, so far.** A `cameras:` list validates, gets its defaults, and goes through
-apply and rollback like any other section today; nothing yet turns it into a running
-stream — that lands through M4 ([roadmap](roadmap.md)).
+A `cameras:` list validates, gets its defaults, and goes through apply and rollback like
+any other section; since M4 it also runs — the pipeline, the media server's configuration
+and the console's camera pages are all generated from it ([roadmap](roadmap.md)).
 
 ```yaml
 cameras:
@@ -179,9 +179,18 @@ cameras:
       rotation: 0                  # 0 | 90 | 180 | 270
     outputs:                       # simultaneous, not exclusive (R-VID-05)
       - { kind: rtp,  host: 192.168.2.10, port: 5604 }
-      - { kind: rtsp, path: cam0, password: { secret: cam0_rtsp } }
-      - { kind: srt,  port: 8890 }
+      - { kind: rtsp, password: { secret: cam0_rtsp } }
 ```
+
+An RTSP output names no path: this camera's stream is served at its **id** and its cheap
+preview at `cam0-preview`, so the URL the console prints is
+`rtsp://yonder:<password>@<device>:8554/cam0`. One name, in one place — an output that
+named its own path let the media server declare one name while the pipeline published to
+another, and where the two differed the camera would not start at all.
+
+`kind: srt` is accepted by the schema and refused by the device: SRT arrives with R-VID-06,
+and until it has a credential of its own an SRT output would listen with no password on
+it. The camera page says so before you press Start.
 
 Up to 8 cameras, each with up to 8 outputs. Resolution, frame rate, codec, the preview and
 the image controls are cosmetic enough that changing them does not arm the confirmation
@@ -194,6 +203,9 @@ confirm it (R-CFG-03, R-VPN-07).
 Designed, and rejected by the schema until the code that reads them lands — the loader
 refuses keys it does not know, so adding these to a live `config.yaml` today fails
 validation. They are here so the shape is settled before the milestone opens.
+
+**Except `remote:`, which works.** M2a shipped it, and the block below is what a device
+accepts today rather than a shape waiting for a milestone.
 
 ```yaml
 vehicle:
@@ -230,8 +242,10 @@ gpio:
 **`mavlink.serial.baud: auto`** sweeps the rates ArduPilot is actually configured for in
 the field, fastest-last so a slow link is found before a fast one is guessed at.
 
-**`cameras[].outputs`** is a list, and every entry is active at once — browser preview and
-a ground-station feed are not a choice between two options (R-VID-05).
+**`cameras[].outputs`** is a list, and every entry is active at once — two ground stations
+are not a choice between two options (R-VID-05). The browser's preview is not one of them:
+it is the separate `preview:` block above, always published, and it is what R-VID-13 keeps
+cheap.
 
 **`remote.zerotier`** is the whole of the mesh configuration: a switch and a network ID.
 That is the point of choosing it first — a network ID is a value you can put in a file, and

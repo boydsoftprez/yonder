@@ -205,8 +205,20 @@ const CameraId = z.string().regex(
  *
  * `rtp` is an outbound push to a ground station: no listener, nothing to
  * protect (R-VID-01). `rtsp` and `srt` are listeners on this device, so
- * R-SEC-13 applies — the RTSP path carries a generated per-device credential
+ * R-SEC-13 applies — the RTSP stream carries a generated per-device credential
  * held by reference, exactly as the access point's passphrase is.
+ *
+ * **An RTSP output names no path of its own, and that is a fix rather than an
+ * omission.** It used to carry `path`, and three files then held two different
+ * answers to *where is this camera's full-rate stream*: `media/config.ts`
+ * declared `<id>`, the pipeline published to `<path>`, and the console asked
+ * the media server for `<id>` again. They agreed only where somebody had typed
+ * the same string twice, and where they did not, mediamtx refused the ANNOUNCE
+ * with 400, the whole pipeline exited — **taking the browser preview with it,
+ * because both branches are one process** — and nothing anywhere named the
+ * path. A camera's stream is at `<id>`, its cheap copy at `<id>-preview`, and
+ * there is one place either can come from. `whep.ts`'s `MEDIA_PATH`, sized for
+ * an id plus `-preview`, was already written to that model.
  */
 const CameraOutput = z.discriminatedUnion("kind", [
   z.object({
@@ -216,7 +228,6 @@ const CameraOutput = z.discriminatedUnion("kind", [
   }).strict(),
   z.object({
     kind: z.literal("rtsp"),
-    path: z.string().regex(/^[a-z0-9][a-z0-9-]{0,31}$/),
     password: SecretRef,
   }).strict(),
   z.object({ kind: z.literal("srt"), port }).strict(),
@@ -322,6 +333,23 @@ export const ConfigSchema = z.object({
   cameras: z.array(Camera).max(8).default([]),
 }).strict().superRefine((cfg, ctx) => {
   const seen = new Set<string>();
+  // Every name this configuration would ask the media server to serve. Two
+  // cameras cannot share one: mediamtx takes one publisher per path, so the
+  // second pipeline's ANNOUNCE is refused and that camera dies with `400`
+  // while the first goes on working, which is the hardest shape of fault to
+  // read off a page. Unique ids are not enough on their own — a camera called
+  // `nose` and a camera called `nose-preview` both want `nose-preview`.
+  const mediaPaths = new Set<string>();
+  const claim = (name: string, i: number, what: string): void => {
+    if (mediaPaths.has(name)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["cameras", i, "id"],
+        message: `two cameras would publish to the media path "${name}"; ${what}`,
+      });
+    }
+    mediaPaths.add(name);
+  };
   for (const [i, cam] of cfg.cameras.entries()) {
     if (seen.has(cam.id)) {
       ctx.addIssue({
@@ -331,6 +359,8 @@ export const ConfigSchema = z.object({
       });
     }
     seen.add(cam.id);
+    claim(cam.id, i, "a camera's stream is served at its id");
+    claim(`${cam.id}-preview`, i, "a camera's preview is served at its id plus -preview");
     for (const [j, out] of cam.outputs.entries()) {
       // The class of fault a confirmation window never catches: today's
       // port-carrying outputs are UDP against a TCP console so nothing

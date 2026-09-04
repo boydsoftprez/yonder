@@ -96,10 +96,10 @@ export function renderReceive(facts: ReceiveFacts): Rendering[] {
       body: rtsp === undefined || rtsp.kind !== "rtsp"
         ? "This camera has no RTSP output configured. Add one in Setup to receive over RTSP."
         : rtspPassword === null
-          ? `rtsp://yonder:<password>@${address}:${rtspPort}/${rtsp.path}\n\n` +
+          ? `rtsp://yonder:<password>@${address}:${rtspPort}/${camera.id}\n\n` +
             "This device's RTSP password is not yet generated; it is created the first " +
             "time the media server is configured."
-          : `rtsp://yonder:${rtspPassword}@${address}:${rtspPort}/${rtsp.path}`,
+          : `rtsp://yonder:${rtspPassword}@${address}:${rtspPort}/${camera.id}`,
     },
   ];
 }

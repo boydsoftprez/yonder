@@ -53,7 +53,7 @@ describe("uplinkBudget", () => {
     const budget = uplinkBudget([camera({
       outputs: [
         { kind: "rtp", host: "192.168.77.20", port: 5600 },
-        { kind: "rtsp", path: "front", password: { secret: "rtsp_password" } },
+        { kind: "rtsp", password: { secret: "rtsp_password" } },
       ],
     })]);
     expect(budget.segments.map((s) => s.label)).toEqual([

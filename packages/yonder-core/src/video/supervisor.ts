@@ -93,6 +93,29 @@ export class Supervisor {
     this.spawner = opts.spawner ?? (() => { throw new Error("no spawner configured"); });
   }
 
+  /**
+   * The operator pressing Start.
+   *
+   * **A failed camera has a retry armed, and this is the state the page
+   * invites a Start in.** Without the two lines below, Start spawned a process
+   * while the backoff was still pending; the retry then fired, spawned a
+   * second, and overwrote `entry.proc` — so the supervisor held a handle to
+   * the second and none at all to the first. `stop()` killed one of the two,
+   * and the orphan went on holding the camera's `/dev/video*` node open, so
+   * every later start got `EBUSY` from `v4l2src` and mediamtx refused it as a
+   * second publisher on the same path. From the console the camera was then
+   * permanently unstartable: only a reboot or a manual `kill` cleared it.
+   * Verified on hardware. The trigger is ordinary — any fail-fast cause,
+   * followed by the operator's natural response.
+   *
+   * **One timer, and only one, because only one can be armed here.** `ended`
+   * clears the settle timer and nulls `proc` before it arms a retry, `stop()`
+   * clears both and kills, and an entry still holding a live process is
+   * `starting` or `running` — which the guard on the first line returns on.
+   * So a pending retry is the only thing this state can be carrying, and a
+   * second `clearTimer` beside it would be a guard no test could ever turn
+   * red. The test below pins the guard the reasoning rests on.
+   */
   start(id: string, argv: string[]): void {
     const existing = this.entries.get(id);
     if (existing && (existing.run.state === "starting" || existing.run.state === "running")) return;
@@ -100,6 +123,8 @@ export class Supervisor {
       run: { id, state: "stopped", since: this.clock.now(), restarts: 0 },
       argv, proc: null, settle: null, retry: null, stopping: false,
     };
+    this.clock.clearTimer(entry.retry);
+    entry.retry = null;
     entry.argv = argv;
     entry.stopping = false;
     entry.run = { ...entry.run, restarts: 0, reason: undefined };
