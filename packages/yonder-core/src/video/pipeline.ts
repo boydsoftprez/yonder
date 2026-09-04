@@ -45,6 +45,20 @@ import type { Encoder } from "./probe/encoder.js";
  * cheap one costs a few tens of kb/s on a branch running at a few hundred —
  * and it is the only branch with a person watching the rectangle. A late-
  * joining *ground station* still wants the control channel, and waits for one.
+ *
+ * **The encoder's node is not chosen here, and cannot be.** `v4l2h264enc`'s
+ * `device` property is *readable only*. The video4linux2 plugin scans the
+ * board's devices when it registers, binds one element to each, and the
+ * property reports which node this element was given — it is an answer, not a
+ * request, and setting it draws a GObject CRITICAL and is ignored. Selection
+ * is by element *name*: the first device offering a codec takes the generic
+ * name and any others take a per-device one, which is why this board carries
+ * both `v4l2convert` (/dev/video12) and `v4l2video18convert` (/dev/video18).
+ * Exactly one node here takes raw in and gives H.264 out, so `v4l2h264enc` is
+ * bound to it and there is nothing to steer; a board with two would need the
+ * name `v4l2video<N>h264enc`, which `Encoder.element`'s type does not admit.
+ * `Encoder.device` is therefore informational, and `probe/encoder.ts` says so
+ * where the field is defined.
  */
 
 /**
@@ -86,6 +100,34 @@ export interface ComposeOptions {
 /** `! element prop=v !` — GStreamer's link token, as its own argv entry. */
 const LINK = "!";
 
+/**
+ * The capsfilter every `v4l2h264enc` needs, and the evidence that it does.
+ *
+ * Without it the element builds, links, reaches PLAYING, and then dies on the
+ * **first frame** — not at link time, which is what makes it expensive to
+ * diagnose, because everything looks well for about a third of a second:
+ *
+ *     ERROR .../v4l2h264enc:v4l2h264enc0: Failed to process frame.
+ *     ../sys/v4l2/gstv4l2videoenc.c(898): gst_v4l2_video_enc_handle_frame ()
+ *
+ * with the driver's own reason in the kernel log, which is where the useful
+ * half of the message is:
+ *
+ *     bcm2835-codec: bcm2835_codec_start_streaming: Failed enabling i/p port, ret -3
+ *
+ * **It is the encoder, not the camera and not the fork.** It reproduces on
+ * `videotestsrc ! video/x-raw,format=I420,1280x720,30/1 ! v4l2h264enc !
+ * fakesink` — no camera, no jpegdec, no tee, one encode.
+ *
+ * **The order was checked**, because a codec left in a bad state by one
+ * attempt would look exactly like this. With the capsfilter first, without it
+ * second, with it again third: ok, ERROR, ok. The caps decide.
+ *
+ * On `v4l2h264enc` only. `x264enc` needs nothing of the kind, and copying it
+ * across would be the ritual this note exists to prevent.
+ */
+const H264_LEVEL = "video/x-h264,level=(string)4";
+
 function encode(encoder: Encoder, kbps: number, shortGop: boolean): string[] {
   if (encoder.element === "x264enc") {
     // x264enc counts in kb/s and takes key-int-max in frames. `tune=zerolatency`
@@ -97,7 +139,14 @@ function encode(encoder: Encoder, kbps: number, shortGop: boolean): string[] {
     ];
   }
   const controls = [`video_bitrate=${kbps * 1000}`, ...(shortGop ? ["h264_i_frame_period=15"] : [])];
-  return ["v4l2h264enc", `device=${encoder.device}`, `extra-controls=controls,${controls.join(",")}`];
+  // No `device=`: the property is read-only and `encoder.device` cannot be
+  // applied — see the module comment. The capsfilter is welded on here rather
+  // than added at the two call sites, because an encoder that reaches one of
+  // them without it does not survive its first frame.
+  return [
+    "v4l2h264enc", `extra-controls=controls,${controls.join(",")}`,
+    LINK, H264_LEVEL,
+  ];
 }
 
 function sink(output: CameraOutput, rtspBase: string): string[] {

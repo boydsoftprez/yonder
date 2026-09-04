@@ -18,6 +18,28 @@ import { systemRunner, type CommandRunner } from "../../net/runner.js";
  */
 export interface Encoder {
   readonly element: "v4l2h264enc" | "x264enc";
+  /**
+   * The node this board's encoder is on, or null where it is software.
+   *
+   * **Informational. It names the encoder; it does not select it.**
+   * `v4l2h264enc`'s own `device` property is *readable only*: the
+   * video4linux2 plugin scans the board's devices when it registers, binds an
+   * element to each, and the property reports which node that element was
+   * given. So `pipeline.ts` cannot pass this value on, and does not try —
+   * setting it draws a GObject CRITICAL and is ignored. Selection is by
+   * element *name*: the first device offering a codec takes the generic name
+   * and any others take a per-device one, which is why this board carries
+   * both `v4l2convert` (/dev/video12) and `v4l2video18convert`
+   * (/dev/video18).
+   *
+   * On a board with one H.264 encoder — this one, where /dev/video11 is the
+   * only node taking raw in and giving H.264 out — the probe's answer and
+   * GStreamer's binding are the same node and nothing is lost. **On a board
+   * with two they could differ, and this field would then name the encoder
+   * the pipeline is not using.** Steering it would need the element name
+   * `v4l2video<N>h264enc`, which `element` above cannot express. Said here,
+   * where the field is defined, rather than left to be discovered.
+   */
   readonly device: string | null;
   readonly hardware: boolean;
   readonly codec: "h264";

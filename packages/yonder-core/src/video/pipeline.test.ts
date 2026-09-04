@@ -102,6 +102,39 @@ describe("compose", () => {
     expect(soft.join(" ")).not.toContain("video_bitrate");
   });
 
+  it("welds the level capsfilter to every v4l2h264enc, and to nothing else", () => {
+    // Without it the encoder links, reaches PLAYING and dies on the *first
+    // frame* — "Failed to process frame", with the driver logging
+    // "bcm2835-codec: Failed enabling i/p port, ret -3". It reproduces on a
+    // bare videotestsrc, so it is the encoder rather than the camera or the
+    // fork, and running with/without/with gives ok, ERROR, ok — the caps
+    // decide, not a codec left in a bad state by the previous attempt.
+    const a = argv();
+    const encoders = a.flatMap((token, i) => (token === "v4l2h264enc" ? [i] : []));
+    expect(encoders).toHaveLength(2);
+    for (const i of encoders) {
+      // The very next thing downstream of the encoder, on both branches.
+      expect(a[a.indexOf("!", i) + 1]).toBe("video/x-h264,level=(string)4");
+    }
+    // x264enc needs nothing of the kind. Copying it across would be the
+    // ritual the comment on H264_LEVEL exists to prevent.
+    const soft = compose({ ...opts, encoder: {
+      element: "x264enc", device: null, hardware: false, codec: "h264",
+      detail: "software",
+    } });
+    expect(soft.join(" ")).not.toContain("level=(string)4");
+  });
+
+  it("does not try to set the encoder's node, which the element will not take", () => {
+    // v4l2h264enc's `device` is readable only: the plugin binds an element
+    // per device when it registers and the property reports which one it got.
+    // Setting it draws a GObject CRITICAL and is ignored, so Encoder.device
+    // is informational and never reaches the pipeline.
+    expect(text()).not.toContain("device=/dev/video11");
+    // The camera's device *is* settable on v4l2src, and is still set.
+    expect(text()).toContain("device=/dev/v4l/by-path/");
+  });
+
   it("never shells out — the composition is a value", () => {
     expect(Array.isArray(argv())).toBe(true);
     expect(argv()[0]).toBe("gst-launch-1.0");
