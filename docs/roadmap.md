@@ -200,6 +200,132 @@ its carrier and signal, and is reachable over the mesh through carrier CGNAT.
 
 At this point Yonder does the thing its name is about, with nothing attached to it.
 
+**M3a — the link: built.** `network.modem` drives it. NetworkManager owns the connection —
+a `gsm` profile bound to the modem's control port, or a DHCP profile on an adapter the
+operator names — and ModemManager is read, never driven, for the things only it knows:
+operator, registration, radio technology and the four signal numbers, which Yonder arms
+itself because they are absent until something asks for them (R-CEL-10). Reachability is
+judged by each interface's own byte counters, which the kernel keeps whether or not anyone
+reads them, and tested with real traffic when a link comes up and on request — never on a
+schedule, because a healthy aircraft should spend no data on health checks. A path that
+stops reaching anything is stood down and the renderer writes it a
+losing metric, so traffic moves to one that works; `network.priority` stays the only writer
+of preference and reachability decides only participation (R-NET-13). The fallback watchdog
+moved onto the same evidence, which closes K-40.
+
+**M3b — the console: built.** A `Cellular` tab: the verdict as a lit annunciator, RSRP and
+SINR drawn against their bands, the facts the modem reports, and the form that repairs them
+without leaving the page (R-CEL-12). Every path listed on `Interfaces` with its lamp and a
+sentence saying why it is in that state. And three things on Status — `Reachable by`,
+`Change pending` on all eight surfaces of the console rather than only the page a change
+was made on (R-UI-15), and `If you lose this console`, which prints the access-point
+passphrase only while it is the published default, says it has been changed when it has,
+and says it cannot tell when it cannot (R-UI-18).
+
+**The finding the milestone is built around.** A cellular link can report `registered`,
+`home`, `lte`, a good signal, a bearer `connected`, an assigned address and an installed
+route — and carry nothing. On the board this was built against the difference was one word
+in the APN: `nxtgenphone` attached and moved nothing, `ereseller` worked, with no other
+change of any kind. Every panel in M3 is shaped by that. The interface states whether
+traffic is getting through rather than listing indicators and leaving the operator to
+conclude, and **no APN is ever suggested, completed or tried on their behalf** — the
+published carrier database's first answer for that SIM was the value that failed, and the
+value that worked was absent from it altogether (R-CEL-09). The measurements are in
+[the design](superpowers/specs/2026-09-02-cellular-design.md).
+
+**What a board has shown.** A Raspberry Pi 4 on Debian 13 trixie, a Quectel EC25-AF and a
+live SIM. The link comes up from `config.yaml` alone, the daemon creating the connection
+itself and reporting `wwan0`, the port that carries the traffic, rather than `cdc-wdm0`,
+the port the connection is bound to. A wrong APN reads as not carrying traffic while
+`/modem/state` goes on saying home, LTE, connected, with an address — seen in both
+directions, and correcting the APN in `config.yaml` re-dials, is probed, and comes back to
+carrying traffic. Signal is read from the modem rather than from the network — across five
+polls the interface's receive counter did not move — so showing it live costs nothing off
+the data plan. Route metrics behave as `network.priority` says, Ethernet 100 and cellular
+700, and taking Ethernet's default route away moved everything to cellular with nothing to
+decide. The Cellular tab, its gauges, the down-interface sentence, the night palette and
+the seeded form were each looked at in a browser against that modem.
+
+**Five defects came only from running it on a board**, and a green suite saw none of them:
+
+- **The reachability probe tested name resolution, not the link.** `curl --interface` binds
+  the DNS lookup to that interface as well as the traffic, and the board's first resolver
+  is the LAN router, reachable over Ethernet and nowhere else — so a working cellular link
+  timed out, three failures stood it down, and every board with a LAN resolver and a modem
+  would have done the same. IP literals only now, two of them so one unreachable host is
+  not read as a dead link.
+- **A changed APN was written and never dialled.** NetworkManager does not re-dial a bearer
+  that is already up because the profile behind it changed, so correcting a mistyped APN —
+  the recovery this whole milestone is built around — did nothing at all.
+- **The re-dial sat behind the radio step**, which throws on every render when the
+  configured Wi-Fi network is out of range, so on any such board the re-dial never ran and
+  the correction was unreachable. A compound of [K-37](known-issues.md).
+- **A re-dial was not recognised as a link coming up**, so nothing tested it. The reach
+  watch decided a path had just come up by comparing the device name it last saw for it,
+  and a re-dial keeps `wwan0`; cellular was not the path in use, so the counter triggers
+  did not reach it either. Between them a link could be re-dialled onto a broken APN and
+  sit looking healthy indefinitely.
+- **A field's label was black on a black recess.** Vuetify draws that label inside the
+  field until something is typed, and Dashboard's own theme redeclares
+  `--v-theme-on-surface` as `0,0,0` two elements before this console's `:root` pointer
+  arrives: 1.05:1 at night, 1.30:1 in day, and present in every committed capture as a
+  picture of an empty field. Two more black fields nobody had reported came out with it,
+  and the page harness now measures contrast in a real browser rather than asserting a
+  string in the generated stylesheet.
+
+**None of this closes M3.** The exit criterion is a board with a SIM and no other
+connection that gets online by itself, and no such board has been flashed, booted and left
+alone. The daemon reached its board as built artefacts, by the installer's prebuilt branch,
+so **`install.sh` itself is unexercised** — and one leg of it cannot work as written:
+`installer/roles/20-yonder-core.sh` copies `src/` and `package.json` to `/opt/yonder` and
+builds there, but never copies `scripts/`, so the build fails on `scripts/copy-assets.mjs`.
+`installer/roles/40-modem.sh` — ModemManager from Debian, the full `udevadm trigger` that a
+subsystem-filtered one is no substitute for, and the service restart — has not run on a
+board at all. And M3b's hardware pass was never written up: there is no
+`docs/hardware/verifying-m3b.md` beside [`verifying-m1a.md`](hardware/verifying-m1a.md).
+
+Four things are known and unfixed, and are recorded here rather than left to be found:
+
+- **A modem password is written to `secrets.yaml` before the apply runs.** The store is
+  flushed immediately, under a constant row name, and the apply engine never sees
+  `secrets.yaml` — its journal holds the previous `Config` and nothing else. So a
+  `/modem/configure` refused because another change is already pending has nonetheless
+  replaced a working credential, and a revert puts the previous document back with the new
+  credential underneath it. R-CFG-03 says the device returns to the last known good
+  configuration; for this one value it does not. `POST /net/join` has had the same shape
+  since M1a, which is what makes this a design change rather than a patch.
+- **A typed credential rests in Dashboard's own datastore.** Dashboard saves every widget
+  change and syncs it to every other connected browser, so after `CONNECT` the password is
+  readable from that datastore — behind the console login — for the life of the deployment.
+  It is in no log line, error or API response, so R-SEC-10's own boundaries hold; the
+  surface is one nothing in this repository put it on.
+- **A configuration the daemon cannot read is drawn as each interface's description.** The
+  loader's error is the only thing a failed tick has to say, so the raw parser message
+  appears as the sentence under every path on `Interfaces`, three times over.
+- **The note under `If you lose this console` is set as full-width body prose** — the
+  largest type in that panel — where it was written to sit quietly under the facts.
+
+**R-CEL-04's quirk table is deliberately unbuilt** and stays at priority 2, correct and
+unimplemented. The EC25-AF arrived in MBIM composition and works in it, no modem in hand
+needs a mode switch, and a table whose only entry would be a no-op teaches a contributor
+nothing about what a real entry looks like. R-CEL-03 is what makes the absence safe: the
+composition and the ports a modem came up on are reported, so a difficult modem shows up as
+an unfamiliar arrangement rather than an unexplained failure. **R-NET-06 was moved out of
+M3** in the design, because generating metrics for every path touches the Ethernet and
+Wi-Fi renderers whose cold boot M1a still owes — and then landed inside M3a anyway, because
+`metricFor` reached only the modem profile, so `network.priority` did not in fact produce
+the metrics it is documented to produce, and the reach monitor derives the path traffic
+leaves by from exactly that premise.
+
+**Added by M3:** R-CEL-09, R-CEL-10, R-CEL-11, R-CEL-12, R-NET-13, R-NET-14, R-UI-15,
+R-UI-16, R-UI-17 and R-UI-18. R-UI-09 and R-CFG-11 were amended in place; no ID was reused
+or renumbered. **Satisfied by M3:** R-CEL-02, R-CEL-03, R-CEL-05 and R-NET-06. R-CEL-06 is
+answered by `connection.autoconnect yes` — a modem that drops and returns is
+NetworkManager's business, not a loop of Yonder's — and no drop has been staged to watch it
+happen. **R-CEL-01 is built and has never been exercised:** there is no tethered-appliance
+modem on this bench, which is the reason such a modem is named in configuration rather than
+detected. K-30 and K-40 are closed; [K-41](known-issues.md) is opened by this work.
+
 ---
 
 ## M4 — Video, one USB camera
