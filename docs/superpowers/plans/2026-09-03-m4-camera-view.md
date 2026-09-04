@@ -4554,6 +4554,15 @@ import type { BudgetSegment } from "./shapes.js";
  * 2 Mb/s that is 6 Mb/s for one camera against a field LTE uplink that is
  * often 1-5, and this is the instrument that makes that visible before it is
  * discovered.
+ *
+ * **It says which layer it counts.** Measured on the board over an 8 s
+ * steady-state window, one 2000 kb/s stream is 2003 kb/s of elementary stream,
+ * 2022 kb/s once RTP framing is added, and ~2067 kb/s at IP and UDP — 3.2%
+ * apart end to end. Rate control itself is within 0.2%, so every discrepancy an
+ * operator sees between the configured figure and this track is framing, not
+ * the encoder missing its target. A bar that does not name its layer invites
+ * exactly the wrong conclusion, and the number an uplink actually carries is
+ * the IP one.
  */
 export = function register(RED: RED): void {
   registerWidget(RED, {
