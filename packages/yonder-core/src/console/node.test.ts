@@ -4,10 +4,13 @@ import {
   DEFAULT_POLL_MS,
   DEFAULT_SOCKET_PATH,
   MIN_POLL_MS,
+  PENDING_WHY,
   applyStatus,
   confirmStatus,
   fetched,
+  pendingChange,
   pollIntervalMs,
+  revertStatus,
   socketPathFrom,
 } from "./node.js";
 import type { DaemonReply } from "./client.js";
@@ -237,5 +240,125 @@ describe("what a radio move tells the operator", () => {
   it("asks the operator for nothing", () => {
     const m = applyStatus(moving as never, 0).message;
     expect(m).not.toMatch(/confirm/i);
+  });
+});
+
+/**
+ * **R-UI-15.** A change that will revert is visible wherever the operator is,
+ * not only where it was made. Everything the banner draws comes from here, in
+ * words, because a clock ticking inside `flows.json` would be arithmetic in
+ * wiring on the one number that decides whether an operator still has a
+ * device (CLAUDE.md rule 2).
+ */
+describe("pendingChange", () => {
+  const answering = (body: unknown): DaemonReply => ({ ok: true, status: 200, body });
+
+  it("says nothing is pending when the engine is at rest", () => {
+    const shaped = pendingChange(answering({ state: "idle" }), 1_000);
+    expect(shaped.payload).toEqual({ pending: false, id: "", what: "", why: "" });
+    expect(shaped.yonder.state).toBe("idle");
+  });
+
+  /**
+   * Every state that is not `pending` is nothing to confirm. `applying` and
+   * `reverting` are in flight and neither offers the operator a decision;
+   * `confirmed` is over.
+   */
+  it("raises nothing for a state that is not pending", () => {
+    for (const state of ["applying", "confirmed", "reverting"]) {
+      expect(pendingChange(answering({ state, id: "a1" }), 0).payload.pending, state).toBe(false);
+    }
+  });
+
+  it("carries the countdown, the id and both lines while one is pending", () => {
+    const shaped = pendingChange(
+      answering({ state: "pending", id: "a1", expiresAt: 212_000 }),
+      120_000,
+    );
+    expect(shaped.payload.pending).toBe(true);
+    expect(shaped.payload.id).toBe("a1");
+    expect(shaped.payload.what).not.toBe("");
+    expect(shaped.payload.why).toBe(PENDING_WHY);
+    // The lamp's caption, already words and in the waiting tone.
+    expect(shaped.yonder.state).toBe("pending");
+    expect(shaped.yonder.message).toBe("Reverts in 1:32");
+    expect(shaped.yonder.id).toBe("a1");
+  });
+
+  /**
+   * The sentence does not threaten the operator with the revert. The revert
+   * is what rescues them, and an interface that presents it as a punishment
+   * for inaction teaches confirming by reflex — which is the habit that turns
+   * a wrong change into a device nobody can reach.
+   */
+  it("states the revert as the thing that recovers them", () => {
+    expect(PENDING_WHY).toMatch(/gets you back in/);
+    expect(PENDING_WHY).not.toMatch(/lose|warning|danger|will be lost/i);
+  });
+
+  /** A countdown frozen at 0:00 reads as a page that has stopped updating. */
+  it("says the rollback is happening once the window has run out", () => {
+    const shaped = pendingChange(
+      answering({ state: "pending", id: "a1", expiresAt: 100 }),
+      5_000,
+    );
+    expect(shaped.payload.pending).toBe(true);
+    expect(shaped.yonder.message).toBe("Reverting now");
+  });
+
+  /**
+   * **The one place this module leaves a panel down rather than shouting.**
+   *
+   * Every field the banner draws — the countdown, the id both of its keys
+   * need — is unknown when the daemon does not answer, so what it could raise
+   * is an alarm with no time on it and two controls that would fail. The
+   * failure still travels on `msg.yonder`, so the node says so in its own
+   * status and the panels beside it on that page report the same silence.
+   */
+  it("leaves the banner down when it cannot find out, and says why on yonder", () => {
+    const shaped = pendingChange(unreachable, 1_000);
+    expect(shaped.payload.pending).toBe(false);
+    expect(shaped.yonder.state).toBe("rejected");
+    expect(shaped.yonder.message).toMatch(/not answering/);
+  });
+
+  it("does not fall over on an answer that is not this daemon's", () => {
+    for (const body of [undefined, null, "ok", { state: "pending" }]) {
+      const shaped = pendingChange(answering(body), 0);
+      expect(typeof shaped.payload.id).toBe("string");
+      expect(typeof shaped.payload.pending).toBe("boolean");
+    }
+    // Pending with no deadline: still pending, and it says so without a clock.
+    expect(pendingChange(answering({ state: "pending" }), 0).yonder.message).toBe("Reverting now");
+  });
+});
+
+describe("revertStatus", () => {
+  /**
+   * `confirmed`, not `rejected`. This is the state of the *command the
+   * operator gave*, which was "put it back": it took effect and it is
+   * staying. Reporting the change's own fate here would light a red lamp on a
+   * control that did exactly what it was asked.
+   */
+  it("reports the operator's own command as done", () => {
+    const status = revertStatus({ ok: true, status: 200, body: { state: "idle" } }, 5, "a1");
+    expect(status.state).toBe("confirmed");
+    expect(status.id).toBe("a1");
+    expect(status.message).toMatch(/previous configuration/);
+  });
+
+  it("says so when the device refused, and keeps the id", () => {
+    const status = revertStatus(
+      { ok: true, status: 400, body: { error: "nothing is pending confirmation" } },
+      5,
+      "a1",
+    );
+    expect(status.state).toBe("rejected");
+    expect(status.message).toBe("nothing is pending confirmation");
+    expect(status.id).toBe("a1");
+  });
+
+  it("says so when the daemon did not answer at all", () => {
+    expect(revertStatus(malformed, 5, "a1").state).toBe("rejected");
   });
 });

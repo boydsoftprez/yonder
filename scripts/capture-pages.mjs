@@ -19,7 +19,9 @@
 //
 //   1. **Rules.** Checks that a page cannot violate ADR-0009 silently: nothing
 //      clipped, no action spanning its container, no page scrolling sideways,
-//      no page rendering nothing at all. These fail the build on their own.
+//      no control whose text cannot be read against what is behind it
+//      (R-UI-16), no page rendering nothing at all. These fail the build on
+//      their own.
 //   2. **Shape.** A manifest of every widget's geometry, committed and diffed.
 //      Geometry rather than pixels, because "shape" is what the requirement
 //      says and because a pixel diff across macOS and CI is a coin toss about
@@ -81,6 +83,14 @@ const LIVE = [
   ".y-gauge__value",
   ".y-bar__v",
   ".tape__box",
+  // An annunciator caption is normally a state word — NOTHING, CONNECTED —
+  // and those are exactly what somebody looking at these pictures needs to
+  // read, so the widget is not masked as a kind. `CHANGE PENDING`'s is the
+  // one that is a *reading*: a countdown, different on every run, which would
+  // leave that committed picture permanently dirty. The widget says so about
+  // itself with `yonder-live`, so nothing here has to know which page it is
+  // on. The lamp and its box are untouched; only the digits go.
+  ".yonder-live .y-ann__text",
 ];
 
 /** Fixed, so geometry means the same thing on a laptop and on a CI runner. */
@@ -150,6 +160,23 @@ const accept = has("accept");
  * console does anything.
  */
 const press = arg("press");
+/**
+ * One page, under a name of its own.
+ *
+ * R-UI-12 says a surface that hides part of itself is captured in each of
+ * those parts, and a panel drawn from live state hides its other states the
+ * same way a tab hides its siblings. The `Way out` rows have four — a path
+ * that is reaching something, one that reached nothing when it was last
+ * tested, one nothing has looked at, and one whose interface is down — and
+ * they are four different *shapes*, because the sentences wrap differently.
+ *
+ * The alternative was a second mechanism that drove state and photographed it
+ * separately. This is the same one, told which page to take and what to call
+ * the file, so a state capture is enforced by exactly the rules and the shape
+ * reference every other page is.
+ */
+const only = arg("only");
+const as = arg("as");
 
 if (!password) {
   process.stderr.write("capture-pages: --password is required\n");
@@ -259,6 +286,102 @@ function measure(liveSelectors) {
     });
   }
 
+  /**
+   * Text on a control that cannot be read against what is behind it (R-UI-16).
+   *
+   * This is the check the picture could not make. An operator reported that
+   * in the night palette the text in the entry fields was "not able to be
+   * read by human eyes"; every unit test passed, the shape reference was
+   * unchanged, and the committed capture showed the words — at 1.05:1 against
+   * their own recess, which is a picture of the defect that looks like a
+   * picture of an empty field.
+   *
+   * **Computed colours, not pixels.** Each control's own colour is composited
+   * over everything painted behind it, with the alpha and the accumulated
+   * `opacity` of its ancestors folded in — because what made those labels
+   * unreadable was Vuetify drawing black at 60% opacity, and a rule that read
+   * `color` alone would have called that black and passed it in the day
+   * palette for the same reason it failed in night.
+   *
+   * **Controls only.** The threshold is WCAG AA for body text, and the
+   * console's own controls clear it in both palettes with room: the tightest
+   * measured is 4.63:1 (a day label on a day recess) and most are 5.5–12.8:1.
+   * Instrument faces, annunciator lamps and gauge bands are deliberately
+   * coloured against their own backgrounds and are a different question; this
+   * one is about the text that says what to type and the text that was typed.
+   */
+  const rgba = (s) => {
+    const n = (s.match(/-?[\d.]+/g) ?? []).map(Number);
+    return n.length >= 3 ? { r: n[0], g: n[1], b: n[2], a: n.length > 3 ? n[3] : 1 } : null;
+  };
+  const over = (fg, bg) => ({
+    r: fg.r * fg.a + bg.r * (1 - fg.a),
+    g: fg.g * fg.a + bg.g * (1 - fg.a),
+    b: fg.b * fg.a + bg.b * (1 - fg.a),
+    a: 1,
+  });
+  const luminance = (c) => {
+    const f = (v) => { const u = v / 255; return u <= 0.03928 ? u / 12.92 : ((u + 0.055) / 1.055) ** 2.4; };
+    return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b);
+  };
+  const contrast = (a, b) => {
+    const [x, y] = [luminance(a), luminance(b)];
+    return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
+  };
+  // Everything painted behind this element, composited bottom-up. The page
+  // itself is the floor: a transparent stack over a transparent body is still
+  // read against something, and white is the browser's own answer.
+  const behind = (el) => {
+    const stack = [];
+    for (let a = el; a !== null; a = a.parentElement) {
+      const c = rgba(getComputedStyle(a).backgroundColor);
+      if (c !== null && c.a > 0) stack.push(c);
+    }
+    let ground = { r: 255, g: 255, b: 255, a: 1 };
+    for (let i = stack.length - 1; i >= 0; i--) ground = over(stack[i], ground);
+    return ground;
+  };
+  const opacityOf = (el) => {
+    let o = 1;
+    for (let a = el; a !== null; a = a.parentElement) o *= Number(getComputedStyle(a).opacity || 1);
+    return o;
+  };
+
+  const unreadable = [];
+  const CONTROL_TEXT = [
+    ".nrdb-ui-widget input", ".nrdb-ui-widget textarea", ".nrdb-ui-widget .v-label",
+    ".nrdb-ui-widget label", ".nrdb-ui-widget .v-field__input",
+    ".nrdb-ui-widget .v-select__selection-text", ".nrdb-ui-widget .v-messages__message",
+    // The table's own search box is not inside a widget wrapper of its own,
+    // and it is a field an operator types into. It measured 1.03:1.
+    ".nrdb-ui-table-wrapper input", ".nrdb-ui-table-wrapper .v-label",
+  ].join(",");
+  for (const el of document.querySelectorAll(CONTROL_TEXT)) {
+    const r = el.getBoundingClientRect();
+    if (r.width === 0 || r.height === 0) continue;
+    const style = getComputedStyle(el);
+    const fill = style.webkitTextFillColor;
+    const own = rgba(fill && fill !== "currentcolor" ? fill : style.color);
+    if (own === null) continue;
+    const ground = behind(el);
+    const shown = over({ ...own, a: own.a * opacityOf(el) }, ground);
+    const ratio = contrast(shown, ground);
+    if (ratio >= 4.5) continue;
+    unreadable.push({
+      // `keyOf` drops framework classes, which is right for a widget and
+      // leaves nothing at all for a Vuetify label — every class it has is a
+      // `v-` one. So the framework's own two are kept here, because a finding
+      // with an empty key cannot be told from another finding with an empty
+      // key, either by a reader or by the debt list.
+      key: keyOf(el) || `${el.tagName.toLowerCase()}.${[...el.classList].filter((c) => /^v-/.test(c)).slice(0, 2).join(".")}`,
+      text: (el.tagName === "INPUT" ? (el.value || el.placeholder || "") : (el.textContent ?? "")).trim().slice(0, 40),
+      color: style.color,
+      opacity: Number(opacityOf(el).toFixed(2)),
+      on: `rgb(${Math.round(ground.r)},${Math.round(ground.g)},${Math.round(ground.b)})`,
+      ratio: Number(ratio.toFixed(2)),
+    });
+  }
+
   const live = new Set();
   for (const sel of liveSelectors) {
     for (const el of document.querySelectorAll(sel)) live.add(el);
@@ -271,12 +394,21 @@ function measure(liveSelectors) {
     liveBoxes: [...live].map(boxOf).filter((b) => b.w > 0 && b.h > 0),
     clipped,
     spanning,
+    unreadable,
   };
 }
 
 // ---------------------------------------------------------------------------
 
-const pages = pagesFromFlows();
+let pages = pagesFromFlows();
+if (only !== undefined) {
+  pages = pages.filter((p) => p.name === only);
+  if (pages.length === 0) {
+    process.stderr.write(`capture-pages: no page called "${only}" in the shipped flows\n`);
+    process.exit(2);
+  }
+  if (as !== undefined) pages = pages.map((p) => ({ ...p, name: as, title: as }));
+}
 mkdirSync(join(refs, "shape"), { recursive: true });
 mkdirSync(join(refs, "capture"), { recursive: true });
 mkdirSync(artifacts, { recursive: true });
@@ -407,6 +539,13 @@ for (const page of pages) {
       `${page.title} (${palette}) has an action spanning its surface: "${a.label}" ${a.width}px of ${a.of}px`,
     );
   }
+  for (const u of shape.unreadable) {
+    report(
+      { rule: "unreadable", page: page.name, palette, key: u.key },
+      `${page.title} (${palette}) draws control text at ${u.ratio}:1, which is below 4.5:1`,
+      `${u.key}  "${u.text}"  ${u.color} at ${u.opacity} on ${u.on}`,
+    );
+  }
   if (shape.scrollWidth > shape.viewport.w + 1) {
     note(`  FAIL  ${page.title} (${palette}) scrolls sideways: ${shape.scrollWidth}px in ${shape.viewport.w}px`);
     failures += 1;
@@ -484,7 +623,10 @@ await browser.close();
 
 // An accepted violation that no longer happens is a line to delete. Left in,
 // it would quietly re-accept the same defect if it ever came back.
-const stale = debt.entries.filter(
+// Only on a full pass. A run of one page has not been anywhere near the
+// entries about the others, and reporting them as fixed would be a lie that
+// deletes a real debt.
+const stale = only !== undefined ? [] : debt.entries.filter(
   (e) => !seen.has(e) && (e.palette === "*" || e.palette === palette),
 );
 for (const e of stale) {

@@ -43,6 +43,21 @@ export interface ReadingBounds {
    * survives 85 °C and slows down at 80, and an operator needs to see the 80.
    */
   limit?: number;
+  /**
+   * Which direction of this quantity is the bad one.
+   *
+   * `higher-is-worse` is the default and is right for everything this console
+   * drew first: temperature, load, memory, disk. Signal is the other kind —
+   * -70 dBm is a strong link and -110 is a dying one — and so are battery
+   * charge, link margin and throughput headroom.
+   *
+   * It is stated rather than inferred. A guess from the order of `caution`
+   * and `limit` would be right most of the time and silently wrong for a
+   * quantity configured with only one of them, and being silently wrong about
+   * which end is alarming is the whole failure this exists to prevent
+   * (R-UI-09).
+   */
+  sense?: "higher-is-worse" | "higher-is-better";
 }
 
 export interface Reading extends ReadingBounds {
@@ -67,16 +82,22 @@ function fraction(value: number, min: number, max: number): number {
  *
  * At or above `limit` is bad; at or above `caution` is waiting; otherwise
  * good. **At** rather than past, because a threshold an operator was told
- * about should announce itself when it is reached, not one sample later.
+ * about should announce itself when it is reached, not one sample later. For
+ * a `higher-is-better` quantity the comparisons run the other way: at or
+ * below `limit` is bad, at or below `caution` is waiting.
  *
  * With neither threshold configured the reading is `neutral`, not `good`: a
  * quantity nobody has set bounds on has not been judged, and claiming it is
  * healthy would be an answer we do not have.
  */
 function tone(value: number, bounds: ReadingBounds): ReadingTone {
-  if (bounds.limit !== undefined && value >= bounds.limit) return "bad";
-  if (bounds.caution !== undefined && value >= bounds.caution) return "waiting";
   if (bounds.caution === undefined && bounds.limit === undefined) return "neutral";
+  // At, not past, in both directions: a threshold an operator was told about
+  // announces itself when it is reached, not one sample later.
+  const past = (threshold: number) =>
+    bounds.sense === "higher-is-better" ? value <= threshold : value >= threshold;
+  if (bounds.limit !== undefined && past(bounds.limit)) return "bad";
+  if (bounds.caution !== undefined && past(bounds.caution)) return "waiting";
   return "good";
 }
 
@@ -93,8 +114,10 @@ export function reading(value: number, bounds: ReadingBounds): Reading {
   const min = bounds.min ?? 0;
   const { max, caution, limit } = bounds;
 
+  const sense = bounds.sense ?? "higher-is-worse";
+
   if (!Number.isFinite(value)) {
-    return { value: Number.NaN, min, max, caution, limit, fraction: 0, tone: "neutral" };
+    return { value: Number.NaN, min, max, caution, limit, sense, fraction: 0, tone: "neutral" };
   }
 
   return {
@@ -103,6 +126,7 @@ export function reading(value: number, bounds: ReadingBounds): Reading {
     max,
     caution,
     limit,
+    sense,
     fraction: fraction(value, min, max),
     cautionAt: caution === undefined ? undefined : fraction(caution, min, max),
     limitAt: limit === undefined ? undefined : fraction(limit, min, max),

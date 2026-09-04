@@ -78,6 +78,7 @@ export { FallbackWatchdog, CARRYING_DEADLINE_MS, type FallbackWatchdogOptions } 
 export {
   MmcliClient,
   MmcliError,
+  controlPort,
   type ModemInfo,
   type ModemPorts,
   type BearerInfo,
@@ -95,6 +96,7 @@ export {
   REACH_TICK_DEADLINE_MS,
   type PathName,
   type PathStanding,
+  type PathEvidence,
   type PathReport,
   type ReachState,
 } from "./net/reach/standing.js";
@@ -263,6 +265,7 @@ export {
   rejected,
   presentation,
   secondsRemaining,
+  countdown,
   type CommandState,
   type CommandStatus,
   type CommandPresentation,
@@ -275,11 +278,15 @@ export {
   fetched,
   applyStatus,
   confirmStatus,
+  pendingChange,
+  revertStatus,
   readFailure,
+  PENDING_WHY,
   MIN_POLL_MS,
   DEFAULT_POLL_MS,
   DEFAULT_SOCKET_PATH,
   type Fetched,
+  type PendingChange,
 } from "./console/node.js";
 export {
   displayFacts,

@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { MmcliClient } from "./client.js";
+import { MmcliClient, controlPort } from "./client.js";
 import type { CommandRunner } from "../../runner.js";
 
 const fixture = (name: string) =>
@@ -53,6 +53,37 @@ describe("MmcliClient.modem", () => {
     const m = await new MmcliClient(runner).modem("/org/freedesktop/ModemManager1/Modem/0");
     expect(m.ports.control).toBe("cdc-wdm0");
     expect(m.ports.net).toBe("wwan0");
+  });
+});
+
+/**
+ * R-CEL-03: *detect which mode a connected modem needs, and say which it
+ * chose.* The rule for which port answers that lives here once, because the
+ * console answers the same question off the port list `/modem/state` carries
+ * and a second copy is the copy that stops matching.
+ */
+describe("controlPort", () => {
+  it("finds the control port and the mode it came up in", () => {
+    expect(controlPort([
+      "cdc-wdm0 (mbim)", "ttyUSB0 (ignored)", "ttyUSB1 (gps)",
+      "ttyUSB2 (at)", "ttyUSB3 (at)", "wwan0 (net)",
+    ])).toEqual({ name: "cdc-wdm0", kind: "mbim" });
+  });
+
+  it("reads QMI too, because both give a data path", () => {
+    expect(controlPort(["cdc-wdm0 (qmi)", "wwan0 (net)"]))
+      .toEqual({ name: "cdc-wdm0", kind: "qmi" });
+  });
+
+  /**
+   * The arrangement the install role's full udev re-trigger exists to
+   * prevent: a modem claimed with `ttyUSB2 (at)` primary and `wwan0
+   * (ignored)` — PPP and no data port. There is no mode to report, and
+   * saying `AT` would name one nothing was built on.
+   */
+  it("is null when no port says which mode it is", () => {
+    expect(controlPort(["ttyUSB2 (at)", "wwan0 (ignored)"])).toBeNull();
+    expect(controlPort([])).toBeNull();
   });
 });
 

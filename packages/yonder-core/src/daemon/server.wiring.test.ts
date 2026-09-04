@@ -232,7 +232,12 @@ function fixture(name: string): string {
 }
 
 /** Talk to the daemon the way the console will: over the Unix socket. */
-function call(socketPath: string, method: string, path: string): Promise<{ status: number; body: unknown }> {
+function call(
+  socketPath: string,
+  method: string,
+  path: string,
+  body?: unknown,
+): Promise<{ status: number; body: unknown }> {
   return new Promise((resolve, reject) => {
     const req = request({ socketPath, method, path }, (res) => {
       const chunks: Buffer[] = [];
@@ -243,6 +248,7 @@ function call(socketPath: string, method: string, path: string): Promise<{ statu
       });
     });
     req.on("error", reject);
+    if (body !== undefined) req.write(typeof body === "string" ? body : JSON.stringify(body));
     req.end();
   });
 }
@@ -328,7 +334,7 @@ describe("the daemon serves what M3a assembles", () => {
   });
 
   /**
-   * R-CEL-12, at the socket rather than in the unit that decides it.
+   * R-CEL-13, at the socket rather than in the unit that decides it.
    *
    * The daemon used to remember the modem's net port for the life of the
    * process, so a board whose modem had been unplugged went on being handed
@@ -411,6 +417,47 @@ describe("the daemon serves what M3a assembles", () => {
     try {
       const res = await call(socketPath, "GET", "/reach/state");
       expect((res.body as { carrying: boolean }).carrying).toBe(true);
+    } finally {
+      await server.close();
+    }
+  });
+
+  /**
+   * The defect, at the socket, on the board it was found on (R-NET-14).
+   *
+   * `eth0` in `unavailable`: no carrier, no address, nothing plugged into it.
+   * What `GET /reach/state` answered was
+   *
+   *     "standing":"standing-by","evidence":"untested",
+   *     "detail":"Up, and not yet tested — nothing has established that it
+   *               reaches anything"
+   *
+   * — a sentence asserting a state the daemon had not established, about an
+   * interface whose condition it could read directly from the device list it
+   * had already fetched.
+   */
+  it("does not say a port with no cable in it is up", async () => {
+    const seen: string[][] = [];
+    const unplugged: CommandRunner = async (argv) => {
+      if (argv[0] === "nmcli" && argv.includes("device") && argv.includes("status")) {
+        seen.push(argv);
+        return { code: 0, stdout: "eth0:ethernet:unavailable:\n", stderr: "" };
+      }
+      return boardRunner(seen)(argv);
+    };
+    const server = await startServer({
+      socketPath, configPath, journalPath,
+      renderers: [noop], secretsPath, runner: unplugged, counters: noCounters,
+    });
+    try {
+      const res = await call(socketPath, "GET", "/reach/state");
+      const state = res.body as { paths: { path: string; device: string | null; standing: string; detail: string }[] };
+      const ethernet = state.paths.find((p) => p.path === "ethernet");
+      expect(ethernet?.standing).toBe("down");
+      expect(ethernet?.detail).not.toMatch(/\bUp\b/);
+      // And still not `absent`: the port is on the board. The three
+      // conditions are three.
+      expect(ethernet?.device).toBe("eth0");
     } finally {
       await server.close();
     }
@@ -859,6 +906,33 @@ describe("the daemon drives the reach watch", () => {
     try {
       for (let i = 0; i < 5; i++) await hand.advance(REACH_TICK_MS);
       expect(seen.some((a) => a[0] === "curl")).toBe(false);
+    } finally {
+      await server.close();
+    }
+  });
+
+  /**
+   * `POST /reach/test`, at the socket — the wiring `testPath` exists for.
+   * This is not a unit test of the route handler, which would pass with
+   * `testPath` left disconnected in `server.ts`: it asserts that asking
+   * through the socket reaches the injected probe on the modem's own
+   * device, the same way the automatic loop above does.
+   */
+  it("reaches the injected probe for an operator-requested test of the modem", async () => {
+    withModem();
+    const seen: string[][] = [];
+    const hand = handClock();
+    const server = await startServer({
+      socketPath, configPath, journalPath, renderers: [noop], secretsPath,
+      runner: deadModemRunner(seen, () => true), clock: hand.clock, counters: noCounters,
+    });
+    try {
+      const res = await call(socketPath, "POST", "/reach/test", { path: "modem" });
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ path: "modem", reached: true });
+      // The net port, not the control port — see the automatic-probe test
+      // above for why that distinction is the one that matters here.
+      expect(probedInterfaces(seen)).toContain("wwan0");
     } finally {
       await server.close();
     }

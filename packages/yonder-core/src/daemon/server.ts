@@ -18,7 +18,7 @@ import { modemState } from "../net/modem/state.js";
 import { ModemNetPort } from "../net/modem/netport.js";
 import { Standing, type StandingView } from "../net/reach/standing.js";
 import { commandProbe } from "../net/reach/probe.js";
-import { ReachMonitor, pathDevices, pathsHolding } from "../net/reach/monitor.js";
+import { ReachMonitor, pathDevices, pathsDown, pathsHolding } from "../net/reach/monitor.js";
 import { ReachWatch } from "../net/reach/watch.js";
 import type { CounterReader } from "../net/reach/counters.js";
 import type { PathName } from "../net/reach/standing.js";
@@ -567,7 +567,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   // ModemManager because it is the only thing that knows it. Its own unit
   // rather than a closure here, for the reason pathDevices records: this file
   // is wiring, not a second place that decides what a modem is. What may be
-  // remembered about a modem and what may not is R-CEL-12, stated there with
+  // remembered about a modem and what may not is R-CEL-13, stated there with
   // its tests.
   const modemPort = new ModemNetPort(modemClient, clock);
 
@@ -589,6 +589,16 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
       const config = reachConfig();
       const [devices, net] = await Promise.all([client.devices(), modemPort.interfaceFor(config)]);
       return pathDevices(config, devices, net);
+    },
+    // What NetworkManager says about the interfaces themselves, so a port
+    // with no cable in it is reported as down rather than as up and untested
+    // (R-NET-14). The control port is passed as the modem's second name for
+    // the same reason `holding` passes it: NetworkManager reports a state for
+    // `cdc-wdm0` and has no entry at all for the `wwan0` the bytes go out of.
+    down: async () => {
+      const config = reachConfig();
+      const [devices, net] = await Promise.all([client.devices(), modemPort.interfaceFor(config)]);
+      return pathsDown(devices, pathDevices(config, devices, net), pathDevices(config, devices));
     },
     order: () => reachOrder(reachConfig()),
     holding: async () => {
@@ -781,6 +791,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
     // board whose secrets.yaml is unreadable can still say which way out is
     // working — which is most of what an operator needs to fix it.
     reachState: () => reach.state(),
+    testPath: async (path) => reach.test(path),
     ...(onProvisioned === undefined ? {} : { onProvisioned }),
   });
 

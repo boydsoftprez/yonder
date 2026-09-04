@@ -184,9 +184,25 @@ npm run build
 ```
 
 Same conventions: one temporary directory, removed on exit unless `KEEP=1`, and `PORT=`
-moves the console off 18881. `ping`, `nmcli`, `hostnamectl`, `rfkill` and `systemctl` are
-stand-ins on `PATH`; the `nmcli` one reports a `wlan0` and a scan with a duplicated SSID, so
-the folding in `scanForNetworks` has something real to fold.
+moves the console off 18881. `ping`, `nmcli`, `mmcli`, `curl`, `hostnamectl`, `rfkill` and
+`systemctl` are stand-ins on `PATH`; the `nmcli` one reports a wired port, a radio and a
+modem control port, and a scan with a duplicated SSID so the folding in `scanForNetworks`
+has something real to fold. The `mmcli` one replays the fixtures `yonder-core`'s own parser
+tests are written against — a real EC25 on a live SIM — so the Cellular tab is captured
+showing what a board actually reported rather than a panel of em dashes. It answers a
+**second board** as well: a file holds 1 or 0 and is read on every call, and with 0 there
+are no modems at all, which is the board `Reachable by` on Status has to be photographed
+on. The config the
+daemon is given is the shipped default with the modem turned on, because with it off the
+daemon reports the cellular path absent and neither cellular page can be captured at all.
+
+The `curl` stand-in is the one the gate *drives*. It is what `commandProbe` runs to find out
+whether a path carries traffic, and it answers whatever the gate last wrote to a file — read
+on every call — which is how the `Way out` rows are photographed in each of the states a probe
+can put them in. Nothing else probes: no interface holds an address in this harness, so
+`ReachWatch` finds no path in use and every probe in the run is one the gate asked for through
+`POST /reach/test`. That is what makes the states reproducible instead of a race with a
+five-second timer.
 
 It checks that the daemon's five page routes answer over the socket and that the scan carries
 no key; that Node-RED starts the shipped flows with **no error at all** and no unregistered
@@ -223,8 +239,20 @@ that build. Nothing in this repository had ever looked at a page.
 It does three separate things.
 
 **Rules that fail on their own.** Nothing clipped inside a box, no action spanning the
-surface it sits on (R-UI-10), no page scrolling sideways, no page rendering nothing at all.
-These are relative comparisons within one rendering, so they hold on any machine.
+surface it sits on (R-UI-10), no page scrolling sideways, no control whose text cannot be
+read against what is behind it (R-UI-16), no page rendering nothing at all. These are
+relative comparisons within one rendering, so they hold on any machine.
+
+The legibility rule is the one a picture could not make. An operator reported that in the
+night palette the text in the entry fields was *"not able to be read by human eyes"*, and
+every check above had passed: the shape was unchanged and the committed capture showed the
+words — at 1.05:1 against their own recess, which is a picture of the defect that looks like
+a picture of an empty field. So it is measured rather than looked at: each control's own
+computed colour is composited over everything painted behind it, with alpha and the
+accumulated `opacity` of its ancestors folded in, and anything under 4.5:1 fails. Folding
+opacity in is the point — what made those labels unreadable was the interface framework
+drawing black at 60%, which a rule reading `color` alone would have called black and passed
+in the day palette for the same reason it failed at night.
 
 **A shape manifest**, committed and diffed — every widget's geometry, so a page that moves
 fails until somebody accepts it. Geometry rather than pixels, because *shape* is what the
@@ -237,6 +265,57 @@ its own instead of one enforcing and the rest printing a note nobody reads.
 readings — a load average changes between two runs and would leave the file permanently
 dirty — so what it records is the layout. The unmasked copy goes to `vendor/capture/`, which
 CI uploads as an artifact.
+
+**And a page in more than one state, where it has them.** R-UI-12 says a surface that hides
+part of itself is captured in each of those parts. A tabbed page hides its other tabs, which
+is why there is one capture per tab; a panel drawn from live state hides its other states the
+same way. The `Way out` rows have four — a path that is reaching something, one that reached
+nothing when it was last tested, one nothing has looked at, and one whose interface is down —
+and they are four different *shapes*, because the sentences are different lengths. The base
+capture is the untested state, which is what a board that has just come up shows; the others
+are driven and captured under names of their own. The last of them is a different *board*
+rather than a different reading — a wired port with nothing plugged into it — and it is
+driven the way the no-modem board is, by a file the `nmcli` stand-in reads on every call.
+That row used to read "Up, and not yet tested — nothing has established that it reaches
+anything" about an `eth0` NetworkManager had in `unavailable` with no carrier and no
+address (R-NET-14).
+
+```
+network-interfaces.day.png                  every path up, and untested
+network-interfaces-not-reaching.day.png     every path probed, and reaching nothing
+network-interfaces-reaching.day.png         every path probed, and reaching something
+network-interfaces-down.day.png             the wired port down, and saying so
+```
+
+**Status has three shapes.** Two of them are two different boards: `Reachable by` is gauges
+over a labelled strip, and on a board with no modem the gauges are *absent* — a gauge with
+no needle reads as a fault, and there being no modem is not one. That capture is driven by
+taking the modem out of the harness rather than by sending an empty reading, so what is
+photographed is the panel degrading rather than a panel with a hole in it.
+
+The third is the same board holding a configuration change nobody has confirmed (R-UI-15).
+The gate applies one, does not confirm it, photographs the banner with a real countdown on
+it, and then **presses `REVERT NOW`** and asserts the device put the previous configuration
+back — which is the only end-to-end proof that either key on that panel reaches the device.
+A banner that renders correctly and whose keys do nothing is the failure `--press NIGHT` was
+added for.
+
+```
+status.day.png                              a board with a modem in it
+status-without-modem.day.png                the same board with nothing in the slot
+status-pending.day.png                      the same board, holding an unconfirmed change
+```
+
+The countdown is masked in the committed picture and only there: it is the one annunciator
+caption on this console that is a *reading*, so without masking that file would differ by a
+second or two on every run. The widget says so about itself with `className: "yonder-live"`,
+which is what the mask list matches — the lamp and its box are untouched, and the unmasked
+copy under `vendor/capture/` carries the digits.
+
+`capture-pages.mjs --only <page> --as <name>` is what takes one of them, so a state capture
+is held to exactly the rules and the shape reference every other page is. The shape manifest
+is what proves the degradation rather than the picture: the two gauges appear in the
+without-modem reference carrying `d-none` and a zero box, and the panel is 120 px shorter.
 
 ```
 ./scripts/verify-pages.sh                    # capture, and gate

@@ -82,3 +82,54 @@ describe("reading", () => {
     expect(reading(5, { min: 20, max: 10 }).fraction).toBe(0);
   });
 });
+
+describe("a quantity where higher is better", () => {
+  // Signal strength, in dBm. -120 is the floor of the scale, -70 the top;
+  // below -105 is bad and below -90 is marginal. These are the values the
+  // cellular console uses.
+  const SIGNAL = { min: -120, max: -70, caution: -90, limit: -105, sense: "higher-is-better" } as const;
+
+  it("is good above the caution", () => {
+    expect(reading(-85, SIGNAL).tone).toBe("good");
+  });
+
+  it("is waiting at and below the caution", () => {
+    // At, not past: a threshold an operator was told about announces itself
+    // when it is reached, which is the same rule the other direction uses.
+    expect(reading(-90, SIGNAL).tone).toBe("waiting");
+    expect(reading(-99, SIGNAL).tone).toBe("waiting");
+  });
+
+  it("is bad at and below the limit", () => {
+    expect(reading(-105, SIGNAL).tone).toBe("bad");
+    expect(reading(-118, SIGNAL).tone).toBe("bad");
+  });
+
+  it("fills more as the value rises, not less", () => {
+    // The fill is the value's position on its own scale and does not change
+    // with the sense. A stronger signal must draw a fuller bar; the sense
+    // decides which end is alarming, not which way the bar grows.
+    expect(reading(-75, SIGNAL).fraction).toBeGreaterThan(reading(-110, SIGNAL).fraction);
+  });
+
+  it("puts the thresholds where they are on the scale, whichever sense applies", () => {
+    const r = reading(-99, SIGNAL);
+    expect(r.limitAt).toBeCloseTo(0.30, 2);
+    expect(r.cautionAt).toBeCloseTo(0.60, 2);
+  });
+
+  it("carries the sense through so a component can draw it", () => {
+    expect(reading(-99, SIGNAL).sense).toBe("higher-is-better");
+  });
+});
+
+describe("the default sense", () => {
+  it("is higher-is-worse, so every existing caller is unchanged", () => {
+    // CPU temperature: 80 is the throttle point, 60 the caution.
+    const TEMP = { min: 0, max: 100, caution: 60, limit: 80 };
+    expect(reading(51, TEMP).tone).toBe("good");
+    expect(reading(65, TEMP).tone).toBe("waiting");
+    expect(reading(85, TEMP).tone).toBe("bad");
+    expect(reading(51, TEMP).sense).toBe("higher-is-worse");
+  });
+});

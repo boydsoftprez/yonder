@@ -1,0 +1,48 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!--
+  The editor half of configure the modem.
+
+  Node-RED finds this by basename beside the node's .js, and without it the
+  flow editor shows the node as "unknown" even though the runtime registered
+  it. It is a form and a registration, and deliberately nothing else: no
+  behaviour lives here (CLAUDE.md rule 2 in spirit — a diff has to be
+  readable), and no asset is fetched from anywhere (R-UI-01).
+-->
+<script type="text/html" data-template-name="yonder-modem-configure">
+  <div class="form-row">
+    <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name" />
+  </div>
+</script>
+
+<script type="text/html" data-help-name="yonder-modem-configure">
+<p>Takes <code>{ apn, username, password, dial }</code> on <code>msg.payload</code>
+— whatever the operator has put into the Connection group's fields — and
+posts a partial modem configuration to <code>POST /modem/configure</code>.</p>
+<p><b>An empty box is not an instruction to clear a setting.</b> Only fields
+the operator actually filled in are sent, so an untouched password box never
+overwrites a working credential with the empty string. Typing an APN is taken
+as asking for the modem to be used, so <code>enabled: true</code> travels
+with it. A form submitted with no APN throws rather than sending anything:
+applying a document identical to the one already in force would report
+success and change nothing, which is the worst kind of feedback because it
+looks like it worked.</p>
+<p>The daemon merges these fields into the whole configuration and applies it,
+so what comes back is a <b>pending</b> command state, not a confirmation that
+the modem has taken the new settings — the same rule <code>yonder-apply</code>
+follows.</p>
+<p>The modem password never appears in <code>msg.yonder</code>, in this
+node's status, or in any error it raises (R-SEC-10).</p>
+</script>
+
+<script type="text/javascript">
+  RED.nodes.registerType("yonder-modem-configure", {
+    category: "yonder",
+    color: "#c7d4e0",
+    defaults: { name: { value: "" } },
+    inputs: 1,
+    outputs: 1,
+    icon: "font-awesome/fa-cog",
+    label: function () { return this.name || "configure the modem"; },
+  });
+</script>

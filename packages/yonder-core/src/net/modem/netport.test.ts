@@ -102,7 +102,7 @@ describe("ModemNetPort", () => {
   });
 
   /**
-   * R-CEL-12. Nothing is remembered in order to skip a reading — not that the
+   * R-CEL-13. Nothing is remembered in order to skip a reading — not that the
    * modem exists, and not its port layout either.
    *
    * ModemManager numbers its object paths per service run, so a restart hands

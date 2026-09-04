@@ -9,13 +9,14 @@ import type { ScanResult } from "../net/scan.js";
 import type { PingResult } from "../diag/probe.js";
 import { ApplyEngine } from "../apply/engine.js";
 import { saveConfig } from "../config/save.js";
+import { loadConfig } from "../config/load.js";
 import { SecretStore } from "../secrets/store.js";
 import { DEFAULT_CONFIG, type Config } from "../schema/config.js";
 import { AdminCredential } from "../console/credential.js";
 import { AttemptThrottle, FAILURE_LIMIT, LOCKOUT_MS } from "../console/throttle.js";
 import type { Clock, Renderer } from "../apply/types.js";
 import type { ModemState } from "../net/modem/state.js";
-import type { ReachState } from "../net/reach/standing.js";
+import type { PathName, ReachState } from "../net/reach/standing.js";
 import type { RemoteState } from "../remote/state.js";
 
 /**
@@ -92,6 +93,8 @@ interface RouterOptions {
   reachState?: () => Promise<ReachState>;
   /** The mesh join state. Undefined, as in production, unless a test says otherwise. */
   remoteState?: () => Promise<RemoteState>;
+  /** Tests one path now, over the same ReachMonitor the automatic probes use. */
+  testPath?: (path: PathName) => Promise<boolean>;
 }
 
 function router(opts: RouterOptions = {}): Router {
@@ -119,6 +122,7 @@ function router(opts: RouterOptions = {}): Router {
     ...(opts.modemState === undefined ? {} : { modemState: opts.modemState }),
     ...(opts.reachState === undefined ? {} : { reachState: opts.reachState }),
     ...(opts.remoteState === undefined ? {} : { remoteState: opts.remoteState }),
+    ...(opts.testPath === undefined ? {} : { testPath: opts.testPath }),
   });
 }
 
@@ -195,6 +199,7 @@ describe("the gate in front of the configuration routes", () => {
     const r = router();
     expect((await r("POST", "/apply", changed())).status).toBe(403);
     expect((await r("POST", "/confirm", { id: "anything" })).status).toBe(403);
+    expect((await r("POST", "/revert", { id: "anything" })).status).toBe(403);
   });
 
   it("refuses an unknown route while unprovisioned rather than saying it is unknown", async () => {
@@ -920,8 +925,10 @@ describe("GET /reach/state", () => {
     inUse: "modem",
     carrying: true,
     paths: [
-      { path: "ethernet", device: "eth0", standing: "no-route-out", since: 1_000, detail: "Stood down" },
-      { path: "modem", device: "wwan0", standing: "in-use", since: null, detail: "Carrying traffic" },
+      { path: "ethernet", device: "eth0", standing: "no-route-out", since: 1_000,
+        evidence: "not-reaching", detail: "Stood down" },
+      { path: "modem", device: "wwan0", standing: "in-use", since: null,
+        evidence: "reaching", detail: "Carrying traffic" },
     ],
   };
 
@@ -931,6 +938,17 @@ describe("GET /reach/state", () => {
     );
     expect(res.status).toBe(200);
     expect((res.body as { inUse: string }).inUse).toBe("modem");
+  });
+
+  it("serves the evidence about each path, not only the sentence", async () => {
+    // The console draws three states from this and must not have to parse
+    // `detail` to get them. Serialised over the socket, so a field the router
+    // dropped would show up here.
+    const res = await provisioned({ reachState: async () => STATE })(
+      "GET", "/reach/state", undefined,
+    );
+    const paths = (res.body as ReachState).paths;
+    expect(paths.map((p) => p.evidence)).toEqual(["not-reaching", "reaching"]);
   });
 
   it("says so plainly when this daemon has no reach monitor to ask", async () => {
@@ -1010,5 +1028,108 @@ describe("the remote routes", () => {
     expect(res.status).toBe(200);
     const config = (await route("GET", "/config", undefined)).body as Config;
     expect(config.remote.zerotier).toEqual({ enabled: false, network_id: null });
+  });
+});
+
+describe("POST /modem/configure", () => {
+  it("merges the fields into the configuration and applies the whole document", async () => {
+    // The same shape /net/join and /remote/join use: the router merges one
+    // section and hands the engine a complete document. Nothing about a modem
+    // is stored anywhere else.
+    const route = provisioned({});
+    const res = await route("POST", "/modem/configure", { enabled: true, apn: "ereseller" });
+    expect(res.status).toBe(200);
+    const config = (await route("GET", "/config", undefined)).body as Config;
+    expect(config.network.modem.enabled).toBe(true);
+    expect(config.network.modem.apn).toBe("ereseller");
+  });
+
+  it("leaves the rest of the configuration alone", async () => {
+    const route = provisioned({});
+    const before = (await route("GET", "/config", undefined)).body as Config;
+    await route("POST", "/modem/configure", { enabled: true, apn: "ereseller" });
+    const after = (await route("GET", "/config", undefined)).body as Config;
+    expect(after.network.ap).toEqual(before.network.ap);
+    expect(after.network.client).toEqual(before.network.client);
+  });
+
+  it("refuses a body that is not a modem configuration", async () => {
+    const res = await provisioned({})("POST", "/modem/configure", { apn: 42 });
+    expect(res.status).toBe(400);
+  });
+
+  it("never returns the modem password", async () => {
+    // R-SEC-10. The response is an apply status, not a configuration.
+    const res = await provisioned({})("POST", "/modem/configure", { enabled: true, apn: "a", password: "hunter2" });
+    expect(JSON.stringify(res.body)).not.toMatch(/hunter2/);
+  });
+});
+
+describe("POST /reach/test", () => {
+  it("tests the path it is given and answers with the result", async () => {
+    const asked: string[] = [];
+    const route = provisioned({ testPath: async (p) => { asked.push(p); return true; } });
+    const res = await route("POST", "/reach/test", { path: "modem" });
+    expect(res.status).toBe(200);
+    expect(asked).toEqual(["modem"]);
+    expect((res.body as { reached: boolean }).reached).toBe(true);
+  });
+
+  it("refuses a path that is not one of the three", async () => {
+    const res = await provisioned({ testPath: async () => true })("POST", "/reach/test", { path: "carrier-pigeon" });
+    expect(res.status).toBe(400);
+  });
+
+  it("says so plainly when this daemon has no reach monitor to ask", async () => {
+    const res = await provisioned({})("POST", "/reach/test", { path: "modem" });
+    expect(res.status).toBe(503);
+  });
+});
+
+/**
+ * **R-UI-15.** The other half of the confirmation decision. A console that
+ * could only confirm would leave an operator who has already decided the
+ * change was wrong watching a five-minute timer — and reaching for the power
+ * instead, which is the one thing that turns a rollback into a recovery.
+ */
+describe("POST /revert", () => {
+  it("puts the previous configuration back and returns to rest", async () => {
+    const r = provisioned();
+    const applied = await r("POST", "/apply", changed());
+    const id = (applied.body as { id: string }).id;
+    expect(loadConfig(configPath).system.hostname).toBe("changed");
+
+    const res = await r("POST", "/revert", { id });
+    expect(res.status).toBe(200);
+    expect((res.body as { state: string }).state).toBe("idle");
+    expect((res.body as { lastResult?: { outcome: string } }).lastResult?.outcome).toBe("reverted");
+    expect(loadConfig(configPath).system.hostname).toBe("yonder");
+  });
+
+  it("wants an id, and says so rather than reverting whatever is pending", async () => {
+    const r = provisioned();
+    await r("POST", "/apply", changed());
+    const res = await r("POST", "/revert", {});
+    expect(res.status).toBe(400);
+    expect(loadConfig(configPath).system.hostname).toBe("changed");
+  });
+
+  /**
+   * A ConfigError is written for the operator, so the console can say what
+   * happened rather than showing a key that did nothing.
+   */
+  it("refuses an id that is not the pending one, in words", async () => {
+    const r = provisioned();
+    await r("POST", "/apply", changed());
+    const res = await r("POST", "/revert", { id: "not-the-id" });
+    expect(res.status).toBe(400);
+    expect((res.body as { error: string }).error).toMatch(/unknown apply/);
+    expect(loadConfig(configPath).system.hostname).toBe("changed");
+  });
+
+  it("refuses when nothing is pending at all", async () => {
+    const res = await provisioned()("POST", "/revert", { id: "a1" });
+    expect(res.status).toBe(400);
+    expect((res.body as { error: string }).error).toMatch(/nothing is pending/);
   });
 });

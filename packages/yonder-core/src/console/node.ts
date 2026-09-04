@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { DaemonClient, type DaemonReply } from "./client.js";
-import { rejected, pending, confirmed, type CommandStatus } from "./command.js";
+import {
+  countdown, idle, rejected, pending, confirmed, type CommandStatus,
+} from "./command.js";
 
 /**
  * Everything a Node-RED node in this project is allowed to decide.
@@ -172,4 +174,111 @@ export function confirmStatus(reply: DaemonReply, now: number, id: string): Comm
  */
 export function readFailure(message: string, now: number): CommandStatus {
   return rejected(message, { at: now });
+}
+
+/**
+ * What a page needs to draw a change that has not been confirmed (R-UI-15).
+ *
+ * Everything here is a string a widget binds directly. In particular the
+ * countdown is **already words**: a clock ticking inside `flows.json` would be
+ * arithmetic in wiring, which is the thing CLAUDE.md rule 2 exists to stop,
+ * and it would be arithmetic on the one number that decides whether an
+ * operator still has a device.
+ */
+export interface PendingChange {
+  /**
+   * Whether a change is in force and unconfirmed.
+   *
+   * The banner is present only while this is true. A panel that is always
+   * there saying "nothing pending" is noise on a page an operator glances at,
+   * and noise on that page is what makes the one time it matters invisible.
+   */
+  pending: boolean;
+  /** The apply to confirm or revert. Empty when there is nothing pending. */
+  id: string;
+  /** The line that names the change. Empty when there is nothing pending. */
+  what: string;
+  /** Why the revert is on the operator's side. Empty when nothing is pending. */
+  why: string;
+}
+
+/**
+ * The sentence under the countdown, and the reason this task exists.
+ *
+ * It does **not** threaten the operator with the revert. The revert is the
+ * thing that rescues them — it is the whole of what makes this device
+ * unbrickable (R-CFG-03) — and an interface that presents it as a punishment
+ * for inaction teaches an operator to confirm reflexively, which is exactly
+ * the habit that turns a wrong change into a device nobody can reach.
+ */
+export const PENDING_WHY =
+  "Confirm it to keep it. If you do not, the device puts the previous "
+  + "configuration back by itself — which is what gets you back in if this "
+  + "change was the wrong one.";
+
+/**
+ * `GET /status`, as the banner on every page reads it (R-UI-15).
+ *
+ * The apply engine has tracked the pending change and its deadline all along.
+ * What was missing was anywhere to see it except the page the change was made
+ * on: make a change on the Network page, walk to Status, and nothing said the
+ * configuration reverts in ninety seconds unless somebody confirms it.
+ *
+ * **A read that fails leaves the banner down.** That is the one place this
+ * module departs from "never a silent nothing", and deliberately: every field
+ * the banner draws — the countdown, the id both of its keys need — is
+ * unknown when the daemon does not answer, so what it could raise is an alarm
+ * with no time on it and two controls that would fail. The failure still
+ * travels on `msg.yonder`, so the node says so in its own status, and the
+ * panels beside it on that page already report a daemon that has gone quiet.
+ */
+export function pendingChange(
+  reply: DaemonReply,
+  now: number,
+): { payload: PendingChange; yonder: CommandStatus } {
+  const nothing: PendingChange = { pending: false, id: "", what: "", why: "" };
+  const result = fetched(reply);
+  if (!result.ok) return { payload: nothing, yonder: readFailure(result.message, now) };
+
+  const body = result.value as {
+    state?: unknown; id?: unknown; expiresAt?: unknown;
+  } | undefined;
+  if (body?.state !== "pending") return { payload: nothing, yonder: idle(now) };
+
+  const status = pending("", {
+    at: now,
+    ...(typeof body.id === "string" ? { id: body.id } : {}),
+    ...(typeof body.expiresAt === "number" ? { expiresAt: body.expiresAt } : {}),
+  });
+  const left = countdown(status, now);
+  return {
+    payload: {
+      pending: true,
+      id: typeof body.id === "string" ? body.id : "",
+      // What the daemon knows, and no more. `GET /status` carries an apply
+      // state, an id and a deadline; it does not say which settings moved,
+      // and a line inventing one would be the console's only sentence about
+      // this that nothing on the device could check.
+      what: "A configuration change is in force on this device and has not been confirmed.",
+      why: PENDING_WHY,
+    },
+    // The lamp's caption. `Reverting now` rather than `0:00` for a window that
+    // has run out: the rollback is already happening, and a countdown frozen
+    // at zero reads as a page that has stopped updating.
+    yonder: { ...status, message: left === null ? "Reverting now" : `Reverts in ${left}` },
+  };
+}
+
+/**
+ * `POST /revert`'s answer.
+ *
+ * `confirmed`, not `rejected`, and the distinction is worth stating: this is
+ * the state of the *command the operator gave*, which was "put it back". That
+ * command took effect and is staying. Reporting the change's own fate here
+ * would light a red lamp on a control that did exactly what it was asked.
+ */
+export function revertStatus(reply: DaemonReply, now: number, id: string): CommandStatus {
+  const result = fetched(reply);
+  if (!result.ok) return rejected(result.message, { at: now, id });
+  return confirmed("Put back. The device is running the previous configuration.", { at: now, id });
 }

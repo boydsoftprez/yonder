@@ -592,7 +592,7 @@ thermal sensor drew **0.0 °C**, which says *cold* rather than *not there*. `fac
 explicit that absent is null and never zero; the components were the other end of that rule
 and had it wrong.
 
-### K-30 · `yonder-confirm` is registered and used by nothing
+### K-30 · ~~`yonder-confirm` is registered and used by nothing~~ — CLOSED
 
 R-CFG-11 removed the operator confirmation: joining a network takes the access point off
 the air, so the console an operator would confirm from goes with it, and the device answers
@@ -605,9 +605,17 @@ it end to end, and the next person to need a confirmation step will find one tha
 been run since the flows stopped calling it. `scripts/verify-pages.sh` used to catch
 exactly this and stopped naming it in the same change, so nothing was watching either.
 
-**Closes when** either the node is removed with its route, or something uses it again — an
-apply that does not move the radio still goes through the engine's confirmation timer, so
-there may be a real caller here rather than a deletion.
+**Closed in `00ba2ca`, by the second half of this entry's own guess.** The way out was a
+real caller and not a deletion: an apply that does not move the radio still goes through the
+engine's confirmation timer, and until R-UI-15 there was nowhere to see one except the page
+the change was made on. Status now carries a `Change pending` banner — the countdown, what
+is in force, and `CONFIRM` beside `REVERT NOW` — and `confirm-pending` in
+`flows/flows.json` is a `yonder-confirm`. It gained a twin in the same change,
+`yonder-revert`, because the banner offers both directions and a node with a mode would be a
+wiring diagram that no longer says which one a wire performs.
+
+`scripts/verify-pages.sh` names both again in the list of types the flows must use, so the
+thing that stopped watching is watching.
 
 ### K-31 · The network dropdown's label is red before anything is scanned
 
@@ -906,3 +914,48 @@ check to `FallbackWatchdogOptions` and requires it — when wired in — to agre
 `check()` treats an address as reachability. Absent, behaviour is unchanged: an address
 alone is still accepted, so a daemon assembled without a reach monitor does not become one
 that raises its access point on a working device.
+
+---
+
+### K-41 · ~~The modem's interface name is remembered for the life of the daemon~~ — CLOSED
+
+**Status:** Closed · **Requirement:** R-CEL-09, R-CEL-13, R-NET-14
+
+`modemInterface` in `packages/yonder-core/src/daemon/server.ts` caches the net port
+ModemManager reports — `if (modemNet !== null) return modemNet;` — because a modem's port
+layout is a property of the modem. It is not a property of the *slot*. Once a modem has
+been seen, `pathDevices` goes on being handed `wwan0` whatever ModemManager and
+NetworkManager now say, so `/reach/state` keeps reporting a cellular path on an interface
+that has been unplugged, and the Cellular tab draws a green `READY` lamp over the words
+"No modem found".
+
+Visible in `docs/console/capture/network-cellular-without-modem.*.png`, which is why those
+two pictures are read with this entry beside them. On a board that never had a modem — the
+hardware this was found on — the tab reads `NO MODEM` correctly, so it is a defect about
+hardware being *removed* rather than about hardware being absent.
+
+R-NET-14 did not close it, and deliberately. `pathsDown` names a path down only when
+NetworkManager lists its interface in a state it knows to be not-up; when a modem is
+unplugged neither `wwan0` nor `cdc-wdm0` is listed at all, so nothing has been established
+and nothing is claimed. Fixing this means deciding what a daemon should do when the
+hardware under a cached reading disappears — re-read on every call, invalidate on a
+ModemManager signal, or expire the cache — and that changes reach behaviour, which is a
+decision of its own rather than a consequence of this one.
+
+**Closed by:** this commit, which takes the first of those three and states it as R-CEL-13.
+`ModemNetPort` in `net/modem/netport.ts` asks ModemManager both questions on every reading
+and remembers nothing in order to skip one — not that a modem exists, and not its port
+layout either, because those object paths are numbered per run of the service and a stick
+swapped across a ModemManager restart would inherit the departed one's port.
+
+Reach behaviour moves in one direction only, and it is the direction rule 6 allows. A path
+with no interface is reported `absent`, and an absent path is neither probed nor stood
+down — so the old behaviour was *inventing* failure evidence against a `wwan0` that was not
+there. `carrying` is a question about paths holding addresses, which a departed modem does
+not hold either way, so the fallback watchdog's answer cannot move at all. What is kept is
+only the answer to a reading that *did not happen*: a failed or late one falls back to the
+last interface actually observed, never to the control port, because probing `cdc-wdm0`
+fails on a perfectly good link and three of those stand a working modem down. The reading
+is bounded at `MODEM_READ_DEADLINE_MS` for the reason `net/deadline.ts` was written: a
+wedged ModemManager answers nothing at all, and asking it on every reading rather than once
+is what made that worth bounding.

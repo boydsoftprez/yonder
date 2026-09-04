@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, it, expect } from "vitest";
-import { CONSOLE_HOME, THEME_HREF } from "./console/settings.js";
 import { JOIN_TOPIC } from "./net/join.js";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { EXCLUDED_NODES, THEME_HREF } from "./console/settings.js";
+import { CONSOLE_HOME, EXCLUDED_NODES, THEME_HREF } from "./console/settings.js";
 import { MIN_POLL_MS } from "./console/node.js";
 
 /**
@@ -47,6 +46,7 @@ function contribTypes(): Set<string> {
     "node-red-contrib-yonder-system",
     "node-red-contrib-yonder-network",
     "node-red-contrib-yonder-remote",
+    "node-red-contrib-yonder-modem",
     "node-red-dashboard-2-yonder",
   ]) {
     const manifest = JSON.parse(
@@ -608,9 +608,20 @@ describe("flows/flows.json join controls", () => {
    * thrown away because somebody was slow. The device establishes for itself
    * whether the join took, so nothing is asked of the operator at all.
    */
-  it("asks the operator to confirm nothing", () => {
+  it("asks the operator to confirm nothing about the join", () => {
     expect(flows.find((n) => n.id === "group-net-confirm")).toBeUndefined();
-    expect(flows.find((n) => n.type === "yonder-confirm")).toBeUndefined();
+    // Narrowed, not weakened. R-UI-15 put a `yonder-confirm` back on Status,
+    // reached from a banner that any pending change raises — which closed
+    // K-30. What R-CFG-11 removed was a confirmation *of the join*, asked for
+    // from a page the join takes off the air. So the assertion is that the
+    // only confirm control in the flows is that one, and that nothing in the
+    // Wi-Fi panel reaches it.
+    expect(flows.filter((n) => n.type === "yonder-confirm").map((n) => n.id))
+      .toEqual(["confirm-pending"]);
+    const fromJoin = flows
+      .filter((n) => n.group === "group-net-join" || n.type === "yonder-join")
+      .flatMap((n) => (n.wires ?? []).flat());
+    expect(fromJoin).not.toContain("confirm-pending");
     const words = flows
       .filter((n) => n.type === "ui-markdown" || n.type === "ui-button")
       .map((n) => `${String(n.content ?? "")} ${String(n.label ?? "")}`.toLowerCase())
@@ -839,22 +850,345 @@ describe("flows/flows.json ZeroTier tab", () => {
 });
 
 /**
+ * The Cellular tab, against the artefact rather than a rendering
+ * (R-CEL-09, R-CEL-12, R-UI-09).
+ */
+describe("flows/flows.json Cellular tab", () => {
+  const page = flows.find((n) => n.type === "ui-page" && n.name === "Network");
+  const tabs = flows
+    .filter((n) => n.type === "ui-group" && n.page === page?.id)
+    .sort((a, b) => Number(a.order) - Number(b.order));
+  const inTab = flows.filter((n) => n.group === "group-net-cellular");
+
+  /**
+   * A `ui-group` on a page whose layout is `tabs` **is** a tab — Dashboard's
+   * `LayoutTabs` renders one `v-tab` per group — so this is also the check
+   * that the tab exists at all, and where in the strip it is.
+   */
+  it("sits between ZeroTier and Activity in the strip", () => {
+    expect(page?.layout).toBe("tabs");
+    expect(tabs.map((g) => g.name))
+      .toEqual(["Interfaces", "Wi-Fi", "ZeroTier", "Cellular", "Activity"]);
+  });
+
+  it.each(["yonder-modem-state", "yonder-modem-configure", "yonder-reach-test"])(
+    "the shipped flows use %s",
+    (type) => {
+      expect(flows.some((n) => n.type === type)).toBe(true);
+    },
+  );
+
+  /**
+   * **The defect the gauge's second sense exists to prevent.**
+   *
+   * `ui-yonder-gauge` lays its bands good → caution → bad left to right and
+   * fills as the value climbs, which is right for temperature and backwards
+   * for signal. Without `sense`, a dying link draws as a full bar — the one
+   * reading an operator glances at, saying the opposite of the truth. The
+   * bounds are the standard cellular thresholds, so a number that looks
+   * alarming here looks alarming to a carrier's support desk too.
+   */
+  it("draws both signal gauges against their bands, the right way round", () => {
+    const gauges = inTab.filter((n) => n.type === "ui-yonder-gauge");
+    expect(gauges.map((g) => g.label).sort()).toEqual(["QUALITY", "SIGNAL"]);
+    for (const g of gauges) {
+      expect(g.sense, `${String(g.label)} would draw a dying link as a full bar`)
+        .toBe("higher-is-better");
+    }
+    const signal = gauges.find((g) => g.label === "SIGNAL");
+    expect([signal?.min, signal?.max, signal?.caution, signal?.limit])
+      .toEqual([-120, -70, -90, -105]);
+    expect(signal?.unit).toBe("dBm");
+    const quality = gauges.find((g) => g.label === "QUALITY");
+    expect([quality?.min, quality?.max, quality?.caution, quality?.limit])
+      .toEqual([-5, 25, 13, 0]);
+    expect(quality?.unit).toBe("dB");
+  });
+
+  /**
+   * A gauge places a pointer, so it needs a number. The state node computes
+   * both the number and the string beside it, and these move one into the
+   * message — a `function` node deriving one from the other is what
+   * CLAUDE.md rule 2 forbids.
+   */
+  it("feeds each gauge a number, from the output that carries them", () => {
+    const state = flows.find((n) => n.type === "yonder-modem-state");
+    const signals = (state!.wires as string[][])[1];
+    for (const id of ["pick-cell-strength", "pick-cell-quality", "bar-cell-signal"]) {
+      expect(signals).toContain(id);
+    }
+    for (const id of ["pick-cell-strength", "pick-cell-quality"]) {
+      const node = flows.find((n) => n.id === id);
+      const rules = node?.rules as { p: string; to: string; tot: string }[];
+      // Found by what it sets rather than by where it sits: this pick also
+      // carries `msg.visible`, and which rule is written first is settled by
+      // the test below for the reason it has to be.
+      const onto = rules.find((r) => r.p === "payload");
+      expect(onto?.tot).toBe("jsonata");
+      expect(onto?.to).toMatch(/^payload\.gauges\./);
+    }
+  });
+
+  /**
+   * **The defect a capture found with the modem unplugged.** The tab showed a
+   * `NO MODEM` lamp, "No modem found" and a dash in every fact — and then two
+   * gauge tracks with their coloured bands and no needle. A gauge with no
+   * needle reads as a fault, and *there is no modem* is not a fault, so the
+   * gauges are **absent** rather than empty.
+   *
+   * The binding is `showsSignal` and never `reportsSignal`. That one is a
+   * property of the *kind* of modem and is true whenever one is not an
+   * appliance — including on a board with no modem in it at all, which has no
+   * kind — so binding to it would have hidden nothing. The distinction is
+   * settled in the modem package, where it is tested; the flow only carries
+   * it onto `msg.visible`.
+   *
+   * `visible` is set **before** `payload` is replaced, because after that rule
+   * the field is gone. This is the same wiring the `Reachable by` panel on
+   * Status uses, deliberately: two surfaces drawing one modem's gauges must
+   * disappear on the same board.
+   */
+  it.each(["strength", "quality"])("hides the %s gauge rather than emptying it", (which) => {
+    const pick = flows.find((n) => n.id === `pick-cell-${which}`);
+    const rules = pick?.rules as { t: string; p: string; to: string; tot: string }[];
+    expect(rules.map((r) => r.p)).toEqual(["visible", "payload"]);
+    expect(rules[0].to).toBe("payload.showsSignal");
+    // JSONata, not a plain property read: a failed tick sends `payload: null`
+    // and `null.showsSignal` throws in the latter.
+    for (const r of rules) {
+      expect(r.t).toBe("set");
+      expect(r.tot).toBe("jsonata");
+    }
+    expect(rules[1].to).toBe(`payload.gauges.${which}`);
+    expect((pick?.wires as string[][])[0]).toEqual([`gauge-cell-${which}`]);
+  });
+
+  /**
+   * **The other defect the same capture found:** `COMPOSITION` ran off the
+   * right of the viewport as
+   * `cdc-wdm0 (mbim) · ttyUSB0 (ignored) · ttyUSB1 (gp…`.
+   *
+   * The cell was not too narrow. It was showing the wrong thing: R-CEL-03 asks
+   * which mode a connected modem needs and which was chosen, and the answer is
+   * one word — `MBIM` — taken from the kind of the control port. An
+   * enumeration of every port including the ignored one and the GPS answers a
+   * different question, and not on a page an operator glances at.
+   *
+   * The fix is the key, not the width. Widening the cell, wrapping it or
+   * shrinking the type would each have kept the wrong answer and made it fit.
+   */
+  it("says which mode the modem came up in, not every port it exposes", () => {
+    const bar = flows.find((n) => n.id === "bar-cell-link");
+    const cells = JSON.parse(String(bar?.cells)) as { key: string; label: string }[];
+    const cell = cells.find((c) => c.label === "COMPOSITION");
+    expect(cell?.key).toBe("composition");
+    expect(cells.some((c) => c.key === "portSummary"), "the port list is not a fact cell")
+      .toBe(false);
+  });
+
+  /**
+   * **R-CEL-12.** The surface that reports a broken link is the one that
+   * repairs it. Four fields and a rail, on the same tab as the verdict — an
+   * operator told the APN is wrong must not have to leave the console to
+   * change it.
+   *
+   * **R-CEL-09:** no APN is suggested, completed or offered as a list. The
+   * published carrier database's first answer for the SIM this was built
+   * against was the value that failed.
+   */
+  it("carries the form that fixes what the verdict reports", () => {
+    const inputs = inTab.filter((n) => n.type === "ui-text-input");
+    expect(inputs.map((n) => n.topic).sort())
+      .toEqual(["apn", "dial", "password", "username"]);
+    const apn = inputs.find((n) => n.topic === "apn");
+    expect(apn?.type, "an APN is typed, never chosen from a list").toBe("ui-text-input");
+  });
+
+  /**
+   * R-SEC-10. `ui-form` renders nothing masked, so the password is its own
+   * `ui-text-input`; `passthru` would put what was typed back on an outgoing
+   * message.
+   */
+  it("masks the password and never echoes any field back", () => {
+    const inputs = inTab.filter((n) => n.type === "ui-text-input");
+    expect(inputs.find((n) => n.topic === "password")?.mode).toBe("password");
+    for (const n of inputs) expect(n.passthru ?? false, String(n.id)).toBe(false);
+  });
+
+  /**
+   * R-UI-10, and the one control on this tab that takes the link away from
+   * the operator. Changing the APN re-dials; asking for a test does not.
+   */
+  it("puts both actions on one rail, with CONNECT as the irreversible one", () => {
+    const rail = inTab.find((n) => n.type === "ui-yonder-softkeys");
+    const keys = JSON.parse(String(rail?.keys)) as { label: string; action: string; tone: string }[];
+    expect(keys).toEqual([
+      { label: "TEST NOW", action: "test", tone: "act" },
+      { label: "CONNECT", action: "connect", tone: "warn" },
+    ]);
+  });
+
+  it("routes each key to the node that answers it", () => {
+    const rail = inTab.find((n) => n.type === "ui-yonder-softkeys");
+    expect((rail?.wires as string[][])[0]).toEqual(["route-cell-key"]);
+    const route = flows.find((n) => n.id === "route-cell-key");
+    expect(route?.type).toBe("switch");
+    const wires = route?.wires as string[][];
+    const typeOf = (id: string) => flows.find((n) => n.id === id)?.type;
+    // TEST NOW asks the daemon to probe one path; CONNECT applies a section.
+    expect(typeOf(wires[0][0])).toBe("change");
+    expect(typeOf((flows.find((n) => n.id === wires[0][0])?.wires as string[][])[0][0]))
+      .toBe("yonder-reach-test");
+    expect(typeOf((flows.find((n) => n.id === wires[1][0])?.wires as string[][])[0][0]))
+      .toBe("yonder-modem-configure");
+  });
+
+  /**
+   * A control that says it will act and does not is worse than an absent one.
+   * Both keys end somewhere an operator can see the answer.
+   */
+  it("says out loud what each key did", () => {
+    const toast = flows.find((n) => n.type === "ui-notification");
+    for (const id of ["reach-test", "modem-configure"]) {
+      const out = (flows.find((n) => n.id === id)?.wires as string[][])[0];
+      expect(out.length, `${id} answers nowhere`).toBeGreaterThan(0);
+      const said = flows.find((n) => n.id === out[0]);
+      expect((said?.wires as string[][])[0]).toContain(toast?.id);
+    }
+  });
+
+  // CLAUDE.md rule 2, once more where it is easiest to break.
+  it("ships no function node", () => {
+    expect(inTab.some((n) => n.type === "function")).toBe(false);
+  });
+});
+
+/**
+ * The `Way out` rows on the Interfaces tab (R-NET-13, R-UI-11).
+ *
+ * They live *inside* the `Interfaces` group rather than in a group of their
+ * own for the reason the Cellular tab is one group: on a page whose layout is
+ * `tabs`, Dashboard's `LayoutTabs` renders one tab per `ui-group`, so a second
+ * group would have put the paths on a surface of their own instead of beside
+ * the addresses they explain.
+ */
+describe("flows/flows.json Way out rows", () => {
+  const inTab = flows.filter((n) => n.group === "group-net-now");
+  const byId = (id: string) => flows.find((n) => n.id === id);
+  const PATHS = [
+    { slug: "ethernet", key: "ethernet" },
+    { slug: "modem", key: "modem" },
+    { slug: "wifi", key: "wifi_client" },
+  ];
+
+  /**
+   * Output 3 of `yonder-modem-state` is the rows. Nothing else may feed them:
+   * a second poller would put the panel and the Cellular tab on different
+   * ticks, which is what one node with four outputs exists to prevent.
+   */
+  it("is fed by the state node's third output, and by nothing else", () => {
+    const state = flows.find((n) => n.type === "yonder-modem-state");
+    expect((state!.wires as string[][])[2])
+      .toEqual(["pick-way-ethernet", "pick-way-modem", "pick-way-wifi"]);
+  });
+
+  it.each(PATHS)("picks the $slug row by name, never by its place in the list", ({ slug, key }) => {
+    const pick = byId(`pick-way-${slug}`);
+    expect(pick?.type).toBe("change");
+    const rules = pick?.rules as { t: string; p: string; to: string; tot: string }[];
+    // The lamp first, while `payload` is still the list of rows.
+    expect(rules.map((r) => r.p)).toEqual(["yonder", "payload"]);
+    for (const r of rules) {
+      expect(r.t).toBe("set");
+      expect(r.tot).toBe("jsonata");
+      expect(r.to).toContain(`path='${key}'`);
+    }
+    expect(rules[0].to).toBe(`payload[path='${key}'].status`);
+  });
+
+  /**
+   * **R-UI-11: the lamp is read before the word.** A path's standing is a lit
+   * annunciator and never right-aligned coloured text — and the annunciator
+   * renders a `CommandStatus` from `msg.yonder`, which the row arrives
+   * carrying because `pathStatus()` in the modem package built it.
+   */
+  it.each(PATHS)("gives $slug a name, a lamp and a sentence, in that order", ({ slug }) => {
+    const row = [`name-way-${slug}`, `ann-way-${slug}`, `why-way-${slug}`];
+    expect((byId(`pick-way-${slug}`)?.wires as string[][])[0]).toEqual(row);
+
+    const name = byId(`name-way-${slug}`);
+    expect(name?.type).toBe("ui-text");
+    // The daemon's own word for the path, not a second copy of the vocabulary
+    // in the flows — `PATH_WORDS` is where an interface is named.
+    expect(name?.value).toBe("payload.name");
+
+    const lamp = byId(`ann-way-${slug}`);
+    expect(lamp?.type, "state is an indicator, not coloured text (R-UI-11)")
+      .toBe("ui-yonder-annunciator");
+    expect(lamp?.source).toBe("yonder");
+    // No label, so the lamp says the standing the daemon settled rather than
+    // a word chosen here.
+    expect(lamp?.label).toBe("");
+
+    const why = byId(`why-way-${slug}`);
+    expect(why?.type).toBe("ui-text");
+    expect(why?.value).toBe("payload.detail");
+    // The sentence is the wide line on the row, and it wraps rather than
+    // being cut off at the edge of a column.
+    expect(why?.width).toBe(6);
+    expect(why?.wrapText).toBe(true);
+    // Prose, not a reading. Without this the sentence is drawn by
+    // `.nrdb-ui-text-value` — bold, tabular and right-aligned — which is the
+    // class that right-aligned an interface name inside its own column.
+    expect(why?.className).toBe("yonder-qualifier");
+  });
+
+  /**
+   * Three rows above the addresses, in the order `network.priority` states by
+   * default. The order numbers are what Dashboard packs the group by, so this
+   * is the only statement of "above" there is.
+   */
+  it("puts the paths above the readouts that were already there", () => {
+    const order = (id: string) => Number(byId(id)?.order);
+    for (const slug of ["ethernet", "modem", "wifi"]) {
+      for (const part of ["name", "ann", "why"]) {
+        expect(order(`${part}-way-${slug}`)).toBeLessThan(order("button-reread"));
+      }
+    }
+    expect(order("name-way-ethernet")).toBeLessThan(order("name-way-modem"));
+    expect(order("name-way-modem")).toBeLessThan(order("name-way-wifi"));
+  });
+
+  // CLAUDE.md rule 2, on the tab that gained the most wiring in this change.
+  it("ships no function node", () => {
+    expect(inTab.some((n) => n.type === "function")).toBe(false);
+  });
+});
+
+/**
  * The Status page's own line for the mesh (R-VPN-10): everything that backs
  * "connected" reduced to the words `messageFor` already built into
  * `payload.summary`, so this page needs no arithmetic of its own to show
  * where the aircraft's link stands.
  */
 describe("flows/flows.json status page remote line", () => {
+  /**
+   * Found by its label and then checked for its binding, not the other way
+   * round. Two panels on this page now say what a subsystem is doing out of a
+   * `payload.summary` — the mesh, and the link in `Reachable by` — so a
+   * search by binding would return whichever happened to be written into the
+   * file first and assert the other one's label.
+   */
   it("shows the mesh summary, labelled Remote", () => {
     const page = flows.find((n) => n.type === "ui-page" && n.name === "Status");
     const groups = new Set(
       flows.filter((n) => n.type === "ui-group" && n.page === page?.id).map((n) => n.id),
     );
     const line = flows.find(
-      (n) => n.type === "ui-text" && groups.has(String(n.group)) && n.value === "payload.summary",
+      (n) => n.type === "ui-text" && groups.has(String(n.group)) && n.label === "Remote",
     );
-    expect(line, "the Status page has no line bound to payload.summary").toBeDefined();
-    expect(line?.label).toBe("Remote");
+    expect(line, "the Status page has no line labelled Remote").toBeDefined();
+    expect(line?.value).toBe("payload.summary");
   });
 
   // The Status page reads independently of which Network tab is open, so it
@@ -870,6 +1204,396 @@ describe("flows/flows.json status page remote line", () => {
     for (const inj of periodic) {
       expect(Number(inj.repeat) * 1000, `${String(inj.id)} repeats every ${String(inj.repeat)} s`)
         .toBeGreaterThanOrEqual(MIN_POLL_MS);
+    }
+  });
+});
+
+/**
+ * `Reachable by` on the Status page (R-UI-05, R-UI-09, R-UI-11, R-CEL-11).
+ *
+ * A sibling of `This board`, in that panel's idiom — gauges over a labelled
+ * strip — because it is the same kind of thing: a few live measurements and
+ * the facts that identify them. `Remote` is a one-line summary and is
+ * deliberately not the model here.
+ *
+ * Status is a `grid` page, not a `tabs` one, so a group here is a panel and
+ * not a tab. That is the whole difference from the Cellular tab and the
+ * `Way out` rows, both of which had to be built inside an existing group.
+ */
+describe("flows/flows.json Reachable by", () => {
+  const byId = (id: string) => flows.find((n) => n.id === id);
+  const inPanel = flows.filter((n) => n.group === "group-status-reach");
+
+  it("is a panel of its own, full width, directly under This board", () => {
+    const group = byId("group-status-reach");
+    expect(group?.type).toBe("ui-group");
+    expect(group?.page).toBe("page-status");
+    expect(group?.name).toBe("Reachable by");
+    // Full width is not decoration: it is what gives the gauge track the room
+    // the bands need to separate at a glance.
+    expect(group?.width).toBe(12);
+    expect(Number(group?.order)).toBeGreaterThan(Number(byId("group-board")?.order));
+    expect(Number(group?.order)).toBeLessThan(Number(byId("group-status-remote")?.order));
+  });
+
+  /**
+   * One node, four outputs, one tick. A second poller would have Status
+   * saying CELLULAR beside a Cellular tab that had not noticed yet — and the
+   * disagreement is the one thing an operator cannot check.
+   */
+  it("is fed by the state node's fourth output, and by nothing else", () => {
+    const state = flows.find((n) => n.type === "yonder-modem-state");
+    expect((state!.wires as string[][])[3]).toEqual([
+      "ann-reach", "text-reach-why", "bar-reach",
+      "pick-reach-strength", "pick-reach-quality",
+    ]);
+  });
+
+  /**
+   * R-UI-11: the lamp is read before the word. The one-word answer arrives as
+   * a `CommandStatus` on `msg.yonder`, built by `reachStatus()` in the modem
+   * package, so no `change` node here turns a state into a colour.
+   */
+  it("says how the aircraft is reachable as a lit lamp, not as coloured text", () => {
+    const lamp = byId("ann-reach");
+    expect(lamp?.type).toBe("ui-yonder-annunciator");
+    expect(lamp?.source).toBe("yonder");
+    // No label, so the lamp carries the daemon's own word.
+    expect(lamp?.label).toBe("");
+    expect(Number(lamp?.order)).toBe(1);
+  });
+
+  /**
+   * The line that says *why* the answer is that word — which path stood down,
+   * and when. It is `payload.why`, composed by `reachWhy()` in the modem
+   * package, and never the modem's own `summary`: that sentence is about the
+   * radio, and under a lamp reading `NOTHING` it said "Connected to Dark
+   * Star", which is the console contradicting itself on one line.
+   */
+  it("puts the sentence under it, as a qualifier and not as a reading", () => {
+    const line = byId("text-reach-why");
+    expect(line?.type).toBe("ui-text");
+    expect(line?.value).toBe("payload.why");
+    expect(line?.wrapText).toBe(true);
+    // `.nrdb-ui-text-value` is large, bold, tabular and right-aligned — right
+    // for an address, wrong for prose about one.
+    expect(line?.className).toBe("yonder-qualifier");
+    // Stacked, not side by side. The lamp hugs its caption, so reserving
+    // columns beside it leaves a gap the eye reads as a missing value.
+    expect(byId("ann-reach")?.width).toBe(12);
+    expect(line?.width).toBe(12);
+    expect(Number(line?.order)).toBeGreaterThan(Number(byId("ann-reach")?.order));
+  });
+
+  /**
+   * R-UI-09, and the sentence it gained: which direction is bad is a property
+   * of the quantity and is stated, never assumed. Getting `sense` wrong here
+   * draws a dying link as a full bar.
+   *
+   * The bounds are the Cellular tab's, to the number. Two scales for one
+   * quantity is two different answers to "is this signal usable", and the
+   * operator would have no way to tell which page was lying.
+   */
+  it.each([
+    { id: "gauge-reach-strength", label: "SIGNAL", unit: "dBm",
+      min: -120, max: -70, caution: -90, limit: -105, twin: "gauge-cell-strength" },
+    { id: "gauge-reach-quality", label: "QUALITY", unit: "dB",
+      min: -5, max: 25, caution: 13, limit: 0, twin: "gauge-cell-quality" },
+  ])("draws $label against the same scale the Cellular tab uses", (g) => {
+    const gauge = byId(g.id);
+    expect(gauge?.type).toBe("ui-yonder-gauge");
+    expect(gauge?.label).toBe(g.label);
+    expect(gauge?.unit).toBe(g.unit);
+    expect(gauge?.sense, "a dying link drawn as a full bar (R-UI-09)").toBe("higher-is-better");
+    for (const k of ["min", "max", "caution", "limit"] as const) {
+      expect(gauge?.[k], `${g.label} ${k}`).toBe(g[k]);
+      expect(gauge?.[k], `${g.label} ${k} differs from the Cellular tab`)
+        .toBe(byId(g.twin)?.[k]);
+    }
+  });
+
+  /**
+   * The reason for the full-width placement, stated as a number.
+   *
+   * At this track width the amber and green bands separate at a glance, which
+   * is the whole point of a banded gauge on a page that is glanced at. All
+   * four gauges on the page read at one scale, which is what `This board`
+   * going full width was for.
+   */
+  it("gives every gauge on the page the same, wider track", () => {
+    for (const id of ["gauge-load", "gauge-temp", "gauge-mem",
+                      "gauge-reach-strength", "gauge-reach-quality"]) {
+      expect(byId(id)?.track, id).toBe(430);
+      expect(byId(id)?.width, id).toBe(12);
+    }
+    // And the Cellular tab keeps its own, narrower one: it is half a tab wide.
+    expect(byId("gauge-cell-strength")?.track).toBe(118);
+  });
+
+  /**
+   * **It degrades rather than breaks.** On a board with no modem the gauges
+   * are absent, not empty — a gauge with no needle reads as a fault, and
+   * *there is no modem* is not a fault.
+   *
+   * The binding is a wire and not a decision: `showsSignal` is settled in the
+   * modem package, where it is tested, and the flow only carries it onto
+   * `msg.visible`. It is set before `payload` is replaced, because after that
+   * rule the field is gone.
+   */
+  it.each(["strength", "quality"])("hides the %s gauge rather than emptying it", (which) => {
+    const pick = byId(`pick-reach-${which}`);
+    expect(pick?.type).toBe("change");
+    const rules = pick?.rules as { t: string; p: string; to: string; tot: string }[];
+    expect(rules.map((r) => r.p)).toEqual(["visible", "payload"]);
+    expect(rules[0].to).toBe("payload.showsSignal");
+    // JSONata, not a plain property read: a failed tick sends `payload: null`
+    // and `null.showsSignal` throws in the latter.
+    for (const r of rules) {
+      expect(r.t).toBe("set");
+      expect(r.tot).toBe("jsonata");
+    }
+    // The gauge is fed the bare number; the strings are the databar's job.
+    expect(rules[1].to).toBe(`payload.gauges.${which}`);
+    expect((pick?.wires as string[][])[0]).toEqual([`gauge-reach-${which}`]);
+  });
+
+  /**
+   * The strip under the gauges: the facts that identify what is being
+   * measured, in the words the Cellular tab already uses for them.
+   *
+   * Status says `SIGNAL` and `QUALITY` where the tab says RSRP and SINR — a
+   * glance and a detail view — but the facts are the same facts and are
+   * labelled the same way.
+   */
+  it("names what is being measured, under the gauges", () => {
+    const bar = byId("bar-reach");
+    expect(bar?.type).toBe("ui-yonder-databar");
+    expect(bar?.width).toBe(12);
+    const cells = JSON.parse(String(bar?.cells)) as { key: string; label: string }[];
+    expect(cells.map((c) => c.key)).toEqual(["operator", "technology", "address"]);
+    expect(cells.map((c) => c.label)).toEqual(["OPERATOR", "NETWORK", "ADDRESS"]);
+    // The strip is the panel's floor and stays on a board with no modem, so
+    // its order is below both gauges.
+    for (const id of ["gauge-reach-strength", "gauge-reach-quality"]) {
+      expect(Number(bar?.order)).toBeGreaterThan(Number(byId(id)?.order));
+    }
+  });
+
+  /**
+   * `Appearance` explained why two palettes exist — an argument that lands
+   * once, on a page an operator returns to. The `Day`/`Night` rail it was
+   * explaining stays, in a different group.
+   */
+  it("no longer explains itself, and still lets the operator choose", () => {
+    expect(flows.find((n) => n.id === "group-appearance")).toBeUndefined();
+    expect(flows.find((n) => n.id === "note-theme")).toBeUndefined();
+    const page = flows.find((n) => n.type === "ui-page" && n.name === "Status");
+    const groups = new Set(
+      flows.filter((n) => n.type === "ui-group" && n.page === page?.id).map((n) => n.id),
+    );
+    expect(flows.filter((n) => n.type === "ui-markdown" && groups.has(String(n.group))))
+      .toEqual([]);
+    // The rail the panel was about.
+    expect(flows.find((n) => n.id === "keys-status")?.group).toBe("group-rail-status");
+  });
+
+  // CLAUDE.md rule 2, on the page that gained the most wiring in this change.
+  it("ships no function node", () => {
+    expect(inPanel.some((n) => n.type === "function")).toBe(false);
+    for (const id of ["pick-reach-strength", "pick-reach-quality"]) {
+      expect(byId(id)?.type).toBe("change");
+    }
+  });
+});
+
+/**
+ * **`CHANGE PENDING` (R-UI-15).**
+ *
+ * The confirmation timer is what makes this device unbrickable (R-CFG-03).
+ * The apply engine has tracked the pending change and its deadline all along
+ * and the console drew it **only on the page the change was made on** — make
+ * a change on the Network page, walk to Status, and nothing said the
+ * configuration reverts in ninety seconds unless somebody confirms it.
+ *
+ * This is also what closed K-30: `yonder-confirm` had been registered and used
+ * by nothing since R-CFG-11 took away the wiring that called it.
+ */
+describe("flows/flows.json Change pending", () => {
+  const byId = (id: string) => flows.find((n) => n.id === id);
+  const inPanel = flows.filter((n) => n.group === "group-status-pending");
+  const wiresOf = (id: string) => (byId(id)?.wires ?? []) as string[][];
+
+  it("is the first panel on Status, above the board it is about to change", () => {
+    const group = byId("group-status-pending");
+    expect(group?.type).toBe("ui-group");
+    expect(group?.page).toBe("page-status");
+    expect(group?.name).toBe("Change pending");
+    expect(group?.width).toBe(12);
+    for (const other of ["group-board", "group-status-reach", "group-status-remote"]) {
+      expect(Number(group?.order)).toBeLessThan(Number(byId(other)?.order));
+    }
+  });
+
+  /**
+   * **Hidden in the shipped file, not merely at the first poll.**
+   *
+   * Dashboard reads a group with no `visible` as visible, and group
+   * visibility is server-side state that starts unset — so a console that had
+   * just started would draw an empty CHANGE PENDING panel until the first
+   * read said otherwise. A panel that is always there saying nothing is
+   * pending is noise on a page an operator glances at, and noise on that page
+   * is what makes the one time it matters invisible.
+   */
+  it("ships hidden, and is raised only while something is pending", () => {
+    expect(byId("group-status-pending")?.visible).toBe(false);
+
+    // The decision is a boolean the package computed. The flow routes it; it
+    // does not work it out (CLAUDE.md rule 2).
+    const gate = byId("route-pending-banner");
+    expect(gate?.type).toBe("switch");
+    expect(gate?.property).toBe("payload.pending");
+    expect((gate?.rules as { t: string }[]).map((r) => r.t)).toEqual(["true", "false"]);
+    expect(wiresOf("route-pending-banner"))
+      .toEqual([["show-pending-banner"], ["hide-pending-banner"]]);
+
+    // Two constants either side of it, never one conditional.
+    for (const [id, key] of [["show-pending-banner", "show"], ["hide-pending-banner", "hide"]]) {
+      const node = byId(id);
+      expect(node?.type).toBe("change");
+      const rules = node?.rules as { p: string; tot: string; to: string }[];
+      expect(rules).toHaveLength(1);
+      expect(rules[0].p).toBe("payload");
+      expect(rules[0].tot).toBe("json");
+      expect(JSON.parse(rules[0].to)).toEqual({ groups: { [key]: ["group-status-pending"] } });
+      expect(wiresOf(id)).toEqual([["control-pending"]]);
+    }
+    // Dashboard hides a *group* only through ui-control, which needs the base.
+    expect(byId("control-pending")?.type).toBe("ui-control");
+    expect(byId("control-pending")?.ui).toBe(flows.find((n) => n.type === "ui-base")?.id);
+  });
+
+  /**
+   * The countdown is text when it reaches the page. A clock ticking inside
+   * `flows.json` would be arithmetic in wiring — on the one number that
+   * decides whether an operator still has a device.
+   */
+  it("draws the time left as a lit caption, computed in the package", () => {
+    const poller = byId("poll-pending");
+    expect(poller?.type).toBe("yonder-pending");
+    expect(Number(poller?.interval) * 1000).toBeGreaterThanOrEqual(MIN_POLL_MS);
+    expect(wiresOf("poll-pending")[0]).toEqual([
+      "ann-pending", "text-pending-what", "text-pending-why",
+      "route-pending-banner", "route-pending-key",
+    ]);
+
+    const lamp = byId("ann-pending");
+    expect(lamp?.type).toBe("ui-yonder-annunciator");
+    expect(lamp?.group).toBe("group-status-pending");
+    // From the shared channel, with no label of its own, so the words are the
+    // ones `pendingChange()` wrote.
+    expect(lamp?.source).toBe("yonder");
+    expect(lamp?.label).toBe("");
+    expect(Number(lamp?.order)).toBe(1);
+    // The one annunciator on this console whose caption is a *reading* rather
+    // than a state word. Without saying so, the committed picture of this page
+    // would differ on every run by a second or two of countdown — which is the
+    // thing masking exists to stop.
+    expect(lamp?.className).toBe("yonder-live");
+  });
+
+  /**
+   * Both lines are sentences, so both are qualifiers. `.nrdb-ui-text-value`
+   * is `text-align: right` — the defect Task 8's capture found, on prose the
+   * console had put in a readout's slot.
+   */
+  it("says what is in force and what the revert is for, as prose", () => {
+    for (const [id, bound] of [["text-pending-what", "payload.what"], ["text-pending-why", "payload.why"]]) {
+      const line = byId(id);
+      expect(line?.type).toBe("ui-text");
+      expect(line?.group).toBe("group-status-pending");
+      expect(line?.value).toBe(bound);
+      expect(line?.valueType).toBe("msg");
+      expect(line?.wrapText).toBe(true);
+      expect(line?.className).toBe("yonder-qualifier");
+    }
+    expect(Number(byId("text-pending-what")?.order))
+      .toBeLessThan(Number(byId("text-pending-why")?.order));
+  });
+
+  /**
+   * **`CONFIRM` is the irreversible one, and `REVERT NOW` is not.**
+   *
+   * This is the opposite of what most interfaces do and it is deliberate.
+   * Confirming keeps a change nobody can take back automatically; reverting
+   * is the safe direction, and it is the thing that gets an operator back in.
+   */
+  it("marks confirming as the irreversible act, and reverting as the safe one", () => {
+    const keys = JSON.parse(String(byId("keys-pending")?.keys ?? "[]")) as
+      { label: string; action: string; tone: string }[];
+    expect(keys).toEqual([
+      { label: "CONFIRM", action: "confirm", tone: "warn" },
+      { label: "REVERT NOW", action: "revert", tone: "act" },
+    ]);
+    // R-UI-10: at most one control per page takes the irreversible tone, and
+    // Status's other rail is two palette keys.
+    const warnOnStatus = flows
+      .filter((n) => n.type === "ui-yonder-softkeys")
+      .filter((n) => String(n.group).includes("status") || n.group === "group-status-pending")
+      .flatMap((n) => JSON.parse(String(n.keys ?? "[]")) as { tone?: string }[])
+      .filter((k) => k.tone === "warn");
+    expect(warnOnStatus).toHaveLength(1);
+  });
+
+  /**
+   * A press is answered by a fresh read, so the id the two nodes act on is
+   * the one the device holds at that moment — never one a flow cached and may
+   * have watched expire. The key's own action rides on `msg.topic`, which the
+   * read does not overwrite.
+   */
+  it("reads the apply id at the moment the key is pressed, and caches none", () => {
+    expect(wiresOf("keys-pending")).toEqual([["tag-pending-key"]]);
+    const tag = byId("tag-pending-key");
+    expect(tag?.type).toBe("change");
+    expect(tag?.rules).toEqual([{ t: "set", p: "topic", pt: "msg", to: "payload", tot: "msg" }]);
+    expect(wiresOf("tag-pending-key")).toEqual([["poll-pending"]]);
+
+    const route = byId("route-pending-key");
+    expect(route?.type).toBe("switch");
+    expect(route?.property).toBe("topic");
+    expect((route?.rules as { v: string }[]).map((r) => r.v)).toEqual(["confirm", "revert"]);
+    expect(wiresOf("route-pending-key")).toEqual([["confirm-pending"], ["revert-pending"]]);
+
+    expect(byId("confirm-pending")?.type).toBe("yonder-confirm");
+    expect(byId("revert-pending")?.type).toBe("yonder-revert");
+    // Nothing here keeps state between one press and the next.
+    expect(JSON.stringify(inPanel)).not.toMatch(/"flow"|"global"/);
+  });
+
+  /**
+   * Whichever key was pressed, the operator is told what it did. Without
+   * this a confirm the daemon refused — "nothing is pending confirmation" —
+   * would be a key that did nothing and said nothing (R-UI-05).
+   */
+  it("says out loud what each key did", () => {
+    for (const id of ["confirm-pending", "revert-pending"]) {
+      expect(wiresOf(id)).toEqual([["say-pending"]]);
+    }
+    const say = byId("say-pending");
+    expect(say?.type).toBe("change");
+    expect((say?.rules as { to: string }[])[0].to).toBe("yonder.message");
+    expect(wiresOf("say-pending")[0]).toContain(flows.find((n) => n.type === "ui-notification")?.id);
+  });
+
+  // CLAUDE.md rule 2. The countdown is the thing most likely to be reached
+  // for with a function node, and it is in yonder-core.
+  it("ships no function node", () => {
+    const own = new Set([
+      "poll-pending", "tag-pending-key", "route-pending-key", "route-pending-banner",
+      "show-pending-banner", "hide-pending-banner", "control-pending",
+      "confirm-pending", "revert-pending", "say-pending",
+    ]);
+    for (const node of flows.filter((n) => own.has(n.id) || inPanel.includes(n))) {
+      expect(node.type, node.id).not.toBe("function");
     }
   });
 });

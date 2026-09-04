@@ -39,7 +39,7 @@ interface SeenModem {
  * counting need the second one, and ModemManager is the only thing that knows
  * it. See `pathDevices`, which is where the name is used.
  *
- * **Read now, every time (R-CEL-12).** Nothing here is remembered in order to
+ * **Read now, every time (R-CEL-13).** Nothing here is remembered in order to
  * skip a reading. The defect this class was extracted to fix was a name kept
  * for the life of the daemon: once a modem had been seen, an unplugged one
  * went on being reported as `wwan0` whatever ModemManager and NetworkManager
