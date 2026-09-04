@@ -101,6 +101,27 @@ describe("detectCameras", () => {
     expect(caps.stills.state).toBe("not-offered");
   });
 
+  /**
+   * R-CTL-05: `rotate` is a standard V4L2 control, but this bench camera's
+   * own `--list-ctrls-menus` output carries no such line — many UVC cameras
+   * do not implement it. Absence must read as `not-offered`, never as a
+   * silent fallback to rotating in the pipeline (video/controls.ts).
+   */
+  it("reports rotation not-offered on a camera that does not implement it", async () => {
+    const r = await bench();
+    expect(r.found[0].capabilities.rotation.state).toBe("not-offered");
+  });
+
+  it("fills rotation from `rotate`, with the device's reading, when it is implemented", async () => {
+    const withRotate = `${fixture("list-ctrls-menus-globalshutter.txt")}
+                         rotate 0x00980922 (int)    : min=0 max=270 step=90 default=0 value=90 flags=has-min-max`;
+    const r = await bench({ runner: benchRunner({ "--list-ctrls-menus": withRotate }) });
+    expect(r.found[0].capabilities.rotation).toEqual({
+      state: "present",
+      value: { min: 0, max: 270, step: 90, default: 0, current: 90 },
+    });
+  });
+
   it("rejects the board's own JPEG decoder, with the reason", async () => {
     // K-40: /dev/video10 advertises MJPEG, cannot be started, and looks like a
     // camera to everything that asks. An operator who is not told why it

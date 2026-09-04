@@ -100,6 +100,14 @@ export interface CameraCapabilities {
   readonly whiteBalance: Capability<ControlRange>;
   readonly brightness: Capability<ControlRange>;
   readonly contrast: Capability<ControlRange>;
+  /**
+   * V4L2's `rotate` control, in degrees (R-CTL-05). **Not every UVC camera
+   * implements it** — probed like any other control rather than assumed, so
+   * a camera that lacks it reports `not-offered` instead of the page falling
+   * back to rotating the pipeline, which would be a stream control wearing
+   * an image control's clothes (see `video/controls.ts`).
+   */
+  readonly rotation: Capability<ControlRange>;
   readonly aim: Capability<AimCapability>;
   readonly recording: Capability<RecordingCapability>;
   readonly stills: Capability<StillsCapability>;
@@ -111,7 +119,7 @@ export interface CameraCapabilities {
  */
 export const CAPABILITY_KEYS = [
   "formats", "zoom", "focus", "exposure", "whiteBalance",
-  "brightness", "contrast", "aim", "recording", "stills",
+  "brightness", "contrast", "rotation", "aim", "recording", "stills",
 ] as const satisfies readonly (keyof CameraCapabilities)[];
 
 /** A camera with nothing answered. The base every probe builds on. */
@@ -119,7 +127,7 @@ export function noCapabilities(): CameraCapabilities {
   return {
     formats: notOffered(), zoom: notOffered(), focus: notOffered(),
     exposure: notOffered(), whiteBalance: notOffered(), brightness: notOffered(),
-    contrast: notOffered(), aim: notOffered(), recording: notOffered(),
+    contrast: notOffered(), rotation: notOffered(), aim: notOffered(), recording: notOffered(),
     stills: notOffered(),
   };
 }

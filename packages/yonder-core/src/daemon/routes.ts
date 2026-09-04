@@ -21,6 +21,7 @@ import { ZEROTIER_NETWORK_ID, type Camera } from "../schema/config.js";
 import type { RemoteState } from "../remote/state.js";
 import { compose, refuse } from "../video/pipeline.js";
 import { noCapabilities, summarise, type CameraCapabilities } from "../video/capability.js";
+import { CONTROL_NAMES, type ApplyControlsOptions, type ApplyControlsResult } from "../video/controls.js";
 import { renderReceive, type Rendering } from "../video/receive.js";
 import type { CameraRun, Supervisor } from "../video/supervisor.js";
 import type { Detection, DetectResult, Rejection } from "../video/probe/camera.js";
@@ -96,6 +97,15 @@ export interface RouterDeps {
   cameras?: CameraProbes;
   /** Which encoder this board actually has (R-CAM-13). Injected, like `cameras`. */
   encoder?: () => Promise<Encoder>;
+  /**
+   * Writes image controls to a camera's device node and reads them back
+   * (R-CTL-04, R-CTL-05, R-CTL-10). Injected, like `cameras` and `encoder`:
+   * with a default, a test that merely exercised this route would run a real
+   * `v4l2-ctl`. Absent means this daemon cannot change a camera's controls,
+   * not that the device has none to offer — `POST …/controls` says so rather
+   * than pretending the write happened.
+   */
+  applyControls?: (opts: ApplyControlsOptions) => Promise<ApplyControlsResult>;
   /**
    * The one supervisor this process owns.
    *
@@ -225,6 +235,40 @@ function sinceParam(query: string): number {
 }
 
 /**
+ * `POST /cameras/:id/controls`'s body, off the wire and rejected before it
+ * reaches `applyControls` if it names nothing this route understands.
+ *
+ * A key naming anything but `brightness`, `contrast` or `rotation` is
+ * ignored rather than refused — the same tolerance `submittedPassword` shows
+ * an extra field. `null` is the schema's own "leave it" for a nullable image
+ * control, so it is dropped rather than treated as a value; what is refused
+ * is a value that is neither a number nor absent, and a body that — once
+ * nulls and absent keys are set aside — names nothing left to change, which
+ * is indistinguishable from a caller that meant to ask for something and did
+ * not.
+ *
+ * Deliberately not a bound on the *number* — the schema's own bound is
+ * `-100..100` and a real device's is usually narrower still. Neither belongs
+ * here: `applyControls` clamps to what `capabilities` reports (rule 1), which
+ * this function has no access to and must not guess at.
+ */
+function requestedControls(body: unknown): Partial<Camera["controls"]> | null {
+  if (body === null || typeof body !== "object" || Array.isArray(body)) return null;
+  const out: Partial<Record<keyof Camera["controls"], number>> = {};
+  for (const control of Object.keys(CONTROL_NAMES) as (keyof Camera["controls"])[]) {
+    const value = (body as Record<string, unknown>)[control];
+    if (value === undefined || value === null) continue;
+    if (typeof value !== "number" || !Number.isFinite(value)) return null;
+    out[control] = value;
+  }
+  // The cast is the one place a plain number crosses into the schema's own,
+  // narrower shape (`rotation` is a literal union there, not `number`);
+  // `applyControls` reads every field as a number regardless of which
+  // control it names, so nothing downstream relies on the narrower type.
+  return Object.keys(out).length === 0 ? null : (out as Partial<Camera["controls"]>);
+}
+
+/**
  * The camera id comes off a URL, so it is matched against the same pattern the
  * schema allows rather than trusted. It reaches `compose()` and becomes a
  * media path and a file path; this is the one place a traversal could get in.
@@ -238,7 +282,7 @@ function sinceParam(query: string): number {
 const CAMERA_ID = /^[a-z0-9][a-z0-9-]{0,31}$/;
 
 /**
- * `/cameras/<id>` and its three suffixes.
+ * `/cameras/<id>` and its four suffixes.
  *
  * Deliberately permissive about the id — `.+?` rather than the pattern above —
  * so that a traversal is refused by `CAMERA_ID` with a 404 that means "no such
@@ -246,7 +290,7 @@ const CAMERA_ID = /^[a-z0-9][a-z0-9-]{0,31}$/;
  * matching at all. The difference is not cosmetic: a guard nothing can reach
  * is a guard no test can prove.
  */
-const CAMERA_ROUTE = /^\/cameras\/(.+?)(?:\/(run|probe|receive-line))?$/;
+const CAMERA_ROUTE = /^\/cameras\/(.+?)(?:\/(run|probe|receive-line|controls))?$/;
 
 /**
  * Where a pipeline publishes: mediamtx, on loopback.
@@ -429,6 +473,67 @@ export function createRouter(deps: RouterDeps): Router {
         rtspBase: RTSP_BASE,
       }));
       return { status: 200, body: supervisor.state(id) };
+    }
+
+    /**
+     * R-CTL-04, R-CTL-05: image controls reach the device directly, never
+     * through config.yaml. A camera's *stored* controls still change only
+     * through `yonder-apply` (`apply/reachability.ts` exempts them from the
+     * confirmation window, on the grounds that none of them changes what
+     * leaves the aircraft) — this route is the other half, the one that was
+     * missing entirely: without it a stored value was committed and never
+     * reached the sensor.
+     *
+     * Runtime only, like `run` above and for the same reason: an operator
+     * moving a slider needs the picture to answer now, not after a
+     * confirmation window.
+     */
+    if (method === "POST" && verb === "controls") {
+      const apply = deps.applyControls;
+      if (apply === undefined) return noCameraLayer(`${method} /cameras/${id}/controls`, say);
+
+      const requested = requestedControls(body);
+      if (requested === null) {
+        return {
+          status: 400,
+          body: {
+            error: "name at least one of brightness, contrast or rotation, "
+              + "each a finite number (null leaves it alone)",
+          },
+        };
+      }
+
+      // Through the same view the page reads, so what the page shows before
+      // a control is moved and what this route resolves cannot disagree.
+      // `view(false)` rather than a re-probe: `run`'s refusal check above
+      // takes the same sweep-freshness trade-off, and re-probing twice more
+      // in this one request — once here and once for the read-back below —
+      // would be three device round trips for one slider.
+      const found = await view(false);
+      if (found.device === null || found.card === null || found.capabilities === null) {
+        return {
+          status: 400,
+          body: { error: "this camera's device could not be resolved; re-probe it and try again" },
+        };
+      }
+
+      const { applied, refused, clamped } = await apply({
+        node: found.device,
+        controls: requested,
+        capabilities: found.capabilities,
+      });
+
+      // R-CTL-10: the whole device, read again — not the pre-write snapshot
+      // patched in memory with what `applied` says. A page showing three
+      // controls must not show two fresh values and one this request
+      // happened to leave alone; a rejection here (the device went away
+      // between the write and this read) is `current: null`, the same
+      // honest "no reading" `view()` reports elsewhere rather than a stale
+      // number dressed as a fresh one.
+      const after = await probes.probe(found.device, found.card);
+      const current = "capabilities" in after ? after.capabilities : null;
+
+      return { status: 200, body: { applied, refused, clamped, current } };
     }
 
     // The credential leaves the daemon on exactly one route. Everything else

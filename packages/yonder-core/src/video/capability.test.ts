@@ -9,7 +9,7 @@ const FIXED: CameraCapabilities = {
   formats: present([{ fourcc: "MJPG", width: 1280, height: 720, rates: [30] }]),
   zoom: notOffered(), focus: notOffered(), exposure: notOffered(),
   whiteBalance: notOffered(), brightness: notOffered(), contrast: notOffered(),
-  aim: notOffered(), recording: notOffered(), stills: notOffered(),
+  rotation: notOffered(), aim: notOffered(), recording: notOffered(), stills: notOffered(),
 };
 
 describe("the three states", () => {
@@ -39,7 +39,7 @@ describe("summarise", () => {
   it("reads as facts, not as a list of blanks", () => {
     expect(summarise(FIXED)).toBe(
       "formats: 1 · zoom: none · focus: none · exposure: none · whiteBalance: none · " +
-      "brightness: none · contrast: none · aim: none · recording: none · stills: none",
+      "brightness: none · contrast: none · rotation: none · aim: none · recording: none · stills: none",
     );
   });
 

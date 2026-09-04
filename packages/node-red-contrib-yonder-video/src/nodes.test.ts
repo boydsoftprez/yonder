@@ -100,6 +100,38 @@ describe("yonder-camera", () => {
     expect(asked).toEqual([{ method: "POST", path: "/cameras/cam0/probe" }]);
   });
 
+  /**
+   * R-CTL-04, R-CTL-05: the one topic that writes anything, and even this one
+   * writes nothing to config.yaml — it is `POST /cameras/:id/controls`, the
+   * live route, never `yonder-apply`. `msg.topic` must say so explicitly: a
+   * plain input carrying a payload stays a read (the test above), so a flow
+   * cannot change a camera's controls by accident.
+   */
+  it("posts a control change for the camera the message names", async () => {
+    replies.push(ok({
+      applied: { brightness: 64 },
+      refused: [],
+      clamped: [{ control: "brightness", requested: 100, sent: 64 }],
+      current: { brightness: { state: "present", value: { current: 64 } } },
+    }));
+    const msg = await send(cameraNode, "yonder-camera", {
+      topic: "controls", payload: { brightness: 100 }, camera: "cam0",
+    });
+    expect(asked).toEqual([
+      { method: "POST", path: "/cameras/cam0/controls", body: { brightness: 100 } },
+    ]);
+    expect((msg.payload as { applied: Record<string, number> }).applied).toEqual({ brightness: 64 });
+  });
+
+  it("refuses a controls message whose payload is not an object, and calls nothing", async () => {
+    for (const payload of ["bright", 100, null, undefined, [1, 2]]) {
+      const msg = await send(cameraNode, "yonder-camera", { topic: "controls", payload, camera: "cam0" });
+      expect(msg.yonder?.state, JSON.stringify(payload)).toBe("rejected");
+      await helper.unload();
+    }
+    expect(asked).toEqual([]);
+  });
+
   it("takes the camera from the node when the message names none", async () => {
     replies.push(ok({ camera: { id: "nose" }, run: { state: "stopped" } }));
     const flow = [

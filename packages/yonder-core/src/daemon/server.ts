@@ -24,6 +24,7 @@ import { MediaRenderer, MEDIA_CONFIG_PATH } from "../media/renderer.js";
 import { Supervisor, systemSpawner } from "../video/supervisor.js";
 import { detectCameras, probeCamera } from "../video/probe/camera.js";
 import { probeEncoder } from "../video/probe/encoder.js";
+import { applyControls } from "../video/controls.js";
 import { readSupply } from "../system/supply.js";
 import { ZeroTierCli } from "../remote/zerotier/cli.js";
 import { readTraffic } from "../remote/traffic.js";
@@ -561,6 +562,10 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
         probe: (node, card) => probeCamera(node, card, { runner: probeRunner }),
       },
       encoder: () => probeEncoder({ runner: probeRunner }),
+      // Over the same runner as everything else in this block, for the same
+      // reason: a test that injects a fake runner must get a fake v4l2-ctl
+      // for POST …/controls too, not a real one by omission.
+      applyControls: (opts) => applyControls({ ...opts, runner: probeRunner }),
       // One supervisor, for the process's lifetime. See buildRenderers.
       supervisor: built.supervisor,
       // The one value this router can reach in the secret store, and the one

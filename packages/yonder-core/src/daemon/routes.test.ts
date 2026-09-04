@@ -13,6 +13,7 @@ import { SecretStore } from "../secrets/store.js";
 import { ConfigSchema, DEFAULT_CONFIG, type Camera, type Config } from "../schema/config.js";
 import { Supervisor } from "../video/supervisor.js";
 import { noCapabilities, present, type CameraCapabilities, type VideoFormat } from "../video/capability.js";
+import type { ApplyControlsOptions, ApplyControlsResult } from "../video/controls.js";
 import type { DetectResult, Detection, Rejection } from "../video/probe/camera.js";
 import type { Encoder } from "../video/probe/encoder.js";
 import type { SupplyState } from "../system/supply.js";
@@ -45,6 +46,7 @@ beforeEach(() => {
   saveConfig(configPath, DEFAULT_CONFIG);
   spawned = [];
   probed = [];
+  controlsCalls = [];
 });
 afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
 
@@ -166,6 +168,8 @@ function cameraConfig(overrides: Partial<Camera> = {}): Config {
 /** Every pipeline the supervisor was asked to spawn, and every re-probe made. */
 let spawned: string[][] = [];
 let probed: { node: string; card: string }[] = [];
+/** Every call the controls route made to `applyControls`. */
+let controlsCalls: ApplyControlsOptions[] = [];
 
 interface RouterOptions {
   credential?: AdminCredential | undefined;
@@ -193,6 +197,8 @@ interface RouterOptions {
   reprobed?: Detection | Rejection;
   /** The supply register (R-SYS-09). Absent means this board does not expose it. */
   supply?: () => Promise<SupplyState | null>;
+  /** What the fake `applyControls` answers. Defaults to nothing applied and nothing refused. */
+  controlsResult?: ApplyControlsResult;
 }
 
 function router(opts: RouterOptions = {}): Router {
@@ -244,6 +250,13 @@ function router(opts: RouterOptions = {}): Router {
       supervisor,
       rtspPassword: () => RTSP_PASSWORD,
       addresses: () => Promise.resolve(ADDRESSES),
+      // Given, never a real applyControls — exactly as `cameras` and
+      // `encoder` are given rather than defaulted: with a default, any test
+      // that reached this route would run a real v4l2-ctl.
+      applyControls: (o: ApplyControlsOptions) => {
+        controlsCalls.push(o);
+        return Promise.resolve(opts.controlsResult ?? { applied: {}, refused: [], clamped: [] });
+      },
     }),
   });
 }
@@ -1083,7 +1096,9 @@ describe("the camera routes", () => {
     expect((await r("GET", "/cameras/cam0", undefined)).status).toBe(403);
     expect((await r("POST", "/cameras/cam0/run", { action: "start" })).status).toBe(403);
     expect((await r("GET", "/cameras/cam0/receive-line", undefined)).status).toBe(403);
+    expect((await r("POST", "/cameras/cam0/controls", { brightness: 10 })).status).toBe(403);
     expect(spawned).toEqual([]);
+    expect(controlsCalls).toEqual([]);
   });
 
   it("lists what was found and what was rejected, with reasons", async () => {
@@ -1262,6 +1277,7 @@ describe("the camera routes", () => {
     expect((await r("GET", "/cameras/cam9", undefined)).status).toBe(404);
     expect((await r("POST", "/cameras/cam9/run", { action: "start" })).status).toBe(404);
     expect((await r("GET", "/cameras/cam9/receive-line", undefined)).status).toBe(404);
+    expect((await r("POST", "/cameras/cam9/controls", { brightness: 10 })).status).toBe(404);
   });
 
   it("refuses a run request that names neither start nor stop", async () => {
@@ -1293,6 +1309,7 @@ describe("the camera routes", () => {
       ["POST", "/cameras/cam0/probe", undefined],
       ["POST", "/cameras/cam0/run", { action: "start" }],
       ["POST", "/cameras/cam0/run", { action: "stop" }],
+      ["POST", "/cameras/cam0/controls", { brightness: 10 }],
       ["GET", "/config", undefined],
       ["GET", "/system", undefined],
     ] as [string, string, unknown][]) {
@@ -1338,6 +1355,110 @@ describe("the camera routes", () => {
     expect((await r("GET", "/cameras/cam0", undefined)).status).toBe(503);
     expect((await r("POST", "/cameras/cam0/run", { action: "start" })).status).toBe(503);
     expect((await r("GET", "/cameras/cam0/receive-line", undefined)).status).toBe(503);
+    expect((await r("POST", "/cameras/cam0/controls", { brightness: 10 })).status).toBe(503);
+  });
+});
+
+/**
+ * R-CTL-04, R-CTL-05, R-CTL-10: the route that actually reaches the camera.
+ *
+ * `config.cameras[].controls` was, before this route existed, stored and
+ * never applied — `apply/reachability.ts` exempts it from the confirmation
+ * window and nothing carried it any further. These tests are about what this
+ * route does with a request, not about `v4l2-ctl` itself: clamping, refusal
+ * wording and the read-back are `controls.test.ts`'s job. `applyControls` is
+ * given here exactly as `cameras` and `encoder` are — a test that reached
+ * this route with no camera layer configured must not be able to run a real
+ * `v4l2-ctl` by omission.
+ */
+describe("POST /cameras/:id/controls", () => {
+  it("resolves the camera to its device node and hands the request to applyControls", async () => {
+    const r = provisioned({
+      cameras: fixtureDetection(),
+      controlsResult: {
+        applied: { brightness: 64 },
+        refused: [],
+        clamped: [{ control: "brightness", requested: 100, sent: 64 }],
+      },
+    });
+    const out = await r("POST", "/cameras/cam0/controls", { brightness: 100 });
+    expect(out.status).toBe(200);
+    expect(controlsCalls).toHaveLength(1);
+    // The resolved /dev node, never the by-path name — that is what
+    // v4l2-ctl accepts (probe/bypath.ts resolves the other direction).
+    expect(controlsCalls[0].node).toBe("/dev/video0");
+    expect(controlsCalls[0].controls).toEqual({ brightness: 100 });
+    expect(controlsCalls[0].capabilities).toEqual(fixtureCapabilities());
+    const body = out.body as { applied: Record<string, number>; refused: unknown[] };
+    expect(body.applied).toEqual({ brightness: 64 });
+    expect(body.refused).toEqual([]);
+  });
+
+  /**
+   * R-CTL-10, and the reason this route re-probes rather than answering with
+   * the snapshot it already had: a page showing three controls must not show
+   * two fresh values and one the operator's last request happened to leave
+   * alone.
+   */
+  it("answers with a fresh read-back of the whole device, not the pre-write snapshot", async () => {
+    const detection = fixtureDetection();
+    const reprobed: Detection = {
+      ...detection.found[0],
+      capabilities: {
+        ...fixtureCapabilities(),
+        brightness: present({ min: 0, max: 255, step: 1, default: 128, current: 64 }),
+      },
+    };
+    const r = provisioned({
+      cameras: detection,
+      reprobed,
+      controlsResult: { applied: { brightness: 64 }, refused: [], clamped: [] },
+    });
+    const out = await r("POST", "/cameras/cam0/controls", { brightness: 64 });
+    expect(probed).toEqual([{ node: "/dev/video0", card: "Global Shutter Camera: Global S" }]);
+    const body = out.body as { current: CameraCapabilities };
+    expect((body.current.brightness as { value: { current: number } }).value.current).toBe(64);
+  });
+
+  it("passes a refusal straight through, unmodified", async () => {
+    const r = provisioned({
+      cameras: fixtureDetection(),
+      controlsResult: {
+        applied: {},
+        refused: [{ control: "rotation", reason: "this camera does not offer rotation" }],
+        clamped: [],
+      },
+    });
+    const out = await r("POST", "/cameras/cam0/controls", { rotation: 90 });
+    expect(out.status).toBe(200);
+    const body = out.body as { refused: { control: string; reason: string }[] };
+    expect(body.refused).toEqual([{ control: "rotation", reason: "this camera does not offer rotation" }]);
+  });
+
+  it("refuses a body naming no recognised control, before calling applyControls", async () => {
+    const r = provisioned({ cameras: fixtureDetection() });
+    for (const bad of [{}, { zoom: 5 }, undefined, "brighter"]) {
+      expect((await r("POST", "/cameras/cam0/controls", bad)).status, JSON.stringify(bad)).toBe(400);
+    }
+    expect(controlsCalls).toEqual([]);
+  });
+
+  it("refuses a control value that is not a finite number, before calling applyControls", async () => {
+    const r = provisioned({ cameras: fixtureDetection() });
+    for (const bad of [{ brightness: "bright" }, { brightness: null }, { brightness: NaN }, { contrast: [1] }]) {
+      expect((await r("POST", "/cameras/cam0/controls", bad)).status, JSON.stringify(bad)).toBe(400);
+    }
+    expect(controlsCalls).toEqual([]);
+  });
+
+  it("refuses a camera whose device cannot currently be resolved, before calling applyControls", async () => {
+    const r = provisioned({
+      cameras: fixtureDetection(),
+      camera: { device: "some-other-socket" },
+    });
+    const out = await r("POST", "/cameras/cam0/controls", { brightness: 10 });
+    expect(out.status).toBe(400);
+    expect(controlsCalls).toEqual([]);
   });
 });
 

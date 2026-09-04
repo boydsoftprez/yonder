@@ -85,10 +85,25 @@ const COMPRESSED = new Set(["MJPG", "JPEG", "H264", "HEVC"]);
 const resolveNames = (opts: ProbeOptions): ReadonlyMap<string, string> =>
   byPathNames(opts.byPath?.() ?? systemByPath());
 
-/** V4L2 control names this page draws, mapped to the capability they fill. */
-const CONTROL_MAP = [
+/**
+ * V4L2 control names this page draws, mapped to the capability they fill.
+ *
+ * **Exported so `video/controls.ts` can be checked against it.** That file
+ * writes these same three image controls back to the device, under its own
+ * `CONTROL_NAMES`; the two are maintained by hand rather than one deriving
+ * the other, so a test cross-checks them — a control probed under one name
+ * and set under another is a silent split that would otherwise surface only
+ * as a page whose value never moves.
+ *
+ * `rotate` is here despite most UVC cameras not implementing it, for the
+ * same reason `zoom_absolute` and the rest are: absence is what
+ * `noCapabilities()` already means, so an unmatched name simply stays
+ * `not-offered` rather than needing a special case (R-CTL-05).
+ */
+export const CONTROL_MAP = [
   ["brightness", "brightness"],
   ["contrast", "contrast"],
+  ["rotate", "rotation"],
   ["zoom_absolute", "zoom"],
   ["focus_absolute", "focus"],
   ["exposure_time_absolute", "exposure"],
