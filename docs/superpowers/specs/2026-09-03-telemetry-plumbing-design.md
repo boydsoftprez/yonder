@@ -220,12 +220,20 @@ typed a port number.
 A ground-station address touches no interface, no route and no radio. It cannot take the
 console away from anyone.
 
-**Decision: `mavlink` is exempt from the confirmation window, by name.**
+**Decision: the telemetry fields that cannot cost reachability are exempt from the
+confirmation window — named one leaf at a time.**
 
-`affectsReachability` names `remote.zerotier` today and nothing else. It gains `mavlink`,
-by name and not by category, because `R-CFG-12` is explicit that everything is treated as
-reachable until proven otherwise and a field nobody has considered is load-bearing by
-default. Adding a section is a decision; adding a pattern would be an accident waiting.
+`affectsReachability` names leaves, never subtrees, and `reachability.ts` is explicit about
+why: deleting `remote.zerotier` whole would hand the exemption to every field added under it
+later, with nobody deciding it should have one. Its own worked example is `allow_default`,
+the one ZeroTier setting that *can* replace the default route — which would have shipped
+kept, with no window and no rollback timer, under a subtree exemption.
+
+So the exempt set gains **`mavlink.endpoints`, `mavlink.autocast`, `mavlink.tcp_server.enabled`
+and `mavlink.tcp_server.port`**, individually. **`mavlink.serial` and `mavlink.ingest` are
+deliberately left load-bearing**: the first moves which wire the router opens, and the second
+opens an unauthenticated command path to the vehicle (`R-MAV-07`). Neither has been shown to
+be safe to keep, and `R-CFG-12` treats what has not been shown to be safe as load-bearing.
 
 **The console still warns before it acts.** Applying an endpoint change restarts the router,
 which interrupts the ground stations already receiving for as long as that takes. The page
@@ -280,12 +288,14 @@ that implements them. The R-MAV block currently ends at R-MAV-12.
 |---|---|---|
 | R-MAV-13 | **When no flight controller is found, say which kind of nothing it is.** A sweep that ends without a link distinguishes three outcomes and reports the one it reached: nothing transmitting on the wire at any speed, which is also what a swapped or missing pair looks like and is reported with the pins to check; bytes arriving at every speed that never form a valid frame, which rules the wiring out and points at the autopilot's own protocol and baud settings; or a link. Detection continues on a cadence rather than giving up, because a board is routinely powered before the aircraft it is wired to, and the interface says how long it has been looking and when it will look again. **The port and speed a probe found are never written to the configuration** — they are remembered as a hint that is tried first and discarded when it fails, so replacing a flight controller heals on the next boot rather than needing a file edited (the reasoning R-CAM-06 was withdrawn for, applied to a serial port) | 1 |
 
-**`R-CFG-12` gains a second exemption rather than a new ID.** Its text is extended the way
-`R-VPN-07` extended it for a mesh join: `mavlink` is named in the exempt set, on the
-grounds that a ground-station endpoint touches no interface, no route and no radio, and that
-the failure the timer prevents — a device that cannot be reached — has no path to occur.
-Recorded with the reason, because the requirement is explicit that an exemption is earned
-individually and that anything unconsidered is load-bearing by default.
+**`R-CFG-12` gains further exemptions rather than a new ID.** Its text is extended the way
+`R-VPN-07` extended it for a mesh join, and to the same standard: four leaves are named —
+`mavlink.endpoints`, `mavlink.autocast`, `mavlink.tcp_server.enabled` and
+`mavlink.tcp_server.port` — on the grounds that none of them touches an interface, a route or
+a radio, and that the window's own remedy is to revert *and reboot*, which would take the
+video, the telemetry and the mesh off a flying aircraft in exchange for protecting nothing.
+`mavlink.serial` and `mavlink.ingest` are named as deliberately *not* exempt, so that a later
+reader knows they were considered rather than missed.
 
 **No new ADR.** ADR-0001 already settles that this logic lives in node packages; the
 architecture document already names `mavlink-router` and the loopback copy. Nothing here

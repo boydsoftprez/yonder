@@ -1,0 +1,1467 @@
+# M5a — Telemetry Plumbing Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Find the flight controller on a serial port, fan its MAVLink out to ground stations without the control plane in the path, and report honestly whether the link is alive — reading nothing but heartbeats.
+
+**Architecture:** `mavlink-router` runs as its own systemd service and owns the serial port, so a Node-RED restart is invisible to Mission Planner (`R-MAV-06`). `yonder-core` detects the port and speed *before* the router starts, generates the router's configuration from `config.yaml`, and consumes a loopback copy on `:14559`. Everything decided lives in pure modules in `yonder-core/src/mav/`; the console reaches them over the existing daemon socket and holds no privilege of its own.
+
+**Tech Stack:** TypeScript (ESM, Node ≥22.12), Zod for the schema, Vitest, Node-RED 5 + Dashboard 2.x, `mavlink-router` (Meson/C++), systemd, `nmcli`-style injected `CommandRunner`.
+
+**Spec:** [`2026-09-03-telemetry-plumbing-design.md`](../specs/2026-09-03-telemetry-plumbing-design.md). Section references below (§1…§10) are to that document.
+
+## Global Constraints
+
+- **Logic never goes in a Node-RED `function` node.** Behaviour lives in `packages/node-red-contrib-yonder-*`, presentation in `node-red-dashboard-2-yonder`. `flows/flows.json` is wiring only, and a test asserts the artefact contains no `function` node. (CLAUDE.md rule 2, ADR-0001)
+- **Every change traces to a requirement ID.** Where a behaviour has no requirement, the requirement is added to `docs/requirements.md` **in the same commit**. IDs are stable — never reuse, never renumber. (CLAUDE.md rule 3)
+- **Commits and tags are GPG-signed.** Never `--no-gpg-sign`; if signing fails, fix signing. (CLAUDE.md rule 5)
+- **Nothing shells out except a renderer**, and only through the injected `CommandRunner` from `packages/yonder-core/src/net/runner.ts`. No test may execute `mavlink-router` or open a real serial port. (ADR-0006)
+- **No test waits on the wall clock.** Take the injected `Clock` from `packages/yonder-core/src/apply/types.ts`. (established across `net/`, `remote/`)
+- **One declarative file is the only writer.** `/etc/mavlink-router/main.conf` is generated from `config.yaml` on every apply and never hand-edited.
+- **Nothing may make the device unreachable.** Any change touching networking or configuration works *with* the rollback engine and the access-point fallback, never around it. (CLAUDE.md rule 6, `R-NET-07`, `R-CFG-03`)
+- **The repository is self-contained.** No reference to paths, repositories or products outside it. (CLAUDE.md rule 1)
+- **Node packages are unscoped**, named `node-red-contrib-yonder-*`.
+- **Every file starts with** `// SPDX-License-Identifier: GPL-3.0-or-later`.
+- **Baud rates, in sweep order:** `57600, 115200, 230400, 921600` — slowest first, so a slow link is found rather than a fast one guessed at.
+- **Default ports:** ground stations `14550 / 14551 / 14552`, TCP server `5760`, loopback copy `127.0.0.1:14559`.
+- **Retry cadence when nothing is found:** 30 seconds (§3).
+- **Run tests with** `npx vitest run --root packages/<pkg>`. This worktree has no `node_modules`; symlink the main checkout's once at the start: `ln -sfn /Users/j.j.boyd/OpenUAS/node_modules node_modules` — and **remove it before committing** (`rm -f node_modules`).
+
+---
+
+## File Structure
+
+| File | Responsibility |
+|---|---|
+| `packages/yonder-core/src/schema/config.ts` | *(modify)* the `mavlink` section |
+| `packages/yonder-core/src/apply/reachability.ts` | *(modify)* the `R-CFG-12` exemption, leaf by leaf |
+| `packages/yonder-core/src/mav/frame.ts` | Pure. Bytes → heartbeats. Not a MAVLink library and must not become one |
+| `packages/yonder-core/src/mav/detect.ts` | Pure over an injected port. The sweep, and its three outcomes |
+| `packages/yonder-core/src/mav/hint.ts` | The remembered port and speed. State, never configuration |
+| `packages/yonder-core/src/mav/router/config.ts` | Pure. `Config` + a detected link → `mavlink-router`'s ini |
+| `packages/yonder-core/src/mav/link.ts` | Pure. Heartbeats and counters → the one state the console renders |
+| `packages/yonder-core/src/mav/renderer.ts` | `MavlinkRenderer implements Renderer`. The only thing here that shells out |
+| `packages/yonder-core/src/mav/listener.ts` | The loopback UDP socket on `:14559`, feeding `link.ts` |
+| `packages/yonder-core/src/daemon/routes.ts` | *(modify)* `/mav/*` routes |
+| `packages/node-red-contrib-yonder-mavlink/` | Nodes: thin adapters over the daemon socket |
+| `packages/node-red-dashboard-2-yonder/src/flow.*` | The Status page's flow strip, as a component |
+| `flows/flows.json` | *(modify)* wiring only: the Telemetry page |
+| `installer/roles/` | The UART role, and the `mavlink-router` payload role |
+| `docs/requirements.md` | *(modify)* `R-MAV-13`; `R-CFG-12` extended |
+
+---
+
+## Task 1: Bench — does the kernel report framing errors on this port?
+
+§10.1. **Do this first: it can change what `R-MAV-13` says**, and Task 5 is written against its answer.
+
+**Files:**
+- Create: `docs/hardware/an-autopilot-on-the-uart.md`
+- Modify: `installer/roles/` — nothing yet; this task only measures
+
+**Interfaces:**
+- Consumes: nothing
+- Produces: a recorded answer to "can we tell malformed bytes from no bytes", which Task 5's `DetectOutcome` union depends on
+
+- [ ] **Step 1: Free the UART on the board**
+
+On the development board (`ssh yonder@10.0.252.246`), by hand — the installer role is Task 14:
+
+```bash
+sudo cp /boot/firmware/config.txt /boot/firmware/config.txt.before-uart
+printf '\n# bench: autopilot on pins 8/10\nenable_uart=1\ndtoverlay=disable-bt\n' | sudo tee -a /boot/firmware/config.txt
+sudo sed -i 's/console=serial0,115200 //' /boot/firmware/cmdline.txt
+sudo systemctl disable --now serial-getty@ttyAMA0.service hciuart.service
+sudo reboot
+```
+
+- [ ] **Step 2: Wire the autopilot and confirm bytes arrive at all**
+
+Pin 6 → GND, pin 8 → autopilot **RX**, pin 10 → autopilot **TX**. Then:
+
+```bash
+stty -F /dev/ttyAMA0 57600 raw -echo && timeout 5 xxd -l 256 /dev/ttyAMA0
+```
+
+Expected: bytes beginning `fd` (MAVLink v2) or `fe` (v1). If nothing, the wire is wrong — that is itself the first row of §3's table and worth recording.
+
+- [ ] **Step 3: Read the framing-error counter at a deliberately wrong speed**
+
+This is the measurement the whole task exists for. Save as `/tmp/icount.c` on the board:
+
+```c
+#include <stdio.h>
+#include <fcntl.h>
+#include <sys/ioctl.h>
+#include <linux/serial.h>
+#include <unistd.h>
+int main(int argc, char **argv) {
+  int fd = open(argv[1], O_RDONLY | O_NOCTTY);
+  struct serial_icounter_struct c;
+  if (ioctl(fd, TIOCGICOUNT, &c) < 0) { perror("TIOCGICOUNT"); return 1; }
+  printf("rx=%d frame=%d parity=%d overrun=%d brk=%d\n",
+         c.rx, c.frame, c.parity, c.overrun, c.brk);
+  return 0;
+}
+```
+
+```bash
+cc -o /tmp/icount /tmp/icount.c
+stty -F /dev/ttyAMA0 921600 raw -echo   # deliberately wrong
+timeout 3 cat /dev/ttyAMA0 > /dev/null; /tmp/icount /dev/ttyAMA0
+stty -F /dev/ttyAMA0 57600 raw -echo    # correct
+timeout 3 cat /dev/ttyAMA0 > /dev/null; /tmp/icount /dev/ttyAMA0
+```
+
+Expected if the assumption holds: `frame` climbs sharply at the wrong speed and barely moves at the right one, while `rx` climbs at both.
+
+- [ ] **Step 4: Record what actually happened**
+
+Write `docs/hardware/an-autopilot-on-the-uart.md` in the voice of `docs/hardware/usb-camera-on-a-pi-4.md`: a table of what was observed with the date and the board, then what it means for the design. It must answer, in one sentence each:
+
+1. Does `TIOCGICOUNT` report a rising `frame` count at a wrong speed? (**yes** → §3's three outcomes stand as written)
+2. If not, does `rx` climb at a wrong speed while no frame ever checksums? (**yes** → the middle outcome survives by counting bytes-in against frames-accepted, and the console's wording does not change)
+3. If neither — `rx` is also flat at a wrong speed — then **`R-MAV-13` reduces to two outcomes** and the wiring advice is given in both cases. Say so plainly.
+
+Add a `<!-- yonder:hardware-observed -->` marker under the heading, as that file does.
+
+- [ ] **Step 5: Restore the board and commit the note**
+
+```bash
+sudo cp /boot/firmware/config.txt.before-uart /boot/firmware/config.txt && sudo reboot
+```
+
+```bash
+git add docs/hardware/an-autopilot-on-the-uart.md
+git commit -m "docs(hardware): what the UART reports at a wrong baud — R-MAV-13"
+```
+
+---
+
+## Task 2: Bench — build `mavlink-router` for arm64, and see what it says about its endpoints
+
+§10.2 and §10.3, which are the same binary and belong in the same sitting.
+
+**Files:**
+- Modify: `docs/hardware/an-autopilot-on-the-uart.md` — a second section
+
+**Interfaces:**
+- Consumes: Task 1's board setup
+- Produces: the answer that decides whether Task 8's `LinkState` carries one `answering` field or one per endpoint
+
+- [ ] **Step 1: Build it on the board**
+
+```bash
+sudo apt-get install -y git meson ninja-build pkg-config g++ python3
+git clone --recurse-submodules https://github.com/mavlink-router/mavlink-router /tmp/mr
+cd /tmp/mr && meson setup build . && ninja -C build && ./build/src/mavlink-routerd --version
+```
+
+Record: the version, how long the build took, and the size of the resulting binary. That is the §10.2 cost.
+
+- [ ] **Step 2: Run it against the autopilot and a fake ground station**
+
+```bash
+./build/src/mavlink-routerd -e 127.0.0.1:14550 /dev/ttyAMA0:57600
+```
+
+In another shell, act as a ground station that heartbeats back, then check what the router reports:
+
+```bash
+nc -u -l 14550 > /dev/null &   # receive only
+kill -USR1 $(pgrep mavlink-routerd)   # statistics to the log
+journalctl -f | tail -40
+```
+
+- [ ] **Step 3: Answer §10.3 in one sentence**
+
+Does the statistics output attribute received traffic to a *named endpoint*, or only totals? Append to the hardware note:
+
+- **Per-endpoint counters exist** → Task 8's `LinkState.groundStations` becomes an array with a state per entry, and §6's "we do not claim which" is lifted. Say so, and say which field carries it.
+- **Only totals** → the design as specified stands unchanged.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add docs/hardware/an-autopilot-on-the-uart.md
+git commit -m "docs(hardware): building mavlink-router on the board, and what it reports"
+```
+
+---
+
+## Task 3: The `mavlink` section in the schema
+
+[`configuration.md`](../../configuration.md) already documents a `mavlink:` block. **The schema has never had one**, so that documentation is currently a promise the code does not keep — the same shape as `K-39`. This closes it.
+
+**Files:**
+- Modify: `packages/yonder-core/src/schema/config.ts`
+- Test: `packages/yonder-core/src/schema/config.test.ts` (or the existing round-trip test file — follow whichever the package already uses for schema cases)
+- Modify: `docs/configuration.md`
+
+**Interfaces:**
+- Consumes: nothing
+- Produces: `Config["mavlink"]` with this exact shape, which every later task reads:
+  ```ts
+  {
+    serial: { device: string | "auto"; baud: number | "auto" };
+    endpoints: { name: string; host: string; port: number }[];  // max 3
+    tcp_server: { enabled: boolean; port: number };
+    autocast: boolean;
+    ingest: { loopback_only: boolean };
+  }
+  ```
+
+- [ ] **Step 1: Write the failing tests**
+
+```ts
+// packages/yonder-core/src/schema/mavlink.test.ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+import { describe, expect, it } from "vitest";
+import { ConfigSchema, DEFAULT_CONFIG } from "./config.js";
+
+describe("the mavlink section", () => {
+  it("defaults to auto detection, no endpoints, tcp on, autocast on, loopback ingest", () => {
+    expect(DEFAULT_CONFIG.mavlink).toEqual({
+      serial: { device: "auto", baud: "auto" },
+      endpoints: [],
+      tcp_server: { enabled: true, port: 5760 },
+      autocast: true,
+      ingest: { loopback_only: true },
+    });
+  });
+
+  it("takes three ground stations and refuses a fourth (R-MAV-03)", () => {
+    const three = [
+      { name: "gcs0", host: "192.168.2.10", port: 14550 },
+      { name: "gcs1", host: "10.147.20.8", port: 14551 },
+      { name: "gcs2", host: "10.147.20.9", port: 14552 },
+    ];
+    expect(ConfigSchema.parse({ ...DEFAULT_CONFIG, mavlink: { ...DEFAULT_CONFIG.mavlink, endpoints: three } })
+      .mavlink.endpoints).toHaveLength(3);
+    expect(() => ConfigSchema.parse({
+      ...DEFAULT_CONFIG,
+      mavlink: { ...DEFAULT_CONFIG.mavlink, endpoints: [...three, { name: "gcs3", host: "1.2.3.4", port: 14553 }] },
+    })).toThrow();
+  });
+
+  it("accepts a pinned device and baud, and refuses a baud outside the sweep", () => {
+    const pinned = ConfigSchema.parse({
+      ...DEFAULT_CONFIG,
+      mavlink: { ...DEFAULT_CONFIG.mavlink, serial: { device: "/dev/ttyAMA0", baud: 57600 } },
+    });
+    expect(pinned.mavlink.serial).toEqual({ device: "/dev/ttyAMA0", baud: 57600 });
+    expect(() => ConfigSchema.parse({
+      ...DEFAULT_CONFIG,
+      mavlink: { ...DEFAULT_CONFIG.mavlink, serial: { device: "/dev/ttyAMA0", baud: 9600 } },
+    })).toThrow();
+  });
+
+  it("is strict — a misspelled key is refused, not ignored (R-CFG-09)", () => {
+    expect(() => ConfigSchema.parse({
+      ...DEFAULT_CONFIG,
+      mavlink: { ...DEFAULT_CONFIG.mavlink, autocasst: true },
+    })).toThrow();
+  });
+});
+```
+
+- [ ] **Step 2: Run them and watch them fail**
+
+Run: `npx vitest run --root packages/yonder-core src/schema/mavlink.test.ts`
+Expected: FAIL — `DEFAULT_CONFIG.mavlink` is `undefined`.
+
+- [ ] **Step 3: Add the section**
+
+In `packages/yonder-core/src/schema/config.ts`, above `ConfigSchema`:
+
+```ts
+/**
+ * The rates ArduPilot is actually configured for in the field, slowest first.
+ * Slowest first so a slow link is *found* rather than a fast one guessed at —
+ * a wrong fast rate produces noise that a slow one would have decoded.
+ */
+export const MAVLINK_BAUDS = [57600, 115200, 230400, 921600] as const;
+
+const MavlinkSerial = z
+  .object({
+    device: z.string().min(1).default("auto"),
+    baud: z.union([z.literal("auto"), z.union(MAVLINK_BAUDS.map((b) => z.literal(b)) as [z.ZodLiteral<number>, z.ZodLiteral<number>, ...z.ZodLiteral<number>[]])])
+      .default("auto"),
+  })
+  .strict();
+
+/**
+ * Three, because R-MAV-03 says three. The limit is in the schema rather than
+ * in a renderer so a fourth is refused with the offending path named, at the
+ * moment the operator writes it, rather than silently dropped later.
+ */
+const MavlinkEndpoint = z
+  .object({ name: z.string().min(1), host: z.string().min(1), port: z.number().int().min(1).max(65535) })
+  .strict();
+
+const Mavlink = z
+  .object({
+    serial: MavlinkSerial.default({}),
+    endpoints: z.array(MavlinkEndpoint).max(3).default([]),
+    tcp_server: z.object({ enabled: z.boolean().default(true), port: z.number().int().min(1).max(65535).default(5760) })
+      .strict().default({}),
+    autocast: z.boolean().default(true),
+    // R-MAV-07: an open MAVLink port on a routable address is an
+    // unauthenticated command path to the vehicle. Closed unless asked for,
+    // and the asking is logged.
+    ingest: z.object({ loopback_only: z.boolean().default(true) }).strict().default({}),
+  })
+  .strict();
+```
+
+Then add `mavlink: Mavlink.default({}),` to `ConfigSchema`, after `remote`.
+
+- [ ] **Step 4: Run the tests and the whole suite**
+
+Run: `npx vitest run --root packages/yonder-core`
+Expected: the four new tests PASS, and all 1004 existing tests still pass. `roundtrip.test.ts` and `docs.test.ts` are the two most likely to notice a new section — if either fails, the failure is real, not incidental.
+
+- [ ] **Step 5: Make the documentation true**
+
+`docs/configuration.md` already shows this block. Reconcile it with what the schema now accepts — in particular add `ingest.loopback_only`, which the document does not mention, and confirm the `baud: auto` note still matches `MAVLINK_BAUDS`.
+
+- [ ] **Step 6: Commit**
+
+```bash
+rm -f node_modules
+git add packages/yonder-core/src/schema/config.ts packages/yonder-core/src/schema/mavlink.test.ts docs/configuration.md
+git commit -m "feat(config): the mavlink section, which configuration.md already promised — R-MAV-03, R-MAV-07"
+```
+
+---
+
+## Task 4: A telemetry endpoint change is kept, not held
+
+§5 and §7. `R-CFG-12` exemption. **Leaf by leaf, never by subtree** — `reachability.ts` is explicit about why, and the `allow_default` comment in it is the worked example of what a subtree exemption costs.
+
+**Files:**
+- Modify: `packages/yonder-core/src/apply/reachability.ts`
+- Test: `packages/yonder-core/src/apply/reachability.test.ts`
+- Modify: `docs/requirements.md` — `R-CFG-12`'s text
+
+**Interfaces:**
+- Consumes: `Config["mavlink"]` from Task 3
+- Produces: `affectsReachability` returns `false` for endpoint/tcp/autocast changes and `true` for everything else under `mavlink`
+
+- [ ] **Step 1: Write the failing tests**
+
+Append to `packages/yonder-core/src/apply/reachability.test.ts`:
+
+```ts
+describe("mavlink (R-CFG-12, R-MAV-03)", () => {
+  const withMav = (mavlink: Config["mavlink"]): Config => ({ ...DEFAULT_CONFIG, mavlink });
+
+  it("adding a ground station is kept, not held", () => {
+    const before = withMav(DEFAULT_CONFIG.mavlink);
+    const after = withMav({ ...DEFAULT_CONFIG.mavlink, endpoints: [{ name: "gcs0", host: "10.147.20.8", port: 14550 }] });
+    expect(affectsReachability(before, after)).toBe(false);
+  });
+
+  it("turning the tcp server off, and moving its port, are both kept", () => {
+    const before = withMav(DEFAULT_CONFIG.mavlink);
+    expect(affectsReachability(before, withMav({ ...DEFAULT_CONFIG.mavlink, tcp_server: { enabled: false, port: 5760 } }))).toBe(false);
+    expect(affectsReachability(before, withMav({ ...DEFAULT_CONFIG.mavlink, tcp_server: { enabled: true, port: 5761 } }))).toBe(false);
+  });
+
+  it("autocast is kept", () => {
+    expect(affectsReachability(withMav(DEFAULT_CONFIG.mavlink), withMav({ ...DEFAULT_CONFIG.mavlink, autocast: false }))).toBe(false);
+  });
+
+  // The exemption is earned per leaf. These two are not exempt and must not
+  // become so by sitting next to ones that are.
+  it("pinning the serial port is still held", () => {
+    const after = withMav({ ...DEFAULT_CONFIG.mavlink, serial: { device: "/dev/ttyAMA0", baud: 57600 } });
+    expect(affectsReachability(withMav(DEFAULT_CONFIG.mavlink), after)).toBe(true);
+  });
+
+  it("opening ingest to the network is still held (R-MAV-07)", () => {
+    const after = withMav({ ...DEFAULT_CONFIG.mavlink, ingest: { loopback_only: false } });
+    expect(affectsReachability(withMav(DEFAULT_CONFIG.mavlink), after)).toBe(true);
+  });
+});
+```
+
+- [ ] **Step 2: Run them and watch them fail**
+
+Run: `npx vitest run --root packages/yonder-core src/apply/reachability.test.ts`
+Expected: the three "kept" tests FAIL (they return `true`); the two "held" tests already pass, which is the point — they must keep passing after the change.
+
+- [ ] **Step 3: Extend `withoutCosmetics`, naming leaves**
+
+In `packages/yonder-core/src/apply/reachability.ts`, extend the local type and add, after the zerotier block:
+
+```ts
+  // A ground-station endpoint touches no interface, no route and no radio, so
+  // it cannot take away the path the operator is reaching the device on —
+  // which is the only thing the confirmation window exists to protect.
+  //
+  // The failure this prevents is specific and bad: the window reverts *and
+  // reboots*, so an operator adjusting a port mid-flight over a marginal link
+  // loses the video, the telemetry and the mesh a minute after touching
+  // something that could not have cost them any of it (R-CFG-12, §5).
+  //
+  // Leaf by leaf, exactly as `remote.zerotier` above and for the same reason.
+  // `mavlink.serial` and `mavlink.ingest` are deliberately absent: the first
+  // moves which wire the router opens, and the second opens an
+  // unauthenticated command path to the vehicle (R-MAV-07). Neither has been
+  // shown to be safe to keep, so both stay load-bearing.
+  const mavlink = copy.mavlink;
+  if (mavlink !== undefined) {
+    delete mavlink.endpoints;
+    delete mavlink.autocast;
+    const tcp = mavlink.tcp_server as Record<string, unknown> | undefined;
+    if (tcp !== undefined) {
+      delete tcp.enabled;
+      delete tcp.port;
+    }
+  }
+```
+
+and widen the cast at the top of the function:
+
+```ts
+  const copy = structuredClone(config) as {
+    ui: Record<string, unknown>;
+    remote?: { zerotier?: Record<string, unknown> };
+    mavlink?: Record<string, unknown>;
+  };
+```
+
+- [ ] **Step 4: Run the tests**
+
+Run: `npx vitest run --root packages/yonder-core src/apply/reachability.test.ts`
+Expected: PASS, all five.
+
+- [ ] **Step 5: Extend `R-CFG-12` in `docs/requirements.md`**
+
+Append to `R-CFG-12`'s requirement text, in the same cell:
+
+> **Each exemption is earned individually and named leaf by leaf.** `ui.theme` earned it by reverting a palette an operator had watched take. `remote.zerotier`'s two fields earned it on a board, where a join added exactly one route and the client refused a controller-pushed route that overlapped the device's own network. `mavlink.endpoints`, `mavlink.autocast` and `mavlink.tcp_server` earn it by construction: none of them touches an interface, a route or a radio, and the window's own remedy — revert *and reboot* — would take the video, the telemetry and the mesh off a flying aircraft in exchange for protecting nothing. `mavlink.serial` and `mavlink.ingest` are deliberately not exempt.
+
+- [ ] **Step 6: Commit**
+
+```bash
+rm -f node_modules
+git add packages/yonder-core/src/apply/reachability.ts packages/yonder-core/src/apply/reachability.test.ts docs/requirements.md
+git commit -m "feat(apply): a telemetry endpoint change is kept, not held — R-CFG-12"
+```
+
+---
+
+## Task 5: `frame.ts` — heartbeats out of a byte stream
+
+**Files:**
+- Create: `packages/yonder-core/src/mav/frame.ts`
+- Test: `packages/yonder-core/src/mav/frame.test.ts`
+
+**Interfaces:**
+- Consumes: nothing
+- Produces:
+  ```ts
+  export interface Heartbeat {
+    system: number; component: number;
+    /** MAV_TYPE. 6 is a ground station, not a vehicle. */
+    vehicleType: number;
+    /** MAV_AUTOPILOT. 3 is ArduPilot, 8 is "invalid" — what a GCS sends. */
+    autopilot: number;
+    /** True when this came from a vehicle rather than a ground station. */
+    fromVehicle: boolean;
+  }
+  export class HeartbeatScanner {
+    /** Feed bytes as they arrive; returns every complete heartbeat found. */
+    push(chunk: Uint8Array): Heartbeat[];
+    /** Frames that started but failed their checksum, since construction. */
+    readonly rejected: number;
+  }
+  export function describeVehicle(h: Heartbeat): string;
+  ```
+
+**This file is deliberately small and must not grow into a MAVLink library.** Which library, which dialect and which version are M5b's decisions (§1). It knows one message.
+
+- [ ] **Step 1: Write the failing test**
+
+```ts
+// packages/yonder-core/src/mav/frame.test.ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+import { describe, expect, it } from "vitest";
+import { HeartbeatScanner, describeVehicle } from "./frame.js";
+
+/** Build a MAVLink v2 HEARTBEAT so the test states its own input exactly. */
+function heartbeatV2(system: number, vehicleType: number, autopilot: number): Uint8Array {
+  const payload = new Uint8Array(9);
+  new DataView(payload.buffer).setUint32(0, 0, true); // custom_mode
+  payload[4] = vehicleType;
+  payload[5] = autopilot;
+  payload[6] = 0;  // base_mode
+  payload[7] = 4;  // system_status
+  payload[8] = 3;  // mavlink_version
+  const head = Uint8Array.from([payload.length, 0, 0, 0, system, 1, 0, 0, 0]);
+  let crc = 0xffff;
+  const acc = (b: number) => {
+    let t = (b ^ (crc & 0xff)) & 0xff;
+    t = (t ^ (t << 4)) & 0xff;
+    crc = ((crc >> 8) ^ (t << 8) ^ (t << 3) ^ (t >> 4)) & 0xffff;
+  };
+  for (const b of head) acc(b);
+  for (const b of payload) acc(b);
+  acc(50); // CRC_EXTRA for HEARTBEAT
+  return Uint8Array.from([0xfd, ...head, ...payload, crc & 0xff, crc >> 8]);
+}
+
+describe("HeartbeatScanner", () => {
+  it("finds a heartbeat and reports the vehicle it came from", () => {
+    const s = new HeartbeatScanner();
+    const [hb] = s.push(heartbeatV2(1, 1, 3)); // fixed wing, ArduPilot
+    expect(hb).toMatchObject({ system: 1, vehicleType: 1, autopilot: 3, fromVehicle: true });
+    expect(describeVehicle(hb)).toBe("ArduPlane");
+  });
+
+  it("tells a ground station's heartbeat from a vehicle's (§6)", () => {
+    const s = new HeartbeatScanner();
+    const [hb] = s.push(heartbeatV2(255, 6, 8)); // MAV_TYPE_GCS, MAV_AUTOPILOT_INVALID
+    expect(hb.fromVehicle).toBe(false);
+  });
+
+  it("survives being fed one byte at a time", () => {
+    const s = new HeartbeatScanner();
+    const frame = heartbeatV2(1, 2, 3);
+    const found = frame.reduce<number>((n, b) => n + s.push(Uint8Array.of(b)).length, 0);
+    expect(found).toBe(1);
+  });
+
+  it("counts a frame whose checksum fails and does not emit it", () => {
+    const s = new HeartbeatScanner();
+    const bad = heartbeatV2(1, 1, 3);
+    bad[bad.length - 1] ^= 0xff;
+    expect(s.push(bad)).toEqual([]);
+    expect(s.rejected).toBe(1);
+  });
+
+  it("finds a good frame that follows garbage — this is what a wrong baud looks like", () => {
+    const s = new HeartbeatScanner();
+    const noise = Uint8Array.from({ length: 64 }, (_, i) => (i * 37) & 0xff);
+    const found = s.push(Uint8Array.from([...noise, ...heartbeatV2(1, 1, 3)]));
+    expect(found).toHaveLength(1);
+  });
+});
+```
+
+- [ ] **Step 2: Run it and watch it fail**
+
+Run: `npx vitest run --root packages/yonder-core src/mav/frame.test.ts`
+Expected: FAIL — `Cannot find module './frame.js'`.
+
+- [ ] **Step 3: Write it**
+
+```ts
+// packages/yonder-core/src/mav/frame.ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+/**
+ * Enough MAVLink to recognise a heartbeat, and no more (§1).
+ *
+ * M5a reads nothing but heartbeats, which is a boundary chosen to defer a
+ * decision rather than to make one: which library, which dialect, v1 or v2,
+ * signed or not. Recognising one message needs none of that. When M5b needs
+ * the rest it takes a dependency and this file goes away; growing it into a
+ * MAVLink library one message at a time is how that decision gets made by
+ * accident.
+ */
+
+const V1 = 0xfe;
+const V2 = 0xfd;
+const HEARTBEAT = 0;
+/** The message-definition checksum MAVLink appends before the CRC. */
+const HEARTBEAT_CRC_EXTRA = 50;
+const MAV_TYPE_GCS = 6;
+
+/** X25 / CRC-16-MCRF4XX, one byte at a time — MAVLink's own accumulator. */
+function accumulate(byte: number, crc: number): number {
+  let tmp = (byte ^ (crc & 0xff)) & 0xff;
+  tmp = (tmp ^ (tmp << 4)) & 0xff;
+  return ((crc >> 8) ^ (tmp << 8) ^ (tmp << 3) ^ (tmp >> 4)) & 0xffff;
+}
+
+export interface Heartbeat {
+  system: number;
+  component: number;
+  vehicleType: number;
+  autopilot: number;
+  /**
+   * A ground station heartbeats back, which is what makes §6's "someone is
+   * listening" a measurement rather than an assumption — and also what would
+   * make a naive reader think the aircraft had two autopilots.
+   */
+  fromVehicle: boolean;
+}
+
+const VEHICLES: Record<number, string> = {
+  1: "ArduPlane", 2: "ArduCopter", 4: "Helicopter", 6: "Ground station",
+  10: "Rover", 11: "Boat", 12: "Submarine", 13: "Hexacopter",
+  14: "Octocopter", 15: "Tricopter", 19: "VTOL", 20: "VTOL",
+};
+
+export function describeVehicle(h: Heartbeat): string {
+  return VEHICLES[h.vehicleType] ?? `Vehicle type ${h.vehicleType}`;
+}
+
+export class HeartbeatScanner {
+  private buffer = new Uint8Array(0);
+  rejected = 0;
+
+  push(chunk: Uint8Array): Heartbeat[] {
+    const merged = new Uint8Array(this.buffer.length + chunk.length);
+    merged.set(this.buffer);
+    merged.set(chunk, this.buffer.length);
+    this.buffer = merged;
+
+    const found: Heartbeat[] = [];
+    let i = 0;
+    while (i < this.buffer.length) {
+      const magic = this.buffer[i];
+      if (magic !== V1 && magic !== V2) { i += 1; continue; }
+      const headerLength = magic === V2 ? 10 : 6;
+      if (i + headerLength > this.buffer.length) break;       // need more bytes
+      const payloadLength = this.buffer[i + 1];
+      const signed = magic === V2 && (this.buffer[i + 2] & 0x01) !== 0;
+      const total = headerLength + payloadLength + 2 + (signed ? 13 : 0);
+      if (i + total > this.buffer.length) break;
+
+      const messageId = magic === V2
+        ? this.buffer[i + 7] | (this.buffer[i + 8] << 8) | (this.buffer[i + 9] << 16)
+        : this.buffer[i + 5];
+
+      let crc = 0xffff;
+      for (let k = i + 1; k < i + headerLength + payloadLength; k += 1) crc = accumulate(this.buffer[k], crc);
+      // Only HEARTBEAT's extra byte is known here, so only HEARTBEAT can be
+      // checksummed — every other message is skipped by length, never rejected.
+      if (messageId !== HEARTBEAT) { i += total; continue; }
+      crc = accumulate(HEARTBEAT_CRC_EXTRA, crc);
+
+      const sent = this.buffer[i + headerLength + payloadLength] | (this.buffer[i + headerLength + payloadLength + 1] << 8);
+      if (crc !== sent) { this.rejected += 1; i += 1; continue; }  // resync from the next byte
+
+      const payload = this.buffer.subarray(i + headerLength, i + headerLength + payloadLength);
+      const vehicleType = payload[4] ?? 0;
+      found.push({
+        system: this.buffer[i + (magic === V2 ? 5 : 3)],
+        component: this.buffer[i + (magic === V2 ? 6 : 4)],
+        vehicleType,
+        autopilot: payload[5] ?? 0,
+        fromVehicle: vehicleType !== MAV_TYPE_GCS,
+      });
+      i += total;
+    }
+    this.buffer = this.buffer.subarray(i);
+    return found;
+  }
+}
+```
+
+- [ ] **Step 4: Run the tests**
+
+Run: `npx vitest run --root packages/yonder-core src/mav/frame.test.ts`
+Expected: PASS, all five.
+
+- [ ] **Step 5: Commit**
+
+```bash
+rm -f node_modules
+git add packages/yonder-core/src/mav/frame.ts packages/yonder-core/src/mav/frame.test.ts
+git commit -m "feat(mav): enough MAVLink to recognise a heartbeat — R-MAV-10"
+```
+
+---
+
+## Task 6: `detect.ts` — the sweep, and its three outcomes
+
+§3 and `R-MAV-13`. **Read Task 1's hardware note before starting**: if it recorded that framing errors are unavailable *and* byte counts are flat at a wrong speed, drop `"noise"` from the union and say so in the requirement.
+
+**Files:**
+- Create: `packages/yonder-core/src/mav/detect.ts`
+- Test: `packages/yonder-core/src/mav/detect.test.ts`
+- Modify: `docs/requirements.md` — add `R-MAV-13`
+
+**Interfaces:**
+- Consumes: `HeartbeatScanner`, `describeVehicle` (Task 5); `MAVLINK_BAUDS` (Task 3); `Clock`
+- Produces:
+  ```ts
+  export interface SerialPort { read(ms: number): Promise<{ bytes: Uint8Array; framingErrors: number }>; close(): Promise<void>; }
+  export type OpenPort = (device: string, baud: number) => Promise<SerialPort>;
+  export type DetectOutcome =
+    | { kind: "found"; device: string; baud: number; vehicle: string; system: number }
+    | { kind: "silent"; device: string; triedBauds: number[] }
+    | { kind: "noise"; device: string; triedBauds: number[]; bytes: number };
+  export function detect(opts: { device: string; open: OpenPort; bauds?: readonly number[]; first?: number }): Promise<DetectOutcome>;
+  ```
+
+- [ ] **Step 1: Write the failing test**
+
+```ts
+// packages/yonder-core/src/mav/detect.test.ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+import { describe, expect, it, vi } from "vitest";
+import { detect, type OpenPort } from "./detect.js";
+
+const heartbeatBytes = /* reuse the builder from frame.test.ts — export it from a shared test helper */ null as never;
+
+/** A port that answers with whatever the table says for the baud it was opened at. */
+function portsAnswering(table: Record<number, { bytes: Uint8Array; framingErrors: number }>): { open: OpenPort; opened: number[] } {
+  const opened: number[] = [];
+  const open: OpenPort = async (_device, baud) => {
+    opened.push(baud);
+    return {
+      read: async () => table[baud] ?? { bytes: new Uint8Array(0), framingErrors: 0 },
+      close: async () => {},
+    };
+  };
+  return { open, opened };
+}
+
+describe("detect", () => {
+  it("finds the autopilot and names the vehicle and speed", async () => {
+    const { open } = portsAnswering({ 57600: { bytes: heartbeatBytes(1, 1, 3), framingErrors: 0 } });
+    await expect(detect({ device: "/dev/ttyAMA0", open })).resolves.toMatchObject({
+      kind: "found", baud: 57600, vehicle: "ArduPlane", system: 1,
+    });
+  });
+
+  it("stops at the first good frame and never opens the rates behind it", async () => {
+    const { open, opened } = portsAnswering({ 115200: { bytes: heartbeatBytes(1, 2, 3), framingErrors: 0 } });
+    await detect({ device: "/dev/ttyAMA0", open });
+    expect(opened).toEqual([57600, 115200]);
+  });
+
+  it("tries a remembered speed first, then the rest in order", async () => {
+    const { open, opened } = portsAnswering({});
+    await detect({ device: "/dev/ttyAMA0", open, first: 921600 });
+    expect(opened).toEqual([921600, 57600, 115200, 230400, 921600]);
+  });
+
+  it("reports silence when no bytes arrive anywhere — the wiring case", async () => {
+    const { open } = portsAnswering({});
+    await expect(detect({ device: "/dev/ttyAMA0", open })).resolves.toMatchObject({
+      kind: "silent", triedBauds: [57600, 115200, 230400, 921600],
+    });
+  });
+
+  it("reports noise when bytes arrive everywhere and nothing ever parses (R-MAV-13)", async () => {
+    const junk = { bytes: Uint8Array.from({ length: 200 }, (_, i) => (i * 37) & 0xff), framingErrors: 40 };
+    const { open } = portsAnswering({ 57600: junk, 115200: junk, 230400: junk, 921600: junk });
+    const outcome = await detect({ device: "/dev/ttyAMA0", open });
+    expect(outcome.kind).toBe("noise");
+    expect(outcome).toMatchObject({ bytes: 800 });
+  });
+
+  it("ignores a ground station's heartbeat when looking for an autopilot", async () => {
+    const { open } = portsAnswering({ 57600: { bytes: heartbeatBytes(255, 6, 8), framingErrors: 0 } });
+    await expect(detect({ device: "/dev/ttyAMA0", open })).resolves.toMatchObject({ kind: "noise" });
+  });
+});
+```
+
+**Before writing the implementation:** extract `heartbeatV2` from `frame.test.ts` into `packages/yonder-core/src/mav/testing.ts` (exported, `SPDX` header, not shipped in `index.ts`) and import it in both test files, replacing the `null as never` placeholder above.
+
+- [ ] **Step 2: Run it and watch it fail**
+
+Run: `npx vitest run --root packages/yonder-core src/mav/detect.test.ts`
+Expected: FAIL — `Cannot find module './detect.js'`.
+
+- [ ] **Step 3: Write it**
+
+```ts
+// packages/yonder-core/src/mav/detect.ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+import { MAVLINK_BAUDS } from "../schema/config.js";
+import { HeartbeatScanner, describeVehicle } from "./frame.js";
+
+/**
+ * The sweep is the only mechanism (§3). A UART has to be told a speed before
+ * it can turn a wire into bytes, so there is nothing to sense. Everything
+ * worth doing is around it:
+ *
+ *   - **Leave a wrong speed as soon as it proves wrong.** At a wrong rate
+ *     bytes still arrive, and bytes that never parse are proof of a mismatch
+ *     in a few hundred milliseconds. The full wait is owed only to a rate at
+ *     which nothing at all arrives.
+ *   - **Stop on the first good frame.** A checksum that passes is certainty.
+ *   - **Say which kind of nothing it was** (R-MAV-13), which is the part an
+ *     operator with a wire in the wrong hole actually needs.
+ */
+
+/** How long to wait at a rate where nothing has arrived at all. */
+const SILENT_MS = 1_200;
+/** How long to keep reading once bytes have started, before calling it noise. */
+const NOISE_MS = 400;
+
+export interface SerialPort {
+  read(ms: number): Promise<{ bytes: Uint8Array; framingErrors: number }>;
+  close(): Promise<void>;
+}
+
+export type OpenPort = (device: string, baud: number) => Promise<SerialPort>;
+
+export type DetectOutcome =
+  | { kind: "found"; device: string; baud: number; vehicle: string; system: number }
+  | { kind: "silent"; device: string; triedBauds: number[] }
+  | { kind: "noise"; device: string; triedBauds: number[]; bytes: number };
+
+export async function detect(opts: {
+  device: string;
+  open: OpenPort;
+  bauds?: readonly number[];
+  /** A remembered speed, tried before the sweep. Not removed from the sweep:
+      if it fails it is retried in its turn, which costs one read and keeps the
+      "tried these four" message true. */
+  first?: number;
+}): Promise<DetectOutcome> {
+  const sweep = opts.bauds ?? MAVLINK_BAUDS;
+  const order = opts.first === undefined ? [...sweep] : [opts.first, ...sweep];
+  const tried: number[] = [];
+  let bytesSeen = 0;
+
+  for (const baud of order) {
+    if (!tried.includes(baud)) tried.push(baud);
+    const port = await opts.open(opts.device, baud);
+    try {
+      const scanner = new HeartbeatScanner();
+      const first = await port.read(SILENT_MS);
+      bytesSeen += first.bytes.length;
+      let vehicle = scanner.push(first.bytes).find((h) => h.fromVehicle);
+
+      // Bytes arrived but nothing parsed yet: give it one short second look
+      // rather than the full wait, then move on. This is the whole speed-up.
+      if (vehicle === undefined && first.bytes.length > 0) {
+        const again = await port.read(NOISE_MS);
+        bytesSeen += again.bytes.length;
+        vehicle = scanner.push(again.bytes).find((h) => h.fromVehicle);
+      }
+
+      if (vehicle !== undefined) {
+        return { kind: "found", device: opts.device, baud, vehicle: describeVehicle(vehicle), system: vehicle.system };
+      }
+    } finally {
+      await port.close();
+    }
+  }
+
+  return bytesSeen === 0
+    ? { kind: "silent", device: opts.device, triedBauds: [...MAVLINK_BAUDS] }
+    : { kind: "noise", device: opts.device, triedBauds: [...MAVLINK_BAUDS], bytes: bytesSeen };
+}
+```
+
+- [ ] **Step 4: Run the tests**
+
+Run: `npx vitest run --root packages/yonder-core src/mav/detect.test.ts`
+Expected: PASS, all six.
+
+- [ ] **Step 5: Add `R-MAV-13` to `docs/requirements.md`**
+
+Insert after `R-MAV-12`, in the R-MAV table, with priority `1` — the text is in §7 of the spec, copied verbatim. **If Task 1 found that neither framing errors nor byte counts distinguish a wrong speed from silence**, amend the requirement's first sentence to say two outcomes rather than three, and record why in the same cell.
+
+- [ ] **Step 6: Commit**
+
+```bash
+rm -f node_modules
+git add packages/yonder-core/src/mav/detect.ts packages/yonder-core/src/mav/detect.test.ts packages/yonder-core/src/mav/testing.ts packages/yonder-core/src/mav/frame.test.ts docs/requirements.md
+git commit -m "feat(mav): find the autopilot, and say which kind of nothing it was — R-MAV-01, R-MAV-13"
+```
+
+---
+
+## Task 7: `hint.ts` — remembered, never configured
+
+§3. `R-CAM-06` was withdrawn for writing a probed result into configuration; the same reasoning applies to a serial port, so the answer lives in `/var/lib/yonder`, not `config.yaml`.
+
+**Files:**
+- Create: `packages/yonder-core/src/mav/hint.ts`
+- Test: `packages/yonder-core/src/mav/hint.test.ts`
+
+**Interfaces:**
+- Consumes: `DetectOutcome` (Task 6)
+- Produces:
+  ```ts
+  export interface LinkHint { device: string; baud: number }
+  export function readHint(path: string): LinkHint | undefined;
+  export function writeHint(path: string, hint: LinkHint): void;
+  export function forgetHint(path: string): void;
+  ```
+
+- [ ] **Step 1: Write the failing test**
+
+```ts
+// packages/yonder-core/src/mav/hint.test.ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import { forgetHint, readHint, writeHint } from "./hint.js";
+
+const scratch = () => join(mkdtempSync(join(tmpdir(), "yonder-hint-")), "link.json");
+
+describe("the remembered port and speed", () => {
+  it("round-trips", () => {
+    const p = scratch();
+    writeHint(p, { device: "/dev/ttyAMA0", baud: 57600 });
+    expect(readHint(p)).toEqual({ device: "/dev/ttyAMA0", baud: 57600 });
+  });
+
+  it("is undefined when it has never been written", () => {
+    expect(readHint(scratch())).toBeUndefined();
+  });
+
+  // A hint is an optimisation. Anything wrong with it must degrade to the
+  // full sweep, never to a failed boot — this file is on the path to
+  // telemetry starting at all (R-MAV-08).
+  it("is undefined rather than an exception when the file is corrupt", () => {
+    const p = scratch();
+    writeFileSync(p, "{ this is not json");
+    expect(readHint(p)).toBeUndefined();
+  });
+
+  it("is undefined when the file is valid json of the wrong shape", () => {
+    const p = scratch();
+    writeFileSync(p, JSON.stringify({ device: "/dev/ttyAMA0", baud: "fast" }));
+    expect(readHint(p)).toBeUndefined();
+  });
+
+  it("refuses a baud that is not one we sweep", () => {
+    const p = scratch();
+    writeFileSync(p, JSON.stringify({ device: "/dev/ttyAMA0", baud: 9600 }));
+    expect(readHint(p)).toBeUndefined();
+  });
+
+  it("can be forgotten, and forgetting one that is not there is not an error", () => {
+    const p = scratch();
+    writeHint(p, { device: "/dev/ttyAMA0", baud: 57600 });
+    forgetHint(p);
+    expect(readHint(p)).toBeUndefined();
+    expect(() => forgetHint(p)).not.toThrow();
+  });
+});
+```
+
+- [ ] **Step 2: Run it and watch it fail**
+
+Run: `npx vitest run --root packages/yonder-core src/mav/hint.test.ts`
+Expected: FAIL — `Cannot find module './hint.js'`.
+
+- [ ] **Step 3: Write it**
+
+```ts
+// packages/yonder-core/src/mav/hint.ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
+import { MAVLINK_BAUDS } from "../schema/config.js";
+
+/**
+ * The port and speed that worked last time — state, never configuration (§3).
+ *
+ * R-CAM-06 was withdrawn for the encoder version of this idea, and the
+ * reasoning transfers without a change: the installer seeds `config.yaml`
+ * only when it is absent, so a probed value written there goes stale on
+ * upgrade; and an image built in a chroot on a build host would bake the
+ * build machine's answer into every board. So this is a cache under
+ * /var/lib/yonder that an operator never edits and nothing reads as truth.
+ *
+ * Every failure here returns `undefined` rather than throwing. A hint is an
+ * optimisation on the path to telemetry starting at all (R-MAV-08): the worst
+ * a bad one may cost is one wasted read before the ordinary sweep.
+ */
+
+export interface LinkHint {
+  device: string;
+  baud: number;
+}
+
+export function readHint(path: string): LinkHint | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    return undefined;
+  }
+  if (typeof parsed !== "object" || parsed === null) return undefined;
+  const { device, baud } = parsed as Record<string, unknown>;
+  if (typeof device !== "string" || device.length === 0) return undefined;
+  if (typeof baud !== "number" || !(MAVLINK_BAUDS as readonly number[]).includes(baud)) return undefined;
+  return { device, baud };
+}
+
+export function writeHint(path: string, hint: LinkHint): void {
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, `${JSON.stringify(hint)}\n`, { mode: 0o644 });
+}
+
+export function forgetHint(path: string): void {
+  rmSync(path, { force: true });
+}
+```
+
+- [ ] **Step 4: Run the tests**
+
+Run: `npx vitest run --root packages/yonder-core src/mav/hint.test.ts`
+Expected: PASS, all six.
+
+- [ ] **Step 5: Commit**
+
+```bash
+rm -f node_modules
+git add packages/yonder-core/src/mav/hint.ts packages/yonder-core/src/mav/hint.test.ts
+git commit -m "feat(mav): remember the port and speed as a hint, never as configuration — R-MAV-01"
+```
+
+---
+
+## Task 8: `router/config.ts` — `mavlink-router`'s configuration, generated
+
+§4. One writer: this text is regenerated from `config.yaml` on every apply.
+
+**Files:**
+- Create: `packages/yonder-core/src/mav/router/config.ts`
+- Test: `packages/yonder-core/src/mav/router/config.test.ts`
+
+**Interfaces:**
+- Consumes: `Config["mavlink"]` (Task 3); `{ device, baud }` from `DetectOutcome` (Task 6)
+- Produces: `export function routerConfig(mavlink: Config["mavlink"], link: { device: string; baud: number }): string;`
+
+- [ ] **Step 1: Write the failing test**
+
+```ts
+// packages/yonder-core/src/mav/router/config.test.ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+import { describe, expect, it } from "vitest";
+import { DEFAULT_CONFIG } from "../../schema/config.js";
+import { routerConfig } from "./config.js";
+
+const link = { device: "/dev/ttyAMA0", baud: 57600 };
+const base = DEFAULT_CONFIG.mavlink;
+
+describe("routerConfig", () => {
+  it("names the serial device and the speed detection settled on", () => {
+    const out = routerConfig(base, link);
+    expect(out).toContain("[UartEndpoint autopilot]");
+    expect(out).toContain("Device = /dev/ttyAMA0");
+    expect(out).toContain("Baud = 57600");
+  });
+
+  it("always emits the control plane's loopback copy, even with no ground station (R-MAV-05)", () => {
+    const out = routerConfig({ ...base, endpoints: [] }, link);
+    expect(out).toContain("[UdpEndpoint yonder]");
+    expect(out).toContain("Address = 127.0.0.1");
+    expect(out).toContain("Port = 14559");
+  });
+
+  it("emits one block per ground station, named for it (R-MAV-03)", () => {
+    const out = routerConfig({ ...base, endpoints: [
+      { name: "gcs0", host: "192.168.2.10", port: 14550 },
+      { name: "gcs1", host: "10.147.20.8", port: 14551 },
+    ] }, link);
+    expect(out).toContain("[UdpEndpoint gcs0]");
+    expect(out).toContain("Address = 192.168.2.10");
+    expect(out).toContain("[UdpEndpoint gcs1]");
+    expect(out).toContain("Port = 14551");
+  });
+
+  it("omits the tcp server entirely when it is off (R-MAV-04)", () => {
+    expect(routerConfig({ ...base, tcp_server: { enabled: false, port: 5760 } }, link)).not.toContain("TcpServerPort");
+    expect(routerConfig(base, link)).toContain("TcpServerPort = 5760");
+  });
+
+  // R-MAV-07: the difference between these two is an unauthenticated command
+  // path to the vehicle, so it is asserted rather than reviewed.
+  it("binds ingest to loopback by default and to every address only when asked", () => {
+    expect(routerConfig(base, link)).toContain("[General]\nTcpServerPort = 5760\nReportStats = true\n");
+    const open = routerConfig({ ...base, ingest: { loopback_only: false } }, link);
+    expect(open).toContain("Mode = Server");
+  });
+});
+```
+
+- [ ] **Step 2: Run it and watch it fail**
+
+Run: `npx vitest run --root packages/yonder-core src/mav/router/config.test.ts`
+Expected: FAIL — module not found.
+
+- [ ] **Step 3: Write it**
+
+```ts
+// packages/yonder-core/src/mav/router/config.ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+import type { Config } from "../../schema/config.js";
+
+/**
+ * `mavlink-router`'s configuration, generated from `config.yaml` and rewritten
+ * from scratch on every apply (§4). Editing the file on the device survives
+ * until the next apply and then disappears; that single-writer rule is what
+ * makes rollback possible and it is not relaxed for this service.
+ *
+ * The loopback endpoint is not optional and is not configurable. It is how the
+ * control plane sees traffic at all (R-MAV-05), and it is deliberately a
+ * *copy*: raw MAVLink reaches a ground station without passing through
+ * Node-RED, so a console restart is invisible to Mission Planner (R-MAV-06).
+ */
+
+/** Where the control plane listens. Not a setting: R-MAV-05 and R-MAV-06. */
+export const LOOPBACK_PORT = 14559;
+
+export function routerConfig(mavlink: Config["mavlink"], link: { device: string; baud: number }): string {
+  const parts: string[] = [];
+
+  const general = ["[General]"];
+  if (mavlink.tcp_server.enabled) general.push(`TcpServerPort = ${mavlink.tcp_server.port}`);
+  general.push("ReportStats = true");
+  parts.push(`${general.join("\n")}\n`);
+
+  parts.push(
+    `[UartEndpoint autopilot]\nDevice = ${link.device}\nBaud = ${link.baud}\n`,
+  );
+
+  parts.push(
+    `[UdpEndpoint yonder]\nMode = Normal\nAddress = 127.0.0.1\nPort = ${LOOPBACK_PORT}\n`,
+  );
+
+  for (const endpoint of mavlink.endpoints) {
+    parts.push(
+      `[UdpEndpoint ${endpoint.name}]\nMode = Normal\nAddress = ${endpoint.host}\nPort = ${endpoint.port}\n`,
+    );
+  }
+
+  // R-MAV-07. `Server` mode binds a listening socket that accepts MAVLink from
+  // anywhere it is reachable, which on this device includes the mobile network
+  // and the mesh — an unauthenticated way to command the aircraft. Off unless
+  // configured, and the renderer logs the moment it goes on.
+  if (!mavlink.ingest.loopback_only) {
+    parts.push(`[UdpEndpoint inbound]\nMode = Server\nAddress = 0.0.0.0\nPort = 14540\n`);
+  }
+
+  return `${parts.join("\n")}`;
+}
+```
+
+- [ ] **Step 4: Run the tests**
+
+Run: `npx vitest run --root packages/yonder-core src/mav/router/config.test.ts`
+Expected: PASS. If the `[General]` assertion fails on exact whitespace, fix the *test* to match the generator's real output rather than loosening the generator — the ingest assertion is the one that matters and it must stay exact.
+
+- [ ] **Step 5: Commit**
+
+```bash
+rm -f node_modules
+git add packages/yonder-core/src/mav/router/
+git commit -m "feat(mav): generate mavlink-router's configuration from config.yaml — R-MAV-03, R-MAV-05, R-MAV-07"
+```
+
+---
+
+## Task 9: `link.ts` — one link state
+
+§6. **Check Task 2's finding first**: if the router attributes traffic per endpoint, `groundStations` becomes an array with a state per entry.
+
+**Files:**
+- Create: `packages/yonder-core/src/mav/link.ts`
+- Test: `packages/yonder-core/src/mav/link.test.ts`
+
+**Interfaces:**
+- Consumes: `Heartbeat` (Task 5), `DetectOutcome` (Task 6), `Clock`
+- Produces:
+  ```ts
+  export interface LinkState {
+    phase: "searching" | "silent" | "noise" | "linked" | "stopped";
+    device: string | null; baud: number | null;
+    vehicle: string | null; system: number | null;
+    heartbeatHz: number | null; lastHeardMs: number | null;
+    groundStationAnswering: boolean; groundStationLastHeardMs: number | null;
+    triedBauds: number[];
+  }
+  export class LinkTracker {
+    constructor(opts?: { clock?: Clock; windowMs?: number });
+    observed(outcome: DetectOutcome): void;
+    heard(heartbeat: Heartbeat): void;
+    stopped(): void;
+    state(): LinkState;
+  }
+  ```
+
+- [ ] **Step 1: Write the failing test**
+
+```ts
+// packages/yonder-core/src/mav/link.test.ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+import { describe, expect, it } from "vitest";
+import type { Clock } from "../apply/types.js";
+import { LinkTracker } from "./link.js";
+
+function fakeClock(): Clock & { advance(ms: number): void } {
+  let now = 1_000_000;
+  return {
+    now: () => now,
+    setTimer: () => 0,
+    clearTimer: () => {},
+    advance(ms) { now += ms; },
+  };
+}
+
+const vehicle = { system: 1, component: 1, vehicleType: 1, autopilot: 3, fromVehicle: true };
+const gcs = { system: 255, component: 190, vehicleType: 6, autopilot: 8, fromVehicle: false };
+
+describe("LinkTracker", () => {
+  it("starts out searching, with nothing to report", () => {
+    expect(new LinkTracker().state()).toMatchObject({ phase: "searching", device: null, vehicle: null });
+  });
+
+  it("carries silence through as the wiring case, with the rates tried", () => {
+    const t = new LinkTracker();
+    t.observed({ kind: "silent", device: "/dev/ttyAMA0", triedBauds: [57600, 115200, 230400, 921600] });
+    expect(t.state()).toMatchObject({ phase: "silent", device: "/dev/ttyAMA0", triedBauds: [57600, 115200, 230400, 921600] });
+  });
+
+  it("carries noise through as its own phase (R-MAV-13)", () => {
+    const t = new LinkTracker();
+    t.observed({ kind: "noise", device: "/dev/ttyAMA0", triedBauds: [57600], bytes: 800 });
+    expect(t.state().phase).toBe("noise");
+  });
+
+  it("reports the vehicle and speed once a link is found", () => {
+    const t = new LinkTracker();
+    t.observed({ kind: "found", device: "/dev/ttyAMA0", baud: 57600, vehicle: "ArduPlane", system: 1 });
+    expect(t.state()).toMatchObject({ phase: "linked", baud: 57600, vehicle: "ArduPlane", system: 1 });
+  });
+
+  it("computes a heartbeat rate from arrivals, not from a configured number", () => {
+    const clock = fakeClock();
+    const t = new LinkTracker({ clock });
+    t.observed({ kind: "found", device: "/dev/ttyAMA0", baud: 57600, vehicle: "ArduPlane", system: 1 });
+    for (let i = 0; i < 5; i += 1) { t.heard(vehicle); clock.advance(1_000); }
+    expect(t.state().heartbeatHz).toBeCloseTo(1, 1);
+  });
+
+  // §6: this is the whole point — "configured" is not "connected".
+  it("only calls a ground station answering when one has actually answered", () => {
+    const clock = fakeClock();
+    const t = new LinkTracker({ clock });
+    t.observed({ kind: "found", device: "/dev/ttyAMA0", baud: 57600, vehicle: "ArduPlane", system: 1 });
+    t.heard(vehicle);
+    expect(t.state().groundStationAnswering).toBe(false);
+    t.heard(gcs);
+    expect(t.state()).toMatchObject({ groundStationAnswering: true, groundStationLastHeardMs: 0 });
+  });
+
+  it("stops calling a ground station answering once it has gone quiet", () => {
+    const clock = fakeClock();
+    const t = new LinkTracker({ clock, windowMs: 5_000 });
+    t.heard(gcs);
+    clock.advance(6_000);
+    expect(t.state().groundStationAnswering).toBe(false);
+  });
+
+  it("keeps the autopilot half alive when the operator stops telemetry (R-MAV-09)", () => {
+    const t = new LinkTracker();
+    t.observed({ kind: "found", device: "/dev/ttyAMA0", baud: 57600, vehicle: "ArduPlane", system: 1 });
+    t.stopped();
+    expect(t.state()).toMatchObject({ phase: "stopped", vehicle: "ArduPlane", baud: 57600 });
+  });
+});
+```
+
+- [ ] **Step 2: Run it and watch it fail**
+
+Run: `npx vitest run --root packages/yonder-core src/mav/link.test.ts`
+Expected: FAIL — module not found.
+
+- [ ] **Step 3: Write it**
+
+Implement `LinkTracker` to satisfy exactly those tests: keep the last `DetectOutcome`, a ring of vehicle-heartbeat timestamps for the rate (`heartbeatHz = (n - 1) / (last - first)` in seconds, `null` below two samples — a rate from one arrival is a claim no measurement supports), and the timestamp of the last heartbeat with `fromVehicle === false` for the ground-station half. `windowMs` defaults to `5_000`. `stopped()` sets the phase and leaves every autopilot-side field untouched.
+
+- [ ] **Step 4: Run the tests**
+
+Run: `npx vitest run --root packages/yonder-core src/mav/link.test.ts`
+Expected: PASS, all eight.
+
+- [ ] **Step 5: Commit**
+
+```bash
+rm -f node_modules
+git add packages/yonder-core/src/mav/link.ts packages/yonder-core/src/mav/link.test.ts
+git commit -m "feat(mav): one link state, measured rather than configured — R-MAV-10"
+```
+
+---
+
+## Task 10: `MavlinkRenderer` — the only part that shells out
+
+§4. Boot order, the contended port, and the service.
+
+**Files:**
+- Create: `packages/yonder-core/src/mav/renderer.ts`
+- Test: `packages/yonder-core/src/mav/renderer.test.ts`
+- Modify: `packages/yonder-core/src/daemon/server.ts` — build and register it
+- Modify: `packages/yonder-core/src/index.ts` — export it
+
+**Interfaces:**
+- Consumes: everything from Tasks 5–9; `CommandRunner`, `Clock`, `Renderer`
+- Produces: `export class MavlinkRenderer implements Renderer { readonly name = "mavlink"; render(config: Config): Promise<void>; state(): LinkState; detectNow(): Promise<DetectOutcome>; }`
+
+- [ ] **Step 1: Write the failing test**
+
+Follow `packages/yonder-core/src/remote/renderer.test.ts` for the fake-`CommandRunner` shape. Assert, at minimum:
+
+```ts
+it("detects before it starts the router, because they contend for the port", async () => { /* assert order: open() calls precede the systemctl start */ });
+it("writes the router's configuration with the speed detection settled on", async () => { /* assert the file content */ });
+it("does not start the router when nothing was found, so retrying stays free (§3)", async () => { /* assert no systemctl start */ });
+it("remembers a found port and speed, and forgets one that stopped answering", async () => { /* assert hint file */ });
+it("skips detection entirely when the operator pinned a device and baud", async () => { /* assert open() never called */ });
+it("logs the moment ingest is opened to the network (R-MAV-07)", async () => { /* assert the log line names it */ });
+it("does not start the router at all when autocast is off (R-MAV-08, R-MAV-09)", async () => { /* assert no start */ });
+```
+
+- [ ] **Step 2: Run and watch fail** — `npx vitest run --root packages/yonder-core src/mav/renderer.test.ts`
+
+- [ ] **Step 3: Write the renderer**
+
+`render(config)` in order: resolve the link (pinned values win; else hint, else sweep); on `found`, write the hint, write `/etc/mavlink-router/main.conf` from `routerConfig`, and `systemctl restart mavlink-router` through the injected runner; on `silent` or `noise`, forget the hint, do **not** start the service, and schedule the next attempt 30 s out on the injected `Clock`. Log at `warn` when ingest is not loopback-only, naming what it means, and at `warn` on a failed sweep carrying the outcome.
+
+- [ ] **Step 4: Run the tests, then the whole suite**
+
+Run: `npx vitest run --root packages/yonder-core`
+Expected: everything green. `K-19` matters here — a renderer that throws stops the ones behind it, so a failed sweep must **not** throw.
+
+- [ ] **Step 5: Register and export it**
+
+In `daemon/server.ts`, build it alongside `RemoteRenderer` and add it to the renderer list. In `index.ts`, export `MavlinkRenderer`, `type LinkState`, `type DetectOutcome`.
+
+- [ ] **Step 6: Commit**
+
+```bash
+rm -f node_modules
+git add packages/yonder-core/src/mav/renderer.ts packages/yonder-core/src/mav/renderer.test.ts packages/yonder-core/src/daemon/server.ts packages/yonder-core/src/index.ts
+git commit -m "feat(mav): the renderer — detect, then render, then start — R-MAV-01, R-MAV-06, R-MAV-08"
+```
+
+---
+
+## Task 11: The loopback listener and the `/mav/*` routes
+
+**Files:**
+- Create: `packages/yonder-core/src/mav/listener.ts`, `listener.test.ts`
+- Modify: `packages/yonder-core/src/daemon/routes.ts`, `routes.test.ts`
+
+**Interfaces:**
+- Consumes: `HeartbeatScanner`, `LinkTracker`, `LOOPBACK_PORT`
+- Produces: routes `GET /mav/state` → `LinkState`; `POST /mav/detect`; `POST /mav/start`; `POST /mav/stop`; `GET /mav/check` → `{ autopilot, outbound, inbound }`, each `{ ok: boolean | null; detail: string }` — `null` meaning not attempted, which is what draws the dash rather than the cross (§8)
+
+- [ ] **Step 1: Write the failing tests** — a UDP socket on an ephemeral port fed a crafted heartbeat, asserting `LinkTracker` saw it; and route tests following the existing `/remote/state` cases in `routes.test.ts`.
+- [ ] **Step 2: Run and watch fail.**
+- [ ] **Step 3: Implement** the `dgram` listener bound to `127.0.0.1` only, and the five routes.
+- [ ] **Step 4: Run** `npx vitest run --root packages/yonder-core` — expected green, including the existing 69 route tests.
+- [ ] **Step 5: Commit** — `feat(mav): the loopback feed and the console's routes — R-MAV-05, R-MAV-10, R-DIA-04`
+
+---
+
+## Task 12: `node-red-contrib-yonder-mavlink`
+
+**Files:**
+- Create: the package, following `packages/node-red-contrib-yonder-remote/` exactly — `package.json`, `tsconfig.json`, `vitest.config.ts`, `src/red.ts`, and one node per route with its `.html`
+- Nodes: `yonder-mav-state`, `yonder-mav-endpoints`, `yonder-mav-run`, `yonder-mav-check`
+
+**Interfaces:**
+- Consumes: `LinkState`, `DaemonClient`, `clientFor`, `fetched`, `readFailure` from `yonder-core`
+- Produces: message payloads shaped for the widgets — every string already in words, so no widget learns a vocabulary (the rule `messageFor` in the remote package follows)
+
+- [ ] **Step 1: Write the failing test** for `messageFor(state: LinkState, now?: number)`, covering all five phases and asserting the operator-facing sentences — including that the silent case names **pin 8, pin 10 and pin 6**, and the noise case names `SERIALn_PROTOCOL` and `SERIALn_BAUD`.
+- [ ] **Step 2: Run and watch fail.**
+- [ ] **Step 3: Implement** the nodes as thin adapters. No decision lives here.
+- [ ] **Step 4: Run** `npx vitest run --root packages/node-red-contrib-yonder-mavlink`.
+- [ ] **Step 5: Commit** — `feat(mavlink-nodes): thin adapters over the daemon socket — R-MAV-10`
+
+---
+
+## Task 13: The flow strip
+
+**Files:**
+- Create: `packages/node-red-dashboard-2-yonder/src/flow.ts`, `flow.html`, `src/ui/YonderFlow.vue`
+- Modify: `src/red.ts`, `package.json`, `scripts/build-widgets.mjs` if it enumerates widgets
+- Test: `src/nodes.test.ts` — extend
+
+**Interfaces:**
+- Consumes: `{ from, through, to }`, each `{ label, detail, absent }`, plus `legs: { rate, caption, absent }[]`
+- Produces: the `yonder-flow` widget
+
+- [ ] **Step 1: Extend `nodes.test.ts`** to assert the new node registers and its defaults, as the existing widgets are asserted.
+- [ ] **Step 2: Run and watch fail.**
+- [ ] **Step 3: Write the component**, reading `--yonder-*` with night fallbacks like every other widget (`R-UI-13`). Three cells and two legs; a leg with `absent` draws a dashed grey arrow. Below 1024px the grid becomes one column and the arrows point down.
+- [ ] **Step 4: Run** `npx vitest run --root packages/node-red-dashboard-2-yonder`.
+- [ ] **Step 5: Commit** — `feat(instruments): the telemetry flow strip — R-UI-13`
+
+---
+
+## Task 14: The Telemetry page
+
+**Files:**
+- Modify: `flows/flows.json` — wiring only
+- Modify: `packages/yonder-core/src/flows.test.ts` — it already asserts no `function` node exists; extend it for the new page
+- Modify: `scripts/verify-pages.sh`, `docs/console/capture/`, `docs/console/shape/`
+
+- [ ] **Step 1: Extend `flows.test.ts`** — assert the Telemetry page exists, that its groups are the four in §8, and that the artefact still contains no `function` node.
+- [ ] **Step 2: Run and watch fail.**
+- [ ] **Step 3: Build the page** in the editor and export it, or write the wiring by hand. Reference: the mockups this design was agreed from, in the session scratchpad, and §8 for what each panel holds.
+- [ ] **Step 4: Run** `HOLD=1 PORT=18900 ./scripts/verify-pages.sh` and **look at the page** in a browser in both palettes before believing it.
+- [ ] **Step 5: Capture** the page into `docs/console/capture/` and `docs/console/shape/`, in both palettes.
+- [ ] **Step 6: Commit** — `feat(console): the Telemetry page — R-MAV-10, R-DIA-04, R-UI-12`
+
+**Note for the reviewer:** §8 records that `R-UI-12` does not yet cover a page with five mutually exclusive states. This task captures whichever state the fixtures produce. Do not claim the others are covered.
+
+---
+
+## Task 15: The installer — the UART role
+
+§2. **Do not merge this without Task 1's hardware note**, which is the only evidence these overlay lines do what they claim.
+
+**Files:**
+- Create: `installer/roles/uart.sh` (follow the naming of the roles already there)
+- Modify: `installer/install.sh` — register the role
+- Modify: `docs/hardware/an-autopilot-on-the-uart.md` — the wiring table as the operator-facing record
+
+- [ ] **Step 1: Write the role**, owning one marked stanza and never touching the rest, exactly as `scripts/pocket2/enable-gadget-mode.sh` does: `enable_uart=1` and `dtoverlay=disable-bt` appended under a `# yonder-uart` marker; `console=serial0,115200` removed from `cmdline.txt`; `serial-getty@ttyAMA0` and `hciuart` disabled. Idempotent — running it twice changes nothing.
+- [ ] **Step 2: Add the role's post-condition** — the role runner already supports one; assert `/dev/ttyAMA0` exists and no getty holds it. **M2a's lesson applies directly:** `deb-systemd-helper` refuses to run outside `dpkg`, and only a post-condition caught it.
+- [ ] **Step 3: Run the installer on the board**, reboot, and confirm the wiring still carries MAVLink.
+- [ ] **Step 4: Commit** — `feat(installer): give the autopilot the UART — R-MAV-02, R-HW-04`
+
+---
+
+## Task 16: The installer — `mavlink-router` in the offline payload
+
+§10.2. Task 2 measured the cost; this pays it.
+
+**Files:**
+- Create: `installer/roles/mavlink-router.sh`, `systemd/mavlink-router.service`
+- Modify: the CI workflow that builds the offline payload
+
+- [ ] **Step 1: Build it in CI** for arm64, pinned to the version Task 2 recorded, with the fingerprint committed — the shape `R-VPN-08` defines and M2a proved.
+- [ ] **Step 2: Write the role** to install from the payload with no network, and leave the unit **stopped and disabled**: `yonder-core` starts it, and only once a link has been found (§4, and the `R-VPN-08` precedent that installing a thing must not start it).
+- [ ] **Step 3: Prove `R-CFG-07`** the way M2a did — run the role with `apt` pointed at a dead proxy and confirm `Need to get 0 B`.
+- [ ] **Step 4: Commit** — `feat(installer): carry mavlink-router in the offline payload — R-CFG-07, R-MAV-06`
+
+---
+
+## Self-Review
+
+**Spec coverage.** §1 → Task 3 and the slice this whole plan implements. §2 → Task 15. §3 → Tasks 1, 6, 7. §4 → Tasks 8, 10, 16. §5 → Task 4. §6 → Tasks 2, 9. §7 → Tasks 4 and 6 (each requirement lands in the commit that implements it, per rule 3). §8 → Tasks 12, 13, 14. §9 → the file structure above. §10 → Tasks 1 and 2, deliberately first.
+
+**Two gaps I found and am recording rather than hiding:**
+
+1. **The interruption warning has no task.** §5 says the console warns that applying an endpoint change briefly interrupts the ground stations already receiving; §8 already records that no screen shows it. It belongs in Task 14 as a line beside the commit action, and Task 14 does not currently say so. **Add it there when Task 14 is implemented.**
+2. **`R-MAV-09`'s start/stop is asserted in Task 10 and routed in Task 11, but no task makes the *service* survive a `yonder-core` restart** — that is `R-MAV-06`'s whole point and it follows from `mavlink-router` being its own systemd unit, so it is a property of Task 16's unit file rather than of any code. Task 16 must include a test that restarting `yonder-core` leaves the router running.
+
+**Type consistency.** `DetectOutcome`, `LinkState`, `LinkHint`, `Heartbeat`, `SerialPort`, `OpenPort` and `routerConfig` are each defined once, in the task that creates them, and referenced by exactly those names afterwards. `LOOPBACK_PORT` is exported from `router/config.ts` and consumed in Task 11 rather than repeated as `14559`.
+
+**One correction the plan makes to the spec.** §5 and §7 say `mavlink` is exempted from the confirmation window "by name". `reachability.ts` names **leaves**, never subtrees, and its own comment explains that a subtree exemption silently enfranchises every field added under it later. Task 4 therefore exempts `mavlink.endpoints`, `mavlink.autocast`, `mavlink.tcp_server.enabled` and `mavlink.tcp_server.port` individually, and deliberately leaves `mavlink.serial` and `mavlink.ingest` load-bearing. **The spec has been tightened to match** in the same change as this plan: §5 and §7 now name the four exempt leaves and name `mavlink.serial` and `mavlink.ingest` as deliberately not exempt, so a later reader knows they were considered rather than missed.
