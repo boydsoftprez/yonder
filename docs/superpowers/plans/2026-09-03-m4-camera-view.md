@@ -49,7 +49,7 @@ This plan is **M4 only** — the spec spans M4, M5 and M7, and its §9 milestone
 - **No secret is ever logged.** The RTSP credential is a `SecretRef` in `config.yaml` and a value in `/etc/yonder/secrets.yaml` at `0600`, and Task 14 asserts no captured page contains the resolved value.
 - **A token carrying a unit is never uppercased** (spec §10). `Mb/s`, `kb/s`, `ms`, `fps`, `°/s` keep their case. Small caps are for labels only. This appeared three times in three components during design; it is a constraint on every component in Tasks 12–15.
 - **A segmented control has a maximum width** and never stretches to its container (spec §10, R-UI-10).
-- **Paths:** config `/etc/yonder/config.yaml`, secrets `/etc/yonder/secrets.yaml`, state `/var/lib/yonder/`, socket `/run/yonder/core.sock`, payload `vendor/`, mediamtx config `/etc/yonder/mediamtx.yml`.
+- **Paths:** config `/etc/yonder/config.yaml`, secrets `/etc/yonder/secrets.yaml`, state `/var/lib/yonder/`, socket `/run/yonder/core.sock`, payload `vendor/`, mediamtx config `/etc/mediamtx/mediamtx.yml` at `0640` in a `2750 root:yonder-media` directory — **not** `/etc/yonder` at `0600`, which Task 9 proved cannot be read by the `yonder-media` user the server runs as.
 
 ---
 
@@ -95,7 +95,7 @@ packages/yonder-core/src/
 ├── system/supply.test.ts
 ├── media/config.ts                  pure: Config + resolved secret -> mediamtx yaml (Task 9)
 ├── media/config.test.ts
-├── media/renderer.ts                MediaRenderer: config -> /etc/yonder/mediamtx.yml
+├── media/renderer.ts                MediaRenderer: config -> /etc/mediamtx/mediamtx.yml
 ├── media/renderer.test.ts
 ├── console/whep.ts                  authenticated proxy for the stream handshake (Task 10)
 ├── console/whep.test.ts
@@ -3039,7 +3039,7 @@ export class MediaRenderer implements Renderer {
   private readonly secrets: SecretStore;
 
   constructor(opts: { path?: string; runner?: CommandRunner; secrets: SecretStore }) {
-    this.path = opts.path ?? "/etc/yonder/mediamtx.yml";
+    this.path = opts.path ?? "/etc/mediamtx/mediamtx.yml";
     this.runner = opts.runner ?? systemRunner;
     this.secrets = opts.secrets;
   }
@@ -3098,7 +3098,7 @@ Stage into `vendor/mediamtx/`.
 
 **One package the board does not have.** `rtspclientsink` lives in `gstreamer1.0-rtsp`, which is **not installed** on the development board — verified in Task 6, where a pipeline carrying it failed to parse at all rather than merely failing to connect. Every RTSP branch in `pipeline.ts` depends on it, which is both full-rate consumers and the preview. Install it in this role alongside mediamtx, from the payload if the payload carries it and from `apt` otherwise, and fail loudly if it is absent afterwards — a missing element here takes the whole video path down, not one branch.
 
-Then `installer/roles/50-mediamtx.sh`, copying `40-zerotier.sh` line for line in structure — a missing payload is a log line and `return 0`, not an error (R-CFG-08) — installing the binary to `/usr/local/bin/mediamtx`, writing a unit that runs it as a dedicated `yonder-media` user with `ExecStart=/usr/local/bin/mediamtx /etc/yonder/mediamtx.yml`, and then:
+Then `installer/roles/50-mediamtx.sh`, copying `40-zerotier.sh` line for line in structure — a missing payload is a log line and `return 0`, not an error (R-CFG-08) — installing the binary to `/usr/local/bin/mediamtx`, writing a unit that runs it as a dedicated `yonder-media` user with `ExecStart=/usr/local/bin/mediamtx /etc/mediamtx/mediamtx.yml`, and then:
 
 ```sh
 # Installed and off, for the reason 40-zerotier.sh is: a media server present
@@ -3108,7 +3108,7 @@ Then `installer/roles/50-mediamtx.sh`, copying `40-zerotier.sh` line for line in
 # The same ownership check 40-zerotier.sh learned the hard way: an operator
 # upgrading a device while watching video over it must not have the picture
 # taken away by a role that ran after the daemon already started the service.
-if [ -f /etc/yonder/mediamtx.yml ]; then
+if [ -f /etc/mediamtx/mediamtx.yml ]; then
     log "yonder-core owns mediamtx (a camera is configured); leaving it running"
 else
     log "stopping and disabling mediamtx until a camera is configured"
