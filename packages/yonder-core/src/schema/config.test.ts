@@ -3,6 +3,12 @@ import { describe, it, expect } from "vitest";
 import { ConfigSchema, DEFAULT_CONFIG } from "./config.js";
 import { withoutRetiredKeys } from "./retired.js";
 import { formatIssues } from "../config/errors.js";
+// Imported rather than restated: the point of the guard under test is that
+// these four numbers have one home, so a test asserting literals would be the
+// second copy it exists to prevent.
+import {
+  RTSP_PORT, SRT_PORT, WEBRTC_LOCAL_UDP_PORT, WEBRTC_PORT,
+} from "../media/ports.js";
 
 /** A config.yaml as a build before the pool was removed would have written it. */
 function seededByAnEarlierBuild(): unknown {
@@ -292,5 +298,146 @@ describe("remote", () => {
         remote: { zerotier: { netwrok_id: "9fef8a3bf9000001" } },
       }),
     ).toThrow();
+  });
+});
+
+describe("cameras", () => {
+  it("defaults cameras to an empty list", () => {
+    const cfg = ConfigSchema.parse({
+      version: 1, network: { ap: { psk: { secret: "ap_psk" } } }, ui: { editor: {} },
+    });
+    expect(cfg.cameras).toEqual([]);
+  });
+
+  it("fills a camera's defaults from its identity alone", () => {
+    const cfg = ConfigSchema.parse({
+      version: 1, network: { ap: { psk: { secret: "ap_psk" } } }, ui: { editor: {} },
+      cameras: [{ id: "cam0", name: "Nose", source: "usb", device: "usb-0000:01:00.0-1.2" }],
+    });
+    const cam = cfg.cameras[0];
+    expect(cam).toMatchObject({
+      enabled: true, autostart: false,
+      width: 1280, height: 720, framerate: 30,
+      codec: "h264", bitrate_kbps: 2000, outputs: [],
+    });
+    expect(cam.preview).toEqual({ width: 640, height: 360, framerate: 15, bitrate_kbps: 400 });
+    expect(cam.controls).toEqual({ brightness: null, contrast: null, rotation: 0 });
+  });
+
+  it("bounds the preview so no setting of it can saturate a link", () => {
+    // The preview is exempt from the confirmation window (reachability.ts), and
+    // that exemption is only safe because this bound exists. Widening it means
+    // moving `preview` out of the exempt list in the same change.
+    const base = { version: 1, network: { ap: { psk: { secret: "ap_psk" } } }, ui: { editor: {} } };
+    const withPreview = (preview: unknown) =>
+      ConfigSchema.safeParse({ ...base, cameras: [
+        { id: "cam0", name: "Nose", source: "usb", device: "usb-1", preview },
+      ] });
+    expect(withPreview({ bitrate_kbps: 2000 }).success).toBe(true);
+    expect(withPreview({ bitrate_kbps: 2001 }).success).toBe(false);
+    expect(withPreview({ width: 1280 }).success).toBe(true);
+    expect(withPreview({ width: 1281 }).success).toBe(false);
+  });
+
+  it("refuses two cameras with the same id", () => {
+    const r = ConfigSchema.safeParse({
+      version: 1, network: { ap: { psk: { secret: "ap_psk" } } }, ui: { editor: {} },
+      cameras: [
+        { id: "cam0", name: "A", source: "usb", device: "usb-1" },
+        { id: "cam0", name: "B", source: "usb", device: "usb-2" },
+      ],
+    });
+    expect(r.success).toBe(false);
+    expect(JSON.stringify(r.error?.issues)).toContain("cam0");
+  });
+
+  it("refuses an output on the console's own port", () => {
+    // A bind race after a reboot is a configuration that confirms while it looks
+    // fine and bites on the next boot. The confirmation window never catches it,
+    // because on the day it is applied nothing collides.
+    const r = ConfigSchema.safeParse({
+      version: 1, network: { ap: { psk: { secret: "ap_psk" } } },
+      ui: { port: 3000, editor: {} },
+      cameras: [{
+        id: "cam0", name: "Nose", source: "usb", device: "usb-1",
+        outputs: [{ kind: "srt", port: 3000 }],
+      }],
+    });
+    expect(r.success).toBe(false);
+    expect(JSON.stringify(r.error?.issues)).toContain("ui.port");
+  });
+
+  it("refuses two cameras that would publish to one media path", () => {
+    // Unique ids are not enough: a camera's preview is served at its id plus
+    // `-preview`, so `nose` and `nose-preview` both want `nose-preview`.
+    // mediamtx takes one publisher per path, so the second pipeline's ANNOUNCE
+    // is refused with 400 and that camera dies while the first goes on
+    // working — the hardest shape of fault to read off a page.
+    const r = ConfigSchema.safeParse({
+      version: 1, network: { ap: { psk: { secret: "ap_psk" } } }, ui: { editor: {} },
+      cameras: [
+        { id: "nose", name: "A", source: "usb", device: "usb-1" },
+        { id: "nose-preview", name: "B", source: "usb", device: "usb-2" },
+      ],
+    });
+    expect(r.success).toBe(false);
+    expect(JSON.stringify(r.error?.issues)).toContain("nose-preview");
+  });
+
+  it("refuses an output on a port the media server binds", () => {
+    // The same class as ui.port above, and the one that was open: mediamtx
+    // does not degrade when two of its servers want one port, it exits — so
+    // an SRT output on 8890 takes *every* camera on the device off the air,
+    // including the browser's, on a boot with nobody watching a countdown.
+    // 8890 was the branch's own fixture value.
+    const withPort = (port: number) => ConfigSchema.safeParse({
+      version: 1, network: { ap: { psk: { secret: "ap_psk" } } },
+      ui: { port: 1880, editor: {} },
+      cameras: [{
+        id: "cam0", name: "Nose", source: "usb", device: "usb-1",
+        outputs: [{ kind: "srt", port }],
+      }],
+    });
+    for (const port of [RTSP_PORT, WEBRTC_PORT, WEBRTC_LOCAL_UDP_PORT, SRT_PORT]) {
+      const r = withPort(port);
+      expect(r.success, `port ${port}`).toBe(false);
+      expect(JSON.stringify(r.error?.issues)).toContain("media server");
+    }
+    // And nothing else: a port the device does not bind is an operator's to
+    // choose, and a schema refusing one of those refuses a working device.
+    expect(withPort(9998).success).toBe(true);
+  });
+
+  it("leaves a ground station's own port alone, because nothing here binds it", () => {
+    // An `rtp` output names a port on the *other* machine — `udpsink` binds
+    // nothing on this device — so 8554 there is not this board's RTSP server
+    // and refusing it would refuse a configuration that works.
+    const r = ConfigSchema.safeParse({
+      version: 1, network: { ap: { psk: { secret: "ap_psk" } } }, ui: { editor: {} },
+      cameras: [{
+        id: "cam0", name: "Nose", source: "usb", device: "usb-1",
+        outputs: [{ kind: "rtp", host: "192.168.1.50", port: RTSP_PORT }],
+      }],
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("holds an RTSP password by reference, never inline", () => {
+    const ok = ConfigSchema.safeParse({
+      version: 1, network: { ap: { psk: { secret: "ap_psk" } } }, ui: { editor: {} },
+      cameras: [{
+        id: "cam0", name: "Nose", source: "usb", device: "usb-1",
+        outputs: [{ kind: "rtsp", password: { secret: "rtsp_password" } }],
+      }],
+    });
+    expect(ok.success).toBe(true);
+    const inline = ConfigSchema.safeParse({
+      version: 1, network: { ap: { psk: { secret: "ap_psk" } } }, ui: { editor: {} },
+      cameras: [{
+        id: "cam0", name: "Nose", source: "usb", device: "usb-1",
+        outputs: [{ kind: "rtsp", password: "hunter2" }],
+      }],
+    });
+    expect(inline.success).toBe(false);
   });
 });

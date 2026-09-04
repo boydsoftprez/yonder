@@ -146,16 +146,33 @@ Direct path — `v4l2src ! image/jpeg ! jpegdec ! v4l2h264enc ! h264parse` — a
 target. Each figure is the mean of three runs of 300 frames; run-to-run spread was under
 two points. The Pi 4 has four cores, so the last column is the share of the whole board.
 
-| Resolution | Keeps 30 fps | One core | The board |
-|---|---|---|---|
-| 1920×1200 (full sensor, level 5) | yes | 65% | 16% |
-| 1920×1080 | yes | 55% | 14% |
-| 1280×720 | yes | 27% | 7% |
-| 640×480 | yes | 11% | 3% |
+| Resolution | Keeps 30 fps | One core | The board | Supply |
+|---|---|---|---|---|
+| 1920×1200 (full sensor, level 5) | yes | 65% | 16% | not checked per run |
+| 1920×1080 | yes | 55% | 14% | not checked per run |
+| 1280×720 | yes | 27% | 7% | not checked per run |
+| 640×480 | yes | 11% | 3% | not checked per run |
 
 Verified as real work, not dropped frames: `fpsdisplaysink` reported **rendered 294,
 dropped 0** across 300 buffers, and the encoded file was 2,498,545 bytes over ten seconds —
 2.00 Mb/s against a 2 Mb/s target.
+
+**The 640×480 row is not the cost of the preview branch**, and was for a while read as
+though it were. It is a whole separate pipeline at that size, paying its own software JPEG
+decode; the preview branch starts from frames the main path has already decoded and adds a
+downscale instead. The two have almost no term in common. That branch now has a figure of
+its own, measured rather than substituted — see [the composed
+pipeline](#the-composed-pipeline-and-what-the-preview-branch-costs) below.
+
+**On the supply column.** These four were taken on 2026-09-02, which recorded
+`get_throttled=0x0` once for the session as a whole (see [Thermals](#thermals)) rather than
+either side of each run. K-41 then found the same board at `0x50000` — under-voltage and
+throttling both latched — under a heavier accessory load, and the latch clears on the
+reboots it was causing, so a single session-level reading does not qualify an individual
+run. Neither claim is being doubted here; what is missing is the per-run evidence, and
+"not checked per run" is what the table can honestly say. Everything measured since goes
+through `scripts/measure-pipeline.sh`, which reads the register before and after each run
+and **refuses to print a figure** unless both reads are clean.
 
 Where the 1080p cost goes:
 
@@ -193,6 +210,55 @@ up the same link. At 2 Mb/s that is 6 Mb/s of uplink for one camera, against a f
 uplink that is often 1–5 Mb/s. **The `tee` removes the encoding trade-off. It does not
 remove the bandwidth trade-off, and `architecture.md` currently implies it does.**
 
+### The composed pipeline, and what the preview branch costs
+
+R-VID-13 answers the bandwidth trade-off above by serving the interface a **separate,
+cheaper copy**, encoded from the frames the main path has already decoded. It is the only
+P1 in the camera set, and until now its cost had never been measured — the 640×480 row
+above was standing in for it, which is a substitution from a different pipeline.
+
+Measured on 2026-09-04 with `scripts/measure-pipeline.sh`, on the pipeline `compose()`
+actually emits rather than one written out by hand: capture at 1280×720p30 MJPEG, one
+`jpegdec`, a full-rate encode at 2 Mb/s published to mediamtx over RTSP, and the preview
+branch — `v4l2convert` to 640×360, `videorate` to 15 fps, a second encode at 400 kb/s with
+a short GOP — published to its own path. Each figure is the mean of three 60-second runs,
+sampled from the process's own CPU time after a five-second settle, interleaved so thermal
+drift could not favour one variant. mediamtx v1.20.1 was relaying both paths.
+
+| | One core | The board | Runs | Supply |
+|---|---|---|---|---|
+| Whole pipeline, **both encodes** | **43%** | **11%** | 42, 44, 43 | clean, checked either side of each run |
+| The same graph, preview branch removed | 31% | 8% | 31, 31, 31 | clean, checked either side of each run |
+| **The preview branch, as the difference** | **12%** | **3%** | 11, 13, 12 | clean, checked either side of each run |
+
+**The preview branch is measured as a difference, not in isolation, and that is the figure
+the requirement wants.** It cannot be run alone: it has no source of its own, and giving it
+one would make it pay a second JPEG decode — the very cost the design exists to avoid. What
+an operator is deciding is whether to *add* the browser's copy to a pipeline that was going
+to run anyway, so the marginal cost is the honest answer to that question. The two graphs
+differ by the preview branch and nothing else: both come from one `compose()` call, and the
+shorter one is that call's output truncated at the tee reference that opens the branch.
+
+Verified as real work rather than dropped frames, in a separate run so the consumers'
+own cost stayed outside the figures: 300 frames off the main path and 150 off the preview
+each took 11.1 s including RTSP setup — 30 fps and 15 fps respectively, both holding. Over
+twenty seconds the main path carried 1,888 kb/s and the preview 374 kb/s against targets of
+2,000 and 400: **the browser's copy costs about a fifth of the uplink a ground-station feed
+does**, which is what R-VID-13 is for. mediamtx's own share of relaying both was 1% of one
+core; the figures above are the pipeline process only.
+
+Three things worth carrying forward:
+
+- **The 11% substitution was near enough by accident.** The preview branch costs 12 points,
+  and the number standing in for it was 11 — but of a pipeline sharing almost no term with
+  it, dominated by a JPEG decode this branch never performs and containing no allowance at
+  all for the downscale it does perform. It was right for reasons that did not hold.
+- **The downscale is close to free**, which is why the hardware resizer is worth keeping:
+  12 points buys `v4l2convert`, a rate drop and a whole second H.264 encode.
+- **1280×720p30 with a preview costs 11% of the board.** The full-rate branch alone is 31%
+  of a core here against the 27% in the direct-path table, and the four points are the
+  `tee`, the queues and an RTSP publish over the loopback — not a regression.
+
 ### The Pi 5 path, measured on slower hardware
 
 R-HW-02 wants software H.264 on boards without an encoder. No Pi 5 was available, but
@@ -223,9 +289,19 @@ v4l2src device=<by-path>
   ! video/x-h264,level=(string)L     # L derived from W×H, not pinned (Defect 3)
   ! h264parse
   ! tee name=t
-      t. ! queue ! rtph264pay ! udpsink host=… port=…     # ground station, R-VID-01
-      t. ! queue ! rtspclientsink location=…              # mediamtx, R-VID-03/04
+      t. ! queue leaky=downstream max-size-time=200000000 max-size-buffers=0 max-size-bytes=0
+         ! rtph264pay ! udpsink host=… port=…             # ground station, R-VID-01
+      t. ! queue leaky=downstream max-size-time=200000000 max-size-buffers=0 max-size-bytes=0
+         ! rtspclientsink location=…                      # mediamtx, R-VID-03/04
 ```
+
+**The queues are bounded and leaky, and that is load-bearing rather than tidy.** A bare
+`queue` blocks when it fills. A ground station that stops reading, a stalled media server or
+a TCP connection gone quiet then back-pressures through the `tee`, stalls the shared encoder,
+and takes every other branch with it — the browser's included. Bounded by time and dropping
+the oldest, a slow consumer loses its own frames and nothing else notices. The sketch above
+was written before this was understood; it is corrected here rather than left for somebody to
+find in a field.
 
 No `v4l2convert`. No `videoconvert`. The decoder's output format is already the encoder's
 input format.
@@ -280,8 +356,10 @@ dmesg | grep 'Failed enabling i/p port'
   and resolves, but this camera reports the serial `01.00.00` — a generic string. Two
   identical modules would collide, so identity needs the USB topology path
   (`usb-0000:01:00.0-1.3`) as the tiebreak. Not yet tried with two cameras.
-- **mediamtx.** Not installed on this board; nothing has been published to it, and no
-  browser has played anything. Every measurement above ends at a `fakesink` or a file.
+- **A browser playing any of it.** mediamtx v1.20.1 is installed now, and the composed
+  pipeline publishes both paths to it and has been read back off both — but by another
+  GStreamer process, not by a browser over WebRTC. The direct-path measurements above still
+  end at a `fakesink` or a file.
 - **Anything over the modem.** The EC25 is attached and unconfigured. No video has crossed
   a cellular link.
 - **Sustained thermal load in an enclosure.**

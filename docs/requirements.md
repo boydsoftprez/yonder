@@ -98,6 +98,9 @@ Parameter writes are vehicle commands. R-CMD applies to every requirement here.
 | R-CAM-13 | Select an encoder appropriate to the board by probing the hardware, not from a table of board names, and report the encoder in use. An operator may name one explicitly to bypass the probe | 1 |
 | R-CAM-14 | Build a camera's offered formats, resolutions, rates and controls from what the device answers, never from a stored list. **A capability the device advertises but does not answer is absent**, and is reported as advertised-but-unavailable rather than hidden | 1 |
 | R-CAM-15 | Capture from a camera that is itself a USB host and expects a phone, by presenting the board as that phone and speaking the camera's own protocol. The picture and the gimbal, exposure and white-balance controls (R-CAM-11) arrive on the same link. Requires a board port that can act as a USB device, which on a Raspberry Pi 4 means header or PoE power | 3 |
+| R-CAM-16 | Accept camera and gimbal commands arriving over MAVLink and relay them to the camera on the same terms as commands from the interface | 2 |
+| R-CAM-17 | **Record to storage, wherever this camera can do it.** A camera with its own recorder records to its own medium at whatever it is capable of; a camera without one is recorded by the board from the running pipeline. The interface says which of the two is happening and shows the remaining time on the medium doing the work. Where the camera holds the file, Yonder says so rather than offering to manage a file it never sees | 2 |
+| R-CAM-18 | **Capture a still on demand**, by the same rule: the camera's own photo where it has one, a frame from the running pipeline where it does not. A still the board holds can be viewed, downloaded and deleted; one the camera holds is reported as the camera's | 2 |
 
 ## R-VID — Video transport
 
@@ -111,9 +114,13 @@ Parameter writes are vehicle commands. R-CMD applies to every requirement here.
 | R-VID-06 | Serve SRT for lossy links, with recovery | 2 |
 | R-VID-07 | Adapt encoder bitrate to measured link conditions, within an operator-set floor and ceiling | 2 |
 | R-VID-08 | Allow a fixed bitrate where the operator prefers determinism | 1 |
-| R-VID-09 | Give a late-joining receiver a decodable picture without waiting for the next natural keyframe | 3 |
+| R-VID-09 | Give a late-joining receiver a decodable picture without waiting for the next natural keyframe. Raised from 3: a browser reconnecting after a link drop is a late joiner, and without this it sees a grey rectangle for up to a GOP | 2 |
 | R-VID-10 | Publish the exact receive-side pipeline for each codec, so a ground station can be configured from the documentation alone | 1 |
 | R-VID-11 | Report the egress bandwidth each running output consumes and their total, against the capacity of the path they leave by. R-VID-05 makes simultaneous outputs possible; this is what stops an operator oversubscribing a link without being told | 1 |
+| R-VID-12 | Announce each camera, its stream and its storage on the MAVLink link Yonder already carries, so a ground station finds the picture without being configured by hand. R-VID-10 makes that configuration possible from the documentation; this makes it unnecessary | 2 |
+| R-VID-13 | **Serve the interface a separate, cheaper copy by default**, encoded from the frames already decoded for the main output, so watching in a browser costs a fraction of what a ground-station feed costs. The full-rate picture stays available on request, and the interface states what requesting it would cost before it is requested. R-VID-05 makes simultaneous outputs possible; this is what keeps them affordable on a cellular uplink | 1 |
+| R-VID-14 | **Where live video cannot be established, serve periodic stills instead**, at a stated cost and with the age of the current frame shown. The fall-back happens without being asked for and reports why it happened, and stills are also offered as a deliberate choice on a link that cannot carry video | 2 |
+| R-VID-15 | **Show the exact receive-side command in the interface**, generated from what the camera is doing at that moment and carrying the address the operator is actually reaching the device on. R-VID-10 makes a ground station configurable from the documentation; this removes the need to read it | 2 |
 
 ## R-CTL — Live camera control
 
@@ -256,6 +263,7 @@ Parameter writes are vehicle commands. R-CMD applies to every requirement here.
 | R-STO-03 | Survive loss of power at any moment without corrupting configuration | 1 |
 | R-STO-04 | Provide a read-only or overlay root option for operators who want it | 3 |
 | R-STO-05 | Ship no periodic background task that writes to the card without a stated reason | 2 |
+| R-STO-06 | **Recording on the device's own medium stops before it fills it.** A reserve is kept that recording may not consume, the remaining time is shown against that reserve, and recording ends by itself when it is reached rather than by exhausting the card. R-STO-02 bounds what logging may take; this bounds what video may | 2 |
 
 ## R-SEC — Security
 
@@ -270,9 +278,10 @@ Parameter writes are vehicle commands. R-CMD applies to every requirement here.
 | R-SEC-07 | Include no credential material in a published image | 1 |
 | R-SEC-08 | Offer TLS for the web interface | 2 |
 | R-SEC-09 | **Until an administrator password has been set, the console offers no function but setting one.** No configuration read, no command, and no status beyond two things: whether a password has been set, and whether the device is healthy enough to set one. The second is a deliberate carve-out — a board that cannot say *why* it is refusing is a board that goes back in a box — and it is bounded to state that names no configuration, no interface, no address and no credential | 1 |
-| R-SEC-10 | **Emit no credential anywhere a credential does not belong** — a log line, an error message, a support bundle, or an API response. Redaction happens where the value is captured, not where it is printed, so a new caller cannot reintroduce the leak | 1 |
+| R-SEC-10 | **Emit no credential anywhere a credential does not belong** — a log line, an error message, a support bundle, an API response, or **an interface capture committed to the repository** (R-UI-12). Redaction happens where the value is captured, not where it is printed, so a new caller cannot reintroduce the leak | 1 |
 | R-SEC-11 | **Authentication fails closed.** A component that cannot reach, or cannot get an answer from, whatever holds a credential refuses the login. Being unable to check a password is never treated as the password being right, and a device that cannot tell whether it has a lock behaves as though it has one nobody can open | 1 |
 | R-SEC-12 | **A failure of the interface never costs the network.** Nothing that serves the console — the process, its configuration, its dependencies — may stop, restart or reconfigure the service that keeps the device reachable. A console that will not start is a device you can still reach | 1 |
+| R-SEC-13 | **Every media listener has a stated posture, and none is reachable by default without one.** The picture the interface serves is behind the interface's own credential; a listener a ground station needs, which cannot hold an interface session, carries a generated per-device credential of its own and never a shared default (R-SEC-01); an outbound push has no listener to protect; and a protocol nothing in the configuration uses is not listening at all. R-SEC-04 governs write paths to the vehicle; this governs who may read what the aircraft sends | 1 |
 
 ## R-UI — Interface
 
@@ -297,6 +306,7 @@ Parameter writes are vehicle commands. R-CMD applies to every requirement here.
 | R-UI-17 | **A field that edits a setting opens showing that setting.** An empty box on a configured device is a page giving two answers to one question — the readings above it say the device is on a value the form says is unset — and it makes an operator correcting one field retype the rest from memory. The seeded value is the **configured** one, never the one in use: the two differ while an apply is pending, and that difference is worth seeing rather than hiding. **A credential is the exception and is never seeded** (R-SEC-10): neither the value nor a reference to it goes into a form, and the field says only *whether* one is on file, so an operator can tell a stored credential from an absent one | 1 |
 | R-UI-18 | **The device shows how to get back to it.** The console names the access point, its address and the name it answers to, on the page an operator looks at when something is wrong. **The access-point passphrase is shown only while it is the published default** — that value is deliberately public and is what makes a locked-out operator's way back in usable at all; one the operator has set is theirs, and the interface says it has been changed rather than printing it. **A device that cannot establish which passphrase its own access point is on says so**, rather than naming the published default at an operator for whom it will not work (R-SEC-01, R-SEC-10) | 2 |
 | R-UI-19 | **The console an install produces is the console this project ships.** Every node type the shipped flows use is provided by a package the install path actually installs, and the build fails when one is not. A node that exists in this repository and is never installed is exactly as absent as one nobody wrote: it loads as an unknown type, the page it sits on is missing that control, and nothing reports an error anywhere. **The surface that photographs the pages is built from the same set the installer installs**, so a capture gate can never pass on a console no device receives | 1 |
+| R-UI-20 | **Nothing is silently missing.** A capability the device does not have is stated as a fact where its control would have been — never drawn as a control that cannot be used, and never simply absent, because an operator must be able to tell *this camera cannot* from *this page failed*. A capability the device advertises and does not answer keeps its control, marked inoperative and carrying the reason (R-CAM-14). Actions are the exception: the soft-key rail carries only what can be done | 2 |
 
 ---
 

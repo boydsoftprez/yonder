@@ -12,9 +12,21 @@ import { setupMiddleware, consoleMiddleware, type Middleware } from "./middlewar
  * the same reason CLAUDE.md rule 2 keeps logic out of `flows.json`. A
  * generated file with behaviour in it is a file nobody can review a diff of.
  *
- * Keeping the surface to two functions is also what keeps the module graph
- * small: nothing here reaches the configuration schema, so `settings.js`
- * loads without zod, yaml or anything else the daemon's own tree carries.
+ * Keeping the surface to two functions is meant to keep the module graph
+ * small as well, and it is worth writing down what that graph is rather than
+ * what it was intended to be. Measured, by resolving every import reachable
+ * from this file: 105 modules, 72 of them `yaml` and 10 `zod`. **Every one of
+ * those 82 arrives through a single edge** — `middleware.ts` takes the string
+ * `CONSOLE_HOME` from `settings.ts`, which loads configuration in order to
+ * generate a settings file, and loading configuration reaches the schema. One
+ * constant, and the parser and the validator come with it.
+ *
+ * The stream handshake route was very nearly the second such edge: it needs
+ * the media server's WebRTC port, which lived beside the code that writes
+ * that server's YAML. It reads `media/ports.js` instead — a file that imports
+ * nothing at all — and so costs this graph one module rather than the
+ * seventy-six that `media/config.js` brings. Giving `CONSOLE_HOME` the same
+ * treatment is what would make the first sentence true.
  */
 
 /** The username the flow editor's login expects. There is one administrator. */

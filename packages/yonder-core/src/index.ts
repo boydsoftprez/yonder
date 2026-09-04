@@ -313,6 +313,19 @@ export {
   type BoardDisplay,
 } from "./system/format.js";
 export {
+  cameraStrip,
+  capabilityFacts,
+  identityWords,
+  uplinkBudget,
+  atIp,
+  IP_OVERHEAD,
+  ASSUMED_UPLINK_KBPS,
+  type BudgetSegment,
+  type CameraStrip,
+  type CapabilityFact,
+  type UplinkBudget,
+} from "./video/present.js";
+export {
   PALETTES,
   DEFAULT_THEME,
   themeCss,

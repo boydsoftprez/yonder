@@ -1,0 +1,334 @@
+{
+  "why": [
+    "What one Raspberry Pi 4 with a Global Shutter Camera actually answered, recorded",
+    "off the board on 2026-09-04 and pinned here.",
+    "",
+    "It exists because R-UI-03 builds navigation from detected hardware and R-UI-12",
+    "photographs every page on every build. With no camera attached there is no camera",
+    "page, so the capture gate covers none of the camera work and does not complain —",
+    "from its point of view there is nothing there. This is the camera CI does not have.",
+    "",
+    "`found` and `rejected` are verbatim the shape `detectCameras()` returns, so a change",
+    "to that shape shows up here as a diff rather than as a page that renders nothing.",
+    "The other keys are what the harness has to seed alongside it: the configured camera",
+    "the pages are about, the encoder `probeEncoder()` found, and a deliberately fake",
+    "RTSP credential.",
+    "",
+    "**The credential is fake on purpose.** The receive-line surface shows a *resolved*",
+    "RTSP password (R-VID-15) and R-UI-12 commits the captured images, so a capture taken",
+    "against a real device would put a real secret in this repository for ever.",
+    "capture-pages.mjs reads the device's own secrets.yaml and fails any page whose HTML",
+    "carries that value — this fake is what the pages render instead (R-SEC-10)."
+  ],
+  "recorded": {
+    "board": "Raspberry Pi 4 Model B",
+    "kernel": "6.18.34+rpt-rpi-v8",
+    "v4l2Ctl": "1.30.1",
+    "camera": "Global Shutter Camera: Global S, on USB",
+    "at": "2026-09-04"
+  },
+  "camera": {
+    "id": "front",
+    "name": "Front camera",
+    "source": "usb",
+    "device": "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0",
+    "enabled": true,
+    "autostart": false,
+    "width": 1280,
+    "height": 720,
+    "framerate": 30,
+    "codec": "h264",
+    "bitrate_kbps": 2000,
+    "preview": {
+      "width": 640,
+      "height": 360,
+      "framerate": 15,
+      "bitrate_kbps": 400
+    },
+    "controls": {
+      "brightness": null,
+      "contrast": null,
+      "rotation": 0
+    },
+    "outputs": [
+      {
+        "kind": "rtp",
+        "host": "192.168.77.20",
+        "port": 5600
+      },
+      {
+        "kind": "rtsp",
+        "password": {
+          "secret": "rtsp_password"
+        }
+      }
+    ]
+  },
+  "rtspPassword": "FIXTURE-NOT-A-REAL-PASSWORD",
+  "encoder": {
+    "element": "v4l2h264enc",
+    "device": "/dev/video11",
+    "hardware": true,
+    "codec": "h264",
+    "detail": "hardware H.264 on /dev/video11 — raw in, H.264 out"
+  },
+  "found": [
+    {
+      "device": "/dev/video0",
+      "card": "Global Shutter Camera: Global S",
+      "byPath": "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0",
+      "byPathStable": true,
+      "capabilities": {
+        "formats": {
+          "state": "present",
+          "value": [
+            {
+              "fourcc": "MJPG",
+              "width": 1920,
+              "height": 1080,
+              "rates": [
+                90,
+                60,
+                30,
+                25,
+                20,
+                15,
+                10,
+                5
+              ]
+            },
+            {
+              "fourcc": "MJPG",
+              "width": 1920,
+              "height": 1200,
+              "rates": [
+                90,
+                60,
+                30,
+                25,
+                20,
+                15,
+                10,
+                5
+              ]
+            },
+            {
+              "fourcc": "MJPG",
+              "width": 1600,
+              "height": 1200,
+              "rates": [
+                90,
+                60,
+                30,
+                25,
+                20,
+                15,
+                10,
+                5
+              ]
+            },
+            {
+              "fourcc": "MJPG",
+              "width": 1280,
+              "height": 960,
+              "rates": [
+                90,
+                60,
+                30,
+                25,
+                20,
+                15,
+                10,
+                5
+              ]
+            },
+            {
+              "fourcc": "MJPG",
+              "width": 1280,
+              "height": 720,
+              "rates": [
+                90,
+                60,
+                30,
+                25,
+                20,
+                15,
+                10,
+                5
+              ]
+            },
+            {
+              "fourcc": "MJPG",
+              "width": 1024,
+              "height": 768,
+              "rates": [
+                90,
+                60,
+                30,
+                25,
+                20,
+                15,
+                10,
+                5
+              ]
+            },
+            {
+              "fourcc": "MJPG",
+              "width": 960,
+              "height": 720,
+              "rates": [
+                90,
+                60,
+                30,
+                25,
+                20,
+                15,
+                10,
+                5
+              ]
+            },
+            {
+              "fourcc": "MJPG",
+              "width": 800,
+              "height": 600,
+              "rates": [
+                90,
+                60,
+                30,
+                25,
+                20,
+                15,
+                10,
+                5
+              ]
+            },
+            {
+              "fourcc": "MJPG",
+              "width": 640,
+              "height": 480,
+              "rates": [
+                90,
+                60,
+                30,
+                25,
+                20,
+                15,
+                10,
+                5
+              ]
+            },
+            {
+              "fourcc": "MJPG",
+              "width": 320,
+              "height": 240,
+              "rates": [
+                90,
+                60,
+                30,
+                25,
+                20,
+                15,
+                10,
+                5
+              ]
+            }
+          ]
+        },
+        "zoom": {
+          "state": "present",
+          "value": {
+            "min": 0,
+            "max": 60,
+            "step": 1,
+            "default": 0,
+            "current": 0
+          }
+        },
+        "focus": {
+          "state": "present",
+          "value": {
+            "min": 0,
+            "max": 1023,
+            "step": 1,
+            "default": 0,
+            "current": 348
+          }
+        },
+        "exposure": {
+          "state": "present",
+          "value": {
+            "min": 1,
+            "max": 10000,
+            "step": 1,
+            "default": 156,
+            "current": 156
+          }
+        },
+        "whiteBalance": {
+          "state": "present",
+          "value": {
+            "min": 2800,
+            "max": 6500,
+            "step": 1,
+            "default": 4600,
+            "current": 4600
+          }
+        },
+        "brightness": {
+          "state": "present",
+          "value": {
+            "min": -64,
+            "max": 64,
+            "step": 1,
+            "default": 0,
+            "current": 0
+          }
+        },
+        "contrast": {
+          "state": "present",
+          "value": {
+            "min": 0,
+            "max": 95,
+            "step": 1,
+            "default": 0,
+            "current": 0
+          }
+        },
+        "rotation": {
+          "state": "not-offered"
+        },
+        "aim": {
+          "state": "not-offered"
+        },
+        "recording": {
+          "state": "not-offered"
+        },
+        "stills": {
+          "state": "not-offered"
+        }
+      }
+    }
+  ],
+  "rejected": [
+    {
+      "device": "/dev/video10",
+      "card": "bcm2835-codec-decode",
+      "reason": "bcm2835-codec-decode is a hardware codec on this board, not a camera; it advertises formats it cannot capture (K-40)"
+    },
+    {
+      "device": "/dev/video13",
+      "card": "bcm2835-isp",
+      "reason": "bcm2835-isp is a hardware codec on this board, not a camera; it advertises formats it cannot capture (K-40)"
+    },
+    {
+      "device": "/dev/video19",
+      "card": "rpi-hevc-dec",
+      "reason": "rpi-hevc-dec is a hardware codec on this board, not a camera; it advertises formats it cannot capture (K-40)"
+    },
+    {
+      "device": "/dev/media3",
+      "card": "bcm2835-codec",
+      "reason": "bcm2835-codec is a hardware codec on this board, not a camera; it advertises formats it cannot capture (K-40)"
+    }
+  ]
+}

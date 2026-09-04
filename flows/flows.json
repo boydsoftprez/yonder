@@ -149,7 +149,7 @@
                 "cols": "12"
             }
         ],
-        "order": 3,
+        "order": 5,
         "className": "",
         "visible": true,
         "disabled": false
@@ -185,7 +185,7 @@
                 "cols": "12"
             }
         ],
-        "order": 4,
+        "order": 6,
         "className": "",
         "visible": true,
         "disabled": false
@@ -4004,6 +4004,2169 @@
         "wires": [
             [
                 "tag-pending-key"
+            ]
+        ]
+    },
+    {
+        "id": "page-cameras",
+        "type": "ui-page",
+        "name": "Cameras",
+        "ui": "dashboard",
+        "path": "/cameras",
+        "icon": "camera",
+        "layout": "grid",
+        "theme": "palette",
+        "breakpoints": [
+            {
+                "name": "Default",
+                "px": "0",
+                "cols": "3"
+            },
+            {
+                "name": "Tablet",
+                "px": "576",
+                "cols": "6"
+            },
+            {
+                "name": "Small Desktop",
+                "px": "768",
+                "cols": "9"
+            },
+            {
+                "name": "Desktop",
+                "px": "1024",
+                "cols": "12"
+            }
+        ],
+        "order": 3,
+        "className": "",
+        "visible": true,
+        "disabled": false
+    },
+    {
+        "id": "group-cameras-list",
+        "type": "ui-group",
+        "name": "Attached",
+        "page": "page-cameras",
+        "width": 12,
+        "height": 1,
+        "order": 1,
+        "showTitle": true,
+        "className": "",
+        "visible": true,
+        "disabled": false,
+        "groupType": "default"
+    },
+    {
+        "id": "group-cameras-rejected",
+        "type": "ui-group",
+        "name": "Not cameras",
+        "page": "page-cameras",
+        "width": 12,
+        "height": 1,
+        "order": 2,
+        "showTitle": true,
+        "className": "",
+        "visible": true,
+        "disabled": false,
+        "groupType": "default"
+    },
+    {
+        "id": "group-cameras-uplink",
+        "type": "ui-group",
+        "name": "Uplink",
+        "page": "page-cameras",
+        "width": 12,
+        "height": 1,
+        "order": 3,
+        "showTitle": true,
+        "className": "",
+        "visible": true,
+        "disabled": false,
+        "groupType": "default"
+    },
+    {
+        "id": "group-rail-cameras",
+        "type": "ui-group",
+        "name": "Controls",
+        "page": "page-cameras",
+        "width": 12,
+        "height": 1,
+        "order": 20,
+        "showTitle": false,
+        "className": "yonder-rail",
+        "visible": true,
+        "disabled": false,
+        "groupType": "default"
+    },
+    {
+        "id": "cameras-poll",
+        "type": "inject",
+        "z": "yonder-console",
+        "name": "sweep for cameras",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "5",
+        "crontab": "",
+        "once": true,
+        "onceDelay": "1",
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 200,
+        "y": 1800,
+        "wires": [
+            [
+                "cameras-read"
+            ]
+        ]
+    },
+    {
+        "id": "cameras-read",
+        "type": "yonder-cameras",
+        "z": "yonder-console",
+        "name": "what is attached",
+        "x": 460,
+        "y": 1800,
+        "wires": [
+            [
+                "pick-cameras-found",
+                "pick-cameras-rejected",
+                "budget-cameras",
+                "cameras-present",
+                "cam-identify"
+            ]
+        ]
+    },
+    {
+        "id": "pick-cameras-found",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "the cameras that answered",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "payload.found",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 760,
+        "y": 1740,
+        "wires": [
+            [
+                "table-cameras"
+            ]
+        ]
+    },
+    {
+        "id": "table-cameras",
+        "type": "ui-table",
+        "z": "yonder-console",
+        "group": "group-cameras-list",
+        "name": "attached cameras",
+        "label": "",
+        "order": 1,
+        "width": 12,
+        "height": 4,
+        "maxrows": 8,
+        "passthru": false,
+        "autocols": false,
+        "showSearch": false,
+        "selectionType": "none",
+        "deselect": true,
+        "action": "replace",
+        "mobileBreakpoint": "sm",
+        "mobileBreakpointType": "defaults",
+        "className": "",
+        "columns": [
+            {
+                "title": "Camera",
+                "key": "card",
+                "type": "text",
+                "width": "220px",
+                "align": "start"
+            },
+            {
+                "title": "Configured as",
+                "key": "id",
+                "type": "text",
+                "width": "110px",
+                "align": "start"
+            },
+            {
+                "title": "Identity",
+                "key": "identity",
+                "type": "text",
+                "width": "",
+                "align": "start"
+            },
+            {
+                "title": "What it offers",
+                "key": "summary",
+                "type": "text",
+                "width": "",
+                "align": "start"
+            }
+        ],
+        "x": 1020,
+        "y": 1740,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "pick-cameras-rejected",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "and what was rejected, with the reason",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "payload.rejected",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 780,
+        "y": 1800,
+        "wires": [
+            [
+                "table-cameras-rejected"
+            ]
+        ]
+    },
+    {
+        "id": "table-cameras-rejected",
+        "type": "ui-table",
+        "z": "yonder-console",
+        "group": "group-cameras-rejected",
+        "name": "not cameras",
+        "label": "",
+        "order": 1,
+        "width": 12,
+        "height": 6,
+        "maxrows": 16,
+        "passthru": false,
+        "autocols": false,
+        "showSearch": false,
+        "selectionType": "none",
+        "deselect": true,
+        "action": "replace",
+        "mobileBreakpoint": "sm",
+        "mobileBreakpointType": "defaults",
+        "className": "",
+        "columns": [
+            {
+                "title": "Device",
+                "key": "device",
+                "type": "text",
+                "width": "130px",
+                "align": "start"
+            },
+            {
+                "title": "Card",
+                "key": "card",
+                "type": "text",
+                "width": "200px",
+                "align": "start"
+            },
+            {
+                "title": "Why",
+                "key": "reason",
+                "type": "text",
+                "width": "",
+                "align": "start"
+            }
+        ],
+        "x": 1030,
+        "y": 1800,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "budget-cameras",
+        "type": "ui-yonder-budget",
+        "z": "yonder-console",
+        "group": "group-cameras-uplink",
+        "name": "uplink budget",
+        "order": 1,
+        "width": 12,
+        "height": 2,
+        "label": "LEAVING THIS AIRCRAFT, AT IP",
+        "capacityKbps": 5000,
+        "segments": "[]",
+        "x": 1010,
+        "y": 1860,
+        "wires": []
+    },
+    {
+        "id": "cameras-present",
+        "type": "switch",
+        "z": "yonder-console",
+        "name": "is a camera attached?",
+        "property": "payload.found[id != null]",
+        "propertyType": "jsonata",
+        "rules": [
+            {
+                "t": "nempty"
+            },
+            {
+                "t": "else"
+            }
+        ],
+        "checkall": "false",
+        "repair": false,
+        "outputs": 2,
+        "x": 780,
+        "y": 1920,
+        "wires": [
+            [
+                "cameras-show-page"
+            ],
+            [
+                "cameras-hide-page"
+            ]
+        ]
+    },
+    {
+        "id": "cameras-show-page",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "show the camera page",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "{\"pages\":{\"show\":[\"page-camera\"]}}",
+                "tot": "json"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 1050,
+        "y": 1900,
+        "wires": [
+            [
+                "console-control"
+            ]
+        ]
+    },
+    {
+        "id": "cameras-hide-page",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "hide it when nothing is attached",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "{\"pages\":{\"hide\":[\"page-camera\"]}}",
+                "tot": "json"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 1060,
+        "y": 1950,
+        "wires": [
+            [
+                "console-control"
+            ]
+        ]
+    },
+    {
+        "id": "console-control",
+        "type": "ui-control",
+        "z": "yonder-console",
+        "ui": "dashboard",
+        "name": "what the console shows",
+        "events": "all",
+        "x": 1360,
+        "y": 1920,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "keys-cameras",
+        "type": "ui-yonder-softkeys",
+        "z": "yonder-console",
+        "group": "group-rail-cameras",
+        "name": "actions",
+        "order": 1,
+        "width": 12,
+        "height": 1,
+        "keys": "[{\"label\":\"SWEEP AGAIN\",\"action\":\"rescan\",\"tone\":\"act\"}]",
+        "x": 260,
+        "y": 1860,
+        "wires": [
+            [
+                "cameras-read"
+            ]
+        ]
+    },
+    {
+        "id": "page-camera",
+        "type": "ui-page",
+        "name": "Camera",
+        "ui": "dashboard",
+        "path": "/camera",
+        "icon": "video",
+        "layout": "grid",
+        "theme": "palette",
+        "breakpoints": [
+            {
+                "name": "Default",
+                "px": "0",
+                "cols": "3"
+            },
+            {
+                "name": "Tablet",
+                "px": "576",
+                "cols": "6"
+            },
+            {
+                "name": "Small Desktop",
+                "px": "768",
+                "cols": "9"
+            },
+            {
+                "name": "Desktop",
+                "px": "1024",
+                "cols": "12"
+            }
+        ],
+        "order": 4,
+        "className": "",
+        "visible": true,
+        "disabled": false
+    },
+    {
+        "id": "group-cam-picture",
+        "type": "ui-group",
+        "name": "Picture",
+        "page": "page-camera",
+        "width": 12,
+        "height": 1,
+        "order": 1,
+        "showTitle": false,
+        "className": "",
+        "visible": true,
+        "disabled": false,
+        "groupType": "default"
+    },
+    {
+        "id": "group-cam-readout",
+        "type": "ui-group",
+        "name": "Readout",
+        "page": "page-camera",
+        "width": 12,
+        "height": 1,
+        "order": 2,
+        "showTitle": false,
+        "className": "",
+        "visible": true,
+        "disabled": false,
+        "groupType": "default"
+    },
+    {
+        "id": "group-cam-live",
+        "type": "ui-group",
+        "name": "Applies live",
+        "page": "page-camera",
+        "width": 6,
+        "height": 1,
+        "order": 3,
+        "showTitle": true,
+        "className": "yonder-deck-live",
+        "visible": true,
+        "disabled": false,
+        "groupType": "default"
+    },
+    {
+        "id": "group-cam-facts",
+        "type": "ui-group",
+        "name": "No control for these",
+        "page": "page-camera",
+        "width": 6,
+        "height": 1,
+        "order": 4,
+        "showTitle": true,
+        "className": "yonder-deck-live",
+        "visible": true,
+        "disabled": false,
+        "groupType": "default"
+    },
+    {
+        "id": "group-cam-restarts",
+        "type": "ui-group",
+        "name": "Restarts the picture",
+        "page": "page-camera",
+        "width": 6,
+        "height": 1,
+        "order": 5,
+        "showTitle": true,
+        "className": "yonder-deck-setup",
+        "visible": false,
+        "disabled": false,
+        "groupType": "default"
+    },
+    {
+        "id": "group-cam-stored",
+        "type": "ui-group",
+        "name": "Stored in config.yaml",
+        "page": "page-camera",
+        "width": 6,
+        "height": 1,
+        "order": 6,
+        "showTitle": true,
+        "className": "yonder-deck-setup",
+        "visible": false,
+        "disabled": false,
+        "groupType": "default"
+    },
+    {
+        "id": "group-cam-receive",
+        "type": "ui-group",
+        "name": "Receive this feed",
+        "page": "page-camera",
+        "width": 12,
+        "height": 1,
+        "order": 7,
+        "showTitle": true,
+        "className": "yonder-deck-setup",
+        "visible": false,
+        "disabled": false,
+        "groupType": "default"
+    },
+    {
+        "id": "group-cam-rail-live",
+        "type": "ui-group",
+        "name": "Controls",
+        "page": "page-camera",
+        "width": 12,
+        "height": 1,
+        "order": 20,
+        "showTitle": false,
+        "className": "yonder-rail yonder-deck-live",
+        "visible": true,
+        "disabled": false,
+        "groupType": "default"
+    },
+    {
+        "id": "group-cam-rail-setup",
+        "type": "ui-group",
+        "name": "Controls",
+        "page": "page-camera",
+        "width": 12,
+        "height": 1,
+        "order": 21,
+        "showTitle": false,
+        "className": "yonder-rail yonder-deck-setup",
+        "visible": false,
+        "disabled": false,
+        "groupType": "default"
+    },
+    {
+        "id": "camera-poll",
+        "type": "inject",
+        "z": "yonder-console",
+        "name": "read the camera",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "5",
+        "crontab": "",
+        "once": true,
+        "onceDelay": "2",
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 200,
+        "y": 2020,
+        "wires": [
+            [
+                "cam-at-read"
+            ]
+        ]
+    },
+    {
+        "id": "camera-read",
+        "type": "yonder-camera",
+        "z": "yonder-console",
+        "name": "this camera",
+        "camera": "",
+        "x": 460,
+        "y": 2020,
+        "wires": [
+            [
+                "pick-cam-strip",
+                "facts-camera",
+                "cam-brightness-range",
+                "cam-contrast-range",
+                "text-cam-refusal",
+                "text-cam-name",
+                "text-cam-identity",
+                "text-cam-encoder",
+                "num-cam-framerate-read",
+                "num-cam-preview-read",
+                "num-cam-bitrate-read",
+                "pick-cam-picture",
+                "pick-cam-hold"
+            ]
+        ]
+    },
+    {
+        "id": "cam-identify",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "which camera this device has",
+        "rules": [
+            {
+                "t": "set",
+                "p": "camera",
+                "pt": "flow",
+                "to": "(payload.found[id != null].id)[0]",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 780,
+        "y": 1980,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "cam-at-read",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "point this at the camera",
+        "rules": [
+            {
+                "t": "set",
+                "p": "camera",
+                "pt": "msg",
+                "to": "camera",
+                "tot": "flow"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 300,
+        "y": 2060,
+        "wires": [
+            [
+                "camera-read"
+            ]
+        ]
+    },
+    {
+        "id": "cam-at-controls",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "point this at the camera",
+        "rules": [
+            {
+                "t": "set",
+                "p": "camera",
+                "pt": "msg",
+                "to": "camera",
+                "tot": "flow"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 1480,
+        "y": 2225,
+        "wires": [
+            [
+                "camera-controls"
+            ]
+        ]
+    },
+    {
+        "id": "cam-at-settings",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "point this at the camera",
+        "rules": [
+            {
+                "t": "set",
+                "p": "camera",
+                "pt": "msg",
+                "to": "camera",
+                "tot": "flow"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 1310,
+        "y": 2380,
+        "wires": [
+            [
+                "camera-settings"
+            ]
+        ]
+    },
+    {
+        "id": "cam-at-receive",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "point this at the camera",
+        "rules": [
+            {
+                "t": "set",
+                "p": "camera",
+                "pt": "msg",
+                "to": "camera",
+                "tot": "flow"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 640,
+        "y": 2620,
+        "wires": [
+            [
+                "receive-camera"
+            ]
+        ]
+    },
+    {
+        "id": "cam-at-stream",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "point this at the camera",
+        "rules": [
+            {
+                "t": "set",
+                "p": "camera",
+                "pt": "msg",
+                "to": "camera",
+                "tot": "flow"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 690,
+        "y": 2710,
+        "wires": [
+            [
+                "stream-camera"
+            ]
+        ]
+    },
+    {
+        "id": "pick-cam-picture",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "the picture: which camera, and what it costs",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "{\"path\": payload.camera.id, \"cost\": payload.display.pictureCost}",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 800,
+        "y": 1980,
+        "wires": [
+            [
+                "pic-camera"
+            ]
+        ]
+    },
+    {
+        "id": "pick-cam-hold",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "the full-rate key: what holding it costs, and whether it can be",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "{\"cost\": payload.display.holdCost, \"available\": payload.display.fullRate}",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 560,
+        "y": 2750,
+        "wires": [
+            [
+                "hold-cam-fullrate"
+            ]
+        ]
+    },
+    {
+        "id": "pic-camera",
+        "type": "ui-yonder-picture",
+        "z": "yonder-console",
+        "group": "group-cam-picture",
+        "name": "the picture",
+        "order": 1,
+        "width": 12,
+        "height": 7,
+        "path": "",
+        "label": "Front camera",
+        "stillsAfterMs": 12000,
+        "stillsUrl": "",
+        "cost": "",
+        "x": 460,
+        "y": 1980,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "pick-cam-strip",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "the strip, as yonder-core composed it",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "payload.display",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 780,
+        "y": 2080,
+        "wires": [
+            [
+                "bar-camera"
+            ]
+        ]
+    },
+    {
+        "id": "bar-camera",
+        "type": "ui-yonder-databar",
+        "z": "yonder-console",
+        "group": "group-cam-readout",
+        "name": "readout strip",
+        "order": 1,
+        "width": 12,
+        "height": 1,
+        "label": "",
+        "cells": "[{\"key\":\"state\",\"label\":\"RUNNING\"},{\"key\":\"picture\",\"label\":\"PICTURE\"},{\"key\":\"rate\",\"label\":\"RATE\"},{\"key\":\"bitrate\",\"label\":\"BITRATE\"},{\"key\":\"uplink\",\"label\":\"UPLINK\"}]",
+        "x": 1030,
+        "y": 2080,
+        "wires": []
+    },
+    {
+        "id": "text-cam-refusal",
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-cam-readout",
+        "order": 2,
+        "width": 12,
+        "height": 1,
+        "name": "the start check",
+        "label": "Before you press Start",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "value": "payload.display.startCheck",
+        "valueType": "msg",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "wrapText": true,
+        "className": "",
+        "x": 1030,
+        "y": 2130,
+        "wires": []
+    },
+    {
+        "id": "facts-camera",
+        "type": "ui-yonder-facts",
+        "z": "yonder-console",
+        "group": "group-cam-facts",
+        "name": "what this camera cannot do",
+        "order": 1,
+        "width": 12,
+        "height": 4,
+        "title": "",
+        "facts": "[]",
+        "x": 800,
+        "y": 2140,
+        "wires": []
+    },
+    {
+        "id": "cam-brightness-range",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "Brightness: the device's own range and current value",
+        "rules": [
+            {
+                "t": "set",
+                "p": "ui_update",
+                "pt": "msg",
+                "to": "{\"min\": payload.capabilities.brightness.value.min, \"max\": payload.capabilities.brightness.value.max, \"step\": payload.capabilities.brightness.value.step}",
+                "tot": "jsonata"
+            },
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "payload.capabilities.brightness.value.current",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 800,
+        "y": 2200,
+        "wires": [
+            [
+                "slider-cam-brightness"
+            ]
+        ]
+    },
+    {
+        "id": "slider-cam-brightness",
+        "type": "ui-slider",
+        "z": "yonder-console",
+        "group": "group-cam-live",
+        "name": "brightness",
+        "label": "Brightness",
+        "tooltip": "",
+        "order": 1,
+        "width": 12,
+        "height": 2,
+        "passthru": false,
+        "outs": "end",
+        "topic": "brightness",
+        "topicType": "str",
+        "thumbLabel": true,
+        "showTicks": "never",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "className": "",
+        "iconPrepend": "",
+        "iconAppend": "",
+        "color": "",
+        "outlinedColor": "",
+        "thumbColor": "",
+        "x": 1080,
+        "y": 2200,
+        "wires": [
+            [
+                "cam-brightness-msg"
+            ]
+        ]
+    },
+    {
+        "id": "cam-brightness-msg",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "send Brightness to the device",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "controls",
+                "tot": "str"
+            },
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "{\"brightness\": payload}",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 1330,
+        "y": 2200,
+        "wires": [
+            [
+                "cam-at-controls"
+            ]
+        ]
+    },
+    {
+        "id": "cam-contrast-range",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "Contrast: the device's own range and current value",
+        "rules": [
+            {
+                "t": "set",
+                "p": "ui_update",
+                "pt": "msg",
+                "to": "{\"min\": payload.capabilities.contrast.value.min, \"max\": payload.capabilities.contrast.value.max, \"step\": payload.capabilities.contrast.value.step}",
+                "tot": "jsonata"
+            },
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "payload.capabilities.contrast.value.current",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 800,
+        "y": 2250,
+        "wires": [
+            [
+                "slider-cam-contrast"
+            ]
+        ]
+    },
+    {
+        "id": "slider-cam-contrast",
+        "type": "ui-slider",
+        "z": "yonder-console",
+        "group": "group-cam-live",
+        "name": "contrast",
+        "label": "Contrast",
+        "tooltip": "",
+        "order": 2,
+        "width": 12,
+        "height": 2,
+        "passthru": false,
+        "outs": "end",
+        "topic": "contrast",
+        "topicType": "str",
+        "thumbLabel": true,
+        "showTicks": "never",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "className": "",
+        "iconPrepend": "",
+        "iconAppend": "",
+        "color": "",
+        "outlinedColor": "",
+        "thumbColor": "",
+        "x": 1080,
+        "y": 2250,
+        "wires": [
+            [
+                "cam-contrast-msg"
+            ]
+        ]
+    },
+    {
+        "id": "cam-contrast-msg",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "send Contrast to the device",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "controls",
+                "tot": "str"
+            },
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "{\"contrast\": payload}",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 1330,
+        "y": 2250,
+        "wires": [
+            [
+                "cam-at-controls"
+            ]
+        ]
+    },
+    {
+        "id": "camera-controls",
+        "type": "yonder-camera",
+        "z": "yonder-console",
+        "name": "apply an image control",
+        "camera": "",
+        "x": 1620,
+        "y": 2225,
+        "wires": [
+            [
+                "ann-cam-live"
+            ]
+        ]
+    },
+    {
+        "id": "ann-cam-live",
+        "type": "ui-yonder-annunciator",
+        "z": "yonder-console",
+        "group": "group-cam-live",
+        "name": "what the device took",
+        "order": 3,
+        "width": 12,
+        "height": 1,
+        "label": "",
+        "source": "yonder",
+        "x": 1880,
+        "y": 2225,
+        "wires": []
+    },
+    {
+        "id": "num-cam-framerate",
+        "type": "ui-number-input",
+        "z": "yonder-console",
+        "group": "group-cam-restarts",
+        "name": "Rate (fps)",
+        "label": "Rate (fps)",
+        "tooltip": "",
+        "order": 1,
+        "width": 12,
+        "height": 1,
+        "passthru": false,
+        "topic": "framerate",
+        "topicType": "str",
+        "min": 1,
+        "max": 60,
+        "step": 1,
+        "delay": 300,
+        "sendOnDelay": false,
+        "sendOnBlur": true,
+        "sendOnEnter": true,
+        "className": "",
+        "iconPrepend": "",
+        "iconAppend": "",
+        "clearable": false,
+        "x": 800,
+        "y": 2320,
+        "wires": [
+            [
+                "num-cam-framerate-msg"
+            ]
+        ]
+    },
+    {
+        "id": "num-cam-framerate-msg",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "Rate (fps), through the apply engine",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "settings",
+                "tot": "str"
+            },
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "{\"framerate\": payload}",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 1130,
+        "y": 2320,
+        "wires": [
+            [
+                "cam-at-settings"
+            ]
+        ]
+    },
+    {
+        "id": "num-cam-framerate-read",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "Rate (fps), as it is stored",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "payload.camera.framerate",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 800,
+        "y": 2345,
+        "wires": [
+            [
+                "num-cam-framerate"
+            ]
+        ]
+    },
+    {
+        "id": "num-cam-preview",
+        "type": "ui-number-input",
+        "z": "yonder-console",
+        "group": "group-cam-restarts",
+        "name": "Preview (kb/s)",
+        "label": "Preview (kb/s)",
+        "tooltip": "",
+        "order": 2,
+        "width": 12,
+        "height": 1,
+        "passthru": false,
+        "topic": "preview_bitrate_kbps",
+        "topicType": "str",
+        "min": 100,
+        "max": 2000,
+        "step": 1,
+        "delay": 300,
+        "sendOnDelay": false,
+        "sendOnBlur": true,
+        "sendOnEnter": true,
+        "className": "",
+        "iconPrepend": "",
+        "iconAppend": "",
+        "clearable": false,
+        "x": 800,
+        "y": 2380,
+        "wires": [
+            [
+                "num-cam-preview-msg"
+            ]
+        ]
+    },
+    {
+        "id": "num-cam-preview-msg",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "Preview (kb/s), through the apply engine",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "settings",
+                "tot": "str"
+            },
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "{\"preview_bitrate_kbps\": payload}",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 1130,
+        "y": 2380,
+        "wires": [
+            [
+                "cam-at-settings"
+            ]
+        ]
+    },
+    {
+        "id": "num-cam-preview-read",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "Preview (kb/s), as it is stored",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "payload.camera.preview.bitrate_kbps",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 800,
+        "y": 2405,
+        "wires": [
+            [
+                "num-cam-preview"
+            ]
+        ]
+    },
+    {
+        "id": "num-cam-bitrate",
+        "type": "ui-number-input",
+        "z": "yonder-console",
+        "group": "group-cam-stored",
+        "name": "Bitrate (kb/s)",
+        "label": "Bitrate (kb/s)",
+        "tooltip": "",
+        "order": 1,
+        "width": 12,
+        "height": 1,
+        "passthru": false,
+        "topic": "bitrate_kbps",
+        "topicType": "str",
+        "min": 100,
+        "max": 20000,
+        "step": 1,
+        "delay": 300,
+        "sendOnDelay": false,
+        "sendOnBlur": true,
+        "sendOnEnter": true,
+        "className": "",
+        "iconPrepend": "",
+        "iconAppend": "",
+        "clearable": false,
+        "x": 800,
+        "y": 2440,
+        "wires": [
+            [
+                "num-cam-bitrate-msg"
+            ]
+        ]
+    },
+    {
+        "id": "num-cam-bitrate-msg",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "Bitrate (kb/s), through the apply engine",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "settings",
+                "tot": "str"
+            },
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "{\"bitrate_kbps\": payload}",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 1130,
+        "y": 2440,
+        "wires": [
+            [
+                "cam-at-settings"
+            ]
+        ]
+    },
+    {
+        "id": "num-cam-bitrate-read",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "Bitrate (kb/s), as it is stored",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "payload.camera.bitrate_kbps",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 800,
+        "y": 2465,
+        "wires": [
+            [
+                "num-cam-bitrate"
+            ]
+        ]
+    },
+    {
+        "id": "camera-settings",
+        "type": "yonder-camera",
+        "z": "yonder-console",
+        "name": "change a stored setting",
+        "camera": "",
+        "x": 1450,
+        "y": 2380,
+        "wires": [
+            [
+                "ann-cam-setup",
+                "cam-apply-route",
+                "cam-reread"
+            ]
+        ]
+    },
+    {
+        "id": "ann-cam-setup",
+        "type": "ui-yonder-annunciator",
+        "z": "yonder-console",
+        "group": "group-cam-stored",
+        "name": "what the apply did",
+        "order": 4,
+        "width": 12,
+        "height": 1,
+        "label": "",
+        "source": "yonder",
+        "x": 1760,
+        "y": 2330,
+        "wires": []
+    },
+    {
+        "id": "cam-reread",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "read the camera back after an apply",
+        "rules": [
+            {
+                "t": "delete",
+                "p": "topic",
+                "pt": "msg"
+            },
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 1760,
+        "y": 2440,
+        "wires": [
+            [
+                "cam-at-read"
+            ]
+        ]
+    },
+    {
+        "id": "cam-apply-route",
+        "type": "switch",
+        "z": "yonder-console",
+        "name": "did the window arm?",
+        "property": "yonder.state",
+        "propertyType": "msg",
+        "rules": [
+            {
+                "t": "eq",
+                "v": "pending",
+                "vt": "str"
+            },
+            {
+                "t": "else"
+            }
+        ],
+        "checkall": "false",
+        "repair": false,
+        "outputs": 2,
+        "x": 1760,
+        "y": 2385,
+        "wires": [
+            [
+                "cam-toast-text"
+            ],
+            [
+                "cam-kept-text"
+            ]
+        ]
+    },
+    {
+        "id": "cam-toast-text",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "the words the daemon chose",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "yonder.message",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 2020,
+        "y": 2360,
+        "wires": [
+            [
+                "toast-cam-confirm"
+            ]
+        ]
+    },
+    {
+        "id": "toast-cam-confirm",
+        "type": "ui-notification",
+        "z": "yonder-console",
+        "ui": "dashboard",
+        "name": "confirm it, or it reverts",
+        "position": "top right",
+        "colorDefault": true,
+        "color": null,
+        "displayTime": "120",
+        "showCountdown": true,
+        "outputs": 1,
+        "allowDismiss": true,
+        "dismissText": "Let it revert",
+        "allowConfirm": true,
+        "confirmText": "KEEP IT",
+        "raw": false,
+        "className": "",
+        "x": 2300,
+        "y": 2360,
+        "wires": [
+            [
+                "cam-confirm-gate"
+            ]
+        ]
+    },
+    {
+        "id": "cam-confirm-gate",
+        "type": "switch",
+        "z": "yonder-console",
+        "name": "only the confirm",
+        "property": "payload",
+        "propertyType": "msg",
+        "rules": [
+            {
+                "t": "eq",
+                "v": "confirm_clicked",
+                "vt": "str"
+            }
+        ],
+        "checkall": "true",
+        "repair": false,
+        "outputs": 1,
+        "x": 2560,
+        "y": 2360,
+        "wires": [
+            [
+                "cam-confirm"
+            ]
+        ]
+    },
+    {
+        "id": "cam-confirm",
+        "type": "yonder-confirm",
+        "z": "yonder-console",
+        "name": "keep it",
+        "x": 2790,
+        "y": 2360,
+        "wires": [
+            [
+                "ann-cam-setup"
+            ]
+        ]
+    },
+    {
+        "id": "cam-kept-text",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "the words the daemon chose",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "yonder.message",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 2020,
+        "y": 2420,
+        "wires": [
+            [
+                "toast-cam-kept"
+            ]
+        ]
+    },
+    {
+        "id": "toast-cam-kept",
+        "type": "ui-notification",
+        "z": "yonder-console",
+        "ui": "dashboard",
+        "name": "applied, and kept",
+        "position": "top right",
+        "colorDefault": true,
+        "color": null,
+        "displayTime": "10",
+        "showCountdown": true,
+        "outputs": 0,
+        "allowDismiss": true,
+        "dismissText": "Dismiss",
+        "allowConfirm": false,
+        "confirmText": "",
+        "raw": false,
+        "className": "",
+        "x": 2300,
+        "y": 2420,
+        "wires": []
+    },
+    {
+        "id": "text-cam-name",
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-cam-stored",
+        "order": 5,
+        "width": 12,
+        "height": 1,
+        "name": "camera",
+        "label": "Camera",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "value": "payload.camera.name",
+        "valueType": "msg",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "wrapText": false,
+        "className": "",
+        "x": 800,
+        "y": 2500,
+        "wires": []
+    },
+    {
+        "id": "text-cam-identity",
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-cam-stored",
+        "order": 6,
+        "width": 12,
+        "height": 3,
+        "name": "identity",
+        "label": "Identity",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "value": "payload.display.identity",
+        "valueType": "msg",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "wrapText": true,
+        "className": "",
+        "x": 800,
+        "y": 2530,
+        "wires": []
+    },
+    {
+        "id": "text-cam-encoder",
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-cam-stored",
+        "order": 7,
+        "width": 12,
+        "height": 1,
+        "name": "encoder",
+        "label": "Encoder",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "value": "payload.display.encoder",
+        "valueType": "msg",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "wrapText": false,
+        "className": "",
+        "x": 800,
+        "y": 2560,
+        "wires": []
+    },
+    {
+        "id": "receive-camera",
+        "type": "yonder-receive-line",
+        "z": "yonder-console",
+        "name": "how to receive this",
+        "camera": "",
+        "x": 780,
+        "y": 2620,
+        "wires": [
+            [
+                "pick-cam-receive"
+            ]
+        ]
+    },
+    {
+        "id": "pick-cam-receive",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "the two an operator copies",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload.rtsp",
+                "pt": "msg",
+                "to": "payload.renderings[kind=\"url\"].body",
+                "tot": "jsonata"
+            },
+            {
+                "t": "set",
+                "p": "payload.gstreamer",
+                "pt": "msg",
+                "to": "payload.renderings[kind=\"gstreamer\"].body",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 1060,
+        "y": 2620,
+        "wires": [
+            [
+                "identity-cam-rtsp",
+                "identity-cam-gstreamer"
+            ]
+        ]
+    },
+    {
+        "id": "identity-cam-rtsp",
+        "type": "ui-yonder-identity",
+        "z": "yonder-console",
+        "group": "group-cam-receive",
+        "order": 1,
+        "width": 12,
+        "height": 1,
+        "name": "rtsp url",
+        "label": "RTSP URL",
+        "key": "rtsp",
+        "x": 1360,
+        "y": 2600,
+        "wires": []
+    },
+    {
+        "id": "identity-cam-gstreamer",
+        "type": "ui-yonder-identity",
+        "z": "yonder-console",
+        "group": "group-cam-receive",
+        "order": 2,
+        "width": 12,
+        "height": 1,
+        "name": "gstreamer",
+        "label": "GStreamer",
+        "key": "gstreamer",
+        "x": 1360,
+        "y": 2650,
+        "wires": []
+    },
+    {
+        "id": "keys-cam-live",
+        "type": "ui-yonder-softkeys",
+        "z": "yonder-console",
+        "group": "group-cam-rail-live",
+        "name": "actions",
+        "order": 1,
+        "width": 8,
+        "height": 2,
+        "keys": "[{\"label\":\"START\",\"action\":\"start\",\"tone\":\"act\"},{\"label\":\"STOP\",\"action\":\"stop\",\"tone\":\"plain\"},{\"label\":\"SETUP\",\"action\":\"setup\",\"tone\":\"plain\"}]",
+        "x": 260,
+        "y": 2700,
+        "wires": [
+            [
+                "cam-live-keys"
+            ]
+        ]
+    },
+    {
+        "id": "hold-cam-fullrate",
+        "type": "ui-yonder-holdkey",
+        "z": "yonder-console",
+        "group": "group-cam-rail-live",
+        "name": "full rate",
+        "order": 2,
+        "width": 4,
+        "height": 2,
+        "label": "FULL RATE",
+        "action": "fullrate",
+        "cost": "",
+        "tone": "act",
+        "x": 270,
+        "y": 2750,
+        "wires": [
+            [
+                "cam-hold-edge"
+            ]
+        ]
+    },
+    {
+        "id": "cam-live-keys",
+        "type": "switch",
+        "z": "yonder-console",
+        "name": "setup, or the pipeline",
+        "property": "payload",
+        "propertyType": "msg",
+        "rules": [
+            {
+                "t": "eq",
+                "v": "setup",
+                "vt": "str"
+            },
+            {
+                "t": "else"
+            }
+        ],
+        "checkall": "false",
+        "repair": false,
+        "outputs": 2,
+        "x": 560,
+        "y": 2700,
+        "wires": [
+            [
+                "deck-setup",
+                "cam-at-receive"
+            ],
+            [
+                "cam-at-stream"
+            ]
+        ]
+    },
+    {
+        "id": "stream-camera",
+        "type": "yonder-stream",
+        "z": "yonder-console",
+        "name": "start and stop",
+        "camera": "",
+        "x": 830,
+        "y": 2710,
+        "wires": [
+            [
+                "cam-reread"
+            ]
+        ]
+    },
+    {
+        "id": "cam-hold-edge",
+        "type": "switch",
+        "z": "yonder-console",
+        "name": "held, or let go",
+        "property": "payload",
+        "propertyType": "msg",
+        "rules": [
+            {
+                "t": "eq",
+                "v": "fullrate:down",
+                "vt": "str"
+            },
+            {
+                "t": "eq",
+                "v": "fullrate:up",
+                "vt": "str"
+            }
+        ],
+        "checkall": "false",
+        "repair": false,
+        "outputs": 2,
+        "x": 560,
+        "y": 2750,
+        "wires": [
+            [
+                "cam-rate-full"
+            ],
+            [
+                "cam-rate-preview"
+            ]
+        ]
+    },
+    {
+        "id": "cam-rate-full",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "the full-rate path, while it is held",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "rate:full",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 850,
+        "y": 2750,
+        "wires": [
+            [
+                "pic-camera"
+            ]
+        ]
+    },
+    {
+        "id": "cam-rate-preview",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "back to the cheap copy",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "rate:preview",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 850,
+        "y": 2790,
+        "wires": [
+            [
+                "pic-camera"
+            ]
+        ]
+    },
+    {
+        "id": "keys-cam-setup",
+        "type": "ui-yonder-softkeys",
+        "z": "yonder-console",
+        "group": "group-cam-rail-setup",
+        "name": "actions",
+        "order": 1,
+        "width": 12,
+        "height": 1,
+        "keys": "[{\"label\":\"LIVE\",\"action\":\"live\",\"tone\":\"act\"},{\"label\":\"RE-PROBE\",\"action\":\"probe\",\"tone\":\"plain\"},{\"label\":\"RECEIVE LINE\",\"action\":\"receive\",\"tone\":\"plain\"}]",
+        "x": 260,
+        "y": 2850,
+        "wires": [
+            [
+                "cam-setup-keys"
+            ]
+        ]
+    },
+    {
+        "id": "cam-setup-keys",
+        "type": "switch",
+        "z": "yonder-console",
+        "name": "which setup action",
+        "property": "payload",
+        "propertyType": "msg",
+        "rules": [
+            {
+                "t": "eq",
+                "v": "live",
+                "vt": "str"
+            },
+            {
+                "t": "eq",
+                "v": "probe",
+                "vt": "str"
+            },
+            {
+                "t": "eq",
+                "v": "receive",
+                "vt": "str"
+            }
+        ],
+        "checkall": "false",
+        "repair": false,
+        "outputs": 3,
+        "x": 560,
+        "y": 2850,
+        "wires": [
+            [
+                "deck-live"
+            ],
+            [
+                "cam-reprobe"
+            ],
+            [
+                "cam-at-receive"
+            ]
+        ]
+    },
+    {
+        "id": "cam-reprobe",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "read this one device again",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "probe",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 830,
+        "y": 2860,
+        "wires": [
+            [
+                "cam-at-read"
+            ]
+        ]
+    },
+    {
+        "id": "deck-setup",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "put Setup under the picture",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "{\"groups\":{\"show\":[\"group-cam-restarts\",\"group-cam-stored\",\"group-cam-receive\",\"group-cam-rail-setup\"],\"hide\":[\"group-cam-live\",\"group-cam-facts\",\"group-cam-rail-live\"]}}",
+                "tot": "json"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 830,
+        "y": 2650,
+        "wires": [
+            [
+                "console-control"
+            ]
+        ]
+    },
+    {
+        "id": "deck-live",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "put Live back",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "{\"groups\":{\"show\":[\"group-cam-live\",\"group-cam-facts\",\"group-cam-rail-live\"],\"hide\":[\"group-cam-restarts\",\"group-cam-stored\",\"group-cam-receive\",\"group-cam-rail-setup\"]}}",
+                "tot": "json"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 830,
+        "y": 2900,
+        "wires": [
+            [
+                "console-control"
             ]
         ]
     }

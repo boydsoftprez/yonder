@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { z } from "zod";
+import {
+  RTSP_PORT, SRT_PORT, WEBRTC_LOCAL_UDP_PORT, WEBRTC_PORT,
+} from "../media/ports.js";
 
 /**
  * A dotted-quad octet, 0–255. Pinned to the range an octet actually has
@@ -240,6 +243,123 @@ const ZeroTier = z
 const Remote = z.object({ zerotier: ZeroTier.default({}) }).strict();
 
 /**
+ * A camera's identity, source and settings.
+ *
+ * **The device is held by port, not by enumeration number** (R-CAM-05).
+ * `/dev/video0` is whichever camera the kernel probed first this boot; the
+ * `by-path` name — for example
+ * `platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0` — is
+ * the entry under `/dev/v4l/by-path/` for the socket it is plugged into, so
+ * the configured camera is the detected one after a reboot and after a
+ * plug-order change. `probe/camera.ts` resolves it to a node at run time.
+ *
+ * **Not the bus id.** `v4l2-ctl --list-devices` prints a bus id in
+ * parentheses after the card name — `usb-0000:01:00.0-1.3` on this same
+ * socket — and it is tempting to reach for because it is shorter. It will
+ * not work: the bus id has no entry under `/dev/v4l/by-path/`, so a
+ * configuration holding one resolves to nothing and the operator sees a
+ * gstreamer failure with no explanation why.
+ *
+ * **What is not here.** No capability is stored: R-CAM-14 requires formats,
+ * rates and controls to come from what the device answers, and a stored copy
+ * is a stale copy the first time a lens or a firmware changes. This section
+ * holds what an operator *chose*; `capability.ts` holds what the camera
+ * *offers*, and only one of those belongs in a file.
+ */
+const CameraId = z.string().regex(
+  /^[a-z0-9][a-z0-9-]{0,31}$/,
+  "must be lower-case letters, digits and hyphens, starting with a letter or digit",
+);
+
+/**
+ * Where a stream goes.
+ *
+ * `rtp` is an outbound push to a ground station: no listener, nothing to
+ * protect (R-VID-01). `rtsp` and `srt` are listeners on this device, so
+ * R-SEC-13 applies — the RTSP stream carries a generated per-device credential
+ * held by reference, exactly as the access point's passphrase is.
+ *
+ * **An RTSP output names no path of its own, and that is a fix rather than an
+ * omission.** It used to carry `path`, and three files then held two different
+ * answers to *where is this camera's full-rate stream*: `media/config.ts`
+ * declared `<id>`, the pipeline published to `<path>`, and the console asked
+ * the media server for `<id>` again. They agreed only where somebody had typed
+ * the same string twice, and where they did not, mediamtx refused the ANNOUNCE
+ * with 400, the whole pipeline exited — **taking the browser preview with it,
+ * because both branches are one process** — and nothing anywhere named the
+ * path. A camera's stream is at `<id>`, its cheap copy at `<id>-preview`, and
+ * there is one place either can come from. `whep.ts`'s `MEDIA_PATH`, sized for
+ * an id plus `-preview`, was already written to that model.
+ */
+const CameraOutput = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("rtp"),
+    host: z.string().regex(IPV4_PATTERN, "must be an IPv4 address, for example 192.168.1.50"),
+    port,
+  }).strict(),
+  z.object({
+    kind: z.literal("rtsp"),
+    password: SecretRef,
+  }).strict(),
+  z.object({ kind: z.literal("srt"), port }).strict(),
+]);
+export type CameraOutput = z.infer<typeof CameraOutput>;
+
+/**
+ * The cheap copy the interface watches (R-VID-13).
+ *
+ * **Bounded deliberately, and the bound is load-bearing.** `reachability.ts`
+ * exempts this object from the confirmation window on the grounds that no
+ * setting of it changes what leaves the aircraft on a path the console shares
+ * — which is only true while the ceiling here is small enough that it cannot.
+ * Raising either bound means moving `preview` out of that exemption in the
+ * same change; `reachability.test.ts` asserts the numbers so the two cannot
+ * drift apart quietly.
+ */
+const Preview = z.object({
+  width: z.number().int().min(160).max(1280).default(640),
+  height: z.number().int().min(90).max(720).default(360),
+  framerate: z.number().int().min(1).max(30).default(15),
+  bitrate_kbps: z.number().int().min(100).max(2000).default(400),
+}).strict();
+
+/** Image controls: applied live on the running stream, never a respawn. */
+const CameraControls = z.object({
+  brightness: z.number().int().min(-100).max(100).nullable().default(null),
+  contrast: z.number().int().min(-100).max(100).nullable().default(null),
+  /** R-CTL-05: by degrees rather than a boolean. */
+  rotation: z.union([z.literal(0), z.literal(90), z.literal(180), z.literal(270)]).default(0),
+}).strict();
+
+const Camera = z.object({
+  id: CameraId,
+  name: z.string().min(1).max(48),
+  /** M6 adds `csi` and `hdmi`; M5 adds the accessory camera. One today. */
+  source: z.enum(["usb"]),
+  /** A `by-path` name, without the `/dev/v4l/by-path/` prefix. See above. */
+  device: z.string().min(1).max(128),
+  enabled: z.boolean().default(true),
+  /**
+   * Whether the pipeline starts at boot.
+   *
+   * Off by default and deliberately: R-MAV-08 autocasts telemetry because a
+   * quiet aircraft is unflyable, and video has no equivalent claim. The
+   * asymmetry is recorded in the spec's §12 as an unmade decision rather than
+   * settled here.
+   */
+  autostart: z.boolean().default(false),
+  width: z.number().int().min(160).max(3840).default(1280),
+  height: z.number().int().min(90).max(2160).default(720),
+  framerate: z.number().int().min(1).max(60).default(30),
+  codec: z.enum(["h264"]).default("h264"),
+  bitrate_kbps: z.number().int().min(100).max(20000).default(2000),
+  preview: Preview.default({}),
+  controls: CameraControls.default({}),
+  outputs: z.array(CameraOutput).max(8).default([]),
+}).strict();
+export type Camera = z.infer<typeof Camera>;
+
+/**
  * Strict, deliberately: an unrecognised key is a misspelling, and a
  * misspelling silently ignored is a setting an operator believes is in force
  * and is not.
@@ -251,6 +371,29 @@ const Remote = z.object({ zerotier: ZeroTier.default({}) }).strict();
  * added here without that strands every device carrying a key an earlier
  * build wrote. `retired.test.ts` fails when a new call site appears.
  */
+/**
+ * Ports this device binds itself, and what holds each one.
+ *
+ * `ui.port` is the console's and is refused below beside these. The other four
+ * are the media server's, imported from `media/ports.ts` rather than restated:
+ * a number written twice is a number that moves once, and the symptom of the
+ * copy left behind is a media server that will not start.
+ *
+ * **mediamtx does not degrade when two of its servers want one port — it
+ * exits**, with the line `media/ports.ts` records verbatim, and every camera on
+ * the device goes off the air with it, including the one the browser is
+ * watching. `ports.ts`'s own worked example is 8890: it cost Task 9 a rewrite
+ * when WebRTC's media port was derived as `WEBRTC_PORT + 1`, and an output
+ * carrying the same number arrives at the same collision through a different
+ * door.
+ */
+const BOUND_ON_THIS_DEVICE: ReadonlyMap<number, string> = new Map([
+  [RTSP_PORT, "the media server's RTSP port"],
+  [WEBRTC_PORT, "the media server's WebRTC port"],
+  [WEBRTC_LOCAL_UDP_PORT, "the media server's WebRTC media port"],
+  [SRT_PORT, "the media server's SRT port"],
+]);
+
 export const ConfigSchema = z.object({
   version: z.literal(1),
   network: Network,
@@ -258,7 +401,67 @@ export const ConfigSchema = z.object({
   apply: Apply.default({}),
   system: System.default({}),
   remote: Remote.default({}),
-}).strict();
+  cameras: z.array(Camera).max(8).default([]),
+}).strict().superRefine((cfg, ctx) => {
+  const seen = new Set<string>();
+  // Every name this configuration would ask the media server to serve. Two
+  // cameras cannot share one: mediamtx takes one publisher per path, so the
+  // second pipeline's ANNOUNCE is refused and that camera dies with `400`
+  // while the first goes on working, which is the hardest shape of fault to
+  // read off a page. Unique ids are not enough on their own — a camera called
+  // `nose` and a camera called `nose-preview` both want `nose-preview`.
+  const mediaPaths = new Set<string>();
+  const claim = (name: string, i: number, what: string): void => {
+    if (mediaPaths.has(name)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["cameras", i, "id"],
+        message: `two cameras would publish to the media path "${name}"; ${what}`,
+      });
+    }
+    mediaPaths.add(name);
+  };
+  for (const [i, cam] of cfg.cameras.entries()) {
+    if (seen.has(cam.id)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["cameras", i, "id"],
+        message: `two cameras share the id "${cam.id}"; each camera needs its own`,
+      });
+    }
+    seen.add(cam.id);
+    claim(cam.id, i, "a camera's stream is served at its id");
+    claim(`${cam.id}-preview`, i, "a camera's preview is served at its id plus -preview");
+    for (const [j, out] of cam.outputs.entries()) {
+      // The class of fault a confirmation window never catches: today's
+      // port-carrying outputs are UDP against a TCP console so nothing
+      // collides, and the apply confirms. The bind race happens on the next
+      // boot, by which time nobody is watching a countdown.
+      if ("port" in out && out.port === cfg.ui.port) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["cameras", i, "outputs", j, "port"],
+          message: `port ${out.port} is ui.port; the console and a stream cannot share one`,
+        });
+      }
+      // **Only the kinds that bind here.** An `rtp` output names a port on the
+      // *ground station* — its `udpsink` binds nothing on this device — so
+      // refusing it one of these numbers would be refusing a configuration
+      // that works. `srt` is the one kind that opens a socket on this board,
+      // and it is refused these four because the media server has them.
+      if (out.kind === "srt") {
+        const held = BOUND_ON_THIS_DEVICE.get(out.port);
+        if (held !== undefined) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["cameras", i, "outputs", j, "port"],
+            message: `port ${out.port} is ${held}; a stream that binds it takes every camera on this device off the air`,
+          });
+        }
+      }
+    }
+  }
+});
 
 export type Config = z.infer<typeof ConfigSchema>;
 

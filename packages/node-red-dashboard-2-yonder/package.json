@@ -2,7 +2,7 @@
   "name": "node-red-dashboard-2-yonder",
   "version": "0.1.0",
   "license": "GPL-3.0-or-later",
-  "description": "Yonder's instrument objects for Dashboard 2.x — engine bars, tapes, annunciators, data bars, identities, soft keys and sparklines. The console's visual language, built once (ADR-0009).",
+  "description": "Yonder's instrument objects for Dashboard 2.x — engine bars, tapes, annunciators, data bars, identities, soft keys, hold keys and sparklines. The console's visual language, built once (ADR-0009).",
   "keywords": [
     "node-red",
     "node-red-dashboard-2",
@@ -17,7 +17,11 @@
       "ui-yonder-databar": "dist/databar.js",
       "ui-yonder-softkeys": "dist/softkeys.js",
       "ui-yonder-identity": "dist/identity.js",
-      "ui-yonder-sparkline": "dist/sparkline.js"
+      "ui-yonder-sparkline": "dist/sparkline.js",
+      "ui-yonder-holdkey": "dist/holdkey.js",
+      "ui-yonder-picture": "dist/picture.js",
+      "ui-yonder-facts": "dist/facts.js",
+      "ui-yonder-budget": "dist/budget.js"
     }
   },
   "node-red-dashboard-2": {
@@ -29,7 +33,11 @@
       "ui-yonder-databar": { "output": "ui-yonder-databar.umd.js", "component": "YonderDataBar" },
       "ui-yonder-softkeys": { "output": "ui-yonder-softkeys.umd.js", "component": "YonderSoftKeys" },
       "ui-yonder-identity": { "output": "ui-yonder-identity.umd.js", "component": "YonderIdentity" },
-      "ui-yonder-sparkline": { "output": "ui-yonder-sparkline.umd.js", "component": "YonderSparkline" }
+      "ui-yonder-sparkline": { "output": "ui-yonder-sparkline.umd.js", "component": "YonderSparkline" },
+      "ui-yonder-holdkey": { "output": "ui-yonder-holdkey.umd.js", "component": "YonderHoldKey" },
+      "ui-yonder-picture": { "output": "ui-yonder-picture.umd.js", "component": "YonderPicture" },
+      "ui-yonder-facts": { "output": "ui-yonder-facts.umd.js", "component": "YonderFacts" },
+      "ui-yonder-budget": { "output": "ui-yonder-budget.umd.js", "component": "YonderBudget" }
     }
   },
   "scripts": {
@@ -43,6 +51,8 @@
   "devDependencies": {
     "@types/node": "^20.19.43",
     "@vitejs/plugin-vue": "^5.1.0",
+    "@vue/test-utils": "^2.5.0",
+    "jsdom": "^30.0.1",
     "typescript": "^5.6.0",
     "vite": "^5.4.0",
     "vue": "^3.5.0"

@@ -1,0 +1,36 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!--
+  The editor half of start/stop stream. A form and a registration, nothing else.
+-->
+<script type="text/html" data-template-name="yonder-stream">
+  <div class="form-row">
+    <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-camera"><i class="fa fa-video-camera"></i> Camera</label>
+    <input type="text" id="node-input-camera" placeholder="cam0" />
+  </div>
+</script>
+
+<script type="text/html" data-help-name="yonder-stream">
+<p>Posts <code>/cameras/&lt;id&gt;/run</code> with the action in
+<code>msg.payload</code> — <code>start</code> or <code>stop</code> — and emits
+the run state that came back.</p>
+<p>A runtime action, not a configuration change: it survives no apply and no
+reboot, and a camera set to autostart comes back streaming.</p>
+<p>The state on <code>msg.yonder</code> is what the daemon observed, not the
+command that was sent.</p>
+</script>
+
+<script type="text/javascript">
+  RED.nodes.registerType("yonder-stream", {
+    category: "yonder",
+    color: "#c7d4e0",
+    defaults: { name: { value: "" }, camera: { value: "" } },
+    inputs: 1,
+    outputs: 1,
+    icon: "font-awesome/fa-play",
+    label: function () { return this.name || this.camera || "start/stop stream"; },
+  });
+</script>

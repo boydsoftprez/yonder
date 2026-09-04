@@ -157,11 +157,63 @@ path, because a key silently ignored is a setting you believe is in force and is
 |---|---|
 | `network.ap.dhcp` | The access point's DHCP range is not configurable; NetworkManager derives it from `network.ap.address`, so this key decided nothing (K-15) |
 
+### Cameras
+
+A `cameras:` list validates, gets its defaults, and goes through apply and rollback like
+any other section; since M4 it also runs — the pipeline, the media server's configuration
+and the console's camera pages are all generated from it ([roadmap](roadmap.md)).
+
+```yaml
+cameras:
+  - id: cam0
+    name: Nose
+    source: usb                    # usb only today — csi, hdmi and a second camera arrive later
+    device: platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0  # the by-path name (R-CAM-05) — not the bus id v4l2-ctl prints, which resolves to nothing
+    enabled: true
+    autostart: false               # off by default; video has no equivalent of R-MAV-08
+    width: 1280
+    height: 720
+    framerate: 30
+    codec: h264                    # h264 only today
+    bitrate_kbps: 2000
+    preview:                       # the cheap copy the interface watches (R-VID-13)
+      width: 640
+      height: 360
+      framerate: 15
+      bitrate_kbps: 400
+    controls:
+      brightness: null
+      contrast: null
+      rotation: 0                  # 0 | 90 | 180 | 270
+    outputs:                       # simultaneous, not exclusive (R-VID-05)
+      - { kind: rtp,  host: 192.168.2.10, port: 5604 }
+      - { kind: rtsp, password: { secret: cam0_rtsp } }
+```
+
+An RTSP output names no path: this camera's stream is served at its **id** and its cheap
+preview at `cam0-preview`, so the URL the console prints is
+`rtsp://yonder:<password>@<device>:8554/cam0`. One name, in one place — an output that
+named its own path let the media server declare one name while the pipeline published to
+another, and where the two differed the camera would not start at all.
+
+`kind: srt` is accepted by the schema and refused by the device: SRT arrives with R-VID-06,
+and until it has a credential of its own an SRT output would listen with no password on
+it. The camera page says so before you press Start.
+
+Up to 8 cameras, each with up to 8 outputs. Resolution, frame rate, codec, the preview and
+the image controls are cosmetic enough that changing them does not arm the confirmation
+window; everything else about a camera does, including its bitrate and its outputs — both
+share the uplink the console itself is reached over, so a change to either is held until you
+confirm it (R-CFG-03, R-VPN-07).
+
 ### Sections that arrive with later milestones
 
 Designed, and rejected by the schema until the code that reads them lands — the loader
 refuses keys it does not know, so adding these to a live `config.yaml` today fails
 validation. They are here so the shape is settled before the milestone opens.
+
+**Except `remote:`, which works.** M2a shipped it, and the block below is what a device
+accepts today rather than a shape waiting for a milestone.
 
 ```yaml
 vehicle:
@@ -175,32 +227,6 @@ mavlink:
     - { name: gcs0, host: 192.168.2.10, port: 14550 }
   tcp_server: { enabled: true, port: 5760 }
   autocast: true                # start telemetry at boot without operator action
-
-cameras:
-  - id: cam0
-    source:
-      type: csi                 # csi | usb | hdmi | rtsp
-      device: auto
-    encoder: auto               # auto resolves per board; or v4l2h264 | x264 | rkmpp
-    codec: h264                 # h264 | h265
-    resolution: 1280x720
-    framerate: 30
-    bitrate:
-      mode: adaptive            # adaptive | fixed
-      min: 500k
-      target: 2M
-      max: 6M
-    controls:
-      contrast: normal
-      brightness: normal
-      flip_horizontal: 0        # 0 | 180
-      flip_vertical: 0
-      hdr: false
-    outputs:                    # simultaneous, not exclusive
-      - { type: rtp,    host: 192.168.2.10, port: 5604 }
-      - { type: webrtc }
-      - { type: rtsp,   path: /cam0 }
-      - { type: srt,    port: 8890 }
 
 remote:
   zerotier:  { enabled: false, network_id: null }   # primary — joins by network ID
@@ -216,8 +242,10 @@ gpio:
 **`mavlink.serial.baud: auto`** sweeps the rates ArduPilot is actually configured for in
 the field, fastest-last so a slow link is found before a fast one is guessed at.
 
-**`cameras[].outputs`** is a list, and every entry is active at once — browser preview and
-a ground-station feed are not a choice between two options (R-VID-05).
+**`cameras[].outputs`** is a list, and every entry is active at once — two ground stations
+are not a choice between two options (R-VID-05). The browser's preview is not one of them:
+it is the separate `preview:` block above, always published, and it is what R-VID-13 keeps
+cheap.
 
 **`remote.zerotier`** is the whole of the mesh configuration: a switch and a network ID.
 That is the point of choosing it first — a network ID is a value you can put in a file, and

@@ -1102,3 +1102,22 @@ created — a board whose modem was not visible for a single render while cellul
 enabled — nothing generates it until a render happens with the modem present. That is a
 real but smaller hole than the one above: it needs a first apply rather than surviving a
 reboot, and it is left for a future change.
+
+---
+
+### K-45 · `revert()` does not reboot, and `architecture.md` says it does
+
+`docs/architecture.md` step 5 of the apply cycle reads **"If the timer expires unconfirmed,
+revert to last-known-good and reboot."** The engine does not reboot.
+`packages/yonder-core/src/apply/engine.ts` `revert()` writes the previous configuration
+back, clears the journal, drops to `idle` and re-runs `renderAll(previous)`; `grep -rn
+reboot packages/yonder-core/src` finds nothing anywhere in the apply path.
+
+Which of the two is wrong is a real question, not a typo. Re-rendering is the gentler
+behaviour and is what the renderers are built for — `settleRadio` skips steps already in the
+wanted state, so nothing bounces. But R-NET-07 and R-CFG-03 promise the device comes back by
+itself, and a renderer that cannot undo what it did — a driver wedged, a `wpa_supplicant`
+in a bad state — leaves a board that a reboot would have recovered and a re-render does not.
+
+Recorded rather than fixed because the answer is a decision. Found while writing the camera
+view design, which had leaned on the documented behaviour rather than the shipped one.

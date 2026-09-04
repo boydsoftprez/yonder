@@ -41,3 +41,19 @@ export interface SoftKey {
   /** Marks the key for the page currently shown. */
   active?: boolean;
 }
+
+/**
+ * One row of the facts row (R-UI-20), and one output on the budget track
+ * (R-VID-11) — **both from yonder-core, not declared again here.**
+ *
+ * `capabilityFacts()` and `uplinkBudget()` produce these and the daemon sends
+ * them; these components draw them. Two declarations of the same shape is two
+ * things to keep in step, and the one that drifts is the one nothing imports:
+ * a third capability state added in `capability.ts` would leave this file's
+ * union quietly wrong and the row drawing an unknown state as a known one.
+ *
+ * From `yonder-core/presentation` rather than the package's main entry, which
+ * pulls in the config loader and `node:fs` — the reason that second entry
+ * point exists.
+ */
+export type { CapabilityFact, BudgetSegment } from "yonder-core/presentation";

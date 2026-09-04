@@ -722,6 +722,74 @@ ${panelCss(theme)}
   opacity: 1;
 }
 
+/* The number input's label keeps the !important the measurement above
+   removed from the ui-form half. The two were measured separately: the
+   ui-form label reads 5.54:1 either way, and this one has only ever been
+   measured with it. Dropping it here would be an untested change to the
+   control whose night capture is what found the fault in the first place. */
+.nrdb-ui-number-input label,
+.nrdb-ui-number-input .v-label {
+  color: var(--yonder-label) !important;
+  opacity: 1 !important;
+}
+
+/* ---- sliders and number fields ----------------------------------------
+   Neither existed on this console until the camera page, so neither had ever
+   been given the palette. The night capture is what showed it: a slider's
+   label came through in Vuetify's own near-black, on the near-black panel,
+   with the track drawn straight across it — a control an operator could feel
+   for and not read. Nothing was wrong with the widget; nothing had looked.
+
+   The label goes above the track rather than beside it, because a label and a
+   track sharing a line is what put the two on top of each other. */
+.nrdb-ui-slider .v-input--horizontal {
+  display: block;
+}
+
+/* **The label is a bare span in .v-input__prepend, not a .v-label.**
+   Looked at, not assumed: the first rule written here targeted .v-label, it
+   matched nothing at all, and the capture came back with the label exactly as
+   dim as before. Vuetify's prepend slot carries the medium-emphasis opacity,
+   which is what dims it.
+
+   (No backticks anywhere in this file: the whole stylesheet is one template
+   literal, so a backtick in a comment ends it.) */
+.nrdb-ui-slider .v-input__prepend {
+  color: var(--yonder-label) !important;
+  opacity: 1 !important;
+  font-family: var(--yonder-font);
+  font-size: var(--yonder-size-label);
+  margin: 0 0 var(--yonder-space-1) 0;
+}
+
+/* The rail the thumb runs in: a recess, like every other input on this
+   console, rather than a pale line laid on the panel. */
+.nrdb-ui-slider .v-slider-track__background {
+  background: var(--yonder-pane) !important;
+  box-shadow: inset 0 1px 2px var(--yonder-seat);
+}
+
+.nrdb-ui-slider .v-slider-track__fill,
+.nrdb-ui-slider .v-slider-thumb__surface {
+  background: var(--yonder-accent) !important;
+}
+
+.nrdb-ui-number-input .v-field {
+  background: var(--yonder-pane) !important;
+  border-radius: 2px;
+  box-shadow: inset 0 1px 3px var(--yonder-seat);
+}
+
+.nrdb-ui-number-input .v-field__outline {
+  --v-field-border-opacity: 1;
+  color: var(--yonder-divider);
+}
+
+.nrdb-ui-number-input input {
+  font-family: var(--yonder-font-mono);
+  color: var(--yonder-value);
+}
+
 /* Visible, and visible in both palettes. A field device gets driven by
    keyboard more often than a desktop one, because a tablet keyboard is what
    is to hand. */

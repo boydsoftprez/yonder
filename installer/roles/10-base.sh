@@ -100,6 +100,36 @@ else
         --comment "Yonder console" yonder
 fi
 
+# The account the media server runs as.
+#
+# Its own, and neither root nor `yonder`. mediamtx listens on RTSP — and on
+# SRT where an output asks for it — so it is reachable from the mesh and from
+# whatever network the aircraft is on, which makes it the second
+# internet-adjacent surface on this device after the console. `yonder` is the
+# group that owns /run/yonder/core.sock (K-01), so putting this process in it
+# would hand a network-facing server the daemon's control socket; a compromise
+# of the media server must cost the media server and nothing else.
+#
+# Created here rather than in 50-mediamtx.sh for the reason the `yonder`
+# account is: a unit naming an account that does not exist fails at step USER
+# with status=217 on every start, and installer.test.ts asserts that every
+# account any shipped unit names is created by this role.
+if getent group yonder-media >/dev/null 2>&1; then
+    log "group yonder-media already exists"
+else
+    log "creating the system group yonder-media"
+    run groupadd --system yonder-media
+fi
+
+if getent passwd yonder-media >/dev/null 2>&1; then
+    log "user yonder-media already exists"
+else
+    log "creating the system user yonder-media"
+    run useradd --system --gid yonder-media --home-dir /nonexistent \
+        --no-create-home --shell /usr/sbin/nologin \
+        --comment "Yonder media server" yonder-media
+fi
+
 # 0750, not 0755: this directory holds secrets.yaml. The file is 0600, but a
 # world-readable directory still tells anyone with a shell what is in it.
 ensure_dir "$YONDER_ETC" 0750

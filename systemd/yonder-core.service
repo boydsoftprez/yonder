@@ -41,7 +41,16 @@ ProtectSystem=strict
 # needed it decided nothing and has been removed (K-15). Nothing this daemon does
 # writes under /etc/NetworkManager any more — NetworkManager's own keyfiles are
 # written by NetworkManager, on this daemon's behalf, over D-Bus.
-ReadWritePaths=/etc/yonder /var/lib/yonder
+# /etc/mediamtx is the media server's generated configuration, and it is here
+# for want of anywhere else this daemon may write that mediamtx may read. That
+# file carries the RTSP credential, so it must not be world-readable; the
+# media server runs as its own unprivileged account, so it cannot traverse
+# /etc/yonder (0750 root:root, it holds secrets.yaml) and must not be put in
+# group `yonder`, which owns the daemon's control socket. One narrow
+# purpose-made directory is the smaller of the two widenings.
+# assert_daemon_can_write in 50-mediamtx.sh checks this line against
+# MEDIA_CONFIG_PATH, so the two cannot drift apart.
+ReadWritePaths=/etc/yonder /var/lib/yonder /etc/mediamtx
 ProtectHome=yes
 NoNewPrivileges=yes
 PrivateTmp=yes

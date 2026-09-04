@@ -15,6 +15,10 @@ const databarNode = (await import("./databar.js")).default ?? await import("./da
 const softkeysNode = (await import("./softkeys.js")).default ?? await import("./softkeys.js");
 const identityNode = (await import("./identity.js")).default ?? await import("./identity.js");
 const sparklineNode = (await import("./sparkline.js")).default ?? await import("./sparkline.js");
+const holdkeyNode = (await import("./holdkey.js")).default ?? await import("./holdkey.js");
+const pictureNode = (await import("./picture.js")).default ?? await import("./picture.js");
+const factsNode = (await import("./facts.js")).default ?? await import("./facts.js");
+const budgetNode = (await import("./budget.js")).default ?? await import("./budget.js");
 
 /**
  * What is tested here, and what honestly cannot be.
@@ -23,14 +27,33 @@ const sparklineNode = (await import("./sparkline.js")).default ?? await import("
  * registration with the Dashboard group, and the reading of an editor form.
  * That is the part that runs in Node-RED and the part a flow depends on.
  *
- * The Vue halves are not exercised. Rendering them needs Dashboard's own
- * runtime — the `$socket` and `$dataTracker` it injects, and its Vuex store —
- * and a mock of those would assert that our mock behaves like our mock. What
- * the components draw is checked where it can be checked honestly: `reading()`
- * is tested in `yonder-core`, and the pages get captured in both palettes by
+ * Seven of the nine widgets' Vue halves are not exercised here, and that is
+ * still correct: a gauge, a tape, an annunciator, a data bar, an identity, a
+ * sparkline and a soft-key rail all draw what they are given and decide
+ * nothing, so mounting one against a mocked `$socket`, `$dataTracker` and
+ * Vuex store would only assert that our mock behaves like our mock. What
+ * they draw is checked where it can be checked honestly: `reading()` is
+ * tested in `yonder-core`, and the pages get captured in both palettes by
  * the gate R-UI-12 asks for. Until that gate exists and this has run on a
  * board, the rendering is unverified, and `docs/known-issues.md` says so
  * rather than this file implying otherwise.
+ *
+ * `YonderHoldKey` and `YonderPicture` are the other two, and neither is
+ * exempt. The hold key carries a state machine — four release paths and two
+ * duplicate-collapse guards — and the picture carries a larger one: a mode
+ * machine, a twelve-second deadline, a reconnect loop with backoff and a
+ * degrade that is a function of elapsed time. What either does with an event
+ * is a decision, not a drawing. Both are tested directly, in
+ * `./ui/holdkey.component.test.ts` and `./ui/picture.component.test.ts`:
+ * mounted for real with `@vue/test-utils` against jsdom, with only
+ * `$socket.emit`, `$dataTracker` and — for the picture — `fetch` and
+ * `RTCPeerConnection` stubbed, which is the whole of the surface either one
+ * touches. That is honest for the same reason the exemption above is
+ * honest: the assertion is on a call our own code makes, not on a mock
+ * echoing what it was told to say. Mutation-testing is why the line moved
+ * here: deleting `pointercancel`, and separately deleting `pointerleave`,
+ * each once left this package's suite fully green. Neither can happen
+ * unnoticed now.
  */
 
 interface Registered {
@@ -335,5 +358,119 @@ describe("the widgets", () => {
     const { node, props } = build(databarNode as (RED: RED) => void, { cells: "[[[" });
     expect(props!.cells).toEqual([]);
     expect(node.error).toHaveBeenCalled();
+  });
+});
+
+describe("the hold key", () => {
+  it("registers as a widget that sends", () => {
+    // Dashboard drops a widget-action from a widget that did not register
+    // onAction — no error, no warning. Every soft key on this console once
+    // shipped dead this way.
+    const { type, events } = build(holdkeyNode as (RED: RED) => void, { label: "Full rate", action: "fullrate" });
+    expect(type).toBe("ui-yonder-holdkey");
+    expect(events).toMatchObject({ onAction: true });
+  });
+
+  it("carries the cost of holding it, so the page states it before it is asked", () => {
+    // R-VID-11: the interface states what asking would cost *before* it is
+    // asked. A held key with no cost on it is a key whose consequence is a
+    // surprise.
+    const { props } = build(holdkeyNode as (RED: RED) => void, { label: "Full rate", action: "fullrate", cost: "2.0 Mb/s" });
+    expect(props).toMatchObject({ label: "Full rate", action: "fullrate", cost: "2.0 Mb/s" });
+  });
+
+  it("keeps a unit in the case it was given", () => {
+    // Mb/s rendered as MB/S says megabytes. The component's stylesheet is
+    // where that is enforced; this is the half that can be asserted.
+    const { props } = build(holdkeyNode as (RED: RED) => void, { label: "Full rate", action: "fullrate", cost: "2.0 Mb/s" });
+    expect(props!.cost).toBe("2.0 Mb/s");
+  });
+
+  it("does not draw itself when it has no dashboard group", () => {
+    // A widget dragged onto a flow before it has a group is a normal
+    // intermediate state in the editor, not a fault. Node-RED must load the
+    // rest of the flow either way.
+    const { node } = build(holdkeyNode as (RED: RED) => void, { label: "Full rate", action: "fullrate" }, null);
+    expect(node.error).toHaveBeenCalled();
+  });
+});
+describe("the picture", () => {
+  it("registers as a widget that sends", () => {
+    // It sends: the mode changes and 'try live again' are actions.
+    const { type, events } = build(pictureNode as (RED: RED) => void, { path: "cam0" });
+    expect(type).toBe("ui-yonder-picture");
+    expect(events).toMatchObject({ onAction: true });
+  });
+
+  it("defaults to the cheap preview path, never the full-rate one", () => {
+    // R-VID-13 makes the cheap copy the default. A component that defaulted
+    // to the full stream would spend most of a field uplink the moment
+    // somebody opened a page, with no reason to suspect it.
+    expect(build(pictureNode as (RED: RED) => void, { path: "cam0" }).props)
+      .toMatchObject({ path: "cam0-preview" });
+  });
+
+  it("does not append -preview twice", () => {
+    expect(build(pictureNode as (RED: RED) => void, { path: "cam0-preview" }).props)
+      .toMatchObject({ path: "cam0-preview" });
+  });
+
+  it("falls back to twelve seconds when the field is blank", () => {
+    // Long enough for a slow negotiation to finish, short enough that nobody
+    // is left staring at nothing. `num` treats an empty string as absent, not
+    // as zero — a zero here would fall back to stills instantly.
+    expect(build(pictureNode as (RED: RED) => void, { path: "cam0", stillsAfterMs: "" }).props)
+      .toMatchObject({ stillsAfterMs: 12_000 });
+  });
+
+  it("carries the stills source, so the fall-back has somewhere to point", () => {
+    // R-VID-14's fall-back is only useful if it can draw something. Nothing
+    // in this repository serves stills yet, so this is configuration rather
+    // than a discovered URL, and an unset one leaves the fall-back drawing
+    // its reason and no picture.
+    expect(build(pictureNode as (RED: RED) => void, { path: "cam0", stillsUrl: "/stills/cam0.jpg" }).props)
+      .toMatchObject({ stillsUrl: "/stills/cam0.jpg" });
+    expect(build(pictureNode as (RED: RED) => void, { path: "cam0" }).props)
+      .toMatchObject({ stillsUrl: "" });
+  });
+});
+
+describe("the facts row and the budget", () => {
+  it("registers both without onAction, because both are read-only", () => {
+    // A facts row that could emit is a facts row that could originate a
+    // command. Read-only instruments leave it off, as every other one does.
+    expect(build(factsNode as (RED: RED) => void, { facts: "[]" }).events).toEqual({});
+    expect(build(budgetNode as (RED: RED) => void, { segments: "[]" }).events).toEqual({});
+  });
+
+  it("draws nothing, and says so, when the facts list is malformed", () => {
+    // A widget that cannot render its own configuration must not stop the
+    // console starting — a console that will not start is a device the
+    // operator cannot reach. `list()` already has this behaviour; this is the
+    // assertion that these two widgets use it rather than JSON.parse.
+    const { node, props } = build(factsNode as (RED: RED) => void, { facts: "{not json" });
+    expect(node.error).toHaveBeenCalledTimes(1);
+    expect(props).toMatchObject({ facts: [] });
+  });
+
+  it("reads a facts list from the editor form", () => {
+    const facts = JSON.stringify([
+      { label: "aim", state: "not-offered" },
+      { label: "zoom", state: "advertised", reason: "accepted, does not reshape the feed" },
+    ]);
+    const { props } = build(factsNode as (RED: RED) => void, { title: "This camera has no", facts });
+    expect(props!.facts).toHaveLength(2);
+    expect((props!.facts as { state: string }[])[1].state).toBe("advertised");
+  });
+
+  it("takes the uplink capacity as the mark the segments are drawn against", () => {
+    const { props } = build(budgetNode as (RED: RED) => void, { label: "Uplink", capacityKbps: "5000", segments: "[]" });
+    expect(props).toMatchObject({ capacityKbps: 5000 });
+  });
+
+  it("has no capacity rather than a false one when the field is blank", () => {
+    // Zero is the honest answer: nothing has measured this path yet, and a
+    // made-up ceiling is a mark an operator would trust.
+    expect(build(budgetNode as (RED: RED) => void, { segments: "[]" }).props).toMatchObject({ capacityKbps: 0 });
   });
 });

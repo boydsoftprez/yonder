@@ -1,0 +1,37 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!--
+  The editor half of the receive line. A form and a registration, nothing else.
+-->
+<script type="text/html" data-template-name="yonder-receive-line">
+  <div class="form-row">
+    <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-camera"><i class="fa fa-video-camera"></i> Camera</label>
+    <input type="text" id="node-input-camera" placeholder="cam0" />
+  </div>
+</script>
+
+<script type="text/html" data-help-name="yonder-receive-line">
+<p>Reads <code>GET /cameras/&lt;id&gt;/receive-line</code> and emits the four
+renderings of the receive-side command — a GStreamer command line, a ground
+station's own video settings, a pipeline ending in an application sink, and an
+RTSP URL.</p>
+<p>The daemon resolves the RTSP credential and hands back finished text. This
+node never reads the device's secrets: it has no filesystem access at all.</p>
+<p>Set <code>msg.address</code> to the address this session arrived on, if the
+page knows it; the daemon uses it only if the device answers on it.</p>
+</script>
+
+<script type="text/javascript">
+  RED.nodes.registerType("yonder-receive-line", {
+    category: "yonder",
+    color: "#c7d4e0",
+    defaults: { name: { value: "" }, camera: { value: "" } },
+    inputs: 1,
+    outputs: 1,
+    icon: "font-awesome/fa-clipboard",
+    label: function () { return this.name || "receive line"; },
+  });
+</script>

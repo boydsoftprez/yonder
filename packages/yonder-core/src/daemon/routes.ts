@@ -20,9 +20,23 @@ import { setTheme, type ThemeRequest } from "../ui/theme.js";
 import type { ScanResult } from "../net/scan.js";
 import type { BoardFacts } from "../system/facts.js";
 import type { Versions } from "../system/versions.js";
-import { DEFAULT_CONFIG, ZEROTIER_NETWORK_ID } from "../schema/config.js";
+import { DEFAULT_CONFIG, ZEROTIER_NETWORK_ID, type Camera } from "../schema/config.js";
 import { publishableApPassphrase } from "../net/profiles.js";
 import type { RemoteState } from "../remote/state.js";
+import { compose, refuse } from "../video/pipeline.js";
+import { noCapabilities, summarise, type CameraCapabilities } from "../video/capability.js";
+import {
+  cameraStrip, capabilityFacts, identityWords, uplinkBudget,
+  type CameraStrip, type CapabilityFact,
+} from "../video/present.js";
+import { CONTROL_NAMES, type ApplyControlsOptions, type ApplyControlsResult } from "../video/controls.js";
+import { setCameraSettings, type CameraSettings } from "../video/settings.js";
+import { renderReceive, type Rendering } from "../video/receive.js";
+import type { CameraRun, Supervisor } from "../video/supervisor.js";
+import type { Detection, DetectResult, Rejection } from "../video/probe/camera.js";
+import type { Encoder } from "../video/probe/encoder.js";
+import type { SupplyFlags, SupplyState } from "../system/supply.js";
+import { RTSP_PORT } from "../media/ports.js";
 
 export interface RouterDeps {
   engine: ApplyEngine;
@@ -105,6 +119,115 @@ export interface RouterDeps {
    * operator asked for and one the device ran itself are the same evidence.
    */
   testPath?: (path: PathName) => Promise<boolean>;
+  /**
+   * What is plugged into this board. **Given, never defaulted**, exactly as
+   * `scan` and `diag` are: with a default, any caller reaching a camera route
+   * would run a real `v4l2-ctl`, and "no test executes v4l2-ctl" is a rule
+   * that has to be impossible to break rather than remembered. Absent means
+   * this daemon cannot detect cameras, not that none is attached.
+   */
+  cameras?: CameraProbes;
+  /** Which encoder this board actually has (R-CAM-13). Injected, like `cameras`. */
+  encoder?: () => Promise<Encoder>;
+  /**
+   * Writes image controls to a camera's device node and reads them back
+   * (R-CTL-04, R-CTL-05, R-CTL-10). Injected, like `cameras` and `encoder`:
+   * with a default, a test that merely exercised this route would run a real
+   * `v4l2-ctl`. Absent means this daemon cannot change a camera's controls,
+   * not that the device has none to offer — `POST …/controls` says so rather
+   * than pretending the write happened.
+   */
+  applyControls?: (opts: ApplyControlsOptions) => Promise<ApplyControlsResult>;
+  /**
+   * The one supervisor this process owns.
+   *
+   * It lives here, for the daemon's lifetime, and deliberately not inside a
+   * Node-RED node: a redeploy destroys and recreates every node, so a
+   * supervisor in one would drop every camera's pipeline the moment somebody
+   * edited a flow — including, on a flying aircraft, the feed a ground
+   * station is watching.
+   */
+  supervisor?: Supervisor;
+  /**
+   * The RTSP credential, resolved from `secrets.yaml`.
+   *
+   * A function returning one value rather than the whole store, because the
+   * narrowness *is* the guarantee: `GET /cameras/:id/receive-line` is the one
+   * route allowed to spend it, and nothing else in this router can reach a
+   * secret at all (R-SEC-10). `null` before the media server has ever been
+   * configured, which the rendering says in words rather than printing a URL
+   * that would not work.
+   */
+  rtspPassword?: () => string | null;
+  /**
+   * Every address this device answers on, most-used first.
+   *
+   * R-VID-15 wants the receive line to carry the address the operator is
+   * actually reaching the device on. A Unix socket carries no Host header, so
+   * the caller may name one with `?address=` — and it is honoured only if it
+   * is in this list, which makes the allowed set the set of real addresses
+   * rather than a pattern somebody had to guess.
+   */
+  addresses?: () => Promise<string[]>;
+  /**
+   * The supply register (R-SYS-09). Injected for the same reason as `cameras`:
+   * absent means this board does not expose it, and no caller runs `vcgencmd`
+   * by omission.
+   */
+  supply?: () => Promise<SupplyState | null>;
+}
+
+/**
+ * The camera probes, injected — the same reasoning as `DiagProbes` below.
+ *
+ * Two members and not one: `detect()` sweeps the board, which is what names
+ * the `/dev` node a configured by-path name currently means; `probe()` reads
+ * one device again, which is what the Setup deck's *Re-probe* key asks for
+ * and what makes R-CTL-10 a read-back at the moment of the request rather
+ * than a repeat of the sweep's answer.
+ */
+export interface CameraProbes {
+  detect(): Promise<DetectResult>;
+  probe(node: string, card: string): Promise<Detection | Rejection>;
+}
+
+/**
+ * One camera, as its page reads it.
+ *
+ * `camera` is what an operator chose and `capabilities` is what the device
+ * answers *now* — R-CAM-14 keeps those apart, and R-CTL-10 says the controls
+ * are drawn from the second. `run` is what the supervisor observed, never
+ * what the configuration asked for.
+ */
+export interface CameraView {
+  camera: Camera;
+  run: CameraRun;
+  /** The `/dev` node this camera's by-path name resolves to now, or null. */
+  device: string | null;
+  card: string | null;
+  /** False where the kernel publishes no stable name for this camera (R-UI-20). */
+  byPathStable: boolean;
+  capabilities: CameraCapabilities | null;
+  /** Why there are no capabilities, in the probe's own words, or null. */
+  reason: string | null;
+  encoder: Encoder;
+  /** Why a start would be refused (R-CAM-10), or null. */
+  refusal: string | null;
+  /**
+   * The same facts as strings the readout strip binds — see `video/present.ts`
+   * and `displayFacts` beside it. A page binds a widget to a key and cannot
+   * compose `1280 × 720`; doing that in a `function` node is CLAUDE.md rule 2
+   * and doing it in a `change` node's JSONata is the same rule wearing a
+   * different hat. Anything that wants the raw values still has them above.
+   */
+  display: CameraStrip;
+  /**
+   * What this camera cannot do (R-UI-20), computed from the capabilities
+   * beside it rather than listed in the flows — a stored list is a stale list
+   * the first time a different camera is plugged in, which is the whole of
+   * R-CAM-14.
+   */
+  facts: CapabilityFact[];
 }
 
 /** What GET /system answers with. */
@@ -194,6 +317,81 @@ function sinceParam(query: string): number {
   return Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
 }
 
+/**
+ * `POST /cameras/:id/controls`'s body, off the wire and rejected before it
+ * reaches `applyControls` if it names nothing this route understands.
+ *
+ * A key naming anything but `brightness`, `contrast` or `rotation` is
+ * ignored rather than refused — the same tolerance `submittedPassword` shows
+ * an extra field. `null` is the schema's own "leave it" for a nullable image
+ * control, so it is dropped rather than treated as a value; what is refused
+ * is a value that is neither a number nor absent, and a body that — once
+ * nulls and absent keys are set aside — names nothing left to change, which
+ * is indistinguishable from a caller that meant to ask for something and did
+ * not.
+ *
+ * Deliberately not a bound on the *number* — the schema's own bound is
+ * `-100..100` and a real device's is usually narrower still. Neither belongs
+ * here: `applyControls` clamps to what `capabilities` reports (rule 1), which
+ * this function has no access to and must not guess at.
+ */
+function requestedControls(body: unknown): Partial<Camera["controls"]> | null {
+  if (body === null || typeof body !== "object" || Array.isArray(body)) return null;
+  const out: Partial<Record<keyof Camera["controls"], number>> = {};
+  for (const control of Object.keys(CONTROL_NAMES) as (keyof Camera["controls"])[]) {
+    const value = (body as Record<string, unknown>)[control];
+    if (value === undefined || value === null) continue;
+    if (typeof value !== "number" || !Number.isFinite(value)) return null;
+    out[control] = value;
+  }
+  // The cast is the one place a plain number crosses into the schema's own,
+  // narrower shape (`rotation` is a literal union there, not `number`);
+  // `applyControls` reads every field as a number regardless of which
+  // control it names, so nothing downstream relies on the narrower type.
+  return Object.keys(out).length === 0 ? null : (out as Partial<Camera["controls"]>);
+}
+
+/**
+ * The camera id comes off a URL, so it is matched against the same pattern the
+ * schema allows rather than trusted. It reaches `compose()` and becomes a
+ * media path and a file path; this is the one place a traversal could get in.
+ *
+ * A pattern, not a filter for `..`: a filter is a list of the tricks somebody
+ * thought of, and a pattern is a statement of what is allowed. Stated here
+ * rather than imported from `schema/config.ts` for the reason `whep.ts` states
+ * its own — the two are checked against each other by hand, and both say the
+ * same thing: thirty-two characters of lower-case letters, digits and hyphens.
+ */
+const CAMERA_ID = /^[a-z0-9][a-z0-9-]{0,31}$/;
+
+/**
+ * `/cameras/<id>` and its four suffixes.
+ *
+ * Deliberately permissive about the id — `.+?` rather than the pattern above —
+ * so that a traversal is refused by `CAMERA_ID` with a 404 that means "no such
+ * camera", rather than falling through to the router's generic 404 by not
+ * matching at all. The difference is not cosmetic: a guard nothing can reach
+ * is a guard no test can prove.
+ */
+const CAMERA_ROUTE = /^\/cameras\/(.+?)(?:\/(run|probe|receive-line|controls|settings))?$/;
+
+/**
+ * Where a pipeline publishes: mediamtx, on loopback.
+ *
+ * No credential in it, and that is deliberate. `media/config.ts` grants
+ * publish to the anonymous user from 127.0.0.1 only, so the board's own
+ * pipeline needs none — and a credential here would be a credential in the
+ * argv of a long-running process, which is a credential in `ps` output.
+ */
+const RTSP_BASE = `rtsp://127.0.0.1:${RTSP_PORT}`;
+
+/** The latched supply bits, and the words the log uses for each (R-SYS-09). */
+const LATCHED_BITS: readonly (readonly [keyof SupplyFlags, string])[] = [
+  ["undervoltage", "undervoltage"],
+  ["capped", "frequency capped"],
+  ["throttled", "throttling"],
+];
+
 export function createRouter(deps: RouterDeps): Router {
   const throttle = deps.throttle ?? new AttemptThrottle();
   const activity = deps.activity ?? activityLog;
@@ -243,6 +441,288 @@ export function createRouter(deps: RouterDeps): Router {
       hostname: `${config.system.hostname}.local`,
       ...(passphrase === undefined ? {} : { passphrase }),
     };
+  };
+
+  /**
+   * R-SYS-09's second half: *record an occurrence in the log*.
+   *
+   * **The transition, not the state.** A board dirty since boot would
+   * otherwise write one line every time a status page polled, for ever — and a
+   * log that says the same thing four hundred times is a log with nothing in
+   * it. Held here, on the router, because a router is per process and a latched
+   * bit is per boot: the two have the same lifetime.
+   *
+   * The first read of a dirty board does log, once. That is the case the
+   * requirement is written for — an undervoltage event restarts the board, and
+   * a restart in flight presents as an aircraft that went quiet with nothing to
+   * explain it, so the line has to appear even though nothing changed while
+   * anyone was watching.
+   */
+  let latchedSeen: SupplyFlags | null = null;
+  const supplyTransition = (state: SupplyState | null): string | null => {
+    if (state === null) return null;
+    const before = latchedSeen;
+    latchedSeen = state.sinceBoot;
+    const fresh = LATCHED_BITS
+      .filter(([bit]) => state.sinceBoot[bit] && !(before?.[bit] ?? false))
+      .map(([, words]) => words);
+    if (fresh.length === 0) return null;
+    return `supply: ${fresh.join(", ")} ${fresh.length === 1 ? "has" : "have"} been latched `
+      + `since boot (${state.raw}); an undervoltage event restarts the board`;
+  };
+
+  /**
+   * "This daemon has no camera layer", said once.
+   *
+   * Never a 500: a board whose secret store could not be read is assembled
+   * without one, and a device that answers "I cannot" is diagnosable where a
+   * device that throws is not.
+   */
+  const noCameraLayer = (what: string, say: (line: string) => void): RouteResult => {
+    say(`${what}: there is no camera layer on this daemon to ask`);
+    return {
+      status: 503,
+      body: { error: "this device cannot report on its cameras; see the device journal for the reason" },
+    };
+  };
+
+  /**
+   * Everything under `/cameras/<id>`.
+   *
+   * The id has already been matched against `CAMERA_ID` by the caller, before
+   * anything at all was done with it — including reading the configuration.
+   */
+  const cameraRoute = async (
+    method: string,
+    id: string,
+    verb: string,
+    body: unknown,
+    query: string,
+    say: (line: string) => void,
+  ): Promise<RouteResult> => {
+    const probes = deps.cameras;
+    const supervisor = deps.supervisor;
+    const readEncoder = deps.encoder;
+    if (probes === undefined || supervisor === undefined || readEncoder === undefined) {
+      return noCameraLayer(`${method} /cameras/${id}`, say);
+    }
+
+    const config = loadConfig(deps.configPath);
+    const camera = config.cameras.find((c) => c.id === id);
+    if (camera === undefined) {
+      return { status: 404, body: { error: `no camera is configured with the id "${id}"` } };
+    }
+
+    /** One camera's page, read from the device rather than from the form (R-CTL-10). */
+    const view = async (reprobe: boolean): Promise<CameraView> => {
+      const detection = await probes.detect();
+      const known = new Set(detection.found.map((d) => d.byPath));
+      const swept = detection.found.find((d) => d.byPath === camera.device);
+      // The sweep names the `/dev` node and the card this by-path name means
+      // right now; the re-probe is what the operator pressed, and it reads
+      // that one device again so a control turned on the camera itself shows
+      // up rather than the sweep's slightly older answer.
+      const answer: Detection | Rejection | undefined = reprobe && swept !== undefined
+        ? await probes.probe(swept.device, swept.card)
+        : swept;
+      const found = answer !== undefined && "capabilities" in answer ? answer : undefined;
+      const rejection = answer !== undefined && !("capabilities" in answer) ? answer : undefined;
+      const encoder = await readEncoder();
+      const run = supervisor.state(id);
+      const device = answer?.device ?? null;
+      const byPathStable = found?.byPathStable ?? false;
+      const capabilities = found?.capabilities ?? null;
+      return {
+        camera,
+        run,
+        device,
+        card: answer?.card ?? null,
+        byPathStable,
+        capabilities,
+        reason: rejection?.reason ?? null,
+        encoder,
+        display: cameraStrip({
+          camera, run, device, byPathStable, encoder,
+          refusal: refuse({
+            camera,
+            capabilities: capabilities ?? noCapabilities(),
+            encoder,
+            rtspBase: RTSP_BASE,
+            knownDevices: known,
+          }),
+        }),
+        // From what the device answered a moment ago, never from a list. A
+        // camera that answered nothing yields every row, which is the honest
+        // reading: an operator has to be able to tell *this camera cannot*
+        // from *this page failed*.
+        facts: capabilityFacts(capabilities ?? noCapabilities()),
+        // Answered on the page rather than only on the start, so an operator
+        // reads which of their settings this camera does not offer before
+        // they press anything (R-CAM-10). `knownDevices` comes from the sweep
+        // that just ran, so a `device` resolving to nothing is caught here
+        // rather than later as `Internal data stream error`.
+        refusal: refuse({
+          camera,
+          capabilities: found?.capabilities ?? noCapabilities(),
+          encoder,
+          rtspBase: RTSP_BASE,
+          knownDevices: known,
+        }),
+      };
+    };
+
+    if (method === "GET" && verb === "") {
+      return { status: 200, body: await view(false) };
+    }
+
+    /** The Setup deck's *Re-probe* key. */
+    if (method === "POST" && verb === "probe") {
+      return { status: 200, body: await view(true) };
+    }
+
+    // R-CTL-01: start and stop each stream independently. Runtime only — it
+    // survives no apply and no reboot, because an operator watching the
+    // uplink track go past its mark needs something that acts now rather than
+    // something that takes a confirmation window to arm.
+    if (method === "POST" && verb === "run") {
+      const action = (body as { action?: unknown } | undefined)?.action;
+      if (action !== "start" && action !== "stop") {
+        return { status: 400, body: { error: 'action must be "start" or "stop"' } };
+      }
+      if (action === "stop") {
+        supervisor.stop(id);
+        return { status: 200, body: supervisor.state(id) };
+      }
+      // Through the same view the page reads, so the sentence an operator is
+      // shown before they press Start and the sentence they get for pressing
+      // it cannot differ. A start is refused before it is attempted
+      // (R-CAM-10): a pipeline that fails to start says "Internal data stream
+      // error" and nothing else, and an operator deserves to be told which of
+      // their settings the camera does not offer.
+      const found = await view(false);
+      if (found.refusal !== null) return { status: 400, body: { error: found.refusal } };
+      supervisor.start(id, compose({
+        camera,
+        // Never reached: `refuse` answers "this camera has not answered with
+        // any capture format" for a camera with no capabilities, so a null
+        // here has already been refused above.
+        capabilities: found.capabilities ?? noCapabilities(),
+        encoder: found.encoder,
+        rtspBase: RTSP_BASE,
+      }));
+      return { status: 200, body: supervisor.state(id) };
+    }
+
+    /**
+     * R-CTL-04, R-CTL-05: image controls reach the device directly, never
+     * through config.yaml. A camera's *stored* controls still change only
+     * through `yonder-apply` (`apply/reachability.ts` exempts them from the
+     * confirmation window, on the grounds that none of them changes what
+     * leaves the aircraft) — this route is the other half, the one that was
+     * missing entirely: without it a stored value was committed and never
+     * reached the sensor.
+     *
+     * Runtime only, like `run` above and for the same reason: an operator
+     * moving a slider needs the picture to answer now, not after a
+     * confirmation window.
+     */
+    if (method === "POST" && verb === "controls") {
+      const apply = deps.applyControls;
+      if (apply === undefined) return noCameraLayer(`${method} /cameras/${id}/controls`, say);
+
+      const requested = requestedControls(body);
+      if (requested === null) {
+        return {
+          status: 400,
+          body: {
+            error: "name at least one of brightness, contrast or rotation, "
+              + "each a finite number (null leaves it alone)",
+          },
+        };
+      }
+
+      // Through the same view the page reads, so what the page shows before
+      // a control is moved and what this route resolves cannot disagree.
+      // `view(false)` rather than a re-probe: `run`'s refusal check above
+      // takes the same sweep-freshness trade-off, and re-probing twice more
+      // in this one request — once here and once for the read-back below —
+      // would be three device round trips for one slider.
+      const found = await view(false);
+      if (found.device === null || found.card === null || found.capabilities === null) {
+        return {
+          status: 400,
+          body: { error: "this camera's device could not be resolved; re-probe it and try again" },
+        };
+      }
+
+      const { applied, refused, clamped } = await apply({
+        node: found.device,
+        controls: requested,
+        capabilities: found.capabilities,
+      });
+
+      // R-CTL-10: the whole device, read again — not the pre-write snapshot
+      // patched in memory with what `applied` says. A page showing three
+      // controls must not show two fresh values and one this request
+      // happened to leave alone; a rejection here (the device went away
+      // between the write and this read) is `current: null`, the same
+      // honest "no reading" `view()` reports elsewhere rather than a stale
+      // number dressed as a fresh one.
+      const after = await probes.probe(found.device, found.card);
+      const current = "capabilities" in after ? after.capabilities : null;
+
+      return { status: 200, body: { applied, refused, clamped, current } };
+    }
+
+    /**
+     * R-CTL-02, R-CTL-03: the stream settings, through the apply engine.
+     *
+     * **Never a write to config.yaml from here.** The engine is what makes a
+     * change reversible: it snapshots the document, renders it, and either
+     * keeps it or arms the confirmation window — and it decides which from
+     * `apply/reachability.ts` and `CAMERA_EXEMPT_LEAVES`, not from anything
+     * this route knows. So the Setup deck draws a countdown exactly where one
+     * armed, because it is drawing the engine's own answer rather than a
+     * prediction of it.
+     *
+     * Deliberately unlike `run` and `controls` above, which are runtime and
+     * take effect at once: those change what the device is *doing*, this
+     * changes what it *is*.
+     */
+    if (method === "POST" && verb === "settings") {
+      const next = setCameraSettings(config, id, body as CameraSettings);
+      if (!next.ok) return { status: 400, body: { error: next.error } };
+      return { status: 200, body: await deps.engine.apply(next.config) };
+    }
+
+    // The credential leaves the daemon on exactly one route. Everything else
+    // answers with the reference the configuration holds, never the value
+    // (R-SEC-10). This one is allowed it because the operator is being handed
+    // a URL to copy, which is the whole of R-VID-15.
+    if (method === "GET" && verb === "receive-line") {
+      const addresses = deps.addresses === undefined ? [] : await deps.addresses();
+      // A Unix socket carries no Host header, so the caller may name the
+      // address it arrived on — honoured only when this device actually
+      // answers on it, which makes the allowed set the set of real addresses
+      // rather than a pattern somebody had to guess.
+      const named = new URLSearchParams(query).get("address");
+      const address = named !== null && addresses.includes(named)
+        ? named
+        // The access point is the address every device answers on before it
+        // has joined anything, so it is the honest last resort rather than a
+        // placeholder that would print a command nobody could run.
+        : addresses[0] ?? config.network.ap.address.split("/")[0] ?? "";
+      const renderings: Rendering[] = renderReceive({
+        camera,
+        address,
+        alternatives: addresses.filter((a) => a !== address),
+        rtspPassword: deps.rtspPassword?.() ?? null,
+        rtspPort: RTSP_PORT,
+      });
+      return { status: 200, body: { renderings } };
+    }
+
+    return { status: 404, body: { error: `no route for ${method} /cameras/${id}` } };
   };
 
   return async (method, rawPath, body) => {
@@ -384,7 +864,62 @@ export function createRouter(deps: RouterDeps): Router {
       // none.
 
       if (method === "GET" && path === "/system") {
-        return { status: 200, body: system() };
+        // Sampled where this daemon already samples system state, so R-SYS-09
+        // has one reader rather than a second poller nobody remembers to run.
+        const supply = deps.supply === undefined ? null : await deps.supply();
+        const occurrence = supplyTransition(supply);
+        if (occurrence !== null) say(occurrence);
+        return { status: 200, body: { ...system(), supply } };
+      }
+
+      // ---- the cameras -------------------------------------------------
+      //
+      // R-CAM-12: what was found, what was rejected, and why. A rejection is a
+      // value here for the same reason it is one in `probe/camera.ts` — a
+      // thrown exception carries none of the third, and a camera that simply
+      // did not appear sends an operator looking for the one that vanished.
+      if (method === "GET" && path === "/cameras") {
+        if (deps.cameras === undefined) return noCameraLayer("GET /cameras", say);
+        const config = loadConfig(deps.configPath);
+        const { found, rejected } = await deps.cameras.detect();
+        return {
+          status: 200,
+          body: {
+            found: found.map((detected) => ({
+              ...detected,
+              // `aim: none · zoom: none` explains why that camera's page has
+              // no Aim group before anyone goes looking for one — R-UI-20
+              // applied a level up from the page it governs.
+              summary: summarise(detected.capabilities),
+              // R-CAM-05 in words. Nothing rendered `byPathStable` until this
+              // page did, and until something does, the stable-identity work
+              // stops at the type: an operator never learns whether the camera
+              // they configured will still be the one this name means after a
+              // reboot.
+              identity: identityWords(detected.byPath, detected.byPathStable),
+              // Null where nothing is configured for this socket yet: a
+              // detected camera with no id has no page to open (R-UI-03).
+              id: config.cameras.find((c) => c.device === detected.byPath)?.id ?? null,
+            })),
+            rejected,
+            // Both totals live here rather than on any one camera's page,
+            // because both are shared: *starting the second camera would need
+            // 2.1 Mb/s more* is a sentence no single camera's page can say
+            // (R-VID-11).
+            budget: uplinkBudget(config.cameras),
+          },
+        };
+      }
+
+      const addressed = CAMERA_ROUTE.exec(path);
+      if (addressed !== null) {
+        const id = addressed[1];
+        // Before the configuration is read, before the probe is asked
+        // anything, before this id is used for anything at all.
+        if (!CAMERA_ID.test(id)) {
+          return { status: 404, body: { error: "no such camera" } };
+        }
+        return await cameraRoute(method, id, addressed[2] ?? "", body, query, say);
       }
 
       if (method === "GET" && path === "/net/scan") {

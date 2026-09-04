@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { ApplyEngine } from "../apply/engine.js";
 import { warn, note, trace } from "../log.js";
-import { createRouter, type DiagProbes } from "./routes.js";
+import { createRouter, type CameraProbes, type DiagProbes } from "./routes.js";
 import { AdminCredential } from "../console/credential.js";
 import { ConsoleRenderer } from "../console/renderer.js";
 import { consolePaths, type ConsolePaths } from "../console/settings.js";
@@ -29,6 +29,12 @@ import { joinSucceeded } from "../net/joined.js";
 import { networkState } from "../net/state.js";
 import { readRemoteState } from "../remote/state.js";
 import { RemoteRenderer } from "../remote/renderer.js";
+import { MediaRenderer, MEDIA_CONFIG_PATH } from "../media/renderer.js";
+import { Supervisor, systemSpawner } from "../video/supervisor.js";
+import { detectCameras, probeCamera } from "../video/probe/camera.js";
+import { probeEncoder, type Encoder } from "../video/probe/encoder.js";
+import { applyControls } from "../video/controls.js";
+import { readSupply } from "../system/supply.js";
 import { ZeroTierCli } from "../remote/zerotier/cli.js";
 import { readTraffic } from "../remote/traffic.js";
 import { TrafficSampler } from "../remote/sampler.js";
@@ -97,6 +103,47 @@ export interface ServerOptions {
    * Absent means no ConsoleRenderer is assembled — see BuildRenderersOptions.
    */
   console?: Partial<ConsolePaths>;
+  /**
+   * Where the media server's generated configuration goes. **Given, never
+   * defaulted**, like `console`: absent means no MediaRenderer is assembled,
+   * so nothing in a test can write to — or delete from — a real
+   * /etc/mediamtx by forgetting to override a path. main() supplies the
+   * production value.
+   */
+  mediaConfigPath?: string;
+  /**
+   * The camera layer, given whole instead of probed for.
+   *
+   * **Test-only, exactly like `runner` and `clock` above, and `main()` never
+   * supplies it.** There is no environment variable for it and there must not
+   * be: a switch that makes this daemon report the cameras a file names rather
+   * than the ones the board has is a device lying about its own hardware, and
+   * an aircraft is the wrong place to discover that somebody set it.
+   * Supplying it takes writing a different program, which is what
+   * `scripts/synthetic-daemon.mjs` is.
+   *
+   * It exists because the capture gate (R-UI-12) has no camera. With none
+   * attached there is no camera page, so the gate covers none of the camera
+   * work and does not complain — from its point of view there is nothing
+   * there. Given whole rather than as a fake `runner`, because
+   * `detectCameras` reads `/dev/v4l/by-path` as well as running `v4l2-ctl`,
+   * and a machine with no `/dev/v4l` answers `byPathStable: false` — which is
+   * the one thing the Cameras page exists to report honestly (R-CAM-05).
+   */
+  cameraLayer?: CameraLayer;
+}
+
+/**
+ * Everything about cameras this daemon would otherwise ask the board for.
+ *
+ * All three together, not one at a time: a probe that answered from a fixture
+ * beside an encoder read off the host would be a view no device has ever had.
+ */
+export interface CameraLayer {
+  cameras: CameraProbes;
+  encoder: () => Promise<Encoder>;
+  /** What `GET /cameras/:id/receive-line` resolves. See ServerOptions.cameraLayer. */
+  rtspPassword: () => string | null;
 }
 
 export interface BuildRenderersOptions {
@@ -142,6 +189,14 @@ export interface BuildRenderersOptions {
    * one would be `/var/lib/yonder`.
    */
   remoteStatePath: string;
+  /**
+   * Where the media server's generated configuration goes. **Given, never
+   * defaulted**, for the same reason as `console` and `remoteStatePath`:
+   * absent means no MediaRenderer is assembled, and a path with a default is
+   * a path a test writes to by forgetting to override it — this one would be
+   * a real media server's configuration, credential and all.
+   */
+  mediaConfigPath?: string;
 }
 
 /**
@@ -172,6 +227,21 @@ export function buildRenderers(opts: BuildRenderersOptions): {
   /** Talks to the installed zerotier-cli, over the same runner as everything else. */
   zerotier: ZeroTierCli;
   remoteRenderer: RemoteRenderer;
+  /** Present only when `opts.mediaConfigPath` said where the file goes. */
+  mediaRenderer?: MediaRenderer;
+  /**
+   * The one supervisor this process owns, for the whole of its life.
+   *
+   * Built here, beside the renderers, and deliberately not inside a Node-RED
+   * node: a redeploy destroys and recreates every node, so a supervisor in one
+   * would drop every camera's pipeline the moment somebody edited a flow —
+   * including, on a flying aircraft, the feed a ground station is watching.
+   *
+   * Not a renderer. Starting and stopping a stream is a runtime action that
+   * survives no apply and no reboot (R-CTL-01), so it has no place in a
+   * sequence whose whole purpose is to make a configuration true.
+   */
+  supervisor: Supervisor;
   generated: string[];
 } {
   const log = opts.log ?? note;
@@ -226,6 +296,22 @@ export function buildRenderers(opts: BuildRenderersOptions): {
       log,
     });
 
+  // Last of all, and deliberately the opposite of the console's reasoning.
+  //
+  // Renderers run in sequence and a failure stops the ones behind it, so the
+  // question is what each one is allowed to prevent. A media server that will
+  // not start must not stop the console being re-rendered: the console is how
+  // an operator fixes a device, and video is not. Nothing is behind this one,
+  // so nothing is at risk from it.
+  const mediaRenderer = opts.mediaConfigPath === undefined
+    ? undefined
+    : new MediaRenderer({
+      path: opts.mediaConfigPath,
+      runner: opts.runner ?? systemRunner,
+      secrets,
+      log,
+    });
+
   // First, and deliberately.
   //
   // K-19: renderers run in sequence and a failure stops the ones behind it,
@@ -238,10 +324,19 @@ export function buildRenderers(opts: BuildRenderersOptions): {
   // hostname on the DHCP request the network render is about to make.
   const hostname = new HostnameRenderer({ runner: opts.runner ?? systemRunner, log });
 
+  // Nothing is spawned by constructing it: a Supervisor holds no process
+  // until something calls start(), which only POST /cameras/:id/run does.
+  const supervisor = new Supervisor({
+    spawner: systemSpawner,
+    ...(opts.clock === undefined ? {} : { clock: opts.clock }),
+  });
+
+  const renderers: Renderer[] = [hostname, renderer, remoteRenderer];
+  if (consoleRenderer !== undefined) renderers.push(consoleRenderer);
+  if (mediaRenderer !== undefined) renderers.push(mediaRenderer);
+
   return {
-    renderers: consoleRenderer === undefined
-      ? [hostname, renderer, remoteRenderer]
-      : [hostname, renderer, remoteRenderer, consoleRenderer],
+    renderers,
     renderer,
     ...(consoleRenderer === undefined ? {} : { consoleRenderer }),
     secrets,
@@ -249,6 +344,8 @@ export function buildRenderers(opts: BuildRenderersOptions): {
     modemClient,
     zerotier,
     remoteRenderer,
+    ...(mediaRenderer === undefined ? {} : { mediaRenderer }),
+    supervisor,
     generated,
   };
 }
@@ -409,6 +506,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
       // The same directory the apply journal already lives in — one state
       // directory for this daemon, not a second one this renderer invented.
       remoteStatePath: join(dirname(opts.journalPath), "remote.json"),
+      ...(opts.mediaConfigPath === undefined ? {} : { mediaConfigPath: opts.mediaConfigPath }),
       ...(opts.console === undefined ? {} : { console: opts.console }),
     });
   } catch (e) {
@@ -742,6 +840,10 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
     configPath: opts.configPath,
     credential,
     diag,
+    // Outside the block below on purpose: reading the supply register needs no
+    // secret store, and a board whose secrets.yaml is unreadable is exactly the
+    // one whose brownouts an operator wants recorded (R-SYS-09).
+    supply: () => readSupply({ runner: probeRunner }),
     // Absent when buildRenderers threw. GET /net/scan then says this device
     // cannot scan, which is true, rather than reporting an empty air; and
     // POST /net/join refuses rather than applying a configuration whose
@@ -785,6 +887,46 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
         readTraffic,
         throughput: (iface) => sampler.forInterface(iface),
       }),
+      // The camera layer, over the same runner as everything else — so a test
+      // injecting a fake runner gets a fake v4l2-ctl for free, and nothing
+      // reaches a real one by omission.
+      cameras: {
+        detect: () => detectCameras({ runner: probeRunner }),
+        probe: (node, card) => probeCamera(node, card, { runner: probeRunner }),
+      },
+      encoder: () => probeEncoder({ runner: probeRunner }),
+      // Over the same runner as everything else in this block, for the same
+      // reason: a test that injects a fake runner must get a fake v4l2-ctl
+      // for POST …/controls too, not a real one by omission.
+      applyControls: (opts) => applyControls({ ...opts, runner: probeRunner }),
+      // One supervisor, for the process's lifetime. See buildRenderers.
+      supervisor: built.supervisor,
+      // The one value this router can reach in the secret store, and the one
+      // route that spends it is GET /cameras/:id/receive-line (R-SEC-10).
+      // Absent until the media server has been configured once, which the
+      // rendering says in words rather than printing a URL that would not work.
+      rtspPassword: () => built.secrets.get("rtsp_password") ?? null,
+      // Every address this device answers on: what the radio holds, then what
+      // the mesh assigned. The receive line names one of these and lists the
+      // rest beneath it, because a board on a mesh has several and only one of
+      // them is the one the operator is actually reaching it on (R-VID-15).
+      addresses: async () => {
+        const [local, mesh] = await Promise.all([
+          client.activeIpv4(),
+          readRemoteState(loadConfig(opts.configPath), built.zerotier, { readTraffic }),
+        ]);
+        return [
+          ...local.map((a) => a.address.split("/")[0] ?? a.address),
+          ...mesh.addresses.map((a) => a.split("/")[0] ?? a),
+        ].filter((a) => a !== "");
+      },
+    }),
+    // Last, so it wins over the real probes above rather than sitting beside
+    // them. Absent in production: main() never sets it (ServerOptions.cameraLayer).
+    ...(opts.cameraLayer === undefined ? {} : {
+      cameras: opts.cameraLayer.cameras,
+      encoder: opts.cameraLayer.encoder,
+      rtspPassword: opts.cameraLayer.rtspPassword,
     }),
     // Not behind `built`: the reach monitor is assembled from the runner and
     // the nmcli client, neither of which depends on the secret store, so a
@@ -911,6 +1053,12 @@ async function main(): Promise<void> {
     // The one place production console paths are decided. Everywhere else
     // they are given, so nothing can write to /opt/yonder by default.
     console: consolePathsFromEnv(),
+    // The one place the production path is decided, as with the console
+    // above, so nothing else can reach a real /etc/mediamtx by default. No
+    // environment override, deliberately: mediamtx.service names this path
+    // literally, and a daemon writing somewhere else would be a media server
+    // whose listeners never change with the configuration.
+    mediaConfigPath: MEDIA_CONFIG_PATH,
   });
   note("yonder-core listening");
 }

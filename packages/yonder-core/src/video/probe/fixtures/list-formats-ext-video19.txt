@@ -1,0 +1,7 @@
+ioctl: VIDIOC_ENUM_FMT
+	Type: Video Capture Multiplanar
+
+	[0]: 'Nc12' (Y/CbCr 4:2:0 (128b cols))
+	[1]: 'Nc30' (10-bit Y/CbCr 4:2:0 (128b cols))
+	[2]: 'NC12' (Y/CbCr 4:2:0 (128b cols))
+	[3]: 'NC30' (10-bit Y/CbCr 4:2:0 (128b cols))
