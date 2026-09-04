@@ -84,20 +84,52 @@ describe("uplinkBudget", () => {
 });
 
 describe("capabilityFacts", () => {
+  /** What the bench's own camera answers, from the committed fixture. */
+  const globalShutter: CameraCapabilities = {
+    ...noCapabilities(),
+    formats: present([{ fourcc: "MJPG", width: 1280, height: 720, rates: [30] }]),
+    zoom: present(range),
+    focus: present(range),
+    exposure: present(range),
+    whiteBalance: present(range),
+    brightness: present(range),
+    contrast: present(range),
+  };
+
   it("states everything the camera does not have, and nothing it does", () => {
-    const caps: CameraCapabilities = {
-      ...noCapabilities(),
-      formats: present([{ fourcc: "MJPG", width: 1280, height: 720, rates: [30] }]),
-      zoom: present(range),
-      focus: present(range),
-      exposure: present(range),
-      whiteBalance: present(range),
-      brightness: present(range),
-      contrast: present(range),
-    };
-    expect(capabilityFacts(caps).map((f) => f.label))
+    expect(capabilityFacts(globalShutter).filter((f) => f.state === "not-offered")
+      .map((f) => f.label))
       .toEqual(["Rotation", "Aim", "Recording", "Stills"]);
-    expect(capabilityFacts(caps).every((f) => f.state === "not-offered")).toBe(true);
+  });
+
+  /**
+   * **R-UI-15 in the direction nothing was watching.** This camera answers
+   * zoom, focus, exposure and white balance as present; the page draws
+   * brightness and contrast. Those four appeared nowhere at all — no control,
+   * and no fact — so an operator read the page and concluded the camera had
+   * two adjustable settings when it has six. Neither *this camera cannot* nor
+   * *this page failed* was being said.
+   */
+  it("states a capability the camera has and the page does not draw", () => {
+    const undrawn = capabilityFacts(globalShutter).filter((f) => f.state === "undrawn");
+    expect(undrawn.map((f) => f.label)).toEqual(["Zoom", "Focus", "Exposure", "White balance"]);
+  });
+
+  it("says nothing about a capability the page does draw", () => {
+    // A control *and* a row saying it is missing would be the page saying both.
+    const said = capabilityFacts(globalShutter).map((f) => f.label);
+    expect(said).not.toContain("Brightness");
+    expect(said).not.toContain("Contrast");
+    expect(said).not.toContain("Capture formats");
+  });
+
+  it("follows the page rather than a list of its own", () => {
+    // The set is an argument, so a control added to the page moves the row
+    // rather than needing this file to be edited in step with the wiring.
+    const drawn = capabilityFacts(globalShutter, ["formats", "brightness", "contrast", "zoom"]);
+    expect(drawn.map((f) => f.label)).not.toContain("Zoom");
+    expect(drawn.filter((f) => f.state === "undrawn").map((f) => f.label))
+      .toEqual(["Focus", "Exposure", "White balance"]);
   });
 
   /**
@@ -207,6 +239,51 @@ describe("cameraStrip", () => {
     });
     // 2067 + 2067 + 413
     expect(strip.uplink).toBe("4.55 Mb/s at IP");
+  });
+
+  /**
+   * **The cost the operator reads before they spend the uplink** (R-VID-11).
+   *
+   * Both of these were literals in `flows.json` — the fixture's own numbers,
+   * frozen at deploy time and reachable by no message. Raise the bitrate and
+   * the picture went on saying 2.07 Mb/s while the strip beside it said 8.27:
+   * the same page contradicting itself, with the number an operator would act
+   * on wrong by four times.
+   */
+  it("states what the picture costs, from the configuration in force", () => {
+    const rtsp = { kind: "rtsp" as const, password: { secret: "rtsp_password" } };
+    const strip = (over: Partial<Camera>) => cameraStrip({
+      camera: camera({ outputs: [rtsp], ...over }),
+      run: { state: "running" }, device: "/dev/video0", byPathStable: true, encoder,
+    });
+    expect(strip({}).pictureCost).toBe("preview 0.41 Mb/s · full rate 2.07 Mb/s at IP");
+    expect(strip({}).holdCost).toBe("2.07 Mb/s while held");
+
+    // The whole point of computing them: they move.
+    const raised = strip({ bitrate_kbps: 8000, preview: {
+      width: 640, height: 360, framerate: 15, bitrate_kbps: 2000,
+    } });
+    expect(raised.pictureCost).toBe("preview 2.07 Mb/s · full rate 8.27 Mb/s at IP");
+    expect(raised.holdCost).toBe("8.27 Mb/s while held");
+    // And they agree with the strip's own total, which is computed elsewhere
+    // in this file: 8268 + 2067.
+    expect(raised.uplink).toBe("10.34 Mb/s at IP");
+  });
+
+  it("offers no full rate where there is no full-rate stream to hold", () => {
+    // The full-rate path exists only where an RTSP output does. Held on a
+    // camera without one, the key asks the media server for a path that does
+    // not exist and the picture reports the 404 as "this camera is not
+    // streaming" — a true sentence about the wrong thing, for a key that
+    // should not have been offered (R-UI-15).
+    const strip = cameraStrip({
+      camera: camera({ outputs: [{ kind: "rtp", host: "192.168.77.20", port: 5600 }] }),
+      run: { state: "running" }, device: "/dev/video0", byPathStable: true, encoder,
+    });
+    expect(strip.fullRate).toBe(false);
+    expect(strip.holdCost).toContain("no full-rate stream");
+    expect(strip.pictureCost).toBe("preview 0.41 Mb/s at IP");
+    expect(strip.pictureCost).not.toContain("full rate");
   });
 
   /** Units keep their case: `KB/S` says kilobytes and `FPS` says nothing. */

@@ -58,7 +58,6 @@
       },
       {
         "kind": "rtsp",
-        "path": "front",
         "password": {
           "secret": "rtsp_password"
         }

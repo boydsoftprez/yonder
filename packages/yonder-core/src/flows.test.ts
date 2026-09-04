@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, it, expect } from "vitest";
-import { CONSOLE_HOME, THEME_HREF } from "./console/settings.js";
+import { CONSOLE_HOME, EXCLUDED_NODES, THEME_HREF } from "./console/settings.js";
+import { DRAWN_CAPABILITIES } from "./video/present.js";
 import { JOIN_TOPIC } from "./net/join.js";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { EXCLUDED_NODES, THEME_HREF } from "./console/settings.js";
 import { MIN_POLL_MS } from "./console/node.js";
 
 /**
@@ -960,10 +960,18 @@ describe("flows/flows.json camera pages", () => {
    * hidden — and the decision is a switch on what the sweep found, never a
    * guess made once when the file was written.
    */
-  it("hides the camera page when nothing is attached", () => {
+  it("hides the camera page when there is no camera to show", () => {
+    // **On a *configured* camera, not on attached hardware.** `found` is the
+    // hardware sweep, so a freshly flashed device — which now ships
+    // `cameras: []` — put CAMERA in the nav the moment anything was plugged
+    // in, and every node on the page then asked for a camera that is not in
+    // the configuration: 404, "not answering" on every badge, and a page of
+    // empty widgets. `found[].id` is the configured id for the socket a
+    // camera was detected on, or null, which is exactly the question.
     const decide = flows.find((n) => n.id === "cameras-present");
     expect(decide?.type).toBe("switch");
-    expect(decide?.property).toBe("payload.found");
+    expect(decide?.property).toBe("payload.found[id != null]");
+    expect(decide?.propertyType).toBe("jsonata");
     const [present, absent] = decide?.wires as string[][];
     expect(present).toEqual(["cameras-show-page"]);
     expect(absent).toEqual(["cameras-hide-page"]);
@@ -1082,9 +1090,22 @@ describe("flows/flows.json camera pages", () => {
   it("reaches the full rate by holding a key, and says what holding it costs", () => {
     const hold = flows.find((n) => n.type === "ui-yonder-holdkey");
     expect(hold, "there is no full-rate key").toBeDefined();
-    expect(String(hold?.cost)).toMatch(/Mb\/s/);
-    // Never uppercased: `MB/S` says megabytes.
-    expect(String(hold?.cost)).not.toMatch(/MB\/S/);
+    // **The cost is read from the device, never typed in here.** It was
+    // `2.07 Mb/s while held` — `cameraStrip()`'s own figure for one
+    // configuration, frozen at deploy time and reachable by no message, so
+    // raising the bitrate left the key saying a quarter of the truth beside a
+    // readout strip that said all of it. R-VID-11 is about stating the cost
+    // *before* it is asked for, so a number that cannot move is the
+    // requirement failing.
+    expect(hold?.cost).toBe("");
+    const cost = flows.find((n) => n.id === "pick-cam-hold");
+    expect((cost?.wires as string[][])[0]).toEqual(["hold-cam-fullrate"]);
+    expect(JSON.stringify(cost?.rules)).toContain("payload.display.holdCost");
+    // And whether there is anything to hold at all: the full-rate stream
+    // exists only where an RTSP output does (R-UI-15).
+    expect(JSON.stringify(cost?.rules)).toContain("payload.display.fullRate");
+    expect((flows.find((n) => n.id === "camera-read")?.wires as string[][])[0])
+      .toContain("pick-cam-hold");
 
     const edge = flows.find((n) => n.id === "cam-hold-edge");
     expect((hold?.wires as string[][])[0]).toEqual(["cam-hold-edge"]);
@@ -1202,21 +1223,92 @@ describe("flows/flows.json camera pages", () => {
     // Setup also fetches the receive line: the deck an operator opens to find
     // it should already have it, and the committed capture of that deck is
     // what makes the gate's credential check bite (R-SEC-10).
-    expect(setup).toEqual(["deck-setup", "receive-camera"]);
-    expect(rest).toEqual(["stream-camera"]);
+    expect(setup).toEqual(["deck-setup", "cam-at-receive"]);
+    expect(rest).toEqual(["cam-at-stream"]);
     expect(flows.find((n) => n.id === "stream-camera")?.type).toBe("yonder-stream");
   });
 
   /**
-   * Every camera node on these pages names the same camera. One that named
-   * none would answer "this control is not pointed at a camera" from a page
-   * built around one.
+   * **No camera's id is written into this file.**
+   *
+   * Five nodes carried `"camera": "front"` — the capture fixture's name — so
+   * the page was dead on every device whose camera is called anything else:
+   * `404 no camera is configured with the id "front"`, badged "not answering",
+   * every widget drawing nothing. The package was built to be dynamic —
+   * `adapter.ts` prefers `msg.camera` over the node's own field — and the
+   * wiring froze it.
+   *
+   * The id comes from `GET /cameras`, which already answers it, and reaches
+   * each node through one addressing node in front of it.
    */
-  it("points every camera node at the camera the page is about", () => {
+  it("names no camera in the wiring, and addresses every camera node by message", () => {
     const nodes = flows.filter(
       (n) => ["yonder-camera", "yonder-stream", "yonder-receive-line"].includes(n.type),
     );
     expect(nodes.length).toBeGreaterThan(0);
-    for (const n of nodes) expect(n.camera, `${String(n.id)} names no camera`).toBe("front");
+    for (const n of nodes) {
+      expect(n.camera, `${String(n.id)} still names a camera`).toBe("");
+      // Everything that feeds it sets `msg.camera` — either it is an
+      // addressing node itself, or every one of its inputs is.
+      const feeders = flows.filter((f) =>
+        ((f.wires as string[][] | undefined) ?? []).some((out) => out.includes(String(n.id))));
+      expect(feeders.length, `${String(n.id)} is fed by nothing`).toBeGreaterThan(0);
+      for (const f of feeders) {
+        expect(JSON.stringify(f.rules), `${String(f.id)} does not address a camera`)
+          .toContain('"p":"camera"');
+      }
+    }
+  });
+
+  it("takes that id from the sweep, which is the only thing that knows it", () => {
+    const identify = flows.find((n) => n.id === "cam-identify");
+    expect((flows.find((n) => n.id === "cameras-read")?.wires as string[][])[0])
+      .toContain("cam-identify");
+    // The configured id for a socket something was detected on, or null.
+    expect(JSON.stringify(identify?.rules)).toContain("payload.found[id != null]");
+    expect(JSON.stringify(identify?.rules)).toContain('"pt":"flow"');
+  });
+
+  /**
+   * R-VID-11 again, on the picture: both of its numbers were literals here.
+   * The path was too, which is the same defect as the ids above — a picture
+   * negotiating against `front-preview` on a device whose camera is `nose`
+   * gets a 404 and reports it as a camera that is not streaming.
+   */
+  it("tells the picture which camera it is of, and what watching it costs", () => {
+    const picture = flows.find((n) => n.type === "ui-yonder-picture");
+    expect(picture?.cost).toBe("");
+    expect(picture?.path).toBe("");
+    const from = flows.find((n) => n.id === "pick-cam-picture");
+    expect((from?.wires as string[][])[0]).toEqual(["pic-camera"]);
+    expect(JSON.stringify(from?.rules)).toContain("payload.camera.id");
+    expect(JSON.stringify(from?.rules)).toContain("payload.display.pictureCost");
+    expect((flows.find((n) => n.id === "camera-read")?.wires as string[][])[0])
+      .toContain("pick-cam-picture");
+  });
+
+  /**
+   * R-UI-15, in the direction nothing was watching: a capability the camera
+   * *has* and this page does not draw must be stated, or an operator reads the
+   * page and concludes the camera cannot do it.
+   *
+   * `DRAWN_CAPABILITIES` is what `capabilityFacts()` stays silent about, so it
+   * has to be the set this file actually draws a control for. This holds the
+   * two together: nothing else does.
+   */
+  it("draws a control for exactly the capabilities the facts row stays silent about", () => {
+    // Every reference in the file: the controls are fed by `change` nodes,
+    // which belong to no group and so are not `on` the page in the sense the
+    // helper above means.
+    const drawn = new Set(
+      flows
+        .flatMap((n) => JSON.stringify(n.rules ?? "").match(/payload\.capabilities\.(\w+)/g) ?? [])
+        .map((m) => m.replace("payload.capabilities.", "")),
+    );
+    // `formats` is drawn as the readout strip's size and rate rather than as a
+    // control, so it is named there and not reachable by this scan.
+    expect([...drawn].sort()).toEqual(
+      DRAWN_CAPABILITIES.filter((k) => k !== "formats").slice().sort(),
+    );
   });
 });

@@ -3,8 +3,9 @@
     <button
         type="button"
         class="y-hold"
-        :class="['tone-' + (props.tone || 'plain'), { held }]"
+        :class="['tone-' + (props.tone || 'plain'), { held, unavailable: !available }]"
         :aria-pressed="held ? 'true' : 'false'"
+        :disabled="!available"
         @pointerdown.prevent="down"
         @pointerup="up"
         @pointercancel="up"
@@ -12,7 +13,7 @@
         @contextmenu.prevent
     >
         <span class="y-hold__label">{{ props.label }}</span>
-        <span v-if="props.cost" class="y-hold__cost">{{ props.cost }}</span>
+        <span v-if="cost" class="y-hold__cost">{{ cost }}</span>
     </button>
 </template>
 
@@ -57,6 +58,50 @@ export default {
     data () {
         return { held: false }
     },
+    computed: {
+        /**
+         * What the flow last said about this key, or nothing yet.
+         *
+         * Through `$store` rather than vuex's `mapState`, for the reason
+         * YonderDataBar records.
+         */
+        sent () {
+            const payload = this.$store?.state?.data?.messages?.[this.id]?.payload
+            return payload && typeof payload === 'object' ? payload : {}
+        },
+        /**
+         * What holding this costs, stated before it is pressed (R-VID-11).
+         *
+         * **From the message, in preference to the editor field.** The
+         * configured string is one configuration's number frozen at deploy
+         * time: raise the camera's bitrate and this key went on saying
+         * *2.07 Mb/s while held* while the readout strip beside it said 8.27.
+         * R-VID-11 is about stating the cost *before* it is asked for, so a
+         * figure that cannot move is the requirement failing rather than a
+         * cosmetic slip. The prop stays as the fall-back, so the key says
+         * something before the first read arrives.
+         */
+        cost () {
+            return typeof this.sent.cost === 'string' ? this.sent.cost : this.props.cost
+        },
+        /**
+         * Whether there is anything to hold.
+         *
+         * **A key that cannot do its job must not offer to** — R-UI-15's own
+         * exception clause is that the soft-key rail carries only what can be
+         * done. The full-rate stream exists only where the camera has an RTSP
+         * output; without one, holding this asks the media server for a path
+         * that does not exist and the picture reports the 404 as "this camera
+         * is not streaming", which is a true sentence about the wrong thing.
+         *
+         * Drawn and disabled rather than hidden, because a key that vanishes
+         * leaves an operator wondering where it went, and `cost` is where the
+         * answer goes.
+         */
+        available () {
+            return this.sent.available !== false
+        }
+    },
     created () {
         this.$dataTracker(this.id)
     },
@@ -72,6 +117,7 @@ export default {
     },
     methods: {
         down () {
+            if (!this.available) return
             if (this.held) return
             this.held = true
             this.send('down')
@@ -113,6 +159,13 @@ export default {
     /* A held key must not be interpreted as a scroll or a text selection. */
     touch-action: none;
     user-select: none;
+}
+.y-hold.unavailable {
+    /* Visibly not a control: the words say why, and the cursor and the tone
+       agree with them. */
+    cursor: not-allowed;
+    color: var(--yonder-label, #7f8a95);
+    border-style: dashed;
 }
 .y-hold.held {
     border-color: var(--yonder-select, #2ad4f0);

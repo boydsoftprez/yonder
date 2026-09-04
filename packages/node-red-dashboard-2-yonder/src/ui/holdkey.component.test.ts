@@ -29,18 +29,24 @@ import YonderHoldKey from "./YonderHoldKey.vue";
 const ACTION = "fullrate";
 const LABEL = "Full rate";
 
-function mountKey() {
+function mountKey(payload?: unknown, configured: Record<string, unknown> = {}) {
   const emit = vi.fn();
   const wrapper = mount(YonderHoldKey, {
     props: {
       id: "n1",
-      props: { label: LABEL, action: ACTION },
+      props: { label: LABEL, action: ACTION, ...configured },
     },
     global: {
       provide: {
         $socket: { emit },
         $dataTracker: () => {},
       },
+      // Where Dashboard puts what the flow sent this widget. Absent is the
+      // state before the first message, which is what the editor field is
+      // the fall-back for.
+      mocks: payload === undefined
+        ? { $store: undefined }
+        : { $store: { state: { data: { messages: { n1: { payload } } } } } },
     },
   });
   return { wrapper, emit };
@@ -75,6 +81,54 @@ describe("mounting", () => {
     // machine.
     const { wrapper } = mountKey();
     expect(wrapper.find(".y-hold__label").text()).toBe(LABEL);
+  });
+});
+
+/**
+ * **What holding this costs, and whether it can be held at all** (R-VID-11,
+ * R-UI-15).
+ *
+ * Both were editor fields and nothing else: the cost was one configuration's
+ * number frozen at deploy time, and the key was drawn whether or not the
+ * stream it asks for exists.
+ */
+describe("the cost, and whether there is anything to hold", () => {
+  it("draws the configured cost before a message has arrived", () => {
+    const { wrapper } = mountKey(undefined, { cost: "2.07 Mb/s while held" });
+    expect(wrapper.find(".y-hold__cost").text()).toBe("2.07 Mb/s while held");
+  });
+
+  it("prefers what the flow sent, because the configured one cannot move", () => {
+    // Raise the camera's bitrate and this must move with it, or the page
+    // contradicts the readout strip beside it and the operator acts on the
+    // wrong one of the two.
+    const { wrapper } = mountKey(
+      { cost: "8.27 Mb/s while held", available: true },
+      { cost: "2.07 Mb/s while held" },
+    );
+    expect(wrapper.find(".y-hold__cost").text()).toBe("8.27 Mb/s while held");
+  });
+
+  it("refuses to act, and says why, when there is no stream to ask for", () => {
+    const { wrapper, emit } = mountKey({
+      available: false,
+      cost: "no full-rate stream on this camera; add an RTSP output",
+    });
+    expect(wrapper.find(".y-hold__cost").text()).toContain("no full-rate stream");
+    expect(wrapper.attributes("disabled")).toBeDefined();
+
+    // Belt as well as the attribute: a disabled button does not fire pointer
+    // events in a browser, and this component must not be the thing relying
+    // on that.
+    fire(wrapper, "pointerdown");
+    fire(wrapper, "pointerup");
+    expect(emit).not.toHaveBeenCalled();
+  });
+
+  it("acts when the flow says the stream is there", () => {
+    const { wrapper, emit } = mountKey({ available: true, cost: "2.07 Mb/s while held" });
+    fire(wrapper, "pointerdown");
+    expect(emit).toHaveBeenCalledTimes(1);
   });
 });
 

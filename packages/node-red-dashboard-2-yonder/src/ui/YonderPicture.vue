@@ -14,7 +14,7 @@
         <div class="y-pic__hud">
             <span class="y-pic__badge" :class="'tone-' + tone">{{ caption }}</span>
             <span v-if="staleFor > 0" class="y-pic__age">{{ ageText }}</span>
-            <span v-if="props.cost" class="y-pic__cost">{{ props.cost }}</span>
+            <span v-if="cost" class="y-pic__cost">{{ cost }}</span>
         </div>
         <div v-if="reason" class="y-pic__reason">{{ reason }}</div>
         <div v-if="mode === 'off'" class="y-pic__off">
@@ -126,6 +126,12 @@ export default {
             stillSrc: '',
             stillsTimer: null,
             retryTimer: null,
+            /** The last cost the flow sent, held across later commands. */
+            sentCost: '',
+            /** The camera the flow last said this picture is of. */
+            sentPath: '',
+            /** The path the session in hand was negotiated against. */
+            negotiated: '',
             tick: null,
             /**
              * `preview` or `full`.
@@ -156,15 +162,55 @@ export default {
         /**
          * The path this session negotiates against.
          *
-         * `path` from the editor is the camera's own name, and the widget
-         * appends `-preview` to it — so the *default* cannot be the expensive
-         * one by anybody's oversight (picture.ts does the same on the way in).
-         * Holding the full-rate key is what takes it off.
+         * The widget appends `-preview` to the camera's own name — so the
+         * *default* cannot be the expensive one by anybody's oversight
+         * (picture.ts does the same on the way in). Holding the full-rate key
+         * is what takes it off.
+         *
+         * **The camera's name comes from the message first.** Written into the
+         * wiring it was one device's camera id frozen at deploy time, so every
+         * board whose camera is not called that got a 404 and a picture
+         * reporting "this camera is not streaming" about a camera that was
+         * running. The editor field stays as the fall-back for a page that
+         * genuinely is about one fixed camera.
          */
         streamPath () {
-            const path = this.props.path || ''
+            const configured = this.props.path || ''
+            const path = this.told || configured
             const base = path.endsWith('-preview') ? path.slice(0, -8) : path
+            if (!base) return ''
             return this.rate === 'full' ? base : `${base}-preview`
+        },
+        /**
+         * What watching this costs, stated before it is asked (R-VID-11).
+         *
+         * **From the message, in preference to the editor field.** The
+         * configured string is `cameraStrip()`'s own numbers frozen at deploy
+         * time and reachable by nothing: raise `bitrate_kbps` and this went on
+         * saying 2.07 Mb/s while the readout strip beside it — which is
+         * computed — said 8.27. The page contradicted itself, and the figure
+         * an operator uses to decide whether to spend a field uplink was the
+         * wrong one of the two. The prop stays as the fall-back, so the
+         * picture states *something* before the first read arrives.
+         *
+         * It rides on an object payload because a string payload is already
+         * this widget's command channel (see `command` above); the two cannot
+         * be confused, and the last cost is kept so a later `rate:` command
+         * does not put the stale literal back on screen.
+         */
+        cost () {
+            const payload = this.command
+            if (payload && typeof payload === 'object' && typeof payload.cost === 'string') {
+                return payload.cost
+            }
+            return this.sentCost || this.props.cost
+        },
+        /** The camera named by the last message that named one. */
+        told () {
+            const payload = this.command
+            return payload && typeof payload === 'object' && typeof payload.path === 'string'
+                ? payload.path
+                : this.sentPath
         },
         staleFor () {
             if (this.mode !== 'live' || this.lastFrameAt === null) return 0
@@ -211,7 +257,31 @@ export default {
          * emits `mode:<mode>` when the operator changes it, so a flow that
          * looped that back would be a picture commanding itself.
          */
+        /**
+         * The camera this picture is of, changing under it.
+         *
+         * Nothing in the shipped flows changes it after the first message, but
+         * the first message *is* a change — from nothing, or from the editor's
+         * fall-back — and a computed with no watcher would leave the session
+         * negotiated against the old name under the new label.
+         *
+         * Against the path the session in hand was actually negotiated with,
+         * rather than against the previous value: holding the full-rate key
+         * moves this too, and `setRate` renegotiates already, so comparing
+         * with the old value would close the session it had just opened. It
+         * also means being *told* the camera the picture is already showing —
+         * which every read does, five seconds apart — costs nothing.
+         */
+        streamPath (next) {
+            if (this.mode !== 'live' || next === this.negotiated) return
+            this.requestLive()
+        },
         command (value) {
+            if (value && typeof value === 'object') {
+                if (typeof value.cost === 'string') this.sentCost = value.cost
+                if (typeof value.path === 'string') this.sentPath = value.path
+                return
+            }
             if (typeof value !== 'string') return
             if (value.startsWith('mode:')) {
                 const mode = value.slice(5)
@@ -355,6 +425,14 @@ export default {
          */
         async connect () {
             this.teardown()
+            this.negotiated = this.streamPath
+            // Nothing has said which camera this is yet. Not a fault and not a
+            // reconnect: the message that names it is what starts this, through
+            // the `streamPath` watcher.
+            if (!this.streamPath) {
+                this.reason = 'this picture has not been told which camera to show'
+                return
+            }
             const session = this.session
             const mine = () => this.session === session
             const pc = new RTCPeerConnection()

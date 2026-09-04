@@ -855,6 +855,87 @@ describe("what the soft-key rail sends it", () => {
   });
 
   /**
+   * **What watching this costs** (R-VID-11), which used to be a literal in the
+   * wiring: `cameraStrip()`'s numbers for one configuration, frozen at deploy
+   * time and reachable by no message. Raise the bitrate and the picture went
+   * on saying 2.07 Mb/s while the strip beside it said 8.27.
+   */
+  it("states the cost the flow sent it, in preference to the configured one", async () => {
+    const { wrapper, press } = mountWithRail();
+    await settle();
+    await press({ cost: "preview 2.07 Mb/s · full rate 8.27 Mb/s at IP" });
+    expect(wrapper.find(".y-pic__cost").text())
+      .toBe("preview 2.07 Mb/s · full rate 8.27 Mb/s at IP");
+
+    // And a later command does not put the stale one back: the store holds
+    // one message per widget, and this widget's commands share that channel.
+    await press("rate:full");
+    expect(wrapper.find(".y-pic__cost").text())
+      .toBe("preview 2.07 Mb/s · full rate 8.27 Mb/s at IP");
+  });
+
+  /**
+   * **Which camera this is, from the message.** Written into the wiring it was
+   * one device's camera id frozen at deploy time — `front`, the capture
+   * fixture's name — so every board whose camera is called anything else got a
+   * 404 and a picture reporting "this camera is not streaming" about a camera
+   * that was running.
+   */
+  it("negotiates against the camera the flow named, not the one in its editor", async () => {
+    const { press } = mountWithRail();
+    await settle();
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/video/cam0-preview/whep");
+
+    await press({ path: "nose" });
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("/video/nose-preview/whep");
+
+    // And the full rate follows it, rather than the editor's name.
+    await press("rate:full");
+    expect(fetchMock.mock.calls[2]?.[0]).toBe("/video/nose/whep");
+  });
+
+  it("does not renegotiate when it is told the camera it is already showing", async () => {
+    const { press } = mountWithRail();
+    await settle();
+    await press({ path: "cam0", cost: "preview 0.41 Mb/s at IP" });
+    await press({ path: "cam0", cost: "preview 0.41 Mb/s at IP" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("asks for nothing at all until something names a camera", async () => {
+    // The editor field is empty in the shipped wiring, because the id belongs
+    // to the device rather than to this file. A picture that negotiated
+    // against `-preview` would get a 404 and report it as a camera that is not
+    // streaming — a true sentence about the wrong thing.
+    const emit = vi.fn();
+    const messages = reactive<Record<string, { payload?: unknown }>>({ n1: {} });
+    const wrapper = mount(YonderPicture, {
+      props: { id: "n1", props: { path: "", label: LABEL, stillsAfterMs: 600_000 } },
+      global: {
+        provide: { $socket: { emit }, $dataTracker: () => {} },
+        mocks: { $store: { state: { data: { messages } } } },
+      },
+    });
+    await settle();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(reasonText(wrapper)).toMatch(/which camera/i);
+
+    messages.n1 = { payload: { path: "nose" } };
+    await nextTick();
+    await settle();
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/video/nose-preview/whep");
+  });
+
+  it("is not commanded by a cost", async () => {
+    // An object payload is a state message, not one of the two vocabularies.
+    const { wrapper, press } = mountWithRail();
+    await settle();
+    await press({ cost: "preview 0.41 Mb/s at IP" });
+    expect(badge(wrapper)).toBe("live · preview");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  /**
    * Ignored rather than guessed at: a picture that acted on a message it did
    * not understand would be originating behaviour nobody asked for
    * (R-CMD-04).

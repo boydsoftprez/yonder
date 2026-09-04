@@ -99,10 +99,19 @@ export function uplinkBudget(
   return { capacityKbps, segments };
 }
 
-/** One row of the facts row: a capability this camera does not have (R-UI-15). */
+/**
+ * One row of the facts row: a capability this camera's page does not offer a
+ * control for, and which of the three reasons that is (R-UI-15).
+ *
+ *   - `not-offered` — the camera does not have it. Nothing is wrong.
+ *   - `advertised` — it lists the capability, accepts the command and does
+ *     nothing. Something is misreporting itself.
+ *   - `undrawn` — the camera has it and this page does not draw it. Nothing is
+ *     wrong with the device; the console has not been built that far.
+ */
 export interface CapabilityFact {
   readonly label: string;
-  readonly state: "not-offered" | "advertised";
+  readonly state: "not-offered" | "advertised" | "undrawn";
   readonly reason?: string;
 }
 
@@ -127,10 +136,37 @@ const LABELS: Record<(typeof CAPABILITY_KEYS)[number], string> = {
 };
 
 /**
- * Everything this camera cannot do, stated (R-UI-15).
+ * The capabilities a camera's page draws a control for.
  *
- * Only the two states that are not `present`: a capability the device answered
- * gets a real control, and a row here as well would be the page saying both.
+ * `brightness` and `contrast` are the two sliders on the Live deck.
+ * `formats` is drawn as well, though not as a control: the readout strip
+ * states the size and the rate the camera is capturing at, and the Setup deck
+ * lets the rate be changed, so an operator is not left wondering what happened
+ * to it.
+ *
+ * **Everything else the camera offers gets a row saying so**, which is the
+ * half of R-UI-15 nobody was watching. `flows.test.ts` holds this list against
+ * the shipped wiring, so a control added to the page without being named here
+ * is drawn *and* reported as missing, and a control taken off the page is
+ * reported.
+ */
+export const DRAWN_CAPABILITIES = ["formats", "brightness", "contrast"] as const;
+
+/**
+ * Everything this camera's page does not give the operator, stated (R-UI-15).
+ *
+ * **Three states, not two.** A capability that is `present` and has a control
+ * is silent — a row as well would be the page saying both. A capability that
+ * is `present` and has *no* control on this page was silent too, and that was
+ * the requirement failing in the direction nothing was watching: the bench's
+ * own camera answers `zoom`, `focus`, `exposure` and `whiteBalance` as
+ * present, and the committed page image shows them nowhere at all — no
+ * control, and no fact. An operator reads that page and concludes the camera
+ * has two adjustable settings when it has six. R-UI-15 is *an operator must be
+ * able to tell "this camera cannot" from "this page failed"*, and neither was
+ * being said. `rotation` is the same hole: R-CTL-05 is built end to end in
+ * `controls.ts` and has no control on any page.
+ *
  * The order is `CAPABILITY_KEYS`, so adding a capability puts it in the right
  * place rather than at the end of whichever object literal was edited last.
  *
@@ -139,11 +175,17 @@ const LABELS: Record<(typeof CAPABILITY_KEYS)[number], string> = {
  * tell *this camera cannot* from *this page failed*, and an empty facts row on
  * a failed probe says neither.
  */
-export function capabilityFacts(caps: CameraCapabilities): CapabilityFact[] {
+export function capabilityFacts(
+  caps: CameraCapabilities,
+  drawn: readonly (typeof CAPABILITY_KEYS)[number][] = [...DRAWN_CAPABILITIES],
+): CapabilityFact[] {
   const facts: CapabilityFact[] = [];
   for (const key of CAPABILITY_KEYS) {
     const cap = caps[key] as Capability<unknown>;
-    if (cap.state === "present") continue;
+    if (cap.state === "present") {
+      if (!drawn.includes(key)) facts.push({ label: LABELS[key], state: "undrawn" });
+      continue;
+    }
     facts.push(
       cap.state === "advertised"
         ? { label: LABELS[key], state: "advertised", reason: cap.reason }
@@ -176,6 +218,33 @@ export interface CameraStrip {
    * truth when everything is fine is worse than one that says nothing.
    */
   readonly startCheck: string;
+  /**
+   * What watching this camera in the browser costs, both copies, before it is
+   * asked for (R-VID-11).
+   *
+   * **Computed here, and it has to be.** These two strings were literals in
+   * `flows.json` — `preview 0.41 Mb/s · full rate 2.07 Mb/s at IP` — which are
+   * this fixture's numbers frozen at deploy time. Raise `bitrate_kbps` to 8000
+   * and the page said 2.07 while the readout strip beside it, which *is*
+   * computed, said 8.27: the figure an operator uses to decide whether to
+   * spend a field uplink, wrong by four times, sitting next to the right one.
+   * R-VID-11 is about stating the cost *before* it is asked, so a stale cost
+   * is the requirement failing rather than a cosmetic slip.
+   */
+  readonly pictureCost: string;
+  /** What holding the full-rate key costs, or why there is nothing to hold. */
+  readonly holdCost: string;
+  /**
+   * Whether a full-rate stream exists on this device at all.
+   *
+   * The full-rate path is published only where an RTSP output is configured
+   * (`media/config.ts`, `pipeline.ts`), so on a camera with only an `rtp`
+   * output — or none — holding FULL RATE asks for a path that does not exist
+   * and gets a 404 the picture reports as "this camera is not streaming".
+   * R-UI-15's own exception clause is that the soft-key rail carries only what
+   * can be done.
+   */
+  readonly fullRate: boolean;
   /** The `/dev` node the configured by-path name resolves to right now. */
   readonly device: string;
   /** Whether that identity survives a reboot (R-CAM-05), in words. */
@@ -216,6 +285,10 @@ export function cameraStrip(view: {
   const { camera } = view;
   const outputs = camera.outputs.length;
   const own = atIp(camera.bitrate_kbps) * outputs + atIp(camera.preview.bitrate_kbps);
+  const mbps = (kbps: number): string => (atIp(kbps) / 1000).toFixed(2);
+  // The browser's full rate comes off the same path a ground station's RTSP
+  // does, so it exists exactly where that output does.
+  const fullRate = camera.outputs.some((o) => o.kind === "rtsp");
   return {
     state: runWords(view.run.state, view.run.reason),
     picture: `${camera.width} × ${camera.height}`,
@@ -224,6 +297,13 @@ export function cameraStrip(view: {
     rate: `${camera.framerate} fps`,
     bitrate: `${camera.bitrate_kbps} kb/s`,
     uplink: `${(own / 1000).toFixed(2)} Mb/s at IP`,
+    pictureCost: fullRate
+      ? `preview ${mbps(camera.preview.bitrate_kbps)} Mb/s · full rate ${mbps(camera.bitrate_kbps)} Mb/s at IP`
+      : `preview ${mbps(camera.preview.bitrate_kbps)} Mb/s at IP`,
+    holdCost: fullRate
+      ? `${mbps(camera.bitrate_kbps)} Mb/s while held`
+      : "no full-rate stream on this camera; add an RTSP output",
+    fullRate,
     startCheck: view.refusal ?? "nothing is stopping it",
     device: view.device ?? "not resolved",
     identity: identityWords(view.device === null ? null : camera.device, view.byPathStable),

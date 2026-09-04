@@ -92,13 +92,40 @@ describe("the two states, side by side", () => {
     const wrapper = mountFacts([
       { label: "aim", state: "not-offered" },
       { label: "zoom", state: "advertised", reason: "accepted, does not reshape the feed" },
+      { label: "focus", state: "undrawn" },
     ]);
     const rows = wrapper.findAll(".y-facts__row");
-    expect(rows).toHaveLength(2);
-    const [notOffered, advertised] = rows;
-    expect(notOffered!.find(".y-facts__state").text())
-      .not.toBe(advertised!.find(".y-facts__state").text());
-    expect(notOffered!.classes()).not.toEqual(advertised!.classes());
+    expect(rows).toHaveLength(3);
+    const said = rows.map((r) => r.find(".y-facts__state").text());
+    expect(new Set(said).size).toBe(3);
+    const classes = rows.map((r) => r.classes().join(" "));
+    expect(new Set(classes).size).toBe(3);
+  });
+
+  /**
+   * **The camera has it and this page does not draw it**, which is a fact
+   * about the console rather than about the device — and the sentence for a
+   * capability the camera does not have would be a lie about the camera.
+   */
+  it("says a capability is offered but not on this page, not that the camera lacks it", () => {
+    const wrapper = mountFacts([{ label: "Zoom", state: "undrawn" }]);
+    const said = wrapper.find(".y-facts__state").text();
+    expect(said).toBe("offered, not on this page");
+    expect(said).not.toContain("none");
+  });
+
+  it("names a state it does not know rather than asserting the camera lacks it", () => {
+    // The rendering was a binary ternary, so *every* state that was not
+    // `advertised` read "this camera has none" — and a state added to
+    // `capability.ts` later would have had the console asserting a camera
+    // lacks something it knows nothing about. `shapes.ts` imports the type to
+    // stop that drift and cannot reach here: this template is untyped JS.
+    const wrapper = mountFacts([
+      { label: "Zoom", state: "partial" } as unknown as CapabilityFact,
+    ]);
+    const said = wrapper.find(".y-facts__state").text();
+    expect(said).toContain("partial");
+    expect(said).not.toContain("none");
   });
 });
 

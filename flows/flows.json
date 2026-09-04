@@ -1963,7 +1963,8 @@
                 "pick-cameras-found",
                 "pick-cameras-rejected",
                 "budget-cameras",
-                "cameras-present"
+                "cameras-present",
+                "cam-identify"
             ]
         ]
     },
@@ -2147,8 +2148,8 @@
         "type": "switch",
         "z": "yonder-console",
         "name": "is a camera attached?",
-        "property": "payload.found",
-        "propertyType": "msg",
+        "property": "payload.found[id != null]",
+        "propertyType": "jsonata",
         "rules": [
             {
                 "t": "nempty"
@@ -2337,7 +2338,7 @@
     {
         "id": "group-cam-facts",
         "type": "ui-group",
-        "name": "Not on this camera",
+        "name": "No control for these",
         "page": "page-camera",
         "width": 6,
         "height": 1,
@@ -2439,7 +2440,7 @@
         "y": 2020,
         "wires": [
             [
-                "camera-read"
+                "cam-at-read"
             ]
         ]
     },
@@ -2448,7 +2449,7 @@
         "type": "yonder-camera",
         "z": "yonder-console",
         "name": "this camera",
-        "camera": "front",
+        "camera": "",
         "x": 460,
         "y": 2020,
         "wires": [
@@ -2463,7 +2464,223 @@
                 "text-cam-encoder",
                 "num-cam-framerate-read",
                 "num-cam-preview-read",
-                "num-cam-bitrate-read"
+                "num-cam-bitrate-read",
+                "pick-cam-picture",
+                "pick-cam-hold"
+            ]
+        ]
+    },
+    {
+        "id": "cam-identify",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "which camera this device has",
+        "rules": [
+            {
+                "t": "set",
+                "p": "camera",
+                "pt": "flow",
+                "to": "(payload.found[id != null].id)[0]",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 780,
+        "y": 1980,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "cam-at-read",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "point this at the camera",
+        "rules": [
+            {
+                "t": "set",
+                "p": "camera",
+                "pt": "msg",
+                "to": "camera",
+                "tot": "flow"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 300,
+        "y": 2060,
+        "wires": [
+            [
+                "camera-read"
+            ]
+        ]
+    },
+    {
+        "id": "cam-at-controls",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "point this at the camera",
+        "rules": [
+            {
+                "t": "set",
+                "p": "camera",
+                "pt": "msg",
+                "to": "camera",
+                "tot": "flow"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 1480,
+        "y": 2225,
+        "wires": [
+            [
+                "camera-controls"
+            ]
+        ]
+    },
+    {
+        "id": "cam-at-settings",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "point this at the camera",
+        "rules": [
+            {
+                "t": "set",
+                "p": "camera",
+                "pt": "msg",
+                "to": "camera",
+                "tot": "flow"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 1310,
+        "y": 2380,
+        "wires": [
+            [
+                "camera-settings"
+            ]
+        ]
+    },
+    {
+        "id": "cam-at-receive",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "point this at the camera",
+        "rules": [
+            {
+                "t": "set",
+                "p": "camera",
+                "pt": "msg",
+                "to": "camera",
+                "tot": "flow"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 640,
+        "y": 2620,
+        "wires": [
+            [
+                "receive-camera"
+            ]
+        ]
+    },
+    {
+        "id": "cam-at-stream",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "point this at the camera",
+        "rules": [
+            {
+                "t": "set",
+                "p": "camera",
+                "pt": "msg",
+                "to": "camera",
+                "tot": "flow"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 690,
+        "y": 2710,
+        "wires": [
+            [
+                "stream-camera"
+            ]
+        ]
+    },
+    {
+        "id": "pick-cam-picture",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "the picture: which camera, and what it costs",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "{\"path\": payload.camera.id, \"cost\": payload.display.pictureCost}",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 800,
+        "y": 1980,
+        "wires": [
+            [
+                "pic-camera"
+            ]
+        ]
+    },
+    {
+        "id": "pick-cam-hold",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "the full-rate key: what holding it costs, and whether it can be",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "{\"cost\": payload.display.holdCost, \"available\": payload.display.fullRate}",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 560,
+        "y": 2750,
+        "wires": [
+            [
+                "hold-cam-fullrate"
             ]
         ]
     },
@@ -2476,11 +2693,11 @@
         "order": 1,
         "width": 12,
         "height": 7,
-        "path": "front",
+        "path": "",
         "label": "Front camera",
         "stillsAfterMs": 12000,
         "stillsUrl": "",
-        "cost": "preview 0.41 Mb/s \u00b7 full rate 2.07 Mb/s at IP",
+        "cost": "",
         "x": 460,
         "y": 1980,
         "wires": [
@@ -2561,7 +2778,7 @@
         "name": "what this camera cannot do",
         "order": 1,
         "width": 12,
-        "height": 3,
+        "height": 4,
         "title": "",
         "facts": "[]",
         "x": 800,
@@ -2666,7 +2883,7 @@
         "y": 2200,
         "wires": [
             [
-                "camera-controls"
+                "cam-at-controls"
             ]
         ]
     },
@@ -2768,7 +2985,7 @@
         "y": 2250,
         "wires": [
             [
-                "camera-controls"
+                "cam-at-controls"
             ]
         ]
     },
@@ -2777,7 +2994,7 @@
         "type": "yonder-camera",
         "z": "yonder-console",
         "name": "apply an image control",
-        "camera": "front",
+        "camera": "",
         "x": 1620,
         "y": 2225,
         "wires": [
@@ -2864,7 +3081,7 @@
         "y": 2320,
         "wires": [
             [
-                "camera-settings"
+                "cam-at-settings"
             ]
         ]
     },
@@ -2958,7 +3175,7 @@
         "y": 2380,
         "wires": [
             [
-                "camera-settings"
+                "cam-at-settings"
             ]
         ]
     },
@@ -3052,7 +3269,7 @@
         "y": 2440,
         "wires": [
             [
-                "camera-settings"
+                "cam-at-settings"
             ]
         ]
     },
@@ -3088,7 +3305,7 @@
         "type": "yonder-camera",
         "z": "yonder-console",
         "name": "change a stored setting",
-        "camera": "front",
+        "camera": "",
         "x": 1450,
         "y": 2380,
         "wires": [
@@ -3142,7 +3359,7 @@
         "y": 2440,
         "wires": [
             [
-                "camera-read"
+                "cam-at-read"
             ]
         ]
     },
@@ -3394,7 +3611,7 @@
         "type": "yonder-receive-line",
         "z": "yonder-console",
         "name": "how to receive this",
-        "camera": "front",
+        "camera": "",
         "x": 780,
         "y": 2620,
         "wires": [
@@ -3497,7 +3714,7 @@
         "height": 2,
         "label": "FULL RATE",
         "action": "fullrate",
-        "cost": "2.07 Mb/s while held",
+        "cost": "",
         "tone": "act",
         "x": 270,
         "y": 2750,
@@ -3532,10 +3749,10 @@
         "wires": [
             [
                 "deck-setup",
-                "receive-camera"
+                "cam-at-receive"
             ],
             [
-                "stream-camera"
+                "cam-at-stream"
             ]
         ]
     },
@@ -3544,7 +3761,7 @@
         "type": "yonder-stream",
         "z": "yonder-console",
         "name": "start and stop",
-        "camera": "front",
+        "camera": "",
         "x": 830,
         "y": 2710,
         "wires": [
@@ -3695,7 +3912,7 @@
                 "cam-reprobe"
             ],
             [
-                "receive-camera"
+                "cam-at-receive"
             ]
         ]
     },
@@ -3722,7 +3939,7 @@
         "y": 2860,
         "wires": [
             [
-                "camera-read"
+                "cam-at-read"
             ]
         ]
     },
