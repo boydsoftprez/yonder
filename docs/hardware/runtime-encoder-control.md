@@ -40,13 +40,12 @@ a different port), so nothing here is carried over from an earlier check.
 | `yonder-core` / `yonder-console` | active throughout; neither restarted or reconfigured; `yonder-core`'s main PID held no video file descriptor at any point checked | `systemctl is-active`; `sudo ls -l /proc/<pid>/fd \| grep video` |
 | Date | 2026-09-05 (00:04–00:10 local, board clock) | — |
 
-**This camera's connection is a mechanical fault, not power or thermal — established, not
-re-derived here.** The modem shares its internal hub, draws considerably more current, and
-transmits on cellular; it has never dropped once across any of these events. The SoC held
-62–65 °C flat across the drops recorded in the previous 43-minute session, with no
-throttling. Every drop is a clean disconnect with no preceding communication error — a
-contact break, not a device giving up. This is why the device-number bracket below exists:
-on this bench, a bitrate reading and a camera pulled out from under the pipeline can look
+**This camera's connection is mechanically marginal, and it dropped repeatedly on the
+bench while these measurements were being taken.** The cause was diagnosed outside this
+task and is not re-derived here; what matters to a reader of these numbers is that it was
+neither power nor temperature, both of which were sampled throughout and are recorded in
+the table above and in the runs below. This is why the device-number bracket exists: on
+this bench, a bitrate reading and a camera pulled out from under the pipeline look
 identical from the encoder's side.
 
 ## The pipeline, checked against the daemon rather than described from memory
