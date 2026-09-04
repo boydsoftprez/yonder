@@ -2,7 +2,8 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { detectCameras, probeCamera } from "./camera.js";
+import { detectCameras, probeCamera, type ProbeOptions } from "./camera.js";
+import type { ByPathEntry } from "./bypath.js";
 import type { CommandRunner } from "../../net/runner.js";
 
 const fixture = (name: string) =>
@@ -37,9 +38,29 @@ function benchRunner(overrides: Record<string, string> = {}): CommandRunner {
   };
 }
 
+/** The recorded `ls -l /dev/v4l/by-path/`, as the reader would return it. */
+function recordedByPath(): ByPathEntry[] {
+  return fixture("by-path.txt")
+    .split("\n")
+    .flatMap((line) => {
+      const m = /(\S+) -> (\S+)\s*$/.exec(line);
+      return m ? [{ name: m[1], target: m[2] }] : [];
+    });
+}
+
+/**
+ * Detection answering only from the recorded fixtures.
+ *
+ * **Both seams are supplied here, always.** Leaving `byPath` unset would let
+ * `systemByPath()` read the host's real /dev/v4l/by-path, so a test would pass
+ * or fail according to what is plugged into the machine running it.
+ */
+const bench = (opts: ProbeOptions = {}) =>
+  detectCameras({ runner: benchRunner(), byPath: recordedByPath, ...opts });
+
 describe("detectCameras", () => {
   it("finds the camera and reports what it can do", async () => {
-    const r = await detectCameras({ runner: benchRunner() });
+    const r = await bench();
     expect(r.found).toHaveLength(1);
     expect(r.found[0].device).toBe("/dev/video0");
     expect(r.found[0].card).toBe("Global Shutter Camera: Global S");
@@ -50,7 +71,7 @@ describe("detectCameras", () => {
     // R-CAM-02. The camera lists MJPG and YUYV at ten sizes each; only the
     // ten MJPG modes are flyable, and a page that offered the other ten would
     // be offering five frames a second as a video link.
-    const r = await detectCameras({ runner: benchRunner() });
+    const r = await bench();
     const formats = r.found[0].capabilities.formats;
     expect(formats.state).toBe("present");
     if (formats.state !== "present") return;
@@ -64,7 +85,7 @@ describe("detectCameras", () => {
   it("fills a capability from the control that answers it, with the device's reading", async () => {
     // R-CTL-04 and R-CTL-10: focus_absolute fills `focus`, and it carries what
     // the camera says now — 348 — not the factory default of 0.
-    const r = await detectCameras({ runner: benchRunner() });
+    const r = await bench();
     const caps = r.found[0].capabilities;
     for (const key of ["zoom", "focus", "exposure", "whiteBalance", "brightness", "contrast"] as const) {
       expect(caps[key].state).toBe("present");
@@ -84,7 +105,7 @@ describe("detectCameras", () => {
     // K-40: /dev/video10 advertises MJPEG, cannot be started, and looks like a
     // camera to everything that asks. An operator who is not told why it
     // vanished will go looking for it.
-    const r = await detectCameras({ runner: benchRunner() });
+    const r = await bench();
     const decoder = r.rejected.find((x) => x.device.includes("video10"));
     expect(decoder).toBeDefined();
     expect(decoder!.reason).toContain("hardware codec");
@@ -95,7 +116,7 @@ describe("detectCameras", () => {
     // pattern was widened it reached format probing and was rejected for
     // offering only raw frames — a true sentence that sends an operator
     // looking for a camera setting on a hardware decoder.
-    const r = await detectCameras({ runner: benchRunner() });
+    const r = await bench();
     const hevc = r.rejected.find((x) => x.card.includes("hevc"));
     expect(hevc).toBeDefined();
     expect(hevc!.reason).toContain("hardware codec");
@@ -106,7 +127,7 @@ describe("detectCameras", () => {
     // A UVC camera owns two nodes and the second answers no formats. A
     // rejection sitting beside the camera that was just found reads as
     // "something went wrong with your camera" when nothing did.
-    const r = await detectCameras({ runner: benchRunner() });
+    const r = await bench();
     const cameraCard = r.found[0].card;
     expect(r.rejected.some((x) => x.card === cameraCard)).toBe(false);
     // Five cards, sixteen nodes, one camera: five rows, never sixteen.
@@ -122,7 +143,7 @@ describe("detectCameras", () => {
       "\t\tSize: Discrete 640x480",
       "\t\t\tInterval: Discrete 0.200s (5.000 fps)",
     ].join("\n");
-    const r = await detectCameras({ runner: benchRunner({ "--list-formats-ext": rawOnly }) });
+    const r = await bench({ runner: benchRunner({ "--list-formats-ext": rawOnly }) });
     expect(r.found).toHaveLength(0);
     const raw = r.rejected.find((x) => x.reason.includes("compressed"));
     expect(raw).toBeDefined();
@@ -133,29 +154,34 @@ describe("detectCameras", () => {
 
   it("never throws — a failed probe is a rejection", async () => {
     const dead: CommandRunner = async () => ({ code: 1, stdout: "", stderr: "boom" });
-    await expect(detectCameras({ runner: dead })).resolves.toMatchObject({ found: [] });
-    const r = await detectCameras({ runner: dead });
+    await expect(bench({ runner: dead })).resolves.toMatchObject({ found: [] });
+    const r = await bench({ runner: dead });
     expect(r.rejected).toHaveLength(1);
     expect(r.rejected[0].reason).toContain("boom");
   });
 
   it("carries the by-path name, so the configured camera survives a reboot", async () => {
     // R-CAM-05. /dev/video0 is whichever camera the kernel probed first this
-    // boot; the by-path name is the socket it is plugged into. The name below
-    // is the one /dev/v4l/by-path holds for this camera on this board.
-    const r = await detectCameras({
-      runner: benchRunner(),
-      readLink: (p) =>
-        p.includes("video0")
-          ? "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0"
-          : null,
-    });
-    expect(r.found[0].byPath).toContain("usb-");
+    // boot; the by-path name is the socket it is plugged into. This is the
+    // name the recorded listing holds for this camera, and the one a
+    // configuration stores.
+    const r = await bench();
+    expect(r.found[0].byPath).toBe(
+      "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0",
+    );
+    expect(r.found[0].byPathStable).toBe(true);
+    // Not the enumeration number, which is the whole point of the requirement.
+    expect(r.found[0].byPath).not.toContain("/dev/video");
   });
 
-  it("falls back to the node when no by-path name resolves", async () => {
-    const r = await detectCameras({ runner: benchRunner() });
+  it("says so when it falls back to the enumeration number", async () => {
+    // A camera with no entry under /dev/v4l/by-path can still be streamed, but
+    // its identity moves on the next boot. Reporting that as an ordinary
+    // by-path name — a string that looks just as authoritative — is the silent
+    // absence R-UI-15 forbids.
+    const r = await bench({ byPath: () => [] });
     expect(r.found[0].byPath).toBe("/dev/video0");
+    expect(r.found[0].byPathStable).toBe(false);
   });
 });
 
@@ -166,14 +192,18 @@ describe("probeCamera", () => {
       seen.push(argv);
       return benchRunner()(argv);
     };
-    const out = await probeCamera("/dev/video0", "Global Shutter Camera: Global S", { runner });
+    const out = await probeCamera("/dev/video0", "Global Shutter Camera: Global S", {
+      runner, byPath: recordedByPath,
+    });
     expect("capabilities" in out).toBe(true);
     expect(seen.some((argv) => argv.includes("--list-devices"))).toBe(false);
   });
 
   it("returns a rejection rather than throwing when the device has gone", async () => {
     const dead: CommandRunner = async () => ({ code: 1, stdout: "", stderr: "No such file" });
-    const out = await probeCamera("/dev/video7", "Some Camera", { runner: dead });
+    const out = await probeCamera("/dev/video7", "Some Camera", {
+      runner: dead, byPath: recordedByPath,
+    });
     expect("capabilities" in out).toBe(false);
     expect((out as { reason: string }).reason).toContain("No such file");
   });

@@ -4,6 +4,7 @@ import {
   noCapabilities, present, type CameraCapabilities, type ControlRange,
 } from "../capability.js";
 import { parseControls, parseDevices, parseFormats } from "./parse.js";
+import { byPathNames, systemByPath, type ByPathReader } from "./bypath.js";
 
 /**
  * Detection on demand (R-CAM-12).
@@ -31,8 +32,25 @@ export interface Rejection {
 export interface Detection {
   readonly device: string;
   readonly card: string;
-  /** The socket, not the enumeration number (R-CAM-05). */
+  /**
+   * The socket, not the enumeration number (R-CAM-05) — the name under
+   * `/dev/v4l/by-path/` that means this node, which is what a configuration
+   * stores and what survives a reboot and a plug-order change. `bypath.ts`
+   * records how one name is chosen when the kernel publishes several.
+   */
   readonly byPath: string;
+  /**
+   * Whether `byPath` above is a real by-path name or the enumeration number
+   * it fell back to.
+   *
+   * **False is a fact worth showing, not a detail to hide.** A camera with no
+   * entry under `/dev/v4l/by-path/` can still be streamed from today, but its
+   * identity moves the next time the kernel probes in a different order, and
+   * the configuration written now will point somewhere else. Reporting that
+   * as an ordinary `byPath` — a string that looks exactly as authoritative as
+   * a real one — is the silent absence R-UI-15 exists to forbid.
+   */
+  readonly byPathStable: boolean;
   readonly capabilities: CameraCapabilities;
 }
 export interface DetectResult {
@@ -42,12 +60,30 @@ export interface DetectResult {
 
 export interface ProbeOptions {
   runner?: CommandRunner;
-  /** Injected so a test resolves by-path names without a /dev tree. */
-  readLink?: (path: string) => string | null;
+  /**
+   * The `/dev/v4l/by-path/` listing, injected so a test resolves names from
+   * the recorded directory without a `/dev` tree.
+   *
+   * The seam is the directory *reader*, and deliberately not the resolver:
+   * choosing one name from the several the kernel publishes is the part
+   * R-CAM-05 turns on, so it must not be the part a test stands in for.
+   * Unset means the real directory, which is the whole point — an option only
+   * ever supplied by a test leaves the requirement unmet on the board.
+   */
+  byPath?: ByPathReader;
 }
 
 /** Formats that carry compressed video, and are therefore flyable (R-CAM-02). */
 const COMPRESSED = new Set(["MJPG", "JPEG", "H264", "HEVC"]);
+
+/**
+ * The by-path map for one sweep: the injected listing, or the real directory.
+ *
+ * Read once and passed down rather than resolved per node — sixteen nodes on
+ * this board, and the directory does not change while we walk them.
+ */
+const resolveNames = (opts: ProbeOptions): ReadonlyMap<string, string> =>
+  byPathNames(opts.byPath?.() ?? systemByPath());
 
 /** V4L2 control names this page draws, mapped to the capability they fill. */
 const CONTROL_MAP = [
@@ -63,6 +99,8 @@ export async function detectCameras(opts: ProbeOptions = {}): Promise<DetectResu
   const runner = opts.runner ?? systemRunner;
   const found: Detection[] = [];
   const rejected: Rejection[] = [];
+
+  const names = resolveNames(opts);
 
   const listed = await runner(["v4l2-ctl", "--list-devices"]);
   if (listed.code !== 0) {
@@ -85,7 +123,7 @@ export async function detectCameras(opts: ProbeOptions = {}): Promise<DetectResu
     // kernel created.
     const outcomes: (Detection | Rejection)[] = [];
     for (const node of device.nodes) {
-      outcomes.push(await probeNode(node, device.card, runner, opts.readLink));
+      outcomes.push(await probeNode(node, device.card, runner, names));
     }
     const accepted = outcomes.find((o): o is Detection => "capabilities" in o);
     if (accepted) found.push(accepted);
@@ -98,7 +136,7 @@ async function probeNode(
   node: string,
   card: string,
   runner: CommandRunner,
-  readLink?: (path: string) => string | null,
+  byPath: ReadonlyMap<string, string>,
 ): Promise<Detection | Rejection> {
   // K-40, checked by card rather than by node number: the decoder is
   // /dev/video10 on this board and need not be on another, but a codec always
@@ -157,8 +195,16 @@ async function probeNode(
     if (range) capabilities[key] = present(range);
   }
 
-  const byPath = readLink?.(node) ?? node;
-  return { device: node, card, byPath, capabilities };
+  // No entry is a fallback to the node, and the fallback is reported rather
+  // than blended in: see `byPathStable` above.
+  const stable = byPath.get(node);
+  return {
+    device: node,
+    card,
+    byPath: stable ?? node,
+    byPathStable: stable !== undefined,
+    capabilities,
+  };
 }
 
 /** One camera, re-probed — the Setup deck's *Re-probe* key. */
@@ -167,5 +213,5 @@ export async function probeCamera(
   card: string,
   opts: ProbeOptions = {},
 ): Promise<Detection | Rejection> {
-  return probeNode(node, card, opts.runner ?? systemRunner, opts.readLink);
+  return probeNode(node, card, opts.runner ?? systemRunner, resolveNames(opts));
 }
