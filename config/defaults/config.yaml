@@ -47,3 +47,4 @@ remote:
   zerotier:
     enabled: false
     network_id: null
+cameras: []

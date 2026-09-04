@@ -169,6 +169,103 @@ const ZeroTier = z
 const Remote = z.object({ zerotier: ZeroTier.default({}) }).strict();
 
 /**
+ * A camera's identity, source and settings.
+ *
+ * **The device is held by port, not by enumeration number** (R-CAM-05).
+ * `/dev/video0` is whichever camera the kernel probed first this boot; the
+ * `by-path` name — `usb-0000:01:00.0-1.2` — is the socket it is plugged into,
+ * so the configured camera is the detected one after a reboot and after a
+ * plug-order change. `probe/camera.ts` resolves it to a node at run time.
+ *
+ * **What is not here.** No capability is stored: R-CAM-14 requires formats,
+ * rates and controls to come from what the device answers, and a stored copy
+ * is a stale copy the first time a lens or a firmware changes. This section
+ * holds what an operator *chose*; `capability.ts` holds what the camera
+ * *offers*, and only one of those belongs in a file.
+ */
+const CameraId = z.string().regex(
+  /^[a-z0-9][a-z0-9-]{0,31}$/,
+  "must be lower-case letters, digits and hyphens, starting with a letter or digit",
+);
+
+/**
+ * Where a stream goes.
+ *
+ * `rtp` is an outbound push to a ground station: no listener, nothing to
+ * protect (R-VID-01). `rtsp` and `srt` are listeners on this device, so
+ * R-SEC-13 applies — the RTSP path carries a generated per-device credential
+ * held by reference, exactly as the access point's passphrase is.
+ */
+const CameraOutput = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("rtp"),
+    host: z.string().regex(IPV4_PATTERN, "must be an IPv4 address, for example 192.168.1.50"),
+    port,
+  }).strict(),
+  z.object({
+    kind: z.literal("rtsp"),
+    path: z.string().regex(/^[a-z0-9][a-z0-9-]{0,31}$/),
+    password: SecretRef,
+  }).strict(),
+  z.object({ kind: z.literal("srt"), port }).strict(),
+]);
+export type CameraOutput = z.infer<typeof CameraOutput>;
+
+/**
+ * The cheap copy the interface watches (R-VID-13).
+ *
+ * **Bounded deliberately, and the bound is load-bearing.** `reachability.ts`
+ * exempts this object from the confirmation window on the grounds that no
+ * setting of it changes what leaves the aircraft on a path the console shares
+ * — which is only true while the ceiling here is small enough that it cannot.
+ * Raising either bound means moving `preview` out of that exemption in the
+ * same change; `reachability.test.ts` asserts the numbers so the two cannot
+ * drift apart quietly.
+ */
+const Preview = z.object({
+  width: z.number().int().min(160).max(1280).default(640),
+  height: z.number().int().min(90).max(720).default(360),
+  framerate: z.number().int().min(1).max(30).default(15),
+  bitrate_kbps: z.number().int().min(100).max(2000).default(400),
+}).strict();
+
+/** Image controls: applied live on the running stream, never a respawn. */
+const CameraControls = z.object({
+  brightness: z.number().int().min(-100).max(100).nullable().default(null),
+  contrast: z.number().int().min(-100).max(100).nullable().default(null),
+  /** R-CTL-05: by degrees rather than a boolean. */
+  rotation: z.union([z.literal(0), z.literal(90), z.literal(180), z.literal(270)]).default(0),
+}).strict();
+
+const Camera = z.object({
+  id: CameraId,
+  name: z.string().min(1).max(48),
+  /** M6 adds `csi` and `hdmi`; M5 adds the accessory camera. One today. */
+  source: z.enum(["usb"]),
+  /** A `by-path` name, without the `/dev/v4l/by-path/` prefix. See above. */
+  device: z.string().min(1).max(128),
+  enabled: z.boolean().default(true),
+  /**
+   * Whether the pipeline starts at boot.
+   *
+   * Off by default and deliberately: R-MAV-08 autocasts telemetry because a
+   * quiet aircraft is unflyable, and video has no equivalent claim. The
+   * asymmetry is recorded in the spec's §12 as an unmade decision rather than
+   * settled here.
+   */
+  autostart: z.boolean().default(false),
+  width: z.number().int().min(160).max(3840).default(1280),
+  height: z.number().int().min(90).max(2160).default(720),
+  framerate: z.number().int().min(1).max(60).default(30),
+  codec: z.enum(["h264"]).default("h264"),
+  bitrate_kbps: z.number().int().min(100).max(20000).default(2000),
+  preview: Preview.default({}),
+  controls: CameraControls.default({}),
+  outputs: z.array(CameraOutput).max(8).default([]),
+}).strict();
+export type Camera = z.infer<typeof Camera>;
+
+/**
  * Strict, deliberately: an unrecognised key is a misspelling, and a
  * misspelling silently ignored is a setting an operator believes is in force
  * and is not.
@@ -187,7 +284,33 @@ export const ConfigSchema = z.object({
   apply: Apply.default({}),
   system: System.default({}),
   remote: Remote.default({}),
-}).strict();
+  cameras: z.array(Camera).max(8).default([]),
+}).strict().superRefine((cfg, ctx) => {
+  const seen = new Set<string>();
+  for (const [i, cam] of cfg.cameras.entries()) {
+    if (seen.has(cam.id)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["cameras", i, "id"],
+        message: `two cameras share the id "${cam.id}"; each camera needs its own`,
+      });
+    }
+    seen.add(cam.id);
+    for (const [j, out] of cam.outputs.entries()) {
+      // The class of fault a confirmation window never catches: today's
+      // port-carrying outputs are UDP against a TCP console so nothing
+      // collides, and the apply confirms. The bind race happens on the next
+      // boot, by which time nobody is watching a countdown.
+      if ("port" in out && out.port === cfg.ui.port) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["cameras", i, "outputs", j, "port"],
+          message: `port ${out.port} is ui.port; the console and a stream cannot share one`,
+        });
+      }
+    }
+  }
+});
 
 export type Config = z.infer<typeof ConfigSchema>;
 

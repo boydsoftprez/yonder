@@ -274,6 +274,240 @@
       },
       "additionalProperties": false,
       "default": {}
+    },
+    "cameras": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,31}$"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 48
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "usb"
+            ]
+          },
+          "device": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "enabled": {
+            "type": "boolean",
+            "default": true
+          },
+          "autostart": {
+            "type": "boolean",
+            "default": false
+          },
+          "width": {
+            "type": "integer",
+            "minimum": 160,
+            "maximum": 3840,
+            "default": 1280
+          },
+          "height": {
+            "type": "integer",
+            "minimum": 90,
+            "maximum": 2160,
+            "default": 720
+          },
+          "framerate": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60,
+            "default": 30
+          },
+          "codec": {
+            "type": "string",
+            "enum": [
+              "h264"
+            ],
+            "default": "h264"
+          },
+          "bitrate_kbps": {
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 20000,
+            "default": 2000
+          },
+          "preview": {
+            "type": "object",
+            "properties": {
+              "width": {
+                "type": "integer",
+                "minimum": 160,
+                "maximum": 1280,
+                "default": 640
+              },
+              "height": {
+                "type": "integer",
+                "minimum": 90,
+                "maximum": 720,
+                "default": 360
+              },
+              "framerate": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 30,
+                "default": 15
+              },
+              "bitrate_kbps": {
+                "type": "integer",
+                "minimum": 100,
+                "maximum": 2000,
+                "default": 400
+              }
+            },
+            "additionalProperties": false,
+            "default": {}
+          },
+          "controls": {
+            "type": "object",
+            "properties": {
+              "brightness": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": -100,
+                    "maximum": 100
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "contrast": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": -100,
+                    "maximum": 100
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "rotation": {
+                "type": "number",
+                "enum": [
+                  0,
+                  90,
+                  180,
+                  270
+                ],
+                "default": 0
+              }
+            },
+            "additionalProperties": false,
+            "default": {}
+          },
+          "outputs": {
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "rtp"
+                    },
+                    "host": {
+                      "type": "string",
+                      "pattern": "^(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)(\\.(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)){3}$"
+                    },
+                    "port": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 65535
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "host",
+                    "port"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "rtsp"
+                    },
+                    "path": {
+                      "type": "string",
+                      "pattern": "^[a-z0-9][a-z0-9-]{0,31}$"
+                    },
+                    "password": {
+                      "type": "object",
+                      "properties": {
+                        "secret": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "secret"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "path",
+                    "password"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "srt"
+                    },
+                    "port": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 65535
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "port"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "maxItems": 8,
+            "default": []
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "source",
+          "device"
+        ],
+        "additionalProperties": false
+      },
+      "maxItems": 8,
+      "default": []
     }
   },
   "required": [

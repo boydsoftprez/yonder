@@ -177,3 +177,89 @@ describe("remote", () => {
     ).toThrow();
   });
 });
+
+describe("cameras", () => {
+  it("defaults cameras to an empty list", () => {
+    const cfg = ConfigSchema.parse({
+      version: 1, network: { ap: { psk: { secret: "ap_psk" } } }, ui: { editor: {} },
+    });
+    expect(cfg.cameras).toEqual([]);
+  });
+
+  it("fills a camera's defaults from its identity alone", () => {
+    const cfg = ConfigSchema.parse({
+      version: 1, network: { ap: { psk: { secret: "ap_psk" } } }, ui: { editor: {} },
+      cameras: [{ id: "cam0", name: "Nose", source: "usb", device: "usb-0000:01:00.0-1.2" }],
+    });
+    const cam = cfg.cameras[0];
+    expect(cam).toMatchObject({
+      enabled: true, autostart: false,
+      width: 1280, height: 720, framerate: 30,
+      codec: "h264", bitrate_kbps: 2000, outputs: [],
+    });
+    expect(cam.preview).toEqual({ width: 640, height: 360, framerate: 15, bitrate_kbps: 400 });
+    expect(cam.controls).toEqual({ brightness: null, contrast: null, rotation: 0 });
+  });
+
+  it("bounds the preview so no setting of it can saturate a link", () => {
+    // The preview is exempt from the confirmation window (reachability.ts), and
+    // that exemption is only safe because this bound exists. Widening it means
+    // moving `preview` out of the exempt list in the same change.
+    const base = { version: 1, network: { ap: { psk: { secret: "ap_psk" } } }, ui: { editor: {} } };
+    const withPreview = (preview: unknown) =>
+      ConfigSchema.safeParse({ ...base, cameras: [
+        { id: "cam0", name: "Nose", source: "usb", device: "usb-1", preview },
+      ] });
+    expect(withPreview({ bitrate_kbps: 2000 }).success).toBe(true);
+    expect(withPreview({ bitrate_kbps: 2001 }).success).toBe(false);
+    expect(withPreview({ width: 1280 }).success).toBe(true);
+    expect(withPreview({ width: 1281 }).success).toBe(false);
+  });
+
+  it("refuses two cameras with the same id", () => {
+    const r = ConfigSchema.safeParse({
+      version: 1, network: { ap: { psk: { secret: "ap_psk" } } }, ui: { editor: {} },
+      cameras: [
+        { id: "cam0", name: "A", source: "usb", device: "usb-1" },
+        { id: "cam0", name: "B", source: "usb", device: "usb-2" },
+      ],
+    });
+    expect(r.success).toBe(false);
+    expect(JSON.stringify(r.error?.issues)).toContain("cam0");
+  });
+
+  it("refuses an output on the console's own port", () => {
+    // A bind race after a reboot is a configuration that confirms while it looks
+    // fine and bites on the next boot. The confirmation window never catches it,
+    // because on the day it is applied nothing collides.
+    const r = ConfigSchema.safeParse({
+      version: 1, network: { ap: { psk: { secret: "ap_psk" } } },
+      ui: { port: 3000, editor: {} },
+      cameras: [{
+        id: "cam0", name: "Nose", source: "usb", device: "usb-1",
+        outputs: [{ kind: "srt", port: 3000 }],
+      }],
+    });
+    expect(r.success).toBe(false);
+    expect(JSON.stringify(r.error?.issues)).toContain("ui.port");
+  });
+
+  it("holds an RTSP password by reference, never inline", () => {
+    const ok = ConfigSchema.safeParse({
+      version: 1, network: { ap: { psk: { secret: "ap_psk" } } }, ui: { editor: {} },
+      cameras: [{
+        id: "cam0", name: "Nose", source: "usb", device: "usb-1",
+        outputs: [{ kind: "rtsp", path: "cam0", password: { secret: "rtsp_password" } }],
+      }],
+    });
+    expect(ok.success).toBe(true);
+    const inline = ConfigSchema.safeParse({
+      version: 1, network: { ap: { psk: { secret: "ap_psk" } } }, ui: { editor: {} },
+      cameras: [{
+        id: "cam0", name: "Nose", source: "usb", device: "usb-1",
+        outputs: [{ kind: "rtsp", path: "cam0", password: "hunter2" }],
+      }],
+    });
+    expect(inline.success).toBe(false);
+  });
+});
