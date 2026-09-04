@@ -550,7 +550,39 @@ expect_missing "and nowhere in the configuration the console is served" \
     "$MODEM_PASSWORD" "$(sock /config)"
 expect_missing "nor in the modem state every surface is drawn from" \
     "$MODEM_PASSWORD" "$(sock /modem/state)"
-expect_missing "nor in the dashboard the browser is handed" "$MODEM_PASSWORD" "$dash"
+
+# **Not `$dash`.** That is the Dashboard SPA shell — `index.html`, asserted
+# above to contain `id="app"` — and every widget value arrives afterwards over
+# socket.io. Grepping it for a credential could not fail for the only way one
+# would get there, which is a value rendered into a widget.
+#
+# `_debug/datastore/<widget id>` is that value: exactly what Dashboard replays
+# to a browser when it connects, behind the same login. The password box is
+# the widget on this console that would carry the credential if anything did —
+# `modemForm` sends it a label and deliberately no payload — so this is the
+# check the shell grep was pretending to be.
+# The label goes to Dashboard's *state* store and the value to its data store,
+# and both are asked here — the label because it proves this check is live
+# (`modemForm` really did reach that widget), the value because "there is
+# nothing there" is the claim R-SEC-10 needs and an assertion that cannot fail
+# is not one.
+# The one check in this section that has to wait for something: the boxes are
+# seeded by an `inject` a second after deploy and a round trip to the daemon,
+# and this used to race it.
+i=0
+seeded=""
+while [ "$i" -lt "$TRIES" ]; do
+    seeded=$(body "/dashboard/_debug/statestore/input-cell-password")
+    case "$seeded" in *"leave blank to keep it"*) break ;; esac
+    sleep "$POLL"; i=$((i + 1))
+done
+expect_contains "the password box is told a credential is on file" \
+    "leave blank to keep it" "$seeded"
+expect_missing "and is never told the credential" "$MODEM_PASSWORD" "$seeded"
+stored=$(body "/dashboard/_debug/datastore/input-cell-password")
+expect_missing "and has no value at all for Dashboard to replay into it" \
+    '"payload"' "$stored"
+expect_missing "nor the credential in what it would replay" "$MODEM_PASSWORD" "$stored"
 
 # What `GET /config` *does* carry is the name of the row, not the row. Stated
 # as an assertion rather than left implicit, because it is the thing the seed
@@ -677,11 +709,15 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
     # those parts, and a panel drawn from live state hides its other states
     # exactly the way a tab hides its siblings. The `Way out` rows have four —
     # three of them driven here by probing, and the fourth by taking the wired
-    # port down; see capture_unplugged below. Each is a different *shape* —
-    # the sentences are different lengths and wrap differently, and the lamp
-    # captions are different widths — which is how the defect this gate is for
-    # showed up in the first place: an interface name right-aligned in its own
-    # column, visible only when the qualifier beneath it was the wider line.
+    # port down; see capture_unplugged below.
+    #
+    # What separates them is the **sentence**, not the geometry. Each row
+    # wears `yonder-fixed`, so the words are visible in the committed picture
+    # and recorded in the shape manifest; without it the four states were
+    # three grey rectangles apiece and four byte-identical references. The
+    # defect this gate was written after — an interface name right-aligned in
+    # its own column, visible only when the qualifier beneath it was the wider
+    # line — is in the same two elements, and was behind the mask too.
     #
     # The state is driven through `POST /reach/test`, the daemon's own route
     # for R-CEL-09's "on request" and the one the TEST NOW key presses. Only
@@ -778,10 +814,13 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
     # not established, and the condition was in the device list it had already
     # read.
     #
-    # It is a different *shape* as well as a different sentence — DOWN is a
-    # shorter lamp caption than NOT YET TESTED and the qualifier beneath it
-    # wraps differently — which is exactly what R-UI-12 asks to see a picture
-    # of.
+    # **It is a different sentence and not a different geometry**, which is
+    # what the reference used to claim. Nothing moves: an annunciator is
+    # `inline-flex` inside a grid-fixed wrapper and the qualifier wraps to one
+    # line in every state. The words are the difference, so the row wears
+    # `yonder-fixed` — which both unmasks it in the committed picture and puts
+    # its text in the shape manifest, where a regression in the sentence
+    # R-NET-14 was written for now fails the gate.
     capture_unplugged() {
         echo unavailable > "$ETH_STATE"
         # One poll of `yonder-modem-state`, so the panel is showing this board
@@ -845,6 +884,27 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
         # not the other, so the committed picture depended on where a timer
         # happened to fall.
         sleep 7
+        # **The banner on a tab, which is the half that was missing** (R-UI-15).
+        # A `ui-group` belongs to one page and Dashboard's tabs layout draws
+        # one group per tab, so the four widgets live inside each tab instead
+        # and are raised by id. Nothing but a picture says whether that
+        # actually happens, and the Cellular tab is the one the requirement
+        # was failing on: an operator who fixed an APN there, watched the
+        # modem redial and stayed put had no countdown and no key to press.
+        #
+        # Before the press below, which is what ends the pending state.
+        if node "$REPO/scripts/capture-pages.mjs" \
+                --base-url "http://127.0.0.1:$PORT" \
+                --password "$PASSWORD" \
+                --palette "$1" \
+                --only network-cellular \
+                --as network-cellular-pending \
+                --artifacts "$REPO/vendor/capture" \
+                ${ACCEPT_SHAPE:+--accept}; then
+            ok "the $1 palette: the Cellular tab with the same change pending on it"
+        else
+            bad "the $1 palette: the Cellular tab with a change pending, see above"
+        fi
         if node "$REPO/scripts/capture-pages.mjs" \
                 --base-url "http://127.0.0.1:$PORT" \
                 --password "$PASSWORD" \
@@ -981,8 +1041,14 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
         "$AP_PASSPHRASE" "$(sock /config)"
     expect_contains "which names the row and does not contain it" \
         '"secret":"ap_psk"' "$(sock /config)"
-    expect_missing "nor in the dashboard the browser is handed" \
-        "$AP_PASSPHRASE" "$(body /dashboard/)"
+    # The widget that draws it, not the SPA shell — see the note on the modem
+    # password above. `bar-wayback` is where an access-point passphrase would
+    # appear if `publishableApPassphrase` ever handed back what it read.
+    wayback=$(body "/dashboard/_debug/datastore/bar-wayback")
+    expect_contains "the way-back panel really is drawing something" \
+        "passphrase" "$wayback"
+    expect_missing "and the operator's passphrase is not in what it draws" \
+        "$AP_PASSPHRASE" "$wayback"
     leaked=$(grep -rl "$AP_PASSPHRASE" "$ROOT" 2>/dev/null \
         | grep -v "etc/yonder/secrets.yaml" || true)
     if [ -z "$leaked" ]; then

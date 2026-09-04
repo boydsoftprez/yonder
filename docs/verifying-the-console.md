@@ -273,6 +273,20 @@ about font rasterisation rather than a check. References are named for the platf
 recorded them (`status.day.darwin.json`, `status.day.linux.json`) so every machine enforces
 its own instead of one enforcing and the rest printing a note nobody reads.
 
+The manifest also carries **the words of anything wearing `yonder-fixed`**, and it has to.
+Geometry alone could not tell four of the state captures apart from their bases: an
+annunciator is `inline-flex` inside a grid-fixed wrapper and a qualifier wraps to one line
+in every state, so no box moves, and four committed references came out byte-identical to
+the pages they were meant to distinguish. `yonder-fixed` is the one declaration on this
+console that a value is the same on every run, which is exactly the licence needed to freeze
+its text; nothing else's text is recorded, because a load average in a reference would leave
+it dirty for ever.
+
+On CI the check is `git status --porcelain docs/console/shape`, not `git diff`. Every
+committed reference is a `.darwin.json` and the runner is Linux, so the gate takes its
+*record* branch and writes `.linux.json` files that are **untracked** — which `git diff`
+does not see, and did not, on every run since the job was written.
+
 **A picture**, in `docs/console/capture/`, written every run. The committed copy masks live
 readings — a load average changes between two runs and would leave the file permanently
 dirty — so what it records is the layout. The unmasked copy goes to `vendor/capture/`, which
@@ -282,8 +296,12 @@ CI uploads as an artifact.
 part of itself is captured in each of those parts. A tabbed page hides its other tabs, which
 is why there is one capture per tab; a panel drawn from live state hides its other states the
 same way. The `Way out` rows have four — a path that is reaching something, one that reached
-nothing when it was last tested, one nothing has looked at, and one whose interface is down —
-and they are four different *shapes*, because the sentences are different lengths. The base
+nothing when it was last tested, one nothing has looked at, and one whose interface is down.
+What separates them is **the sentence**, not the geometry: nothing on that panel moves
+between the four, so each row wears `yonder-fixed`, which both unmasks it in the committed
+picture and puts its words in the shape manifest. Without that the states were three grey
+rectangles apiece and four identical references — and the exact sentence R-NET-14 was
+written to abolish was invisible in every one of them. The base
 capture is the untested state, which is what a board that has just come up shows; the others
 are driven and captured under names of their own. The last of them is a different *board*
 rather than a different reading — a wired port with nothing plugged into it — and it is
@@ -312,6 +330,20 @@ back — which is the only end-to-end proof that either key on that panel reache
 A banner that renders correctly and whose keys do nothing is the failure `--press NIGHT` was
 added for.
 
+The banner is on **every** surface, which is what R-UI-15 asks for and what it did not have:
+one copy per page, and on the Network page one copy per tab, because Dashboard's tabs layout
+renders one `ui-group` per tab — a group there would be a tab that *appears*, which an
+operator on another tab would never see. A grid page's whole group is hidden between
+changes; a tab's four widgets are hidden by id instead. In the same pending window the gate
+photographs the **Cellular tab**, because that is the surface the requirement was failing on:
+an operator who fixed an APN there, watched the modem redial and stayed put had no countdown
+in front of them and no key to press.
+
+```
+status-pending.day.png                      the banner on a page whose groups are a grid
+network-cellular-pending.day.png            the same change, on a tab
+```
+
 The fourth is `If you lose this console` in its other state (R-UI-18). That panel prints the
 access-point passphrase **only while it is the published default** — ADR-0007 makes that
 value deliberately public, and it is the only thing that makes a locked-out operator's way
@@ -319,10 +351,13 @@ back in usable at all — and says it has been changed once the operator has set
 Every other picture in the run is of the first state, so the second is captured under a name
 of its own. There is no route that changes that passphrase yet, so the gate does what an
 operator would have to do today: stops the daemon, edits `secrets.yaml`, starts it again.
-Around that capture it greps the journal, `GET /config`, `GET /status`, the dashboard the
-browser is handed, and every file under the temporary root for the value it set — which is
-the same claim made against the modem credential, applied to the other secret this device
-holds.
+Around that capture it greps the journal, `GET /config`, `GET /status`, **the value the
+widget that draws it is actually handed**, and every file under the temporary root for the
+value it set — which is the same claim made against the modem credential, applied to the
+other secret this device holds. The widget value rather than the dashboard: what the browser
+is served at `/dashboard` is the application shell, and every value reaches it afterwards
+over socket.io, so grepping the shell could not fail for the only way a credential would get
+there. Dashboard's own `_debug/datastore/<widget id>` is that value.
 
 ```
 status.day.png                              a board with a modem in it
@@ -335,14 +370,16 @@ The countdown is masked in the committed picture and only there: it is the one a
 caption on this console that is a *reading*, so without masking that file would differ by a
 second or two on every run. The widget says so about itself with `className: "yonder-live"`,
 which is what the mask list matches — the lamp and its box are untouched, and the unmasked
-copy under `vendor/capture/` carries the digits.
+copy under `vendor/capture/` carries the digits. The *caption* goes whole, the word with the
+digits: the annunciator draws both in one element and there is no smaller one to mask. The
+two lines under it wear `yonder-fixed`, so what the banner is about is still readable.
 
-`className: "yonder-fixed"` is the mirror of that, and `If you lose this console` is the
-only thing wearing it. Data-bar cells and text values are masked as *kinds*, because most
-of them carry readings; that panel's four carry none — an SSID, an address, a hostname, and
-either the published passphrase or the sentence that stands in for a changed one. Masked,
-its two states would be the same picture, which is most of the reason for taking the second
-one.
+`className: "yonder-fixed"` is the mirror of that. `If you lose this console` wears it, and
+so does every row of `Way out`. Data-bar cells and text values are masked as *kinds*,
+because most of them carry readings; those two panels carry none — an SSID, an address, a
+hostname and either the published passphrase or the sentence that stands in for a changed
+one; an interface name from a device list and one of five fixed sentences. Masked, each
+panel's states were the same picture, which is most of the reason for taking the second one.
 
 `capture-pages.mjs --only <page> --as <name>` is what takes one of them, so a state capture
 is held to exactly the rules and the shape reference every other page is. The shape manifest

@@ -89,7 +89,11 @@ const LIVE = [
   // one that is a *reading*: a countdown, different on every run, which would
   // leave that committed picture permanently dirty. The widget says so about
   // itself with `yonder-live`, so nothing here has to know which page it is
-  // on. The lamp and its box are untouched; only the digits go.
+  // on. The lamp and its box are untouched — the *caption* goes whole, the
+  // word with the digits, because `YonderAnnunciator.vue` draws both in one
+  // `.y-ann__text` and there is no smaller element to mask. The two lines
+  // under it wear `yonder-fixed`, so what the banner is about is still
+  // readable in the picture.
   ".yonder-live .y-ann__text",
 ];
 
@@ -188,8 +192,14 @@ const press = arg("press");
  * those parts, and a panel drawn from live state hides its other states the
  * same way a tab hides its siblings. The `Way out` rows have four — a path
  * that is reaching something, one that reached nothing when it was last
- * tested, one nothing has looked at, and one whose interface is down — and
- * they are four different *shapes*, because the sentences wrap differently.
+ * tested, one nothing has looked at, and one whose interface is down.
+ *
+ * **They are not four different geometries, and the reference used to claim
+ * they were.** An annunciator is `inline-flex` inside a grid-fixed wrapper
+ * and the qualifier wraps to one line in every state, so no box moves: the
+ * four committed files came out byte-identical to their bases and asserted
+ * nothing. What actually differs is the words, which is why the manifest
+ * records the text of anything wearing `yonder-fixed` — see `measure()`.
  *
  * The alternative was a second mechanism that drove state and photographed it
  * separately. This is the same one, told which page to take and what to call
@@ -421,11 +431,34 @@ function measure([liveSelectors, fixedSelector]) {
     }
   }
 
+  /**
+   * The words on anything that has declared itself fixed.
+   *
+   * Geometry alone could not tell four of these states apart. The `Way out`
+   * rows differ by a sentence and a lamp caption; an annunciator is
+   * `inline-flex` inside a grid-fixed wrapper and the qualifier wraps to one
+   * line in every state, so *no box moves* — and the four state references
+   * came out byte-identical to their bases, asserting nothing the base did
+   * not already assert. Same for `status-psk-changed`, whose whole subject is
+   * one cell's text.
+   *
+   * `yonder-fixed` is the one declaration on this console that a value is the
+   * same on every run, which is exactly the licence needed to freeze its
+   * text. Nothing else's text is recorded: a load average in a reference
+   * would leave it dirty for ever, which is what the masking exists to
+   * prevent.
+   */
+  const fixed = [...document.querySelectorAll(fixedSelector)].map((el) => ({
+    key: keyOf(el),
+    text: (el.textContent ?? "").replace(/\s+/g, " ").trim(),
+  })).filter((f) => f.text !== "");
+
   return {
     viewport: { w: window.innerWidth, h: window.innerHeight },
     scrollWidth: document.documentElement.scrollWidth,
     widgets: widgets.map((el) => ({ key: keyOf(el), box: boxOf(el) })),
     liveBoxes: [...live].map(boxOf).filter((b) => b.w > 0 && b.h > 0),
+    fixed,
     clipped,
     spanning,
     unreadable,
@@ -603,7 +636,15 @@ for (const page of pages) {
   // own. The *rules* above need none of this: clipped content, a spanning
   // action and a sideways scroll are relative comparisons within one
   // rendering, and they hold anywhere.
-  const recorded = { platform: process.platform, viewport: shape.viewport, widgets: shape.widgets };
+  // Geometry, plus the words of anything that said its words do not move.
+  // `fixed` is omitted where a page has none, so a page that declares nothing
+  // fixed has exactly the reference it always had.
+  const recorded = {
+    platform: process.platform,
+    viewport: shape.viewport,
+    widgets: shape.widgets,
+    ...(shape.fixed.length ? { fixed: shape.fixed } : {}),
+  };
   // One reference per platform, so every machine enforces rather than one
   // machine enforcing and the rest printing a note nobody reads. A platform
   // with no reference yet records one and says so.
@@ -623,8 +664,13 @@ for (const page of pages) {
         const before = was.widgets[i];
         return !before || before.key !== w.key || JSON.stringify(before.box) !== JSON.stringify(w.box);
       });
-      note(`  FAIL  ${page.title} (${palette}) changed shape: ${was.widgets.length} widgets -> ${recorded.widgets.length}, ${moved.length} moved`);
+      const reworded = (recorded.fixed ?? []).filter((f, i) => {
+        const before = (was.fixed ?? [])[i];
+        return !before || before.key !== f.key || before.text !== f.text;
+      });
+      note(`  FAIL  ${page.title} (${palette}) changed shape: ${was.widgets.length} widgets -> ${recorded.widgets.length}, ${moved.length} moved, ${reworded.length} reworded`);
       for (const w of moved.slice(0, 4)) note(`          ${w.key} now ${w.box.w}x${w.box.h} at ${w.box.x},${w.box.y}`);
+      for (const f of reworded.slice(0, 4)) note(`          ${f.key} now says "${f.text.slice(0, 70)}"`);
       note(`          look at ${join("docs/console/capture", stem + ".png")}, then re-run with ACCEPT_SHAPE=1`);
       changed += 1;
     }

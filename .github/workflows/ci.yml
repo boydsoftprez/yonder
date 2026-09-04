@@ -94,8 +94,25 @@ jobs:
       # recorded them and this checks the ones for *this* one. A first run on a
       # new platform records a baseline and fails here, which is correct: a
       # baseline nobody reviewed is not a baseline.
+      #
+      # `git status --porcelain`, not `git diff --exit-code`: every committed
+      # reference is a `.darwin.json` and this runner is Linux, so the capture
+      # gate takes its *record* branch and writes `.linux.json` files that are
+      # **untracked** — which `git diff` does not see. It exited 0 on every
+      # run, and neither half of the shape gate was enforced on the only
+      # machine that runs it unattended. Pictures are not checked here at all,
+      # deliberately: they are per-platform pixels and diffing them across
+      # runners is a coin toss about font rasterisation, which is the whole
+      # reason the reference is geometry. The run's own are uploaded below.
       - name: Check the recorded shape is current and committed
-        run: git diff --exit-code docs/console/shape
+        run: |
+          out=$(git status --porcelain docs/console/shape)
+          if [ -n "$out" ]; then
+            printf '%s\n' "$out"
+            echo "::error::the shape references for this platform are not what this run recorded"
+            echo "download the console-pages artifact, review the new shape, and commit it"
+            exit 1
+          fi
       # The unmasked pictures, so a reviewer can look at what the run saw
       # rather than at a description of it.
       - uses: actions/upload-artifact@v4
