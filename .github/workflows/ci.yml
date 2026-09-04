@@ -91,6 +91,48 @@ jobs:
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The whole history, so the step below can ask what this pull
+          # request actually changed rather than guessing from one commit.
+          fetch-depth: 0
+      # This job is four minutes and the other three are one between them, and
+      # it runs on every commit — including the many that cannot possibly move
+      # a pixel. A day of work on this branch spent it repeatedly on changes
+      # to `docs/`.
+      #
+      # The test is deliberately an *exclusion*, not a list of paths that
+      # matter. The obvious filter — run when `flows/` or the widget packages
+      # change — is wrong, because a page's shape is its geometry and its
+      # geometry follows its words: an edit to a sentence in `net/reach`
+      # changes the width of a row. Nearly all of this repository can move a
+      # page, so the only safe question is whether a change is provably unable
+      # to, and documentation is the one honest answer. `docs/console` is
+      # excluded from the exclusion: those are the references themselves.
+      #
+      # The job still runs and still reports, so a required check is never
+      # left pending; it just finishes in seconds when there is nothing here
+      # that could have moved anything.
+      - name: Decide whether anything in this change could move a page
+        id: scope
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "not a pull request; capturing"
+            echo "run=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          base=$(git merge-base "origin/${{ github.base_ref }}" HEAD)
+          changed=$(git diff --name-only "$base"...HEAD)
+          # Anything that is not documentation, or is documentation *of the
+          # console itself*, means capture.
+          if printf '%s\n' "$changed" | grep -qE '^docs/console/'; then
+            echo "the console's own references changed; capturing"
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          elif printf '%s\n' "$changed" | grep -qvE '^docs/'; then
+            echo "something outside docs/ changed; capturing"
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "only documentation outside docs/console changed; skipping the capture"
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
