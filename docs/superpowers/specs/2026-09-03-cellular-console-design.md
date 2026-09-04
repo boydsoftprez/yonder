@@ -239,10 +239,17 @@ Both are behind the administrator password like every other configuration route
 Rule 3: added to `docs/requirements.md` in the same change that implements them. R-CEL ends at
 R-CEL-11, R-UI at R-UI-14, R-SEC and R-CFG at 12.
 
+**The way back in shipped as R-UI-18, not the R-UI-16 this document first gave it.** Two
+defects found on the board while M3b was being built took R-UI-16 and R-UI-17 first — the
+contrast measurement and the seeded form — and IDs are never reused (rule 3), so the way
+back in took the next number. Its row below carries the text now in `docs/requirements.md`,
+which gained a third clause after this was written: a device that cannot establish which
+passphrase its access point is on says so.
+
 | ID | Requirement | P |
 |---|---|---|
 | R-UI-15 | **A change that will revert is visible wherever the operator is, not only where it was made.** While a configuration change is in force and unconfirmed, every surface of the console shows that it is, how long remains before it reverts, and offers the means to confirm or revert it now. The confirmation timer is what makes the device unbrickable, and an operator who has navigated away from the page they changed something on is exactly the operator about to lose a working configuration to a timer they cannot see. The wording states the revert as the thing that recovers them, not as a threat | 1 |
-| R-UI-16 | **The device shows how to get back to it.** The console names the access point, its address and the name it answers to, on the page an operator looks at when something is wrong. **The access-point passphrase is shown only while it is the published default** — that value is deliberately public and is what makes a locked-out operator's way back in usable at all; one the operator has set is theirs, and the interface says it has been changed rather than printing it (R-SEC-01, R-SEC-10) | 2 |
+| R-UI-18 | **The device shows how to get back to it.** The console names the access point, its address and the name it answers to, on the page an operator looks at when something is wrong. **The access-point passphrase is shown only while it is the published default** — that value is deliberately public and is what makes a locked-out operator's way back in usable at all; one the operator has set is theirs, and the interface says it has been changed rather than printing it. **A device that cannot establish which passphrase its own access point is on says so**, rather than naming the published default at an operator for whom it will not work (R-SEC-01, R-SEC-10) | 2 |
 | R-CEL-12 | **The interface that reports a broken link is the one that can repair it.** Where the console shows that a cellular link is not carrying traffic, the settings that would fix it are editable from the same surface, and the change goes through the ordinary confirmation and rollback path so that a second wrong value is recoverable rather than fatal. Reporting a fault an operator must then leave the console to correct is most of the value of reporting it thrown away | 2 |
 
 **R-UI-09 gains a sentence rather than a new ID.** It requires a bounded quantity to be

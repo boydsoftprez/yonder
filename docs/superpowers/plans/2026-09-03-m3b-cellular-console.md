@@ -73,7 +73,7 @@ Every decision is settled there; this is how it gets built.
 | `packages/yonder-core/src/daemon/routes.ts` | Two routes |
 | `packages/yonder-core/src/daemon/server.ts` | Wire them |
 | `flows/flows.json` | Cellular tab, Way out, three Status changes — wiring only |
-| `docs/requirements.md` | R-UI-15, R-UI-16, R-CEL-12; R-UI-09 gains a sentence |
+| `docs/requirements.md` | R-UI-15, R-UI-18, R-CEL-12; R-UI-09 gains a sentence |
 | `docs/console/capture/`, `docs/console/shape/` | Five new shapes |
 
 ---
@@ -1079,7 +1079,7 @@ git commit -s -m "feat(console): a change that will revert says so wherever you 
 
 **Files:**
 - Modify: `flows/flows.json`, `packages/yonder-core/src/daemon/routes.ts`
-- Modify: `docs/requirements.md` — R-UI-16
+- Modify: `docs/requirements.md` — R-UI-18
 - Test: `packages/yonder-core/src/daemon/routes.test.ts`
 
 **Interfaces:**
@@ -1090,6 +1090,10 @@ git commit -s -m "feat(console): a change that will revert says so wherever you 
 is the published default.** ADR-0007 makes that value deliberately public — a per-device one
 could only be read from the device you are locked out of — but one the operator has set is
 theirs, and returning it would be a credential in an API response (R-SEC-10).
+
+**The number this task ships under is R-UI-18**, not the R-UI-16 the spec and this plan
+first gave it: two defects found on the board while M3b was in flight took R-UI-16 and
+R-UI-17 first, and an ID is never reused (rule 3).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1135,20 +1139,20 @@ value when they match and `null` when they do not. Compose `hostname` from
 `system.hostname` plus `.local` and `address` from `network.ap.address` without its prefix
 length.
 
-- [ ] **Step 4: Add the group and R-UI-16**
+- [ ] **Step 4: Add the group and R-UI-18**
 
 A full-width `If you lose this console` group at the bottom of Status, a
 `ui-yonder-databar` of `JOIN`, `PASSPHRASE`, `AT`, `OR`, and the explanatory line beneath.
 When `passphrase` is null the cell reads `changed — the one you set`.
 
-Copy the R-UI-16 row verbatim from §7 of the spec into `docs/requirements.md`.
+Copy the R-UI-18 row verbatim from §7 of the spec into `docs/requirements.md`.
 
 - [ ] **Step 5: Capture and commit**
 
 ```bash
 npm test && npm run lint
 git add flows/flows.json packages/yonder-core/src/daemon/ docs/requirements.md docs/console/
-git commit -s -m "feat(console): the device says how to get back to it — R-UI-16"
+git commit -s -m "feat(console): the device says how to get back to it — R-UI-18"
 ```
 
 ---
@@ -1233,7 +1237,7 @@ git commit -s -m "docs(hardware): M3b on a board, fixing a wrong APN without a t
 | §5 `IF YOU LOSE THIS CONSOLE` | 11 |
 | §5 `APPEARANCE` removed, `THIS BOARD` widened | 9 |
 | §6 the daemon's two routes | 3 |
-| §7 R-UI-15, R-UI-16, R-CEL-12, R-UI-09's sentence | 10, 11, 3, 1 |
+| §7 R-UI-15, R-UI-18, R-CEL-12, R-UI-09's sentence | 10, 11, 3, 1 |
 | §8 shape of the code | File Structure |
 | §9 five shapes captured | 7, 8, 9, 10 |
 
