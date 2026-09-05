@@ -2,7 +2,7 @@
 import { systemRunner, type CommandRunner } from "../../net/runner.js";
 import {
   advertised, gated, noCapabilities, present,
-  type AimCapability, type CameraCapabilities, type ControlRange,
+  type AimCapability, type CameraCapabilities, type Capability, type ControlRange,
 } from "../capability.js";
 import { DESCRIPTORS, sentenceLabel } from "../descriptors.js";
 import { parseControls, parseDevices, parseFormats } from "./parse.js";
@@ -172,6 +172,46 @@ export const CONTROL_MAP = [
   ["focus_automatic_continuous", "autoFocus"],
 ] as const;
 
+/**
+ * Whether one control's own range is gated right now, or plainly present.
+ *
+ * **`range.inactive` is the condition — not "does this key have a gate
+ * configured at all".** `exposure`, `whiteBalance` and `focus` all carry a
+ * `DESCRIPTORS[key].gates` entry permanently, whether or not anything is
+ * gating them *right now*: the ELP's shutter is genuinely live and
+ * adjustable whenever `auto_exposure` holds Manual Mode, and at that moment
+ * `exposure_time_absolute` answers with `inactive: false`. Gating on "a gate
+ * is configured" alone — dropping the `range.inactive` test — would tell an
+ * operator auto exposure has charge of a shutter that is, at that moment,
+ * genuinely theirs to move: the false statement R-UI-20 and R-UI-21 exist to
+ * prevent, and the same class of lie this whole task was written to stop for
+ * the ten controls that had nowhere to live at all.
+ *
+ * **The one recorded fixture cannot prove this function tells the two
+ * conditions apart**, because every gate-eligible control in it is
+ * permanently `inactive` — "has a gate" and "is inactive" are perfectly
+ * correlated in the only device state this repository holds, so a mutant
+ * that gates on gate-presence alone passes every fixture-derived test
+ * unchanged. `camera.test.ts`'s `gateIfInactive` block builds the missing
+ * state by hand — a `ControlRange` with `inactive: false` on a gate-eligible
+ * key — for exactly this reason, and says so in its own comment so a future
+ * reader does not "tidy" it back onto the fixture and restore the blind
+ * spot. A capture from the board with `auto_exposure` in Manual Mode is the
+ * better evidence and will replace it once the bench is reachable again.
+ *
+ * `DESCRIPTORS[key].gates?.[0]` names the gating *capability* key — never
+ * the V4L2 control name, so nothing downstream ever has to map back to
+ * `auto_exposure` — and `by.label` is `sentenceLabel()`'s lowercase form,
+ * because it is read inside a sentence: `exposure: auto exposure has it`,
+ * never the heading form `DESCRIPTORS` uses everywhere else.
+ */
+export function gateIfInactive(range: ControlRange, key: keyof CameraCapabilities): Capability<ControlRange> {
+  const gateKey = range.inactive ? DESCRIPTORS[key].gates?.[0] : undefined;
+  return gateKey
+    ? gated(range, { id: gateKey, label: sentenceLabel(gateKey) })
+    : present(range);
+}
+
 export async function detectCameras(opts: ProbeOptions = {}): Promise<DetectResult> {
   const runner = opts.runner ?? systemRunner;
   const found: Detection[] = [];
@@ -265,21 +305,10 @@ async function probeNode(
     // not separate the two, and inventing the distinction here would be worse
     // than not drawing it.
     if (!range) continue;
-    // R-UI-21: `flags=inactive` on the device's own line means the control
-    // is real and in range, not absent and not a fault — another control has
-    // charge of it right now. Which control that is belongs to the adapter
-    // boundary, not here (`descriptors.ts`'s `DESCRIPTORS[key].gates` says
-    // it, per device), and its first entry is the one the bench camera's
-    // three gated controls each carry. `by.id` is that capability key —
-    // never the V4L2 name a page has no reason to know (nothing downstream
-    // should have to map back to `auto_exposure`) — and `by.label` is
-    // `sentenceLabel()`'s lowercase form because it is read inside a
-    // sentence: `exposure: auto exposure has it`, never the heading
-    // `Auto exposure` `DESCRIPTORS` uses everywhere else.
-    const gateKey = range.inactive ? DESCRIPTORS[key].gates?.[0] : undefined;
-    capabilities[key] = gateKey
-      ? gated(range, { id: gateKey, label: sentenceLabel(gateKey) })
-      : present(range);
+    // R-UI-21: gating logic (and why `inactive`, not "a gate is configured",
+    // is the condition) lives on `gateIfInactive` itself, beside the test
+    // that proves the direction the one recorded fixture cannot.
+    capabilities[key] = gateIfInactive(range, key);
   }
 
   // R-CAM-14: this bench camera lists `pan_absolute` and `tilt_absolute`,

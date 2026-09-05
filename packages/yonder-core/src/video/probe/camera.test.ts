@@ -2,10 +2,10 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { detectCameras, isHardwareCodec, probeCamera, type ProbeOptions } from "./camera.js";
+import { detectCameras, gateIfInactive, isHardwareCodec, probeCamera, type ProbeOptions } from "./camera.js";
 import type { ByPathEntry } from "./bypath.js";
 import type { CommandRunner } from "../../net/runner.js";
-import type { CameraCapabilities } from "../capability.js";
+import type { CameraCapabilities, ControlRange } from "../capability.js";
 
 const fixture = (name: string) =>
   readFileSync(join(import.meta.dirname, "fixtures", name), "utf8");
@@ -357,5 +357,52 @@ describe("the bench camera's controls", () => {
     expect(caps.exposure.by.id).toBe("autoExposure");
     expect(caps.whiteBalance.by.id).toBe("autoWhiteBalance");
     expect(caps.focus.by.id).toBe("autoFocus");
+  });
+});
+
+/**
+ * **Fix round 1 (coordinator review).** A mutation caught what the tests
+ * above did not: drop the `range.inactive` test from `gateIfInactive`'s
+ * condition — gating whenever a key merely *has* a gate configured — and
+ * every test above, and every test in `controls.test.ts`, stays green. The
+ * one recorded fixture cannot tell the two conditions apart: `exposure`,
+ * `whiteBalance` and `focus` are the only gate-eligible keys, and all three
+ * are permanently `inactive` in it, so "has a gate" and "is inactive" are
+ * perfectly correlated in the only device state this repository holds.
+ *
+ * **This state is built by hand, not read from the fixture, because the
+ * fixture cannot supply it** — every gate-eligible control it carries is
+ * always inactive. Do not "tidy" this back onto `capabilitiesFrom` or the
+ * committed fixture: that fixture is real recorded output and is left
+ * untouched deliberately (see its own file). A second capture from the
+ * board, taken with `auto_exposure` in Manual Mode, is the better evidence
+ * and should replace this hand-built range the next time the bench is
+ * reachable — this is a stand-in for that, not a preference for one.
+ */
+describe("gateIfInactive", () => {
+  it("leaves a gate-eligible control present when the device does not report it inactive", () => {
+    // A shutter genuinely live and adjustable right now: the same shape as
+    // the fixture's own exposure_time_absolute line, but with `inactive:
+    // false` — the state auto_exposure in Manual Mode would produce, and the
+    // one condition the committed fixture never exercises.
+    const liveShutter: ControlRange = {
+      min: 1, max: 10000, step: 1, default: 156, current: 156, inactive: false,
+    };
+    expect(gateIfInactive(liveShutter, "exposure")).toEqual({ state: "present", value: liveShutter });
+  });
+
+  it("still gates the same control once the device reports it inactive", () => {
+    // The direction the fixture-derived tests above already prove, repeated
+    // here at the unit level so both branches of the same condition are
+    // exercised beside each other rather than one living only in the
+    // fixture-derived suite and the other only here.
+    const heldShutter: ControlRange = {
+      min: 1, max: 10000, step: 1, default: 156, current: 156, inactive: true,
+    };
+    expect(gateIfInactive(heldShutter, "exposure")).toEqual({
+      state: "gated",
+      by: { id: "autoExposure", label: "auto exposure" },
+      value: heldShutter,
+    });
   });
 });
