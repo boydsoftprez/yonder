@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import YonderAnnunciator from "../src/ui/YonderAnnunciator.vue";
 import YonderBudget from "../src/ui/YonderBudget.vue";
+import YonderColumn from "../src/ui/YonderColumn.vue";
 import YonderDataBar from "../src/ui/YonderDataBar.vue";
 import YonderFacts from "../src/ui/YonderFacts.vue";
 import YonderGauge from "../src/ui/YonderGauge.vue";
@@ -181,6 +182,14 @@ export const SPECIMENS = [
     note: "R-UI-27: Yonder ships Cam 1, Cam 2 — never a guess at a mounting, because that is a guess about somebody else's aircraft. Renamed here to Nose, the same camera Budget's own specimen shows oversubscribing this aircraft's uplink.",
     component: YonderTextField,
     props: { label: "Name", value: "Nose", placeholder: "Cam 1", max: 24 },
+    payload: undefined,
+    part: true,
+  },
+  {
+    title: "Column — stream, to the ground station",
+    note: "The right-hand qualifier (§6) is what tells two columns of otherwise identical controls apart: this one and Preview's own share the same fields (bitrate mode, floor, ceiling), and the qualifier is the only thing on screen saying which camera output each one is steering. The select tone marks it as the destination currently in view, the same cyan this library already uses for a live choice.",
+    component: YonderColumn,
+    props: { legend: "Stream", qualifier: "to the ground station", tone: "select" },
     payload: undefined,
     part: true,
   },
