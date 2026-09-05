@@ -78,6 +78,9 @@ const TONE_CLASS = {
     advertised: 'why-advertised',
     gated: 'why-gated'
 }
+/** One counter for the module, so every picker on a page gets its own id. */
+let nextPickerId = 0;
+
 export default {
     name: 'YonderPicker',
     props: {
@@ -88,7 +91,7 @@ export default {
         reason: { type: String, default: '' }
     },
     emits: ['change'],
-    data: () => ({ focused: false }),
+    data: () => ({ focused: false, uid: nextPickerId++ }),
     computed: {
         /**
          * **A real `<label for>`, not a span beside a control.** `aria-label`
@@ -100,8 +103,15 @@ export default {
          *
          * Unique per instance, because a deck draws many of these at once and
          * duplicate ids would associate every label with the first select.
+         *
+         * The counter is module-level and the id is taken once in `data()`.
+         * This reached for `this._uid` first, which is Vue 2's and does not
+         * exist here — it warned on every mount and fell through to a random
+         * string. Task 22's implementer found it while composing sixteen of
+         * these into one deck, which is exactly the situation the uniqueness
+         * is for.
          */
-        selectId () { return `y-pick-${this._uid ?? this.$?.uid ?? Math.random().toString(36).slice(2)}` },
+        selectId () { return `y-pick-${this.uid}` },
         /**
          * The overlay text shown under the real, transparent `<select>` —
          * the current value's own label, so the drawn control reads the
