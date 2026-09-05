@@ -178,10 +178,13 @@ export interface CameraCapabilities {
    * `contrast`, `white_balance_temperature`, `exposure_time_absolute`,
    * `pan_absolute`, `tilt_absolute`, `focus_absolute` and `zoom_absolute`
    * already had a field above, which leaves these ten with nowhere to live
-   * (R-CTL-11 … R-CTL-14). **Modelled only** — `probe/camera.ts`'s
-   * `CONTROL_MAP` does not read any of them yet and `video/controls.ts`'s
-   * `CONTROL_NAMES` does not write them, so every one of these reports
-   * `not-offered` until a later task teaches the probe their V4L2 names.
+   * (R-CTL-11 … R-CTL-14). `probe/camera.ts`'s `CONTROL_MAP` reads all ten,
+   * so a camera that answers them reports `present` rather than the
+   * `not-offered` this file defaults them to — which asserts the device does
+   * not have the control, and would be a page telling an operator their
+   * camera is short of ten controls it has. `video/controls.ts`'s
+   * `CONTROL_NAMES` does not write them yet, so they are readable and not
+   * yet settable.
    *
    * **Ordered as the camera reports them, not alphabetically**, so a diff
    * against a `v4l2-ctl` dump reads by eye — skipping the eight names above

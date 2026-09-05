@@ -571,7 +571,11 @@ describe("the bench camera's controls", () => {
 `capabilitiesFrom` stubs the runner the way the file already does for
 `v4l2-ctl --list-ctrls`.
 
-- [ ] **Step 2–4: Fail; implement; pass.** The `CONTROL_MAP`/`CONTROL_NAMES` cross-check goes red here — **leave it red until Task 9; it is the alarm it was written to raise.**
+- [ ] **Step 2–4: Fail; implement; pass.** The `CONTROL_MAP`/`CONTROL_NAMES`
+  cross-check stays **green** through this task, and that is not it passing
+  vacuously by luck: it walks `CONTROL_NAMES` forward into `CONTROL_MAP`, so
+  growing the map alone cannot trip it. It bites in Task 9, when the names
+  gain entries that must agree. Do not force it red.
 - [ ] **Step 5: Mutation-check** — remove the `inactive → gated` branch: red; remove the pan/tilt block: red. Restore.
 - [ ] **Step 6: Commit** — `git commit -s -m "feat(video): probe the controls the model gained, and report the aim this camera advertises — R-CAM-14"`
 
@@ -622,7 +626,12 @@ it("accepts any int for a menu control at the schema", () => { expect(CameraCont
 
 **Interfaces:**
 - Produces: `CONTROL_NAMES` gains the new entries (the `satisfies` clause
-  enforces it). `applyControls` refuses a `not-offered` control, a `gated`
+  enforces it). **Its cross-check with `CONTROL_MAP` gains the other
+  direction**: today it walks the names forward into the map, so a control
+  the probe reads and nothing can write passes unnoticed. Task 8 gives every
+  probed control a config field, so from here the two lists should cover the
+  same controls, and a missing pair is a control an operator can see and
+  cannot set. Assert both directions and name the offending key. `applyControls` refuses a `not-offered` control, a `gated`
   control naming its gate, an `advertised` control with its reason, and a
   menu value not among the offered entries; sends a boolean as `1`/`0`; and
   after a gate control is written, **re-probes the keys it gates** and returns
