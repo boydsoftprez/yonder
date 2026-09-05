@@ -680,26 +680,25 @@ export const ConfigSchema = z.object({
     claim(cam.id, i, "a camera's stream is served at its id");
     claim(`${cam.id}-preview`, i, "a camera's preview is served at its id plus -preview");
     for (const [j, out] of cam.outputs.entries()) {
-      // The class of fault a confirmation window never catches: today's
-      // port-carrying outputs are UDP against a TCP console so nothing
-      // collides, and the apply confirms. The bind race happens on the next
+      // The class of fault a confirmation window never catches: an SRT output
+      // is UDP against a TCP console, so on the day it is applied nothing
+      // collides and the apply confirms. The bind race happens on the next
       // boot, by which time nobody is watching a countdown.
       //
-      // **Deliberately blind to `enabled`** — for `srt`, which binds this
-      // port on this device. A stopped SRT output carrying `ui.port` is
-      // refused now, at a keyboard, rather than when somebody switches it on:
-      // that may be in flight, and the console it would collide with is the
-      // only way left to reach the aircraft. Rule 6.
+      // **Only the kinds that bind here**, scoped exactly as the paragraph
+      // below is and for the same reason. Two kinds carry a port and only
+      // `srt` opens a socket on this board — `video/pipeline.ts` would give it
+      // `srtsink uri=srt://:<port>`, which binds `0.0.0.0`. An `rtp` output's
+      // port is a port on the *ground station*, reached as
+      // `udpsink host=… port=…`, and binds nothing on this device, so it
+      // cannot collide with the console whatever number it carries; refusing
+      // it one was refusing a configuration that works.
       //
-      // **For `rtp` this refusal is a false positive**, and the paragraph
-      // below says why in its own words: an `rtp` output's port is a port on
-      // the *ground station* and its `udpsink` binds nothing here, so it
-      // cannot collide with the console whatever its number. Narrowing this
-      // check to the kinds that bind locally is a change to what
-      // configurations are accepted and wants its own test and review, so it
-      // is recorded rather than done in passing. Do not read the `enabled`
-      // reasoning above as covering `rtp` — it does not.
-      if ("port" in out && out.port === cfg.ui.port) {
+      // **Deliberately blind to `enabled`.** A stopped SRT output carrying
+      // `ui.port` is refused now, at a keyboard, rather than when somebody
+      // switches it on: that may be in flight, and the console it would
+      // collide with is the only way left to reach the aircraft. Rule 6.
+      if (out.kind === "srt" && out.port === cfg.ui.port) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["cameras", i, "outputs", j, "port"],

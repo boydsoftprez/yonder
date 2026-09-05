@@ -348,10 +348,14 @@ describe("cameras", () => {
     expect(JSON.stringify(r.error?.issues)).toContain("cam0");
   });
 
-  it("refuses an output on the console's own port", () => {
+  it("refuses an srt output on the console's own port", () => {
     // A bind race after a reboot is a configuration that confirms while it looks
     // fine and bites on the next boot. The confirmation window never catches it,
     // because on the day it is applied nothing collides.
+    //
+    // `srt` because `srt` is the one port-carrying kind that opens a socket on
+    // this board, and the check is scoped to it. Narrow that scope any further
+    // and this test is what goes red.
     const r = ConfigSchema.safeParse({
       version: 1, network: { ap: { psk: { secret: "ap_psk" } } },
       ui: { port: 3000, editor: {} },
@@ -362,6 +366,24 @@ describe("cameras", () => {
     });
     expect(r.success).toBe(false);
     expect(JSON.stringify(r.error?.issues)).toContain("ui.port");
+  });
+
+  it("leaves a ground station's port alone when it matches the console's", () => {
+    // The same reasoning as the media-server check below, applied to the same
+    // pair of kinds: an `rtp` output's port is a port on the *other* machine —
+    // `udpsink host=… port=…` sends there and binds nothing on this device — so
+    // it cannot collide with the console whatever number it carries, and
+    // refusing it would refuse a configuration that works.
+    const r = ConfigSchema.safeParse({
+      version: 1, network: { ap: { psk: { secret: "ap_psk" } } },
+      ui: { port: 3000, editor: {} },
+      cameras: [{
+        id: "cam0", name: "Nose", source: "usb", device: "usb-1",
+        outputs: [{ kind: "rtp", host: "192.168.1.50", port: 3000 }],
+      }],
+    });
+    expect(JSON.stringify(r.error?.issues ?? [])).not.toContain("ui.port");
+    expect(r.success).toBe(true);
   });
 
   it("refuses two cameras that would publish to one media path", () => {
