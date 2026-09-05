@@ -18,9 +18,16 @@ body { margin:0; background: var(--yonder-background, #0a0c0f); color: var(--yon
   min-height: 62px; display: flex; align-items: center; }
 
 /* ---- the draft deck ------------------------------------------------ */
-.d-panel { border:1px solid var(--yonder-divider,#2b333c); border-radius:5px; overflow:hidden;
+/* No `overflow:hidden` here any more. It used to clip `.d-rail` to this
+   panel's own box for corner-rounding — but that box has no fixed height,
+   so it also clipped the rail's *sticky* travel to nothing: a sticky
+   element can only move within a containing block taller than itself, and
+   `overflow:hidden` on the panel made the panel itself that containing
+   block. Corner-rounding moved to `.d-rail`, the element actually sitting at
+   the bottom edge; nothing above it needs to clip anything. */
+.d-panel { border:1px solid var(--yonder-divider,#2b333c); border-radius:5px;
   background: var(--yonder-background,#0a0c0f); }
-.d-placard { display:flex; justify-content:space-between; padding:10px 15px;
+.d-placard { display:flex; justify-content:space-between; padding:7px 15px;
   font-size:10px; letter-spacing:.2em; text-transform:uppercase; color: var(--yonder-label,#7f8a95); }
 .d-placard b { color: var(--yonder-value,#fff); font-weight:600; }
 .d-display { background: var(--yonder-display,#04060a); border-top:1px solid var(--yonder-divider,#2b333c); }
@@ -39,7 +46,17 @@ body { margin:0; background: var(--yonder-background, #0a0c0f); color: var(--yon
 .d-out .r { font-size:10.5px; color: var(--yonder-label,#7f8a95); }
 .d-out .r.ok { color: var(--yonder-good,#35d06a); }
 .d-out .r.warn { color: var(--yonder-waiting,#ffcf28); }
-.d-rail { border-top:1px solid var(--yonder-divider,#2b333c); padding:10px 15px; }
+/* The sticky rail (§5: "The rail remains reachable while the deck scrolls").
+   Sticks to the bottom of the viewport for as long as `.d-display` (its
+   containing block) is still in view, settling at its normal flow position
+   — flush with the panel's own bottom edge — once the page is scrolled all
+   the way to the end. Its own background makes it opaque while stuck, so
+   scrolled column content does not show through the padding around the
+   keys; its own bottom radius is what used to be the panel's, now that
+   nothing clips it there for free. */
+.d-rail { border-top:1px solid var(--yonder-divider,#2b333c); padding:10px 15px;
+  position:sticky; bottom:0; z-index:2; background: var(--yonder-display,#04060a);
+  border-radius:0 0 4px 4px; }
 .d-wide { grid-column: 1 / -1; }
 .g-wide { grid-column: 1 / -1; margin-bottom: 16px; }
 .g-stage--deck { display:block; padding:0; background:transparent; }
@@ -99,6 +116,13 @@ body { margin:0; background: var(--yonder-background, #0a0c0f); color: var(--yon
 
 /* the aim column's readouts belong beside the dial, not at the pane's edge */
 .d-cols .d-aim { max-width: 230px; }
+/* The rest of the viewport-contract trim (see DraftShell.vue's `.d-main`):
+   Capture is first specifically so it is above the fold at 1440×900, and
+   its own column's top padding and heading margin were the remaining 18px
+   of the gap the fold measurement found. */
+.d-cols .d-col { padding-top: 9px; }
+.d-cols .d-h { margin-bottom: 8px; }
+.d-cols .d-shutter { margin-bottom: 9px; }
 .d-capkey { margin-bottom:16px; }
 .d-capkey__n { max-width:230px; line-height:1.4; }
 .d-unproven { position:static; display:inline-block; margin-top:4px; }
@@ -147,7 +171,10 @@ body { margin:0; background: var(--yonder-background, #0a0c0f); color: var(--yon
 .d-rail { padding:12px 18px; }
 
 /* one shutter key, red when it is recording */
-.d-shutter { margin-bottom:13px; }
+/* `position:relative`: the captures popover (DraftCaptures.vue) anchors to
+   this, not to some distant ancestor — it needs a positioned container no
+   further away than the key it is reachable "beside". */
+.d-shutter { margin-bottom:13px; position:relative; }
 .d-shutter__b { display:inline-flex; align-items:center; gap:9px; font:inherit; font-size:11.5px;
   letter-spacing:.13em; text-transform:uppercase; padding:0 18px; min-height:38px; border-radius:3px;
   cursor:pointer; background:transparent; border:1px solid var(--yonder-divider,#2b333c);
@@ -165,6 +192,25 @@ body { margin:0; background: var(--yonder-background, #0a0c0f); color: var(--yon
   padding:0 16px; min-height:34px; border-radius:3px; cursor:pointer; background:transparent;
   border:1px solid var(--yonder-divider,#2b333c); color: var(--yonder-value,#fff); }
 .d-recentre:hover { border-color: var(--yonder-select,#2ad4f0); color: var(--yonder-select,#2ad4f0); }
+
+/* the captures panel's own reveal — beside Capture, on Live and Setup */
+.d-caps-toggle { display:block; margin-top:9px; font:inherit; font-size:10.5px; letter-spacing:.08em;
+  text-transform:uppercase; padding:0; cursor:pointer; background:transparent; border:0;
+  color: var(--yonder-select,#2ad4f0); }
+.d-caps-toggle:hover { text-decoration:underline; }
+
+/* Setup's pending-changes listing (§7's shared draft) */
+.d-pending { border-top:1px solid var(--yonder-divider,#2b333c); padding:13px 18px; }
+.d-pending .d-h { display:flex; justify-content:space-between; gap:10px; font-size:11px; letter-spacing:.16em;
+  text-transform:uppercase; color: var(--yonder-label,#7f8a95); margin-bottom:10px; }
+.d-pending .d-h em { font-style:normal; letter-spacing:.06em; }
+.d-pending__row { display:flex; align-items:baseline; gap:14px; padding:5px 0; font-size:12.5px;
+  border-top:1px solid color-mix(in srgb, var(--yonder-divider,#2b333c) 55%, transparent); flex-wrap:wrap; }
+.d-pending__row:first-of-type { border-top:0; }
+.d-pending__row .l { flex:0 0 180px; font-size:10.5px; letter-spacing:.08em; text-transform:uppercase;
+  color: var(--yonder-label,#7f8a95); }
+.d-pending__row .v { flex:0 0 auto; font-weight:600; font-variant-numeric:tabular-nums; color: var(--yonder-select,#2ad4f0); }
+.d-pending__row .i { flex:1 1 220px; font-size:11px; color: var(--yonder-label,#7f8a95); text-align:right; }
 
 .d-fact2.over b { color: var(--yonder-waiting,#ffcf28); }
 .d-fact2 em { font-style:normal; text-transform:none; letter-spacing:0; font-size:11px; color: var(--yonder-waiting,#ffcf28); }

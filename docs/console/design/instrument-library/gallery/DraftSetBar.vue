@@ -1,5 +1,7 @@
-<!-- Interactive. One track, two marks: where the device is, and what was asked
-     for. Drag or tap; it snaps to the driver's own step and clamps to its bounds. -->
+<!-- Interactive. Up to three marks on one track: where the device is, what was
+     asked for and has not yet arrived, and — hollow, the third — what a Live
+     edit has drafted but not applied. Drag or tap; it snaps to the driver's
+     own step and clamps to its bounds. -->
 <template>
   <div class="d-field" :class="'is-' + state">
     <div class="d-top">
@@ -12,8 +14,10 @@
       <i class="d-fill" :style="{ width: pct(displayed) }" />
       <i v-if="showCommanded" class="d-cmd" :style="{ left: pct(commanded) }" />
       <i v-if="state === 'present'" class="d-ptr" :style="{ left: pct(actual) }" />
+      <i v-if="pending !== null" class="d-pend" :style="{ left: pct(pending) }" />
     </div>
     <div v-if="fine" class="d-fine">{{ fine }}</div>
+    <div v-if="pending !== null" class="d-pend-note">Pending &middot; apply on Setup</div>
     <div v-if="reason" class="d-why" :class="'why-' + state">{{ reason }}</div>
   </div>
 </template>
@@ -31,6 +35,8 @@ export default {
     actual: { type: Number, default: 0 },
     /** What was asked for and has not arrived. null when they agree. */
     commanded: { type: Number, default: null },
+    /** A Live edit not yet applied on Setup (§7). null when there is none. */
+    pending: { type: Number, default: null },
     state: { type: String, default: 'present' },
     reason: { type: String, default: '' },
     fine: { type: String, default: '' }
@@ -90,6 +96,12 @@ export default {
   background: var(--yonder-value,#fff); pointer-events:none; }
 .d-cmd { position:absolute; top:-5px; width:2px; height:20px; margin-left:-1px;
   background: var(--yonder-waiting,#ffcf28); pointer-events:none; }
+/* The third mark: hollow, so it reads as "requested" rather than "measured"
+   even sitting right beside the solid actual/commanded ticks. */
+.d-pend { position:absolute; top:-4px; width:8px; height:8px; margin-left:-4px;
+  border-radius:50%; border:2px solid var(--yonder-select,#2ad4f0);
+  background: var(--yonder-display,#04060a); pointer-events:none; }
+.d-pend-note { font-size:10.5px; margin-top:4px; color: var(--yonder-select,#2ad4f0); }
 .d-fine { font-size:10px; letter-spacing:.04em; color: var(--yonder-label,#7f8a95);
   font-variant-numeric: tabular-nums; }
 .is-gated .d-trk { background:transparent; border:1px dashed var(--yonder-divider,#2b333c);

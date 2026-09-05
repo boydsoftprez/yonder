@@ -65,5 +65,10 @@ export default {
 .d-nav__sect { font-size:9.5px; letter-spacing:.2em; text-transform:uppercase; color: var(--yonder-label,#7f8a95);
   opacity:.7; padding:16px 22px 6px; }
 .d-nav__i.sub { padding-left:34px; }
-.d-main { flex:1; min-width:0; padding:16px; }
+/* Vertical padding trimmed from 16px (kept on the sides): the viewport
+   contract (§5) measures the picture, Aim and Capture against 900px of real
+   estate, and Capture's readouts landed 18px past it before this. Measured,
+   not eyeballed — docs/console/design/instrument-library/gallery/shot6.mjs
+   prints the fold numbers this and the .d-col trims in gallery.css answer. */
+.d-main { flex:1; min-width:0; padding:10px 16px; }
 </style>

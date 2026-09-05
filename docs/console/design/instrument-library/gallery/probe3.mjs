@@ -2,7 +2,11 @@ import { chromium } from "playwright";
 const b = await chromium.launch(); const p = await b.newPage({ viewport: { width: 1400, height: 900 }, deviceScaleFactor: 2 });
 const errs = []; p.on("pageerror", e => errs.push(e.message));
 await p.goto("http://127.0.0.1:18930/index.html", { waitUntil: "networkidle" });
-await p.getByRole("button", { name: /pocket 2/i }).click(); await p.waitForTimeout(300);
+// See shot2.mjs: neutralises a Chromium screenshot-only artifact with the
+// sticky rail on a tall `.d-shell` capture, verified correct under real
+// scrolling separately. Capture-session only.
+await p.addStyleTag({ content: ".d-rail { position: static !important; }" });
+await p.locator(".d-nav__i", { hasText: "Cam 2" }).click(); await p.waitForTimeout(300);
 const state = async () => (await p.locator(".d-state").innerText()).replace(/\n/g, " / ");
 const step = async () => (await p.locator(".d-step").count()) ? await p.locator(".d-step").innerText() : "(none)";
 console.log("good :", await state(), "|", await step());

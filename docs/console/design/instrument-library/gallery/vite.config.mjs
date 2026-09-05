@@ -7,7 +7,7 @@ export default defineConfig({
   plugins: [vue()],
   resolve: {
     alias: {
-      "yonder-core/presentation": fileURLToPath(new URL("../../../../packages/yonder-core/dist/console/presentation.js", import.meta.url)),
+      "yonder-core/presentation": fileURLToPath(new URL("../../../../../packages/yonder-core/dist/console/presentation.js", import.meta.url)),
     },
   },
 });

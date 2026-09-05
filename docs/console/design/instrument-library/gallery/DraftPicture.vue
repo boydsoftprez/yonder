@@ -7,6 +7,8 @@
        @pointerup="up" @pointercancel="up" @pointerleave="up">
     <div class="d-sky" /><div class="d-gnd" />
     <div v-if="recording" class="d-rec"><i />REC 00:13:47</div>
+    <div v-if="flashing" class="d-flash" />
+    <div v-if="flashing" class="d-saved"><i />Saved &middot; to {{ savedTo }}</div>
     <!-- what this picture is, right now. On the picture and not in the strip,
          because in Cockpit the picture is there and the deck is not. -->
     <div v-if="preview" class="d-state" :class="'tone-' + preview.tone" :style="{ top: recording ? '48px' : '10px' }">
@@ -36,7 +38,7 @@
       <template v-if="aimable">
         <span class="k">PAN</span>{{ fmt(pan, 1) }}&deg;<span class="k sp">TILT</span>{{ fmt(tilt, 1) }}&deg;
       </template>
-      <span class="k" :class="{ sp: aimable }">ZOOM</span>{{ (1 + zoom / 60).toFixed(1) }}&times;
+      <span class="k" :class="{ sp: aimable }">ZOOM</span>{{ zoomText }}
       <span v-if="expLabel" class="k sp">{{ expLabel }}</span>{{ expValue }}
     </div>
 
@@ -49,16 +51,33 @@ const MAX_RATE = 30;
 export default {
   name: 'DraftPicture',
   props: {
-    zoom: { type: Number, default: 0 },
+    /** The camera's own fact, already formatted — device steps with no
+        unit, or a calibrated "2.0×" — decided once by the deck from the
+        report, never a ratio this picture invents for itself (R-CTL-14). */
+    zoomText: { type: String, default: '' },
     expLabel: { type: String, default: '' }, expValue: { type: String, default: '' },
     pan: { type: Number, default: 0 }, tilt: { type: Number, default: 0 },
     slewPan: { type: Number, default: 0 }, slewTilt: { type: Number, default: 0 },
     aimable: { type: Boolean, default: false },
     recording: { type: Boolean, default: false },
+    /** A timestamp: a new value is a photo just taken (camera-view/stills-
+        and-snapshot.html's white flash — "a deliberate confirmation that
+        something happened at the moment you pressed", R-UI-05). */
+    flash: { type: Number, default: 0 },
+    savedTo: { type: String, default: '' },
     preview: { type: Object, default: null }
   },
   emits: ['slew', 'stop'],
-  data: () => ({ pushing: false, hx: 470, hy: 150, k: 0, ox: 470, oy: 150 }),
+  data: () => ({ pushing: false, hx: 470, hy: 150, k: 0, ox: 470, oy: 150, flashing: false }),
+  watch: {
+    flash (v) {
+      if (!v) return
+      this.flashing = true
+      clearTimeout(this._flashTimer)
+      this._flashTimer = setTimeout(() => { this.flashing = false }, 1200)
+    }
+  },
+  beforeUnmount () { clearTimeout(this._flashTimer) },
   methods: {
     fmt (v, p = 0) { return (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(p) },
     at (e) {
@@ -107,6 +126,12 @@ export default {
   background:rgba(4,6,10,.78); border:1px solid var(--yonder-bad,#ff4034);
   color: var(--yonder-bad,#ff4034); pointer-events:none; }
 .d-rec i { width:7px; height:7px; border-radius:50%; background: var(--yonder-bad,#ff4034); }
+.d-flash { position:absolute; inset:0; z-index:7; background:#fff; opacity:.55; pointer-events:none; }
+.d-saved { position:absolute; z-index:8; left:50%; top:50%; transform:translate(-50%,-50%);
+  display:flex; align-items:center; gap:7px; font-size:12px; letter-spacing:.08em; text-transform:uppercase;
+  padding:7px 13px; border-radius:2px; background:rgba(4,6,10,.82); border:1px solid var(--yonder-select,#2ad4f0);
+  color: var(--yonder-select,#2ad4f0); pointer-events:none; white-space:nowrap; }
+.d-saved i { width:6px; height:6px; border-radius:50%; background: var(--yonder-select,#2ad4f0); }
 .d-state { position:absolute; z-index:6; left:10px; display:flex; flex-direction:column; gap:2px;
   padding:7px 10px; border-radius:2px; background:rgba(4,6,10,.8); border:1px solid rgba(255,255,255,.12);
   font-size:11.5px; font-variant-numeric:tabular-nums; color:#fff; pointer-events:none; max-width:360px; }

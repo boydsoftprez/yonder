@@ -2,10 +2,10 @@ import { createApp, h, ref, defineComponent } from "vue";
 import Shell from "./DraftShell.vue";
 import Index from "./DraftIndex.vue";
 import { DraftDeck } from "./deck.js";
-import Budget from "../../../../packages/node-red-dashboard-2-yonder/src/ui/YonderBudget.vue";
-import Gauge from "../../../../packages/node-red-dashboard-2-yonder/src/ui/YonderGauge.vue";
-import SoftKeys from "../../../../packages/node-red-dashboard-2-yonder/src/ui/YonderSoftKeys.vue";
-import "../../../../packages/node-red-dashboard-2-yonder/src/ui/tokens.css";
+import Budget from "../../../../../packages/node-red-dashboard-2-yonder/src/ui/YonderBudget.vue";
+import Gauge from "../../../../../packages/node-red-dashboard-2-yonder/src/ui/YonderGauge.vue";
+import SoftKeys from "../../../../../packages/node-red-dashboard-2-yonder/src/ui/YonderSoftKeys.vue";
+import "../../../../../packages/node-red-dashboard-2-yonder/src/ui/tokens.css";
 import "./gallery.css";
 
 const messages = {};
@@ -122,6 +122,12 @@ app.provide("$socket", { on () {}, off () {},
     if (event !== "widget-action") return;
     if (msg?.payload === "live" || msg?.payload === "setup")
       window.dispatchEvent(new CustomEvent("yonder-mode", { detail: msg.payload }));
+    // Apply and Discard are the deck's own rail keys (id "deck-keys"), not
+    // the harness's — dispatched the same way as the mode switch above so
+    // DraftDeck can hear a press without the harness knowing what a "draft"
+    // is. Every other rail action (Detect again, Add by address, the
+    // Cameras page's own Apply) has nothing listening and stays inert.
+    else window.dispatchEvent(new CustomEvent("yonder-action", { detail: msg.payload }));
   } });
 app
   .mixin({ computed: { $store: () => store } })
