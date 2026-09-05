@@ -1123,7 +1123,21 @@ it("draws the haloed puck at the centre at rest and under the pointer while push
 **Files:** `ui/draft.ts` + `draft.test.ts`
 
 **Interfaces:**
-- Produces: `createDraftStore(): { get(camera), set(camera, path, value), pending(camera, applied): { path, requested }[], clear(camera), snapshot(), restore(snapshot) }` — **`pending` takes the applied state and filters against it at read time**, so an edit that matches what is applied stops being pending the moment that becomes true, however it became true. Comparing at `set` time instead freezes the answer at the keystroke: a draft that later matches a re-probed or externally applied value would keep offering to apply a change that changes nothing — kept in Dashboard's client store under `yonder.draft`; survives page switches for the session; **never posts to the socket**.
+- Produces: `createDraftStore(): { get(camera), set(camera, path, value), pending(camera, applied): { path, requested }[], clear(camera), snapshot(), restore(snapshot) }` — **`pending` takes the applied state and filters against it at read time**, so an edit that matches what is applied stops being pending the moment that becomes true, however it became true. Comparing at `set` time instead freezes the answer at the keystroke: a draft
+  that later matches a re-probed or externally applied value would keep
+  offering to apply a change that changes nothing.
+
+  **An edit survives being matched, and that is the decision rather than an
+  accident.** Filtering at read time means the record is still there when
+  applied drifts away again, so an operator's request reappears as pending
+  with its original value. I claimed the opposite when asking for this change
+  and Task 21's implementer disproved it empirically rather than taking my
+  word. Having seen it, keep it: the operator asked for that value and never
+  withdrew it, and it was some other agent — a re-probe, another operator, a
+  mode change — that briefly made it moot. Dropping their instruction because
+  something else coincidentally satisfied it would be the console discarding a
+  request nobody cancelled, which is worse than a request that waits. `clear`
+  is how an operator withdraws one, and Discard is how they reach it — kept in Dashboard's client store under `yonder.draft`; survives page switches for the session; **never posts to the socket**.
 
 - [ ] **Step 1: Write the failing tests** — a set is pending until cleared; pending survives `snapshot`/`restore` (a page switch); per camera; `clear` empties; a set never calls `emit` (a spy stays uncalled).
 - [ ] **Step 2–4: Fail; implement; pass; mutation-check** — call `emit` on set: the never-posts test goes red. Restore.
