@@ -14,6 +14,7 @@ import YonderPositionGauge from "../src/ui/YonderPositionGauge.vue";
 import YonderReadout from "../src/ui/YonderReadout.vue";
 import YonderSegmented from "../src/ui/YonderSegmented.vue";
 import YonderSetBar from "../src/ui/YonderSetBar.vue";
+import YonderShutter from "../src/ui/YonderShutter.vue";
 import YonderSoftKeys from "../src/ui/YonderSoftKeys.vue";
 import YonderSparkline from "../src/ui/YonderSparkline.vue";
 import YonderStateOverlay from "../src/ui/YonderStateOverlay.vue";
@@ -419,6 +420,30 @@ export const SPECIMENS = [
       ],
       downlink: "3.9 Mb/s",
     },
+    payload: undefined,
+    part: true,
+  },
+  {
+    title: "Shutter — video mode, idle",
+    note: "R-CAM-17: the ELP has no recorder of its own, so a press records to the board — the destination line says so before anything is recording, not only once it starts.",
+    component: YonderShutter,
+    props: { mode: "video", destination: "to this board · 41 GB free" },
+    payload: undefined,
+    part: true,
+  },
+  {
+    title: "Shutter — recording, lit and counting",
+    note: "§8.3: lit from the moment recording.since says it started, not from when this page happened to open — the elapsed reading keeps counting on its own for as long as this gallery tab stays open, the same live timer YonderPicture's own age reading uses.",
+    component: YonderShutter,
+    props: { mode: "video", recording: { since: Date.now() - 47000 }, destination: "to this board · 41 GB free" },
+    payload: undefined,
+    part: true,
+  },
+  {
+    title: "Shutter — a press pending, photo mode",
+    note: "Coordinator resolution 7: this is the one control in the whole library that starts something on the aircraft, so while a press awaits the device's own acknowledgement the key is disabled outright rather than merely styled to look busy — a second press here must be impossible to make by accident, not just discouraged.",
+    component: YonderShutter,
+    props: { mode: "photo", pending: true },
     payload: undefined,
     part: true,
   },
