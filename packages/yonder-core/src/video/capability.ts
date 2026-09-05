@@ -198,16 +198,33 @@ export function noCapabilities(): CameraCapabilities {
  * `aim: none · zoom: none` explains why that camera's page has no Aim group
  * before anyone goes looking for one — which is R-UI-20 applied a level up
  * from the page it governs.
+ *
+ * The `.map` callback is annotated `: string` and switches on `cap.state`,
+ * every case returning, no `default:` — the same shape `absentFact` in
+ * `present.ts` uses, for the same reason: a fifth `Capability` state must
+ * fail to compile here, not silently print `yes` for a state nobody has
+ * decided how to summarise. **The `: string` annotation is load-bearing,
+ * not decoration** — remove it and TypeScript infers `string | undefined`
+ * for this callback, which accepts a missing case without complaint and
+ * takes the whole guarantee with it; confirmed by trying it before relying
+ * on it.
  */
 export function summarise(caps: CameraCapabilities): string {
-  return CAPABILITY_KEYS.map((key) => {
+  return CAPABILITY_KEYS.map((key): string => {
     const cap = caps[key] as Capability<unknown>;
-    if (cap.state === "not-offered") return `${key}: none`;
-    if (cap.state === "advertised") return `${key}: unanswered`;
-    // Neutral, not a fault (R-UI-21) — named in the operator's own words,
-    // never the V4L2 control name that has charge of it.
-    if (cap.state === "gated") return `${key}: ${cap.by.label} has it`;
-    if (key === "formats") return `${key}: ${(cap.value as readonly unknown[]).length}`;
-    return `${key}: yes`;
+    switch (cap.state) {
+      case "not-offered":
+        return `${key}: none`;
+      case "advertised":
+        return `${key}: unanswered`;
+      case "gated":
+        // Neutral, not a fault (R-UI-21) — named in the operator's own
+        // words, never the V4L2 control name that has charge of it.
+        return `${key}: ${cap.by.label} has it`;
+      case "present":
+        return key === "formats"
+          ? `${key}: ${(cap.value as readonly unknown[]).length}`
+          : `${key}: yes`;
+    }
   }).join(" · ");
 }

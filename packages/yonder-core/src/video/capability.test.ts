@@ -79,4 +79,11 @@ describe("summarise", () => {
     expect(s).toContain("exposure: auto exposure has it");
     expect(s).not.toContain("unanswered");
   });
+
+  // The one branch none of the tests above exercise: every other fixture's
+  // present capability is `formats`, which takes the count line instead.
+  it("says yes for a present capability that is not formats", () => {
+    const line = summarise({ ...FIXED, zoom: present(range) });
+    expect(line).toContain("zoom: yes");
+  });
 });

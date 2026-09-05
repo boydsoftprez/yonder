@@ -49,8 +49,8 @@ export interface SoftKey {
  * `capabilityFacts()` and `uplinkBudget()` produce these and the daemon sends
  * them; these components draw them. Two declarations of the same shape is two
  * things to keep in step, and the one that drifts is the one nothing imports:
- * a third capability state added in `capability.ts` would leave this file's
- * union quietly wrong and the row drawing an unknown state as a known one.
+ * a state added to `capability.ts` later would leave this file's union
+ * quietly wrong and the row drawing an unknown state as a known one.
  *
  * From `yonder-core/presentation` rather than the package's main entry, which
  * pulls in the config loader and `node:fs` — the reason that second entry
