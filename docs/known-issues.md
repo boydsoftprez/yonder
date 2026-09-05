@@ -1158,12 +1158,21 @@ EC25 modem's port carries `power/control=on`, has never spent a millisecond
 suspended, and has never once dropped. Same hub, same supply, same board.
 
 Tested by writing `on` to the camera port's `power/control`. Its
-suspended-time counter froze at that instant, confirming the mechanism was off,
-and the drops stopped — measured against a baseline of four in the preceding
-nine minutes. **Record the interval the fix has been watched over when this
-note is next touched**, and treat a short quiet window as consistent with the
-diagnosis rather than as proof of it: this fault's whole history is of
-plausible answers that a few quiet minutes appeared to confirm.
+suspended-time counter froze at that instant — 87 204 ms, unchanged ever since
+— confirming the mechanism was off rather than merely quiet.
+
+| | before | after |
+|---|---|---|
+| watched | 9 minutes | 93 minutes |
+| drops | 4 | 0 |
+| port suspended | 31% of its life | never again |
+
+The prior rate was about one drop every two minutes, so ninety-three minutes
+clean is roughly forty-five expected drops that did not happen. That is the
+whole of the evidence and it is enough; it is recorded as an interval rather
+than as *the drops stopped* because this fault's history is of plausible
+answers that a few quiet minutes appeared to confirm, and two of them survived
+longer than this before failing.
 
 Two things worth keeping from how long this took. Every wrong diagnosis was
 confirmed by a real fault it happened to explain — the brownout was genuine and
