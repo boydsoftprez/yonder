@@ -25,23 +25,38 @@
  * `createDraftStore()` on mount via `restore`, and keeps `yonder.draft`
  * caught up with `snapshot()` as edits happen.
  *
- * **A value equal to the applied one is not pending.** Setting brightness to
- * what it already is leaves nothing to apply, and an operator who nudges a
- * control back to where it started should see the pending mark disappear
- * rather than be asked to apply a change that changes nothing. `set` takes
- * the camera's currently-applied state alongside the requested value for
- * exactly this comparison — read only, never written — compared by
- * `String()` the same way the blueprint's own `setDraft` does, because a
- * bar's value arrives as a number while a report can carry the same field
- * as a string.
+ * **A value equal to the applied one is not pending — checked at read time,
+ * not write time.** `set` records whatever the operator asked for,
+ * unconditionally; `pending` is what decides whether that is still worth
+ * showing, by comparing the recorded value against the camera's
+ * currently-applied state every time it is asked. `get` does not filter —
+ * it is the raw draft, exactly what has been recorded — so `get` and
+ * `pending` can legitimately disagree about one path: `get` says a value is
+ * recorded there, `pending` says there is nothing to apply, because the two
+ * now happen to match.
  *
- * **On `set`'s fourth parameter.** The brief's own interface line abbreviates
- * this to `set(camera, path, value)`. A three-argument `set` cannot honour
- * the guarantee above — there is no other channel by which this module
- * could ever learn what is currently applied, and without it "equal to
- * applied" has nothing to compare against. `applied` is that channel: the
- * camera's whole current control state, not just the one field at `path`,
- * so that a test can also prove `set` reads it and never writes it.
+ * **Why the comparison lives in `pending` and not in `set` (revised from
+ * this file's first version).** A write-time comparison goes stale: draft
+ * brightness at 50 while applied is 20 (pending, correctly); then applied
+ * becomes 50 by some other route — a re-probe, another operator, a mode
+ * change reporting back — and a store that decided at write time would
+ * still list the edit as pending, offering to send 50 to a camera already
+ * at 50. Comparing at read time answers with what is true *now*, every time
+ * `pending` is asked, however applied got there. `set` therefore takes only
+ * three arguments, exactly as the plan declares it, and `pending` takes the
+ * camera's currently-applied state — supplied by the caller, which is
+ * rendering from the report at exactly the moment it asks what is pending,
+ * and so already has it — read only, never written.
+ *
+ * A known asymmetry this leaves open, worth its own line rather than
+ * silence: a draft that is *withdrawn* by matching applied at the moment it
+ * is asked about is not the same as a draft that was never recorded — the
+ * value is still sitting in the map, and if applied later drifts away from
+ * it *without the operator touching that field again*, `pending` will
+ * report it once more. Fixing that would need the store to distinguish "the
+ * operator asked for this" from "this happened to coincide with applied,"
+ * which is more than a comparison at either write or read time can tell on
+ * its own.
  */
 
 /** A staged value: whatever a control on this console can be set to. */
@@ -57,18 +72,18 @@ export interface PendingEdit {
 export type DraftSnapshot = Record<string, Record<string, DraftValue>>;
 
 export interface DraftStore {
-  /** The camera's whole draft, path to requested value. `{}` if nothing is pending. */
+  /** The camera's whole draft, unfiltered, path to requested value. `{}` if nothing is recorded. */
   get(camera: string): Record<string, DraftValue>;
+  /** Stage `value` at `path` for `camera`, unconditionally. Never posts anywhere. */
+  set(camera: string, path: string, value: DraftValue): void;
   /**
-   * Stage `value` at `path` for `camera`. `applied` is that camera's current
-   * (device-reported) control state — read only, to decide whether this
-   * edit is a no-op. Equal to applied withdraws any existing draft at
-   * `path` rather than recording one. Never posts anywhere; never writes to
-   * `applied`.
+   * What is pending for `camera`: every recorded edit whose value differs
+   * from `applied` at the same path, in the order it was staged. `applied`
+   * is that camera's current (device-reported) control state — read only,
+   * never written. An edit equal to `applied` is recorded (`get` still
+   * shows it) but is not pending, so it is omitted here.
    */
-  set(camera: string, path: string, value: DraftValue, applied: Record<string, DraftValue>): void;
-  /** What is pending for `camera`, in the order it was staged. */
-  pending(camera: string): PendingEdit[];
+  pending(camera: string, applied: Record<string, DraftValue>): PendingEdit[];
   /** Discard every pending edit for `camera`. Every other camera is untouched. */
   clear(camera: string): void;
   /** The whole store, as plain data — for Dashboard's client store to hold across a remount. */
@@ -87,11 +102,7 @@ export function createDraftStore(): DraftStore {
       return draft ? Object.fromEntries(draft) : {};
     },
 
-    set(camera, path, value, applied) {
-      if (String(value) === String(applied[path])) {
-        cameras.get(camera)?.delete(path);
-        return;
-      }
+    set(camera, path, value) {
       let draft = cameras.get(camera);
       if (!draft) {
         draft = new Map();
@@ -100,10 +111,12 @@ export function createDraftStore(): DraftStore {
       draft.set(path, value);
     },
 
-    pending(camera) {
+    pending(camera, applied) {
       const draft = cameras.get(camera);
       if (!draft) return [];
-      return Array.from(draft, ([path, requested]) => ({ path, requested }));
+      return Array.from(draft)
+        .filter(([path, requested]) => String(requested) !== String(applied[path]))
+        .map(([path, requested]) => ({ path, requested }));
     },
 
     clear(camera) {
