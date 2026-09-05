@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import type { Config } from "../schema/config.js";
+import type { Camera, Config } from "../schema/config.js";
 
 /**
  * Turning "make it 25 fps" into a configuration (R-CTL-02, R-CTL-03).
@@ -51,6 +51,37 @@ export const CAMERA_SETTING_KEYS = [
 
 export type CameraSettingKey = (typeof CAMERA_SETTING_KEYS)[number];
 
+/**
+ * Which schema leaf each setting key actually writes.
+ *
+ * **A setting key and the schema leaf it touches are two vocabularies, and
+ * only one of the seven keys above has to say so out loud.** Six of the
+ * seven happen to share their name with the `Camera` leaf they write —
+ * `width` writes `width`, `enabled` writes `enabled` — which makes it easy to
+ * assume that correspondence is automatic. `preview_bitrate_kbps` is the
+ * exception: it is the Setup deck's name for a value that actually lives at
+ * `preview.bitrate_kbps`, so the leaf it is load-bearing or exempt *as* is
+ * `preview` — a name `CameraSettingKey` itself does not contain, and a plain
+ * `CAMERA_EXEMPT_LEAVES.has(key)` string comparison can never match.
+ *
+ * That gap is exactly what let `settings.test.ts` drift: it once checked
+ * exemption by that same direct string comparison, which meant
+ * `preview_bitrate_kbps`'s classification never actually depended on whether
+ * `"preview"` was in `CAMERA_EXEMPT_LEAVES` at all, and the test kept passing
+ * regardless. Exporting the mapping, and routing both the writer below and
+ * `settings.test.ts` through it, means there is one place this
+ * correspondence is stated rather than two chances for it to disagree.
+ */
+export const SETTING_LEAF: Record<CameraSettingKey, keyof Camera> = {
+  width: "width",
+  height: "height",
+  framerate: "framerate",
+  bitrate_kbps: "bitrate_kbps",
+  enabled: "enabled",
+  autostart: "autostart",
+  preview_bitrate_kbps: "preview",
+};
+
 export type CameraSettings = Partial<Record<CameraSettingKey, unknown>>;
 
 export type SettingsResult =
@@ -95,16 +126,21 @@ export function setCameraSettings(
   const camera = config.cameras[index];
   if (camera === undefined) return { ok: false, error: `no camera is configured with the id "${id}"` };
 
+  // Every write below goes by `leaf` — the schema field this key actually
+  // touches, from `SETTING_LEAF` — rather than by `key` a second time, so the
+  // one key whose name and leaf differ (`preview_bitrate_kbps` / `preview`)
+  // cannot fall out of step with the mapping above.
   for (const [key, value] of given) {
-    if (key === "enabled" || key === "autostart") {
+    const leaf = SETTING_LEAF[key as CameraSettingKey];
+    if (leaf === "enabled" || leaf === "autostart") {
       if (typeof value !== "boolean") return { ok: false, error: `${key} must be true or false` };
-      camera[key] = value;
+      camera[leaf] = value;
       continue;
     }
     const n = whole(value);
     if (n === null) return { ok: false, error: `${key} must be a whole number` };
-    if (key === "preview_bitrate_kbps") camera.preview.bitrate_kbps = n;
-    else camera[key as "width" | "height" | "framerate" | "bitrate_kbps"] = n;
+    if (leaf === "preview") camera.preview.bitrate_kbps = n;
+    else camera[leaf as "width" | "height" | "framerate" | "bitrate_kbps"] = n;
   }
   return { ok: true, config };
 }

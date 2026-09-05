@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, it, expect } from "vitest";
-import { CAMERA_SETTING_KEYS, setCameraSettings } from "./settings.js";
+import { CAMERA_SETTING_KEYS, SETTING_LEAF, setCameraSettings } from "./settings.js";
 import { CAMERA_EXEMPT_LEAVES } from "../apply/reachability.js";
 import { ConfigSchema, DEFAULT_CONFIG, type Config } from "../schema/config.js";
 
@@ -92,21 +92,27 @@ describe("setCameraSettings", () => {
   /**
    * **The reason the Setup deck can promise what it promises.**
    *
-   * Every settable key is either in `CAMERA_EXEMPT_LEAVES` — kept, no
-   * countdown — or it is not, and the confirmation window arms. A key that
-   * belonged to neither list would be a control whose confirmation behaviour
-   * nobody had decided, which is K-32 on the camera page.
+   * Every settable key is either exempt — kept, no countdown — or it is not,
+   * and the confirmation window arms. A key that belonged to neither
+   * outcome would be a control whose confirmation behaviour nobody had
+   * decided, which is K-32 on the camera page.
    *
-   * `preview_bitrate_kbps` moved from kept to held in the same change that
-   * removed `preview` from `CAMERA_EXEMPT_LEAVES` (R-NET-07): the special
-   * case this test used to need — `preview_bitrate_kbps` mapping to the
-   * schema's `preview` leaf — is gone along with it, because neither name is
-   * exempt any more.
+   * **Resolved through `SETTING_LEAF`, not by comparing the key itself
+   * against `CAMERA_EXEMPT_LEAVES`.** `preview_bitrate_kbps` is a setting
+   * key, never a `Camera` leaf — the leaf it actually writes is `preview` —
+   * so a bare `exempt.has(key)` can never be true for it regardless of
+   * what `CAMERA_EXEMPT_LEAVES` contains, and a test built on that
+   * comparison stops proving anything for this one key: it was passing
+   * because `preview_bitrate_kbps` could never appear in `kept` at all, not
+   * because the code correctly puts it in `held`. Routing through the
+   * mapping restores the dependency: put `preview` back in
+   * `CAMERA_EXEMPT_LEAVES` and this test goes red, because
+   * `preview_bitrate_kbps` resolves to that leaf and would move into `kept`.
    */
   it("settles every settable key on one side or the other of the exempt list", () => {
     const exempt = new Set<string>(CAMERA_EXEMPT_LEAVES);
-    const kept = CAMERA_SETTING_KEYS.filter((k) => exempt.has(k));
-    const held = CAMERA_SETTING_KEYS.filter((k) => !kept.includes(k));
+    const kept = CAMERA_SETTING_KEYS.filter((k) => exempt.has(SETTING_LEAF[k]));
+    const held = CAMERA_SETTING_KEYS.filter((k) => !exempt.has(SETTING_LEAF[k]));
     expect([...kept]).toEqual(["width", "height", "framerate"]);
     expect([...held]).toEqual(["bitrate_kbps", "enabled", "autostart", "preview_bitrate_kbps"]);
   });
