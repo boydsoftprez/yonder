@@ -181,10 +181,24 @@ cameras:
       height: 360
       framerate: 15
       bitrate_kbps: 400
-    controls:
+    controls:                      # raw device units throughout — R-CTL-11 … R-CTL-14
       brightness: null
       contrast: null
       rotation: 0                  # 0 | 90 | 180 | 270
+      zoom: null
+      focus: null
+      exposureTime: null           # RAW 100 µs units — 156 shows as 15600 µs on the console
+      whiteBalanceTemperature: null # kelvin
+      gain: null
+      backlightCompensation: null
+      gamma: null
+      sharpness: null
+      saturation: null
+      hue: null
+      powerLineFrequency: null     # menu id: 0 disabled, 1 50 Hz, 2 60 Hz, 3 auto
+      autoExposure: null           # menu id: 0 auto, 1 manual, 2 shutter priority, 3 aperture priority
+      autoWhiteBalance: null
+      autoFocus: null
     outputs:                       # simultaneous, not exclusive (R-VID-05)
       - { kind: rtp,  host: 192.168.2.10, port: 5604 }
       - { kind: rtsp, password: { secret: cam0_rtsp } }
@@ -205,6 +219,39 @@ the image controls are cosmetic enough that changing them does not arm the confi
 window; everything else about a camera does, including its bitrate and its outputs — both
 share the uplink the console itself is reached over, so a change to either is held until you
 confirm it (R-CFG-03, R-VPN-07).
+
+#### Camera image controls
+
+`cameras[].controls` stores what an operator asked the sensor to hold, in **the camera's
+own raw units, never a display unit** (R-CTL-11 … R-CTL-14). `null` means *leave the camera
+alone* — it is not the same as zero, which several of these accept as a real, meaningful
+setting: `gain: 0` is a camera's own floor, not "unset".
+
+| Key | Stored as |
+|---|---|
+| `brightness`, `contrast` | device units, -100..100 |
+| `rotation` | degrees: 0, 90, 180 or 270 |
+| `zoom`, `focus` | device units (no published × ratio for zoom yet — R-CTL-14) |
+| `exposureTime` | **raw** 100 µs units — `156` is a 15,600 µs shutter |
+| `whiteBalanceTemperature` | kelvin |
+| `gain`, `backlightCompensation`, `gamma`, `sharpness`, `saturation` | device units |
+| `hue` | device units, signed |
+| `powerLineFrequency` | menu id — 0 disabled, 1 50 Hz, 2 60 Hz, 3 auto |
+| `autoExposure` | menu id — 0 auto, 1 manual, 2 shutter priority, 3 aperture priority |
+| `autoWhiteBalance`, `autoFocus` | boolean |
+
+The console converts for display only where the stored number is not what an operator
+should read: `exposureTime`'s 100 µs units become microseconds. Every other field above —
+including the two menu ids and `whiteBalanceTemperature`'s kelvin reading — is shown
+exactly as stored (`video/descriptors.ts`'s `DESCRIPTORS`, the one place that conversion is
+allowed to live).
+
+Each field accepts the widest range its V4L2 control can express, not the narrower range
+any one camera answers — wide enough to hold every camera Yonder might meet. A real
+device's own range is enforced only when a control is actually written (`applyControls`,
+`packages/yonder-core/src/video/controls.ts`), against what that device reported; which
+menu ids a camera actually offers — among `powerLineFrequency`'s and `autoExposure`'s four
+each — is enforced there too, not by this schema.
 
 ### Sections that arrive with later milestones
 

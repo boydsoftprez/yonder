@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, it, expect } from "vitest";
-import { ConfigSchema, DEFAULT_CONFIG } from "./config.js";
+import { CameraControls, ConfigSchema, DEFAULT_CONFIG } from "./config.js";
 import { withoutRetiredKeys } from "./retired.js";
 import { formatIssues } from "../config/errors.js";
 // Imported rather than restated: the point of the guard under test is that
@@ -321,7 +321,13 @@ describe("cameras", () => {
       codec: "h264", bitrate_kbps: 2000, outputs: [],
     });
     expect(cam.preview).toEqual({ width: 640, height: 360, framerate: 15, bitrate_kbps: 400 });
-    expect(cam.controls).toEqual({ brightness: null, contrast: null, rotation: 0 });
+    expect(cam.controls).toEqual({
+      brightness: null, contrast: null, rotation: 0,
+      zoom: null, focus: null, exposureTime: null, whiteBalanceTemperature: null,
+      gain: null, backlightCompensation: null, gamma: null, sharpness: null,
+      saturation: null, hue: null, powerLineFrequency: null,
+      autoExposure: null, autoWhiteBalance: null, autoFocus: null,
+    });
   });
 
   it("bounds the preview so no setting of it can saturate a link", () => {
@@ -439,5 +445,66 @@ describe("cameras", () => {
       }],
     });
     expect(inline.success).toBe(false);
+  });
+});
+
+describe("CameraControls", () => {
+  /**
+   * Every one of the fourteen keys Task 5 added to `CameraCapabilities`, in
+   * this schema's own field names — `exposure`/`whiteBalance` there are
+   * `exposureTime`/`whiteBalanceTemperature` here, deliberately (see the
+   * schema's own comment on `CameraControls`).
+   *
+   * Named out in full rather than sampled: a test asserting only four of
+   * these — as this plan's own brief once did — leaves ten free to default
+   * to `0` instead of `null` and stay green. `noCapabilities()` set the
+   * precedent this test follows: state the whole set, not a sample of it.
+   */
+  const NEW_CONTROLS = [
+    "zoom", "focus", "exposureTime", "whiteBalanceTemperature", "gain",
+    "backlightCompensation", "gamma", "sharpness", "saturation", "hue",
+    "powerLineFrequency", "autoExposure", "autoWhiteBalance", "autoFocus",
+  ] as const satisfies readonly (keyof CameraControls)[];
+
+  it("accepts every control the bench camera answers", () => {
+    const p = CameraControls.parse({
+      brightness: 12, gain: 200, exposureTime: 156, autoExposure: 1, autoFocus: false,
+    });
+    expect(p.exposureTime).toBe(156);
+    expect(p.autoFocus).toBe(false);
+  });
+
+  it("defaults every control to null, never to zero", () => {
+    const p = CameraControls.parse({});
+    for (const k of NEW_CONTROLS) expect(p[k]).toBeNull();
+  });
+
+  /**
+   * `null` is not zero (the schema's own header comment), and this is the
+   * test that can tell them apart: zero is a legal reading for several of
+   * these — `gain: 0` is the bench camera's own floor — so a schema that
+   * quietly turned an explicit `0` into `null`, or the reverse, would stop
+   * an operator's setting from ever reaching the device. Both directions
+   * are asserted, on both a control this task adds (`gain`) and one that
+   * already existed (`brightness`), because the bug this guards against —
+   * treating `0` as falsy and folding it into "absent" — is exactly as
+   * likely in code that predates this task as in code this task adds.
+   */
+  it("keeps an explicit 0 distinguishable from an absent field", () => {
+    const zeroed = CameraControls.parse({ gain: 0, brightness: 0 });
+    expect(zeroed.gain).toBe(0);
+    expect(zeroed.brightness).toBe(0);
+    const absent = CameraControls.parse({});
+    expect(absent.gain).toBeNull();
+    expect(absent.brightness).toBeNull();
+  });
+
+  it("refuses a value outside any UVC range", () => {
+    expect(() => CameraControls.parse({ gain: 10_000_000 })).toThrow();
+  });
+
+  // Menu membership is the adapter's job (Task 9): the schema cannot know a camera's menu.
+  it("accepts any int for a menu control at the schema", () => {
+    expect(CameraControls.parse({ autoExposure: 2 }).autoExposure).toBe(2);
   });
 });

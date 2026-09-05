@@ -323,13 +323,86 @@ const Preview = z.object({
   bitrate_kbps: z.number().int().min(100).max(2000).default(400),
 }).strict();
 
-/** Image controls: applied live on the running stream, never a respawn. */
-const CameraControls = z.object({
+/**
+ * Image controls: applied live on the running stream, never a respawn.
+ *
+ * **`null` means leave the camera alone; it is not zero.** Zero is a legal,
+ * meaningful reading for several of these — `brightness: 0` is the bench
+ * camera's own shipped default, and `gain: 0` is its floor — so a schema
+ * that folded an explicit `0` into the same stored value as an absent field
+ * would silently stop sending a control the operator deliberately set to
+ * its floor. `config.test.ts` asserts the two stay distinguishable.
+ *
+ * **Units are device-native, never display units.** `exposureTime: 156` is
+ * 156 raw 100-µs units — the same number `exposure_time_absolute` answers on
+ * the wire — not 15600 µs. `video/descriptors.ts`'s `DESCRIPTORS` is the one
+ * place a raw value is converted to what an operator reads (spec §7); this
+ * file must not duplicate that factor, or the two would eventually disagree
+ * about what a stored number means.
+ *
+ * **Every bound below is the widest the V4L2 control can express, not the
+ * widest any one camera reports — say so, because the two are easy to
+ * confuse.** This schema has to accept every camera Yonder might meet, so a
+ * field's bound is the width of the wire value the Linux kernel's uvcvideo
+ * driver maps it onto (`uvc_ctrl_mappings` in
+ * `drivers/media/usb/uvc/uvc_ctrl.c`): an unsigned or signed 16-bit field for
+ * most Processing Unit and Camera Terminal controls, 32-bit for
+ * `exposure_time_absolute`, and the fixed four-entry menus V4L2 itself
+ * defines for `auto_exposure` (`V4L2_EXPOSURE_AUTO`=0 …
+ * `V4L2_EXPOSURE_APERTURE_PRIORITY`=3) and `power_line_frequency`
+ * (`V4L2_CID_POWER_LINE_FREQUENCY_DISABLED`=0 … `_AUTO`=3 — docs.kernel.org's
+ * V4L2 user-controls reference). **This is not the bench camera's own
+ * range** — its measured numbers, recorded in `capability.test.ts`'s
+ * fixture, are narrower than every bound below — and the narrow, real clamp
+ * against what a given device actually answered is `applyControls`'s job
+ * (`video/controls.ts`), which already clamps to `capabilities` and has a
+ * test saying so. A future reader who tightens a bound here to this
+ * camera's numbers would silently refuse a setting a wider camera's
+ * operator is entitled to make.
+ *
+ * **Menu membership is not this schema's job.** `autoExposure` and
+ * `powerLineFrequency` accept any integer in the menu's full defined range,
+ * because this file cannot know which entries a given camera actually
+ * offers — the bench camera's `auto_exposure` answers a queryable range of
+ * 0..3 but lists only ids 1 and 3 as selectable. Refusing an id the device
+ * did not list is `applyControls`'s job, checked against
+ * `ControlRange.menu` (R-CTL-11 … R-CTL-14).
+ */
+const ctl = (lo: number, hi: number) =>
+  z.number().int().min(lo).max(hi).nullable().default(null);
+
+export const CameraControls = z.object({
   brightness: z.number().int().min(-100).max(100).nullable().default(null),
   contrast: z.number().int().min(-100).max(100).nullable().default(null),
   /** R-CTL-05: by degrees rather than a boolean. */
   rotation: z.union([z.literal(0), z.literal(90), z.literal(180), z.literal(270)]).default(0),
+
+  /**
+   * Fourteen more, ordered as `probe/camera.ts`'s `CONTROL_MAP` reads them
+   * off the device rather than alphabetically, so a diff against a
+   * `v4l2-ctl` dump reads by eye (R-CTL-11 … R-CTL-14). Each is named to
+   * match the capability key it describes the same control as —
+   * `capability.ts`'s `exposure` and `whiteBalance` excepted, stored here as
+   * `exposureTime` and `whiteBalanceTemperature`: a config field says what
+   * it holds, and a raw exposure count is not "the exposure" any more than a
+   * raw kelvin reading is "the white balance".
+   */
+  zoom: ctl(0, 65535),                     // zoom_absolute — driver-specific units
+  focus: ctl(0, 65535),                    // focus_absolute — driver-specific units
+  exposureTime: ctl(0, 4_294_967_295),     // exposure_time_absolute — RAW 100 µs units (156 raw is 15600 µs shown)
+  whiteBalanceTemperature: ctl(0, 65535),  // white_balance_temperature — kelvin
+  gain: ctl(0, 65535),                     // gain — driver-specific units
+  backlightCompensation: ctl(0, 65535),    // backlight_compensation — driver-specific units
+  gamma: ctl(0, 65535),                    // gamma — driver-specific units
+  sharpness: ctl(0, 65535),                // sharpness — driver-specific units
+  saturation: ctl(0, 65535),               // saturation — driver-specific units
+  hue: ctl(-32768, 32767),                 // hue — driver-specific units, signed
+  powerLineFrequency: ctl(0, 3),           // power_line_frequency — menu id: 0 disabled, 1 50 Hz, 2 60 Hz, 3 auto
+  autoExposure: ctl(0, 3),                 // auto_exposure — menu id: 0 auto, 1 manual, 2 shutter priority, 3 aperture priority
+  autoWhiteBalance: z.boolean().nullable().default(null), // white_balance_automatic
+  autoFocus: z.boolean().nullable().default(null),        // focus_automatic_continuous
 }).strict();
+export type CameraControls = z.infer<typeof CameraControls>;
 
 const Camera = z.object({
   id: CameraId,
