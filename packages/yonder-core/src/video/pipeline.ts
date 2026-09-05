@@ -139,6 +139,24 @@ export const RTP_PAYLOAD_TYPE = 96;
  */
 const H264_LEVEL = "video/x-h264,level=(string)4";
 
+/**
+ * The concrete pixel size to bake into today's respawn-only pipeline.
+ *
+ * `preview.size` names one of three offered resolutions directly, or
+ * `"auto"` for the rate controller (spec §8.1) to choose at runtime — and
+ * that controller does not exist yet: this pipeline is composed once, from
+ * `config.yaml`, and respawned on Apply, with no live resizing in between.
+ * Until a real controller replaces this respawn path, `"auto"` resolves to
+ * `ladder_bottom` — the conservative end an adaptive algorithm starts from
+ * before it has proven more capacity is safe — rather than to a size baked
+ * in independently of it, so the two cannot silently disagree.
+ */
+function previewSize(preview: Camera["preview"]): { width: number; height: number } {
+  const held = preview.size === "auto" ? preview.ladder_bottom : preview.size;
+  const [width, height] = held.split("x").map(Number) as [number, number];
+  return { width, height };
+}
+
 function encode(encoder: Encoder, kbps: number, shortGop: boolean): string[] {
   if (encoder.element === "x264enc") {
     // x264enc counts in kb/s and takes key-int-max in frames. `tune=zerolatency`
@@ -219,10 +237,11 @@ export function compose(opts: ComposeOptions): string[] {
 
   // The cheap copy the interface watches (R-VID-13), always published, always
   // under its own path so the console can never subscribe to the wrong one.
+  const preview = previewSize(camera.preview);
   push(
     "raw.", LINK, ...QUEUE, LINK,
     "v4l2convert", LINK,
-    `video/x-raw,width=${camera.preview.width},height=${camera.preview.height}`, LINK,
+    `video/x-raw,width=${preview.width},height=${preview.height}`, LINK,
     "videorate", LINK, `video/x-raw,framerate=${camera.preview.framerate}/1`, LINK,
     ...encode(encoder, camera.preview.bitrate_kbps, true), LINK,
     "h264parse", LINK,
@@ -286,8 +305,9 @@ export function refuse(opts: ComposeOptions): string | null {
       ? `this board has no /dev/v4l/by-path/${camera.device}; the cameras it can see are ${offered}`
       : `this board has no /dev/v4l/by-path/${camera.device}, and no camera on it has a stable name at all`;
   }
-  if (camera.preview.width > camera.width || camera.preview.height > camera.height) {
-    return `the preview is ${camera.preview.width}x${camera.preview.height}, larger than the ${camera.width}x${camera.height} it is scaled from`;
+  const preview = previewSize(camera.preview);
+  if (preview.width > camera.width || preview.height > camera.height) {
+    return `the preview is ${preview.width}x${preview.height}, larger than the ${camera.width}x${camera.height} it is scaled from`;
   }
 
   if (capabilities.formats.state !== "present") {

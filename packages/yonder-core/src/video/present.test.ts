@@ -28,9 +28,13 @@ function camera(over: Partial<Camera> = {}): Camera {
     framerate: 30,
     codec: "h264",
     bitrate_kbps: 2000,
-    preview: { width: 640, height: 360, framerate: 15, bitrate_kbps: 400 },
+    preview: {
+      mode: "adaptive", size: "auto", ladder_top: "1280x720", ladder_bottom: "640x360",
+      floor_kbps: 300, ceiling_kbps: 2000, bitrate_kbps: 400, framerate: 15,
+    },
     controls: { brightness: null, contrast: null, rotation: 0 },
     outputs: [{ kind: "rtp", host: "192.168.77.20", port: 5600, enabled: true }],
+    stream: { mode: "fixed", floor_kbps: 2000, ceiling_kbps: 2000 },
     ...over,
   } as Camera;
 }
@@ -303,7 +307,8 @@ describe("cameraStrip", () => {
 
     // The whole point of computing them: they move.
     const raised = strip({ bitrate_kbps: 8000, preview: {
-      width: 640, height: 360, framerate: 15, bitrate_kbps: 2000,
+      mode: "adaptive", size: "auto", ladder_top: "1280x720", ladder_bottom: "640x360",
+      floor_kbps: 300, ceiling_kbps: 2000, bitrate_kbps: 2000, framerate: 15,
     } });
     expect(raised.pictureCost).toBe("preview 2.07 Mb/s · full rate 8.27 Mb/s at IP");
     expect(raised.holdCost).toBe("8.27 Mb/s while held");

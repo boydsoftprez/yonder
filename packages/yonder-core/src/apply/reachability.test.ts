@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
 import { affectsReachability, CAMERA_EXEMPT_LEAVES, CAMERA_LEAVES } from "./reachability.js";
-import { ConfigSchema, DEFAULT_CONFIG, type Config } from "../schema/config.js";
+import { ConfigSchema, DEFAULT_CONFIG, type Camera, type Config } from "../schema/config.js";
 
 const base = (): Config => structuredClone(DEFAULT_CONFIG);
 
@@ -126,21 +126,40 @@ function withCamera(overrides: Record<string, unknown> = {}): Config {
 }
 
 describe("camera leaves", () => {
-  it("exempts resolution, rate, codec, preview and image controls", () => {
+  it("exempts resolution, rate, codec and image controls", () => {
     const before = withCamera();
     expect(affectsReachability(before, withCamera({ width: 1920, height: 1080 }))).toBe(false);
     expect(affectsReachability(before, withCamera({ framerate: 15 }))).toBe(false);
     expect(affectsReachability(before, withCamera({ codec: "h264" }))).toBe(false);
-    expect(affectsReachability(before, withCamera({ preview: { width: 320, bitrate_kbps: 200 } }))).toBe(false);
     expect(affectsReachability(before, withCamera({ controls: { brightness: 20 } }))).toBe(false);
   });
 
-  it("keeps bitrate and outputs load-bearing — they are egress on the console's own path", () => {
+  /**
+   * **The load-bearing change this task makes.** A preview whose ceiling now
+   * reaches 4000 kb/s is egress on the same path the console is reached
+   * over, so it can no longer be kept without a countdown — R-NET-07 is the
+   * requirement, and the old exemption assumed at most 2000 kb/s.
+   */
+  it("preview is no longer exempt from the reachability comparison", () => {
+    expect(CAMERA_EXEMPT_LEAVES).not.toContain("preview");
+    const withPreview = (preview: Record<string, unknown>) => withCamera({ preview });
+    expect(affectsReachability(
+      withPreview({ ceiling_kbps: 2000 }),
+      withPreview({ ceiling_kbps: 4000 }),
+    )).toBe(true);
+  });
+
+  it("controls stays exempt — a brightness change cannot cost you the aircraft", () => {
+    expect(CAMERA_EXEMPT_LEAVES).toContain("controls");
+  });
+
+  it("keeps bitrate, outputs and stream load-bearing — they are egress on the console's own path", () => {
     const before = withCamera();
     expect(affectsReachability(before, withCamera({ bitrate_kbps: 8000 }))).toBe(true);
     expect(affectsReachability(before, withCamera({
       outputs: [{ kind: "rtp", host: "192.168.1.50", port: 5600 }],
     }))).toBe(true);
+    expect(affectsReachability(before, withCamera({ stream: { mode: "adaptive" } }))).toBe(true);
   });
 
   it("keeps adding and removing a camera load-bearing", () => {
@@ -166,22 +185,12 @@ describe("camera leaves", () => {
   it("forces a decision when the camera schema grows a field", () => {
     expect([...CAMERA_LEAVES].sort()).toEqual([
       "autostart", "bitrate_kbps", "codec", "controls", "device", "enabled",
-      "framerate", "height", "id", "name", "outputs", "preview", "source", "width",
+      "framerate", "height", "id", "name", "outputs", "preview", "source", "stream", "width",
     ]);
     expect(Object.keys(withCamera().cameras[0]).sort()).toEqual([...CAMERA_LEAVES].sort());
     expect([...CAMERA_EXEMPT_LEAVES].sort()).toEqual([
-      "codec", "controls", "framerate", "height", "preview", "width",
+      "codec", "controls", "framerate", "height", "width",
     ]);
-  });
-
-  // The preview's exemption is earned by its bound, not by argument. If the
-  // ceiling moves, this fails and `preview` has to leave the exempt list.
-  it("holds the preview to the bound its exemption rests on", () => {
-    const tooFast = ConfigSchema.safeParse({
-      version: 1, network: { ap: { psk: { secret: "ap_psk" } } }, ui: { editor: {} },
-      cameras: [{ ...CAMERA, preview: { bitrate_kbps: 2001 } }],
-    });
-    expect(tooFast.success).toBe(false);
   });
 
   it("refuses a subtree exemption for cameras", () => {
@@ -189,5 +198,56 @@ describe("camera leaves", () => {
     // later, with nobody deciding it should have one. The proof it was not
     // done that way: a load-bearing leaf still registers.
     expect(affectsReachability(withCamera(), withCamera({ bitrate_kbps: 3000 }))).toBe(true);
+  });
+});
+
+/**
+ * Coordinator resolution 4: this is the test that has to survive the plan.
+ * Its job is that a field added to `Camera` later cannot quietly inherit an
+ * exemption nobody chose for it — so the enumeration side comes from the
+ * schema, not from a copy of `CAMERA_LEAVES` that could itself go stale.
+ */
+describe("camera leaf enumeration", () => {
+  const realLeaves = Object.keys(withCamera().cameras[0]).sort();
+
+  /**
+   * The leaves this file affirmatively calls load-bearing — not "whatever
+   * `CAMERA_EXEMPT_LEAVES` does not mention", which would make the check
+   * below tautological and unable to fail. Naming them means a leaf sitting
+   * in neither this array nor `CAMERA_EXEMPT_LEAVES` fails the test below,
+   * by name.
+   */
+  const LOAD_BEARING = [
+    "id", "name", "source", "device", "enabled", "autostart",
+    "bitrate_kbps", "outputs", "stream", "preview",
+  ];
+
+  it("classifies every camera leaf, and names any it has not decided about", () => {
+    const unclassified = realLeaves.filter(
+      (leaf) => !(CAMERA_EXEMPT_LEAVES as readonly string[]).includes(leaf) && !LOAD_BEARING.includes(leaf),
+    );
+    expect(unclassified).toEqual([]);
+
+    // And neither side names a leaf the schema does not actually have —
+    // `CAMERA_EXEMPT_LEAVES` and `LOAD_BEARING` are each accountable to
+    // `realLeaves`, not only to each other.
+    for (const leaf of [...CAMERA_EXEMPT_LEAVES, ...LOAD_BEARING]) {
+      expect(realLeaves, `"${leaf}" is classified but is not a real camera leaf`).toContain(leaf);
+    }
+  });
+
+  /**
+   * The behavioural half. Not merely omitted from the two lists above —
+   * genuinely absent from both, simulating a field `Camera` grows tomorrow
+   * before anyone has touched this file for it. `withoutCosmetics` only
+   * ever deletes what `CAMERA_EXEMPT_LEAVES` names, so a leaf nobody has
+   * classified still arms the confirmation window, which is the actual
+   * safety property the enumeration test above exists to protect.
+   */
+  it("an unknown sibling — one this file has never classified at all — is load-bearing", () => {
+    const before = withCamera();
+    const after = withCamera() as Config & { cameras: (Camera & { somethingNew?: unknown })[] };
+    after.cameras[0].somethingNew = { invented: "later" };
+    expect(affectsReachability(before, after)).toBe(true);
   });
 });

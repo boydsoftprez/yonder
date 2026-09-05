@@ -96,14 +96,18 @@ describe("setCameraSettings", () => {
    * countdown — or it is not, and the confirmation window arms. A key that
    * belonged to neither list would be a control whose confirmation behaviour
    * nobody had decided, which is K-32 on the camera page.
+   *
+   * `preview_bitrate_kbps` moved from kept to held in the same change that
+   * removed `preview` from `CAMERA_EXEMPT_LEAVES` (R-NET-07): the special
+   * case this test used to need — `preview_bitrate_kbps` mapping to the
+   * schema's `preview` leaf — is gone along with it, because neither name is
+   * exempt any more.
    */
   it("settles every settable key on one side or the other of the exempt list", () => {
     const exempt = new Set<string>(CAMERA_EXEMPT_LEAVES);
-    const kept = CAMERA_SETTING_KEYS.filter(
-      (k) => exempt.has(k) || (k === "preview_bitrate_kbps" && exempt.has("preview")),
-    );
+    const kept = CAMERA_SETTING_KEYS.filter((k) => exempt.has(k));
     const held = CAMERA_SETTING_KEYS.filter((k) => !kept.includes(k));
-    expect([...kept]).toEqual(["width", "height", "framerate", "preview_bitrate_kbps"]);
-    expect([...held]).toEqual(["bitrate_kbps", "enabled", "autostart"]);
+    expect([...kept]).toEqual(["width", "height", "framerate"]);
+    expect([...held]).toEqual(["bitrate_kbps", "enabled", "autostart", "preview_bitrate_kbps"]);
   });
 });

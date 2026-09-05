@@ -13,9 +13,13 @@ const CAMERA: Camera = {
   id: "cam0", name: "Nose", source: "usb", device: "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0",
   enabled: true, autostart: false,
   width: 1280, height: 720, framerate: 30, codec: "h264", bitrate_kbps: 2000,
-  preview: { width: 640, height: 360, framerate: 15, bitrate_kbps: 400 },
+  preview: {
+    mode: "adaptive", size: "auto", ladder_top: "1280x720", ladder_bottom: "640x360",
+    floor_kbps: 300, ceiling_kbps: 2000, bitrate_kbps: 400, framerate: 15,
+  },
   controls: { brightness: null, contrast: null, rotation: 0 },
   outputs: [rtpOutput, rtspOutput],
+  stream: { mode: "fixed", floor_kbps: 2000, ceiling_kbps: 2000 },
 };
 const CAPS = {
   ...noCapabilities(),
@@ -181,7 +185,7 @@ describe("refuse", () => {
   it("refuses a preview larger than the capture it is scaled from", () => {
     expect(refuse({ ...opts, camera: {
       ...CAMERA, width: 640, height: 360,
-      preview: { width: 1280, height: 720, framerate: 15, bitrate_kbps: 400 },
+      preview: { ...CAMERA.preview, size: "1280x720" },
     } })).toContain("preview");
   });
 

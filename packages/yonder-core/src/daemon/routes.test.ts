@@ -1861,10 +1861,14 @@ describe("the camera routes", () => {
       expect(typeof (out.body as { expiresAt: number | null }).expiresAt).toBe("number");
     });
 
-    it("keeps a preview change, because the schema bounds what the preview can spend", async () => {
+    // R-NET-07: a preview ceiling that can now reach 4000 kb/s is egress on
+    // the same path the console is reached over, so — unlike before this
+    // task — a preview change is held exactly like a change to the main
+    // bitrate is, not kept on the strength of a bound that no longer holds.
+    it("arms the window for a preview change too, now that the schema no longer bounds it small", async () => {
       const r = provisioned({ cameras: fixtureDetection() });
       const out = await r("POST", "/cameras/cam0/settings", { preview_bitrate_kbps: 300 });
-      expect((out.body as { expiresAt: number | null }).expiresAt).toBeNull();
+      expect(typeof (out.body as { expiresAt: number | null }).expiresAt).toBe("number");
     });
 
     it("refuses a setting nobody offers, and never writes the document", async () => {

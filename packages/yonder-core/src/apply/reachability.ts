@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import type { Config } from "../schema/config.js";
+import { CameraShape, type Config } from "../schema/config.js";
 
 /**
  * Whether an apply could cost the operator their way back to the device.
@@ -27,14 +27,15 @@ export function affectsReachability(previous: Config, next: Config): boolean {
 }
 
 /**
- * Every key on a camera. Not derived — written down, so that adding a field to
- * the schema fails a test rather than silently acquiring a default.
+ * Every key on a camera, asked of the schema itself rather than typed out a
+ * second time: a hand-written copy is exactly the kind of thing that can
+ * fall out of sync with an addition to `Camera` — silently, with nothing
+ * here to notice. `reachability.test.ts`'s leaf-enumeration test is the
+ * guard that actually matters; this export exists for the same reason it
+ * always has, so a consumer that needs to know what a camera is made of has
+ * one place to ask.
  */
-export const CAMERA_LEAVES = [
-  "id", "name", "source", "device", "enabled", "autostart",
-  "width", "height", "framerate", "codec", "bitrate_kbps",
-  "preview", "controls", "outputs",
-] as const;
+export const CAMERA_LEAVES = Object.keys(CameraShape.shape) as readonly (keyof Config["cameras"][number])[];
 
 /**
  * The camera leaves that cannot cost the operator their way back to the
@@ -46,22 +47,27 @@ export const CAMERA_LEAVES = [
  * video leaves by, so an added output or a raised ceiling is spend on that
  * path — and nobody has yet measured what a saturated uplink does to a console
  * session on a board. R-VPN-07 requires an exemption to be earned by
- * measurement rather than by argument, so `bitrate_kbps` and `outputs` stay
- * load-bearing until somebody measures.
+ * measurement rather than by argument, so `bitrate_kbps`, `outputs` and the
+ * new `stream` stay load-bearing until somebody measures: an adaptive
+ * envelope is still a bitrate policy for the path the console shares.
  *
- * `preview` is the one entry here that *is* egress on that path, and it is
- * exempt because the schema bounds it: `max(2000)` kb/s and `max(1280)` px
- * mean no reachable setting of it can saturate a link. The exemption is safe
- * because the range is. Widening either bound means removing `preview` from
- * this list in the same change — `reachability.test.ts` asserts the bound so
- * the two cannot drift apart quietly.
+ * **`preview` is no longer here (R-NET-07, R-CFG-03).** It used to be exempt
+ * on the strength of a bound tight enough that no reachable setting of it
+ * could saturate a link — `max(2000)` kb/s, `max(1280)` px. That bound is now
+ * `max(4000)` kb/s, enough on a thin cellular link to take the console's own
+ * uplink with it, so the exemption is withdrawn in the same change that
+ * raised it: every field under `preview` — mode, size, the ladder, floor,
+ * ceiling, the fixed target, rate — is load-bearing from here on, because the
+ * object as a whole is no longer deleted before the comparison runs.
+ * `config.test.ts` asserts the new bound so nobody can raise it again without
+ * this file being where they have to look.
  *
  * Everything absent falls through to load-bearing, which is this file's whole
  * design: `id`, `name`, `device`, `enabled` and `autostart` all change what
  * the aircraft is doing or which hardware it is doing it with.
  */
 export const CAMERA_EXEMPT_LEAVES = [
-  "width", "height", "framerate", "codec", "preview", "controls",
+  "width", "height", "framerate", "codec", "controls",
 ] as const;
 
 /** The document with the fields that cannot affect reachability removed. */

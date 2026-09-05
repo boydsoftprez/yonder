@@ -421,29 +421,65 @@
           "preview": {
             "type": "object",
             "properties": {
-              "width": {
-                "type": "integer",
-                "minimum": 160,
-                "maximum": 1280,
-                "default": 640
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "adaptive",
+                  "fixed"
+                ],
+                "default": "adaptive"
               },
-              "height": {
+              "size": {
+                "type": "string",
+                "enum": [
+                  "auto",
+                  "1280x720",
+                  "854x480",
+                  "640x360"
+                ],
+                "default": "auto"
+              },
+              "ladder_top": {
+                "type": "string",
+                "enum": [
+                  "1280x720",
+                  "854x480",
+                  "640x360"
+                ],
+                "default": "1280x720"
+              },
+              "ladder_bottom": {
+                "type": "string",
+                "enum": [
+                  "1280x720",
+                  "854x480",
+                  "640x360"
+                ],
+                "default": "640x360"
+              },
+              "floor_kbps": {
                 "type": "integer",
-                "minimum": 90,
-                "maximum": 720,
-                "default": 360
+                "minimum": 100,
+                "maximum": 4000,
+                "default": 300
+              },
+              "ceiling_kbps": {
+                "type": "integer",
+                "minimum": 100,
+                "maximum": 4000,
+                "default": 2000
+              },
+              "bitrate_kbps": {
+                "type": "integer",
+                "minimum": 100,
+                "maximum": 4000,
+                "default": 400
               },
               "framerate": {
                 "type": "integer",
                 "minimum": 1,
                 "maximum": 30,
                 "default": 15
-              },
-              "bitrate_kbps": {
-                "type": "integer",
-                "minimum": 100,
-                "maximum": 2000,
-                "default": 400
               }
             },
             "additionalProperties": false,
@@ -752,6 +788,31 @@
             },
             "maxItems": 8,
             "default": []
+          },
+          "stream": {
+            "type": "object",
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "fixed",
+                  "adaptive"
+                ],
+                "default": "fixed"
+              },
+              "floor_kbps": {
+                "type": "integer",
+                "minimum": 100,
+                "maximum": 20000
+              },
+              "ceiling_kbps": {
+                "type": "integer",
+                "minimum": 100,
+                "maximum": 20000
+              }
+            },
+            "additionalProperties": false,
+            "default": {}
           }
         },
         "required": [

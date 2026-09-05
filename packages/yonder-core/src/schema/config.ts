@@ -323,21 +323,143 @@ const CameraOutput = z.discriminatedUnion("kind", [
 export type CameraOutput = z.infer<typeof CameraOutput>;
 
 /**
+ * The sizes the preview's automatic stepping can hold at, largest first.
+ *
+ * Exported so `apply/draft.ts` can check a held size against what a specific
+ * camera actually offers, rather than restating this list. `"auto"` is not a
+ * member: it names the controller's own free-running mode, never a size in
+ * its own right, so `preview.size` adds it separately instead of folding it
+ * in here.
+ */
+export const PREVIEW_RUNGS = ["1280x720", "854x480", "640x360"] as const;
+export type PreviewRung = (typeof PREVIEW_RUNGS)[number];
+
+/**
  * The cheap copy the interface watches (R-VID-13).
  *
- * **Bounded deliberately, and the bound is load-bearing.** `reachability.ts`
- * exempts this object from the confirmation window on the grounds that no
- * setting of it changes what leaves the aircraft on a path the console shares
- * — which is only true while the ceiling here is small enough that it cannot.
- * Raising either bound means moving `preview` out of that exemption in the
- * same change; `reachability.test.ts` asserts the numbers so the two cannot
- * drift apart quietly.
+ * **No longer exempt from the confirmation window (R-NET-07, R-CFG-03).**
+ * `reachability.ts` used to drop this whole object from the comparison the
+ * confirmation window arms on, on the grounds that no setting of it could
+ * change what leaves the aircraft on the path the console itself shares —
+ * true only while the ceiling stayed at 2000 kb/s. It now reaches 4000,
+ * enough on a thin cellular link to take that path with it, so the exemption
+ * is withdrawn in the same change that raises the bound: every field below
+ * is load-bearing from here on, exactly as `bitrate_kbps` always has been.
+ *
+ * **`size` replaces `width`/`height`.** A preview is now pinned to one of
+ * three offered resolutions, or left at `"auto"` for the rate controller to
+ * choose (spec §8.1 — not built by this change). `width`/`height` are still
+ * accepted on input, migrated into `size` below rather than reinterpreted:
+ * every `config.yaml` in the field carries them, and the migrated pair must
+ * name one of the three sizes this schema offers *exactly*, because
+ * inventing a fourth rung to hold an arbitrary legacy pixel size is not
+ * something this schema can validate against anything a camera actually
+ * offers, and silently rounding to the nearest one would be a repair —
+ * R-CMD-04's reasoning against that applies here as much as it does in
+ * `validateDraft`. Both `width`/`height` and `size` at once is refused
+ * rather than resolved by precedence, because a precedence rule would pick
+ * one silently and an operator would never learn which.
+ *
+ * **`ladder_top`/`ladder_bottom`** are the endpoints Auto steps between.
+ * Defaulted here to the widest either end of this schema can express, not
+ * what any one camera actually offers — the same posture `CameraControls`
+ * takes on its own bounds, and for the same reason: a real camera's offered
+ * sizes are what `validateDraft`'s `supportedRungs` argument narrows this
+ * down to, and this file cannot know them.
+ *
+ * **`floor_kbps`/`ceiling_kbps`/`bitrate_kbps` share one 100–4000 kb/s
+ * range** — the blueprint's 4 Mb/s ceiling, covering every kb/s figure here
+ * alike rather than three copies of the same bound that could drift apart.
  */
-const Preview = z.object({
-  width: z.number().int().min(160).max(1280).default(640),
-  height: z.number().int().min(90).max(720).default(360),
+const PreviewShape = z.object({
+  mode: z.enum(["adaptive", "fixed"]).default("adaptive"),
+  size: z.enum(["auto", ...PREVIEW_RUNGS]).default("auto"),
+  ladder_top: z.enum(PREVIEW_RUNGS).default("1280x720"),
+  ladder_bottom: z.enum(PREVIEW_RUNGS).default("640x360"),
+  floor_kbps: z.number().int().min(100).max(4000).default(300),
+  ceiling_kbps: z.number().int().min(100).max(4000).default(2000),
+  bitrate_kbps: z.number().int().min(100).max(4000).default(400),
   framerate: z.number().int().min(1).max(30).default(15),
-  bitrate_kbps: z.number().int().min(100).max(2000).default(400),
+}).strict();
+
+/**
+ * Migrates `width`/`height` into `size` before `PreviewShape` ever sees
+ * them.
+ *
+ * A `.preprocess`, not a `.transform`: the fields this schema no longer has
+ * are never declared just to be stripped again, so `PreviewShape.strict()`
+ * never has to be told to tolerate a key that is not part of what it means
+ * any more. See the type header above for why both sources at once, or a
+ * pair naming no offered size, are refused rather than resolved.
+ */
+const Preview = z.preprocess((input: unknown, ctx: z.RefinementCtx) => {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) return input;
+  const raw = input as Record<string, unknown>;
+  const hasWidth = "width" in raw;
+  const hasHeight = "height" in raw;
+  if (!hasWidth && !hasHeight) return raw;
+  if (hasWidth !== hasHeight) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: [hasWidth ? "height" : "width"],
+      message: "preview needs both width and height together to migrate into a size, or neither",
+    });
+    return z.NEVER;
+  }
+  if ("size" in raw) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["size"],
+      message:
+        "preview carries both width/height and size for the same picture; set only one, so it "
+        + "is unambiguous which one was meant",
+    });
+    return z.NEVER;
+  }
+  const { width, height, ...rest } = raw;
+  if (typeof width !== "number" || typeof height !== "number") {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["width"],
+      message: "preview width and height must both be numbers",
+    });
+    return z.NEVER;
+  }
+  const migrated = `${width}x${height}`;
+  if (!(PREVIEW_RUNGS as readonly string[]).includes(migrated)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["width"],
+      message: `preview ${migrated} is not one of the sizes this schema offers `
+        + `(${PREVIEW_RUNGS.join(", ")}); set preview.size to one of those directly`,
+    });
+    return z.NEVER;
+  }
+  return { ...rest, size: migrated };
+}, PreviewShape);
+
+/**
+ * The bitrate policy for the stream leaving on the console's own path
+ * (R-VID-07, R-VID-17).
+ *
+ * **Seeded from `bitrate_kbps`, one level up.** `floor_kbps`/`ceiling_kbps`
+ * are optional here, not at the point anything reads them: `Camera`'s own
+ * transform fills whichever is left unset from this camera's `bitrate_kbps`
+ * — its existing Fixed target — so a `config.yaml` written before this field
+ * existed means exactly what it meant before (Coordinator resolution 6).
+ * That happens on `Camera` rather than here because the value being seeded
+ * from is a sibling this object cannot see.
+ *
+ * **Bounded 100–20000, unchanged from `bitrate_kbps`'s own range**: the main
+ * stream gains no new ceiling in this task, only a policy that can move it
+ * inside that range automatically. Load-bearing in `reachability.ts`, the
+ * same as `bitrate_kbps` has always been — an adaptive envelope is still
+ * egress on the path the console is standing on.
+ */
+const Stream = z.object({
+  mode: z.enum(["fixed", "adaptive"]).default("fixed"),
+  floor_kbps: z.number().int().min(100).max(20000).optional(),
+  ceiling_kbps: z.number().int().min(100).max(20000).optional(),
 }).strict();
 
 /**
@@ -421,7 +543,17 @@ export const CameraControls = z.object({
 }).strict();
 export type CameraControls = z.infer<typeof CameraControls>;
 
-const Camera = z.object({
+/**
+ * Every field a camera has, before `stream`'s adaptive envelope is seeded
+ * from `bitrate_kbps` below.
+ *
+ * Exported — as a plain object, not the transformed `Camera` below — so
+ * anything that needs the shape itself rather than a parsed instance has the
+ * schema to ask: `reachability.ts`'s leaf enumeration is the first such
+ * reader, and asking here means it can never hold a hand-typed copy of this
+ * field list that quietly drifts from it.
+ */
+export const CameraShape = z.object({
   id: CameraId,
   name: z.string().min(1).max(48),
   /** M6 adds `csi` and `hdmi`; M5 adds the accessory camera. One today. */
@@ -446,7 +578,32 @@ const Camera = z.object({
   preview: Preview.default({}),
   controls: CameraControls.default({}),
   outputs: z.array(CameraOutput).max(8).default([]),
+  stream: Stream.default({}),
 }).strict();
+
+/**
+ * Seeds `stream`'s adaptive envelope from `bitrate_kbps` (Coordinator
+ * resolution 6).
+ *
+ * A `.transform`, not a `superRefine`: seeding produces a value the parse
+ * returns, not an issue about the one it was given. The cost, exactly as it
+ * is for `Modem` above, is that `Camera` is a `ZodEffects` and not a plain
+ * object any more — which is why `CameraShape` stays exported as the plain
+ * version, for a reader that needs `.shape` rather than a parsed instance.
+ *
+ * **Only fills what is missing.** An operator who has set either bound
+ * explicitly keeps it; widening the envelope afterwards is an explicit draft
+ * edit (`apply/draft.ts`), never something this transform does again once a
+ * value is on record.
+ */
+export const Camera = CameraShape.transform((camera) => ({
+  ...camera,
+  stream: {
+    ...camera.stream,
+    floor_kbps: camera.stream.floor_kbps ?? camera.bitrate_kbps,
+    ceiling_kbps: camera.stream.ceiling_kbps ?? camera.bitrate_kbps,
+  },
+}));
 export type Camera = z.infer<typeof Camera>;
 
 /**

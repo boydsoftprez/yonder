@@ -31,10 +31,14 @@ import type { Config } from "../schema/config.js";
  * into.
  *
  * Written out rather than "anything in the schema", because the two kinds are
- * the thing an operator is being told about: `width`, `height`, `framerate`
- * and the preview are `CAMERA_EXEMPT_LEAVES`, so they restart the picture and
- * are kept without a countdown; `bitrate_kbps`, `enabled` and `autostart`
- * change what leaves the aircraft, so they arm the confirmation window.
+ * the thing an operator is being told about: `width`, `height` and
+ * `framerate` are `CAMERA_EXEMPT_LEAVES`, so they restart the picture and are
+ * kept without a countdown; `bitrate_kbps`, `enabled`, `autostart` and — since
+ * this task — `preview_bitrate_kbps` change what leaves the aircraft, so they
+ * arm the confirmation window. `preview` lost its exemption here too
+ * (R-NET-07): a preview ceiling that can now reach 4000 kb/s is egress on the
+ * same path the console is reached over, so a change to it is held exactly
+ * like a change to the main bitrate is.
  *
  * `id`, `name`, `device` and `outputs` are deliberately absent. Each is a
  * different camera or a different consumer rather than a setting of this one,

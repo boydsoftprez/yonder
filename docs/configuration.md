@@ -176,11 +176,19 @@ cameras:
     framerate: 30
     codec: h264                    # h264 only today
     bitrate_kbps: 2000
+    stream:                        # the bitrate policy for the ground-station stream (R-VID-07, R-VID-17)
+      mode: fixed                  # fixed | adaptive — fixed by default
+      floor_kbps: 2000             # the adaptive envelope; seeded from bitrate_kbps until set explicitly
+      ceiling_kbps: 2000           # bounded 100-20000, the same range bitrate_kbps has always had
     preview:                       # the cheap copy the interface watches (R-VID-13)
-      width: 640
-      height: 360
+      mode: adaptive                # adaptive | fixed — adaptive by default
+      size: auto                   # auto | 1280x720 | 854x480 | 640x360
+      ladder_top: 1280x720         # the largest size Auto may step to
+      ladder_bottom: 640x360       # the smallest
+      floor_kbps: 300              # bounded 100-4000
+      ceiling_kbps: 2000
+      bitrate_kbps: 400            # the Fixed-mode target, retained while Adaptive is selected
       framerate: 15
-      bitrate_kbps: 400
     controls:                      # raw device units throughout — R-CTL-11 … R-CTL-14
       brightness: null
       contrast: null
@@ -214,11 +222,48 @@ another, and where the two differed the camera would not start at all.
 and until it has a credential of its own an SRT output would listen with no password on
 it. The camera page says so before you press Start.
 
-Up to 8 cameras, each with up to 8 outputs. Resolution, frame rate, codec, the preview and
-the image controls are cosmetic enough that changing them does not arm the confirmation
-window; everything else about a camera does, including its bitrate and its outputs — both
-share the uplink the console itself is reached over, so a change to either is held until you
-confirm it (R-CFG-03, R-VPN-07).
+Up to 8 cameras, each with up to 8 outputs. Resolution, frame rate, codec and the image
+controls are cosmetic enough that changing them does not arm the confirmation window;
+everything else about a camera does, including its bitrate, its stream and preview policy,
+and its outputs — all four share the uplink the console itself is reached over, so a change
+to any of them is held until you confirm it (R-CFG-03, R-VPN-07).
+
+**`preview` is no longer cosmetic (R-NET-07).** It used to be exempt from the confirmation
+window on the strength of a bound small enough that nothing set inside it could saturate a
+link — 2000 kb/s at most. That ceiling is now 4000, enough on a thin cellular link to take
+the console's own uplink with it, so a change to any field under `preview` — the mode, the
+size, the ladder, the floor, the ceiling, the fixed target, the rate — is held and confirmed
+exactly like a change to `bitrate_kbps` is.
+
+#### Stream and preview policy
+
+`stream` and `preview` both carry a bitrate policy: a fixed target the operator sets
+directly, or an adaptive floor and ceiling the device's rate controller stays inside.
+`preview` additionally carries `size`, held at one of three offered pictures or left at
+`auto` for the controller to step between `ladder_bottom` and `ladder_top` on its own.
+
+A configuration written before this section existed still means what it meant. `stream`'s
+adaptive floor and ceiling default to whatever `bitrate_kbps` already is — a fixed-rate
+stream expressed in the new fields, not a new envelope nobody chose. `preview.width` and
+`preview.height` are still accepted and are migrated into `preview.size`: the pair must name
+one of the three offered pictures exactly, because inventing a fourth to hold an arbitrary
+legacy size, or rounding to the nearest offered one, would be Yonder deciding what the
+operator meant rather than reporting that the file needs attention. Carrying both
+`width`/`height` and `size` at once is refused rather than resolved by precedence, so an
+ambiguous file is never silently read one way when it might have meant the other.
+
+`preview.size`, `preview.ladder_top` and `preview.ladder_bottom` each hold one of
+`1280x720`, `854x480` or `640x360`; `size` alone may also be `auto`. `stream` and `preview`
+both bound their floor and ceiling to the same range their own fixed target does —
+100-20000 kb/s for `stream`, 100-4000 for `preview`.
+
+The schema bounds each field to its own range; it does not itself compare a floor against
+a ceiling, or a ladder's smallest against its largest. That comparison is `validateDraft`'s
+job, in `yonder-core`'s `apply/draft.ts` — it runs on the console's in-progress edit before
+Apply, names a reversed floor and ceiling, a reversed ladder, or a held size a camera does
+not offer by the field that is wrong, and never repairs one: swapping a reversed pair,
+clamping an out-of-range value, or substituting the nearest legal size would all be Yonder
+deciding what the operator meant, and R-CMD-04 is why that decision stays theirs.
 
 #### Camera image controls
 

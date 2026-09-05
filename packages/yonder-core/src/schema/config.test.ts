@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, it, expect } from "vitest";
-import { CameraControls, ConfigSchema, DEFAULT_CONFIG } from "./config.js";
+import {
+  Camera, CameraControls, ConfigSchema, DEFAULT_CONFIG,
+} from "./config.js";
 import { withoutRetiredKeys } from "./retired.js";
 import { formatIssues } from "../config/errors.js";
 // Imported rather than restated: the point of the guard under test is that
@@ -320,7 +322,11 @@ describe("cameras", () => {
       width: 1280, height: 720, framerate: 30,
       codec: "h264", bitrate_kbps: 2000, outputs: [],
     });
-    expect(cam.preview).toEqual({ width: 640, height: 360, framerate: 15, bitrate_kbps: 400 });
+    expect(cam.preview).toEqual({
+      mode: "adaptive", size: "auto", ladder_top: "1280x720", ladder_bottom: "640x360",
+      floor_kbps: 300, ceiling_kbps: 2000, bitrate_kbps: 400, framerate: 15,
+    });
+    expect(cam.stream).toEqual({ mode: "fixed", floor_kbps: 2000, ceiling_kbps: 2000 });
     expect(cam.controls).toEqual({
       brightness: null, contrast: null, rotation: 0,
       zoom: null, focus: null, exposureTime: null, whiteBalanceTemperature: null,
@@ -328,21 +334,6 @@ describe("cameras", () => {
       saturation: null, hue: null, powerLineFrequency: null,
       autoExposure: null, autoWhiteBalance: null, autoFocus: null,
     });
-  });
-
-  it("bounds the preview so no setting of it can saturate a link", () => {
-    // The preview is exempt from the confirmation window (reachability.ts), and
-    // that exemption is only safe because this bound exists. Widening it means
-    // moving `preview` out of the exempt list in the same change.
-    const base = { version: 1, network: { ap: { psk: { secret: "ap_psk" } } }, ui: { editor: {} } };
-    const withPreview = (preview: unknown) =>
-      ConfigSchema.safeParse({ ...base, cameras: [
-        { id: "cam0", name: "Nose", source: "usb", device: "usb-1", preview },
-      ] });
-    expect(withPreview({ bitrate_kbps: 2000 }).success).toBe(true);
-    expect(withPreview({ bitrate_kbps: 2001 }).success).toBe(false);
-    expect(withPreview({ width: 1280 }).success).toBe(true);
-    expect(withPreview({ width: 1281 }).success).toBe(false);
   });
 
   it("refuses two cameras with the same id", () => {
@@ -516,6 +507,129 @@ describe("cameras", () => {
     const [rtp, srt] = cfg.cameras[0].outputs;
     expect(rtp).toMatchObject({ enabled: false, host: "192.168.1.50", port: 5600 });
     expect(srt).toMatchObject({ enabled: false, port: 9998 });
+  });
+});
+
+/**
+ * `stream` and `preview`'s policy fields (spec §11): a fixed-rate stream by
+ * default, an adaptive preview bounded 100-4000 kb/s, and the width/height to
+ * size migration. `Camera.parse` directly, as the brief's own tests do,
+ * rather than through `ConfigSchema` — these are facts about one camera, not
+ * about the document it sits in.
+ */
+describe("camera stream and preview policy", () => {
+  const minimal = { id: "cam0", name: "Nose", source: "usb" as const, device: "usb-1" };
+
+  it("defaults: stream fixed, preview adaptive at 300–2000 kb/s, ladder at the supported ends", () => {
+    const c = Camera.parse(minimal);
+    expect(c.stream.mode).toBe("fixed");
+    expect(c.preview).toMatchObject({ mode: "adaptive", floor_kbps: 300, ceiling_kbps: 2000, size: "auto" });
+  });
+
+  it("defaults the ladder to this schema's own widest and narrowest sizes", () => {
+    const c = Camera.parse(minimal);
+    expect(c.preview.ladder_top).toBe("1280x720");
+    expect(c.preview.ladder_bottom).toBe("640x360");
+  });
+
+  it("migrates preview width/height into size, and refuses two sources", () => {
+    expect(Camera.parse({ ...minimal, preview: { width: 640, height: 360 } }).preview.size).toBe("640x360");
+    expect(() => Camera.parse({ ...minimal, preview: { width: 640, height: 360, size: "854x480" } })).toThrow();
+  });
+
+  // The given test above only ever migrates the default pair. An
+  // implementation that special-cased "640x360" rather than genuinely
+  // reading width/height would still pass it.
+  it("migrates a second size pair too, not only the default one", () => {
+    expect(Camera.parse({ ...minimal, preview: { width: 1280, height: 720 } }).preview.size).toBe("1280x720");
+  });
+
+  it("accepts a size set directly, with no width/height involved at all", () => {
+    expect(Camera.parse({ ...minimal, preview: { size: "854x480" } }).preview.size).toBe("854x480");
+  });
+
+  it("refuses width without height, and height without width, saying so specifically", () => {
+    // Both throw even without this file's own "needs both together" check —
+    // the lone field left standing is `undefined` where a number is
+    // expected, which the numeric check below would also catch. The message
+    // is what proves this check, not that backstop, is the one that fired.
+    const widthOnly = Camera.safeParse({ ...minimal, preview: { width: 640 } });
+    expect(widthOnly.success).toBe(false);
+    if (!widthOnly.success) expect(widthOnly.error.issues[0]?.message).toContain("together");
+    const heightOnly = Camera.safeParse({ ...minimal, preview: { height: 360 } });
+    expect(heightOnly.success).toBe(false);
+    if (!heightOnly.success) expect(heightOnly.error.issues[0]?.message).toContain("together");
+  });
+
+  /**
+   * The old schema accepted any 160–1280 × 90–720 pair; this one names
+   * exactly three pictures. A legacy value naming a fourth is refused by
+   * name rather than silently rounded to the nearest offered size, which
+   * would be this schema repairing a draft the same way `validateDraft`
+   * refuses to (R-CMD-04, Coordinator resolution 5).
+   */
+  it("refuses a width/height pair naming no size this schema offers, and names width", () => {
+    const result = Camera.safeParse({ ...minimal, preview: { width: 800, height: 450 } });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    // A bare `.toThrow()` here cannot tell this file's own membership check
+    // apart from `size`'s own enum rejecting "800x450" as a backstop — both
+    // throw. Naming the path and the message is what proves this file's
+    // check is the one that actually fired, pointing at the field an
+    // operator actually wrote rather than `size`, which they did not.
+    expect(result.error.issues[0]?.path).toEqual(["preview", "width"]);
+    expect(result.error.issues[0]?.message).toContain("800x450");
+  });
+
+  it("a preview ceiling of 4000 is accepted and 4001 is not", () => {
+    expect(Camera.parse({ ...minimal, preview: { ceiling_kbps: 4000 } })
+      .preview.ceiling_kbps).toBe(4000);
+    expect(() => Camera.parse({ ...minimal, preview: { ceiling_kbps: 4001 } })).toThrow();
+  });
+
+  it("bounds the preview's fixed target at the same 100–4000 kb/s range", () => {
+    expect(Camera.parse({ ...minimal, preview: { bitrate_kbps: 4000 } }).preview.bitrate_kbps).toBe(4000);
+    expect(() => Camera.parse({ ...minimal, preview: { bitrate_kbps: 4001 } })).toThrow();
+  });
+
+  it("accepts preview mode adaptive or fixed, and refuses anything else", () => {
+    expect(Camera.parse({ ...minimal, preview: { mode: "fixed" } }).preview.mode).toBe("fixed");
+    expect(() => Camera.parse({ ...minimal, preview: { mode: "manual" } })).toThrow();
+  });
+
+  it("refuses a ladder endpoint naming no size this schema offers", () => {
+    expect(() => Camera.parse({ ...minimal, preview: { ladder_top: "1920x1080" } })).toThrow();
+  });
+
+  it("seeds a stream's adaptive envelope from its fixed target", () => {
+    const c = Camera.parse({ ...minimal, bitrate_kbps: 3000 });
+    expect(c.stream.floor_kbps).toBe(3000);
+    expect(c.stream.ceiling_kbps).toBe(3000);
+  });
+
+  it("seeds the default camera's stream envelope too, from the default bitrate", () => {
+    const c = Camera.parse(minimal);
+    expect(c.stream.floor_kbps).toBe(2000);
+    expect(c.stream.ceiling_kbps).toBe(2000);
+  });
+
+  // An implementation that always reseeds from bitrate_kbps — rather than
+  // only filling what is missing — would still pass the two tests above,
+  // since neither one sets stream.floor_kbps or ceiling_kbps explicitly.
+  it("keeps an explicit stream floor or ceiling rather than reseeding it", () => {
+    const c = Camera.parse({ ...minimal, bitrate_kbps: 3000, stream: { floor_kbps: 1000 } });
+    expect(c.stream.floor_kbps).toBe(1000);
+    expect(c.stream.ceiling_kbps).toBe(3000);
+  });
+
+  it("defaults stream mode to fixed, and accepts adaptive", () => {
+    expect(Camera.parse(minimal).stream.mode).toBe("fixed");
+    expect(Camera.parse({ ...minimal, stream: { mode: "adaptive" } }).stream.mode).toBe("adaptive");
+  });
+
+  it("bounds a stream's floor and ceiling at bitrate_kbps's own 100–20000 kb/s range", () => {
+    expect(Camera.parse({ ...minimal, stream: { ceiling_kbps: 20000 } }).stream.ceiling_kbps).toBe(20000);
+    expect(() => Camera.parse({ ...minimal, stream: { ceiling_kbps: 20001 } })).toThrow();
   });
 });
 
