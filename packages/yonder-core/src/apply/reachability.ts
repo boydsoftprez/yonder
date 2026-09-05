@@ -31,6 +31,7 @@ function withoutCosmetics(config: Config): unknown {
   const copy = structuredClone(config) as {
     ui: Record<string, unknown>;
     remote?: { zerotier?: Record<string, unknown> };
+    mavlink?: Record<string, unknown>;
   };
   delete copy.ui.theme;
   // Joining a mesh only ever *adds* a path to this device; it cannot take away
@@ -62,6 +63,36 @@ function withoutCosmetics(config: Config): unknown {
   if (zerotier !== undefined) {
     delete zerotier.enabled;
     delete zerotier.network_id;
+  }
+  // A ground-station endpoint touches no interface, no route and no radio, so
+  // it cannot take away the path the operator is reaching the device on —
+  // which is the only thing the confirmation window exists to protect.
+  //
+  // The failure this prevents is specific and bad: the window reverts *and
+  // reboots*, so an operator adjusting a port mid-flight over a marginal link
+  // loses the video, the telemetry and the mesh a minute after touching
+  // something that could not have cost them any of it (R-CFG-12, §5).
+  //
+  // Leaf by leaf, exactly as `remote.zerotier` above and for the same reason.
+  // `mavlink.serial`, `mavlink.ingest` and `mavlink.tcp_server.port` are
+  // deliberately absent, and each earns its absence on its own. The first
+  // moves which wire the router opens, and the second opens an
+  // unauthenticated command path to the vehicle (R-MAV-07); neither has been
+  // shown to be safe to keep. The port is not like those two, and not like its
+  // own sibling `tcp_server.enabled` either: it is a number the schema would
+  // otherwise accept in full, and a value the schema accepts can still be a
+  // port some other service on the device already holds. R-MAV-14 refuses
+  // exactly one such collision — with `ui.port`, the console's own — which
+  // leaves every other one for the window to catch, not the schema. A
+  // validator is a narrower promise than a rollback.
+  const mavlink = copy.mavlink;
+  if (mavlink !== undefined) {
+    delete mavlink.endpoints;
+    delete mavlink.autocast;
+    const tcp = mavlink.tcp_server as Record<string, unknown> | undefined;
+    if (tcp !== undefined) {
+      delete tcp.enabled;
+    }
   }
   return copy;
 }

@@ -496,7 +496,7 @@ git commit -s -m "feat(config): the mavlink section, which configuration.md alre
 
 **Interfaces:**
 - Consumes: `Config["mavlink"]` from Task 3
-- Produces: `affectsReachability` returns `false` for endpoint/tcp/autocast changes and `true` for everything else under `mavlink`
+- Produces: `affectsReachability` returns `false` for `mavlink.endpoints`, `mavlink.autocast` and `mavlink.tcp_server.enabled` changes, and `true` for everything else under `mavlink` — `mavlink.tcp_server.port` included, which stays held
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -512,14 +512,26 @@ describe("mavlink (R-CFG-12, R-MAV-03)", () => {
     expect(affectsReachability(before, after)).toBe(false);
   });
 
-  it("turning the tcp server off, and moving its port, are both kept", () => {
+  it("turning the tcp server off is kept", () => {
     const before = withMav(DEFAULT_CONFIG.mavlink);
-    expect(affectsReachability(before, withMav({ ...DEFAULT_CONFIG.mavlink, tcp_server: { enabled: false, port: 5760 } }))).toBe(false);
-    expect(affectsReachability(before, withMav({ ...DEFAULT_CONFIG.mavlink, tcp_server: { enabled: true, port: 5761 } }))).toBe(false);
+    const after = withMav({ ...DEFAULT_CONFIG.mavlink, tcp_server: { enabled: false, port: 5760 } });
+    expect(affectsReachability(before, after)).toBe(false);
   });
 
   it("autocast is kept", () => {
     expect(affectsReachability(withMav(DEFAULT_CONFIG.mavlink), withMav({ ...DEFAULT_CONFIG.mavlink, autocast: false }))).toBe(false);
+  });
+
+  // The port is not like `enabled`: the schema accepts any value in range, and
+  // a value the schema accepts can still be a port some other service on the
+  // device already holds. R-MAV-14 only refuses the one collision it can see
+  // - with `ui.port`, the console's own - so a bind failure against sshd,
+  // mediamtx or the mesh client is invisible to the schema and would
+  // otherwise ship kept. Still held, on purpose.
+  it("moving the tcp server's port is still held", () => {
+    const before = withMav(DEFAULT_CONFIG.mavlink);
+    const after = withMav({ ...DEFAULT_CONFIG.mavlink, tcp_server: { enabled: true, port: 5761 } });
+    expect(affectsReachability(before, after)).toBe(true);
   });
 
   // The exemption is earned per leaf. These two are not exempt and must not
@@ -533,13 +545,34 @@ describe("mavlink (R-CFG-12, R-MAV-03)", () => {
     const after = withMav({ ...DEFAULT_CONFIG.mavlink, ingest: { loopback_only: false } });
     expect(affectsReachability(withMav(DEFAULT_CONFIG.mavlink), after)).toBe(true);
   });
+
+  // The exemption is three named leaves, not the subtree they sit in - the
+  // same regression `remote.zerotier` guards against above. A field added
+  // directly under `mavlink`, or under `mavlink.tcp_server` specifically,
+  // must not inherit a kept-not-held apply from its neighbours with nobody
+  // deciding it should.
+  it("holds a field added directly under mavlink that nobody has measured", () => {
+    const before = withMav(DEFAULT_CONFIG.mavlink);
+    const after = structuredClone(before) as Config & { mavlink: Record<string, unknown> };
+    after.mavlink.somethingNew = { invented: "later" };
+    expect(affectsReachability(before, after)).toBe(true);
+  });
+
+  it("holds a field added under mavlink.tcp_server that nobody has measured", () => {
+    const before = withMav(DEFAULT_CONFIG.mavlink);
+    const after = structuredClone(before) as Config & {
+      mavlink: { tcp_server: Record<string, unknown> };
+    };
+    after.mavlink.tcp_server.somethingNew = true;
+    expect(affectsReachability(before, after)).toBe(true);
+  });
 });
 ```
 
 - [ ] **Step 2: Run them and watch them fail**
 
 Run: `npx vitest run --root packages/yonder-core src/apply/reachability.test.ts`
-Expected: the three "kept" tests FAIL (they return `true`); the two "held" tests already pass, which is the point — they must keep passing after the change.
+Expected: the three "kept" tests FAIL (they return `true`); the five "still held" tests already pass, which is the point — they must keep passing after the change.
 
 - [ ] **Step 3: Extend `withoutCosmetics`, naming leaves**
 
@@ -556,10 +589,17 @@ In `packages/yonder-core/src/apply/reachability.ts`, extend the local type and a
   // something that could not have cost them any of it (R-CFG-12, §5).
   //
   // Leaf by leaf, exactly as `remote.zerotier` above and for the same reason.
-  // `mavlink.serial` and `mavlink.ingest` are deliberately absent: the first
+  // `mavlink.serial`, `mavlink.ingest` and `mavlink.tcp_server.port` are
+  // deliberately absent, and each earns its absence on its own. The first
   // moves which wire the router opens, and the second opens an
-  // unauthenticated command path to the vehicle (R-MAV-07). Neither has been
-  // shown to be safe to keep, so both stay load-bearing.
+  // unauthenticated command path to the vehicle (R-MAV-07); neither has been
+  // shown to be safe to keep. The port is not like those two, and not like its
+  // own sibling `tcp_server.enabled` either: it is a number the schema would
+  // otherwise accept in full, and a value the schema accepts can still be a
+  // port some other service on the device already holds. R-MAV-14 refuses
+  // exactly one such collision — with `ui.port`, the console's own — which
+  // leaves every other one for the window to catch, not the schema. A
+  // validator is a narrower promise than a rollback.
   const mavlink = copy.mavlink;
   if (mavlink !== undefined) {
     delete mavlink.endpoints;
@@ -567,7 +607,6 @@ In `packages/yonder-core/src/apply/reachability.ts`, extend the local type and a
     const tcp = mavlink.tcp_server as Record<string, unknown> | undefined;
     if (tcp !== undefined) {
       delete tcp.enabled;
-      delete tcp.port;
     }
   }
 ```
@@ -585,13 +624,13 @@ and widen the cast at the top of the function:
 - [ ] **Step 4: Run the tests**
 
 Run: `npx vitest run --root packages/yonder-core src/apply/reachability.test.ts`
-Expected: PASS, all five.
+Expected: PASS, all eight.
 
 - [ ] **Step 5: Extend `R-CFG-12` in `docs/requirements.md`**
 
 Append to `R-CFG-12`'s requirement text, in the same cell:
 
-> **Each exemption is earned individually and named leaf by leaf.** `ui.theme` earned it by reverting a palette an operator had watched take. `remote.zerotier`'s two fields earned it on a board, where a join added exactly one route and the client refused a controller-pushed route that overlapped the device's own network. `mavlink.endpoints`, `mavlink.autocast` and `mavlink.tcp_server` earn it by construction: none of them touches an interface, a route or a radio, and the window's own remedy — revert *and reboot* — would take the video, the telemetry and the mesh off a flying aircraft in exchange for protecting nothing. `mavlink.serial` and `mavlink.ingest` are deliberately not exempt.
+> **Each exemption is earned individually and named leaf by leaf.** `ui.theme` earned it by reverting a palette an operator had watched take. `remote.zerotier`'s two fields earned it on a board, where a join added exactly one route and the client refused a controller-pushed route that overlapped the device's own network. `mavlink.endpoints`, `mavlink.autocast` and `mavlink.tcp_server.enabled` earn it by construction: none of them touches an interface, a route or a radio, and the window's own remedy — revert *and reboot* — would take the video, the telemetry and the mesh off a flying aircraft in exchange for protecting nothing. `mavlink.serial`, `mavlink.ingest` and `mavlink.tcp_server.port` are deliberately not exempt — the port because a value the schema accepts in full can still be one another service on the device already holds, and R-MAV-14 checks that collision against only `ui.port`.
 
 - [ ] **Step 6: Commit**
 
@@ -2158,4 +2197,4 @@ too. And `R-UI-15` turned out to apply to this page after all, which the spec ha
 but no screen had shown: `mavlink.serial` and `mavlink.ingest` are not exempt, so the page
 pends, and `flows.test.ts` failed until it carried the banner.
 
-**One correction the plan makes to the spec.** §5 and §7 say `mavlink` is exempted from the confirmation window "by name". `reachability.ts` names **leaves**, never subtrees, and its own comment explains that a subtree exemption silently enfranchises every field added under it later. Task 4 therefore exempts `mavlink.endpoints`, `mavlink.autocast`, `mavlink.tcp_server.enabled` and `mavlink.tcp_server.port` individually, and deliberately leaves `mavlink.serial` and `mavlink.ingest` load-bearing. **The spec has been tightened to match** in the same change as this plan: §5 and §7 now name the four exempt leaves and name `mavlink.serial` and `mavlink.ingest` as deliberately not exempt, so a later reader knows they were considered rather than missed.
+**A correction the plan tried to make to the spec, and should not have.** An earlier draft of this paragraph claimed §5 and §7 exempted `mavlink` "by name" and that the spec "has been tightened to match". Both were false: §5 already named individual leaves, and it excluded `mavlink.tcp_server.port` on purpose, with a counterexample — a router that takes a port another service needs costs reachability by a route touching no interface, no route and no radio, and `R-MAV-14` refuses exactly one such collision while the window catches the rest. The spec was never amended. Task 4 therefore exempts **three** leaves — `mavlink.endpoints`, `mavlink.autocast` and `mavlink.tcp_server.enabled` — and leaves `mavlink.serial`, `mavlink.ingest` and `mavlink.tcp_server.port` load-bearing, which is what the spec said in the first place.
