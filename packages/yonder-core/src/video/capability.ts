@@ -11,8 +11,9 @@
  * behaves identically whether it is a sensor crop, a UVC control, or a
  * protocol message answered by cropping at the receiver.
  *
- * **Three states, and the middle one is the reason this is a union rather
- * than an optional.**
+ * **Four states. Two of them are why this is a union rather than an
+ * optional** — a plain `{ value?: T }` cannot also carry a reason, or name
+ * who is in charge.
  *
  * - `present` — the device answered and the control works.
  * - `not-offered` — the device does not have it. The page states this as a
@@ -24,7 +25,18 @@
  *   because on the wire it is indistinguishable from success: the accessory
  *   camera's live-view resolution was tried at fifteen values across three
  *   payload widths and every one was acknowledged while the frame stayed
- *   1280x720.
+ *   1280x720. **It carries a value too** — the same reading `present` would
+ *   have, when the device gave one before it stopped taking effect — so the
+ *   page still has something to draw the dead control from, rather than a
+ *   bare sentence where a control used to be (R-UI-21).
+ * - `gated` — the control is real and working, and another control currently
+ *   has charge of it (R-UI-21). **Not a fault.** The bench camera's
+ *   `exposure_time_absolute` answers a real range right up until
+ *   `auto_exposure` is put in Manual, which is the device behaving exactly as
+ *   documented, not a defect to report. The page draws it inert, in a
+ *   neutral tone, and names the control that has charge of it in words an
+ *   operator would use — `auto exposure` — never the V4L2 name
+ *   `auto_exposure` an operator has no reason to know.
  *
  * A discriminated union rather than `{ value?: T }` because the compiler is
  * then the thing that stops a caller reading a value off a capability that has
@@ -42,7 +54,13 @@
 export type Capability<T> =
   | { readonly state: "present"; readonly value: T }
   | { readonly state: "not-offered" }
-  | { readonly state: "advertised"; readonly reason: string };
+  | { readonly state: "advertised"; readonly value: T | undefined; readonly reason: string }
+  | {
+      readonly state: "gated";
+      readonly value: T;
+      /** Who has charge of it — an id for code, a label for an operator. */
+      readonly by: { readonly id: string; readonly label: string };
+    };
 
 export function present<T>(value: T): Capability<T> {
   return { state: "present", value };
@@ -50,9 +68,32 @@ export function present<T>(value: T): Capability<T> {
 export function notOffered<T>(): Capability<T> {
   return { state: "not-offered" };
 }
-/** `reason` is shown on the inoperative control, so write it for an operator. */
-export function advertised<T>(reason: string): Capability<T> {
-  return { state: "advertised", reason };
+/**
+ * `reason` is shown on the inoperative control, so write it for an operator.
+ *
+ * `value` is what the device last answered for it — the same reading
+ * `present` would carry — so the page can still draw the dead control
+ * instead of falling back to a bare sentence (R-UI-21). Kept optional via
+ * overload rather than made a required second argument: every existing
+ * caller has only a reason, never a value, and none of them is this task's
+ * to edit. `advertised<T>(reason)` is exactly `advertised<T>(undefined,
+ * reason)`.
+ */
+export function advertised<T>(reason: string): Capability<T>;
+export function advertised<T>(value: T | undefined, reason: string): Capability<T>;
+export function advertised<T>(valueOrReason: T | undefined | string, reason?: string): Capability<T> {
+  return reason === undefined
+    ? { state: "advertised", value: undefined, reason: valueOrReason as string }
+    : { state: "advertised", value: valueOrReason as T | undefined, reason };
+}
+/**
+ * The control is real and in range; another one has charge of it (R-UI-21).
+ * **Not a fault**, so unlike `advertised` there is no reason to carry — only
+ * `by`, the control that has it, named as an operator would: `{ id:
+ * "auto_exposure", label: "auto exposure" }`, never the id alone.
+ */
+export function gated<T>(value: T, by: { readonly id: string; readonly label: string }): Capability<T> {
+  return { state: "gated", value, by };
 }
 
 /** One capture mode the device offered: a pixel format, a size and its rates. */
@@ -163,6 +204,9 @@ export function summarise(caps: CameraCapabilities): string {
     const cap = caps[key] as Capability<unknown>;
     if (cap.state === "not-offered") return `${key}: none`;
     if (cap.state === "advertised") return `${key}: unanswered`;
+    // Neutral, not a fault (R-UI-21) — named in the operator's own words,
+    // never the V4L2 control name that has charge of it.
+    if (cap.state === "gated") return `${key}: ${cap.by.label} has it`;
     if (key === "formats") return `${key}: ${(cap.value as readonly unknown[]).length}`;
     return `${key}: yes`;
   }).join(" · ");
