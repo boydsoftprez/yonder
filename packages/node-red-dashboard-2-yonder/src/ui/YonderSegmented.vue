@@ -157,7 +157,19 @@ export default {
    exactly as the draft already had it — an advertised or gated option
    reads in its state's tone whether or not it is the one marked on. */
 .is-advertised .y-seg__opt { border-color: var(--yonder-waiting, #ffcf28); color: var(--yonder-waiting, #ffcf28); }
-.is-gated .y-seg__opt { border-style: dashed; }
+/* **Gated takes the neutral tone, exactly as `YonderPicker` does and as the
+   advertised rule above already does here.** Dashing the border alone left
+   the chosen option wearing `.on`'s select colour — cyan, which is this
+   console's mark for *this is live and selected* — so a shutter another
+   control had charge of read as a working control with an unusual border.
+   Another control holding this one is not a fault, and it is not live
+   either; both facts have to be visible (R-UI-21). */
+.is-gated .y-seg__opt {
+    border-style: dashed;
+    border-color: var(--yonder-neutral, #7d7869);
+    color: var(--yonder-neutral, #7d7869);
+    background: transparent;
+}
 .y-seg__why { font-size: 11px; margin-top: 5px; line-height: 1.4; max-width: 230px; }
 .why-advertised { color: var(--yonder-waiting, #ffcf28); }
 .why-gated { color: var(--yonder-neutral, #7d7869); }

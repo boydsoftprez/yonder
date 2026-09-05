@@ -85,4 +85,27 @@ describe("the three states that never emit (R-UI-20, R-UI-21)", () => {
       expect(w.emitted("change"), `${state} emitted a change`).toBeUndefined();
     }
   });
+
+it("a gated control never wears the colour of a live selection", () => {
+    // `.on` marks the chosen option in the select colour, which is this
+    // console's mark for "live and selected". A gated control is neither, so
+    // the state's own tone must win over it — the same way advertised's does
+    // here, and the same way the picker's whole control goes neutral.
+    const w = seg({ options: ["Manual", "Auto"], value: "Auto", state: "gated",
+                    reason: "while auto exposure is aperture priority" });
+    //
+    // jsdom does not resolve custom properties, so `color` comes back as the
+    // literal `var(--yonder-neutral, …)` rather than a colour, and an
+    // unresolvable var in `border-color` reads as transparent. So this asserts
+    // which *token* wins, which is the thing that can regress; the resolved
+    // colours are checked in the gallery, in both palettes, by eye and by
+    // getComputedStyle in a real browser.
+    const gated = getComputedStyle(w.find(".y-seg__opt.on").element).color;
+    const live = getComputedStyle(
+        seg({ options: ["Manual", "Auto"], value: "Auto", state: "present" })
+            .find(".y-seg__opt.on").element).color;
+    expect(gated).not.toBe(live);
+    expect(gated).toContain("yonder-neutral");
+    expect(live).toContain("yonder-select");
+});
 });
