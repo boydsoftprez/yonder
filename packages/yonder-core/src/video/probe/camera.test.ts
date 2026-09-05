@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { detectCameras, isHardwareCodec, probeCamera, type ProbeOptions } from "./camera.js";
 import type { ByPathEntry } from "./bypath.js";
 import type { CommandRunner } from "../../net/runner.js";
+import type { CameraCapabilities } from "../capability.js";
 
 const fixture = (name: string) =>
   readFileSync(join(import.meta.dirname, "fixtures", name), "utf8");
@@ -58,6 +59,17 @@ function recordedByPath(): ByPathEntry[] {
 const bench = (opts: ProbeOptions = {}) =>
   detectCameras({ runner: benchRunner(), byPath: recordedByPath, ...opts });
 
+/**
+ * One camera's capabilities, probed from an arbitrary `--list-ctrls-menus`
+ * dump — `benchRunner`'s own `overrides` seam, the way the rotation test
+ * below already substitutes one, rather than a second runner built to do
+ * the same thing a second way.
+ */
+const capabilitiesFrom = async (listCtrls: string): Promise<CameraCapabilities> => {
+  const r = await bench({ runner: benchRunner({ "--list-ctrls-menus": listCtrls }) });
+  return r.found[0].capabilities;
+};
+
 describe("detectCameras", () => {
   it("finds the camera and reports what it can do", async () => {
     const r = await bench();
@@ -87,18 +99,25 @@ describe("detectCameras", () => {
     // the camera says now — 348 — not the factory default of 0.
     const r = await bench();
     const caps = r.found[0].capabilities;
-    for (const key of ["zoom", "focus", "exposure", "whiteBalance", "brightness", "contrast"] as const) {
+    for (const key of ["zoom", "brightness", "contrast"] as const) {
       expect(caps[key].state).toBe("present");
     }
+    // `focus_absolute` carries `flags=inactive` on this camera: real and in
+    // range, gated by `focus_automatic_continuous` (`autoFocus`), not absent
+    // and not a fault (R-UI-21). `exposure` and `whiteBalance` are gated the
+    // same way — exhaustively covered by "the bench camera's controls" below.
     expect(caps.focus).toEqual({
-      state: "present",
+      state: "gated",
+      by: { id: "autoFocus", label: "auto focus" },
       // The fixture's focus_absolute line carries flags=inactive, has-min-max
       // — still a reading, not a fault (R-UI-21).
       value: { min: 0, max: 1023, step: 1, default: 0, current: 348, inactive: true },
     });
-    // M5 fills these; M4 answers them honestly rather than guessing from the
-    // pan_absolute and tilt_absolute this camera happens to list.
-    expect(caps.aim.state).toBe("not-offered");
+    // R-CAM-14: pan_absolute and tilt_absolute, full range, no motor behind
+    // either — advertised, not a guess dressed up as `present`. `recording`
+    // and `stills` are M5's to fill; M4 answers them honestly rather than
+    // guessing.
+    expect(caps.aim.state).toBe("advertised");
     expect(caps.recording.state).toBe("not-offered");
     expect(caps.stills.state).toBe("not-offered");
   });
@@ -290,5 +309,53 @@ describe("probeCamera", () => {
     });
     expect("capabilities" in out).toBe(false);
     expect((out as { reason: string }).reason).toContain("No such file");
+  });
+});
+
+const listCtrls = fixture("list-ctrls-menus-globalshutter.txt");
+
+describe("the bench camera's controls", () => {
+  // All ten, not a sample of them. Task 5 added the keys defaulting to
+  // `not-offered`, which asserts *this camera does not have it* — false for
+  // every one of these, and said on a page an operator reads. Any key this
+  // task fails to map keeps telling that lie, so the guard has to name each.
+  it("fills the ten controls that had no home", async () => {
+    const caps = await capabilitiesFrom(listCtrls);
+    for (const k of ["gain", "backlightCompensation", "gamma", "sharpness", "saturation",
+      "hue", "powerLineFrequency", "autoExposure", "autoWhiteBalance", "autoFocus"]) {
+      expect(caps[k].state).toBe("present");
+    }
+  });
+  it("reports the pan and tilt it advertises with no motor behind them", async () => {
+    const caps = await capabilitiesFrom(listCtrls);
+    expect(caps.aim.state).toBe("advertised");
+    if (caps.aim.state !== "advertised") throw new Error("narrowing");
+    expect(caps.aim.reason).toMatch(/pan/i);
+  });
+  it("gates the three controls an automatic mode has charge of, keeping their range", async () => {
+    const caps = await capabilitiesFrom(listCtrls);
+    for (const k of ["exposure", "whiteBalance", "focus"]) expect(caps[k].state).toBe("gated");
+    if (caps.exposure.state !== "gated") throw new Error("narrowing");
+    expect(caps.exposure.by.label).toBe("auto exposure"); expect(caps.exposure.value.max).toBe(10000);
+  });
+  it("keeps only the menu ids the device listed", async () => {
+    const caps = await capabilitiesFrom(listCtrls);
+    if (caps.autoExposure.state !== "present") throw new Error("narrowing");
+    expect(caps.autoExposure.value.menu?.map((m) => m.id)).toEqual([1, 3]);
+  });
+  // Resolution #3: `by.id` is the gating *capability* key, never the V4L2
+  // control name — nothing downstream should ever have to map back to
+  // `auto_exposure`. The brief's own test above checks `by.label` for
+  // `exposure` alone; this checks `by.id` for all three gated controls, since
+  // a label-only check would still pass an implementation that put the raw
+  // V4L2 name (or the wrong control's key) in `id`.
+  it("names each gate by its own capability key, all three, never the V4L2 name", async () => {
+    const caps = await capabilitiesFrom(listCtrls);
+    if (caps.exposure.state !== "gated") throw new Error("narrowing");
+    if (caps.whiteBalance.state !== "gated") throw new Error("narrowing");
+    if (caps.focus.state !== "gated") throw new Error("narrowing");
+    expect(caps.exposure.by.id).toBe("autoExposure");
+    expect(caps.whiteBalance.by.id).toBe("autoWhiteBalance");
+    expect(caps.focus.by.id).toBe("autoFocus");
   });
 });

@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { systemRunner, type CommandRunner } from "../../net/runner.js";
 import {
-  noCapabilities, present, type CameraCapabilities, type ControlRange,
+  advertised, gated, noCapabilities, present,
+  type AimCapability, type CameraCapabilities, type ControlRange,
 } from "../capability.js";
+import { DESCRIPTORS, sentenceLabel } from "../descriptors.js";
 import { parseControls, parseDevices, parseFormats } from "./parse.js";
 import { byPathNames, systemByPath, type ByPathReader } from "./bypath.js";
 
@@ -139,6 +141,16 @@ const resolveNames = (opts: ProbeOptions): ReadonlyMap<string, string> =>
  * same reason `zoom_absolute` and the rest are: absence is what
  * `noCapabilities()` already means, so an unmatched name simply stays
  * `not-offered` rather than needing a special case (R-CTL-05).
+ *
+ * **Ten more pairs read the ten controls `capability.ts` modelled with
+ * nowhere to read them from** (R-CTL-11 … R-CTL-14) — `gain` through
+ * `focus_automatic_continuous` below, read straight off the bench camera's
+ * own `--list-ctrls-menus` output (`fixtures/list-ctrls-menus-globalshutter.txt`).
+ * None of the ten is written back yet: `controls.ts`'s `CONTROL_NAMES` still
+ * names only the three settable image controls it did before this file
+ * could read the rest, so the two lists no longer name the same set — a
+ * later task teaches `CONTROL_NAMES` the ones among these ten that a page
+ * can actually set.
  */
 export const CONTROL_MAP = [
   ["brightness", "brightness"],
@@ -148,6 +160,16 @@ export const CONTROL_MAP = [
   ["focus_absolute", "focus"],
   ["exposure_time_absolute", "exposure"],
   ["white_balance_temperature", "whiteBalance"],
+  ["gain", "gain"],
+  ["backlight_compensation", "backlightCompensation"],
+  ["gamma", "gamma"],
+  ["sharpness", "sharpness"],
+  ["saturation", "saturation"],
+  ["hue", "hue"],
+  ["power_line_frequency", "powerLineFrequency"],
+  ["auto_exposure", "autoExposure"],
+  ["white_balance_automatic", "autoWhiteBalance"],
+  ["focus_automatic_continuous", "autoFocus"],
 ] as const;
 
 export async function detectCameras(opts: ProbeOptions = {}): Promise<DetectResult> {
@@ -242,7 +264,43 @@ async function probeNode(
     // state, and M5 is where that distinction gets drawn; today v4l2-ctl does
     // not separate the two, and inventing the distinction here would be worse
     // than not drawing it.
-    if (range) capabilities[key] = present(range);
+    if (!range) continue;
+    // R-UI-21: `flags=inactive` on the device's own line means the control
+    // is real and in range, not absent and not a fault — another control has
+    // charge of it right now. Which control that is belongs to the adapter
+    // boundary, not here (`descriptors.ts`'s `DESCRIPTORS[key].gates` says
+    // it, per device), and its first entry is the one the bench camera's
+    // three gated controls each carry. `by.id` is that capability key —
+    // never the V4L2 name a page has no reason to know (nothing downstream
+    // should have to map back to `auto_exposure`) — and `by.label` is
+    // `sentenceLabel()`'s lowercase form because it is read inside a
+    // sentence: `exposure: auto exposure has it`, never the heading
+    // `Auto exposure` `DESCRIPTORS` uses everywhere else.
+    const gateKey = range.inactive ? DESCRIPTORS[key].gates?.[0] : undefined;
+    capabilities[key] = gateKey
+      ? gated(range, { id: gateKey, label: sentenceLabel(gateKey) })
+      : present(range);
+  }
+
+  // R-CAM-14: this bench camera lists `pan_absolute` and `tilt_absolute`,
+  // each with a full range, and answers any command sent to them — and
+  // nothing on the bench moves. There is no motor behind either control.
+  // That is `advertised`, not `present`: the device is not lying about
+  // having the control, it is lying about what commanding it does (R-UI-21).
+  // No single `ControlRange` describes a pan and a tilt together, so
+  // `advertised` carries no value here — just the reason, in the operator's
+  // words.
+  if (ranges.has("pan_absolute") && ranges.has("tilt_absolute")) {
+    // The explicit type argument is load-bearing: inferred from a bare
+    // `undefined` with nothing else to unify against, `advertised` would
+    // otherwise fill in `Capability<undefined>`, and assigning that to
+    // `capabilities.aim` (`Capability<AimCapability>`) is a compile error —
+    // caught by `tsc`, not by a test, which is exactly what `npm run lint`
+    // is for.
+    capabilities.aim = advertised<AimCapability>(
+      undefined,
+      "this camera advertises pan and tilt but there is no motor behind either — it accepts the command and nothing moves",
+    );
   }
 
   // No entry is a fallback to the node, and the fallback is reported rather
