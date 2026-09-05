@@ -29,6 +29,8 @@ export = function register(RED: RED): void {
       // is for it.
       caution: optionalNum(config.caution),
       limit: optionalNum(config.limit),
+      // Named in the flow, never guessed. See ReadingBounds.sense.
+      sense: config.sense === "higher-is-better" ? "higher-is-better" : "higher-is-worse",
       limitLabel: str(config.limitLabel),
       precision: num(config.precision, 1),
       /** Track width in px. Fixed by design; see the note above. */

@@ -2,6 +2,10 @@
 import type { Config } from "../schema/config.js";
 import type { SecretStore } from "../secrets/store.js";
 import type { ConnectionSpec } from "./nmcli/client.js";
+import { MODEM_CONNECTION, STOOD_DOWN_METRIC, metricFor, modemProfile } from "./modem/profiles.js";
+import { NOTHING_STOOD_DOWN, type PathName, type StandingView } from "./reach/standing.js";
+
+export { MODEM_CONNECTION, STOOD_DOWN_METRIC, metricFor };
 
 /**
  * The setup access point's passphrase: published, documented, and the same on
@@ -18,6 +22,48 @@ import type { ConnectionSpec } from "./nmcli/client.js";
  * value instead of three copies of a string.
  */
 export const DEFAULT_AP_PASSPHRASE = "yonder1234";
+
+/**
+ * The access-point passphrase a device is allowed to print, or `null` when it
+ * must not print one at all (R-UI-18, R-SEC-10).
+ *
+ * Two values are public: the constant above, and nothing else. **What comes
+ * back is always the constant itself, never the string that was read** — the
+ * argument is compared and then discarded. Comparing and returning `stored`
+ * would be correct today and one edit away from putting an operator's own
+ * passphrase on a route that is deliberately in front of the administrator
+ * password gate. R-SEC-10 asks for a leak that is unreachable rather than one
+ * that is merely absent, and this is that shape: no call site can obtain a
+ * stored credential from this function whatever it passes in.
+ *
+ * **Three answers, not two.**
+ *
+ *   - the constant, when the row is still on it: print it;
+ *   - `null`, when it is something else: the operator's own, withheld;
+ *   - `undefined`, when there is no row to read: *cannot tell*.
+ *
+ * `undefined` — no `ap_psk` row at all — is its own answer and must not be
+ * collapsed into either of the others. The store seeds that row with this
+ * constant before anything serves, so on a running device the row is always
+ * there and `undefined` means the store could not be read at all. This used
+ * to answer with the published value, and the reasoning was about leaking,
+ * which was right: nothing in that state has an operator's passphrase to
+ * leak. It was wrong about being correct. On a device whose operator *has*
+ * set their own and whose `secrets.yaml` has since become unreadable, the
+ * access point on the air was rendered from their value — and naming
+ * `yonder1234` prints a passphrase that will not work, in the one failure
+ * mode this exists for. `null` would be just as wrong the other way: nothing
+ * has established that anything changed.
+ *
+ * `daemon/routes.ts` already treats *cannot tell* as its own answer
+ * everywhere else (`credential: undefined`, documented there). This is the
+ * same distinction, kept rather than flattened, and the console has words for
+ * it (`AP_PASSPHRASE_UNKNOWN`).
+ */
+export function publishableApPassphrase(stored: string | undefined): string | null | undefined {
+  if (stored === undefined) return undefined;
+  return stored === DEFAULT_AP_PASSPHRASE ? DEFAULT_AP_PASSPHRASE : null;
+}
 
 export const AP_CONNECTION = "yonder-ap";
 export const CLIENT_CONNECTION = "yonder-wifi";
@@ -65,14 +111,22 @@ export function apProfile(config: Config, psk: string, iface: string): DesiredPr
   };
 }
 
-export function clientProfile(config: Config, psk: string | null, iface: string): DesiredProfile | null {
+export function clientProfile(
+  config: Config,
+  psk: string | null,
+  iface: string,
+  standing: StandingView = NOTHING_STOOD_DOWN,
+): DesiredProfile | null {
   const client = config.network.client;
   if (client.ssid === null || client.ssid === "") return null;
 
+  const metric = String(metricFor(config, "wifi_client", standing));
   const settings: string[][] = [
     ["802-11-wireless.mode", "infrastructure"],
     ["802-11-wireless.ssid", client.ssid],
     ["ipv4.method", "auto"],
+    ["ipv4.route-metric", metric],
+    ["ipv6.route-metric", metric],
     ["connection.autoconnect", "yes"],
   ];
   if (psk !== null) {
@@ -82,13 +136,20 @@ export function clientProfile(config: Config, psk: string | null, iface: string)
   return { name: CLIENT_CONNECTION, type: "wifi", ifname: iface, settings };
 }
 
-export function ethernetProfile(config: Config, iface: string): DesiredProfile {
+export function ethernetProfile(
+  config: Config,
+  iface: string,
+  standing: StandingView = NOTHING_STOOD_DOWN,
+): DesiredProfile {
+  const metric = String(metricFor(config, "ethernet", standing));
   return {
     name: ETHERNET_CONNECTION,
     type: "ethernet",
     ifname: iface,
     settings: [
       ["ipv4.method", config.network.ethernet.dhcp ? "auto" : "disabled"],
+      ["ipv4.route-metric", metric],
+      ["ipv6.route-metric", metric],
       ["connection.autoconnect", "yes"],
     ],
   };
@@ -97,6 +158,11 @@ export function ethernetProfile(config: Config, iface: string): DesiredProfile {
 export interface Interfaces {
   wifi: string | null;
   ethernet: string | null;
+  /**
+   * The modem's control port — `cdc-wdm0`, not `wwan0` — or the adapter the
+   * operator named when the modem is one that dials for itself.
+   */
+  modem: string | null;
 }
 
 /**
@@ -187,6 +253,50 @@ export function radioPlan(config: Config): RadioStep[] {
 }
 
 /**
+ * Which of the four connections this renderer owns the *configuration*
+ * currently asks for — answered without looking at a single device.
+ *
+ * `render()`'s removal loop is the only caller, and the reason this exists
+ * apart from `desiredProfiles` is R-NET-16. A Quectel EC25 on USB takes
+ * several seconds to enumerate; a render that lands in that window sees no
+ * `gsm` device and, if "wanted" were read off `desiredProfiles`'s own
+ * hardware-gated output, would take the absence as the operator having
+ * turned cellular off and delete `yonder-modem` — measured on a board, where
+ * it stayed down until the operator re-entered the settings by hand, because
+ * nothing re-renders on its own and `connection.autoconnect` had nothing
+ * left to dial. `network.modem.enabled: true` is a durable statement of
+ * intent; a modem a few seconds from finishing enumeration is a fact about
+ * timing, and the two must never be read as the same question.
+ *
+ * The same hazard reaches every profile in `OWNED`, not only the modem — the
+ * modem is only where it was measured, being the one interface that appears
+ * seconds after the others — so every one of the four is decided here, each
+ * on the piece of configuration that actually governs it, and none of them
+ * on `Interfaces`:
+ *
+ * - the access point and the wired profile carry no configuration switch of
+ *   their own — R-NET-07 needs the access point's profile to exist whatever
+ *   `ap.enabled` says, and nothing in the schema declines wired Ethernet at
+ *   all — so both are wanted unconditionally, exactly as `desiredProfiles`
+ *   already treats them once a device exists to write them against;
+ * - the wifi client is wanted exactly when an SSID is configured, the same
+ *   test `clientProfile` makes;
+ * - the modem is wanted exactly when `network.modem.enabled` is, the same
+ *   test `modemDevice` makes before it ever looks at the device list.
+ *
+ * A profile added to `OWNED` next year has to be given its own line above —
+ * there is no catch-all branch here for a name this function does not
+ * recognise — rather than silently inheriting either answer.
+ */
+export function configuredConnections(config: Config): Set<string> {
+  const wanted = new Set<string>([AP_CONNECTION, ETHERNET_CONNECTION]);
+  const { client, modem } = config.network;
+  if (client.ssid !== null && client.ssid !== "") wanted.add(CLIENT_CONNECTION);
+  if (modem.enabled) wanted.add(MODEM_CONNECTION);
+  return wanted;
+}
+
+/**
  * Everything the config asks for, for the interfaces this board actually has.
  *
  * The access point's profile is written on any board with a radio, including
@@ -195,18 +305,59 @@ export function radioPlan(config: Config): RadioStep[] {
  * because raising it is the only move the fallback watchdog has and a
  * watchdog whose one action names a profile nothing created is not a
  * watchdog (R-NET-07, K-16).
+ *
+ * **This is a question about generation, not about removal.** It answers
+ * "what can be written for the interfaces visible this instant", and stays
+ * gated on `Interfaces` because there is genuinely no profile to write for a
+ * modem that has not enumerated yet. Whether an *existing* profile this
+ * renderer owns should be deleted is a different question, with a different
+ * answer — see `configuredConnections` — and `render()` is the only place
+ * the two are meant to meet (R-NET-16).
  */
-export function desiredProfiles(config: Config, secrets: SecretStore, ifaces: Interfaces): DesiredProfile[] {
+export function desiredProfiles(
+  config: Config,
+  secrets: SecretStore,
+  ifaces: Interfaces,
+  standing: StandingView = NOTHING_STOOD_DOWN,
+): DesiredProfile[] {
   const out: DesiredProfile[] = [];
 
   if (ifaces.wifi !== null) {
     out.push(apProfile(config, secrets.resolve(config.network.ap.psk), ifaces.wifi));
     const clientPsk = config.network.client.psk === null ? null : secrets.resolve(config.network.client.psk);
-    const client = clientProfile(config, clientPsk, ifaces.wifi);
+    const client = clientProfile(config, clientPsk, ifaces.wifi, standing);
     if (client !== null) out.push(client);
   }
   if (ifaces.ethernet !== null) {
-    out.push(ethernetProfile(config, ifaces.ethernet));
+    out.push(ethernetProfile(config, ifaces.ethernet, standing));
+  }
+  if (ifaces.modem !== null) {
+    const password = config.network.modem.password === null
+      ? null
+      : secrets.resolve(config.network.modem.password);
+    const modem = modemProfile(config, password, ifaces.modem, standing);
+    if (modem !== null) out.push(modem);
   }
   return out;
 }
+
+/**
+ * The connections that carry a route metric, and which path each one is.
+ *
+ * The list `NetworkRenderer.remetric` walks when a path's standing changes,
+ * and the reason it is here rather than there: it is the same set
+ * `desiredProfiles` writes a metric into, and two lists that must agree
+ * would eventually stop agreeing — a connection added to one and not the
+ * other is a path that renders with a metric and then never has it rewritten
+ * when it stops working.
+ *
+ * **The access point is not in it, and must never be.** `ipv4.method shared`
+ * is how an operator reaches a board with no way out, not a way out. It has
+ * no metric to recompute and nothing about a dead egress path is a reason to
+ * disturb the one connection the operator may be standing on.
+ */
+export const EGRESS_CONNECTIONS: readonly (readonly [string, PathName])[] = [
+  [ETHERNET_CONNECTION, "ethernet"],
+  [CLIENT_CONNECTION, "wifi_client"],
+  [MODEM_CONNECTION, "modem"],
+];

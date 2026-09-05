@@ -184,9 +184,37 @@ npm run build
 ```
 
 Same conventions: one temporary directory, removed on exit unless `KEEP=1`, and `PORT=`
-moves the console off 18881. `ping`, `nmcli`, `hostnamectl`, `rfkill` and `systemctl` are
-stand-ins on `PATH`; the `nmcli` one reports a `wlan0` and a scan with a duplicated SSID, so
-the folding in `scanForNetworks` has something real to fold.
+moves the console off 18881. `ping`, `nmcli`, `mmcli`, `curl`, `hostnamectl`, `rfkill` and
+`systemctl` are stand-ins on `PATH`; the `nmcli` one reports a wired port, a radio and a
+modem control port, and a scan with a duplicated SSID so the folding in `scanForNetworks`
+has something real to fold. The `mmcli` one replays the fixtures `yonder-core`'s own parser
+tests are written against — a real EC25 on a live SIM — so the Cellular tab is captured
+showing what a board actually reported rather than a panel of em dashes. It answers a
+**second board** as well: a file holds 1 or 0 and is read on every call, and with 0 there
+are no modems at all, which is the board `Reachable by` on Status has to be photographed
+on. The config the
+daemon is given is the shipped default with the modem turned on, because with it off the
+daemon reports the cellular path absent and neither cellular page can be captured at all.
+
+The rest of `network.modem` is **configured** rather than left at its defaults, because
+R-UI-17 made it visible: the Cellular tab's four boxes are seeded from that section, so a
+capture taken against `apn: null` would photograph the defect it was taken to prove fixed.
+The APN is the value the bearer fixture is dialled on — the ordinary state of a working
+device, where the form and the fact cell above it agree — and the dial number is
+deliberately left unset, because an empty box beside two filled ones is what *not
+configured* has to look like. The password is a reference into a `secrets.yaml` the gate
+writes before starting the daemon, so the box can be photographed saying a credential is
+on file; the value behind that reference is then grepped for in the journal, in every route
+the console serves, in the dashboard it hands a browser, and in every file under the
+temporary root but `secrets.yaml` itself (R-SEC-10).
+
+The `curl` stand-in is the one the gate *drives*. It is what `commandProbe` runs to find out
+whether a path carries traffic, and it answers whatever the gate last wrote to a file — read
+on every call — which is how the `Way out` rows are photographed in each of the states a probe
+can put them in. Nothing else probes: no interface holds an address in this harness, so
+`ReachWatch` finds no path in use and every probe in the run is one the gate asked for through
+`POST /reach/test`. That is what makes the states reproducible instead of a race with a
+five-second timer.
 
 It checks that the daemon's five page routes answer over the socket and that the scan carries
 no key; that Node-RED starts the shipped flows with **no error at all** and no unregistered
@@ -223,8 +251,20 @@ that build. Nothing in this repository had ever looked at a page.
 It does three separate things.
 
 **Rules that fail on their own.** Nothing clipped inside a box, no action spanning the
-surface it sits on (R-UI-10), no page scrolling sideways, no page rendering nothing at all.
-These are relative comparisons within one rendering, so they hold on any machine.
+surface it sits on (R-UI-10), no page scrolling sideways, no control whose text cannot be
+read against what is behind it (R-UI-16), no page rendering nothing at all. These are
+relative comparisons within one rendering, so they hold on any machine.
+
+The legibility rule is the one a picture could not make. An operator reported that in the
+night palette the text in the entry fields was *"not able to be read by human eyes"*, and
+every check above had passed: the shape was unchanged and the committed capture showed the
+words — at 1.05:1 against their own recess, which is a picture of the defect that looks like
+a picture of an empty field. So it is measured rather than looked at: each control's own
+computed colour is composited over everything painted behind it, with alpha and the
+accumulated `opacity` of its ancestors folded in, and anything under 4.5:1 fails. Folding
+opacity in is the point — what made those labels unreadable was the interface framework
+drawing black at 60%, which a rule reading `color` alone would have called black and passed
+in the day palette for the same reason it failed at night.
 
 **A shape manifest**, committed and diffed — every widget's geometry, so a page that moves
 fails until somebody accepts it. Geometry rather than pixels, because *shape* is what the
@@ -233,10 +273,140 @@ about font rasterisation rather than a check. References are named for the platf
 recorded them (`status.day.darwin.json`, `status.day.linux.json`) so every machine enforces
 its own instead of one enforcing and the rest printing a note nobody reads.
 
+The manifest also carries **the words of anything wearing `yonder-fixed`**, and it has to.
+Geometry alone could not tell four of the state captures apart from their bases: an
+annunciator is `inline-flex` inside a grid-fixed wrapper and a qualifier wraps to one line
+in every state, so no box moves, and four committed references came out byte-identical to
+the pages they were meant to distinguish. `yonder-fixed` is the one declaration on this
+console that a value is the same on every run, which is exactly the licence needed to freeze
+its text; nothing else's text is recorded, because a load average in a reference would leave
+it dirty for ever.
+
+On CI the check is `git status --porcelain docs/console/shape`, not `git diff`. Every
+committed reference is a `.darwin.json` and the runner is Linux, so the gate takes its
+*record* branch and writes `.linux.json` files that are **untracked** — which `git diff`
+does not see, and did not, on every run since the job was written.
+
 **A picture**, in `docs/console/capture/`, written every run. The committed copy masks live
 readings — a load average changes between two runs and would leave the file permanently
 dirty — so what it records is the layout. The unmasked copy goes to `vendor/capture/`, which
 CI uploads as an artifact.
+
+**And a page in more than one state, where it has them.** R-UI-12 says a surface that hides
+part of itself is captured in each of those parts. A tabbed page hides its other tabs, which
+is why there is one capture per tab; a panel drawn from live state hides its other states the
+same way. The `Way out` rows have four — a path that is reaching something, one that reached
+nothing when it was last tested, one nothing has looked at, and one whose interface is down.
+What separates them is **the sentence**, not the geometry: nothing on that panel moves
+between the four, so each row wears `yonder-fixed`, which both unmasks it in the committed
+picture and puts its words in the shape manifest. Without that the states were three grey
+rectangles apiece and four identical references — and the exact sentence R-NET-14 was
+written to abolish was invisible in every one of them. The base
+capture is the untested state, which is what a board that has just come up shows; the others
+are driven and captured under names of their own. The last of them is a different *board*
+rather than a different reading — a wired port with nothing plugged into it — and it is
+driven the way the no-modem board is, by a file the `nmcli` stand-in reads on every call.
+That row used to read "Up, and not yet tested — nothing has established that it reaches
+anything" about an `eth0` NetworkManager had in `unavailable` with no carrier and no
+address (R-NET-14).
+
+```
+network-interfaces.day.png                  every path up, and untested
+network-interfaces-not-reaching.day.png     every path probed, and reaching nothing
+network-interfaces-reaching.day.png         every path probed, and reaching something
+network-interfaces-down.day.png             the wired port down, and saying so
+```
+
+**Status has five shapes.** Two of them are two different boards: `Reachable by` is gauges
+over a labelled strip, and on a board with no modem the gauges are *absent* — a gauge with
+no needle reads as a fault, and there being no modem is not one. That capture is driven by
+taking the modem out of the harness rather than by sending an empty reading, so what is
+photographed is the panel degrading rather than a panel with a hole in it.
+
+The third is the same board holding a configuration change nobody has confirmed (R-UI-15).
+The gate applies one, does not confirm it, photographs the banner with a real countdown on
+it, and then **presses `REVERT NOW`** and asserts the device put the previous configuration
+back — which is the only end-to-end proof that either key on that panel reaches the device.
+A banner that renders correctly and whose keys do nothing is the failure `--press NIGHT` was
+added for.
+
+The banner is on **every** surface, which is what R-UI-15 asks for and what it did not have:
+one copy per page, and on the Network page one copy per tab, because Dashboard's tabs layout
+renders one `ui-group` per tab — a group there would be a tab that *appears*, which an
+operator on another tab would never see. A grid page's whole group is hidden between
+changes; a tab's four widgets are hidden by id instead. In the same pending window the gate
+photographs the **Cellular tab**, because that is the surface the requirement was failing on:
+an operator who fixed an APN there, watched the modem redial and stayed put had no countdown
+in front of them and no key to press.
+
+```
+status-pending.day.png                      the banner on a page whose groups are a grid
+network-cellular-pending.day.png            the same change, on a tab
+```
+
+The fourth is **the same banner over a change that moved the Wi-Fi radio**, and it is a
+different panel: it offers no `CONFIRM`. That confirmation is the device's (R-CFG-11) —
+the console an operator would press it from goes off the air with the access point, so a
+press is either pointless or made by somebody who cannot see that the device is already
+fine, and it ends the device's own check early. The countdown is still there, the two lines
+say who is confirming, and `REVERT NOW` is still there because deciding you do not want the
+change is still a real thing to want. **The gate presses it**, for the same reason it presses
+the other one: that key is now the operator's only control over this apply, and a picture of
+a key nobody pressed is a picture of a key that might be dead.
+
+Two things make it capturable. The join never lands on this harness — nothing here issues an
+address — so `$JOIN_DELAY` holds the verifier's first `nmcli` poll open rather than letting
+its twenty-second grace run out mid-screenshot; the delay is zero for every other capture in
+the run. And beside the picture the gate reads what Dashboard would replay into the soft-key
+rail, so the artefact is not the only evidence of which keys were on it.
+
+```
+status-pending.day.png                      a change the operator confirms
+status-pending-radio.day.png                a change the device confirms — no CONFIRM key
+```
+
+The fifth is `If you lose this console` in its other state (R-UI-18). That panel prints the
+access-point passphrase **only while it is the published default** — ADR-0007 makes that
+value deliberately public, and it is the only thing that makes a locked-out operator's way
+back in usable at all — and says it has been changed once the operator has set their own.
+Every other picture in the run is of the first state, so the second is captured under a name
+of its own. There is no route that changes that passphrase yet, so the gate does what an
+operator would have to do today: stops the daemon, edits `secrets.yaml`, starts it again.
+Around that capture it greps the journal, `GET /config`, `GET /status`, **the value the
+widget that draws it is actually handed**, and every file under the temporary root for the
+value it set — which is the same claim made against the modem credential, applied to the
+other secret this device holds. The widget value rather than the dashboard: what the browser
+is served at `/dashboard` is the application shell, and every value reaches it afterwards
+over socket.io, so grepping the shell could not fail for the only way a credential would get
+there. Dashboard's own `_debug/datastore/<widget id>` is that value.
+
+```
+status.day.png                              a board with a modem in it
+status-without-modem.day.png                the same board with nothing in the slot
+status-pending.day.png                      the same board, holding an unconfirmed change
+status-pending-radio.day.png                and one only the device can confirm
+status-psk-changed.day.png                  the same board, on a passphrase the operator set
+```
+
+The countdown is masked in the committed picture and only there: it is the one annunciator
+caption on this console that is a *reading*, so without masking that file would differ by a
+second or two on every run. The widget says so about itself with `className: "yonder-live"`,
+which is what the mask list matches — the lamp and its box are untouched, and the unmasked
+copy under `vendor/capture/` carries the digits. The *caption* goes whole, the word with the
+digits: the annunciator draws both in one element and there is no smaller one to mask. The
+two lines under it wear `yonder-fixed`, so what the banner is about is still readable.
+
+`className: "yonder-fixed"` is the mirror of that. `If you lose this console` wears it, and
+so does every row of `Way out`. Data-bar cells and text values are masked as *kinds*,
+because most of them carry readings; those two panels carry none — an SSID, an address, a
+hostname and either the published passphrase or the sentence that stands in for a changed
+one; an interface name from a device list and one of five fixed sentences. Masked, each
+panel's states were the same picture, which is most of the reason for taking the second one.
+
+`capture-pages.mjs --only <page> --as <name>` is what takes one of them, so a state capture
+is held to exactly the rules and the shape reference every other page is. The shape manifest
+is what proves the degradation rather than the picture: the two gauges appear in the
+without-modem reference carrying `d-none` and a zero box, and the panel is 120 px shorter.
 
 ```
 ./scripts/verify-pages.sh                    # capture, and gate

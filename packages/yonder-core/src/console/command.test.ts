@@ -2,6 +2,7 @@
 import { describe, it, expect } from "vitest";
 import {
   confirmed,
+  countdown,
   idle,
   pending,
   presentation,
@@ -104,5 +105,33 @@ describe("secondsRemaining", () => {
     expect(secondsRemaining(confirmed("x", { at: 0 }), 0)).toBeNull();
     expect(secondsRemaining(rejected("x", { at: 0 }), 0)).toBeNull();
     expect(secondsRemaining(pending("x", { at: 0 }), 0)).toBeNull();
+  });
+});
+
+/**
+ * The one number on this console that is about the rollback timer. It is
+ * formatted here rather than wherever it is shown, because a console that
+ * formatted it in a flow would be a console whose most load-bearing number
+ * lived in wiring (CLAUDE.md rule 2).
+ */
+describe("countdown", () => {
+  it("is m:ss, so a two-minute window does not have to be divided to be read", () => {
+    const status = pending("x", { at: 0, expiresAt: 300_000 });
+    expect(countdown(status, 0)).toBe("5:00");
+    expect(countdown(status, 212_000)).toBe("1:28");
+    expect(countdown(status, 295_000)).toBe("0:05");
+  });
+
+  /** Zero-padded seconds: "1:8" is not a time. */
+  it("pads the seconds", () => {
+    expect(countdown(pending("x", { at: 0, expiresAt: 68_000 }), 0)).toBe("1:08");
+    expect(countdown(pending("x", { at: 0, expiresAt: 9_000 }), 0)).toBe("0:09");
+  });
+
+  it("is null wherever secondsRemaining is, so nothing draws a frozen 0:00", () => {
+    expect(countdown(pending("x", { at: 0, expiresAt: 300_000 }), 300_000)).toBeNull();
+    expect(countdown(idle(0), 0)).toBeNull();
+    expect(countdown(confirmed("x", { at: 0 }), 0)).toBeNull();
+    expect(countdown(pending("x", { at: 0 }), 0)).toBeNull();
   });
 });

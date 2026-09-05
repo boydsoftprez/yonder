@@ -452,6 +452,25 @@ describe("themeCss never clips content an operator has to act on", () => {
 });
 
 /**
+ * Prose is not a reading, and this console styles every `ui-text` value as
+ * one — large, bold, tabular and right-aligned. That is right for an address
+ * and wrong for a sentence about an interface, and a name right-aligned
+ * inside its own column by exactly this class is the defect the capture gate
+ * was written after.
+ */
+describe("themeCss leaves a qualifier reading as prose", () => {
+  for (const t of ["day", "night"] as ThemeName[]) {
+    it(`unstyles the reading when a value is a sentence (${t})`, () => {
+      const rule = /\.yonder-qualifier \.nrdb-ui-text-value\s*\{[^}]*\}/s
+        .exec(themeCss(t))?.[0] ?? "";
+      expect(rule, "there must be a rule for a qualifier's value").not.toBe("");
+      expect(rule, "the defect this class exists for").toMatch(/text-align:\s*left/);
+      expect(rule).toMatch(/font-weight:\s*400/);
+    });
+  }
+});
+
+/**
  * Vuetify's block button is `min-width: 100%` with `flex: 1 0 auto` — not
  * `width`. Overriding `width` alone does nothing, which is how the first
  * attempt at this shipped a console whose every action was still a 704px

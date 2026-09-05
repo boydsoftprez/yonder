@@ -1,0 +1,234 @@
+{
+  "platform": "linux",
+  "viewport": {
+    "w": 1280,
+    "h": 900
+  },
+  "widgets": [
+    {
+      "key": "nrdb-ui-group#0",
+      "box": {
+        "x": 268,
+        "y": 76,
+        "w": 1000,
+        "h": 317
+      }
+    },
+    {
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-annunciator.yonder-live.yonder-pending",
+      "box": {
+        "x": 285,
+        "y": 148,
+        "w": 966,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-text.nrdb-ui-widget.yonder-fixed.yonder-pending.yonder-qualifier#0",
+      "box": {
+        "x": 285,
+        "y": 208,
+        "w": 966,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-text.nrdb-ui-widget.yonder-fixed.yonder-pending.yonder-qualifier#1",
+      "box": {
+        "x": 285,
+        "y": 268,
+        "w": 966,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-softkeys.yonder-pending",
+      "box": {
+        "x": 285,
+        "y": 328,
+        "w": 966,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-group#1",
+      "box": {
+        "x": 268,
+        "y": 405,
+        "w": 1000,
+        "h": 317
+      }
+    },
+    {
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-gauge#0",
+      "box": {
+        "x": 285,
+        "y": 476,
+        "w": 966,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-gauge#1",
+      "box": {
+        "x": 285,
+        "y": 536,
+        "w": 966,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-gauge#2",
+      "box": {
+        "x": 285,
+        "y": 596,
+        "w": 966,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-databar",
+      "box": {
+        "x": 285,
+        "y": 656,
+        "w": 966,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-group#2",
+      "box": {
+        "x": 268,
+        "y": 733,
+        "w": 1000,
+        "h": 377
+      }
+    },
+    {
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-annunciator",
+      "box": {
+        "x": 285,
+        "y": 805,
+        "w": 966,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-text.nrdb-ui-widget.yonder-qualifier",
+      "box": {
+        "x": 285,
+        "y": 865,
+        "w": 966,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-gauge#0",
+      "box": {
+        "x": 285,
+        "y": 925,
+        "w": 966,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-gauge#1",
+      "box": {
+        "x": 285,
+        "y": 985,
+        "w": 966,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-databar",
+      "box": {
+        "x": 285,
+        "y": 1045,
+        "w": 966,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-group#3",
+      "box": {
+        "x": 268,
+        "y": 1122,
+        "w": 1000,
+        "h": 137
+      }
+    },
+    {
+      "key": "nrdb-ui-text.nrdb-ui-widget",
+      "box": {
+        "x": 285,
+        "y": 1193,
+        "w": 966,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-group#4",
+      "box": {
+        "x": 268,
+        "y": 1270,
+        "w": 1000,
+        "h": 197
+      }
+    },
+    {
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-databar.yonder-fixed",
+      "box": {
+        "x": 285,
+        "y": 1342,
+        "w": 966,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-text.nrdb-ui-widget.yonder-fixed.yonder-qualifier",
+      "box": {
+        "x": 285,
+        "y": 1402,
+        "w": 966,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-group.yonder-rail",
+      "box": {
+        "x": 268,
+        "y": 1479,
+        "w": 1000,
+        "h": 82
+      }
+    },
+    {
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-softkeys",
+      "box": {
+        "x": 285,
+        "y": 1496,
+        "w": 966,
+        "h": 48
+      }
+    }
+  ],
+  "fixed": [
+    {
+      "key": "nrdb-ui-text.nrdb-ui-widget.yonder-fixed.yonder-pending.yonder-qualifier#0",
+      "text": "A change that moved the Wi-Fi radio is in force on this device, and the device is confirming it for itself."
+    },
+    {
+      "key": "nrdb-ui-text.nrdb-ui-widget.yonder-fixed.yonder-pending.yonder-qualifier#1",
+      "text": "There is nothing for you to confirm: the device keeps the change once it holds an address on the new network, and puts the previous configuration back by itself if it does not. Revert it now if you have decided against it."
+    },
+    {
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-databar.yonder-fixed",
+      "text": "JOINyonderPASSPHRASEyonder1234AT192.168.77.1ORyonder.local"
+    },
+    {
+      "key": "nrdb-ui-text.nrdb-ui-widget.yonder-fixed.yonder-qualifier",
+      "text": "Join that network from a phone or a laptop and open this console at either address above, on the port you are using now. Worth photographing before you change anything: it is what gets you back in when this page stops answering."
+    }
+  ]
+}

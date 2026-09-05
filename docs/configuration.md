@@ -111,6 +111,14 @@ network:
     ssid: null                                 # set from the console, not at flash time
     psk: null                                  # then { secret: wifi_psk }
   ethernet: { dhcp: true }
+  modem:
+    enabled: false
+    mode: auto                                 # auto | appliance — see note below
+    interface: null
+    apn: null
+    username: null
+    password: null                             # then { secret: modem_password }
+    dial: null
   priority: [ethernet, modem, wifi_client]     # egress preference, highest first
 
 ui:
@@ -194,14 +202,6 @@ cameras:
       - { type: rtsp,   path: /cam0 }
       - { type: srt,    port: 8890 }
 
-network:
-  modem:
-    enabled: true
-    mode: auto                  # auto | hilink | stick
-    apn: null
-    username: null
-    password: { secret: modem_psk }
-
 remote:
   zerotier:  { enabled: false, network_id: null }   # primary — joins by network ID
 
@@ -251,6 +251,39 @@ it does, the `remote` section accepts `zerotier` and nothing else — a configur
 
 **`network.priority`** replaces hand-tuned route metrics. Egress preference is stated once,
 in order, and the metrics are generated.
+
+**`network.modem.mode`** is `auto` or `appliance`. `auto` means the modem the system found —
+the kind ModemManager claims and identifies for itself, with registration, operator, radio
+technology and signal all available without being told anything. `appliance` means a modem
+the operator names in `network.modem.interface`, because it holds the SIM, dials by itself
+and presents to the host as an ordinary network adapter — indistinguishable from any other
+without a list of device identifiers written from a vendor's documentation (R-CEL-11). These
+replace the `hilink`/`stick` sketch that appeared in this reference before M3a: that sketch
+was never implemented and never shipped, so no device in the field can be carrying either
+value.
+
+**An enabled appliance must name its adapter.** `interface` is the whole of how this device
+locates one, so `enabled: true` with `mode: appliance` and no `interface` is refused —
+loading such a file fails and applying such a change is rejected before anything is written.
+It used to be accepted, and what it produced was a device that dialled nothing while the
+Cellular tab reported the appliance as connected on "the named adapter", naming nothing.
+`enabled: false` says nothing about the adapter: switching an appliance off is not the same
+as deleting its settings. This is a rule between two fields, so it is not expressible in
+`config/schema/yonder.schema.json` — an editor validating against that file will not catch
+it, and the device will.
+
+**Clearing a modem setting clears it on the device.** `apn`, `username`, `password` and
+`dial` set to `null` are removed from the connection profile, not merely left out of the
+next write — and because a bearer setting being removed is a change to the bearer, the modem
+is dialled again so the removal takes effect (R-CFG-13, R-CEL-09). Changing `mode` between
+`auto` and `appliance` replaces the profile rather than editing it: the two modes are
+different kinds of NetworkManager connection sharing one name, and a connection's kind
+cannot be changed.
+
+**`network.modem.apn`** has no default and is never guessed. Debian's carrier database
+lists `NXTGENPHONE` first for the SIM this was measured against, which is the value that
+attached and carried nothing, and the value that worked is absent from the file entirely.
+An APN comes from your carrier (R-CEL-09).
 
 **`ui.editor.interfaces`** deliberately omits `modem`. The flow editor is a
 code-execution surface; it should not be reachable from a public cellular address without
@@ -309,6 +342,13 @@ daemon, which puts the passphrase in `secrets.yaml`, writes `{ secret: wifi_psk 
 applies the whole document — so the passphrase never lands in this file, which is
 world-readable on the device.
 
+**`network.modem.password`** takes the same road, from the Network page's Cellular tab. The
+console posts what the operator typed; the daemon stores it as `modem_password` in
+`secrets.yaml`, writes `{ secret: modem_password }` here, and applies the whole document
+(R-CEL-02). An **empty password box means "leave the stored credential alone"**, not "clear
+it" — so an operator who came to the page to change an APN does not lose a working SIM
+credential by not retyping it. Clearing the credential is `password: null` in this file.
+
 On a board with one Wi-Fi radio, setting these takes the access point down: one radio serves
 one mode at a time, the configured client wins, and the client is raised before the access
 point is dropped (R-NET-12, K-13). If the join fails, the access point comes back — the
@@ -337,6 +377,15 @@ true, and the apply reverts, the previous configuration is restored, and the
 This replaced a confirmation the operator had to give by hand, inside a window,
 from a console that had just disappeared — which meant a **working**
 configuration was discarded whenever somebody was slow finding the device again.
+
+**So the console does not offer a confirm control for one.** The `CHANGE
+PENDING` banner is still there, still counting down, and it says that the device
+is confirming for itself. A console still on the air after a radio move is one
+the change already worked for, so a `CONFIRM` there would either do nothing
+useful or be pressed by somebody who cannot see that the device is already fine
+— and pressing it ends the device's own check early, which is exactly the
+judgement R-CFG-11 took away. `REVERT NOW` stays: deciding you do not want the
+change is still yours, and it is the only control over that apply you have.
 
 What the device cannot establish is whether *you* can reach it. A network that
 isolates its clients will satisfy every check above and still hide the board from

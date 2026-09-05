@@ -2,9 +2,19 @@ name: CI
 on:
   push: { branches: [main] }
   pull_request:
+# Where these jobs run is a repository variable, not a line in this file.
+#
+# CI_RUNNER unset — a fresh clone, and this repository once it is public —
+# means ubuntu-latest, which is free for public repositories. Set to a runner
+# label, the jobs go to that runner instead, which is free for private ones.
+# So the day the repository opens, deleting the variable is the whole change;
+# nothing here has to be edited, and nothing here names a machine.
+#
+# Self-hosted is deliberately the private-only setting: a public repository
+# would run a fork's pull request on that hardware.
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
       # 24, not 20. Node-RED 5 refuses to start below 22.9, and the console's
@@ -41,7 +51,7 @@ jobs:
           git diff --exit-code config/defaults
 
   installer:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
       # The console role calls `require_node 22.12`, and require_node dies on a
@@ -50,9 +60,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
+      # shellcheck ships on the GitHub-hosted image and is installed once on a
+      # persistent runner, so the install is a fallback rather than a step: an
+      # `apt-get update` on every job is a minute spent re-proving a binary is
+      # already there. Still unconditional in effect — a runner without it
+      # installs it and the job passes, rather than failing on host state.
       - name: Lint shell
         run: |
-          sudo apt-get update && sudo apt-get install -y shellcheck
+          command -v shellcheck >/dev/null \
+            || { sudo apt-get update && sudo apt-get install -y shellcheck; }
           shellcheck installer/install.sh installer/lib/*.sh installer/roles/*.sh scripts/*.sh
       - name: Installer dry run
         run: ./installer/install.sh --dry-run
@@ -72,9 +88,51 @@ jobs:
   # dashboard and a real browser, which is why it is its own job rather than a
   # step in `test`.
   console-pages:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The whole history, so the step below can ask what this pull
+          # request actually changed rather than guessing from one commit.
+          fetch-depth: 0
+      # This job is four minutes and the other three are one between them, and
+      # it runs on every commit — including the many that cannot possibly move
+      # a pixel. A day of work on this branch spent it repeatedly on changes
+      # to `docs/`.
+      #
+      # The test is deliberately an *exclusion*, not a list of paths that
+      # matter. The obvious filter — run when `flows/` or the widget packages
+      # change — is wrong, because a page's shape is its geometry and its
+      # geometry follows its words: an edit to a sentence in `net/reach`
+      # changes the width of a row. Nearly all of this repository can move a
+      # page, so the only safe question is whether a change is provably unable
+      # to, and documentation is the one honest answer. `docs/console` is
+      # excluded from the exclusion: those are the references themselves.
+      #
+      # The job still runs and still reports, so a required check is never
+      # left pending; it just finishes in seconds when there is nothing here
+      # that could have moved anything.
+      - name: Decide whether anything in this change could move a page
+        id: scope
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "not a pull request; capturing"
+            echo "run=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          base=$(git merge-base "origin/${{ github.base_ref }}" HEAD)
+          changed=$(git diff --name-only "$base"...HEAD)
+          # Anything that is not documentation, or is documentation *of the
+          # console itself*, means capture.
+          if printf '%s\n' "$changed" | grep -qE '^docs/console/'; then
+            echo "the console's own references changed; capturing"
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          elif printf '%s\n' "$changed" | grep -qvE '^docs/'; then
+            echo "something outside docs/ changed; capturing"
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "only documentation outside docs/console changed; skipping the capture"
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
@@ -85,8 +143,12 @@ jobs:
       # arm64 a Pi runs, because this runner has to execute it.
       - name: Stage the console tree
         run: ./installer/make-payload.sh --arch linux-x64
+      # --with-deps is an apt install under sudo. A GitHub-hosted VM is new
+      # every run and needs it; a persistent runner had those libraries
+      # installed once, so asking for them per job is sudo and bandwidth spent
+      # on a no-op. The browser itself is cached either way.
       - name: Install the browser the capture gate needs
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install ${{ runner.environment == 'github-hosted' && '--with-deps' || '' }} chromium
       - name: Verify the pages, and capture them
         run: ./scripts/verify-pages.sh
       # Geometry is per-platform — the system font stack resolves differently
@@ -94,16 +156,46 @@ jobs:
       # recorded them and this checks the ones for *this* one. A first run on a
       # new platform records a baseline and fails here, which is correct: a
       # baseline nobody reviewed is not a baseline.
+      #
+      # `git status --porcelain`, not `git diff --exit-code`: every committed
+      # reference is a `.darwin.json` and this runner is Linux, so the capture
+      # gate takes its *record* branch and writes `.linux.json` files that are
+      # **untracked** — which `git diff` does not see. It exited 0 on every
+      # run, and neither half of the shape gate was enforced on the only
+      # machine that runs it unattended. Pictures are not checked here at all,
+      # deliberately: they are per-platform pixels and diffing them across
+      # runners is a coin toss about font rasterisation, which is the whole
+      # reason the reference is geometry. The run's own are uploaded below.
       - name: Check the recorded shape is current and committed
-        run: git diff --exit-code docs/console/shape
+        run: |
+          out=$(git status --porcelain docs/console/shape)
+          if [ -n "$out" ]; then
+            printf '%s\n' "$out"
+            echo "::error::the shape references for this platform are not what this run recorded"
+            echo "download the console-pages artifact, review the new shape, and commit it"
+            exit 1
+          fi
       # The unmasked pictures, so a reviewer can look at what the run saw
-      # rather than at a description of it.
+      # rather than at a description of it — and the shape this run recorded,
+      # because the step above tells a reviewer to download this artifact and
+      # commit that shape, and for as long as only the pictures were in here
+      # that instruction could not be followed. It is the first-run case that
+      # needs it: a platform with no reference at all records thirty-odd new
+      # files and there is nowhere else to get them from.
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: console-pages
-          path: vendor/capture/
+          path: |
+            vendor/capture/
+            docs/console/shape/
           if-no-files-found: warn
+          # Storage is billed on a private repository no matter which runner
+          # produced it — a self-hosted runner saves minutes, not gigabytes.
+          # These are looked at while the pull request is open, and never
+          # again; 90 days of every run's captures is paying to keep pictures
+          # nobody opens.
+          retention-days: 7
 
   # yonder-core declares `engines.node >= 20` and `20-yonder-core.sh` calls
   # `require_node 20`, and that floor is load-bearing rather than decorative:
@@ -118,7 +210,7 @@ jobs:
   # running them here would assert something that was never true. Verified to
   # pass on 20.20.2 before this job was added, rather than added hopefully.
   core-on-its-floor:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

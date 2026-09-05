@@ -137,6 +137,22 @@ export class ApplyEngine {
   private previous?: Config;
   private timer?: unknown;
   private expiresAt?: number;
+  /**
+   * The confirmation window this pending apply was given, kept so a rollback
+   * that could not be written can re-arm the same one rather than guess. See
+   * `revert()`.
+   */
+  private window?: number;
+  /**
+   * Whether the pending apply moved the Wi-Fi radio (R-CFG-11).
+   *
+   * Kept rather than recomputed, so `status()` reports the same answer the
+   * apply was measured by. The console decides whether to offer a confirm
+   * control from this, and a second reading of `touchesWifiClient` against a
+   * configuration that has since been written would be a second opinion on a
+   * question that already has one.
+   */
+  private movesRadio = false;
   private lastResult?: ApplyResult;
   /** An in-flight rollback render. A new apply waits for it rather than racing it. */
   private settling?: Promise<void>;
@@ -160,6 +176,10 @@ export class ApplyEngine {
       expiresAt: this.expiresAt,
       lastResult: this.lastResult,
       degraded: this.degraded,
+      // Absent, not `false`, for an ordinary change: the field says only that
+      // this one is the radio case, and a console reads its absence as the
+      // ordinary one either way.
+      ...(this.movesRadio ? { movesRadio: true as const } : {}),
     };
   }
 
@@ -368,8 +388,14 @@ export class ApplyEngine {
     }
 
     this.state = "pending";
+    this.window = window;
+    // The same answer the window above was chosen by, kept so `status()` can
+    // report it. R-CFG-11 took the confirmation of this change away from the
+    // operator, and until now nothing outside this method knew which change
+    // it was — so the console offered a confirm control for every one.
+    this.movesRadio = movesRadio;
     this.expiresAt = this.clock.now() + window;
-    this.timer = this.clock.setTimer(window, () => { void this.revert(); });
+    this.timer = this.clock.setTimer(window, () => { this.revertInBackground("the countdown"); });
 
     // R-CFG-11. The operator cannot confirm a radio move: the console goes
     // off the air with the access point, which is the whole difficulty. So
@@ -391,7 +417,7 @@ export class ApplyEngine {
             this.confirm(applyId);
           } else {
             warn(`the change did not take (${result.reason}); reverting now rather than waiting`);
-            void this.revert();
+            this.revertInBackground("the device's own check of the change");
           }
         },
         (e: unknown) => {
@@ -423,7 +449,41 @@ export class ApplyEngine {
     this.state = "confirmed";
     this.timer = undefined;
     this.expiresAt = undefined;
+    // With the window, because it describes the window: nothing is pending
+    // any more, and a flag left set here would still be set when the next
+    // apply is kept outright under R-CFG-12 — which never touches the radio
+    // and never reaches finish() either.
+    this.movesRadio = false;
     this.lastResult = { id, outcome: "confirmed", at: this.clock.now() };
+  }
+
+  /**
+   * The operator asking for the change to go back **now** (R-UI-15).
+   *
+   * The countdown already does this; this is the same rollback taken early.
+   * It exists because the window is up to five minutes long and an operator
+   * who has already decided the change was wrong should not have to sit and
+   * watch a timer to get their device back — which is the one situation where
+   * they are most likely to reach for a power cycle instead, and a power
+   * cycle during an unconfirmed apply is the case `recover()` has to clean up
+   * after.
+   *
+   * Guarded exactly as `confirm()` is, and for the same reason: an id that is
+   * not the pending one is a caller acting on a change that has already
+   * ended, and rolling back whatever happens to be pending instead would undo
+   * something nobody asked about.
+   *
+   * The countdown timer is disarmed first. `revert()` is idempotent by way of
+   * its own state check, so a timer left armed would be harmless — but a
+   * timer nobody cancelled is a timer that fires, and one that fires into a
+   * `return` is indistinguishable in a log from one that did the work.
+   */
+  async revertNow(id: string): Promise<void> {
+    if (this.state !== "pending") throw new ConfigError("nothing is pending confirmation");
+    if (id !== this.id) throw new ConfigError(`unknown apply id "${id}"`);
+    if (this.timer !== undefined) this.clock.clearTimer(this.timer);
+    this.timer = undefined;
+    await this.revert();
   }
 
   /** Called at start-up. Reverts an apply the previous process never confirmed. */
@@ -457,12 +517,70 @@ export class ApplyEngine {
     await this.renderAll(loadConfig(this.configPath));
   }
 
+  /**
+   * Roll back off a timer or a verifier — the two callers that do not await.
+   *
+   * `revert()` can now throw (see the write guard below), and a rejection
+   * nothing catches is an unhandled rejection, which under Node's default
+   * takes the process down. That used to be the better of two bad answers,
+   * because the alternative was a wedged engine. It is not the better answer
+   * any more, and it never was in the case that actually produces it: the
+   * write fails because the rootfs went read-only, so a restarted daemon's
+   * `recover()` writes the same file with the same result and systemd
+   * restarts it in a loop — with the console an operator would use to fix it
+   * down the whole time (rule 6). The engine stays up, says what happened,
+   * and the re-armed countdown tries again.
+   */
+  private revertInBackground(who: string): void {
+    void this.revert().catch((e: unknown) => {
+      warn(`${who} could not put the previous configuration back: ${(e as Error).message}`);
+    });
+  }
+
+  /**
+   * Put the countdown back, for a rollback that could not be completed.
+   *
+   * The same window this apply was given, measured again from now. A shorter
+   * one would be arithmetic about somebody else's disk; a longer one would
+   * leave a change nobody confirmed in force for longer than they were told.
+   */
+  private rearm(): void {
+    const window = this.window ?? this.timeoutMs;
+    if (this.timer !== undefined) this.clock.clearTimer(this.timer);
+    this.expiresAt = this.clock.now() + window;
+    this.timer = this.clock.setTimer(window, () => { this.revertInBackground("the countdown"); });
+  }
+
   private async revert(): Promise<void> {
     if (this.state !== "pending" || this.previous === undefined) return;
     this.state = "reverting";
     const previous = this.previous;
     const id = this.id;
-    saveConfig(this.configPath, previous);
+    // Guarded, and it is the one write in this class that must never be
+    // allowed to fail silently. `saveConfig` throws when the file cannot be
+    // written — the ordinary way a Pi's rootfs fails is the kernel remounting
+    // it read-only after an I/O error — and without this the engine was left
+    // in `"reverting"`, which is in BUSY: every later apply refused, both
+    // `confirm()` and `revertNow()` answering "nothing is pending", and, when
+    // this was reached through `revertNow`, the countdown already cleared. An
+    // unconfirmed change in force with no rollback armed and no way to ask
+    // for one is the exact state R-CFG-03 exists to make impossible.
+    //
+    // So the engine goes back to where it was: pending, armed, and saying so.
+    // Nothing has been rolled back and nothing has been kept, which is the
+    // truth. The journal is untouched — `clear()` is below this — so a
+    // restart still rolls the change back as well.
+    try {
+      saveConfig(this.configPath, previous);
+    } catch (e) {
+      this.state = "pending";
+      this.rearm();
+      warn(
+        `could not put the previous configuration back (${(e as Error).message}); `
+        + `the change is still pending and reverts again in ${Math.round((this.window ?? this.timeoutMs) / 1000)} s`,
+      );
+      throw e;
+    }
     // Clear the journal and drop back to idle before the render settles: revert()
     // runs fire-and-forget off the countdown timer (nothing awaits this promise),
     // so anyone calling status() must see the terminal state as soon as the
@@ -525,5 +643,7 @@ export class ApplyEngine {
     this.previous = undefined;
     this.timer = undefined;
     this.expiresAt = undefined;
+    this.window = undefined;
+    this.movesRadio = false;
   }
 }

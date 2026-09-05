@@ -2,7 +2,7 @@
 <template>
     <div class="y-keys" role="toolbar">
         <button
-            v-for="key in props.keys"
+            v-for="key in keys"
             :key="key.action"
             type="button"
             class="y-keys__key"
@@ -33,6 +33,14 @@
  * — the join that drops the access point (K-13) — and a page has at most one.
  * That is a rule about pages, enforced where pages are assembled; this
  * component draws the tone it is given.
+ *
+ * The keys themselves are usually the rail's own configuration, and for one
+ * rail they are not: the CHANGE PENDING banner offers `CONFIRM` for an
+ * ordinary change and, for a change that moved the Wi-Fi radio, does not —
+ * because R-CFG-11 gives that confirmation to the device rather than to the
+ * operator. `pendingChange()` in `yonder-core` decides which, and this draws
+ * the list it is sent. It decides nothing itself, the way nothing in this
+ * package does.
  */
 export default {
     name: 'YonderSoftKeys',
@@ -41,6 +49,23 @@ export default {
         id: { type: String, required: true },
         props: { type: Object, default: () => ({}) },
         state: { type: Object, default: () => ({}) }
+    },
+    computed: {
+        /**
+         * The keys this rail is currently offering.
+         *
+         * A list on the message wins, and anything else falls back to the
+         * rail's own configuration — an absent list, a payload that is not
+         * one, an empty one. That is the direction to fail in twice over: a
+         * rail with no keys is a panel an operator cannot act on at all, and
+         * the configured list is the one that offers `CONFIRM`, which is the
+         * key it would cost an operator a working configuration to withhold
+         * by accident.
+         */
+        keys () {
+            const sent = this.$store?.state?.data?.messages?.[this.id]?.payload?.keys
+            return Array.isArray(sent) && sent.length > 0 ? sent : (this.props.keys || [])
+        }
     },
     created () {
         this.$dataTracker(this.id)

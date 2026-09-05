@@ -1,0 +1,4 @@
+bearer.status.connected                  : no
+bearer.status.interface                  : --
+bearer.properties.apn                    : nxtgenphone
+bearer.properties.ip-type                : ipv4v6

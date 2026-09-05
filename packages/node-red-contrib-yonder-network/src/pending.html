@@ -1,0 +1,45 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!--
+  The editor half of the change-pending poller.
+
+  Node-RED finds this by basename beside the node's .js, and without it the
+  flow editor shows the node as "unknown" even though the runtime registered
+  it. It is a form and a registration, and deliberately nothing else: no
+  behaviour lives here (CLAUDE.md rule 2 in spirit — a diff has to be
+  readable), and no asset is fetched from anywhere (R-UI-01).
+-->
+<script type="text/html" data-template-name="yonder-pending">
+  <div class="form-row">
+    <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-interval"><i class="fa fa-clock-o"></i> Every</label>
+    <input type="number" id="node-input-interval" min="2" step="1" /> seconds
+  </div>
+</script>
+
+<script type="text/html" data-help-name="yonder-pending">
+<p>Reads <code>GET /status</code> on a timer and reports whether a configuration
+change is in force and unconfirmed.</p>
+<p><code>msg.payload</code> carries <code>pending</code>, the apply
+<code>id</code> both keys of the banner need, and the two lines it draws;
+<code>msg.yonder</code> carries the countdown as a command status, already in
+words. The floor on the interval is two seconds (R-UI-06) and is enforced in
+<code>yonder-core</code>, not here.</p>
+<p>The confirmation timer is what makes this device unbrickable (R-CFG-03).
+R-UI-15 is the requirement this node exists for: a change that will revert is
+visible wherever the operator is, not only where it was made.</p>
+</script>
+
+<script type="text/javascript">
+  RED.nodes.registerType("yonder-pending", {
+    category: "yonder",
+    color: "#c7d4e0",
+    defaults: { name: { value: "" }, interval: { value: 2 } },
+    inputs: 1,
+    outputs: 1,
+    icon: "font-awesome/fa-hourglass-half",
+    label: function () { return this.name || "a change waiting to be confirmed"; },
+  });
+</script>

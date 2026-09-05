@@ -195,9 +195,9 @@
         "type": "ui-group",
         "name": "This board",
         "page": "page-status",
-        "width": 8,
+        "width": 12,
         "height": 1,
-        "order": 1,
+        "order": 2,
         "showTitle": true,
         "className": "",
         "visible": true,
@@ -205,13 +205,13 @@
         "groupType": "default"
     },
     {
-        "id": "group-appearance",
+        "id": "group-status-reach",
         "type": "ui-group",
-        "name": "Appearance",
+        "name": "Reachable by",
         "page": "page-status",
-        "width": 4,
+        "width": 12,
         "height": 1,
-        "order": 2,
+        "order": 3,
         "showTitle": true,
         "className": "",
         "visible": true,
@@ -225,7 +225,21 @@
         "page": "page-status",
         "width": 12,
         "height": 1,
-        "order": 3,
+        "order": 4,
+        "showTitle": true,
+        "className": "",
+        "visible": true,
+        "disabled": false,
+        "groupType": "default"
+    },
+    {
+        "id": "group-status-wayback",
+        "type": "ui-group",
+        "name": "If you lose this console",
+        "page": "page-status",
+        "width": 12,
+        "height": 1,
+        "order": 5,
         "showTitle": true,
         "className": "",
         "visible": true,
@@ -267,7 +281,7 @@
         "page": "page-log",
         "width": 12,
         "height": 1,
-        "order": 1,
+        "order": 2,
         "showTitle": true,
         "className": "",
         "visible": true,
@@ -281,7 +295,7 @@
         "page": "page-diagnostics",
         "width": 6,
         "height": 1,
-        "order": 1,
+        "order": 2,
         "showTitle": true,
         "className": "",
         "visible": true,
@@ -295,7 +309,7 @@
         "page": "page-diagnostics",
         "width": 6,
         "height": 1,
-        "order": 2,
+        "order": 3,
         "showTitle": true,
         "className": "",
         "visible": true,
@@ -340,21 +354,6 @@
         ]
     },
     {
-        "id": "note-theme",
-        "type": "ui-markdown",
-        "z": "yonder-console",
-        "group": "group-appearance",
-        "order": 1,
-        "width": 6,
-        "height": 2,
-        "name": "what changing this costs",
-        "content": "**Day is the chart. Night is the display.**\n\nIn sunlight a dark screen is a mirror, so day is a light page. After dusk a light page costs dark adaptation, so night is the glass display in its panel.\n\nThe layout is the same in both. Only the material changes.",
-        "className": "",
-        "x": 200,
-        "y": 380,
-        "wires": []
-    },
-    {
         "id": "apply-config",
         "type": "yonder-apply",
         "z": "yonder-console",
@@ -395,7 +394,7 @@
         "type": "ui-button",
         "z": "yonder-console",
         "group": "group-net-now",
-        "order": 1,
+        "order": 14,
         "width": 3,
         "height": 1,
         "label": "Refresh",
@@ -437,7 +436,9 @@
         "x": 500,
         "y": 540,
         "wires": [
-            []
+            [
+                "seed-cell-form"
+            ]
         ]
     },
     {
@@ -445,7 +446,7 @@
         "type": "ui-button",
         "z": "yonder-console",
         "group": "group-net-join",
-        "order": 2,
+        "order": 6,
         "width": 3,
         "height": 1,
         "label": "Scan",
@@ -793,7 +794,7 @@
         "label": "Network",
         "tooltip": "",
         "place": "Choose a network",
-        "order": 3,
+        "order": 7,
         "width": 6,
         "height": 1,
         "passthru": false,
@@ -821,7 +822,7 @@
         "name": "passphrase",
         "label": "Password",
         "tooltip": "",
-        "order": 4,
+        "order": 8,
         "width": 6,
         "height": 1,
         "topic": "psk",
@@ -850,7 +851,7 @@
         "group": "group-net-join",
         "name": "join",
         "label": "Join",
-        "order": 5,
+        "order": 9,
         "width": 3,
         "height": 1,
         "tooltip": "",
@@ -902,7 +903,7 @@
         "z": "yonder-console",
         "group": "group-net-join",
         "name": "leave",
-        "order": 1,
+        "order": 5,
         "width": 3,
         "height": 1,
         "label": "Use access point",
@@ -947,7 +948,7 @@
         "type": "ui-text",
         "z": "yonder-console",
         "group": "group-net-now",
-        "order": 2,
+        "order": 15,
         "width": 8,
         "height": 1,
         "name": "summary",
@@ -971,7 +972,7 @@
         "type": "ui-text",
         "z": "yonder-console",
         "group": "group-net-now",
-        "order": 3,
+        "order": 16,
         "width": 4,
         "height": 1,
         "name": "address",
@@ -1057,7 +1058,7 @@
         "type": "ui-text",
         "z": "yonder-console",
         "group": "group-net-zerotier",
-        "order": 1,
+        "order": 5,
         "width": 12,
         "height": 1,
         "name": "status",
@@ -1081,7 +1082,7 @@
         "type": "ui-text",
         "z": "yonder-console",
         "group": "group-net-zerotier",
-        "order": 2,
+        "order": 6,
         "width": 6,
         "height": 1,
         "name": "path",
@@ -1105,7 +1106,7 @@
         "type": "ui-text",
         "z": "yonder-console",
         "group": "group-net-zerotier",
-        "order": 3,
+        "order": 7,
         "width": 6,
         "height": 1,
         "name": "latency",
@@ -1132,7 +1133,7 @@
         "name": "network id",
         "label": "Network ID",
         "tooltip": "",
-        "order": 4,
+        "order": 8,
         "width": 8,
         "height": 1,
         "topic": "networkId",
@@ -1185,7 +1186,7 @@
         "z": "yonder-console",
         "group": "group-net-zerotier",
         "name": "join",
-        "order": 5,
+        "order": 9,
         "width": 4,
         "height": 1,
         "label": "Join",
@@ -1236,7 +1237,7 @@
         "type": "ui-text",
         "z": "yonder-console",
         "group": "group-net-zerotier",
-        "order": 6,
+        "order": 10,
         "width": 12,
         "height": 1,
         "name": "network name",
@@ -1260,7 +1261,7 @@
         "type": "ui-text",
         "z": "yonder-console",
         "group": "group-net-zerotier",
-        "order": 7,
+        "order": 11,
         "width": 12,
         "height": 1,
         "name": "network",
@@ -1284,7 +1285,7 @@
         "type": "ui-yonder-identity",
         "z": "yonder-console",
         "group": "group-net-zerotier",
-        "order": 8,
+        "order": 12,
         "width": 12,
         "height": 1,
         "name": "this device",
@@ -1299,7 +1300,7 @@
         "type": "ui-yonder-identity",
         "z": "yonder-console",
         "group": "group-net-zerotier",
-        "order": 9,
+        "order": 13,
         "width": 12,
         "height": 1,
         "name": "address",
@@ -1314,7 +1315,7 @@
         "type": "ui-text",
         "z": "yonder-console",
         "group": "group-net-zerotier",
-        "order": 10,
+        "order": 14,
         "width": 12,
         "height": 1,
         "name": "traffic",
@@ -1338,7 +1339,7 @@
         "type": "ui-text",
         "z": "yonder-console",
         "group": "group-net-zerotier",
-        "order": 11,
+        "order": 15,
         "width": 12,
         "height": 1,
         "name": "throughput",
@@ -1362,7 +1363,7 @@
         "type": "ui-yonder-sparkline",
         "z": "yonder-console",
         "group": "group-net-zerotier",
-        "order": 12,
+        "order": 16,
         "width": 12,
         "height": 1,
         "name": "throughput graph",
@@ -1377,7 +1378,7 @@
         "type": "ui-text",
         "z": "yonder-console",
         "group": "group-net-zerotier",
-        "order": 13,
+        "order": 17,
         "width": 12,
         "height": 1,
         "name": "last heard",
@@ -1402,7 +1403,7 @@
         "z": "yonder-console",
         "group": "group-net-zerotier",
         "name": "leave",
-        "order": 14,
+        "order": 18,
         "width": 3,
         "height": 1,
         "label": "Leave",
@@ -1449,13 +1450,27 @@
         ]
     },
     {
+        "id": "group-net-cellular",
+        "type": "ui-group",
+        "name": "Cellular",
+        "page": "page-network",
+        "width": 12,
+        "height": 1,
+        "order": 4,
+        "showTitle": true,
+        "className": "",
+        "visible": true,
+        "disabled": false,
+        "groupType": "default"
+    },
+    {
         "id": "group-net-activity",
         "type": "ui-group",
         "name": "Activity",
         "page": "page-network",
         "width": 12,
         "height": 1,
-        "order": 4,
+        "order": 5,
         "showTitle": true,
         "className": "",
         "visible": true,
@@ -1483,7 +1498,7 @@
         "group": "group-net-activity",
         "name": "what the device is doing",
         "label": "",
-        "order": 1,
+        "order": 5,
         "width": 12,
         "height": 6,
         "maxrows": 200,
@@ -1551,7 +1566,7 @@
         "group": "group-board",
         "name": "cpu load",
         "order": 1,
-        "width": 8,
+        "width": 12,
         "height": 1,
         "label": "CPU LOAD",
         "unit": "",
@@ -1561,7 +1576,7 @@
         "limit": 3.8,
         "limitLabel": "",
         "precision": 2,
-        "track": 118,
+        "track": 430,
         "series": "",
         "x": 700,
         "y": 100,
@@ -1601,7 +1616,7 @@
         "group": "group-board",
         "name": "cpu temp",
         "order": 2,
-        "width": 8,
+        "width": 12,
         "height": 1,
         "label": "CPU TEMP",
         "unit": "°C",
@@ -1611,7 +1626,7 @@
         "limit": 80,
         "limitLabel": "THROTTLE",
         "precision": 1,
-        "track": 118,
+        "track": 430,
         "series": "",
         "x": 700,
         "y": 160,
@@ -1651,7 +1666,7 @@
         "group": "group-board",
         "name": "memory",
         "order": 3,
-        "width": 8,
+        "width": 12,
         "height": 1,
         "label": "MEMORY",
         "unit": "GB",
@@ -1661,7 +1676,7 @@
         "limit": 7.5,
         "limitLabel": "",
         "precision": 2,
-        "track": 118,
+        "track": 430,
         "series": "",
         "x": 700,
         "y": 220,
@@ -1701,7 +1716,7 @@
         "group": "group-board",
         "name": "board facts",
         "order": 4,
-        "width": 8,
+        "width": 12,
         "height": 1,
         "label": "",
         "cells": "[{\"key\":\"model\",\"label\":\"BOARD\"},{\"key\":\"uptime\",\"label\":\"UP FOR\"},{\"key\":\"yonder\",\"label\":\"YONDER\",\"kind\":\"id\"},{\"key\":\"os\",\"label\":\"SYSTEM\",\"kind\":\"id\"}]",
@@ -1833,5 +1848,2163 @@
         "x": 1220,
         "y": 1680,
         "wires": []
+    },
+    {
+        "id": "modem-state",
+        "type": "yonder-modem-state",
+        "z": "yonder-console",
+        "name": "the modem, and which way out is working",
+        "interval": 5,
+        "x": 260,
+        "y": 1720,
+        "wires": [
+            [
+                "ann-cell-verdict",
+                "text-cell-summary",
+                "bar-cell-facts",
+                "bar-cell-link"
+            ],
+            [
+                "pick-cell-strength",
+                "pick-cell-quality",
+                "bar-cell-signal"
+            ],
+            [
+                "pick-way-ethernet",
+                "pick-way-modem",
+                "pick-way-wifi"
+            ],
+            [
+                "ann-reach",
+                "text-reach-why",
+                "bar-reach",
+                "pick-reach-strength",
+                "pick-reach-quality"
+            ]
+        ]
+    },
+    {
+        "id": "ann-cell-verdict",
+        "type": "ui-yonder-annunciator",
+        "z": "yonder-console",
+        "group": "group-net-cellular",
+        "name": "verdict",
+        "order": 5,
+        "width": 6,
+        "height": 1,
+        "label": "",
+        "source": "yonder",
+        "x": 700,
+        "y": 1660,
+        "wires": []
+    },
+    {
+        "id": "text-cell-summary",
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-net-cellular",
+        "order": 7,
+        "width": 6,
+        "height": 1,
+        "name": "summary",
+        "label": "",
+        "format": "{{msg.payload}}",
+        "layout": "row-left",
+        "value": "payload.summary",
+        "valueType": "msg",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "wrapText": false,
+        "className": "",
+        "x": 700,
+        "y": 1720,
+        "wires": []
+    },
+    {
+        "id": "bar-cell-facts",
+        "type": "ui-yonder-databar",
+        "z": "yonder-console",
+        "group": "group-net-cellular",
+        "name": "facts",
+        "order": 9,
+        "width": 6,
+        "height": 1,
+        "label": "",
+        "cells": "[{\"key\":\"operator\",\"label\":\"OPERATOR\"},{\"key\":\"technology\",\"label\":\"NETWORK\"},{\"key\":\"registration\",\"label\":\"REGISTERED\"},{\"key\":\"apn\",\"label\":\"APN\"}]",
+        "x": 700,
+        "y": 1780,
+        "wires": []
+    },
+    {
+        "id": "bar-cell-link",
+        "type": "ui-yonder-databar",
+        "z": "yonder-console",
+        "group": "group-net-cellular",
+        "name": "link",
+        "order": 11,
+        "width": 12,
+        "height": 1,
+        "label": "",
+        "cells": "[{\"key\":\"address\",\"label\":\"ADDRESS\",\"kind\":\"id\"},{\"key\":\"mtu\",\"label\":\"MTU\"},{\"key\":\"composition\",\"label\":\"COMPOSITION\"}]",
+        "x": 700,
+        "y": 1840,
+        "wires": []
+    },
+    {
+        "id": "pick-cell-strength",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "RSRP, and whether there is a gauge to draw at all",
+        "rules": [
+            {
+                "t": "set",
+                "p": "visible",
+                "pt": "msg",
+                "to": "payload.showsSignal",
+                "tot": "jsonata"
+            },
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "payload.gauges.strength",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 700,
+        "y": 1900,
+        "wires": [
+            [
+                "gauge-cell-strength"
+            ]
+        ]
+    },
+    {
+        "id": "gauge-cell-strength",
+        "type": "ui-yonder-gauge",
+        "z": "yonder-console",
+        "group": "group-net-cellular",
+        "name": "strength",
+        "order": 6,
+        "width": 6,
+        "height": 1,
+        "label": "SIGNAL",
+        "unit": "dBm",
+        "min": -120,
+        "max": -70,
+        "caution": -90,
+        "limit": -105,
+        "sense": "higher-is-better",
+        "limitLabel": "",
+        "precision": 0,
+        "track": 118,
+        "series": "",
+        "x": 1020,
+        "y": 1900,
+        "wires": []
+    },
+    {
+        "id": "pick-cell-quality",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "SINR, and whether there is a gauge to draw at all",
+        "rules": [
+            {
+                "t": "set",
+                "p": "visible",
+                "pt": "msg",
+                "to": "payload.showsSignal",
+                "tot": "jsonata"
+            },
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "payload.gauges.quality",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 700,
+        "y": 1960,
+        "wires": [
+            [
+                "gauge-cell-quality"
+            ]
+        ]
+    },
+    {
+        "id": "gauge-cell-quality",
+        "type": "ui-yonder-gauge",
+        "z": "yonder-console",
+        "group": "group-net-cellular",
+        "name": "quality",
+        "order": 8,
+        "width": 6,
+        "height": 1,
+        "label": "QUALITY",
+        "unit": "dB",
+        "min": -5,
+        "max": 25,
+        "caution": 13,
+        "limit": 0,
+        "sense": "higher-is-better",
+        "limitLabel": "",
+        "precision": 0,
+        "track": 118,
+        "series": "",
+        "x": 1020,
+        "y": 1960,
+        "wires": []
+    },
+    {
+        "id": "bar-cell-signal",
+        "type": "ui-yonder-databar",
+        "z": "yonder-console",
+        "group": "group-net-cellular",
+        "name": "signal",
+        "order": 10,
+        "width": 6,
+        "height": 1,
+        "label": "",
+        "cells": "[{\"key\":\"rssi\",\"label\":\"RSSI\"},{\"key\":\"rsrq\",\"label\":\"RSRQ\"}]",
+        "x": 700,
+        "y": 2020,
+        "wires": []
+    },
+    {
+        "id": "seed-cell-form",
+        "type": "yonder-modem-form",
+        "z": "yonder-console",
+        "name": "what the configuration says these boxes hold",
+        "x": 260,
+        "y": 2020,
+        "wires": [
+            [
+                "input-cell-apn",
+                "remember-cell-apn"
+            ],
+            [
+                "input-cell-dial",
+                "remember-cell-dial"
+            ],
+            [
+                "input-cell-username",
+                "remember-cell-username"
+            ],
+            [
+                "input-cell-password"
+            ]
+        ]
+    },
+    {
+        "id": "input-cell-apn",
+        "type": "ui-text-input",
+        "z": "yonder-console",
+        "group": "group-net-cellular",
+        "name": "apn",
+        "label": "APN",
+        "tooltip": "",
+        "order": 12,
+        "width": 6,
+        "height": 1,
+        "topic": "apn",
+        "topicType": "str",
+        "mode": "text",
+        "delay": 300,
+        "passthru": false,
+        "sendOnBlur": true,
+        "className": "",
+        "icon": "",
+        "iconPosition": "left",
+        "clearable": false,
+        "sendOnDelay": true,
+        "x": 260,
+        "y": 2080,
+        "wires": [
+            [
+                "remember-cell-apn"
+            ]
+        ]
+    },
+    {
+        "id": "remember-cell-apn",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "the typed apn, for Connect to read",
+        "rules": [
+            {
+                "t": "set",
+                "p": "modemApn",
+                "pt": "flow",
+                "to": "payload",
+                "tot": "msg"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 620,
+        "y": 2080,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "input-cell-dial",
+        "type": "ui-text-input",
+        "z": "yonder-console",
+        "group": "group-net-cellular",
+        "name": "dial",
+        "label": "Dial number",
+        "tooltip": "",
+        "order": 13,
+        "width": 6,
+        "height": 1,
+        "topic": "dial",
+        "topicType": "str",
+        "mode": "text",
+        "delay": 300,
+        "passthru": false,
+        "sendOnBlur": true,
+        "className": "",
+        "icon": "",
+        "iconPosition": "left",
+        "clearable": false,
+        "sendOnDelay": true,
+        "x": 260,
+        "y": 2140,
+        "wires": [
+            [
+                "remember-cell-dial"
+            ]
+        ]
+    },
+    {
+        "id": "remember-cell-dial",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "the typed dial, for Connect to read",
+        "rules": [
+            {
+                "t": "set",
+                "p": "modemDial",
+                "pt": "flow",
+                "to": "payload",
+                "tot": "msg"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 620,
+        "y": 2140,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "input-cell-username",
+        "type": "ui-text-input",
+        "z": "yonder-console",
+        "group": "group-net-cellular",
+        "name": "username",
+        "label": "Username",
+        "tooltip": "",
+        "order": 14,
+        "width": 6,
+        "height": 1,
+        "topic": "username",
+        "topicType": "str",
+        "mode": "text",
+        "delay": 300,
+        "passthru": false,
+        "sendOnBlur": true,
+        "className": "",
+        "icon": "",
+        "iconPosition": "left",
+        "clearable": false,
+        "sendOnDelay": true,
+        "x": 260,
+        "y": 2200,
+        "wires": [
+            [
+                "remember-cell-username"
+            ]
+        ]
+    },
+    {
+        "id": "remember-cell-username",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "the typed username, for Connect to read",
+        "rules": [
+            {
+                "t": "set",
+                "p": "modemUsername",
+                "pt": "flow",
+                "to": "payload",
+                "tot": "msg"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 620,
+        "y": 2200,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "input-cell-password",
+        "type": "ui-text-input",
+        "z": "yonder-console",
+        "group": "group-net-cellular",
+        "name": "password",
+        "label": "Password",
+        "tooltip": "",
+        "order": 15,
+        "width": 6,
+        "height": 1,
+        "topic": "password",
+        "topicType": "str",
+        "mode": "password",
+        "delay": 300,
+        "passthru": false,
+        "sendOnBlur": true,
+        "className": "",
+        "icon": "",
+        "iconPosition": "left",
+        "clearable": false,
+        "sendOnDelay": true,
+        "x": 260,
+        "y": 2260,
+        "wires": [
+            [
+                "remember-cell-password"
+            ]
+        ]
+    },
+    {
+        "id": "remember-cell-password",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "the typed password, for Connect to read",
+        "rules": [
+            {
+                "t": "set",
+                "p": "modemPassword",
+                "pt": "flow",
+                "to": "payload",
+                "tot": "msg"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 620,
+        "y": 2260,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "keys-cell",
+        "type": "ui-yonder-softkeys",
+        "z": "yonder-console",
+        "group": "group-net-cellular",
+        "name": "actions",
+        "order": 16,
+        "width": 12,
+        "height": 1,
+        "keys": "[{\"label\":\"TEST NOW\",\"action\":\"test\",\"tone\":\"act\"},{\"label\":\"CONNECT\",\"action\":\"connect\",\"tone\":\"warn\"}]",
+        "x": 260,
+        "y": 2320,
+        "wires": [
+            [
+                "route-cell-key"
+            ]
+        ]
+    },
+    {
+        "id": "route-cell-key",
+        "type": "switch",
+        "z": "yonder-console",
+        "name": "which key was pressed",
+        "property": "payload",
+        "propertyType": "msg",
+        "rules": [
+            {
+                "t": "eq",
+                "v": "test",
+                "vt": "str"
+            },
+            {
+                "t": "eq",
+                "v": "connect",
+                "vt": "str"
+            }
+        ],
+        "checkall": "true",
+        "repair": false,
+        "outputs": 2,
+        "x": 560,
+        "y": 2320,
+        "wires": [
+            [
+                "pick-cell-path"
+            ],
+            [
+                "gather-cell-form"
+            ]
+        ]
+    },
+    {
+        "id": "pick-cell-path",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "test this one path",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "modem",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 820,
+        "y": 2290,
+        "wires": [
+            [
+                "reach-test"
+            ]
+        ]
+    },
+    {
+        "id": "reach-test",
+        "type": "yonder-reach-test",
+        "z": "yonder-console",
+        "name": "test the way out",
+        "x": 1080,
+        "y": 2290,
+        "wires": [
+            [
+                "say-cell"
+            ]
+        ]
+    },
+    {
+        "id": "gather-cell-form",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "the four fields, as one section; the password is not kept",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "{}",
+                "tot": "json"
+            },
+            {
+                "t": "set",
+                "p": "payload.apn",
+                "pt": "msg",
+                "to": "modemApn",
+                "tot": "flow"
+            },
+            {
+                "t": "set",
+                "p": "payload.dial",
+                "pt": "msg",
+                "to": "modemDial",
+                "tot": "flow"
+            },
+            {
+                "t": "set",
+                "p": "payload.username",
+                "pt": "msg",
+                "to": "modemUsername",
+                "tot": "flow"
+            },
+            {
+                "t": "set",
+                "p": "payload.password",
+                "pt": "msg",
+                "to": "modemPassword",
+                "tot": "flow"
+            },
+            {
+                "t": "delete",
+                "p": "modemPassword",
+                "pt": "flow"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 820,
+        "y": 2350,
+        "wires": [
+            [
+                "modem-configure"
+            ]
+        ]
+    },
+    {
+        "id": "modem-configure",
+        "type": "yonder-modem-configure",
+        "z": "yonder-console",
+        "name": "apply the modem section",
+        "x": 1080,
+        "y": 2350,
+        "wires": [
+            [
+                "say-cell"
+            ]
+        ]
+    },
+    {
+        "id": "say-cell",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "what happened, in words",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "yonder.message",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 1340,
+        "y": 2320,
+        "wires": [
+            [
+                "join-toast"
+            ]
+        ]
+    },
+    {
+        "id": "pick-way-ethernet",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "the Ethernet row",
+        "rules": [
+            {
+                "t": "set",
+                "p": "yonder",
+                "pt": "msg",
+                "to": "payload[path='ethernet'].status",
+                "tot": "jsonata"
+            },
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "payload[path='ethernet']",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 700,
+        "y": 2420,
+        "wires": [
+            [
+                "name-way-ethernet",
+                "ann-way-ethernet",
+                "why-way-ethernet"
+            ]
+        ]
+    },
+    {
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-net-now",
+        "height": 1,
+        "label": "",
+        "format": "{{msg.payload}}",
+        "valueType": "msg",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "className": "yonder-fixed",
+        "wires": [],
+        "id": "name-way-ethernet",
+        "name": "ethernet name",
+        "order": 5,
+        "width": 3,
+        "layout": "row-left",
+        "value": "payload.name",
+        "wrapText": false,
+        "x": 1000,
+        "y": 2380
+    },
+    {
+        "id": "ann-way-ethernet",
+        "type": "ui-yonder-annunciator",
+        "z": "yonder-console",
+        "group": "group-net-now",
+        "name": "ethernet standing",
+        "order": 6,
+        "width": 3,
+        "height": 1,
+        "label": "",
+        "source": "yonder",
+        "x": 1000,
+        "y": 2420,
+        "wires": []
+    },
+    {
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-net-now",
+        "height": 1,
+        "label": "",
+        "format": "{{msg.payload}}",
+        "valueType": "msg",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "className": "yonder-qualifier yonder-fixed",
+        "wires": [],
+        "id": "why-way-ethernet",
+        "name": "why ethernet is",
+        "order": 7,
+        "width": 6,
+        "layout": "row-left",
+        "value": "payload.detail",
+        "wrapText": true,
+        "x": 1000,
+        "y": 2460
+    },
+    {
+        "id": "pick-way-modem",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "the Cellular row",
+        "rules": [
+            {
+                "t": "set",
+                "p": "yonder",
+                "pt": "msg",
+                "to": "payload[path='modem'].status",
+                "tot": "jsonata"
+            },
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "payload[path='modem']",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 700,
+        "y": 2560,
+        "wires": [
+            [
+                "name-way-modem",
+                "ann-way-modem",
+                "why-way-modem"
+            ]
+        ]
+    },
+    {
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-net-now",
+        "height": 1,
+        "label": "",
+        "format": "{{msg.payload}}",
+        "valueType": "msg",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "className": "yonder-fixed",
+        "wires": [],
+        "id": "name-way-modem",
+        "name": "modem name",
+        "order": 8,
+        "width": 3,
+        "layout": "row-left",
+        "value": "payload.name",
+        "wrapText": false,
+        "x": 1000,
+        "y": 2520
+    },
+    {
+        "id": "ann-way-modem",
+        "type": "ui-yonder-annunciator",
+        "z": "yonder-console",
+        "group": "group-net-now",
+        "name": "modem standing",
+        "order": 9,
+        "width": 3,
+        "height": 1,
+        "label": "",
+        "source": "yonder",
+        "x": 1000,
+        "y": 2560,
+        "wires": []
+    },
+    {
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-net-now",
+        "height": 1,
+        "label": "",
+        "format": "{{msg.payload}}",
+        "valueType": "msg",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "className": "yonder-qualifier yonder-fixed",
+        "wires": [],
+        "id": "why-way-modem",
+        "name": "why modem is",
+        "order": 10,
+        "width": 6,
+        "layout": "row-left",
+        "value": "payload.detail",
+        "wrapText": true,
+        "x": 1000,
+        "y": 2600
+    },
+    {
+        "id": "pick-way-wifi",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "the Wi-Fi row",
+        "rules": [
+            {
+                "t": "set",
+                "p": "yonder",
+                "pt": "msg",
+                "to": "payload[path='wifi_client'].status",
+                "tot": "jsonata"
+            },
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "payload[path='wifi_client']",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 700,
+        "y": 2700,
+        "wires": [
+            [
+                "name-way-wifi",
+                "ann-way-wifi",
+                "why-way-wifi"
+            ]
+        ]
+    },
+    {
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-net-now",
+        "height": 1,
+        "label": "",
+        "format": "{{msg.payload}}",
+        "valueType": "msg",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "className": "yonder-fixed",
+        "wires": [],
+        "id": "name-way-wifi",
+        "name": "wifi name",
+        "order": 11,
+        "width": 3,
+        "layout": "row-left",
+        "value": "payload.name",
+        "wrapText": false,
+        "x": 1000,
+        "y": 2660
+    },
+    {
+        "id": "ann-way-wifi",
+        "type": "ui-yonder-annunciator",
+        "z": "yonder-console",
+        "group": "group-net-now",
+        "name": "wifi standing",
+        "order": 12,
+        "width": 3,
+        "height": 1,
+        "label": "",
+        "source": "yonder",
+        "x": 1000,
+        "y": 2700,
+        "wires": []
+    },
+    {
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-net-now",
+        "height": 1,
+        "label": "",
+        "format": "{{msg.payload}}",
+        "valueType": "msg",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "className": "yonder-qualifier yonder-fixed",
+        "wires": [],
+        "id": "why-way-wifi",
+        "name": "why wifi is",
+        "order": 13,
+        "width": 6,
+        "layout": "row-left",
+        "value": "payload.detail",
+        "wrapText": true,
+        "x": 1000,
+        "y": 2740
+    },
+    {
+        "id": "pick-reach-strength",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "RSRP, and whether there is a gauge to draw at all",
+        "rules": [
+            {
+                "t": "set",
+                "p": "visible",
+                "pt": "msg",
+                "to": "payload.showsSignal",
+                "tot": "jsonata"
+            },
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "payload.gauges.strength",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 700,
+        "y": 2900,
+        "wires": [
+            [
+                "gauge-reach-strength"
+            ]
+        ]
+    },
+    {
+        "id": "pick-reach-quality",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "SINR, and whether there is a gauge to draw at all",
+        "rules": [
+            {
+                "t": "set",
+                "p": "visible",
+                "pt": "msg",
+                "to": "payload.showsSignal",
+                "tot": "jsonata"
+            },
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "payload.gauges.quality",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 700,
+        "y": 2960,
+        "wires": [
+            [
+                "gauge-reach-quality"
+            ]
+        ]
+    },
+    {
+        "id": "ann-reach",
+        "type": "ui-yonder-annunciator",
+        "z": "yonder-console",
+        "group": "group-status-reach",
+        "name": "the one-word answer",
+        "order": 1,
+        "width": 12,
+        "height": 1,
+        "label": "",
+        "source": "yonder",
+        "x": 1020,
+        "y": 2780,
+        "wires": []
+    },
+    {
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-status-reach",
+        "height": 1,
+        "label": "",
+        "format": "{{msg.payload}}",
+        "valueType": "msg",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "className": "yonder-qualifier",
+        "wires": [],
+        "id": "text-reach-why",
+        "name": "what changed, and when",
+        "order": 2,
+        "width": 12,
+        "layout": "row-left",
+        "value": "payload.why",
+        "wrapText": true,
+        "x": 1020,
+        "y": 2840
+    },
+    {
+        "type": "ui-yonder-gauge",
+        "z": "yonder-console",
+        "group": "group-status-reach",
+        "height": 1,
+        "width": 12,
+        "sense": "higher-is-better",
+        "limitLabel": "",
+        "precision": 0,
+        "track": 430,
+        "series": "",
+        "wires": [],
+        "id": "gauge-reach-strength",
+        "name": "signal",
+        "order": 3,
+        "label": "SIGNAL",
+        "unit": "dBm",
+        "min": -120,
+        "max": -70,
+        "caution": -90,
+        "limit": -105,
+        "x": 1020,
+        "y": 2900
+    },
+    {
+        "type": "ui-yonder-gauge",
+        "z": "yonder-console",
+        "group": "group-status-reach",
+        "height": 1,
+        "width": 12,
+        "sense": "higher-is-better",
+        "limitLabel": "",
+        "precision": 0,
+        "track": 430,
+        "series": "",
+        "wires": [],
+        "id": "gauge-reach-quality",
+        "name": "quality",
+        "order": 4,
+        "label": "QUALITY",
+        "unit": "dB",
+        "min": -5,
+        "max": 25,
+        "caution": 13,
+        "limit": 0,
+        "x": 1020,
+        "y": 2960
+    },
+    {
+        "id": "bar-reach",
+        "type": "ui-yonder-databar",
+        "z": "yonder-console",
+        "group": "group-status-reach",
+        "name": "what identifies the link",
+        "order": 5,
+        "width": 12,
+        "height": 1,
+        "label": "",
+        "cells": "[{\"key\":\"operator\",\"label\":\"OPERATOR\"},{\"key\":\"technology\",\"label\":\"NETWORK\"},{\"key\":\"address\",\"label\":\"ADDRESS\",\"kind\":\"id\"}]",
+        "x": 1020,
+        "y": 3020,
+        "wires": []
+    },
+    {
+        "id": "group-status-pending",
+        "type": "ui-group",
+        "name": "Change pending",
+        "page": "page-status",
+        "width": 12,
+        "height": 1,
+        "order": 1,
+        "showTitle": true,
+        "className": "",
+        "visible": false,
+        "disabled": false,
+        "groupType": "default"
+    },
+    {
+        "id": "ann-pending",
+        "type": "ui-yonder-annunciator",
+        "z": "yonder-console",
+        "group": "group-status-pending",
+        "name": "how long is left",
+        "order": 1,
+        "width": 12,
+        "height": 1,
+        "label": "",
+        "source": "yonder",
+        "x": 1020,
+        "y": 3120,
+        "wires": [],
+        "className": "yonder-live yonder-pending"
+    },
+    {
+        "id": "text-pending-what",
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-status-pending",
+        "name": "what is in force",
+        "order": 2,
+        "width": 12,
+        "height": 1,
+        "label": "",
+        "format": "{{msg.payload}}",
+        "layout": "row-left",
+        "value": "payload.what",
+        "valueType": "msg",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "wrapText": true,
+        "className": "yonder-qualifier yonder-fixed yonder-pending",
+        "x": 1020,
+        "y": 3180,
+        "wires": []
+    },
+    {
+        "id": "text-pending-why",
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-status-pending",
+        "name": "what the revert is for",
+        "order": 3,
+        "width": 12,
+        "height": 1,
+        "label": "",
+        "format": "{{msg.payload}}",
+        "layout": "row-left",
+        "value": "payload.why",
+        "valueType": "msg",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "wrapText": true,
+        "className": "yonder-qualifier yonder-fixed yonder-pending",
+        "x": 1020,
+        "y": 3240,
+        "wires": []
+    },
+    {
+        "id": "keys-pending",
+        "type": "ui-yonder-softkeys",
+        "z": "yonder-console",
+        "group": "group-status-pending",
+        "name": "confirm or revert",
+        "order": 4,
+        "width": 12,
+        "height": 1,
+        "keys": "[{\"label\": \"CONFIRM\", \"action\": \"confirm\", \"tone\": \"warn\"}, {\"label\": \"REVERT NOW\", \"action\": \"revert\", \"tone\": \"act\"}]",
+        "x": 260,
+        "y": 3300,
+        "wires": [
+            [
+                "tag-pending-key"
+            ]
+        ],
+        "className": "yonder-pending"
+    },
+    {
+        "id": "poll-pending",
+        "type": "yonder-pending",
+        "z": "yonder-console",
+        "name": "a change waiting to be confirmed",
+        "interval": 2,
+        "x": 700,
+        "y": 3180,
+        "wires": [
+            [
+                "ann-pending",
+                "text-pending-what",
+                "text-pending-why",
+                "keys-pending",
+                "ann-pending-log",
+                "text-pending-what-log",
+                "text-pending-why-log",
+                "keys-pending-log",
+                "ann-pending-diag",
+                "text-pending-what-diag",
+                "text-pending-why-diag",
+                "keys-pending-diag",
+                "ann-pending-interfaces",
+                "text-pending-what-interfaces",
+                "text-pending-why-interfaces",
+                "keys-pending-interfaces",
+                "ann-pending-wifi",
+                "text-pending-what-wifi",
+                "text-pending-why-wifi",
+                "keys-pending-wifi",
+                "ann-pending-zerotier",
+                "text-pending-what-zerotier",
+                "text-pending-why-zerotier",
+                "keys-pending-zerotier",
+                "ann-pending-cellular",
+                "text-pending-what-cellular",
+                "text-pending-why-cellular",
+                "keys-pending-cellular",
+                "ann-pending-activity",
+                "text-pending-what-activity",
+                "text-pending-why-activity",
+                "keys-pending-activity",
+                "route-pending-banner",
+                "route-pending-key"
+            ]
+        ]
+    },
+    {
+        "id": "tag-pending-key",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "which key, kept across the read",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "payload",
+                "tot": "msg"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 500,
+        "y": 3300,
+        "wires": [
+            [
+                "poll-pending"
+            ]
+        ]
+    },
+    {
+        "id": "route-pending-key",
+        "type": "switch",
+        "z": "yonder-console",
+        "name": "which key was pressed",
+        "property": "topic",
+        "propertyType": "msg",
+        "rules": [
+            {
+                "t": "eq",
+                "v": "confirm",
+                "vt": "str"
+            },
+            {
+                "t": "eq",
+                "v": "revert",
+                "vt": "str"
+            }
+        ],
+        "checkall": "true",
+        "repair": false,
+        "outputs": 2,
+        "x": 1020,
+        "y": 3360,
+        "wires": [
+            [
+                "confirm-pending"
+            ],
+            [
+                "revert-pending"
+            ]
+        ]
+    },
+    {
+        "id": "route-pending-banner",
+        "type": "switch",
+        "z": "yonder-console",
+        "name": "is anything pending",
+        "property": "payload.pending",
+        "propertyType": "msg",
+        "rules": [
+            {
+                "t": "true",
+                "v": "",
+                "vt": "str"
+            },
+            {
+                "t": "false",
+                "v": "",
+                "vt": "str"
+            }
+        ],
+        "checkall": "true",
+        "repair": false,
+        "outputs": 2,
+        "x": 700,
+        "y": 3420,
+        "wires": [
+            [
+                "show-pending-banner"
+            ],
+            [
+                "hide-pending-banner"
+            ]
+        ]
+    },
+    {
+        "id": "show-pending-banner",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "raise it",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "{\"groups\":{\"show\":[\"group-status-pending\",\"group-log-pending\",\"group-diag-pending\"]},\"widgets\":{\"show\":[\"ann-pending-interfaces\",\"text-pending-what-interfaces\",\"text-pending-why-interfaces\",\"keys-pending-interfaces\",\"ann-pending-wifi\",\"text-pending-what-wifi\",\"text-pending-why-wifi\",\"keys-pending-wifi\",\"ann-pending-zerotier\",\"text-pending-what-zerotier\",\"text-pending-why-zerotier\",\"keys-pending-zerotier\",\"ann-pending-cellular\",\"text-pending-what-cellular\",\"text-pending-why-cellular\",\"keys-pending-cellular\",\"ann-pending-activity\",\"text-pending-what-activity\",\"text-pending-why-activity\",\"keys-pending-activity\"]}}",
+                "tot": "json"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 1020,
+        "y": 3420,
+        "wires": [
+            [
+                "control-pending"
+            ]
+        ]
+    },
+    {
+        "id": "hide-pending-banner",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "take it down",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "{\"groups\":{\"hide\":[\"group-status-pending\",\"group-log-pending\",\"group-diag-pending\"]},\"widgets\":{\"hide\":[\"ann-pending-interfaces\",\"text-pending-what-interfaces\",\"text-pending-why-interfaces\",\"keys-pending-interfaces\",\"ann-pending-wifi\",\"text-pending-what-wifi\",\"text-pending-why-wifi\",\"keys-pending-wifi\",\"ann-pending-zerotier\",\"text-pending-what-zerotier\",\"text-pending-why-zerotier\",\"keys-pending-zerotier\",\"ann-pending-cellular\",\"text-pending-what-cellular\",\"text-pending-why-cellular\",\"keys-pending-cellular\",\"ann-pending-activity\",\"text-pending-what-activity\",\"text-pending-why-activity\",\"keys-pending-activity\"]}}",
+                "tot": "json"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 1020,
+        "y": 3480,
+        "wires": [
+            [
+                "control-pending"
+            ]
+        ]
+    },
+    {
+        "id": "control-pending",
+        "type": "ui-control",
+        "z": "yonder-console",
+        "ui": "dashboard",
+        "name": "the banner is there only when it is true",
+        "events": "all",
+        "x": 1340,
+        "y": 3450,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "confirm-pending",
+        "type": "yonder-confirm",
+        "z": "yonder-console",
+        "name": "keep the change",
+        "x": 1340,
+        "y": 3330,
+        "wires": [
+            [
+                "say-pending"
+            ]
+        ]
+    },
+    {
+        "id": "revert-pending",
+        "type": "yonder-revert",
+        "z": "yonder-console",
+        "name": "put the previous configuration back",
+        "x": 1340,
+        "y": 3390,
+        "wires": [
+            [
+                "say-pending"
+            ]
+        ]
+    },
+    {
+        "id": "say-pending",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "what happened, in words",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "yonder.message",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 1600,
+        "y": 3360,
+        "wires": [
+            [
+                "join-toast"
+            ]
+        ]
+    },
+    {
+        "id": "poll-wayback",
+        "type": "yonder-wayback",
+        "z": "yonder-console",
+        "name": "how to get back to this device",
+        "interval": 5,
+        "x": 700,
+        "y": 3570,
+        "wires": [
+            [
+                "bar-wayback",
+                "text-wayback-note"
+            ]
+        ]
+    },
+    {
+        "id": "bar-wayback",
+        "type": "ui-yonder-databar",
+        "z": "yonder-console",
+        "group": "group-status-wayback",
+        "name": "the network, the passphrase and both names",
+        "order": 1,
+        "width": 12,
+        "height": 1,
+        "label": "",
+        "cells": "[{\"key\":\"join\",\"label\":\"JOIN\",\"kind\":\"id\"},{\"key\":\"passphrase\",\"label\":\"PASSPHRASE\"},{\"key\":\"at\",\"label\":\"AT\",\"kind\":\"id\"},{\"key\":\"or\",\"label\":\"OR\",\"kind\":\"id\"}]",
+        "x": 1020,
+        "y": 3540,
+        "wires": [],
+        "className": "yonder-fixed"
+    },
+    {
+        "id": "text-wayback-note",
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-status-wayback",
+        "name": "what to do with it",
+        "order": 2,
+        "width": 12,
+        "height": 1,
+        "label": "",
+        "format": "{{msg.payload}}",
+        "layout": "row-left",
+        "value": "payload.note",
+        "valueType": "msg",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "wrapText": true,
+        "className": "yonder-qualifier yonder-fixed",
+        "x": 1020,
+        "y": 3600,
+        "wires": []
+    },
+    {
+        "id": "group-log-pending",
+        "type": "ui-group",
+        "name": "Change pending",
+        "page": "page-log",
+        "width": 12,
+        "height": 1,
+        "order": 1,
+        "showTitle": true,
+        "className": "",
+        "visible": false,
+        "disabled": false,
+        "groupType": "default"
+    },
+    {
+        "id": "group-diag-pending",
+        "type": "ui-group",
+        "name": "Change pending",
+        "page": "page-diagnostics",
+        "width": 12,
+        "height": 1,
+        "order": 1,
+        "showTitle": true,
+        "className": "",
+        "visible": false,
+        "disabled": false,
+        "groupType": "default"
+    },
+    {
+        "id": "ann-pending-log",
+        "type": "ui-yonder-annunciator",
+        "z": "yonder-console",
+        "group": "group-log-pending",
+        "name": "how long is left",
+        "order": 1,
+        "width": 12,
+        "height": 1,
+        "label": "",
+        "source": "yonder",
+        "x": 1020,
+        "y": 3760,
+        "wires": [],
+        "className": "yonder-live yonder-pending"
+    },
+    {
+        "id": "text-pending-what-log",
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-log-pending",
+        "name": "what is in force",
+        "order": 2,
+        "width": 12,
+        "height": 1,
+        "label": "",
+        "format": "{{msg.payload}}",
+        "layout": "row-left",
+        "value": "payload.what",
+        "valueType": "msg",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "wrapText": true,
+        "className": "yonder-qualifier yonder-fixed yonder-pending",
+        "x": 1020,
+        "y": 3820,
+        "wires": []
+    },
+    {
+        "id": "text-pending-why-log",
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-log-pending",
+        "name": "what the revert is for",
+        "order": 3,
+        "width": 12,
+        "height": 1,
+        "label": "",
+        "format": "{{msg.payload}}",
+        "layout": "row-left",
+        "value": "payload.why",
+        "valueType": "msg",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "wrapText": true,
+        "className": "yonder-qualifier yonder-fixed yonder-pending",
+        "x": 1020,
+        "y": 3880,
+        "wires": []
+    },
+    {
+        "id": "keys-pending-log",
+        "type": "ui-yonder-softkeys",
+        "z": "yonder-console",
+        "group": "group-log-pending",
+        "name": "confirm or revert",
+        "order": 4,
+        "width": 12,
+        "height": 1,
+        "keys": "[{\"label\": \"CONFIRM\", \"action\": \"confirm\", \"tone\": \"warn\"}, {\"label\": \"REVERT NOW\", \"action\": \"revert\", \"tone\": \"act\"}]",
+        "className": "yonder-pending",
+        "x": 260,
+        "y": 3940,
+        "wires": [
+            [
+                "tag-pending-key"
+            ]
+        ]
+    },
+    {
+        "id": "ann-pending-diag",
+        "type": "ui-yonder-annunciator",
+        "z": "yonder-console",
+        "group": "group-diag-pending",
+        "name": "how long is left",
+        "order": 1,
+        "width": 12,
+        "height": 1,
+        "label": "",
+        "source": "yonder",
+        "x": 1020,
+        "y": 4000,
+        "wires": [],
+        "className": "yonder-live yonder-pending"
+    },
+    {
+        "id": "text-pending-what-diag",
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-diag-pending",
+        "name": "what is in force",
+        "order": 2,
+        "width": 12,
+        "height": 1,
+        "label": "",
+        "format": "{{msg.payload}}",
+        "layout": "row-left",
+        "value": "payload.what",
+        "valueType": "msg",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "wrapText": true,
+        "className": "yonder-qualifier yonder-fixed yonder-pending",
+        "x": 1020,
+        "y": 4060,
+        "wires": []
+    },
+    {
+        "id": "text-pending-why-diag",
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-diag-pending",
+        "name": "what the revert is for",
+        "order": 3,
+        "width": 12,
+        "height": 1,
+        "label": "",
+        "format": "{{msg.payload}}",
+        "layout": "row-left",
+        "value": "payload.why",
+        "valueType": "msg",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "wrapText": true,
+        "className": "yonder-qualifier yonder-fixed yonder-pending",
+        "x": 1020,
+        "y": 4120,
+        "wires": []
+    },
+    {
+        "id": "keys-pending-diag",
+        "type": "ui-yonder-softkeys",
+        "z": "yonder-console",
+        "group": "group-diag-pending",
+        "name": "confirm or revert",
+        "order": 4,
+        "width": 12,
+        "height": 1,
+        "keys": "[{\"label\": \"CONFIRM\", \"action\": \"confirm\", \"tone\": \"warn\"}, {\"label\": \"REVERT NOW\", \"action\": \"revert\", \"tone\": \"act\"}]",
+        "className": "yonder-pending",
+        "x": 260,
+        "y": 4180,
+        "wires": [
+            [
+                "tag-pending-key"
+            ]
+        ]
+    },
+    {
+        "id": "ann-pending-interfaces",
+        "type": "ui-yonder-annunciator",
+        "z": "yonder-console",
+        "group": "group-net-now",
+        "name": "how long is left",
+        "order": 1,
+        "width": 12,
+        "height": 1,
+        "label": "",
+        "source": "yonder",
+        "x": 1020,
+        "y": 4240,
+        "wires": [],
+        "className": "yonder-live yonder-pending"
+    },
+    {
+        "id": "text-pending-what-interfaces",
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-net-now",
+        "name": "what is in force",
+        "order": 2,
+        "width": 12,
+        "height": 1,
+        "label": "",
+        "format": "{{msg.payload}}",
+        "layout": "row-left",
+        "value": "payload.what",
+        "valueType": "msg",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "wrapText": true,
+        "className": "yonder-qualifier yonder-fixed yonder-pending",
+        "x": 1020,
+        "y": 4300,
+        "wires": []
+    },
+    {
+        "id": "text-pending-why-interfaces",
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-net-now",
+        "name": "what the revert is for",
+        "order": 3,
+        "width": 12,
+        "height": 1,
+        "label": "",
+        "format": "{{msg.payload}}",
+        "layout": "row-left",
+        "value": "payload.why",
+        "valueType": "msg",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "wrapText": true,
+        "className": "yonder-qualifier yonder-fixed yonder-pending",
+        "x": 1020,
+        "y": 4360,
+        "wires": []
+    },
+    {
+        "id": "keys-pending-interfaces",
+        "type": "ui-yonder-softkeys",
+        "z": "yonder-console",
+        "group": "group-net-now",
+        "name": "confirm or revert",
+        "order": 4,
+        "width": 12,
+        "height": 1,
+        "keys": "[{\"label\": \"CONFIRM\", \"action\": \"confirm\", \"tone\": \"warn\"}, {\"label\": \"REVERT NOW\", \"action\": \"revert\", \"tone\": \"act\"}]",
+        "className": "yonder-pending",
+        "x": 260,
+        "y": 4420,
+        "wires": [
+            [
+                "tag-pending-key"
+            ]
+        ]
+    },
+    {
+        "id": "ann-pending-wifi",
+        "type": "ui-yonder-annunciator",
+        "z": "yonder-console",
+        "group": "group-net-join",
+        "name": "how long is left",
+        "order": 1,
+        "width": 12,
+        "height": 1,
+        "label": "",
+        "source": "yonder",
+        "x": 1020,
+        "y": 4480,
+        "wires": [],
+        "className": "yonder-live yonder-pending"
+    },
+    {
+        "id": "text-pending-what-wifi",
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-net-join",
+        "name": "what is in force",
+        "order": 2,
+        "width": 12,
+        "height": 1,
+        "label": "",
+        "format": "{{msg.payload}}",
+        "layout": "row-left",
+        "value": "payload.what",
+        "valueType": "msg",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "wrapText": true,
+        "className": "yonder-qualifier yonder-fixed yonder-pending",
+        "x": 1020,
+        "y": 4540,
+        "wires": []
+    },
+    {
+        "id": "text-pending-why-wifi",
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-net-join",
+        "name": "what the revert is for",
+        "order": 3,
+        "width": 12,
+        "height": 1,
+        "label": "",
+        "format": "{{msg.payload}}",
+        "layout": "row-left",
+        "value": "payload.why",
+        "valueType": "msg",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "wrapText": true,
+        "className": "yonder-qualifier yonder-fixed yonder-pending",
+        "x": 1020,
+        "y": 4600,
+        "wires": []
+    },
+    {
+        "id": "keys-pending-wifi",
+        "type": "ui-yonder-softkeys",
+        "z": "yonder-console",
+        "group": "group-net-join",
+        "name": "confirm or revert",
+        "order": 4,
+        "width": 12,
+        "height": 1,
+        "keys": "[{\"label\": \"CONFIRM\", \"action\": \"confirm\", \"tone\": \"warn\"}, {\"label\": \"REVERT NOW\", \"action\": \"revert\", \"tone\": \"act\"}]",
+        "className": "yonder-pending",
+        "x": 260,
+        "y": 4660,
+        "wires": [
+            [
+                "tag-pending-key"
+            ]
+        ]
+    },
+    {
+        "id": "ann-pending-zerotier",
+        "type": "ui-yonder-annunciator",
+        "z": "yonder-console",
+        "group": "group-net-zerotier",
+        "name": "how long is left",
+        "order": 1,
+        "width": 12,
+        "height": 1,
+        "label": "",
+        "source": "yonder",
+        "x": 1020,
+        "y": 4720,
+        "wires": [],
+        "className": "yonder-live yonder-pending"
+    },
+    {
+        "id": "text-pending-what-zerotier",
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-net-zerotier",
+        "name": "what is in force",
+        "order": 2,
+        "width": 12,
+        "height": 1,
+        "label": "",
+        "format": "{{msg.payload}}",
+        "layout": "row-left",
+        "value": "payload.what",
+        "valueType": "msg",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "wrapText": true,
+        "className": "yonder-qualifier yonder-fixed yonder-pending",
+        "x": 1020,
+        "y": 4780,
+        "wires": []
+    },
+    {
+        "id": "text-pending-why-zerotier",
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-net-zerotier",
+        "name": "what the revert is for",
+        "order": 3,
+        "width": 12,
+        "height": 1,
+        "label": "",
+        "format": "{{msg.payload}}",
+        "layout": "row-left",
+        "value": "payload.why",
+        "valueType": "msg",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "wrapText": true,
+        "className": "yonder-qualifier yonder-fixed yonder-pending",
+        "x": 1020,
+        "y": 4840,
+        "wires": []
+    },
+    {
+        "id": "keys-pending-zerotier",
+        "type": "ui-yonder-softkeys",
+        "z": "yonder-console",
+        "group": "group-net-zerotier",
+        "name": "confirm or revert",
+        "order": 4,
+        "width": 12,
+        "height": 1,
+        "keys": "[{\"label\": \"CONFIRM\", \"action\": \"confirm\", \"tone\": \"warn\"}, {\"label\": \"REVERT NOW\", \"action\": \"revert\", \"tone\": \"act\"}]",
+        "className": "yonder-pending",
+        "x": 260,
+        "y": 4900,
+        "wires": [
+            [
+                "tag-pending-key"
+            ]
+        ]
+    },
+    {
+        "id": "ann-pending-cellular",
+        "type": "ui-yonder-annunciator",
+        "z": "yonder-console",
+        "group": "group-net-cellular",
+        "name": "how long is left",
+        "order": 1,
+        "width": 12,
+        "height": 1,
+        "label": "",
+        "source": "yonder",
+        "x": 1020,
+        "y": 4960,
+        "wires": [],
+        "className": "yonder-live yonder-pending"
+    },
+    {
+        "id": "text-pending-what-cellular",
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-net-cellular",
+        "name": "what is in force",
+        "order": 2,
+        "width": 12,
+        "height": 1,
+        "label": "",
+        "format": "{{msg.payload}}",
+        "layout": "row-left",
+        "value": "payload.what",
+        "valueType": "msg",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "wrapText": true,
+        "className": "yonder-qualifier yonder-fixed yonder-pending",
+        "x": 1020,
+        "y": 5020,
+        "wires": []
+    },
+    {
+        "id": "text-pending-why-cellular",
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-net-cellular",
+        "name": "what the revert is for",
+        "order": 3,
+        "width": 12,
+        "height": 1,
+        "label": "",
+        "format": "{{msg.payload}}",
+        "layout": "row-left",
+        "value": "payload.why",
+        "valueType": "msg",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "wrapText": true,
+        "className": "yonder-qualifier yonder-fixed yonder-pending",
+        "x": 1020,
+        "y": 5080,
+        "wires": []
+    },
+    {
+        "id": "keys-pending-cellular",
+        "type": "ui-yonder-softkeys",
+        "z": "yonder-console",
+        "group": "group-net-cellular",
+        "name": "confirm or revert",
+        "order": 4,
+        "width": 12,
+        "height": 1,
+        "keys": "[{\"label\": \"CONFIRM\", \"action\": \"confirm\", \"tone\": \"warn\"}, {\"label\": \"REVERT NOW\", \"action\": \"revert\", \"tone\": \"act\"}]",
+        "className": "yonder-pending",
+        "x": 260,
+        "y": 5140,
+        "wires": [
+            [
+                "tag-pending-key"
+            ]
+        ]
+    },
+    {
+        "id": "ann-pending-activity",
+        "type": "ui-yonder-annunciator",
+        "z": "yonder-console",
+        "group": "group-net-activity",
+        "name": "how long is left",
+        "order": 1,
+        "width": 12,
+        "height": 1,
+        "label": "",
+        "source": "yonder",
+        "x": 1020,
+        "y": 5200,
+        "wires": [],
+        "className": "yonder-live yonder-pending"
+    },
+    {
+        "id": "text-pending-what-activity",
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-net-activity",
+        "name": "what is in force",
+        "order": 2,
+        "width": 12,
+        "height": 1,
+        "label": "",
+        "format": "{{msg.payload}}",
+        "layout": "row-left",
+        "value": "payload.what",
+        "valueType": "msg",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "wrapText": true,
+        "className": "yonder-qualifier yonder-fixed yonder-pending",
+        "x": 1020,
+        "y": 5260,
+        "wires": []
+    },
+    {
+        "id": "text-pending-why-activity",
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-net-activity",
+        "name": "what the revert is for",
+        "order": 3,
+        "width": 12,
+        "height": 1,
+        "label": "",
+        "format": "{{msg.payload}}",
+        "layout": "row-left",
+        "value": "payload.why",
+        "valueType": "msg",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "wrapText": true,
+        "className": "yonder-qualifier yonder-fixed yonder-pending",
+        "x": 1020,
+        "y": 5320,
+        "wires": []
+    },
+    {
+        "id": "keys-pending-activity",
+        "type": "ui-yonder-softkeys",
+        "z": "yonder-console",
+        "group": "group-net-activity",
+        "name": "confirm or revert",
+        "order": 4,
+        "width": 12,
+        "height": 1,
+        "keys": "[{\"label\": \"CONFIRM\", \"action\": \"confirm\", \"tone\": \"warn\"}, {\"label\": \"REVERT NOW\", \"action\": \"revert\", \"tone\": \"act\"}]",
+        "className": "yonder-pending",
+        "x": 260,
+        "y": 5380,
+        "wires": [
+            [
+                "tag-pending-key"
+            ]
+        ]
     }
 ]
