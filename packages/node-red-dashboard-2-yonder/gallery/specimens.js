@@ -6,6 +6,7 @@ import YonderFacts from "../src/ui/YonderFacts.vue";
 import YonderGauge from "../src/ui/YonderGauge.vue";
 import YonderHoldKey from "../src/ui/YonderHoldKey.vue";
 import YonderIdentity from "../src/ui/YonderIdentity.vue";
+import YonderPicker from "../src/ui/YonderPicker.vue";
 import YonderPicture from "../src/ui/YonderPicture.vue";
 import YonderReadout from "../src/ui/YonderReadout.vue";
 import YonderSoftKeys from "../src/ui/YonderSoftKeys.vue";
@@ -178,6 +179,72 @@ export const SPECIMENS = [
     note: "R-UI-27: Yonder ships Cam 1, Cam 2 — never a guess at a mounting, because that is a guess about somebody else's aircraft. Renamed here to Nose, the same camera Budget's own specimen shows oversubscribing this aircraft's uplink.",
     component: YonderTextField,
     props: { label: "Name", value: "Nose", placeholder: "Cam 1", max: 24 },
+    payload: undefined,
+    part: true,
+  },
+  {
+    title: "Picker — auto exposure, present",
+    note: "R-CAM-14: the bench's own auto_exposure answers menu ids 1 and 3 only (min=0 max=3 in the raw probe, but 0 and 2 are not real entries) — offering every id in that range would put a mode on the page this camera does not have. Enabled; Aperture priority is the current selection.",
+    component: YonderPicker,
+    props: {
+      label: "Auto exposure",
+      value: "3",
+      options: [
+        { value: "1", label: "Manual" },
+        { value: "3", label: "Aperture priority" },
+      ],
+      state: "present",
+    },
+    payload: undefined,
+    part: true,
+  },
+  {
+    title: "Picker — records at, advertised",
+    note: "A fault, in the caution tone (R-UI-20): the device lists 4K30 and accepts it, and the stream stays at its own default regardless. The control stays on the page, disabled, carrying why — never hidden, which would read as this page failed rather than this camera cannot.",
+    component: YonderPicker,
+    props: {
+      label: "Records at",
+      value: "3840x2160@30",
+      options: [
+        { value: "3840x2160@30", label: "3840×2160 · 30 fps" },
+        { value: "1920x1080@60", label: "1920×1080 · 60 fps" },
+        { value: "1920x1080@30", label: "1920×1080 · 30 fps" },
+      ],
+      state: "advertised",
+      reason: "accepted; keeps recording at 1920×1080 · 30 fps",
+    },
+    payload: undefined,
+    part: true,
+  },
+  {
+    title: "Picker — shutter preset, gated",
+    note: "Not a fault (R-UI-21): the same bench fixture behind the specimen above leaves exposure_time_absolute flags=inactive while auto_exposure sits in Aperture Priority Mode. Neutral tone, dashed box, naming the control that has it — drawing this in caution would tell an operator something is broken when nothing is.",
+    component: YonderPicker,
+    props: {
+      label: "Shutter",
+      value: "1/125",
+      options: [
+        { value: "1/60", label: "1/60" },
+        { value: "1/125", label: "1/125" },
+        { value: "1/250", label: "1/250" },
+        { value: "1/500", label: "1/500" },
+      ],
+      state: "gated",
+      reason: "while auto exposure is aperture priority",
+    },
+    payload: undefined,
+    part: true,
+  },
+  {
+    title: "Picker — aim, not offered",
+    note: "R-UI-20: nothing draws below — no wrapper, no label, no select. The same fact YonderFacts' own specimen states in words is stated here by an empty stage, so a picker never repeats an absence YonderFacts has already reported, in a second silence of its own.",
+    component: YonderPicker,
+    props: {
+      label: "Aim",
+      value: "",
+      options: [{ value: "1", label: "Centre" }],
+      state: "not-offered",
+    },
     payload: undefined,
     part: true,
   },
