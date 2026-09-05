@@ -1102,3 +1102,42 @@ created — a board whose modem was not visible for a single render while cellul
 enabled — nothing generates it until a render happens with the modem present. That is a
 real but smaller hole than the one above: it needs a first apply rather than surviving a
 reboot, and it is left for a future change.
+
+---
+
+### K-45 · The capture gate photographs whatever answers on the port, and calls it green
+
+`scripts/verify-pages.sh` waits for the console by polling until *something* replies:
+
+```sh
+if curl -s -o /dev/null --max-time 1 "http://127.0.0.1:$PORT/"; then return 0; fi
+```
+
+Then `scripts/capture-pages.mjs` is pointed at `--base-url http://127.0.0.1:$PORT` and
+photographs whatever is there.
+
+`HOLD=1` leaves a console running on that port on purpose, so a developer can look at it.
+If a second run starts while the first is still held, the new run's Node-RED cannot bind
+the port — and **the new run's capture connects to the old run's console instead.** Every
+check passes. Every page is captured. The shape comparison finds no change, because
+nothing changed: it re-photographed a server built from the flows as they were when the
+*first* run started.
+
+Observed 2026-09-05: a held console from 14:21 was still listening; a run at 16:17 wrote
+`flows.json` at 16:17:35, served the new file to its own daemon at 16:17:58, captured at
+16:19, and reported *"every page captured, and none changed shape"* — while the PNG showed
+the four-hour-old page. The edit under test was invisible in a gate that had just declared
+itself green.
+
+**This is worse than a flaky check**, because the failure mode is a false pass on the one
+gate whose entire purpose is to notice that a page changed. The `R-UI-12` machinery exists
+because nothing in this repository had ever looked at a page; a gate that looks at the
+wrong page restores that condition while appearing not to.
+
+**The fix is to make the run own the port rather than share it:** fail immediately when
+`$PORT` is already listening (naming the stale process), or bind an ephemeral port and
+capture against that. Refusing to start is the smaller change and the more honest one — a
+held console is a deliberate act, and silently capturing someone else's is never wanted.
+
+Found by eye, not by the gate: the change under review was three widgets swapping type, and
+the picture still showed the widgets they replaced.
