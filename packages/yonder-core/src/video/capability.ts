@@ -171,6 +171,36 @@ export interface CameraCapabilities {
   readonly aim: Capability<AimCapability>;
   readonly recording: Capability<RecordingCapability>;
   readonly stills: Capability<StillsCapability>;
+
+  /**
+   * Ten more controls the bench camera answers, read off `v4l2-ctl
+   * --list-ctrls` alongside the eighteen it reports in total: `brightness`,
+   * `contrast`, `white_balance_temperature`, `exposure_time_absolute`,
+   * `pan_absolute`, `tilt_absolute`, `focus_absolute` and `zoom_absolute`
+   * already had a field above, which leaves these ten with nowhere to live
+   * (R-CTL-11 … R-CTL-14). **Modelled only** — `probe/camera.ts`'s
+   * `CONTROL_MAP` does not read any of them yet and `video/controls.ts`'s
+   * `CONTROL_NAMES` does not write them, so every one of these reports
+   * `not-offered` until a later task teaches the probe their V4L2 names.
+   *
+   * **Ordered as the camera reports them, not alphabetically**, so a diff
+   * against a `v4l2-ctl` dump reads by eye — skipping the eight names above
+   * that already had a field, rather than moving those eight to interleave
+   * exactly and touching every place their old position was relied on.
+   */
+  readonly saturation: Capability<ControlRange>;
+  readonly hue: Capability<ControlRange>;
+  /** `white_balance_automatic` — gates `whiteBalance` (R-UI-21). */
+  readonly autoWhiteBalance: Capability<ControlRange>;
+  readonly gamma: Capability<ControlRange>;
+  readonly gain: Capability<ControlRange>;
+  readonly powerLineFrequency: Capability<ControlRange>;
+  readonly sharpness: Capability<ControlRange>;
+  readonly backlightCompensation: Capability<ControlRange>;
+  /** `auto_exposure` — gates `exposure` (R-UI-21). */
+  readonly autoExposure: Capability<ControlRange>;
+  /** `focus_automatic_continuous` — gates `focus` (R-UI-21). */
+  readonly autoFocus: Capability<ControlRange>;
 }
 
 /**
@@ -180,6 +210,8 @@ export interface CameraCapabilities {
 export const CAPABILITY_KEYS = [
   "formats", "zoom", "focus", "exposure", "whiteBalance",
   "brightness", "contrast", "rotation", "aim", "recording", "stills",
+  "saturation", "hue", "autoWhiteBalance", "gamma", "gain", "powerLineFrequency",
+  "sharpness", "backlightCompensation", "autoExposure", "autoFocus",
 ] as const satisfies readonly (keyof CameraCapabilities)[];
 
 /** A camera with nothing answered. The base every probe builds on. */
@@ -189,6 +221,13 @@ export function noCapabilities(): CameraCapabilities {
     exposure: notOffered(), whiteBalance: notOffered(), brightness: notOffered(),
     contrast: notOffered(), rotation: notOffered(), aim: notOffered(), recording: notOffered(),
     stills: notOffered(),
+    // A camera that has not been probed has not offered any of these ten
+    // either — the same fact the eleven above already state, not a second
+    // default for a device Yonder has not asked.
+    saturation: notOffered(), hue: notOffered(), autoWhiteBalance: notOffered(),
+    gamma: notOffered(), gain: notOffered(), powerLineFrequency: notOffered(),
+    sharpness: notOffered(), backlightCompensation: notOffered(),
+    autoExposure: notOffered(), autoFocus: notOffered(),
   };
 }
 

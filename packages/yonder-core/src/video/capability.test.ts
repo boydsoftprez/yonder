@@ -10,6 +10,10 @@ const FIXED: CameraCapabilities = {
   zoom: notOffered(), focus: notOffered(), exposure: notOffered(),
   whiteBalance: notOffered(), brightness: notOffered(), contrast: notOffered(),
   rotation: notOffered(), aim: notOffered(), recording: notOffered(), stills: notOffered(),
+  saturation: notOffered(), hue: notOffered(), autoWhiteBalance: notOffered(),
+  gamma: notOffered(), gain: notOffered(), powerLineFrequency: notOffered(),
+  sharpness: notOffered(), backlightCompensation: notOffered(),
+  autoExposure: notOffered(), autoFocus: notOffered(),
 };
 
 // The bench's own exposure_time_absolute: a real range, held while
@@ -64,7 +68,10 @@ describe("summarise", () => {
   it("reads as facts, not as a list of blanks", () => {
     expect(summarise(FIXED)).toBe(
       "formats: 1 · zoom: none · focus: none · exposure: none · whiteBalance: none · " +
-      "brightness: none · contrast: none · rotation: none · aim: none · recording: none · stills: none",
+      "brightness: none · contrast: none · rotation: none · aim: none · recording: none · stills: none · " +
+      "saturation: none · hue: none · autoWhiteBalance: none · gamma: none · gain: none · " +
+      "powerLineFrequency: none · sharpness: none · backlightCompensation: none · " +
+      "autoExposure: none · autoFocus: none",
     );
   });
 
@@ -85,5 +92,37 @@ describe("summarise", () => {
   it("says yes for a present capability that is not formats", () => {
     const line = summarise({ ...FIXED, zoom: present(range) });
     expect(line).toContain("zoom: yes");
+  });
+});
+
+describe("the capabilities the devices answer", () => {
+  // Read off the bench camera tonight with `v4l2-ctl --list-ctrls`: eighteen
+  // controls, of which eight already had a field before this task. These ten
+  // had nowhere to live (R-CTL-11 … R-CTL-14).
+  const NEW = ["gain", "backlightCompensation", "gamma", "sharpness", "saturation", "hue",
+    "powerLineFrequency", "autoExposure", "autoWhiteBalance", "autoFocus"] as const;
+
+  it("carries every control the bench camera reports", () => {
+    for (const k of NEW) expect(CAPABILITY_KEYS).toContain(k);
+  });
+
+  it("defaults every key to not-offered", () => {
+    const caps = noCapabilities();
+    for (const k of CAPABILITY_KEYS) expect(caps[k].state).toBe("not-offered");
+  });
+
+  /**
+   * The real guard, and the only one of the three that would catch
+   * `CAPABILITY_KEYS` and `CameraCapabilities` drifting apart. The compiler
+   * catches an entry in `CAPABILITY_KEYS` that is not a real field — the
+   * `satisfies` clause on its declaration — but not the other direction: a
+   * real field on `CameraCapabilities` that `CAPABILITY_KEYS` never names
+   * compiles cleanly and simply does not appear on `summarise` or
+   * `capabilityFacts`, which is the exact silent omission R-UI-20 exists to
+   * catch, one level up from the page it governs. Sorted and compared both
+   * ways, so a key present on only one side fails it either way round.
+   */
+  it("has one key per field, and no field without a key", () => {
+    expect([...CAPABILITY_KEYS].sort()).toEqual(Object.keys(noCapabilities()).sort());
   });
 });

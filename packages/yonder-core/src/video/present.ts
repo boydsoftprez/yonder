@@ -140,6 +140,16 @@ export const LABELS: Record<(typeof CAPABILITY_KEYS)[number], string> = {
   aim: "Aim",
   recording: "Recording",
   stills: "Stills",
+  saturation: "Saturation",
+  hue: "Hue",
+  autoWhiteBalance: "Auto white balance",
+  gamma: "Gamma",
+  gain: "Gain",
+  powerLineFrequency: "Mains frequency",
+  sharpness: "Sharpness",
+  backlightCompensation: "Backlight compensation",
+  autoExposure: "Auto exposure",
+  autoFocus: "Auto focus",
 };
 
 /**

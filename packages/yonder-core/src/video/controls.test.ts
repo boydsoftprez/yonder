@@ -19,6 +19,13 @@ const BENCH_CAPS: CameraCapabilities = {
   contrast: present({ min: 0, max: 95, step: 1, default: 0, current: 0, inactive: false }),
   rotation: notOffered(),
   aim: notOffered(), recording: notOffered(), stills: notOffered(),
+  // Not part of this bench fixture (or of `CONTROL_MAP`, still): the ten
+  // controls video/capability.ts modelled without yet teaching the probe or
+  // the write path their V4L2 names.
+  saturation: notOffered(), hue: notOffered(), autoWhiteBalance: notOffered(),
+  gamma: notOffered(), gain: notOffered(), powerLineFrequency: notOffered(),
+  sharpness: notOffered(), backlightCompensation: notOffered(),
+  autoExposure: notOffered(), autoFocus: notOffered(),
 };
 
 /**

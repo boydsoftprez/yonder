@@ -98,9 +98,18 @@ describe("capabilityFacts", () => {
   };
 
   it("states everything the camera does not have, and nothing it does", () => {
+    // `globalShutter` answers only the six controls the bench's own camera
+    // does (plus `formats`); the ten this task added are not among them, so
+    // they read `not-offered` too, in `CAPABILITY_KEYS` order, right after
+    // the four that were already here.
     expect(capabilityFacts(globalShutter).filter((f) => f.state === "not-offered")
       .map((f) => f.label))
-      .toEqual(["Rotation", "Aim", "Recording", "Stills"]);
+      .toEqual([
+        "Rotation", "Aim", "Recording", "Stills",
+        "Saturation", "Hue", "Auto white balance", "Gamma", "Gain",
+        "Mains frequency", "Sharpness", "Backlight compensation",
+        "Auto exposure", "Auto focus",
+      ]);
   });
 
   /**
@@ -172,7 +181,8 @@ describe("capabilityFacts", () => {
 
   it("says every row when the probe answered nothing, never an empty row", () => {
     // *This camera cannot* and *this page failed* must not look the same.
-    expect(capabilityFacts(noCapabilities())).toHaveLength(11);
+    // One row per `CAPABILITY_KEYS` entry — eleven before this task's ten.
+    expect(capabilityFacts(noCapabilities())).toHaveLength(21);
   });
 
   it("labels a capability in words, never with its own field name", () => {
