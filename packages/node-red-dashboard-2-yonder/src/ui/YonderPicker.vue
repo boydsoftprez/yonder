@@ -1,11 +1,12 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <template>
     <div v-if="state !== 'not-offered'" class="y-pick" :class="'is-' + state">
-        <span v-if="label" class="y-pick__label">{{ label }}</span>
+        <label v-if="label" class="y-pick__label" :for="selectId">{{ label }}</label>
         <div class="y-pick__control" :class="{ 'is-focus': focused }">
             <span class="y-pick__value">{{ shownLabel }}</span>
             <span class="y-pick__caret" aria-hidden="true">&#9662;</span>
             <select
+                :id="selectId"
                 class="y-pick__select"
                 :value="value"
                 :disabled="state !== 'present'"
@@ -89,6 +90,18 @@ export default {
     emits: ['change'],
     data: () => ({ focused: false }),
     computed: {
+        /**
+         * **A real `<label for>`, not a span beside a control.** `aria-label`
+         * already gave the select its accessible name, so a screen reader was
+         * never lost — but a span is not a label, and clicking the word
+         * `Exposure` did nothing. On a page an operator reaches for while an
+         * aircraft is flying, a target the size of the word costs nothing to
+         * offer and is the difference between one press and two.
+         *
+         * Unique per instance, because a deck draws many of these at once and
+         * duplicate ids would associate every label with the first select.
+         */
+        selectId () { return `y-pick-${this._uid ?? this.$?.uid ?? Math.random().toString(36).slice(2)}` },
         /**
          * The overlay text shown under the real, transparent `<select>` —
          * the current value's own label, so the drawn control reads the

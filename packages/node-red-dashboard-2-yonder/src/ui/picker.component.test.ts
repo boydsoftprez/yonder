@@ -174,4 +174,16 @@ describe("layout", () => {
     const w = picker({ value: "3", options: [{ value: "3", label: "Aperture priority" }] });
     expect(getComputedStyle(w.find(".y-pick__control").element).maxWidth).not.toBe("none");
   });
+
+it("associates its label with its select, and gives each instance its own id", () => {
+    // A span beside a control is not a label: the accessible name was fine,
+    // but clicking the word did nothing. And a deck draws many pickers at
+    // once, so a shared id would point every label at the first select.
+    const a = picker({ label: "Exposure", state: "present" });
+    const b = picker({ label: "White balance", state: "present" });
+    const forA = a.find("label").attributes("for");
+    expect(forA).toBeTruthy();
+    expect(a.find("select").attributes("id")).toBe(forA);
+    expect(b.find("label").attributes("for")).not.toBe(forA);
+});
 });
