@@ -51,3 +51,24 @@ export {
  * and drifting.
  */
 export type { CapabilityFact, BudgetSegment } from "../video/present.js";
+
+/**
+ * The adapter boundary: labels, display units and gating for one V4L2
+ * control (R-CTL-10, R-CTL-11).
+ *
+ * `DESCRIPTORS` and `describe` are runtime values, not types, and belong
+ * here anyway: `video/descriptors.ts` imports only types from
+ * `video/capability.ts`, which itself imports nothing, so neither pulls in
+ * `node:fs` or the config loader this file's own opening comment keeps out
+ * of a browser bundle. A picker or a set bar in
+ * `node-red-dashboard-2-yonder` needs the same conversion the config schema
+ * and the write path use — raw 156 is 15600 µs everywhere, never
+ * recomputed with a second copy of the factor — which is this file's own
+ * rule for what belongs in it.
+ */
+export {
+  DESCRIPTORS,
+  describe,
+  type ControlDescriptor,
+  type DescriptorView,
+} from "../video/descriptors.js";
