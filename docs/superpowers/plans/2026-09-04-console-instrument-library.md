@@ -637,6 +637,19 @@ it("accepts any int for a menu control at the schema", () => { expect(CameraCont
 - [ ] **Step 5: Regenerate the published schema the way `ee7e1aa` did; document every field with its raw unit in `docs/configuration.md`**
 - [ ] **Step 6: Commit** — `git commit -s -m "feat(schema): carry every camera control the device answers, device-native — R-CTL-11 … R-CTL-14"`
 
+**`npm run lint` goes red at the end of this task and stays red until Task 9.**
+`CONTROL_NAMES satisfies Record<keyof Camera["controls"], string>` in
+`video/controls.ts` is the alarm: the schema has just gained fourteen controls
+and the write path still knows three, so `TS1360` names every field an
+operator could now save and nothing could send. Leave it. Do not add the
+entries here — Task 9 owns the write path, its refusals and its re-probe, and
+splitting that across two tasks would put half a mechanism under each
+reviewer. Confirm it is the *only* error before you stop, since a real one
+would hide behind it, and say so in your report.
+
+Note the branch does not build between these two tasks. Task 9 follows
+immediately for that reason.
+
 ---
 
 ### Task 9: Write them; refuse what the camera does not offer; re-read the gates
