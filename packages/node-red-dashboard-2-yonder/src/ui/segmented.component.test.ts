@@ -1,0 +1,88 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+import { mount } from "@vue/test-utils";
+import { describe, expect, it } from "vitest";
+import YonderSegmented from "./YonderSegmented.vue";
+
+/**
+ * `nodes.test.ts` explains why most of this package's Vue halves go
+ * untested: they draw what they are given and decide nothing.
+ *
+ * `YonderSegmented` is not one of those. Which option is marked chosen when
+ * handed a value outside its own list, what it emits when one is pressed,
+ * whether it stays capped to its own content instead of stretching to its
+ * column, and which of the four capability states (R-UI-20, R-UI-21) it
+ * draws disabled and in which tone are all decisions this component's own
+ * template makes — and every one of them looks identical in a screenshot to
+ * the wrong answer beside it (a disabled control reads the same whether it
+ * is a fault or by design until you read the colour and the words), which
+ * is exactly why each gets its own assertion against a real mount rather
+ * than a read of the source.
+ *
+ * A plain part (`docs/superpowers/plans/2026-09-04-console-instrument-
+ * library.md`'s File Structure table), not a Node-RED widget in its own
+ * right — no `id`, no `$dataTracker`, no `$store`. A future node composes
+ * it the way `seg()` below does: plain props, nothing else.
+ */
+function seg(props: { label?: string; value?: string; options?: string[]; state?: string; reason?: string }) {
+  return mount(YonderSegmented, { props });
+}
+
+/**
+ * The coordinator's own resolutions, verbatim (task-17-brief.md's
+ * "Coordinator's resolutions" §1). Mine to mount, not to rewrite.
+ */
+describe("marking the chosen option — honestly, never a consolation prize", () => {
+  it("marks exactly one option as chosen, whatever it is handed", () => {
+    const w = seg({ options: ["Video", "Photo"], value: "Photo" });
+    expect(w.findAll(".y-seg__opt.on")).toHaveLength(1);
+    expect(w.find(".y-seg__opt.on").text()).toBe("Photo");
+    // A value the options do not contain marks none of them, and must not
+    // mark the first as a consolation — that would tell an operator the
+    // camera is in a mode it is not in.
+    const stray = seg({ options: ["Video", "Photo"], value: "Timelapse" });
+    expect(stray.findAll(".y-seg__opt.on")).toHaveLength(0);
+  });
+});
+
+describe("emitting — the option pressed, not its index", () => {
+  it("emits the option pressed, not its index", async () => {
+    const w = seg({ options: ["Video", "Photo"], value: "Video" });
+    await w.findAll(".y-seg__opt")[1].trigger("click");
+    expect(w.emitted("change")?.[0]).toEqual(["Photo"]);
+  });
+});
+
+describe("layout — capped, never stretched to its column (R-UI-08)", () => {
+  it("is capped and never stretches to its column", () => {
+    const el = seg({ options: ["Video", "Photo"], value: "Video" }).find(".y-seg").element;
+    const s = getComputedStyle(el);
+    expect(s.maxWidth).not.toBe("none");
+    expect(s.width).not.toBe("100%");
+  });
+});
+
+describe("gated — not a fault, in the neutral tone, naming the way back (R-UI-21)", () => {
+  it("gated: inert, neutral, and it names the way back", () => {
+    const w = seg({
+      options: ["Manual", "Auto"],
+      value: "Auto",
+      state: "gated",
+      reason: "while auto exposure is aperture priority",
+    });
+    const why = w.find(".y-seg__why");
+    expect(why.classes()).toContain("why-gated");
+    expect(why.classes()).not.toContain("why-advertised");
+    expect(why.text()).toContain("auto exposure");
+  });
+});
+
+describe("the three states that never emit (R-UI-20, R-UI-21)", () => {
+  it("emits nothing at all unless it is present", async () => {
+    for (const state of ["gated", "advertised", "not-offered"]) {
+      const w = seg({ options: ["Video", "Photo"], value: "Video", state });
+      const opts = w.findAll(".y-seg__opt");
+      if (opts.length) await opts[1].trigger("click");
+      expect(w.emitted("change"), `${state} emitted a change`).toBeUndefined();
+    }
+  });
+});

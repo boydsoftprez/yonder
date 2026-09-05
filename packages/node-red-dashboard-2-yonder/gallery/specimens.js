@@ -9,6 +9,7 @@ import YonderIdentity from "../src/ui/YonderIdentity.vue";
 import YonderPicker from "../src/ui/YonderPicker.vue";
 import YonderPicture from "../src/ui/YonderPicture.vue";
 import YonderReadout from "../src/ui/YonderReadout.vue";
+import YonderSegmented from "../src/ui/YonderSegmented.vue";
 import YonderSoftKeys from "../src/ui/YonderSoftKeys.vue";
 import YonderSparkline from "../src/ui/YonderSparkline.vue";
 import YonderTape from "../src/ui/YonderTape.vue";
@@ -245,6 +246,50 @@ export const SPECIMENS = [
       options: [{ value: "1", label: "Centre" }],
       state: "not-offered",
     },
+    payload: undefined,
+    part: true,
+  },
+  {
+    title: "Segmented — bitrate mode, present",
+    note: "R-VID-08: a fixed bitrate where the operator prefers determinism, set against the adaptive mode architecture.md's own encoder config carries as its default. Capped to its own two words (R-UI-08), never a slab stretched to the card.",
+    component: YonderSegmented,
+    props: { label: "Bitrate", value: "Adaptive", options: ["Fixed", "Adaptive"], state: "present" },
+    payload: undefined,
+    part: true,
+  },
+  {
+    title: "Segmented — anti-flicker, advertised",
+    note: "A fault, in the caution tone (R-CAM-14): the bench's own power_line_frequency menu (list-ctrls-menus-globalshutter.txt) offers exactly these three entries, accepted here, with the sensor free-running regardless — the control stays on the page, disabled, carrying why, rather than vanishing as if the page had failed.",
+    component: YonderSegmented,
+    props: {
+      label: "Anti-flicker",
+      value: "50 Hz",
+      options: ["Off", "50 Hz", "60 Hz"],
+      state: "advertised",
+      reason: "accepted; the sensor stays free-running",
+    },
+    payload: undefined,
+    part: true,
+  },
+  {
+    title: "Segmented — exposure priority, gated",
+    note: "Not a fault (R-UI-21): the same bench fixture behind YonderPicker's own gated specimen leaves exposure_time_absolute flags=inactive while auto_exposure sits in Aperture Priority Mode. Neutral tone, dashed boxes, naming the control that has it — never the caution tone, which would tell an operator something is broken when nothing is.",
+    component: YonderSegmented,
+    props: {
+      label: "Exposure priority",
+      value: "Auto",
+      options: ["Manual", "Auto"],
+      state: "gated",
+      reason: "while auto exposure is aperture priority",
+    },
+    payload: undefined,
+    part: true,
+  },
+  {
+    title: "Segmented — night mode, not offered",
+    note: "R-UI-20: nothing draws below — no wrapper, no label, no buttons. This bench's global-shutter camera carries no IR-cut filter to switch, so the same absence YonderFacts states in words is stated here by an empty stage, never a second silence of this control's own.",
+    component: YonderSegmented,
+    props: { label: "Night mode", value: "", options: ["Day", "Night"], state: "not-offered" },
     payload: undefined,
     part: true,
   },
