@@ -14,7 +14,17 @@
 
 - **Logic never goes in a Node-RED `function` node.** Behaviour lives in `packages/node-red-contrib-yonder-*`, presentation in `node-red-dashboard-2-yonder`. `flows/flows.json` is wiring only, and a test asserts the artefact contains no `function` node. (CLAUDE.md rule 2, ADR-0001)
 - **Every change traces to a requirement ID.** Where a behaviour has no requirement, the requirement is added to `docs/requirements.md` **in the same commit**. IDs are stable — never reuse, never renumber. (CLAUDE.md rule 3)
-- **Commits and tags are GPG-signed.** Never `--no-gpg-sign`; if signing fails, fix signing. (CLAUDE.md rule 5)
+- **Commits and tags are GPG-signed *and* DCO signed-off.** `git commit -s`, never `--no-gpg-sign`; if signing fails, fix signing. (CLAUDE.md rule 5, [ADR-0002](../../adr/0002-licence-gplv3.md) — every commit on `main` carries both.)
+- **The blueprint is committed, not remembered.** The agreed screens are
+  [`docs/console/design/telemetry/`](../../console/design/telemetry/README.md), and its
+  README names the node type behind every control. **Build from that table, not from prose.**
+  The camera view shipped eleven of twenty-three widgets as stock Dashboard controls because
+  its spec described behaviour and never named instruments; that README records the cause so
+  it is not repeated.
+- **`R-UI-19`:** every node type the shipped flows use must be provided by a package the
+  install path installs, and the build fails when one is not.
+- **`R-UI-16`:** text legibility on controls is *measured* by the build in both palettes, not
+  reviewed by eye.
 - **Nothing shells out except a renderer**, and only through the injected `CommandRunner` from `packages/yonder-core/src/net/runner.ts`. No test may execute `mavlink-router` or open a real serial port. (ADR-0006)
 - **No test waits on the wall clock.** Take the injected `Clock` from `packages/yonder-core/src/apply/types.ts`. (established across `net/`, `remote/`)
 - **One declarative file is the only writer.** `/etc/mavlink-router/main.conf` is generated from `config.yaml` on every apply and never hand-edited.
@@ -133,7 +143,7 @@ sudo cp /boot/firmware/config.txt.before-uart /boot/firmware/config.txt && sudo 
 
 ```bash
 git add docs/hardware/an-autopilot-on-the-uart.md
-git commit -m "docs(hardware): what the UART reports at a wrong baud — R-MAV-13"
+git commit -s -m "docs(hardware): what the UART reports at a wrong baud — R-MAV-13"
 ```
 
 ---
@@ -184,7 +194,7 @@ Does the statistics output attribute received traffic to a *named endpoint*, or 
 
 ```bash
 git add docs/hardware/an-autopilot-on-the-uart.md
-git commit -m "docs(hardware): building mavlink-router on the board, and what it reports"
+git commit -s -m "docs(hardware): building mavlink-router on the board, and what it reports"
 ```
 
 ---
@@ -330,7 +340,7 @@ Expected: the four new tests PASS, and all 1004 existing tests still pass. `roun
 ```bash
 rm -f node_modules
 git add packages/yonder-core/src/schema/config.ts packages/yonder-core/src/schema/mavlink.test.ts docs/configuration.md
-git commit -m "feat(config): the mavlink section, which configuration.md already promised — R-MAV-03, R-MAV-07"
+git commit -s -m "feat(config): the mavlink section, which configuration.md already promised — R-MAV-03, R-MAV-07"
 ```
 
 ---
@@ -448,7 +458,7 @@ Append to `R-CFG-12`'s requirement text, in the same cell:
 ```bash
 rm -f node_modules
 git add packages/yonder-core/src/apply/reachability.ts packages/yonder-core/src/apply/reachability.test.ts docs/requirements.md
-git commit -m "feat(apply): a telemetry endpoint change is kept, not held — R-CFG-12"
+git commit -s -m "feat(apply): a telemetry endpoint change is kept, not held — R-CFG-12"
 ```
 
 ---
@@ -673,7 +683,7 @@ Expected: PASS, all five.
 ```bash
 rm -f node_modules
 git add packages/yonder-core/src/mav/frame.ts packages/yonder-core/src/mav/frame.test.ts
-git commit -m "feat(mav): enough MAVLink to recognise a heartbeat — R-MAV-10"
+git commit -s -m "feat(mav): enough MAVLink to recognise a heartbeat — R-MAV-10"
 ```
 
 ---
@@ -870,7 +880,7 @@ Insert after `R-MAV-12`, in the R-MAV table, with priority `1` — the text is i
 ```bash
 rm -f node_modules
 git add packages/yonder-core/src/mav/detect.ts packages/yonder-core/src/mav/detect.test.ts packages/yonder-core/src/mav/testing.ts packages/yonder-core/src/mav/frame.test.ts docs/requirements.md
-git commit -m "feat(mav): find the autopilot, and say which kind of nothing it was — R-MAV-01, R-MAV-13"
+git commit -s -m "feat(mav): find the autopilot, and say which kind of nothing it was — R-MAV-01, R-MAV-13"
 ```
 
 ---
@@ -1016,7 +1026,7 @@ Expected: PASS, all six.
 ```bash
 rm -f node_modules
 git add packages/yonder-core/src/mav/hint.ts packages/yonder-core/src/mav/hint.test.ts
-git commit -m "feat(mav): remember the port and speed as a hint, never as configuration — R-MAV-01"
+git commit -s -m "feat(mav): remember the port and speed as a hint, never as configuration — R-MAV-01"
 ```
 
 ---
@@ -1069,6 +1079,20 @@ describe("routerConfig", () => {
     expect(out).toContain("Address = 192.168.2.10");
     expect(out).toContain("[UdpEndpoint gcs1]");
     expect(out).toContain("Port = 14551");
+  });
+
+  // R-CFG-13, added with M3: what is generated matches the configuration
+  // *including what it no longer says*. An operator who clears gcs1 must find
+  // that block gone, not standing at its old address still receiving.
+  it("drops an endpoint the configuration no longer names (R-CFG-13)", () => {
+    const both = routerConfig({ ...base, endpoints: [
+      { name: "gcs0", host: "192.168.2.10", port: 14550 },
+      { name: "gcs1", host: "10.147.20.8", port: 14551 },
+    ] }, link);
+    expect(both).toContain("[UdpEndpoint gcs1]");
+    const cleared = routerConfig({ ...base, endpoints: [{ name: "gcs0", host: "192.168.2.10", port: 14550 }] }, link);
+    expect(cleared).not.toContain("gcs1");
+    expect(cleared).not.toContain("10.147.20.8");
   });
 
   it("omits the tcp server entirely when it is off (R-MAV-04)", () => {
@@ -1157,7 +1181,7 @@ Expected: PASS. If the `[General]` assertion fails on exact whitespace, fix the 
 ```bash
 rm -f node_modules
 git add packages/yonder-core/src/mav/router/
-git commit -m "feat(mav): generate mavlink-router's configuration from config.yaml — R-MAV-03, R-MAV-05, R-MAV-07"
+git commit -s -m "feat(mav): generate mavlink-router's configuration from config.yaml — R-MAV-03, R-MAV-05, R-MAV-07"
 ```
 
 ---
@@ -1291,7 +1315,7 @@ Expected: PASS, all eight.
 ```bash
 rm -f node_modules
 git add packages/yonder-core/src/mav/link.ts packages/yonder-core/src/mav/link.test.ts
-git commit -m "feat(mav): one link state, measured rather than configured — R-MAV-10"
+git commit -s -m "feat(mav): one link state, measured rather than configured — R-MAV-10"
 ```
 
 ---
@@ -1344,7 +1368,7 @@ In `daemon/server.ts`, build it alongside `RemoteRenderer` and add it to the ren
 ```bash
 rm -f node_modules
 git add packages/yonder-core/src/mav/renderer.ts packages/yonder-core/src/mav/renderer.test.ts packages/yonder-core/src/daemon/server.ts packages/yonder-core/src/index.ts
-git commit -m "feat(mav): the renderer — detect, then render, then start — R-MAV-01, R-MAV-06, R-MAV-08"
+git commit -s -m "feat(mav): the renderer — detect, then render, then start — R-MAV-01, R-MAV-06, R-MAV-08"
 ```
 
 ---
@@ -1379,7 +1403,7 @@ git commit -m "feat(mav): the renderer — detect, then render, then start — R
 
 - [ ] **Step 1: Write the failing test** for `messageFor(state: LinkState, now?: number)`, covering all five phases and asserting the operator-facing sentences — including that the silent case names **pin 8, pin 10 and pin 6**, and the noise case names `SERIALn_PROTOCOL` and `SERIALn_BAUD`.
 - [ ] **Step 2: Run and watch fail.**
-- [ ] **Step 3: Implement** the nodes as thin adapters. No decision lives here.
+- [ ] **Step 3: Implement** the nodes as thin adapters. No decision lives here. **`R-UI-17`: the endpoint node emits each field's configured value**, so the three host/port pairs open showing what the device is actually set to — an empty box on a configured device is a page giving two answers to one question.
 - [ ] **Step 4: Run** `npx vitest run --root packages/node-red-contrib-yonder-mavlink`.
 - [ ] **Step 5: Commit** — `feat(mavlink-nodes): thin adapters over the daemon socket — R-MAV-10`
 
@@ -1398,9 +1422,10 @@ git commit -m "feat(mav): the renderer — detect, then render, then start — R
 
 - [ ] **Step 1: Extend `nodes.test.ts`** to assert the new node registers and its defaults, as the existing widgets are asserted.
 - [ ] **Step 2: Run and watch fail.**
-- [ ] **Step 3: Write the component**, reading `--yonder-*` with night fallbacks like every other widget (`R-UI-13`). Three cells and two legs; a leg with `absent` draws a dashed grey arrow. Below 1024px the grid becomes one column and the arrows point down.
-- [ ] **Step 4: Run** `npx vitest run --root packages/node-red-dashboard-2-yonder`.
-- [ ] **Step 5: Commit** — `feat(instruments): the telemetry flow strip — R-UI-13`
+- [ ] **Step 3: Write the component**, reading `--yonder-*` with night fallbacks like every other widget (`R-UI-13`). Three cells and two legs; a leg with `absent` draws a dashed grey arrow. Below 1024px the grid becomes one column and the arrows point down. The blueprint is the `Status page — Telemetry` table in [the design README](../../console/design/telemetry/README.md), and the rendered target is `status-telemetry-flowing.html` and `status-telemetry-no-autopilot.html` beside it.
+- [ ] **Step 4: Add the soft-key `caution` tone.** `YonderSoftKeys` has `act` and `warn`; neither means *deliberately on and hazardous*, which is what the ingest key is. Amber, matching the warning band. This is a gap in an existing component, not a new component — and the reasoning for choosing amber over red or magenta is in §8 of the spec.
+- [ ] **Step 5: Run** `npx vitest run --root packages/node-red-dashboard-2-yonder`, **and the contrast gate** — `R-UI-16` measures every control's text against what is actually behind it, in both palettes, in a real browser. A new instrument that has never been measured is exactly what that requirement was added for.
+- [ ] **Step 6: Commit** — `feat(instruments): the telemetry flow strip, and a caution key — R-UI-13, R-UI-16`
 
 ---
 
@@ -1413,12 +1438,13 @@ git commit -m "feat(mav): the renderer — detect, then render, then start — R
 
 - [ ] **Step 1: Extend `flows.test.ts`** — assert the Telemetry page exists, that its groups are the four in §8, and that the artefact still contains no `function` node.
 - [ ] **Step 2: Run and watch fail.**
-- [ ] **Step 3: Build the page** in the editor and export it, or write the wiring by hand. Reference: the mockups this design was agreed from, in the session scratchpad, and §8 for what each panel holds.
-- [ ] **Step 4: Run** `HOLD=1 PORT=18900 ./scripts/verify-pages.sh` and **look at the page** in a browser in both palettes before believing it.
-- [ ] **Step 5: Capture** the page into `docs/console/capture/` and `docs/console/shape/`, in both palettes.
-- [ ] **Step 6: Commit** — `feat(console): the Telemetry page — R-MAV-10, R-DIA-04, R-UI-12`
+- [ ] **Step 3: Build the page from the blueprint**, node type by node type. The table is *Every control is an instrument, and here is the list* in [`docs/console/design/telemetry/README.md`](../../console/design/telemetry/README.md); the rendered target is the ten HTML files beside it. **Do not substitute a stock Dashboard widget for a named instrument.** Where the table says `ui-text` with a `className`, that is the deliberate choice and the class is how the theme reaches it — the same way `yonder-qualifier` and `yonder-fixed` are applied on the pages that already ship.
+- [ ] **Step 4: Carry `yonder-pending` (`R-UI-15`).** `mavlink.serial` and `mavlink.ingest` are *not* exempt from the confirmation window, so changing either pends — and the requirement is that a pending change shows on every surface, not only where it was made. The Status page's existing `yonder-pending` wiring is the pattern.
+- [ ] **Step 5: Run** `HOLD=1 PORT=18900 ./scripts/verify-pages.sh` and **look at the page** in a browser in both palettes before believing it.
+- [ ] **Step 6: Capture all six states.** `R-UI-12` requires a surface that hides part of itself to be captured in each part, and M3 built the machinery: `verify-pages.sh` drives real states through the daemon and captures each under its own name, as `status-without-modem` and `status-pending` already are. The six are enumerated in the design README. Then `node scripts/capture-pages.mjs --accept` and **inspect every PNG by eye before committing it**.
+- [ ] **Step 7: Commit** — `feat(console): the Telemetry page — R-MAV-10, R-DIA-04, R-UI-12, R-UI-15, R-UI-17`
 
-**Note for the reviewer:** §8 records that `R-UI-12` does not yet cover a page with five mutually exclusive states. This task captures whichever state the fixtures produce. Do not claim the others are covered.
+**Note for the reviewer:** `R-UI-12`'s *text* still speaks only of tabs, while the practice M3 established already covers states. That gap belongs to whoever next edits `R-UI-12`, not to this milestone — but this page must be captured in all six states regardless, because the machinery exists and the requirement's intent is plain.
 
 ---
 

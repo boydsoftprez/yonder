@@ -28,9 +28,10 @@ M5 as written contains three separable jobs that share only a milestone number:
 | **M5c** | The DJI Pocket 2 — R-CAM-15 | M4's pipeline |
 
 M5's exit criterion — *telemetry and video over cellular from beyond line of sight* — needs
-M3 and M4, neither of which has started. **M5a needs neither.** It needs an autopilot on
-three pins and the console that exists, which is why it can be built and proven now while
-the milestones it nominally follows are still empty.
+M3 and M4. **M3 has since landed**; M4 has not. **M5a needs neither.** It needs an autopilot
+on three pins and the console that exists, which is why it could be designed while the
+milestones it nominally follows were still empty — and why the cellular half of its exit
+criterion is now real rather than hypothetical.
 
 This is the same split M1 and M2 already took: the invisible layer first, proven on a board,
 and the pages that read it after. It has a pay-off of its own — **at the end of M5a you fly
@@ -201,6 +202,13 @@ access point is about to drop before it drops it.
 on every apply. Editing it by hand survives until the next apply and then disappears. This
 is the rule that makes rollback possible and it is not relaxed here.
 
+**`R-CFG-13`, added with M3, makes the sharper half of that explicit:** what is generated
+matches the configuration *including what the configuration no longer says*. An operator who
+clears `gcs1` must find that endpoint block gone from `main.conf`, not standing at its old
+value — otherwise telemetry keeps arriving at an address nobody asked for it any more.
+Generating from scratch satisfies this by construction, which is exactly why it is done that
+way, and it is asserted rather than assumed.
+
 **Packaging is an open cost — see §10.2.**
 
 ---
@@ -240,10 +248,18 @@ which interrupts the ground stations already receiving for as long as that takes
 says so before the operator presses the button, the way the network page already does before
 moving the radio.
 
-**And it shows no countdown, deliberately.** The Network page shows a confirmation timer
-because a Wi-Fi change can lock you out. This page shows none because a telemetry change
-cannot. The absence is the design, and the log line says why in words an operator reads:
-*kept without a confirmation window — a telemetry change cannot cost reachability*.
+**An endpoint change shows no countdown, deliberately.** The Network page shows a
+confirmation timer because a Wi-Fi change can lock you out. An endpoint change shows none
+because it cannot. The absence is the design, and the log line says why in words an operator
+reads: *kept without a confirmation window — a telemetry change cannot cost reachability*.
+
+**But two changes on this page are not exempt, and they do pend.** `mavlink.serial` and
+`mavlink.ingest` were deliberately left load-bearing above, which means changing either one
+goes through the ordinary window — and `R-UI-15`, added with M3, requires that *while a
+change is in force and unconfirmed, every surface of the console shows that it is and how
+long remains*. So the Telemetry page needs a pending state, and it is the same one the Status
+page now carries. Saying "this page has no countdown" without that qualifier would be false
+for the most consequential control on it.
 
 ---
 
@@ -396,15 +412,37 @@ invisible policy.
 unreviewed, and it was already extended once — for the tabbed Network page — to say that a
 surface hiding part of itself is captured in each of those parts.
 
-**The Telemetry page hides part of itself without being tabbed.** It has five mutually
-exclusive states — linked, searching, not-MAVLink, stopped, and ingest open — and a capture
-run against whichever fixture the harness happens to supply proves nothing about the other
-four. Every one of them is a designed screen, and the two diagnosis states are the ones most
-likely to rot, because they are the ones nobody looks at while things are working.
+**The Telemetry page hides part of itself without being tabbed.** It has six mutually
+exclusive states — linked, searching, not-MAVLink, stopped, ingest open, and a change
+pending — and a capture run against whichever fixture the harness happens to supply proves
+nothing about the other five.
 
-This is noted rather than settled: whether `R-UI-12` should cover states as well as tabs is a
-question this page raises and M5b will raise far harder, since a Cockpit is nothing but
-states. Recorded here so it is not discovered then.
+**M3 has since answered the mechanical half of this.** `verify-pages.sh` now drives real
+states through the daemon and captures each under its own name — `status-without-modem`,
+`status-pending`, `status-psk-changed` — and `capture-pages.mjs` reasons explicitly about a
+panel drawn from live state hiding its other states. So there is nothing to invent: this page
+is captured in each of its six states the way the Status page already is in four.
+
+What M3 did *not* do is amend `R-UI-12`, whose text still speaks only of tabs. The practice
+has moved ahead of the requirement. That is worth closing — but it is a requirements change
+of its own and it belongs to whoever next touches `R-UI-12`, not to this milestone.
+
+### Four requirements M3 added that this page must meet
+
+None of these existed when the screens were drawn, and all four land on them.
+
+- **`R-UI-15` — a pending change is visible everywhere.** Covered above: the page needs a
+  pending state, because opening ingest is not exempt.
+- **`R-UI-16` — every piece of text on a control is legible against what is behind it, in
+  both palettes, and *the build measures it*.** Not reviewed by eye. The flow strip's cells
+  and captions, the annunciators and the soft keys are all new surfaces and all must pass
+  that measurement rather than a reviewer's judgement.
+- **`R-UI-17` — a field that edits a setting opens showing that setting.** The three endpoint
+  fields open carrying the configured host and port, and an unset one says so. The screens
+  already do this; it is now a requirement rather than a preference.
+- **`R-UI-19` — every node type the shipped flows use is provided by a package the install
+  path installs, and the build fails when one is not.** The flow strip and the four
+  `yonder-mav-*` nodes have to be in the install payload, not merely in the repository.
 
 ### Widths
 
@@ -517,3 +555,11 @@ The screens in §8 were built against the real generated stylesheet — `themeCs
 `yonder-core`, not an approximation of it — and rendered at 2× in both palettes and at three
 widths before being agreed. That is evidence about the design, and none at all about the
 board.
+
+**They are committed, in [`docs/console/design/telemetry/`](../../console/design/telemetry/README.md),
+and its README names the node type behind every control.** That is not tidiness. The camera
+view's spec described its deck's behaviour and never said "every control is an instrument, and
+here is the list"; the plan inherited the gap and filled it with what Dashboard already
+shipped, and eleven of twenty-three widgets came out as stock controls — the thing ADR-0009
+exists to prevent. §8 below says what each panel *holds*, which is the same prose that failed
+there, so the binding list lives beside the mockups and the plan builds from that.
