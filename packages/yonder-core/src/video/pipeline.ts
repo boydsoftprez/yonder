@@ -262,6 +262,13 @@ export function refuse(opts: ComposeOptions): string | null {
   // stays in the schema so a configuration already holding one still loads and
   // can be read and corrected, and the milestone that serves SRT owes it a
   // credential before this refusal comes out.
+  //
+  // **Deliberately ignores `enabled`.** *SRT is not supported yet* is true
+  // whether or not this particular output is switched on — disabling it
+  // does not give it the posture R-VID-06 owes it — so gating this refusal
+  // on `enabled` would only delay the same message to a worse moment: the
+  // operator would re-enable the output expecting it to work, on the
+  // strength of a config that had gone on loading without complaint.
   const srt = camera.outputs.find((o) => o.kind === "srt");
   if (srt !== undefined) {
     return `this device cannot serve SRT yet: the output on port ${srt.port} would listen with no password on it (R-VID-06). Remove it, or use an RTSP output, which carries this device's own credential`;

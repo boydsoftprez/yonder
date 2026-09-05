@@ -539,6 +539,13 @@ export const ConfigSchema = z.object({
       // refusing it one of these numbers would be refusing a configuration
       // that works. `srt` is the one kind that opens a socket on this board,
       // and it is refused these four because the media server has them.
+      //
+      // **Deliberately ignores `enabled`.** A disabled SRT output still
+      // claims this port the moment it is switched back on, so refusing it
+      // now, at configuration time, catches the collision while an operator
+      // is at a keyboard rather than when they flip the switch — possibly in
+      // flight. Gating this on `enabled` would only delay the same message
+      // to a worse moment, not avoid it.
       if (out.kind === "srt") {
         const held = BOUND_ON_THIS_DEVICE.get(out.port);
         if (held !== undefined) {

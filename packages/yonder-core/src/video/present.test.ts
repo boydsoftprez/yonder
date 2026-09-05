@@ -30,7 +30,7 @@ function camera(over: Partial<Camera> = {}): Camera {
     bitrate_kbps: 2000,
     preview: { width: 640, height: 360, framerate: 15, bitrate_kbps: 400 },
     controls: { brightness: null, contrast: null, rotation: 0 },
-    outputs: [{ kind: "rtp", host: "192.168.77.20", port: 5600 }],
+    outputs: [{ kind: "rtp", host: "192.168.77.20", port: 5600, enabled: true }],
     ...over,
   } as Camera;
 }
@@ -50,12 +50,15 @@ describe("atIp", () => {
 });
 
 describe("uplinkBudget", () => {
+  // Named so a test can disable one and leave the other running, without
+  // retyping its shape (Task 10 fix round 1: `stops counting an output the
+  // operator stopped`).
+  const rtpOutput = { kind: "rtp", host: "192.168.77.20", port: 5600, enabled: true } as const;
+  const rtspOutput = { kind: "rtsp", password: { secret: "rtsp_password" }, enabled: true } as const;
+
   it("gives every consumer its own segment, because every one costs its own bitrate", () => {
     const budget = uplinkBudget([camera({
-      outputs: [
-        { kind: "rtp", host: "192.168.77.20", port: 5600 },
-        { kind: "rtsp", password: { secret: "rtsp_password" } },
-      ],
+      outputs: [rtpOutput, rtspOutput],
     })]);
     expect(budget.segments.map((s) => s.label)).toEqual([
       "Front camera · rtp",
@@ -67,6 +70,18 @@ describe("uplinkBudget", () => {
 
   it("counts nothing for a camera that is not enabled, because it has no pipeline", () => {
     expect(uplinkBudget([camera({ enabled: false })]).segments).toEqual([]);
+  });
+
+  it("stops counting an output the operator stopped", () => {
+    // The whole point of the fix: a disabled output's bitrate is not billed,
+    // exactly as if it had never been configured, while its enabled sibling
+    // and the preview still are.
+    const b = uplinkBudget([camera({ outputs: [
+      { ...rtpOutput, enabled: false }, rtspOutput,
+    ] })]);
+    expect(b.segments.map((s) => s.label)).toEqual([
+      "Front camera · rtsp", "Front camera · preview",
+    ]);
   });
 
   it("totals across cameras, which is why this lives on the index and not on a page", () => {

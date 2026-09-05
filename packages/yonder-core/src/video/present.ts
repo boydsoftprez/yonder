@@ -72,7 +72,11 @@ export interface UplinkBudget {
  *
  * A camera that is not enabled contributes nothing — it has no pipeline — and
  * the browser preview is counted once per camera because that is what watching
- * one costs while it is being watched (R-VID-13).
+ * one costs while it is being watched (R-VID-13). **A disabled output
+ * contributes nothing either (R-VID-16)**: it has no branch in `compose()`
+ * (`video/pipeline.ts`), so charging its bitrate here would bill an operator
+ * for a stream that is not running — the fix mirrors `compose()`'s own
+ * filter, one line above the loop it belongs to.
  */
 export function uplinkBudget(
   cameras: readonly Camera[],
@@ -85,7 +89,7 @@ export function uplinkBudget(
     // nothing on the board (68% of a core for one output against 70% for two)
     // and every consumer that leaves over cellular costs its own bitrate. That
     // asymmetry is the whole reason this instrument exists.
-    for (const output of camera.outputs) {
+    for (const output of camera.outputs.filter((o) => o.enabled)) {
       segments.push({
         label: `${camera.name} · ${output.kind}`,
         kbps: atIp(camera.bitrate_kbps),
