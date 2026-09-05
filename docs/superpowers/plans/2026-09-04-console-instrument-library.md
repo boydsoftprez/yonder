@@ -90,7 +90,7 @@ surface. One branch, seven phases, each a review checkpoint.
 | `apply/reachability.ts` | The `preview` blanket exemption removed; policy fields classified by leaf |
 | `apply/draft.ts` | **New.** Draft validation and the interruption statement |
 | `console/settings.ts` | The theme `<link>` in the document head |
-| `daemon/routes.ts` | Controls, outputs, drafts, viewers, captures, aim, range finder |
+| `daemon/routes.ts` | Controls, outputs, drafts, viewers, captures, aim |
 
 **`packages/node-red-dashboard-2-yonder/src/`**
 
@@ -890,7 +890,7 @@ drawn, and the M4 lesson is that nothing gets built from prose.
   - **Preview:** the Fixed target bar; `Smallest · Largest automatic size` pickers shown with `Auto`. **Stream:** floor and ceiling shown in Adaptive.
   - **ELP Photo mode** with *to this board*; **the captures panel** (`DraftCaptures.vue`) — board stills with view · download · delete — reachable beside Capture on Live and Setup.
   - **The sticky rail**, and the viewport contract: a 1440×900 capture with the picture, Aim and Capture above the fold; a full-page capture proving one vertical scroll, no horizontal overflow, no nested scroller.
-  - **The range finder** (`DraftRangeFinder.vue`): a Setup step on a gimbal camera — one axis at a time, ≤ 5° a step, the limit flag watched, the envelope recorded per mounting and mode; the Aim panel inhibited with *envelope unknown — run the range finder* until it is.
+  - ~~**The range finder**~~ — drawn, then **removed at the operator's request** and the Aim panel left live. He did not ask for it, it reached the blueprint through a spec revision, and it was inhibiting the control he wanted to try. The evidence agreed with him: `hardware/dji-pocket-2-over-usb.md` records the camera pushing a limit flag twenty times a second, so an operator-run sweep pre-computes what the device announces anyway, goes stale when the mounting changes, and did not find one of the four bounds. What should guard the gimbal instead is Task 38's open question.
   - **Cost as three numbers**: this viewer's delivery, the shared encode, the path total.
 
 - [ ] **Step 3: Show the operator; take his corrections; re-render; update the README's decisions and gaps**
@@ -1108,7 +1108,7 @@ it("the dead zone emits stop; leaving it again starts a new gesture id", ...);
 for (const ev of ["pointerup", "pointercancel", "pointerleave", "lostpointercapture"])
   it(`emits exactly one stop on ${ev}`, ...);
 it("emits stop when the window blurs, when the page hides, and on pagehide", ...);
-it("emits nothing while inhibited, and shows the reason", () => { /* inhibited: "envelope unknown — run the range finder" */ });
+it("emits nothing while inhibited, and shows the reason", () => { /* inhibited: any reason string the deck supplies, e.g. "gimbal not responding" */ });
 it("draws the struck axis for one that will not answer", ...);
 it("draws the haloed puck at the centre at rest and under the pointer while pushing", ...);
 ```
@@ -1443,7 +1443,7 @@ it("latency beyond the budget inhibits new motion rather than admitting stale co
 **Files:** `video/accessory/guard.ts` + `guard.test.ts`; `schema/config.ts` (`cameras[].gimbal.envelope` per mode, per mounting); `daemon/routes.ts` (`/cameras/:id/range-finder`); `ui/YonderRangeFinder.vue` + `range-finder.ts/.html` + test; `flows/flows.json`
 
 **Interfaces:**
-- Produces: `guard(cmd: Rate | Recentre | Mode, ctx: { envelope, mode, attitude, attitudeAge, limits, signsVerified, stopMargin }): Allowed | Refused`. Unknown envelope, unknown mode, stale attitude or unverified signs → refused per axis with the missing precondition; motion farther into a lit limit → refused; away from it → allowed only with fresh position and a verified direction inside a known envelope; recentre and mode changes allowed only from poses the bench established; a mode change ends the active gesture; the stop-bound's continuing travel is reserved. **The envelope comes from the operator-directed range finder** — one axis at a time, ≤ 5° a step, the flag watched, recorded per mounting and mode — never an autonomous sweep, never a manufacturer's figure. No absolute pointing command is exposed.
+- Produces: `guard(cmd: Rate | Recentre | Mode, ctx: { envelope, mode, attitude, attitudeAge, limits, signsVerified, stopMargin }): Allowed | Refused`. Unknown envelope, unknown mode, stale attitude or unverified signs → refused per axis with the missing precondition; motion farther into a lit limit → refused; away from it → allowed only with fresh position and a verified direction inside a known envelope; recentre and mode changes allowed only from poses the bench established; a mode change ends the active gesture; the stop-bound's continuing travel is reserved. **Where the envelope comes from is an open question, and the range finder is no longer the answer.** The operator rejected it and the evidence backs him: the camera pushes a limit flag twenty times a second on the same link as the video, so a sweep pre-computes what it announces anyway. The likely shape is to listen — refuse motion farther into a flag that is lit now, and slow near one — which needs no procedure and cannot go stale when the mounting changes. Settle it against bench queue items 1 and 3 before building this, and never from a manufacturer's figure. No absolute pointing command is exposed.
 
 - [ ] **Step 1: Write the failing tests** — one per rule above; and for the range finder: refuses a step over 5°; stops on the limit flag; records the envelope per mode; the guard refuses everything until it has one; the finder never runs without an operator's press per step.
 - [ ] **Step 2–4: Fail; implement; pass; mutation-check** every refusal.
