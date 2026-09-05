@@ -7,9 +7,11 @@ import YonderGauge from "../src/ui/YonderGauge.vue";
 import YonderHoldKey from "../src/ui/YonderHoldKey.vue";
 import YonderIdentity from "../src/ui/YonderIdentity.vue";
 import YonderPicture from "../src/ui/YonderPicture.vue";
+import YonderReadout from "../src/ui/YonderReadout.vue";
 import YonderSoftKeys from "../src/ui/YonderSoftKeys.vue";
 import YonderSparkline from "../src/ui/YonderSparkline.vue";
 import YonderTape from "../src/ui/YonderTape.vue";
+import YonderTextField from "../src/ui/YonderTextField.vue";
 
 /**
  * One specimen per shipped instrument (R-UI-25, CLAUDE.md rule 2).
@@ -33,6 +35,15 @@ import YonderTape from "../src/ui/YonderTape.vue";
  * `id` is not part of this shape. Which store key a specimen's payload
  * lands under is the harness's business (`main.js` assigns one per entry),
  * not something a specimen states about itself.
+ *
+ * `part: true` (Task 15 on) marks a specimen whose component is a plain
+ * part — `YonderReadout`, `YonderTextField`, and whatever this plan's
+ * later tasks add beside them — rather than a Node-RED widget in its own
+ * right. A part declares its own props directly instead of the
+ * `id`/`props`/`state` wrapper every widget above needs to find its
+ * `$store` entry, so `main.js` mounts it with `props` spread onto it
+ * as-is, the way a real composing widget will. Omitted (falsy) for every
+ * widget specimen, which is most of the entries below.
  */
 export const SPECIMENS = [
   {
@@ -147,5 +158,27 @@ export const SPECIMENS = [
         ],
       },
     },
+  },
+  {
+    title: "Readout — Pocket 2 status",
+    note: "Battery carries its unit without shouting it; Card is not fitted, which reads as none in the neutral tone rather than the blank a bare 0 would leave (coordinator resolution 5) — the same three rows the blueprint's own POCKET2 fixture carries, with the absent Card expressed as a null value rather than a pre-formatted string.",
+    component: YonderReadout,
+    props: {
+      rows: [
+        { label: "Battery", value: "99", unit: "%" },
+        { label: "Card", value: null },
+        { label: "Sensor", value: "16", unit: "MP" },
+      ],
+    },
+    payload: undefined,
+    part: true,
+  },
+  {
+    title: "Text field — camera name",
+    note: "R-UI-27: Yonder ships Cam 1, Cam 2 — never a guess at a mounting, because that is a guess about somebody else's aircraft. Renamed here to Nose, the same camera Budget's own specimen shows oversubscribing this aircraft's uplink.",
+    component: YonderTextField,
+    props: { label: "Name", value: "Nose", placeholder: "Cam 1", max: 24 },
+    payload: undefined,
+    part: true,
   },
 ];

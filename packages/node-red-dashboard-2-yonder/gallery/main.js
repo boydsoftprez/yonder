@@ -106,7 +106,21 @@ const Gallery = defineComponent({
           h("div", { class: "g-cap" }, specimen.title),
           h("div", { class: "g-sub" }, specimen.note),
           h("div", { class: "g-stage" }, [
-            h(specimen.component, { id: "specimen-" + i, props: specimen.props }),
+            h(specimen.component, specimen.part
+              // A part (Task 15 on: YonderReadout, YonderTextField, and
+              // whatever this plan's later tasks add beside them) is never
+              // mounted by Dashboard as a node in its own right, so it
+              // declares its own props directly — `rows`, `value`, `max` —
+              // rather than the `id`/`props`/`state` wrapper every real
+              // widget above this line needs to find its `$store` entry.
+              // Spreading `specimen.props` onto it here is exactly what a
+              // real composing widget (`YonderDeck`, later in this plan)
+              // will do; wrapping it in `props:` the way a widget specimen
+              // is below would leave a part reading its own declared props
+              // as `undefined` and drawing nothing but its defaults — a
+              // stub specimen this harness exists to catch, not produce.
+              ? { ...specimen.props }
+              : { id: "specimen-" + i, props: specimen.props }),
           ]),
         ]))),
       ]),
