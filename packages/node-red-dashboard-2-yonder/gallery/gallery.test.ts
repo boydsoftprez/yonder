@@ -57,4 +57,35 @@ describe("a specimen is a real state, not a stub", () => {
       expect(hasProps || hasPayload, `${String(s.title)} carries neither a configured prop nor a payload`).toBe(true);
     }
   });
+
+  /**
+   * **A part mounted as a widget draws its defaults and says nothing.**
+   * `main.js` mounts a Node-RED widget by handing it `id`, `props` and
+   * `state`; a plain part takes its props directly. Forget `part: true` and
+   * the specimen still mounts, still has non-empty props, and still passes
+   * the check above — it just renders an empty component, and the gallery
+   * quietly stops being evidence for that one.
+   *
+   * Which of the two a component is, is not a matter of opinion: a widget has
+   * a Node-RED registration beside it in `src/`, and a part does not. Derive
+   * it from the filesystem rather than trusting the flag to agree with
+   * itself.
+   */
+  it("flags every part as a part, and no widget as one", () => {
+    const registrations = new Set(
+      readdirSync(join(import.meta.dirname, "..", "src"))
+        .filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"))
+        .map((f) => f.replace(/\.ts$/, "")),
+    );
+    for (const s of SPECIMENS) {
+      const name = String(s.component?.name ?? s.component?.__name ?? "");
+      const isWidget = registrations.has(name.replace(/^Yonder/, "").toLowerCase());
+      expect(
+        Boolean(s.part),
+        isWidget
+          ? `${name} has a Node-RED registration, so its specimen must not set part: true`
+          : `${name} has no Node-RED registration, so its specimen must set part: true or it mounts as a widget and draws nothing`,
+      ).toBe(!isWidget);
+    }
+  });
 });
