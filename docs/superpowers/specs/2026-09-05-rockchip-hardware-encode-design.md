@@ -13,9 +13,9 @@ Every number cited was measured on hardware, and the citation is the note it cam
 [`hardware-encode-on-a-radxa-zero-3w.md`](../../hardware/hardware-encode-on-a-radxa-zero-3w.md).
 
 > **Note on placement.** This spec describes changes to `packages/yonder-core/src/video/`,
-> which exists on the M4 camera branch and is not yet merged to `main`. Both this document
-> and its hardware note were written on a branch that does not carry that code; they belong
-> on the camera lineage and should move there when it merges.
+> which exists on the M4 camera branch and is not yet merged to `main`. This document and
+> its two hardware notes sit on that branch alongside the code they describe, and reach
+> `main` with it.
 
 ## 1. The problem is three problems with one cause
 
