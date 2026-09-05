@@ -9,6 +9,7 @@ import YonderHoldKey from "../src/ui/YonderHoldKey.vue";
 import YonderIdentity from "../src/ui/YonderIdentity.vue";
 import YonderPicker from "../src/ui/YonderPicker.vue";
 import YonderPicture from "../src/ui/YonderPicture.vue";
+import YonderPlacard from "../src/ui/YonderPlacard.vue";
 import YonderReadout from "../src/ui/YonderReadout.vue";
 import YonderSegmented from "../src/ui/YonderSegmented.vue";
 import YonderSetBar from "../src/ui/YonderSetBar.vue";
@@ -190,6 +191,22 @@ export const SPECIMENS = [
     note: "The right-hand qualifier (§6) is what tells two columns of otherwise identical controls apart: this one and Preview's own share the same fields (bitrate mode, floor, ceiling), and the qualifier is the only thing on screen saying which camera output each one is steering. The select tone marks it as the destination currently in view, the same cyan this library already uses for a live choice.",
     component: YonderColumn,
     props: { legend: "Stream", qualifier: "to the ground station", tone: "select" },
+    payload: undefined,
+    part: true,
+  },
+  {
+    title: "Placard — camera identity",
+    note: "The camera's own name (R-UI-27), read the way ADR-0009 draws every placard on this console: letterspaced capitals from a single ambient rule, never typed in shouting case by whoever configured the camera.",
+    component: YonderPlacard,
+    props: { kind: "Camera", name: "Cam 2" },
+    payload: undefined,
+    part: true,
+  },
+  {
+    title: "Placard — what the accessory is, with a protected unit",
+    note: "§6's own second worked example, with a real unit standing in for its illustrative one: `2.07 Mb/s` is holdkey.component.test.ts's own measured full-rate figure, carried here to show the exact hazard this part exists to avoid — the ambient uppercase that draws CAMERA and Cam 2 above must stop at the unit, or Mb/s reads MB/S and says megabytes.",
+    component: YonderPlacard,
+    props: { kind: "Accessory", name: "H.264 · 1280×720", unit: "2.07 Mb/s" },
     payload: undefined,
     part: true,
   },
