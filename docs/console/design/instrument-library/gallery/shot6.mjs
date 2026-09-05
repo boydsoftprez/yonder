@@ -1,8 +1,7 @@
 import { chromium } from "playwright";
 const b = await chromium.launch();
 
-/* ---- Setup/Pocket 2: the shared draft's pending list, and the range
-   finder ready to run (envelope unknown) --------------------------------- */
+/* ---- Setup/Pocket 2: the shared draft's pending list ------------------- */
 {
   const p = await b.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 });
   await p.goto("http://127.0.0.1:18930/index.html", { waitUntil: "networkidle" });
@@ -19,29 +18,8 @@ const b = await chromium.launch();
   await p.locator(".g-switch button", { hasText: /^setup$/i }).click(); await p.waitForTimeout(300);
   console.log("pending block present:", await p.locator(".d-pending").count());
   console.log("pending rows:", (await p.locator(".d-pending__row").allInnerTexts()).join(" || "));
+  console.log("no Aim group on Setup (round 2, correction 4):", await p.locator(".d-col", { hasText: "Aim" }).count());
   await p.locator(".d-shell").screenshot({ path: ".superpowers/gallery/setup.pocket2.night.png" });
-  await p.close();
-}
-
-/* ---- The range finder, run end to end, both axes recorded ------------- */
-{
-  const p = await b.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 });
-  await p.goto("http://127.0.0.1:18930/index.html", { waitUntil: "networkidle" });
-  await p.locator(".d-nav__i", { hasText: "Cam 2" }).click(); await p.waitForTimeout(200);
-  await p.locator(".g-switch button", { hasText: /^setup$/i }).click(); await p.waitForTimeout(300);
-  const rf = p.locator(".d-rf");
-  const press = async (name) => { await rf.getByRole("button", { name }).click(); await p.waitForTimeout(60); };
-  await press("−5°"); await press(/limit flag/i); await press("Record this bound");
-  await press("Tilt");
-  await press("−5°"); await press(/limit flag/i); await press("Record this bound");
-  await press(/limit flag/i); // clear
-  await press("+5°"); await press(/limit flag/i); await press("Record this bound");
-  await press("Pan");
-  await press(/limit flag/i); // clear
-  await press("+5°"); await press(/limit flag/i); await press("Record this bound");
-  await rf.getByRole("button", { name: /save envelope/i }).click(); await p.waitForTimeout(200);
-  console.log("envelope:", (await rf.locator(".d-row").allInnerTexts()).join(" | "));
-  await p.locator(".d-col", { hasText: "Aim" }).screenshot({ path: ".superpowers/gallery/rangefinder.pocket2.png" });
   await p.close();
 }
 
@@ -55,6 +33,42 @@ const b = await chromium.launch();
   await p.locator(".d-shutter__b.photo").click();
   await p.locator(".d-shell").screenshot({ path: ".superpowers/gallery/photo-and-captures.elp.png" });
   console.log("captures after photo:", await p.locator(".d-caps-toggle").innerText());
+  await p.close();
+}
+
+/* ---- Stable columns (round 2, correction 3): two renders, Fixed and
+   Adaptive, same camera and scroll position, so every group heading's x
+   position can be compared directly rather than taken on trust. --------- */
+{
+  const p = await b.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 });
+  await p.goto("http://127.0.0.1:18930/index.html", { waitUntil: "networkidle" });
+  await p.addStyleTag({ content: ".d-rail { position: static !important; }" }); // see shot2.mjs
+
+  const headingsX = async () => {
+    const heads = await p.locator(".d-cols .d-h span:first-child").all();
+    const out = {};
+    for (const h of heads) { const box = await h.boundingBox(); out[(await h.innerText()).trim()] = Math.round(box.x); }
+    return out;
+  };
+
+  await p.locator(".d-shell").screenshot({ path: ".superpowers/gallery/columns.fixed.png" });
+  const fixedX = await headingsX();
+
+  await p.locator(".d-col", { hasText: "Stream" }).locator(".d-seg__b", { hasText: "Adaptive" }).click();
+  await p.waitForTimeout(200);
+  await p.locator(".d-shell").screenshot({ path: ".superpowers/gallery/columns.adaptive.png" });
+  const adaptiveX = await headingsX();
+
+  let stable = true;
+  for (const k of Object.keys(fixedX)) {
+    if (adaptiveX[k] !== undefined && adaptiveX[k] !== fixedX[k]) {
+      stable = false;
+      console.log(`COLUMN MOVED: "${k}" was x=${fixedX[k]}, now x=${adaptiveX[k]}`);
+    }
+  }
+  console.log("fixed:", JSON.stringify(fixedX));
+  console.log("adaptive:", JSON.stringify(adaptiveX));
+  console.log(stable ? "COLUMNS STABLE: every heading at the same x in both renders" : "COLUMNS UNSTABLE — see above");
   await p.close();
 }
 

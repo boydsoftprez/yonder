@@ -7,7 +7,6 @@ import Column from "./DraftColumn.vue";
 import AimDial from "./DraftAimDial.vue";
 import Picture from "./DraftPicture.vue";
 import Captures from "./DraftCaptures.vue";
-import RangeFinder from "./DraftRangeFinder.vue";
 import SoftKeys from "../../../../../packages/node-red-dashboard-2-yonder/src/ui/YonderSoftKeys.vue";
 import Annunciator from "../../../../../packages/node-red-dashboard-2-yonder/src/ui/YonderAnnunciator.vue";
 import HoldKey from "../../../../../packages/node-red-dashboard-2-yonder/src/ui/YonderHoldKey.vue";
@@ -27,8 +26,24 @@ function palette () {
 // above the fold at 1440×900). Everything else keeps the pipeline order.
 const COLUMNS = [
   ["capture", "Capture"], ["stream", "Stream"], ["preview", "Preview"], ["exposure", "Exposure"],
-  ["colour", "Colour"], ["optics", "Optics"], ["rendering", "Rendering"],
+  ["colour", "Colour"], ["optics", "Optics"], ["rendering", "Rendering"], ["orientation", "Orientation"],
   ["housekeeping", "Housekeeping"], ["aim", "Aim"],
+];
+
+// Fixed column assignment (round 2 correction): each group always lands in
+// the same visual slot, so toggling one group's own fields — Stream's
+// Floor/Ceiling with the link mode, Preview's ladder with Auto, and so on —
+// changes that group's own height only and never moves another group
+// between columns. CSS multi-column flow (this file's previous mechanism)
+// repacked every group whenever any one group's height changed, which read
+// as controls moving around on a page someone uses while an aircraft is
+// flying. Preview sits alone because it is by far the tallest and most
+// variable group; an uneven column is a smaller problem than a moving one.
+const SLOTS = [
+  ["capture", "stream"],
+  ["preview"],
+  ["exposure", "colour"],
+  ["optics", "rendering", "orientation", "housekeeping"],
 ];
 
 /* The shared draft (§7 "Editing on Live and Setup"): a Live edit to a Stream
@@ -40,11 +55,6 @@ const COLUMNS = [
    browser session" — a lifetime this module outlives every one of those
    remounts, the same way `cameras.js`'s two reports do. */
 const DRAFTS = { elp: reactive({}), pocket2: reactive({}) };
-
-/* The aim guard's precondition (§8.7, R-CAM-11): unknown until the range
-   finder records it, per camera, for the browser session — same reasoning
-   as DRAFTS above. The ELP has no motor, so its entry is never read. */
-const ENVELOPES = reactive({ elp: true, pocket2: false });
 
 /* Board-saved stills (§8.3, R-CAM-18) — camera-card photos never appear
    here, because Yonder cannot list, view or fetch those. The ELP has no
@@ -273,32 +283,34 @@ export const DraftDeck = defineComponent({
     const cam = this.cam, setup = this.mode === "setup";
     const aimLive = cam.aim.state === "present";
     const hasAim = cam.aim.state !== "not-offered";
-    // §8.7/R-CAM-11: unknown bounds inhibit motion. Recorded per camera by
-    // the range finder below; the ELP has no motor, so it is never inhibited
-    // by this — its panel is dead for the reason it always was.
-    const inhibited = aimLive && !ENVELOPES[this.camera];
-    const aimUsable = aimLive && !inhibited;
-
-    const aimPanel = hasAim ? h("div", { class: ["d-aimpanel", { dead: !aimUsable }] }, [
+    // The range finder that used to gate this on a recorded envelope is
+    // gone (round 2): the bench's own limit flag arrives continuously, 20
+    // Hz on the same link as the video, which is why the hardware note
+    // concludes "a limit is not something to infer" — an operator-run sweep
+    // pre-computes what the camera already announces, can go stale the
+    // moment the mounting changes, and did not even find every bound on the
+    // bench run. The panel is simply live once the device answers at all;
+    // what a real daemon guard should require before forwarding a command
+    // is Task 38's open question, not a fact this page states.
+    const aimPanel = hasAim ? h("div", { class: ["d-aimpanel", { dead: !aimLive }] }, [
       h("div", { class: "d-h" }, [h("span", "Aim"),
-        h("em", { class: ["d-badge", aimUsable ? "" : "warn"] }, [h("i"),
-          !aimLive ? "not answering" : inhibited ? "envelope unknown" : "rate control"])]),
+        h("em", { class: ["d-badge", aimLive ? "" : "warn"] }, [h("i"),
+          aimLive ? "rate control" : "not answering"])]),
       h(AimDial, {
         pan: this.aim.pan, tilt: this.aim.tilt, c: this.pal,
-        atLimit: aimUsable && Math.abs(this.aim.tilt) > 60,
-        axes: aimUsable ? { pan: "present", tilt: "present", roll: "advertised" }
+        atLimit: aimLive && Math.abs(this.aim.tilt) > 60,
+        axes: aimLive ? { pan: "present", tilt: "present", roll: "advertised" }
                       : { pan: "advertised", tilt: "advertised", roll: "advertised" },
-        onSlew: ({ pan, tilt }) => { if (aimUsable) { this.aim.slewPan = pan; this.aim.slewTilt = tilt; } },
+        onSlew: ({ pan, tilt }) => { if (aimLive) { this.aim.slewPan = pan; this.aim.slewTilt = tilt; } },
         onStop: () => { this.aim.slewPan = 0; this.aim.slewTilt = 0; },
       }),
       ...Object.entries(cam.controls).filter(([, c]) => c.column === "aim").map(([k, c]) => this.draw(k, c)),
-      aimUsable ? h("div", { class: "d-modenote" }, {
+      aimLive ? h("div", { class: "d-modenote" }, {
         "Follow": "Pan and tilt follow the handle.",
         "Tilt lock": "Tilt holds where you put it; pan follows the handle.",
         "FPV": "Everything follows the handle, roll included.",
       }[this.v.gimbalMode] ?? "") : null,
-      inhibited ? h("div", { class: "d-why why-advertised" }, "envelope unknown — run the range finder") : null,
-      aimUsable ? h("button", { type: "button", class: "d-recentre d-recentre--soft",
+      aimLive ? h("button", { type: "button", class: "d-recentre d-recentre--soft",
         onClick: () => { this.aim.pan = 0; this.aim.tilt = 0; } }, "Recentre gimbal") : null,
       (!aimLive && cam.aim.reason) ? h("div", { class: "d-why why-advertised" }, cam.aim.reason) : null,
     ]) : null;
@@ -313,9 +325,9 @@ export const DraftDeck = defineComponent({
     const picture = h(Picture, {
       zoomText, expLabel, expValue, preview: this.preview,
       pan: this.aim.pan, tilt: this.aim.tilt,
-      slewPan: this.aim.slewPan, slewTilt: this.aim.slewTilt, aimable: aimUsable,
+      slewPan: this.aim.slewPan, slewTilt: this.aim.slewTilt, aimable: aimLive,
       recording: this.recording, flash: this.flash, savedTo: this.savedTo,
-      onSlew: ({ pan, tilt }) => { if (aimUsable) { this.aim.slewPan = pan; this.aim.slewTilt = tilt; } },
+      onSlew: ({ pan, tilt }) => { if (aimLive) { this.aim.slewPan = pan; this.aim.slewTilt = tilt; } },
       onStop: () => { this.aim.slewPan = 0; this.aim.slewTilt = 0; },
     });
 
@@ -369,7 +381,8 @@ export const DraftDeck = defineComponent({
     ]);
 
     /* ---- The deck: every control the camera has. Setup adds the bench-only ones. ---- */
-    const cols = COLUMNS.filter(([id]) => id !== "aim").map(([id, title]) => {
+    const built = {};
+    COLUMNS.filter(([id]) => id !== "aim").forEach(([id, title]) => {
       const entries = Object.entries(cam.controls)
         .filter(([, c]) => c.column === id && (setup || !c.setup));
       if (id === "stream") {
@@ -389,9 +402,9 @@ export const DraftDeck = defineComponent({
         if (adaptive) entries.splice(1, 0, ["__pbar", { kind: "__pbar" }]);
       }
       if (id === "stream" && setup) entries.unshift(["__name", { kind: "__name" }]);
-      if (!entries.length) return null;
+      if (!entries.length) { built[id] = null; return; }
       const note = id === "stream" ? "to the ground station" : id === "preview" ? "to this browser" : "";
-      return h(Column, { title, note, noteTone: "label" }, () => [
+      built[id] = h(Column, { title, note, noteTone: "label" }, () => [
         ...entries.map(([k, c]) => k === "__name"
           ? h(TextField, { label: "Name", modelValue: this.name, placeholder: "Cam 1", max: 24,
               hint: "shown on this page, in the camera list and on the stream address",
@@ -401,20 +414,18 @@ export const DraftDeck = defineComponent({
               actual: this.preview.mbps, fine: `${this.preview.head.toLowerCase()} · ${this.preview.size} · ${this.preview.rate || "—"} fps` })
           : this.draw(k, c)),
         id === "capture" && cam.readouts ? h(Readout, { rows: cam.readouts }) : null,
+        // R-CTL-15: which one is turning the picture, stated once beneath
+        // Mirror/Flip/Rotation — neutral tone, not the caution one, because
+        // a known, real per-frame cost is a fact, not a warning.
+        id === "orientation" && cam.orientationNote ? h("div", { class: "d-modenote" }, cam.orientationNote) : null,
       ]);
-    }).filter(Boolean);
+    });
 
-    // The range finder is a Setup step (§15), not a Live one: it is how the
-    // envelope the Aim panel is waiting for gets recorded in the first place.
-    if (setup && hasAim && aimLive) {
-      cols.push(h(Column, { title: "Aim",
-        note: ENVELOPES[this.camera] ? "envelope recorded" : "envelope unknown",
-        noteTone: ENVELOPES[this.camera] ? "select" : "waiting" }, () => [
-        ...Object.entries(cam.controls).filter(([, c]) => c.column === "aim").map(([k, c]) => this.draw(k, c)),
-        h(RangeFinder, { known: ENVELOPES[this.camera],
-          "onUpdate:known": () => { ENVELOPES[this.camera] = true; } }),
-      ]));
-    }
+    // Fixed slots (round 2 correction), not CSS-balanced columns: see SLOTS
+    // above. Each slot stacks its assigned groups in a fixed vertical order;
+    // an empty group (nothing to show, e.g. Housekeeping on the Pocket 2 or
+    // on Live) just isn't there, and nothing else moves for it either way.
+    const cols = SLOTS.map((ids) => ids.map((id) => built[id]).filter(Boolean)).filter((slot) => slot.length);
 
     const out = (key, label, cost, note, tone) => h("div", { class: "d-out" }, [
       h("span", { class: "n" }, label), h("span", { class: "c" }, cost),
@@ -457,10 +468,10 @@ export const DraftDeck = defineComponent({
         h("span", cam.spec),
       ]),
       h("div", { class: "d-display" }, setup
-        ? [pendingBlock, picture, strip, h("div", { class: "d-cols" }, cols.map((c) => h("div", {}, [c]))), outTable,
+        ? [pendingBlock, picture, strip, h("div", { class: "d-cols" }, cols.map((slot) => h("div", { class: "d-cols__slot" }, slot))), outTable,
            h("div", { class: "d-rail" }, [h(SoftKeys, { id: "deck-keys", props: { passthru: false, keys } })])]
         : [h("div", { class: "d-stage" }, [h("div", { class: "d-stage__pic" }, [picture]), aimPanel]),
-           thumbs, strip, h("div", { class: "d-cols" }, cols.map((c) => h("div", {}, [c]))), outLine,
+           thumbs, strip, h("div", { class: "d-cols" }, cols.map((slot) => h("div", { class: "d-cols__slot" }, slot))), outLine,
            h("div", { class: "d-rail d-rail--two" }, [
              h(SoftKeys, { id: "deck-keys", props: { passthru: false, keys } }),
              h("div", { class: ["d-hold", { on: this.fullRate }],

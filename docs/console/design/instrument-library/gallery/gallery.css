@@ -33,9 +33,17 @@ body { margin:0; background: var(--yonder-background, #0a0c0f); color: var(--yon
 .d-display { background: var(--yonder-display,#04060a); border-top:1px solid var(--yonder-divider,#2b333c); }
 .d-strip { display:flex; gap:22px; align-items:center; flex-wrap:wrap; padding:9px 15px;
   border-top:1px solid var(--yonder-divider,#2b333c); }
-.d-cols { display:flex; border-top:1px solid var(--yonder-divider,#2b333c); }
-.d-cols > div { flex:1; min-width:0; border-left:1px solid var(--yonder-divider,#2b333c); }
-.d-cols > div:first-child { border-left:0; }
+/* Fixed slots (round 2 correction), not CSS-balanced columns. deck.js
+   assigns every group to one of a fixed number of slots (`SLOTS`); this
+   just lays those slots out side by side and lets each grow or shrink on
+   its own — a slot's height never depends on any other slot's content, so
+   toggling a control moves nothing outside its own group. `flex-wrap`
+   reduces the slot count at narrower widths (§5's tablet row), which is a
+   *container-width* reflow, not the *content-height* one this replaced. */
+.d-cols { display:flex; flex-wrap:wrap; align-items:flex-start;
+  border-top:1px solid var(--yonder-divider,#2b333c); }
+.d-cols__slot { flex:1 1 252px; min-width:220px; border-left:1px solid var(--yonder-divider,#2b333c); }
+.d-cols__slot:first-child { border-left:0; }
 .d-cols :deep(.d-field) { margin-bottom:13px; }
 .d-outs { border-top:1px solid var(--yonder-divider,#2b333c); }
 .d-out { display:grid; grid-template-columns: 118px 74px 1fr auto; gap:12px; align-items:center;
@@ -61,15 +69,13 @@ body { margin:0; background: var(--yonder-background, #0a0c0f); color: var(--yon
 .g-wide { grid-column: 1 / -1; margin-bottom: 16px; }
 .g-stage--deck { display:block; padding:0; background:transparent; }
 
-/* Columns are a fixed track, not a share of the pane. Equal thirds made the
-   Stream column half empty while Exposure overflowed, and a flex share put Aim
-   alone on a second row stretched across the whole width. */
-/* Groups flow top-to-bottom into as many columns as fit, and the browser
-   balances them. A grid stranded the last group alone on a second row; this
-   stacks a short group under a shorter one, which is what a panel does. */
-.d-cols { display:block; column-width:252px; column-gap:0;
-  column-rule:1px solid var(--yonder-divider,#2b333c); }
-.d-cols > div { break-inside:avoid; min-width:0; }
+/* Two earlier mechanisms lived here and are both outranked now. Equal flex
+   thirds put Aim alone on a second row stretched across the whole width;
+   CSS multi-column flow (the fixed `column-width` this replaced) balanced
+   column heights by repacking every group whenever any one group's height
+   changed, which read as controls moving around underneath an operator's
+   hands. `.d-cols`/`.d-cols__slot` above is the third: a fixed assignment,
+   uneven column heights, nothing moves for a reason two columns away. */
 .d-aim-dead { opacity:.62; filter:saturate(.4); pointer-events:none; }
 .d-why { font-size:10px; margin-top:6px; line-height:1.4; }
 .why-advertised { color: var(--yonder-waiting,#ffcf28); }

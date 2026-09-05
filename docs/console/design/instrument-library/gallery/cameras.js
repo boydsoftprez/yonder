@@ -115,6 +115,20 @@ export const ELP = {
       min: 0, max: 255, step: 1, value: 56 },
     hue: { state: "present", proven: true, kind: "bar", label: "Hue", column: "rendering",
       min: -2000, max: 2000, step: 1, value: 0 },
+    // R-CTL-05/R-CTL-15. `horizontal_flip`/`vertical_flip`/`rotate` answer
+    // nothing in this camera's own `v4l2-ctl --list-ctrls` — not absent from
+    // the fixture by oversight, absent because this board does not print a
+    // control it doesn't have. Drawn present anyway: the board's own
+    // pipeline correction (Task 44) is the fallback for exactly this case,
+    // not a claim that the sensor does it.
+    mirror: { state: "present", proven: false, kind: "seg", label: "Mirror", column: "orientation",
+      options: ["Off", "On"], value: "Off" },
+    flip: { state: "present", proven: false, kind: "seg", label: "Flip", column: "orientation",
+      options: ["Off", "On"], value: "Off" },
+    rotation: { state: "present", proven: false, kind: "pick", label: "Rotation", column: "orientation",
+      value: "0", options: [
+        { value: "0", label: "0°" }, { value: "90", label: "90°" },
+        { value: "180", label: "180°" }, { value: "270", label: "270°" }] },
     mains: { setup: true, state: "present", proven: true, kind: "pick", label: "Mains frequency", column: "housekeeping",
       value: "1", options: [{ value: "0", label: "Disabled" }, { value: "1", label: "50 Hz" }, { value: "2", label: "60 Hz" }] },
     // §8.3: "This makes Video/Photo and the same shutter key available on
@@ -128,6 +142,10 @@ export const ELP = {
       to: "this board", free: 118, freeStills: 3900, note: "" },
   },
   exposureReadout: (v) => ["GAIN", String(v.gain ?? 0)],
+  // R-CTL-15: which one is turning the picture, stated plainly, in a
+  // neutral tone rather than the caution one — a real pipeline element with
+  // a real, known cost is a fact, not a warning.
+  orientationNote: "the board is doing this, at a cost per frame",
   readouts: [
     { label: "Device", value: "usb-1.2 · ELP-USBFHD01M" },
     { label: "Encoder", value: "v4l2h264enc · hardware" },
@@ -218,10 +236,25 @@ export const POCKET2 = {
       fine: "digital · the feed does not change, the browser crops" },
     focusMode: { state: "present", proven: false, kind: "seg", label: "Focus", column: "optics",
       options: ["AFC", "AFS", "Spot"], value: "AFC" },
+    // R-CTL-05/R-CTL-15. No DUML command for this is documented anywhere in
+    // docs/hardware/dji-pocket-2-over-usb.md — untried, not absent-by-proof
+    // the way the ELP's is. Drawn the same as the ELP's for consistency:
+    // the board's pipeline correction (Task 44) is the system's own
+    // fallback for any camera without a proven native alternative, which is
+    // a fact about Yonder rather than a claim about this camera.
+    mirror: { state: "present", proven: false, kind: "seg", label: "Mirror", column: "orientation",
+      options: ["Off", "On"], value: "Off" },
+    flip: { state: "present", proven: false, kind: "seg", label: "Flip", column: "orientation",
+      options: ["Off", "On"], value: "Off" },
+    rotation: { state: "present", proven: false, kind: "pick", label: "Rotation", column: "orientation",
+      value: "0", options: [
+        { value: "0", label: "0°" }, { value: "90", label: "90°" },
+        { value: "180", label: "180°" }, { value: "270", label: "270°" }] },
     gimbalMode: { fly: true, state: "present", proven: "partly", kind: "seg", label: "Gimbal mode", column: "aim",
       options: ["Follow", "Tilt lock", "FPV"], value: "Follow" },
   },
   exposureReadout: (v) => ["EV", (v.ev >= 0 ? "+" : "−") + Math.abs(v.ev ?? 0).toFixed(1)],
+  orientationNote: "the board is doing this, at a cost per frame",
   readouts: [
     { label: "Battery", value: "99", unit: "%" },
     { label: "Card", value: "none", absent: true },

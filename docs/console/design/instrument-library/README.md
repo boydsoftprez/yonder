@@ -26,7 +26,8 @@ the repository root first (the gallery mounts the real components from
 theme generator). `shot2.mjs`, `shot4.mjs`, `shot5.mjs` and `shot6.mjs` render
 the PNGs here; `probe2.mjs` exercises the rail, the shutter key and Recentre
 headlessly, and `probe3.mjs`–`probe6.mjs` are the exploratory sessions that
-settled the drafts, the cost breakdown and the viewport measurement (task 12,
+settled the drafts, the cost breakdown, the stable-columns proof and the
+viewport measurement (task 12,
 console-instrument-library plan). The strip along the top of the page is the
 harness — palette, page, link and camera switches — not the design.
 
@@ -71,17 +72,16 @@ artefact) shows.
 | `gallery/DraftShell.vue` | The console's shell, wearing Dashboard's class names so the real `theme.css` rules draw it |
 | `gallery/DraftIndex.vue` | The Cameras page: camera rows and rejection rows |
 | `gallery/DraftCaptures.vue` | The captures panel (§8.3, R-CAM-18): board-saved stills only, view · download · delete. A popover beside the shutter key — the deck's 252px columns have no room for a thumbnail, two dates and three keys side by side |
-| `gallery/DraftRangeFinder.vue` | The Setup step that gives the aim guard its envelope (§8.7): one axis at a time, five degrees a step, the limit flag watched — a hand-toggled stand-in for the device's own push, never assumed from the angle |
-| `gallery/cameras.js` | The two capability reports, with `proven` recording what the bench has actually driven; `openValues` on every gate states which of its own values leave the controls it holds live |
-| `gallery/deck.js` | The deck. Composes columns from the report; Live and Setup are one component in two modes; owns the shared draft, the recorded envelope and the board captures list, each a module-level store keyed by camera so a Live↔Setup or camera switch — which remounts this component — does not lose them |
-| `live.pocket2.night.png`, `live.pocket2.poor.png`, `live.pocket2.day.png`, `live.elp.night.png` | Live, both cameras, both palettes, the link degraded |
+| `gallery/cameras.js` | The two capability reports, with `proven` recording what the bench has actually driven; `openValues` on every gate states which of its own values leave the controls it holds live; `orientationNote` states which one is turning the picture |
+| `gallery/deck.js` | The deck. Composes columns from the report; Live and Setup are one component in two modes; owns the shared draft and the board captures list, each a module-level store keyed by camera so a Live↔Setup or camera switch — which remounts this component — does not lose them; assigns every group to a fixed slot (`SLOTS`) rather than letting the browser balance column heights |
+| `live.pocket2.night.png`, `live.pocket2.poor.png`, `live.pocket2.day.png`, `live.elp.night.png` | Live, both cameras, both palettes, the link degraded. The Aim panel is simply live — round 2 removed the range finder and the envelope it recorded |
 | `setup.elp.night.png` | Setup, the ELP: the four bench-only fields, no Aim group — this camera has no motor |
-| `setup.pocket2.night.png` | Setup, the Pocket 2: two pending changes listed with their interruptions, `DISCARD`/`APPLY` on the rail, the range finder not yet run |
-| `rangefinder.pocket2.png` | The range finder after both axes are recorded — pan and tilt each −5°…+0° here — the Aim panel's inhibition lifting is what recording one does |
+| `setup.pocket2.night.png` | Setup, the Pocket 2: two pending changes listed with their interruptions, `DISCARD`/`APPLY` on the rail. No Aim group here either (round 2) — Setup carries only the bench-only fields, as it always did |
 | `photo-and-captures.elp.png` | Photo mode's flash and board-saved confirmation, captures popover open, the new still first in the list |
 | `cameras.night.png` | The Cameras page |
 | `stage.poor.1512.png` | The picture and Aim side by side, link degraded |
 | `fold.1440.png`, `fullpage.1440.png` | The viewport contract (§5) as a measurement: the picture, Aim and Capture above the fold at 1440×900 (`fold.1440.png`, a genuine unscrolled viewport capture); the whole page, one scroll, no horizontal overflow, no nested scroller (`fullpage.1440.png`) |
+| `columns.fixed.png`, `columns.adaptive.png` | The stable-columns proof (round 2): the same camera, Stream toggled Fixed → Adaptive between the two, every group heading at the same x position in both |
 
 ## Spec §15's corrections, applied
 
@@ -142,22 +142,49 @@ missing is drawn — both are here now, not just described:
   measurement (`shot6.mjs` prints the fold and page-size numbers,
   including an explicit nested-scroller scan) rather than claimed from the
   CSS alone.
-- **The range finder** (`DraftRangeFinder.vue`) is a Setup step for a
-  gimbal camera: one axis, ≤ 5° per press (a step further into an already-
-  lit limit is refused, the same rule the production guard states),
-  the limit flag watched and recorded per axis. Until both axes are
-  recorded, the Aim panel is drawn inhibited — dial dead, badge reading
-  *envelope unknown* — with *envelope unknown — run the range finder*
-  where `Recentre gimbal` would be; recording flips it live. The Pocket 2
-  starts every session with no envelope recorded, because that is the
-  bench's actual, current state (§15's remaining-evidence note), not a
-  state chosen for the screenshot.
+- **Orientation** (R-CTL-05, R-CTL-15) is a new group on both cameras:
+  `Mirror` and `Flip` as switches, `Rotation` as `0° | 90° | 180° | 270°`,
+  and beneath them one line naming which one is turning the picture. Both
+  cameras currently read "the board is doing this, at a cost per frame" —
+  the ELP's fixture answers no `rotate`, `horizontal_flip` or
+  `vertical_flip` at all, and nothing in the Pocket 2's command matrix
+  documents one either, so the board's own pipeline correction (the
+  system's fallback for any camera without a proven native alternative) is
+  what's actually true for both today, not a claim invented for either.
+  Neutral tone, not the caution one — a known, real per-frame cost is a
+  fact, not a warning.
+- **Every group has a fixed column, and the columns are uneven on
+  purpose.** `deck.js`'s `SLOTS` assigns each group to one of four slots
+  once; CSS lays the slots out side by side and lets each grow on its own,
+  so toggling any control changes that control's own group height and
+  moves nothing else. This replaces CSS multi-column flow, which balanced
+  column heights by repacking every group whenever any one group's height
+  changed — controls visibly moving on a page someone uses while an
+  aircraft is flying. Verified, not asserted: `columns.fixed.png` and
+  `columns.adaptive.png` are the same camera with Stream toggled between
+  the two, and `shot6.mjs` prints every group heading's x position in both
+  and confirms none of them moved.
 - **Cost is drawn as three numbers**: *This viewer*, *Shared encode*,
   *Path total* — replacing the single simulated two-encode sum §15 named
   outright. They read identically on a good link and diverge under
   `link poor`/`link lost`, where this viewer has fallen back but the
   shared encode (stated for whoever else needs it — this mockup does not
   render a second viewer as a visible fact) has not.
+
+**A range finder was drawn here, then taken back out, in the same review
+round.** The first pass added `DraftRangeFinder.vue` — an operator-run,
+one-axis-at-a-time sweep gating the Aim panel on a recorded envelope,
+faithful to §8.7's guard rules. The operator rejected it on the hardware's
+own evidence: `docs/hardware/dji-pocket-2-over-usb.md` (lines 264–271)
+records the camera pushing its limit flag continuously, 20 Hz on the same
+link as the video, and concludes "a limit is not something to infer." A
+sweep pre-computes what the camera already announces, can go stale the
+moment the mounting changes, and did not even find every bound on the
+bench run it was built from. The component is deleted — recorded in git
+history, not carried as dead code — and the Aim panel is simply live
+whenever the device answers at all. What a real daemon guard should
+require before forwarding a command is Task 38's open question now, not a
+fact this blueprint states.
 
 ## Decisions the mockup carries that the spec does not yet
 
@@ -178,8 +205,9 @@ predates these and must be brought up to them:
 - **"Receive line" is "Stream address".**
 - **Sizing is notebook-first**: 36 px keys, 220 px tracks with a hit zone a
   finger can still land on, 10.5 px labels. Not 44 px everywhere.
-- **Groups flow into balanced columns** rather than a grid, so a short group
-  packs under a shorter one and nothing is stranded on a second row.
+- **Groups sit in fixed columns**, not a grid and — since round 2 — not
+  CSS-balanced multi-column flow either; see "Every group has a fixed
+  column" under §15 below for why that changed.
 - **Two encodes, each with a mode.** `STREAM · to the ground station` is Fixed
   by default; `PREVIEW · to this browser` is Adaptive by default, with a floor,
   a ceiling, and a Size picker whose `Auto` steps down the ladder with the link
@@ -217,10 +245,6 @@ predates these and must be brought up to them:
 - Several Pocket 2 controls are drawn from command ids the bench has not
   driven: sensor size, record format, focus mode, shutter. Press **mark
   unproven** in the harness to see them tagged.
-- The range finder records one envelope per camera, not per mounting and
-  mode — spec's fuller granularity (§8.7: "recorded per mounting and mode")
-  is not separately modelled here; there is one mounting and one mode in
-  this mockup, so the distinction has nothing to show against yet.
 - The Pocket 2's shutter figures (12 500–800 000 µs) are the same
   raw-×-100 convention the ELP's shutter uses, applied for consistency —
   not a range the bench has measured. `camera/0x28` is still untried.
@@ -230,7 +254,15 @@ predates these and must be brought up to them:
 - The captures panel's `View` and `Download` keys are visual only; only
   `Delete` actually removes an item from the list, matching how much of
   the rest of this harness is wired versus decorative.
-- The range finder's `Limit flag` is a hand-operated toggle standing in for
-  the device's own push (`gimbal/0x05` byte 10, 20 Hz) — a deliberate
-  choice, not a shortcut: the point of the procedure is that a person
-  watches a real signal, and this mockup has no bench connection to watch.
+- Neither camera's Mirror/Flip/Rotation controls are bench-proven
+  (`proven: false` on both) — the ELP's fixture proves the *absence* of a
+  native control, which is why the board note is drawn for it; the
+  Pocket 2 has no evidence either way, and is drawn the same way on the
+  reasoning that the board's own fallback is the system's default absent a
+  proven native alternative, not a claim about this specific camera. Press
+  **mark unproven** to see both tagged.
+- Real daemon-side aim guarding — what a production guard should require
+  before forwarding a rate, mode or Recentre command, now that the range
+  finder that used to supply an envelope is gone — is Task 38's open
+  question, put to the operator separately. This blueprint draws the Aim
+  panel simply live; it does not draw or claim an answer to that question.
