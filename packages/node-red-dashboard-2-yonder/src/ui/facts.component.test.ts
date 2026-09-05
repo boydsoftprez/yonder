@@ -80,26 +80,41 @@ describe("the advertised state — a fault, in the caution tone, carrying its re
   });
 });
 
-describe("the two states, side by side", () => {
+describe("the gated state — neutral, naming who has charge, not a fault (R-UI-21)", () => {
+  it("draws the row inert, in the neutral tone, naming the control that has it", () => {
+    const row = mountFacts([
+      { label: "exposure", state: "gated", reason: "auto exposure" },
+    ]).get(".y-facts__row");
+    expect(row.classes()).toContain("is-gated");
+    expect(row.classes()).not.toContain("is-advertised");
+    expect(row.find(".y-facts__state").text()).toBe("another control has it");
+    expect(row.find(".y-facts__reason").text()).toBe("auto exposure");
+  });
+});
+
+describe("the four states, side by side", () => {
   /**
-   * The whole point of this component. Drawing `not-offered` and
-   * `advertised` the same way is the one failure it exists to prevent, so
-   * this is the test that has to go red if a future edit ever collapses the
-   * two renderings into one — whether by unifying the state text, the row
-   * class, or both.
+   * The whole point of this component. Drawing any two of these states the
+   * same way is the one failure it exists to prevent, so this is the test
+   * that has to go red if a future edit ever collapses two renderings into
+   * one — whether by unifying the state text, the row class, or both.
+   * `gated` is the newest, and the one most likely to be folded into
+   * `not-offered` by accident since both are neutral in tone; it still has
+   * to read as its own thing, naming who has charge of it.
    */
   it("renders different text and a different class for each state", () => {
     const wrapper = mountFacts([
       { label: "aim", state: "not-offered" },
       { label: "zoom", state: "advertised", reason: "accepted, does not reshape the feed" },
+      { label: "exposure", state: "gated", reason: "auto exposure" },
       { label: "focus", state: "undrawn" },
     ]);
     const rows = wrapper.findAll(".y-facts__row");
-    expect(rows).toHaveLength(3);
+    expect(rows).toHaveLength(4);
     const said = rows.map((r) => r.find(".y-facts__state").text());
-    expect(new Set(said).size).toBe(3);
+    expect(new Set(said).size).toBe(4);
     const classes = rows.map((r) => r.classes().join(" "));
-    expect(new Set(classes).size).toBe(3);
+    expect(new Set(classes).size).toBe(4);
   });
 
   /**

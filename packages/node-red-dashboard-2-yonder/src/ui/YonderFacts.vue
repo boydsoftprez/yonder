@@ -15,15 +15,21 @@
  * What this camera cannot do, stated where the control would have been
  * (R-UI-20).
  *
- * **The two states look different, and that is the whole component.**
- * `not-offered` is a fact in the neutral tone — the camera does not have it,
- * nothing is wrong, and the row exists only so nobody goes looking.
- * `advertised` is a *fault* in the caution tone, carrying its reason: the
- * device lists the capability, accepts the command, and does nothing.
- * Something is misreporting itself and a firmware or kernel change may make it
- * work.
+ * **Four states, and each has to look different — that is the whole
+ * component.** `not-offered` is a fact in the neutral tone — the camera does
+ * not have it, nothing is wrong, and the row exists only so nobody goes
+ * looking. `advertised` is a *fault* in the caution tone, carrying its
+ * reason: the device lists the capability, accepts the command, and does
+ * nothing. Something is misreporting itself and a firmware or kernel change
+ * may make it work.
  *
- * `undrawn` is the third: the camera *has* it and this page does not draw it.
+ * `gated` (R-UI-21) reads as neutral as `not-offered` — the same colour, and
+ * no caution border — because another control having charge of this one is
+ * not a fault: the bench camera's own `auto_exposure` holds its shutter
+ * exactly as documented. `reason` carries the responsible control's name, in
+ * an operator's own words rather than a V4L2 identifier.
+ *
+ * `undrawn` is the last: the camera *has* it and this page does not draw it.
  * Nothing is wrong with the device and nothing is wrong with the probe — the
  * console has not been built that far — and saying so is the difference
  * between a page an operator can trust and one that quietly under-reports
@@ -31,9 +37,9 @@
  * focus, exposure and white balance as present while the page said nothing
  * about any of them.
  *
- * Drawing them the same would be the failure this exists to prevent — and the
- * advertised state is the one most likely to be got wrong in code, because on
- * the wire it is indistinguishable from success.
+ * Drawing any two of them the same would be the failure this exists to
+ * prevent — and `advertised` is the one most likely to be got wrong in code,
+ * because on the wire it is indistinguishable from success.
  */
 /**
  * The words for each state.
@@ -50,6 +56,7 @@
 const STATES = {
     'not-offered': 'this camera has none',
     advertised: 'not answering',
+    gated: 'another control has it',
     undrawn: 'offered, not on this page'
 }
 export default {
@@ -103,7 +110,12 @@ export default {
 }
 .y-facts__row { display: flex; gap: 10px; align-items: baseline; padding: 3px 0; }
 .y-facts__label { min-width: 90px; color: var(--yonder-value, #fff); }
-.y-facts__row.is-not-offered .y-facts__state { color: var(--yonder-neutral, #7d7869); }
+/* `gated` reads exactly as neutral as `not-offered` — sharing this rule
+   means the two cannot drift apart by accident — and takes no border: the
+   left border below belongs to `advertised`, a fault, which this is not
+   (R-UI-21). */
+.y-facts__row.is-not-offered .y-facts__state,
+.y-facts__row.is-gated .y-facts__state { color: var(--yonder-neutral, #7d7869); }
 .y-facts__row.is-advertised { border-left: 3px solid var(--yonder-waiting, #ffcf28); padding-left: 7px; }
 .y-facts__row.is-advertised .y-facts__state { color: var(--yonder-waiting, #ffcf28); font-weight: 600; }
 /* The camera has it; this page does not draw it. Nothing is wrong, so it

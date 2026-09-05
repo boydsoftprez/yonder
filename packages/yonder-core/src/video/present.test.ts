@@ -6,9 +6,10 @@ import {
   cameraStrip,
   capabilityFacts,
   identityWords,
+  LABELS,
   uplinkBudget,
 } from "./present.js";
-import { advertised, noCapabilities, notOffered, present } from "./capability.js";
+import { advertised, gated, noCapabilities, notOffered, present } from "./capability.js";
 import type { CameraCapabilities } from "./capability.js";
 import type { Camera } from "../schema/config.js";
 
@@ -151,6 +152,22 @@ describe("capabilityFacts", () => {
     });
     expect(capabilityFacts(caps).find((f) => f.label === "Focus"))
       .toEqual({ label: "Focus", state: "not-offered" });
+  });
+
+  /**
+   * **The console must not call a camera short of something it has.** A
+   * `gated` capability is real and working; another control just has charge
+   * of it right now, which is not a fault and reads nothing like one — see
+   * `capability.ts`'s own module comment for why this state exists. This is
+   * the fix for the bug the ternary this replaced had: everything that was
+   * not `advertised` read `not-offered`, `gated` included.
+   */
+  it("says which control has it, and does not call the camera short of one", () => {
+    const range = { min: 1, max: 10000, step: 1, default: 156, current: 156, inactive: true };
+    const by = { id: "auto_exposure", label: "auto exposure" };
+    const caps = { ...noCapabilities(), exposure: gated(range, by) };
+    const fact = capabilityFacts(caps).find((f) => f.label === LABELS.exposure);
+    expect(fact).toEqual({ label: LABELS.exposure, state: "gated", reason: "auto exposure" });
   });
 
   it("says every row when the probe answered nothing, never an empty row", () => {

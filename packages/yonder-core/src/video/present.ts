@@ -101,17 +101,20 @@ export function uplinkBudget(
 
 /**
  * One row of the facts row: a capability this camera's page does not offer a
- * control for, and which of the three reasons that is (R-UI-20).
+ * control for, and which of the four reasons that is (R-UI-20, R-UI-21).
  *
  *   - `not-offered` — the camera does not have it. Nothing is wrong.
  *   - `advertised` — it lists the capability, accepts the command and does
  *     nothing. Something is misreporting itself.
+ *   - `gated` — another control has charge of it right now. Nothing is
+ *     wrong, and `reason` names that control the way an operator would,
+ *     rather than by its V4L2 identifier.
  *   - `undrawn` — the camera has it and this page does not draw it. Nothing is
  *     wrong with the device; the console has not been built that far.
  */
 export interface CapabilityFact {
   readonly label: string;
-  readonly state: "not-offered" | "advertised" | "undrawn";
+  readonly state: "not-offered" | "advertised" | "gated" | "undrawn";
   readonly reason?: string;
 }
 
@@ -120,8 +123,12 @@ export interface CapabilityFact {
  *
  * Written out rather than derived from the key, because `whiteBalance` is not
  * a label and a page that showed one would be showing its own field names.
+ *
+ * Exported so a test can ask for `LABELS.exposure` rather than repeating the
+ * literal `"Exposure"` — the same reason `CAPABILITY_KEYS` is exported from
+ * `capability.ts` rather than re-typed at every call site.
  */
-const LABELS: Record<(typeof CAPABILITY_KEYS)[number], string> = {
+export const LABELS: Record<(typeof CAPABILITY_KEYS)[number], string> = {
   formats: "Capture formats",
   zoom: "Zoom",
   focus: "Focus",
@@ -151,6 +158,42 @@ const LABELS: Record<(typeof CAPABILITY_KEYS)[number], string> = {
  * reported.
  */
 export const DRAWN_CAPABILITIES = ["formats", "brightness", "contrast"] as const;
+
+/**
+ * The row for a capability the loop below has already ruled `present` out
+ * of — built by a `switch` that **returns** from every case rather than
+ * `push`ing and `break`ing, and carries no `default:`.
+ *
+ * That shape is load-bearing, not a style choice. This project's
+ * `strict: true` turns "a path falls off the end of a function whose return
+ * type excludes `undefined`" into a real compile error (`strictNullChecks`),
+ * and TypeScript's reachability analysis knows exactly which `case` is left
+ * uncovered — so a fifth `Capability` state is a compile error here, at the
+ * one place a person must decide how it reads, rather than a silent
+ * `not-offered` on a page (which is exactly the bug this function was
+ * rewritten to fix: it used to be a ternary between `advertised` and
+ * everything else, so `gated` fell into "everything else" and told an
+ * operator their camera had none of a control it was actively using).
+ * A `default:` would take the guarantee back — it is exactly the branch
+ * that would swallow a state nobody has decided how to draw yet. A `switch`
+ * that only `push`es and `break`s inside the caller's loop does **not** get
+ * this guarantee either: nothing downstream would force the compiler to
+ * prove it exhaustive, so it would compile cleanly with a case missing and
+ * silently drop that capability's row.
+ */
+function absentFact(
+  label: string,
+  cap: Exclude<Capability<unknown>, { readonly state: "present" }>,
+): CapabilityFact {
+  switch (cap.state) {
+    case "not-offered":
+      return { label, state: "not-offered" };
+    case "advertised":
+      return { label, state: "advertised", reason: cap.reason };
+    case "gated":
+      return { label, state: "gated", reason: cap.by.label };
+  }
+}
 
 /**
  * Everything this camera's page does not give the operator, stated (R-UI-20).
@@ -186,11 +229,7 @@ export function capabilityFacts(
       if (!drawn.includes(key)) facts.push({ label: LABELS[key], state: "undrawn" });
       continue;
     }
-    facts.push(
-      cap.state === "advertised"
-        ? { label: LABELS[key], state: "advertised", reason: cap.reason }
-        : { label: LABELS[key], state: "not-offered" },
-    );
+    facts.push(absentFact(LABELS[key], cap));
   }
   return facts;
 }
