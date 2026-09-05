@@ -764,6 +764,8 @@ Expected: FAIL — `Cannot find module './frame.js'`.
 
 - [ ] **Step 3: Write it**
 
+A candidate's message ID lives inside the fixed-size header, so it is read — and checked against `HEARTBEAT` — before the payload length that same header claims is ever trusted for anything. An unverified length is a number a noise byte can invent: treating it as authoritative before confirming this is even a HEARTBEAT candidate would let a bogus header's claimed length swallow whatever real frame follows it, rather than the frame being resynced past one byte at a time. Only a candidate that has already passed as `HEARTBEAT` by message ID ever waits on its length; everything else resyncs immediately, regardless of what length it claims.
+
 ```ts
 // packages/yonder-core/src/mav/frame.ts
 // SPDX-License-Identifier: GPL-3.0-or-later
@@ -834,25 +836,33 @@ export class HeartbeatScanner {
       const magic = this.buffer[i];
       if (magic !== V1 && magic !== V2) { i += 1; continue; }
       const headerLength = magic === V2 ? 10 : 6;
-      if (i + headerLength > this.buffer.length) break;       // need more bytes
-      const payloadLength = this.buffer[i + 1];
-      const signed = magic === V2 && (this.buffer[i + 2] & 0x01) !== 0;
-      const total = headerLength + payloadLength + 2 + (signed ? 13 : 0);
-      if (i + total > this.buffer.length) break;
+      if (i + headerLength > this.buffer.length) break;       // need more bytes to even read the header
 
+      // msgid lives inside the fixed-size header, so it is readable as soon
+      // as the header itself is — *before* the payload length claimed by
+      // that same header has been trusted for anything. Only HEARTBEAT
+      // carries a CRC_EXTRA we know, so only HEARTBEAT can be checksummed;
+      // everything else is resynced past one byte at a time, regardless of
+      // what length it claims.
       const messageId = magic === V2
         ? this.buffer[i + 7] | (this.buffer[i + 8] << 8) | (this.buffer[i + 9] << 16)
         : this.buffer[i + 5];
+      if (messageId !== HEARTBEAT) { i += 1; continue; }
+
+      const payloadLength = this.buffer[i + 1];
+      const signed = magic === V2 && (this.buffer[i + 2] & 0x01) !== 0;
+      const total = headerLength + payloadLength + 2 + (signed ? 13 : 0);
 
       // A length we have not checksummed is a number a noise byte can invent,
       // and skipping by it steps *over* whatever follows. A bogus header
-      // claiming 21 bytes, followed by a real heartbeat, swallows the
-      // heartbeat — and during a bounded probe that rejects the right baud.
-      //
-      // So an unverified frame advances by ONE byte, never by its own claim.
-      // Only HEARTBEAT carries a CRC_EXTRA we know, so only HEARTBEAT can be
-      // checksummed; everything else is resynced past rather than trusted.
-      if (messageId !== HEARTBEAT) { i += 1; continue; }
+      // claiming to be a 21-byte HEARTBEAT, followed by a real one, must not
+      // swallow the real frame — but that trap is already closed above: a
+      // bogus header only reaches here at all once its msgid has passed as
+      // HEARTBEAT, which noise does not do on purpose. What is left to
+      // handle here is the ordinary streaming case, so an unverified-but-
+      // plausible frame short of bytes so far is waited for, never skipped
+      // past by its own claim.
+      if (i + total > this.buffer.length) break;
 
       let crc = 0xffff;
       for (let k = i + 1; k < i + headerLength + payloadLength; k += 1) crc = accumulate(this.buffer[k], crc);
