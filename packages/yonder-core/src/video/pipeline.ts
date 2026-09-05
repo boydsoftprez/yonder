@@ -210,7 +210,10 @@ export function compose(opts: ComposeOptions): string[] {
   // The full-rate encode, then the fork to its consumers.
   push("raw.", LINK, ...QUEUE, LINK, ...encode(encoder, camera.bitrate_kbps, false), LINK,
     "h264parse", LINK, "tee", "name=main");
-  for (const output of camera.outputs) {
+  // A disabled output contributes no branch at all (R-VID-16) — not a branch
+  // that opens a socket and sits muted, which is a different claim to an
+  // operator than "stopped". See the note on `CameraOutput.enabled`.
+  for (const output of camera.outputs.filter((o) => o.enabled)) {
     push("main.", LINK, ...QUEUE, LINK, ...sink(output, rtspBase, camera.id));
   }
 

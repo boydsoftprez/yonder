@@ -73,3 +73,22 @@ export {
   type ControlDescriptor,
   type DescriptorView,
 } from "../video/descriptors.js";
+
+/**
+ * Whether a peer can reach one configured output, and by which path
+ * (R-VID-16, R-UI-24).
+ *
+ * A pure function of a kind and three booleans — no device, no socket, no
+ * `node:` import — so a camera page can ask it the same question the daemon
+ * would ask, and draw the same answer. It states a fact and never acts
+ * (R-CMD-04): see `video/outputs.ts` for why disabling an output and an
+ * output being unreachable are independent facts, neither implying the
+ * other.
+ */
+export {
+  outputReach,
+  type OutputReach,
+  type OutputDirection,
+  type ReachPaths,
+  type OutputKind,
+} from "../video/outputs.js";

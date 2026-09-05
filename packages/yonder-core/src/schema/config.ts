@@ -290,18 +290,35 @@ const CameraId = z.string().regex(
  * path. A camera's stream is at `<id>`, its cheap copy at `<id>-preview`, and
  * there is one place either can come from. `whep.ts`'s `MEDIA_PATH`, sized for
  * an id plus `-preview`, was already written to that model.
+ *
+ * **`enabled` stops an output without discarding it (R-VID-16).** The default
+ * of `true` matters as much as the field: every `config.yaml` already in the
+ * field predates it, and a default of `false` would silently stop an
+ * aircraft's stream on the next upgrade with nothing in the file changed to
+ * explain why. A disabled output keeps its host, its port, its credential —
+ * everything an operator typed — because stopping traffic is a different
+ * decision from forgetting where it goes. `video/pipeline.ts`'s `compose()`
+ * is where a disabled output actually stops: it contributes no branch to the
+ * pipeline at all, never a branch that opens a socket and sits muted, which
+ * is a different claim to an operator than "stopped". Whether a *listener*
+ * output can be reached at all, as distinct from whether it is *enabled*, is
+ * a separate question `video/outputs.ts`'s `outputReach` answers (R-UI-24) —
+ * the console states one and the other independently, and neither implies
+ * the other (R-CMD-04).
  */
 const CameraOutput = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("rtp"),
+    enabled: z.boolean().default(true),
     host: z.string().regex(IPV4_PATTERN, "must be an IPv4 address, for example 192.168.1.50"),
     port,
   }).strict(),
   z.object({
     kind: z.literal("rtsp"),
+    enabled: z.boolean().default(true),
     password: SecretRef,
   }).strict(),
-  z.object({ kind: z.literal("srt"), port }).strict(),
+  z.object({ kind: z.literal("srt"), enabled: z.boolean().default(true), port }).strict(),
 ]);
 export type CameraOutput = z.infer<typeof CameraOutput>;
 

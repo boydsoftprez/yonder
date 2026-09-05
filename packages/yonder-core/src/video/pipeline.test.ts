@@ -2,7 +2,12 @@
 import { describe, expect, it } from "vitest";
 import { compose, refuse, QUEUE } from "./pipeline.js";
 import { present, noCapabilities } from "./capability.js";
-import type { Camera } from "../schema/config.js";
+import type { Camera, CameraOutput } from "../schema/config.js";
+
+// Named so a test can disable one kind and leave the other running, without
+// retyping its shape (Task 10: `renders no pipeline for a disabled output`).
+const rtpOutput: CameraOutput = { kind: "rtp", enabled: true, host: "192.168.1.50", port: 5600 };
+const rtspOutput: CameraOutput = { kind: "rtsp", enabled: true, password: { secret: "rtsp_password" } };
 
 const CAMERA: Camera = {
   id: "cam0", name: "Nose", source: "usb", device: "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0",
@@ -10,10 +15,7 @@ const CAMERA: Camera = {
   width: 1280, height: 720, framerate: 30, codec: "h264", bitrate_kbps: 2000,
   preview: { width: 640, height: 360, framerate: 15, bitrate_kbps: 400 },
   controls: { brightness: null, contrast: null, rotation: 0 },
-  outputs: [
-    { kind: "rtp", host: "192.168.1.50", port: 5600 },
-    { kind: "rtsp", password: { secret: "rtsp_password" } },
-  ],
+  outputs: [rtpOutput, rtspOutput],
 };
 const CAPS = {
   ...noCapabilities(),
@@ -80,6 +82,28 @@ describe("compose", () => {
     expect(text()).toContain("rtph264pay");
     expect(text()).toContain("host=192.168.1.50");
     expect(text()).toContain("port=5600");
+  });
+
+  it("renders no pipeline for a disabled output", () => {
+    // The whole point: the branch is absent from the argv, not present and idle.
+    const argv = compose({ ...opts, camera: { ...CAMERA, outputs: [
+      { ...rtpOutput, enabled: false }, { ...rtspOutput, enabled: true },
+    ] } });
+    expect(argv.join(" ")).not.toContain("udpsink");
+    expect(argv.join(" ")).toContain("rtspclientsink");
+  });
+
+  it("counts branches rather than trusting a substring, in both directions", () => {
+    // `rtspclientsink` alone cannot prove the rtsp *output's* branch
+    // rendered: the preview copy always publishes one too (R-VID-13),
+    // enabled or not — so the test above would stay green even for a filter
+    // that dropped every output, or one with its condition inverted.
+    // Counting tells the two apart.
+    const countSinks = (enabled: boolean) => compose({ ...opts, camera: { ...CAMERA, outputs: [
+      { ...rtpOutput, enabled: true }, { ...rtspOutput, enabled },
+    ] } }).filter((t) => t === "rtspclientsink").length;
+    expect(countSinks(true)).toBe(2);   // the rtsp output, and the preview
+    expect(countSinks(false)).toBe(1);  // the preview only
   });
 
   it("publishes the full-rate stream and the preview under separate paths", () => {
@@ -196,7 +220,7 @@ describe("refuse", () => {
    *
    * R-VID-06 is not built. The refusal is what stands in for it.
    */
-  const withSrt = { ...CAMERA, outputs: [{ kind: "srt" as const, port: 9998 }] };
+  const withSrt = { ...CAMERA, outputs: [{ kind: "srt" as const, enabled: true, port: 9998 }] };
 
   it("refuses an SRT output, because SRT has no posture on this device yet", () => {
     const refusal = refuse({ ...opts, camera: withSrt });
@@ -221,5 +245,16 @@ describe("refuse", () => {
     // in, and the one a reviewer can see.
     expect(() => compose({ ...opts, camera: withSrt })).toThrow(/SRT/);
     expect(text()).not.toContain("srtsink");
+  });
+
+  it("a disabled SRT output is filtered out before sink() ever throws on it", () => {
+    // enabled's filter runs first in compose()'s own loop, so a disabled SRT
+    // output never reaches the branch above that refuses to compose one —
+    // proving the branch is skipped, not built and discarded. If the filter
+    // ran after sink() (or not at all), this would throw exactly like the
+    // test above.
+    const disabledSrt = { ...withSrt, outputs: [{ ...withSrt.outputs[0], enabled: false }] };
+    expect(() => compose({ ...opts, camera: disabledSrt })).not.toThrow();
+    expect(compose({ ...opts, camera: disabledSrt }).join(" ")).not.toContain("srtsink");
   });
 });

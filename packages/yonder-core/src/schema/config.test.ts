@@ -446,6 +446,77 @@ describe("cameras", () => {
     });
     expect(inline.success).toBe(false);
   });
+
+  it("defaults to enabled, so an existing config means what it meant", () => {
+    // Every config.yaml in the field predates this field. Defaulting to
+    // false would stop an aircraft's stream on upgrade, with nothing in the
+    // file changed to explain it.
+    const cfg = ConfigSchema.parse({
+      version: 1, network: { ap: { psk: { secret: "ap_psk" } } }, ui: { editor: {} },
+      cameras: [{
+        id: "cam0", name: "Nose", source: "usb", device: "usb-1",
+        outputs: [{ kind: "rtp", host: "10.0.0.9", port: 5600 }],
+      }],
+    });
+    expect(cfg.cameras[0].outputs[0].enabled).toBe(true);
+  });
+
+  it("defaults to enabled for an rtsp output too, not only rtp", () => {
+    // enabled is declared separately on each of the three discriminated-union
+    // members; a default added to two of three is exactly the kind of gap
+    // this plan has shipped before.
+    const cfg = ConfigSchema.parse({
+      version: 1, network: { ap: { psk: { secret: "ap_psk" } } }, ui: { editor: {} },
+      cameras: [{
+        id: "cam0", name: "Nose", source: "usb", device: "usb-1",
+        outputs: [{ kind: "rtsp", password: { secret: "rtsp_password" } }],
+      }],
+    });
+    expect(cfg.cameras[0].outputs[0].enabled).toBe(true);
+  });
+
+  it("defaults to enabled for an srt output too, not only rtp", () => {
+    const cfg = ConfigSchema.parse({
+      version: 1, network: { ap: { psk: { secret: "ap_psk" } } }, ui: { editor: {} },
+      cameras: [{
+        id: "cam0", name: "Nose", source: "usb", device: "usb-1",
+        outputs: [{ kind: "srt", port: 9998 }],
+      }],
+    });
+    expect(cfg.cameras[0].outputs[0].enabled).toBe(true);
+  });
+
+  it("keeps its path and its secret while disabled", () => {
+    // Stopping an output is not forgetting it. A disabled output that dropped
+    // its credential would come back needing one typed again, and the
+    // operator stopped it to stop the traffic, not to surrender the setting.
+    const cfg = ConfigSchema.parse({
+      version: 1, network: { ap: { psk: { secret: "ap_psk" } } }, ui: { editor: {} },
+      cameras: [{
+        id: "cam0", name: "Nose", source: "usb", device: "usb-1",
+        outputs: [{ kind: "rtsp", enabled: false, password: { secret: "cam1-rtsp" } }],
+      }],
+    });
+    const out = cfg.cameras[0].outputs[0];
+    expect(out.enabled).toBe(false);
+    expect(out).toMatchObject({ kind: "rtsp", password: { secret: "cam1-rtsp" } });
+  });
+
+  it("keeps its address while disabled, for the other two kinds too", () => {
+    const cfg = ConfigSchema.parse({
+      version: 1, network: { ap: { psk: { secret: "ap_psk" } } }, ui: { editor: {} },
+      cameras: [{
+        id: "cam0", name: "Nose", source: "usb", device: "usb-1",
+        outputs: [
+          { kind: "rtp", enabled: false, host: "192.168.1.50", port: 5600 },
+          { kind: "srt", enabled: false, port: 9998 },
+        ],
+      }],
+    });
+    const [rtp, srt] = cfg.cameras[0].outputs;
+    expect(rtp).toMatchObject({ enabled: false, host: "192.168.1.50", port: 5600 });
+    expect(srt).toMatchObject({ enabled: false, port: 9998 });
+  });
 });
 
 describe("CameraControls", () => {
