@@ -673,6 +673,10 @@
                       "type": "string",
                       "const": "rtp"
                     },
+                    "enabled": {
+                      "type": "boolean",
+                      "default": true
+                    },
                     "host": {
                       "type": "string",
                       "pattern": "^(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)(\\.(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)){3}$"
@@ -696,6 +700,10 @@
                     "kind": {
                       "type": "string",
                       "const": "rtsp"
+                    },
+                    "enabled": {
+                      "type": "boolean",
+                      "default": true
                     },
                     "password": {
                       "type": "object",
@@ -723,6 +731,10 @@
                     "kind": {
                       "type": "string",
                       "const": "srt"
+                    },
+                    "enabled": {
+                      "type": "boolean",
+                      "default": true
                     },
                     "port": {
                       "type": "integer",
