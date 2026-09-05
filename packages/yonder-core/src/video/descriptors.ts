@@ -13,7 +13,10 @@ import type { CameraCapabilities, ControlRange } from "./capability.js";
  * µs. If that factor were written once at the page and once at the config
  * schema it would eventually disagree with itself, and an operator would set
  * a shutter speed and get a different one back. `config.yaml` and
- * `CameraControls` (R-CFG's device-native rule) keep the device's own number;
+ * `CameraControls` keep the device's own number, device-native and
+ * documented as such (spec §7: "Retain device-native units in stored
+ * control values and document them; the descriptor supplies display units
+ * and conversion, so an existing config value is not reinterpreted.");
  * every value a page shows goes through `toDisplay` first, and every value a
  * write sends goes through `toRaw` first. Nothing downstream — a page, a
  * picker, the config schema — is allowed to know the factor itself.
