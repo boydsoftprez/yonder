@@ -118,8 +118,12 @@ export default {
     letter-spacing: 0.13em;
     text-transform: uppercase;
     white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    /* No `overflow:hidden; text-overflow:ellipsis` here. A key is
+       `flex: 0 0 auto` with a `min-width`, so it never shrinks and can never
+       ellipsize — the rule was inert, and an inert truncation rule is an
+       invitation to fix a future regression by widening it back into a live
+       one. A key an operator cannot read in full is a key that does not
+       exist, which is the whole reason this rail wraps (R-UI-25). */
     color: var(--yonder-label, #7f8a95);
     cursor: pointer;
 }
