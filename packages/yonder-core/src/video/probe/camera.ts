@@ -205,7 +205,16 @@ export const CONTROL_MAP = [
  * because it is read inside a sentence: `exposure: auto exposure has it`,
  * never the heading form `DESCRIPTORS` uses everywhere else.
  */
-export function gateIfInactive(range: ControlRange, key: keyof CameraCapabilities): Capability<ControlRange> {
+/**
+ * The capabilities `CONTROL_MAP` actually fills — not every capability there
+ * is. Typed from the map itself, so a key reaches this function only by being
+ * a control the probe reads. Widened to `keyof CameraCapabilities` it would
+ * accept `aim` or `formats`, which carry no `ControlRange` and no gate, and
+ * quietly answer `present` instead of failing to compile.
+ */
+export type ControlKey = (typeof CONTROL_MAP)[number][1];
+
+export function gateIfInactive(range: ControlRange, key: ControlKey): Capability<ControlRange> {
   const gateKey = range.inactive ? DESCRIPTORS[key].gates?.[0] : undefined;
   return gateKey
     ? gated(range, { id: gateKey, label: sentenceLabel(gateKey) })
