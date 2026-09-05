@@ -60,9 +60,18 @@
       }
     },
     {
-      "key": "nrdb-ui-widget.nrdb-ui-yonder-annunciator",
+      "key": "nrdb-ui-text.nrdb-ui-widget",
       "box": {
         "x": 285,
+        "y": 476,
+        "w": 477,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-annunciator",
+      "box": {
+        "x": 774,
         "y": 476,
         "w": 477,
         "h": 48

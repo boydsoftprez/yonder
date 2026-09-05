@@ -4118,13 +4118,37 @@
         "groupType": "default"
     },
     {
+        "id": "label-tel-ann-link",
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-tel-autopilot",
+        "order": 1,
+        "width": 4,
+        "height": 1,
+        "name": "label-tel-ann-link",
+        "label": "Link",
+        "format": "{{msg.payload}}",
+        "layout": "row-left",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "wrapText": false,
+        "className": "",
+        "x": 300,
+        "y": 2100,
+        "wires": [],
+        "value": "payload",
+        "valueType": "msg"
+    },
+    {
         "id": "tel-ann-link",
         "type": "ui-yonder-annunciator",
         "z": "yonder-console",
         "group": "group-tel-autopilot",
         "name": "tel-ann-link",
-        "order": 1,
-        "width": 6,
+        "order": 2,
+        "width": 4,
         "height": 1,
         "label": "",
         "source": "payload",
@@ -4229,6 +4253,30 @@
         "valueType": "msg"
     },
     {
+        "id": "label-tel-ann-recv",
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-tel-stations",
+        "order": 1,
+        "width": 4,
+        "height": 1,
+        "name": "label-tel-ann-recv",
+        "label": "Receiving",
+        "format": "{{msg.payload}}",
+        "layout": "row-left",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "wrapText": false,
+        "className": "",
+        "x": 300,
+        "y": 2100,
+        "wires": [],
+        "value": "payload",
+        "valueType": "msg"
+    },
+    {
         "id": "tel-heard",
         "type": "ui-text",
         "z": "yonder-console",
@@ -4258,8 +4306,8 @@
         "z": "yonder-console",
         "group": "group-tel-stations",
         "name": "tel-ann-recv",
-        "order": 1,
-        "width": 6,
+        "order": 2,
+        "width": 4,
         "height": 1,
         "label": "",
         "source": "payload",
@@ -4297,7 +4345,7 @@
         "z": "yonder-console",
         "group": "group-tel-stations",
         "order": 3,
-        "width": 8,
+        "width": 5,
         "height": 1,
         "name": "tel-host-0",
         "label": "GCS 0",
@@ -4324,7 +4372,7 @@
         "z": "yonder-console",
         "group": "group-tel-stations",
         "order": 4,
-        "width": 4,
+        "width": 3,
         "height": 1,
         "name": "tel-port-0",
         "label": "Port",
@@ -4351,7 +4399,7 @@
         "z": "yonder-console",
         "group": "group-tel-stations",
         "order": 5,
-        "width": 8,
+        "width": 5,
         "height": 1,
         "name": "tel-host-1",
         "label": "GCS 1",
@@ -4378,7 +4426,7 @@
         "z": "yonder-console",
         "group": "group-tel-stations",
         "order": 6,
-        "width": 4,
+        "width": 3,
         "height": 1,
         "name": "tel-port-1",
         "label": "Port",
@@ -4405,7 +4453,7 @@
         "z": "yonder-console",
         "group": "group-tel-stations",
         "order": 7,
-        "width": 8,
+        "width": 5,
         "height": 1,
         "name": "tel-host-2",
         "label": "GCS 2",
@@ -4432,7 +4480,7 @@
         "z": "yonder-console",
         "group": "group-tel-stations",
         "order": 8,
-        "width": 4,
+        "width": 3,
         "height": 1,
         "name": "tel-port-2",
         "label": "Port",
@@ -4489,6 +4537,30 @@
         ]
     },
     {
+        "id": "label-tel-ann-state",
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-tel-run",
+        "order": 1,
+        "width": 2,
+        "height": 1,
+        "name": "label-tel-ann-state",
+        "label": "State",
+        "format": "{{msg.payload}}",
+        "layout": "row-left",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "wrapText": false,
+        "className": "",
+        "x": 300,
+        "y": 2100,
+        "wires": [],
+        "value": "payload",
+        "valueType": "msg"
+    },
+    {
         "id": "tel-tcp",
         "type": "ui-text",
         "z": "yonder-console",
@@ -4533,8 +4605,8 @@
         "z": "yonder-console",
         "group": "group-tel-run",
         "name": "tel-ann-state",
-        "order": 1,
-        "width": 6,
+        "order": 2,
+        "width": 2,
         "height": 1,
         "label": "",
         "source": "payload",
@@ -4647,20 +4719,44 @@
         "z": "yonder-console",
         "group": "group-tel-check",
         "order": 1,
-        "width": 12,
-        "height": 2,
+        "width": 4,
+        "height": 1,
         "name": "autopilot to yonder",
-        "label": "",
+        "label": "Autopilot to Yonder",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "wrapText": false,
+        "className": "yonder-qualifier",
+        "x": 300,
+        "y": 3120,
+        "wires": [],
+        "value": "payload",
+        "valueType": "msg"
+    },
+    {
+        "id": "label-stat-ann-feed",
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-status-telemetry",
+        "order": 1,
+        "width": 6,
+        "height": 1,
+        "name": "label-stat-ann-feed",
+        "label": "Feed",
         "format": "{{msg.payload}}",
         "layout": "row-left",
         "style": false,
         "font": "",
         "fontSize": 16,
         "color": "#717171",
-        "wrapText": true,
-        "className": "yonder-qualifier",
+        "wrapText": false,
+        "className": "",
         "x": 300,
-        "y": 3120,
+        "y": 2100,
         "wires": [],
         "value": "payload",
         "valueType": "msg"
@@ -4671,17 +4767,17 @@
         "z": "yonder-console",
         "group": "group-tel-check",
         "order": 2,
-        "width": 12,
-        "height": 2,
+        "width": 4,
+        "height": 1,
         "name": "yonder to ground stations",
-        "label": "",
+        "label": "Yonder to stations",
         "format": "{{msg.payload}}",
-        "layout": "row-left",
+        "layout": "row-spread",
         "style": false,
         "font": "",
         "fontSize": 16,
         "color": "#717171",
-        "wrapText": true,
+        "wrapText": false,
         "className": "yonder-qualifier",
         "x": 300,
         "y": 3160,
@@ -4695,17 +4791,17 @@
         "z": "yonder-console",
         "group": "group-tel-check",
         "order": 3,
-        "width": 12,
-        "height": 2,
+        "width": 4,
+        "height": 1,
         "name": "ground station to yonder",
-        "label": "",
+        "label": "Station to Yonder",
         "format": "{{msg.payload}}",
-        "layout": "row-left",
+        "layout": "row-spread",
         "style": false,
         "font": "",
         "fontSize": 16,
         "color": "#717171",
-        "wrapText": true,
+        "wrapText": false,
         "className": "yonder-qualifier",
         "x": 300,
         "y": 3200,
@@ -4754,7 +4850,7 @@
         "z": "yonder-console",
         "group": "group-status-telemetry",
         "name": "feed",
-        "order": 1,
+        "order": 2,
         "width": 6,
         "height": 1,
         "label": "",
@@ -5314,7 +5410,7 @@
                 "t": "set",
                 "p": "payload",
                 "pt": "msg",
-                "to": "Autopilot to Yonder \u2014 OK, heartbeat every second at 57 600 baud",
+                "to": "OK \u00b7 1.0 Hz",
                 "tot": "str"
             }
         ],
@@ -5341,7 +5437,7 @@
                 "t": "set",
                 "p": "payload",
                 "pt": "msg",
-                "to": "Yonder to ground stations \u2014 OK, 3.1 kB/s leaving, two endpoints configured",
+                "to": "OK \u00b7 3.1 kB/s",
                 "tot": "str"
             }
         ],
@@ -5368,7 +5464,7 @@
                 "t": "set",
                 "p": "payload",
                 "pt": "msg",
-                "to": "Ground station to Yonder \u2014 OK, answering, last heard 0.3 s ago",
+                "to": "OK \u00b7 0.3 s ago",
                 "tot": "str"
             }
         ],
@@ -5511,7 +5607,11 @@
                 "mock-tel-chain-3",
                 "mock-stat-ann-feed",
                 "mock-stat-flow",
-                "mock-stat-tel-bar"
+                "mock-stat-tel-bar",
+                "mock-label-tel-ann-link",
+                "mock-label-tel-ann-recv",
+                "mock-label-tel-ann-state",
+                "mock-label-stat-ann-feed"
             ]
         ]
     },
@@ -5609,6 +5709,114 @@
         "wires": [
             [
                 "tag-pending-key"
+            ]
+        ]
+    },
+    {
+        "id": "mock-label-tel-ann-link",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "mock label-tel-ann-link",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 1500,
+        "y": 3434,
+        "wires": [
+            [
+                "label-tel-ann-link"
+            ]
+        ]
+    },
+    {
+        "id": "mock-label-tel-ann-recv",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "mock label-tel-ann-recv",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 1500,
+        "y": 3468,
+        "wires": [
+            [
+                "label-tel-ann-recv"
+            ]
+        ]
+    },
+    {
+        "id": "mock-label-tel-ann-state",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "mock label-tel-ann-state",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 1500,
+        "y": 3502,
+        "wires": [
+            [
+                "label-tel-ann-state"
+            ]
+        ]
+    },
+    {
+        "id": "mock-label-stat-ann-feed",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "mock label-stat-ann-feed",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 1500,
+        "y": 3536,
+        "wires": [
+            [
+                "label-stat-ann-feed"
             ]
         ]
     }

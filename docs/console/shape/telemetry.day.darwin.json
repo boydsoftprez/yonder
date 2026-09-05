@@ -15,16 +15,25 @@
       }
     },
     {
-      "key": "nrdb-ui-widget.nrdb-ui-yonder-annunciator",
+      "key": "nrdb-ui-text.nrdb-ui-widget#0",
       "box": {
         "x": 285,
         "y": 148,
-        "w": 468,
+        "w": 308,
         "h": 48
       }
     },
     {
-      "key": "nrdb-ui-text.nrdb-ui-widget#0",
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-annunciator",
+      "box": {
+        "x": 605,
+        "y": 148,
+        "w": 308,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-text.nrdb-ui-widget#1",
       "box": {
         "x": 285,
         "y": 208,
@@ -33,7 +42,7 @@
       }
     },
     {
-      "key": "nrdb-ui-text.nrdb-ui-widget#1",
+      "key": "nrdb-ui-text.nrdb-ui-widget#2",
       "box": {
         "x": 285,
         "y": 268,
@@ -42,7 +51,7 @@
       }
     },
     {
-      "key": "nrdb-ui-text.nrdb-ui-widget#2",
+      "key": "nrdb-ui-text.nrdb-ui-widget#3",
       "box": {
         "x": 285,
         "y": 328,
@@ -51,7 +60,7 @@
       }
     },
     {
-      "key": "nrdb-ui-text.nrdb-ui-widget#3",
+      "key": "nrdb-ui-text.nrdb-ui-widget#4",
       "box": {
         "x": 285,
         "y": 388,
@@ -60,7 +69,7 @@
       }
     },
     {
-      "key": "nrdb-ui-text.nrdb-ui-widget#4",
+      "key": "nrdb-ui-text.nrdb-ui-widget#5",
       "box": {
         "x": 285,
         "y": 448,
@@ -78,16 +87,25 @@
       }
     },
     {
-      "key": "nrdb-ui-widget.nrdb-ui-yonder-annunciator",
+      "key": "nrdb-ui-text.nrdb-ui-widget#0",
       "box": {
         "x": 960,
         "y": 148,
-        "w": 291,
+        "w": 140,
         "h": 48
       }
     },
     {
-      "key": "nrdb-ui-text.nrdb-ui-widget#0",
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-annunciator",
+      "box": {
+        "x": 1111,
+        "y": 148,
+        "w": 140,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-text.nrdb-ui-widget#1",
       "box": {
         "x": 960,
         "y": 208,
@@ -96,7 +114,7 @@
       }
     },
     {
-      "key": "nrdb-ui-text.nrdb-ui-widget#1",
+      "key": "nrdb-ui-text.nrdb-ui-widget#2",
       "box": {
         "x": 960,
         "y": 268,
@@ -128,20 +146,29 @@
         "x": 268,
         "y": 525,
         "w": 663,
-        "h": 737
+        "h": 557
+      }
+    },
+    {
+      "key": "nrdb-ui-text.nrdb-ui-widget#0",
+      "box": {
+        "x": 285,
+        "y": 596,
+        "w": 308,
+        "h": 48
       }
     },
     {
       "key": "nrdb-ui-widget.nrdb-ui-yonder-annunciator",
       "box": {
-        "x": 285,
+        "x": 605,
         "y": 596,
-        "w": 468,
+        "w": 308,
         "h": 48
       }
     },
     {
-      "key": "nrdb-ui-text.nrdb-ui-widget#0",
+      "key": "nrdb-ui-text.nrdb-ui-widget#1",
       "box": {
         "x": 285,
         "y": 656,
@@ -154,16 +181,16 @@
       "box": {
         "x": 285,
         "y": 716,
-        "w": 629,
+        "w": 388,
         "h": 48
       }
     },
     {
       "key": "nrdb-ui-text-input.nrdb-ui-widget#1",
       "box": {
-        "x": 285,
-        "y": 776,
-        "w": 308,
+        "x": 685,
+        "y": 716,
+        "w": 228,
         "h": 48
       }
     },
@@ -171,22 +198,49 @@
       "key": "nrdb-ui-text-input.nrdb-ui-widget#2",
       "box": {
         "x": 285,
-        "y": 836,
-        "w": 629,
+        "y": 776,
+        "w": 388,
         "h": 48
       }
     },
     {
       "key": "nrdb-ui-text-input.nrdb-ui-widget#3",
       "box": {
-        "x": 285,
-        "y": 896,
-        "w": 308,
+        "x": 685,
+        "y": 776,
+        "w": 228,
         "h": 48
       }
     },
     {
       "key": "nrdb-ui-text-input.nrdb-ui-widget#4",
+      "box": {
+        "x": 285,
+        "y": 836,
+        "w": 388,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-text-input.nrdb-ui-widget#5",
+      "box": {
+        "x": 685,
+        "y": 836,
+        "w": 228,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-button.nrdb-ui-widget",
+      "box": {
+        "x": 285,
+        "y": 896,
+        "w": 388,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-text.nrdb-ui-widget#2",
       "box": {
         "x": 285,
         "y": 956,
@@ -195,37 +249,10 @@
       }
     },
     {
-      "key": "nrdb-ui-text-input.nrdb-ui-widget#5",
-      "box": {
-        "x": 285,
-        "y": 1016,
-        "w": 308,
-        "h": 48
-      }
-    },
-    {
-      "key": "nrdb-ui-button.nrdb-ui-widget",
-      "box": {
-        "x": 285,
-        "y": 1076,
-        "w": 388,
-        "h": 48
-      }
-    },
-    {
-      "key": "nrdb-ui-text.nrdb-ui-widget#1",
-      "box": {
-        "x": 285,
-        "y": 1136,
-        "w": 629,
-        "h": 48
-      }
-    },
-    {
       "key": "nrdb-ui-widget.nrdb-ui-yonder-sparkline",
       "box": {
         "x": 285,
-        "y": 1196,
+        "y": 1016,
         "w": 629,
         "h": 48
       }
@@ -236,7 +263,7 @@
         "x": 943,
         "y": 525,
         "w": 325,
-        "h": 737
+        "h": 557
       }
     },
     {
@@ -245,32 +272,32 @@
         "x": 960,
         "y": 596,
         "w": 291,
-        "h": 108
+        "h": 48
       }
     },
     {
       "key": "nrdb-ui-text.nrdb-ui-widget.yonder-qualifier#1",
       "box": {
         "x": 960,
-        "y": 716,
+        "y": 656,
         "w": 291,
-        "h": 108
+        "h": 48
       }
     },
     {
       "key": "nrdb-ui-text.nrdb-ui-widget.yonder-qualifier#2",
       "box": {
         "x": 960,
-        "y": 836,
+        "y": 716,
         "w": 291,
-        "h": 108
+        "h": 48
       }
     },
     {
       "key": "nrdb-ui-button.nrdb-ui-widget",
       "box": {
         "x": 960,
-        "y": 956,
+        "y": 776,
         "w": 291,
         "h": 48
       }
