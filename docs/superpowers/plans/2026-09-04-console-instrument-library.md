@@ -520,9 +520,16 @@ it("no descriptor carries an uppercased unit", () => {
 ```ts
 const listCtrls = readFileSync(join(import.meta.dirname, "fixtures/list-ctrls-menus-globalshutter.txt"), "utf8");
 describe("the bench camera's controls", () => {
+  // All ten, not a sample of them. Task 5 added the keys defaulting to
+  // `not-offered`, which asserts *this camera does not have it* — false for
+  // every one of these, and said on a page an operator reads. Any key this
+  // task fails to map keeps telling that lie, so the guard has to name each.
   it("fills the ten controls that had no home", async () => {
     const caps = await capabilitiesFrom(listCtrls);
-    for (const k of ["gain", "backlightCompensation", "autoExposure", "autoWhiteBalance"]) expect(caps[k].state).toBe("present");
+    for (const k of ["gain", "backlightCompensation", "gamma", "sharpness", "saturation",
+      "hue", "powerLineFrequency", "autoExposure", "autoWhiteBalance", "autoFocus"]) {
+      expect(caps[k].state).toBe("present");
+    }
   });
   it("reports the pan and tilt it advertises with no motor behind them", async () => {
     const caps = await capabilitiesFrom(listCtrls);
