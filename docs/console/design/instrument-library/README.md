@@ -147,10 +147,14 @@ missing is drawn — both are here now, not just described:
   and beneath them one line naming which one is turning the picture. Both
   cameras currently read "the board is doing this, at a cost per frame" —
   the ELP's fixture answers no `rotate`, `horizontal_flip` or
-  `vertical_flip` at all, and nothing in the Pocket 2's command matrix
-  documents one either, so the board's own pipeline correction (the
-  system's fallback for any camera without a proven native alternative) is
-  what's actually true for both today, not a claim invented for either.
+  `vertical_flip` at all, and the Pocket 2's is an **open bench question**,
+  item 9 in the queue in
+  [`hardware/dji-pocket-2-over-usb.md`](../../../hardware/dji-pocket-2-over-usb.md):
+  nothing in the recovered SDK surface suggests a command, so the working
+  answer is the board — but nobody has asked the camera. The board's own
+  pipeline correction is the system's fallback for any camera without a
+  proven native alternative, so it is what's true for both today rather
+  than a claim invented for either.
   Neutral tone, not the caution one — a known, real per-frame cost is a
   fact, not a warning.
 - **Every group has a fixed column, and the columns are uneven on
@@ -257,9 +261,10 @@ predates these and must be brought up to them:
 - Neither camera's Mirror/Flip/Rotation controls are bench-proven
   (`proven: false` on both) — the ELP's fixture proves the *absence* of a
   native control, which is why the board note is drawn for it; the
-  Pocket 2 has no evidence either way, and is drawn the same way on the
-  reasoning that the board's own fallback is the system's default absent a
-  proven native alternative, not a claim about this specific camera. Press
+  Pocket 2's is a question already on the bench queue rather than an
+  absence of thought, and is drawn the same way on the reasoning that the
+  board's own fallback is the system's default absent a proven native
+  alternative, not a claim about this specific camera. Press
   **mark unproven** to see both tagged.
 - Real daemon-side aim guarding — what a production guard should require
   before forwarding a rate, mode or Recentre command, now that the range
