@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { mount } from "@vue/test-utils";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import YonderPicker from "./YonderPicker.vue";
 
 /**
@@ -185,5 +185,30 @@ it("associates its label with its select, and gives each instance its own id", (
     expect(forA).toBeTruthy();
     expect(a.find("select").attributes("id")).toBe(forA);
     expect(b.find("label").attributes("for")).not.toBe(forA);
+});
+
+it("takes its id from a counter, not from a Vue 2 property that does not exist here", () => {
+    // The fix this guards shipped without a test, and review caught that by
+    // reverting it: all thirteen tests still passed. The uniqueness test
+    // above only asks that two ids differ, which two random strings do
+    // near-certainly — so it could not tell a counter from the fallback the
+    // bug was landing in. `this._uid` is Vue 2's; here it warned on every
+    // mount and fell through to `Math.random().toString(36)`.
+    //
+    // Assert the shape a counter produces and the shape random does not, and
+    // assert the warning is gone, because the warning is what an operator's
+    // console was actually filling up with.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+        const id = picker({ label: "Exposure", state: "present" }).find("select").attributes("id");
+        expect(id, "a counter gives digits; Math.random().toString(36) gives letters too")
+            .toMatch(/^y-pick-\d+$/);
+        expect(
+            warn.mock.calls.flat().join(" "),
+            "mounting a picker must not warn about a property that does not exist",
+        ).not.toContain("_uid");
+    } finally {
+        warn.mockRestore();
+    }
 });
 });
