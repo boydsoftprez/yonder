@@ -16,6 +16,7 @@ import YonderSegmented from "../src/ui/YonderSegmented.vue";
 import YonderSetBar from "../src/ui/YonderSetBar.vue";
 import YonderSoftKeys from "../src/ui/YonderSoftKeys.vue";
 import YonderSparkline from "../src/ui/YonderSparkline.vue";
+import YonderStateOverlay from "../src/ui/YonderStateOverlay.vue";
 import YonderTape from "../src/ui/YonderTape.vue";
 import YonderTextField from "../src/ui/YonderTextField.vue";
 
@@ -372,6 +373,36 @@ export const SPECIMENS = [
     note: "§6: 'PREVIEW · to this browser is Adaptive by default … In Adaptive the bar is a readout, GOING OUT' (R-VID-07, R-VID-13). The encoder is steering itself off the measured link, so there is nothing an operator's press would honour — readonly removes the one grabbable mark entirely rather than merely disabling it, the same way gated and advertised never draw a stray handle, and the reading stays live and in its ordinary colour throughout.",
     component: YonderSetBar,
     props: { label: "Going out", unit: "Mb/s", min: 0, max: 4, step: 0.1, precision: 1, actual: 1.8, readonly: true },
+    payload: undefined,
+    part: true,
+  },
+  {
+    title: "State overlay — adaptive, inside the envelope",
+    note: "§8.2's own worked string, in full: 1.8 Mb/s of an operator-set 0.3–2.0 Mb/s envelope, three cost fields rather than one sum — this browser's own 0.6 Mb/s share, the 1.8 Mb/s shared preview encode, and the 3.9 Mb/s measured total leaving this path (other viewers and thumbnail stills included, per §8.2 — not 0.6 + 1.8).",
+    component: YonderStateOverlay,
+    props: {
+      head: "adaptive", size: "1280×720", rate: "15 fps", bitrate: "1.8 Mb/s", detail: "1.8 of 0.3–2.0",
+      cost: { view: "0.6 Mb/s", encode: "1.8 Mb/s", path: "3.9 Mb/s" },
+    },
+    payload: undefined,
+    part: true,
+  },
+  {
+    title: "State overlay — pinned at the floor, mid-step",
+    note: "The caution tone (coordinator resolution 5) and the step line together: the rate controller (§8.1) just stepped the preview down a rung, and says why beneath the reading rather than leaving an operator to infer it from a resolution change alone.",
+    component: YonderStateOverlay,
+    props: {
+      head: "floor", size: "854×480", rate: "15 fps", bitrate: "0.3 Mb/s", detail: "0.3 of 0.3–2.0",
+      step: "stepped down to 854×480 · pinned at the floor",
+    },
+    payload: undefined,
+    part: true,
+  },
+  {
+    title: "State overlay — stills, the R-VID-14 fall-back",
+    note: "The fault tone (coordinator resolution 5): live video could not be established and this viewer fell back to periodic stills without being asked, exactly as R-VID-14 requires — stated as a fact about the link, not styled as an ordinary picture that merely looks different.",
+    component: YonderStateOverlay,
+    props: { head: "stills", detail: "every 2 s" },
     payload: undefined,
     part: true,
   },
