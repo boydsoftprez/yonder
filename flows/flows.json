@@ -4320,7 +4320,7 @@
         "type": "ui-text",
         "z": "yonder-console",
         "group": "group-tel-stations",
-        "order": 2,
+        "order": 3,
         "width": 12,
         "height": 1,
         "name": "last answered",
@@ -4340,15 +4340,39 @@
         "valueType": "msg"
     },
     {
+        "id": "label-tel-gcs-0",
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-tel-stations",
+        "order": 4,
+        "width": 2,
+        "height": 1,
+        "name": "label-tel-gcs-0",
+        "label": "GCS 0",
+        "format": "{{msg.payload}}",
+        "layout": "row-left",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "wrapText": false,
+        "className": "",
+        "x": 300,
+        "y": 3634,
+        "wires": [],
+        "value": "payload",
+        "valueType": "msg"
+    },
+    {
         "id": "tel-host-0",
         "type": "ui-text-input",
         "z": "yonder-console",
         "group": "group-tel-stations",
-        "order": 3,
-        "width": 5,
+        "order": 5,
+        "width": 4,
         "height": 1,
         "name": "tel-host-0",
-        "label": "GCS 0",
+        "label": "",
         "tooltip": "",
         "mode": "text",
         "tooltipPosition": "",
@@ -4367,12 +4391,36 @@
         ]
     },
     {
+        "id": "label-tel-gcs-1",
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-tel-stations",
+        "order": 7,
+        "width": 2,
+        "height": 1,
+        "name": "label-tel-gcs-1",
+        "label": "GCS 1",
+        "format": "{{msg.payload}}",
+        "layout": "row-left",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "wrapText": false,
+        "className": "",
+        "x": 300,
+        "y": 3668,
+        "wires": [],
+        "value": "payload",
+        "valueType": "msg"
+    },
+    {
         "id": "tel-port-0",
         "type": "ui-text-input",
         "z": "yonder-console",
         "group": "group-tel-stations",
-        "order": 4,
-        "width": 3,
+        "order": 6,
+        "width": 2,
         "height": 1,
         "name": "tel-port-0",
         "label": "Port",
@@ -4394,15 +4442,39 @@
         ]
     },
     {
+        "id": "label-tel-gcs-2",
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-tel-stations",
+        "order": 10,
+        "width": 2,
+        "height": 1,
+        "name": "label-tel-gcs-2",
+        "label": "GCS 2",
+        "format": "{{msg.payload}}",
+        "layout": "row-left",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "wrapText": false,
+        "className": "",
+        "x": 300,
+        "y": 3702,
+        "wires": [],
+        "value": "payload",
+        "valueType": "msg"
+    },
+    {
         "id": "tel-host-1",
         "type": "ui-text-input",
         "z": "yonder-console",
         "group": "group-tel-stations",
-        "order": 5,
-        "width": 5,
+        "order": 8,
+        "width": 4,
         "height": 1,
         "name": "tel-host-1",
-        "label": "GCS 1",
+        "label": "",
         "tooltip": "",
         "mode": "text",
         "tooltipPosition": "",
@@ -4425,8 +4497,8 @@
         "type": "ui-text-input",
         "z": "yonder-console",
         "group": "group-tel-stations",
-        "order": 6,
-        "width": 3,
+        "order": 9,
+        "width": 2,
         "height": 1,
         "name": "tel-port-1",
         "label": "Port",
@@ -4452,11 +4524,11 @@
         "type": "ui-text-input",
         "z": "yonder-console",
         "group": "group-tel-stations",
-        "order": 7,
-        "width": 5,
+        "order": 11,
+        "width": 4,
         "height": 1,
         "name": "tel-host-2",
-        "label": "GCS 2",
+        "label": "",
         "tooltip": "",
         "mode": "text",
         "tooltipPosition": "",
@@ -4479,8 +4551,8 @@
         "type": "ui-text-input",
         "z": "yonder-console",
         "group": "group-tel-stations",
-        "order": 8,
-        "width": 3,
+        "order": 12,
+        "width": 2,
         "height": 1,
         "name": "tel-port-2",
         "label": "Port",
@@ -4506,7 +4578,7 @@
         "type": "ui-button",
         "z": "yonder-console",
         "group": "group-tel-stations",
-        "order": 9,
+        "order": 13,
         "width": 5,
         "height": 1,
         "label": "Send telemetry here",
@@ -4565,7 +4637,7 @@
         "type": "ui-text",
         "z": "yonder-console",
         "group": "group-tel-stations",
-        "order": 10,
+        "order": 14,
         "width": 12,
         "height": 1,
         "name": "tcp server",
@@ -4589,7 +4661,7 @@
         "type": "ui-yonder-sparkline",
         "z": "yonder-console",
         "group": "group-tel-stations",
-        "order": 11,
+        "order": 15,
         "width": 12,
         "height": 1,
         "name": "telemetry throughput",
@@ -5611,7 +5683,10 @@
                 "mock-label-tel-ann-link",
                 "mock-label-tel-ann-recv",
                 "mock-label-tel-ann-state",
-                "mock-label-stat-ann-feed"
+                "mock-label-stat-ann-feed",
+                "mock-label-tel-gcs-0",
+                "mock-label-tel-gcs-1",
+                "mock-label-tel-gcs-2"
             ]
         ]
     },
@@ -5817,6 +5892,87 @@
         "wires": [
             [
                 "label-stat-ann-feed"
+            ]
+        ]
+    },
+    {
+        "id": "mock-label-tel-gcs-0",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "mock label-tel-gcs-0",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 1500,
+        "y": 3634,
+        "wires": [
+            [
+                "label-tel-gcs-0"
+            ]
+        ]
+    },
+    {
+        "id": "mock-label-tel-gcs-1",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "mock label-tel-gcs-1",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 1500,
+        "y": 3668,
+        "wires": [
+            [
+                "label-tel-gcs-1"
+            ]
+        ]
+    },
+    {
+        "id": "mock-label-tel-gcs-2",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "mock label-tel-gcs-2",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 1500,
+        "y": 3702,
+        "wires": [
+            [
+                "label-tel-gcs-2"
             ]
         ]
     }

@@ -177,56 +177,83 @@
       }
     },
     {
-      "key": "nrdb-ui-text-input.nrdb-ui-widget#0",
+      "key": "nrdb-ui-text.nrdb-ui-widget#2",
       "box": {
         "x": 285,
         "y": 716,
-        "w": 388,
+        "w": 148,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-text-input.nrdb-ui-widget#0",
+      "box": {
+        "x": 445,
+        "y": 716,
+        "w": 308,
         "h": 48
       }
     },
     {
       "key": "nrdb-ui-text-input.nrdb-ui-widget#1",
       "box": {
-        "x": 685,
+        "x": 765,
         "y": 716,
-        "w": 228,
+        "w": 148,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-text.nrdb-ui-widget#3",
+      "box": {
+        "x": 285,
+        "y": 776,
+        "w": 148,
         "h": 48
       }
     },
     {
       "key": "nrdb-ui-text-input.nrdb-ui-widget#2",
       "box": {
-        "x": 285,
+        "x": 445,
         "y": 776,
-        "w": 388,
+        "w": 308,
         "h": 48
       }
     },
     {
       "key": "nrdb-ui-text-input.nrdb-ui-widget#3",
       "box": {
-        "x": 685,
+        "x": 765,
         "y": 776,
-        "w": 228,
+        "w": 148,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-text.nrdb-ui-widget#4",
+      "box": {
+        "x": 285,
+        "y": 836,
+        "w": 148,
         "h": 48
       }
     },
     {
       "key": "nrdb-ui-text-input.nrdb-ui-widget#4",
       "box": {
-        "x": 285,
+        "x": 445,
         "y": 836,
-        "w": 388,
+        "w": 308,
         "h": 48
       }
     },
     {
       "key": "nrdb-ui-text-input.nrdb-ui-widget#5",
       "box": {
-        "x": 685,
+        "x": 765,
         "y": 836,
-        "w": 228,
+        "w": 148,
         "h": 48
       }
     },
@@ -240,7 +267,7 @@
       }
     },
     {
-      "key": "nrdb-ui-text.nrdb-ui-widget#2",
+      "key": "nrdb-ui-text.nrdb-ui-widget#5",
       "box": {
         "x": 285,
         "y": 956,
