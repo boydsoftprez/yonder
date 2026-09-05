@@ -20,6 +20,7 @@ const pictureNode = (await import("./picture.js")).default ?? await import("./pi
 const factsNode = (await import("./facts.js")).default ?? await import("./facts.js");
 const budgetNode = (await import("./budget.js")).default ?? await import("./budget.js");
 const deckNode = (await import("./deck.js")).default ?? await import("./deck.js");
+const aimNode = (await import("./aim.js")).default ?? await import("./aim.js");
 
 /**
  * What is tested here, and what honestly cannot be.
@@ -499,5 +500,40 @@ describe("the deck", () => {
   it("falls back to Live for anything else, rather than an unrecognised page", () => {
     expect(build(deckNode as (RED: RED) => void, {}).props).toMatchObject({ mode: "live" });
     expect(build(deckNode as (RED: RED) => void, { mode: "nonsense" }).props).toMatchObject({ mode: "live" });
+  });
+});
+
+describe("the aim panel", () => {
+  /**
+   * `emitsActions` is load-bearing here exactly as it is for the deck
+   * (`widget.ts`'s own note): Dashboard drops a `widget-action` from a
+   * widget that never registered `onAction` — silently, with no error
+   * anywhere. A press on the pad, the mode control or Recentre all depend
+   * on it.
+   *
+   * **This is the test `aim.component.test.ts` cannot write, by
+   * construction** (task-23-brief.md, coordinator resolution 4, confirmed
+   * by task-22's own review): a component test mounts `YonderAim.vue`
+   * directly against a mocked `$socket` and never touches `aim.ts`'s own
+   * registration at all, so a mutation to `emitsActions` there is
+   * invisible to it. This one imports the real registration module and
+   * asserts what it actually passes to `group.register`.
+   *
+   * Confirmed directly, not merely asserted here (see task-23-report.md):
+   * flipping `emitsActions: true` to `false` in `aim.ts` turns exactly
+   * this test red and nothing else in this package's suite.
+   */
+  it("registers as a widget that sends", () => {
+    const { type, events } = build(aimNode as (RED: RED) => void, {});
+    expect(type).toBe("ui-yonder-aim");
+    expect(events).toMatchObject({ onAction: true });
+  });
+
+  it("does not draw itself when it has no dashboard group", () => {
+    // A widget dragged onto a flow before it has a group is a normal
+    // intermediate state in the editor, not a fault — Node-RED must load
+    // the rest of the flow either way.
+    const { node } = build(aimNode as (RED: RED) => void, {}, null);
+    expect(node.error).toHaveBeenCalledWith(expect.stringContaining("no dashboard group"));
   });
 });

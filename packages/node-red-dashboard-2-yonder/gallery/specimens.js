@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import YonderAim from "../src/ui/YonderAim.vue";
 import YonderAimPad from "../src/ui/YonderAimPad.vue";
 import YonderAnnunciator from "../src/ui/YonderAnnunciator.vue";
 import YonderBudget from "../src/ui/YonderBudget.vue";
@@ -713,6 +714,86 @@ export const SPECIMENS = [
     component: YonderDeck,
     props: { mode: "setup" },
     payload: POCKET2_REPORT,
+    part: false,
+  },
+  {
+    title: "Aim panel — live, on its own",
+    note: "Task 23: ui-yonder-aim, mounted with no deck and no camera page around it (R-UI-28) — everything here comes from this one payload. The badge reads RATE CONTROL in the select tone; Commanded rate is real only while dragging the pad below it. Roll stays struck through even here — no camera this project supports has a roll motor, so YonderAim.vue hardcodes it exactly as YonderDeck.buildAim() does, not derived from this payload.",
+    component: YonderAim,
+    props: {
+      report: {
+        state: "present",
+        reason: "",
+        pan: 12.4,
+        tilt: -6.0,
+        bounds: { pan: [-180, 180], tilt: [-90, 90] },
+        atLimit: { pitch: false, yaw: false },
+        mode: "Follow",
+        modes: ["Follow", "Tilt lock", "FPV"],
+        inhibited: null,
+      },
+    },
+    payload: undefined,
+    part: false,
+  },
+  {
+    title: "Aim panel — inhibited",
+    note: "The device answers aim normally (state: present) but a live guard is temporarily refusing motion (§8.7: unknown bounds, unknown mode or stale attitude inhibit non-zero motion until the missing precondition clears) — the badge still reads RATE CONTROL, since the capability itself is not the thing that is unavailable, but the pad, the gimbal-mode control and Recentre are all disabled and carry this same reason, which YonderAimPad's own inhibited prop states directly on the pad itself.",
+    component: YonderAim,
+    props: {
+      report: {
+        state: "present",
+        reason: "",
+        pan: -42.0,
+        tilt: 8.5,
+        bounds: { pan: [-180, 180], tilt: [-90, 90] },
+        atLimit: { pitch: false, yaw: false },
+        mode: "Follow",
+        modes: ["Follow", "Tilt lock", "FPV"],
+        inhibited: "attitude is stale; movement is held until it refreshes",
+      },
+    },
+    payload: undefined,
+    part: false,
+  },
+  {
+    title: "Aim panel — not answering (ELP)",
+    note: "The ELP bench camera again (compare the Deck — ELP specimens above): it advertises pan and tilt and has no motor behind either. The badge reads NOT ANSWERING in the caution tone, the reason is stated once at the top of the panel, and every control — pad, both position gauges, the mode line, Recentre — stays drawn and marked rather than disappearing (R-UI-20, coordinator resolution 7). Bounds is null because a camera that does not answer aim at all is not reporting a position either; Commanded rate is omitted entirely, since there is nothing a rate reading could mean here.",
+    component: YonderAim,
+    props: {
+      report: {
+        state: "advertised",
+        reason: "this camera advertises pan and tilt but there is no motor behind either — it accepts the command and nothing moves",
+        pan: 0,
+        tilt: 0,
+        bounds: null,
+        atLimit: { pitch: false, yaw: false },
+        mode: "",
+        modes: [],
+        inhibited: null,
+      },
+    },
+    payload: undefined,
+    part: false,
+  },
+  {
+    title: "Aim panel — at the limit, roll struck",
+    note: "A second live specimen, at tilt's own mechanical limit (atLimit.yaw, drawing the pad's own pill) and in FPV mode — included specifically to show the struck-roll treatment beside a genuinely different reading than the plain live specimen above, so it is not the only place in this gallery a reviewer can see it. Only roll ever draws this way (coordinator resolution 7): the pad is a two-axis stick and never had a gesture for a third axis at all, and no gimbal this project supports has one yet.",
+    component: YonderAim,
+    props: {
+      report: {
+        state: "present",
+        reason: "",
+        pan: -178.2,
+        tilt: 41.0,
+        bounds: { pan: [-180, 180], tilt: [-90, 90] },
+        atLimit: { pitch: false, yaw: true },
+        mode: "FPV",
+        modes: ["Follow", "Tilt lock", "FPV"],
+        inhibited: null,
+      },
+    },
+    payload: undefined,
     part: false,
   },
 ];

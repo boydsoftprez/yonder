@@ -1,0 +1,53 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!--
+  The editor half of the aim panel. Node-RED finds this by basename beside
+  the node's .js; without it the widget registers and shows as "unknown
+  node". A form and a registration, nothing else (CLAUDE.md rule 2, R-UI-01).
+-->
+<script type="text/html" data-template-name="ui-yonder-aim">
+  <div class="form-row"><label for="node-input-group"><i class="fa fa-table"></i> Group</label>
+    <input type="text" id="node-input-group" /></div>
+  <div class="form-row"><label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name" /></div>
+  <div class="form-tips">
+    <b>Stands alone (R-UI-28).</b> This node draws the gimbal pad, the
+    reported pan/tilt against their bounds, the gimbal mode and Recentre from
+    <code>msg.payload</code> alone &mdash; it does not read anything
+    <code>ui-yonder-deck</code> draws, and needs no camera deck on the same
+    page. Place it on the Cockpit, or beside a deck on a camera page; either
+    way it is the same node with the same payload.
+  </div>
+</script>
+<script type="text/html" data-help-name="ui-yonder-aim">
+<p>The gimbal panel &mdash; aim, reported position, gimbal mode and Recentre
+&mdash; as a node of its own (R-UI-28, R-CAM-11), so a page like the Cockpit
+can carry it with no camera deck beside it.</p>
+<p>Reads one <code>msg.payload</code>:</p>
+<pre>{ state, reason, pan, tilt,
+  bounds: { pan: [lo, hi], tilt: [lo, hi] } | null,
+  atLimit: { pitch, yaw }, mode, modes: string[], inhibited: string | null }</pre>
+<p><b>A press becomes movement on an aircraft.</b> Dragging the pad sends
+<code>{ slew: { pan, tilt, seq, gesture } }</code> at a rate, for as long as
+it is held; releasing (however the release happens) sends
+<code>{ stop: { gesture } }</code> exactly once. Choosing a gimbal mode sends
+<code>{ mode }</code>; pressing Recentre sends <code>{ recentre: true }</code>
+once per press, refusing a second press until a fresh report arrives.</p>
+<p><b>Nothing here decides to move.</b> Every one of the above is a relay of
+an operator's own press (R-CMD-04) &mdash; this node originates nothing, and
+a capability the device advertises but does not answer keeps its control on
+the page, marked, carrying the reason, rather than disappearing (R-UI-20).</p>
+</script>
+<script type="text/javascript">
+  RED.nodes.registerType("ui-yonder-aim", {
+    category: "dashboard 2", color: "#c7e0d4",
+    defaults: {
+      name: { value: "" },
+      group: { type: "ui-group", required: true },
+      order: { value: 0 }, width: { value: 0 }, height: { value: 0 }
+    },
+    inputs: 1, outputs: 1,
+    icon: "font-awesome/fa-crosshairs",
+    paletteLabel: "yonder aim",
+    label: function () { return this.name || "yonder aim"; }
+  });
+</script>
