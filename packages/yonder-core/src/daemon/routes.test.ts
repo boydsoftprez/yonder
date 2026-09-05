@@ -2006,8 +2006,12 @@ describe("POST /cameras/:id/controls", () => {
   });
 
   it("refuses a body naming no recognised control, before calling applyControls", async () => {
+    // `zoom` used to stand in here for "a name CONTROL_NAMES does not know" —
+    // Task 9 gave the write path all fourteen controls the schema carries
+    // (R-CTL-11 … R-CTL-14), zoom among them, so that example is retired in
+    // favour of a name no schema field will ever use.
     const r = provisioned({ cameras: fixtureDetection() });
-    for (const bad of [{}, { zoom: 5 }, undefined, "brighter"]) {
+    for (const bad of [{}, { nonexistent: 5 }, undefined, "brighter"]) {
       expect((await r("POST", "/cameras/cam0/controls", bad)).status, JSON.stringify(bad)).toBe(400);
     }
     expect(controlsCalls).toEqual([]);
