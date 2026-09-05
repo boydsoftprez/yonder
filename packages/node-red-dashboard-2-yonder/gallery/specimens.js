@@ -10,6 +10,7 @@ import YonderIdentity from "../src/ui/YonderIdentity.vue";
 import YonderPicker from "../src/ui/YonderPicker.vue";
 import YonderPicture from "../src/ui/YonderPicture.vue";
 import YonderPlacard from "../src/ui/YonderPlacard.vue";
+import YonderPositionGauge from "../src/ui/YonderPositionGauge.vue";
 import YonderReadout from "../src/ui/YonderReadout.vue";
 import YonderSegmented from "../src/ui/YonderSegmented.vue";
 import YonderSetBar from "../src/ui/YonderSetBar.vue";
@@ -207,6 +208,22 @@ export const SPECIMENS = [
     note: "§6's own second worked example, with a real unit standing in for its illustrative one: `2.07 Mb/s` is holdkey.component.test.ts's own measured full-rate figure, carried here to show the exact hazard this part exists to avoid — the ambient uppercase that draws CAMERA and Cam 2 above must stop at the unit, or Mb/s reads MB/S and says megabytes.",
     component: YonderPlacard,
     props: { kind: "Accessory", name: "H.264 · 1280×720", unit: "2.07 Mb/s" },
+    payload: undefined,
+    part: true,
+  },
+  {
+    title: "Position gauge — pan, reported",
+    note: "R-UI-09: the bench's own gimbal push (§7, gimbal/0x05 at 20 Hz) reporting +134.5° of its ±180° pan range — a pointer three-quarters along the track, with both bounds written beneath it rather than a bare number nobody can judge without them.",
+    component: YonderPositionGauge,
+    props: { label: "Pan", value: 134.5, min: -180, max: 180, unit: "°", precision: 1 },
+    payload: undefined,
+    part: true,
+  },
+  {
+    title: "Position gauge — roll, dead",
+    note: "§7's own Aim table: 'Roll — struck | no answer on the third axis'. A single em dash rather than a number, no pointer on the track, and the reason named — the neutral tone, not caution, because a bench gimbal with two axes is not a fault (coordinator resolution 8's own rule for a gated control, applied here to an axis).",
+    component: YonderPositionGauge,
+    props: { label: "Roll", value: 0, min: -180, max: 180, unit: "°", dead: true, reason: "no answer on this axis" },
     payload: undefined,
     part: true,
   },
