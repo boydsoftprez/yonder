@@ -363,7 +363,38 @@ it("advertised keeps a value too, so the dead control can be drawn", () => {
 - [ ] **Step 2: Fail** — `npx vitest run src/video/capability.test.ts --root packages/yonder-core`
 - [ ] **Step 3: Implement** — extend the union; `gated()`; `advertised(value, reason)` with the old one-argument form kept for existing callers; the `summarise` branch. `npm run lint`: fix every exhaustive switch **without adding `default:`**.
 - [ ] **Step 4: Pass; mutation-check** — delete the `gated` branch in `summarise`: red. Restore.
-- [ ] **Step 5: Commit** — `git commit -s -m "feat(video): a fourth capability state, and advertised keeps its range — R-UI-21"`
+- [ ] **Step 5: Teach the one consumer that silently absorbs the new state**
+
+`capabilityFacts()` in `packages/yonder-core/src/video/present.ts` branches on
+`present`, then a ternary between `advertised` and everything else — so a
+`gated` capability is reported as `not-offered`, the console tells an operator
+their camera *has none* of a control it has, and no compiler warns, because a
+ternary is not an exhaustive switch. `YonderFacts.vue`'s own comment describes
+this exact failure one layer down and was hardened against it; the producer
+was not.
+
+- `CapabilityFact["state"]` gains `"gated"`.
+- The ternary becomes an exhaustive `switch` on `cap.state`, no `default:`, so
+  a fifth state is a compile error here rather than a wrong sentence on a page.
+- A gated capability yields `{ label, state: "gated", reason: by.label }`.
+- `STATES` in `packages/node-red-dashboard-2-yonder/src/ui/YonderFacts.vue`
+  gains `gated: 'another control has it'` — the register of the other three,
+  with the responsible control's own name arriving as the reason. Its tone is
+  neutral, the same colour as `not-offered`, and it takes **no** caution
+  border: a gated control is not a fault.
+
+```ts
+it("says which control has it, and does not call the camera short of one", () => {
+  const caps = { ...noCapabilities(), exposure: gated(range, by) };
+  const fact = capabilityFacts(caps).find((f) => f.label === LABELS.exposure);
+  expect(fact).toEqual({ label: LABELS.exposure, state: "gated", reason: "auto exposure" });
+});
+```
+
+Mutation-check it: make the switch return `not-offered` for `gated` and this
+test goes red.
+
+- [ ] **Step 6: Commit** — `git commit -s -m "feat(video): a fourth capability state, and advertised keeps its range — R-UI-21"`
 
 ---
 
