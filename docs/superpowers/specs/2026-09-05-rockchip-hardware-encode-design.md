@@ -73,6 +73,30 @@ currently works. That path must be re-proven on Pi hardware before this ships �
 decision rests on inference for one of its two boards, and the plan must not treat it
 otherwise.
 
+### The risk this decision carries, and it is not settled
+
+Roughly **two seconds** of end-to-end latency was seen in QGroundControl watching this
+board over UDP H.265, against a Raspberry Pi running the GStreamer pipeline that felt
+markedly quicker.
+
+What was established: QGC's own configuration is correct — UDP h.265 source, port 5600,
+Low Latency Mode on, read directly from the running application. So `rtspsrc`'s 2000 ms
+default, which matches the figure almost too well, is **not** the cause: that code path is
+not in use. The stream itself is sound — pulled off the server it decodes at a true 30 fps
+with every frame distinct.
+
+What was **not** established: the pipeline's own contribution. Two attempts at a
+burned-in-clock measurement failed on filter escaping and on QGC holding the receive port,
+and the third was abandoned rather than put a second video copy on a bandwidth-limited
+link. The evidence points at the receiver. **That is an inference, not a result.**
+
+It bears directly on this section. "One composer, and it is ffmpeg" is a much weaker
+proposition if ffmpeg costs seconds of latency that GStreamer's `latency=0` sinks do not —
+and latency is not a detail on an aircraft. Measuring it is therefore a **gate on this
+decision**, alongside the Pi re-proof, not a task to schedule afterwards. The measurement
+wants one stream carrying a burned-in frame counter, compared against what the receiver
+displays; no clock synchronisation and no additional traffic are required.
+
 ## 3. Delivery: one pinned package, nothing compiled
 
 ### Evidence
@@ -154,7 +178,61 @@ Radxa's own documentation recommends `mpph265enc` over `mpph264enc` on the 6.1 k
 H.265 is not a luxury on this hardware — but both were measured working here, and neither
 is assumed.
 
-## 7. What this corrects in the repository
+## 7. Nothing streams without a consumer
+
+### The problem
+
+M4 encodes and publishes whatever is configured, for as long as the camera is running.
+On a cellular uplink that means a browser preview leaving the aircraft with nobody looking
+at it, and a ground-station feed leaving it with no ground station attached. R-VID-11
+reports what that costs; nothing stops it being spent for no reason.
+
+### The constraint that shapes every option
+
+**The camera is exclusive.** Measured, not assumed — a second process gets
+`Device or resource busy`, and `fuser` names the one holding it. So the obvious
+implementation is unavailable: mediamtx's `runOnDemand` per path would have `cam0` and
+`cam0-preview` each spawn their own process, and the second would fail to open the camera.
+
+### Decision
+
+**`yonder-core` keeps sole ownership of the process holding the camera, and drives it from
+demand.** It asks mediamtx how many readers each path has — the server reports this over
+its API, which `media/config.ts` currently generates as `api: false` and would need to
+enable on the loopback — and:
+
+- no readers on the preview → that branch is not encoded
+- no readers anywhere → the pipeline is not running at all
+- a reader arrives → the branch it wants starts
+
+One owner of the exclusive resource, no second transcode, and R-UI-05's "report the
+observed state" stays truthful because the daemon still knows what it started.
+
+**R-VID-05 is untouched, and that is the point.** Demand-driven delivers what was asked —
+traffic cannot blow out without cause, because the cause *is* a consumer — while leaving
+intact the priority-1 requirement that a browser preview and a ground-station feed are not
+mutually exclusive. Where both are genuinely being watched, both are wanted, and R-VID-13's
+cheap second copy is what makes that affordable.
+
+Hard mutual exclusion — never more than one egress stream — was considered and **rejected**.
+It contradicts R-VID-05 directly, so adopting it would mean withdrawing that requirement
+rather than quietly violating it, and it buys nothing demand-driven does not already
+deliver. A configurable ceiling on simultaneous egress was also rejected: it keeps
+R-VID-05 true only by default, and adds a second way for a stream to be refused for a
+reason an operator has to go looking for.
+
+Deriving the preview by re-reading `cam0` back out of mediamtx would dodge the exclusivity
+clash, and is rejected too: it adds a decode and an encode to a board measured at a ceiling
+of two simultaneous encodes at native resolution.
+
+### What this leaves open
+
+An RTP output pushes to an address; it has no reader to count. Demand cannot be observed
+for it, so it stays under explicit operator control — started and stopped deliberately, and
+reported as running because it is. That asymmetry between pull outputs and push outputs
+should be visible on the camera page rather than surprising.
+
+## 8. What this corrects in the repository
 
 Three claims are wrong and are fixed as part of this work, not left for someone to trip on:
 
@@ -164,7 +242,7 @@ Three claims are wrong and are fixed as part of this work, not left for someone 
 | `architecture.md` §6, `roadmap.md` M4 | Radxa is "image-only in practice", needing the vendor BSP kernel and MPP libraries | Armbian ships the BSP kernel; `install.sh` ran on it unmodified. The MPP libraries arrive in one `.deb`. Radxa is installable |
 | `probe/encoder.ts` | "this board offers no hardware encoder" | False on every Rockchip vendor-kernel board |
 
-## 8. A requirement that does not exist yet
+## 9. A requirement that does not exist yet
 
 R-CAM-07 says to use hardware encoding where the board provides it. The principle this work
 was directed by is broader — **use a hardware offload wherever the board has one for a
@@ -174,7 +252,7 @@ here, to decode (§5) and to scaling (§4).
 A new `R-HW` requirement states it, and R-CAM-07 becomes an instance of it rather than the
 whole rule. IDs are stable and never reused, so this takes the next free number.
 
-## 9. Testing
+## 10. Testing
 
 - `encoder.test.ts` gains an MPP case: a probe on a machine with `/dev/mpp_service` and an
   ffmpeg listing `h264_rkmpp` returns hardware, and one without returns software with a
@@ -188,9 +266,32 @@ whole rule. IDs are stable and never reused, so this takes the next free number.
   both currently assumed and absent.
 - The Pi measurement in §2 is a gate on shipping, not a test.
 
-## 10. Open, and deliberately not settled here
+## 11. Open, and deliberately not settled here
+
+Two of these are **gates on §2**, not follow-up work. If either goes the wrong way, the
+single-ffmpeg-composer decision has to be reopened rather than patched around.
 
 - **The Pi re-proof** (§2). Named as the risk it is.
+- **End-to-end latency** (§2). Roughly two seconds observed; the receiver is the likely
+  cause and the pipeline's own share is unmeasured. A gate, for the reason §2 gives.
+- **Per-board encoder limits.** This board sustains two simultaneous 1920×1200 encodes;
+  three fail with `ioctl(VIDIOC_QBUF): Bad file descriptor`, and degrade silently by
+  duplicating frames before they do. R-HW-05 asks for such limits to be documented and
+  enforced in validation, and R-CAM-10 asks for a configuration exceeding them to be
+  refused with a clear message rather than met as a V4L2 error in flight. Neither is
+  designed here. How the limit is *discovered* rather than tabulated — R-CAM-13's argument
+  applies equally — is the harder half.
+- **`by-path` identity on Rockchip.** The camera's by-path name changed across a reboot
+  (`xhci-hcd.6.auto` → `.4.auto`, same camera, same port) because the `.N.auto` platform
+  instantiation counter moved. R-CAM-05 requires identity to survive reboots, and on this
+  SoC the name embeds something that is not a property of the port. Whether it varies on an
+  unchanged configuration is unestablished — two clean reboots would answer it. Until then
+  R-CAM-05 cannot be claimed on Rockchip, and any fix belongs with the enumeration code
+  rather than here.
+- **Enabling mediamtx's API** (§7). Demand-driven output needs reader counts, which the
+  server reports over an API `media/config.ts` currently generates as `api: false`. Turning
+  it on adds a listener to a device whose surfaces are deliberately few; loopback-only is
+  the obvious answer and is not yet the designed one.
 - **Dropping the pipeline's privileges.** `yonder-core` runs as root and spawns the encoder
   as its child, which is why `/dev/mpp_service` at `0600` costs nothing today. mediamtx
   already runs unprivileged; the encoder does not. That is a security question worth asking
