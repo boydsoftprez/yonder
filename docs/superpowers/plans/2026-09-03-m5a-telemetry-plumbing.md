@@ -84,6 +84,7 @@ its name in its own column or it looks like a different control.
 | `packages/yonder-core/src/mav/detect.ts` | Pure over an injected port. The sweep, and its three outcomes |
 | `packages/yonder-core/src/mav/hint.ts` | The remembered port and speed. State, never configuration |
 | `packages/yonder-core/src/mav/router/config.ts` | Pure. `Config` + a detected link → `mavlink-router`'s ini |
+| `packages/yonder-core/src/mav/router/stats.ts` | Pure. The router's own per-endpoint counters, out of the text it prints |
 | `packages/yonder-core/src/mav/link.ts` | Pure. Heartbeats and counters → the one state the console renders |
 | `packages/yonder-core/src/mav/renderer.ts` | `MavlinkRenderer implements Renderer`. The only thing here that shells out |
 | `packages/yonder-core/src/mav/listener.ts` | The loopback UDP socket on `:14559`, feeding `link.ts` |
@@ -468,7 +469,7 @@ site reaching for `.shape` or `.extend` is not. Check `schema/generate.ts` still
 - [ ] **Step 4: Run the tests and the whole suite**
 
 Run: `npx vitest run --root packages/yonder-core`
-Expected: the four new tests PASS, and all 1004 existing tests still pass. `roundtrip.test.ts` and `docs.test.ts` are the two most likely to notice a new section — if either fails, the failure is real, not incidental.
+Expected: the six new tests PASS, and the whole suite stays green. `roundtrip.test.ts` and `docs.test.ts` are the two most likely to notice a new section — if either fails, the failure is real, not incidental.
 
 - [ ] **Step 5: Make the documentation true**
 
@@ -862,7 +863,9 @@ git commit -s -m "feat(mav): enough MAVLink to recognise a heartbeat — R-MAV-1
 
 ## Task 6: `detect.ts` — the sweep, and its three outcomes
 
-§3 and `R-MAV-13`. **Read Task 1's hardware note before starting**: if it recorded that framing errors are unavailable *and* byte counts are flat at a wrong speed, drop `"noise"` from the union and say so in the requirement.
+§3 and `R-MAV-13`. **Task 1 settled the conditional this task used to carry:** the kernel does report framing errors per port — 1071 and 2482 in four seconds at the wrong rates against zero at the right one — so all three outcomes stand and `"noise"` stays in the union.
+
+What Task 1 also found, and what this task must honour: **921600 produced no framing errors and no frames either.** Reading a 115200 signal at eight times its rate samples each bit eight times, and the long uniform runs frame cleanly as bytes. So errors are *sufficient* evidence of a mismatch and never *necessary* — the sweep leaves early on errors and waits out the deadline on their absence, which is why `RATE_DEADLINE_MS` is a clock and not a read count.
 
 **Files:**
 - Create: `packages/yonder-core/src/mav/detect.ts`
@@ -879,7 +882,7 @@ git commit -s -m "feat(mav): enough MAVLink to recognise a heartbeat — R-MAV-1
     | { kind: "found"; device: string; baud: number; vehicle: string; system: number }
     | { kind: "silent"; device: string; triedBauds: number[] }
     | { kind: "noise"; device: string; triedBauds: number[]; bytes: number };
-  export function detect(opts: { device: string; open: OpenPort; bauds?: readonly number[]; first?: number }): Promise<DetectOutcome>;
+  export function detect(opts: { device: string; open: OpenPort; bauds?: readonly number[]; first?: number; clock?: Clock }): Promise<DetectOutcome>;
   ```
 
 - [ ] **Step 1: Write the failing test**
@@ -1461,16 +1464,177 @@ git commit -s -m "feat(mav): generate mavlink-router's configuration from config
 
 ---
 
+## Task 8b: `router/stats.ts` — what the router already knows
+
+§6 and §10.3. **Task 2 established this task's reason to exist.** Three `LinkState` fields —
+`groundStations`, `traffic` and `tcpClients` — are all measurements only `mavlink-router`
+holds, and no other task reads them. This is the parser; Task 9 folds its output into state
+and Task 10 fetches the text.
+
+**Files:**
+- Create: `packages/yonder-core/src/mav/router/stats.ts`
+- Test: `packages/yonder-core/src/mav/router/stats.test.ts`
+
+**Interfaces:**
+- Consumes: nothing. Pure text in, numbers out.
+- Produces:
+  ```ts
+  export interface EndpointStats {
+    /** The endpoint's configured name, as it appears in the block header. */
+    name: string;
+    kind: "uart" | "udp" | "tcp";
+    /** Cumulative since the router started. `Handled`, not `Total`. */
+    received: number;
+    transmitted: number;
+    crcErrors: number;
+    sequenceLost: number;
+  }
+  export function parseStats(text: string): EndpointStats[];
+  ```
+
+**Why a parser and not a protocol.** The statistics are text on stdout and nothing upstream
+promises the format is stable — the spec records that coupling deliberately, as the better
+trade than reporting less than the router knows. Keeping the parse in one pure function with
+the real output as its fixture means a format change is one failing test naming one file,
+rather than a page that quietly goes blank.
+
+- [ ] **Step 1: Write the failing test**
+
+The fixture is verbatim from the board, 2026-09-05 — not invented, and not reformatted.
+
+```ts
+// packages/yonder-core/src/mav/router/stats.test.ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+import { describe, expect, it } from "vitest";
+import { parseStats } from "./stats.js";
+
+/** Verbatim from mavlink-router 2362c62 on a Pi 4, ReportStats = true. */
+const REAL = `UDP Endpoint [7]gcs0 {
+	Received messages {
+		CRC error: 0 0% 0KB
+		Sequence lost: 0 0%
+		Handled: 21 1KB
+		Total: 21
+	}
+	Transmitted messages {
+		Total: 954 34KB
+	}
+}
+UDP Endpoint [8]gcs1 {
+	Received messages {
+		CRC error: 0 0% 0KB
+		Sequence lost: 0 0%
+		Handled: 0 0KB
+		Total: 0
+	}
+	Transmitted messages {
+		Total: 954 34KB
+	}
+}
+UART Endpoint [6]autopilot {
+	Received messages {
+		CRC error: 0 0% 0KB
+		Sequence lost: 0 0%
+		Handled: 955 34KB
+		Total: 955
+	}
+	Transmitted messages {
+		Total: 0 0KB
+	}
+}
+`;
+
+describe("parseStats", () => {
+  // The measurement §6 was reversed by: the answering endpoint's count tracks
+  // its replies exactly, and the silent one stays at zero.
+  it("attributes received messages to the endpoint that received them", () => {
+    expect(parseStats(REAL)).toEqual([
+      { name: "gcs0", kind: "udp", received: 21, transmitted: 954, crcErrors: 0, sequenceLost: 0 },
+      { name: "gcs1", kind: "udp", received: 0, transmitted: 954, crcErrors: 0, sequenceLost: 0 },
+      { name: "autopilot", kind: "uart", received: 955, transmitted: 0, crcErrors: 0, sequenceLost: 0 },
+    ]);
+  });
+
+  // `Handled` is the count that moved when a ground station answered. `Total`
+  // includes messages the router saw and dropped, so a busy endpoint that
+  // routes nothing back would read as answering.
+  it("reads Handled, not Total", () => {
+    const text = REAL.replace("\t\tHandled: 21 1KB\n\t\tTotal: 21", "\t\tHandled: 3 1KB\n\t\tTotal: 99");
+    expect(parseStats(text)[0].received).toBe(3);
+  });
+
+  it("returns nothing rather than throwing on output that is not statistics", () => {
+    expect(parseStats("")).toEqual([]);
+    expect(parseStats("mavlink-router version 2362c62\nOpened UART\n")).toEqual([]);
+  });
+
+  // The journal interleaves. A block split by an unrelated line is still a block.
+  it("skips lines that are not part of a block", () => {
+    const noisy = REAL.replace("UART Endpoint [6]autopilot {", "some other log line\nUART Endpoint [6]autopilot {");
+    expect(parseStats(noisy).map((e) => e.name)).toEqual(["gcs0", "gcs1", "autopilot"]);
+  });
+
+  // A truncated tail is the ordinary case when reading the last N journal
+  // lines: the newest block is usually half-written.
+  it("drops a block whose counters are not all present rather than guessing at zero", () => {
+    const cut = REAL.slice(0, REAL.indexOf("UART Endpoint"));
+    expect(parseStats(cut + "UART Endpoint [6]autopilot {\n\tReceived messages {\n").map((e) => e.name))
+      .toEqual(["gcs0", "gcs1"]);
+  });
+});
+```
+
+- [ ] **Step 2: Run it and watch it fail**
+
+Run: `npx vitest run --root packages/yonder-core src/mav/router/stats.test.ts`
+Expected: FAIL — `Cannot find module './stats.js'`.
+
+- [ ] **Step 3: Write it**
+
+A block starts on a line matching `/^(UART|UDP|TCP) Endpoint \[\d+\](\S+) \{$/` and ends at
+a line that is exactly `}` at the same depth. Inside, take `Handled:`, the `Total:` under
+`Transmitted messages`, `CRC error:` and `Sequence lost:`. **A block missing any of the four
+is dropped, not defaulted** — a truncated read must not report a silent ground station as
+having gone quiet, which is a lamp changing colour because the journal was cut mid-write.
+
+Lowercase the endpoint kind. Keep the order the text gave, because the configuration order is
+what the page's three rows are in.
+
+**No regex over the whole text.** Parse line by line with an explicit current-block, so an
+interleaved journal line cannot join two blocks.
+
+- [ ] **Step 4: Run the tests**
+
+Run: `npx vitest run --root packages/yonder-core src/mav/router/stats.test.ts`
+Expected: PASS, all five.
+
+- [ ] **Step 5: Commit**
+
+```bash
+rm -f node_modules
+git add packages/yonder-core/src/mav/router/stats.ts packages/yonder-core/src/mav/router/stats.test.ts
+git commit -s -m "feat(mav): read the router's own per-endpoint counters — R-MAV-10"
+```
+
+**What Task 2 did not settle, and this task must not pretend it did.** The bench ran with no
+TCP client attached, so **nothing has established how a connected TCP client appears in this
+output** — whether as its own block, as a counter on the server's, or not at all. `parseStats`
+therefore reports what it sees and derives nothing. `LinkState.tcpClients` stays `null` until
+a bench with a client attached says what to count, and `null` draws no number rather than a
+zero nobody measured. Recorded so the gap is a known one rather than a wrong readout.
+
+---
+
 ## Task 9: `link.ts` — one link state
 
-§6. **Check Task 2's finding first**: if the router attributes traffic per endpoint, `groundStations` becomes an array with a state per entry.
+§6. **Task 2 settled the question this task used to carry.** The router does attribute traffic per endpoint, so `groundStations` is an array with a state per entry, fed by `parseStats` (Task 8b) rather than inferred from the merged loopback copy.
 
 **Files:**
 - Create: `packages/yonder-core/src/mav/link.ts`
 - Test: `packages/yonder-core/src/mav/link.test.ts`
 
 **Interfaces:**
-- Consumes: `Heartbeat` (Task 5), `DetectOutcome` (Task 6), `Clock`
+- Consumes: `Heartbeat` (Task 5), `DetectOutcome` (Task 6), `EndpointStats` (Task 8b), `Clock`
 - Produces:
   ```ts
   export interface LinkState {
@@ -1509,6 +1673,8 @@ git commit -s -m "feat(mav): generate mavlink-router's configuration from config
     constructor(opts?: { clock?: Clock; windowMs?: number });
     observed(outcome: DetectOutcome): void;
     heard(heartbeat: Heartbeat): void;
+    /** One reading of the router's own counters (Task 8b). */
+    sampled(stats: EndpointStats[]): void;
     stopped(): void;
     state(): LinkState;
   }
@@ -1521,6 +1687,7 @@ git commit -s -m "feat(mav): generate mavlink-router's configuration from config
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
 import type { Clock } from "../apply/types.js";
+import type { EndpointStats } from "./router/stats.js";
 import { LinkTracker } from "./link.js";
 
 function fakeClock(): Clock & { advance(ms: number): void } {
@@ -1567,23 +1734,68 @@ describe("LinkTracker", () => {
     expect(t.state().heartbeatHz).toBeCloseTo(1, 1);
   });
 
-  // §6: this is the whole point — "configured" is not "connected".
-  it("only calls a ground station answering when one has actually answered", () => {
+  // §6: this is the whole point — "configured" is not "connected". The
+  // attribution comes from the router's own counters (Task 8b), never from the
+  // merged loopback copy, in which every ground station identifies itself the
+  // same way. Measured on a board 2026-09-05: the answering endpoint's count
+  // tracked its replies exactly and the silent one stayed at zero.
+  const udp = (name: string, received: number, transmitted: number): EndpointStats =>
+    ({ name, kind: "udp", received, transmitted, crcErrors: 0, sequenceLost: 0 });
+
+  it("calls a ground station answering only once its own counter has moved", () => {
     const clock = fakeClock();
     const t = new LinkTracker({ clock });
     t.observed({ kind: "found", device: "/dev/ttyAMA0", baud: 57600, vehicle: "ArduPlane", system: 1 });
     t.heard(vehicle);
-    expect(t.state().groundStationAnswering).toBe(false);
-    t.heard(gcs);
-    expect(t.state()).toMatchObject({ groundStationAnswering: true, groundStationLastHeardMs: 0 });
+
+    t.sampled([udp("gcs0", 0, 954), udp("gcs1", 0, 954)]);
+    expect(t.state().groundStations).toEqual([
+      { name: "gcs0", answering: false, lastHeardMs: null },
+      { name: "gcs1", answering: false, lastHeardMs: null },
+    ]);
+
+    clock.advance(1_000);
+    t.sampled([udp("gcs0", 21, 1008), udp("gcs1", 0, 1008)]);
+    expect(t.state().groundStations).toEqual([
+      { name: "gcs0", answering: true, lastHeardMs: 0 },
+      { name: "gcs1", answering: false, lastHeardMs: null },
+    ]);
   });
 
-  it("stops calling a ground station answering once it has gone quiet", () => {
+  // The console must be able to say *which* one went quiet, which is the whole
+  // reason this is an array.
+  it("names the station that went quiet, not merely that one did", () => {
     const clock = fakeClock();
     const t = new LinkTracker({ clock, windowMs: 5_000 });
-    t.heard(gcs);
+    t.sampled([udp("gcs0", 1, 60), udp("gcs1", 1, 60)]);
+    clock.advance(1_000);
+    t.sampled([udp("gcs0", 2, 120), udp("gcs1", 1, 120)]);
     clock.advance(6_000);
-    expect(t.state().groundStationAnswering).toBe(false);
+    t.sampled([udp("gcs0", 3, 480), udp("gcs1", 1, 480)]);
+
+    expect(t.state().groundStations).toEqual([
+      { name: "gcs0", answering: true, lastHeardMs: 0 },
+      { name: "gcs1", answering: false, lastHeardMs: 7_000 },
+    ]);
+  });
+
+  // The UART is in the same output and is not a ground station.
+  it("keeps only the endpoints that are ground stations, in configuration order", () => {
+    const t = new LinkTracker({ clock: fakeClock() });
+    t.sampled([
+      udp("gcs0", 0, 954),
+      { name: "autopilot", kind: "uart", received: 955, transmitted: 0, crcErrors: 0, sequenceLost: 0 },
+      udp("gcs1", 0, 954),
+    ]);
+    expect(t.state().groundStations.map((g) => g.name)).toEqual(["gcs0", "gcs1"]);
+  });
+
+  // Nothing has measured how a connected TCP client appears in the router's
+  // output (Task 8b), so this reports nothing rather than a zero.
+  it("leaves the TCP client count unmeasured rather than reporting zero", () => {
+    const t = new LinkTracker({ clock: fakeClock() });
+    t.sampled([udp("gcs0", 0, 954)]);
+    expect(t.state().tcpClients).toBeNull();
   });
 
   it("keeps the autopilot half alive when the operator stops telemetry (R-MAV-09)", () => {
@@ -1602,12 +1814,12 @@ Expected: FAIL — module not found.
 
 - [ ] **Step 3: Write it**
 
-Implement `LinkTracker` to satisfy exactly those tests: keep the last `DetectOutcome`, a ring of vehicle-heartbeat timestamps for the rate (`heartbeatHz = (n - 1) / (last - first)` in seconds, `null` below two samples — a rate from one arrival is a claim no measurement supports), and the timestamp of the last heartbeat with `fromVehicle === false` for the ground-station half. `windowMs` defaults to `5_000`. `stopped()` sets the phase and leaves every autopilot-side field untouched.
+Implement `LinkTracker` to satisfy exactly those tests: keep the last `DetectOutcome`, a ring of vehicle-heartbeat timestamps for the rate (`heartbeatHz = (n - 1) / (last - first)` in seconds, `null` below two samples — a rate from one arrival is a claim no measurement supports), and, for the ground-station half, **the last sample at which each endpoint's `received` counter increased** — not the last heartbeat with `fromVehicle === false`, which is what an earlier draft said and what Task 2 disproved. Keep the previous sample to difference against; an endpoint seen for the first time has `lastHeardMs: null`, and one whose counter has not moved within `windowMs` is no longer answering. Drop endpoints whose `kind` is not `"udp"` or `"tcp"` — the UART is in the same output and is not a ground station. `windowMs` defaults to `5_000`. `stopped()` sets the phase and leaves every autopilot-side field untouched.
 
 - [ ] **Step 4: Run the tests**
 
 Run: `npx vitest run --root packages/yonder-core src/mav/link.test.ts`
-Expected: PASS, all eight.
+Expected: PASS, all ten.
 
 - [ ] **Step 5: Commit**
 
@@ -1743,7 +1955,8 @@ it replaces emits today, so the page does not move when the fake is deleted:
 | Widget | Payload shape, from the built page |
 |---|---|
 | `tel-ann-link`, `tel-ann-recv`, `tel-ann-state`, `stat-ann-feed` | `{ state, message }` — a `CommandStatus`. `state` picks the tone, `message` is the caption |
-| `tel-port`, `tel-speed`, `tel-vehicle`, `tel-hb`, `tel-heard`, `tel-answered`, `tel-atboot`, `tel-ingest`, `tel-tcp` | a plain string, already in words: `"/dev/ttyAMA0"`, `"57 600 baud"`, `"ArduPlane · system 1"`, `"1.0 Hz"`, `"0.4 s ago"` |
+| `tel-gcs-0..2` | `{ state, message }` too, **one per ground station**, from `LinkState.groundStations[i]`. The node carries no label, so the message is the whole caption and must name the row: `"GCS 0 · answering"` (`confirmed`), `"GCS 1 · silent"` (`pending` — it answered before and has gone quiet), `"GCS 2 · not set"` or `"· no reply"` (`idle`). These replaced the rows' `ui-text` labels when Task 2 showed the router attributes traffic per endpoint |
+| `tel-port`, `tel-speed`, `tel-vehicle`, `tel-hb`, `tel-heard`, `tel-answered`, `tel-atboot`, `tel-ingest`, `tel-tcp` | a plain string, already in words: `"/dev/ttyAMA0"`, `"57 600 baud"`, `"ArduPlane · system 1"`, `"1.0 Hz"`, `"0.4 s ago"`. **`tel-answered` names the station** — `"GCS 0 · 0.3 s ago"` — because three rows now carry their own state and an unattributed "last answered" asks a question the page can answer |
 | `tel-chain-1..3` | a plain string: `"OK · 1.0 Hz"`. A link nobody attempted reads `"— not checked"`, never a cross |
 | `tel-host-0..2`, `tel-port-0..2` | the configured value, so the field opens showing its setting (`R-UI-17`); an unset host is `""` |
 | `tel-spark` | `{ series: { rx: number[], tx: number[] }, peak, span, known }` |
@@ -1916,7 +2129,14 @@ leaving the renderer to `mkdir` into a read-only filesystem.
 
 ## Self-Review
 
-**Spec coverage.** §1 → Task 3 and the slice this whole plan implements. §2 → Task 15. §3 → Tasks 1, 6, 7. §4 → Tasks 8, 10, 16. §5 → Task 4. §6 → Tasks 2, 9. §7 → Tasks 4 and 6 (each requirement lands in the commit that implements it, per rule 3). §8 → Tasks 12, 13, 14. §9 → the file structure above. §10 → Tasks 1 and 2, deliberately first.
+**Spec coverage.** §1 → Task 3 and the slice this whole plan implements. §2 → Task 15. §3 → Tasks 1, 6, 7. §4 → Tasks 8, 10, 16. §5 → Task 4. §6 → Tasks 2, 8b, 9. §7 → Tasks 4 and 6 (each requirement lands in the commit that implements it, per rule 3). §8 → Tasks 12, 13, 14. §9 → the file structure above. §10 → Tasks 1 and 2, deliberately first.
+
+**A third gap, found by the pre-flight scan on 2026-09-05 and closed by Task 8b.** Three
+`LinkState` fields — `groundStations`, `traffic` and `tcpClients` — each said they came from
+`mavlink-router`'s own statistics, and **no task read them**. Task 10 shells out but only for
+the service lifecycle; Task 11 reads heartbeats off the loopback socket. The page's sparkline,
+its TCP client count and its three per-station marks would all have had no source. Task 8b is
+the parser; Task 9 folds it in; Task 10 fetches the text.
 
 **Two gaps I found and am recording rather than hiding:**
 
