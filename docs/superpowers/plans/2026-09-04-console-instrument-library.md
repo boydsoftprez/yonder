@@ -455,7 +455,7 @@ it("has one key per field, and no field without a key", () => {
 ```ts
 export interface ControlDescriptor {
   readonly key: keyof CameraCapabilities;
-  readonly label: string;                       // "Shutter"
+  readonly label: string;                       // "Shutter" — the heading form
   readonly unit: string;                        // "µs", "K", "" — never uppercased downstream
   readonly toDisplay: (raw: number) => number;
   readonly toRaw: (shown: number) => number;
@@ -466,7 +466,15 @@ export interface ControlDescriptor {
 export const DESCRIPTORS: Record<keyof CameraCapabilities, ControlDescriptor>;
 export interface DescriptorView { label; unit; min; max; step; current; default }
 export function describe(key, range: ControlRange): DescriptorView;  // display units
+/** The label lowercased for use inside a sentence: `auto exposure has it`. */
+export function sentenceLabel(key: keyof CameraCapabilities): string;
 ```
+
+**Every `label` is the heading form**, capitalised the same way, because a page
+draws control headings from this field and three lowercase headings among
+sixteen would be a visible defect. The one place a label appears mid-sentence
+is a gated control naming the control that holds it, and that place calls
+`sentenceLabel` rather than the field reading lowercase for everyone else.
 
 **Why:** Spec §7 — V4L2 absolute exposure is 100 µs per raw unit; raw 156 is
 15 600 µs. Config stores raw; the page shows µs; the conversion lives here,
@@ -511,8 +519,10 @@ it("no descriptor carries an uppercased unit", () => {
 - Produces: `CONTROL_MAP` gains ten pairs (`gain`, `backlight_compensation`,
   `gamma`, `sharpness`, `saturation`, `hue`, `power_line_frequency`,
   `auto_exposure`, `white_balance_automatic`, `focus_automatic_continuous`).
-  A control whose range is `inactive` becomes `gated(range, by)` with `by`
-  from `DESCRIPTORS[key].gates[0]`'s label. `pan_absolute`/`tilt_absolute`
+  A control whose range is `inactive` becomes `gated(range, by)` with `by.id`
+  the gating key from `DESCRIPTORS[key].gates[0]` and `by.label` that key's
+  `sentenceLabel()` — `auto exposure`, lowercase because it is read inside
+  `exposure: auto exposure has it`, never the heading form. `pan_absolute`/`tilt_absolute`
   present → `aim: advertised(undefined, reason)`.
 
 - [ ] **Step 1: Write the failing tests**
@@ -1273,8 +1283,16 @@ it("latency beyond the budget inhibits new motion rather than admitting stale co
 
 - [ ] **Step 1: Decode `camera/0x80…0x88`** from recorded pushes — mode, record time, battery, card; failing tests from the recordings; pass.
 - [ ] **Step 2: Drive, under the guard, mounted, with a card in the camera:** photo `0x01`, shutter `0x28`, focus `0x24/0x30/0x32`, record format `0x18`, sensor size `0x12`, standalone mode `0x44`, and record `0x02` confirmed by the push. Record each effect in the hardware note the way it records the others. **Only what answered becomes `present`; what did not becomes `advertised` with the note's sentence.**
-- [ ] **Step 3: Measure the complete stop bound** — browser intent to observed rest — with the browser disconnected and USB intact, five runs; record beside Task 2's device term; confirm the sum is inside Task 36's budget or shrink the lease.
-- [ ] **Step 4: Commit** — `git commit -s -m "feat(video): the camera's state push, every untried command driven, and the stop bound measured end to end — R-CAM-15"`
+- [ ] **Step 3: Give the Pocket 2 its own gate rules.** Every `openWhen` in
+  `video/descriptors.ts` is the bench ELP's, read off its fixture, and that
+  file says so: a second device gets its own rule written the same way, never
+  a branch threaded into this one's. The Pocket 2 leaves shutter live under
+  Manual **or** Shutter priority, where the ELP allows Manual alone, so a
+  shared table would gate a working control. Write that device's table beside
+  its source, of the same `ControlDescriptor` type, and prove both rules with
+  a test each. **Only what Step 2 actually drove may claim to be a gate.**
+- [ ] **Step 4: Measure the complete stop bound** — browser intent to observed rest — with the browser disconnected and USB intact, five runs; record beside Task 2's device term; confirm the sum is inside Task 36's budget or shrink the lease.
+- [ ] **Step 5: Commit** — `git commit -s -m "feat(video): the camera's state push, every untried command driven, and the stop bound measured end to end — R-CAM-15"`
 
 ---
 
