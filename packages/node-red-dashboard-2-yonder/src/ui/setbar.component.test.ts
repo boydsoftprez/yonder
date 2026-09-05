@@ -365,4 +365,48 @@ describe("not-offered — draws nothing at all (R-UI-20)", () => {
     expect(w.find(".y-sb").exists()).toBe(false);
     expect(w.html().replace(/<!--.*?-->/g, "").trim()).toBe("");
   });
+
+it("rounds a negative value the same way it rounds a positive one", () => {
+    // Found in review by measurement: an unsigned epsilon nudge only ever
+    // pushes upward, so it corrects the positive half-boundaries and breaks
+    // the negative ones — `(-4.995).toFixed(2)` is already right at -5.00 and
+    // an unsigned nudge makes it -4.99. Dormant only because nothing shipped
+    // draws a negative fraction yet, and this component already takes
+    // negative ranges: the gimbal's pan is min -648000.
+    expect(bar({ actual: -4.995, precision: 2, unit: "dB" }).find(".y-sb__val").text())
+        .toBe("-5.00 dB");
+    expect(bar({ actual: 4.995, precision: 2, unit: "dB" }).find(".y-sb__val").text())
+        .toBe("5.00 dB");
+    // And zero stays zero rather than acquiring a sign.
+    expect(bar({ actual: 0, precision: 1, unit: "dB" }).find(".y-sb__val").text())
+        .toBe("0.0 dB");
+});
+
+it("offers a press target larger than the bar it paints", () => {
+    // The blueprint grew the hit area with a transparent border and kept the
+    // painted bar at its own size with background-clip. Dropping that shrank
+    // the target to the visible 220x10 — a silent regression review caught.
+    // A notebook is the primary surface, but a tablet is a real one.
+    const trk = getComputedStyle(bar({ actual: 2000 }).find(".y-sb__trk").element);
+    expect(trk.borderTopWidth).not.toBe("0px");
+    expect(trk.borderTopStyle).toBe("solid");
+    expect(trk.backgroundClip).toBe("padding-box");
+    // content-box, so the border cannot eat the width the pointer maths assumes.
+    expect(trk.boxSizing).toBe("content-box");
+});
+
+it("still says a draft is pending when the control cannot be pressed", () => {
+    // Deliberate, and worth pinning because the combination looks like an
+    // oversight. A draft is a fact about what an operator asked for on Setup;
+    // whether the live control can be pressed right now is a different fact.
+    // Hiding the pending line on a gated or readonly bar would lose the first
+    // to the second, and an operator would find an unexplained change waiting
+    // on Setup. Zero grabbable marks, and the line still shown.
+    for (const props of [{ state: "gated", reason: "while auto exposure is aperture priority" },
+                         { readonly: true }]) {
+        const w = bar({ actual: 1800, requested: 2000, ...props });
+        expect(w.findAll("[data-grab]"), "a bar that cannot be pressed offers no handle").toHaveLength(0);
+        expect(w.text(), "but the draft is still declared").toContain("Pending");
+    }
+});
 });

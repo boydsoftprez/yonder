@@ -155,8 +155,18 @@ const TRACK_WIDTH = 220
  * cause.
  */
 function fixed (value, precision) {
+    // **The nudge follows the sign, and that is not a detail.** Adding
+    // `Number.EPSILON` outright only ever pushes upward, which happens to fix
+    // the positive half-boundary cases and silently breaks the negative ones:
+    // `(-4.995).toFixed(2)` is already right at `-5.00`, and an unsigned
+    // nudge turns it into `-4.99`. Caught in review, which measured it —
+    // 268 positive cases corrected and none broken, against 289 negative
+    // cases broken and none corrected. Dormant only because nothing shipped
+    // draws a negative fraction yet, and this component already takes
+    // negative ranges: the gimbal's pan is min -648000. Nudge away from zero.
     const factor = 10 ** precision
-    return (Math.round((value + Number.EPSILON) * factor) / factor).toFixed(precision)
+    const nudged = value + Math.sign(value) * Number.EPSILON * Math.abs(value || 1)
+    return (Math.round(nudged * factor) / factor).toFixed(precision)
 }
 
 export default {
@@ -297,6 +307,17 @@ export default {
     background: var(--yonder-track, #161b21);
     cursor: pointer;
     touch-action: none;
+    /* **The press target is bigger than the bar, deliberately.** A
+       transparent border grows the hit area to about 232×22 while
+       `background-clip` keeps the painted bar at its 220×10, so the thing an
+       operator hits is not the thing they see. The blueprint had this and
+       dropping it was a silent regression review caught: a notebook is the
+       primary surface here but a tablet is a real one, and a 10-pixel-tall
+       press target is a miss waiting to happen. `content-box` so the border
+       does not eat the width the pointer geometry assumes. */
+    border: 6px solid transparent;
+    box-sizing: content-box;
+    background-clip: padding-box;
 }
 .y-sb__trk:hover { outline: 1px solid color-mix(in srgb, var(--yonder-select, #2ad4f0) 40%, transparent); }
 /* The readings: below the track, `pointer-events: none`, never a filled
