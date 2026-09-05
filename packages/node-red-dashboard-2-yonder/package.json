@@ -43,7 +43,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json && node ../../scripts/copy-node-html.mjs && node scripts/build-widgets.mjs",
     "build:nodes": "tsc -p tsconfig.json && node ../../scripts/copy-node-html.mjs",
-    "test": "vitest run"
+    "test": "vitest run",
+    "gallery": "node gallery/build-themes.mjs && vite build --config gallery/vite.config.mjs"
   },
   "dependencies": {
     "yonder-core": "^0.1.0"

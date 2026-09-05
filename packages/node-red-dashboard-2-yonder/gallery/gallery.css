@@ -1,0 +1,113 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * The harness around the instruments, not the instruments themselves —
+ * every rule an instrument draws with comes from its own `<style scoped>`
+ * and from the theme stylesheet `main.js` swaps in. This file only lays
+ * out the swatch grid and the bar above it, and deliberately does nothing
+ * to the width or the display mode of what lands in a stage: some of these
+ * components are `display:flex` and fill it, and at least two (the
+ * annunciator, the hold key) are `inline-flex` and size to their own words
+ * on purpose (ADR-0009) — a stage that forced a shared width on both would
+ * put the annunciator's border back around the 475px empty box its own
+ * doc comment describes fixing. Plain block flow gives every one of them
+ * exactly the box its own author intended, for free.
+ */
+body {
+  margin: 0;
+  background: var(--yonder-background, #0a0c0f);
+  color: var(--yonder-value, #fff);
+  font-family: var(--yonder-font, ui-sans-serif, system-ui);
+}
+
+.g-root { min-height: 100vh; }
+
+.g-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  flex-wrap: wrap;
+  padding: 10px 18px;
+  background: var(--yonder-pane, #090d12);
+  border-bottom: 1px solid var(--yonder-divider, #2b333c);
+}
+.g-bar__t {
+  font-size: 11px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--yonder-label, #7f8a95);
+}
+.g-bar__action {
+  font-size: 11px;
+  color: var(--yonder-label, #7f8a95);
+  font-family: var(--yonder-font-mono, ui-monospace, monospace);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 46ch;
+}
+
+.g-switch { display: flex; gap: 6px; }
+.g-switch button {
+  background: transparent;
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  padding: 7px 14px;
+  cursor: pointer;
+  border: 1px solid var(--yonder-divider, #2b333c);
+  border-radius: 2px;
+  color: var(--yonder-label, #7f8a95);
+}
+.g-switch button.on {
+  color: var(--yonder-select, #2ad4f0);
+  border-color: var(--yonder-select, #2ad4f0);
+}
+
+.g-page { padding: 22px 26px 60px; }
+
+/*
+ * `align-items: start` rather than the grid default of `stretch`: cards
+ * size to their own content, so a row that happens to hold the picture
+ * specimen beside a one-line data bar does not stretch the data bar's card
+ * to match it. Simpler, and nothing to get wrong, versus distributing that
+ * leftover height back down into a stage a shorter instrument would then
+ * have to be centred within.
+ */
+.g-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+.g-cell {
+  border: 1px solid var(--yonder-divider, #2b333c);
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--yonder-pane, #090d12);
+}
+
+.g-cap {
+  font-size: 9.5px;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--yonder-label, #7f8a95);
+  padding: 10px 13px 0;
+}
+
+.g-sub {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--yonder-label, #7f8a95);
+  opacity: .85;
+  padding: 4px 13px 0;
+}
+
+.g-stage {
+  padding: 15px 13px 18px;
+  background: var(--yonder-display, #04060a);
+  margin-top: 10px;
+  min-height: 70px;
+}
