@@ -14,7 +14,8 @@
       <i class="d-fill" :style="{ width: pct(displayed) }" />
       <i v-if="showCommanded" class="d-cmd" :style="{ left: pct(commanded) }" />
       <i v-if="state === 'present'" class="d-ptr" :style="{ left: pct(actual) }" />
-      <i v-if="pending !== null" class="d-pend" :style="{ left: pct(pending) }" />
+      <i v-if="grabAt !== null" class="d-pend" :style="{ left: pct(grabAt) }"
+         :aria-label="pending !== null ? 'requested' : 'set'" />
     </div>
     <div v-if="fine" class="d-fine">{{ fine }}</div>
     <div v-if="pending !== null" class="d-pend-note">Pending &middot; apply on Setup</div>
@@ -46,6 +47,13 @@ export default {
   computed: {
     shown () { return this.state === 'gated' ? '——' : this.actual.toFixed(this.precision) },
     displayed () { return this.state === 'present' ? this.actual : this.min },
+    /* The handle sits at the pending value when there is one and at the
+       device's value otherwise, so the bar always has exactly one thing
+       that moves — never none, never two. */
+    grabAt () {
+      if (this.state !== 'present') return null
+      return this.pending !== null ? this.pending : this.actual
+    },
     showCommanded () {
       return this.state === 'present' && this.commanded !== null &&
         Math.abs(this.commanded - this.actual) > this.step / 2
@@ -90,17 +98,29 @@ export default {
   background: var(--yonder-track,#161b21); cursor:pointer; touch-action:none;
   background-clip:padding-box; border:6px solid transparent; box-sizing:content-box; }
 .d-trk:hover { outline:1px solid color-mix(in srgb, var(--yonder-select,#2ad4f0) 40%, transparent); }
-.d-fill { position:absolute; inset:0 auto 0 0; border-radius:1px; background: var(--yonder-select,#2ad4f0);
-  pointer-events:none; }
-.d-ptr { position:absolute; top:-3px; width:2px; height:16px; margin-left:-1px;
-  background: var(--yonder-value,#fff); pointer-events:none; }
-.d-cmd { position:absolute; top:-5px; width:2px; height:20px; margin-left:-1px;
-  background: var(--yonder-waiting,#ffcf28); pointer-events:none; }
-/* The third mark: hollow, so it reads as "requested" rather than "measured"
-   even sitting right beside the solid actual/commanded ticks. */
-.d-pend { position:absolute; top:-4px; width:8px; height:8px; margin-left:-4px;
-  border-radius:50%; border:2px solid var(--yonder-select,#2ad4f0);
-  background: var(--yonder-display,#04060a); pointer-events:none; }
+/* **Exactly one mark may look draggable, and it is the requested one.**
+   This bar used to fill the track to the device's value and end it in a tick.
+   A filled track ending in a tick is the shape of a slider, and the hollow
+   ring beside it is the shape of a thumb, so the operator met two things that
+   looked grabbable and found that only one moved. He said so within a minute
+   of using it. The behaviour was right; the drawing was not.
+
+   So the readings now sit *below* the track as carets, where nothing invites
+   a grab, and the fill is gone. What remains on the track is the one thing
+   that is a request rather than a reading. */
+.d-fill { display:none; }
+.d-ptr { position:absolute; top:11px; width:0; height:0; margin-left:-4px;
+  border-left:4px solid transparent; border-right:4px solid transparent;
+  border-bottom:5px solid var(--yonder-value,#fff); pointer-events:none; }
+.d-cmd { position:absolute; top:11px; width:0; height:0; margin-left:-5px;
+  border-left:5px solid transparent; border-right:5px solid transparent;
+  border-bottom:6px solid var(--yonder-waiting,#ffcf28); pointer-events:none; }
+/* The one grabbable mark: solid, on the track, and large enough to read as a
+   handle beside the carets that are not one. */
+.d-pend { position:absolute; top:-3px; width:14px; height:14px; margin-left:-7px;
+  border-radius:50%; border:2px solid var(--yonder-display,#04060a);
+  background: var(--yonder-select,#2ad4f0); pointer-events:none;
+  box-shadow:0 0 0 1px var(--yonder-select,#2ad4f0); }
 .d-pend-note { font-size:10.5px; margin-top:4px; color: var(--yonder-select,#2ad4f0); }
 .d-fine { font-size:10px; letter-spacing:.04em; color: var(--yonder-label,#7f8a95);
   font-variant-numeric: tabular-nums; }
