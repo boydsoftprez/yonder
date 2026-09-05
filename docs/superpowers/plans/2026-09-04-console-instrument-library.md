@@ -758,7 +758,38 @@ it("returns exactly direction, reachable and note", () => { expect(Object.keys(o
 ```
 
 - [ ] **Step 2–4: Fail; implement; pass; mutation-check** — `reachable = true` for listeners: red; remove the `enabled` filter: red. Restore.
-- [ ] **Step 5: Commit** — `git commit -s -m "feat(video): an output can be stopped without losing its secret, and the console says what can reach it — R-VID-16, R-UI-24"`
+- [ ] **Step 5: The uplink budget must stop counting an output that is stopped**
+
+`uplinkBudget()` in `video/present.ts` skips a camera that is disabled —
+`if (!camera.enabled) continue;` — and then counts every one of its outputs
+regardless of `output.enabled`. So an operator who stops an output watches the
+budget instrument keep charging them for its bitrate, on a page the daemon
+already serves. The precedent for the fix is one line above the bug.
+
+```ts
+it("stops counting an output the operator stopped", () => {
+  const b = uplinkBudget([{ ...camera, outputs: [
+    { ...rtpOutput, enabled: false }, { ...rtspOutput, enabled: true },
+  ] }]);
+  expect(b.segments.map((s) => s.label)).toEqual([
+    `${camera.name} · rtsp`, `${camera.name} · preview`,
+  ]);
+});
+```
+
+Mutation-check it: drop the `enabled` test from the output loop and this goes
+red while the disabled-*camera* test stays green, so the two are not covering
+for each other.
+
+**Two neighbouring places are deliberately left alone, and the reasons belong
+in the code so nobody 'fixes' them later.** `ConfigSchema`'s SRT port guard
+refuses a port the media server holds even for a disabled output: refusing at
+configuration time is better than refusing when an operator flips the switch,
+possibly in flight. `pipeline.ts`'s SRT refusal stands until R-VID-06 gives
+SRT a posture, and *SRT is not supported yet* is true whether or not this
+particular output is switched on.
+
+- [ ] **Step 6: Commit** — `git commit -s -m "feat(video): an output can be stopped without losing its secret, and the console says what can reach it — R-VID-16, R-UI-24"`
 
 ---
 
