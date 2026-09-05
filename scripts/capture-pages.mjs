@@ -671,7 +671,7 @@ for (const page of pages) {
       note(`  FAIL  ${page.title} (${palette}) changed shape: ${was.widgets.length} widgets -> ${recorded.widgets.length}, ${moved.length} moved, ${reworded.length} reworded`);
       for (const w of moved.slice(0, 4)) note(`          ${w.key} now ${w.box.w}x${w.box.h} at ${w.box.x},${w.box.y}`);
       for (const f of reworded.slice(0, 4)) note(`          ${f.key} now says "${f.text.slice(0, 70)}"`);
-      note(`          look at ${join("docs/console/capture", stem + ".png")}, then re-run with ACCEPT_SHAPE=1`);
+      note(`          look at ${join(artifacts, stem + ".png")}, then re-run with ACCEPT_SHAPE=1`);
       changed += 1;
     }
   }

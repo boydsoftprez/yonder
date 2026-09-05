@@ -287,10 +287,14 @@ committed reference is a `.darwin.json` and the runner is Linux, so the gate tak
 *record* branch and writes `.linux.json` files that are **untracked** — which `git diff`
 does not see, and did not, on every run since the job was written.
 
-**A picture**, in `docs/console/capture/`, written every run. The committed copy masks live
-readings — a load average changes between two runs and would leave the file permanently
-dirty — so what it records is the layout. The unmasked copy goes to `vendor/capture/`, which
-CI uploads as an artifact.
+**A picture**, in `vendor/capture/`, written every run and uploaded by CI as an artifact a
+reviewer downloads. **It is not committed**, and that is a correction rather than an
+omission: a parallel set under `docs/console/` was hand-copied there by whoever remembered,
+read by no script, and compared by no job — 7.3 MB gating nothing and growing two files per
+page per state. The evidence that is kept and compared is the geometry, in
+`docs/console/shape/`; the picture is per-platform pixels, and the defect that provoked the
+legibility rule showed its words plainly at 1.05:1. A picture is committed only when it is
+*evidence* for a known issue rather than a gate artifact, and then one file at a time.
 
 **And a page in more than one state, where it has them.** R-UI-12 says a surface that hides
 part of itself is captured in each of those parts. A tabbed page hides its other tabs, which
