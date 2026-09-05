@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { expect, it } from "vitest";
-import { DESCRIPTORS, describe } from "./descriptors.js";
+import { DESCRIPTORS, describe, sentenceLabel } from "./descriptors.js";
 import { CAPABILITY_KEYS } from "./capability.js";
 
 // `describe` here is this file's own conversion function (`./descriptors.js`),
@@ -98,12 +98,37 @@ it("only the three controls the bench fixture actually gates carry gates and ope
   }
 });
 
-it("a gated control's gate resolves to a descriptor labelled in the operator's own lowercase words", () => {
-  // The exact shape Task 7 reads: DESCRIPTORS[key].gates[0], looked up again
-  // in DESCRIPTORS, for the label a `gated()` capability carries as `by.label`
-  // (capability.ts, capability.test.ts, present.test.ts all fix this at
-  // "auto exposure", lowercase, for the same reason this file does).
-  expect(DESCRIPTORS[DESCRIPTORS.exposure.gates![0]].label).toBe("auto exposure");
-  expect(DESCRIPTORS[DESCRIPTORS.whiteBalance.gates![0]].label).toBe("auto white balance");
-  expect(DESCRIPTORS[DESCRIPTORS.focus.gates![0]].label).toBe("auto focus");
+// --- Fix round 1: `label` is the heading form for every key, and
+// `sentenceLabel` is the one place that derives the mid-sentence form from
+// it. The prior version of this file stored the three gate labels lowercase
+// directly on `label`, which is exactly the "three of nineteen wrong"
+// defect a sampled test would miss — so this checks every key, not the
+// three that used to be different. --------------------------------------
+
+it("every label reads as a heading, capitalised the same way for every key — checked over all of them, not a sample", () => {
+  for (const key of CAPABILITY_KEYS) {
+    expect(DESCRIPTORS[key].label).toMatch(/^[A-Z]/);
+  }
+});
+
+it("sentenceLabel lowercases the heading for use inside a sentence — the exact shape a gated control needs", () => {
+  // The exact shape Task 7 reads: DESCRIPTORS[key].gates[0], then
+  // sentenceLabel of that key, for the label a `gated()` capability carries
+  // as `by.label` (capability.ts, capability.test.ts, present.test.ts all
+  // fix this at "auto exposure", lowercase, for the same reason).
+  expect(sentenceLabel(DESCRIPTORS.exposure.gates![0])).toBe("auto exposure");
+  expect(sentenceLabel(DESCRIPTORS.whiteBalance.gates![0])).toBe("auto white balance");
+  expect(sentenceLabel(DESCRIPTORS.focus.gates![0])).toBe("auto focus");
+  // Named literally, as the brief specifies.
+  expect(sentenceLabel("autoExposure")).toBe("auto exposure");
+});
+
+it("sentenceLabel is a plain first-letter lowercase, not special-cased to the three gate keys", () => {
+  expect(sentenceLabel("exposure")).toBe("shutter");
+  // Already lowercase after the first letter, and the first letter has
+  // nowhere further to go — a fixed point, not a no-op that would pass
+  // against a function that never touched its argument at all (the
+  // exposure/autoExposure cases above already rule that out, but this one
+  // is here so a single-word, already-terse label is covered too).
+  expect(sentenceLabel("zoom")).toBe("zoom");
 });

@@ -51,7 +51,7 @@ import type { CameraCapabilities, ControlRange } from "./capability.js";
  */
 export interface ControlDescriptor {
   readonly key: keyof CameraCapabilities;
-  readonly label: string;                       // "Shutter"
+  readonly label: string;                       // "Shutter" — the heading form
   readonly unit: string;                        // "µs", "K", "" — never uppercased downstream
   readonly toDisplay: (raw: number) => number;
   readonly toRaw: (shown: number) => number;
@@ -75,23 +75,18 @@ function deviceNative(key: keyof CameraCapabilities, label: string): ControlDesc
 /**
  * One entry per `CameraCapabilities` key (R-CTL-10, R-CTL-11 … R-CTL-14).
  *
- * **A label-case note for whichever task next reads `autoExposure`,
- * `autoWhiteBalance` or `autoFocus`.** Their `label` is lowercase —
- * `"auto exposure"`, not `"Auto exposure"` — because the call site this task
- * was handed reads a gated control's `gates[0]`, looks up *that* key's
- * descriptor, and drops the result mid-sentence: `` `${label}: ${gateLabel}
- * has it` ``, exactly the shape `capability.ts`'s own `gated()` doc comment
- * and `summarise()` already use (`` `${key}: ${cap.by.label} has it` ``, and
- * `capability.test.ts`/`present.test.ts` both fix `by.label` at
- * `"auto exposure"`, lowercase, for the same reason). A menu-driven control
- * drawn on its own — the "Exposure `Aperture priority | Manual`" segmented
- * control itself, which the interactive blueprint heads `"Auto exposure"`,
- * title case — would read wrong taking this same string verbatim as its
- * heading. One field cannot be both a sentence-initial heading and a
- * mid-sentence name; this file resolves it towards the call site it was
- * actually asked to serve, and whichever task draws that segmented control's
- * own heading will need to capitalise it there (or hold a second string),
- * not read `label` and assume it is already title case.
+ * **Every `label` below is the heading form, capitalised the same way for
+ * every key** — `autoExposure`, `autoWhiteBalance` and `autoFocus` included.
+ * A page draws a control's own heading straight from this field (the
+ * segmented "Exposure `Aperture priority | Manual`" control's heading is
+ * `DESCRIPTORS.autoExposure.label`), so three lowercase entries among the
+ * rest would be a visible, page-wide inconsistency — the shape this file
+ * shipped with once already, corrected here rather than left for a page to
+ * expose. The one place a label is read mid-sentence — a gated control
+ * naming the control that holds it — calls `sentenceLabel` below rather
+ * than reading this field directly; see that function's own comment for
+ * why the two forms are one field derived on demand and not two stored
+ * ones.
  */
 export const DESCRIPTORS: Record<keyof CameraCapabilities, ControlDescriptor> = {
   formats: deviceNative("formats", "Capture formats"),
@@ -149,14 +144,14 @@ export const DESCRIPTORS: Record<keyof CameraCapabilities, ControlDescriptor> = 
   stills: deviceNative("stills", "Stills"),
   saturation: deviceNative("saturation", "Saturation"),
   hue: deviceNative("hue", "Hue"),
-  autoWhiteBalance: deviceNative("autoWhiteBalance", "auto white balance"),
+  autoWhiteBalance: deviceNative("autoWhiteBalance", "Auto white balance"),
   gamma: deviceNative("gamma", "Gamma"),
   gain: deviceNative("gain", "Gain"),
   powerLineFrequency: deviceNative("powerLineFrequency", "Mains frequency"),
   sharpness: deviceNative("sharpness", "Sharpness"),
   backlightCompensation: deviceNative("backlightCompensation", "Backlight compensation"),
-  autoExposure: deviceNative("autoExposure", "auto exposure"),
-  autoFocus: deviceNative("autoFocus", "auto focus"),
+  autoExposure: deviceNative("autoExposure", "Auto exposure"),
+  autoFocus: deviceNative("autoFocus", "Auto focus"),
 };
 
 /** What a page actually draws for one control: display units throughout. */
@@ -194,4 +189,29 @@ export function describe(key: keyof CameraCapabilities, range: ControlRange): De
     current: d.toDisplay(range.current),
     default: d.toDisplay(range.default),
   };
+}
+
+/**
+ * The label lowercased for use inside a sentence: `auto exposure has it`.
+ *
+ * `label` itself is always the heading form (see the note on `DESCRIPTORS`
+ * above), so a gated control naming the control that holds it — the one
+ * place an operator reads a label mid-sentence rather than at the top of a
+ * control — cannot read `label` directly without three headings out of
+ * every twenty-one coming out capitalised wrong. This function is the one
+ * place that lowercases it, derived on demand from that one stored form.
+ *
+ * **Why this is a function and not a second stored field.** The obvious
+ * instinct on meeting this file is that a control's name is one string and
+ * the two casings are a formatting detail close enough to fold into a
+ * single field — which is exactly the instinct that produced this file's
+ * first version: `autoExposure.label` stored `"auto exposure"` directly,
+ * correct for the sentence a gated control builds and wrong for every
+ * heading that same field is also read for. Deriving the sentence form from
+ * the heading form, rather than storing both, leaves exactly one place a
+ * label can be wrong instead of two that can quietly disagree.
+ */
+export function sentenceLabel(key: keyof CameraCapabilities): string {
+  const label = DESCRIPTORS[key].label;
+  return label.charAt(0).toLowerCase() + label.slice(1);
 }

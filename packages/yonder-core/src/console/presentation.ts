@@ -69,6 +69,7 @@ export type { CapabilityFact, BudgetSegment } from "../video/present.js";
 export {
   DESCRIPTORS,
   describe,
+  sentenceLabel,
   type ControlDescriptor,
   type DescriptorView,
 } from "../video/descriptors.js";
