@@ -10,6 +10,7 @@ import YonderPicker from "../src/ui/YonderPicker.vue";
 import YonderPicture from "../src/ui/YonderPicture.vue";
 import YonderReadout from "../src/ui/YonderReadout.vue";
 import YonderSegmented from "../src/ui/YonderSegmented.vue";
+import YonderSetBar from "../src/ui/YonderSetBar.vue";
 import YonderSoftKeys from "../src/ui/YonderSoftKeys.vue";
 import YonderSparkline from "../src/ui/YonderSparkline.vue";
 import YonderTape from "../src/ui/YonderTape.vue";
@@ -290,6 +291,44 @@ export const SPECIMENS = [
     note: "R-UI-20: nothing draws below — no wrapper, no label, no buttons. This bench's global-shutter camera carries no IR-cut filter to switch, so the same absence YonderFacts states in words is stated here by an empty stage, never a second silence of this control's own.",
     component: YonderSegmented,
     props: { label: "Night mode", value: "", options: ["Day", "Night"], state: "not-offered" },
+    payload: undefined,
+    part: true,
+  },
+  {
+    title: "Set bar — shutter, present",
+    note: "R-CTL-11: the bench's own exposure control is raw × 100 µs (packages/yonder-core/src/video/descriptors.ts) — raw 156 is 15600 µs, the coordinator's own worked example for precision. One grabbable mark, sitting at the device's own value: nothing commanded and not yet arrived, no draft pending apply on Setup.",
+    component: YonderSetBar,
+    props: { label: "Shutter", unit: "µs", min: 100, max: 1000000, step: 100, precision: 0, actual: 15600, state: "present" },
+    payload: undefined,
+    part: true,
+  },
+  {
+    title: "Set bar — shutter, gated",
+    note: "Not a fault (R-UI-21): the same bench fixture behind YonderPicker's and YonderSegmented's own gated specimens leaves exposure_time_absolute flags=inactive while auto_exposure sits in Aperture Priority Mode. The value is not meaningfully known while another control holds it, so the readout goes to a double em dash rather than restating a number it cannot vouch for — no reading mark, no grabbable one, neutral tone, dashed track, naming the control that has it.",
+    component: YonderSetBar,
+    props: {
+      label: "Shutter", unit: "µs", min: 100, max: 1000000, step: 100, precision: 0, actual: 15600,
+      state: "gated", reason: "while auto exposure is aperture priority",
+    },
+    payload: undefined,
+    part: true,
+  },
+  {
+    title: "Set bar — preview bitrate, a pending draft",
+    note: "Every mark this bar can draw, at once — the coordinator's own worked example (task-18-brief.md): the device reports 0.4 Mb/s (actual, a caret below the track); 1.0 Mb/s was commanded and has not arrived (a second caret, the waiting tone); 1.5 Mb/s is a Live edit not yet applied on Setup (§7) — the one solid mark on the track, and the only one a press can move. Exactly one mark may look draggable, and it is this one.",
+    component: YonderSetBar,
+    props: {
+      label: "Bitrate", unit: "Mb/s", min: 0.1, max: 4, step: 0.1, precision: 1,
+      actual: 0.4, commanded: 1.0, requested: 1.5, state: "present",
+    },
+    payload: undefined,
+    part: true,
+  },
+  {
+    title: "Set bar — preview bitrate, readonly (Adaptive)",
+    note: "§6: 'PREVIEW · to this browser is Adaptive by default … In Adaptive the bar is a readout, GOING OUT' (R-VID-07, R-VID-13). The encoder is steering itself off the measured link, so there is nothing an operator's press would honour — readonly removes the one grabbable mark entirely rather than merely disabling it, the same way gated and advertised never draw a stray handle, and the reading stays live and in its ordinary colour throughout.",
+    component: YonderSetBar,
+    props: { label: "Going out", unit: "Mb/s", min: 0, max: 4, step: 0.1, precision: 1, actual: 1.8, readonly: true },
     payload: undefined,
     part: true,
   },
