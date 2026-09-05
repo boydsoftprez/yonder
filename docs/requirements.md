@@ -101,6 +101,7 @@ Parameter writes are vehicle commands. R-CMD applies to every requirement here.
 | R-CAM-16 | Accept camera and gimbal commands arriving over MAVLink and relay them to the camera on the same terms as commands from the interface | 2 |
 | R-CAM-17 | **Record to storage, wherever this camera can do it.** A camera with its own recorder records to its own medium at whatever it is capable of; a camera without one is recorded by the board from the running pipeline. The interface says which of the two is happening and shows the remaining time on the medium doing the work. Where the camera holds the file, Yonder says so rather than offering to manage a file it never sees | 2 |
 | R-CAM-18 | **Capture a still on demand**, by the same rule: the camera's own photo where it has one, a frame from the running pipeline where it does not. A still the board holds can be viewed, downloaded and deleted; one the camera holds is reported as the camera's | 2 |
+| R-CAM-19 | **Keep an attached camera attached.** Runtime USB power management suspends an idle device and drops it if the resume fails, which presents as a cable fault and is not one. A camera is idle whenever nothing is streaming from it, which is most of the time. Hold video devices out of runtime suspend, and do it from the installer so a flashed card inherits it | 1 |
 
 ## R-VID — Video transport
 

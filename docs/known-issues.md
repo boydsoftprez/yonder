@@ -1121,3 +1121,55 @@ in a bad state — leaves a board that a reboot would have recovered and a re-re
 
 Recorded rather than fixed because the answer is a decision. Found while writing the camera
 view design, which had leaned on the documented behaviour rather than the shipped one.
+
+---
+
+### K-46 · ~~The camera falls off the USB bus every few minutes~~ — CLOSED
+
+**Status:** Closed · **Requirement:** R-CAM-19
+
+The development board's ELP global-shutter camera disconnected and
+re-enumerated repeatedly — eight times in one 43-minute session, four times in
+the first nine minutes of another. Every drop was a clean `USB disconnect`
+followed about a quarter of a second later by a clean re-enumeration of the
+same device. Occasionally a re-enumeration failed outright and the port
+latched off with `unable to enumerate USB device`, which needed a reboot.
+
+It was diagnosed wrongly three times, and each wrong answer was plausible:
+
+- **A failing supply.** The board *was* browning out, on GPIO header power left
+  over from the Pocket 2 bench work — `get_throttled` reported under-voltage
+  live, 48 enumeration failures, and the modem going down beside the camera.
+  Moving to a USB-C supply fixed that and gave the board its first
+  `throttled=0x0` reading. The camera kept dropping.
+- **A hub.** Two devices died 400 ms apart, which looks like shared power
+  collapsing — but the hub they share is the Pi 4's own internal one, so there
+  was nothing to bypass.
+- **A cable or connector.** The signature fits: instant clean disconnect,
+  instant clean return, irregular intervals, healthy supply. Reseating it,
+  changing ports and swapping the cable all appeared to help and none did.
+
+**The cause is runtime USB power management.** The kernel suspends an idle USB
+device two seconds after its last access, and a camera nobody is streaming
+from is idle nearly always. On one boot the camera's port had spent **31% of
+its life suspended**, cycling in and out; a resume that fails is reported as a
+disconnect. The evidence that settles it sat on the same hub throughout: the
+EC25 modem's port carries `power/control=on`, has never spent a millisecond
+suspended, and has never once dropped. Same hub, same supply, same board.
+
+Tested by writing `on` to the camera port's `power/control`. Its
+suspended-time counter froze at that instant, confirming the mechanism was off,
+and the drops stopped — measured against a baseline of four in the preceding
+nine minutes. **Record the interval the fix has been watched over when this
+note is next touched**, and treat a short quiet window as consistent with the
+diagnosis rather than as proof of it: this fault's whole history is of
+plausible answers that a few quiet minutes appeared to confirm.
+
+Two things worth keeping from how long this took. Every wrong diagnosis was
+confirmed by a real fault it happened to explain — the brownout was genuine and
+worth fixing on its own. And the asymmetry that solved it was visible from the
+first `lsusb`: one device on that hub was dropping and the other never was.
+
+**Closed by:** `installer/roles/15-usb-power.sh`, which writes a udev rule
+holding USB video devices out of runtime suspend, matched on the video
+interface class rather than on the vendor id of the camera this was found on.
