@@ -124,10 +124,26 @@ export default {
     margin-bottom: 6px;
 }
 
+/*
+ * A panel's height is fixed once, and this instrument's natural height is not:
+ * three places side by side are short, three stacked are three times taller.
+ * The panel has to be sized for the stacked arrangement or that one is cut off.
+ *
+ * So the *wide* arrangement grows into the height rather than the narrow one
+ * being cut down to fit it. The alternative — dropping the port, the address
+ * and the leg captions when the screen narrows — takes detail off a status
+ * page to solve a spacing problem, which is the wrong way round: the phone is
+ * where an operator has least context and most needs it.
+ *
+ * The places stretch, so the space becomes three taller instrument faces with
+ * their readings centred, which is what this strip should look like anyway on
+ * the screen it is mostly read on.
+ */
 .y-flow__rail {
     display: grid;
     grid-template-columns: 1fr 112px 1fr 112px 1fr;
     align-items: stretch;
+    min-height: 232px;
 }
 
 .y-flow__node {
