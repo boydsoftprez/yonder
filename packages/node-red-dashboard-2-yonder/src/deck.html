@@ -1,0 +1,64 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!--
+  The editor half of the deck. Node-RED finds this by basename beside the
+  node's .js; without it the widget registers and shows as "unknown node".
+  A form and a registration, nothing else (CLAUDE.md rule 2, R-UI-01).
+-->
+<script type="text/html" data-template-name="ui-yonder-deck">
+  <div class="form-row"><label for="node-input-group"><i class="fa fa-table"></i> Group</label>
+    <input type="text" id="node-input-group" /></div>
+  <div class="form-row"><label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name" /></div>
+  <div class="form-row"><label for="node-input-mode"><i class="fa fa-desktop"></i> Page</label>
+    <select id="node-input-mode">
+      <option value="live">Live</option>
+      <option value="setup">Setup</option>
+    </select></div>
+  <div class="form-tips">
+    <b>One instance per page.</b> A Live-mode instance and a Setup-mode
+    instance both draw from the same camera's report; Setup additionally
+    draws the housekeeping group, the camera's name and the Apply/Discard
+    keys. Which page a message reaches is a flow decision &mdash; this field
+    only says which page this particular node is.
+    <br /><b>Two kinds of edit.</b> An image control &mdash; brightness,
+    gain, white balance &mdash; posts the moment it is pressed, because it
+    changes the picture rather than what leaves the aircraft. A stream or
+    preview policy edit waits in a draft, shown as pending, until Setup's
+    Apply is pressed.
+  </div>
+</script>
+<script type="text/html" data-help-name="ui-yonder-deck">
+<p>A camera's whole control surface, composed from what it answered
+(R-UI-08, R-UI-20, R-UI-21) &mdash; capture, stream, preview, exposure,
+colour, optics, rendering, orientation and, on Setup only, housekeeping,
+plus the outputs table and (Live only) the aim pad.</p>
+<p><b>An image control posts on press.</b> Brightness, gain, white balance
+and the rest of the camera's own controls are live commands: pressing one
+sends <code>{ control, value }</code> on <code>msg.payload</code>
+immediately.</p>
+<p><b>A stream or preview policy edit never does.</b> It changes what
+leaves the aircraft, so it waits in a draft, shown as pending on Setup,
+until Apply is pressed &mdash; which sends the whole draft once as
+<code>{ apply }</code>. Discard sends <code>{ discard: true }</code> and
+clears it. This is the fix for the shipped console's own defect: a value
+used to reach the aircraft the moment focus left the field.</p>
+<p>Also sends <code>{ output, enabled }</code> for an output toggle,
+<code>{ shutter: "record" | "stop" | "photo" }</code> for the shutter, and
+<code>{ mode: "live" | "setup" }</code> when the rail's own page key is
+pressed.</p>
+</script>
+<script type="text/javascript">
+  RED.nodes.registerType("ui-yonder-deck", {
+    category: "dashboard 2", color: "#c7e0d4",
+    defaults: {
+      name: { value: "" },
+      group: { type: "ui-group", required: true },
+      order: { value: 0 }, width: { value: 0 }, height: { value: 0 },
+      mode: { value: "live" }
+    },
+    inputs: 1, outputs: 1,
+    icon: "font-awesome/fa-video-camera",
+    paletteLabel: "yonder deck",
+    label: function () { return this.name || ("yonder deck · " + (this.mode || "live")); }
+  });
+</script>

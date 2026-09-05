@@ -53,6 +53,21 @@ export {
 export type { CapabilityFact, BudgetSegment } from "../video/present.js";
 
 /**
+ * The operator-facing word for each capability key — `whiteBalance` is not a
+ * label, and a page that showed one would be showing its own field name.
+ *
+ * A value, not a type, and safe here for the same reason: confirmed against
+ * the compiled `dist/video/present.js` before relying on it, that file's own
+ * `import type { Camera }` is erased entirely at build time, so nothing pulls
+ * the schema (and therefore zod) in behind it. `YonderDeck` is the reader —
+ * it draws a heading for all 21 keys, not the 3 `capabilityFacts()` already
+ * summarises for the shipped facts row — and a second, hand-typed copy of
+ * this exact map inside the dashboard package is precisely the drift this
+ * file exists to stop.
+ */
+export { LABELS } from "../video/present.js";
+
+/**
  * The adapter boundary: labels, display units and gating for one V4L2
  * control (R-CTL-10, R-CTL-11).
  *
@@ -92,3 +107,31 @@ export {
   type ReachPaths,
   type OutputKind,
 } from "../video/outputs.js";
+
+/**
+ * What a camera answered, and the discriminated union each capability comes
+ * back as (R-CAM-14, R-UI-20, R-UI-21).
+ *
+ * `video/capability.ts` imports nothing — not `node:fs`, not the config
+ * loader, not zod — so re-exporting it here costs a browser bundle nothing,
+ * the same reasoning that already applies to `descriptors.ts`'s runtime
+ * values above. `YonderDeck` is the first component that draws straight from
+ * a capability's own `state`/`reason`/`by`/`value` rather than from a shape
+ * something in `yonder-core` has already summarised for it (`CapabilityFact`,
+ * above, is exactly that kind of summary, and loses `by.id` and the raw
+ * `ControlRange` a control needs to draw itself). `CAPABILITY_KEYS` travels
+ * too, as a value: it is what lets a static per-key table compile against
+ * the real 21 keys instead of a second, hand-typed list that could quietly
+ * fall out of step with it — precisely the reason that array is written down
+ * in `capability.ts` rather than derived.
+ */
+export {
+  CAPABILITY_KEYS,
+  type Capability,
+  type CameraCapabilities,
+  type ControlRange,
+  type AimCapability,
+  type RecordingCapability,
+  type StillsCapability,
+  type VideoFormat,
+} from "../video/capability.js";

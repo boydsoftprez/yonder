@@ -4,6 +4,7 @@ import YonderAnnunciator from "../src/ui/YonderAnnunciator.vue";
 import YonderBudget from "../src/ui/YonderBudget.vue";
 import YonderColumn from "../src/ui/YonderColumn.vue";
 import YonderDataBar from "../src/ui/YonderDataBar.vue";
+import YonderDeck from "../src/ui/YonderDeck.vue";
 import YonderFacts from "../src/ui/YonderFacts.vue";
 import YonderGauge from "../src/ui/YonderGauge.vue";
 import YonderHoldKey from "../src/ui/YonderHoldKey.vue";
@@ -55,6 +56,184 @@ import YonderThumbStrip from "../src/ui/YonderThumbStrip.vue";
  * as-is, the way a real composing widget will. Omitted (falsy) for every
  * widget specimen, which is most of the entries below.
  */
+/**
+ * Two full deck reports, one per bench camera, built the same shape
+ * `YonderDeck.vue`'s own module comment documents — never the blueprint's
+ * own richer `cameras.js` fixture, which models fields (`mirror`,
+ * `exposureMode`, `gimbalMode` …) this repository's real `CameraCapabilities`
+ * does not have yet. `capability.ts`'s own four-state constructors, mirrored
+ * here rather than imported, so a specimen reads as plain data the way
+ * every other one in this file does.
+ */
+function range (over = {}) {
+  return { min: 0, max: 100, step: 1, default: 0, current: 0, inactive: false, ...over };
+}
+function present (value) { return { state: "present", value }; }
+function notOffered () { return { state: "not-offered" }; }
+function advertised (value, reason) { return { state: "advertised", value, reason }; }
+function gated (value, by) { return { state: "gated", value, by }; }
+
+/**
+ * The ELP global-shutter camera (M1's own bench unit): `auto_exposure`
+ * default 3 (Aperture Priority) gates `exposure`; `white_balance_automatic`
+ * and `focus_automatic_continuous` default on and gate their own controls
+ * the same way — every one of the three real gates `descriptors.ts` states
+ * for this camera, all three actually closed, so the gallery shows the
+ * `gated` tone rather than only asserting it exists. `aim` is `advertised`,
+ * not `present`: this board answers pan/tilt and nothing moves
+ * (`probe/camera.ts`'s own comment, verbatim reason).
+ */
+const ELP_REPORT = {
+  camera: { id: "elp", name: "Cam 1", spec: "USB · H.264 · 1280×720p30" },
+  capabilities: {
+    formats: present([{ fourcc: "MJPG", width: 1280, height: 720, rates: [90, 60, 30, 25, 20] }]),
+    zoom: present(range({ min: 0, max: 60, step: 1, current: 0, default: 0 })),
+    autoFocus: present(range({ min: 0, max: 1, step: 1, current: 1, default: 1 })),
+    focus: gated(range({ min: 0, max: 1023, step: 1, current: 347, default: 0, inactive: true }), { id: "autoFocus", label: "auto focus" }),
+    autoExposure: present(range({
+      min: 0, max: 3, step: 1, current: 3, default: 3,
+      menu: [{ id: 1, label: "Manual Mode" }, { id: 3, label: "Aperture Priority Mode" }],
+    })),
+    exposure: gated(range({ min: 1, max: 10000, step: 1, current: 156, default: 156, inactive: true }), { id: "autoExposure", label: "auto exposure" }),
+    autoWhiteBalance: present(range({ min: 0, max: 1, step: 1, current: 1, default: 1 })),
+    whiteBalance: gated(range({ min: 2800, max: 6500, step: 1, current: 4600, default: 4600, inactive: true }), { id: "autoWhiteBalance", label: "auto white balance" }),
+    brightness: present(range({ min: -64, max: 64, step: 1, current: 0, default: 0 })),
+    contrast: present(range({ min: 0, max: 95, step: 1, current: 0, default: 0 })),
+    rotation: notOffered(),
+    aim: advertised(undefined, "this camera advertises pan and tilt but there is no motor behind either — it accepts the command and nothing moves"),
+    recording: notOffered(),
+    stills: notOffered(),
+    saturation: present(range({ min: 0, max: 255, step: 1, current: 56, default: 56 })),
+    hue: present(range({ min: -2000, max: 2000, step: 1, current: 0, default: 0 })),
+    gamma: present(range({ min: 64, max: 300, step: 1, current: 110, default: 110 })),
+    gain: present(range({ min: 0, max: 1023, step: 1, current: 0, default: 0 })),
+    powerLineFrequency: present(range({
+      min: 0, max: 3, step: 1, current: 1, default: 1,
+      menu: [{ id: 0, label: "Disabled" }, { id: 1, label: "50 Hz" }, { id: 2, label: "60 Hz" }],
+    })),
+    sharpness: present(range({ min: 0, max: 7, step: 1, current: 0, default: 0 })),
+    backlightCompensation: present(range({ min: 36, max: 160, step: 1, current: 54, default: 54 })),
+  },
+  descriptors: {
+    zoom: { label: "Zoom", unit: "", min: 0, max: 60, step: 1, current: 0, default: 0 },
+    autoFocus: { label: "Auto focus", unit: "", min: 0, max: 1, step: 1, current: 1, default: 1 },
+    focus: { label: "Focus", unit: "", min: 0, max: 1023, step: 1, current: 347, default: 0 },
+    autoExposure: { label: "Auto exposure", unit: "", min: 0, max: 3, step: 1, current: 3, default: 3 },
+    // video/descriptors.ts: exposure is raw x100 µs — 156 is 15600.
+    exposure: { label: "Shutter", unit: "µs", min: 100, max: 1000000, step: 100, current: 15600, default: 15600 },
+    autoWhiteBalance: { label: "Auto white balance", unit: "", min: 0, max: 1, step: 1, current: 1, default: 1 },
+    whiteBalance: { label: "Temperature", unit: "K", min: 2800, max: 6500, step: 1, current: 4600, default: 4600 },
+    brightness: { label: "Brightness", unit: "", min: -64, max: 64, step: 1, current: 0, default: 0 },
+    contrast: { label: "Contrast", unit: "", min: 0, max: 95, step: 1, current: 0, default: 0 },
+    saturation: { label: "Saturation", unit: "", min: 0, max: 255, step: 1, current: 56, default: 56 },
+    hue: { label: "Hue", unit: "", min: -2000, max: 2000, step: 1, current: 0, default: 0 },
+    gamma: { label: "Gamma", unit: "", min: 64, max: 300, step: 1, current: 110, default: 110 },
+    gain: { label: "Gain", unit: "", min: 0, max: 1023, step: 1, current: 0, default: 0 },
+    powerLineFrequency: { label: "Mains frequency", unit: "", min: 0, max: 3, step: 1, current: 1, default: 1 },
+    sharpness: { label: "Sharpness", unit: "", min: 0, max: 7, step: 1, current: 0, default: 0 },
+    backlightCompensation: { label: "Backlight compensation", unit: "", min: 36, max: 160, step: 1, current: 54, default: 54 },
+  },
+  values: {
+    zoom: 0, autoFocus: true, focus: 347, autoExposure: 3, exposure: 15600,
+    autoWhiteBalance: true, whiteBalance: 4600, brightness: 0, contrast: 0,
+    saturation: 56, hue: 0, gamma: 110, gain: 0, powerLineFrequency: 1,
+    sharpness: 0, backlightCompensation: 54,
+  },
+  commanded: {},
+  policy: {
+    stream: { mode: "fixed", floor_kbps: 1000, ceiling_kbps: 6000, bitrate_kbps: 3000 },
+    preview: {
+      mode: "adaptive", size: "auto", ladder_bottom: "640x360", ladder_top: "1280x720",
+      floor_kbps: 300, ceiling_kbps: 2000, bitrate_kbps: 400, framerate: 15,
+    },
+  },
+  applied: {
+    stream: { mode: "fixed", floor_kbps: 1000, ceiling_kbps: 6000, bitrate_kbps: 3010 },
+    preview: {
+      mode: "adaptive", size: "auto", ladder_bottom: "640x360", ladder_top: "1280x720",
+      floor_kbps: 300, ceiling_kbps: 2000, bitrate_kbps: 410, framerate: 15,
+    },
+  },
+  outputs: [
+    { kind: "rtp", label: "Ground station", enabled: true, costKbps: 3010,
+      reach: { direction: "outbound", reachable: true, note: "an outbound push to the configured ground station; it leaves over whichever path is active, cellular included" } },
+    { kind: "rtsp", label: "RTSP", enabled: true, costKbps: 0,
+      reach: { direction: "listener", reachable: false, note: "nothing can dial in to this RTSP listener over cellular; it is reachable on the mesh or a LAN" } },
+  ],
+  captures: { count: 3 },
+  interruption: [],
+};
+
+/**
+ * The DJI Pocket 2 (M5's own accessory camera): a real gimbal — `aim` is
+ * `present`, not `advertised` — and its own card, so a still lands there
+ * rather than on the board (§8.3). Its image controls are fewer: this
+ * protocol has no equivalent of the ELP's ten housekeeping-grade V4L2
+ * controls, so `gain`, `gamma`, `sharpness`, `backlightCompensation` and
+ * `powerLineFrequency` all read `not-offered` here — the gallery's own
+ * demonstration of Housekeeping being omitted whole on a camera that has
+ * none of it (this task's own "omits a whole group" test, at a second,
+ * different camera).
+ */
+const POCKET2_REPORT = {
+  camera: { id: "pocket2", name: "Cam 2", spec: "Accessory · H.264 · 1280×720p30" },
+  capabilities: {
+    formats: present([{ fourcc: "H264", width: 1280, height: 720, rates: [30] }]),
+    zoom: present(range({ min: 1, max: 10, step: 0.1, current: 1, default: 1 })),
+    autoFocus: notOffered(),
+    focus: notOffered(),
+    autoExposure: present(range({
+      min: 1, max: 4, step: 1, current: 3, default: 1,
+      menu: [{ id: 1, label: "Program" }, { id: 2, label: "Shutter priority" },
+        { id: 3, label: "Aperture priority" }, { id: 4, label: "Manual" }],
+    })),
+    exposure: gated(range({ min: 125, max: 8000, step: 1, current: 2000, default: 2000, inactive: true }), { id: "autoExposure", label: "auto exposure" }),
+    autoWhiteBalance: notOffered(),
+    whiteBalance: present(range({ min: 2000, max: 10000, step: 1, current: 5500, default: 5500 })),
+    brightness: notOffered(),
+    contrast: notOffered(),
+    rotation: notOffered(),
+    aim: present({ pitch: { min: -90, max: 90 }, yaw: { min: -180, max: 180 }, mode: "Follow" }),
+    recording: present({ medium: "camera" }),
+    stills: present({ source: "camera" }),
+    saturation: notOffered(),
+    hue: notOffered(),
+    gamma: notOffered(),
+    gain: notOffered(),
+    powerLineFrequency: notOffered(),
+    sharpness: notOffered(),
+    backlightCompensation: notOffered(),
+  },
+  descriptors: {
+    zoom: { label: "Zoom", unit: "×", min: 1, max: 10, step: 0.1, current: 1, default: 1 },
+    autoExposure: { label: "Auto exposure", unit: "", min: 1, max: 4, step: 1, current: 3, default: 1 },
+    exposure: { label: "Shutter", unit: "µs", min: 12500, max: 800000, step: 100, current: 200000, default: 200000 },
+    whiteBalance: { label: "Temperature", unit: "K", min: 2000, max: 10000, step: 1, current: 5500, default: 5500 },
+  },
+  values: { zoom: 1, autoExposure: 3, exposure: 200000, whiteBalance: 5500 },
+  commanded: {},
+  policy: {
+    stream: { mode: "adaptive", floor_kbps: 1500, ceiling_kbps: 8000, bitrate_kbps: 4000 },
+    preview: {
+      mode: "fixed", size: "854x480", ladder_bottom: "640x360", ladder_top: "1280x720",
+      floor_kbps: 300, ceiling_kbps: 2000, bitrate_kbps: 400, framerate: 15,
+    },
+  },
+  applied: {
+    stream: { mode: "adaptive", floor_kbps: 1500, ceiling_kbps: 8000, bitrate_kbps: 3200 },
+    preview: {
+      mode: "fixed", size: "854x480", ladder_bottom: "640x360", ladder_top: "1280x720",
+      floor_kbps: 300, ceiling_kbps: 2000, bitrate_kbps: 400, framerate: 15,
+    },
+  },
+  outputs: [
+    { kind: "rtp", label: "Ground station", enabled: true, costKbps: 3200,
+      reach: { direction: "outbound", reachable: true, note: "an outbound push to the configured ground station; it leaves over whichever path is active, cellular included" } },
+  ],
+  captures: { count: 0 },
+  interruption: ["current respawn path only"],
+};
+
 export const SPECIMENS = [
   {
     title: "Gauge — encoding used",
@@ -503,5 +682,37 @@ export const SPECIMENS = [
     props: { axes: { pan: "present", tilt: "present", roll: "not-offered" } },
     payload: undefined,
     part: true,
+  },
+  {
+    title: "Deck — ELP, Live",
+    note: "Task 22: the deck composes itself from the report alone. Exposure, colour and optics all show the `gated` tone at once — every one of the ELP's own three gates (auto exposure, auto white balance, auto focus) closed, matching the bench's own default state — and Aim carries the pan/tilt-that-does-not-move reason verbatim from probe/camera.ts, disabling the pad rather than hiding it.",
+    component: YonderDeck,
+    props: { mode: "live" },
+    payload: ELP_REPORT,
+    part: false,
+  },
+  {
+    title: "Deck — ELP, Setup",
+    note: "The same report, on Setup: Housekeeping appears (gain, backlight compensation, sharpness, mains frequency — the four bench-only controls), the camera's own Name field draws, and the rail gains Discard and Apply. Toggle Stream or Preview between Fixed and Adaptive here and in the Live specimen alike to see a group's own height change without any other group moving column — the operator's own correction to the blueprint.",
+    component: YonderDeck,
+    props: { mode: "setup" },
+    payload: ELP_REPORT,
+    part: false,
+  },
+  {
+    title: "Deck — Pocket 2, Live",
+    note: "A second camera answering a different shape entirely: Aim is `present` (a real gimbal, not the ELP's dead advertised pan/tilt) and draws the live pad; Housekeeping's own four controls are all not-offered on this camera, so the whole group is omitted on both pages — this task's own 'omits a whole group' behaviour, seen on a camera the eleven required tests do not exercise directly.",
+    component: YonderDeck,
+    props: { mode: "live" },
+    payload: POCKET2_REPORT,
+    part: false,
+  },
+  {
+    title: "Deck — Pocket 2, Setup",
+    note: "Setup on the second camera: no Housekeeping column to add (none of its four controls are offered here), so only Name and the Apply/Discard keys are new relative to Live — drawing the same fixed four-column layout with one slot legitimately shorter than the ELP's own, never reflowed to fill the gap.",
+    component: YonderDeck,
+    props: { mode: "setup" },
+    payload: POCKET2_REPORT,
+    part: false,
   },
 ];

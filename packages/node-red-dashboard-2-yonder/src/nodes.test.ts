@@ -19,6 +19,7 @@ const holdkeyNode = (await import("./holdkey.js")).default ?? await import("./ho
 const pictureNode = (await import("./picture.js")).default ?? await import("./picture.js");
 const factsNode = (await import("./facts.js")).default ?? await import("./facts.js");
 const budgetNode = (await import("./budget.js")).default ?? await import("./budget.js");
+const deckNode = (await import("./deck.js")).default ?? await import("./deck.js");
 
 /**
  * What is tested here, and what honestly cannot be.
@@ -472,5 +473,31 @@ describe("the facts row and the budget", () => {
     // Zero is the honest answer: nothing has measured this path yet, and a
     // made-up ceiling is a mark an operator would trust.
     expect(build(budgetNode as (RED: RED) => void, { segments: "[]" }).props).toMatchObject({ capacityKbps: 0 });
+  });
+});
+
+describe("the deck", () => {
+  /**
+   * `emitsActions` is load-bearing (`widget.ts`'s own note): Dashboard drops
+   * a `widget-action` from a widget that never registered `onAction` —
+   * silently, with no error anywhere. Every image control, Apply, Discard,
+   * output toggle and shutter press on this page depends on it, so a
+   * mutation to `false` here must turn this test red — confirmed directly
+   * as part of task-22's own mutation check (task-22-report.md).
+   */
+  it("registers as a widget that sends", () => {
+    const { type, events } = build(deckNode as (RED: RED) => void, {});
+    expect(type).toBe("ui-yonder-deck");
+    expect(events).toMatchObject({ onAction: true });
+  });
+
+  it("reads the editor's own page — live or setup — never from a message", () => {
+    expect(build(deckNode as (RED: RED) => void, { mode: "setup" }).props).toMatchObject({ mode: "setup" });
+    expect(build(deckNode as (RED: RED) => void, { mode: "live" }).props).toMatchObject({ mode: "live" });
+  });
+
+  it("falls back to Live for anything else, rather than an unrecognised page", () => {
+    expect(build(deckNode as (RED: RED) => void, {}).props).toMatchObject({ mode: "live" });
+    expect(build(deckNode as (RED: RED) => void, { mode: "nonsense" }).props).toMatchObject({ mode: "live" });
   });
 });

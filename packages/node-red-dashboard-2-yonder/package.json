@@ -21,7 +21,8 @@
       "ui-yonder-holdkey": "dist/holdkey.js",
       "ui-yonder-picture": "dist/picture.js",
       "ui-yonder-facts": "dist/facts.js",
-      "ui-yonder-budget": "dist/budget.js"
+      "ui-yonder-budget": "dist/budget.js",
+      "ui-yonder-deck": "dist/deck.js"
     }
   },
   "node-red-dashboard-2": {
@@ -37,7 +38,8 @@
       "ui-yonder-holdkey": { "output": "ui-yonder-holdkey.umd.js", "component": "YonderHoldKey" },
       "ui-yonder-picture": { "output": "ui-yonder-picture.umd.js", "component": "YonderPicture" },
       "ui-yonder-facts": { "output": "ui-yonder-facts.umd.js", "component": "YonderFacts" },
-      "ui-yonder-budget": { "output": "ui-yonder-budget.umd.js", "component": "YonderBudget" }
+      "ui-yonder-budget": { "output": "ui-yonder-budget.umd.js", "component": "YonderBudget" },
+      "ui-yonder-deck": { "output": "ui-yonder-deck.umd.js", "component": "YonderDeck" }
     }
   },
   "scripts": {
