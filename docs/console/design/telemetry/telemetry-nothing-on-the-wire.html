@@ -873,7 +873,7 @@ body { margin: 0; }
             <div class="yonder-warning y-hide" data-state="noise">
               <p><b>Something is transmitting, but it isn't MAVLink.</b></p>
               <p>Bytes arrived at all four speeds and not one of them formed a valid frame.
-                 That rules out the wiring — a swapped or missing wire gives silence, not noise.</p>
+                 So something is reaching the receive pin. Its port may be set to another protocol, or to a rate outside the four. A wiring fault that corrupts rather than silences — a poor ground, an intermittent joint — looks like this too, and nothing here has exercised the transmit wire.</p>
               <p>The autopilot's port is most likely set to a protocol other than MAVLink, or to a
                  speed outside the four. Check its <b>SERIAL<i>n</i>_PROTOCOL</b> and
                  <b>SERIAL<i>n</i>_BAUD</b> for whichever port you wired.</p>

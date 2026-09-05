@@ -100,9 +100,22 @@ nothing to sense and nothing to be clever about. Everything worth improving is a
 ### Leave a wrong speed the moment it proves wrong
 
 The ordinary implementation dwells a fixed two seconds on each rate, waiting to see whether
-a heartbeat turns up. That is backwards. At the wrong speed **bytes still arrive** — plenty
-of them, and all malformed — and malformed bytes are proof of a mismatch in a few hundred
-milliseconds. The full wait is only owed to a rate at which *nothing at all* arrives.
+a heartbeat turns up. That is backwards: the full wait is only owed to a rate at which
+*nothing at all* arrives.
+
+**But arriving bytes are not themselves proof of a mismatch**, and an earlier draft of this
+section said they were. At the *right* rate an autopilot sends far more than heartbeats — a
+stream of attitude, position and status messages — so a probe can easily read two chunks of
+perfectly valid traffic before a heartbeat's turn comes round. A rule that gives up as soon
+as bytes fail to contain a heartbeat abandons the correct rate.
+
+So the rule is a **deadline, not a read count**: each rate is given at least one heartbeat
+interval — a little over a second, since `HEARTBEAT` is 1 Hz — measured on the clock rather
+than in reads, and abandoned early only when nothing at all has arrived. Reads return what is
+available rather than blocking for their full window, so a rate that is silent costs its
+deadline and a rate that is busy costs the same. The saving is real but smaller than it
+looked: about four and a half seconds worst case rather than eight, and under a second in the
+ordinary case where the remembered rate answers first.
 
 ### Stop on the first good frame
 
@@ -110,8 +123,8 @@ A MAVLink frame carries a known start marker and a checksum. One frame whose che
 passes is certainty; noise does not produce that by accident. At the right rate that is one
 heartbeat interval, so under a second.
 
-Together these take the worst case from about eight seconds to under three, and the ordinary
-case to under one.
+Together these take the worst case from about eight seconds to roughly four and a half, and
+the ordinary case — the remembered rate, answering on its first heartbeat — to under one.
 
 ### Three outcomes, not two
 
@@ -121,13 +134,22 @@ it separates three situations a plain sweep reports with one word:
 | What arrives | What it means | What the console says |
 |---|---|---|
 | Nothing, at any speed | Nothing is transmitting on that wire | Check pin 8 to the autopilot's RX, pin 10 to its TX, ground on pin 6. A swapped pair looks exactly like this |
-| Bytes and framing errors at every speed | Something is talking, in a protocol that isn't MAVLink or at a rate outside the four | The autopilot's port is probably set to another protocol or another speed — check its `SERIALn_PROTOCOL` and `SERIALn_BAUD`. The wiring is fine: a swapped or missing wire gives silence, not noise |
+| Bytes and framing errors at every speed | Something *is* reaching the receive pin, and none of it parses | The autopilot's port may be set to another protocol, or to a rate outside the four — check its `SERIALn_PROTOCOL` and `SERIALn_BAUD`. It may also be a wiring fault that corrupts rather than silences: a poor ground, an intermittent joint, interference. **This says nothing about the transmit wire**, which nothing has yet exercised |
 | A frame that checksums | Found it | The port, the speed, the vehicle type and the system id |
 
-The middle row is the one worth having. It rules the wiring *out*, which is the inference an
-operator would otherwise spend an evening making with a multimeter. This is `R-CAM-12`'s
-*say what was rejected and why*, applied to a serial port, and it is the reason for the new
-requirement in §7.
+The middle row is the one worth having, and its value is narrower than it first looks. It
+proves *something is arriving on the receive pin*, which the first row does not — so it
+separates "nothing is connected" from "something is connected and we cannot read it", and
+sends the operator to the autopilot's settings first rather than to a multimeter.
+
+**It does not clear the wiring.** An earlier draft said it did, which was wrong twice over: a
+poor ground, an intermittent joint or interference corrupts bytes rather than silencing them,
+so noise is consistent with a wiring fault; and receiving proves nothing whatever about the
+*transmit* wire, which no part of detection exercises. The console says what was observed and
+what it suggests, in that order, and names both possibilities.
+
+This is `R-CAM-12`'s *say what was rejected and why*, applied to a serial port, and it is the
+reason for the new requirement in §7.
 
 **This rests on an assumption — see §10.1.**
 
@@ -169,9 +191,22 @@ it has been doing it.
 Autopilot ──pins 8/10──► UART0 ──► mavlink-router ──┬── UDP → gcs0  :14550
                                                      ├── UDP → gcs1  :14551
                                                      ├── UDP → gcs2  :14552
-                                                     ├── TCP server  :5760
+                                                     ├── TCP server  :5760   ← inbound too
                                                      └── UDP → 127.0.0.1:14559 → yonder-core
 ```
+
+**The TCP server is not an output.** `R-MAV-04` reads as though it were one, and an earlier
+draft of this document treated it that way — a fourth destination beside the three UDP
+endpoints. It is a *listening socket*, it binds every interface, and MAVLink is
+bidirectional: anything that connects to it can send commands to the vehicle. So it is
+governed by `R-MAV-07` exactly as UDP ingest is, and **`mavlink.ingest.loopback_only` gates
+it**. With ingest closed the server binds loopback or does not run; opening it to the network
+is the same decision, with the same warning, as opening UDP ingest.
+
+Disabling it is also not the absence of a setting. `mavlink-router` starts its TCP server on
+its own default when the configuration says nothing, so "off" is written explicitly as port
+`0` rather than by omitting the key — an omission would ship the very listener the operator
+turned off.
 
 This is `R-MAV-06`: raw MAVLink never passes through the control plane on its way to a
 ground station, so a Node-RED restart is invisible to Mission Planner. `yonder-core` is a
@@ -237,11 +272,22 @@ later, with nobody deciding it should have one. Its own worked example is `allow
 the one ZeroTier setting that *can* replace the default route — which would have shipped
 kept, with no window and no rollback timer, under a subtree exemption.
 
-So the exempt set gains **`mavlink.endpoints`, `mavlink.autocast`, `mavlink.tcp_server.enabled`
-and `mavlink.tcp_server.port`**, individually. **`mavlink.serial` and `mavlink.ingest` are
-deliberately left load-bearing**: the first moves which wire the router opens, and the second
-opens an unauthenticated command path to the vehicle (`R-MAV-07`). Neither has been shown to
-be safe to keep, and `R-CFG-12` treats what has not been shown to be safe as load-bearing.
+So the exempt set gains **`mavlink.endpoints`, `mavlink.autocast` and
+`mavlink.tcp_server.enabled`**, individually.
+
+**`mavlink.tcp_server.port` is *not* exempt, and the reason is a counterexample rather than
+caution.** A port is a number the schema would otherwise accept in full, including `3000` —
+the console's own. A router that binds the console's port first, after a restart, leaves the
+console unable to start, and the operator without the page they would fix it from. That is a
+change costing reachability by a route that touches no interface, no route and no radio, which
+is exactly the shape of reasoning `R-CFG-12` warns is insufficient. The schema therefore
+refuses a port already spoken for (§7), and the field stays behind the window regardless,
+because a validator is a narrower promise than a rollback.
+
+**`mavlink.serial` and `mavlink.ingest` are deliberately left load-bearing too**: the first
+moves which wire the router opens, and the second opens an unauthenticated command path to
+the vehicle (`R-MAV-07`). Neither has been shown to be safe to keep, and `R-CFG-12` treats
+what has not been shown to be safe as load-bearing.
 
 **The console still warns before it acts.** Applying an endpoint change restarts the router,
 which interrupts the ground stations already receiving for as long as that takes. The page
@@ -304,14 +350,23 @@ that implements them. The R-MAV block currently ends at R-MAV-12.
 |---|---|---|
 | R-MAV-13 | **When no flight controller is found, say which kind of nothing it is.** A sweep that ends without a link distinguishes three outcomes and reports the one it reached: nothing transmitting on the wire at any speed, which is also what a swapped or missing pair looks like and is reported with the pins to check; bytes arriving at every speed that never form a valid frame, which rules the wiring out and points at the autopilot's own protocol and baud settings; or a link. Detection continues on a cadence rather than giving up, because a board is routinely powered before the aircraft it is wired to, and the interface says how long it has been looking and when it will look again. **The port and speed a probe found are never written to the configuration** — they are remembered as a hint that is tried first and discarded when it fails, so replacing a flight controller heals on the next boot rather than needing a file edited (the reasoning R-CAM-06 was withdrawn for, applied to a serial port) | 1 |
 
+**`R-MAV-14` — a generated listener never takes a port the device is already serving on.**
+Priority 1. The configuration refuses a MAVLink TCP port that collides with a port Yonder
+itself binds — the console's above all — with the offending path named, at the moment it is
+written. This is not tidiness: `mavlink-router` starts before the console and would win the
+race, leaving an operator without the page they would fix it from. The check lives in the
+schema rather than in a renderer, because a renderer runs after the apply has been accepted.
+
 **`R-CFG-12` gains further exemptions rather than a new ID.** Its text is extended the way
-`R-VPN-07` extended it for a mesh join, and to the same standard: four leaves are named —
-`mavlink.endpoints`, `mavlink.autocast`, `mavlink.tcp_server.enabled` and
-`mavlink.tcp_server.port` — on the grounds that none of them touches an interface, a route or
-a radio, and that the window's own remedy is to revert *and reboot*, which would take the
-video, the telemetry and the mesh off a flying aircraft in exchange for protecting nothing.
-`mavlink.serial` and `mavlink.ingest` are named as deliberately *not* exempt, so that a later
-reader knows they were considered rather than missed.
+`R-VPN-07` extended it for a mesh join, and to the same standard: three leaves are named —
+`mavlink.endpoints`, `mavlink.autocast` and `mavlink.tcp_server.enabled` — on the grounds
+that none of them touches an interface, a route or a radio, and that the window's own remedy
+is to revert *and reboot*, which would take the video, the telemetry and the mesh off a flying
+aircraft in exchange for protecting nothing.
+
+**`mavlink.tcp_server.port`, `mavlink.serial` and `mavlink.ingest` are named as deliberately
+*not* exempt**, so a later reader knows they were considered rather than missed — and the port
+is the one that earns its place there by counterexample rather than by caution (§5).
 
 **No new ADR.** ADR-0001 already settles that this logic lives in node packages; the
 architecture document already names `mavlink-router` and the loopback copy. Nothing here

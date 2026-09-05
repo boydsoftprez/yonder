@@ -68,6 +68,22 @@ every quantity was the mistake this decision replaces.
 | **Data bar** | facts | Label in small caps, value beside it, on one row. Six facts fit where one stock widget held one string |
 | **Soft keys** | every action | A rail along the foot of the display. The *select* tone for a command, the *irreversible* tone for one that takes the page away. **No action lives anywhere else on a page** (R-UI-10) |
 
+**A stock button is a soft key in a different container, and that is deliberate.** The rule
+above says every action is a soft key, and the shipped console has nine `ui-button` nodes —
+Refresh, Scan, Join, Use access point, Leave, and the four on the Telemetry page. That is not
+drift. A soft-key rail is a *rail*: it belongs at the foot of a surface and carries the
+actions of that whole surface. An action that belongs to one group inside a page — Scan
+belongs to the Wi-Fi form, Check the path to the path check — has no rail to sit on, and
+inventing one per group would be nine rails on five pages.
+
+So `theme.ts` gives a stock button the key's own treatment, and says so where it does it: a
+machined face, a hard edge, an engraved label in letterspaced caps, sized to its words. The
+two are one object in two containers. What the rule is really protecting is stated in R-UI-10
+and holds either way: **no action is full-width, and a page has at most one primary action.**
+
+This was written down here after a review pointed out that the ADR said one thing and the
+stylesheet did another, with only the stylesheet's comment to reconcile them.
+
 ### The rules that follow
 
 **Navigation is not in the rail**, though an earlier draft of this table said

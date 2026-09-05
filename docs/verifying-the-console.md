@@ -287,11 +287,16 @@ committed reference is a `.darwin.json` and the runner is Linux, so the gate tak
 *record* branch and writes `.linux.json` files that are **untracked** — which `git diff`
 does not see, and did not, on every run since the job was written.
 
-**A picture**, in `vendor/capture/`, written every run and uploaded by CI as an artifact a
-reviewer downloads. **It is not committed**, and that is a correction rather than an
-omission: a parallel set under `docs/console/` was hand-copied there by whoever remembered,
-read by no script, and compared by no job — 7.3 MB gating nothing and growing two files per
-page per state. The evidence that is kept and compared is the geometry, in
+**A picture**, written every run — a masked copy under `docs/console/capture/` and the whole
+one under `vendor/capture/`, which CI uploads as the artifact a reviewer downloads. **Neither
+is committed**, and that is a correction rather than an omission: the masked set *was*
+tracked, all 7.3 MB of it, growing two files per page per state.
+
+It was removed because **no job ever compared it**. CI checks `docs/console/shape/` — the
+geometry — and nothing else; the pictures went to an artifact instead. An earlier version of
+this paragraph said nothing wrote that directory, which was wrong: `capture-pages.mjs` writes
+it on every run and always has. What was true is the part that mattered — the file was
+produced, committed, and never read. The evidence that is kept and compared is the geometry, in
 `docs/console/shape/`; the picture is per-platform pixels, and the defect that provoked the
 legibility rule showed its words plainly at 1.05:1. A picture is committed only when it is
 *evidence* for a known issue rather than a gate artifact, and then one file at a time.

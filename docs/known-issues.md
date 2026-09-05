@@ -1008,7 +1008,7 @@ NetworkManager now say, so `/reach/state` keeps reporting a cellular path on an 
 that has been unplugged, and the Cellular tab draws a green `READY` lamp over the words
 "No modem found".
 
-Visible in `docs/console/capture/network-cellular-without-modem.*.png`, which is why those
+Visible in `docs/console/evidence/k42-no-modem.*.png`, which is why those
 two pictures are read with this entry beside them. On a board that never had a modem — the
 hardware this was found on — the tab reads `NO MODEM` correctly, so it is a defect about
 hardware being *removed* rather than about hardware being absent.

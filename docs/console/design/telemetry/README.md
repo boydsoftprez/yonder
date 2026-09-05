@@ -32,7 +32,7 @@ there is one page to design and one page for the capture gate to photograph.
 | `page-anatomy.html` | **The blueprint** — three arrangements, the chosen one, and every control named |
 | `telemetry-linked.html` | An autopilot found and answering, telemetry flowing |
 | `telemetry-nothing-on-the-wire.html` | The sweep found silence — the wiring case, naming the pins |
-| `telemetry-not-mavlink.html` | Bytes at every speed, none of them a frame — the autopilot's port is set to something else |
+| `telemetry-not-mavlink.html` | Bytes at every speed, none of them a frame — something is reaching the receive pin and cannot be read. **This does not clear the wiring**: a fault that corrupts rather than silences looks the same, and nothing has exercised the transmit wire |
 | `telemetry-stopped.html` | `R-MAV-09`: the operator stopped it. Autopilot half alive, ground-station half deliberately dead |
 | `telemetry-ingest-open.html` | `R-MAV-07` turned off — the amber boundary and what it costs |
 | `telemetry-sent.html` | The moment after **Send telemetry here**, with no countdown |
