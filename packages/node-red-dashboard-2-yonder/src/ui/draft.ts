@@ -48,15 +48,24 @@
  * rendering from the report at exactly the moment it asks what is pending,
  * and so already has it — read only, never written.
  *
- * A known asymmetry this leaves open, worth its own line rather than
- * silence: a draft that is *withdrawn* by matching applied at the moment it
- * is asked about is not the same as a draft that was never recorded — the
- * value is still sitting in the map, and if applied later drifts away from
- * it *without the operator touching that field again*, `pending` will
- * report it once more. Fixing that would need the store to distinguish "the
- * operator asked for this" from "this happened to coincide with applied,"
- * which is more than a comparison at either write or read time can tell on
- * its own.
+ * **An edit survives being matched, and that is the decision.** A draft
+ * withdrawn by matching applied at the moment it is asked about is not the
+ * same as a draft that was never recorded: the value is still in the map,
+ * and if applied later drifts away from it without the operator touching
+ * that field again, `pending` reports it once more.
+ *
+ * Keep that. The operator asked for that value and never withdrew it; it was
+ * some other agent — a re-probe, a second operator, a mode change reporting a
+ * value back — that briefly made it moot. Discarding their instruction
+ * because something else coincidentally satisfied it would be the console
+ * dropping a request nobody cancelled, which is worse than a request that
+ * waits. `clear()` is how an operator withdraws one, and Discard is how they
+ * reach it.
+ *
+ * Recorded because it was got wrong first: the change to read-time filtering
+ * was asked for on the stated grounds that a withdrawn draft would *not*
+ * come back, and this store's own implementer disproved that in a standalone
+ * simulation before writing a line of it.
  */
 
 /** A staged value: whatever a control on this console can be set to. */

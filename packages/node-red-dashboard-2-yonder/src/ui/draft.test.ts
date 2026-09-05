@@ -145,7 +145,7 @@ describe("createDraftStore", () => {
    * Named here rather than left as a surprise for whoever next reads
    * `pending`'s output and wonders where an edit came from.
    */
-  it("characterisation: a withdrawn draft can reappear if applied later drifts away from it unasked", () => {
+  it("an edit survives being matched, and returns when applied drifts away from it", () => {
     const store = createDraftStore();
 
     store.set("elp", "brightness", 70);
