@@ -35,6 +35,18 @@ surface. One branch, seven phases, each a review checkpoint.
 - **Yonder relays commands and never originates them** (R-CMD-04). The rate controller carries out an applied policy; the guard refuses, it never aims.
 - **No credential in a committed capture** (R-SEC-10). **No board address in any committed file.** `git commit -s`, GPG-signed, never `--no-gpg-sign`.
 - **Commit messages**: imperative mood, the requirement ID where one applies.
+- **`setValue()` fires `input` *and* `change`, so it cannot tell them apart.**
+  Measured in Task 15: a test written with `setValue()` passes against a field
+  bound to `@change` alone — which emits on blur, not on the keystroke — so it
+  cannot prove the live-editing behaviour it appears to. Where a component
+  must react to typing rather than to leaving the field, trigger the bare
+  `input` event and assert on that. The same caution applies to any helper
+  that fires more than one event for one call.
+- **`css: true` is set in the dashboard package's `vitest.config.ts`** (Task
+  14). Before it, `getComputedStyle` in a component test returned CSS-initial
+  defaults whatever the component's own styles said, and every style assertion
+  in that package was quietly meaningless. Do not remove it, and do not assume
+  a style test in another package works without it.
 - **An exhaustive switch protects you only with all three of: every case
   `return`s, no `default:`, and the enclosing function's return type written
   out explicitly.** Measured on this repository in Task 4 by adding a fifth
