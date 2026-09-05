@@ -583,4 +583,33 @@ describe("teardown", () => {
     w.unmount();
     expect(stops(w)).toHaveLength(1);
   });
+
+it("a press refused while inhibited cannot start slewing when the inhibition lifts", async () => {
+    // **The guard's real job, and nothing pinned it until review.** The
+    // shipped `down()` refuses a press while inhibited *and* records no
+    // pointer id. A surgical mutant that skipped only the capture, while
+    // still recording the id, passed all thirty-nine tests here — including
+    // "captures nothing at all while inhibited" — and yet let a slew fire:
+    // press while inhibited, the deck clears the inhibition while the
+    // operator is still holding, then a move with no fresh press starts the
+    // gimbal moving. That is a command nobody sent, which is exactly what
+    // R-CMD-04 forbids. The pad may only ever move on a press it accepted.
+    const w = pad({ inhibited: "gimbal not responding" });
+    const dial = dialOf(w);
+    down(dial, 0, 0);
+    move(dial, 40, 0);
+    expect(w.emitted("slew"), "a press while inhibited must not slew").toBeUndefined();
+
+    await w.setProps({ inhibited: null });
+    move(dial, 40, 0);
+    expect(
+        w.emitted("slew"),
+        "the inhibition lifting is not a press — a gesture may only begin with one",
+    ).toBeUndefined();
+
+    // And a fresh press, now that it is allowed, does move.
+    down(dial, 0, 0);
+    move(dial, 40, 0);
+    expect(w.emitted("slew")).toHaveLength(1);
+});
 });
