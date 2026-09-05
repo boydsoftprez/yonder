@@ -131,12 +131,13 @@ Parameter writes are vehicle commands. R-CMD applies to every requirement here.
 | R-CTL-02 | Set resolution | 1 |
 | R-CTL-03 | Set bitrate | 1 |
 | R-CTL-04 | Set contrast and brightness | 2 |
-| R-CTL-05 | Flip horizontally and vertically, by degrees rather than a boolean | 2 |
+| R-CTL-05 | **Turn the picture the right way up.** Flip horizontally, flip vertically and rotate, using the camera's own controls where it has them and the board's pipeline where it does not — an inverted or side-on mount is ordinary on an airframe, and a stream nobody can turn upright is a stream nobody can use. Rotation is by degrees rather than a boolean. Mirroring is not a rotation and needs its own control: 180° is both flips together, and neither flip alone is any rotation | 2 |
 | R-CTL-06 | Toggle HDR where the sensor supports it | 3 |
 | R-CTL-07 | Select colour treatment: normal, monochrome, saturated | 3 |
 | R-CTL-08 | Select codec per camera | 2 |
 | R-CTL-09 | Select transport per camera | 2 |
 | R-CTL-10 | Show current settings and running state for each camera, reading back stored values rather than form defaults | 1 |
+| R-CTL-15 | **Say which one is turning the picture.** Where the board corrects orientation because the camera cannot, the interface states that plainly beside the control. The two are indistinguishable in the picture and not in their cost: the board's costs processing on every frame and re-encodes what it changed, the sensor's costs nothing. An operator choosing between mounting the camera differently and paying for the correction needs to know which they are looking at | 2 |
 
 ## R-CEL — Cellular
 

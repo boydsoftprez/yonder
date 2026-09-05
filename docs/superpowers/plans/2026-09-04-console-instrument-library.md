@@ -25,7 +25,7 @@ surface. One branch, seven phases, each a review checkpoint.
 ## Global Constraints
 
 - **Logic and presentation live in node packages.** No `function` node, no `ui-template` markup, no `exec` node. `flows/` is wiring only.
-- **Every change traces to a requirement ID.** New IDs: `R-CTL-11…14`, `R-UI-21…28`, `R-VID-16…18`, `K-46…50`. Stable; never reuse or renumber; withdraw, never delete.
+- **Every change traces to a requirement ID.** New IDs: `R-CTL-11…14`, `R-UI-21…28`, `R-VID-16…18`, `K-46…50`, and — added mid-plan with Phase 8 — `R-CTL-15` and an amended `R-CTL-05`. Stable; never reuse or renumber; withdraw, never delete. `R-CAM-19` and `K-46` were filed as they were fixed rather than at the end, because the fault they record was live on the bench.
 - **A node without tests will not be merged. Mutation-check every guard**: delete it, confirm a named test goes red, restore it.
 - **Both palettes**: `var(--yonder-*, <night fallback from tokens.css>)` only.
 - **A token carrying a unit is never uppercased.** `Mb/s`, `µs`, `°/s`.
@@ -1428,9 +1428,172 @@ it("latency beyond the budget inhibits new motion rather than admitting stale co
 
 ---
 
+# Phase 8 — turning the picture the right way up
+
+Found by the operator after Phase 1, and it is a gap in the spec rather than in
+the build: §7 never mentions flip, mirror or rotation, so the gallery never drew
+them and forty-one tasks went past without noticing. `rotation` was already
+modelled end to end and drawn nowhere; flip and mirror were modelled nowhere at
+all, against a requirement (`R-CTL-05`) written long ago and never built.
+
+**These tasks run before Task 42**, which files the requirements this branch
+closes. Task 42 must insert `R-CTL-11 … R-CTL-14` immediately after `R-CTL-10`,
+so the table stays in order around the `R-CTL-15` these tasks add.
+
+### Task 43: The model, the probe and the config learn to flip
+
+**Files:**
+- Modify: `packages/yonder-core/src/video/capability.ts`, `video/probe/camera.ts`,
+  `video/descriptors.ts`, `video/controls.ts`, `schema/config.ts`
+- Test: the matching `*.test.ts` for each
+
+**Interfaces:**
+- Produces: `CameraCapabilities` gains `horizontalFlip` and `verticalFlip`,
+  each `Capability<ControlRange>`; `CONTROL_MAP` gains
+  `["horizontal_flip", "horizontalFlip"]` and `["vertical_flip", "verticalFlip"]`;
+  `CONTROL_NAMES` and `CameraControls` gain the matching booleans;
+  `DESCRIPTORS` gains `Mirror` and `Flip` — **`Mirror` for horizontal, because
+  that is what an operator calls it**, and neither carries a unit.
+
+**Why booleans here and degrees for rotation.** `R-CTL-05` says rotation is by
+degrees rather than a boolean, and it is right: 0, 90, 180, 270 is a rotation.
+A flip is not a rotation and cannot be expressed as one — 180° is both flips
+together, and neither flip alone is any rotation at all. So rotation keeps its
+degrees and each flip is its own switch.
+
+- [ ] **Step 1: Write the failing tests**
+
+```ts
+it("carries a mirror and a flip the device answers", async () => {
+  const withFlips = `${fixture("list-ctrls-menus-globalshutter.txt")}
+                horizontal_flip 0x00980914 (bool)   : default=0 value=1
+                  vertical_flip 0x00980915 (bool)   : default=0 value=0`;
+  const r = await bench({ runner: benchRunner({ "--list-ctrls-menus": withFlips }) });
+  expect(r.found[0].capabilities.horizontalFlip.state).toBe("present");
+  expect(r.found[0].capabilities.verticalFlip.state).toBe("present");
+});
+it("says this camera has neither, because it does not", async () => {
+  // The bench ELP answers no flip control of any kind — that is the recorded
+  // fixture, not an assumption, and it is why Task 44 exists.
+  const r = await bench();
+  expect(r.found[0].capabilities.horizontalFlip.state).toBe("not-offered");
+  expect(r.found[0].capabilities.verticalFlip.state).toBe("not-offered");
+});
+it("sends a mirror as 1 or 0, which is what V4L2 takes", async () => {
+  const calls: string[][] = [];
+  await applyControls({ node, controls: { horizontalFlip: true },
+    capabilities: { ...noCapabilities(), horizontalFlip: present(boolRange) },
+    runner: async (argv) => { calls.push(argv); return ok; } });
+  expect(calls.flat().join(" ")).toContain("horizontal_flip=1");
+});
+it("calls horizontal flip Mirror, which is what an operator calls it", () => {
+  expect(DESCRIPTORS.horizontalFlip.label).toBe("Mirror");
+  expect(DESCRIPTORS.horizontalFlip.unit).toBe("");
+});
+```
+
+- [ ] **Step 2–4: Fail; implement; pass; mutation-check** — drop `horizontal_flip` from `CONTROL_MAP`: the first test goes red and the cross-check names it. Restore.
+- [ ] **Step 5: Regenerate the schema; document both fields; commit** — `git commit -s -m "feat(video): model, probe and store mirror and flip — R-CTL-05"`
+
+---
+
+### Task 44: The board turns the picture when the camera cannot
+
+**Files:**
+- Modify: `packages/yonder-core/src/video/pipeline.ts`
+- Create: `packages/yonder-core/src/video/orientation.ts`, `orientation.test.ts`
+- Test: `video/pipeline.test.ts`
+
+**Interfaces:**
+- Produces: `orientation(caps, controls): { method: "sensor" | "board" | "none"; flip: string | null; note: string }`
+  — `flip` is the `videoflip` `video-direction` value, or `null` when the
+  sensor is doing it or nothing is asked for.
+
+**Why this sits before the tee.** One correction, applied once to the decoded
+frames, so the full-rate stream and the preview cannot disagree about which way
+up the world is. After `jpegdec`, before `tee name=raw`.
+
+**What it costs, so the note can be honest.** A 180° turn and either flip are
+memory operations. A 90° or 270° turn is a transpose, and on a Pi 4 at 1080p30
+that is real CPU on a board already spending about half a core on the JPEG
+decode. Measure it on the bench and record the figure in the note rather than
+estimating it.
+
+- [ ] **Step 1: Write the failing tests**
+
+```ts
+it("uses the sensor when the camera has the control, and adds no element", () => {
+  const o = orientation({ ...noCapabilities(), horizontalFlip: present(boolRange) },
+    { horizontalFlip: true });
+  expect(o).toMatchObject({ method: "sensor", flip: null });
+  expect(compose({ ...opts, camera: mirroredCamera }).join(" ")).not.toContain("videoflip");
+});
+it("uses the board when the camera does not have the control", () => {
+  const o = orientation(noCapabilities(), { horizontalFlip: true });
+  expect(o).toMatchObject({ method: "board", flip: "horiz" });
+});
+it("combines a flip and a rotation into one videoflip, not two", () => {
+  expect(orientation(noCapabilities(), { horizontalFlip: true, rotation: 180 }).flip)
+    .toBe("vert"); // mirror then half-turn is a vertical flip
+});
+it("adds nothing at all when nothing is asked for", () => {
+  expect(orientation(noCapabilities(), {}).method).toBe("none");
+  expect(compose(opts).join(" ")).not.toContain("videoflip");
+});
+it("applies the correction once, before the tee, so both branches agree", () => {
+  const argv = compose({ ...opts, camera: boardMirroredCamera });
+  expect(argv.join(" ").match(/videoflip/g)).toHaveLength(1);
+  expect(argv.indexOf("videoflip")).toBeLessThan(argv.indexOf("tee"));
+});
+```
+
+- [ ] **Step 2–4: Fail; implement; pass; mutation-check** — put `videoflip` after the tee: the last test goes red. Restore.
+- [ ] **Step 5: Measure the cost on the bench** — 1080p30, each of mirror, 180° and 90°, against the unturned baseline; record in `docs/hardware/usb-camera-on-a-pi-4.md` beside the existing figures.
+- [ ] **Step 6: Commit** — `git commit -s -m "feat(video): the board turns the picture when the sensor cannot — R-CTL-05"`
+
+---
+
+### Task 45: The console draws it, and says which one is turning it
+
+**Files:**
+- Modify: the gallery under `docs/console/design/instrument-library/gallery/`;
+  `packages/node-red-dashboard-2-yonder/src/ui/YonderDeck.vue`;
+  `daemon/routes.ts`
+- Test: the deck's component test
+
+**Why the label is not decoration (`R-CTL-15`).** The two are identical in the
+picture and not in their cost: the board's correction is processing on every
+frame and a re-encode of what it changed, the sensor's is free. An operator
+deciding between remounting the camera and paying for the correction has to be
+able to tell which they are looking at.
+
+- [ ] **Step 1: Draw it in the gallery first**, as Task 12 established: an
+  Orientation group with `Mirror` and `Flip` as switches and `Rotation` as
+  0/90/180/270, and beneath it one line — *the sensor is doing this* or *the
+  board is doing this, at a cost per frame*. Show the operator before building.
+- [ ] **Step 2: The failing component test**
+
+```ts
+it("says the board is turning it when the camera cannot", async () => {
+  const el = mount(YonderDeck, { props: { orientation: { method: "board", note: "…" } } });
+  expect(el.text()).toMatch(/the board is doing this/i);
+});
+it("says the sensor is, when the camera can", async () => {
+  const el = mount(YonderDeck, { props: { orientation: { method: "sensor", note: "…" } } });
+  expect(el.text()).toMatch(/the sensor is doing this/i);
+});
+```
+
+- [ ] **Step 3–4: Implement; pass; `./scripts/verify-pages.sh`**
+- [ ] **Step 5: Commit** — `git commit -s -m "feat(console): mirror, flip and rotation, and which one is turning the picture — R-CTL-05, R-CTL-15"`
+
+---
+
 ### Task 42: Close the loop
 
-- [ ] Add every new requirement to `docs/requirements.md` verbatim from spec §12; file `K-46…K-50` as fixed with their commits; record Task 31's thresholds and Task 39's measurements in the hardware notes; update the blueprint README with what each draft became; `npm test && npm run lint && ./scripts/verify-pages.sh`.
+**Runs last, after Phase 8**, whatever the numbering suggests.
+
+- [ ] Add every new requirement to `docs/requirements.md` verbatim from spec §12, inserting `R-CTL-11 … R-CTL-14` immediately after `R-CTL-10` so the table stays ordered around the `R-CTL-15` Phase 8 added; file `K-46…K-50` as fixed with their commits; record Task 31's thresholds and Task 39's measurements in the hardware notes; update the blueprint README with what each draft became; `npm test && npm run lint && ./scripts/verify-pages.sh`.
 - [ ] Commit — `git commit -s -m "docs: file the requirements, the known issues and the measurements this branch closed"`
 
 ---
