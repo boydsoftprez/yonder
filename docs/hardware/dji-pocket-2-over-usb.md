@@ -661,3 +661,34 @@ board; the operator plugs one cable.
   the real struct needs a decompiler pass or a capture. Not needed while the board transcodes.
 - **Power draw** on the link. Not measured.
 - **The side port**, the phone adapter, and the original Osmo Pocket (`HG210`).
+
+---
+
+## The bench queue — everything one mounted session should close
+
+The camera has been off the bench more often than on it, and every question
+below has waited for it separately. They are gathered here so that the next
+time it is mounted, one session closes the lot rather than five sessions each
+closing one. Ordered so that an early answer cannot invalidate a later one.
+
+**Bring:** the camera mounted as it will fly, not handle-up; a card in it; the
+board on header power with `dr_mode=peripheral` (see [The bench
+procedure](#the-bench-procedure)); and a way to see the picture, because half
+of these are confirmed by watching rather than by a reply.
+
+| # | Question | Why it is blocking | Closes |
+|---|---|---|---|
+| 1 | **Which limit bit is which axis.** `gimbal/0x05` byte 10, one axis at a time to its stop | The whole guard turns on it. Byte 10 bit 1 is confirmed as *a* limit flag; the public dissector calls the byte "limit/status flags for pitch, roll, yaw" and which is which was never separated | The guard's shape, Task 38 |
+| 2 | **The stop bound after the last frame.** Browser intent to observed rest, five runs, browser disconnected with USB intact | Sets the command lease. The device timeout alone is not the end-to-end bound, and an over-long lease is travel nobody asked for | Task 2, sizes Task 36 |
+| 3 | **Recentre from a limit pose** | The one recorded stall. Whether it is safe with the flag watched, or must be refused | The guard's refusal rule |
+| 4 | **Standalone work mode** `gimbal/0x44`, and selfie `0x4C`/`0x14 ±180°` | Both untried; both are motion commands the guard must cover | Task 37 |
+| 5 | **Shutter `camera/0x28`** | Exposure mode, ISO and EV are proven and shutter is not, so the console cannot yet offer a manual shutter on this camera | Task 39, the Pocket 2's gates |
+| 6 | **Photo `camera/0x01`**, and **record `camera/0x02` confirmed with a card in** | Record was acknowledged but unconfirmable with no card. R-CAM-17 and R-CAM-18 both turn on it | Task 39, the captures panel |
+| 7 | **Focus AFC/AFS/spot** `0x24`, `0x30`, `0x32`; **record format** `0x18`; **sensor size** `0x12`; **colour and filter** `0x3e`, `0x42` | Ids known, none driven. Each is drawn in the blueprint and none may ship live until it has been | Task 39 |
+| 8 | **Decode the camera state pushes** `0x80`, `0x81`, `0x87`, `0x88` | Arriving at 10–20 Hz and never decoded. They carry mode, recording time, battery and card — everything the deck's placard claims to show | Task 39 |
+| 9 | **Whether flip, mirror and rotation exist at all on this camera** | Newly asked (R-CTL-05). Nothing in the recovered SDK surface suggests a command, so the working answer is that the board does it — but ask the camera before assuming | Phase 8, Task 45's labelling |
+
+**Nothing marked untried above may ship as a live control** until it has been
+driven here and the effect recorded, which is this plan's own rule. The
+console draws them; whether they are offered is decided by what this session
+answers.
