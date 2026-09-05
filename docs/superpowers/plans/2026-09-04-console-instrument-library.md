@@ -992,6 +992,34 @@ it("has a maximum width", () => { expect(getComputedStyle(el).maxWidth).not.toBe
 
 **Interfaces:** props `{ label, unit, min, max, step, precision, actual, commanded, requested, state, reason, fine, readonly }`; emits `set`, snapped to `step` and clamped. `requested` is the draft's pending value — a third, hollow mark with *Pending · apply on Setup* beneath.
 
+**Exactly one mark may look draggable, and it is `requested`.** The operator
+read the blueprint's bar as two handles inside a minute of using it, and he
+was reading it fairly: the track was filled to the device's value and ended in
+a tick, which is the shape of a slider, while the pending value was a hollow
+ring, which is the shape of a thumb. Two grabbable-looking things, one of them
+inert.
+
+`actual` and `commanded` are readings, not requests. Draw them where they
+cannot be mistaken for a control — below the track rather than on it, and not
+as a filled extent from zero. Keep the fill only if it is unmistakably a
+scale, never a handle. On a page whose entire purpose is separating what the
+device reports from what was asked for, a reported value must never wear a
+control's costume.
+
+```ts
+it("offers exactly one grabbable mark, whatever else it is drawing", () => {
+  const w = bar({ actual: 3000, commanded: 4000, requested: 5000, state: "present" });
+  expect(w.findAll("[data-grab]")).toHaveLength(1);
+  expect(w.find("[data-grab]").attributes("aria-label")).toMatch(/requested|pending/i);
+});
+it("a press anywhere on the track moves the requested mark and nothing else", async () => {
+  const w = bar({ actual: 3000, commanded: 4000, requested: 5000 });
+  await w.find(".y-sb__trk").trigger("pointerdown", { clientX: 40 });
+  expect(w.emitted("set")).toHaveLength(1);
+  expect(w.props("actual")).toBe(3000);
+});
+```
+
 - [ ] **Step 1: Write the failing tests**
 
 ```ts
