@@ -108,4 +108,51 @@ it("a gated control never wears the colour of a live selection", () => {
     expect(gated).toContain("yonder-neutral");
     expect(live).toContain("yonder-select");
 });
+
+it("not-offered draws no wrapper at all, not an empty one", () => {
+    // The picker's suite has had this since Task 16; this one did not, and
+    // deleting the root's v-if left every other test here green. An empty
+    // bordered box and an absent control say different things to an operator
+    // (R-UI-20): the deck states the fact where the control would have been.
+    const w = seg({ options: ["Video", "Photo"], value: "Video", state: "not-offered" });
+    expect(w.find(".y-seg").exists()).toBe(false);
+    expect(w.html().replace(/<!--.*?-->/g, "").trim()).toBe("");
+});
+
+it("the disabled attribute alone stops the press", async () => {
+    // These two isolate what the general "emits nothing" test cannot: it
+    // passes with either protection removed, so it proves only their joint
+    // absence. Caught in review, after a mutation report that removed the
+    // guard and concluded `disabled` carried it — the symmetric mutation
+    // was never run and tells the opposite story.
+    const w = seg({ options: ["Video", "Photo"], value: "Video", state: "gated" });
+    expect(w.findAll(".y-seg__opt").every((o) => o.attributes("disabled") !== undefined)).toBe(true);
+});
+
+it("the guard inside pick() stops the press even reaching a handler", async () => {
+    // A real browser will deliver a *dispatched* click to a disabled
+    // button's listener even though `.click()` will not, so `disabled` is
+    // not a guarantee on its own. Dispatch it the way a browser would.
+    const w = seg({ options: ["Video", "Photo"], value: "Video", state: "gated" });
+    w.findAll(".y-seg__opt")[1].element.dispatchEvent(new Event("click", { bubbles: true }));
+    await w.vm.$nextTick();
+    expect(w.emitted("change")).toBeUndefined();
+});
+
+it("neither disabled state keeps the wash that marks a live selection", () => {
+    // `.on` tints the chosen option with the select colour. Overriding only
+    // the border and the text leaves that wash behind, so a control the
+    // device is not delivering — or that another control holds — still reads
+    // as the live, chosen one. Found in review for advertised after the same
+    // defect was fixed for gated; check both so neither can drift back.
+    const live = getComputedStyle(
+        seg({ options: ["Video", "Photo"], value: "Photo", state: "present" })
+            .find(".y-seg__opt.on").element).background;
+    for (const state of ["advertised", "gated"]) {
+        const off = getComputedStyle(
+            seg({ options: ["Video", "Photo"], value: "Photo", state, reason: "why" })
+                .find(".y-seg__opt.on").element).background;
+        expect(off, `${state} kept the live selection's wash`).not.toBe(live);
+    }
+});
 });

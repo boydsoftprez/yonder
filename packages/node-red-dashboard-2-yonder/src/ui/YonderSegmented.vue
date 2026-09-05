@@ -72,20 +72,21 @@
  * `width: max-content`, never a percentage, so it is capped and sized to
  * its own content rather than to whatever surface it happens to sit on.
  *
- * **The `disabled` attribute is what stops the emit; the guard inside
- * `pick()` is belt-and-suspenders beside it, not a second path the test
- * suite exercises.** Mutation-checked (task-17-report.md): with the guard
- * removed and `disabled` left in place, `segmented.component.test.ts`'s
- * "emits nothing at all unless it is present" stays green — a real
- * `<button disabled>`'s click does not reach a Vue `@click` handler at all,
- * in jsdom same as in a browser. Only removing both together turns it red.
- * The guard stays anyway, exactly as the draft already had it: a disabled
- * DOM attribute is state this component asserts about itself on every
- * render, and the guard is what keeps a stray emit impossible even if some
- * future change ever let a press reach `pick()` by a path that does not
- * pass through that attribute — cheap insurance the test does not itself
- * require, recorded here so the next reader does not credit it with more
- * than it proves.
+ * **Two independent things stop the emit, and the general test proves
+ * neither of them individually.** `disabled` on the button, and the guard
+ * inside `pick()`. Remove either alone and "emits nothing at all unless it
+ * is present" stays green; only removing both turns it red. An earlier
+ * version of this comment credited `disabled` with carrying it, on a
+ * mutation that only removed the guard — the symmetric mutation was not run,
+ * and it tells the opposite story. Review caught that. The two tests below
+ * this one now isolate each, so the redundancy is deliberate and checked
+ * rather than assumed.
+ *
+ * Worth knowing why jsdom never delivers the click: not a platform
+ * guarantee, but `@vue/test-utils`' own `trigger()`, which skips a disabled
+ * element. In a real browser a dispatched click *does* reach a disabled
+ * button's listener, though `.click()` does not — which is the argument for
+ * keeping the guard rather than against it.
  */
 const TONE_CLASS = {
     advertised: 'why-advertised',
@@ -156,7 +157,16 @@ export default {
    control's own tone wins over the "on" colour on equal specificity,
    exactly as the draft already had it — an advertised or gated option
    reads in its state's tone whether or not it is the one marked on. */
-.is-advertised .y-seg__opt { border-color: var(--yonder-waiting, #ffcf28); color: var(--yonder-waiting, #ffcf28); }
+.is-advertised .y-seg__opt {
+    border-color: var(--yonder-waiting, #ffcf28);
+    color: var(--yonder-waiting, #ffcf28);
+    /* `background` too, and this was missed until review. Overriding only the
+       border and the text left `.on`'s select-tinted background behind, so an
+       advertised control's chosen option still carried the wash that marks a
+       live selection — the same defect the gated rule below was fixed for,
+       one state along. */
+    background: transparent;
+}
 /* **Gated takes the neutral tone, exactly as `YonderPicker` does and as the
    advertised rule above already does here.** Dashing the border alone left
    the chosen option wearing `.on`'s select colour — cyan, which is this
