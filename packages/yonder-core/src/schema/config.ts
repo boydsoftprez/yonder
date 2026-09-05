@@ -527,6 +527,12 @@ export const ConfigSchema = z.object({
       // port-carrying outputs are UDP against a TCP console so nothing
       // collides, and the apply confirms. The bind race happens on the next
       // boot, by which time nobody is watching a countdown.
+      //
+      // **Deliberately blind to `enabled`, for the same reason.** A stopped
+      // output carrying `ui.port` is refused now, at a keyboard, rather than
+      // when somebody switches it on — which may be in flight, and is the
+      // moment the console it collides with is the only way to reach the
+      // aircraft. Rule 6.
       if ("port" in out && out.port === cfg.ui.port) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
