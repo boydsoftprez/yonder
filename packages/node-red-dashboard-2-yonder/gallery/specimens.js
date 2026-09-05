@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import YonderAimPad from "../src/ui/YonderAimPad.vue";
 import YonderAnnunciator from "../src/ui/YonderAnnunciator.vue";
 import YonderBudget from "../src/ui/YonderBudget.vue";
 import YonderColumn from "../src/ui/YonderColumn.vue";
@@ -468,6 +469,38 @@ export const SPECIMENS = [
     note: "Coordinator resolution 7: this is the one control in the whole library that starts something on the aircraft, so while a press awaits the device's own acknowledgement the key is disabled outright rather than merely styled to look busy — a second press here must be impossible to make by accident, not just discouraged.",
     component: YonderShutter,
     props: { mode: "photo", pending: true },
+    payload: undefined,
+    part: true,
+  },
+  {
+    title: "Aim pad — at rest, tilt at its limit",
+    note: "R-CAM-11, R-CMD-04: the haloed puck sits at the dial's own centre until an operator pushes it — this is the only control in the library where a press becomes movement on an aircraft, and at rest it commands nothing. The tilt axis is reporting its own mechanical limit (atLimit.pitch) regardless of whether anyone is pushing right now, which is why the pill can show even here.",
+    component: YonderAimPad,
+    props: { axes: { pan: "present", tilt: "present", roll: "present" }, atLimit: { pitch: true, yaw: false }, inhibited: null },
+    payload: undefined,
+    part: true,
+  },
+  {
+    title: "Aim pad — pushing",
+    note: "The same props as the resting specimen beside it — 'pushing' is transient, client-only state with no prop of its own, exactly like YonderHoldKey's own 'held'. Drag inside the dial (or hold and move) to push the puck out from centre; a real press cannot be captured as a static prop, so this specimen is the one to interact with directly, in both palettes.",
+    component: YonderAimPad,
+    props: { axes: { pan: "present", tilt: "present", roll: "present" } },
+    payload: undefined,
+    part: true,
+  },
+  {
+    title: "Aim pad — inhibited",
+    note: "Coordinator resolution 6: a general inhibition reason, shown and acted on — every one of down()'s and updateFromEvent()'s own guards refuses a press outright, not merely disables the cursor. Not the range finder's own wording (removed from this plan after the operator rejected it) — the deck supplies whatever reason is true, and here it is a gimbal that is simply not answering.",
+    component: YonderAimPad,
+    props: { axes: { pan: "present", tilt: "present", roll: "present" }, inhibited: "gimbal not responding" },
+    payload: undefined,
+    part: true,
+  },
+  {
+    title: "Aim pad — roll not answering",
+    note: "Coordinator resolution 7: an axis the device advertises and will not answer — the bench camera's roll — struck through on the pad itself rather than hidden, so an operator can tell 'this camera cannot' from 'this page failed'. Pan and tilt are unaffected: the pad is a two-axis stick and never had a gesture for roll at all.",
+    component: YonderAimPad,
+    props: { axes: { pan: "present", tilt: "present", roll: "not-offered" } },
     payload: undefined,
     part: true,
   },
