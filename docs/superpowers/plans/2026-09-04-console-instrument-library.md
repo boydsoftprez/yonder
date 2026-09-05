@@ -698,7 +698,36 @@ it("re-reads the gated controls after the gate changes", async () => {
 ```
 
 - [ ] **Step 2–4: Fail; implement; `npm test -w yonder-core` — the cross-check is green again; mutation-check each refusal and the re-probe**
-- [ ] **Step 5: Commit** — `git commit -s -m "feat(video): write every modelled control; refuse a gated one and an unlisted menu id — R-CTL-11 … R-CTL-14, R-UI-21"`
+- [ ] **Step 5: The route must carry a boolean, or the switches are unreachable**
+
+`requestedControls()` in `daemon/routes.ts` rejects any value that is not a
+finite number — and returns `null` for the *whole* request when it meets one,
+so a page sending brightness and auto focus together has both discarded.
+`autoWhiteBalance` and `autoFocus` are booleans in the schema, and
+`applyControls` now sends them as `1`/`0`, so without this the support added
+above cannot be reached by the only caller that has it.
+
+Accept a boolean for exactly the controls the schema types as boolean, and a
+number for the rest. **Derive that from the schema rather than listing the two
+by hand**: a hand-written list is a third place that has to be remembered when
+a control is added, and the first two have already drifted once in this plan.
+If deriving it is impractical, use a construct the compiler checks, and say in
+a comment why the hand-written form was unavoidable.
+
+```ts
+it("takes a switch as a boolean and a level as a number, in one request", () => {
+  expect(requestedControls({ brightness: 12, autoFocus: false }))
+    .toEqual({ brightness: 12, autoFocus: false });
+});
+it("still refuses a boolean for a control that is not a switch", () => {
+  expect(requestedControls({ brightness: true })).toBeNull();
+});
+```
+
+Mutation-check it: make the boolean branch accept a boolean for every control
+and the second test goes red.
+
+- [ ] **Step 6: Commit** — `git commit -s -m "feat(video): write every modelled control; refuse a gated one and an unlisted menu id — R-CTL-11 … R-CTL-14, R-UI-21"`
 
 ---
 
