@@ -35,14 +35,16 @@ surface. One branch, seven phases, each a review checkpoint.
 - **Yonder relays commands and never originates them** (R-CMD-04). The rate controller carries out an applied policy; the guard refuses, it never aims.
 - **No credential in a committed capture** (R-SEC-10). **No board address in any committed file.** `git commit -s`, GPG-signed, never `--no-gpg-sign`.
 - **Commit messages**: imperative mood, the requirement ID where one applies.
-- **An exhaustive switch only protects you if every case `return`s**, inside a
-  function whose return type excludes `undefined`. Measured on this repository
-  in Task 4, by adding a fifth `Capability` state and counting the errors: a
-  switch using `break` with an `assertNever` after it compiles identically
-  whether or not it is exhaustive, so it reads as a guard and is not one. The
-  returning form produced exactly one error, at the one site that needed
-  changing. Never add `default:` to either form — it silences the only warning
-  worth having.
+- **An exhaustive switch protects you only with all three of: every case
+  `return`s, no `default:`, and the enclosing function's return type written
+  out explicitly.** Measured on this repository in Task 4 by adding a fifth
+  `Capability` state and counting the errors. A switch using `break` with an
+  `assertNever` after it compiles identically whether or not it is exhaustive,
+  so it reads as a guard and is none. An *inferred* return type defeats the
+  returning form just as quietly: TypeScript widens it to `string | undefined`
+  and the missing case passes. With all three in place, the fifth state
+  produced exactly one error per site that needed changing. The annotation is
+  load-bearing — say so where you write it, or someone tidies it away.
 
 **Commands:** `npm test -w yonder-core` · `npm test -w node-red-dashboard-2-yonder` · `npx vitest run <file> --root packages/<pkg>` · `npm test` · `npm run lint` · `./scripts/verify-pages.sh` (`ACCEPT_SHAPE=1` to adopt a shape) · `HOLD=1 PORT=18900 ./scripts/verify-pages.sh` to stand the console up · gallery: `npm run gallery -w node-red-dashboard-2-yonder`.
 
