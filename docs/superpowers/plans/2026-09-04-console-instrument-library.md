@@ -1123,7 +1123,7 @@ it("draws the haloed puck at the centre at rest and under the pointer while push
 **Files:** `ui/draft.ts` + `draft.test.ts`
 
 **Interfaces:**
-- Produces: `createDraftStore(): { get(camera), set(camera, path, value), pending(camera): { path, requested }[], clear(camera), snapshot(), restore(snapshot) }` — kept in Dashboard's client store under `yonder.draft`; survives page switches for the session; **never posts to the socket**.
+- Produces: `createDraftStore(): { get(camera), set(camera, path, value), pending(camera, applied): { path, requested }[], clear(camera), snapshot(), restore(snapshot) }` — **`pending` takes the applied state and filters against it at read time**, so an edit that matches what is applied stops being pending the moment that becomes true, however it became true. Comparing at `set` time instead freezes the answer at the keystroke: a draft that later matches a re-probed or externally applied value would keep offering to apply a change that changes nothing — kept in Dashboard's client store under `yonder.draft`; survives page switches for the session; **never posts to the socket**.
 
 - [ ] **Step 1: Write the failing tests** — a set is pending until cleared; pending survives `snapshot`/`restore` (a page switch); per camera; `clear` empties; a set never calls `emit` (a spy stays uncalled).
 - [ ] **Step 2–4: Fail; implement; pass; mutation-check** — call `emit` on set: the never-posts test goes red. Restore.
