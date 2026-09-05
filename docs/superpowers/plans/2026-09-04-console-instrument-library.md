@@ -1376,6 +1376,23 @@ it("ignores a draft and reads only the applied policy", ...);
 
 # Phase 5 — the accessory camera
 
+**Phase 5 is deferred until the Pocket 2 is back in hand** — the operator's
+decision, taken on 2026-09-05. Every task in it drives a real gimbal or a real
+camera over a real USB link, and none can be finished, or honestly reviewed,
+without the device mounted. Nothing here is blocked on understanding.
+
+Task 2 is deferred with them, for the same reason.
+
+**When the camera returns, start from the bench queue** in
+[`hardware/dji-pocket-2-over-usb.md`](../../hardware/dji-pocket-2-over-usb.md),
+which gathers all nine open questions in an order where an early answer cannot
+invalidate a later one. It exists so one mounted session closes the lot rather
+than five sessions closing one each.
+
+**Nothing marked untried in that note ships as a live control** until the bench
+has driven it — this plan's own rule, and the reason these tasks cannot be
+approximated in software.
+
 ### Task 35: DUML and the AOA session
 
 **Files:** `video/accessory/duml.ts`, `aoa.ts`, and tests
@@ -1639,6 +1656,12 @@ it("says the sensor is, when the camera can", async () => {
 ### Task 42: Close the loop
 
 **Runs last, after Phase 8**, whatever the numbering suggests.
+
+**It closes what this branch actually did, not what the plan set out to do.**
+Task 2 and Phase 5 are deferred until the Pocket 2 is in hand, so their
+requirements, their known-issue entries and their measurements are not this
+branch's to file. File the rest, and record the deferral itself — a plan that
+quietly drops seven tasks reads later as a plan that finished them.
 
 - [ ] Add every new requirement to `docs/requirements.md` verbatim from spec §12, inserting `R-CTL-11 … R-CTL-14` immediately after `R-CTL-10` so the table stays ordered around the `R-CTL-15` Phase 8 added; file `K-46…K-50` as fixed with their commits; record Task 31's thresholds and Task 39's measurements in the hardware notes; update the blueprint README with what each draft became; `npm test && npm run lint && ./scripts/verify-pages.sh`.
 - [ ] Commit — `git commit -s -m "docs: file the requirements, the known issues and the measurements this branch closed"`
