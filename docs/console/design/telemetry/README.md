@@ -12,10 +12,24 @@ They were built against the **real generated stylesheet** — `themeCss()` run o
 treatment is the console's own. Each file is one resolved state with that stylesheet inlined
 and no script, so it opens in a browser and shows exactly one screen.
 
+## Start here
+
+**`page-anatomy.html`** is the blueprint. It poses the arrangement question, draws the three
+answers, marks the chosen one, and then takes the chosen one apart: **click any control and it
+names the node that draws it**, with the reason. That is the file to open first and the file to
+build from.
+
+**Arrangement A is the one chosen** — readings in a main column, actions in a rail — on the
+grounds that it is the arrangement the Status page already uses, that it keeps the autopilot's
+state and the path check visible at the same time, which is exactly when you need both, and
+that below 1024 px the rail drops under the readings without anything being rearranged, so
+there is one page to design and one page for the capture gate to photograph.
+
 ## What is here
 
 | File | The state it shows |
 |---|---|
+| `page-anatomy.html` | **The blueprint** — three arrangements, the chosen one, and every control named |
 | `telemetry-linked.html` | An autopilot found and answering, telemetry flowing |
 | `telemetry-nothing-on-the-wire.html` | The sweep found silence — the wiring case, naming the pins |
 | `telemetry-not-mavlink.html` | Bytes at every speed, none of them a frame — the autopilot's port is set to something else |
