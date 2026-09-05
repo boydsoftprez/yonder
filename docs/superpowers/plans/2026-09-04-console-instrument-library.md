@@ -35,6 +35,13 @@ surface. One branch, seven phases, each a review checkpoint.
 - **Yonder relays commands and never originates them** (R-CMD-04). The rate controller carries out an applied policy; the guard refuses, it never aims.
 - **No credential in a committed capture** (R-SEC-10). **No board address in any committed file.** `git commit -s`, GPG-signed, never `--no-gpg-sign`.
 - **Commit messages**: imperative mood, the requirement ID where one applies.
+- **To screenshot the gallery, resize the viewport to the page's height
+  rather than scrolling.** The browser pane returns blank or reports itself
+  hidden after any scroll gesture, and it cost five tasks in this phase before
+  Task 19's reviewer found the way round: set the viewport to the page's own
+  content height and the whole page renders in one reliable capture. Where
+  even that fails, inspect the live DOM and computed styles and say that is
+  what you did — never report a look you did not get.
 - **`setValue()` fires `input` *and* `change`, so it cannot tell them apart.**
   Measured in Task 15: a test written with `setValue()` passes against a field
   bound to `@change` alone — which emits on blur, not on the keystroke — so it
