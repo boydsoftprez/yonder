@@ -133,6 +133,32 @@ describe("detectCameras", () => {
     expect(r.found[0].capabilities.rotation.state).toBe("not-offered");
   });
 
+  /**
+   * The same camera, the same session, `auto_exposure` switched to Manual
+   * Mode and switched back — recorded rather than edited. Two lines differ
+   * that matter: `auto_exposure` reads 1, and `exposure_time_absolute` has
+   * lost `flags=inactive`. (`focus_absolute`'s value moved too; that is a
+   * live autofocus reading, not a gate.)
+   *
+   * **This is the state the other fixture cannot express.** In it all three
+   * gate-eligible controls are permanently inactive, so *the device says this
+   * control is inactive* and *this control has a gate configured* are
+   * perfectly correlated, and no test drawn from it alone can tell the two
+   * apart — which is how `gateIfInactive` shipped with that branch uncovered.
+   * `gateIfInactive`'s own unit tests build the state by hand and remain the
+   * precise guard; this one proves the whole path agrees with a real camera.
+   */
+  it("leaves the shutter live when the camera is actually in Manual Mode", async () => {
+    const r = await bench({ runner: benchRunner({
+      "--list-ctrls-menus": fixture("list-ctrls-menus-globalshutter-manual.txt"),
+    }) });
+    const caps = r.found[0].capabilities;
+    expect(caps.exposure.state).toBe("present");
+    // The other two are still held, so this is not the whole gate switched off.
+    expect(caps.whiteBalance.state).toBe("gated");
+    expect(caps.focus.state).toBe("gated");
+  });
+
   it("fills rotation from `rotate`, with the device's reading, when it is implemented", async () => {
     const withRotate = `${fixture("list-ctrls-menus-globalshutter.txt")}
                          rotate 0x00980922 (int)    : min=0 max=270 step=90 default=0 value=90 flags=has-min-max`;
