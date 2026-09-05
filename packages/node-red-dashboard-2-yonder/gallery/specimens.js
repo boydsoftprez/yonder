@@ -19,6 +19,7 @@ import YonderSparkline from "../src/ui/YonderSparkline.vue";
 import YonderStateOverlay from "../src/ui/YonderStateOverlay.vue";
 import YonderTape from "../src/ui/YonderTape.vue";
 import YonderTextField from "../src/ui/YonderTextField.vue";
+import YonderThumbStrip from "../src/ui/YonderThumbStrip.vue";
 
 /**
  * One specimen per shipped instrument (R-UI-25, CLAUDE.md rule 2).
@@ -403,6 +404,21 @@ export const SPECIMENS = [
     note: "The fault tone (coordinator resolution 5): live video could not be established and this viewer fell back to periodic stills without being asked, exactly as R-VID-14 requires — stated as a fact about the link, not styled as an ordinary picture that merely looks different.",
     component: YonderStateOverlay,
     props: { head: "stills", detail: "every 2 s" },
+    payload: undefined,
+    part: true,
+  },
+  {
+    title: "Thumb strip — three cameras, one live",
+    note: "R-UI-03, R-VID-14: every detected camera keeps its place in the strip, including the one already on the main picture (coordinator resolution 6 corrects §6's own looser first draft, which showed only 'the others') — Nose and Tail read their still's own age, Belly reads Live and is marked. Downlink now is this path's measured total (§8.2), not the sum any of the per-camera figures on this page would suggest.",
+    component: YonderThumbStrip,
+    props: {
+      cameras: [
+        { id: "cam-nose", name: "Nose", active: false, ageSeconds: 4 },
+        { id: "cam-belly", name: "Belly", active: true, ageSeconds: 0 },
+        { id: "cam-tail", name: "Tail", active: false, ageSeconds: 11 },
+      ],
+      downlink: "3.9 Mb/s",
+    },
     payload: undefined,
     part: true,
   },
