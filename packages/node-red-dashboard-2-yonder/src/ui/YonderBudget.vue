@@ -2,8 +2,7 @@
 <template>
     <div class="y-budget">
         <div class="y-budget__head">
-            <span class="y-budget__label">{{ props.label }}</span>
-            <span class="y-budget__total">{{ mbps(total) }} of {{ mbps(capacity) }} Mb/s</span>
+            <span class="y-budget__label">{{ props.label }}</span>{{ ' ' }}<span class="y-budget__total">{{ mbps(total) }} of {{ mbps(capacity) }} Mb/s</span>
         </div>
         <div class="y-budget__track">
             <div
@@ -35,6 +34,17 @@
  *
  * A **readout, not an input.** With a slider you cannot tell whether the bar
  * shows what you asked for or what you are getting.
+ *
+ * **The label and the value are separated twice over (R-UI-25).** They used
+ * to share one gap — `.y-budget__head`'s `justify-content: space-between` —
+ * which is a *visual* fact and not a textual one: two sibling elements each
+ * on their own line are, to Vue's own whitespace handling, elements with
+ * nothing at all between them. On the board that read as `In use0.0of3.2`.
+ * The template's `{{ ' ' }}` between the two spans is a real, second
+ * character of separation that survives however the markup is reformatted
+ * later; `.y-budget__head`'s own `gap` is the first, so the flex layout
+ * itself no longer depends on there being room to spare before it draws any
+ * space between them at all.
  */
 export default {
     name: 'YonderBudget',
@@ -89,7 +99,7 @@ export default {
 
 <style scoped>
 .y-budget { font-family: var(--yonder-font, system-ui, sans-serif); }
-.y-budget__head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px; }
+.y-budget__head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 4px; }
 .y-budget__label { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--yonder-label, #7f8a95); }
 /* Never uppercased: Mb/s rendered as MB/S says megabytes. */
 .y-budget__total { font-family: var(--yonder-font-mono, ui-monospace, monospace); font-size: 12px; text-transform: none; color: var(--yonder-value, #fff); }

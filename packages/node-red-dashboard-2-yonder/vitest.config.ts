@@ -18,12 +18,23 @@ import vue from "@vitejs/plugin-vue";
  * from happy-dom's speed. The rest of this package's tests — `nodes.test.ts`,
  * registering widgets against a fake Node-RED — need no DOM at all and stay
  * on the cheaper default.
+ *
+ * `css: true` (Task 14, R-UI-25): Vitest's default drops every `<style>`
+ * block on the floor — cheap, and correct for every test above this one, since
+ * none had asked a component's own rendered CSS anything before. Task 14's
+ * regression guards do: whether a rail's rule is `flex-wrap: wrap` is a fact
+ * about the stylesheet, not about the DOM tree, and with styles discarded
+ * `getComputedStyle` can only ever report the CSS-initial default —
+ * `nowrap` — which would make a guard against clipping pass whether or not
+ * the fix is still there. Confirmed by hand: without this line the same
+ * `<style scoped>` block never reaches `document.head` at all.
  */
 export default defineConfig({
   plugins: [vue()],
   test: {
     environment: "node",
     environmentMatchGlobs: [["src/ui/**", "jsdom"]],
+    css: true,
   },
   resolve: {
     alias: {

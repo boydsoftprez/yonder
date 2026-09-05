@@ -68,6 +68,10 @@ export default {
 <style scoped>
 .y-bar {
     display: flex;
+    /* R-UI-25: six cells of real values ran past the row's own width and one
+       came back `1280 × 7…`. Wrapping onto a second line is what a row this
+       narrow does instead of asking a cell to shrink below its value. */
+    flex-wrap: wrap;
     align-items: stretch;
     font-family: var(--yonder-font);
     border-top: 1px solid var(--yonder-divider, #2b333c);
@@ -75,7 +79,11 @@ export default {
 
 .y-bar__cell {
     flex: 1;
-    min-width: 0;
+    /* `min-width: 0` is what let a cell shrink below its own value's width
+       in the first place — `flex-wrap` above cannot help a cell that will
+       still rather shrink than wrap. `max-content` is the floor: never
+       smaller than the value it was handed. */
+    min-width: max-content;
     padding: 5px 10px;
     border-right: 1px solid var(--yonder-divider, #2b333c);
 }
@@ -98,8 +106,9 @@ export default {
     font-variant-numeric: tabular-nums;
     color: var(--yonder-value, #fff);
     display: block;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    /* No `text-overflow: ellipsis` here (R-UI-25): the cell it sits in is
+       never narrower than this value needs (`min-width: max-content`
+       above), so a value is never shortened to fit — the row wraps first. */
     white-space: nowrap;
 }
 

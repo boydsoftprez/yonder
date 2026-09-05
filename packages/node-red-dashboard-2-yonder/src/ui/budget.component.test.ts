@@ -46,6 +46,16 @@ function mountWithMessage(
   });
 }
 
+/**
+ * The minimal mount Task 14's own regression needs: only what that test
+ * varies from one call to the next. "In use" stands in for whatever caption
+ * a real instance carries — the defect is the missing gap *after* it, not
+ * this particular word, the same way "Uplink" above stands in for one.
+ */
+function budget(cfg: { segments: BudgetSegment[]; capacityKbps: number; label?: string }) {
+  return mountBudget(cfg.capacityKbps, cfg.segments, cfg.label ?? "In use");
+}
+
 function leftPct(el: { element: Element }): number {
   return parseFloat((el.element as HTMLElement).style.left);
 }
@@ -159,5 +169,40 @@ describe("the live answer", () => {
     );
     const over = wrapper.findAll(".y-budget__seg").filter((n) => n.classes().includes("over"));
     expect(over).toHaveLength(1);
+  });
+});
+
+/**
+ * R-UI-25. `.y-budget__label` and `.y-budget__total` sit side by side only
+ * because `.y-budget__head` is `display: flex` — a *visual* fact, and one
+ * `jsdom` cannot see (it lays nothing out). What it renders faithfully is
+ * the DOM those two elements share, and there the gap was never real: two
+ * sibling elements each on their own line are, to Vue's own whitespace
+ * handling, elements with nothing at all between them, not elements with a
+ * space between them. On the board that read as `In use0.0of3.2` — three
+ * fields with no separator, serialised as one number nobody can parse.
+ * `justify-content: space-between` had been carrying the whole appearance
+ * of a gap, and a layout that never gets narrow enough to need it never
+ * shows the seam — until the one that does.
+ */
+describe("the head's label and its value — a real gap between them, not a visual one", () => {
+  it("separates the budget's label from its value", () => {
+    // Seen on the board as `In use0.0of3.2`: three fields with no gap between
+    // them read as one number nobody can parse.
+    const w = budget({ segments: [{ label: "Cam 1 · rtp", kbps: 0 }], capacityKbps: 3200 });
+    expect(w.text()).toContain("In use 0.0 of 3.2");
+  });
+
+  /**
+   * The test above cannot see this half: `gap` is a layout instruction, and
+   * `jsdom` renders no layout, so a `.text()` assertion neither needs it nor
+   * notices its absence. It is asserted here on its own so a future edit
+   * that quietly drops `.y-budget__head`'s `gap` — leaving the two elements
+   * to rely on `justify-content: space-between` alone, exactly the state
+   * that produced the defect — still goes red somewhere.
+   */
+  it("gives the head a real gap of its own, not only the space between two elements", () => {
+    const w = budget({ segments: [], capacityKbps: 3200 });
+    expect(getComputedStyle(w.find(".y-budget__head").element).gap).toBe("8px");
   });
 });

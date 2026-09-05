@@ -85,6 +85,15 @@ export default {
 <style scoped>
 .y-keys {
     display: flex;
+    /* R-UI-25: a key is `flex: 0 0 auto` below and never shrinks, so a rail
+       narrower than its keys' combined width used to run on past its own
+       edge — visible only for however far whatever clipped it (an
+       ancestor's `overflow: hidden`, the viewport) let it get, with nothing
+       to say a key past that point still existed. Wrapping onto a second
+       row is what a rail this narrow does instead — never a scrollbar,
+       which would trade a hidden key for one behind a gesture nobody knows
+       to make. */
+    flex-wrap: wrap;
     border-top: 1px solid var(--yonder-divider, #2b333c);
     background: var(--yonder-pane, #090d12);
 }
