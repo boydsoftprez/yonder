@@ -528,11 +528,20 @@ export const ConfigSchema = z.object({
       // collides, and the apply confirms. The bind race happens on the next
       // boot, by which time nobody is watching a countdown.
       //
-      // **Deliberately blind to `enabled`, for the same reason.** A stopped
-      // output carrying `ui.port` is refused now, at a keyboard, rather than
-      // when somebody switches it on — which may be in flight, and is the
-      // moment the console it collides with is the only way to reach the
-      // aircraft. Rule 6.
+      // **Deliberately blind to `enabled`** — for `srt`, which binds this
+      // port on this device. A stopped SRT output carrying `ui.port` is
+      // refused now, at a keyboard, rather than when somebody switches it on:
+      // that may be in flight, and the console it would collide with is the
+      // only way left to reach the aircraft. Rule 6.
+      //
+      // **For `rtp` this refusal is a false positive**, and the paragraph
+      // below says why in its own words: an `rtp` output's port is a port on
+      // the *ground station* and its `udpsink` binds nothing here, so it
+      // cannot collide with the console whatever its number. Narrowing this
+      // check to the kinds that bind locally is a change to what
+      // configurations are accepted and wants its own test and review, so it
+      // is recorded rather than done in passing. Do not read the `enabled`
+      // reasoning above as covering `rtp` — it does not.
       if ("port" in out && out.port === cfg.ui.port) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
