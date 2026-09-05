@@ -129,6 +129,19 @@ export default {
 
 .tone-act { color: var(--yonder-select, #2ad4f0); }
 .tone-warn { color: var(--yonder-irreversible, #f03fce); }
+/*
+ * `caution` is for a key that is deliberately on and hazardous — opening the
+ * MAVLink command path to the network is the case it was added for (R-MAV-07).
+ *
+ * Neither existing tone says that. `warn` is the irreversible mark, reserved
+ * for the one control that takes the page away from the operator, and spending
+ * it twice makes it mean less. `bad` on the annunciator means *failed*, and
+ * this has not failed — it is doing exactly what it was told. Amber already
+ * carries "the boundary you have to understand before you cross it" in the
+ * generated stylesheet, which is what this is.
+ */
+.tone-caution { color: var(--yonder-waiting, #ffcf28); }
+.tone-caution.on { box-shadow: inset 0 2px 0 var(--yonder-waiting, #ffcf28); }
 
 .y-keys__key:hover { background: var(--yonder-raised, rgba(255, 255, 255, 0.04)); }
 .y-keys__key:focus-visible {

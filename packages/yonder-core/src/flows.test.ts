@@ -334,10 +334,13 @@ describe("flows/flows.json", () => {
     expect(base?.navigationStyle, "default collapses the pane at every width").toBe("fixed");
   });
 
-  it("serves the four pages this milestone is for", () => {
+  it("serves the five pages the console is for", () => {
     const pages = flows.filter((n) => n.type === "ui-page");
+    // Telemetry joined them with M5a. The list is exhaustive rather than a
+    // minimum on purpose: a page added without a line here is a page nobody
+    // decided to ship, and the capture gate would photograph it anyway.
     expect(pages.map((p) => p.name).sort())
-      .toEqual(["Diagnostics", "Log", "Network", "Status"]);
+      .toEqual(["Diagnostics", "Log", "Network", "Status", "Telemetry"]);
 
     const groups = flows.filter((n) => n.type === "ui-group");
     for (const page of pages) {
@@ -1627,6 +1630,7 @@ describe("flows/flows.json Change pending", () => {
     { group: "group-status-pending", suffix: "", hidden: "group" },
     { group: "group-log-pending", suffix: "-log", hidden: "group" },
     { group: "group-diag-pending", suffix: "-diag", hidden: "group" },
+    { group: "group-tel-pending", suffix: "-tel", hidden: "group" },
     { group: "group-net-now", suffix: "-interfaces", hidden: "widgets" },
     { group: "group-net-join", suffix: "-wifi", hidden: "widgets" },
     { group: "group-net-zerotier", suffix: "-zerotier", hidden: "widgets" },

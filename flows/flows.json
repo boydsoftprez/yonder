@@ -4,7 +4,7 @@
         "type": "tab",
         "label": "Yonder console",
         "disabled": false,
-        "info": "The shipped console.\n\nWIRING ONLY (CLAUDE.md rule 2). Every node here is either a Dashboard\nwidget, a core node moving a value from one place to another, or one of\nthe `yonder-*` adapters from packages/node-red-contrib-yonder-*. There is\nno `function` node and there cannot be one: `settings.js` excludes the\ntype, and `src/flows.test.ts` asserts against this file.\n\nAnything that needed a decision was written in yonder-core instead —\nthe number formatting on the status page, the folding of a Wi-Fi scan, the\nmerge that turns a form into a configuration, and the command-state\nlanguage that decides what pending, confirmed and rejected look like.",
+        "info": "The shipped console.\n\nWIRING ONLY (CLAUDE.md rule 2). Every node here is either a Dashboard\nwidget, a core node moving a value from one place to another, or one of\nthe `yonder-*` adapters from packages/node-red-contrib-yonder-*. There is\nno `function` node and there cannot be one: `settings.js` excludes the\ntype, and `src/flows.test.ts` asserts against this file.\n\nAnything that needed a decision was written in yonder-core instead \u2014\nthe number formatting on the status page, the folding of a Wi-Fi scan, the\nmerge that turns a form into a configuration, and the command-state\nlanguage that decides what pending, confirmed and rejected look like.",
         "env": []
     },
     {
@@ -149,7 +149,7 @@
                 "cols": "12"
             }
         ],
-        "order": 3,
+        "order": 4,
         "className": "",
         "visible": true,
         "disabled": false
@@ -185,7 +185,7 @@
                 "cols": "12"
             }
         ],
-        "order": 4,
+        "order": 5,
         "className": "",
         "visible": true,
         "disabled": false
@@ -211,7 +211,7 @@
         "page": "page-status",
         "width": 12,
         "height": 1,
-        "order": 3,
+        "order": 4,
         "showTitle": true,
         "className": "",
         "visible": true,
@@ -225,7 +225,7 @@
         "page": "page-status",
         "width": 12,
         "height": 1,
-        "order": 4,
+        "order": 5,
         "showTitle": true,
         "className": "",
         "visible": true,
@@ -239,7 +239,7 @@
         "page": "page-status",
         "width": 12,
         "height": 1,
-        "order": 5,
+        "order": 6,
         "showTitle": true,
         "className": "",
         "visible": true,
@@ -1619,7 +1619,7 @@
         "width": 12,
         "height": 1,
         "label": "CPU TEMP",
-        "unit": "°C",
+        "unit": "\u00b0C",
         "min": 0,
         "max": 85,
         "caution": 60,
@@ -1732,7 +1732,7 @@
         "page": "page-status",
         "width": 12,
         "height": 1,
-        "order": 20,
+        "order": 21,
         "showTitle": false,
         "className": "yonder-rail",
         "visible": true,
@@ -3125,6 +3125,10 @@
                 "text-pending-what-activity",
                 "text-pending-why-activity",
                 "keys-pending-activity",
+                "ann-pending-tel",
+                "text-pending-what-tel",
+                "text-pending-why-tel",
+                "keys-pending-tel",
                 "route-pending-banner",
                 "route-pending-key"
             ]
@@ -3233,7 +3237,7 @@
                 "t": "set",
                 "p": "payload",
                 "pt": "msg",
-                "to": "{\"groups\":{\"show\":[\"group-status-pending\",\"group-log-pending\",\"group-diag-pending\"]},\"widgets\":{\"show\":[\"ann-pending-interfaces\",\"text-pending-what-interfaces\",\"text-pending-why-interfaces\",\"keys-pending-interfaces\",\"ann-pending-wifi\",\"text-pending-what-wifi\",\"text-pending-why-wifi\",\"keys-pending-wifi\",\"ann-pending-zerotier\",\"text-pending-what-zerotier\",\"text-pending-why-zerotier\",\"keys-pending-zerotier\",\"ann-pending-cellular\",\"text-pending-what-cellular\",\"text-pending-why-cellular\",\"keys-pending-cellular\",\"ann-pending-activity\",\"text-pending-what-activity\",\"text-pending-why-activity\",\"keys-pending-activity\"]}}",
+                "to": "{\"groups\": {\"show\": [\"group-status-pending\", \"group-log-pending\", \"group-diag-pending\", \"group-tel-pending\"]}, \"widgets\": {\"show\": [\"ann-pending-interfaces\", \"text-pending-what-interfaces\", \"text-pending-why-interfaces\", \"keys-pending-interfaces\", \"ann-pending-wifi\", \"text-pending-what-wifi\", \"text-pending-why-wifi\", \"keys-pending-wifi\", \"ann-pending-zerotier\", \"text-pending-what-zerotier\", \"text-pending-why-zerotier\", \"keys-pending-zerotier\", \"ann-pending-cellular\", \"text-pending-what-cellular\", \"text-pending-why-cellular\", \"keys-pending-cellular\", \"ann-pending-activity\", \"text-pending-what-activity\", \"text-pending-why-activity\", \"keys-pending-activity\"]}}",
                 "tot": "json"
             }
         ],
@@ -3260,7 +3264,7 @@
                 "t": "set",
                 "p": "payload",
                 "pt": "msg",
-                "to": "{\"groups\":{\"hide\":[\"group-status-pending\",\"group-log-pending\",\"group-diag-pending\"]},\"widgets\":{\"hide\":[\"ann-pending-interfaces\",\"text-pending-what-interfaces\",\"text-pending-why-interfaces\",\"keys-pending-interfaces\",\"ann-pending-wifi\",\"text-pending-what-wifi\",\"text-pending-why-wifi\",\"keys-pending-wifi\",\"ann-pending-zerotier\",\"text-pending-what-zerotier\",\"text-pending-why-zerotier\",\"keys-pending-zerotier\",\"ann-pending-cellular\",\"text-pending-what-cellular\",\"text-pending-why-cellular\",\"keys-pending-cellular\",\"ann-pending-activity\",\"text-pending-what-activity\",\"text-pending-why-activity\",\"keys-pending-activity\"]}}",
+                "to": "{\"groups\": {\"hide\": [\"group-status-pending\", \"group-log-pending\", \"group-diag-pending\", \"group-tel-pending\"]}, \"widgets\": {\"hide\": [\"ann-pending-interfaces\", \"text-pending-what-interfaces\", \"text-pending-why-interfaces\", \"keys-pending-interfaces\", \"ann-pending-wifi\", \"text-pending-what-wifi\", \"text-pending-why-wifi\", \"keys-pending-wifi\", \"ann-pending-zerotier\", \"text-pending-what-zerotier\", \"text-pending-why-zerotier\", \"keys-pending-zerotier\", \"ann-pending-cellular\", \"text-pending-what-cellular\", \"text-pending-why-cellular\", \"keys-pending-cellular\", \"ann-pending-activity\", \"text-pending-what-activity\", \"text-pending-why-activity\", \"keys-pending-activity\"]}}",
                 "tot": "json"
             }
         ],
@@ -4001,6 +4005,1607 @@
         "className": "yonder-pending",
         "x": 260,
         "y": 5380,
+        "wires": [
+            [
+                "tag-pending-key"
+            ]
+        ]
+    },
+    {
+        "id": "page-telemetry",
+        "type": "ui-page",
+        "name": "Telemetry",
+        "ui": "dashboard",
+        "path": "/telemetry",
+        "icon": "chart-line",
+        "layout": "grid",
+        "theme": "palette",
+        "breakpoints": [
+            {
+                "name": "Default",
+                "px": "0",
+                "cols": "3"
+            },
+            {
+                "name": "Tablet",
+                "px": "576",
+                "cols": "6"
+            },
+            {
+                "name": "Small Desktop",
+                "px": "768",
+                "cols": "9"
+            },
+            {
+                "name": "Desktop",
+                "px": "1024",
+                "cols": "12"
+            }
+        ],
+        "order": 3,
+        "className": "",
+        "visible": true,
+        "disabled": false
+    },
+    {
+        "id": "group-tel-autopilot",
+        "type": "ui-group",
+        "name": "Autopilot",
+        "page": "page-telemetry",
+        "width": 8,
+        "height": 1,
+        "order": 2,
+        "showTitle": true,
+        "className": "",
+        "visible": true,
+        "disabled": false,
+        "groupType": "default"
+    },
+    {
+        "id": "group-tel-run",
+        "type": "ui-group",
+        "name": "Telemetry",
+        "page": "page-telemetry",
+        "width": 4,
+        "height": 1,
+        "order": 3,
+        "showTitle": true,
+        "className": "",
+        "visible": true,
+        "disabled": false,
+        "groupType": "default"
+    },
+    {
+        "id": "group-tel-stations",
+        "type": "ui-group",
+        "name": "Ground stations",
+        "page": "page-telemetry",
+        "width": 8,
+        "height": 1,
+        "order": 4,
+        "showTitle": true,
+        "className": "",
+        "visible": true,
+        "disabled": false,
+        "groupType": "default"
+    },
+    {
+        "id": "group-tel-check",
+        "type": "ui-group",
+        "name": "Path check",
+        "page": "page-telemetry",
+        "width": 4,
+        "height": 1,
+        "order": 5,
+        "showTitle": true,
+        "className": "",
+        "visible": true,
+        "disabled": false,
+        "groupType": "default"
+    },
+    {
+        "id": "group-status-telemetry",
+        "type": "ui-group",
+        "name": "Telemetry",
+        "page": "page-status",
+        "width": 12,
+        "height": 1,
+        "order": 3,
+        "showTitle": true,
+        "className": "",
+        "visible": true,
+        "disabled": false,
+        "groupType": "default"
+    },
+    {
+        "id": "tel-ann-link",
+        "type": "ui-yonder-annunciator",
+        "z": "yonder-console",
+        "group": "group-tel-autopilot",
+        "name": "tel-ann-link",
+        "order": 1,
+        "width": 6,
+        "height": 1,
+        "label": "",
+        "source": "payload",
+        "x": 300,
+        "y": 2240,
+        "wires": []
+    },
+    {
+        "id": "tel-port",
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-tel-autopilot",
+        "order": 2,
+        "width": 12,
+        "height": 1,
+        "name": "port",
+        "label": "Port",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "wrapText": false,
+        "className": "",
+        "x": 300,
+        "y": 2280,
+        "wires": [],
+        "value": "payload",
+        "valueType": "msg"
+    },
+    {
+        "id": "tel-speed",
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-tel-autopilot",
+        "order": 3,
+        "width": 12,
+        "height": 1,
+        "name": "speed",
+        "label": "Speed",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "wrapText": false,
+        "className": "",
+        "x": 300,
+        "y": 2320,
+        "wires": [],
+        "value": "payload",
+        "valueType": "msg"
+    },
+    {
+        "id": "tel-vehicle",
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-tel-autopilot",
+        "order": 4,
+        "width": 12,
+        "height": 1,
+        "name": "vehicle",
+        "label": "Vehicle",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "wrapText": false,
+        "className": "",
+        "x": 300,
+        "y": 2360,
+        "wires": [],
+        "value": "payload",
+        "valueType": "msg"
+    },
+    {
+        "id": "tel-hb",
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-tel-autopilot",
+        "order": 5,
+        "width": 12,
+        "height": 1,
+        "name": "heartbeat",
+        "label": "Heartbeat",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "wrapText": false,
+        "className": "",
+        "x": 300,
+        "y": 2400,
+        "wires": [],
+        "value": "payload",
+        "valueType": "msg"
+    },
+    {
+        "id": "tel-heard",
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-tel-autopilot",
+        "order": 6,
+        "width": 12,
+        "height": 1,
+        "name": "last heard",
+        "label": "Last heard",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "wrapText": false,
+        "className": "",
+        "x": 300,
+        "y": 2440,
+        "wires": [],
+        "value": "payload",
+        "valueType": "msg"
+    },
+    {
+        "id": "tel-ann-recv",
+        "type": "ui-yonder-annunciator",
+        "z": "yonder-console",
+        "group": "group-tel-stations",
+        "name": "tel-ann-recv",
+        "order": 1,
+        "width": 6,
+        "height": 1,
+        "label": "",
+        "source": "payload",
+        "x": 300,
+        "y": 2480,
+        "wires": []
+    },
+    {
+        "id": "tel-answered",
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-tel-stations",
+        "order": 2,
+        "width": 12,
+        "height": 1,
+        "name": "last answered",
+        "label": "Last answered",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "wrapText": false,
+        "className": "",
+        "x": 300,
+        "y": 2520,
+        "wires": [],
+        "value": "payload",
+        "valueType": "msg"
+    },
+    {
+        "id": "tel-host-0",
+        "type": "ui-text-input",
+        "z": "yonder-console",
+        "group": "group-tel-stations",
+        "order": 3,
+        "width": 8,
+        "height": 1,
+        "name": "tel-host-0",
+        "label": "GCS 0",
+        "tooltip": "",
+        "mode": "text",
+        "tooltipPosition": "",
+        "delay": "300",
+        "topic": "topic",
+        "topicType": "msg",
+        "className": "",
+        "sendOnDelay": false,
+        "sendOnBlur": true,
+        "sendOnEnter": true,
+        "passthru": true,
+        "x": 300,
+        "y": 2560,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "tel-port-0",
+        "type": "ui-text-input",
+        "z": "yonder-console",
+        "group": "group-tel-stations",
+        "order": 4,
+        "width": 4,
+        "height": 1,
+        "name": "tel-port-0",
+        "label": "Port",
+        "tooltip": "",
+        "mode": "text",
+        "tooltipPosition": "",
+        "delay": "300",
+        "topic": "topic",
+        "topicType": "msg",
+        "className": "",
+        "sendOnDelay": false,
+        "sendOnBlur": true,
+        "sendOnEnter": true,
+        "passthru": true,
+        "x": 300,
+        "y": 2600,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "tel-host-1",
+        "type": "ui-text-input",
+        "z": "yonder-console",
+        "group": "group-tel-stations",
+        "order": 5,
+        "width": 8,
+        "height": 1,
+        "name": "tel-host-1",
+        "label": "GCS 1",
+        "tooltip": "",
+        "mode": "text",
+        "tooltipPosition": "",
+        "delay": "300",
+        "topic": "topic",
+        "topicType": "msg",
+        "className": "",
+        "sendOnDelay": false,
+        "sendOnBlur": true,
+        "sendOnEnter": true,
+        "passthru": true,
+        "x": 300,
+        "y": 2640,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "tel-port-1",
+        "type": "ui-text-input",
+        "z": "yonder-console",
+        "group": "group-tel-stations",
+        "order": 6,
+        "width": 4,
+        "height": 1,
+        "name": "tel-port-1",
+        "label": "Port",
+        "tooltip": "",
+        "mode": "text",
+        "tooltipPosition": "",
+        "delay": "300",
+        "topic": "topic",
+        "topicType": "msg",
+        "className": "",
+        "sendOnDelay": false,
+        "sendOnBlur": true,
+        "sendOnEnter": true,
+        "passthru": true,
+        "x": 300,
+        "y": 2680,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "tel-host-2",
+        "type": "ui-text-input",
+        "z": "yonder-console",
+        "group": "group-tel-stations",
+        "order": 7,
+        "width": 8,
+        "height": 1,
+        "name": "tel-host-2",
+        "label": "GCS 2",
+        "tooltip": "",
+        "mode": "text",
+        "tooltipPosition": "",
+        "delay": "300",
+        "topic": "topic",
+        "topicType": "msg",
+        "className": "",
+        "sendOnDelay": false,
+        "sendOnBlur": true,
+        "sendOnEnter": true,
+        "passthru": true,
+        "x": 300,
+        "y": 2720,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "tel-port-2",
+        "type": "ui-text-input",
+        "z": "yonder-console",
+        "group": "group-tel-stations",
+        "order": 8,
+        "width": 4,
+        "height": 1,
+        "name": "tel-port-2",
+        "label": "Port",
+        "tooltip": "",
+        "mode": "text",
+        "tooltipPosition": "",
+        "delay": "300",
+        "topic": "topic",
+        "topicType": "msg",
+        "className": "",
+        "sendOnDelay": false,
+        "sendOnBlur": true,
+        "sendOnEnter": true,
+        "passthru": true,
+        "x": 300,
+        "y": 2760,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "tel-send",
+        "type": "ui-button",
+        "z": "yonder-console",
+        "group": "group-tel-stations",
+        "order": 9,
+        "width": 5,
+        "height": 1,
+        "label": "Send telemetry here",
+        "tooltip": "",
+        "color": "",
+        "bgcolor": "",
+        "className": "",
+        "icon": "",
+        "iconPosition": "left",
+        "payload": "",
+        "payloadType": "str",
+        "topic": "",
+        "topicType": "str",
+        "buttonColor": "",
+        "textColor": "",
+        "iconColor": "",
+        "enableClick": true,
+        "enablePointerdown": false,
+        "pointerdownPayload": "",
+        "pointerdownPayloadType": "str",
+        "enablePointerup": false,
+        "pointerupPayload": "",
+        "pointerupPayloadType": "str",
+        "x": 300,
+        "y": 2800,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "tel-tcp",
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-tel-stations",
+        "order": 10,
+        "width": 12,
+        "height": 1,
+        "name": "tcp server",
+        "label": "TCP server",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "wrapText": false,
+        "className": "",
+        "x": 300,
+        "y": 2840,
+        "wires": [],
+        "value": "payload",
+        "valueType": "msg"
+    },
+    {
+        "id": "tel-spark",
+        "type": "ui-yonder-sparkline",
+        "z": "yonder-console",
+        "group": "group-tel-stations",
+        "order": 11,
+        "width": 12,
+        "height": 1,
+        "name": "telemetry throughput",
+        "label": "TELEMETRY",
+        "height2": 48,
+        "x": 300,
+        "y": 2880,
+        "wires": []
+    },
+    {
+        "id": "tel-ann-state",
+        "type": "ui-yonder-annunciator",
+        "z": "yonder-console",
+        "group": "group-tel-run",
+        "name": "tel-ann-state",
+        "order": 1,
+        "width": 6,
+        "height": 1,
+        "label": "",
+        "source": "payload",
+        "x": 300,
+        "y": 2920,
+        "wires": []
+    },
+    {
+        "id": "tel-atboot",
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-tel-run",
+        "order": 2,
+        "width": 12,
+        "height": 1,
+        "name": "at boot",
+        "label": "At boot",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "wrapText": false,
+        "className": "",
+        "x": 300,
+        "y": 2960,
+        "wires": [],
+        "value": "payload",
+        "valueType": "msg"
+    },
+    {
+        "id": "tel-ingest",
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-tel-run",
+        "order": 3,
+        "width": 12,
+        "height": 1,
+        "name": "accepting from",
+        "label": "Accepting from",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "wrapText": false,
+        "className": "",
+        "x": 300,
+        "y": 3000,
+        "wires": [],
+        "value": "payload",
+        "valueType": "msg"
+    },
+    {
+        "id": "tel-keys-ingest",
+        "type": "ui-yonder-softkeys",
+        "z": "yonder-console",
+        "group": "group-tel-run",
+        "name": "ingest",
+        "order": 4,
+        "width": 12,
+        "height": 1,
+        "keys": "[{\"label\": \"THIS DEVICE\", \"action\": \"loopback\", \"tone\": \"act\", \"active\": true}, {\"label\": \"ANY NETWORK\", \"action\": \"open\", \"tone\": \"caution\"}]",
+        "x": 300,
+        "y": 3040,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "tel-runstop",
+        "type": "ui-button",
+        "z": "yonder-console",
+        "group": "group-tel-run",
+        "order": 5,
+        "width": 5,
+        "height": 1,
+        "label": "Stop telemetry",
+        "tooltip": "",
+        "color": "",
+        "bgcolor": "",
+        "className": "",
+        "icon": "",
+        "iconPosition": "left",
+        "payload": "",
+        "payloadType": "str",
+        "topic": "",
+        "topicType": "str",
+        "buttonColor": "",
+        "textColor": "",
+        "iconColor": "",
+        "enableClick": true,
+        "enablePointerdown": false,
+        "pointerdownPayload": "",
+        "pointerdownPayloadType": "str",
+        "enablePointerup": false,
+        "pointerupPayload": "",
+        "pointerupPayloadType": "str",
+        "x": 300,
+        "y": 3080,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "tel-chain-1",
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-tel-check",
+        "order": 1,
+        "width": 12,
+        "height": 2,
+        "name": "autopilot to yonder",
+        "label": "",
+        "format": "{{msg.payload}}",
+        "layout": "row-left",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "wrapText": true,
+        "className": "yonder-qualifier",
+        "x": 300,
+        "y": 3120,
+        "wires": [],
+        "value": "payload",
+        "valueType": "msg"
+    },
+    {
+        "id": "tel-chain-2",
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-tel-check",
+        "order": 2,
+        "width": 12,
+        "height": 2,
+        "name": "yonder to ground stations",
+        "label": "",
+        "format": "{{msg.payload}}",
+        "layout": "row-left",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "wrapText": true,
+        "className": "yonder-qualifier",
+        "x": 300,
+        "y": 3160,
+        "wires": [],
+        "value": "payload",
+        "valueType": "msg"
+    },
+    {
+        "id": "tel-chain-3",
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-tel-check",
+        "order": 3,
+        "width": 12,
+        "height": 2,
+        "name": "ground station to yonder",
+        "label": "",
+        "format": "{{msg.payload}}",
+        "layout": "row-left",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "wrapText": true,
+        "className": "yonder-qualifier",
+        "x": 300,
+        "y": 3200,
+        "wires": [],
+        "value": "payload",
+        "valueType": "msg"
+    },
+    {
+        "id": "tel-check",
+        "type": "ui-button",
+        "z": "yonder-console",
+        "group": "group-tel-check",
+        "order": 4,
+        "width": 5,
+        "height": 1,
+        "label": "Check the path",
+        "tooltip": "",
+        "color": "",
+        "bgcolor": "",
+        "className": "",
+        "icon": "",
+        "iconPosition": "left",
+        "payload": "",
+        "payloadType": "str",
+        "topic": "",
+        "topicType": "str",
+        "buttonColor": "",
+        "textColor": "",
+        "iconColor": "",
+        "enableClick": true,
+        "enablePointerdown": false,
+        "pointerdownPayload": "",
+        "pointerdownPayloadType": "str",
+        "enablePointerup": false,
+        "pointerupPayload": "",
+        "pointerupPayloadType": "str",
+        "x": 300,
+        "y": 3240,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "stat-ann-feed",
+        "type": "ui-yonder-annunciator",
+        "z": "yonder-console",
+        "group": "group-status-telemetry",
+        "name": "feed",
+        "order": 1,
+        "width": 6,
+        "height": 1,
+        "label": "",
+        "source": "payload",
+        "x": 300,
+        "y": 3280,
+        "wires": []
+    },
+    {
+        "id": "stat-flow",
+        "type": "ui-yonder-flow",
+        "z": "yonder-console",
+        "group": "group-status-telemetry",
+        "name": "telemetry flow",
+        "order": 2,
+        "width": 12,
+        "height": 2,
+        "label": "",
+        "x": 300,
+        "y": 3320,
+        "wires": []
+    },
+    {
+        "id": "stat-tel-bar",
+        "type": "ui-yonder-databar",
+        "z": "yonder-console",
+        "group": "group-status-telemetry",
+        "name": "telemetry facts",
+        "order": 3,
+        "width": 12,
+        "height": 1,
+        "cells": "[{\"key\":\"atboot\",\"label\":\"At boot\"},{\"key\":\"ingest\",\"label\":\"Accepting from\"},{\"key\":\"heard\",\"label\":\"Last heard\"},{\"key\":\"vehicle\",\"label\":\"Vehicle\"}]",
+        "x": 300,
+        "y": 3360,
+        "wires": []
+    },
+    {
+        "id": "mock-tel-ann-link",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "mock tel-ann-link",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "{\"state\": \"confirmed\", \"message\": \"Connected\"}",
+                "tot": "json"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 1500,
+        "y": 2234,
+        "wires": [
+            [
+                "tel-ann-link"
+            ]
+        ]
+    },
+    {
+        "id": "mock-tel-port",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "mock tel-port",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "/dev/ttyAMA0",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 1500,
+        "y": 2268,
+        "wires": [
+            [
+                "tel-port"
+            ]
+        ]
+    },
+    {
+        "id": "mock-tel-speed",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "mock tel-speed",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "57 600 baud",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 1500,
+        "y": 2302,
+        "wires": [
+            [
+                "tel-speed"
+            ]
+        ]
+    },
+    {
+        "id": "mock-tel-vehicle",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "mock tel-vehicle",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "ArduPlane \u00b7 system 1",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 1500,
+        "y": 2336,
+        "wires": [
+            [
+                "tel-vehicle"
+            ]
+        ]
+    },
+    {
+        "id": "mock-tel-hb",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "mock tel-hb",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "1.0 Hz",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 1500,
+        "y": 2370,
+        "wires": [
+            [
+                "tel-hb"
+            ]
+        ]
+    },
+    {
+        "id": "mock-tel-heard",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "mock tel-heard",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "0.4 s ago",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 1500,
+        "y": 2404,
+        "wires": [
+            [
+                "tel-heard"
+            ]
+        ]
+    },
+    {
+        "id": "mock-tel-ann-recv",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "mock tel-ann-recv",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "{\"state\": \"confirmed\", \"message\": \"Answering\"}",
+                "tot": "json"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 1500,
+        "y": 2438,
+        "wires": [
+            [
+                "tel-ann-recv"
+            ]
+        ]
+    },
+    {
+        "id": "mock-tel-answered",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "mock tel-answered",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "0.3 s ago",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 1500,
+        "y": 2472,
+        "wires": [
+            [
+                "tel-answered"
+            ]
+        ]
+    },
+    {
+        "id": "mock-tel-host-0",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "mock tel-host-0",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "192.168.191.40",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 1500,
+        "y": 2506,
+        "wires": [
+            [
+                "tel-host-0"
+            ]
+        ]
+    },
+    {
+        "id": "mock-tel-port-0",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "mock tel-port-0",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "14550",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 1500,
+        "y": 2540,
+        "wires": [
+            [
+                "tel-port-0"
+            ]
+        ]
+    },
+    {
+        "id": "mock-tel-host-1",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "mock tel-host-1",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "10.147.20.8",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 1500,
+        "y": 2574,
+        "wires": [
+            [
+                "tel-host-1"
+            ]
+        ]
+    },
+    {
+        "id": "mock-tel-port-1",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "mock tel-port-1",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "14551",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 1500,
+        "y": 2608,
+        "wires": [
+            [
+                "tel-port-1"
+            ]
+        ]
+    },
+    {
+        "id": "mock-tel-host-2",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "mock tel-host-2",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 1500,
+        "y": 2642,
+        "wires": [
+            [
+                "tel-host-2"
+            ]
+        ]
+    },
+    {
+        "id": "mock-tel-port-2",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "mock tel-port-2",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "14552",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 1500,
+        "y": 2676,
+        "wires": [
+            [
+                "tel-port-2"
+            ]
+        ]
+    },
+    {
+        "id": "mock-tel-tcp",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "mock tel-tcp",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": ":5760 \u00b7 1 client",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 1500,
+        "y": 2710,
+        "wires": [
+            [
+                "tel-tcp"
+            ]
+        ]
+    },
+    {
+        "id": "mock-tel-spark",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "mock tel-spark",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "{\"series\": {\"rx\": [0.9, 1.0, 0.95, 1.1, 1.05, 1.2, 1.1, 1.25, 1.15, 1.3], \"tx\": [2.6, 2.8, 2.7, 3.0, 2.9, 3.1, 3.0, 3.2, 3.1, 3.3]}, \"peak\": \"4.1 kB/s\", \"span\": \"2 min\", \"known\": true}",
+                "tot": "json"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 1500,
+        "y": 2744,
+        "wires": [
+            [
+                "tel-spark"
+            ]
+        ]
+    },
+    {
+        "id": "mock-tel-ann-state",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "mock tel-ann-state",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "{\"state\": \"confirmed\", \"message\": \"Running\"}",
+                "tot": "json"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 1500,
+        "y": 2778,
+        "wires": [
+            [
+                "tel-ann-state"
+            ]
+        ]
+    },
+    {
+        "id": "mock-tel-atboot",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "mock tel-atboot",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "Automatic",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 1500,
+        "y": 2812,
+        "wires": [
+            [
+                "tel-atboot"
+            ]
+        ]
+    },
+    {
+        "id": "mock-tel-ingest",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "mock tel-ingest",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "Loopback only",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 1500,
+        "y": 2846,
+        "wires": [
+            [
+                "tel-ingest"
+            ]
+        ]
+    },
+    {
+        "id": "mock-tel-chain-1",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "mock tel-chain-1",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "Autopilot to Yonder \u2014 OK, heartbeat every second at 57 600 baud",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 1500,
+        "y": 2880,
+        "wires": [
+            [
+                "tel-chain-1"
+            ]
+        ]
+    },
+    {
+        "id": "mock-tel-chain-2",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "mock tel-chain-2",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "Yonder to ground stations \u2014 OK, 3.1 kB/s leaving, two endpoints configured",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 1500,
+        "y": 2914,
+        "wires": [
+            [
+                "tel-chain-2"
+            ]
+        ]
+    },
+    {
+        "id": "mock-tel-chain-3",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "mock tel-chain-3",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "Ground station to Yonder \u2014 OK, answering, last heard 0.3 s ago",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 1500,
+        "y": 2948,
+        "wires": [
+            [
+                "tel-chain-3"
+            ]
+        ]
+    },
+    {
+        "id": "mock-stat-ann-feed",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "mock stat-ann-feed",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "{\"state\": \"confirmed\", \"message\": \"Flowing\"}",
+                "tot": "json"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 1500,
+        "y": 2982,
+        "wires": [
+            [
+                "stat-ann-feed"
+            ]
+        ]
+    },
+    {
+        "id": "mock-stat-flow",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "mock stat-flow",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "{\"from\": {\"label\": \"ArduPlane\", \"detail\": \"/dev/ttyAMA0 \\u00b7 57 600 baud\"}, \"through\": {\"label\": \"Yonder\", \"detail\": \"mavlink-router \\u00b7 up 16 min\"}, \"to\": {\"label\": \"2 ground stations\", \"detail\": \"192.168.191.40:14550 \\u00b7 +1 tcp\"}, \"legs\": [{\"rate\": \"1.0 Hz\", \"caption\": \"heartbeat\"}, {\"rate\": \"3.1 kB/s\", \"caption\": \"answering\"}]}",
+                "tot": "json"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 1500,
+        "y": 3016,
+        "wires": [
+            [
+                "stat-flow"
+            ]
+        ]
+    },
+    {
+        "id": "mock-stat-tel-bar",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "mock stat-tel-bar",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "{\"atboot\": \"Automatic\", \"ingest\": \"Loopback only\", \"heard\": \"0.4 s ago\", \"vehicle\": \"ArduPlane \\u00b7 sys 1\"}",
+                "tot": "json"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 1500,
+        "y": 3050,
+        "wires": [
+            [
+                "stat-tel-bar"
+            ]
+        ]
+    },
+    {
+        "id": "mock-telemetry-once",
+        "type": "inject",
+        "z": "yonder-console",
+        "name": "MOCKUP \u2014 static telemetry, until yonder-core feeds this",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": true,
+        "onceDelay": "1.2",
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 1120,
+        "y": 2200,
+        "wires": [
+            [
+                "mock-tel-ann-link",
+                "mock-tel-port",
+                "mock-tel-speed",
+                "mock-tel-vehicle",
+                "mock-tel-hb",
+                "mock-tel-heard",
+                "mock-tel-ann-recv",
+                "mock-tel-answered",
+                "mock-tel-host-0",
+                "mock-tel-port-0",
+                "mock-tel-host-1",
+                "mock-tel-port-1",
+                "mock-tel-host-2",
+                "mock-tel-port-2",
+                "mock-tel-tcp",
+                "mock-tel-spark",
+                "mock-tel-ann-state",
+                "mock-tel-atboot",
+                "mock-tel-ingest",
+                "mock-tel-chain-1",
+                "mock-tel-chain-2",
+                "mock-tel-chain-3",
+                "mock-stat-ann-feed",
+                "mock-stat-flow",
+                "mock-stat-tel-bar"
+            ]
+        ]
+    },
+    {
+        "id": "group-tel-pending",
+        "type": "ui-group",
+        "name": "Change pending",
+        "page": "page-telemetry",
+        "width": 12,
+        "height": 1,
+        "order": 0,
+        "showTitle": true,
+        "className": "",
+        "visible": false,
+        "disabled": false,
+        "groupType": "default"
+    },
+    {
+        "id": "ann-pending-tel",
+        "type": "ui-yonder-annunciator",
+        "z": "yonder-console",
+        "group": "group-tel-pending",
+        "name": "how long is left",
+        "order": 1,
+        "width": 12,
+        "height": 1,
+        "label": "",
+        "source": "yonder",
+        "x": 1020,
+        "y": 4180,
+        "wires": [],
+        "className": "yonder-live yonder-pending"
+    },
+    {
+        "id": "text-pending-what-tel",
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-tel-pending",
+        "name": "what is in force",
+        "order": 2,
+        "width": 12,
+        "height": 1,
+        "label": "",
+        "format": "{{msg.payload}}",
+        "layout": "row-left",
+        "value": "payload.what",
+        "valueType": "msg",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "wrapText": true,
+        "className": "yonder-qualifier yonder-fixed yonder-pending",
+        "x": 1020,
+        "y": 4240,
+        "wires": []
+    },
+    {
+        "id": "text-pending-why-tel",
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-tel-pending",
+        "name": "what the revert is for",
+        "order": 3,
+        "width": 12,
+        "height": 1,
+        "label": "",
+        "format": "{{msg.payload}}",
+        "layout": "row-left",
+        "value": "payload.why",
+        "valueType": "msg",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "wrapText": true,
+        "className": "yonder-qualifier yonder-fixed yonder-pending",
+        "x": 1020,
+        "y": 4300,
+        "wires": []
+    },
+    {
+        "id": "keys-pending-tel",
+        "type": "ui-yonder-softkeys",
+        "z": "yonder-console",
+        "group": "group-tel-pending",
+        "name": "confirm or revert",
+        "order": 4,
+        "width": 12,
+        "height": 1,
+        "keys": "[{\"label\": \"CONFIRM\", \"action\": \"confirm\", \"tone\": \"warn\"}, {\"label\": \"REVERT NOW\", \"action\": \"revert\", \"tone\": \"act\"}]",
+        "className": "yonder-pending",
+        "x": 260,
+        "y": 4360,
         "wires": [
             [
                 "tag-pending-key"

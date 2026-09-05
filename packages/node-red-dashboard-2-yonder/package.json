@@ -2,7 +2,7 @@
   "name": "node-red-dashboard-2-yonder",
   "version": "0.1.0",
   "license": "GPL-3.0-or-later",
-  "description": "Yonder's instrument objects for Dashboard 2.x — engine bars, tapes, annunciators, data bars, identities, soft keys and sparklines. The console's visual language, built once (ADR-0009).",
+  "description": "Yonder's instrument objects for Dashboard 2.x \u2014 engine bars, tapes, annunciators, data bars, identities, soft keys and sparklines. The console's visual language, built once (ADR-0009).",
   "keywords": [
     "node-red",
     "node-red-dashboard-2",
@@ -17,19 +17,45 @@
       "ui-yonder-databar": "dist/databar.js",
       "ui-yonder-softkeys": "dist/softkeys.js",
       "ui-yonder-identity": "dist/identity.js",
-      "ui-yonder-sparkline": "dist/sparkline.js"
+      "ui-yonder-sparkline": "dist/sparkline.js",
+      "ui-yonder-flow": "dist/flow.js"
     }
   },
   "node-red-dashboard-2": {
     "version": "1.0.0",
     "widgets": {
-      "ui-yonder-gauge": { "output": "ui-yonder-gauge.umd.js", "component": "YonderGauge" },
-      "ui-yonder-tape": { "output": "ui-yonder-tape.umd.js", "component": "YonderTape" },
-      "ui-yonder-annunciator": { "output": "ui-yonder-annunciator.umd.js", "component": "YonderAnnunciator" },
-      "ui-yonder-databar": { "output": "ui-yonder-databar.umd.js", "component": "YonderDataBar" },
-      "ui-yonder-softkeys": { "output": "ui-yonder-softkeys.umd.js", "component": "YonderSoftKeys" },
-      "ui-yonder-identity": { "output": "ui-yonder-identity.umd.js", "component": "YonderIdentity" },
-      "ui-yonder-sparkline": { "output": "ui-yonder-sparkline.umd.js", "component": "YonderSparkline" }
+      "ui-yonder-gauge": {
+        "output": "ui-yonder-gauge.umd.js",
+        "component": "YonderGauge"
+      },
+      "ui-yonder-tape": {
+        "output": "ui-yonder-tape.umd.js",
+        "component": "YonderTape"
+      },
+      "ui-yonder-annunciator": {
+        "output": "ui-yonder-annunciator.umd.js",
+        "component": "YonderAnnunciator"
+      },
+      "ui-yonder-databar": {
+        "output": "ui-yonder-databar.umd.js",
+        "component": "YonderDataBar"
+      },
+      "ui-yonder-softkeys": {
+        "output": "ui-yonder-softkeys.umd.js",
+        "component": "YonderSoftKeys"
+      },
+      "ui-yonder-identity": {
+        "output": "ui-yonder-identity.umd.js",
+        "component": "YonderIdentity"
+      },
+      "ui-yonder-sparkline": {
+        "output": "ui-yonder-sparkline.umd.js",
+        "component": "YonderSparkline"
+      },
+      "ui-yonder-flow": {
+        "output": "ui-yonder-flow.umd.js",
+        "component": "YonderFlow"
+      }
     }
   },
   "scripts": {
