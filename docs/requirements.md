@@ -27,6 +27,7 @@ land later.
 | R-MAV-10 | Report link state: heartbeat present, telemetry running, endpoints in use | 1 |
 | R-MAV-11 | Support all ArduPilot vehicle types, not fixed-wing alone | 1 |
 | R-MAV-12 | Support PX4 | 3 |
+| R-MAV-14 | **A generated listener never takes a port the device is already serving on.** The configuration refuses a MAVLink TCP port that collides with a port Yonder itself binds — the console's above all — with the offending path named, at the moment it is written. This is not tidiness: `mavlink-router` starts before the console and would win the race, leaving an operator without the page they would fix it from. The check lives in the schema rather than in a renderer, because a renderer runs after the apply has been accepted | 1 |
 
 ## R-TEL — Telemetry presentation
 

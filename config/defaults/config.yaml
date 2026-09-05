@@ -55,3 +55,14 @@ remote:
   zerotier:
     enabled: false
     network_id: null
+mavlink:
+  serial:
+    device: auto
+    baud: auto
+  endpoints: []
+  tcp_server:
+    enabled: true
+    port: 5760
+  autocast: true
+  ingest:
+    loopback_only: true

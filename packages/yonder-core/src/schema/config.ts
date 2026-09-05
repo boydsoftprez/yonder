@@ -240,6 +240,44 @@ const ZeroTier = z
 const Remote = z.object({ zerotier: ZeroTier.default({}) }).strict();
 
 /**
+ * The rates ArduPilot is actually configured for in the field, slowest first.
+ * Slowest first so a slow link is *found* rather than a fast one guessed at —
+ * a wrong fast rate produces noise that a slow one would have decoded.
+ */
+export const MAVLINK_BAUDS = [57600, 115200, 230400, 921600] as const;
+
+const MavlinkSerial = z
+  .object({
+    device: z.string().min(1).default("auto"),
+    baud: z.union([z.literal("auto"), z.union(MAVLINK_BAUDS.map((b) => z.literal(b)) as [z.ZodLiteral<number>, z.ZodLiteral<number>, ...z.ZodLiteral<number>[]])])
+      .default("auto"),
+  })
+  .strict();
+
+/**
+ * Three, because R-MAV-03 says three. The limit is in the schema rather than
+ * in a renderer so a fourth is refused with the offending path named, at the
+ * moment the operator writes it, rather than silently dropped later.
+ */
+const MavlinkEndpoint = z
+  .object({ name: z.string().min(1), host: z.string().min(1), port: z.number().int().min(1).max(65535) })
+  .strict();
+
+const Mavlink = z
+  .object({
+    serial: MavlinkSerial.default({}),
+    endpoints: z.array(MavlinkEndpoint).max(3).default([]),
+    tcp_server: z.object({ enabled: z.boolean().default(true), port: z.number().int().min(1).max(65535).default(5760) })
+      .strict().default({}),
+    autocast: z.boolean().default(true),
+    // R-MAV-07: an open MAVLink port on a routable address is an
+    // unauthenticated command path to the vehicle. Closed unless asked for,
+    // and the asking is logged.
+    ingest: z.object({ loopback_only: z.boolean().default(true) }).strict().default({}),
+  })
+  .strict();
+
+/**
  * Strict, deliberately: an unrecognised key is a misspelling, and a
  * misspelling silently ignored is a setting an operator believes is in force
  * and is not.
@@ -258,7 +296,20 @@ export const ConfigSchema = z.object({
   apply: Apply.default({}),
   system: System.default({}),
   remote: Remote.default({}),
-}).strict();
+  mavlink: Mavlink.default({}),
+}).strict().superRefine((config, ctx) => {
+  // R-MAV-14. The router is started by yonder-core before the console is, so
+  // a collision is not a race the console can win. Refused here rather than
+  // in a renderer: a renderer runs after the apply has been accepted, and by
+  // then the confirmation window is the only thing left to catch it.
+  if (config.mavlink.tcp_server.enabled && config.mavlink.tcp_server.port === config.ui.port) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["mavlink", "tcp_server", "port"],
+      message: `port ${config.ui.port} is the console's own (ui.port); MAVLink cannot take it`,
+    });
+  }
+});
 
 export type Config = z.infer<typeof ConfigSchema>;
 

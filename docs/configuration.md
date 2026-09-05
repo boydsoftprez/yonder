@@ -136,6 +136,18 @@ apply:
 system:
   hostname: yonder                             # also published as <hostname>.local
   timezone: UTC
+
+mavlink:
+  serial:
+    device: auto                # auto | /dev/ttyAMA0 | /dev/ttyACM0
+    baud: auto                  # auto sweeps 57600, 115200, 230400, 921600, slowest first
+  endpoints: []                 # up to three, e.g. { name: gcs0, host: 192.168.2.10, port: 14550 }
+  tcp_server:
+    enabled: true
+    port: 5760                  # must not be ui.port — the console always wins that collision
+  autocast: true                # start telemetry at boot without operator action
+  ingest:
+    loopback_only: true         # accepting MAVLink from off-device requires setting this false
 ```
 
 ### Keys that have been retired
@@ -166,15 +178,6 @@ validation. They are here so the shape is settled before the milestone opens.
 ```yaml
 vehicle:
   autopilot: ardupilot          # ardupilot | px4 (px4 later)
-
-mavlink:
-  serial:
-    device: auto                # auto | /dev/ttyAMA0 | /dev/ttyACM0
-    baud: auto                  # auto sweeps 57600, 115200, 230400, 921600
-  endpoints:                    # up to three ground stations
-    - { name: gcs0, host: 192.168.2.10, port: 14550 }
-  tcp_server: { enabled: true, port: 5760 }
-  autocast: true                # start telemetry at boot without operator action
 
 cameras:
   - id: cam0
@@ -214,7 +217,22 @@ gpio:
 ## Notes on specific keys
 
 **`mavlink.serial.baud: auto`** sweeps the rates ArduPilot is actually configured for in
-the field, fastest-last so a slow link is found before a fast one is guessed at.
+the field, fastest-last so a slow link is found before a fast one is guessed at. A pinned
+value is checked against that same set — `57600`, `115200`, `230400` or `921600` — and
+anything else is refused rather than passed to the router untried.
+
+**`mavlink.endpoints`** takes up to three ground stations, each with its own name, host and
+port; a fourth is refused rather than silently dropped (R-MAV-03).
+
+**`mavlink.tcp_server.port`** must not be the same as `ui.port`. `mavlink-router` is started
+before the console, so a collision is not a race the console could win — it would lose its
+own port and strand the operator on the page they would fix it from. Refused at write time,
+before either service is started (R-MAV-14).
+
+**`mavlink.ingest.loopback_only`** keeps the control-plane MAVLink feed bound to loopback.
+Accepting it from a non-loopback interface is an unauthenticated command path to the vehicle,
+so it takes an explicit `false` here to open it, and the daemon logs that it is running that
+way (R-MAV-07).
 
 **`cameras[].outputs`** is a list, and every entry is active at once — browser preview and
 a ground-station feed are not a choice between two options (R-VID-05).
