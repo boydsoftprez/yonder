@@ -21,7 +21,7 @@ Every number cited was measured on hardware, and the citation is the note it cam
 
 ### Evidence
 
-`pipeline.ts` line 221 hard-codes `v4l2convert` in the preview branch. `probe/encoder.ts`
+`pipeline.ts` hard-codes `v4l2convert` in the preview branch — line 243 on this branch, and cited by the element rather than the number because it has already moved once. `probe/encoder.ts`
 looks for an encoder by walking `/dev/video10`–`/dev/video17`. Both are V4L2 M2M
 assumptions, and the comment above the first says so outright: *"this board carries both
 `v4l2convert` (/dev/video12) and `v4l2video18convert` (/dev/video18)"* — a sentence about a
