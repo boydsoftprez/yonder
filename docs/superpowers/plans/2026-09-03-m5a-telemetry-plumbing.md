@@ -848,7 +848,7 @@ git commit -s -m "feat(mav): enough MAVLink to recognise a heartbeat — R-MAV-1
 - Consumes: `HeartbeatScanner`, `describeVehicle` (Task 5); `MAVLINK_BAUDS` (Task 3); `Clock`
 - Produces:
   ```ts
-  export interface SerialPort { read(ms: number): Promise<{ bytes: Uint8Array; framingErrors: number }>; close(): Promise<void>; }
+  export interface SerialPort { settleAndFlush(): Promise<void>; read(ms: number): Promise<{ bytes: Uint8Array; framingErrors: number }>; close(): Promise<void>; }
   export type OpenPort = (device: string, baud: number) => Promise<SerialPort>;
   export type DetectOutcome =
     | { kind: "found"; device: string; baud: number; vehicle: string; system: number }
@@ -873,6 +873,7 @@ function portsAnswering(table: Record<number, { bytes: Uint8Array; framingErrors
   const open: OpenPort = async (_device, baud) => {
     opened.push(baud);
     return {
+      settleAndFlush: async () => {},
       read: async () => table[baud] ?? { bytes: new Uint8Array(0), framingErrors: 0 },
       close: async () => {},
     };
@@ -920,7 +921,8 @@ describe("detect", () => {
 
   // A byte the UART could not frame never reaches the reader, so a port that
   // delivers nothing but counts framing errors is not silent — and calling it
-  // silent sends an operator to check a wire that is connected.
+  // silent sends an operator to check a wire that is connected. Measured on a
+  // board: the wrong rates threw 1071 and 2482 framing errors in four seconds.
   it("calls framing errors with no delivered bytes noise, not silence", async () => {
     const errs = { bytes: new Uint8Array(0), framingErrors: 120 };
     const { open } = portsAnswering({ 57600: errs, 115200: errs, 230400: errs, 921600: errs });
@@ -940,6 +942,7 @@ describe("detect", () => {
     const sysStatus = validSysStatusBytes();
     let call = 0;
     const open: OpenPort = async () => ({
+      settleAndFlush: async () => {},
       read: async () => (call++ < 4
         ? { bytes: sysStatus, framingErrors: 0 }
         : { bytes: heartbeatBytes(1, 1, 3), framingErrors: 0 }),
@@ -1005,6 +1008,16 @@ const SILENT_GIVE_UP_MS = 400;
 const READ_SLICE_MS = 100;
 
 export interface SerialPort {
+  /**
+   * Settle, then discard anything buffered from the previous rate.
+   *
+   * On a board, an ascending sweep reported two checksum-valid heartbeats at a
+   * rate that cannot produce them: bytes buffered at the old rate survived the
+   * change and were attributed to the new one. That is the worst failure
+   * available here — detection confidently naming the wrong baud, having
+   * genuinely seen a valid frame — and 50 ms of settling is the whole fix.
+   */
+  settleAndFlush(): Promise<void>;
   read(ms: number): Promise<{ bytes: Uint8Array; framingErrors: number }>;
   close(): Promise<void>;
 }
@@ -1037,6 +1050,7 @@ export async function detect(opts: {
   for (const baud of order) {
     if (!tried.includes(baud)) tried.push(baud);
     const port = await opts.open(opts.device, baud);
+    await port.settleAndFlush();
     const started = clock.now();
     try {
       const scanner = new HeartbeatScanner();
@@ -1055,8 +1069,17 @@ export async function detect(opts: {
         if (vehicle !== undefined) {
           return { kind: "found", device: opts.device, baud, vehicle: describeVehicle(vehicle), system: vehicle.system };
         }
-        // Silence is the one signal that can be read early.
-        if (bytesHere === 0 && errorsHere === 0 && clock.now() - started >= SILENT_GIVE_UP_MS) break;
+        // Two signals can be read before the deadline. Silence is one.
+        //
+        // Framing errors are the other, and they are *sufficient* evidence of a
+        // mismatch without being necessary: on a board, 57600 and 230400 threw
+        // a thousand and two and a half thousand of them against zero at the
+        // rate that worked — but 921600 threw none and carried no frames
+        // either, because reading a 115200 signal at eight times its rate
+        // samples each bit eight times and the runs frame cleanly as bytes. So
+        // errors mean leave now; their absence means wait for the deadline.
+        if (errorsHere > 0) break;
+        if (bytesHere === 0 && clock.now() - started >= SILENT_GIVE_UP_MS) break;
       }
       bytesSeen += bytesHere;
       errorsSeen += errorsHere;

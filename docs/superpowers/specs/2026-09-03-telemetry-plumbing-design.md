@@ -111,7 +111,17 @@ as bytes fail to contain a heartbeat abandons the correct rate.
 
 So the rule is a **deadline, not a read count**: each rate is given at least one heartbeat
 interval — a little over a second, since `HEARTBEAT` is 1 Hz — measured on the clock rather
-than in reads, and abandoned early only when nothing at all has arrived. Reads return what is
+than in reads, and abandoned early only when the rate has disproved itself.
+
+**1300 ms, and that number is measured.** Six consecutive runs at the rate that worked
+answered in 874, 746, 746, 753, 739 and 752 ms — one heartbeat interval with a random phase
+offset, as expected. A one-second deadline would have missed the first of them.
+
+**And the port is flushed after the rate changes, not before.** The first bench run reported
+two checksum-valid heartbeats at a rate that cannot produce them, because rates were tried in
+ascending order and bytes buffered at the previous rate survived the change. That failure is
+the worst kind available here — detection confidently reporting the wrong baud, having
+genuinely seen a valid frame — and it costs a 50 ms settle to avoid. Reads return what is
 available rather than blocking for their full window, so a rate that is silent costs its
 deadline and a rate that is busy costs the same. The saving is real but smaller than it
 looked: about four and a half seconds worst case rather than eight, and under a second in the
@@ -151,7 +161,20 @@ what it suggests, in that order, and names both possibilities.
 This is `R-CAM-12`'s *say what was rejected and why*, applied to a serial port, and it is the
 reason for the new requirement in §7.
 
-**This rests on an assumption — see §10.1.**
+**Measured on a board, 2026-09-05.** The counter exists and discriminates hard: 1071 framing
+errors at 57600 and 2482 at 230400, against **zero** at the rate that worked. But one wrong
+rate produced no framing errors *either* — reading a 115200 signal at 921600, each bit spans
+eight samples and the runs frame cleanly as bytes. So framing errors are **sufficient evidence
+of a mismatch and not necessary**, and the rule is three-way rather than two:
+
+- a valid frame → right rate, stop;
+- framing errors → wrong rate, leave immediately;
+- bytes but neither → still wrong, and only the deadline can say so.
+
+Bytes alone prove nothing at all: they arrived at every rate, 2384 up to 10294 in four
+seconds, scaling with the rate because a mismatched sampler manufactures more garbage per
+second. The full transcript is in
+[`hardware/an-autopilot-on-the-uart.md`](../../hardware/an-autopilot-on-the-uart.md).
 
 ### The answer is remembered, never configured
 
