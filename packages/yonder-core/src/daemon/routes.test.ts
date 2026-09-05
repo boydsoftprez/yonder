@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, rmSync, readFileSync, existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createRouter, type DiagProbes, type Router, type SystemReport } from "./routes.js";
+import { createRouter, requestedControls, type DiagProbes, type Router, type SystemReport } from "./routes.js";
 import { ActivityLog } from "../log/activity.js";
 import type { ScanResult } from "../net/scan.js";
 import type { PingResult } from "../diag/probe.js";
@@ -1926,6 +1926,44 @@ describe("the camera routes", () => {
     expect((await r("POST", "/cameras/cam0/run", { action: "start" })).status).toBe(503);
     expect((await r("GET", "/cameras/cam0/receive-line", undefined)).status).toBe(503);
     expect((await r("POST", "/cameras/cam0/controls", { brightness: 10 })).status).toBe(503);
+  });
+});
+
+/**
+ * `requestedControls` itself (round 2, coordinator's resolutions 8-10):
+ * exactly one JS type is accepted per control, and it must be the type the
+ * schema itself gives that field, derived rather than hand-listed
+ * (`BOOLEAN_CONTROLS` in `routes.ts`) — never a bound on the number, which
+ * is `applyControls`'s job against the device's own reported range.
+ */
+describe("requestedControls", () => {
+  // The sharp edge round 2 exists to close: before this, a single boolean
+  // anywhere in the body returned null for the *entire* request, so a page
+  // setting brightness and auto focus in one gesture would have lost the
+  // brightness too, silently. This is the case that matters, not the
+  // single-field case below.
+  it("takes a switch as a boolean and a level as a number, in one request", () => {
+    expect(requestedControls({ brightness: 12, autoFocus: false }))
+      .toEqual({ brightness: 12, autoFocus: false });
+  });
+
+  it("still refuses a boolean for a control that is not a switch", () => {
+    expect(requestedControls({ brightness: true })).toBeNull();
+  });
+
+  // Beyond the brief's two: the same wrong-JS-type refusal in the other
+  // direction (a non-boolean for a field the schema does type as boolean),
+  // so the boolean branch is checked both ways rather than only the one the
+  // brief's own two tests exercise.
+  it("refuses a non-boolean for a control that is a switch", () => {
+    expect(requestedControls({ autoFocus: "on" })).toBeNull();
+  });
+
+  // `null` still means "leave it" for a boolean field, exactly as for a
+  // numeric one — the boolean branch is a different type check, not a
+  // different rule about absence.
+  it("drops a null switch rather than refusing it, alongside a real value", () => {
+    expect(requestedControls({ brightness: 5, autoFocus: null })).toEqual({ brightness: 5 });
   });
 });
 

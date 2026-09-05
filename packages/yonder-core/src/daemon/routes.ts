@@ -20,7 +20,8 @@ import { setTheme, type ThemeRequest } from "../ui/theme.js";
 import type { ScanResult } from "../net/scan.js";
 import type { BoardFacts } from "../system/facts.js";
 import type { Versions } from "../system/versions.js";
-import { DEFAULT_CONFIG, ZEROTIER_NETWORK_ID, type Camera } from "../schema/config.js";
+import { z } from "zod";
+import { CameraControls, DEFAULT_CONFIG, ZEROTIER_NETWORK_ID, type Camera } from "../schema/config.js";
 import { publishableApPassphrase } from "../net/profiles.js";
 import type { RemoteState } from "../remote/state.js";
 import { compose, refuse } from "../video/pipeline.js";
@@ -318,36 +319,93 @@ function sinceParam(query: string): number {
 }
 
 /**
+ * Whether `fieldSchema` is `z.boolean()` under any of the wrappers a
+ * `CameraControls` field actually carries — `.nullable().default(null)` for
+ * every field but `rotation` (`.default(0)` alone, over a `z.union` of
+ * literals, never a boolean or a number). Unwrapping `_def.innerType` this
+ * way is Zod's own introspection surface, the same one `zod-to-json-schema`
+ * (already a dependency — see `schema/generate.ts`) walks to turn this exact
+ * schema into JSON Schema, not a private detail this file invented a reason
+ * to poke at.
+ */
+function isBooleanControl(fieldSchema: z.ZodTypeAny): boolean {
+  let s: z.ZodTypeAny = fieldSchema;
+  while (s._def.innerType) s = s._def.innerType;
+  return s._def.typeName === z.ZodFirstPartyTypeKind.ZodBoolean;
+}
+
+/**
+ * Which `CameraControls` fields are booleans, read off the schema itself
+ * (R-CTL-11 … R-CTL-14) rather than typed out by hand a third time.
+ * `video/controls.ts`'s `CONTROL_NAMES` is the second list of the same
+ * seventeen controls, and it and the schema already drifted apart once in
+ * this plan — Task 8 gave the schema fourteen more fields before Task 9
+ * taught `CONTROL_NAMES` about them — caught only because a `satisfies`
+ * clause happened to tie that particular pair together. A hand-written pair
+ * of names here (`["autoWhiteBalance", "autoFocus"]`) would be a third list
+ * with nothing watching it: a fifteenth boolean control added to the schema
+ * later would silently fall through this route's number-only check instead
+ * of failing to compile the way a `CONTROL_NAMES` omission does.
+ */
+const BOOLEAN_CONTROLS: ReadonlySet<string> = new Set(
+  Object.entries(CameraControls.shape)
+    .filter(([, fieldSchema]) => isBooleanControl(fieldSchema))
+    .map(([key]) => key),
+);
+
+/**
  * `POST /cameras/:id/controls`'s body, off the wire and rejected before it
  * reaches `applyControls` if it names nothing this route understands.
  *
- * A key naming anything but `brightness`, `contrast` or `rotation` is
- * ignored rather than refused — the same tolerance `submittedPassword` shows
- * an extra field. `null` is the schema's own "leave it" for a nullable image
- * control, so it is dropped rather than treated as a value; what is refused
- * is a value that is neither a number nor absent, and a body that — once
- * nulls and absent keys are set aside — names nothing left to change, which
- * is indistinguishable from a caller that meant to ask for something and did
- * not.
+ * A key naming a control the schema does not have is ignored rather than
+ * refused — the same tolerance `submittedPassword` shows an extra field.
+ * `null` is the schema's own "leave it" for a nullable control, so it is
+ * dropped rather than treated as a value; what is refused is a value that is
+ * neither the right JS type for that particular control nor absent, and a
+ * body that — once nulls and absent keys are set aside — names nothing left
+ * to change, which is indistinguishable from a caller that meant to ask for
+ * something and did not.
+ *
+ * **A boolean is accepted only for the controls the schema itself types as
+ * boolean** (`BOOLEAN_CONTROLS` above — `autoWhiteBalance` and `autoFocus`
+ * today) and a number for every other one. Getting this wrong in either
+ * direction is a real fault: refusing a genuine boolean control would leave
+ * `applyControls`'s own `1`/`0` encoding (`video/controls.ts`) unreachable by
+ * the only caller that would ever send one; accepting a boolean for a
+ * numeric control would hand `applyControls` a `true`/`false` where it
+ * expects a device-native number.
+ *
+ * **One bad field refuses the whole body, not just that field** — deliberate,
+ * not an oversight: a page setting brightness and auto focus in the same
+ * request must not have brightness silently applied while auto focus is
+ * quietly dropped for being the wrong JS type. Better an operator sees
+ * nothing happened and tries again than have one of two settings they asked
+ * for take effect unannounced.
  *
  * Deliberately not a bound on the *number* — the schema's own bound is
  * `-100..100` and a real device's is usually narrower still. Neither belongs
  * here: `applyControls` clamps to what `capabilities` reports (rule 1), which
  * this function has no access to and must not guess at.
  */
-function requestedControls(body: unknown): Partial<Camera["controls"]> | null {
+export function requestedControls(body: unknown): Partial<Camera["controls"]> | null {
   if (body === null || typeof body !== "object" || Array.isArray(body)) return null;
-  const out: Partial<Record<keyof Camera["controls"], number>> = {};
+  const out: Partial<Record<keyof Camera["controls"], number | boolean>> = {};
   for (const control of Object.keys(CONTROL_NAMES) as (keyof Camera["controls"])[]) {
     const value = (body as Record<string, unknown>)[control];
     if (value === undefined || value === null) continue;
-    if (typeof value !== "number" || !Number.isFinite(value)) return null;
-    out[control] = value;
+    if (BOOLEAN_CONTROLS.has(control)) {
+      if (typeof value !== "boolean") return null;
+      out[control] = value;
+    } else {
+      if (typeof value !== "number" || !Number.isFinite(value)) return null;
+      out[control] = value;
+    }
   }
-  // The cast is the one place a plain number crosses into the schema's own,
-  // narrower shape (`rotation` is a literal union there, not `number`);
-  // `applyControls` reads every field as a number regardless of which
-  // control it names, so nothing downstream relies on the narrower type.
+  // The cast is the one place a plain number or boolean crosses into the
+  // schema's own, narrower shape (`rotation` is a literal union there, not
+  // `number`); `applyControls` reads a field as whichever of the two it
+  // actually is regardless of which control it names, so nothing downstream
+  // relies on the narrower type.
   return Object.keys(out).length === 0 ? null : (out as Partial<Camera["controls"]>);
 }
 
@@ -635,8 +693,8 @@ export function createRouter(deps: RouterDeps): Router {
         return {
           status: 400,
           body: {
-            error: "name at least one of brightness, contrast or rotation, "
-              + "each a finite number (null leaves it alone)",
+            error: "name at least one recognised camera control, each a finite "
+              + "number, or a boolean for a switch like autoFocus (null leaves it alone)",
           },
         };
       }
