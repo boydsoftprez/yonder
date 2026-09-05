@@ -39,6 +39,38 @@
 
 ---
 
+## What already exists
+
+**The page is built.** The blueprint for this milestone is not a drawing — it is
+`flows/flows.json`, standing up in the real console with real widgets, and every value on it
+arriving from one `inject` and thirty-two `change` nodes carrying static payloads. Stand it
+up and look at it before starting:
+
+```bash
+ACCEPT_SHAPE=1 HOLD=1 PORT=18900 ./scripts/verify-pages.sh
+```
+
+| Landed | What it is |
+|---|---|
+| `page-telemetry` and its five groups | Autopilot, Ground stations, Telemetry (rail), Path check (rail), and the pending banner `R-UI-15` requires |
+| `group-status-telemetry` | The flow strip on the Status page, between `This board` and `Reachable by` |
+| `ui-yonder-flow` | A new instrument — three places, two legs, an absent leg dashed and grey |
+| `YonderSoftKeys` `caution` tone | Amber, for a key that is deliberately on and hazardous |
+| 32 `mock-*` change nodes | **The work of Tasks 12 and 14 is to delete these**, one at a time, as a real node starts producing what each one fakes |
+
+So the console tasks below are no longer "design a page and build it". They are "replace a
+known static payload with a real one, and delete the node that was faking it". Every one of
+them can be verified by looking at the page before and after and seeing nothing change.
+
+Four defects were found by building it rather than drawing it, and are recorded here because
+they are the ones a later page will hit again: **a widget's width is relative to its group,
+not to the page**; **an annunciator's `label` replaces its caption rather than titling it**,
+so a labelled row is two widgets; **a `ui-text` with an empty `format` renders nothing**; and
+**Vuetify floats a field's label only when the field has content**, so an unset field needs
+its name in its own column or it looks like a different control.
+
+---
+
 ## File Structure
 
 | File | Responsibility |
@@ -1401,6 +1433,23 @@ git commit -s -m "feat(mav): the renderer — detect, then render, then start �
 - Consumes: `LinkState`, `DaemonClient`, `clientFor`, `fetched`, `readFailure` from `yonder-core`
 - Produces: message payloads shaped for the widgets — every string already in words, so no widget learns a vocabulary (the rule `messageFor` in the remote package follows)
 
+**The contract is already on the page.** Each node must emit exactly what the `mock-*` node
+it replaces emits today, so the page does not move when the fake is deleted:
+
+| Widget | Payload shape, from the built page |
+|---|---|
+| `tel-ann-link`, `tel-ann-recv`, `tel-ann-state`, `stat-ann-feed` | `{ state, message }` — a `CommandStatus`. `state` picks the tone, `message` is the caption |
+| `tel-port`, `tel-speed`, `tel-vehicle`, `tel-hb`, `tel-heard`, `tel-answered`, `tel-atboot`, `tel-ingest`, `tel-tcp` | a plain string, already in words: `"/dev/ttyAMA0"`, `"57 600 baud"`, `"ArduPlane · system 1"`, `"1.0 Hz"`, `"0.4 s ago"` |
+| `tel-chain-1..3` | a plain string: `"OK · 1.0 Hz"`. A link nobody attempted reads `"— not checked"`, never a cross |
+| `tel-host-0..2`, `tel-port-0..2` | the configured value, so the field opens showing its setting (`R-UI-17`); an unset host is `""` |
+| `tel-spark` | `{ series: { rx: number[], tx: number[] }, peak, span, known }` |
+| `stat-flow` | `{ from, through, to, legs }` — each place `{ label, detail, absent }`, each leg `{ rate, caption, absent }` |
+| `stat-tel-bar` | `{ atboot, ingest, heard, vehicle }` |
+
+**Every string arrives already in words.** No widget learns a vocabulary, which is the rule
+`messageFor` in the remote package already follows — the page must not know what `57600`
+means or what a `DetectOutcome` is.
+
 - [ ] **Step 1: Write the failing test** for `messageFor(state: LinkState, now?: number)`, covering all five phases and asserting the operator-facing sentences — including that the silent case names **pin 8, pin 10 and pin 6**, and the noise case names `SERIALn_PROTOCOL` and `SERIALn_BAUD`.
 - [ ] **Step 2: Run and watch fail.**
 - [ ] **Step 3: Implement** the nodes as thin adapters. No decision lives here. **`R-UI-17`: the endpoint node emits each field's configured value**, so the three host/port pairs open showing what the device is actually set to — an empty box on a configured device is a page giving two answers to one question.
@@ -1409,7 +1458,16 @@ git commit -s -m "feat(mav): the renderer — detect, then render, then start �
 
 ---
 
-## Task 13: The flow strip
+## Task 13: The flow strip — **landed, nothing to do**
+
+Built while the blueprint was, and on the page now. Left here rather than deleted so the
+numbering matches the commits, and because its two decisions are ones a reviewer should be
+able to find: **an absent leg is dashed and grey, never red** — nothing has failed when
+telemetry is stopped on purpose — and **all three places are always drawn**, because a strip
+that collapsed to whatever is working would answer "where is my telemetry going" with silence
+in exactly the case an operator is asking. The `caution` soft-key tone landed with it.
+
+*The original task text follows, for the record.*
 
 **Files:**
 - Create: `packages/node-red-dashboard-2-yonder/src/flow.ts`, `flow.html`, `src/ui/YonderFlow.vue`
@@ -1429,7 +1487,60 @@ git commit -s -m "feat(mav): the renderer — detect, then render, then start �
 
 ---
 
-## Task 14: The Telemetry page
+## Task 14: Cut the page over from the mockup to the daemon
+
+**The page exists.** This task deletes the scaffolding under it. Nothing here is a design
+decision: the arrangement, the widgets and the payload shapes were all settled by building
+it, and this is the mechanical half.
+
+**Files:**
+- Modify: `flows/flows.json` — rewire, and delete `mock-telemetry-once` and all 32 `mock-*` nodes
+- Modify: `packages/yonder-core/src/flows.test.ts`
+- Modify: `docs/console/shape/` — recapture
+
+**Interfaces:**
+- Consumes: the four `yonder-mav-*` nodes from Task 12
+- Produces: a page whose every value came from the device
+
+- [ ] **Step 1: Assert the scaffolding is gone before removing it**
+
+```ts
+it("carries no mockup scaffolding — every value on the Telemetry page came from the device", () => {
+  const mocks = flows.filter((n) => String(n.id).startsWith("mock-"));
+  expect(mocks.map((n) => n.id)).toEqual([]);
+});
+```
+
+Run it and watch it fail with all thirty-two named. That list is the task's own checklist.
+
+- [ ] **Step 2: Rewire one group at a time, deleting each fake as its real source lands**
+
+Wire `yonder-mav-state` to the widgets in the table in Task 12, and delete the `mock-*` node
+that fed each. **After every group, stand the console up and look at it** — the page should
+not move. A widget that goes blank is a payload shape that does not match what the mockup
+proved, and the mockup is the specification.
+
+- [ ] **Step 3: Wire the three actions**
+
+`tel-send` to `yonder-mav-endpoints`, `tel-runstop` to `yonder-mav-run`, `tel-check` to
+`yonder-mav-check`, and `tel-keys-ingest` through a `switch` on the key's action. **No
+`function` node** — `flows.test.ts` asserts it against the artefact.
+
+- [ ] **Step 4: Recapture all six states**
+
+`R-UI-12`, and the machinery M3 built: drive each state through the daemon's fake and capture
+it under its own name, as `status-without-modem` already is. The six are enumerated in
+[the design README](../../console/design/telemetry/README.md). Inspect every PNG by eye.
+
+- [ ] **Step 5: Commit**
+
+```bash
+npm test
+git add flows/flows.json docs/console/ packages/yonder-core/src/flows.test.ts
+git commit -s -m "feat(console): the Telemetry page reads the device — R-MAV-10, R-DIA-04"
+```
+
+*The original task text follows, for the record.*
 
 **Files:**
 - Modify: `flows/flows.json` — wiring only
@@ -1485,9 +1596,22 @@ git commit -s -m "feat(mav): the renderer — detect, then render, then start �
 
 **Two gaps I found and am recording rather than hiding:**
 
-1. **The interruption warning has no task.** §5 says the console warns that applying an endpoint change briefly interrupts the ground stations already receiving; §8 already records that no screen shows it. It belongs in Task 14 as a line beside the commit action, and Task 14 does not currently say so. **Add it there when Task 14 is implemented.**
+1. **The interruption warning still has no screen.** §5 says the console warns that applying
+   an endpoint change briefly interrupts the ground stations already receiving. The built page
+   does not show it — the row beside **Send telemetry here** says only whether a change is
+   unsent. It belongs there, as a `ui-text` with `className: "yonder-qualifier"`, and Task 14's
+   rewiring step is where it lands. **This is the one thing on the page that was designed and
+   never drawn.**
 2. **`R-MAV-09`'s start/stop is asserted in Task 10 and routed in Task 11, but no task makes the *service* survive a `yonder-core` restart** — that is `R-MAV-06`'s whole point and it follows from `mavlink-router` being its own systemd unit, so it is a property of Task 16's unit file rather than of any code. Task 16 must include a test that restarting `yonder-core` leaves the router running.
 
 **Type consistency.** `DetectOutcome`, `LinkState`, `LinkHint`, `Heartbeat`, `SerialPort`, `OpenPort` and `routerConfig` are each defined once, in the task that creates them, and referenced by exactly those names afterwards. `LOOPBACK_PORT` is exported from `router/config.ts` and consumed in Task 11 rather than repeated as `14559`.
+
+**What building the page closed, and what it opened.** Tasks 13 and 14 were written as
+"design and build"; the blueprint is now built, so 13 is done and 14 is a cutover with a
+thirty-two-item checklist the flows themselves produce. Four defects surfaced that no drawing
+would have — they are listed under *What already exists* because the next page will hit them
+too. And `R-UI-15` turned out to apply to this page after all, which the spec had reasoned to
+but no screen had shown: `mavlink.serial` and `mavlink.ingest` are not exempt, so the page
+pends, and `flows.test.ts` failed until it carried the banner.
 
 **One correction the plan makes to the spec.** §5 and §7 say `mavlink` is exempted from the confirmation window "by name". `reachability.ts` names **leaves**, never subtrees, and its own comment explains that a subtree exemption silently enfranchises every field added under it later. Task 4 therefore exempts `mavlink.endpoints`, `mavlink.autocast`, `mavlink.tcp_server.enabled` and `mavlink.tcp_server.port` individually, and deliberately leaves `mavlink.serial` and `mavlink.ingest` load-bearing. **The spec has been tightened to match** in the same change as this plan: §5 and §7 now name the four exempt leaves and name `mavlink.serial` and `mavlink.ingest` as deliberately not exempt, so a later reader knows they were considered rather than missed.
