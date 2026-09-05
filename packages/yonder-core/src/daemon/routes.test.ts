@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, rmSync, readFileSync, existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createRouter, requestedControls, type DiagProbes, type Router, type SystemReport } from "./routes.js";
+import { BOOLEAN_CONTROLS, createRouter, requestedControls, type DiagProbes, type Router, type SystemReport } from "./routes.js";
 import { ActivityLog } from "../log/activity.js";
 import type { ScanResult } from "../net/scan.js";
 import type { PingResult } from "../diag/probe.js";
@@ -1949,6 +1949,25 @@ describe("requestedControls", () => {
 
   it("still refuses a boolean for a control that is not a switch", () => {
     expect(requestedControls({ brightness: true })).toBeNull();
+  });
+
+  // The set is walked out of the schema rather than typed here, which is what
+  // keeps it from becoming a third list to remember. The cost is that a walk
+  // which stopped finding the boolean fields would return nothing, silently
+  // refuse every switch again, and be caught only by the mixed-request test
+  // above. Name the members, so a broken derivation fails as itself.
+  it("derives exactly the two switches the schema declares boolean", () => {
+    expect([...BOOLEAN_CONTROLS].sort()).toEqual(["autoFocus", "autoWhiteBalance"]);
+  });
+
+  // Refusing the whole body is the deliberate behaviour, not the sharp edge
+  // that was fixed. The edge was refusing it over a *boolean*, which is now a
+  // legal value for two controls; a string is still nobody's control value,
+  // and half-applying a request an operator made in one gesture would be
+  // worse than declining it.
+  it("refuses the whole body for a value that is nobody's, not just that field", () => {
+    expect(requestedControls({ brightness: 12, contrast: "bad" })).toBeNull();
+    expect(requestedControls({ brightness: 12, autoFocus: "bad" })).toBeNull();
   });
 
   // Beyond the brief's two: the same wrong-JS-type refusal in the other

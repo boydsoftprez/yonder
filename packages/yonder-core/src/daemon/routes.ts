@@ -347,7 +347,7 @@ function isBooleanControl(fieldSchema: z.ZodTypeAny): boolean {
  * later would silently fall through this route's number-only check instead
  * of failing to compile the way a `CONTROL_NAMES` omission does.
  */
-const BOOLEAN_CONTROLS: ReadonlySet<string> = new Set(
+export const BOOLEAN_CONTROLS: ReadonlySet<string> = new Set(
   Object.entries(CameraControls.shape)
     .filter(([, fieldSchema]) => isBooleanControl(fieldSchema))
     .map(([key]) => key),
