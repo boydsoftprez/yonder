@@ -25,8 +25,15 @@ it("shutter is open under Manual (1) and closed under Aperture priority (3)", ()
 it("zoom on a UVC camera is device steps with no ratio", () => {
   expect(DESCRIPTORS.zoom.unit).toBe(""); expect(DESCRIPTORS.zoom.toDisplay(30)).toBe(30);
 });
-it("no descriptor carries an uppercased unit", () => {
-  for (const d of Object.values(DESCRIPTORS)) expect(d.unit).not.toMatch(/MB\/S|KB\/S|ΜS/);
+// A blocklist of three wrong spellings passes `µS`, `MHZ` and every other
+// miscasing nobody thought of, which is the failure it was written to catch.
+// A closed vocabulary inverts that: a unit reaches this table only by being
+// added here deliberately, which is the one place the casing rule is applied.
+const UNITS = new Set(["", "µs", "K"]);
+it("every unit is one this project has written down, in that spelling", () => {
+  for (const [key, d] of Object.entries(DESCRIPTORS)) {
+    expect(UNITS, `${key} carries an unlisted unit ${JSON.stringify(d.unit)}`).toContain(d.unit);
+  }
 });
 
 // --- Round-trip over the whole device domain, not the one value above -----
