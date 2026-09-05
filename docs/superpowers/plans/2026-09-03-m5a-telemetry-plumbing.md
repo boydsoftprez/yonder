@@ -96,7 +96,19 @@ its name in its own column or it looks like a different control.
 
 ---
 
-## Task 1: Bench — does the kernel report framing errors on this port?
+## Task 1: Bench — does the kernel report framing errors on this port? — **DONE, 2026-09-05**
+
+**Answered yes**, and it changed two things. The counter discriminates hard — 1071 and 2482
+framing errors at wrong rates against zero at the right one — so `R-MAV-13`'s three outcomes
+stand and §10.1's fallback is not needed. But **one wrong rate produced no framing errors
+either**, so errors are sufficient evidence of a mismatch and not necessary, and the sweep
+leaves early on errors while waiting out the deadline on their absence. The 1300 ms deadline
+is now measured: six runs answered in 739–874 ms.
+
+It also found the trap that `SerialPort.settleAndFlush()` exists for. Full transcript:
+[`hardware/an-autopilot-on-the-uart.md`](../../hardware/an-autopilot-on-the-uart.md).
+
+*The original task follows, for the record.*
 
 §10.1. **Do this first: it can change what `R-MAV-13` says**, and Task 5 is written against its answer.
 
@@ -183,7 +195,20 @@ git commit -s -m "docs(hardware): what the UART reports at a wrong baud — R-MA
 
 ---
 
-## Task 2: Bench — build `mavlink-router` for arm64, and see what it says about its endpoints
+## Task 2: Bench — build `mavlink-router` for arm64, and what it says about its endpoints — **DONE, 2026-09-05**
+
+**§10.2:** builds on the board, but only just — `meson`, `ninja-build`, `libsystemd-dev` and
+`systemd-dev` are all missing from a stock image (the build wants the `systemd` pkg-config
+module, not `libsystemd`), and a default parallel build **runs a 1 GB Pi 4 out of memory**.
+`-j1` completes. The stripped binary is **325 KB**, which makes the offline payload cheap and
+the on-device build the wrong idea — Task 16 stands, for stronger reasons than `R-CFG-07`.
+
+**§10.3: it does attribute traffic per endpoint, by name.** So §6's limitation is lifted and
+`LinkState.groundStations` is per-endpoint (Task 9). The first measurement said otherwise and
+was wrong — the fake ground station replied to itself rather than to the router's source port,
+so nothing reached the router at all.
+
+*The original task follows, for the record.*
 
 §10.2 and §10.3, which are the same binary and belong in the same sitting.
 
@@ -1453,7 +1478,17 @@ git commit -s -m "feat(mav): generate mavlink-router's configuration from config
     device: string | null; baud: number | null;
     vehicle: string | null; system: number | null;
     heartbeatHz: number | null; lastHeardMs: number | null;
-    groundStationAnswering: boolean; groundStationLastHeardMs: number | null;
+    /**
+     * One entry per configured endpoint, in configuration order.
+     *
+     * Per-endpoint rather than a single flag, because the router turned out to
+     * keep the attribution itself: with ReportStats on, an answering endpoint's
+     * received count tracks its replies exactly and a silent one stays at zero.
+     * §6 originally reported only *that* someone was answering, having reasoned
+     * correctly that the merged loopback copy cannot distinguish them — and
+     * missed that it does not have to.
+     */
+    groundStations: { name: string; answering: boolean; lastHeardMs: number | null }[];
     triedBauds: number[];
     /**
      * The sparkline's two series and the TCP client count, which the page

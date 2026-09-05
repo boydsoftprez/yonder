@@ -125,3 +125,96 @@ trusting an unverified length.
 2. Wire pin 6 to the autopilot's ground, pin 8 to its **RX**, pin 10 to its **TX**.
 3. Run the probe as root. Reverse the order and repeat a rate: an ascending sweep hides the
    stale-buffer trap above.
+
+---
+
+# Building mavlink-router on the same board
+
+Task 2 of the M5a plan, answering §10.2 and §10.3 of the spec. Same board, same day.
+
+## What it costs to build
+
+<!-- yonder:hardware-observed -->
+
+| | |
+|---|---|
+| Source | `mavlink-router` at `2362c62`, 2026-02-19, with submodules |
+| Missing on a stock board | `meson`, `ninja-build`, `libsystemd-dev`, **and `systemd-dev`** |
+| Binary | 5.0 MB unstripped, **325 KB stripped** |
+| Version string | `mavlink-router version 2362c62` |
+
+**Two dependency traps, and the second cost a build.** `meson` and `ninja-build` are the
+obvious ones. Less obvious: the build looks for the **`systemd`** pkg-config module, not
+`libsystemd` — installing `libsystemd-dev` gets you `libsystemd.pc` and the configure step
+still fails with `Dependency "systemd" not found`. The package that carries `systemd.pc` on
+Debian 13 is `systemd-dev`.
+
+**And a parallel build runs this board out of memory.** `ninja -C build` with its default
+four jobs died compiling `endpoint.cpp`:
+
+```
+c++: fatal error: Killed signal terminated program cc1plus
+```
+
+That is the OOM killer. This Pi 4 has **905 MiB of RAM and no swap**, and was also running
+the daemon, the console and ZeroTier. `ninja -j1` completed without trouble.
+
+**This is the argument for the offline payload, made concretely.** A 325 KB stripped binary
+is cheap to carry; a build that needs three extra packages, a non-obvious one of them, and
+more memory than the smallest board in the matrix has, is not something to do on a device.
+`R-VPN-08`'s shape — build in CI, pin the version, record the fingerprint, install from the
+payload — is the right one here for reasons beyond `R-CFG-07`.
+
+## §10.3 is answered: it does attribute traffic per endpoint
+
+With `ReportStats = true`, the router prints a block per endpoint to **stdout, once a
+second**, naming each one:
+
+```
+UDP Endpoint [7]gcs0 {
+	Received messages {
+		CRC error: 0 0% 0KB
+		Sequence lost: 0 0%
+		Handled: 1 0KB
+		Total: 1
+	}
+	Transmitted messages {
+		Total: 45 1KB
+	}
+}
+```
+
+Two ground stations were configured. Only one answered — a fake GCS that listened on its port
+and replied to whatever address the stream arrived from, which is how a real one behaves,
+because the router sends from an ephemeral source port.
+
+| Endpoint | Received (`Handled`) | Transmitted |
+|---|---|---|
+| `gcs0` — replied 21 heartbeats | **21** | 954 |
+| `gcs1` — configured, silent | **0** | 954 |
+| `autopilot` — the UART | 955 | 0 |
+
+The received count tracks the answering endpoint exactly, and the silent one stays at zero.
+
+**So §6's limitation is lifted.** The spec reasoned that the console could report *that* a
+ground station was answering but not *which*, because the control plane sees one merged
+loopback copy in which every ground station identifies itself the same way. That reasoning is
+correct about the merged copy and irrelevant, because the attribution does not have to come
+from the traffic — the router already keeps it, per endpoint, by name.
+
+The first attempt at this measurement got `Handled: 0` on both endpoints and would have
+confirmed the limitation wrongly. The fake ground station was sending its heartbeats to its
+own port rather than back to the router's source port, so nothing ever reached the router at
+all. **A test that proves a limitation by failing to exercise the thing is worth more
+suspicion than one that fails outright.**
+
+## What this does not settle
+
+- **The format is text on stdout, and nothing promises it is stable.** Parsing it couples
+  Yonder to an upstream print statement. Worth weighing against the alternative, which is
+  reporting less than the router knows.
+- **`SIGUSR1` is not a statistics trigger.** There is no handler for it in `src/`, so the
+  default action applies and the signal terminates the process. Statistics are a
+  configuration setting, not a signal.
+- Nothing about the router under `systemd` sandboxing, or surviving a `yonder-core` restart.
+  That is Task 16.

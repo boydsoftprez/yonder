@@ -344,18 +344,30 @@ not connected*. A client reports a network as configured long after it can reach
 A list of three ground-station addresses is the same illusion — three green rows and nobody
 listening.
 
-**Decision: the console reports that a ground station is answering, and when it last did.
-It does not claim which one.**
+**Decision: the console reports which ground station is answering, per endpoint.**
 
-The router hands `yonder-core` one merged copy of everything, including traffic arriving
-from ground stations, and every ground station identifies itself the same way — so which of
-three answered cannot be recovered from the traffic alone. Per-endpoint attribution would
-have to come out of the router's own counters.
+An earlier draft of this section decided the opposite, and the reasoning was sound about the
+wrong thing. The router does hand `yonder-core` one merged copy of everything, and every
+ground station in it identifies itself the same way, so which of three answered genuinely
+cannot be recovered *from the traffic*. What that argument missed is that the attribution
+does not have to come from the traffic: **the router already keeps it, per endpoint, by
+name.**
 
-**What this gives up** is telling a working endpoint from a dead one when more than one is
-configured. An operator with three ground stations configured and one answering sees
-"answering", not which. That is stated here rather than left as a surprise, and §10.3 says
-what would change it.
+Measured on a board on 2026-09-05, with two endpoints configured and one answering:
+
+| Endpoint | Received | Transmitted |
+|---|---|---|
+| `gcs0` — replied 21 heartbeats | **21** | 954 |
+| `gcs1` — configured, silent | **0** | 954 |
+
+With `ReportStats = true` the router prints a named block per endpoint to stdout once a
+second. So each of the three rows on the page carries its own live-or-silent mark, and an
+operator with one dead ground station out of three is told *which*.
+
+**What this costs** is a coupling: the statistics are text on stdout and nothing upstream
+promises that format is stable. The alternative was reporting less than the router knows,
+which is the worse trade for a page whose whole job is saying what is actually happening.
+Recorded here so a future format change is a known breakage rather than a mystery.
 
 What is reported instead is every part that *is* measured: the heartbeat arriving from the
 autopilot and its rate, the vehicle type and system id the heartbeat carries, whether
