@@ -577,6 +577,27 @@ describe("the bench camera's controls", () => {
   growing the map alone cannot trip it. It bites in Task 9, when the names
   gain entries that must agree. Do not force it red.
 - [ ] **Step 5: Mutation-check** — remove the `inactive → gated` branch: red; remove the pan/tilt block: red. Restore.
+
+- [ ] **Step 6: Prove that *inactive* is what gates, not *a gate exists*.**
+
+The gate reads `range.inactive ? DESCRIPTORS[key].gates?.[0] : undefined`. Drop
+the `range.inactive` test — gating whenever a gate is configured at all — and
+every test still passes, because the one recorded fixture has all three
+gate-eligible controls permanently inactive, so the two conditions are
+perfectly correlated in the only device state this repository has. A
+regression to that form would tell an operator a shutter is held by auto
+exposure while the camera sits in Manual Mode with that shutter live and
+adjustable, which is the sentence R-UI-20 and R-UI-21 exist to prevent.
+
+Build the missing state by hand — a `ControlRange` for a gate-eligible control
+with `inactive: false` — and assert it reports `present`, not `gated`. The
+acceptance test is the mutation: dropping `range.inactive` from the condition
+must turn this test red.
+
+A second capture from the board, taken with `auto_exposure` in Manual Mode, is
+the better evidence and should replace the hand-built range when the bench is
+next available. Until then say in the test that its state is constructed and
+why the fixture cannot supply it.
 - [ ] **Step 6: Commit** — `git commit -s -m "feat(video): probe the controls the model gained, and report the aim this camera advertises — R-CAM-14"`
 
 ---
