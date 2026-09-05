@@ -4939,7 +4939,7 @@
         "name": "telemetry flow",
         "order": 2,
         "width": 12,
-        "height": 2,
+        "height": 5,
         "label": "",
         "x": 300,
         "y": 3320,

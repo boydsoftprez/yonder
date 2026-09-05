@@ -220,11 +220,19 @@ export default {
 /* Narrower than a laptop the strip stands up: one column, arrows pointing
    down. Not a second design — the same three places in the same order. */
 @media (max-width: 1023px) {
+    /* Dashboard fixes a widget's height in grid rows, and this instrument's
+       height depends on the width it is laid out at — so one slot has to serve
+       both arrangements, and every row the stacked one does not need is dead
+       space on the laptop this console is mostly read on. The stacked layout is
+       therefore as tight as it can be while staying legible: the places lose
+       their horizontal minimum, and the legs lose the vertical padding they
+       only needed to centre an arrow that is now beside the text. */
     .y-flow__rail { grid-template-columns: 1fr; }
-    .y-flow__node { min-height: 0; }
-    .y-flow__leg { flex-direction: row; justify-content: flex-start; gap: 12px; padding: 6px 0 6px 20px; }
+    .y-flow__node { min-height: 0; padding: 8px 11px; gap: 1px; }
+    .y-flow__leg { flex-direction: row; justify-content: flex-start; align-items: center;
+                   gap: 10px; padding: 3px 0 3px 18px; }
     .y-flow__rate, .y-flow__cap { text-align: left; }
     .y-flow__arrow--h { display: none; }
-    .y-flow__arrow--v { display: block; width: 12px; height: 26px; }
+    .y-flow__arrow--v { display: block; width: 12px; height: 18px; }
 }
 </style>
