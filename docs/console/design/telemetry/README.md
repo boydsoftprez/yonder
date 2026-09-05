@@ -69,8 +69,9 @@ of decisions made in advance instead.
 
 | What it shows | Node | Notes |
 |---|---|---|
-| Receiving | `ui-yonder-annunciator` | `good` answering · `neutral` nothing to send / not sending |
-| Last answered | `ui-text` row-spread | |
+| Receiving | `ui-yonder-annunciator` | The headline for the group: `good` anything answering · `neutral` nothing to send / not sending |
+| Last answered | `ui-text` row-spread | **Names the station** — `GCS 0 · 0.3 s ago`. Once each row carries its own state, "last answered" without a name is a question the page raises and does not answer |
+| Each station's own state | **`ui-yonder-annunciator` × 3** | **This replaces the row's `ui-text` label.** The lamp carries that endpoint's state and the caption carries its name, so the row's identity and its condition are one instrument rather than two widgets. `good` answering · `waiting` silent — it answered before and has gone quiet · `neutral` no reply yet, or not set |
 | Three host + port pairs | `ui-text-input` × 6 | Stock is right for text entry — the Cellular tab enters an APN the same way. **`R-UI-17`: each opens carrying its configured value**, and an unset one says `not set` |
 | Send telemetry here | `ui-button` | The page's one primary action (`R-UI-10`) |
 | Unsent / sent | `ui-text`, `className: "yonder-qualifier"` | |
@@ -107,6 +108,26 @@ state. The soft-key `caution` tone is a gap in an existing component, not a new 
 page are *not* exempt from the confirmation window — `mavlink.serial` and `mavlink.ingest` —
 so changing either one pends, and the requirement is that a pending change is visible on
 every surface, not only the one it was made on.
+
+## The per-station marks came from the bench, and these files predate them
+
+The three per-row annunciators are not in the HTML below. They were added on **2026-09-05**,
+after `mavlink-router` was built on a board and asked what it knew.
+
+The design here assumed the console could report *that* a ground station was answering but
+not *which*, reasoning that the control plane sees one merged loopback copy in which every
+ground station identifies itself identically. That reasoning is correct about the merged copy
+and beside the point: **the attribution does not have to come from the traffic, because the
+router already keeps it.** With `ReportStats = true` it prints a named block per endpoint —
+measured with two configured and one answering, the answering one's received count tracked
+its replies exactly and the silent one stayed at zero.
+
+So an operator with one dead ground station out of three is now told which one. The evidence
+is in [the hardware note](../../../hardware/an-autopilot-on-the-uart.md); the design decision
+is §6 of the spec.
+
+**Where the files below disagree with the built page, the built page is right** — it is the
+one that carries the measurement.
 
 ## What these files are not
 

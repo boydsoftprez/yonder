@@ -4340,28 +4340,19 @@
         "valueType": "msg"
     },
     {
-        "id": "label-tel-gcs-0",
-        "type": "ui-text",
+        "id": "tel-gcs-0",
+        "type": "ui-yonder-annunciator",
         "z": "yonder-console",
         "group": "group-tel-stations",
+        "name": "tel-gcs-0",
         "order": 4,
-        "width": 2,
+        "width": 3,
         "height": 1,
-        "name": "label-tel-gcs-0",
-        "label": "GCS 0",
-        "format": "{{msg.payload}}",
-        "layout": "row-left",
-        "style": false,
-        "font": "",
-        "fontSize": 16,
-        "color": "#717171",
-        "wrapText": false,
-        "className": "",
+        "label": "",
+        "source": "payload",
         "x": 300,
         "y": 3634,
-        "wires": [],
-        "value": "payload",
-        "valueType": "msg"
+        "wires": []
     },
     {
         "id": "tel-host-0",
@@ -4369,7 +4360,7 @@
         "z": "yonder-console",
         "group": "group-tel-stations",
         "order": 5,
-        "width": 4,
+        "width": 3,
         "height": 1,
         "name": "tel-host-0",
         "label": "",
@@ -4391,28 +4382,19 @@
         ]
     },
     {
-        "id": "label-tel-gcs-1",
-        "type": "ui-text",
+        "id": "tel-gcs-1",
+        "type": "ui-yonder-annunciator",
         "z": "yonder-console",
         "group": "group-tel-stations",
+        "name": "tel-gcs-1",
         "order": 7,
-        "width": 2,
+        "width": 3,
         "height": 1,
-        "name": "label-tel-gcs-1",
-        "label": "GCS 1",
-        "format": "{{msg.payload}}",
-        "layout": "row-left",
-        "style": false,
-        "font": "",
-        "fontSize": 16,
-        "color": "#717171",
-        "wrapText": false,
-        "className": "",
+        "label": "",
+        "source": "payload",
         "x": 300,
         "y": 3668,
-        "wires": [],
-        "value": "payload",
-        "valueType": "msg"
+        "wires": []
     },
     {
         "id": "tel-port-0",
@@ -4442,28 +4424,19 @@
         ]
     },
     {
-        "id": "label-tel-gcs-2",
-        "type": "ui-text",
+        "id": "tel-gcs-2",
+        "type": "ui-yonder-annunciator",
         "z": "yonder-console",
         "group": "group-tel-stations",
+        "name": "tel-gcs-2",
         "order": 10,
-        "width": 2,
+        "width": 3,
         "height": 1,
-        "name": "label-tel-gcs-2",
-        "label": "GCS 2",
-        "format": "{{msg.payload}}",
-        "layout": "row-left",
-        "style": false,
-        "font": "",
-        "fontSize": 16,
-        "color": "#717171",
-        "wrapText": false,
-        "className": "",
+        "label": "",
+        "source": "payload",
         "x": 300,
         "y": 3702,
-        "wires": [],
-        "value": "payload",
-        "valueType": "msg"
+        "wires": []
     },
     {
         "id": "tel-host-1",
@@ -4471,7 +4444,7 @@
         "z": "yonder-console",
         "group": "group-tel-stations",
         "order": 8,
-        "width": 4,
+        "width": 3,
         "height": 1,
         "name": "tel-host-1",
         "label": "",
@@ -4525,7 +4498,7 @@
         "z": "yonder-console",
         "group": "group-tel-stations",
         "order": 11,
-        "width": 4,
+        "width": 3,
         "height": 1,
         "name": "tel-host-2",
         "label": "",
@@ -5158,7 +5131,7 @@
                 "t": "set",
                 "p": "payload",
                 "pt": "msg",
-                "to": "0.3 s ago",
+                "to": "GCS 0 \u00b7 0.3 s ago",
                 "tot": "str"
             }
         ],
@@ -5684,9 +5657,9 @@
                 "mock-label-tel-ann-recv",
                 "mock-label-tel-ann-state",
                 "mock-label-stat-ann-feed",
-                "mock-label-tel-gcs-0",
-                "mock-label-tel-gcs-1",
-                "mock-label-tel-gcs-2"
+                "mock-tel-gcs-0",
+                "mock-tel-gcs-1",
+                "mock-tel-gcs-2"
             ]
         ]
     },
@@ -5896,17 +5869,17 @@
         ]
     },
     {
-        "id": "mock-label-tel-gcs-0",
+        "id": "mock-tel-gcs-0",
         "type": "change",
         "z": "yonder-console",
-        "name": "mock label-tel-gcs-0",
+        "name": "mock tel-gcs-0",
         "rules": [
             {
                 "t": "set",
                 "p": "payload",
                 "pt": "msg",
-                "to": "",
-                "tot": "str"
+                "to": "{\"state\": \"confirmed\", \"message\": \"GCS 0 \\u00b7 answering\"}",
+                "tot": "json"
             }
         ],
         "action": "",
@@ -5918,22 +5891,22 @@
         "y": 3634,
         "wires": [
             [
-                "label-tel-gcs-0"
+                "tel-gcs-0"
             ]
         ]
     },
     {
-        "id": "mock-label-tel-gcs-1",
+        "id": "mock-tel-gcs-1",
         "type": "change",
         "z": "yonder-console",
-        "name": "mock label-tel-gcs-1",
+        "name": "mock tel-gcs-1",
         "rules": [
             {
                 "t": "set",
                 "p": "payload",
                 "pt": "msg",
-                "to": "",
-                "tot": "str"
+                "to": "{\"state\": \"pending\", \"message\": \"GCS 1 \\u00b7 silent\"}",
+                "tot": "json"
             }
         ],
         "action": "",
@@ -5945,22 +5918,22 @@
         "y": 3668,
         "wires": [
             [
-                "label-tel-gcs-1"
+                "tel-gcs-1"
             ]
         ]
     },
     {
-        "id": "mock-label-tel-gcs-2",
+        "id": "mock-tel-gcs-2",
         "type": "change",
         "z": "yonder-console",
-        "name": "mock label-tel-gcs-2",
+        "name": "mock tel-gcs-2",
         "rules": [
             {
                 "t": "set",
                 "p": "payload",
                 "pt": "msg",
-                "to": "",
-                "tot": "str"
+                "to": "{\"state\": \"idle\", \"message\": \"GCS 2 \\u00b7 not set\"}",
+                "tot": "json"
             }
         ],
         "action": "",
@@ -5972,7 +5945,7 @@
         "y": 3702,
         "wires": [
             [
-                "label-tel-gcs-2"
+                "tel-gcs-2"
             ]
         ]
     }
