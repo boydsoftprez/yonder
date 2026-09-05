@@ -6,6 +6,16 @@
 // colour, a threshold or a font: this script only asks yonder-core for the
 // whole shell and saves the answer.
 //
+// **This one import reaches built output, and it is the only thing here that
+// does.** `themeCss` and `PALETTES` are exported from yonder-core's main
+// entry alone, not from the browser-safe `presentation` entry the gallery's
+// Vite config aliases to source, so this script resolves them through
+// `dist/`. R-UI-25 asks the gallery to show what the source does *now*, and a
+// stale `dist/` would quietly show what it did last time it was built. The
+// `gallery` script therefore builds yonder-core before running this — keep
+// that first step, or this file starts lying on the exact axis the gallery
+// exists to be honest about.
+//
 // Written into `public/`, not beside this script or into the build output
 // directly. `vite build` empties its output directory before it writes
 // anything, and it wipes anything not emitted by the bundler — including a
