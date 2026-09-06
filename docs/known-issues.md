@@ -1315,9 +1315,9 @@ the guarded run and carries the fixture value.
 
 Found by review during Task 29 (`75f8c46`).
 
-### K-48 · An applied bitrate never reaches the running encoder
+### K-48 · ~~An applied bitrate never reaches the running encoder~~ — CLOSED
 
-**Status:** Open · **Requirements:** R-VID-07, R-UI-05
+**Status:** Closed · **Requirements:** R-VID-07, R-UI-05, R-CFG-03
 
 Found by the operator on the development board, then reproduced at the daemon.
 
@@ -1358,7 +1358,42 @@ interface, no socket and no stdin protocol; and `v4l2h264enc`'s controls are
 per-open-handle, so no outside process can reach the encoder either. Both facts
 had to hold for the retune to work and only one was checked.
 
-See K-53 for what closes it.
+**Closed by respawn-on-apply** (`506bbe5`), not by the runtime channel. A
+renderer composes the launch line each camera's new configuration implies,
+compares it against the line that camera's pipeline is actually running
+(`supervisor.argv(id)`), and restarts only where they differ. It never needs to
+know which fields matter, so it survives the ffmpeg pivot untouched — and it is
+the mechanism the console spec's own control table already named: *"the current
+implementation respawns"* for bitrate, *"Pipeline respawn on Apply"* for
+resolution.
+
+**Proved on the board**, 2026-09-06:
+
+| | pid | main | preview |
+|---|---|---|---|
+| before | 1656195 | 1.0 Mb/s | 1.35 Mb/s |
+| apply 2600, confirm | 1657114 | **2.6 Mb/s** | 1.35 Mb/s |
+
+The pid moved, the main rate is what was applied, the preview kept its own
+value, and the daemon logged *"cam0's settings changed, so its pipeline was
+restarted"*.
+
+**And the rollback, which is the half that matters:** applied 4800 without
+confirming — pid 1658398 at 4.8 Mb/s — then reverted, and the pipeline came
+back at 2.6 Mb/s on pid 1658901. A change that is reverted takes the picture
+back with it, which is R-CFG-03 reaching the aircraft rather than only the
+file.
+
+The cost is a visible break in the picture on a change the operator deliberately
+applied. K-53 remains open for the no-break path, and is now a refinement rather
+than a defect.
+
+**One gap left open, deliberately** (found by the implementer, not a test): a
+camera in spawn backoff is not reached. `argv()` answers null both for a camera
+the operator stopped and for the 1–30 s gap between a failed spawn and its
+retry, so an apply — or a rollback — landing in that gap does not move it.
+Telling those two apart needs the supervisor to distinguish *stopped* from
+*between attempts*, which `argv()` deliberately does not.
 
 **Update — the respawn is built, and it is the sanctioned path.** A live
 retune is blocked for as long as `gst-launch-1.0` carries the pipeline, and
