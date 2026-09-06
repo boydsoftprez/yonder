@@ -192,7 +192,7 @@ export default {
         readonly: { type: Boolean, default: false }
     },
     emits: ['set'],
-    data: () => ({ dragging: false, TRACK_WIDTH }),
+    data: () => ({ dragging: false, captureFailed: false, TRACK_WIDTH }),
     computed: {
         hasRequested () {
             return this.requested !== null && this.requested !== undefined
@@ -256,7 +256,26 @@ export default {
         down (e) {
             if (this.state !== 'present' || this.readonly) return
             this.dragging = true
-            this.$refs.trk.setPointerCapture?.(e.pointerId)
+            /**
+             * **The press is emitted whatever pointer capture does.**
+             *
+             * `setPointerCapture` throws `NotFoundError` for a pointer id the
+             * browser no longer considers active, and it threw *before* the
+             * emit — so a press that hit that case set nothing at all, and the
+             * bar read as a control that would not move. `?.` guards the
+             * method being absent, which is the jsdom case; it does not guard
+             * the method throwing, which is the browser case, and every test
+             * here runs in jsdom.
+             *
+             * Capture is a convenience — it keeps the drag alive when the
+             * pointer leaves the track. Losing it costs a drag that stops at
+             * the edge. Losing the press costs the control.
+             */
+            try {
+                this.$refs.trk.setPointerCapture?.(e.pointerId)
+            } catch {
+                this.captureFailed = true
+            }
             this.$emit('set', this.from(e))
         },
         move (e) {

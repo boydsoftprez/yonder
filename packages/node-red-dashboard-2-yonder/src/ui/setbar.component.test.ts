@@ -91,6 +91,36 @@ function press(el: Element, clientX: number) {
   el.dispatchEvent(new PointerEvent("pointerdown", { clientX, bubbles: true, cancelable: true }));
 }
 
+/**
+ * **A press must survive pointer capture failing.**
+ *
+ * `setPointerCapture` throws `NotFoundError` for a pointer id the browser no
+ * longer considers active, and it used to run *before* the emit — so a press
+ * that hit that case set nothing, and the bar read to the operator as a
+ * control that would not move at all. `?.` guards the method being absent,
+ * which is what jsdom does; it does not guard it throwing, which is what a
+ * browser does, and every test in this file runs in jsdom. So the case was
+ * invisible here by construction.
+ */
+describe("when the browser refuses pointer capture", () => {
+  it("still emits the press", async () => {
+    const w = mount(YonderSetBar, {
+      props: { label: "Brightness", min: 0, max: 100, step: 1, actual: 55, state: "present" },
+      attachTo: document.body,
+    });
+    const trk = w.find(".y-sb__trk").element as HTMLElement;
+    // Exactly what a browser does for a stale pointer id.
+    (trk as unknown as { setPointerCapture: () => void }).setPointerCapture = () => {
+      throw new DOMException("no active pointer", "NotFoundError");
+    };
+    const ev = new MouseEvent("pointerdown", { clientX: 120, bubbles: true });
+    Object.defineProperty(ev, "pointerId", { value: 9 });
+    trk.dispatchEvent(ev);
+    await w.vm.$nextTick();
+    expect(w.emitted("set"), "the press reached the control anyway").toBeTruthy();
+  });
+});
+
 describe("formatting the device's own reading", () => {
   /**
    * The coordinator's own resolution, verbatim (task-18-brief.md's
