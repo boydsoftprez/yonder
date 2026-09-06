@@ -693,6 +693,20 @@
                   "null"
                 ],
                 "default": null
+              },
+              "horizontalFlip": {
+                "type": [
+                  "boolean",
+                  "null"
+                ],
+                "default": null
+              },
+              "verticalFlip": {
+                "type": [
+                  "boolean",
+                  "null"
+                ],
+                "default": null
               }
             },
             "additionalProperties": false,

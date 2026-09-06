@@ -540,6 +540,24 @@ export const CameraControls = z.object({
   autoExposure: ctl(0, 3),                 // auto_exposure — menu id: 0 auto, 1 manual, 2 shutter priority, 3 aperture priority
   autoWhiteBalance: z.boolean().nullable().default(null), // white_balance_automatic
   autoFocus: z.boolean().nullable().default(null),        // focus_automatic_continuous
+
+  /**
+   * **A mirror and a flip, each a switch — not more degrees on `rotation`**
+   * (R-CTL-05). A flip is not a rotation and cannot be expressed as one:
+   * 180° is both flips together, and neither flip alone is any rotation at
+   * all. A single degrees field therefore reaches four of the eight
+   * orientations an airframe mount can need, and cannot say which of the
+   * other four it is looking at — so rotation keeps its degrees and each
+   * flip gets its own field.
+   *
+   * Nullable like the two switches above and unlike `rotation`, because the
+   * distinction this file's header draws applies here too: `null` is *leave
+   * the camera alone*, and `false` is an operator saying the picture is not
+   * mirrored. A camera whose sensor is already flipped in hardware should
+   * not have that undone by a default nobody chose.
+   */
+  horizontalFlip: z.boolean().nullable().default(null),   // horizontal_flip (V4L2_CID_HFLIP)
+  verticalFlip: z.boolean().nullable().default(null),     // vertical_flip (V4L2_CID_VFLIP)
 }).strict();
 export type CameraControls = z.infer<typeof CameraControls>;
 

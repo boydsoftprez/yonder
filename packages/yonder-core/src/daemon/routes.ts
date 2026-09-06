@@ -253,7 +253,7 @@ export interface CameraView {
    * `ui-yonder-deck`'s whole payload, and `ui-yonder-aim`'s (R-UI-08,
    * R-UI-28) — composed in `video/present.ts` beside `display` above and for
    * the identical reason: a widget binds one object, and the alternative is
-   * a `change` node's JSONata assembling twenty-one descriptors next to a
+   * a `change` node's JSONata assembling twenty-three descriptors next to a
    * wire coordinate, which is CLAUDE.md rule 2 wearing a different hat.
    *
    * Two fields and not one, because the Cockpit (M5) draws the aim panel
@@ -370,12 +370,12 @@ function isBooleanControl(fieldSchema: z.ZodTypeAny): boolean {
  * Which `CameraControls` fields are booleans, read off the schema itself
  * (R-CTL-11 … R-CTL-14) rather than typed out by hand a third time.
  * `video/controls.ts`'s `CONTROL_NAMES` is the second list of the same
- * seventeen controls, and it and the schema already drifted apart once in
+ * nineteen controls, and it and the schema already drifted apart once in
  * this plan — Task 8 gave the schema fourteen more fields before Task 9
  * taught `CONTROL_NAMES` about them — caught only because a `satisfies`
  * clause happened to tie that particular pair together. A hand-written pair
  * of names here (`["autoWhiteBalance", "autoFocus"]`) would be a third list
- * with nothing watching it: a fifteenth boolean control added to the schema
+ * with nothing watching it: a fifth boolean control added to the schema
  * later would silently fall through this route's number-only check instead
  * of failing to compile the way a `CONTROL_NAMES` omission does.
  */

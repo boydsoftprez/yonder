@@ -129,6 +129,12 @@ export const CONTROL_NAMES = {
   autoExposure: "auto_exposure",
   autoWhiteBalance: "white_balance_automatic",
   autoFocus: "focus_automatic_continuous",
+  // R-CTL-05. Switches, so rule 7 above carries them: `true` reaches the
+  // device as `1`, never as the four-character string a boolean stringifies
+  // to. Kept apart from `rotation` above rather than folded into it — a flip
+  // is not a rotation, and `rotate=180` is not a request to mirror anything.
+  horizontalFlip: "horizontal_flip",
+  verticalFlip: "vertical_flip",
 } as const satisfies Record<keyof Camera["controls"], string>;
 
 /**
@@ -267,7 +273,7 @@ export async function applyControls(opts: ApplyControlsOptions): Promise<ApplyCo
     // would be.
     const requestedNumber = typeof requested === "boolean" ? (requested ? 1 : 0) : requested;
 
-    // `capabilityKeyFor` is the identity for fifteen of these seventeen
+    // `capabilityKeyFor` is the identity for seventeen of these nineteen
     // keys, and only ever returns one of the keys `CameraCapabilities`
     // types as `Capability<ControlRange>` — `formats`, `aim`, `recording`
     // and `stills` have no schema control and never reach this function,

@@ -152,6 +152,18 @@ export const DESCRIPTORS: Record<keyof CameraCapabilities, ControlDescriptor> = 
   backlightCompensation: deviceNative("backlightCompensation", "Backlight compensation"),
   autoExposure: deviceNative("autoExposure", "Auto exposure"),
   autoFocus: deviceNative("autoFocus", "Auto focus"),
+  /**
+   * **`Mirror`, not `Horizontal flip`** (R-CTL-05). `horizontal_flip` is
+   * V4L2's name for the control and this file is the one place a device's
+   * name becomes an operator's, so the translation happens here rather than
+   * at the page that draws it. Mirror is the word somebody standing at an
+   * airframe uses for a picture that comes back left-for-right; `Flip` is
+   * the word for one that comes back upside down. Neither carries a unit: a
+   * switch has no scale to name, and `deviceNative`'s own `""` is that
+   * absence rather than a symbol invented to fill the space.
+   */
+  horizontalFlip: deviceNative("horizontalFlip", "Mirror"),
+  verticalFlip: deviceNative("verticalFlip", "Flip"),
 };
 
 /** What a page actually draws for one control: display units throughout. */
@@ -198,7 +210,7 @@ export function describe(key: keyof CameraCapabilities, range: ControlRange): De
  * above), so a gated control naming the control that holds it — the one
  * place an operator reads a label mid-sentence rather than at the top of a
  * control — cannot read `label` directly without three headings out of
- * every twenty-one coming out capitalised wrong. This function is the one
+ * every twenty-three coming out capitalised wrong. This function is the one
  * place that lowercases it, derived on demand from that one stored form.
  *
  * **Why this is a function and not a second stored field.** The obvious

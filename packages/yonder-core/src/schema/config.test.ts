@@ -333,6 +333,7 @@ describe("cameras", () => {
       gain: null, backlightCompensation: null, gamma: null, sharpness: null,
       saturation: null, hue: null, powerLineFrequency: null,
       autoExposure: null, autoWhiteBalance: null, autoFocus: null,
+      horizontalFlip: null, verticalFlip: null,
     });
   });
 
@@ -713,5 +714,32 @@ describe("CameraControls", () => {
   // Menu membership is the adapter's job (Task 9): the schema cannot know a camera's menu.
   it("accepts any int for a menu control at the schema", () => {
     expect(CameraControls.parse({ autoExposure: 2 }).autoExposure).toBe(2);
+  });
+
+  /**
+   * R-CTL-05. Two switches, not a third rotation: 180° is both flips
+   * together, and neither flip alone is any rotation at all, so a mirror
+   * cannot be stored as degrees. Stored the way the other two switches are —
+   * `null` leaves the camera alone, and `false` is a picture the operator has
+   * said is *not* mirrored, which is a different instruction from having said
+   * nothing.
+   */
+  it("stores a mirror and a flip as switches, each with its own field", () => {
+    const p = CameraControls.parse({ horizontalFlip: true, verticalFlip: false });
+    expect(p.horizontalFlip).toBe(true);
+    expect(p.verticalFlip).toBe(false);
+    const absent = CameraControls.parse({});
+    expect(absent.horizontalFlip).toBeNull();
+    expect(absent.verticalFlip).toBeNull();
+  });
+
+  it("refuses degrees for a flip, because a flip is not a rotation", () => {
+    // The collapse this field pair exists to prevent, stated as a test: a
+    // schema that took a number here would accept `rotation`'s own values
+    // for a control that has none.
+    expect(() => CameraControls.parse({ horizontalFlip: 180 })).toThrow();
+    expect(() => CameraControls.parse({ verticalFlip: 0 })).toThrow();
+    // And the converse still holds — rotation is degrees, never a switch.
+    expect(() => CameraControls.parse({ rotation: true })).toThrow();
   });
 });

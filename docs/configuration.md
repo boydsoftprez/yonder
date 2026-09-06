@@ -207,6 +207,8 @@ cameras:
       autoExposure: null           # menu id: 0 auto, 1 manual, 2 shutter priority, 3 aperture priority
       autoWhiteBalance: null
       autoFocus: null
+      horizontalFlip: null           # the mirror — a switch, not degrees
+      verticalFlip: null             # the flip — likewise
     outputs:                       # simultaneous, not exclusive (R-VID-05)
       - { kind: rtp,  host: 192.168.2.10, port: 5604 }
       - { kind: rtsp, password: { secret: cam0_rtsp } }
@@ -284,6 +286,22 @@ setting: `gain: 0` is a camera's own floor, not "unset".
 | `powerLineFrequency` | menu id — 0 disabled, 1 50 Hz, 2 60 Hz, 3 auto |
 | `autoExposure` | menu id — 0 auto, 1 manual, 2 shutter priority, 3 aperture priority |
 | `autoWhiteBalance`, `autoFocus` | boolean |
+| `horizontalFlip` (the mirror), `verticalFlip` (the flip) | boolean — `null` leaves the camera alone |
+
+**A flip is not a rotation, which is why there are three fields and not one** (R-CTL-05).
+`rotation` is degrees because 0, 90, 180 and 270 are rotations; a mirror is not one of them.
+180 degrees is both flips together, and neither flip alone is any rotation at all, so a
+single degrees field reaches four of the eight orientations an airframe mount can need and
+cannot say which of the other four it is looking at. Each flip therefore gets its own
+switch, stored beside the degrees rather than folded into them. The console calls
+`horizontalFlip` **Mirror** and `verticalFlip` **Flip**, which is what an operator standing
+at the aircraft calls them; `video/descriptors.ts` is the one place that translation lives.
+
+Not every camera implements them — the bench Global Shutter Camera implements neither, and
+implements no `rotate` either. A camera that does not offer one reports it as not offered,
+which is the honest answer and not a silent fall back to turning the frame on the board:
+the two look identical in the picture and cost very different amounts, the board's
+correction being processing on every frame and the sensor's being free.
 
 The console converts for display only where the stored number is not what an operator
 should read: `exposureTime`'s 100 µs units become microseconds. Every other field above —

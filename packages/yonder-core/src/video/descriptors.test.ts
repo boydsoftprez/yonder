@@ -36,6 +36,25 @@ it("every unit is one this project has written down, in that spelling", () => {
   }
 });
 
+/**
+ * R-CTL-05. The V4L2 control is `horizontal_flip` and an operator calls it a
+ * mirror — this file is the one place that translation is allowed to live,
+ * so the label is checked here rather than at the page that reads it.
+ * Neither carries a unit: a switch has no scale to name.
+ */
+it("calls horizontal flip Mirror, which is what an operator calls it", () => {
+  expect(DESCRIPTORS.horizontalFlip.label).toBe("Mirror");
+  expect(DESCRIPTORS.horizontalFlip.unit).toBe("");
+});
+
+it("calls vertical flip Flip, and the two are not the same word", () => {
+  // Named separately because one label copied onto both keys would pass the
+  // test above and put "Mirror" on a page beside a second "Mirror".
+  expect(DESCRIPTORS.verticalFlip.label).toBe("Flip");
+  expect(DESCRIPTORS.verticalFlip.unit).toBe("");
+  expect(DESCRIPTORS.verticalFlip.label).not.toBe(DESCRIPTORS.horizontalFlip.label);
+});
+
 // --- Round-trip over the whole device domain, not the one value above -----
 //
 // The task brief's ambiguity note is explicit: "toDisplay and toRaw must
@@ -108,7 +127,7 @@ it("only the three controls the bench fixture actually gates carry gates and ope
 // --- Fix round 1: `label` is the heading form for every key, and
 // `sentenceLabel` is the one place that derives the mid-sentence form from
 // it. The prior version of this file stored the three gate labels lowercase
-// directly on `label`, which is exactly the "three of nineteen wrong"
+// directly on `label`, which is exactly the "three of twenty-one wrong"
 // defect a sampled test would miss — so this checks every key, not the
 // three that used to be different. --------------------------------------
 

@@ -25,7 +25,7 @@ import YonderIndex from "./YonderIndex.vue";
  * shape directly rather than reaching past the package boundary into
  * `video/capability.ts`'s own source. One `gated` and one `not-offered` key
  * are enough to prove `summarise()`'s real output reaches the page — the
- * other nineteen are `present` only because `summarise()` has no `default:`
+ * other twenty-one are `present` only because `summarise()` has no `default:`
  * branch and throws on a key it cannot read at all. */
 function makeCapabilities(overrides: Record<string, unknown> = {}) {
     const range = { min: 0, max: 100, step: 1, default: 0, current: 0, inactive: false };
@@ -55,6 +55,12 @@ function makeCapabilities(overrides: Record<string, unknown> = {}) {
         backlightCompensation: { state: "present", value: range },
         autoExposure: { state: "present", value: range },
         autoFocus: { state: "present", value: range },
+        // R-CTL-05's mirror and flip. Present here for the reason the note
+        // above gives for the other twenty-one — `summarise()` has no
+        // `default:` and throws on a key it cannot read at all — not because
+        // any recorded camera answers them.
+        horizontalFlip: { state: "present", value: range },
+        verticalFlip: { state: "present", value: range },
         ...overrides,
     };
 }

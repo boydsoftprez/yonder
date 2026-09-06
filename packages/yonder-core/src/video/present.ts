@@ -160,6 +160,11 @@ export const LABELS: Record<(typeof CAPABILITY_KEYS)[number], string> = {
   backlightCompensation: "Backlight compensation",
   autoExposure: "Auto exposure",
   autoFocus: "Auto focus",
+  // The operator's words, not V4L2's `horizontal_flip`/`vertical_flip`
+  // (R-CTL-05) — the same two strings `DESCRIPTORS` carries, for the same
+  // reason `whiteBalance` is "White balance" here.
+  horizontalFlip: "Mirror",
+  verticalFlip: "Flip",
 };
 
 /**

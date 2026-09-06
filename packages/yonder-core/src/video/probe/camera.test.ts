@@ -169,6 +169,38 @@ describe("detectCameras", () => {
     });
   });
 
+  /**
+   * R-CTL-05. A mirror and a flip are each their own switch, never a
+   * rotation: 180° is both flips together, and neither flip alone is any
+   * rotation at all. `horizontal_flip` and `vertical_flip` are V4L2's own
+   * names for them (`V4L2_CID_HFLIP` 0x00980914 and `V4L2_CID_VFLIP`
+   * 0x00980915), so a camera that implements either fills its capability the
+   * same way `rotate` fills `rotation`.
+   */
+  it("carries a mirror and a flip the device answers", async () => {
+    const withFlips = `${fixture("list-ctrls-menus-globalshutter.txt")}
+                horizontal_flip 0x00980914 (bool)   : default=0 value=1
+                  vertical_flip 0x00980915 (bool)   : default=0 value=0`;
+    const r = await bench({ runner: benchRunner({ "--list-ctrls-menus": withFlips }) });
+    expect(r.found[0].capabilities.horizontalFlip.state).toBe("present");
+    expect(r.found[0].capabilities.verticalFlip.state).toBe("present");
+    // The two are separate answers, not one switch read twice: the device
+    // says the mirror is on and the flip is off, and a probe that read either
+    // name for both keys would report the same reading twice.
+    if (r.found[0].capabilities.horizontalFlip.state !== "present") throw new Error("narrowing");
+    if (r.found[0].capabilities.verticalFlip.state !== "present") throw new Error("narrowing");
+    expect(r.found[0].capabilities.horizontalFlip.value.current).toBe(1);
+    expect(r.found[0].capabilities.verticalFlip.value.current).toBe(0);
+  });
+
+  it("says this camera has neither, because it does not", async () => {
+    // The bench ELP answers no flip control of any kind — that is the recorded
+    // fixture, not an assumption, and it is why Task 44 exists.
+    const r = await bench();
+    expect(r.found[0].capabilities.horizontalFlip.state).toBe("not-offered");
+    expect(r.found[0].capabilities.verticalFlip.state).toBe("not-offered");
+  });
+
   it("rejects the board's own JPEG decoder, with the reason", async () => {
     // K-40: /dev/video10 advertises MJPEG, cannot be started, and looks like a
     // camera to everything that asks. An operator who is not told why it

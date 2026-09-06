@@ -176,6 +176,14 @@ export const CONTROL_MAP = [
   ["auto_exposure", "autoExposure"],
   ["white_balance_automatic", "autoWhiteBalance"],
   ["focus_automatic_continuous", "autoFocus"],
+  // R-CTL-05. `V4L2_CID_HFLIP` and `V4L2_CID_VFLIP`, read exactly like
+  // `rotate` above and absent from this bench camera for the same reason —
+  // which `noCapabilities()` already states as `not-offered`, so neither
+  // needs a special case here. Two names, because they are two controls: a
+  // camera can offer one without the other, and a probe that read one name
+  // into both keys would report a mirror the device never mentioned.
+  ["horizontal_flip", "horizontalFlip"],
+  ["vertical_flip", "verticalFlip"],
 ] as const;
 
 /**

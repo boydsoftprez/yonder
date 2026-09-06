@@ -478,6 +478,12 @@
             "current": 1,
             "inactive": false
           }
+        },
+        "horizontalFlip": {
+          "state": "not-offered"
+        },
+        "verticalFlip": {
+          "state": "not-offered"
         }
       }
     }

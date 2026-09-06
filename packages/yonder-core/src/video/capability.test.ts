@@ -14,6 +14,7 @@ const FIXED: CameraCapabilities = {
   gamma: notOffered(), gain: notOffered(), powerLineFrequency: notOffered(),
   sharpness: notOffered(), backlightCompensation: notOffered(),
   autoExposure: notOffered(), autoFocus: notOffered(),
+  horizontalFlip: notOffered(), verticalFlip: notOffered(),
 };
 
 // The bench's own exposure_time_absolute: a real range, held while
@@ -71,7 +72,7 @@ describe("summarise", () => {
       "brightness: none · contrast: none · rotation: none · aim: none · recording: none · stills: none · " +
       "saturation: none · hue: none · autoWhiteBalance: none · gamma: none · gain: none · " +
       "powerLineFrequency: none · sharpness: none · backlightCompensation: none · " +
-      "autoExposure: none · autoFocus: none",
+      "autoExposure: none · autoFocus: none · horizontalFlip: none · verticalFlip: none",
     );
   });
 
@@ -104,6 +105,22 @@ describe("the capabilities the devices answer", () => {
 
   it("carries every control the bench camera reports", () => {
     for (const k of NEW) expect(CAPABILITY_KEYS).toContain(k);
+  });
+
+  /**
+   * R-CTL-05, and the reason these are two booleans rather than one more
+   * number: a flip is not a rotation and cannot be expressed as one. 180° is
+   * both flips together, and neither flip alone is any rotation at all — so
+   * `rotation` keeps its degrees and each flip is its own switch. The bench
+   * camera answers neither (`camera.test.ts`), which is a fact about that
+   * camera and not about the model.
+   */
+  it("has a mirror and a flip of its own, apart from rotation", () => {
+    for (const k of ["horizontalFlip", "verticalFlip"] as const) {
+      expect(CAPABILITY_KEYS).toContain(k);
+    }
+    // Three separate keys, not one orientation field wearing three names.
+    expect(new Set(["horizontalFlip", "verticalFlip", "rotation"]).size).toBe(3);
   });
 
   it("defaults every key to not-offered", () => {

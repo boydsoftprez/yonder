@@ -32,6 +32,10 @@ const BENCH_CAPS: CameraCapabilities = {
   gamma: notOffered(), gain: notOffered(), powerLineFrequency: notOffered(),
   sharpness: notOffered(), backlightCompensation: notOffered(),
   autoExposure: notOffered(), autoFocus: notOffered(),
+  // The bench camera answers no flip control of any kind either — this pair
+  // is the fixture's own answer rather than a convenience, and the flip
+  // tests below build their own capabilities exactly as the note above says.
+  horizontalFlip: notOffered(), verticalFlip: notOffered(),
 };
 
 /**
@@ -323,6 +327,47 @@ describe("applyControls", () => {
     // Asserting `clamped` is empty is what catches that version; the wire
     // check above alone does not.
     expect(r.clamped).toEqual([]);
+  });
+
+  /**
+   * R-CTL-05, and rule 7 a second time. A mirror is a switch, not a
+   * rotation, so it travels the same `1`/`0` road `autoWhiteBalance` does —
+   * `horizontal_flip=true` is a command V4L2 refuses.
+   */
+  it("sends a mirror as 1 or 0, which is what V4L2 takes", async () => {
+    const calls: string[][] = [];
+    const ok: CommandResult = { code: 0, stdout: "horizontal_flip: 1\n", stderr: "" };
+    const r = await applyControls({
+      node: NODE,
+      controls: { horizontalFlip: true },
+      capabilities: { ...noCapabilities(), horizontalFlip: present(boolRange) },
+      runner: async (argv) => { calls.push(argv); return ok; },
+    });
+    expect(calls.flat().join(" ")).toContain("horizontal_flip=1");
+    // Same mutation as the switch test above: a version that reaches
+    // `clampToRange` with the raw `true` still sends the right digit, and
+    // reports a clamp for a value that was never out of range.
+    expect(r.clamped).toEqual([]);
+    // And the read-back is kept, so the write really did complete rather
+    // than being refused on the way (which would leave `applied` empty and
+    // the wire check above still green).
+    expect(r.applied).toEqual({ horizontalFlip: 1 });
+  });
+
+  it("sends a flip as 1 or 0 too, under its own V4L2 name", async () => {
+    // The pair is two controls, not one read twice: a mapping that sent
+    // `horizontal_flip` for both would pass the test above on its own.
+    const calls: string[][] = [];
+    const ok: CommandResult = { code: 0, stdout: "vertical_flip: 0\n", stderr: "" };
+    await applyControls({
+      node: NODE,
+      controls: { verticalFlip: false },
+      capabilities: { ...noCapabilities(), verticalFlip: present(boolRange) },
+      runner: async (argv) => { calls.push(argv); return ok; },
+    });
+    const wire = calls.flat().join(" ");
+    expect(wire).toContain("vertical_flip=0");
+    expect(wire).not.toContain("horizontal_flip");
   });
 
   // A runner that throws if it is ever called — used below where the whole

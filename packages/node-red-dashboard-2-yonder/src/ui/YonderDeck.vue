@@ -35,7 +35,7 @@ import { LABELS, deckDraft, draftPathFor, interruption } from 'yonder-core/prese
  * says.** `CAPABILITY_LAYOUT` is `capability.ts`'s own `CAPABILITY_KEYS`
  * technique applied a second time: a plain object literal typed (informally —
  * this file is JavaScript, not TypeScript, like every other `.vue` in this
- * package) against all 21 real keys, so a capability with nowhere to go is a
+ * package) against all 23 real keys, so a capability with nowhere to go is a
  * fact this file has to state rather than a control silently missing.
  * `drawCapability()` reads a key's `state` straight off `capabilities[key]` —
  * `present` draws the control, `not-offered` draws a fact and nothing else,
@@ -144,6 +144,14 @@ export const CAPABILITY_LAYOUT = {
   backlightCompensation: { group: 'housekeeping', kind: 'bar', setupOnly: true },
   autoExposure: { group: 'exposure', kind: 'pick' },
   autoFocus: { group: 'optics', kind: 'seg' },
+  /* R-CTL-05's two switches, beside `rotation` in the same group — a flip is
+   * not a rotation, so each is its own on/off rather than more degrees on
+   * that bar. Named here because `capability.ts` now carries them and this
+   * table has to state where every key goes; how the group reads once a
+   * camera actually answers one — and the line saying whether the sensor or
+   * the board is doing the turning — is drawn later, from the gallery. */
+  horizontalFlip: { group: 'orientation', kind: 'seg' },
+  verticalFlip: { group: 'orientation', kind: 'seg' },
 }
 
 /** Every key `CAPABILITY_LAYOUT` assigns to a group, in the order it draws —
@@ -153,7 +161,7 @@ const GROUP_KEYS = {
   colour: ['brightness', 'contrast', 'saturation', 'hue'],
   optics: ['autoFocus', 'focus', 'zoom'],
   rendering: ['gamma'],
-  orientation: ['rotation'],
+  orientation: ['rotation', 'horizontalFlip', 'verticalFlip'],
   housekeeping: ['gain', 'backlightCompensation', 'sharpness', 'powerLineFrequency'],
 }
 

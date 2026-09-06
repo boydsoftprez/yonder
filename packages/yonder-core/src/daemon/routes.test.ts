@@ -2272,8 +2272,31 @@ describe("requestedControls", () => {
   // which stopped finding the boolean fields would return nothing, silently
   // refuse every switch again, and be caught only by the mixed-request test
   // above. Name the members, so a broken derivation fails as itself.
-  it("derives exactly the two switches the schema declares boolean", () => {
-    expect([...BOOLEAN_CONTROLS].sort()).toEqual(["autoFocus", "autoWhiteBalance"]);
+  it("derives exactly the four switches the schema declares boolean", () => {
+    expect([...BOOLEAN_CONTROLS].sort())
+      .toEqual(["autoFocus", "autoWhiteBalance", "horizontalFlip", "verticalFlip"]);
+  });
+
+  /**
+   * R-CTL-05, at the hop that carries it onto the wire. A mirror reaches
+   * this route as a boolean because the schema types it as one; a route that
+   * still expected a number for it would refuse the whole body — and the
+   * refusal is whole-body, so an operator moving brightness and the mirror
+   * in one gesture would lose both.
+   */
+  it("takes a mirror and a flip as booleans, alongside a level, in one request", () => {
+    expect(requestedControls({ brightness: 12, horizontalFlip: true, verticalFlip: false }))
+      .toEqual({ brightness: 12, horizontalFlip: true, verticalFlip: false });
+  });
+
+  it("refuses degrees for a mirror — a flip is not a rotation", () => {
+    // 180 is the number that makes this sharp: it is a legal `rotation`, and
+    // a route that let it through for a flip would be accepting the very
+    // collapse the two boolean fields exist to prevent.
+    expect(requestedControls({ horizontalFlip: 180 })).toBeNull();
+    expect(requestedControls({ verticalFlip: 0 })).toBeNull();
+    // Rotation itself is unaffected and still a number.
+    expect(requestedControls({ rotation: 180 })).toEqual({ rotation: 180 });
   });
 
   // Refusing the whole body is the deliberate behaviour, not the sharp edge

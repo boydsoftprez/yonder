@@ -204,6 +204,28 @@ export interface CameraCapabilities {
   readonly autoExposure: Capability<ControlRange>;
   /** `focus_automatic_continuous` — gates `focus` (R-UI-21). */
   readonly autoFocus: Capability<ControlRange>;
+
+  /**
+   * V4L2's `horizontal_flip` and `vertical_flip`, each a switch (R-CTL-05).
+   *
+   * **Two booleans, and deliberately not more degrees on `rotation`.** A
+   * flip is not a rotation and cannot be expressed as one: 180° is both
+   * flips together, and neither flip alone is any rotation at all. Folding
+   * them into `rotation` would give an operator four of the eight
+   * orientations a mount can need and no way to say which of the other four
+   * they are looking at.
+   *
+   * Probed like every other control rather than assumed, for the reason
+   * `rotation` states above: **the bench camera implements neither**, and
+   * says so as `not-offered` rather than the console quietly flipping the
+   * frame on the board and calling it the sensor. Turning it on the board
+   * when the camera cannot is real and wanted, and it belongs in the
+   * pipeline rather than here; what this key must never do is let the two
+   * be confused, because the board's correction costs a re-encode of every
+   * frame and the sensor's costs nothing.
+   */
+  readonly horizontalFlip: Capability<ControlRange>;
+  readonly verticalFlip: Capability<ControlRange>;
 }
 
 /**
@@ -215,6 +237,7 @@ export const CAPABILITY_KEYS = [
   "brightness", "contrast", "rotation", "aim", "recording", "stills",
   "saturation", "hue", "autoWhiteBalance", "gamma", "gain", "powerLineFrequency",
   "sharpness", "backlightCompensation", "autoExposure", "autoFocus",
+  "horizontalFlip", "verticalFlip",
 ] as const satisfies readonly (keyof CameraCapabilities)[];
 
 /** A camera with nothing answered. The base every probe builds on. */
@@ -231,6 +254,10 @@ export function noCapabilities(): CameraCapabilities {
     gamma: notOffered(), gain: notOffered(), powerLineFrequency: notOffered(),
     sharpness: notOffered(), backlightCompensation: notOffered(),
     autoExposure: notOffered(), autoFocus: notOffered(),
+    // Nor has it offered a mirror or a flip (R-CTL-05). The bench camera
+    // genuinely has neither, so this default happens to be its answer too —
+    // which is a coincidence, not a licence to stop probing for them.
+    horizontalFlip: notOffered(), verticalFlip: notOffered(),
   };
 }
 

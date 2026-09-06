@@ -130,7 +130,7 @@ describe("capabilityFacts", () => {
         "Rotation", "Aim", "Recording", "Stills",
         "Saturation", "Hue", "Auto white balance", "Gamma", "Gain",
         "Mains frequency", "Sharpness", "Backlight compensation",
-        "Auto exposure", "Auto focus",
+        "Auto exposure", "Auto focus", "Mirror", "Flip",
       ]);
   });
 
@@ -203,8 +203,11 @@ describe("capabilityFacts", () => {
 
   it("says every row when the probe answered nothing, never an empty row", () => {
     // *This camera cannot* and *this page failed* must not look the same.
-    // One row per `CAPABILITY_KEYS` entry — eleven before this task's ten.
-    expect(capabilityFacts(noCapabilities())).toHaveLength(21);
+    // One row per `CAPABILITY_KEYS` entry — eleven, then ten, then the
+    // mirror and the flip (R-CTL-05). A literal on purpose, not
+    // `CAPABILITY_KEYS.length`: counted against the implementation it would
+    // agree with any number the implementation happened to produce.
+    expect(capabilityFacts(noCapabilities())).toHaveLength(23);
   });
 
   it("labels a capability in words, never with its own field name", () => {
