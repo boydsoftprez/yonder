@@ -179,6 +179,16 @@ export class PipelineRenderer implements Renderer {
           // did not change, and comes back turning the picture twice — once
           // at the sensor, once on the board.
           //
+          // **And the console now says out loud which of the two it thinks
+          // is turning the picture** (R-CTL-15): the camera deck draws
+          // Mirror, Flip and Rotation on every camera and names the sensor
+          // beside a control the sensor will carry, from the *probed*
+          // capabilities. So on a camera that offers one of the three, the
+          // page reads "the camera turns this itself" while the line this
+          // renderer would compose on the next apply turns it a second time
+          // on the board. The disagreement did not change; what changed is
+          // that an operator can now read one half of it.
+          //
           // The fix is a capability answer both composers share, and it is
           // not this task's to choose: probing here costs a v4l2 sweep inside
           // an apply, and an apply that hangs is the failure R-CFG-03 and

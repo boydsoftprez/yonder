@@ -299,9 +299,22 @@ at the aircraft calls them; `video/descriptors.ts` is the one place that transla
 
 Not every camera implements them — the bench Global Shutter Camera implements neither, and
 implements no `rotate` either. A camera that does not offer one reports it as not offered,
-which is the honest answer and not a silent fall back to turning the frame on the board:
-the two look identical in the picture and cost very different amounts, the board's
-correction being processing on every frame and the sensor's being free.
+which is the honest answer about the *device*.
+
+**All three fields work on every camera even so** (R-CTL-05, R-CTL-15). Where the sensor
+carries a turn it costs nothing; where it will not, the board carries it after decoding, as
+one `videoflip` on the decoded frames ahead of the tee — so the full-rate stream and the
+preview cannot disagree about which way up the world is. The board is given only the
+*remainder*, the turn that takes the picture the sensor is actually producing to the one
+asked for, so a mirror the sensor is already making is never mirrored a second time.
+
+The fall back is never silent, which is the whole of R-CTL-15: the console draws all three
+controls on every camera and states beside each which of the two is carrying it. The two
+look identical in the picture and cost very different amounts — the board's correction is
+processing on every frame, the sensor's is free — and an operator choosing between mounting
+the camera differently and paying for the correction has to be able to tell which they are
+looking at. A quarter turn is the dearest: it transposes every frame, and it swaps the
+picture's width and height.
 
 The console converts for display only where the stored number is not what an operator
 should read: `exposureTime`'s 100 µs units become microseconds. Every other field above —

@@ -70,7 +70,24 @@ export interface Orientation {
   readonly flip: VideoDirection | null;
   /** One sentence, for an operator, about which of them is turning it. */
   readonly note: string;
+  /**
+   * Whether the board's share is a **quarter** turn — a transpose, the
+   * dearest of the eight, and the only one that swaps the picture's width and
+   * height. A field rather than something a caller re-derives from `flip`,
+   * because there are four directions that transpose and a second list of
+   * them somewhere else is a second list to get wrong.
+   */
+  readonly transposes: boolean;
 }
+
+/**
+ * What a quarter turn costs, appended to whatever sentence is being said
+ * about it — one copy, because two pages saying it in two wordings is two
+ * chances to soften one of them. Stated as a kind of cost, never as a number:
+ * nothing here has been measured on a board.
+ */
+export const QUARTER_TURN_NOTE =
+  " — a quarter turn transposes every frame, and swaps its width and height";
 
 /**
  * One of the eight orientations, in the normal form the arithmetic below
@@ -186,7 +203,42 @@ function asked(controls: Partial<Camera["controls"]>, offered: (key: FlipKey) =>
 }
 
 /** The three controls that turn a picture, as `CameraCapabilities` names them. */
-type FlipKey = "horizontalFlip" | "verticalFlip" | "rotation";
+export type FlipKey = "horizontalFlip" | "verticalFlip" | "rotation";
+
+/**
+ * The three, written out — the order the console draws them in.
+ *
+ * Written down rather than derived from `CameraCapabilities`, for the reason
+ * `CAPABILITY_KEYS` itself is: a fourth way of turning a picture must be a
+ * decision somebody made here, not a key that quietly appears or quietly
+ * does not on a page.
+ */
+export const FLIP_KEYS = ["horizontalFlip", "verticalFlip", "rotation"] as const satisfies readonly FlipKey[];
+
+/**
+ * The sentence beside **one** control saying which of the two carries it
+ * (R-CTL-15).
+ *
+ * **Drawn only where the three controls disagree.** Where they agree —
+ * every camera anyone has met — `turningSays()` below says it once for the
+ * whole group and these are not drawn at all: three copies of one sentence
+ * is three times the words and none of the information, which is the shape
+ * this shipped as once and the first thing visible in the capture.
+ *
+ * **Here rather than in the component**, beside the `note` wording below,
+ * because these are the same sentence said about one control instead of the
+ * whole picture: a page that wrote its own would be a second vocabulary for
+ * one fact, free to drift from `note` the first time either is reworded.
+ */
+export const TURNED_BY_SAYS: Readonly<Record<"sensor" | "board", string>> = {
+  sensor: "the camera turns this itself",
+  board: "the board turns this after decoding",
+};
+
+/** The whole picture, carried by the sensor — `note`'s wording and `turningSays()`'s. */
+const SENSOR_NOTE = "the camera turns this picture itself";
+/** The whole picture, carried by the board. Same two callers, same one string. */
+const BOARD_NOTE = "this camera cannot turn the picture itself, so the board turns it after decoding";
 
 /**
  * Whether the **sensor** will carry out `key` — which is exactly the
@@ -220,6 +272,26 @@ function sensorWillDo(capability: Capability<ControlRange>): boolean {
 }
 
 /**
+ * Which of the two will carry `capability`'s share of the turn (R-CTL-15).
+ *
+ * **Never a third answer, and never "neither".** Turning the picture is
+ * available on every camera: where the sensor will not do it, the board
+ * does, after decoding — so this is a choice between two, not a report of
+ * whether the device has a control. That is the whole difference between
+ * this function and the `Capability` state it reads: `not-offered` is a true
+ * fact about the *device* and it is never a true fact about *Yonder*, which
+ * is why a page must ask this rather than reading the state directly and
+ * drawing "this camera has none" over a control that works.
+ *
+ * The same `sensorWillDo` the board's own share is computed from, so the
+ * sentence beside a control and the element in the pipeline cannot disagree
+ * about who is turning the picture.
+ */
+export function turnedBy(capability: Capability<ControlRange>): "sensor" | "board" {
+  return sensorWillDo(capability) ? "sensor" : "board";
+}
+
+/**
  * Who turns this camera's picture, and what the pipeline must add.
  *
  * The board's share is `asked ∘ sensor⁻¹` — the turn that takes the picture
@@ -239,21 +311,57 @@ export function orientation(
 
   if (isStill(board)) {
     return isStill(wanted)
-      ? { method: "none", flip: null, note: "this picture is not turned" }
-      : { method: "sensor", flip: null, note: "the camera turns this picture itself" };
+      ? { method: "none", flip: null, note: "this picture is not turned", transposes: false }
+      : { method: "sensor", flip: null, note: SENSOR_NOTE, transposes: false };
   }
 
   const flip = directionOf(board);
   // A quarter-turn is the one correction that transposes every frame rather
   // than moving it, and it is the one that also swaps the picture's width
-  // and height — both worth saying to whoever is choosing it. Stated as a
-  // kind of cost, never as a number: nothing here has been measured.
+  // and height — both worth saying to whoever is choosing it.
   const transposes = board.quarters === 1 || board.quarters === 3;
   return {
     method: "board",
     flip,
-    note: transposes
-      ? "this camera cannot turn the picture itself, so the board turns it after decoding — a quarter turn transposes every frame, and swaps its width and height"
-      : "this camera cannot turn the picture itself, so the board turns it after decoding",
+    note: transposes ? BOARD_NOTE + QUARTER_TURN_NOTE : BOARD_NOTE,
+    transposes,
   };
+}
+
+/**
+ * The one line the console draws beneath Mirror, Flip and Rotation
+ * (R-CTL-15).
+ *
+ * **It is about the camera, not about the picture.** `orientation()`'s own
+ * `note` says what is being done to the picture *right now*, which is the
+ * honest report of a state and says nothing at all while nothing is turned —
+ * and *nothing is turned* is exactly when an operator is deciding whether to
+ * turn something, and needs to know what it will cost. So this answers the
+ * standing question instead: which of the two would carry a turn asked for
+ * here. It borrows the same two sentences, so the line under the group and
+ * the line `orientation()` writes cannot drift apart.
+ *
+ * **One line and not three.** Drawn once for the whole group rather than
+ * beside each control, because on every camera anyone has met all three are
+ * carried by the same one and three copies of one sentence is three times
+ * the words and none of the information — the shape this shipped as once,
+ * and the first thing visible in the capture. Where the three genuinely
+ * disagree this says so and stands aside: the deck then draws
+ * `TURNED_BY_SAYS` on each control, which is the only case a single sentence
+ * cannot carry.
+ *
+ * The quarter-turn clause is appended when the board is actually making one,
+ * because that is a fact about what is happening rather than about what
+ * could — and it is the one cost on this group worth interrupting a decision
+ * for.
+ */
+export function turningSays(
+  capabilities: CameraCapabilities,
+  controls: Partial<Camera["controls"]>,
+): string {
+  const carriers = FLIP_KEYS.map((key) => turnedBy(capabilities[key]));
+  const tail = orientation(capabilities, controls).transposes ? QUARTER_TURN_NOTE : "";
+  if (carriers.every((by) => by === "sensor")) return SENSOR_NOTE + tail;
+  if (carriers.every((by) => by === "board")) return BOARD_NOTE + tail;
+  return "this camera turns part of the picture itself, and each control says which" + tail;
 }

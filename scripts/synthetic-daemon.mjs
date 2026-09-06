@@ -46,7 +46,32 @@ if (fixturePath === undefined) {
   process.stderr.write("synthetic-daemon: YONDER_CAMERAS_FIXTURE is required\n");
   process.exit(2);
 }
-const fixture = JSON.parse(readFileSync(fixturePath, "utf8"));
+/**
+ * Read on **every call**, never once at start-up.
+ *
+ * A camera is a thing that can be unplugged, or replaced with a different one
+ * — the same reason `verify-pages.sh`'s own `nmcli` and `mmcli` stand-ins read
+ * `$MODEM_PRESENT` on every call rather than at start-up, and for the same
+ * payoff: the gate can photograph two boards without restarting either
+ * service. R-CTL-15 is what needs it. The console has to say which of the
+ * sensor and the board is turning the picture, no camera on the bench answers
+ * a flip control at all, and a run that could only ever describe one camera
+ * could only ever photograph one of the two sentences.
+ *
+ * A read that fails or a file half-written by a `cp` in flight would take the
+ * daemon down mid-capture, so the last good answer is kept and the failure is
+ * said out loud rather than thrown: a harness that dies silently between two
+ * captures is a harness that reports the *next* page as the broken one.
+ */
+let fixture = JSON.parse(readFileSync(fixturePath, "utf8"));
+function current() {
+  try {
+    fixture = JSON.parse(readFileSync(fixturePath, "utf8"));
+  } catch (e) {
+    process.stdout.write(`synthetic-daemon: ${fixturePath} could not be re-read (${e.message}); keeping the last answer\n`);
+  }
+  return fixture;
+}
 
 /**
  * The recorded sweep, answered as `detectCameras()` would.
@@ -54,7 +79,10 @@ const fixture = JSON.parse(readFileSync(fixturePath, "utf8"));
  * Cloned per call because the router hands what it gets straight to a page and
  * a shared object read twice would be one object two answers deep.
  */
-const detect = async () => structuredClone({ found: fixture.found, rejected: fixture.rejected });
+const detect = async () => {
+  const f = current();
+  return structuredClone({ found: f.found, rejected: f.rejected });
+};
 
 /**
  * One device, read again — the Setup deck's *Re-probe* key.
@@ -65,9 +93,10 @@ const detect = async () => structuredClone({ found: fixture.found, rejected: fix
  * key reaches a route and the page redraws from the answer.
  */
 const probe = async (node, card) => {
-  const found = fixture.found.find((d) => d.device === node);
+  const f = current();
+  const found = f.found.find((d) => d.device === node);
   if (found !== undefined) return structuredClone(found);
-  const rejected = fixture.rejected.find((r) => r.device === node);
+  const rejected = f.rejected.find((r) => r.device === node);
   return structuredClone(rejected ?? { device: node, card, reason: "this device is not in the fixture" });
 };
 
@@ -86,13 +115,13 @@ await startServer({
     : { mediaConfigPath: process.env.YONDER_MEDIA_CONFIG }),
   cameraLayer: {
     cameras: { detect, probe },
-    encoder: async () => structuredClone(fixture.encoder),
+    encoder: async () => structuredClone(current().encoder),
     // The visibly fake value, and the whole reason it is in the fixture: the
     // stream address resolves a credential (R-VID-15) and R-UI-12 commits the
     // picture of it. capture-pages.mjs reads the device's own secrets.yaml and
     // fails any page carrying *that* value, so this is what a committed image
     // is allowed to show (R-SEC-10).
-    rtspPassword: () => fixture.rtspPassword ?? null,
+    rtspPassword: () => current().rtspPassword ?? null,
   },
 });
 process.stdout.write(`synthetic-daemon: listening, cameras from ${fixturePath}\n`);

@@ -339,6 +339,39 @@ writeFileSync(path, stringify(config));
 ' || die "could not put the fixture's camera into $ETC/config.yaml"
 grep -q "^cameras:" "$ETC/config.yaml" || die "the fixture's camera did not reach $ETC/config.yaml"
 
+# The camera answer the daemon reads, and a second one for the half of R-CTL-15
+# no camera on this bench can draw.
+#
+# `synthetic-daemon.mjs` re-reads its fixture on every call, the way the
+# `nmcli`/`mmcli` stand-ins above re-read `$MODEM_PRESENT`, so swapping this
+# copy describes a different camera without restarting anything. The console
+# has to say which of the sensor and the board is turning the picture
+# (R-CTL-15); the Global Shutter Camera implements no `horizontal_flip`, no
+# `vertical_flip` and no `rotate`, so the board carries all three here and the
+# sensor's own sentence has no hardware to produce it. `camera-sensor-turns
+# .json` is the overlay that does, and it is merged rather than kept as a
+# second whole fixture so the board's recorded answers stay in one file.
+CAMERAS_LIVE="$ROOT/cameras.json"
+CAMERAS_SENSOR="$ROOT/cameras-sensor.json"
+SENSOR_OVERLAY="$REPO/scripts/fixtures/camera-sensor-turns.json"
+cp "$CAMERAS" "$CAMERAS_LIVE" || die "could not stage the camera fixture at $CAMERAS_LIVE"
+[ -f "$SENSOR_OVERLAY" ] || die "no sensor-turns overlay at $SENSOR_OVERLAY"
+BASE="$CAMERAS" OVERLAY="$SENSOR_OVERLAY" OUT="$CAMERAS_SENSOR" node -e '
+const { readFileSync, writeFileSync } = require("node:fs");
+const base = JSON.parse(readFileSync(process.env.BASE, "utf8"));
+const overlay = JSON.parse(readFileSync(process.env.OVERLAY, "utf8"));
+for (const [key, value] of Object.entries(overlay.capabilities)) {
+  // A capability the overlay names and the recorded fixture does not is a
+  // renamed key, not a camera that lacks it: written silently it would leave
+  // the sensor capture describing the board case and passing.
+  if (!(key in base.found[0].capabilities)) {
+    throw new Error(`the overlay names ${key}, which the recorded fixture has no key for`);
+  }
+  base.found[0].capabilities[key] = value;
+}
+writeFileSync(process.env.OUT, JSON.stringify(base, null, 2) + "\n");
+' || die "could not build the sensor-turns fixture at $CAMERAS_SENSOR"
+
 DAEMON_PID=""
 CONSOLE_PID=""
 cleanup() {
@@ -370,7 +403,7 @@ start_daemon() {
     YONDER_CONSOLE_USERDIR="$USERDIR" \
     YONDER_CONSOLE_CORE_TREE="$CORE" \
     YONDER_CONSOLE_UNIT="yonder-console.service" \
-    YONDER_CAMERAS_FIXTURE="$CAMERAS" \
+    YONDER_CAMERAS_FIXTURE="$CAMERAS_LIVE" \
     YONDER_MEDIA_CONFIG="$ROOT/etc/mediamtx/mediamtx.yml" \
     PATH="$BIN:$PATH" \
         node "$REPO/scripts/synthetic-daemon.mjs" >>"$JOURNAL" 2>&1 &
@@ -978,6 +1011,60 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
             '"standing":"down"' "$(sock /reach/state)"
     }
 
+    # R-CTL-15's other sentence: the camera turning its own picture.
+    #
+    # Mirror, Flip and Rotation are drawn on **every** camera, because where
+    # the sensor will not turn the picture the board does, after decoding
+    # (`video/orientation.ts`). The two are identical in the picture and not
+    # in their cost, so the console says which of them is carrying each
+    # control — and that is two sentences, of which the base captures can only
+    # ever show one. The Global Shutter Camera implements none of the three:
+    # every capture above this line photographs the *board* case, with the
+    # recorded fixture's own `horizontalFlip: true` being carried by a
+    # `videoflip`.
+    #
+    # **There is no hardware here that can draw the other one**, which is why
+    # this swaps the fixture rather than pressing something. A gate that only
+    # ever photographed the board's sentence would not notice the sensor's
+    # going wrong, and the sensor's is the one that says a correction is free.
+    #
+    # Only `camera-live`: the group is the same group on Setup, drawn by the
+    # same method from the same payload, and a second picture of it would cost
+    # a capture to prove nothing the first does not.
+    capture_sensor_turns() {
+        cp "$CAMERAS_SENSOR" "$CAMERAS_LIVE"
+        # One poll of the camera page's own report, so the deck is drawing
+        # this camera and not the one before it.
+        sleep 7
+        # The whole hop, through a real daemon: this camera's sensor answers a
+        # mirror of its own, and the deck's payload says the camera is
+        # carrying it. `orientation.test.ts` proves the answer and
+        # `present.test.ts` proves the payload; this is the only place the two
+        # are joined by the daemon that actually composes them.
+        expect_contains "the deck says the camera is turning its own picture, not the board" \
+            '"by":"sensor"' "$(sock /cameras/front)"
+        if node "$REPO/scripts/capture-pages.mjs" \
+                --base-url "http://127.0.0.1:$PORT" \
+                --password "$PASSWORD" \
+                --palette "$1" \
+                --only camera-live \
+                --as camera-live-sensor-turns \
+                --artifacts "$REPO/vendor/capture" \
+                --synthetic-cameras "$CAMERAS_SENSOR" \
+                --secrets "$ETC/secrets.yaml" \
+                ${ACCEPT_SHAPE:+--accept}; then
+            ok "the $1 palette: Orientation on a camera whose sensor turns its own picture"
+        else
+            bad "the $1 palette: Orientation on a camera whose sensor turns it, see above"
+        fi
+        # Back to the board's own camera before anything else is captured:
+        # every other picture in this run is of the recorded fixture.
+        cp "$CAMERAS" "$CAMERAS_LIVE"
+        sleep 7
+        expect_contains "the recorded camera is back for the rest of the run" \
+            '"horizontalFlip":{"state":"not-offered"}' "$(sock /cameras/front)"
+    }
+
     # Status's third shape, and the one the confirmation timer exists for
     # (R-UI-15, R-CFG-03). A change is applied and deliberately *not*
     # confirmed, so the banner is up with a real countdown on it — then the
@@ -1275,6 +1362,7 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
         capture_unplugged night
         capture_status_pending night
         capture_pending_radio night
+        capture_sensor_turns night
         capture_fold night notebook 1440x900
         capture_fold night tablet 1024x768
     else
@@ -1292,6 +1380,7 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
         capture_unplugged day
         capture_status_pending day
         capture_pending_radio day
+        capture_sensor_turns day
         capture_fold day notebook 1440x900
         capture_fold day tablet 1024x768
     else

@@ -528,6 +528,157 @@ describe("cameraDeck", () => {
   const encoder = { element: "v4l2h264enc", hardware: true };
   const paths = { lan: true, mesh: false, cellular: false };
 
+  /**
+   * R-CTL-15, and the reason this block exists at all. The bench camera
+   * answers `not-offered` to all three orientation controls — honestly, and
+   * `probe/camera.ts` must go on doing so — and the deck must nonetheless
+   * draw three working controls, because the board turns the picture when
+   * the sensor will not. `not-offered` is the one state orientation is never
+   * in, because it is never true of Yonder.
+   */
+  describe("the three that turn the picture", () => {
+    const boolRange = { min: 0, max: 1, step: 1, default: 0, current: 0, inactive: false };
+    const degrees = { min: 0, max: 270, step: 90, default: 0, current: 0, inactive: false };
+
+    it("offers all three on a camera whose sensor offers none of them", () => {
+      const deck = cameraDeck({ camera: camera(), capabilities: noCapabilities(), encoder, paths });
+      expect(deck.orientation.turns.map((t) => t.key))
+        .toEqual(["horizontalFlip", "verticalFlip", "rotation"]);
+      for (const turn of deck.orientation.turns) expect(turn.by).toBe("board");
+      // The state the group must never be in, checked as the absence it is:
+      // nothing on this payload's orientation block carries a capability
+      // state at all, so a page cannot read one and draw a fact from it.
+      for (const turn of deck.orientation.turns) {
+        expect(turn).not.toHaveProperty("state");
+      }
+    });
+
+    it("says which of the two carries the picture, once, beneath the group", () => {
+      const board = cameraDeck({ camera: camera(), capabilities: noCapabilities(), encoder, paths });
+      expect(board.orientation.says).toContain("cannot turn the picture itself");
+      // And not a fourth time beside each control: three copies of one
+      // sentence is three times the words and none of the information.
+      for (const turn of board.orientation.turns) expect(turn.says).toBeNull();
+
+      const sensor = cameraDeck({
+        camera: camera(),
+        capabilities: {
+          ...noCapabilities(),
+          horizontalFlip: present(boolRange), verticalFlip: present(boolRange), rotation: present(degrees),
+        },
+        encoder,
+        paths,
+      });
+      expect(sensor.orientation.says).toContain("camera turns this picture itself");
+      for (const turn of sensor.orientation.turns) expect(turn.says).toBeNull();
+    });
+
+    it("names the sensor for the controls the sensor will actually carry", () => {
+      const deck = cameraDeck({
+        camera: camera(),
+        // A camera that mirrors in its sensor and cannot rotate — the mixed
+        // case, which is why this is per control and not one answer for the
+        // whole group.
+        capabilities: { ...noCapabilities(), horizontalFlip: present(boolRange) },
+        encoder,
+        paths,
+      });
+      const by = Object.fromEntries(deck.orientation.turns.map((t) => [t.key, t.by]));
+      expect(by).toEqual({ horizontalFlip: "sensor", verticalFlip: "board", rotation: "board" });
+      // The one case the group's own line cannot carry, so each control says
+      // it instead — and the line stands aside and points at them.
+      const says = Object.fromEntries(deck.orientation.turns.map((t) => [t.key, t.says]));
+      for (const key of Object.keys(says)) expect(typeof says[key], `${key} says nothing`).toBe("string");
+      expect(says.horizontalFlip).toMatch(/camera turns this/i);
+      expect(says.verticalFlip).toMatch(/board turns this/i);
+      expect(says.rotation).toMatch(/board turns this/i);
+      expect(deck.orientation.says).toContain("each control says which");
+    });
+
+    it("reads a board-turned control from what was stored, not from the device", () => {
+      // The sensor has no such control, so there is no reading to have: the
+      // stored request is the only fact, and it is the one the pipeline is
+      // acting on. `true` reaches the page as 1, the same encoding
+      // `commanded` and `applyControls` use.
+      const deck = cameraDeck({
+        camera: camera({ controls: { horizontalFlip: true, verticalFlip: null, rotation: 180 } as Camera["controls"] }),
+        capabilities: noCapabilities(),
+        encoder,
+        paths,
+      });
+      const value = Object.fromEntries(deck.orientation.turns.map((t) => [t.key, t.value]));
+      expect(value).toEqual({ horizontalFlip: 1, verticalFlip: null, rotation: 180 });
+      expect(deck.values.horizontalFlip).toBeUndefined();
+    });
+
+    it("reads a sensor-turned control from the device's own read-back (R-CTL-10)", () => {
+      const deck = cameraDeck({
+        camera: camera({ controls: { horizontalFlip: false, verticalFlip: null, rotation: 0 } as Camera["controls"] }),
+        // The device says it is mirrored; the configuration says it is not.
+        // A control the sensor holds draws the device, never what was sent.
+        capabilities: { ...noCapabilities(), horizontalFlip: present({ ...boolRange, current: 1 }) },
+        encoder,
+        paths,
+      });
+      const mirror = deck.orientation.turns.find((t) => t.key === "horizontalFlip");
+      expect(mirror?.value).toBe(1);
+    });
+
+    it("says the same thing while nothing is turned, because the question is the same", () => {
+      // `orientation()`'s own note answers *what is happening to the picture*
+      // and says nothing at all at rest — and at rest is exactly when an
+      // operator is deciding whether to turn something. The line under the
+      // group answers the standing question instead, so it reads the same
+      // before and after the mirror goes on.
+      const still = cameraDeck({ camera: camera(), capabilities: noCapabilities(), encoder, paths });
+      const turned = cameraDeck({
+        camera: camera({ controls: { horizontalFlip: true, verticalFlip: null, rotation: 0 } as Camera["controls"] }),
+        capabilities: noCapabilities(), encoder, paths,
+      });
+      expect(still.orientation.says).toBe(turned.orientation.says);
+      expect(still.orientation.says).toContain("cannot turn the picture itself");
+    });
+
+    it("warns about a quarter turn the board is making, and about no other turn", () => {
+      // A transpose swaps the picture's width and height, and the preview's
+      // capsfilter is fixed at 640x360 — so an operator who can reach one
+      // from this control has to be told from this control.
+      const quarter = cameraDeck({
+        camera: camera({ controls: { horizontalFlip: null, verticalFlip: null, rotation: 90 } as Camera["controls"] }),
+        capabilities: noCapabilities(), encoder, paths,
+      });
+      expect(quarter.orientation.says).toContain("swaps its width and height");
+
+      const half = cameraDeck({
+        camera: camera({ controls: { horizontalFlip: null, verticalFlip: null, rotation: 180 } as Camera["controls"] }),
+        capabilities: noCapabilities(), encoder, paths,
+      });
+      expect(half.orientation.says).not.toContain("quarter turn");
+
+      // The sensor's own quarter turn costs nothing on this board, so it
+      // carries no warning: the clause is about what the pipeline is doing.
+      const atSensor = cameraDeck({
+        camera: camera({ controls: { horizontalFlip: null, verticalFlip: null, rotation: 90 } as Camera["controls"] }),
+        capabilities: {
+          ...noCapabilities(),
+          horizontalFlip: present(boolRange), verticalFlip: present(boolRange), rotation: present(degrees),
+        },
+        encoder, paths,
+      });
+      expect(atSensor.orientation.says).not.toContain("quarter turn");
+    });
+
+    it("still offers all three for a camera that answered nothing at all", () => {
+      // `capabilities: null` is a probe that failed, not a camera that said
+      // no. Every other group falls back to `noCapabilities()` and draws
+      // facts; this one still draws controls, because the board can turn a
+      // picture from a camera the probe could not read.
+      const deck = cameraDeck({ camera: camera(), capabilities: null, encoder, paths });
+      expect(deck.orientation.turns).toHaveLength(3);
+      for (const turn of deck.orientation.turns) expect(turn.by).toBe("board");
+    });
+  });
+
   it("draws descriptors and values from the device, in display units", () => {
     const deck = cameraDeck({
       camera: camera(),

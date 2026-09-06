@@ -5,6 +5,7 @@ import {
   type CameraCapabilities, type Capability, type ControlRange,
 } from "./capability.js";
 import { describe, type DescriptorView } from "./descriptors.js";
+import { FLIP_KEYS, TURNED_BY_SAYS, turnedBy, turningSays, type FlipKey } from "./orientation.js";
 import { outputReach, type OutputKind, type OutputReach, type ReachPaths } from "./outputs.js";
 import type { RunState } from "./supervisor.js";
 
@@ -575,6 +576,66 @@ export interface DeckOutput {
   readonly reach: OutputReach;
 }
 
+/**
+ * One of the three controls that turn the picture, as the deck draws it
+ * (R-CTL-05, R-CTL-15).
+ *
+ * **There is no `state` here, and that absence is the whole point.** Every
+ * other control on the deck carries one of `Capability`'s four, and
+ * `not-offered` draws a fact where the control would have been. Orientation
+ * can never be in that state: where the sensor will not turn the picture the
+ * board does, after decoding (`video/orientation.ts`), so the operator is
+ * offered a control that works either way and the row that says *this camera
+ * has none* would be false on every camera Yonder has met. What varies is
+ * not whether there is a control but **which of the two carries it**, and
+ * that is `by`.
+ */
+export interface DeckTurn {
+  readonly key: FlipKey;
+  /** `sensor` where the camera will carry this one, `board` where the pipeline must. */
+  readonly by: "sensor" | "board";
+  /**
+   * The sentence beside *this* control saying which of the two carries it, or
+   * `null` when the group's own line already says it.
+   *
+   * `null` on every camera anyone has met, because all three are carried by
+   * the same one and three copies of one sentence is three times the words
+   * and none of the information. It is not null where the three genuinely
+   * disagree — a camera that mirrors in its sensor and cannot rotate — which
+   * is the only case one line under the group cannot carry.
+   */
+  readonly says: string | null;
+  /**
+   * Where this one is now, in the units the schema stores: `1`/`0` for the
+   * two flips, degrees for the rotation, `null` for no reading at all.
+   *
+   * **Read from whichever of the two is actually carrying it.** A control the
+   * sensor holds reports the device's own read-back (R-CTL-10, the same
+   * `values` every other control on this deck draws from); a control the
+   * board holds has no device reading to report — the sensor does not have
+   * the control — so the stored request is the only fact there is, and it is
+   * the one the pipeline is acting on. Showing `values` for a board-turned
+   * control would draw `null` beside a picture that is visibly turned.
+   */
+  readonly value: number | null;
+}
+
+/** Who turns this camera's picture, for the deck to draw and to say (R-CTL-15). */
+export interface DeckOrientation {
+  /**
+   * The one line beneath the group — `orientation.ts`'s own `turningSays()`.
+   *
+   * About the *camera*, not about the picture: which of the two would carry a
+   * turn asked for here, which is the question an operator choosing between
+   * remounting the camera and paying for the correction is asking, and it has
+   * an answer while nothing is turned. It carries the quarter-turn cost when
+   * the board is actually making one.
+   */
+  readonly says: string;
+  /** The three, always drawn, in `FLIP_KEYS`' order. */
+  readonly turns: readonly DeckTurn[];
+}
+
 /** `ui-yonder-deck`'s whole payload — `YonderDeck.vue`'s own documented shape. */
 export interface CameraDeck {
   readonly camera: { readonly id: string; readonly name: string; readonly spec: string };
@@ -586,6 +647,7 @@ export interface CameraDeck {
   readonly applied: { readonly stream: Camera["stream"] & { bitrate_kbps: number }; readonly preview: Camera["preview"] };
   readonly outputs: readonly DeckOutput[];
   readonly captures: { readonly count: number };
+  readonly orientation: DeckOrientation;
 }
 
 /** The words for an output kind, once, so two pages cannot disagree. */
@@ -679,6 +741,72 @@ export function cameraDeck(view: {
       reach: outputReach(output.kind, view.paths),
     })),
     captures: { count: 0 },
+    orientation: deckOrientation(caps, camera, values),
+  };
+}
+
+/**
+ * The Orientation group's whole answer: three controls that always draw, and
+ * which of the two is turning the picture (R-CTL-05, R-CTL-15).
+ *
+ * **This is the one place a `not-offered` capability does not become a fact
+ * on the page, and it is deliberate.** `probe/camera.ts` is right that the
+ * bench camera offers no `horizontal_flip`, no `vertical_flip` and no
+ * `rotate` — that is what the device answered and other things depend on it,
+ * `applyControls`'s refusal among them. It is not what *Yonder* can do:
+ * `video/pipeline.ts` composes a `videoflip` for exactly that camera, so the
+ * picture turns either way. A deck that read the capability state directly
+ * would draw three sentences saying the camera cannot, on a console that can
+ * do all three — which is the page this function exists to stop.
+ *
+ * So the presentation layer answers a different question from the probe's:
+ * not *does the device have this control* but *who carries it*. `turnedBy()`
+ * is that answer, taken from `orientation.ts` rather than re-derived here, so
+ * the sentence beside a control and the element in the launch line cannot
+ * disagree.
+ *
+ * **`says` is about the camera, not about the picture, and that is the whole
+ * difference.** `orientation()`'s own `method`/`note` report what is being
+ * done to the picture right now, which says nothing at all while nothing is
+ * turned — and *nothing is turned* is exactly the moment an operator is
+ * deciding whether to turn something and needs to know what it will cost. So
+ * the line drawn is `turningSays()`, which answers the standing question in
+ * the same two sentences `note` uses, and carries the quarter-turn cost when
+ * the board is actually making one.
+ *
+ * **Nothing on this payload is undrawn.** `method` and `note` are not carried
+ * here: a field the deck reads nothing from is a field no test at the join
+ * has to keep honest, which is how a guarantee on this branch has twice
+ * stayed green while the feature did nothing. What they say reaches the page
+ * through `says` and `by`, and `orientation.test.ts` holds those against
+ * `orientation()` itself.
+ */
+function deckOrientation(
+  caps: CameraCapabilities,
+  camera: Camera,
+  values: Record<string, number | null>,
+): DeckOrientation {
+  const carriers = FLIP_KEYS.map((key) => turnedBy(caps[key]));
+  // Beside a control only where the group's own line cannot carry it — see
+  // `DeckTurn.says`, and `turningSays()`'s own note on why that is one line.
+  const agreed = carriers.every((by) => by === carriers[0]);
+  return {
+    says: turningSays(caps, camera.controls),
+    turns: FLIP_KEYS.map((key, i) => {
+      const by = carriers[i] as "sensor" | "board";
+      // The two flips are booleans in the schema and `1`/`0` on the wire —
+      // the same encoding `applyControls` sends and `commanded` above uses,
+      // so one control's value means one thing everywhere on this payload.
+      const stored = camera.controls[key];
+      const asked = typeof stored === "number" ? stored : stored === null || stored === undefined ? null : stored ? 1 : 0;
+      const read = values[key];
+      return {
+        key,
+        by,
+        says: agreed ? null : TURNED_BY_SAYS[by],
+        value: by === "sensor" ? read ?? asked : asked,
+      };
+    }),
   };
 }
 

@@ -719,3 +719,170 @@ describe("the shutter key, in all four capability states", () => {
     expect(wrapper.find(".y-shutter").exists()).toBe(false);
   });
 });
+
+/**
+ * R-CTL-05 and R-CTL-15, and the defect the operator caught before it
+ * shipped.
+ *
+ * Every camera on the bench answers `not-offered` to `horizontal_flip`,
+ * `vertical_flip` and `rotate`. That is honest — it is what the device said —
+ * and read through `drawCapability()` it would print three sentences saying
+ * the camera cannot, on a console that can do all three on the board. So the
+ * Orientation group is drawn from `report.orientation`, which `cameraDeck()`
+ * composed from `video/orientation.ts`, and the four-state vocabulary is not
+ * consulted for it at all.
+ *
+ * **Three hops carry `by`/`says`/`note` from `orientation()` to a pixel**, and
+ * each is tested where it lives: `orientation.test.ts` for the answer,
+ * `present.test.ts` for the payload, and here for the drawing. A guarantee
+ * enforced in one place and untested at the join has left this branch's suite
+ * green while the feature did nothing, twice.
+ */
+function turns(over: Record<string, unknown> = {}) {
+  const by = (over.by || {}) as Record<string, string>;
+  const value = (over.value || {}) as Record<string, number | null>;
+  const carriers = ["horizontalFlip", "verticalFlip", "rotation"].map((key) => by[key] || "board");
+  // `says` beside a control only where the three disagree — the daemon's own
+  // rule (`deckOrientation()`), reproduced here so a report this file builds
+  // is a report the daemon could have sent.
+  const agreed = carriers.every((b) => b === carriers[0]);
+  const beside = (b: string) => (b === "sensor" ? "the camera turns this itself" : "the board turns this after decoding");
+  return {
+    says: (over.says as string) || "this camera cannot turn the picture itself, so the board turns it after decoding",
+    turns: ["horizontalFlip", "verticalFlip", "rotation"].map((key, i) => ({
+      key,
+      by: carriers[i],
+      says: agreed ? null : beside(carriers[i] as string),
+      value: key in value ? value[key] : null,
+    })),
+  };
+}
+
+describe("the three that turn the picture", () => {
+  it("draws all three as controls on a camera whose sensor offers none of them", () => {
+    // The whole point: `capabilities` says not-offered for all three — the
+    // bench camera's own answer — and the group is three working controls,
+    // not three facts.
+    const report = makeReport({ orientation: turns() });
+    const { wrapper } = deck(makeStore(report), "live");
+
+    expect(legends(wrapper)).toContain("Orientation");
+    expect(segByLabel(wrapper, "Mirror").exists()).toBe(true);
+    expect(segByLabel(wrapper, "Flip").exists()).toBe(true);
+    expect(pickerByLabel(wrapper, "Rotation").exists()).toBe(true);
+    // And not one of them as a fact — the row the operator caught.
+    expect(factLabels(wrapper)).not.toContain("Mirror");
+    expect(factLabels(wrapper)).not.toContain("Flip");
+    expect(factLabels(wrapper)).not.toContain("Rotation");
+    // Working, not drawn-and-inert: a control the page disabled would say
+    // "cannot" as loudly as a sentence would.
+    expect(segByLabel(wrapper, "Mirror").classes()).toContain("is-present");
+    expect(segByLabel(wrapper, "Mirror").findAll("button").every((b) => !b.attributes("disabled"))).toBe(true);
+  });
+
+  it("says which of the two is turning the picture, once, beneath all three", () => {
+    // Once and not four times over. It shipped as a sentence beside every
+    // control *and* a line under the group, which put the same words on the
+    // page four times; the committed capture is what said so.
+    const report = makeReport({
+      orientation: turns({
+        says: "this camera cannot turn the picture itself, so the board turns it after decoding"
+          + " — a quarter turn transposes every frame, and swaps its width and height",
+      }),
+    });
+    const { wrapper } = deck(makeStore(report), "live");
+    const notes = wrapper.findAll(".y-deck__turnnote");
+    expect(notes).toHaveLength(1);
+    expect(notes[0].text()).toContain("the board turns it after decoding");
+    // The quarter-turn warning reaches the page rather than being trimmed:
+    // a quarter turn swaps the picture's width and height and the preview's
+    // capsfilter is fixed, so an operator who can reach it must be told.
+    expect(notes[0].text()).toContain("swaps its width and height");
+    // And nothing repeats it beside a control.
+    expect(segByLabel(wrapper, "Mirror").find(".y-seg__why").exists()).toBe(false);
+    expect(segByLabel(wrapper, "Flip").find(".y-seg__why").exists()).toBe(false);
+    expect(pickerByLabel(wrapper, "Rotation").find(".y-pick__why").exists()).toBe(false);
+  });
+
+  it("names each control's own carrier where the three of them disagree", () => {
+    // The one case a single line cannot carry: a camera that mirrors in its
+    // sensor and still needs the board to rotate.
+    const report = makeReport({
+      orientation: turns({
+        by: { horizontalFlip: "sensor" },
+        says: "this camera turns part of the picture itself, and each control says which",
+      }),
+    });
+    const { wrapper } = deck(makeStore(report), "live");
+    expect(segByLabel(wrapper, "Mirror").find(".y-seg__why").text()).toMatch(/the camera turns this/i);
+    expect(segByLabel(wrapper, "Flip").find(".y-seg__why").text()).toMatch(/the board turns this/i);
+    expect(pickerByLabel(wrapper, "Rotation").find(".y-pick__why").text()).toMatch(/the board turns this/i);
+    expect(wrapper.find(".y-deck__turnnote").text()).toContain("each control says which");
+    // Neutral, not the caution tone: a real pipeline element with a real
+    // cost is a fact about the camera, not a fault in it.
+    expect(segByLabel(wrapper, "Flip").find(".y-seg__why").classes()).not.toContain("why-advertised");
+  });
+
+  it("draws the value from the report, whichever of the two is holding it", () => {
+    const report = makeReport({
+      orientation: turns({ value: { horizontalFlip: 1, verticalFlip: 0, rotation: 180 } }),
+    });
+    const { wrapper } = deck(makeStore(report), "live");
+    const pressed = (el: ReturnType<typeof segByLabel>) =>
+      el.findAll("button").filter((b) => b.attributes("aria-pressed") === "true").map((b) => b.text());
+    expect(pressed(segByLabel(wrapper, "Mirror"))).toEqual(["On"]);
+    expect(pressed(segByLabel(wrapper, "Flip"))).toEqual(["Off"]);
+    expect(pickerByLabel(wrapper, "Rotation").find(".y-pick__value").text()).toBe("180°");
+  });
+
+  it("offers exactly the four quarter turns, and no other angle", () => {
+    // The eight orientations a mount can need are these four and the two
+    // flips that reach the other four. A fifth angle here would be an
+    // orientation `videoflip` has no direction for.
+    const { wrapper } = deck(makeStore(makeReport({ orientation: turns() })), "live");
+    const options = pickerByLabel(wrapper, "Rotation").findAll("option");
+    expect(options.map((o) => o.attributes("value"))).toEqual(["0", "90", "180", "270"]);
+    expect(options.map((o) => o.text())).toEqual(["0°", "90°", "180°", "270°"]);
+  });
+
+  it("posts a press through the socket, the way every other image control does", async () => {
+    const report = makeReport({ orientation: turns() });
+    const { wrapper, emit } = deck(makeStore(report), "live");
+
+    await segByLabel(wrapper, "Mirror").findAll("button")[1].trigger("click");
+    expect(emit).toHaveBeenCalledWith("widget-action", "d1", { payload: { control: "horizontalFlip", value: true } });
+
+    emit.mockClear();
+    await pickerByLabel(wrapper, "Rotation").find("select").setValue("270");
+    // The degrees themselves, as a number — `config.yaml` stores degrees and
+    // `applyControls` writes them; a string would reach `v4l2-ctl` as one.
+    expect(emit).toHaveBeenCalledTimes(1);
+    expect(emit).toHaveBeenCalledWith("widget-action", "d1", { payload: { control: "rotation", value: 270 } });
+    // And nothing was staged: an orientation control is a live command, not
+    // a policy edit, so it never reaches the draft.
+    expect(wrapper.vm.pendingEdits).toHaveLength(0);
+  });
+
+  it("draws no orientation group at all for a report that carries none", () => {
+    // Loudly absent rather than quietly wrong. Falling back to the
+    // capability states is exactly what would put the three "this camera has
+    // none" rows back on the page, silently, the day this field went missing.
+    //
+    // **The camera here answers `horizontal_flip` as present**, and that is
+    // what makes this test about the payload rather than about the states: a
+    // deck that fell back to `capabilities` would draw a Mirror switch from
+    // it, and one that draws only from `orientation` draws nothing. Without
+    // that the assertion would hold for a deck that had never been changed
+    // at all, because every capability would be not-offered anyway.
+    const report = makeReport({
+      capabilities: { horizontalFlip: present(range({ min: 0, max: 1, current: 1 })) },
+      descriptors: { horizontalFlip: { label: "Mirror", unit: "", min: 0, max: 1, step: 1, current: 1, default: 0 } },
+      values: { horizontalFlip: 1 },
+    });
+    const { wrapper } = deck(makeStore(report), "live");
+    expect(legends(wrapper)).not.toContain("Orientation");
+    expect(factLabels(wrapper)).not.toContain("Mirror");
+    expect(wrapper.html()).not.toContain(">Mirror<");
+    expect(wrapper.find(".y-deck__turnnote").exists()).toBe(false);
+  });
+});

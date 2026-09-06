@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
-import { orientation, type VideoDirection } from "./orientation.js";
+import {
+  FLIP_KEYS, QUARTER_TURN_NOTE, TURNED_BY_SAYS, orientation, turnedBy, turningSays,
+  type VideoDirection,
+} from "./orientation.js";
 import { advertised, gated, noCapabilities, present } from "./capability.js";
-import type { CameraCapabilities, ControlRange } from "./capability.js";
+import type { Capability, CameraCapabilities, ControlRange } from "./capability.js";
 import type { Camera } from "../schema/config.js";
 
 /**
@@ -200,6 +203,117 @@ describe("the sentence an operator is shown", () => {
     // No note anywhere carries a number, because none has been measured.
     for (const controls of [{}, { rotation: 90 as const }, { horizontalFlip: true }]) {
       expect(orientation(noCapabilities(), controls).note).not.toMatch(/\d/);
+    }
+  });
+});
+
+describe("which of the two carries a control", () => {
+  it("is the sensor only where the sensor will actually write it", () => {
+    // The same four states `applyControls` decides from, answered the same
+    // way: `present` is the sensor's, and the other three all fall to the
+    // board, because `applyControls` refuses every one of them.
+    expect(turnedBy(present(boolRange))).toBe("sensor");
+    expect(turnedBy(noCapabilities().horizontalFlip)).toBe("board");
+    expect(turnedBy(advertised<ControlRange>(boolRange, "acknowledged, never applied"))).toBe("board");
+    expect(turnedBy(gated(boolRange, { id: "x", label: "x" }))).toBe("board");
+  });
+
+  it("never answers that nobody carries it, on any camera", () => {
+    // R-CTL-15's own premise, and the reason a page must ask this rather
+    // than reading the capability state: turning the picture is available on
+    // every camera, so there is no third answer and no absence.
+    const everyState: Capability<ControlRange>[] = [
+      present(boolRange),
+      { state: "not-offered" },
+      advertised<ControlRange>(boolRange, "acknowledged, never applied"),
+      gated(boolRange, { id: "x", label: "x" }),
+    ];
+    for (const capability of everyState) {
+      expect(["sensor", "board"]).toContain(turnedBy(capability));
+    }
+  });
+
+  it("agrees with the element the pipeline composes, on the same camera", () => {
+    // The one guarantee this function exists for: the sentence beside a
+    // control and the `videoflip` in the launch line are the same decision.
+    // A camera whose sensor mirrors composes nothing; one whose sensor does
+    // not composes `horiz`.
+    expect(turnedBy(sensorCan("horizontalFlip").horizontalFlip)).toBe("sensor");
+    expect(orientation(sensorCan("horizontalFlip"), { horizontalFlip: true }).flip).toBeNull();
+    expect(turnedBy(noCapabilities().horizontalFlip)).toBe("board");
+    expect(orientation(noCapabilities(), { horizontalFlip: true }).flip).toBe("horiz");
+  });
+
+  it("names the three, and names each of the two, in words for an operator", () => {
+    expect([...FLIP_KEYS]).toEqual(["horizontalFlip", "verticalFlip", "rotation"]);
+    expect(TURNED_BY_SAYS.sensor).toMatch(/camera turns this/i);
+    expect(TURNED_BY_SAYS.board).toMatch(/board turns this/i);
+    // Never a V4L2 name in a sentence an operator reads, and no number: the
+    // board's cost has not been measured, here or in `note`.
+    for (const says of Object.values(TURNED_BY_SAYS)) {
+      expect(says).not.toMatch(/horizontal_flip|vertical_flip|rotate|videoflip|\d/);
+    }
+  });
+});
+
+describe("the one line beneath the group", () => {
+  it("says the same thing whether or not anything is turned yet", () => {
+    // `note` reports the picture and says nothing at rest; this reports the
+    // camera, and at rest is exactly when an operator is deciding whether to
+    // turn something and needs to know what it will cost.
+    expect(turningSays(noCapabilities(), {})).toBe(turningSays(noCapabilities(), { horizontalFlip: true }));
+    expect(turningSays(noCapabilities(), {})).toContain("cannot turn the picture itself");
+    const all = sensorCan("horizontalFlip", "verticalFlip", "rotation");
+    expect(turningSays(all, {})).toBe(turningSays(all, { horizontalFlip: true }));
+    expect(turningSays(all, {})).toContain("camera turns this picture itself");
+  });
+
+  it("borrows orientation()'s own two sentences rather than writing its own", () => {
+    // One wording for one fact. A second copy here would drift from `note`
+    // the first time either was reworded, and the page would then say one
+    // thing about the camera and another about the picture.
+    expect(turningSays(noCapabilities(), { horizontalFlip: true }))
+      .toBe(orientation(noCapabilities(), { horizontalFlip: true }).note);
+    const all = sensorCan("horizontalFlip", "verticalFlip", "rotation");
+    expect(turningSays(all, { horizontalFlip: true }))
+      .toBe(orientation(all, { horizontalFlip: true }).note);
+  });
+
+  it("stands aside where the three disagree, because one line cannot carry that", () => {
+    const mixed = sensorCan("horizontalFlip");
+    expect(turningSays(mixed, {})).toContain("each control says which");
+    expect(turningSays(mixed, {})).not.toContain("cannot turn the picture itself");
+  });
+
+  it("carries the quarter turn's cost, and only for the board's own quarter turn", () => {
+    expect(turningSays(noCapabilities(), { rotation: 90 })).toContain(QUARTER_TURN_NOTE);
+    expect(turningSays(noCapabilities(), { rotation: 270 })).toContain(QUARTER_TURN_NOTE);
+    expect(turningSays(noCapabilities(), { rotation: 180 })).not.toContain("quarter turn");
+    expect(turningSays(noCapabilities(), {})).not.toContain("quarter turn");
+    // The sensor's own quarter turn costs this board nothing, so it carries
+    // no warning: `transposes` is about what the pipeline is doing.
+    const all = sensorCan("horizontalFlip", "verticalFlip", "rotation");
+    expect(orientation(all, { rotation: 90 }).transposes).toBe(false);
+    expect(turningSays(all, { rotation: 90 })).not.toContain("quarter turn");
+  });
+
+  it("reports a transpose as a field, not as words a caller has to read", () => {
+    expect(orientation(noCapabilities(), { rotation: 90 }).transposes).toBe(true);
+    expect(orientation(noCapabilities(), { rotation: 270 }).transposes).toBe(true);
+    expect(orientation(noCapabilities(), { rotation: 180 }).transposes).toBe(false);
+    expect(orientation(noCapabilities(), { horizontalFlip: true }).transposes).toBe(false);
+    expect(orientation(noCapabilities(), {}).transposes).toBe(false);
+    // Every one of the four directions that transposes says so, so nothing
+    // downstream has to keep a second list of which four they are.
+    for (const controls of [
+      { rotation: 90 as const },
+      { rotation: 270 as const },
+      { horizontalFlip: true, rotation: 90 as const },
+      { verticalFlip: true, rotation: 90 as const },
+    ]) {
+      const o = orientation(noCapabilities(), controls);
+      expect(["90r", "90l", "ur-ll", "ul-lr"]).toContain(o.flip);
+      expect(o.transposes).toBe(true);
     }
   });
 });

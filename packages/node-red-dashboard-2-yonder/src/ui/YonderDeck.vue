@@ -44,6 +44,13 @@ import { LABELS, deckDraft, draftPathFor, interruption } from 'yonder-core/prese
  * does, because the real probe (`probe/camera.ts`'s `gateIfInactive`) has
  * already decided it by the time a report reaches this page.
  *
+ * **The Orientation group is the one exception, and it is a deliberate one**
+ * (R-CTL-15). Mirror, Flip and Rotation are drawn from `orientation`, never
+ * from `capabilities`, because a camera whose sensor turns nothing is still a
+ * camera whose picture Yonder turns — on the board, after decoding. Read the
+ * capability state there and the group prints three sentences saying the
+ * camera cannot, over three controls that work. See `buildOrientation()`.
+ *
  * **Units and menu options are never restated.** `descriptors[key]` is
  * `video/descriptors.ts`'s own `describe()` output — raw 156 already reads
  * 15600 µs by the time it reaches `values.exposure` — and a `pick` control's
@@ -75,6 +82,8 @@ import { LABELS, deckDraft, draftPathFor, interruption } from 'yonder-core/prese
  *              preview: <same shape as policy.preview> },
  *   outputs: { kind, label, enabled, costKbps, reach: OutputReach }[],
  *   captures: { count },
+ *   orientation: { says, turns: { key, by: "sensor"|"board",
+ *                                 says: string|null, value }[] },
  *   problems: { path, message }[],    // only after a refused apply
  *   problemsFor: string }             // the camera those problems are about
  * ```
@@ -130,7 +139,7 @@ export const CAPABILITY_LAYOUT = {
   whiteBalance: { group: 'exposure', kind: 'bar' },
   brightness: { group: 'colour', kind: 'bar' },
   contrast: { group: 'colour', kind: 'bar' },
-  rotation: { group: 'orientation', kind: 'bar' },
+  rotation: { group: 'orientation', kind: 'turn' },
   aim: { group: 'aim', kind: 'aim' },
   recording: { group: 'capture', kind: 'shutter-video' },
   stills: { group: 'capture', kind: 'shutter-photo' },
@@ -146,12 +155,21 @@ export const CAPABILITY_LAYOUT = {
   autoFocus: { group: 'optics', kind: 'seg' },
   /* R-CTL-05's two switches, beside `rotation` in the same group — a flip is
    * not a rotation, so each is its own on/off rather than more degrees on
-   * that bar. Named here because `capability.ts` now carries them and this
-   * table has to state where every key goes; how the group reads once a
-   * camera actually answers one — and the line saying whether the sensor or
-   * the board is doing the turning — is drawn later, from the gallery. */
-  horizontalFlip: { group: 'orientation', kind: 'seg' },
-  verticalFlip: { group: 'orientation', kind: 'seg' },
+   * that bar.
+   *
+   * **`turn` is the fourth kind that draws through its own branch**, beside
+   * `formats` and the two shutters, and it is the only one whose reason is
+   * not the shape of the control. All three of these draw from
+   * `report.orientation` and never from `capabilities[key].state`, because
+   * that state answers a question about the *device* and this group is about
+   * *Yonder*: where the sensor will not turn the picture the board does,
+   * after decoding, so `not-offered` — the bench camera's answer to all
+   * three — must never reach `drawCapability()` here and become "this camera
+   * has none" over a control that works. `buildOrientation()` below is the
+   * branch, and `video/present.ts`'s own `deckOrientation()` is where that
+   * reasoning is written down. */
+  horizontalFlip: { group: 'orientation', kind: 'turn' },
+  verticalFlip: { group: 'orientation', kind: 'turn' },
 }
 
 /** Every key `CAPABILITY_LAYOUT` assigns to a group, in the order it draws —
@@ -161,7 +179,11 @@ const GROUP_KEYS = {
   colour: ['brightness', 'contrast', 'saturation', 'hue'],
   optics: ['autoFocus', 'focus', 'zoom'],
   rendering: ['gamma'],
-  orientation: ['rotation', 'horizontalFlip', 'verticalFlip'],
+  // No `orientation` entry, deliberately: that group is built by
+  // `buildOrientation()` from `report.orientation.turns`, in the order
+  // `video/orientation.ts`'s own `FLIP_KEYS` gives, not from a second list of
+  // the same three keys here that could quietly disagree with it about order
+  // or membership. `buildGroup()` is never called for it.
   housekeeping: ['gain', 'backlightCompensation', 'sharpness', 'powerLineFrequency'],
 }
 
@@ -204,6 +226,24 @@ const PREVIEW_RUNG_OPTIONS = [
   { value: '854x480', label: '854×480' },
   { value: '1280x720', label: '1280×720' },
 ]
+
+/**
+ * The four quarter-turns, and only those (R-CTL-05).
+ *
+ * The eight orientations a mount can need are these four and the two flips
+ * that reach the other four — which is why this list is not eight entries
+ * long and why a mirror is a switch of its own rather than more degrees
+ * here. Degrees are written with the sign an operator reads, not `rotate`'s
+ * bare integer: `video/descriptors.ts` gives `rotation` no unit because a
+ * picker's own options carry it.
+ */
+const ROTATION_OPTIONS = [
+  { value: '0', label: '0°' },
+  { value: '90', label: '90°' },
+  { value: '180', label: '180°' },
+  { value: '270', label: '270°' },
+]
+
 const PREVIEW_RATE_OPTIONS = [
   { value: '30', label: '30 fps' },
   { value: '15', label: '15 fps' },
@@ -641,6 +681,69 @@ export default {
       if (!anyPresent) return null
       return h(YonderColumn, { legend: GROUP_LEGEND[groupId], key: groupId }, () => keys.map((key) => this.drawCapability(key)))
     },
+    /**
+     * The Orientation group — **always drawn, on every camera** (R-CTL-05,
+     * R-CTL-15).
+     *
+     * This is the one group that does not ask `capabilities[key].state` what
+     * to draw, and the reason is the whole of `R-CTL-15`. The bench camera
+     * answers `not-offered` to all three of `horizontal_flip`,
+     * `vertical_flip` and `rotate`; that is true of the *device* and false of
+     * *Yonder*, because `video/pipeline.ts` composes a `videoflip` for
+     * exactly that camera. Read through `drawCapability()` the group would
+     * print three sentences saying the camera cannot, over three controls
+     * that work — so it is read through `report.orientation` instead, which
+     * `video/present.ts` composed from `video/orientation.ts`'s own answer.
+     *
+     * **One line, beneath all three** — `orientation.says`, which names which
+     * of the two would carry a turn asked for here and carries the
+     * quarter-turn cost when the board is actually making one. It shipped
+     * once as a sentence beside every control *and* a line under the group,
+     * which put the same words on the page four times over; the capture is
+     * what said so. `turn.says` is drawn only where the payload sets it,
+     * which is only where the three controls genuinely disagree about who
+     * carries them — the one case a single line cannot say.
+     *
+     * **The value is `turn.value`, whichever of the two holds it** — the
+     * payload already decided that (see `DeckTurn.value`), so this method
+     * never picks between `values` and `commanded` and cannot pick
+     * differently from the sentence beside it.
+     *
+     * A report with no `orientation` block draws no group at all rather than
+     * falling back to the capability states: falling back is what would put
+     * the three "this camera has none" rows on the page again, quietly, the
+     * day this field went missing.
+     */
+    buildOrientation () {
+      const o = this.report.orientation
+      if (!o || !Array.isArray(o.turns) || o.turns.length === 0) return null
+      const children = o.turns.map((turn) => {
+        const label = this.label(turn.key)
+        if (turn.key === 'rotation') {
+          return h(YonderPicker, {
+            key: turn.key,
+            label,
+            // `null` is the schema's own "leave the camera alone", which is a
+            // picture that is not rotated — the same reading `orientation()`
+            // gives it — so it draws as 0°, never as an unmarked picker.
+            value: String(turn.value === null || turn.value === undefined ? 0 : turn.value),
+            options: ROTATION_OPTIONS,
+            reason: turn.says || '',
+            onChange: (v) => this.setControl(turn.key, Number(v)),
+          })
+        }
+        return h(YonderSegmented, {
+          key: turn.key,
+          label,
+          value: turn.value === 1 ? 'On' : 'Off',
+          options: ['Off', 'On'],
+          reason: turn.says || '',
+          onChange: (v) => this.setControl(turn.key, v === 'On'),
+        })
+      })
+      children.push(h('div', { class: 'y-deck__turnnote', key: 'note' }, o.says || ''))
+      return h(YonderColumn, { legend: GROUP_LEGEND.orientation, key: 'orientation' }, () => children)
+    },
     buildCapture () {
       const r = this.report
       const recording = r.capabilities && r.capabilities.recording
@@ -983,6 +1086,7 @@ export default {
         if (id === 'capture') return this.buildCapture()
         if (id === 'stream') return this.buildStream()
         if (id === 'preview') return this.buildPreview()
+        if (id === 'orientation') return this.buildOrientation()
         return this.buildGroup(id)
       }).filter(Boolean))
       .filter((slot) => slot.length > 0)
@@ -1027,6 +1131,15 @@ export default {
     min-width: 90px;
 }
 .y-deck__fact-v { color: var(--yonder-neutral, #7d7869); }
+/* The line under Mirror, Flip and Rotation saying what is being done to the
+   picture (R-CTL-15) — the blueprint's own `.d-modenote`, to its own figures.
+   The label tone, not the caution one: a real pipeline element with a real
+   cost is a fact, not a warning. */
+.y-deck__turnnote {
+    font-size: 11px;
+    color: var(--yonder-label, #7f8a95);
+    margin-top: 2px;
+}
 .y-deck__captures {
     font-size: 11px;
     color: var(--yonder-label, #7f8a95);

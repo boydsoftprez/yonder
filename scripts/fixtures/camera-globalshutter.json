@@ -32,6 +32,21 @@
     "tone, carrying that sentence (spec section 4). Change these to `present` only when there is",
     "somewhere for a file to land.",
     "",
+    "**`camera.controls.horizontalFlip` is on, and it is the board that carries it** (R-CTL-05,",
+    "R-CTL-15). This camera's sensor offers no `horizontal_flip`, no `vertical_flip` and no",
+    "`rotate` — see `capabilities` below, which is the board's own answer and stays that way —",
+    "so `video/pipeline.ts` composes a `videoflip` and the console says so beside the control.",
+    "An inverted or side-on mount is ordinary on an airframe, and with every control left at its",
+    "default the Orientation group would photograph as *this picture is not turned*, which is the",
+    "one case R-CTL-15 has nothing to say about. A mirror rather than a quarter turn on purpose:",
+    "90 and 270 transpose the frame and swap its width and height, and the preview's capsfilter",
+    "is fixed at 640x360, so a committed reference image asking for one would bake a squashed",
+    "preview into this repository.",
+    "",
+    "**The sensor's own half of R-CTL-15 is photographed from a second fixture**,",
+    "`camera-sensor-turns.json`, because no camera on the bench implements any of the three and",
+    "there is therefore no hardware here that can draw it. See that file.",
+    "",
     "`found[0].capabilities` is rebuilt from the committed v4l2-ctl capture named in",
     "`recorded.capabilitiesRebuiltFrom`, by the same CONTROL_MAP loop probeCamera uses.",
     "Regenerate it that way rather than editing states by hand: when the capability model",
@@ -67,7 +82,8 @@
     "controls": {
       "brightness": null,
       "contrast": null,
-      "rotation": 0
+      "rotation": 0,
+      "horizontalFlip": true
     },
     "outputs": [
       {
