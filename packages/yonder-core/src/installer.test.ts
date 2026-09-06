@@ -511,3 +511,57 @@ describe("the daemon can write the media server's configuration", () => {
     ).toBe(true);
   });
 });
+
+/**
+ * The build path in `20-yonder-core.sh` must copy everything `npm run build`
+ * reaches for.
+ *
+ * There are two routes into `/opt/yonder/packages/yonder-core`: a prebuilt one
+ * that copies `dist/` and `node_modules/` and skips the build, and this one,
+ * which copies sources and builds on the board. A checkout whose dependencies
+ * are hoisted to the workspace root takes the build path — which is every
+ * developer checkout, so it is the path a hand deploy actually uses.
+ *
+ * It failed on hardware with `Cannot find module .../scripts/copy-assets.mjs`,
+ * after `npm ci` had already run: far enough in to look like it was working.
+ * `src/` was copied and `scripts/` was not, while the build is `tsc` followed
+ * by `node scripts/copy-assets.mjs`.
+ *
+ * So this reads the build script rather than naming directories: every
+ * repository-relative path it runs must be copied by the role. A build step
+ * that reaches for a new directory fails here, with the directory named,
+ * instead of on a board after a flash.
+ */
+describe("installer/roles/20-yonder-core.sh, the build path", () => {
+  const role = readFileSync(join(ROOT, "installer", "roles", "20-yonder-core.sh"), "utf8");
+  const build = (JSON.parse(
+    readFileSync(join(ROOT, "packages", "yonder-core", "package.json"), "utf8"),
+  ) as { scripts: Record<string, string> }).scripts.build;
+
+  it("runs a build whose steps this test can see", () => {
+    // If the build stops being a string of shell this cannot read, the two
+    // tests below would pass by finding nothing. Fail here instead.
+    expect(build).toBeTruthy();
+    expect(build).toContain("tsc");
+  });
+
+  it("copies every directory the build script runs something out of", () => {
+    // `node scripts/copy-assets.mjs` -> `scripts`. Anything invoked from a
+    // bare relative path is a directory that has to be on the board.
+    const needed = new Set<string>();
+    for (const m of build.matchAll(/(?:^|&&|\|\||;)\s*node\s+([A-Za-z0-9_./-]+)/g)) {
+      const path = m[1];
+      if (path.startsWith("/") || path.startsWith("-")) continue;
+      const top = path.split("/")[0];
+      if (top !== "" && top !== "." && top !== "..") needed.add(top);
+    }
+    expect(needed.size).toBeGreaterThan(0);
+    for (const top of needed) {
+      expect(role).toContain(`run cp -r "$yc_src/${top}" "$yc_dest/${top}"`);
+    }
+  });
+
+  it("copies src, which is what tsc compiles", () => {
+    expect(role).toContain(`run cp -r "$yc_src/src" "$yc_dest/src"`);
+  });
+});

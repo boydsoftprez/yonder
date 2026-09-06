@@ -57,6 +57,16 @@ if [ "$yc_prebuilt" = "1" ]; then
     run cp -r "$yc_src/node_modules" "$yc_dest/node_modules"
 else
     run cp -r "$yc_src/src" "$yc_dest/src"
+    # **`scripts/` too, because `npm run build` runs one of them.** The build
+    # is `tsc` followed by `scripts/copy-assets.mjs`, which carries every
+    # `assets/` directory under src/ into dist — the setup page among them.
+    # Copying src/ and not scripts/ made this path fail outright on a board
+    # with `Cannot find module .../scripts/copy-assets.mjs`, after `npm ci`
+    # had already run: far enough in to look like it was working. It is
+    # asserted in installer.test.ts against package.json's own build script,
+    # so a build step that reaches for another directory fails there rather
+    # than here.
+    run cp -r "$yc_src/scripts" "$yc_dest/scripts"
 
     # The unit starts dist/daemon/server.js, which is generated, and the daemon's
     # dependencies live in the workspace root when the tree is a checkout. Neither
