@@ -218,3 +218,103 @@ suspicion than one that fails outright.**
   configuration setting, not a signal.
 - Nothing about the router under `systemd` sandboxing, or surviving a `yonder-core` restart.
   That is Task 16.
+
+---
+
+# Yonder's own code, on the wire
+
+Task 10b's serial opener and Task 6's sweep, run against a live ArduPlane. Same board, same
+wiring as above; 2026-09-06. This is the first time any of this milestone's code has touched
+a real serial port — every test before it used a regular file, which answers a read and has
+no line settings at all.
+
+## The line settings hold up, and `-drain` matters
+
+<!-- yonder:hardware-observed -->
+
+| | |
+|---|---|
+| Vector | `stty -F /dev/ttyAMA0 -drain raw -echo cread clocal -crtscts cs8 -parenb -cstopb min 0 time 0 <baud>` |
+| Time to apply | **28 ms** |
+| coreutils | 9.7, so `-drain` is available (it needs ≥ 8.29) |
+
+Without `-drain`, `stty` uses `TCSADRAIN` and waits for pending output *under the port's
+current settings* — so a port left in `CRTSCTS` with CTS unasserted blocks before `-crtscts`
+can be applied. 28 ms says the token does its job.
+
+## The kernel's framing-error count is readable after all
+
+`/proc/tty/driver/ttyAMA` prints it, and root can read it with nothing but `fs`:
+
+```
+0: uart:PL011 rev3 mmio:0xFE201000 irq:41 tx:441 rx:128891 fe:8197 brk:18103 oe:1
+```
+
+`fe:8197` is the count `TIOCGICOUNT` would have given. **This is the route back to the
+fast path** `R-MAV-13` gave up when the opener chose `stty` over an ioctl: a wrong rate
+could again be abandoned the moment errors appear, instead of waiting out its deadline.
+Not taken here — recorded because it is cheap and nobody knew it existed.
+
+## A loopback proves the board before the autopilot is blamed
+
+With a jumper across pins 8 and 10 and nothing else attached, twenty bytes written came back
+byte-identical. That settles TX, RX, the pin mux and the line settings in one move, and it is
+worth doing *first* the next time a wire looks dead — it took the board out of the argument in
+ten seconds.
+
+**A trap it exposed:** `cat /dev/ttyAMA0` reads **zero bytes and exits immediately** under
+this vector, because `min 0 time 0` makes an empty read return 0, which `cat` treats as
+end-of-file. The kernel counters showed the bytes arriving while `cat` showed nothing. Any
+hand-check of a port set up this way has to poll, exactly as `serial.ts` does.
+
+## Detection, end to end
+
+<!-- yonder:hardware-observed -->
+
+| Run | Time | Outcome |
+|---|---|---|
+| Cold, no hint | **1664 ms** | `found /dev/ttyAMA0 @ 115200, ArduPlane, system 1` |
+| Warm, hint 115200 | **1001 ms** | the same |
+
+The cold run pays 57600's full deadline before reaching 115200. The warm run goes straight
+there and still waits on the heartbeat's 1 Hz phase — consistent with the 739–874 ms spread
+measured by hand the day before.
+
+## Every wrong rate reports noise, and the plan said otherwise
+
+<!-- yonder:hardware-observed -->
+
+| Pinned rate | Time | Outcome | Bytes seen |
+|---|---|---|---|
+| 57 600 | 1393 ms | `noise` | 637 |
+| 230 400 | 1382 ms | `noise` | 2887 |
+| **921 600** | 1362 ms | **`noise`** | 3676 |
+
+**This is the part worth keeping.** An amendment to `R-MAV-13`, written into the plan and
+into the requirement, claimed that without the framing-error counter a wrong rate would now
+read as *silence* rather than noise — and the bench checklist told the operator to expect
+that. A reviewer disputed it from the kernel sources: `stty raw` clears `INPCK`, so the pl011
+driver never sets the framing-error flag on the character, and the byte is delivered as
+ordinary data. The requirement was reverted before this run.
+
+The run agrees with the reviewer. Had it not been reverted, **a correct result would have
+been read as a defect** — the failure mode where a wrong prediction costs more than a wrong
+implementation, because it teaches you to distrust the right answer.
+
+What losing the counter actually costs is **time**: every wrong rate now pays its full
+1300 ms deadline instead of leaving early, which is the ~1.38 s in the table.
+
+## What an absent device does, and why that is not a bug
+
+`detect()` against `/dev/ttyDOESNOTEXIST` **rejects** with `ENOENT`. That is deliberate:
+`MavlinkRenderer.probe()` catches it and reports `R-MAV-13` silence *for that device*,
+without inventing four speeds it was never tried at. A caller below that layer sees the
+rejection, which is what happened here.
+
+## Still not proven
+
+- **Nothing has been routed to a real ground station.** `mavlink-router` has not run against
+  this link, and no Mission Planner or QGroundControl has ever connected. That is the last
+  unknown in the path.
+- The port-state handover from the sweep to the router.
+- Anything on `/dev/ttyACM0` — a USB-attached autopilot is a different driver.
