@@ -81,6 +81,38 @@ fix the signing instead.
 Any change touching networking or configuration must work *with* the rollback engine and
 the access-point fallback, not around it. `R-NET-07` and `R-CFG-03` are load-bearing.
 
+### 7. The blueprint is the blueprint.
+
+`docs/console/design/instrument-library/` holds the approved renders of every
+console surface. **If a surface is drawn there, it should work.** If an element
+in the blueprint needs another feature built to enable it, building that feature
+is what is expected — not a narrower reading of the surface.
+
+`docs/console/design/blueprint-manifest.md` lists every element of every
+surface, and is the checkable form of that. A surface is finished when its
+manifest is satisfied or each gap is deferred **with a named owner**. A deferred
+item with no owner is indistinguishable from a closed one, and that is how three
+controls went missing: the ground station's resolution picker, the action that
+configures a detected camera, and the Cameras page's encode-headroom panel.
+
+**A review reads a diff, and nothing in a diff is missing.** So a review of a
+console surface must also read the blueprint render and the current capture
+together, and answer *what is absent*. That question is not optional, and it is
+the one the operator kept having to ask.
+
+### 8. Conflicts are the operator's to decide, not yours.
+
+The rules in this file always apply and are never absolutes. Where one collides
+with the blueprint, a requirement, the substrate's limits or another rule, **stop
+and put the choice to the operator, at the moment you meet it.** Present both
+sides and your reading; do not resolve it and report a conclusion.
+
+This is a correction, written down because it was got wrong: several such calls
+were made unilaterally — whether a requirement was satisfied by a weaker
+reading, whether a gate rule was stricter than its specification, whether a task
+was blocked, whether a known defect could stay unfixed. Each was defensible and
+none was ours to make.
+
 ## Settled — do not relitigate
 
 | Decision | Where |
