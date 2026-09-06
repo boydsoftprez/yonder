@@ -1817,3 +1817,59 @@ sensible defaults (`R-UI-27`'s `Cam N`, and the card name).
 both ends of the feature exist and the control between them was never written,
 so no review found it — a task review reads a diff, and nothing in any diff is
 missing. Only somebody using the console finds an action that is not there.
+
+### K-55 · The console polls the daemon into shelling out nine times a second
+
+**Status:** Open · **Requirements:** R-HW-03, R-UI-05
+
+Found by the operator asking why the board's CPU load was high, on a Pi 4
+carrying one 1280×720 encode.
+
+Measured on the board, 2026-09-06:
+
+| | |
+|---|---|
+| Load average | **3.52** on four cores |
+| Temperature | **77.4 °C** |
+| `get_throttled` | `0x80000` — the soft temperature limit has occurred |
+| `yonder-pipeline` (the encode) | 60.6 % of one core |
+| External commands run by the daemon | **547 per minute** — 74 `mmcli`, 49 `nmcli`, 51 `zerotier-cli` per 20 s |
+
+That is about **nine process spawns a second, continuously**, each one paying
+for a fork, an exec, a D-Bus round trip and a teardown. `systemd --user` and
+`dbus-daemon` appear in `top` beside them, which is the cost showing up twice.
+
+**Where it comes from.** `flows/flows.json` carries four repeating injects:
+
+```
+every 2s  poll the mesh state   -> yonder-remote-state
+every 5s  poll the mesh state   -> yonder-remote-state      <- the same thing
+every 5s  sweep for cameras     -> yonder-cameras
+every 5s  read the camera       -> yonder-camera
+```
+
+**Two of them poll the mesh, and they poll the same node.** One at 2 s and one
+at 5 s, so the mesh is read about 0.7 times a second by two timers that do not
+know about each other. Each mesh read is three `zerotier-cli` invocations, which
+is most of the 51 counted above.
+
+Three things worth separating, because they have different fixes:
+
+- **The duplicate poll is a plain mistake** and the cheapest thing to remove.
+- **The rate is a design choice nobody made deliberately.** Nothing on a status
+  page needs the mesh twice a second; a page an operator is looking at is not a
+  control loop.
+- **Shelling out is the underlying cost.** Every read is a new process. A
+  long-lived reader, or a cache with a maximum age, would cut the spawn count
+  by an order of magnitude without changing any page's freshness in a way an
+  operator could see.
+
+**Why this matters more than a warm board.** `throttled=0x80000` was already set
+before this measurement and is not proof this caused it — but a flight computer
+holding 77 °C at idle load has no headroom for a warm day, an enclosure, or a
+second camera. The encode is the work; the polling is not.
+
+**Not measured yet:** how much of the load is the console being *open*. Every
+figure above was taken with a browser on the Camera page. Worth repeating with
+no browser attached, because that separates the daemon's own appetite from the
+console's.
