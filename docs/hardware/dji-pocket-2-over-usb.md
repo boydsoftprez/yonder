@@ -671,6 +671,29 @@ below has waited for it separately. They are gathered here so that the next
 time it is mounted, one session closes the lot rather than five sessions each
 closing one. Ordered so that an early answer cannot invalidate a later one.
 
+**Ask this one first, because it is the only one that can be answered in a
+minute and it decides whether a live defect is reachable.** Does this camera
+offer `horizontal_flip`, `vertical_flip` or `rotate`?
+
+```sh
+v4l2-ctl -d /dev/videoN --list-ctrls-menus | grep -E 'horizontal_flip|vertical_flip|rotate'
+```
+
+The bench ELP offers none of the three, which is why the board learned to turn
+the picture itself (R-CTL-05, `video/orientation.ts`). If the Pocket 2 offers
+one of them **and an operator sets it**, it reaches a known defect recorded in
+`video/renderer.ts` and pinned by `pipeline.test.ts`: the apply renderer
+composes with `noCapabilities()` while the start route composes with what it
+probed, so the two disagree. The pipeline is restarted once for a configuration
+that did not change, and comes back turning the picture **twice** — once at the
+sensor and once on the board.
+
+Nothing on the bench can reach it today. If this camera can, it stops being a
+latent defect and the fix — a capability answer both composers share, without
+putting a `v4l2` sweep inside the confirmation window — needs doing before the
+Pocket 2 work goes further. If it cannot, say so here and the defect stays
+latent with one more camera's worth of evidence behind that claim.
+
 **Bring:** the camera mounted as it will fly, not handle-up; a card in it; the
 board on header power with `dr_mode=peripheral` (see [The bench
 procedure](#the-bench-procedure)); and a way to see the picture, because half
