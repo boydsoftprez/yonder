@@ -430,7 +430,7 @@ the `127.0.1.1` line, and tests for both — which is why it is here rather than
 the change that found it. `assert_daemon_can_write` must be given `/etc/hosts` at the same
 time, or the fix reproduces K-19 in a new place.
 
-### K-25 · A control keeps showing a value the device rolled back
+### K-25 · ~~A control keeps showing a value the device rolled back~~ — CLOSED
 `flows/flows.json`, `src/console/renderer.ts`
 
 Change the theme and let the confirmation window expire. The apply reverts — `lastResult.outcome`
@@ -445,11 +445,38 @@ the widget keeps whatever it last held. The gap is that a rollback is exactly th
 operator most needs the interface to be honest about what the device is doing, and instead the one
 control they touched is the one telling them the wrong thing.
 
-The fix is a way for a page to learn that an apply reached a terminal state and re-read the
-configuration. That is a real piece of work — the apply engine has the state and `GET /status`
-already reports it, but no page subscribes to anything today. It belongs with whatever milestone
-makes the console reactive rather than poll-and-hope, and it should be built once for every
-control rather than patched onto the theme dropdown.
+**Found again, on a control where it is dangerous.** The Telemetry page's `Accepting from`
+readout says whether the board takes MAVLink from anything that can reach it or only from
+itself — the setting deciding who can command the aircraft (R-MAV-07). A capture run opened
+ingest, the daemon took the change, and the page went on reading `Loopback only` with
+`THIS DEVICE` lit. The committed reference for that state
+(`docs/console/shape/telemetry-ingest-open.{day,night}.darwin.json`) was therefore a picture
+of the opposite state, byte-identical to the base capture. Same fault, same cause: `flows.json`
+read `/config` from an `inject` with `once: true` and an empty `repeat`, so *every* value on
+the console that comes from the configuration was read at deploy and never again.
+
+**Closed by R-UI-20 and `yonder-config-watch`.** The tempting fix — learn that an apply
+reached a terminal state, then re-read — was rejected on evidence: R-CFG-12 names
+`mavlink.ingest` as deliberately *not* exempt from the confirmation window, so opening ingest
+**pends**, and the new configuration is in force for the whole window (up to five minutes,
+R-CFG-10). A console waiting for the terminal state would have held `Loopback only` on screen
+for five minutes while the board really was accepting MAVLink from the network. The node reads
+`GET /config` on the ordinary two-second poll and **sends only when the document changed**,
+which also catches what no apply of this console's ever announces: a rollback the device
+performed by itself, and a change made from somewhere else.
+
+That shape is what made it safe to do for every control at once rather than only the readouts.
+The same read seeds ten boxes an operator types into, and re-seeding those on a clock — the
+reason the one-shot was chosen — would have been worse than the defect. Because the read
+repeats and the *message* does not, a form is disturbed at exactly the moment the setting under
+it moved, which is the moment R-UI-17 wants it disturbed.
+
+**The dropdown this was first found on no longer exists**, and that is worth saying plainly
+rather than letting it read as fixed. The palette is a soft-key rail now (`keys-status`), and
+that rail lights neither key — it offers `DAY` and `NIGHT` and shows which is in force nowhere,
+so there is no longer a control on that page holding a value that could go stale. Should it
+ever be made to light the palette in force, it is seeded from the configuration like everything
+else and the watch above carries it.
 
 ### K-26 · ~~The scan list looks tappable and is not~~ — CLOSED
 

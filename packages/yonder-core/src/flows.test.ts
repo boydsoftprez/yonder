@@ -2288,3 +2288,117 @@ describe("flows/flows.json Telemetry page", () => {
     }
   });
 });
+
+
+/**
+ * **What the console shows of the configuration follows the configuration**
+ * (R-UI-20).
+ *
+ * The defect: every value on this console that comes from `config.yaml` was
+ * read once — an `inject` with `once: true` and an empty `repeat` — and never
+ * again, while every other poller on the page repeated. So a saved change did
+ * not reach the screen until somebody redeployed the flows.
+ *
+ * It was found on *Accepting from*, the readout saying whether the board
+ * takes MAVLink from anything that can reach it or only from itself
+ * (R-MAV-07). A run opened ingest, the daemon took the change, and the page
+ * went on reading `Loopback only` with `THIS DEVICE` lit — so the committed
+ * reference for that state was a picture of the opposite state. K-25 recorded
+ * the same fault on a theme dropdown, where being wrong is untidy; this is it
+ * on the control that decides who may command the aircraft.
+ *
+ * **The fix is not a `repeat` on the inject, and that matters.** Ten
+ * `ui-text-input` boxes hang off the same read. Re-seeding them on a clock
+ * would overwrite a half-typed ground-station address or APN, which is why
+ * the one-shot was chosen and is a real constraint rather than an oversight.
+ * `yonder-config-watch` reads on a timer and *sends only when the document
+ * changed*, so the read repeats and the re-seed does not.
+ */
+describe("flows/flows.json reads the configuration again", () => {
+  const byId = (id: string) => flows.find((n) => n.id === id);
+  const wiresOf = (id: string) => ((byId(id)?.wires ?? []) as string[][]);
+  const reaches = (from: string): Set<string> => {
+    const seen = new Set<string>();
+    const queue = [from];
+    while (queue.length > 0) {
+      const id = queue.shift() as string;
+      for (const target of wiresOf(id).flat()) {
+        if (seen.has(target)) continue;
+        seen.add(target);
+        queue.push(target);
+      }
+    }
+    return seen;
+  };
+
+  /** Every control on the console whose value is read out of `config.yaml`. */
+  const FROM_CONFIG = [
+    // The two readouts and the rail the defect was found on.
+    "tel-atboot", "tel-ingest", "tel-keys-ingest",
+    // The six ground-station boxes beside them.
+    "tel-host-0", "tel-port-0", "tel-host-1", "tel-port-1", "tel-host-2", "tel-port-2",
+    // And the Cellular page's four, which are the same read.
+    "input-cell-apn", "input-cell-dial", "input-cell-username", "input-cell-password",
+  ];
+
+  it("watches the configuration rather than reading it once", () => {
+    const watch = byId("watch-config");
+    expect(watch?.type).toBe("yonder-config-watch");
+    expect(wiresOf("watch-config")[0]).toEqual(["seed-cell-form", "seed-tel-endpoints"]);
+  });
+
+  /**
+   * **The defect, stated as a rule.** Every other poller on this console
+   * repeats — the mesh every two seconds, the way out every five, the
+   * telemetry link every two. One inject did not, and it was the one feeding
+   * everything read from the configuration.
+   *
+   * There is now no inject on this console that fires once and never again,
+   * and there should not be one: a value worth putting on a page once is a
+   * value worth keeping right.
+   */
+  it("leaves no reading on the console that is taken once and never again", () => {
+    const oneShot = flows.filter(
+      (n) => n.type === "inject" && n.once === true && String(n.repeat ?? "") === "",
+    );
+    expect(
+      oneShot.map((n) => n.id),
+      "an inject that fires once seeds a widget that then goes stale for ever. "
+      + "That is K-25, and on `Accepting from` it is a page saying nothing can command "
+      + "the aircraft while anything on the network can.",
+    ).toEqual([]);
+  });
+
+  it("brings every configured control downstream of that watch (R-UI-20)", () => {
+    const seeded = reaches("watch-config");
+    for (const id of FROM_CONFIG) {
+      expect(seeded.has(id), `${id} is not downstream of watch-config`).toBe(true);
+    }
+  });
+
+  /**
+   * One watcher, and it asks no faster than the floor (R-UI-06). A second one
+   * would be a second schedule reading the same document, which is how two
+   * halves of one page come to disagree about it.
+   */
+  it("asks once, on one schedule", () => {
+    const watchers = flows.filter((n) => n.type === "yonder-config-watch");
+    expect(watchers.map((n) => n.id)).toEqual(["watch-config"]);
+    expect(Number(watchers[0].interval) * 1000).toBeGreaterThanOrEqual(MIN_POLL_MS);
+  });
+
+  /**
+   * The input-driven read stays, wired to the same two seeders, and the
+   * *Refresh* button on the Network page stays wired to it.
+   *
+   * They are different reads for different reasons: this one answers a
+   * person, so it has to produce a message even when the daemon does not
+   * answer, and `yonder-config-watch` deliberately produces nothing at all in
+   * that case so a dropped socket cannot blank a form full of settings.
+   */
+  it("keeps the read a person can ask for by hand", () => {
+    expect(byId("read-config")?.type).toBe("yonder-config");
+    expect(wiresOf("button-reread").flat()).toContain("read-config");
+    expect(wiresOf("read-config")[0]).toEqual(wiresOf("watch-config")[0]);
+  });
+});

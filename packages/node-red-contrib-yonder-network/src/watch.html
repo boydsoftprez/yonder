@@ -1,0 +1,48 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!--
+  The editor half of the configuration watch.
+
+  Node-RED finds this by basename beside the node's .js, and without it the
+  flow editor shows the node as "unknown" even though the runtime registered
+  it. It is a form and a registration, and deliberately nothing else: no
+  behaviour lives here (CLAUDE.md rule 2 in spirit — a diff has to be
+  readable), and no asset is fetched from anywhere (R-UI-01).
+-->
+<script type="text/html" data-template-name="yonder-config-watch">
+  <div class="form-row">
+    <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-interval"><i class="fa fa-clock-o"></i> Every</label>
+    <input type="number" id="node-input-interval" min="2" step="1" /> seconds
+  </div>
+</script>
+
+<script type="text/html" data-help-name="yonder-config-watch">
+<p>Reads <code>GET /config</code> on a timer and emits the whole configuration
+on <code>msg.payload</code> <em>only when it has changed</em> — including the
+first read, which is what seeds a page when the console opens (R-UI-17).</p>
+<p><strong>The read repeats; the message does not.</strong> The same
+configuration seeds boxes an operator types into, so emitting on every tick
+would overwrite a half-typed address or APN. Emitting only on a real change
+disturbs a form at the one moment the setting under it moved (R-UI-20).</p>
+<p>A daemon that does not answer produces no message at all, so a dropped
+socket leaves the page showing the settings it already had. The floor on the
+interval is two seconds (R-UI-06) and is enforced in <code>yonder-core</code>,
+not here.</p>
+<p>It has no input. <code>yonder-config</code> is the read a button is wired
+to; this one is the read nobody asked for.</p>
+</script>
+
+<script type="text/javascript">
+  RED.nodes.registerType("yonder-config-watch", {
+    category: "yonder",
+    color: "#c7d4e0",
+    defaults: { name: { value: "" }, interval: { value: 2 } },
+    inputs: 0,
+    outputs: 1,
+    icon: "font-awesome/fa-refresh",
+    label: function () { return this.name || "the configuration, when it changes"; },
+  });
+</script>

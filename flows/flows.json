@@ -365,27 +365,17 @@
         ]
     },
     {
-        "id": "config-on-open",
-        "type": "inject",
+        "id": "watch-config",
+        "type": "yonder-config-watch",
         "z": "yonder-console",
-        "name": "read the configuration once",
-        "props": [
-            {
-                "p": "payload"
-            }
-        ],
-        "repeat": "",
-        "crontab": "",
-        "once": true,
-        "onceDelay": "1",
-        "topic": "",
-        "payload": "",
-        "payloadType": "date",
-        "x": 220,
+        "name": "the configuration, whenever it changes",
+        "interval": 2,
+        "x": 240,
         "y": 520,
         "wires": [
             [
-                "read-config"
+                "seed-cell-form",
+                "seed-tel-endpoints"
             ]
         ]
     },

@@ -337,7 +337,7 @@
     },
     {
       "key": "nrdb-ui-text.nrdb-ui-widget.yonder-fixed#1",
-      "text": "Accepting fromLoopback only"
+      "text": "Accepting fromAny network"
     }
   ]
 }
