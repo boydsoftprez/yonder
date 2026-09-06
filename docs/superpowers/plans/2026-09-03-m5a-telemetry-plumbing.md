@@ -87,6 +87,7 @@ its name in its own column or it looks like a different control.
 | `packages/yonder-core/src/mav/router/stats.ts` | Pure. The router's own per-endpoint counters, out of the text it prints |
 | `packages/yonder-core/src/mav/link.ts` | Pure. Heartbeats and counters → the one state the console renders |
 | `packages/yonder-core/src/mav/renderer.ts` | `MavlinkRenderer implements Renderer`. The only thing here that shells out |
+| `packages/yonder-core/src/mav/serial.ts` | The real `OpenPort`: `stty` through the runner, then `fs`. Chosen 2026-09-06 |
 | `packages/yonder-core/src/mav/listener.ts` | The loopback UDP socket on `:14559`, feeding `link.ts` |
 | `packages/yonder-core/src/daemon/routes.ts` | *(modify)* `/mav/*` routes |
 | `packages/node-red-contrib-yonder-mavlink/` | Nodes: thin adapters over the daemon socket |
@@ -2912,6 +2913,70 @@ git commit -s -m "feat(mav): the renderer — adopt, then act only on difference
 generates and imports the name rather than repeating it; `installer.test.ts` and the unit
 for Step 3a; `requirements.md` and `roadmap.md` because this task adds **R-MAV-16**, which
 is the property Step 3 is built around and which nothing had written down.
+
+---
+
+## Task 10b: `serial.ts` — opening the real wire
+
+**This task exists because `OpenPort` had no implementation.** Tasks 6 and 10 are written
+against an injected `OpenPort`, every use of it is a test fake, and `main()` passes none — so
+the renderer is complete, registered, and inert on a board. Nothing in M5a talks to an
+autopilot until this lands.
+
+**The approach was chosen by the project owner on 2026-09-06**: drive the port with `stty`
+through the injected `CommandRunner`, then read the device with `fs`. No new dependency, no
+native module, and nothing compiled on the device — the lesson `mavlink-router` taught when a
+default parallel build was killed by the OOM killer on a 905 MiB Pi 4.
+
+**What it costs, stated up front.** Node cannot issue the `TIOCGICOUNT` ioctl that Task 1's
+bench used to count framing errors, so `framingErrors` is always `0`. That is *safe* rather
+than merely tolerable: `detect.ts` treats framing errors as **sufficient** evidence of a
+mismatch and never necessary — the bench measured 921600 producing zero framing errors and
+zero frames — so detection simply falls back to the per-rate deadline. Worst case is four
+rates x 1300 ms plus settle, about 5.5 s per device, well inside `ApplyEngine`'s 60 s bound.
+
+**The one real regression:** a wire delivering only unframeable bytes reads as `silent`
+rather than `noise`, because the reader never sees a byte the UART could not frame. Task 6
+has a test for exactly that case (`calls framing errors with no delivered bytes noise, not
+silence`), and it will now be unreachable in production. Say so in `R-MAV-13`'s text rather
+than leaving a requirement that promises more than the code can deliver.
+
+**Files:**
+- Create: `packages/yonder-core/src/mav/serial.ts`, `serial.test.ts`
+- Modify: `packages/yonder-core/src/daemon/server.ts` — `main()` passes `opts.mavlink`
+- Modify: `docs/requirements.md` — `R-MAV-13`'s framing-error clause
+- Modify: `docs/hardware/an-autopilot-on-the-uart.md` — the bench transcript
+
+**Interfaces:**
+- Consumes: `CommandRunner` (`net/runner.ts`), `SerialPort`/`OpenPort` (Task 6)
+- Produces: `export function openPortWith(run: CommandRunner): OpenPort;`
+
+**Steps, in order:**
+
+1. **Write the failing tests** against a fake `CommandRunner` and a temporary file standing in
+   for the device. Cover: the exact `stty` argument vector; `settleAndFlush` discarding what
+   was already buffered; `read(ms)` returning only what arrived inside the window; `close()`
+   releasing the descriptor even when the read threw; a device that does not exist failing
+   without throwing out of `detect()` (`K-19`); and `framingErrors` being `0` with a comment
+   saying why rather than a `TODO`.
+2. **Run them and watch them fail.**
+3. **Write it.** `stty -F <device> raw -echo <baud>` through the runner, then a non-blocking
+   read. Match `net/runner.ts`'s existing shape for argument vectors and error handling. **No
+   shell string interpolation** — the device path reaches `execFile`-style arguments, never a
+   shell.
+4. **Run the tests, then the whole suite.**
+5. **Wire it in `main()`** so `buildRenderers` receives `{ open: openPortWith(runner),
+   confPath, hintPath }`, and the renderer stops being inert. Check the "no renderer" 503
+   path still behaves for a board where the device is genuinely absent.
+6. **Bench it on the board.** This is the step that makes the task real, and it must happen
+   before the commit is trusted:
+   - the sweep finds the autopilot at 115200 and names ArduPlane, system 1;
+   - the time from open to first valid heartbeat is inside 1300 ms;
+   - a wrong pinned rate ends in `noise` or `silent` and never a false `found`;
+   - `mavlink-router` starts afterwards and the console shows the link.
+   Append the transcript to `docs/hardware/an-autopilot-on-the-uart.md` under its own heading,
+   in the same shape as Tasks 1 and 2.
+7. **Commit** — `feat(mav): open the real wire with stty and fs — R-MAV-01, R-MAV-13`
 
 ---
 
