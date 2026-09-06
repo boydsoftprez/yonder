@@ -75,7 +75,8 @@ import { LABELS, deckDraft, draftPathFor, interruption } from 'yonder-core/prese
  *              preview: <same shape as policy.preview> },
  *   outputs: { kind, label, enabled, costKbps, reach: OutputReach }[],
  *   captures: { count },
- *   problems: { path, message }[] }   // only after a refused apply
+ *   problems: { path, message }[],    // only after a refused apply
+ *   problemsFor: string }             // the camera those problems are about
  * ```
  *
  * `policy` and `applied` share one schema-shaped sub-shape (schema field
@@ -839,16 +840,33 @@ export default {
      * `preview.floor_kbps` finds the `previewFloor` row it belongs to. One
      * the deck cannot place is still drawn, on its own row with its path, so
      * a problem is never silently dropped.
+     *
+     * **Two conditions before any of them is drawn, and both are about what
+     * a refusal actually is.** A refusal is a fact about *one camera's* draft:
+     *
+     * - `problemsFor` must name the camera on screen. The stash the flow
+     *   keeps is per device, not per camera, and without this a problem left
+     *   by camera A landed on camera B's matching staged path —
+     *   `previewFloor` reading "the floor is above the ceiling" beside a
+     *   perfectly valid value.
+     * - something must still be staged. With the draft discarded there is
+     *   nothing left for a problem to be about, and the block was drawing a
+     *   red sentence under a `Pending changes · 0` header. This is the rule
+     *   rather than a flag some other path has to remember to clear: the
+     *   draft going away *is* the refusal ceasing to apply.
      */
     buildPending () {
       if (this.mode !== 'setup') return null
       const pending = this.pendingEdits
-      const problems = Array.isArray(this.report.problems) ? this.report.problems : []
+      const mine = this.report.problemsFor === this.camera
+      const problems = (mine && pending.length > 0 && Array.isArray(this.report.problems))
+        ? this.report.problems
+        : []
       const stops = interruption(
         deckDraft(this.draft).draft,
         deckDraft(this.appliedFlat).draft,
       )
-      if (pending.length === 0 && stops.length === 0 && problems.length === 0) return null
+      if (pending.length === 0 && stops.length === 0) return null
       const placed = new Set()
       const problemFor = (path) => {
         const found = problems.find((p) => draftPathFor(String(p && p.path)) === path)

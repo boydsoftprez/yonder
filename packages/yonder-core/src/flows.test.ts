@@ -1992,6 +1992,7 @@ describe("flows/flows.json camera pages", () => {
     expect((pick?.rules as { to: string; tot: string }[])).toEqual([
       { t: "set", p: "payload", pt: "msg", to: "payload.deck", tot: "jsonata" },
       { t: "set", p: "payload.problems", pt: "msg", to: "camproblems", tot: "flow" },
+      { t: "set", p: "payload.problemsFor", pt: "msg", to: "camproblemsfor", tot: "flow" },
     ]);
     expect(((pick?.wires as string[][])[0] ?? []).slice().sort())
       .toEqual(["deck-cam-live", "deck-cam-setup"]);
@@ -2155,11 +2156,12 @@ describe("flows/flows.json camera pages", () => {
     const rules = open?.rules as { p: string; pt: string; to: string; tot: string }[];
     // The choice is recorded before the page is set, and it comes off the
     // press rather than out of a list.
-    expect(rules[0]).toEqual({
+    expect(rules.find((r) => r.p === "camera")).toEqual({
       t: "set", p: "camera", pt: "flow", to: "payload.camera", tot: "jsonata",
     });
-    expect(rules[1]?.p).toBe("payload");
-    expect(JSON.parse(String(rules[1]?.to))).toEqual({ page: "Camera" });
+    const page = rules.at(-1);
+    expect(page?.p).toBe("payload");
+    expect(JSON.parse(String(page?.to))).toEqual({ page: "Camera" });
     expect((flows.find((n) => n.type === "ui-yonder-index")?.wires as string[][])[0])
       .toEqual(["cam-open"]);
 
@@ -2170,6 +2172,19 @@ describe("flows/flows.json camera pages", () => {
       ?.rules as { to: string }[])[0]?.to);
     expect(identify).toContain('$flowContext("camera")');
     expect(identify).toContain("payload.found[id != null].id");
+    // **And a sweep that failed leaves the choice alone.** `yonder-cameras`
+    // emits `payload: null` when the daemon does not answer, and without this
+    // guard the expression evaluated to nothing and deleted `flow.camera` —
+    // every widget on the camera page then asking about no camera at all. A
+    // read that failed is not evidence that anything was unplugged.
+    expect(identify).toContain("$exists(payload.found)");
+
+    // A refusal belongs to one camera. Opening another clears the stash the
+    // flow keeps, rather than leaving it to be drawn against the next
+    // camera's matching staged path.
+    const cleared = JSON.stringify(open?.rules);
+    expect(cleared).toContain('"p":"camproblems"');
+    expect(cleared).toContain('"p":"camproblemsfor"');
   });
 
   /**
@@ -2192,7 +2207,12 @@ describe("flows/flows.json camera pages", () => {
     expect(kept).toEqual(["cam-kept-text"]);
 
     const text = flows.find((n) => n.id === "cam-refused-text");
+    // The problems, and the camera they are about: the node emits a fresh
+    // message, so `msg.camera` does not survive the round trip on its own,
+    // and a refusal that cannot say which camera it belongs to gets drawn
+    // against a different one.
     expect(JSON.stringify(text?.rules)).toContain('"p":"camproblems"');
+    expect(JSON.stringify(text?.rules)).toContain('"p":"camproblemsfor"');
     const toast = flows.find((n) => n.id === String((text?.wires as string[][])[0][0]));
     expect(toast?.type).toBe("ui-notification");
     // Nothing about a refusal offers a confirm: there is nothing in force to

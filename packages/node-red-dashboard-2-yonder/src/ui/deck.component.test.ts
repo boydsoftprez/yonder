@@ -463,6 +463,7 @@ it("says nothing about an interruption for an edit that causes none", async () =
 it("puts a refusal's problem beside the staged edit it is about", async () => {
   const { wrapper } = deck(makeStore(makeReport({
     problems: [{ path: "preview.floor_kbps", message: "the floor is above the ceiling" }],
+    problemsFor: "elp",
   })), "setup");
 
   // The *preview* Floor, not the stream's: both decks draw one and the
@@ -478,13 +479,65 @@ it("puts a refusal's problem beside the staged edit it is about", async () => {
 });
 
 /** A problem the deck cannot place is still drawn, with its own path — a
- * refusal must never be silently dropped. */
-it("draws a problem it cannot match to a staged edit rather than losing it", () => {
+ * refusal must never be silently dropped, and `deckDraft`'s unknown-path
+ * branch names a path that *was* staged. */
+it("draws a problem it cannot match to a staged edit rather than losing it", async () => {
   const { wrapper } = deck(makeStore(makeReport({
     problems: [{ path: "somewhere.else", message: "not a setting this device has" }],
+    problemsFor: "elp",
   })), "setup");
+  await segByLabel(wrapper, "Bitrate").findAll("button")
+    .find((b) => b.text() === "Adaptive")!.trigger("click");
   expect(wrapper.text()).toContain("not a setting this device has");
   expect(wrapper.text()).toContain("somewhere.else");
+});
+
+/**
+ * **A refusal belongs to one camera's draft, and to nothing else.**
+ *
+ * The flow keeps one stash per *device*, so both of these were reproduced on
+ * a real page: a problem from camera A drawn beside camera B's matching
+ * staged path, and a red sentence left under a `Pending changes · 0` header
+ * after Discard. Neither is a flag some navigation path has to remember to
+ * clear — they are two readings of the same rule, that a refusal about a
+ * draft stops applying when that draft does.
+ */
+describe("a refusal that is not about the draft on screen", () => {
+  const PROBLEM = { path: "preview.floor_kbps", message: "the floor is above the ceiling" };
+
+  const stagePreviewFloor = async (wrapper: VueWrapper<any>) => {
+    const floor = wrapper.findAll(".y-sb")
+      .filter((b) => b.find(".y-sb__label").text() === "Floor").at(-1)!;
+    press(floor.find(".y-sb__trk").element, 40);
+    await wrapper.vm.$nextTick();
+  };
+
+  it("is not drawn against a different camera's identical staged path", async () => {
+    const { wrapper } = deck(makeStore(makeReport({
+      problems: [PROBLEM],
+      problemsFor: "another-camera",
+    })), "setup");
+    await stagePreviewFloor(wrapper);
+
+    const row = wrapper.findAll(".y-deck__pending-row")
+      .find((r) => r.find(".y-deck__pending-path").text() === "previewFloor");
+    expect(row, "the edit itself is still pending").toBeDefined();
+    expect(row!.find(".y-deck__pending-why").exists()).toBe(false);
+    expect(wrapper.text()).not.toContain("the floor is above the ceiling");
+  });
+
+  it("is not drawn once the draft it was about has been discarded", async () => {
+    const { wrapper } = deck(makeStore(makeReport({
+      problems: [PROBLEM],
+      problemsFor: "elp",
+    })), "setup");
+    await stagePreviewFloor(wrapper);
+    expect(wrapper.text()).toContain("the floor is above the ceiling");
+
+    await wrapper.findAll(".y-deck__key").find((b) => b.text() === "Discard")!.trigger("click");
+    expect(wrapper.find(".y-deck__pending").exists(), "nothing left for it to be about").toBe(false);
+    expect(wrapper.text()).not.toContain("the floor is above the ceiling");
+  });
 });
 
 it("groups flow into columns and no group is stranded on a row of its own", () => {

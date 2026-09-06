@@ -21,7 +21,20 @@ import type { NodeMessage, RED, RedNode } from "./red.js";
 
 /** One request, or the reason there is nothing to ask for. */
 export type Ask =
-  | { method: "GET" | "POST"; path: string; body?: unknown }
+  | {
+    method: "GET" | "POST";
+    path: string;
+    body?: unknown;
+    /**
+     * Which camera this request is about, when it is about one.
+     *
+     * Carried back out on the answer (see below), because a node emits a
+     * fresh message and `msg.camera` does not survive the round trip. Only
+     * the camera routes set it; `yonder-cameras` sweeps the board and is
+     * about no single camera.
+     */
+    camera?: string;
+  }
   | { refuse: string };
 
 /**
@@ -120,6 +133,15 @@ export function registerAdapter(
             payload: null,
             yonder: readFailure(result.message, Date.now()),
             ...(Array.isArray(problems?.problems) ? { problems: problems.problems } : {}),
+            // **Which camera this answer is about.** The node emits a fresh
+            // object rather than the message it was given, so `msg.camera`
+            // — set by whatever addressed this node — does not survive the
+            // round trip on its own. A refusal that does not say which
+            // camera it is about is a refusal that can be shown against a
+            // different one: `previewFloor` on camera B rendering camera A's
+            // "the floor is above the ceiling" beside a perfectly valid
+            // value, which is what happened.
+            ...(wanted.camera === undefined ? {} : { camera: wanted.camera }),
           });
           done();
           return;

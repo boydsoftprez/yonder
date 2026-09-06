@@ -56,7 +56,7 @@ export interface CameraDraft {
  * keyed by *schema* path (`preview.floor_kbps`), and the pending block that
  * has to mark the offending field knows only its own name for it
  * (`previewFloor`). Two hand-kept lists would be two chances to disagree
- * about thirteen names; `draft-shape.test.ts` holds this one against
+ * about thirteen names; `apply/draft.test.ts` holds this one against
  * `deckDraft` by feeding it every key here and checking each lands.
  *
  * `name` is deliberately absent: it is the camera's own name, not a stream or

@@ -40,10 +40,18 @@ const streamNode = (await import("./stream.js")).default ?? await import("./stre
 const receiveNode = (await import("./receive-line.js")).default ?? await import("./receive-line.js");
 
 const ok = (body: unknown): DaemonReply => ({ ok: true, status: 200, body });
+/** The daemon answering, and refusing. `ok` here is the *transport*: the
+ * request reached the daemon and it said no, which is a different thing from
+ * a socket that would not open. */
+const refused = (status: number, body: unknown): DaemonReply => ({ ok: true, status, body });
 
 interface Received {
   payload?: unknown;
   yonder?: { state?: string; message?: string };
+  /** A refused apply's detail, by draft path — see the tests at the end. */
+  problems?: { path: string; message: string }[];
+  /** Which camera an answer is about. */
+  camera?: string;
 }
 
 /** Copied from the network package: load one node, send it a message, read the output. */
@@ -170,6 +178,60 @@ describe("yonder-camera", () => {
       await helper.unload();
     }
     expect(asked).toEqual([]);
+  });
+
+  /**
+   * **The one hop that makes a refusal usable, and it is only visible here.**
+   *
+   * `POST /cameras/:id/apply` answers 400 with `problems` — a message per
+   * draft path — precisely so the Setup deck can mark the field the operator
+   * has to change rather than showing a sentence about a form. `fetched()`
+   * reduces any non-200 to a single sentence, which is right for a status
+   * badge and drops the array; this node is what puts it back on the wire.
+   *
+   * **A component test cannot catch this**, and that is why it is here: every
+   * test in `deck.component.test.ts` mocks the socket and hands the component
+   * a report with `problems` already on it, so removing this pass-through
+   * leaves all of them green — the same shape as a widget shipping dead
+   * because `emitsActions` was missing, which only `nodes.test.ts` could see.
+   *
+   * `camera` travels with it because the node emits a *fresh* message: the
+   * `msg.camera` that addressed it does not survive the round trip, and a
+   * refusal that does not say which camera it is about can be drawn against a
+   * different one.
+   */
+  it("carries a refused apply's problems, and the camera they are about", async () => {
+    replies.push(refused(400, {
+      error: "this draft cannot be applied as it stands",
+      problems: [{ path: "preview.floor_kbps", message: "the floor is above the ceiling" }],
+    }));
+    const msg = await send(cameraNode, "yonder-camera", {
+      topic: "apply", payload: { previewFloor: 2000, previewCeiling: 500 }, camera: "cam0",
+    });
+    expect(msg.yonder?.state).toBe("rejected");
+    // The daemon's own sentence, for the toast.
+    expect(msg.yonder?.message).toBe("this draft cannot be applied as it stands");
+    // And the detail, by path, for the field.
+    expect(msg.problems).toEqual([
+      { path: "preview.floor_kbps", message: "the floor is above the ceiling" },
+    ]);
+    expect(msg.camera).toBe("cam0");
+    // Never a payload: an operator must be able to tell "nothing to show"
+    // from "this never loaded", and a widget's own report must not be
+    // overwritten by a refusal.
+    expect(msg.payload).toBeNull();
+  });
+
+  it("carries no problems where the daemon named none, rather than an empty list", async () => {
+    replies.push(refused(400, { error: "no camera is configured with the id \"cam0\"" }));
+    const msg = await send(cameraNode, "yonder-camera", {
+      topic: "apply", payload: { previewRate: 25 }, camera: "cam0",
+    });
+    expect(msg.yonder?.state).toBe("rejected");
+    // Absent, not `[]`: an empty list is a claim that the daemon looked and
+    // found nothing wrong with any field, which is not what a 404 said.
+    expect(Object.prototype.hasOwnProperty.call(msg, "problems")).toBe(false);
+    expect(msg.camera).toBe("cam0");
   });
 
   it("takes the camera from the node when the message names none", async () => {

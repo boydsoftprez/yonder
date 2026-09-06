@@ -47,7 +47,7 @@ export = function register(RED: RED): void {
         if (controls === null || typeof controls !== "object" || Array.isArray(controls)) {
           return { refuse: "this control needs an object naming brightness, contrast or rotation" };
         }
-        return { method: "POST", path: `/cameras/${id}/controls`, body: controls };
+        return { method: "POST", path: `/cameras/${id}/controls`, body: controls, camera: id };
       }
       /**
        * The Setup deck's **Apply** — one whole draft, once (R-CFG-03).
@@ -72,7 +72,7 @@ export = function register(RED: RED): void {
         if (draft === null || typeof draft !== "object" || Array.isArray(draft)) {
           return { refuse: "an apply needs a draft naming what to change" };
         }
-        return { method: "POST", path: `/cameras/${id}/apply`, body: draft };
+        return { method: "POST", path: `/cameras/${id}/apply`, body: draft, camera: id };
       }
       /**
        * One output stopped or started (R-UI-24). `msg.output` names which,
@@ -88,7 +88,7 @@ export = function register(RED: RED): void {
         if (typeof enabled !== "boolean") {
           return { refuse: "an output is switched with { enabled: true } or { enabled: false }" };
         }
-        return { method: "POST", path: `/cameras/${id}/outputs/${kind}`, body: { enabled } };
+        return { method: "POST", path: `/cameras/${id}/outputs/${kind}`, body: { enabled }, camera: id };
       }
       // R-CTL-02, R-CTL-03. A different thing again from `controls` above:
       // this changes what the camera *is* rather than what it is doing, so it
@@ -100,11 +100,11 @@ export = function register(RED: RED): void {
         if (settings === null || typeof settings !== "object" || Array.isArray(settings)) {
           return { refuse: "this control needs an object naming a setting to change" };
         }
-        return { method: "POST", path: `/cameras/${id}/settings`, body: settings };
+        return { method: "POST", path: `/cameras/${id}/settings`, body: settings, camera: id };
       }
       return msg.topic === "probe"
-        ? { method: "POST", path: `/cameras/${id}/probe` }
-        : { method: "GET", path: `/cameras/${id}` };
+        ? { method: "POST", path: `/cameras/${id}/probe`, camera: id }
+        : { method: "GET", path: `/cameras/${id}`, camera: id };
     },
     (value) => {
       const body = value as {

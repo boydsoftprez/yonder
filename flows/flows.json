@@ -4390,13 +4390,13 @@
         "id": "cam-identify",
         "type": "change",
         "z": "yonder-console",
-        "name": "which camera this device has",
+        "name": "which camera this device has, and which the operator chose",
         "rules": [
             {
                 "t": "set",
                 "p": "camera",
                 "pt": "flow",
-                "to": "$flowContext(\"camera\") in payload.found[id != null].id ? $flowContext(\"camera\") : (payload.found[id != null].id)[0]",
+                "to": "$exists(payload.found) ? ($flowContext(\"camera\") in payload.found[id != null].id ? $flowContext(\"camera\") : (payload.found[id != null].id)[0]) : $flowContext(\"camera\")",
                 "tot": "jsonata"
             }
         ],
@@ -5453,6 +5453,13 @@
                 "pt": "msg",
                 "to": "camproblems",
                 "tot": "flow"
+            },
+            {
+                "t": "set",
+                "p": "payload.problemsFor",
+                "pt": "msg",
+                "to": "camproblemsfor",
+                "tot": "flow"
             }
         ],
         "action": "",
@@ -5648,6 +5655,13 @@
             },
             {
                 "t": "set",
+                "p": "camproblemsfor",
+                "pt": "flow",
+                "to": "",
+                "tot": "str"
+            },
+            {
+                "t": "set",
                 "p": "topic",
                 "pt": "msg",
                 "to": "apply",
@@ -5755,6 +5769,20 @@
         "rules": [
             {
                 "t": "set",
+                "p": "camproblems",
+                "pt": "flow",
+                "to": "[]",
+                "tot": "json"
+            },
+            {
+                "t": "set",
+                "p": "camproblemsfor",
+                "pt": "flow",
+                "to": "",
+                "tot": "str"
+            },
+            {
+                "t": "set",
                 "p": "camera",
                 "pt": "flow",
                 "to": "payload.camera",
@@ -5792,6 +5820,13 @@
                 "p": "camproblems",
                 "pt": "flow",
                 "to": "problems",
+                "tot": "jsonata"
+            },
+            {
+                "t": "set",
+                "p": "camproblemsfor",
+                "pt": "flow",
+                "to": "camera",
                 "tot": "jsonata"
             },
             {
