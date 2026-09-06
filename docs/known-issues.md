@@ -1461,11 +1461,18 @@ anywhere in `yonder-core`. Choosing `Auto` therefore holds whatever rung the
 preview last had, exactly as choosing Adaptive holds whatever rate it last
 had — and reads to an operator as a working automatic mode.
 
-Both are plan Task 31, which is **blocked**: an adaptive controller that moved
-a rate on the respawn path would restart the picture every time the link
-moved, which is not a controller but a stutter generator. It needs the runtime
-channel K-53 records, and whether that is reachable at all is what the ffmpeg
-bench spike exists to answer.
+Both are plan Task 31, which was **blocked**: an adaptive controller that moved
+a rate on the respawn path would restart the picture every time the link moved,
+which is not a controller but a stutter generator. It needs the runtime channel
+K-53 records.
+
+**That channel is now measured and it exists**
+(`docs/hardware/ffmpeg-as-the-pipeline-composer.md`): GStreamer retunes a live
+encode with zero timestamp gaps on both boards — Pi `v4l2h264enc` 0.99 to 3.02
+Mb/s, RK3566 `mpph264enc` 0.98 to 3.92, `mpph265enc` 0.97 to 3.91. Task 31 is
+therefore no longer blocked on *whether*, only on building the host K-53
+describes. ffmpeg cannot retune on either board at any level, so an ffmpeg
+composer would make respawn-on-apply permanent and leave this entry unfixable.
 
 Two faults, and they are separable:
 
@@ -1641,6 +1648,28 @@ list in the plan today.
 **Sequencing:** plan Task 31 (the rate controller) measures thresholds on a
 throttled link and has nothing to measure until a pipeline answers. This should
 land before it.
+
+**Measured, and it changes the answer**
+(`docs/hardware/ffmpeg-as-the-pipeline-composer.md`). This entry was very nearly
+closed as won't-fix, on the reasoning that a GStreamer pipeline host would be
+thrown away by the agreed pivot to an ffmpeg composer. **That reasoning is
+void**, because the retune the host exists to reach is a thing only GStreamer
+can do:
+
+| | GStreamer | ffmpeg |
+|---|---|---|
+| Live retune, Pi | ✔ 0.99 → 3.02 Mb/s, no gaps | ✘ `ENOSYS` |
+| Live retune, RK3566 H.264 | ✔ 0.98 → 3.92 Mb/s, no gaps | ✘ |
+| Live retune, RK3566 H.265 | ✔ 0.97 → 3.91 Mb/s, no gaps | ✘ |
+
+ffmpeg refuses at every level, **including from a program holding the
+`AVCodecContext`** — the best case any pipeline host could have. Its CLI command
+channels reach filters, not encoders, and `h264_rkmpp`'s fifteen options carry
+no runtime flag.
+
+So the host is not merely still viable: it is the only route to R-VID-07 that
+exists, and it works on both boards. Its shape is unchanged from what this entry
+already describes. What has changed is that it is worth building.
 
 ### K-54 · A detected camera cannot be configured from the console
 
