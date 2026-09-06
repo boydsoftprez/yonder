@@ -97,6 +97,53 @@ decision**, alongside the Pi re-proof, not a task to schedule afterwards. The me
 wants one stream carrying a burned-in frame counter, compared against what the receiver
 displays; no clock synchronisation and no additional traffic are required.
 
+### The gates were measured, and the premise failed
+
+**Added 2026-09-06, after the measurements this section asked for.** Evidence:
+[`ffmpeg-as-the-pipeline-composer.md`](../../hardware/ffmpeg-as-the-pipeline-composer.md).
+The decision above is left as written; what follows is what the gates returned.
+
+**Both gates clear.** The Pi re-proof passes — ffmpeg holds 30 fps in the two-branch shape
+on a Pi with a camera, in twelve runs of which none failed, at about twice GStreamer's CPU.
+And latency is not the risk this section feared: measured by crossing sender against
+receiver, the composer's own contribution is **about 120 ms**, not seconds. The two-second
+QGroundControl observation is not explained by ffmpeg.
+
+**But the premise underneath the decision does not hold.** This section rejects a GStreamer
+composer on Rockchip because `gstreamer-rockchip`'s surviving forks "were last touched
+between 2019 and 2023" and "need carried patches to build against GStreamer 1.26". Both
+claims were tested on the board and both are false: `rockchip-linux/mpp` was last committed
+**2026-08-25** and JeffyCN's `gstreamer-rockchip` mirror **2026-08-26**, and the plugin
+configures and compiles against GStreamer 1.26.2 with **no patches**. Installed,
+`mpph264enc` and `mpph265enc` encode clean, decodable streams on an RK3566.
+
+**And the comparison runs the other way on every axis except delivery:**
+
+| | GStreamer | ffmpeg |
+|---|---|---|
+| Live bitrate retune, Pi | ✔ 0.99 → 3.02 Mb/s, no gap | ✘ `ENOSYS` at every level |
+| Live bitrate retune, RK3566, H.264 and H.265 | ✔ 0.96 → 3.93 Mb/s, no gap | ✘ same |
+| CPU, Pi two-branch | +10.5 points | +18.8 points |
+| Latency, Pi, sender side | ~31 ms | ~153 ms |
+| Camera path, RK3566, two branches | +4 points, ~29 fps | not measured |
+| **Delivery** | build MPP and the plugin from source in CI | **one pinned `.deb`** |
+
+Delivery is the one column ffmpeg wins and the cost is real. The reasons this section gave
+for refusing to pay it were not.
+
+**R-VID-07 is the tiebreaker with a requirement behind it.** A bitrate that moves on a
+running pipeline is what plan Task 31's rate controller exists to use, and what §8.1 asks
+for. GStreamer delivers it on both boards; ffmpeg delivers it on neither, so choosing ffmpeg
+means choosing respawn-on-apply permanently and telling Task 31 so. See K-53, whose remedy
+this evidence validates rather than obsoletes.
+
+**Three corrections stand whichever composer is chosen**, because they were measured on the
+Pi and are properties of that board: the direct translation of `compose()` into ffmpeg does
+not run at all (`h264_v4l2m2m` refuses the `yuvj420p` its MJPEG decoder emits); under ffmpeg
+the Pi has no hardware scaler, because `v4l2convert` is a GStreamer element with no ffmpeg
+equivalent; and §4's converter probe therefore owes an answer for what it selects on a Pi
+under ffmpeg. See also K-54.
+
 ## 3. Delivery: one pinned package, nothing compiled
 
 ### Evidence
@@ -271,9 +318,12 @@ whole rule. IDs are stable and never reused, so this takes the next free number.
 Two of these are **gates on §2**, not follow-up work. If either goes the wrong way, the
 single-ffmpeg-composer decision has to be reopened rather than patched around.
 
-- **The Pi re-proof** (§2). Named as the risk it is.
-- **End-to-end latency** (§2). Roughly two seconds observed; the receiver is the likely
-  cause and the pipeline's own share is unmeasured. A gate, for the reason §2 gives.
+- ~~**The Pi re-proof** (§2)~~ — **measured 2026-09-06 and passed.** ffmpeg holds 30 fps
+  in the two-branch shape on a Pi with a camera, at about twice GStreamer's CPU.
+- ~~**End-to-end latency** (§2)~~ — **measured 2026-09-06.** The composer's own contribution
+  is about 120 ms, not seconds; the receiver is the larger term, which §2's inference got
+  right. Neither figure reopens the decision. **A third question does:** the premise that
+  GStreamer cannot reach Rockchip hardware is false — see §2's addendum.
 - **Per-board encoder limits.** This board sustains two simultaneous 1920×1200 encodes;
   three fail with `ioctl(VIDIOC_QBUF): Bad file descriptor`, and degrade silently by
   duplicating frames before they do. R-HW-05 asks for such limits to be documented and
