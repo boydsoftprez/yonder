@@ -156,8 +156,27 @@ ua_strip_console() {
     done
     ua_stripped=$(printf '%s\n' "$ua_stripped" \
         | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//; s/[[:space:]]+/ /g')
-    printf '%s\n' "$ua_stripped" > "$1.new"
-    mv "$1.new" "$1"
+
+    # Every step checked, and the temporary removed on any failure — the
+    # shape 15-mavlink-router.sh's own mr_install_bin already uses, and it
+    # matters more here than it does there.
+    #
+    # This is the only thing on this branch that writes the boot partition,
+    # and cmdline.txt is the one file on it a kernel cannot boot without:
+    # lose `root=` and there is no root filesystem to mount, which is a board
+    # that never comes up at all. R-NET-07's access-point fallback lives
+    # inside yonder-core and cannot help a kernel that never reaches it, and
+    # this role has just taken the serial console off the header pins, so
+    # there is no way back in over those either.
+    #
+    # Unchecked, that is exactly what a full boot partition produced: /boot
+    # /firmware is a small vfat, `printf` fails part-way through with ENOSPC,
+    # `mv` renames the truncated file over the real one anyway, and `run`
+    # reports success — `run`'s body is `"$@" || die`, and a `||` suppresses
+    # `set -e` for the whole of the function it is testing, so nothing inside
+    # here aborts on its own.
+    printf '%s\n' "$ua_stripped" > "$1.new" || { rm -f "$1.new"; return 1; }
+    mv "$1.new" "$1" || { rm -f "$1.new"; return 1; }
 }
 
 if grep -Eq "$ua_console_re" "$ua_cmdline"; then

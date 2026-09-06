@@ -1019,6 +1019,101 @@ describe("the UART role", () => {
     expect(calls).toContain("deb-systemd-helper disable hciuart.service");
   });
 
+  /**
+   * console=serial0 has to be found and removed regardless of where it
+   * falls on the line and whether a baud is even pinned to it, without
+   * disturbing a neighbouring console= entry or leaving a doubled or
+   * dangling space behind. Each of these failed at least once while this
+   * role was being written.
+   */
+  it.each([
+    ["only token, with a baud", "console=serial0,115200", ""],
+    ["only token, no baud", "console=serial0", ""],
+    ["first token", "console=serial0,115200 root=x rootwait", "root=x rootwait"],
+    ["last token", "root=x rootwait console=serial0,115200", "root=x rootwait"],
+    ["no baud, in the middle", "root=x console=serial0 rootwait quiet", "root=x rootwait quiet"],
+    ["beside a different console=", "console=serial0 console=tty1", "console=tty1"],
+    // Two adjacent tokens share the one space between them: a single sed
+    // pass folds it into the first match's trailing group, leaving the
+    // second with no leading separator to match and letting it survive —
+    // fails safe (the post-condition re-runs this same regex and dies) but
+    // stops the install. The removal loops to a fixed point precisely so
+    // this case comes out clean in one role run rather than dying here.
+    ["two adjacent tokens", "root=x console=serial0,115200 console=serial0 rootwait", "root=x rootwait"],
+  ])("removes console=serial0 — %s", (_desc, before, after) => {
+    const { path } = stubSystemdTools();
+    const boot = bootFixture("dtparam=audio=on\n", `${before}\n`);
+
+    const r = runUart(boot, { path });
+    expect(r.code, r.out).toBe(0);
+    expect(readFileSync(join(boot, "cmdline.txt"), "utf8")).toBe(`${after}\n`);
+  });
+
+  /**
+   * **A cmdline.txt that could not be written whole is never renamed over
+   * the real one** (rule 6, and the sharpest case of it on this branch).
+   *
+   * /boot/firmware is a small vfat and this role is the only thing here that
+   * writes it. `printf` failing part-way through — ENOSPC above all — leaves
+   * a truncated file, and renaming that over cmdline.txt drops `root=`,
+   * which is a kernel with no root filesystem to mount: a board that never
+   * boots at all. `R-NET-07`'s access point lives inside `yonder-core` and
+   * cannot help a kernel that never reaches it, and this role has just taken
+   * the serial console off the header pins.
+   *
+   * Nothing above catches it either: `run`'s body is `"$@" || die`, and the
+   * `||` suppresses `set -e` for the whole function under test, so an
+   * unchecked `printf` and an unchecked `mv` both "succeed".
+   *
+   * Injected as *a write that fails with something already sitting at the
+   * temporary's path* — the state an earlier attempt interrupted between its
+   * write and its rename leaves behind, which `mr_install_bin`'s own
+   * docstring says happens. That is what separates a checked write from an
+   * unchecked one: unchecked, the `mv` runs regardless and promotes whatever
+   * is at that path over cmdline.txt, and `run` reports success. A directory
+   * in the way alone would not distinguish them, because the `mv` fails too.
+   *
+   * The refusal is `EISDIR` rather than a permission bit deliberately: a test
+   * that runs as root — a self-hosted runner does — writes straight through
+   * a mode and quietly stops testing anything. `EISDIR` is refused for every
+   * uid, on Linux and on a developer's Mac alike.
+   */
+  it("leaves cmdline.txt alone when the new copy cannot be written", () => {
+    const { path } = stubSystemdTools();
+    const original = "console=serial0,115200 console=tty1 root=PARTUUID=1234-01 rootwait\n";
+    const boot = bootFixture(STANZA, original);
+    const stale = join(boot, "cmdline.txt.new");
+    symlinkSync(boot, stale);
+
+    const r = runUart(boot, { path });
+    expect(r.code, r.out).not.toBe(0);
+    expect(r.out).toContain("command failed");
+    // The one thing that must still be true: cmdline.txt is still the file
+    // it was, and the kernel still has a root= to mount.
+    expect(statSync(join(boot, "cmdline.txt")).isFile(), "cmdline.txt is no longer a file").toBe(true);
+    expect(readFileSync(join(boot, "cmdline.txt"), "utf8")).toBe(original);
+    expect(existsSync(stale)).toBe(false);
+  });
+
+  /**
+   * The same for the rename. `mv` is not a builtin, so a stub on PATH fails
+   * it for every uid — and the temporary must not be left behind next to the
+   * real file for whoever finds it next to wonder about, which is
+   * `mr_install_bin`'s own stated reason for cleaning up inside the function.
+   */
+  it("leaves cmdline.txt alone, and no stray temporary, when the rename fails", () => {
+    const { path } = stubSystemdTools();
+    const bin = join(dir, "sdbin");
+    writeFileSync(join(bin, "mv"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+    const original = "console=serial0,115200 root=PARTUUID=1234-01 rootwait\n";
+    const boot = bootFixture(STANZA, original);
+
+    const r = runUart(boot, { path });
+    expect(r.code, r.out).not.toBe(0);
+    expect(readFileSync(join(boot, "cmdline.txt"), "utf8")).toBe(original);
+    expect(existsSync(join(boot, "cmdline.txt.new"))).toBe(false);
+  });
+
   it("never asserts /dev/ttyAMA0 itself — that fails every image build in a chroot", () => {
     // The trap named in the plan: install.sh also runs in a chroot on a
     // build host, where the board's UART does not exist and no overlay has
