@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, it, expect } from "vitest";
 import {
+  aimPanel,
   ASSUMED_UPLINK_KBPS,
   atIp,
+  cameraDeck,
+  cameraIndex,
   cameraStrip,
   capabilityFacts,
   identityWords,
@@ -362,5 +365,258 @@ describe("cameraStrip", () => {
     expect(strip.state).toBe("failed — the pipeline exited with code 1");
     expect(strip.device).toBe("not resolved");
     expect(strip.identity).toBe("not resolved — this camera did not answer");
+  });
+});
+
+/* ------------------------------------------------------------------------ *
+ * The probe-to-row adapter, and the two payloads beside it.
+ * ------------------------------------------------------------------------ */
+
+function detection(over: Partial<{
+  device: string; card: string; byPath: string; byPathStable: boolean;
+  capabilities: CameraCapabilities;
+}> = {}) {
+  return {
+    device: "/dev/video0",
+    card: "Global Shutter Camera: Global S",
+    byPath: BY_PATH,
+    byPathStable: true,
+    capabilities: noCapabilities(),
+    ...over,
+  };
+}
+
+describe("cameraIndex — the probe-to-row adapter", () => {
+  /**
+   * **R-CAM-05, which is the whole subject of the id.** A configuration
+   * stores the *socket* — the `/dev/v4l/by-path/` name — and this is what
+   * matches a detection to a configured camera. Unplug the camera and plug it
+   * back into the same socket and `byPath` is the same string, so the same id
+   * comes back whatever `/dev/videoN` the kernel hands it this time.
+   */
+  it("matches a detection to a configured camera by its socket, not its /dev node", () => {
+    const { cameras } = cameraIndex({
+      // The enumeration number has moved, as it does across a replug.
+      found: [detection({ device: "/dev/video7" })],
+      rejected: [],
+      cameras: [camera()],
+      run: () => "running",
+    });
+    expect(cameras[0]?.id).toBe("front");
+    expect(cameras[0]?.name).toBe("Front camera");
+    expect(cameras[0]?.bus).toBe("usb · /dev/video7");
+  });
+
+  /**
+   * The other half of R-CAM-05, and the reason `identityWords` exists: a
+   * camera held by an enumeration number will mean a different device after a
+   * reboot, and the row has to say so or nobody ever learns it.
+   */
+  it("carries the identity sentence, in both of its forms", () => {
+    const stable = cameraIndex({
+      found: [detection()], rejected: [], cameras: [camera()], run: () => "stopped",
+    });
+    expect(stable.cameras[0]?.identity).toContain("survives a reboot");
+
+    const unstable = cameraIndex({
+      found: [detection({ byPath: "/dev/video0", byPathStable: false })],
+      rejected: [],
+      cameras: [camera({ device: "/dev/video0" })],
+      run: () => "stopped",
+    });
+    expect(unstable.cameras[0]?.identity)
+      .toContain("it may mean a different camera after a reboot");
+  });
+
+  /**
+   * R-UI-03: a camera detected on a socket nothing is configured for has no
+   * page to open. It is still a row — *there is a camera here and Yonder is
+   * not set up for it* is exactly what an operator has to be told — with a
+   * null id, which is what `YonderIndex` draws an inert key for.
+   */
+  it("reports a camera on an unconfigured socket as a row with no id", () => {
+    const { cameras } = cameraIndex({
+      found: [detection()], rejected: [], cameras: [], run: () => "stopped",
+    });
+    expect(cameras[0]?.id).toBeNull();
+    expect(cameras[0]?.name).toBe("Global Shutter Camera: Global S");
+    expect(cameras[0]?.state).toBe("Not configured");
+    expect(cameras[0]?.tone).toBe("neutral");
+  });
+
+  /**
+   * **`state` and `tone` come from the supervisor's observed run state**, and
+   * never from the configuration: `enabled` and `autostart` are what the
+   * operator asked for, and a camera that was asked to run and did not is the
+   * one case an operator most needs the row to be honest about.
+   */
+  it("takes state and tone from what the supervisor observed", () => {
+    const seen = (state: "running" | "starting" | "failed" | "stopped") =>
+      cameraIndex({
+        found: [detection()], rejected: [], cameras: [camera()], run: () => state,
+      }).cameras[0];
+    expect(seen("running")).toMatchObject({ state: "Streaming", tone: "good" });
+    expect(seen("starting")).toMatchObject({ state: "Starting", tone: "waiting" });
+    expect(seen("failed")).toMatchObject({ state: "Failed", tone: "bad" });
+    expect(seen("stopped")).toMatchObject({ state: "Idle", tone: "neutral" });
+  });
+
+  /**
+   * **`rate` is measured egress, and nothing on this branch measures one.**
+   *
+   * The camera below is configured at 2000 kb/s and the row still reads
+   * `null`. That is the point: a number nobody measured is a number nobody
+   * should act on, and echoing the configured target into the column an
+   * operator reads to find out what is *actually* going out is the most
+   * plausible wrong answer available. `YonderIndex` draws null as "none".
+   */
+  it("reports no rate at all until something measures one, never the configured target", () => {
+    const { cameras } = cameraIndex({
+      found: [detection()], rejected: [], cameras: [camera()], run: () => "running",
+    });
+    expect(cameras[0]?.rate).toBeNull();
+
+    // And when a measurement exists it is stated at IP, the layer an uplink
+    // actually carries — the same layer every other rate on this console is.
+    const measured = cameraIndex({
+      found: [detection()], rejected: [], cameras: [camera()],
+      run: () => "running", egressKbps: () => 1800,
+    });
+    expect(measured.cameras[0]?.rate).toBeCloseTo(atIp(1800) / 1000, 2);
+  });
+
+  /** R-CAM-12: a rejection travels with its reason, never filtered out. */
+  it("carries every rejection through with the reason the probe gave", () => {
+    const { rejected } = cameraIndex({
+      found: [],
+      rejected: [{ device: "/dev/video10", reason: "a hardware codec, not a camera (K-40)" }],
+      cameras: [camera()],
+      run: () => "stopped",
+    });
+    expect(rejected).toEqual([
+      { device: "/dev/video10", reason: "a hardware codec, not a camera (K-40)" },
+    ]);
+  });
+});
+
+describe("cameraDeck", () => {
+  const encoder = { element: "v4l2h264enc", hardware: true };
+  const paths = { lan: true, mesh: false, cellular: false };
+
+  it("draws descriptors and values from the device, in display units", () => {
+    const deck = cameraDeck({
+      camera: camera(),
+      capabilities: { ...noCapabilities(), brightness: present({ ...range, current: 64 }) },
+      encoder,
+      paths,
+    });
+    expect(deck.descriptors.brightness?.current).toBe(64);
+    expect(deck.values.brightness).toBe(64);
+    // A capability the device did not offer gets neither, so the deck draws a
+    // fact rather than a control with an invented range (R-UI-20).
+    expect(deck.descriptors.contrast).toBeUndefined();
+  });
+
+  /**
+   * **`policy` is the configuration's and `applied` is a second name for it**
+   * — equal today because nothing tracks a running pipeline's own settings,
+   * kept apart because a respawn in flight is when they differ, and the deck
+   * compares its draft against `applied` alone.
+   */
+  it("carries the stream and preview policy from the configuration, twice over", () => {
+    const deck = cameraDeck({ camera: camera(), capabilities: null, encoder, paths });
+    expect(deck.policy.stream).toMatchObject({ mode: "fixed", bitrate_kbps: 2000 });
+    expect(deck.policy.preview).toMatchObject({ mode: "adaptive", size: "auto" });
+    expect(deck.applied).toEqual(deck.policy);
+  });
+
+  /** R-UI-24: an output states which way it has to travel and whether it can. */
+  it("states each output's reach, from the paths this board actually has", () => {
+    const behindNat = cameraDeck({
+      camera: camera({
+        outputs: [
+          { kind: "rtp", host: "192.168.77.20", port: 5600, enabled: true },
+          { kind: "rtsp", password: { secret: "rtsp_password" }, enabled: false },
+        ],
+      } as Partial<Camera>),
+      capabilities: null,
+      encoder,
+      paths: { lan: false, mesh: false, cellular: true },
+    });
+    expect(behindNat.outputs[0]).toMatchObject({ kind: "rtp", enabled: true });
+    expect(behindNat.outputs[0]?.reach.reachable).toBe(true);
+    // A listener cannot be dialled from behind a carrier's NAT, and a stopped
+    // output keeps everything but its `enabled`.
+    expect(behindNat.outputs[1]).toMatchObject({ kind: "rtsp", enabled: false });
+    expect(behindNat.outputs[1]?.reach.reachable).toBe(false);
+  });
+
+  /**
+   * Board recording (§8.3) is unbuilt, so there is nothing to count, and the
+   * interruption a draft would cause is computed from the draft — which lives
+   * in the browser and is not sent until Apply.
+   */
+  it("counts no captures and claims no interruption", () => {
+    const deck = cameraDeck({ camera: camera(), capabilities: null, encoder, paths });
+    expect(deck.captures).toEqual({ count: 0 });
+    expect(deck.interruption).toEqual([]);
+  });
+});
+
+describe("aimPanel", () => {
+  it("draws nothing but a fact for a camera with no gimbal", () => {
+    expect(aimPanel(noCapabilities())).toMatchObject({ state: "not-offered", bounds: null });
+  });
+
+  it("keeps the panel and carries the reason for one that advertises and does not answer", () => {
+    const panel = aimPanel({
+      ...noCapabilities(),
+      aim: advertised("advertises pan and tilt but there is no motor behind either"),
+    });
+    expect(panel.state).toBe("advertised");
+    expect(panel.reason).toContain("no motor");
+  });
+
+  /**
+   * **A reported position is a fact nothing reports yet**, and an envelope is
+   * only drawn where the device answered both ends of both axes. §8.7's 20 Hz
+   * attitude push is unbuilt; a zero here would be a claim about where a
+   * gimbal is pointing that nothing measured — the same defect as an
+   * unmeasured rate one field over.
+   *
+   * And the panel is inhibited, because R-CMD-04's motion guard is unbuilt:
+   * a pad that could send a rate with no bounds check behind it would be the
+   * console deciding what is safe.
+   */
+  it("answers bounds where the device gave them, and no position at all", () => {
+    const panel = aimPanel({
+      ...noCapabilities(),
+      aim: present({
+        yaw: { min: -180, max: 180 },
+        pitch: { min: -90, max: 30 },
+        mode: "follow",
+      }),
+    });
+    expect(panel.state).toBe("present");
+    expect(panel.bounds).toEqual({ pan: [-180, 180], tilt: [-90, 30] });
+    expect(panel.pan).toBeNull();
+    expect(panel.tilt).toBeNull();
+    expect(panel.mode).toBe("follow");
+    expect(panel.modes).toEqual([]);
+    expect(panel.inhibited).toContain("guard is not built");
+  });
+
+  it("draws no envelope at all where only one end of an axis was answered", () => {
+    const panel = aimPanel({
+      ...noCapabilities(),
+      aim: present({
+        yaw: { min: -180, max: null },
+        pitch: { min: -90, max: 30 },
+        mode: "follow",
+      }),
+    });
+    // Half an envelope is not an envelope: a gauge drawn against a bound
+    // nothing reported puts a scale on the page no device agreed to.
+    expect(panel.bounds).toBeNull();
   });
 });

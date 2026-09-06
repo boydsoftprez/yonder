@@ -8,12 +8,10 @@
         <div class="y-idx__display">
             <YonderColumn legend="Flying">
                 <template v-if="cameras.length">
-                    <button
+                    <div
                         v-for="cam in cameras"
-                        :key="cam.id"
-                        type="button"
+                        :key="cam.id || cam.bus"
                         class="y-idx__cam"
-                        @click="open(cam.id)"
                     >
                         <span class="y-idx__nm"><b>{{ cam.name }}</b><span>{{ cam.bus }}</span></span>
                         <span class="y-idx__sp">
@@ -26,8 +24,14 @@
                             </span>
                             <YonderReadout :rows="[{ label: '', value: rateValue(cam), unit: 'Mb/s' }]" />
                         </span>
-                        <span class="y-idx__go" aria-hidden="true">&rsaquo;</span>
-                    </button>
+                        <button
+                            type="button"
+                            class="y-idx__open"
+                            :disabled="!cam.id"
+                            :title="cam.id ? 'Open ' + cam.name : 'No page: this camera is not configured'"
+                            @click="open(cam.id)"
+                        >OPEN<i aria-hidden="true">&rsaquo;</i></button>
+                    </div>
                 </template>
                 <p v-else class="y-idx__none">No camera.</p>
             </YonderColumn>
@@ -205,8 +209,18 @@ export default {
         },
         /** The id, never the row's own index in `cameras` (coordinator
          * resolution 5) — the index is a fact about an array, and every
-         * consumer downstream maps a camera by its id. */
+         * consumer downstream maps a camera by its id.
+         *
+         * **A row with no id posts nothing.** A camera detected on a socket
+         * nothing is configured for has no page to open (R-UI-03), and a
+         * press that reached the flow with a null id would open a page whose
+         * every widget then asks the daemon about a camera that is not in the
+         * configuration — 404 on each, "not answering" on every badge. The
+         * key is disabled as well; both, for the reason `YonderShutter` gives
+         * for guarding twice — a dispatched click reaches a disabled button's
+         * listener in a real browser. */
         open (id) {
+            if (!id) return
             this.post({ camera: id })
         },
         toneClass (tone) {
@@ -271,7 +285,7 @@ export default {
  */
 .y-idx__cam {
     display: grid;
-    grid-template-columns: 150px minmax(140px, 1fr) 168px 22px;
+    grid-template-columns: 150px minmax(140px, 1fr) 168px 76px;
     gap: 16px;
     align-items: center;
     width: 100%;
@@ -281,12 +295,46 @@ export default {
     border: 0;
     border-top: 1px solid color-mix(in srgb, var(--yonder-divider, #2b333c) 55%, transparent);
     text-align: left;
-    cursor: pointer;
     color: var(--yonder-value, #ffffff);
     font: inherit;
 }
 .y-idx__cam:first-of-type { border-top: 0; }
 .y-idx__cam:hover { background: color-mix(in srgb, var(--yonder-value, #ffffff) 3%, transparent); }
+/* **The row is a row and the key is the key** (R-UI-10). The whole row was
+   the `<button>`, which made every one of them an action 934 px wide in a
+   966 px page — *no action occupies the full width of the surface it sits
+   on*, measured in the DOM by the capture gate rather than argued about.
+   The row keeps its hover, so it still reads as one thing; what an operator
+   presses is a key sized to what it says, at the end of the row where the
+   chevron already pointed.
+
+   `:disabled` rather than absent: a camera detected on a socket nothing is
+   configured for has no page to open (R-UI-03), and a key that is missing
+   for that reason is indistinguishable from a page that failed to draw it.
+   44 px tall, which is a finger on a tablet (spec §5). */
+.y-idx__open {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    min-height: 44px;
+    padding: 0 10px;
+    border: 1px solid var(--yonder-divider, #2b333c);
+    border-radius: 2px;
+    background: transparent;
+    font-family: var(--yonder-font-mono, ui-monospace, monospace);
+    font-size: 0.5625rem;
+    font-weight: 700;
+    letter-spacing: 0.13em;
+    color: var(--yonder-label, #7f8a95);
+    cursor: pointer;
+}
+.y-idx__open:hover:not(:disabled) {
+    color: var(--yonder-value, #ffffff);
+    border-color: var(--yonder-select, #2ad4f0);
+}
+.y-idx__open:disabled { cursor: not-allowed; opacity: 0.45; }
+.y-idx__open i { font-size: 15px; font-style: normal; }
 
 .y-idx__nm { display: flex; flex-direction: column; gap: 3px; }
 .y-idx__nm b { font-size: 13.5px; font-weight: 600; }
@@ -333,7 +381,6 @@ export default {
 .y-idx__ann.tone-bad { border-color: var(--yonder-bad, #ff4034); color: var(--yonder-bad, #ff4034); }
 .y-idx__ann.tone-neutral { border-color: var(--yonder-label, #7f8a95); color: var(--yonder-label, #7f8a95); }
 
-.y-idx__go { font-size: 19px; color: var(--yonder-label, #7f8a95); text-align: right; }
 .y-idx__none {
     margin: 0;
     padding: 11px 0;

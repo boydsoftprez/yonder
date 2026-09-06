@@ -1082,6 +1082,58 @@ describe("the picture is the shape of the picture (defect 1)", () => {
     // a fresh negotiation has not yet delivered a new `loadedmetadata`.
     expect(frameAspect(wrapper)).toBeCloseTo(1920 / 1080, 5);
   });
+
+  /**
+   * **And the shape is bounded by the slot, not only derived from the
+   * width** — the half of defect 1 the three tests above cannot see, because
+   * every one of them asks what shape the box is and none asks how big.
+   *
+   * Dashboard sizes a widget's grid area at `60h - 12` px, so a frame whose
+   * height is derived from `width: 100%` alone stands 543 px tall in the
+   * 408 px seven rows buy and 633 px at 1440 — the exact numbers the capture
+   * gate reported, on a page whose shape was already right. So this asserts
+   * the four declarations that make the box take *the lesser* of the room
+   * across and the room down, read through `getComputedStyle` (confirmed
+   * against this project's jsdom: it keeps `min()`, `calc()`, a `cqh` length
+   * and `container-type` verbatim, unlike the per-element caching that made
+   * `frameAspect` above read the raw attribute instead).
+   *
+   * Nothing here is measured. `jsdom` performs no layout, and the arithmetic
+   * these four declarations perform is the browser's; what a unit test can
+   * hold is that they are still declared, and the capture gate holds the
+   * result — `nrdb-ui-yonder-picture` spilling over what follows it is the
+   * finding that returns the moment any one of them is dropped.
+   */
+  it("is never taller than the slot the page gave it", () => {
+    const { wrapper } = mountPicture();
+    const fit = wrapper.find(".y-pic__fit");
+    expect(fit.exists(), "the frame needs a box to be fitted inside").toBe(true);
+
+    // `cqh` on the frame has to resolve against *this* box — the widget's own
+    // grid area — and it only does while this box is a size container. Drop
+    // this and the same `min()` silently measures the nearest container that
+    // is one, or the small viewport, which is not the slot.
+    expect(getComputedStyle(fit.element).containerType).toBe("size");
+
+    const frame = getComputedStyle(wrapper.find(".y-pic__frame").element);
+    // The lesser of the two, with `aspect-ratio` turning whichever won into
+    // the height. `100%` alone is the shipped defect.
+    expect(frame.width).toContain("min(100%");
+    expect(frame.width).toContain("100cqh");
+    // The belt-and-braces clamp, and the whole fallback for a browser with no
+    // container queries: without it, dropping the `min()` line at parse time
+    // leaves `width: 100%` and the overflow exactly as it was.
+    expect(frame.maxHeight).toBe("100%");
+    expect(frame.maxWidth).toBe("100%");
+
+    // And the slot really is what is being divided: the root fills the grid
+    // area and hands the picture a track that cannot grow past it. A `1fr`
+    // track without the `minmax(0, ...)` floor takes its minimum from its
+    // content, which is the overflow again with more steps.
+    const root = getComputedStyle(wrapper.find(".y-pic").element);
+    expect(root.height).toBe("100%");
+    expect(root.gridTemplateRows).toContain("minmax(0, 1fr)");
+  });
 });
 
 /** Every overlay's declared `z-index`, read straight off the stylesheet —

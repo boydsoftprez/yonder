@@ -4,8 +4,8 @@
         <button
             type="button"
             class="y-shutter__btn"
-            :class="{ lit: isRecording }"
-            :disabled="pending"
+            :class="{ lit: isRecording, inhibited: Boolean(inhibited) }"
+            :disabled="pending || Boolean(inhibited)"
             :aria-pressed="isRecording ? 'true' : 'false'"
             @click="press"
         >
@@ -13,6 +13,7 @@
             <span class="y-shutter__label">{{ label }}</span>
         </button>
         <span v-if="isRecording" class="y-shutter__elapsed">{{ elapsed }}</span>
+        <span v-if="inhibited" class="y-shutter__why">{{ inhibited }}</span>
         <span v-if="destination" class="y-shutter__dest">{{ destination }}</span>
     </div>
 </template>
@@ -85,7 +86,25 @@ export default {
         /** A press is in flight, awaiting the device's own acknowledgement
          * (§8.3) — see this component's own doc comment on why this is
          * not the same fact as `recording`. */
-        pending: { type: Boolean, default: false }
+        pending: { type: Boolean, default: false },
+        /**
+         * Why this key cannot be pressed right now — spec §4's *advertised*
+         * and *gated* rows applied to the one control on the deck that
+         * starts something (R-UI-21).
+         *
+         * **A different fact from `pending`, and drawn differently.**
+         * `pending` is a press already in flight and is momentary; this is
+         * the capability itself saying the key exists and will not act —
+         * a camera that lists a recorder and has no card in it, or a board
+         * whose own recorder is not built. Spec §4 is explicit that neither
+         * state hides the control: an operator who cannot find Record at all
+         * has to work out whether the page is broken or the camera cannot
+         * do it, and the key with its reason under it answers that in
+         * place. Null when it can be pressed — never an empty string,
+         * because `v-if` on `''` and on `null` read the same here and only
+         * one of them is a state anybody meant.
+         */
+        inhibited: { type: String, default: null }
     },
     emits: ['record', 'photo'],
     data: () => ({ now: Date.now(), tick: null }),
@@ -114,8 +133,12 @@ export default {
     methods: {
         press () {
             // Guard one of two — see this component's own doc comment on
-            // why there are two rather than one.
-            if (this.pending) return
+            // why there are two rather than one. `inhibited` is guarded in
+            // both places for the identical reason `pending` is: a
+            // dispatched click reaches a disabled button's listener in a
+            // real browser even though `.click()` does not, so the attribute
+            // alone is not provably the one holding.
+            if (this.pending || this.inhibited) return
             this.$emit(this.mode === 'photo' ? 'photo' : 'record')
         }
     }
@@ -176,5 +199,17 @@ export default {
     font-size: 10.5px;
     color: var(--yonder-label, #7f8a95);
     text-align: center;
+}
+/* The caution tone (R-UI-21): a key that will not act because the capability
+   is advertised and unanswered is a fault the operator should read, and the
+   ring is dimmed rather than the key hidden — spec §4. A *gated* key gets the
+   same disabled key with a neutral reason, because the caller passes the
+   sentence and this component chooses no tone from the words in it. */
+.y-shutter__btn.inhibited { opacity: 0.5; }
+.y-shutter__why {
+    font-size: 10.5px;
+    color: var(--yonder-waiting, #ffcf28);
+    text-align: center;
+    max-width: 15rem;
 }
 </style>

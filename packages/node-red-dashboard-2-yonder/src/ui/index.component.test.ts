@@ -217,14 +217,49 @@ describe("a found camera's row", () => {
         expect(gimbalRate.classes()).toContain("is-absent");
     });
 
-    it("pressing a row emits { camera: id } — the id, never the row's index", () => {
+    it("pressing the row's key emits { camera: id } — the id, never the row's index", () => {
         const { wrapper, emit } = mountIndex(makeReport());
-        camRows(wrapper)[1]!.trigger("click"); // the second row: index 1, id "gimbal"
+        camRows(wrapper)[1]!.find(".y-idx__open").trigger("click"); // row 1, id "gimbal"
         expect(emit).toHaveBeenCalledTimes(1);
         const [event, id, msg] = emit.mock.calls[0]!;
         expect(event).toBe("widget-action");
         expect(id).toBe("i1");
         expect(msg).toEqual({ payload: { camera: "gimbal" } });
+    });
+
+    /**
+     * **R-UI-10: the row is a row, and the key is the key.**
+     *
+     * Every row used to *be* the button, which made each one an action 934 px
+     * wide inside a 966 px page — the capture gate measures that in the DOM
+     * and reported it on both palettes. Pressing the row body must therefore
+     * do nothing, and that has to be asserted rather than assumed: a `@click`
+     * left on the container would restore the old behaviour with the new
+     * markup and every other test here would still pass.
+     */
+    it("does not act on a press anywhere but that key", () => {
+        const { wrapper, emit } = mountIndex(makeReport());
+        camRows(wrapper)[1]!.trigger("click");
+        camRows(wrapper)[1]!.find(".y-idx__nm").trigger("click");
+        expect(emit).not.toHaveBeenCalled();
+    });
+
+    /**
+     * R-UI-03: a camera detected on a socket nothing is configured for has no
+     * page to open. The key stays — an absent one reads as a page that failed
+     * to draw it — and is inert, guarded in both places for the reason
+     * `YonderShutter` gives: a dispatched click reaches a disabled button's
+     * listener in a real browser even though `.click()` does not.
+     */
+    it("draws an inert key for a camera nothing is configured for, and posts nothing", () => {
+        const report = makeReport();
+        report.cameras[0]!.id = null;
+        const { wrapper, emit } = mountIndex(report);
+        const key = camRows(wrapper)[0]!.find(".y-idx__open");
+        expect(key.exists()).toBe(true);
+        expect(key.attributes("disabled")).toBeDefined();
+        key.trigger("click");
+        expect(emit).not.toHaveBeenCalled();
     });
 });
 

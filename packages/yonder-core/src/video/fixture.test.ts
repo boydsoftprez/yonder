@@ -49,6 +49,40 @@ describe("the harness camera fixture", () => {
     expect(() => summarise(fixture.found[0].capabilities)).not.toThrow();
   });
 
+  /**
+   * **The two keys no probe reads, named rather than exempted.**
+   *
+   * `recording` and `stills` are not V4L2 controls: `CONTROL_MAP` has no
+   * entry for either, `v4l2-ctl` says nothing about them, and `probeCamera`
+   * therefore leaves both at `noCapabilities()`'s `not-offered` — which is
+   * the *model's* default, not the board's answer. Where a recording or a
+   * still can go is the daemon's fact (spec §8.3, R-CAM-17, R-CAM-18), and
+   * the daemon in this harness is the fixture, so the fixture states them.
+   *
+   * Named here so the exception cannot widen quietly. The test below holds
+   * three things at once: that these two and only these two differ from the
+   * rebuild, that the rebuild genuinely could not answer them, and that each
+   * carries the sentence the page draws under an inoperative key (spec §4).
+   */
+  const SEEDED = ["recording", "stills"] as const;
+
+  it("names the two keys no probe reads, and answers both", () => {
+    // Nothing outside `SEEDED` may be a key the probe cannot fill: `aim` is
+    // the one to watch, since spec §11 adds `pan_absolute`/`tilt_absolute` to
+    // CONTROL_MAP and it would otherwise silently join this exemption.
+    const readable = new Set<string>([...CONTROL_MAP.map(([, key]) => key), "formats", "aim"]);
+    expect(CAPABILITY_KEYS.filter((k) => !readable.has(k))).toEqual([...SEEDED]);
+
+    for (const key of SEEDED) {
+      const cap = fixture.found[0].capabilities[key] as { state: string; reason?: string };
+      // Advertised, not present: the console can command a capture and the
+      // board has nowhere to put the file, which is a control that is drawn
+      // and will not act — spec §4's own row, with its reason.
+      expect(cap.state).toBe("advertised");
+      expect(String(cap.reason ?? ""), `${key} must say why`).not.toBe("");
+    }
+  });
+
   it("is the board's answer, not a hand-written one", () => {
     // Rebuilding it the way probeCamera does must reproduce it exactly. This
     // is what stops the next person filling a new key in by eye: a guess and
@@ -67,6 +101,15 @@ describe("the harness camera fixture", () => {
     for (const [v4l2Name, key] of CONTROL_MAP) {
       const range = ranges.get(v4l2Name);
       if (range) Object.assign(rebuilt, { [key]: gateIfInactive(range, key) });
+    }
+    // Exact, for every key but the two the probe cannot read at all — those
+    // are carried across from the fixture here so that a hand edit to any
+    // *other* key still fails, and are held to their own contract by the test
+    // above rather than being silently skipped.
+    for (const key of SEEDED) {
+      expect(rebuilt[key], `${key} must be one the rebuild cannot answer`)
+        .toEqual({ state: "not-offered" });
+      Object.assign(rebuilt, { [key]: fixture.found[0].capabilities[key] });
     }
     expect(fixture.found[0].capabilities).toEqual(rebuilt);
   });

@@ -176,34 +176,6 @@
       "value": "network: cellular is reaching the internet again at 2026-09-06T23:59:59.999Z; ethernet goes on carrying traffic and cellular is back in the running behind it",
       "why": "the same journal line in the Activity table's second column, whose title is deliberately empty."
     },
-    "nrdb-ui-table · Camera": {
-      "value": "Global Shutter Camera: Global S",
-      "why": "the V4L2 `card` string, verbatim from the bench recording (scripts/fixtures/camera-globalshutter.json:85, pinned by probe/camera.test.ts:78). 31 characters is the kernel's own cap — `card` is `__u8 card[32]`, NUL included — and probe/parse.ts:157 strips the parenthesised bus id rather than appending it."
-    },
-    "nrdb-ui-table · Configured as": {
-      "value": "forward-observation-camera",
-      "why": "the camera's id in config.yaml. Nothing caps it, so this is the longest an operator writes by hand."
-    },
-    "nrdb-ui-table · Identity": {
-      "value": "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0 — an enumeration number; it may mean a different camera after a reboot",
-      "why": "identityWords' longer branch (video/present.ts:327) on the by-path name the bench board really answered. `schema/config.ts:562` permits 128 characters of device name, so this is the widest observed rather than the widest permitted."
-    },
-    "nrdb-ui-table · What it offers": {
-      "value": "formats: unanswered · zoom: unanswered · focus: auto focus has it · exposure: auto exposure has it · whiteBalance: auto white balance has it · brightness: unanswered · contrast: unanswered · rotation: unanswered · aim: unanswered · recording: unanswered · stills: unanswered · saturation: unanswered · hue: unanswered · autoWhiteBalance: unanswered · gamma: unanswered · gain: unanswered · powerLineFrequency: unanswered · sharpness: unanswered · backlightCompensation: unanswered · autoExposure: unanswered · autoFocus: unanswered",
-      "why": "summarise() (video/capability.ts:255) mapped over all 21 CAPABILITY_KEYS — it never filters — taking each key's widest branch: `gated` for the three DESCRIPTORS gives a gate (focus, exposure, whiteBalance), `advertised` for the rest. Derived by calling the built summarise(), not typed out. Its *narrowest* possible return, every key not-offered, is 373 characters."
-    },
-    "nrdb-ui-table · Device": {
-      "value": "/dev/video63",
-      "why": "the highest V4L2 device node the kernel enumerates, and so the widest this column carries."
-    },
-    "nrdb-ui-table · Card": {
-      "value": "Global Shutter Camera: Global S",
-      "why": "the same V4L2 `card` string at the same 31-character kernel cap, in the rejection table's own column."
-    },
-    "nrdb-ui-table · Why": {
-      "value": "rockchip-vpu-hevc-decoder-isp-1 is a hardware codec on this board, not a camera; it advertises formats it cannot capture (K-40)",
-      "why": "probe/camera.ts:280's K-40 branch, verbatim, with a whitespace-free driver name at V4L2's own 31-character `card` cap — isHardwareCodec (camera.ts:122) only classifies a card with no whitespace, so the camera name above cannot appear in this sentence. Two other rejection branches are unbounded above: the raw-format list at camera.ts:298 and `could not read this device's formats: <stderr>` at camera.ts:288."
-    },
     "nrdb-ui-yonder-databar · RUNNING": {
       "value": "failed — the pipeline could not be started: Error: spawn gst-launch-1.0 ENOENT; gave up after 5 restarts",
       "why": "runWords (video/present.ts:309) over the wider of the supervisor's two producers: supervisor.ts:206's `the pipeline could not be started: ${String(e)}` — not :205's exit code — plus the `; gave up after 5 restarts` suffix :191 adds at MAX_RESTARTS. `String(e)` is a Node error and is unbounded, so this is a floor."
@@ -224,29 +196,9 @@
       "value": "169.49 Mb/s at IP",
       "why": "cameraStrip's uplink: atIp(20000) × 8 outputs + atIp(4000) preview, at the schema's ceilings (outputs max 8, preview bitrate max 4000), in Mb/s to two places."
     },
-    "nrdb-ui-text · Before you press Start": {
+    "nrdb-ui-yonder-databar · BEFORE YOU PRESS START": {
       "value": "this board has no /dev/v4l/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0; the cameras it can see are platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0",
       "why": "cameraStrip's startCheck at refuse()'s widest branch, video/pipeline.ts:305 — not the SRT branch, which is 182 characters. This is its narrowest honest form: one camera, the bench's own 66-character by-path in both positions, 196 characters. It is unbounded above — schema/config.ts:562 caps `device` at 128 and `offered` joins every by-path name the board can see — so this is a floor for this field, not a ceiling."
-    },
-    "nrdb-ui-text · Camera": {
-      "value": "Nose mast downward wide-angle mapping camera two",
-      "why": "the camera's name at schema/config.ts:558's cap of 48 characters. An operator types it, so the cap is the honest ceiling. **The cap counts characters and the gate measures pixels**, so 48 of them is not one width: this is a realistic name chosen for wide glyphs rather than the narrowest 48 that will fit, because a name padded out with commas, spaces and digits measures about 30px narrower on the page and would have the next task build a box 30px too small. A name of 48 wide glyphs is wider still and is not a name anyone types."
-    },
-    "nrdb-ui-text · Identity": {
-      "value": "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0 — an enumeration number; it may mean a different camera after a reboot",
-      "why": "identityWords' longer branch again, on the Setup deck rather than in the Cameras table. As there, 128 characters of device name are permitted and this is the widest observed."
-    },
-    "nrdb-ui-text · Encoder": {
-      "value": "v4l2h264enc · hardware",
-      "why": "cameraStrip's encoder line. The board's hardware element is the longer of the two probeEncoder returns."
-    },
-    "nrdb-ui-yonder-facts · state": {
-      "value": "offered, not on this page",
-      "why": "the widest of YonderFacts' four state words (STATES, YonderFacts.vue:56). The fallback `reported as ${state}` below it is unreachable while Capability has four states, and a fifth would have to be added here as well as there."
-    },
-    "nrdb-ui-yonder-facts · reason": {
-      "value": "this camera advertises pan and tilt but there is no motor behind either — it accepts the command and nothing moves",
-      "why": "the widest reason absentFact can carry (video/present.ts:205): the advertised branch passes the probe's own sentence through, and this is the longest one the probe composes (probe/camera.ts:346). The gated branch carries a control label instead, of which the widest is `auto white balance` at 18."
     },
     "nrdb-ui-yonder-budget": {
       "value": "1356.0 of 5.0 Mb/s",

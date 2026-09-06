@@ -21,15 +21,19 @@ import type { ScanResult } from "../net/scan.js";
 import type { BoardFacts } from "../system/facts.js";
 import type { Versions } from "../system/versions.js";
 import { z } from "zod";
-import { CameraControls, DEFAULT_CONFIG, ZEROTIER_NETWORK_ID, type Camera } from "../schema/config.js";
+import {
+  CameraControls, DEFAULT_CONFIG, PREVIEW_RUNGS, ZEROTIER_NETWORK_ID, type Camera,
+} from "../schema/config.js";
 import { publishableApPassphrase } from "../net/profiles.js";
 import type { RemoteState } from "../remote/state.js";
 import { compose, refuse } from "../video/pipeline.js";
 import { noCapabilities, summarise, type CameraCapabilities } from "../video/capability.js";
 import {
-  cameraStrip, capabilityFacts, identityWords, uplinkBudget,
-  type CameraStrip, type CapabilityFact,
+  aimPanel, cameraDeck, cameraIndex, cameraStrip, capabilityFacts, identityWords, uplinkBudget,
+  type AimPanel, type CameraDeck, type CameraStrip, type CapabilityFact,
 } from "../video/present.js";
+import { applyCameraDraft, deckDraft, interruption, validateDraft } from "../apply/draft.js";
+import type { ReachPaths } from "../video/outputs.js";
 import { CONTROL_NAMES, type ApplyControlsOptions, type ApplyControlsResult } from "../video/controls.js";
 import { setCameraSettings, type CameraSettings } from "../video/settings.js";
 import { renderReceive, type Rendering } from "../video/receive.js";
@@ -229,6 +233,18 @@ export interface CameraView {
    * R-CAM-14.
    */
   facts: CapabilityFact[];
+  /**
+   * `ui-yonder-deck`'s whole payload, and `ui-yonder-aim`'s (R-UI-08,
+   * R-UI-28) — composed in `video/present.ts` beside `display` above and for
+   * the identical reason: a widget binds one object, and the alternative is
+   * a `change` node's JSONata assembling twenty-one descriptors next to a
+   * wire coordinate, which is CLAUDE.md rule 2 wearing a different hat.
+   *
+   * Two fields and not one, because the Cockpit (M5) draws the aim panel
+   * with no deck beside it and this shape is what it will read (R-UI-28).
+   */
+  deck: CameraDeck;
+  aim: AimPanel;
 }
 
 /** What GET /system answers with. */
@@ -431,7 +447,7 @@ const CAMERA_ID = /^[a-z0-9][a-z0-9-]{0,31}$/;
  * matching at all. The difference is not cosmetic: a guard nothing can reach
  * is a guard no test can prove.
  */
-const CAMERA_ROUTE = /^\/cameras\/(.+?)(?:\/(run|probe|receive-line|controls|settings))?$/;
+const CAMERA_ROUTE = /^\/cameras\/(.+?)(?:\/(run|probe|receive-line|controls|settings|apply|outputs\/(?:rtp|rtsp|srt)))?$/;
 
 /**
  * Where a pipeline publishes: mediamtx, on loopback.
@@ -545,6 +561,32 @@ export function createRouter(deps: RouterDeps): Router {
   };
 
   /**
+   * Which ways off this board a peer could use, for `outputReach()` (R-UI-24).
+   *
+   * **False means *no evidence*, never *broken*.** A daemon assembled with no
+   * network layer, or a path nothing has probed, answers false here, and
+   * `outputReach` then says a listener is not reachable. That is the honest
+   * direction for this particular question: R-UI-24 exists so an operator is
+   * not left waiting for a player to connect to a port nothing can dial, and
+   * "no path has been shown to work" is the same practical answer as "no path
+   * works" for somebody about to try it. `PathReport.evidence` is what is
+   * read rather than `standing`, for the reason that field was added:
+   * `standing-by` covers a path that is reaching, a path that is failing, and
+   * a path nothing has looked at, and treating those as one is K-42.
+   */
+  const reachPaths = async (): Promise<ReachPaths> => {
+    const reach = deps.reachState === undefined ? null : await deps.reachState();
+    const remote = deps.remoteState === undefined ? null : await deps.remoteState();
+    const reaching = (name: PathName): boolean =>
+      reach?.paths.some((p) => p.path === name && p.evidence === "reaching") ?? false;
+    return {
+      lan: reaching("ethernet") || reaching("wifi_client"),
+      cellular: reaching("modem"),
+      mesh: (remote?.online ?? false) && (remote?.addresses.length ?? 0) > 0,
+    };
+  };
+
+  /**
    * Everything under `/cameras/<id>`.
    *
    * The id has already been matched against `CAMERA_ID` by the caller, before
@@ -614,6 +656,11 @@ export function createRouter(deps: RouterDeps): Router {
         // reading: an operator has to be able to tell *this camera cannot*
         // from *this page failed*.
         facts: capabilityFacts(capabilities ?? noCapabilities()),
+        // The two instrument payloads, from the same read as everything
+        // above — never a second sweep, so the deck and the readout strip
+        // can never disagree about the same camera.
+        deck: cameraDeck({ camera, capabilities, encoder, paths: await reachPaths() }),
+        aim: aimPanel(capabilities),
         // Answered on the page rather than only on the start, so an operator
         // reads which of their settings this camera does not offer before
         // they press anything (R-CAM-10). `knownDevices` comes from the sweep
@@ -751,6 +798,129 @@ export function createRouter(deps: RouterDeps): Router {
       const next = setCameraSettings(config, id, body as CameraSettings);
       if (!next.ok) return { status: 400, body: { error: next.error } };
       return { status: 200, body: await deps.engine.apply(next.config) };
+    }
+
+    /**
+     * The Setup deck's **Apply** — one whole draft, through the apply engine
+     * (R-CFG-03, R-CTL-02, spec §7).
+     *
+     * Deliberately not `settings` above, and the difference is the point of
+     * this task. `settings` takes the seven flat keys a `ui-number-input`
+     * could post one at a time, which is how a page ends up applying on blur:
+     * one field, one apply, one confirmation window per keystroke that leaves
+     * a box. This takes the *shared draft* — everything the operator changed,
+     * once, when they pressed Apply — validates it as a whole, and submits it
+     * as one change. A Live deck never reaches here at all: an image control
+     * posts to `controls`, which touches no configuration and arms no window.
+     *
+     * **Validated before it is applied, and never repaired** (R-CMD-04).
+     * `validateDraft` owns the cross-field rules the schema cannot express —
+     * a floor above its ceiling is two legal numbers in an illegal order —
+     * and its answer is returned by path, so the page marks the field the
+     * operator has to change rather than showing a sentence about a form.
+     * The bounds themselves stay the schema's, checked by the engine.
+     *
+     * **The window arms where `apply/reachability.ts` says it does**, not
+     * where this route guesses. The answer carries the engine's own deadline,
+     * which is what the Setup deck's countdown draws.
+     */
+    if (method === "POST" && verb === "apply") {
+      if (body === null || typeof body !== "object" || Array.isArray(body)) {
+        return { status: 400, body: { error: "an apply needs a draft object naming what to change" } };
+      }
+      /**
+       * The body is the deck's own staged draft, flat and in the blueprint's
+       * UI-facing names — `streamMode`, `previewLadderBottom` — because that
+       * is the shape the one client that posts here holds. `deckDraft()` is
+       * the seam between those names and the schema's; it translates and
+       * judges nothing.
+       *
+       * **A staged path this device does not know is refused, by name.**
+       * Dropping it would be an Apply that reported success and left one of
+       * the operator's edits unmade, which is the failure the whole draft
+       * mechanism exists to remove.
+       */
+      const { draft, name, unknown } = deckDraft(body as Record<string, unknown>);
+      if (unknown.length > 0) {
+        return {
+          status: 400,
+          body: {
+            error: `this device does not know how to apply: ${unknown.join(", ")}`,
+            problems: unknown.map((path) => ({ path, message: "not a setting this device has" })),
+          },
+        };
+      }
+      // The rungs *this* camera makes, not the three the schema allows in
+      // general: a size the schema permits is still wrong for a camera that
+      // does not capture it, which is the case `validateDraft`'s own
+      // `supportedRungs` argument exists for.
+      const found = await view(false);
+      const formats = found.capabilities?.formats;
+      const offers = formats !== undefined && formats.state === "present" ? formats.value : [];
+      const rungs = PREVIEW_RUNGS.filter((rung) => {
+        const [w, h] = rung.split("x").map(Number);
+        return offers.some((f) => f.width === w && f.height === h);
+      });
+      const problems = validateDraft(draft, rungs);
+      if (problems.length > 0) {
+        return {
+          status: 400,
+          body: { error: "this draft cannot be applied as it stands", problems },
+        };
+      }
+      const next = applyCameraDraft(config, id, draft);
+      if (!next.ok) return { status: 400, body: { error: next.error } };
+      // The camera's own name, when the deck staged one. Written here rather
+      // than inside `applyCameraDraft` because a name is not a stream or a
+      // preview policy, and a function that quietly renamed a camera while
+      // applying a bitrate would be doing two things under one name.
+      if (name !== undefined) {
+        const renamed = next.config.cameras.find((c) => c.id === id);
+        if (renamed !== undefined) renamed.name = name;
+      }
+      return {
+        status: 200,
+        body: {
+          ...await deps.engine.apply(next.config),
+          // What this apply will interrupt, from the same function the deck
+          // draws before it is pressed — so the warning an operator read and
+          // the one the answer carries are one calculation, not two.
+          interruption: interruption(draft, {
+            width: camera.width,
+            height: camera.height,
+            framerate: camera.framerate,
+            codec: camera.codec,
+            stream: camera.stream,
+            preview: camera.preview,
+          }),
+        },
+      };
+    }
+
+    /**
+     * One output stopped or started (R-UI-24, spec §7's *Outputs* table).
+     *
+     * Through the apply engine like every other change to what leaves the
+     * aircraft, and emphatically not as a runtime toggle: `enabled` is a
+     * stored field, and turning an RTP push to a ground station back on is
+     * exactly the kind of change `R-NET-07` holds pending a confirmation.
+     * **A stopped output keeps its port, its path and its secret** — only
+     * `enabled` is written, so nothing has to be typed again to start it.
+     */
+    if (method === "POST" && verb.startsWith("outputs/")) {
+      const kind = verb.slice("outputs/".length);
+      const enabled = (body as { enabled?: unknown } | undefined)?.enabled;
+      if (typeof enabled !== "boolean") {
+        return { status: 400, body: { error: "an output is switched with { enabled: true | false }" } };
+      }
+      const next = structuredClone(config);
+      const target = next.cameras.find((c) => c.id === id);
+      const output = target?.outputs.find((o) => o.kind === kind);
+      if (target === undefined || output === undefined) {
+        return { status: 404, body: { error: `this camera has no ${kind} output` } };
+      }
+      output.enabled = enabled;
+      return { status: 200, body: await deps.engine.apply(next) };
     }
 
     // The credential leaves the daemon on exactly one route. Everything else
@@ -965,6 +1135,28 @@ export function createRouter(deps: RouterDeps): Router {
             // 2.1 Mb/s more* is a sentence no single camera's page can say
             // (R-VID-11).
             budget: uplinkBudget(config.cameras),
+            /**
+             * `ui-yonder-index`'s whole payload — the probe-to-row adapter
+             * (R-CAM-12, R-CAM-05).
+             *
+             * Beside `found` and not instead of it: `found` is what the probe
+             * answered and this is what one page draws from it, and collapsing
+             * the two would make every other reader of this route depend on
+             * one widget's field names. `video/present.ts` owns the mapping;
+             * this route owns nothing but handing it the three things it
+             * cannot read for itself — the configuration, the supervisor's
+             * observed run state, and (when something measures one) the
+             * egress. **No `egressKbps` is passed**, deliberately: nothing on
+             * this branch measures a camera's egress, so every row reads
+             * `rate: null` rather than echoing the configured target back as
+             * if it had been observed.
+             */
+            index: cameraIndex({
+              found,
+              rejected,
+              cameras: config.cameras,
+              run: (id) => deps.supervisor?.state(id).state ?? "stopped",
+            }),
           },
         };
       }

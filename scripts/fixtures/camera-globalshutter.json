@@ -20,6 +20,18 @@
     "capture-pages.mjs reads the device's own secrets.yaml and fails any page whose HTML",
     "carries that value — this fake is what the pages render instead (R-SEC-10).",
     "",
+    "**`recording` and `stills` are seeded here, and every other capability is the board's own",
+    "answer.** Neither is a V4L2 control, so `v4l2-ctl` says nothing about either and",
+    "`probeCamera` has no reader for them: the `not-offered` they would otherwise carry is",
+    "`noCapabilities()`'s default — the *model's* answer, not the board's. Where a recording or",
+    "a still can go is the daemon's fact (spec 8.3, R-CAM-17, R-CAM-18, R-STO-06), and the",
+    "daemon in this harness is this file. They are `advertised` with the reason, which is what",
+    "is actually true today: the console can command a capture and the board has nowhere to put",
+    "the file, because board recording is not built. The camera page therefore draws the Record",
+    "and Photo keys where they belong — under the picture, R-UI-26 — inoperative, in the caution",
+    "tone, carrying that sentence (spec section 4). Change these to `present` only when there is",
+    "somewhere for a file to land.",
+    "",
     "`found[0].capabilities` is rebuilt from the committed v4l2-ctl capture named in",
     "`recorded.capabilitiesRebuiltFrom`, by the same CONTROL_MAP loop probeCamera uses.",
     "Regenerate it that way rather than editing states by hand: when the capability model",
@@ -326,10 +338,12 @@
           "state": "not-offered"
         },
         "recording": {
-          "state": "not-offered"
+          "state": "advertised",
+          "reason": "Yonder can command a recording and has nowhere to put the file: board recording is not built"
         },
         "stills": {
-          "state": "not-offered"
+          "state": "advertised",
+          "reason": "Yonder can ask for a still and has nowhere to put the file: board storage is not built"
         },
         "saturation": {
           "state": "present",

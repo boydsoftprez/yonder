@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { PREVIEW_RUNGS, type Camera } from "../schema/config.js";
+import { PREVIEW_RUNGS, type Camera, type Config } from "../schema/config.js";
 
 /**
  * A partial edit to one camera's stream and preview policy, as the shared
@@ -15,6 +15,17 @@ export interface CameraDraft {
   height?: number;
   framerate?: number;
   codec?: Camera["codec"];
+  /**
+   * The Fixed target for the main stream.
+   *
+   * A camera leaf and not a `stream` one, because that is where
+   * `schema/config.ts` keeps it: `stream` is the adaptive envelope around
+   * this number, seeded from it. Named here so a draft can carry the one
+   * control spec §7 calls *Fixed bitrate* — without it the deck's own
+   * `streamBitrate` edit had nowhere to land and was silently dropped by the
+   * apply path, which is a control that reports success and changes nothing.
+   */
+  bitrate_kbps?: number;
   stream?: Partial<Camera["stream"]>;
   preview?: Partial<Camera["preview"]>;
 }
@@ -131,4 +142,139 @@ export function interruption(draft: CameraDraft, applied: CameraDraft): string[]
   if (previewBranchChanged) out.push("preview branch only");
 
   return out;
+}
+
+/**
+ * The configuration this device should have with that draft applied to one
+ * camera — the whole document, with nothing else touched.
+ *
+ * **Nothing is checked here that the schema owns.** Bounds, enums and the
+ * shape of every leaf are the schema's, run by the engine on the way in; a
+ * second copy of `min(100).max(20000)` in this file is a copy to keep in
+ * step for no benefit (`video/settings.ts`'s own `setCameraSettings` states
+ * the same rule for the same reason). What *is* checked before this runs is
+ * `validateDraft` above, which is the set of cross-field rules the schema
+ * cannot express — a floor above its ceiling is two legal numbers in an
+ * illegal order.
+ *
+ * **And nothing is repaired** (R-CMD-04, and `validateDraft`'s own note):
+ * a draft that failed validation never reaches here, so this function has no
+ * branch that could quietly clamp or reorder what the operator typed.
+ *
+ * Undefined fields are left alone at every level, which is the whole reason
+ * this exists rather than a spread of the draft over the camera: `{...camera,
+ * ...draft}` would write `stream: undefined` over a real envelope for a draft
+ * that never mentioned `stream`.
+ */
+export function applyCameraDraft(
+  current: Config,
+  id: string,
+  draft: CameraDraft,
+): { ok: true; config: Config } | { ok: false; error: string } {
+  const index = current.cameras.findIndex((c) => c.id === id);
+  if (index === -1) return { ok: false, error: `no camera is configured with the id "${id}"` };
+
+  const config = structuredClone(current);
+  const camera = config.cameras[index];
+  if (camera === undefined) return { ok: false, error: `no camera is configured with the id "${id}"` };
+
+  if (draft.width !== undefined) camera.width = draft.width;
+  if (draft.height !== undefined) camera.height = draft.height;
+  if (draft.framerate !== undefined) camera.framerate = draft.framerate;
+  if (draft.bitrate_kbps !== undefined) camera.bitrate_kbps = draft.bitrate_kbps;
+  if (draft.codec !== undefined) camera.codec = draft.codec;
+  if (draft.stream !== undefined) camera.stream = { ...camera.stream, ...draft.stream };
+  if (draft.preview !== undefined) camera.preview = { ...camera.preview, ...draft.preview };
+
+  return { ok: true, config };
+}
+
+/**
+ * The deck's own staged edits, in the shape the apply path takes.
+ *
+ * **Two naming conventions meet here, and this is the seam.** `YonderDeck`
+ * stages a draft under the blueprint's UI-facing names — `streamMode:
+ * "Adaptive"`, `previewLadderBottom`, `name` — flat, because `draft.ts`'s own
+ * `pending(camera, applied)` in the browser compares one flat map of paths
+ * against one flat map of applied values, and it spans both the image-control
+ * domain (keyed by capability name) and this schema-shaped one. The
+ * configuration is nested and schema-cased (`stream.mode: "adaptive"`).
+ * `YonderDeck.appliedForDraft()` is the same seam facing the other way, and
+ * this is the one facing in.
+ *
+ * It is in `yonder-core` rather than in the flows or the browser because both
+ * ends have to agree about it, and a JSONata expression translating thirteen
+ * field names beside a wire coordinate is CLAUDE.md rule 2. It is separate
+ * from `validateDraft` because translation and judgement are different jobs:
+ * this renames, and never decides whether the result is applicable.
+ *
+ * **Anything it does not recognise is returned, named.** A key the deck does
+ * not stage — an old draft in a browser that has not reloaded, a hand-written
+ * request — must not be dropped silently and must not be written blindly: the
+ * caller answers with the names, so an operator is told which of their edits
+ * this device does not know about rather than pressing Apply and watching one
+ * of them quietly not happen.
+ *
+ * `name` is deliberately not part of `CameraDraft`: it is the camera's own
+ * name, not a stream or preview policy, and it is returned separately so a
+ * caller has to decide to write it rather than getting it by omission.
+ */
+export interface DeckDraft {
+  draft: CameraDraft;
+  /** The camera's new name, when the deck staged one. */
+  name?: string;
+  /** Staged paths this translation does not know, in the order given. */
+  unknown: string[];
+}
+
+/** `"Adaptive" | "Fixed"` back to the schema's own casing. See `toUiMode`. */
+function fromUiMode(value: unknown): Camera["stream"]["mode"] | undefined {
+  if (value === "Adaptive" || value === "adaptive") return "adaptive";
+  if (value === "Fixed" || value === "fixed") return "fixed";
+  return undefined;
+}
+
+export function deckDraft(staged: Record<string, unknown>): DeckDraft {
+  const draft: CameraDraft = {};
+  const stream: Record<string, unknown> = {};
+  const preview: Record<string, unknown> = {};
+  let name: string | undefined;
+  const unknown: string[] = [];
+
+  for (const [path, value] of Object.entries(staged)) {
+    switch (path) {
+      // The four the two conventions already share a name for — the capture
+      // itself, which `CameraDraft` has carried since it was written and
+      // `interruption()` compares. `YonderDeck` has no Resolution picker yet
+      // (spec §7 gives it one), so nothing stages these today; they are here
+      // rather than in `unknown` because when that control arrives the name
+      // it stages is one of these, and a seam that refused them would make
+      // adding the control a change in three files instead of one.
+      case "width": draft.width = value as number; break;
+      case "height": draft.height = value as number; break;
+      case "framerate": draft.framerate = value as number; break;
+      case "codec": draft.codec = value as Camera["codec"]; break;
+      case "name": if (typeof value === "string") name = value; break;
+      case "streamMode": stream.mode = fromUiMode(value); break;
+      case "streamFloor": stream.floor_kbps = value; break;
+      case "streamCeiling": stream.ceiling_kbps = value; break;
+      // The Fixed target lives on the camera itself, not inside `stream` —
+      // `schema/config.ts` keeps `bitrate_kbps` a camera leaf and `stream`
+      // the envelope around it. The deck's one name for it lands on both
+      // sides of that split, which is exactly why this seam is a function.
+      case "streamBitrate": draft.bitrate_kbps = value as number; break;
+      case "previewMode": preview.mode = fromUiMode(value); break;
+      case "previewSize": preview.size = value; break;
+      case "previewLadderBottom": preview.ladder_bottom = value; break;
+      case "previewLadderTop": preview.ladder_top = value; break;
+      case "previewFloor": preview.floor_kbps = value; break;
+      case "previewCeiling": preview.ceiling_kbps = value; break;
+      case "previewBitrate": preview.bitrate_kbps = value; break;
+      case "previewRate": preview.framerate = value; break;
+      default: unknown.push(path);
+    }
+  }
+  if (Object.keys(stream).length > 0) draft.stream = stream as CameraDraft["stream"];
+  if (Object.keys(preview).length > 0) draft.preview = preview as CameraDraft["preview"];
+  return { draft, ...(name === undefined ? {} : { name }), unknown };
 }

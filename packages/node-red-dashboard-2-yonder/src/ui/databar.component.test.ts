@@ -87,3 +87,50 @@ describe("R-UI-25 — the row an operator reaches for while an aircraft is flyin
     expect(getComputedStyle(w.find(".y-bar__cell").element).minWidth).toBe("max-content");
   });
 });
+
+describe("a cell holding a sentence rather than a reading", () => {
+  /**
+   * The camera strip's `RUNNING`, at the widest honest value the capture
+   * gate photographs it at — the supervisor's own failure sentence, 104
+   * characters of it.
+   */
+  const REASON = "failed — the pipeline could not be started: "
+    + "Error: spawn gst-launch-1.0 ENOENT; gave up after 5 restarts";
+
+  /**
+   * Three rules, asserted separately for the reason the test above gives for
+   * splitting its own two: `jsdom` cannot tell a cell that wrapped from one
+   * that never had to, so each rule that has to hold gets its own assertion
+   * rather than standing on another's shoulders. Between them they are what
+   * make the bar's height a function of the page width alone — restore any
+   * one of a reading's three rules to a note cell and the strip either runs
+   * off the side of the page or changes height with its own content.
+   */
+  it("wraps a note, on a line of its own, and never shrinks a reading beside it", () => {
+    const w = bar(
+      [
+        { key: "state", label: "RUNNING", kind: "note" },
+        { key: "res", label: "PICTURE" },
+      ],
+      { state: REASON, res: "3840 × 2160" },
+    );
+
+    const note = w.findAll(".y-bar__cell")[0]!.element;
+    const reading = w.findAll(".y-bar__cell")[1]!.element;
+
+    // 1. The whole sentence is there. Nothing shortens it (R-UI-25).
+    expect(w.findAll(".y-bar__v")[0]!.text()).toBe(REASON);
+
+    // 2. It may shrink, so the row can wrap it — the reading beside it may
+    //    not, which is what keeps `3840 × 2160` from breaking after the ×.
+    expect(getComputedStyle(note).minWidth).toBe("0px");
+    expect(getComputedStyle(reading).minWidth).toBe("max-content");
+
+    // 3. A line of its own, and words that wrap on it. `flex-basis: 100%` is
+    //    what makes the height depend on the page width and not on how wide
+    //    the values beside it happened to be that run.
+    expect(getComputedStyle(note).flexBasis).toBe("100%");
+    expect(getComputedStyle(w.findAll(".y-bar__v")[0]!.element).whiteSpace).toBe("normal");
+    expect(getComputedStyle(w.findAll(".y-bar__v")[1]!.element).whiteSpace).toBe("nowrap");
+  });
+});

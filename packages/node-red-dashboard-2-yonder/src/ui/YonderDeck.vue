@@ -467,9 +467,23 @@ export default {
         if (cap.state !== 'present') return this.fact(key, label, this.stateAndReason(cap).reason)
         return h(YonderReadout, { key, rows: [{ label, value: (cap.value || []).length }] })
       }
+      /**
+       * **The key stays, whatever state the capability is in** — spec §4,
+       * which every other kind on this deck already follows and this branch
+       * did not: it fell back to a fact for anything but `present`, so a
+       * camera that lists a recorder and cannot use one drew no Record key
+       * at all. Only `not-offered` draws a fact (handled above, with every
+       * other kind); `advertised` and `gated` draw the key inoperative,
+       * carrying the reason. R-UI-26: the key is here, under the picture it
+       * records, and not on a rail.
+       */
       if (layout.kind === 'shutter-video' || layout.kind === 'shutter-photo') {
-        if (cap.state !== 'present') return this.fact(key, label, this.stateAndReason(cap).reason)
-        return this.drawShutter(layout.kind === 'shutter-photo' ? 'photo' : 'video', cap)
+        const { state, reason } = this.stateAndReason(cap)
+        return this.drawShutter(
+          layout.kind === 'shutter-photo' ? 'photo' : 'video',
+          cap,
+          state === 'present' ? null : reason,
+        )
       }
 
       const { state, reason } = this.stateAndReason(cap)
@@ -531,7 +545,10 @@ export default {
       }
       return null
     },
-    drawShutter (kind, cap) {
+    /** `inhibited` is the reason the key will not act, or null. See
+     * `drawCapability`'s own shutter branch, and `YonderShutter`'s own
+     * `inhibited` prop for why the key is drawn either way. */
+    drawShutter (kind, cap, inhibited = null) {
       const destination = kind === 'video'
         ? ((cap.value && cap.value.medium === 'board') ? 'this board' : "the camera's card")
         : ((cap.value && cap.value.source === 'pipeline') ? 'this board' : "the camera's card")
@@ -543,6 +560,7 @@ export default {
         mode: kind === 'photo' ? 'photo' : 'video',
         recording,
         destination,
+        inhibited,
         onRecord: () => this.pressShutter('video'),
         onPhoto: () => this.pressShutter('photo'),
       })

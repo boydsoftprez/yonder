@@ -172,6 +172,47 @@ watching:
   step it had to take anyway into the only end-to-end proof that a control on this
   console does something.
 
+## Resolved — where an action lives
+
+**Answered by building both camera pages out of the instruments and finding that
+R-UI-10, read literally, put the wrong controls in the wrong place.**
+
+R-UI-10 said *size a control to what it says*, and the flows enforced it with a
+rule of their own: *every action on this page is on the rail, and only there*.
+That was right about the rail and wrong about everything else. A camera deck is
+twenty-one controls composed from what the device answered, and several of them
+*are* actions — an output stopped or started, Apply and Discard over a staged
+draft, Record under the picture, Recentre beside the gimbal. Herding those onto
+one rail at the foot of the page means an operator watching a picture has to look
+away from it to press the key that acts on it, at exactly the moment they are
+watching.
+
+So the rule splits in two, and both halves keep the sizing rule R-UI-10 was
+written for:
+
+- **An action lives beside the thing it acts on, where that thing is on the
+  page.** Record is under the picture it records, in the deck's own Capture
+  column. Recentre is on the Aim panel, beside the gimbal it moves. An output's
+  on/off is in the row that states that output's cost and reachability. Apply and
+  Discard are at the foot of the deck whose draft they act on. Each is drawn by
+  the component that owns the thing, so it cannot drift away from it.
+- **The rail carries the page's own actions** — the ones whose subject is the
+  page rather than any one control on it: start and stop the pipeline, flip
+  between Live and Setup, re-probe, show the receive line, hold the full rate.
+  The rail is also where an irreversible action goes, because it is the one strip
+  an operator reads before leaving a page.
+
+Neither half licenses a control that spans its surface. R-UI-10's own sentence —
+*no action occupies the full width of the surface it sits on* — is unchanged, is
+checked in the DOM by the capture gate rather than over the flows (a width of
+`auto` that CSS then stretches is exactly what a JSON check cannot see), and now
+applies to a deck's own keys as much as to a rail's.
+
+The requirement text is amended to say both halves. `R-UI-26` (Task 42) states
+the first half as a requirement in its own right and names Record and Recentre as
+the two worked examples; `flows.test.ts` holds the rails to it from the other
+direction, by asserting that neither of those two ever appears on one.
+
 ## Open
 
 Nothing outstanding in this decision. What remains is not a design question but an

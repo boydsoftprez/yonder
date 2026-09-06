@@ -1,9 +1,23 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
-import { interruption, validateDraft } from "./draft.js";
-import { PREVIEW_RUNGS } from "../schema/config.js";
+import { applyCameraDraft, deckDraft, interruption, validateDraft } from "./draft.js";
+import { ConfigSchema, DEFAULT_CONFIG, PREVIEW_RUNGS, type Config } from "../schema/config.js";
 
 const RUNGS = [...PREVIEW_RUNGS];
+
+/** The smallest real document with one camera in it, parsed by the schema so
+ * every default is the schema's own rather than a copy of them here. */
+function configWithCamera(): Config {
+  return ConfigSchema.parse({
+    ...DEFAULT_CONFIG,
+    cameras: [{
+      id: "front",
+      name: "Front camera",
+      source: "usb",
+      device: "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0",
+    }],
+  });
+}
 
 describe("validateDraft", () => {
   it("names floor > ceiling and does not fix it", () => {
@@ -134,5 +148,95 @@ describe("interruption", () => {
     // floor/ceiling/mode exist, and none of those interrupt anything.
     expect(interruption({ stream: { mode: "adaptive", floor_kbps: 1000, ceiling_kbps: 5000 } }, {}))
       .toEqual([]);
+  });
+});
+
+describe("deckDraft — the seam between the deck's names and the schema's", () => {
+  /**
+   * `YonderDeck` stages under the blueprint's UI-facing names, flat, because
+   * the browser's own `pending(camera, applied)` compares one flat map
+   * spanning both the image-control domain and this one. The configuration is
+   * nested and schema-cased. Getting this wrong is silent: a path nobody
+   * translates is an Apply that reports success and changes nothing.
+   */
+  it("renames every path the deck stages, into the shape the config has", () => {
+    const { draft, name, unknown } = deckDraft({
+      name: "Nose mast",
+      streamMode: "Adaptive",
+      streamFloor: 500,
+      streamCeiling: 3000,
+      streamBitrate: 2500,
+      previewMode: "Fixed",
+      previewSize: "854x480",
+      previewLadderBottom: "640x360",
+      previewLadderTop: "1280x720",
+      previewFloor: 200,
+      previewCeiling: 1500,
+      previewBitrate: 600,
+      previewRate: 15,
+    });
+    expect(unknown).toEqual([]);
+    expect(name).toBe("Nose mast");
+    expect(draft).toEqual({
+      // The Fixed target is a camera leaf, not a `stream` one — the one path
+      // whose two sides land in different places, which is why this seam is
+      // a function and not a rename table.
+      bitrate_kbps: 2500,
+      stream: { mode: "adaptive", floor_kbps: 500, ceiling_kbps: 3000 },
+      preview: {
+        mode: "fixed", size: "854x480",
+        ladder_bottom: "640x360", ladder_top: "1280x720",
+        floor_kbps: 200, ceiling_kbps: 1500, bitrate_kbps: 600, framerate: 15,
+      },
+    });
+  });
+
+  /** A draft is partial at every level: an untouched field is not a field. */
+  it("carries only what was staged, and no empty sub-objects", () => {
+    expect(deckDraft({ previewRate: 30 }).draft).toEqual({ preview: { framerate: 30 } });
+    expect(deckDraft({}).draft).toEqual({});
+  });
+
+  /**
+   * **Named, never dropped.** A browser holding a draft from a console two
+   * versions back is the case: ignoring the field it cannot apply would be an
+   * Apply that reported success and left one edit unmade.
+   */
+  it("names a staged path it does not know rather than discarding it", () => {
+    const { draft, unknown } = deckDraft({ streamFloor: 500, streamWobble: 1, brightness: 64 });
+    expect(unknown).toEqual(["streamWobble", "brightness"]);
+    expect(draft).toEqual({ stream: { floor_kbps: 500 } });
+  });
+
+  /** Both casings of a mode, because the deck sends the UI one and a test
+   * or a script may send the schema's. Anything else is not a mode. */
+  it("takes a mode in either casing, and nothing else", () => {
+    expect(deckDraft({ streamMode: "Adaptive" }).draft.stream?.mode).toBe("adaptive");
+    expect(deckDraft({ streamMode: "fixed" }).draft.stream?.mode).toBe("fixed");
+    expect(deckDraft({ streamMode: "sideways" }).draft.stream?.mode).toBeUndefined();
+  });
+});
+
+describe("applyCameraDraft", () => {
+  it("writes only what the draft carries, and leaves the rest of the document alone", () => {
+    const before = configWithCamera();
+    const out = applyCameraDraft(before, "front", { framerate: 25, preview: { framerate: 10 } });
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    const camera = out.config.cameras[0]!;
+    expect(camera.framerate).toBe(25);
+    expect(camera.preview.framerate).toBe(10);
+    // A spread of the draft over the camera would have written
+    // `stream: undefined` over a real envelope for a draft that never
+    // mentioned it — which is the whole reason this is not a spread.
+    expect(camera.preview.bitrate_kbps).toBe(before.cameras[0]!.preview.bitrate_kbps);
+    expect(camera.stream).toEqual(before.cameras[0]!.stream);
+    // And the document it was given is untouched.
+    expect(before.cameras[0]!.framerate).not.toBe(25);
+  });
+
+  it("refuses a camera that is not configured", () => {
+    const out = applyCameraDraft(configWithCamera(), "nose", { framerate: 25 });
+    expect(out.ok).toBe(false);
   });
 });

@@ -152,3 +152,50 @@ describe("pending — the one guard in this whole task that stops an aircraft co
     expect(w.emitted("record")).toHaveLength(1);
   });
 });
+
+/**
+ * **`inhibited` — the key that is drawn and will not act** (spec §4,
+ * R-UI-21).
+ *
+ * Spec §4 gives a capability four states and says only *not offered* draws a
+ * fact where the control would have been; *advertised* and *gated* keep the
+ * control, inoperative, carrying the reason. Every other kind on the deck
+ * already followed that and the shutter did not — it fell back to a fact for
+ * anything but `present`, so a camera that lists a recorder and cannot use
+ * one drew no Record key at all, and an operator had to work out for
+ * themselves whether the page was broken or the camera could not do it.
+ *
+ * Two guards, isolated, for the identical reason `pending`'s own pair is
+ * above: a mutation that removes one leaves the other still catching a
+ * dispatched click, and crediting the wrong guard tells the opposite story
+ * from the one actually run.
+ */
+describe("inhibited — a capability that will not act, drawn rather than hidden", () => {
+  const WHY = "no card in the camera";
+
+  it("keeps the key and says why, rather than drawing nothing", () => {
+    const w = key({ mode: "video", inhibited: WHY });
+    expect(w.find(".y-shutter__btn").exists()).toBe(true);
+    expect(w.find(".y-shutter__why").text()).toBe(WHY);
+  });
+
+  it("the disabled attribute alone stops the press", () => {
+    expect(key({ mode: "video", inhibited: WHY }).find(".y-shutter__btn").attributes("disabled"))
+      .toBeDefined();
+  });
+
+  it("the guard inside press() stops it even reaching a handler", async () => {
+    const w = key({ mode: "video", inhibited: WHY });
+    w.find(".y-shutter__btn").element
+      .dispatchEvent(new Event("click", { bubbles: true, cancelable: true }));
+    await w.vm.$nextTick();
+    expect(w.emitted("record")).toBeUndefined();
+  });
+
+  it("says nothing and acts normally when it is not inhibited", async () => {
+    const w = key({ mode: "video" });
+    expect(w.find(".y-shutter__why").exists()).toBe(false);
+    await w.find(".y-shutter__btn").trigger("click");
+    expect(w.emitted("record")).toHaveLength(1);
+  });
+});

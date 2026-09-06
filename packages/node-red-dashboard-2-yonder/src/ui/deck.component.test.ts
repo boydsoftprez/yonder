@@ -458,3 +458,50 @@ it("groups flow into columns and no group is stranded on a row of its own", () =
     expect(style.minWidth).toBe("252px");
   }
 });
+
+/**
+ * **The shutter follows spec §4 like every other kind on this deck.**
+ *
+ * It did not: the branch returned a fact for anything but `present`, so a
+ * camera that lists a recorder and cannot use one — the bench's own board,
+ * whose recorder is unbuilt — drew no Record key at all, and the capture
+ * gate's viewport contract found nothing to check. Only `not-offered` draws
+ * a fact; `advertised` and `gated` keep the key, inoperative, carrying the
+ * reason (R-UI-21, R-UI-26: under the picture it records, never on a rail).
+ */
+describe("the shutter key, in all four capability states", () => {
+  const REASON = "board recording is not built";
+
+  it("draws the key with its reason when the capability is advertised", () => {
+    const { wrapper } = deck(makeStore(makeReport({
+      capabilities: { ...noCapabilities(), recording: advertised({ medium: "board" }, REASON) },
+    })), "live");
+    const shutter = wrapper.find(".y-shutter");
+    expect(shutter.exists(), "an advertised recorder must still draw its key").toBe(true);
+    expect(shutter.find(".y-shutter__why").text()).toBe(REASON);
+    expect(shutter.find(".y-shutter__btn").attributes("disabled")).toBeDefined();
+  });
+
+  it("draws the key inert, naming what has charge of it, when it is gated", () => {
+    const { wrapper } = deck(makeStore(makeReport({
+      capabilities: {
+        ...noCapabilities(),
+        stills: gated({ source: "pipeline" }, { id: "recording", label: "recording" }),
+      },
+    })), "live");
+    expect(wrapper.find(".y-shutter__why").text()).toBe("recording has it");
+  });
+
+  it("draws a live key for a capability the camera has", () => {
+    const { wrapper } = deck(makeStore(makeReport({
+      capabilities: { ...noCapabilities(), recording: present({ medium: "board" }) },
+    })), "live");
+    expect(wrapper.find(".y-shutter__why").exists()).toBe(false);
+    expect(wrapper.find(".y-shutter__btn").attributes("disabled")).toBeUndefined();
+  });
+
+  it("draws no key at all for a camera that has no recorder", () => {
+    const { wrapper } = deck(makeStore(makeReport({ capabilities: noCapabilities() })), "live");
+    expect(wrapper.find(".y-shutter").exists()).toBe(false);
+  });
+});

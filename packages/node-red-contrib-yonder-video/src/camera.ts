@@ -49,6 +49,47 @@ export = function register(RED: RED): void {
         }
         return { method: "POST", path: `/cameras/${id}/controls`, body: controls };
       }
+      /**
+       * The Setup deck's **Apply** — one whole draft, once (R-CFG-03).
+       *
+       * A different route from `settings` below, and the difference is the
+       * defect this task is named for. `settings` takes one flat key at a
+       * time, which is the shape a `ui-number-input` posts on blur: one
+       * field, one apply, one confirmation window per box an operator tabs
+       * out of. `apply` takes everything the deck staged, validated as a
+       * whole by `apply/draft.ts` before any of it is written — and the deck
+       * emits it exactly once, on a press.
+       *
+       * The daemon answers the engine's own state, so `applyStatus` below
+       * draws a countdown exactly where a window armed.
+       */
+      if (msg.topic === "apply") {
+        const draft = msg.payload;
+        // As with `controls`: nothing here decides whether a draft is
+        // applicable — `validateDraft` does, in yonder-core, once the daemon
+        // has the camera's own supported sizes to check a held rung against.
+        // This only rejects a shape that could never be a draft at all.
+        if (draft === null || typeof draft !== "object" || Array.isArray(draft)) {
+          return { refuse: "an apply needs a draft naming what to change" };
+        }
+        return { method: "POST", path: `/cameras/${id}/apply`, body: draft };
+      }
+      /**
+       * One output stopped or started (R-UI-24). `msg.output` names which,
+       * because the kind is part of the route rather than of the body — the
+       * same addressing shape `msg.camera` already has, one level down.
+       */
+      if (msg.topic === "output") {
+        const kind = msg.output;
+        if (kind !== "rtp" && kind !== "rtsp" && kind !== "srt") {
+          return { refuse: "name the output to switch: rtp, rtsp or srt" };
+        }
+        const enabled = (msg.payload as { enabled?: unknown } | undefined)?.enabled;
+        if (typeof enabled !== "boolean") {
+          return { refuse: "an output is switched with { enabled: true } or { enabled: false }" };
+        }
+        return { method: "POST", path: `/cameras/${id}/outputs/${kind}`, body: { enabled } };
+      }
       // R-CTL-02, R-CTL-03. A different thing again from `controls` above:
       // this changes what the camera *is* rather than what it is doing, so it
       // goes through the apply engine and inherits the confirmation window and

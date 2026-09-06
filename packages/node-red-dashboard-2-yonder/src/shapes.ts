@@ -23,8 +23,16 @@ export interface DataCell {
    * character — an SSID, an address, a version — which is set in the mono
    * face for the reason `theme.ts` gives: a slashed zero and a fixed width
    * are what make an identifier checkable.
+   *
+   * `note` is the third: a **sentence** rather than a reading — a run state
+   * with the supervisor's failure reason on it, or why a start would be
+   * refused. It wraps, on a line of its own, because a reading's own rules
+   * (never shrink below the value, never break the line) are what make a bar
+   * of readings legible and are exactly what a sentence cannot live under:
+   * one 104-character reason took the camera strip 798 px wide inside a
+   * 710 px page. `YonderDataBar.vue`'s own doc comment carries the rest.
    */
-  kind?: "plain" | "id";
+  kind?: "plain" | "id" | "note";
 }
 
 /** One key of the soft-key rail. */

@@ -1,11 +1,12 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <template>
     <div class="y-pic">
+      <div class="y-pic__fit">
         <div
             ref="frame"
             class="y-pic__frame"
             :class="{ 'is-aiming': aimable }"
-            :style="{ aspectRatio: videoAspect }"
+            :style="{ aspectRatio: videoAspect, '--y-pic-aspect': String(videoAspect) }"
             @pointerdown="dragDown"
             @pointermove="dragMove"
             @pointerup="onDragEnd"
@@ -56,6 +57,7 @@
                 not requested · this changes nothing the aircraft sends anyone else
             </div>
         </div>
+      </div>
 
         <YonderThumbStrip
             v-if="cameras.length"
@@ -163,6 +165,22 @@ import { DESCRIPTORS } from 'yonder-core/presentation'
  * default, for the same reason `blank()` leaves the last frame on screen:
  * the shape of the picture is exactly as much "the one thing still held" as
  * the pixels are.
+ *
+ * **And it is never taller than the slot the page gave it.** Taking the
+ * shape from the decoder answered half the question and left the other half
+ * open: `aspect-ratio` with `width: 100%` derives a height from a width
+ * nothing has compared against the widget's own grid area, and the two agree
+ * at one window size. The capture gate measured the disagreement — 543 px of
+ * picture in the 408 px seven rows buy, 633 px at 1440 — which is the same
+ * arithmetic as the original defect with the ratio corrected. So the frame
+ * is now sized by *both* constraints at once, in `.y-pic__frame`'s own CSS
+ * comment below: the width is the lesser of the room across and the room
+ * down, and `aspect-ratio` turns whichever won into the height. The shape is
+ * still the camera's own — nothing here letterboxes or crops, and a portrait
+ * sensor still draws a portrait box — it is simply drawn at the largest size
+ * that fits, with the room left over as empty panel. This is the third shape
+ * of this fix and the first that satisfies both halves; the two that did not
+ * are named in that comment so neither is reintroduced.
  *
  * **2. Every overlay is in front of the video, by an explicit `z-index`, not
  * by DOM order alone.** This is the defect the task is named for: a
@@ -1070,21 +1088,69 @@ export default {
 </script>
 
 <style scoped>
-.y-pic { position: relative; }
-/* **Takes the shape of the video it is showing, and never sets its own
-   fixed height** (defect 1 — see this file's own top-of-file doc comment).
-   `aspect-ratio: 16/9` looked right once and was not: the widget's height
-   was a whole number of grid rows, the width a fraction of the viewport,
-   and the two agreed at exactly one window size — 543 px of picture in a
-   468 px box, with the reason for the missing picture among the 75 px that
-   escaped. Filling the given box (`height: 100%`) was the fix for *that*,
-   and was still wrong: it let the *page* impose an aspect ratio the camera
-   never agreed to, so a camera that is not 16:9 was quietly letterboxed or
-   cropped inside a box built for one that is. `videoAspect` — the decoder's
-   own `loadedmetadata` report — now drives the box directly, so the shape
-   on screen is the camera's own shape, and a badly-shaped picture is never
-   confused with a badly-aimed one again. */
-.y-pic__frame { position: relative; width: 100%; background: var(--yonder-display, #04060a); overflow: hidden; }
+/* **The widget's whole slot**, and a grid so the picture and the strip
+   under it divide it explicitly: one flexible row for the picture, one
+   `auto` row for the strip. `minmax(0, 1fr)` in both axes rather than `1fr`,
+   because a `1fr` track has an automatic minimum of its content and would
+   simply grow past the slot again — which is the entire defect below. */
+.y-pic {
+    position: relative;
+    height: 100%;
+    min-height: 0;
+    display: grid;
+    grid-template-rows: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr);
+}
+/* **Takes the shape of the video it is showing, and never more room than it
+   was given** (defect 1 — see this file's own top-of-file doc comment).
+   Three shapes of this have now been wrong, in three different ways:
+
+   - `aspect-ratio: 16/9` on a box the *page* sized. The widget's height is a
+     whole number of grid rows and its width a fraction of the viewport, so
+     the two agreed at exactly one window size.
+   - `height: 100%`, filling the given box. That fixed the overflow and let
+     the *page* impose an aspect ratio the camera never agreed to: a camera
+     that is not 16:9 was quietly letterboxed or cropped inside a box built
+     for one that is, and an operator could not tell a badly-shaped picture
+     from a badly-aimed one.
+   - `aspect-ratio: videoAspect` with `width: 100%`. The shape became the
+     camera's own — which is right, and is kept — but the height was still
+     derived from a width nothing had checked against the slot, so the box
+     stood 543 px tall in the 408 px seven rows buy (633 px at 1440), with
+     the reason for a missing picture among the pixels that escaped.
+
+   **Both constraints, together.** Dashboard gives this widget a grid area of
+   exactly `60h - 12` px (`grid-template-rows: repeat(h, var(--widget-row-height))`
+   plus `var(--widget-gap)` between them), so the slot's height is a definite
+   number the box can be measured against — and `.y-pic__fit` is declared a
+   size container so it can be. The width is then *the lesser* of the room
+   across and the room down, and `aspect-ratio` turns whichever won into the
+   height: the picture is the camera's own shape, at the largest size that
+   fits, with the leftover as empty panel rather than as escaped picture.
+   That is `object-fit: contain`'s arithmetic, which CSS performs for a
+   replaced element and not for a box with overlays in it.
+
+   `width: 100%` is declared first and deliberately kept: a browser without
+   container queries drops the `min()` line at parse time — `cqh` is not a
+   unit it knows — and falls back to that, where `max-height` still holds the
+   box inside its slot. */
+.y-pic__fit {
+    min-width: 0;
+    min-height: 0;
+    container-type: size;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.y-pic__frame {
+    position: relative;
+    background: var(--yonder-display, #04060a);
+    overflow: hidden;
+    width: 100%;
+    width: min(100%, calc(100cqh * var(--y-pic-aspect, 1.7778)));
+    max-width: 100%;
+    max-height: 100%;
+}
 .y-pic__frame.is-aiming { cursor: crosshair; touch-action: none; }
 /* **Every overlay below is given an explicit `z-index`** (defect 2 — this
    file's own top-of-file doc comment). A hardware-decoded `<video>` can

@@ -189,6 +189,36 @@ describe("registerWidget", () => {
     expect(group!.register).toHaveBeenCalledTimes(1);
   });
 
+  /**
+   * **The framework default that turns a poll into a command.**
+   *
+   * Dashboard's own input handler ends `if (hasProperty(widgetConfig,
+   * 'passthru')) { if (widgetConfig.passthru) send(msg) } else { send(msg) }`
+   * — a widget that says nothing about `passthru` echoes every message it is
+   * *sent* straight out of its own output. That is invisible until a widget
+   * has both an input and an output wired, and then it is a page navigating
+   * itself: the Cameras index, fed its rows by the sweep every few seconds,
+   * echoed them into the flow that opens a camera, which read the echo as a
+   * row press. Every page in the capture gate came back as the camera page,
+   * intermittently, because the navigation raced each `goto`.
+   *
+   * Asserted on a widget that declares no `passthru` of its own, which is
+   * every widget in this package — so this is the property `registerWidget`
+   * adds and not one a config happened to carry. A config that *does* name it
+   * still loses to this, deliberately: no instrument here is a pass-through
+   * node, and a page that wanted one would wire a `change` node.
+   */
+  it("never lets a widget echo the message it was sent", () => {
+    const module = (RED: RED) =>
+      registerWidget(RED, { type: "ui-yonder-test", props: () => ({}) });
+    const { props } = build(module, { order: 1 });
+    expect(props).toMatchObject({ passthru: false });
+
+    const echoing = (RED: RED) =>
+      registerWidget(RED, { type: "ui-yonder-test", props: () => ({ passthru: true }) });
+    expect(build(echoing, { passthru: true }).props).toMatchObject({ passthru: false });
+  });
+
   it("passes the resolved props alongside the raw config", () => {
     const module = (RED: RED) =>
       registerWidget(RED, { type: "ui-yonder-test", props: () => ({ label: "CPU TEMP" }) });

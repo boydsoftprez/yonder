@@ -1892,6 +1892,162 @@ describe("the camera routes", () => {
     });
   });
 
+  /**
+   * **`POST /cameras/:id/apply` — the Setup deck's own Apply** (R-CFG-03,
+   * spec §7, and the defect §10 lists first).
+   *
+   * The route `settings` above is not: it takes one flat key at a time,
+   * which is the shape a `ui-number-input` posts on blur — one field, one
+   * apply, one confirmation window for every box an operator tabs out of.
+   * This takes the whole shared draft, once, when Apply is pressed.
+   */
+  describe("POST /cameras/:id/apply", () => {
+    it("refuses a draft whose fields contradict each other, naming the field to change", async () => {
+      const r = provisioned({ cameras: fixtureDetection() });
+      const out = await r("POST", "/cameras/cam0/apply", {
+        previewFloor: 2000, previewCeiling: 500,
+      });
+      expect(out.status).toBe(400);
+      const body = out.body as { problems: { path: string; message: string }[] };
+      // By path, so the deck marks the field rather than showing a sentence
+      // about a form (R-CMD-04: it reports, it never repairs).
+      expect(body.problems).toEqual([{
+        path: "preview.floor_kbps",
+        message: "the floor (2000 kb/s) is above the ceiling (500 kb/s)",
+      }]);
+      // And nothing was written. A refused draft that had already half
+      // applied is worse than one that was refused.
+      const config = (await r("GET", "/config", undefined)).body as Config;
+      expect(config.cameras[0]?.preview.floor_kbps).not.toBe(2000);
+    });
+
+    /**
+     * A held size is checked against **this camera's** own rungs, not the
+     * schema's three: a size the schema allows in general is still wrong for
+     * a camera that does not make it. The fixture's camera offers 1280×720
+     * and 640×480, so 854×480 is a rung it cannot hold.
+     */
+    it("refuses a held preview size this camera does not offer", async () => {
+      const r = provisioned({ cameras: fixtureDetection() });
+      const out = await r("POST", "/cameras/cam0/apply", { previewSize: "854x480" });
+      expect(out.status).toBe(400);
+      expect(JSON.stringify(out.body)).toContain("does not offer 854x480");
+    });
+
+    it("applies a whole draft at once, and says what it interrupts", async () => {
+      const r = provisioned({ cameras: fixtureDetection() });
+      const out = await r("POST", "/cameras/cam0/apply", {
+        previewRate: 25,
+        streamMode: "Adaptive", streamFloor: 500, streamCeiling: 3000,
+      });
+      expect(out.status).toBe(200);
+      const config = (await r("GET", "/config", undefined)).body as Config;
+      expect(config.cameras[0]?.preview.framerate).toBe(25);
+      expect(config.cameras[0]?.stream.mode).toBe("adaptive");
+      expect(config.cameras[0]?.stream.floor_kbps).toBe(500);
+      // The same function the deck draws before the press, so the warning an
+      // operator read and the answer they get are one calculation. A preview
+      // rate change is the preview branch and nothing else.
+      expect((out.body as { interruption: string[] }).interruption)
+        .toEqual(["preview branch only"]);
+    });
+
+    /**
+     * **Where the window arms, and where it does not** — spec §10's defect 1,
+     * measured at the route rather than assumed at the page. A load-bearing
+     * change to what leaves the aircraft is held pending a confirmation
+     * (R-NET-07, R-CFG-03); a live image control touches no configuration and
+     * can never arm one, which is why `controls` is a different route and not
+     * a flag on this one.
+     */
+    it("arms the confirmation window for a load-bearing change; a control never does", async () => {
+      // A router each, because an armed window is device state: a second
+      // apply while one is pending is refused, and the refusal would be
+      // mistaken for "this change did not arm one".
+      const armed = await provisioned({ cameras: fixtureDetection() })(
+        "POST", "/cameras/cam0/apply", { streamBitrate: 3000 },
+      );
+      expect(typeof (armed.body as { expiresAt: number | null }).expiresAt).toBe("number");
+
+      // A change the engine's own `CAMERA_EXEMPT_LEAVES` exempts is kept, with
+      // nothing to confirm — the page draws a countdown exactly where one
+      // armed because it draws the engine's answer, never a prediction.
+      const kept = await provisioned({ cameras: fixtureDetection() })(
+        "POST", "/cameras/cam0/apply", { framerate: 25 },
+      );
+      expect((kept.body as { expiresAt: number | null }).expiresAt).toBeNull();
+
+      // And the live route, on the same camera, with the same daemon: no
+      // deadline anywhere in the answer, because it never reaches the engine.
+      const live = await provisioned({ cameras: fixtureDetection() })(
+        "POST", "/cameras/cam0/controls", { brightness: 10 },
+      );
+      expect(live.status).toBe(200);
+      expect(Object.keys(live.body as object)).not.toContain("expiresAt");
+    });
+
+    it("refuses anything that is not a draft object at all", async () => {
+      const r = provisioned({ cameras: fixtureDetection() });
+      expect((await r("POST", "/cameras/cam0/apply", "everything")).status).toBe(400);
+      expect((await r("POST", "/cameras/cam0/apply", [1, 2])).status).toBe(400);
+    });
+
+    /**
+     * **A staged path this device does not know is named, never dropped.**
+     * An old browser holding a draft from a console two versions back is the
+     * case: silently ignoring the field it cannot apply is an Apply that
+     * reports success and leaves one of the operator's edits unmade, which is
+     * exactly what the draft mechanism exists to stop.
+     */
+    it("refuses a staged path it does not know, by name, and writes nothing", async () => {
+      const r = provisioned({ cameras: fixtureDetection() });
+      const out = await r("POST", "/cameras/cam0/apply", { previewRate: 25, streamWobble: 1 });
+      expect(out.status).toBe(400);
+      expect(JSON.stringify(out.body)).toContain("streamWobble");
+      const config = (await r("GET", "/config", undefined)).body as Config;
+      expect(config.cameras[0]?.preview.framerate).not.toBe(25);
+    });
+
+    /** The camera's own name travels with the draft, and is written too. */
+    it("renames the camera when the deck staged a name", async () => {
+      const r = provisioned({ cameras: fixtureDetection() });
+      const out = await r("POST", "/cameras/cam0/apply", { name: "Nose mast" });
+      expect(out.status).toBe(200);
+      const config = (await r("GET", "/config", undefined)).body as Config;
+      expect(config.cameras[0]?.name).toBe("Nose mast");
+    });
+  });
+
+  /**
+   * **`POST /cameras/:id/outputs/:kind`** (R-UI-24, spec §7's Outputs table).
+   * Through the engine like every other change to what leaves the aircraft,
+   * and emphatically not a runtime toggle.
+   */
+  describe("POST /cameras/:id/outputs/:kind", () => {
+    it("stops one output without losing its port, its path or its secret", async () => {
+      const r = provisioned({ cameras: fixtureDetection() });
+      const out = await r("POST", "/cameras/cam0/outputs/rtp", { enabled: false });
+      expect(out.status).toBe(200);
+      const config = (await r("GET", "/config", undefined)).body as Config;
+      const rtp = config.cameras[0]?.outputs.find((o) => o.kind === "rtp") as
+        { enabled: boolean; host: string; port: number };
+      expect(rtp.enabled).toBe(false);
+      expect(rtp.host).toBe("192.168.1.50");
+      expect(rtp.port).toBe(5600);
+    });
+
+    it("404s for an output this camera has not got", async () => {
+      const r = provisioned({ cameras: fixtureDetection() });
+      expect((await r("POST", "/cameras/cam0/outputs/srt", { enabled: false })).status).toBe(404);
+    });
+
+    it("needs a boolean, so a missing field cannot read as off", async () => {
+      const r = provisioned({ cameras: fixtureDetection() });
+      expect((await r("POST", "/cameras/cam0/outputs/rtp", {})).status).toBe(400);
+      expect((await r("POST", "/cameras/cam0/outputs/rtp", { enabled: "no" })).status).toBe(400);
+    });
+  });
+
   /** R-VID-15: the command carries the address the operator is reaching this device on. */
   it("names the address the request arrived on, and lists the others beneath it", async () => {
     const r = provisioned({ cameras: fixtureDetection() });
