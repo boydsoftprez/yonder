@@ -357,6 +357,41 @@ export default {
     hasDraft (path) {
       return Object.prototype.hasOwnProperty.call(this.draft, path)
     },
+    /**
+     * **The sentence that says a control is holding an edit.**
+     *
+     * `pendingEdits` and not `hasDraft`: the draft keeps a recorded value
+     * whether or not it still differs from the applied one, and a control
+     * whose staged value has since been applied is not pending — that is the
+     * whole reason `pending` filters at read time.
+     *
+     * The blueprint carries this on every staged control
+     * (`gallery/deck.js`: `reason: pending ? "Pending · apply on Setup" :
+     * st.reason`). Without it the deck shows the staged value and nothing
+     * says it is staged, so the only way to learn which controls are holding
+     * an edit is to leave Live and read the list on Setup — which is exactly
+     * the complaint that sent this back.
+     */
+    /**
+     * The staged value, but only while it is still an edit.
+     *
+     * `hasDraft` is the raw draft and answers "was this recorded", which stays
+     * true after the value has been applied — the store deliberately keeps the
+     * entry and filters at read time. Driving a set bar's second mark from it
+     * left the mark, and `YonderSetBar`'s own "Pending · apply on Setup" note
+     * under it, on screen for ever after an apply: the operator applied a
+     * change and the console went on saying it was waiting.
+     */
+    stagedValue (path) {
+      return this.pendingEdits.some((e) => e.path === path)
+        ? Number(this.draft[path])
+        : null
+    },
+    stagedReason (path, fallback) {
+      return this.pendingEdits.some((e) => e.path === path)
+        ? 'Pending · apply on Setup'
+        : (fallback || '')
+    },
     draftValue (path, fallback) {
       return this.hasDraft(path) ? this.draft[path] : fallback
     },
@@ -642,6 +677,7 @@ export default {
       }
       children.push(h(YonderSegmented, {
         key: 'streamMode',
+        reason: this.stagedReason('streamMode'),
         label: 'Bitrate',
         options: ['Fixed', 'Adaptive'],
         value: uiMode,
@@ -657,7 +693,7 @@ export default {
           step: 100,
           precision: 0,
           actual: policy.floor_kbps ?? 100,
-          requested: this.hasDraft('streamFloor') ? Number(this.draft.streamFloor) : null,
+          requested: this.stagedValue('streamFloor'),
           onSet: (v) => this.stage('streamFloor', v),
         }))
         children.push(h(YonderSetBar, {
@@ -669,7 +705,7 @@ export default {
           step: 100,
           precision: 0,
           actual: policy.ceiling_kbps ?? 20000,
-          requested: this.hasDraft('streamCeiling') ? Number(this.draft.streamCeiling) : null,
+          requested: this.stagedValue('streamCeiling'),
           onSet: (v) => this.stage('streamCeiling', v),
         }))
       }
@@ -683,7 +719,7 @@ export default {
         precision: 0,
         actual: (applied && typeof applied.bitrate_kbps === 'number') ? applied.bitrate_kbps : (policy.bitrate_kbps ?? 0),
         readonly: adaptive,
-        requested: (!adaptive && this.hasDraft('streamBitrate')) ? Number(this.draft.streamBitrate) : null,
+        requested: adaptive ? null : this.stagedValue('streamBitrate'),
         onSet: adaptive ? undefined : (v) => this.stage('streamBitrate', v),
       }))
       return h(YonderColumn, { legend: GROUP_LEGEND.stream, qualifier: 'to the ground station', key: 'stream' }, () => children)
@@ -699,6 +735,7 @@ export default {
       const children = []
       children.push(h(YonderSegmented, {
         key: 'previewMode',
+        reason: this.stagedReason('previewMode'),
         label: 'Bitrate',
         options: ['Adaptive', 'Fixed'],
         value: uiMode,
@@ -706,6 +743,7 @@ export default {
       }))
       children.push(h(YonderPicker, {
         key: 'previewSize',
+        reason: this.stagedReason('previewSize'),
         label: 'Size',
         value: size,
         options: PREVIEW_SIZE_OPTIONS,
@@ -729,6 +767,7 @@ export default {
       }
       children.push(h(YonderPicker, {
         key: 'previewRate',
+        reason: this.stagedReason('previewRate'),
         label: 'Rate',
         value: String(this.draftValue('previewRate', policy.framerate ?? 15)),
         options: PREVIEW_RATE_OPTIONS,
@@ -744,7 +783,7 @@ export default {
           step: 50,
           precision: 0,
           actual: policy.floor_kbps ?? 300,
-          requested: this.hasDraft('previewFloor') ? Number(this.draft.previewFloor) : null,
+          requested: this.stagedValue('previewFloor'),
           onSet: (v) => this.stage('previewFloor', v),
         }))
         children.push(h(YonderSetBar, {
@@ -756,7 +795,7 @@ export default {
           step: 50,
           precision: 0,
           actual: policy.ceiling_kbps ?? 2000,
-          requested: this.hasDraft('previewCeiling') ? Number(this.draft.previewCeiling) : null,
+          requested: this.stagedValue('previewCeiling'),
           onSet: (v) => this.stage('previewCeiling', v),
         }))
       }
@@ -770,7 +809,7 @@ export default {
         precision: 0,
         actual: (applied && typeof applied.bitrate_kbps === 'number') ? applied.bitrate_kbps : (policy.bitrate_kbps ?? 0),
         readonly: adaptive,
-        requested: (!adaptive && this.hasDraft('previewBitrate')) ? Number(this.draft.previewBitrate) : null,
+        requested: adaptive ? null : this.stagedValue('previewBitrate'),
         onSet: adaptive ? undefined : (v) => this.stage('previewBitrate', v),
       }))
       return h(YonderColumn, { legend: GROUP_LEGEND.preview, qualifier: 'to this browser', key: 'preview' }, () => children)
@@ -997,8 +1036,29 @@ export default {
 .y-deck__slot {
     display: flex;
     flex-direction: column;
-    min-width: 252px;
+    /* 220, not 252: the blueprint's own figure (`gallery.css` `.d-cols__slot`).
+       At 252 a fourth slot does not fit a 1280-wide page and wraps under the
+       first, which is how this deck came to photograph as three columns and a
+       stray — the four-column shape `SLOTS` declares only appeared at 1440. */
+    min-width: 220px;
     flex: 1 1 252px;
+    /* The rule between columns, which the blueprint draws and this did not.
+       Not decoration: four unruled columns of label/value pairs read as one
+       field of text, and the eye has nothing to tell it which qualifier —
+       *to the ground station*, *to this browser* — governs which reading.
+
+       Longhand, not the `border-left` shorthand: jsdom does not resolve custom
+       properties, so a shorthand carrying `var(--yonder-divider)` fails to
+       parse there and the width reads as something else entirely — which is
+       how the first version of this rule passed a test asserting 1px while
+       computing 16. Written this way the width and style are readable
+       whatever the colour resolves to. */
+    border-left-width: 1px;
+    border-left-style: solid;
+    border-left-color: var(--yonder-divider, #2b333c);
+}
+.y-deck__slot:first-child {
+    border-left-width: 0;
 }
 .y-deck__aim {
     padding: 10px 16px 0;

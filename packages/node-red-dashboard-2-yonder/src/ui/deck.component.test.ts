@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { mount, type VueWrapper } from "@vue/test-utils";
 import { describe, expect, it, vi } from "vitest";
+import { reactive } from "vue";
 import YonderDeck, { CAPABILITY_LAYOUT, appliedForDraft } from "./YonderDeck.vue";
 import { CAPABILITY_KEYS } from "yonder-core/presentation";
 
@@ -583,6 +584,49 @@ describe("a refusal that is not about the draft on screen", () => {
   });
 });
 
+/**
+ * **A staged control says so, on the page you staged it from.**
+ *
+ * The deck draws the staged value the moment it is staged, and for one commit
+ * nothing said it was staged: an operator on Live saw a changed number and had
+ * to leave for Setup to learn which controls were holding an edit. The
+ * blueprint carries the sentence on every staged control
+ * (`gallery/deck.js`: `reason: pending ? "Pending · apply on Setup"`).
+ *
+ * The pair matters. Staging must add the sentence and the applied report must
+ * take it away again, or the first half alone would pass while the console
+ * told an operator an edit was waiting for ever.
+ */
+it("says which controls are holding an edit, and stops saying it once applied", async () => {
+  // A *reactive* store: `makeStore` returns a plain object, and the deck reads
+  // its report through a computed, so a later mutation of a plain object would
+  // never re-render and the second half of this test could not fail honestly.
+  const store = reactive(makeStore(makeReport({})));
+  const { wrapper } = deck(store as ReturnType<typeof makeStore>, "live");
+  expect(wrapper.text()).not.toContain("Pending · apply on Setup");
+
+  // Staged through the deck's own `stage()` rather than by finding a widget
+  // and guessing which path its label maps to: this is a test about the
+  // marker, and a mis-picked bar would stage one path and apply another.
+  (wrapper.vm as unknown as { stage: (p: string, v: unknown) => void })
+    .stage("streamBitrate", 4200);
+  await wrapper.vm.$nextTick();
+
+  expect(wrapper.text(), "a staged control must say so").toContain("Pending · apply on Setup");
+
+  // The device comes back reporting the value the draft asked for. The edit is
+  // no longer pending, so the sentence must go — `pending` filters at read
+  // time and this is the half of that which reaches the operator.
+  store.state.data.messages.d1.payload = makeReport({
+    applied: { stream: { mode: "fixed", bitrate_kbps: 4200 }, preview: {} },
+  });
+  // Two ticks: `report` -> `appliedFlat` -> `pendingEdits` -> render is a
+  // chain of computeds, and one tick flushes the values but not yet the tree.
+  await wrapper.vm.$nextTick();
+  await wrapper.vm.$nextTick();
+  expect(wrapper.text(), "an applied edit is not pending").not.toContain("Pending · apply on Setup");
+});
+
 it("groups flow into columns and no group is stranded on a row of its own", () => {
   // jsdom performs no layout (Task 14's own lesson): the assertion is on the
   // CSS rule that prevents a stray column, not a measured pixel position.
@@ -612,7 +656,20 @@ it("groups flow into columns and no group is stranded on a row of its own", () =
     const style = getComputedStyle(slot.element);
     // A fixed column width, never 0/auto — the rule that keeps a slot from
     // collapsing to a single stranded row when it holds only one group.
-    expect(style.minWidth).toBe("252px");
+    // 220px is the blueprint's own figure (`gallery.css` `.d-cols__slot`); at
+    // 252 a fourth slot did not fit a 1280-wide page and wrapped under the
+    // first, so the four-column shape `SLOTS` declares only appeared at 1440.
+    expect(style.minWidth).toBe("220px");
+  }
+  // **The rule between columns.** Four unruled columns of label/value pairs
+  // read as one field of text, with nothing to say which qualifier governs
+  // which reading. The blueprint draws a divider and this did not. The first
+  // slot has nothing to its left to be divided from.
+  expect(getComputedStyle(slots[0].element).borderLeftWidth,
+    "the first column has nothing to its left").toBe("0px");
+  for (const slot of slots.slice(1)) {
+    expect(getComputedStyle(slot.element).borderLeftWidth,
+      "every column after the first needs a rule beside it").toBe("1px");
   }
 });
 
