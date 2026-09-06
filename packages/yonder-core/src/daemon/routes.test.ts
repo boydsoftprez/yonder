@@ -150,7 +150,17 @@ const ENCODER: Encoder = {
 /** The value the stream-address route resolves, and no other route may. */
 const RTSP_PASSWORD = "an-actual-generated-rtsp-password";
 
-const ADDRESSES = ["192.168.77.1", "10.147.17.42"];
+/**
+ * What this device answers on, and which of them a peer could dial in to.
+ *
+ * The access point's own address and a mesh address, both dialable — the
+ * modem's is the one that never is, and the case where it is the only address
+ * has its own test below.
+ */
+const ADDRESSES = [
+  { address: "192.168.77.1", dialIn: true },
+  { address: "10.147.17.42", dialIn: true },
+];
 
 /** A configuration with one camera in it, on the by-path name above. */
 function cameraConfig(overrides: Partial<Camera> = {}): Config {
@@ -190,6 +200,8 @@ interface RouterOptions {
   remoteState?: () => Promise<RemoteState>;
   /** Tests one path now, over the same ReachMonitor the automatic probes use. */
   testPath?: (path: PathName) => Promise<boolean>;
+  /** What this device answers on, and which of those a peer can dial in to. */
+  addresses?: { address: string; dialIn: boolean }[];
   /**
    * What the camera probe answers.
    *
@@ -261,7 +273,7 @@ function router(opts: RouterOptions = {}): Router {
       encoder: () => Promise.resolve(ENCODER),
       supervisor,
       rtspPassword: () => RTSP_PASSWORD,
-      addresses: () => Promise.resolve(ADDRESSES),
+      addresses: () => Promise.resolve(opts.addresses ?? ADDRESSES),
       // Given, never a real applyControls — exactly as `cameras` and
       // `encoder` are given rather than defaulted: with a default, any test
       // that reached this route would run a real v4l2-ctl.
@@ -2155,6 +2167,37 @@ describe("the camera routes", () => {
     it("leaves the outbound push usable on the modem, because it dials out", async () => {
       expect((await lineOf(only("modem"), "gstreamer")).usable).toBe(true);
     });
+  });
+
+  /**
+   * **The dial-in subset reaches the rendering** (R-UI-24) — the second half
+   * of the same join as the paths above, and the one that was wrong.
+   *
+   * `renderReceive()` decides which address the RTSP URL is built from, and
+   * `receive.test.ts` holds it to that over a set *it* supplies. If this route
+   * hands it every address rather than the dialable ones, the flying case
+   * silently comes back: a URL carrying the modem's address under a sentence
+   * saying a mesh peer can reach it.
+   */
+  it("builds the RTSP URL from an address a peer can dial in to", async () => {
+    const r = provisioned({
+      cameras: fixtureDetection(),
+      addresses: [
+        // The console arrived on the modem's address — first in the list, as
+        // `server.ts` orders it — and nothing can dial in to that one.
+        { address: "100.72.14.9", dialIn: false },
+        { address: "10.147.17.42", dialIn: true },
+      ],
+      remoteState: () => Promise.resolve(
+        { online: true, addresses: ["10.147.17.42"] } as unknown as RemoteState,
+      ),
+    });
+    const out = await r("GET", "/cameras/cam0/stream-address", undefined);
+    const url = (out.body as { renderings: { kind: string; body: string; usable: boolean }[] })
+      .renderings.find((x) => x.kind === "url");
+    expect(url?.usable, "the mesh is up, so a peer can reach the listener").toBe(true);
+    expect(url?.body).toContain("@10.147.17.42:8554/cam0");
+    expect(url?.body).not.toContain("100.72.14.9");
   });
 
   /**

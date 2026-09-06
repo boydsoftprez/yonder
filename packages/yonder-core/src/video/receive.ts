@@ -35,6 +35,19 @@ export interface ReceiveFacts {
   readonly address: string;
   /** Every other address this device answers on. */
   readonly alternatives: readonly string[];
+  /**
+   * Every address a peer could open a socket **to** — the mesh's, and a LAN's,
+   * never the modem's (R-UI-24).
+   *
+   * Only the RTSP line uses it, and only the RTSP line needs it: the three UDP
+   * renderings carry no address at all, because the ground station listens and
+   * this board dials out to it. A listener is the other direction, and an
+   * address behind the carrier's NAT is one nothing can reach — so a URL built
+   * from "the address this console session arrived on" is wrong precisely when
+   * the console is being reached over cellular, which is the flying case
+   * R-UI-24 exists for.
+   */
+  readonly dialIn: readonly string[];
   /** Resolved from secrets.yaml, or null before it has been generated. */
   readonly rtspPassword: string | null;
   readonly rtspPort: number;
@@ -123,7 +136,7 @@ function usability(
 }
 
 export function renderReceive(facts: ReceiveFacts): Rendering[] {
-  const { camera, address, alternatives, rtspPassword, rtspPort, paths } = facts;
+  const { camera, address, alternatives, rtspPassword, rtspPort, paths, dialIn } = facts;
   const c = CODEC[camera.codec];
   const rtp = camera.outputs.find((o) => o.kind === "rtp");
   const rtsp = camera.outputs.find((o) => o.kind === "rtsp");
@@ -134,6 +147,28 @@ export function renderReceive(facts: ReceiveFacts): Rendering[] {
   // they take one verdict rather than three that could disagree.
   const push = usability(rtp, "rtp", paths);
   const listen = usability(rtsp, "rtsp", paths);
+
+  /**
+   * **The address the RTSP URL is built from, and why it is not always the
+   * one the console arrived on.**
+   *
+   * R-VID-15 asks for the address the operator is actually reaching the device
+   * on, and for three of the four renderings that is not a question at all —
+   * they carry no address. For the fourth it is the whole line, and the
+   * requirement's intent is an address that *works*: R-VID-15's own words are
+   * "the address the operator is actually reaching the device on", which on a
+   * board with several is a proxy for "the one that is live". A peer dialling
+   * in is a different question from a browser dialling in, and the two answers
+   * differ in exactly one case — the console reached over cellular — where the
+   * console's own address is behind the carrier's NAT and no peer can use it.
+   *
+   * So: the console's address when it is one a peer can dial, otherwise the
+   * first that is. When there is none, the console's own address is printed
+   * and `listen` has already marked the line unusable — a URL with an address
+   * nobody can reach, plainly labelled, beats a URL with no address at all.
+   */
+  const listenAt = dialIn.includes(address) ? address : dialIn[0] ?? address;
+  const substituted = listenAt !== address;
 
   const caps =
     `application/x-rtp,media=video,clock-rate=90000,encoding-name=${camera.codec.toUpperCase()},payload=${RTP_PAYLOAD_TYPE}`;
@@ -193,10 +228,10 @@ export function renderReceive(facts: ReceiveFacts): Rendering[] {
       body: rtsp === undefined || rtsp.kind !== "rtsp"
         ? "This camera has no RTSP output configured. Add one in Setup to receive over RTSP."
         : rtspPassword === null
-          ? `rtsp://yonder:<password>@${address}:${rtspPort}/${camera.id}\n\n`
+          ? `rtsp://yonder:<password>@${listenAt}:${rtspPort}/${camera.id}\n\n`
           + "This device's RTSP password is not yet generated; it is created the first "
           + "time the media server is configured."
-          : `rtsp://yonder:${rtspPassword}@${address}:${rtspPort}/${camera.id}`,
+          : `rtsp://yonder:${rtspPassword}@${listenAt}:${rtspPort}/${camera.id}`,
       // A URL with `<password>` where the credential goes is not a URL
       // anybody can use, whatever the paths say, so an unresolved secret is
       // its own unusable case ahead of reach.
@@ -206,7 +241,25 @@ export function renderReceive(facts: ReceiveFacts): Rendering[] {
           note: "unusable — this device's RTSP password has not been generated yet, "
             + "so there is no URL to copy",
         }
-        : listen),
+        // **A verdict about the address that is actually printed.** Where the
+        // URL had to reach for a different address, the note says which and
+        // why, so the sentence and the line under it are about one thing; and
+        // a claim that a peer can reach this output while no address is known
+        // to be dialable is a claim about nothing, so it is withdrawn rather
+        // than left standing over an address that cannot serve it.
+        : listen.usable && dialIn.length === 0
+          ? {
+            usable: false,
+            note: "unusable — nothing this device answers on can be dialled in to; "
+              + "the only address it has is the one it is reached on, and no peer can open a socket to it",
+          }
+          : listen.usable && substituted
+            ? {
+              usable: true,
+              note: `${listen.note}; the URL carries ${listenAt} rather than the address `
+                + "this console is being reached on, which is behind a carrier's NAT and cannot be dialled in to",
+            }
+            : listen),
     },
   ];
 }

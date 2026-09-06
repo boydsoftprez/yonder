@@ -10,6 +10,7 @@ import { AdminCredential } from "../console/credential.js";
 import { ConsoleRenderer } from "../console/renderer.js";
 import { consolePaths, type ConsolePaths } from "../console/settings.js";
 import { loadConfig } from "../config/load.js";
+import { answerableAddresses } from "../net/dial-in.js";
 import { seedConfigIfAbsent } from "../config/defaults.js";
 import { SecretStore } from "../secrets/store.js";
 import { NmcliClient } from "../net/nmcli/client.js";
@@ -911,14 +912,22 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
       // rest beneath it, because a board on a mesh has several and only one of
       // them is the one the operator is actually reaching it on (R-VID-15).
       addresses: async () => {
-        const [local, mesh] = await Promise.all([
+        const [local, mesh, standing] = await Promise.all([
           client.activeIpv4(),
           readRemoteState(loadConfig(opts.configPath), built.zerotier, { readTraffic }),
+          reach.state(),
         ]);
-        return [
-          ...local.map((a) => a.address.split("/")[0] ?? a.address),
-          ...mesh.addresses.map((a) => a.split("/")[0] ?? a),
-        ].filter((a) => a !== "");
+        // **Which address a peer can dial in to** (R-UI-24, `RouterDeps.
+        // addresses`). Assembled here because the two readings it needs are
+        // here — the interface each address is held on, from nmcli, and the
+        // interface the modem is on, from the reach monitor — and decided in
+        // `net/dial-in.ts`, because that decision is the join the whole of
+        // R-UI-24 rests on and a pure function is a join a test can stand on.
+        return answerableAddresses({
+          local,
+          mesh: mesh.addresses,
+          modemDevice: standing.paths.find((p) => p.path === "modem")?.device ?? null,
+        });
       },
     }),
     // Last, so it wins over the real probes above rather than sitting beside

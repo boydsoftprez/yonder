@@ -45,6 +45,9 @@ const FACTS: ReceiveFacts = {
   rtspPassword: "Kx7-mfPq-2Rn4",
   rtspPort: 8554,
   paths: LAN,
+  // On a bench the console's own address is one a peer can dial, so the URL
+  // uses it and nothing is substituted. The flying case is its own block.
+  dialIn: ["192.168.191.42"],
 };
 
 /** The one rendering a given kind produced. */
@@ -203,6 +206,59 @@ describe("renderReceive", () => {
       expect(url.usable).toBe(false);
       expect(url.note).toMatch(/^unusable — /);
       expect(url.note).toMatch(/password/);
+    });
+
+    /**
+     * **The address in the URL must be one the verdict is true of.**
+     *
+     * On the flying case — cellular up, the mesh up, no LAN — a listener is
+     * reachable and the console is being reached on the modem's address, which
+     * is behind the carrier's NAT. Printing that address under "a peer on the
+     * mesh or a LAN has an address that reaches this RTSP output" is the claim
+     * true and the line beside it useless: an address that looks right and does
+     * nothing, which is the whole failure this surface exists to prevent.
+     */
+    it("builds the RTSP URL from an address a peer can dial, not the console's own", () => {
+      const flying = {
+        ...FACTS,
+        address: "100.72.14.9",
+        alternatives: ["10.147.17.42"],
+        dialIn: ["10.147.17.42"],
+        paths: { lan: false, mesh: true, cellular: true },
+      };
+      const url = of("url", flying);
+      expect(url.usable).toBe(true);
+      expect(url.body).toContain("@10.147.17.42:8554/cam0");
+      expect(url.body).not.toContain("100.72.14.9");
+      // And the note says which address it used and why, so the sentence and
+      // the line under it are about one thing.
+      expect(url.note).toContain("10.147.17.42");
+      expect(url.note).toMatch(/carrier/);
+    });
+
+    it("keeps the console's own address when a peer can dial that one", () => {
+      const lan = { ...FACTS, address: "192.168.1.50", dialIn: ["192.168.1.50", "10.147.17.42"] };
+      const url = of("url", lan);
+      expect(url.body).toContain("@192.168.1.50:8554/cam0");
+      // No substitution, so no sentence about one.
+      expect(url.note).not.toMatch(/rather than the address/);
+    });
+
+    it("withdraws the claim when nothing this device answers on can be dialled in to", () => {
+      // A verdict of *reachable* over an empty dial-in set is a claim about no
+      // address at all. It is withdrawn rather than left standing.
+      const url = of("url", { ...FACTS, dialIn: [], paths: { lan: true, mesh: false, cellular: false } });
+      expect(url.usable).toBe(false);
+      expect(url.note).toMatch(/^unusable — /);
+      expect(url.body).toContain("@192.168.191.42:8554/cam0");
+    });
+
+    it("leaves the three UDP lines' addresses alone, because they carry none", () => {
+      const flying = { ...FACTS, address: "100.72.14.9", dialIn: ["10.147.17.42"] };
+      for (const kind of ["gstreamer", "appsink"]) {
+        expect(of(kind, flying).body, kind).not.toContain("10.147.17.42");
+        expect(of(kind, flying).body, kind).not.toContain("100.72.14.9");
+      }
     });
 
     it("gives every rendering both fields, so no surface has to guess", () => {

@@ -2042,18 +2042,33 @@ describe("flows/flows.json camera pages", () => {
     // One identity per rendering `renderReceive()` produces, keyed on the
     // property the pick node sets — so a rendering added there and not drawn
     // here is a widget bound to nothing, which renders an em dash for ever.
-    for (const [id, key] of [
-      ["identity-cam-gstreamer", "gstreamer"],
-      ["identity-cam-dialog", "dialog"],
-      ["identity-cam-appsink", "appsink"],
-      ["identity-cam-rtsp", "rtsp"],
+    // widget id · the payload property it binds · the rendering it must read.
+    // `rtsp` and `url` differ on purpose: the surface's word for the line and
+    // `renderReceive()`'s word for the rendering are not the same word, and
+    // that mismatch is exactly where a rule can be pointed at the wrong one.
+    for (const [id, key, kind] of [
+      ["identity-cam-gstreamer", "gstreamer", "gstreamer"],
+      ["identity-cam-dialog", "dialog", "dialog"],
+      ["identity-cam-appsink", "appsink", "appsink"],
+      ["identity-cam-rtsp", "rtsp", "url"],
     ]) {
       const widget = flows.find((n) => n.id === id);
       expect(widget?.type, `${id} is not an identity`).toBe("ui-yonder-identity");
       expect(widget?.key, `${id} reads the wrong property`).toBe(key);
       expect(fed, `${id} is never fed`).toContain(id);
-      expect(JSON.stringify(pick?.rules), `nothing sets payload.${key}`)
-        .toContain(`"p":"payload.${key}"`);
+      // **The source, not only the target.** Asserting that *something* sets
+      // `payload.dialog` says nothing about what it is set to: pointing that
+      // rule at the gstreamer body leaves this file green, leaves the shape
+      // reference unmoved (the identity rows are a fixed height), and hands a
+      // QGroundControl operator a GStreamer command line in the Ground
+      // station box. The two note rules below were already exact; these four
+      // were not.
+      const rules = pick?.rules as { p: string; to: string; tot: string }[];
+      const rule = rules.find((r) => r.p === `payload.${key}`);
+      expect(rule?.to, `payload.${key} reads the wrong rendering`)
+        .toBe(`payload.renderings[kind="${kind}"].body`);
+      // A move, never a composition (CLAUDE.md rule 2).
+      expect(rule?.tot).toBe("jsonata");
     }
   });
 
@@ -2221,13 +2236,60 @@ describe("flows/flows.json camera pages", () => {
     }
   });
 
-  /** And each rail carries only what can be done from the deck it belongs to. */
-  it("gives each deck the keys that deck can act on", () => {
-    const keysOf = (id: string): string[] =>
-      (JSON.parse(String(flows.find((n) => n.id === id)?.keys)) as { action: string }[])
+  /**
+   * And each rail carries only what can be done from the deck it belongs to —
+   * **and every key it sends is answered by the switch behind it.**
+   *
+   * The two halves were renamed in one commit and nothing held them together:
+   * `keys-cam-setup`'s third key became `address` and `cam-setup-keys`'s third
+   * rule became `address`, and setting either back leaves the whole suite
+   * green. The switch was `checkall: "false"` with no `else`, so a mismatch
+   * dropped the press in silence — a soft key that does nothing at all, on a
+   * board, with the capture gate blind to it because the gate presses deck
+   * keys and `NIGHT` and reaches Setup by a different route.
+   *
+   * So the actions and the rule values are compared to each other rather than
+   * each to a list written twice, and the `else` every rail's switch now has
+   * is asserted to reach the node that says so out loud (R-UI-05: an operator
+   * must be able to tell "nothing happened" from "this did nothing").
+   */
+  it("answers every key each rail sends, and says so out loud when it cannot", () => {
+    const rails = [
+      ["keys-cam-live", "cam-live-keys", ["start", "stop", "setup"]],
+      ["keys-cam-setup", "cam-setup-keys", ["live", "probe", "address"]],
+    ] as const;
+    for (const [railId, switchId, expected] of rails) {
+      const rail = flows.find((n) => n.id === railId);
+      const actions = (JSON.parse(String(rail?.keys)) as { action: string }[])
         .map((k) => k.action);
-    expect(keysOf("keys-cam-live")).toEqual(["start", "stop", "setup"]);
-    expect(keysOf("keys-cam-setup")).toEqual(["live", "probe", "address"]);
+      expect(actions, `${railId} carries the wrong keys`).toEqual([...expected]);
+      // The rail feeds that switch and nothing else, or the binding below is
+      // a binding to a node the press never reaches.
+      expect((rail?.wires as string[][])[0], `${railId} does not feed ${switchId}`)
+        .toEqual([switchId]);
+
+      const decide = flows.find((n) => n.id === switchId);
+      expect(decide?.type).toBe("switch");
+      expect(decide?.property).toBe("payload");
+      const rules = decide?.rules as { t: string; v?: string }[];
+      const wires = decide?.wires as string[][];
+      // One `eq` per action, in the rail's own order, and nothing else.
+      expect(rules.slice(0, -1).map((r) => `${r.t}:${String(r.v)}`),
+        `${switchId} does not answer ${railId}'s keys`)
+        .toEqual(actions.map((a) => `eq:${a}`));
+      // Every one of them reaches something.
+      for (const [i, action] of actions.entries()) {
+        expect(wires[i], `${switchId} routes ${action} nowhere`).not.toEqual([]);
+      }
+      // And the last rule is an `else` that is heard rather than dropped.
+      expect(rules[rules.length - 1]?.t, `${switchId} drops a key it does not know`)
+        .toBe("else");
+      expect(wires[rules.length - 1]).toEqual(["cam-key-unrouted"]);
+    }
+    // The reporter reaches a toast, so an unanswered press is visible rather
+    // than a key that looks pressed and does nothing.
+    expect((flows.find((n) => n.id === "cam-key-unrouted")?.wires as string[][])[0])
+      .toEqual(["toast-cam-refused"]);
   });
 
   /**
@@ -2237,12 +2299,24 @@ describe("flows/flows.json camera pages", () => {
    */
   it("sends only start and stop to the pipeline", () => {
     const route = flows.find((n) => n.id === "cam-live-keys");
-    const [setup, rest] = route?.wires as string[][];
+    const rules = route?.rules as { v?: string }[];
+    const wires = route?.wires as string[][];
+    const toward = (action: string): string[] =>
+      wires[rules.findIndex((r) => r.v === action)] ?? [];
+    // Only the two pipeline keys reach `yonder-stream`. This used to be
+    // asserted as "everything that is not Setup", which was true of the
+    // `else` branch as well — so a key nobody had heard of went to the
+    // pipeline and was refused there rather than being reported as unwired.
+    expect(toward("start")).toEqual(["cam-at-stream"]);
+    expect(toward("stop")).toEqual(["cam-at-stream"]);
+    for (const [i, wired] of wires.entries()) {
+      if (rules[i]?.v === "start" || rules[i]?.v === "stop") continue;
+      expect(wired, `output ${i} reaches the pipeline`).not.toContain("cam-at-stream");
+    }
     // Setup also fetches the stream address: the deck an operator opens to find
     // it should already have it, and the committed capture of that deck is
     // what makes the gate's credential check bite (R-SEC-10).
-    expect(setup).toEqual(["deck-setup", "cam-at-receive"]);
-    expect(rest).toEqual(["cam-at-stream"]);
+    expect(toward("setup")).toEqual(["deck-setup", "cam-at-receive"]);
     expect(flows.find((n) => n.id === "stream-camera")?.type).toBe("yonder-stream");
   });
 

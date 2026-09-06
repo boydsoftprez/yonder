@@ -1219,3 +1219,87 @@ fault consists of. The rule fires on `add`, and a re-enumeration is an `add`,
 so it should — but "should" is what the first version of this rule had going
 for it too. It needs a drop to happen with the rule in place and the interval
 measured afterwards, and no drop has happened since it was installed.
+
+---
+
+### K-47 · The capture gate rewrites every committed day-palette image from a run that checks no credential
+
+**Status:** Open · **Requirements:** R-SEC-10, R-UI-12
+
+`scripts/verify-pages.sh:826` presses the `NIGHT` key through a real browser,
+which is the gate's one end-to-end proof that a soft key on this console does
+anything at all when pressed:
+
+```sh
+node "$REPO/scripts/capture-pages.mjs" \
+    --base-url "http://127.0.0.1:$PORT" --password "$PASSWORD" \
+    --palette day --artifacts "$REPO/vendor/capture" \
+    --press NIGHT >/dev/null 2>&1 || true
+```
+
+Three things about that invocation are wrong together, and none of them is
+wrong alone.
+
+**It captures every page while it is there.** `--press` is applied *after* the
+capture loop (`capture-pages.mjs:313`, `:882`) and there is no `--only`, so this
+run photographs all eleven pages — `Camera · setup` among them — and writes each
+into `docs/console/capture/` unconditionally (`capture-pages.mjs:641`). It runs
+*after* the guarded `capture day`, so the day-palette bytes that end up
+committed are this run's, not the checked run's.
+
+**Both R-SEC-10 guards are inert on that path.** It passes neither `--secrets`
+nor `--synthetic-cameras`. Without `--secrets`, `deviceSecret()` returns `null`
+and the page-HTML credential check is skipped; the guard written to complain
+about exactly this — *"`--synthetic-cameras` without `--secrets`: nothing
+checked the real credential"* — is gated on `syntheticCameras !== undefined` and
+therefore does not fire either. So **committed images can currently be rewritten
+by a path that performs no credential check at all**, which is the part that
+matters: `Camera · setup` is the page that carries a resolved RTSP password
+(R-VID-15), and R-UI-12 commits it.
+
+**And whatever it would have said is discarded.** `>/dev/null 2>&1 || true`
+throws away both the output and the exit status, so a failure on this run is
+indistinguishable from a pass. The `|| true` is deliberate — the *next* check is
+`wait_for_theme night`, which is the assertion this invocation exists to set up
+— but it swallows the capture's own verdict with it.
+
+**This is the third instance of the same defect in the same file.** The script's
+own comment at `verify-pages.sh:1236` records finding and fixing it twice
+before: *"`--secrets`, because these runs write committed images too …
+`deviceSecret()` answers `null` without it, which switches off both R-SEC-10
+guards … Sixteen images went into `docs/console/capture/` from this function
+with neither guard running."* Two invocations were fixed; this one was not
+looked at, because it is not in that function and its purpose is a key press
+rather than a capture.
+
+**It is also one of two mechanisms behind the capture drift** that four separate
+runs have recorded as noise — `camera-live-tablet.day.fold.png` and
+`status-pending-radio.day.png` after Task 28; `status.night.png`,
+`status-psk-changed.night.png`, `camera-live-notebook.day.png` and
+`status-pending-radio.night.png` during Task 29 and its review. Six distinct
+pages whose shape references never moved and whose bytes did. This entry
+accounts for the day-palette base captures: they are rewritten last by a run
+whose output nobody reads.
+
+**The second mechanism is a palette switch the page has not finished applying.**
+`camera-live-notebook.day.png` was compared against its committed version pixel
+by pixel after Task 29's fix round: identical text, identical geometry, and the
+whole page uniformly washed out — the day palette's own colours missing rather
+than the night palette's present. The fold captures run immediately after
+`reach_theme day`, which waits for `theme.css` to be *regenerated on disk* and
+not for a browser to have fetched and applied it, so a screenshot can be taken
+over a stylesheet that is still being written. That is a separate fix from this
+one and belongs with it: both are the gate writing a committed artefact from a
+moment nobody checked.
+
+**Not fixed here, deliberately.** It is the gate's own defect and wants its own
+change rather than a fix smuggled into a console commit — and the fix has to
+answer a question this entry does not: whether the press run should capture at
+all (`--only` on one page, or a `--no-capture`), or should simply be given
+`--secrets` and `--synthetic-cameras` like its neighbours. In this harness the
+daemon is always `scripts/synthetic-daemon.mjs`, so what renders is always the
+fixture's `FIXTURE-NOT-A-REAL-PASSWORD` — the hole is that nothing checks, not
+that anything has leaked. Every committed capture has been read by eye and by
+the guarded run and carries the fixture value.
+
+Found by review during Task 29 (`75f8c46`).

@@ -5116,10 +5116,20 @@
         "id": "cam-live-keys",
         "type": "switch",
         "z": "yonder-console",
-        "name": "setup, or the pipeline",
+        "name": "which live action",
         "property": "payload",
         "propertyType": "msg",
         "rules": [
+            {
+                "t": "eq",
+                "v": "start",
+                "vt": "str"
+            },
+            {
+                "t": "eq",
+                "v": "stop",
+                "vt": "str"
+            },
             {
                 "t": "eq",
                 "v": "setup",
@@ -5131,16 +5141,22 @@
         ],
         "checkall": "false",
         "repair": false,
-        "outputs": 2,
+        "outputs": 4,
         "x": 560,
         "y": 2700,
         "wires": [
+            [
+                "cam-at-stream"
+            ],
+            [
+                "cam-at-stream"
+            ],
             [
                 "deck-setup",
                 "cam-at-receive"
             ],
             [
-                "cam-at-stream"
+                "cam-key-unrouted"
             ]
         ]
     },
@@ -5285,11 +5301,14 @@
                 "t": "eq",
                 "v": "address",
                 "vt": "str"
+            },
+            {
+                "t": "else"
             }
         ],
         "checkall": "false",
         "repair": false,
-        "outputs": 3,
+        "outputs": 4,
         "x": 560,
         "y": 2850,
         "wires": [
@@ -5301,6 +5320,36 @@
             ],
             [
                 "cam-at-receive"
+            ],
+            [
+                "cam-key-unrouted"
+            ]
+        ]
+    },
+    {
+        "id": "cam-key-unrouted",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "a key that reached nothing says so",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "that key is not wired to anything on this console — the rail and the flow disagree about what it does, and nothing was sent to the camera",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 860,
+        "y": 2900,
+        "wires": [
+            [
+                "toast-cam-refused"
             ]
         ]
     },

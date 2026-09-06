@@ -165,15 +165,32 @@ export interface RouterDeps {
    */
   rtspPassword?: () => string | null;
   /**
-   * Every address this device answers on, most-used first.
+   * Every address this device answers on, most-used first, and whether a peer
+   * could **dial in** to each one.
    *
    * R-VID-15 wants the stream address to carry the address the operator is
    * actually reaching the device on. A Unix socket carries no Host header, so
    * the caller may name one with `?address=` — and it is honoured only if it
    * is in this list, which makes the allowed set the set of real addresses
    * rather than a pattern somebody had to guess.
+   *
+   * **`dialIn` is here because an address is not one fact but two** (R-UI-24).
+   * Three of the four renderings need no address at all — the ground station
+   * listens and this board pushes to it — and the fourth is an RTSP URL, which
+   * only works if a peer can open a socket *to* this device. The modem's
+   * address cannot be dialled: it is behind the carrier's NAT, which is the
+   * whole of `outputReach()`'s listener case. So a flat list left the console
+   * printing the CGNAT address under the sentence "a peer on the mesh or a LAN
+   * has an address that reaches this RTSP output" — the claim true, the
+   * address beside it useless, which is exactly the failure this surface
+   * exists to prevent, arriving from the other direction.
+   *
+   * Which addresses those are is the assembly's fact, not this router's: it
+   * takes reading the modem's own interface name off the reach monitor and
+   * comparing it against the device each address is held on. `server.ts` does
+   * that once, where both are already in hand.
    */
-  addresses?: () => Promise<string[]>;
+  addresses?: () => Promise<{ address: string; dialIn: boolean }[]>;
   /**
    * The supply register (R-SYS-09). Injected for the same reason as `cameras`:
    * absent means this board does not expose it, and no caller runs `vcgencmd`
@@ -931,7 +948,8 @@ export function createRouter(deps: RouterDeps): Router {
     // (R-SEC-10). This one is allowed it because the operator is being handed
     // a URL to copy, which is the whole of R-VID-15.
     if (method === "GET" && verb === "stream-address") {
-      const addresses = deps.addresses === undefined ? [] : await deps.addresses();
+      const held = deps.addresses === undefined ? [] : await deps.addresses();
+      const addresses = held.map((a) => a.address);
       // A Unix socket carries no Host header, so the caller may name the
       // address it arrived on — honoured only when this device actually
       // answers on it, which makes the allowed set the set of real addresses
@@ -947,6 +965,8 @@ export function createRouter(deps: RouterDeps): Router {
         camera,
         address,
         alternatives: addresses.filter((a) => a !== address),
+        // The subset a peer can open a socket *to*. See `RouterDeps.addresses`.
+        dialIn: held.filter((a) => a.dialIn).map((a) => a.address),
         rtspPassword: deps.rtspPassword?.() ?? null,
         rtspPort: RTSP_PORT,
         // **The device's own paths, at the moment the line was asked for**
