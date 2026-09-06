@@ -1619,3 +1619,46 @@ list in the plan today.
 **Sequencing:** plan Task 31 (the rate controller) measures thresholds on a
 throttled link and has nothing to measure until a pipeline answers. This should
 land before it.
+
+### K-54 · A detected camera cannot be configured from the console
+
+**Status:** Open · **Requirements:** R-UI-03, R-CAM-12
+
+Found by the operator: he attached a second camera, the Cameras page showed it,
+and there was no way to do anything with it.
+
+The board detects it correctly. `GET /cameras` returns the row:
+
+```
+id=None   name='Global Shutter Camera: Global S'   bus='usb · /dev/video2'   state='Not configured'
+```
+
+`id` is `null` by design — `CameraRow`'s own doc says a null id means *detected
+on a socket nothing is configured for*, and `cameraIndex()` composes
+`state: "Not configured"` for exactly that case. So the model knows precisely
+what has happened and says so.
+
+**The page has one soft key: `SWEEP AGAIN`.** Spec §5 names three things the
+Cameras page must do — *"Rows open their camera; Detect again; Add by
+address"*. The first two exist. The third was never built, and **no task in the
+implementation plan owns it**.
+
+There may be two missing actions rather than one, and they should not be
+conflated:
+
+- **Add by address** is what §5 names, and it reads as adding a network camera
+  by URL — a camera the board cannot detect at all.
+- **Adopting a detected camera** is what the operator actually hit: the board
+  has already found it, already knows its `by-path` socket, and needs only to
+  write a configuration entry for it. Nothing specifies this, and it is the
+  commoner case by far — it is what happens every time somebody plugs a camera
+  into a flying aircraft's spare port.
+
+The second is cheap: the socket, the card name and the format list are all in
+hand at the moment the row is drawn. It wants a name and an id, and both have
+sensible defaults (`R-UI-27`'s `Cam N`, and the card name).
+
+**How it was missed** is the same as K-52's, and that is now three of these:
+both ends of the feature exist and the control between them was never written,
+so no review found it — a task review reads a diff, and nothing in any diff is
+missing. Only somebody using the console finds an action that is not there.
