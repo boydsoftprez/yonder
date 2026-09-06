@@ -1433,3 +1433,57 @@ device is attached, enumerated, and not answering.
 operator had to reload the browser page to see the picture again. `YonderPicture`
 draws `RECONNECTING · ATTEMPT n`, so it knows the stream went away, but the
 WebRTC session did not recover on its own once the publisher returned.
+
+### K-52 · The ground station's stream has no resolution or frame-rate control
+
+**Status:** Open · **Requirements:** R-CAM-14, R-VID-07, R-UI-20
+
+Found by the operator on the board: the preview has **Size** and **Rate**
+pickers; the stream to the ground station has neither. Its resolution and frame
+rate are whatever `config.yaml` was flashed with, and nothing on the console can
+change them.
+
+**It is specified.** The spec's control inventory (§7) carries the row:
+
+| Control | Kind | Model / config | Mechanism | Proven |
+|---|---|---|---|---|
+| Resolution | pick | `width`/`height`/`framerate` (exist), options from the probe's formats | Pipeline respawn on Apply | yes |
+
+— options drawn from what the probe actually reported, and the *Proven* column
+says the mechanism already works.
+
+**Both ends exist and the control between them does not.** The deck stages
+thirteen paths and every one is a preview or a bitrate setting: `name`,
+`streamMode`, `streamFloor`, `streamCeiling`, `streamBitrate`, `previewMode`,
+`previewSize`, `previewRate`, `previewLadderTop`, `previewLadderBottom`,
+`previewFloor`, `previewCeiling`, `previewBitrate`. Nothing stages `width`,
+`height` or `framerate`. The daemon accepts all three — its own refusal names
+them: *"name one of: width, height, framerate, bitrate_kbps, enabled,
+autostart, preview_bitrate_kbps"*. `probeCamera()` has carried the format list
+since Task 3, and the page draws it as `CAPTURE FORMATS 10` — a count, with no
+way to see which ten or choose among them.
+
+**How it was lost.** Task 28's implementer listed *"`YonderDeck` still has no
+Resolution picker"* among its own concerns; it was recorded as deferred in the
+plan's ledger and no task picked it up. The plan has no step that adds it, so
+the omission survived a task review, two fix rounds and two scoped re-reviews —
+none of which was looking for a control that was never written.
+
+The asymmetry the operator sees is not a decision anybody made. It is a control
+that fell out, and the reason it stayed out is that a deferred concern with no
+owner is indistinguishable from a closed one.
+
+**Two smaller cases of the same shape, worth doing together:**
+
+- `CAPTURE FORMATS 10` states a number and not the formats. R-CAM-14 is about
+  offering exactly what the device reported; a count offers nothing.
+- The spec's *Live-view resolution (Pocket 2)* row is marked *"yes — the
+  handlers are stubs"*. When the Pocket 2 returns to the bench that row needs
+  the same picker, against `formats` in its `not-offered` state until it
+  answers.
+
+**What it needs:** the picker, fed from the probe's own format list; the three
+paths staged into the draft like every other Setup edit; and the respawn on
+Apply the spec names — which stays a respawn even after the runtime bitrate
+channel (K-48, plan Task 30) lands, because a size or frame-rate change is not
+something `extra-controls` can retune.
