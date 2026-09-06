@@ -19,11 +19,18 @@ K-53 record what happens when only half of that is asked — Task 1 proved `v4l2
 retunes by holding the pipeline object, the daemon runs `gst-launch-1.0` which answers
 nothing, and the half-answer rode through five tasks before anyone noticed.
 
-**The short answers.** ffmpeg holds real time on a Pi and costs about twice the CPU.
-Latency is a real cost and a small one — about 120 ms on the sending side, nowhere near
-seconds. And ffmpeg cannot retune this encoder at all, from any channel, including from a
-program holding the encoder context: **the device retunes and ffmpeg's wrapper cannot make
-it**, measured side by side on one board in one session.
+**The short answers.** Both gates clear. ffmpeg holds real time on a Pi, at about twice
+the CPU. Latency is a real cost and a small one — roughly 120 ms on the sending side,
+nowhere near seconds — so the two-second figure §2 worried about is not the composer's.
+
+**And then the premise underneath the decision turned out not to hold.** §2 rejects a
+GStreamer composer on Rockchip because the plugin's forks are abandoned and need carried
+patches for GStreamer 1.26. Both claims were tested here and both are false: the trees were
+last committed in **August 2026**, and the plugin builds against 1.26.2 with **no patches**.
+Built and installed, `mpph264enc` and `mpph265enc` encode clean, decodable streams on the
+RK3566 — **and both take a live bitrate change with no gap**, which ffmpeg does on neither
+board. So the honest summary is not "ffmpeg wins"; it is that the comparison §2 never ran
+goes the other way on every axis measured except delivery.
 
 Requirements: R-VID-07, R-CAM-07, R-CAM-13, R-HW-03. Spec: §2, §11.
 
@@ -338,147 +345,234 @@ that respawn and it survives the pivot untouched. K-53's proposed remedy — a p
 that answers an NDJSON protocol — does not survive it: such a host would be built on
 GStreamer's live-element retune, which is the capability the composer change removes.
 
-## The Rockchip board
+## The Rockchip board, and a premise that does not hold
 
-A Radxa Zero 3 **was** on the network, and the brief's instruction was to ask it the same
-questions rather than infer. It was surveyed and then **went off the network entirely**
-mid-session — no ping, no ssh — before the retune test could be run on it. It had been up
-19 hours. That board has a recorded brownout fault (K-41), and this note does not claim to
-know which happened.
+The brief's instruction was to ask the same questions of a Rockchip board rather than infer.
+A Radxa Zero 3 was on the bench. It went off the network mid-session, came back on a fresh
+boot — up 24 minutes against the 19 hours before — and **everything below was read on the
+current boot**, not carried over from the earlier one.
 
-Two boards on this bench both answer to the hostname `yonder`, which is the mDNS collision
-the Radxa install note warns about. It did not affect anything here, and that was checked
-rather than assumed: the host key `yonder.local` presents is byte-identical to the Pi's and
-differs from the Radxa's, so **every Pi measurement in this note went to the Pi**.
+Two boards here both answer to the hostname `yonder`, which is the mDNS collision the Radxa
+install note warns about. It did not affect anything, and that was checked rather than
+assumed: the host key `yonder.local` presents is byte-identical to the Pi's and differs from
+the Radxa's, so every Pi measurement in this note went to the Pi.
 
-### What was established before it went
+**`/dev/mpp_service` and `/dev/rga` are `crw------- root root`, and an unprivileged user gets
+`EACCES` on both.** Every Rockchip measurement below runs as root. This is worth stating
+plainly because the failure it causes is unrecognisable: `h264_rkmpp` reports *"Error while
+opening encoder — maybe incorrect parameters such as bit_rate, rate, width or height"*, which
+names four things, none of them the permission that is actually missing. Spec §11 lists
+dropping the pipeline's privileges as an open question; this is the concrete dependency.
+
+### What the board has, before anything was built
 
 <!-- yonder:hardware-observed -->
 
 | Field | Observed |
 |---|---|
 | Board | `Radxa ZERO 3`, RK3566, Armbian 26.8.1 trixie, kernel `6.1.115-vendor-rk35xx` |
-| MPP devices | `/dev/mpp_service` and `/dev/rga` both present, mode `0600` |
+| MPP devices | `/dev/mpp_service`, `/dev/rga` — present, mode `0600 root:root` |
 | V4L2 nodes | `video0`, `video1` only — the camera's own, no M2M nodes |
 | Camera | `Global Shutter Camera` — the ELP, on this board rather than on the Pi |
-| GStreamer | 1.26.2, with `gst-inspect-1.0` **installed** |
-| Rockchip GStreamer elements | **none** — `gst-inspect-1.0 \| grep -iE 'mpp\|rockchip'` matched only a musepack file extension |
-| H.264 encoders GStreamer can see | `openh264enc`, `x264enc` — **both software** |
-| V4L2 encoder elements | none |
-| Rockchip GStreamer package availability | `gstreamer1.0-rockchip`, `gstreamer1.0-rockchip1` and `gstreamer1.0-mpp` each returned **no candidate**. Three guessed names, against a package cache that was not refreshed first — enough to say none of these is installable as things stand, **not** enough to say no such package exists anywhere |
-| jellyfin-ffmpeg encoders | `h264_rkmpp`, `hevc_rkmpp`, `mjpeg_rkmpp` |
-| jellyfin-ffmpeg filters | `scale_rkrga`, `vpp_rkrga`, `overlay_rkrga` |
-| `h264_rkmpp` options, **first 30 lines only** | `rc_mode`, `qp_init`, `qp_max`, `qp_min`, `qp_max_i`, `qp_min_i`, `intra_refresh`, `refresh_mode`, `refresh_num`, `profile`, `level` — each flagged `E..V.......`, none carrying the runtime flag. **The listing was truncated and the rest was never read** |
+| GStreamer | 1.26.2; 268 plugins, 891 features |
+| Rockchip elements, **as shipped** | none. The complete `*enc*` element list held `x264enc`, `x265enc`, `openh264enc`, `vp8enc`, `vp9enc`, `av1enc`, `svtav1enc`, `theoraenc`, `jpegenc` and no Rockchip element of any kind |
+| Rockchip plugin `.so` on disk | none anywhere; `GST_PLUGIN_PATH` unset, so nothing merely hidden |
+| `video4linux2` plugin | `libgstvideo4linux2.so` loaded, registering **no encoder** — there is no M2M node to bind to |
+| `v4l2codecs` plugin | loads with **`0 features`** |
+| `gstreamer1.0-libav` | not installed. Zero `avenc_*` elements (the one grep hit was `wavenc`) |
+| Packaged Rockchip path | **none.** With freshly refreshed lists, `librockchip-mpp1`, `librockchip-mpp-dev`, `librockchip-mpp`, `librga2`, `librga-dev`, `rockchip-multimedia-config` and `gstreamer1.0-rockchip` all return *no such package*, and none of the 34 available `gstreamer1.0-*` packages is a Rockchip plugin |
+| Repos configured | Armbian configng, Armbian trixie, Debian trixie, Debian security. **No Radxa repo** — which is where the vendor multimedia stack lives |
+| jellyfin-ffmpeg | `h264_rkmpp`, `hevc_rkmpp`, `mjpeg_rkmpp`; `scale_rkrga`, `vpp_rkrga`, `overlay_rkrga` |
 
-**This settles a question the repository had left open on inference.** The Radxa note
-records that a first pass reported `mpph264enc` and four other encoders absent and that
-*"all five were false negatives"*, because `gst-inspect-1.0` was not installed. So nobody
-had ever successfully asked this board what GStreamer can see. It has now been asked, with
-the tool present: **GStreamer 1.26.2 on this board, as installed, has no route to the
-Rockchip hardware, and ffmpeg on the same board does.** That is §2's premise, measured
-rather than argued from a 404 upstream.
+So **as installed**, §2's premise reads true: GStreamer has no route to this hardware and
+ffmpeg has one. That is where this note's first two passes stopped, and stopping there was
+the mistake — because "as installed" is a fact about this SD card, not about GStreamer.
 
-**"As installed" is the whole of the claim.** This establishes what that board can do
-today, with the packages it has. It does not establish that no GStreamer plugin could be
-built to reach MPP — that is a question about carrying patches against 1.26, and it is not
-answered here.
+### The premise, tested rather than argued
 
-The version framing is worth correcting while this is on the record, because it is an easy
-thing to get wrong. The mainline `v4l2codecs` route that GStreamer 1.22+ added is
-**stateless decoders only**, and that was checked rather than recalled — though on the
-**Pi's** build, which is `gstreamer1.0-plugins-bad 1.26.2-3+rpt3+deb13u2` against the
-Radxa's `1.26.2-3+deb13u3`. Same upstream 1.26.2, different Debian revisions, and the
-Radxa's own copy of this plugin was never inspected:
+§2 rejects `gstreamer-rockchip` on the grounds that its upstream is a 404 and that *"the
+surviving forks were last touched between 2019 and 2023, need carried patches to build
+against GStreamer 1.26"*. Every clause of that was checked.
+
+| Claim in §2 | Observed, 2026-09-06 |
+|---|---|
+| the forks were last touched 2019–2023 | **False.** `rockchip-linux/mpp` last commit `0986d01`, **2026-08-25**. `JeffyCN/mirrors` branch `gstreamer-rockchip` last commit `a0d45af`, **2026-08-26**. Both eleven or twelve days old |
+| needs carried patches to build against GStreamer 1.26 | **False.** `meson setup` exit 0 and `ninja` exit 0 against GStreamer 1.26.2, **no patches applied**, warnings only, producing `libgstrockchipmpp.so` |
+
+The plugin declares `version: '1.14.4'` and requires only `gst_req >= 1.14.0`, which 1.26.2
+satisfies — and the API it calls still exists.
+
+**What it took, and it is not nothing.** `/dev/mpp_service` needs root; the MPP library had
+to be built from source (`cmake`, then `make install`, giving `librockchip_mpp.so.1` and
+pkg-config `rockchip_mpp 1.3.10`) because no packaged version exists in any repo this board
+has; and `g++`, `meson`, `ninja-build`, `pkg-config`, `cmake`, `git`, `libgstreamer1.0-dev`,
+`libgstreamer-plugins-base1.0-dev` and `libdrm-dev` all had to be installed first. This is a
+from-source path, not an `apt install`.
+
+### It registers, and both encoders work
 
 ```
-$ gst-inspect-1.0 v4l2codecs
-  v4l2slh265dec: V4L2 Stateless H.265 Video Decoder
-  1 features:
+$ gst-inspect-1.0 rockchipmpp
+  mpph264enc: Rockchip Mpp H264 Encoder
+  mpph265enc: Rockchip Mpp H265 Encoder
+  mppjpegdec: Rockchip's MPP JPEG image decoder
+  mppjpegenc: Rockchip Mpp JPEG Encoder
+  mppvideodec: Rockchip's MPP video decoder
+  mppvpxalphadecodebin: VP8/VP9 Alpha Decoder
+  6 features:
 ```
 
-One element, and it decodes. On this build `v4l2codecs` ships no encoder at all, and
-upstream it is a stateless-decoder plugin by design — so it is not a route to a Rockchip
-*encoder* on any GStreamer version. The `v4l2h264enc` the Pi uses comes from the older
-stateful `video4linux2` plugin and needs an M2M encoder node, which the Radxa does not
-have.
+**The board rebooted between the build and this battery, and the plugin came back by
+itself** — it is installed to `/usr/lib/aarch64-linux-gnu/gstreamer-1.0/` and registers on a
+cold start with nothing re-run. Every figure below was read **after** that reboot, in one
+run, so the two encoders are measured under identical conditions rather than a day apart.
 
-The corresponding claim that rests on a *Radxa* observation rather than on this one is the
-row in the table above: `gst-inspect-1.0` on that board listed no V4L2 encoder elements at
-all. Mainline's `hantro` encode support on RK3566 covers JPEG rather than H.264, and the
-vendor `rockchipmpp` plugin targets GStreamer 1.18–1.20 while that board runs 1.26. "Use
-the right GStreamer version" therefore has no answer on this OS that does not involve
-carrying patches, which is what §2 says.
+Both are asked the same five questions, at 1280×720p30, 300 frames from `videotestsrc`:
 
-### What is still owed on that board
+| | `mpph264enc` | `mpph265enc` |
+|---|---|---|
+| 300 frames, wall clock | **2.970 s** | **2.984 s** |
+| output size | 4,220,102 bytes | 4,224,585 bytes |
+| stream | `h264`, profile **High**, level **4.0**, `yuv420p` | `hevc`, profile **Main**, level **120** (HEVC 4.0), `yuv420p` |
+| frames decoded | **300 / 300** | **300 / 300** |
+| decoder complaints | **0** | **0** |
+| picture at frame 150 | 921,600 bytes, mean 127.4, **variance 7,368** | 921,600 bytes, mean 127.5, **variance 7,368** |
+| `bps=1000000` | **0.98 Mb/s** | **0.97 Mb/s** |
+| `bps=4000000` | **3.92 Mb/s** | **3.91 Mb/s** |
 
-- **The retune question, asked of `h264_rkmpp`.** Not run. `ffmpeg-retune.py` takes
-  `--ffmpeg` and `--encoder` for exactly this, and the AVOption evidence above points the
-  same way as the Pi's, but pointing is not measuring.
-- **Whether `gst-libav` can wrap `h264_rkmpp`**, giving a GStreamer composer that reaches
-  Rockchip hardware through libavcodec. It would remove the whole trade this note prices.
-  `gst-libav` does not normally expose hardware encoders, and that expectation is exactly
-  the sort of inference this spike exists to remove.
-- **Latency and throughput on Rockchip.** Not asked for here, and moot for the composer
-  comparison while GStreamer cannot reach that board's hardware at all.
+Ten seconds of video encoded in under three seconds of wall clock, on both — roughly 3.4×
+real time, which is the shape of a hardware encoder and not of a software one.
+
+**The reported defect did not reproduce, on either encoder.** Radxa's own guidance is that
+`mpph264enc` encodes badly on the 6.1 kernel and that `mpph265enc` should be preferred, and
+that is the reason the middle rows of this table exist rather than only the first. On this
+board, with this build, `mpph264enc` produced a bitstream that decoded end to end with zero
+complaints and carried a real picture — and so did `mpph265enc`. **That is one synthetic
+source on one board and is not a survey**; it is enough to say the defect is not
+unconditional, and not enough to say it is absent.
+
+**H.265 matters beyond this table.** §6 opens `config.yaml`'s `codec` from `h264` to
+`h264 | h265` and R-HW-03 wants H.265 where the board has it. The Pi 4 has HEVC *decode*
+hardware and no HEVC encoder, so R-CAM-08 has always been a Rockchip capability — and here
+it is, in GStreamer, working, at the same cost as H.264.
+
+### And both retune live, which is the whole question
+
+Script: [`retune-bitrate-mpp.py`](../../scripts/spikes/retune-bitrate-mpp.py). `bps` set on
+the live element while the pipeline plays, ten seconds measured either side, three runs each.
+
+| element | run 1 | run 2 | run 3 | gaps after the retune |
+|---|---|---|---|---|
+| `mpph264enc` | 0.98 → **3.92** Mb/s | 0.98 → **3.92** | 0.98 → **3.92** | 0, 0, 0 |
+| `mpph265enc` | 0.97 → **3.91** Mb/s | 0.97 → **3.91** | 0.97 → **3.91** | 0, 0, 0 |
+
+**Zero timestamp gaps in any of the six runs, before or after the change.**
+`gst-inspect-1.0` describes `bps` as merely "readable, writable", with none of the
+"changeable in the PLAYING state" wording GStreamer prints for a mutable property — so the
+flag understates what the element does, which is exactly why this was measured rather than
+read off the flag.
+
+### ffmpeg on the same board, asked the same question
+
+`h264_rkmpp` encodes as root — 1.09 Mb/s at a 1 Mb/s target, 3.91 at 4 Mb/s — and cannot be
+retuned:
+
+| channel | before | after | verdict | what ffmpeg said |
+|---|---|---|---|---|
+| `none` (control) | 1.05 Mb/s | 1.05 Mb/s | unchanged | — |
+| interactive `c`, to the encoder | 1.05 Mb/s | 1.05 Mb/s | unchanged | `Command reply for stream -1: ret:-38` |
+| interactive `C`, broadcast | 1.05 Mb/s | 1.05 Mb/s | unchanged | `ret:-38` |
+| `zmq` | — | — | **channel does not exist** | jellyfin-ffmpeg is built without the zmq filter |
+
+`h264_rkmpp` carries **15 options** — `rc_mode`, `qp_init`, `qp_max`, `qp_min`, `qp_max_i`,
+`qp_min_i`, `intra_refresh`, `refresh_mode`, `refresh_num`, `profile`, `level`, `coder`,
+`8x8dct`, `udu_sei`, `prefix_mode` — and **none carries the runtime flag**. Neither does the
+generic `-b`, which reads `E..VA......`. Same answer as the Pi, by the same mechanism.
 
 ## The recommendation to §2
 
-**The evidence supports "one composer, and it is ffmpeg", and prices it.** Both gates §2
-named are cleared on the Pi:
+**The evidence does not support "one composer, and it is ffmpeg". It removes the premise the
+decision was built on, and the decision should be reopened.**
 
-- **The Pi re-proof passes.** ffmpeg holds 30 fps in the two-branch shape on this board.
-- **The latency risk does not materialise.** The composer's own contribution is ~120 ms,
-  not seconds. §2 can stop treating two seconds as an open charge against ffmpeg.
+§2's case is that ffmpeg is the only composer that reaches hardware on both boards. On the
+two boards in front of us, measured this session, that is not true — and the comparison runs
+the other way on every axis that was measured:
 
-And the Rockchip premise, which §2 argued from repository archaeology, now has board
-evidence behind it: GStreamer on that board sees no Rockchip elements, no such plugin is
-installable from its repos, and jellyfin-ffmpeg sees all three encoders and the RGA
-filters.
+| | GStreamer | ffmpeg |
+|---|---|---|
+| Hardware encode, Pi | `v4l2h264enc` ✔ | `h264_v4l2m2m` ✔ |
+| Hardware encode, RK3566 | `mpph264enc` ✔ *(built from source)* | `h264_rkmpp` ✔ *(one package)* |
+| **Live bitrate retune, Pi** | **✔** 0.99 → 3.02 Mb/s, no gaps | **✘** ENOSYS, at every level including a program holding `AVCodecContext` |
+| **Live bitrate retune, RK3566 H.264** | **✔** 0.98 → 3.92 Mb/s, no gaps | **✘** ENOSYS on the channels that exist |
+| **Live bitrate retune, RK3566 H.265** | **✔** 0.97 → 3.91 Mb/s, no gaps | **✘** same |
+| H.265 encode (R-CAM-08, R-HW-03) | `mpph265enc` ✔ Main/4.0, clean | `hevc_rkmpp` ✔ |
+| CPU, Pi two-branch | **+10.5 points** | +18.8 points |
+| Latency, Pi, sender side | **~31 ms** | ~153 ms |
+| Hardware preview scaler, Pi | `v4l2convert` ✔ | none — software `scale` |
+| Delivery | build MPP and the plugin from source | one pinned `.deb` |
 
-**Three things should change in §2's account, none of which reverses it:**
+**What §2 gets right, and it is the only column ffmpeg wins:** delivery. `jellyfin-ffmpeg7`
+is one published package. The GStreamer path needs MPP and the plugin built from source, in
+CI, for the offline payload — which is precisely the cost §2 refused to take on, and it
+refused on the strength of two factual claims about those repositories that are **both
+false**. The cost is real; the reasons given for it were not.
 
-1. **The Pi pays for this, and §2 does not say so.** About twice the CPU: +12.4 points
-   against +5.8 for one branch, +18.8 against +10.5 for two. The board has the headroom —
-   30.6% of four cores — but R-VID-13's "cheap second copy" gets measurably less cheap, and
-   the M4 figures in `usb-camera-on-a-pi-4.md` were taken on the GStreamer path.
-2. **The Pi loses its hardware scaler.** §4 gives Rockchip `scale_rkrga` and a Pi
-   `v4l2convert`, but `v4l2convert` is a *GStreamer* element. Under an ffmpeg composer the
-   Pi's preview downscale is software, and the ISP block at `/dev/video12` goes unused.
-   §4's converter probe should say what it selects on a Pi under ffmpeg, because the honest
-   answer today is `scale`.
-3. **The direct translation does not run.** `h264_v4l2m2m` refuses `yuvj420p` and the
-   pipeline fails to open. Whatever composes ffmpeg command lines must emit an explicit
-   pixel format, and §10's tests should assert it — this is a regression that would
-   otherwise be found on a board.
+**Three things follow, and none of them is "carry on".**
 
-**And one recommendation about K-53.** Close it as won't-fix rather than leaving it open.
-Its proposed remedy is a GStreamer pipeline host built on the live-element retune, and that
-retune is a capability the composer change deletes. A live bitrate retune is not available
-under ffmpeg from any channel, so **respawn-on-apply becomes the design** and
-`video/renderer.ts` is the whole of it. Plan Task 31's rate controller should be told this
-before it is written: on an ffmpeg composer, moving a rate means respawning a pipeline, and
-the confirmation window and rollback that `renderer.ts` already provides are what make that
-safe.
+1. **§2's evidence must be corrected before it is relied on again.** The forks are current,
+   and the plugin builds clean against 1.26 with no patches. Whatever is decided, it cannot
+   be decided on those two sentences.
+2. **The retune result should drive the decision, because it is the one with a requirement
+   behind it.** R-VID-07 wants a bitrate that moves on a running pipeline, and plan Task 31's
+   rate controller has no subject without one. GStreamer delivers that on both boards;
+   ffmpeg delivers it on neither. Choosing ffmpeg means choosing respawn-on-apply for ever
+   and telling Task 31 so.
+3. **K-53 should not close as won't-fix.** The reasoning for closing it was that a GStreamer
+   pipeline host would be thrown away by the composer pivot. If the pivot is in doubt, so is
+   that reasoning — and the host is now the more valuable of the two paths, since a live
+   retune exists on both boards to be reached.
+
+**Two corrections stand regardless of which composer wins**, because they are about the Pi
+and were measured there:
+
+- **The direct translation of `compose()` into ffmpeg does not run.** `h264_v4l2m2m` refuses
+  the `yuvj420p` its MJPEG decoder emits, and the smallest repair adds a per-pixel range pass
+  GStreamer never performs.
+- **Under ffmpeg the Pi loses its hardware scaler.** §4 gives Rockchip `scale_rkrga` and the
+  Pi `v4l2convert`, but `v4l2convert` is a *GStreamer* element with no ffmpeg equivalent.
 
 ## What this does not settle
 
-- **`h264_rkmpp`'s retune behaviour**, and everything else on Rockchip. The board went
-  down. The scripts take `--ffmpeg` and `--encoder` and the run is about two minutes.
+- **The picture quality question, properly.** Both MPP encoders produced clean, decodable
+  streams carrying a real picture — from **one synthetic source, on one board, at one
+  size**. Radxa's reported `mpph264enc` defect did not reproduce, which establishes that it
+  is not unconditional and nothing more. A camera source, other resolutions and a look at
+  the actual image are all owed before this is leaned on.
+- **The camera path on Rockchip.** Everything measured there came from `videotestsrc`. The
+  ELP camera on that board emits MJPEG, so the real chain is `mppjpegdec` → `mpph26xenc`,
+  and none of it was exercised. §5's zero-copy `drm_prime` claim is likewise untested here.
+- **CPU and latency on Rockchip.** Measured on the Pi only. The recommendation leans on the
+  Pi's figures plus the Rockchip retune result; a two-branch and latency comparison on the
+  Radxa would make the comparison symmetric, and it has not been run.
+- **What shipping a from-source GStreamer path actually costs.** MPP and the plugin were
+  built by hand here, as root, with nine build packages installed. Doing it in CI, pinning
+  it, and staging it in the offline payload is real work that §3's single `.deb` avoids —
+  and it is now the honest trade, rather than the false one §2 stated.
 - **The two-second QGroundControl observation.** This note shows the composer is not the
-  cause; it does not find what is. A real network, a real ground station and H.265 are all
-  outside it.
-- **RTSP.** Latency here was measured over RTP/UDP, which is what the original observation
-  used. The preview branch publishes over RTSP to mediamtx, and `rtspclientsink`/`rtspsrc`
-  have buffering of their own that nothing here exercised.
-- **The leaky queue** (difference 3). An ffmpeg composer has no equivalent, and the
-  property `QUEUE` exists to guarantee — one stalled consumer must not take down the branch
-  the operator is watching — is untested under ffmpeg. It is a safety property, not a
-  performance one, and it deserves its own measurement before this ships.
-- **Sustained load and thermals.** Every run here is 10–25 seconds on a bench in open air,
-  on a board already reading `throttled=0x80000` from before this session began.
-- **Whether the CPU gap narrows with a hardware-decoded source.** §5 keeps frames on the
-  SoC on Rockchip; on a Pi the JPEG decoder does not work (K-40), so both arms decode in
-  software and neither can improve.
+  cause; it does not find what is. A real network, a real ground station and H.265 over the
+  air are all outside it.
+- **RTSP.** Latency was measured over RTP/UDP, which is what the original observation used.
+  The preview branch publishes over RTSP to mediamtx, and `rtspclientsink`/`rtspsrc` carry
+  buffering of their own that nothing here exercised.
+- **The leaky queue** (difference 3). An ffmpeg composer has no equivalent, and the property
+  `QUEUE` exists to guarantee — one stalled consumer must not take down the branch the
+  operator is watching — is untested under ffmpeg. It is a safety property, not a
+  performance one.
+- **Sustained load and thermals.** Every run here is seconds long on a bench in open air, on
+  a Pi already reading `throttled=0x80000` before this session began.
+- **Whether the CPU gap narrows with a hardware-decoded source.** §5 keeps frames on the SoC
+  on Rockchip; on a Pi the JPEG decoder does not work (K-40), so both arms decode in software
+  and neither can improve.
 
 ## Reproducing this
 
@@ -497,11 +591,39 @@ python3 ffmpeg-retune.py --window 8 && gcc -O2 -o ffmpeg-retune-libav ffmpeg-ret
 ```
 
 `composer-throughput.py --differences` prints the table of ffmpeg-versus-GStreamer
-differences above. On a Rockchip board, the retune question is asked with:
+differences above.
+
+### On a Rockchip board
+
+Everything below needs root: `/dev/mpp_service` is mode `0600 root:root`, and an
+unprivileged process fails with an error that names bit rate and frame size rather than the
+permission actually missing.
+
+Ask ffmpeg the retune question:
 
 ```bash
-python3 ffmpeg-retune.py --ffmpeg /usr/lib/jellyfin-ffmpeg/ffmpeg --encoder h264_rkmpp --channels none,stdin-c,zmq-filter,zmq-encoder
+python3 ffmpeg-retune.py --ffmpeg /usr/lib/jellyfin-ffmpeg/ffmpeg --encoder h264_rkmpp --channels none,stdin-c,stdin-C
 ```
 
-Put the camera back afterwards by starting it from the console, or with the same `POST`
+Build the GStreamer MPP path, which no repository packages — MPP first, then the plugin:
+
+```bash
+apt-get install -y g++ meson ninja-build pkg-config cmake git libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libdrm-dev
+```
+
+```bash
+git clone --depth=1 https://github.com/rockchip-linux/mpp.git && cmake -S mpp -B mpp/build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DBUILD_TEST=OFF && make -C mpp/build -j4 install && ldconfig
+```
+
+```bash
+git clone --depth=1 --branch gstreamer-rockchip https://github.com/JeffyCN/mirrors.git gstreamer-rockchip && meson setup gstreamer-rockchip/build gstreamer-rockchip --prefix=/usr --libdir=lib/aarch64-linux-gnu && ninja -C gstreamer-rockchip/build install && rm -rf ~/.cache/gstreamer-1.0
+```
+
+Then ask GStreamer the same question, of each encoder:
+
+```bash
+gst-inspect-1.0 rockchipmpp && python3 retune-bitrate-mpp.py --element mpph264enc && python3 retune-bitrate-mpp.py --element mpph265enc
+```
+
+Put the Pi's camera back afterwards by starting it from the console, or with the same `POST`
 carrying `{"action":"start"}`.

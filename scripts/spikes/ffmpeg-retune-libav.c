@@ -64,14 +64,24 @@ int main(int argc, char **argv)
 {
     long from_kbps = 1000, to_kbps = 4000;
     int frames = 300;
+    // Defaults to the Pi's encoder. `--encoder h264_rkmpp`, with
+    // LD_LIBRARY_PATH pointing at jellyfin-ffmpeg's lib directory, asks the
+    // same question of a Rockchip board. That the name resolves at all is the
+    // proof that jellyfin's libavcodec was the one loaded: Debian's, which
+    // supplies the headers this is compiled against, has no rkmpp encoder.
+    const char *name = "h264_v4l2m2m";
     for (int i = 1; i < argc - 1; i++) {
         if (!strcmp(argv[i], "--from"))   from_kbps = atol(argv[++i]);
         else if (!strcmp(argv[i], "--to"))     to_kbps = atol(argv[++i]);
         else if (!strcmp(argv[i], "--frames")) frames  = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--encoder")) name   = argv[++i];
     }
 
-    const AVCodec *codec = avcodec_find_encoder_by_name("h264_v4l2m2m");
-    if (!codec) { fprintf(stderr, "h264_v4l2m2m not built into this ffmpeg\n"); return 2; }
+    const AVCodec *codec = avcodec_find_encoder_by_name(name);
+    if (!codec) { fprintf(stderr, "%s not built into this ffmpeg\n", name); return 2; }
+    fprintf(stderr, "# encoder %s, libavcodec %u.%u.%u at runtime\n", name,
+            avcodec_version() >> 16, (avcodec_version() >> 8) & 0xff,
+            avcodec_version() & 0xff);
 
     AVCodecContext *ctx = avcodec_alloc_context3(codec);
     ctx->width = W; ctx->height = H;
@@ -117,9 +127,9 @@ int main(int argc, char **argv)
     }
 
     double secs = (double)frames / FPS;
-    printf("from %ld kb/s -> to %ld kb/s   "
+    printf("%s: from %ld kb/s -> to %ld kb/s   "
            "phase1 %.3f Mb/s (%lld pkts)   phase2 %.3f Mb/s (%lld pkts)\n",
-           from_kbps, to_kbps,
+           name, from_kbps, to_kbps,
            bytes[0] * 8.0 / secs / 1e6, packets[0],
            bytes[1] * 8.0 / secs / 1e6, packets[1]);
 
