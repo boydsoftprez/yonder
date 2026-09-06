@@ -10,6 +10,7 @@ import { routerConfig } from "./router/config.js";
 import { fakeClock, heartbeatV2, validSysStatusBytes } from "./testing.js";
 import { MAVLINK_DEVICES, MavlinkRenderer, ROUTER_CONF_PATH, ROUTER_UNIT, linkFromConf } from "./renderer.js";
 import { LinkTracker } from "./link.js";
+import { SweepInProgressError } from "./detect.js";
 
 /**
  * Every command this renderer runs is answered by a fake, and every byte it
@@ -84,6 +85,14 @@ function harness(opts: {
   serial?: Record<string, Record<number, Uint8Array>>;
   /** The shared tracker, when a test needs to play the loopback listener. */
   tracker?: LinkTracker;
+  /**
+   * Awaited inside `open`, before the port answers.
+   *
+   * A test's handle on a sweep that is *in flight*: hold it and the renderer
+   * is stopped with the port half-taken, which is the only state in which two
+   * callers can be shown to collide.
+   */
+  beforeOpen?: (device: string, baud: number) => Promise<void>;
 } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "yonder-mav-"));
   const confPath = join(dir, "etc", "main.conf");
@@ -99,17 +108,32 @@ function harness(opts: {
   const serial = opts.serial ?? {};
   /** Every (device, speed) the sweep asked for, whether or not it opened. */
   const opened: { device: string; baud: number }[] = [];
+  /**
+   * How many opens are in flight at once, and the most there ever were.
+   *
+   * The measurement the concurrency tests are made of: **termios belongs to
+   * the tty, not to a descriptor**, so two callers holding the same port at
+   * the same time set the baud rate out from under each other. One is
+   * correct; two is the defect.
+   */
+  let live = 0;
+  let peak = 0;
   const open: OpenPort = async (device, baud) => {
     opened.push({ device, baud });
+    peak = Math.max(peak, ++live);
+    if (opts.beforeOpen !== undefined) await opts.beforeOpen(device, baud);
     const ports = serial[device];
     // A node that is not there. The ordinary state of /dev/ttyACM0 on a board
     // with nothing plugged into it, and of /dev/ttyAMA0 before the UART role
     // has been rebooted into (Task 15).
-    if (ports === undefined) throw new Error(`ENOENT: no such file or directory, open '${device}'`);
+    if (ports === undefined) {
+      live--;
+      throw new Error(`ENOENT: no such file or directory, open '${device}'`);
+    }
     return {
       settleAndFlush: async () => {},
       read: async () => ({ bytes: ports[baud] ?? new Uint8Array(0), framingErrors: 0 }),
-      close: async () => {},
+      close: async () => { live--; },
     };
   };
 
@@ -120,7 +144,12 @@ function harness(opts: {
     ...(opts.tracker === undefined ? {} : { tracker: opts.tracker }),
   });
 
-  return { dir, confPath, hintPath, calls, opened, serial, clock, log, make, renderer: make() };
+  return {
+    dir, confPath, hintPath, calls, opened, serial, clock, log, make,
+    /** The most ports held at once, across the whole test. Never above 1. */
+    peakOpen: () => peak,
+    renderer: make(),
+  };
 }
 
 const heartbeatAt = (device: string, baud: number) => ({ [device]: { [baud]: heartbeatV2(1, 1, 3) } });
@@ -1321,5 +1350,111 @@ describe("MavlinkRenderer — the constants it publishes", () => {
     await h.renderer.render(config());
 
     expect(h.renderer.state()).toMatchObject({ phase: "linked", baud: 115200 });
+  });
+});
+
+/**
+ * **Two sweeps must never drive one serial port at once.**
+ *
+ * `termios` belongs to the tty, not to the descriptor, so two overlapping
+ * sweeps set the baud rate out from under each other and split one line
+ * discipline's byte stream between them. The result is `found` at a speed the
+ * port is no longer running at — the single failure this whole module exists
+ * to prevent, and the one `settleAndFlush` cannot defend against, because the
+ * corruption is in the line settings rather than in the buffer.
+ *
+ * The window is narrow and it is exactly where it hurts: the 30-second retry
+ * is armed only while nothing has been found, so reaching it takes an
+ * operator pressing *Detect again* as the autopilot powers up — which is when
+ * they would press it.
+ */
+describe("MavlinkRenderer — one caller has the port at a time", () => {
+  /** A sweep frozen inside `open`, and the handle that lets it finish. */
+  function gated() {
+    let gate: Promise<void> | null = null;
+    let release: (() => void) | null = null;
+    return {
+      beforeOpen: async () => { if (gate !== null) await gate; },
+      hold() { gate = new Promise<void>((resolve) => { release = resolve; }); },
+      free() { gate = null; release?.(); release = null; },
+    };
+  }
+
+  it("refuses a second detect while the first still has the port", async () => {
+    const g = gated();
+    const h = harness({ serial: { "/dev/ttyAMA0": SILENT }, beforeOpen: g.beforeOpen });
+    // A first render, so there is a configuration to detect against — and so
+    // the sweep below is the second thing to want the port, not the first.
+    await h.renderer.render(config());
+
+    g.hold();
+    const first = h.renderer.detectNow();
+    await settle();
+
+    // Raced against a single turn of the loop rather than simply awaited: the
+    // refusal has to be *immediate*. A version that queued the second press
+    // behind the first would satisfy `rejects.toThrow` eventually — after the
+    // sweep it should have refused — and only show up here as a hang.
+    const second = h.renderer.detectNow().then(() => "it ran" as const, (error: unknown) => error);
+    expect(await Promise.race([second, settle().then(() => "still waiting" as const)]))
+      .toBeInstanceOf(SweepInProgressError);
+
+    g.free();
+    await first;
+    // One interruption, not two: the refused press must not have stopped the
+    // router a second time on its way to being refused.
+    expect(systemctl(h.calls).filter((verb) => verb === "stop")).toHaveLength(0);
+    expect(h.peakOpen()).toBe(1);
+    h.renderer.close();
+  });
+
+  it("holds a render back rather than letting it join a sweep in progress", async () => {
+    const g = gated();
+    const h = harness({ serial: { "/dev/ttyAMA0": SILENT }, beforeOpen: g.beforeOpen });
+    await h.renderer.render(config());
+    const before = h.opened.length;
+
+    g.hold();
+    const sweep = h.renderer.detectNow();
+    await settle();
+    const rendering = h.renderer.render(config({ endpoints: [{ name: "gcs0", host: "10.0.0.9", port: 14550 }] }));
+    await settle();
+    await settle();
+
+    // The render reached the renderer and stopped at the door: nothing new
+    // has been opened, because the sweep is still standing in `open`.
+    expect(h.opened.length).toBe(before + 1);
+
+    g.free();
+    await sweep;
+    await rendering;
+
+    // Queued, never dropped. An apply that changed the ground stations still
+    // has to be rendered — skipping it would trade one defect for another —
+    // so the render did its own sweep once the port was free.
+    expect(h.opened.length).toBeGreaterThan(before + 1);
+    expect(h.peakOpen()).toBe(1);
+    h.renderer.close();
+  });
+
+  it("keeps the port to one caller when a stop arrives during a sweep (R-MAV-09)", async () => {
+    const g = gated();
+    const h = harness({ serial: { "/dev/ttyAMA0": SILENT }, beforeOpen: g.beforeOpen });
+    await h.renderer.render(config());
+
+    g.hold();
+    const sweep = h.renderer.detectNow();
+    await settle();
+    // Operator actions reach `settle()` too, and `settle()` can sweep.
+    const stopping = h.renderer.stopTelemetry();
+    await settle();
+    await settle();
+
+    g.free();
+    await sweep;
+    await stopping;
+
+    expect(h.peakOpen()).toBe(1);
+    h.renderer.close();
   });
 });

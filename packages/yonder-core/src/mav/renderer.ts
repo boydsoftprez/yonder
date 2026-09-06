@@ -5,7 +5,7 @@ import { systemClock, type Clock, type Renderer } from "../apply/types.js";
 import { writeFileDurable } from "../fs/durable.js";
 import type { CommandRunner } from "../net/runner.js";
 import type { Config } from "../schema/config.js";
-import { detect, type DetectOutcome, type OpenPort } from "./detect.js";
+import { SweepInProgressError, detect, type DetectOutcome, type OpenPort } from "./detect.js";
 import { forgetHint, readHint, writeHint } from "./hint.js";
 import { LinkTracker, type LinkState } from "./link.js";
 import { AUTOPILOT_ENDPOINT_NAME, routerConfig } from "./router/config.js";
@@ -93,8 +93,7 @@ export interface MavlinkRendererOptions {
   run: CommandRunner;
   /**
    * Opens a serial port at a speed. Injected, because **no test may open a
-   * real one** and because this package carries no serial implementation of
-   * its own yet — see the note in the module docstring.
+   * real one**; `openPortWith` in `mav/serial.ts` is the production one.
    */
   open: OpenPort;
   /** `/etc/mavlink-router/main.conf`. Given, never defaulted. */
@@ -148,12 +147,14 @@ export interface MavlinkRendererOptions {
  * all, and a renderer that failed those applies would leave those devices
  * unconfigurable.
  *
- * **This class opens no serial port itself.** `open` is injected, and nothing
- * in this repository implements it against real hardware yet — the sweep
- * `detect()` performs needs a `SerialPort`, and providing one is the piece
- * M5a still owes. Until then `buildRenderers` assembles this renderer only
- * when a caller supplies one, exactly as it assembles the console renderer
- * only when a caller says where the console is.
+ * **This class opens no serial port itself.** `open` is injected: the sweep
+ * `detect()` performs needs a `SerialPort`, and `mav/serial.ts` is the one
+ * implementation of one against real hardware — `stty` through the same
+ * injected runner, then `fs`. `buildRenderers` still assembles this renderer
+ * only when a caller supplies an opener, exactly as it assembles the console
+ * renderer only when a caller says where the console is, so that no test
+ * reaches a real `/dev` by forgetting to override a default. `main()` is the
+ * one caller that supplies the real one.
  */
 export class MavlinkRenderer implements Renderer {
   readonly name = "mavlink";
@@ -210,6 +211,25 @@ export class MavlinkRenderer implements Renderer {
    * across boots has a setting that says exactly that.
    */
   private stoppedByOperator = false;
+
+  /**
+   * Held while something has the serial port, so two sweeps can never run at
+   * once.
+   *
+   * **termios is per-tty, not per-descriptor.** Two sweeps overlapping set the
+   * baud rate out from under each other and split one line discipline's byte
+   * stream between them, so one of them can see a checksum-valid frame at a
+   * speed the port is no longer running at — `found` at the wrong baud, which
+   * is the single failure this whole module exists to prevent. It is also the
+   * one `settleAndFlush` cannot defend against, because the corruption is in
+   * the line settings and not in the buffer.
+   *
+   * The window is narrow and it is exactly where it hurts: the 30-second
+   * retry is armed only while nothing has been found, so reaching it takes an
+   * operator pressing *Detect again* while a board waits for an autopilot to
+   * finish powering up — which is precisely when they would press it.
+   */
+  private holdingPort: Promise<void> | null = null;
 
   private retryTimer: unknown;
   private statsTimer: unknown;
@@ -321,7 +341,11 @@ export class MavlinkRenderer implements Renderer {
     // is about to do the same work with a newer configuration.
     this.cancelRetry();
     try {
-      await this.settle(config);
+      // Queued rather than refused: an apply that changed the ground stations
+      // still has to be written, and K-19 says this may not throw either. The
+      // wait is bounded by one sweep — about 5.5 s — against the apply
+      // engine's 60 s.
+      await this.withPort(() => this.settle(config));
     } catch (error) {
       // Belt and braces over the per-step guards below. K-19, and §5: no
       // telemetry fault is worth reverting an operator's whole configuration
@@ -336,14 +360,25 @@ export class MavlinkRenderer implements Renderer {
    * The one route by which a working router loses its port, and an operator
    * asks for it explicitly with the interruption stated first (§4, and
    * R-NET-12's instinct). Task 11's `POST /mav/detect` is the only caller.
+   *
+   * **Refuses rather than queues** when something already has the port — see
+   * `holdingPort`. This is the one entry point where waiting would be wrong:
+   * it stops the router before it sweeps, so a queued second press means a
+   * second interruption of every ground station to answer a question already
+   * being answered. `SweepInProgressError` is `POST /mav/detect`'s 409.
    */
   async detectNow(): Promise<DetectOutcome> {
     const config = this.lastConfig;
     if (config === null) {
       throw new Error("no configuration has been rendered yet, so there is nothing to detect against");
     }
+    if (this.holdingPort !== null) throw new SweepInProgressError();
     this.cancelRetry();
+    return this.withPort(() => this.detecting(config));
+  }
 
+  /** `detectNow`'s body, run with the port to itself. */
+  private async detecting(config: Config): Promise<DetectOutcome> {
     if (await this.isActive()) {
       // **The only `systemctl stop` left in this class.** Re-detection needs
       // the serial port and the router is holding it, which is why this one
@@ -438,7 +473,10 @@ export class MavlinkRenderer implements Renderer {
       );
     }
     try {
-      await this.settle(config, { force: true });
+      // Queued behind a sweep, never run beside one: `settle` can reach the
+      // serial port itself, and two things driving one tty is `holdingPort`'s
+      // whole subject.
+      await this.withPort(() => this.settle(config, { force: true }));
     } catch (error) {
       // Same reason render() cannot throw: this arrives on a route, and a
       // telemetry fault is worth a line, never an exception nobody catches.
@@ -469,13 +507,38 @@ export class MavlinkRenderer implements Renderer {
       // `startRouter` re-announces an open ingest path at the moment it is bound
       // again (R-MAV-07), rather than leaving the log's last word on the subject
       // to be the stop's.
-      await this.settle(config, { force: true });
+      await this.withPort(() => this.settle(config, { force: true }));
     } catch (error) {
       this.log(`mavlink: telemetry could not be brought up: ${(error as Error).message}`);
     }
   }
 
   // ---------------------------------------------------------------- internals
+
+  /**
+   * Run `work` with the serial port to itself.
+   *
+   * A plain promise chain rather than a library: one `await` and one
+   * assignment, with no interleaving point between the two, is the whole of
+   * the mutual exclusion needed on a single-threaded runtime. Every waiter
+   * re-checks the loop condition after it wakes, so several queued at once
+   * still go through one at a time.
+   *
+   * The lock is released on the failing path as well — the `finally` — and a
+   * waiter is never rejected by the holder's failure: it simply gets the port
+   * next. See `holdingPort` for what overlapping would cost.
+   */
+  private async withPort<T>(work: () => Promise<T>): Promise<T> {
+    while (this.holdingPort !== null) await this.holdingPort;
+    let release!: () => void;
+    this.holdingPort = new Promise<void>((resolve) => { release = resolve; });
+    try {
+      return await work();
+    } finally {
+      this.holdingPort = null;
+      release();
+    }
+  }
 
   /**
    * The `mavlink` section to *render*, which is not always the one the
@@ -703,6 +766,9 @@ export class MavlinkRenderer implements Renderer {
           device,
           open: this.open,
           clock: this.clock,
+          // The journal this class writes to, with this class's prefix on it.
+          // `detect()` has neither, and should not learn either.
+          log: (line) => { this.log(`mavlink: ${line}`); },
           ...(bauds === undefined ? {} : { bauds }),
           // Only for the device the hint actually names, and only when the
           // speed is still being searched for: `first` is a remembered answer,

@@ -22,7 +22,7 @@ import type { PathName, ReachState } from "../net/reach/standing.js";
 import type { RemoteState } from "../remote/state.js";
 import type { MavlinkControl, MavlinkStateBody, MavlinkDetectBody } from "./routes.js";
 import type { LinkState } from "../mav/link.js";
-import type { DetectOutcome } from "../mav/detect.js";
+import { SweepInProgressError, type DetectOutcome } from "../mav/detect.js";
 import type { PathCheck } from "../mav/check.js";
 
 /**
@@ -1486,6 +1486,8 @@ describe("the telemetry routes", () => {
    */
   function fakeMavlink(opts: {
     link?: LinkState; running?: boolean; router?: boolean; outcome?: DetectOutcome; detectThrows?: string;
+    /** The renderer already has the port. `MavlinkRenderer` refuses this way. */
+    detectBusy?: boolean;
   } = {}) {
     let running = opts.running ?? true;
     let link = opts.link ?? LINKED;
@@ -1499,6 +1501,7 @@ describe("the telemetry routes", () => {
       get routerRunning() { return opts.router ?? true; },
       detectNow: async () => {
         calls.push("detect");
+        if (opts.detectBusy === true) throw new SweepInProgressError();
         if (opts.detectThrows !== undefined) throw new Error(opts.detectThrows);
         return opts.outcome ?? FOUND;
       },
@@ -1525,11 +1528,12 @@ describe("the telemetry routes", () => {
   });
 
   /**
-   * The ordinary state of every device built to date: `MavlinkRenderer` needs
-   * a way to open a serial port and this repository implements none, so
-   * `buildRenderers` assembles no telemetry layer at all. A 503 naming the
-   * absence — never a 500, and never an empty link state a page would draw as
-   * a device patiently searching.
+   * A daemon assembled with no telemetry layer at all. **No longer the
+   * ordinary state of a board** — `mav/serial.ts` opens the port and `main()`
+   * wires it in — so this now means only "started without a way to do
+   * telemetry", which no production path produces. A 503 naming the absence
+   * either way: never a 500, and never an empty link state a page would draw
+   * as a device patiently searching.
    */
   it.each(ROUTES)("%s %s says so plainly when this build has no telemetry layer", async (method, path) => {
     const res = await provisioned({})(method, path, undefined);
@@ -1707,6 +1711,23 @@ describe("the telemetry routes", () => {
     const res = await provisioned({ mavlink })("POST", "/mav/detect", undefined);
     expect(res.status).toBe(500);
     expect(JSON.stringify(res.body)).not.toMatch(/systemctl|\/etc\/secret/);
+  });
+
+  /**
+   * **409, not 500: "already looking" is a state, not a fault.**
+   *
+   * Two sweeps at once set the baud rate out from under each other — termios
+   * belongs to the tty and not to a descriptor — so the renderer refuses the
+   * second. Answering that with the catch-all's 500 would tell an operator
+   * who pressed *Detect again* twice that their device is broken, and hide
+   * the reason in a journal they may not be able to reach. The message is
+   * safe to return: it names no path and no subprocess.
+   */
+  it("answers 409 while a sweep is already running, and says so", async () => {
+    const mavlink = fakeMavlink({ detectBusy: true });
+    const res = await provisioned({ mavlink })("POST", "/mav/detect", undefined);
+    expect(res.status).toBe(409);
+    expect((res.body as { error: string }).error).toMatch(/already running/);
   });
 
   // A read is a read and a write is a write: nothing that interrupts a ground

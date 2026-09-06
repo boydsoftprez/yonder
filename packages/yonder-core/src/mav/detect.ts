@@ -15,6 +15,10 @@ import { HeartbeatScanner, describeVehicle } from "./frame.js";
  *   - **Stop on the first good frame.** A checksum that passes is certainty.
  *   - **Say which kind of nothing it was** (R-MAV-13), which is the part an
  *     operator with a wire in the wrong hole actually needs.
+ *   - **Keep what was already heard when the port goes away.** A USB
+ *     autopilot unplugged mid-sweep ends it, and the rates already swept
+ *     still report what they heard: throwing that away turns a demonstrably
+ *     noisy wire into "nothing transmitting — check the pins".
  */
 
 /**
@@ -53,6 +57,24 @@ export interface SerialPort {
 
 export type OpenPort = (device: string, baud: number) => Promise<SerialPort>;
 
+/**
+ * A second sweep was asked for while one already had the port.
+ *
+ * Its own type so a route can answer 409 rather than 500 without reaching for
+ * the renderer: "already looking" is a state, not a fault, and an operator
+ * pressing *Detect again* twice deserves to be told which.
+ *
+ * Lives here rather than in `renderer.ts` because it belongs to the sweep's
+ * vocabulary, and because `daemon/routes.ts` deliberately knows the telemetry
+ * layer as an interface rather than as a `MavlinkRenderer`.
+ */
+export class SweepInProgressError extends Error {
+  constructor(message = "a sweep for the flight controller is already running on this device") {
+    super(message);
+    this.name = "SweepInProgressError";
+  }
+}
+
 export type DetectOutcome =
   | { kind: "found"; device: string; baud: number; vehicle: string; system: number }
   | { kind: "silent"; device: string; triedBauds: number[] }
@@ -68,6 +90,11 @@ export async function detect(opts: {
   first?: number;
   /** Injected, so no test waits on the wall clock. */
   clock?: Clock;
+  /**
+   * Said when a sweep is cut short. Injected, because this function has no
+   * journal of its own and the caller's prefix is the caller's business.
+   */
+  log?: (line: string) => void;
 }): Promise<DetectOutcome> {
   const sweep = opts.bauds ?? MAVLINK_BAUDS;
   const order = opts.first === undefined ? [...sweep] : [opts.first, ...sweep];
@@ -78,7 +105,33 @@ export async function detect(opts: {
 
   for (const baud of order) {
     if (!tried.includes(baud)) tried.push(baud);
-    const port = await opts.open(opts.device, baud);
+
+    let port: SerialPort;
+    try {
+      port = await opts.open(opts.device, baud);
+    } catch (error) {
+      // Nothing heard yet, so the fault is the whole story: it goes up, and
+      // `MavlinkRenderer.probe()` turns it into R-MAV-13's silence with an
+      // empty triedBauds — the honest "there was nothing here to sweep", and
+      // the contract every `OpenPort` in this repository is written to.
+      if (bytesSeen === 0 && errorsSeen === 0) throw error;
+      // But once a rate has heard something, that evidence outranks the
+      // fault. Losing it would tell an operator "nothing transmitting —
+      // check the pins" about a wire that was demonstrably noisy a second
+      // ago, which is the exact misdiagnosis R-MAV-13 exists to prevent.
+      opts.log?.(
+        `${opts.device} stopped answering partway through the sweep (${(error as Error).message}); `
+          + "reporting what was heard before it did",
+      );
+      break;
+    }
+
+    let bytesHere = 0;
+    let errorsHere = 0;
+    // A fault from settleAndFlush() or read() — an autopilot unplugged from
+    // USB is the ordinary way — is held rather than thrown, so the bytes this
+    // rate had already gathered can be added below before it is acted on.
+    let faulted: unknown = null;
     try {
       // Settling and flushing lives inside the guard it pays for: if a real
       // port's settleAndFlush() throws, close() must still run rather than
@@ -86,8 +139,6 @@ export async function detect(opts: {
       await port.settleAndFlush();
       const started = clock.now();
       const scanner = new HeartbeatScanner();
-      let bytesHere = 0;
-      let errorsHere = 0;
 
       // A deadline on the clock, not a count of reads. An earlier version gave
       // up after the second read that produced no heartbeat, which abandons
@@ -113,10 +164,24 @@ export async function detect(opts: {
         if (errorsHere > 0) break;
         if (bytesHere === 0 && clock.now() - started >= SILENT_GIVE_UP_MS) break;
       }
-      bytesSeen += bytesHere;
-      errorsSeen += errorsHere;
+    } catch (error) {
+      faulted = error;
     } finally {
       await port.close();
+    }
+
+    // Outside the guard, so it runs on the faulted path too: bytes that
+    // arrived before the port went away are still bytes that arrived.
+    bytesSeen += bytesHere;
+    errorsSeen += errorsHere;
+
+    if (faulted !== null) {
+      if (bytesSeen === 0 && errorsSeen === 0) throw faulted;
+      opts.log?.(
+        `${opts.device} stopped answering partway through the sweep (${(faulted as Error).message}); `
+          + "reporting what was heard before it did",
+      );
+      break;
     }
   }
 

@@ -32,7 +32,8 @@ import { RemoteRenderer } from "../remote/renderer.js";
 import { ZeroTierCli } from "../remote/zerotier/cli.js";
 import { readTraffic } from "../remote/traffic.js";
 import { TrafficSampler } from "../remote/sampler.js";
-import { MavlinkRenderer } from "../mav/renderer.js";
+import { MavlinkRenderer, ROUTER_CONF_PATH } from "../mav/renderer.js";
+import { openPortWith } from "../mav/serial.js";
 import { LinkTracker } from "../mav/link.js";
 import { LoopbackListener } from "../mav/listener.js";
 import type { OpenPort } from "../mav/detect.js";
@@ -158,11 +159,13 @@ export interface BuildRenderersOptions {
    *
    * **Present only when a caller supplies a way to open a serial port.**
    * `MavlinkRenderer` resolves the autopilot's port and speed by sweeping it
-   * (R-MAV-01), and nothing in this repository implements `OpenPort` against
-   * real hardware yet — so a renderer built without one could not do the
-   * first thing it exists for. The same shape as `console` above, and the
-   * same "given, never defaulted" rule for its two paths, so no test writes
-   * to `/etc/mavlink-router` by forgetting to override one.
+   * (R-MAV-01), so a renderer built without an `OpenPort` could not do the
+   * first thing it exists for. `mav/serial.ts` implements one against real
+   * hardware and `main()` supplies it; this stays given-and-never-defaulted
+   * so that a *test* which forgets to override it gets no telemetry renderer
+   * rather than a real `/dev` and a real `stty`. The same shape as `console`
+   * above, and the same rule for its two paths, so no test writes to
+   * `/etc/mavlink-router` by forgetting to override one.
    */
   mavlink?: {
     open: OpenPort;
@@ -289,9 +292,9 @@ export function buildRenderers(opts: BuildRenderersOptions): {
     // (rule 6). One line an operator can act on, on the same channel the rest
     // of the renderers report on.
     log(
-      "mavlink: telemetry is not configured on this device — this build has no way to open a serial port, "
-        + "so mavlink-router is neither configured nor started and the Telemetry page will stay empty "
-        + "(R-MAV-01, R-MAV-08)",
+      "mavlink: telemetry is not configured on this device — this daemon was started without a way to open "
+        + "a serial port, so mavlink-router is neither configured nor started and the Telemetry page will "
+        + "stay empty (R-MAV-01, R-MAV-08)",
     );
   }
   // **One tracker, two writers.** The renderer supplies the sweep's outcome
@@ -374,6 +377,49 @@ export function consolePathsFromEnv(env: NodeJS.ProcessEnv = process.env): Conso
   if (env.YONDER_CONSOLE_CORE_TREE !== undefined) overrides.coreTree = env.YONDER_CONSOLE_CORE_TREE;
   if (env.YONDER_CONSOLE_UNIT !== undefined) overrides.unit = env.YONDER_CONSOLE_UNIT;
   return consolePaths(overrides);
+}
+
+/**
+ * The apply journal's own path on a real device.
+ *
+ * A constant rather than a literal in `main()` because two production
+ * decisions are derived from it — the mesh record and the telemetry hint both
+ * live beside it — and a second copy of the default is how the three come to
+ * disagree on a board whose `YONDER_JOURNAL` is set.
+ */
+export const DEFAULT_JOURNAL_PATH = "/var/lib/yonder/apply.json";
+
+/**
+ * Everything the telemetry renderer needs on a real device (R-MAV-01).
+ *
+ * The same shape and the same purpose as `consolePathsFromEnv` above: the
+ * only thing that decides a production path is this function, and the only
+ * thing that decides a test path is the test. Without it these three values
+ * would live inside `main()`, which nothing can call and nothing therefore
+ * checks — and a hint written to the wrong place is a sweep on every boot,
+ * silently, for ever.
+ *
+ * `run` is a parameter for the same reason every renderer takes one: nothing
+ * in a test may reach a real `stty`. `opts` is there for the same reason
+ * again, one level down: without it the opener this function builds is welded
+ * to the wall clock and to no journal at all, so the first test that wires
+ * this function through would sleep on real time and lose whatever the opener
+ * had to say. `main()` passes the real ones.
+ */
+export function mavlinkFromEnv(
+  run: CommandRunner = systemRunner,
+  env: NodeJS.ProcessEnv = process.env,
+  opts: { clock?: Clock; log?: (line: string) => void } = {},
+): NonNullable<ServerOptions["mavlink"]> {
+  return {
+    open: openPortWith(run, opts),
+    confPath: ROUTER_CONF_PATH,
+    // Beside the apply journal and the mesh record — one state directory for
+    // this daemon, not a third one the telemetry renderer invented. It
+    // follows YONDER_JOURNAL so a board running out of an alternate state
+    // directory keeps all three together.
+    hintPath: join(dirname(env.YONDER_JOURNAL ?? DEFAULT_JOURNAL_PATH), "mavlink-link.json"),
+  };
 }
 
 export async function startServer(opts: ServerOptions): Promise<{ close(): Promise<void> }> {
@@ -1040,12 +1086,27 @@ async function main(): Promise<void> {
   await startServer({
     socketPath: process.env.YONDER_SOCKET ?? "/run/yonder/core.sock",
     configPath: process.env.YONDER_CONFIG ?? "/etc/yonder/config.yaml",
-    journalPath: process.env.YONDER_JOURNAL ?? "/var/lib/yonder/apply.json",
+    journalPath: process.env.YONDER_JOURNAL ?? DEFAULT_JOURNAL_PATH,
     secretsPath: process.env.YONDER_SECRETS ?? "/etc/yonder/secrets.yaml",
     renderers: [],
     // The one place production console paths are decided. Everywhere else
     // they are given, so nothing can write to /opt/yonder by default.
     console: consolePathsFromEnv(),
+    /**
+     * **The one place a real serial port is opened** (R-MAV-01), and the
+     * line that stops the telemetry renderer being inert: without it
+     * `buildRenderers` assembles no `MavlinkRenderer` at all, every `/mav/*`
+     * route answers 503 and no `mavlink-router` is ever started.
+     *
+     * Given here rather than defaulted inside `buildRenderers`, for the same
+     * reason `console` is: a default that touches hardware is a default a
+     * test reaches by forgetting to override it, and this one would open a
+     * node under `/dev` and run a real `stty`. Every call to what
+     * `openPortWith` returns comes from `MavlinkRenderer` by way of
+     * `detect()`, so every `stty` still runs on a renderer's stack and
+     * through the injected runner (ADR-0006).
+     */
+    mavlink: mavlinkFromEnv(systemRunner, process.env, { log: warn }),
   });
   note("yonder-core listening");
 }

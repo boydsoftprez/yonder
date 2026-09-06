@@ -359,6 +359,7 @@ export {
 } from "./mav/renderer.js";
 export { LinkTracker, type LinkState } from "./mav/link.js";
 export { detect, type DetectOutcome, type OpenPort, type SerialPort } from "./mav/detect.js";
+export { openPortWith, SETTLE_MS } from "./mav/serial.js";
 export { HeartbeatScanner, describeVehicle, type Heartbeat } from "./mav/frame.js";
 export { readHint, writeHint, forgetHint, type LinkHint } from "./mav/hint.js";
 export {

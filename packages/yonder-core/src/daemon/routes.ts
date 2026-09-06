@@ -25,7 +25,7 @@ import { publishableApPassphrase } from "../net/profiles.js";
 import type { RemoteState } from "../remote/state.js";
 import { pathCheck } from "../mav/check.js";
 import type { LinkState } from "../mav/link.js";
-import type { DetectOutcome } from "../mav/detect.js";
+import { SweepInProgressError, type DetectOutcome } from "../mav/detect.js";
 
 export interface RouterDeps {
   engine: ApplyEngine;
@@ -109,12 +109,15 @@ export interface RouterDeps {
    */
   testPath?: (path: PathName) => Promise<boolean>;
   /**
-   * The telemetry link, read and driven. **Absent when this build has no way
-   * to do telemetry at all**, which is the ordinary state of every device
-   * today: `MavlinkRenderer` is assembled only when a caller supplies a way
-   * to open a serial port, and nothing in this repository implements one yet
-   * (`BuildRenderersOptions.mavlink`). Every `/mav/*` route then says so with
-   * a 503 naming the absence.
+   * The telemetry link, read and driven. **Absent when this daemon was
+   * started without a way to do telemetry at all**: `MavlinkRenderer` is
+   * assembled only when a caller supplies a way to open a serial port
+   * (`BuildRenderersOptions.mavlink`), and `main()` always does. So this is
+   * no longer the ordinary state of a device — a board with nothing on its
+   * UART now has a telemetry layer that answers R-MAV-13's "which kind of
+   * nothing", rather than a 503 that cannot tell an absent autopilot from an
+   * absent capability. Every `/mav/*` route still says so with a 503 naming
+   * the absence when there is genuinely no layer to ask.
    */
   mavlink?: MavlinkControl;
 }
@@ -791,6 +794,13 @@ export function createRouter(deps: RouterDeps): Router {
        * it happens. Nothing else here re-probes: the two read routes above
        * are reads, and a page polling one of them must never be able to seize
        * the port from a router that is working.
+       *
+       * **409 while a sweep is already running.** Two sweeps at once set the
+       * baud rate out from under each other — termios belongs to the tty, not
+       * to a descriptor — and can end in `found` at a speed the port is no
+       * longer running at. The renderer refuses; this turns the refusal into
+       * the status code that says *already happening*, rather than the 500
+       * below that would say *broken*.
        */
       if (method === "POST" && path === "/mav/detect") {
         const mavlink = deps.mavlink;
@@ -858,6 +868,13 @@ export function createRouter(deps: RouterDeps): Router {
       // of the route. It never carries anything from a subprocess.
       if (e instanceof ConfigError) {
         return { status: 400, body: { error: e.message, issues: e.issues } };
+      }
+      // Not a fault either: a sweep is already running on the port the caller
+      // asked to sweep. Its message names no path and runs no subprocess, so
+      // it can be answered with rather than swallowed — and 409 is what lets
+      // a page say "already looking" instead of "the request failed".
+      if (e instanceof SweepInProgressError) {
+        return { status: 409, body: { error: e.message } };
       }
       // Everything else does. A renderer failure arrives here as an
       // NmcliError whose message embeds nmcli's stderr verbatim, and echoing

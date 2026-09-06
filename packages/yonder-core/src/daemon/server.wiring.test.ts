@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildRenderers, consolePathsFromEnv, startServer, SIGNAL_POLL_SECONDS } from "./server.js";
+import { buildRenderers, consolePathsFromEnv, mavlinkFromEnv, startServer, SIGNAL_POLL_SECONDS } from "./server.js";
 import { SecretStore } from "../secrets/store.js";
 import { AdminCredential, ADMIN_PASSWORD_SECRET } from "../console/credential.js";
 import { hashPassword } from "../console/password.js";
@@ -16,6 +16,7 @@ import { createSocket } from "node:dgram";
 import { heartbeatV2 } from "../mav/testing.js";
 import type { MavlinkStateBody } from "./routes.js";
 import type { OpenPort } from "../mav/detect.js";
+import { SETTLE_MS } from "../mav/serial.js";
 
 /**
  * The byte counters, injected — never `/sys`.
@@ -182,11 +183,12 @@ describe("buildRenderers", () => {
 
   /**
    * And when it is not, the operator has to be told. `detect()` needs an
-   * `OpenPort` and nothing in this repository implements one against real
-   * hardware, so a build without one configures no telemetry at all — and
-   * doing that silently means an apply that sets three ground stations
-   * succeeds, writes no main.conf, starts no router, and says nothing
-   * anywhere about why the Telemetry page is empty.
+   * `OpenPort`; `mav/serial.ts` implements one against real hardware and
+   * `main()` passes it, so anything reaching this branch is a caller that
+   * supplied none — a test, or a new construction site that forgot.
+   * Configuring no telemetry silently means an apply that sets three ground
+   * stations succeeds, writes no main.conf, starts no router, and says
+   * nothing anywhere about why the Telemetry page is empty.
    */
   it("says so when it has no way to configure telemetry at all", () => {
     const run: CommandRunner = async () => ({ code: 0, stdout: "", stderr: "" });
@@ -304,6 +306,81 @@ describe("buildRenderers", () => {
       console: { settings: join(dir, "console", "settings.js") },
     });
     expect(built.renderers[0]?.name).toBe("hostname");
+  });
+});
+
+describe("mavlinkFromEnv", () => {
+  /**
+   * **This block is what makes telemetry happen at all.** Before it, every
+   * caller of `buildRenderers` passed no `mavlink`, so a real board assembled
+   * no `MavlinkRenderer`, answered 503 on every `/mav/*` route and started no
+   * router. `main()` cannot be called from a test, so the values it decides
+   * are asserted here instead — the same reason `consolePathsFromEnv` exists.
+   */
+  it("names the installed router configuration and puts the hint beside the journal", () => {
+    const { confPath, hintPath } = mavlinkFromEnv(async () => ({ code: 0, stdout: "", stderr: "" }), {});
+    expect(confPath).toBe("/etc/mavlink-router/main.conf");
+    expect(hintPath).toBe("/var/lib/yonder/mavlink-link.json");
+  });
+
+  it("keeps the hint with the journal when the state directory is moved", () => {
+    // One variable for the daemon's state, so a board running out of an
+    // alternate directory does not leave the hint behind in /var/lib/yonder,
+    // where nothing would ever read it and every boot would sweep afresh.
+    const { hintPath } = mavlinkFromEnv(
+      async () => ({ code: 0, stdout: "", stderr: "" }),
+      { YONDER_JOURNAL: "/srv/yonder/apply.json" },
+    );
+    expect(hintPath).toBe("/srv/yonder/mavlink-link.json");
+  });
+
+  it("hands back an opener that runs stty through the runner it was given", async () => {
+    // The ADR-0006 seam, asserted where it is actually established: the
+    // opener `main()` builds shells out only through the injected runner, so
+    // a test that hands it a fake reaches no real `stty` and no real /dev.
+    const calls: string[][] = [];
+    const { open } = mavlinkFromEnv(async (argv) => { calls.push(argv); return { code: 0, stdout: "", stderr: "" }; }, {});
+    // A path that is not there: the opener fails before it ever runs the
+    // command, which is itself the assertion that nothing here touches /dev.
+    await expect(open(join(dir, "ttyNOPE"), 115200)).rejects.toThrow(/ENOENT/);
+    expect(calls).toEqual([]);
+  });
+
+  /**
+   * **The clock and the journal reach the opener too, or nothing can test it.**
+   *
+   * `openPortWith` settles for 50 ms and polls every 10 ms *on an injected
+   * clock*, and it has one thing to say — a flush that hit its bound, which
+   * means bytes from the previous speed surviving into this speed's window.
+   * With no way through this function, the first test that wires the
+   * production opener up sleeps on real time and hears none of that. `main()`
+   * passes the daemon's own.
+   */
+  it("passes the clock and the journal down to the opener it builds", async () => {
+    const waits: number[] = [];
+    const said: string[] = [];
+    const clock: Clock = {
+      now: () => 0,
+      setTimer: (ms, fn) => { waits.push(ms); queueMicrotask(fn); return waits.length; },
+      clearTimer: () => {},
+    };
+    const path = join(dir, "ttyFAKE0");
+    // More than the flush's 64 x 8 KiB bound, so the one line the opener has
+    // to say is actually said and the journal seam is proven, not assumed.
+    writeFileSync(path, "x".repeat(600 * 1024));
+
+    const { open } = mavlinkFromEnv(
+      async () => ({ code: 0, stdout: "", stderr: "" }),
+      {},
+      { clock, log: (line) => { said.push(line); } },
+    );
+    const port = await open(path, 115200);
+    await port.settleAndFlush();
+    await port.close();
+
+    // The settle came off this clock and not the wall clock.
+    expect(waits[0]).toBe(SETTLE_MS);
+    expect(said.join("\n")).toMatch(/would not go quiet/);
   });
 });
 
