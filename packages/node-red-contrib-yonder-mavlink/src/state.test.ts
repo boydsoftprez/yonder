@@ -370,6 +370,29 @@ describe("flowFor — the Status page's three-cell flow strip", () => {
    * actually working. `tx` here is built so peak and latest disagree, so a
    * regression to the newest sample fails this exact assertion.
    */
+  /**
+   * **The gap `FlowLeg`'s own comment used to deny.**
+   *
+   * It claimed `rate` is null exactly when `absent` is true. It is not:
+   * `telemetryRunning` is true from the first reply to a start, while
+   * `traffic` stays null until the router's own counters have been read
+   * twice — there is no rate until two samples exist to divide. So for the
+   * whole of every telemetry start the outbound leg is
+   * `{ rate: null, caption: "answering", absent: false }`: a dash on a solid
+   * arrow, which is right, because the link is there and the number is not.
+   * Nothing covered it, in either of the two shapes it arrives in.
+   *
+   * Pinned so that "fixing" the strip to match the old comment — going
+   * absent, or printing a rate nobody measured — fails here.
+   */
+  it.each([
+    ["before the counters have been read at all", null],
+    ["with a window that has no outbound sample in it yet", { rx: [], tx: [], peak: 0, windowMs: 5_000 }],
+  ])("draws a dash on a solid arrow while telemetry is running but the rate is not known — %s", (_what, traffic) => {
+    const flow = flowFor(linked({ traffic }), true, true, NOW);
+    expect(flow.legs[1]).toEqual({ rate: null, caption: "answering", absent: false });
+  });
+
   it("reads the peak of the window for the outbound rate, not the newest sample", () => {
     const state = linked({ traffic: { rx: [0.4, 0.4], tx: [3.1, 0.0], peak: 3.1, windowMs: 5_000 } });
     const flow = flowFor(state, true, true, NOW);

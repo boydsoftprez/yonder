@@ -38,7 +38,19 @@ export interface FlowPlace {
   absent: boolean;
 }
 
-/** One leg between two places. `rate` is `null` exactly when `absent` is true. */
+/**
+ * One leg between two places. A dashed, grey arrow when `absent`.
+ *
+ * **`rate` is `null` whenever there is no figure to print, which is more
+ * often than `absent`.** Every absent leg has a null rate, but so does a
+ * present one whose rate is not known yet: `flowFor` yields `{ rate: null,
+ * caption: "answering", absent: false }` for the whole of every telemetry
+ * start, because `telemetryRunning` is true from the first reply while
+ * `traffic` stays null until the router's own counters have been read twice.
+ * That draws a dash on a solid arrow, which is right — the link is there and
+ * the number is not — and it is what the strip does today. The comment here
+ * used to claim the two were the same condition.
+ */
 export interface FlowLeg {
   rate: string | null;
   caption: string;

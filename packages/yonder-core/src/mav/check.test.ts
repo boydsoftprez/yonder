@@ -2,6 +2,9 @@
 import { describe, expect, it } from "vitest";
 import type { LinkState } from "./link.js";
 import { pathCheck, type PathCheckInput } from "./check.js";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 
 /**
  * R-DIA-04, as the three-link chain the console draws (§8).
@@ -12,6 +15,53 @@ import { pathCheck, type PathCheckInput } from "./check.js";
  * failed, and the difference is the reason an operator who deliberately
  * stopped telemetry does not open the page to a row of red.
  */
+
+/**
+ * **The two booleans this file exists to keep apart, described apart.**
+ *
+ * `PathCheckInput` restates definitions that live on `MavlinkRenderer`, and
+ * `telemetryRunning`'s restatement had become `routerRunning`'s, word for
+ * word — "whether mavlink-router is on the air, as of the last time systemd
+ * was asked" — in the one file whose whole job is telling them apart. Every
+ * caller passes both, so nothing in the behaviour could catch it; the only
+ * reader it misleads is the next person deciding which one a new row should
+ * read, and `autopilotLink` reading the wrong one is a page that says the
+ * aircraft is gone whenever an operator stops telemetry.
+ *
+ * Compared against the getters themselves, so it is the two files agreeing
+ * rather than one file agreeing with a phrase typed here.
+ */
+describe("the docstrings for telemetryRunning and routerRunning", () => {
+  const HERE = dirname(fileURLToPath(import.meta.url));
+  const doc = (source: string, field: string): string => {
+    const at = source.indexOf(`${field}: boolean;`) >= 0
+      ? source.indexOf(`${field}: boolean;`)
+      : source.indexOf(`get ${field}(): boolean`);
+    expect(at, `${field} is not declared where this test looked`).toBeGreaterThan(0);
+    const opens = source.lastIndexOf("/**", at);
+    return source.slice(opens, at);
+  };
+
+  const check = readFileSync(join(HERE, "check.ts"), "utf8");
+  const renderer = readFileSync(join(HERE, "renderer.ts"), "utf8");
+
+  it("do not describe the two fields with the same sentence", () => {
+    expect(doc(check, "telemetryRunning").trim()).not.toBe(doc(check, "routerRunning").trim());
+  });
+
+  it("say for telemetryRunning what the renderer's own getter actually returns", () => {
+    // `this.running && !this.stoppedByOperator` — the operator's stop is the
+    // whole of the difference, so the description has to name it.
+    expect(renderer).toContain("return this.running && !this.stoppedByOperator;");
+    expect(doc(check, "telemetryRunning")).toMatch(/stoppedByOperator|stopped by the operator/);
+    expect(doc(renderer, "telemetryRunning")).toMatch(/stop/i);
+  });
+
+  it("keep routerRunning's own sentence for routerRunning alone", () => {
+    expect(doc(check, "routerRunning")).toMatch(/on the air at all/);
+    expect(doc(check, "telemetryRunning")).not.toMatch(/on the air at all/);
+  });
+});
 
 /** A link state with nothing measured — the shape a fresh tracker answers with. */
 function fresh(): LinkState {

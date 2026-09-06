@@ -48,10 +48,20 @@ export interface PathCheckInput {
   /** Everything measured about the autopilot. `MavlinkRenderer.state()`. */
   state: LinkState;
   /**
-   * Whether `mavlink-router` is on the air, as of the last time systemd was
-   * asked. Not a field of `LinkState` — every field there is a measurement
-   * about the *aircraft*, and this is a fact about this device — which is why
-   * it arrives beside it rather than inside it.
+   * Whether telemetry is actually being sent on — the router running **and**
+   * not stopped by the operator. `MavlinkRenderer.telemetryRunning`, which is
+   * `this.running && !this.stoppedByOperator` and nothing else.
+   *
+   * This docstring used to be `routerRunning`'s, word for word, in the one
+   * file whose job is keeping the two apart. They differ exactly while
+   * telemetry is stopped: a stop removes the ground-station endpoints and
+   * restarts the router, so the service is up, the flight-controller link is
+   * up, the loopback copy is still delivering heartbeats — and nothing is
+   * being sent on. This field is false there and `routerRunning` is true.
+   *
+   * Not a field of `LinkState` — every field there is a measurement about the
+   * *aircraft*, and this is a fact about this device — which is why it
+   * arrives beside it rather than inside it.
    */
   telemetryRunning: boolean;
   /**
