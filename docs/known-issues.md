@@ -1182,3 +1182,19 @@ first `lsusb`: one device on that hub was dropping and the other never was.
 **Closed by:** `installer/roles/15-usb-power.sh`, which writes a udev rule
 holding USB video devices out of runtime suspend, matched on the video
 interface class rather than on the vendor id of the camera this was found on.
+
+**What is proved, and what is not.** The mechanism is proved: writing `on` to
+the port's `power/control` by hand froze its suspended-time counter and bought
+the interval in the table above. The *rule* is not. No board has ever run
+`installer/roles/15-usb-power.sh`; the development board today has no
+`/etc/udev/rules.d/50-yonder-usb-video-power.rules` and every device on it
+still reads `power/control = auto`, the runtime write having gone with the
+reboot that followed it. Nothing has yet matched a camera on the interface
+class and set it at plug-in time, which is the one thing the rule does that
+the hand-write did not.
+
+Two claims the rule still owes, and neither can be settled without a camera
+attached: that a device arriving after boot is caught by the `add` rule, and
+that the setting survives the re-enumeration this fault consists of. Check both
+on the first install that has the ELP plugged in, and record the interval the
+same way.
