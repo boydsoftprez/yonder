@@ -1436,7 +1436,7 @@ attempts*, which `argv()` deliberately does not.
 that opened it, run again: change a bitrate on Setup, apply, confirm, and read
 `video_bitrate=` out of the running `gst-launch-1.0` command line.
 
-### K-49 · Adaptive is offered, nothing implements it, and choosing it freezes the rate
+### K-49 · Adaptive is offered — for the rate and for the size — and nothing implements either
 
 **Status:** Open · **Requirements:** R-UI-20, R-VID-07
 
@@ -1451,6 +1451,21 @@ The development board was found in exactly that state: `stream.mode: adaptive`,
 `preview.floor_kbps: 300`. **The applied rate was below the camera's own
 declared floor** and nothing on the page could raise it, which is why every
 setting appeared to make no difference to the picture.
+
+**The size ladder is the same defect and is easy to miss beside it.** The
+preview's Size picker offers `Auto — steps with the link` (`YonderDeck.vue`'s
+`PREVIEW_SIZE_OPTIONS`), whose contract in spec §8.1 is to step down a rung
+after `tDown` pinned at the floor and up after `tUp` of headroom. Nothing
+steps it: there is no `video/rate.ts`, no ladder, and no `RateController`
+anywhere in `yonder-core`. Choosing `Auto` therefore holds whatever rung the
+preview last had, exactly as choosing Adaptive holds whatever rate it last
+had — and reads to an operator as a working automatic mode.
+
+Both are plan Task 31, which is **blocked**: an adaptive controller that moved
+a rate on the respawn path would restart the picture every time the link
+moved, which is not a controller but a stutter generator. It needs the runtime
+channel K-53 records, and whether that is reachable at all is what the ffmpeg
+bench spike exists to answer.
 
 Two faults, and they are separable:
 
