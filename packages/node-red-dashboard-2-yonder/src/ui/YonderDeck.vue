@@ -11,7 +11,7 @@ import YonderTextField from './YonderTextField.vue'
 import YonderShutter from './YonderShutter.vue'
 import YonderAimPad from './YonderAimPad.vue'
 import { createDraftStore } from './draft.ts'
-import { LABELS } from 'yonder-core/presentation'
+import { LABELS, deckDraft, draftPathFor, interruption } from 'yonder-core/presentation'
 
 /**
  * `ui-yonder-deck` — a camera's whole control surface, composed from what it
@@ -75,7 +75,7 @@ import { LABELS } from 'yonder-core/presentation'
  *              preview: <same shape as policy.preview> },
  *   outputs: { kind, label, enabled, costKbps, reach: OutputReach }[],
  *   captures: { count },
- *   interruption: string[] }
+ *   problems: { path, message }[] }   // only after a refused apply
  * ```
  *
  * `policy` and `applied` share one schema-shaped sub-shape (schema field
@@ -391,11 +391,24 @@ export default {
     setMode (mode) {
       this.post({ mode })
     },
+    /**
+     * **The draft is not cleared here, and that is the fix.**
+     *
+     * It used to be — posted, then cleared, before the daemon had answered.
+     * A refused apply (`POST /cameras/:id/apply` answers 400 with a
+     * `problems` list, by design, so the page can mark the field) therefore
+     * arrived at a browser that had already thrown away every staged edit:
+     * nothing left to mark, and the operator retypes the lot.
+     *
+     * Nothing has to clear it. `draftStore.pending(camera, applied)` filters
+     * at read time — an edit whose staged value now equals the applied one is
+     * not pending — so a *successful* apply empties the pending block on its
+     * own the moment the re-read lands, and a refused one leaves every edit
+     * exactly where the operator left it. `discard()` is the only thing that
+     * throws a draft away, which is the only thing that should.
+     */
     apply () {
-      const whole = this.draftStore.get(this.camera)
-      this.post({ apply: whole })
-      this.draftStore.clear(this.camera)
-      this.persistDraft()
+      this.post({ apply: this.draftStore.get(this.camera) })
     },
     discard () {
       this.draftStore.clear(this.camera)
@@ -806,18 +819,59 @@ export default {
         }),
       ])
     },
+    /**
+     * What is staged, what it would interrupt, and what the device refused.
+     *
+     * **The interruption is computed here, from this deck's own draft**
+     * (`interruption()` in `yonder-core`, the same function the apply's own
+     * answer carries). It used to be read off `report.interruption`, which
+     * the daemon composes as `[]` and can only ever compose as `[]` — the
+     * interruption a draft would cause is a fact about a draft that has not
+     * been sent, and the daemon has never seen it. So the warning spec §8.1
+     * asks for *before* Apply is pressed could not appear, while two doc
+     * comments said it did. Translating the flat draft and the flat applied
+     * values through `deckDraft()` is what lets one function serve both
+     * sides, rather than a second copy of §8.1's table living here.
+     *
+     * **A refusal's problems are shown beside the field each names.**
+     * `POST /cameras/:id/apply` answers them keyed by schema path;
+     * `draftPathFor()` is the reverse of the seam above, so
+     * `preview.floor_kbps` finds the `previewFloor` row it belongs to. One
+     * the deck cannot place is still drawn, on its own row with its path, so
+     * a problem is never silently dropped.
+     */
     buildPending () {
       if (this.mode !== 'setup') return null
       const pending = this.pendingEdits
-      const interruption = this.report.interruption || []
-      if (pending.length === 0 && interruption.length === 0) return null
-      return h('div', { class: 'y-deck__pending' }, [
-        h('div', { class: 'y-deck__pending-h' }, `Pending changes · ${pending.length}`),
-        ...pending.map((p) => h('div', { class: 'y-deck__pending-row', key: p.path }, [
+      const problems = Array.isArray(this.report.problems) ? this.report.problems : []
+      const stops = interruption(
+        deckDraft(this.draft).draft,
+        deckDraft(this.appliedFlat).draft,
+      )
+      if (pending.length === 0 && stops.length === 0 && problems.length === 0) return null
+      const placed = new Set()
+      const problemFor = (path) => {
+        const found = problems.find((p) => draftPathFor(String(p && p.path)) === path)
+        if (found) placed.add(found)
+        return found
+      }
+      const rows = pending.map((p) => {
+        const problem = problemFor(p.path)
+        return h('div', { class: 'y-deck__pending-row', key: p.path }, [
           h('span', { class: 'y-deck__pending-path' }, p.path),
           h('span', { class: 'y-deck__pending-val' }, String(p.requested)),
+          ...(problem ? [h('span', { class: 'y-deck__pending-why' }, problem.message)] : []),
+        ])
+      })
+      const loose = problems.filter((p) => !placed.has(p))
+      return h('div', { class: 'y-deck__pending' }, [
+        h('div', { class: 'y-deck__pending-h' }, `Pending changes · ${pending.length}`),
+        ...rows,
+        ...loose.map((p, i) => h('div', { class: 'y-deck__pending-row', key: 'why' + i }, [
+          h('span', { class: 'y-deck__pending-path' }, String(p.path)),
+          h('span', { class: 'y-deck__pending-why' }, String(p.message)),
         ])),
-        ...interruption.map((s, i) => h('div', { class: 'y-deck__interrupt', key: 'int' + i }, s)),
+        ...stops.map((s, i) => h('div', { class: 'y-deck__interrupt', key: 'int' + i }, s)),
       ])
     },
     buildRail () {
@@ -969,10 +1023,16 @@ export default {
 }
 .y-deck__pending-row {
     display: flex;
+    flex-wrap: wrap;
     justify-content: space-between;
     gap: 10px;
     font-size: 12px;
     padding: 2px 0;
+}
+.y-deck__pending-why {
+    flex-basis: 100%;
+    color: var(--yonder-bad, #ff4034);
+    font-size: 11px;
 }
 .y-deck__interrupt {
     font-size: 11px;

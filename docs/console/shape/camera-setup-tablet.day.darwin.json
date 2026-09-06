@@ -74,7 +74,7 @@
         "x": 268,
         "y": 1985,
         "w": 744,
-        "h": 112
+        "h": 168
       }
     },
     {
@@ -83,14 +83,14 @@
         "x": 285,
         "y": 2002,
         "w": 710,
-        "h": 78
+        "h": 134
       }
     },
     {
       "key": "nrdb-ui-group.yonder-deck-setup#1",
       "box": {
         "x": 268,
-        "y": 2109,
+        "y": 2164,
         "w": 744,
         "h": 142
       }
@@ -99,7 +99,7 @@
       "key": "nrdb-ui-widget.nrdb-ui-yonder-identity#0",
       "box": {
         "x": 285,
-        "y": 2126,
+        "y": 2181,
         "w": 710,
         "h": 48
       }
@@ -108,7 +108,7 @@
       "key": "nrdb-ui-widget.nrdb-ui-yonder-identity#1",
       "box": {
         "x": 285,
-        "y": 2186,
+        "y": 2241,
         "w": 710,
         "h": 48
       }
@@ -117,7 +117,7 @@
       "key": "nrdb-ui-group.yonder-deck-setup.yonder-rail",
       "box": {
         "x": 268,
-        "y": 2263,
+        "y": 2318,
         "w": 744,
         "h": 82
       }
@@ -126,7 +126,7 @@
       "key": "nrdb-ui-widget.nrdb-ui-yonder-softkeys",
       "box": {
         "x": 285,
-        "y": 2280,
+        "y": 2335,
         "w": 710,
         "h": 48
       }

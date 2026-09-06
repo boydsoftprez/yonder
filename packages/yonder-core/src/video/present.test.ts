@@ -552,14 +552,19 @@ describe("cameraDeck", () => {
   });
 
   /**
-   * Board recording (§8.3) is unbuilt, so there is nothing to count, and the
-   * interruption a draft would cause is computed from the draft — which lives
-   * in the browser and is not sent until Apply.
+   * Board recording (§8.3) is unbuilt, so there is nothing to count.
+   *
+   * And **no `interruption` field at all**: what a draft would interrupt is a
+   * fact about a draft this daemon has never seen, so an empty array here was
+   * a promise the payload could not keep — `YonderDeck` drew it and the
+   * warning never appeared. The deck computes it from its own staged draft
+   * now. Asserted as absent rather than as `[]`, because `[]` is exactly the
+   * value that made the defect invisible.
    */
-  it("counts no captures and claims no interruption", () => {
+  it("counts no captures, and promises no interruption it cannot know", () => {
     const deck = cameraDeck({ camera: camera(), capabilities: null, encoder, paths });
     expect(deck.captures).toEqual({ count: 0 });
-    expect(deck.interruption).toEqual([]);
+    expect(Object.prototype.hasOwnProperty.call(deck, "interruption")).toBe(false);
   });
 });
 

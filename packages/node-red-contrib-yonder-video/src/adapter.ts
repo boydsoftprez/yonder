@@ -88,17 +88,39 @@ export function registerAdapter(
           return;
         }
 
-        const result = fetched(await node.client.request({
+        const reply = await node.client.request({
           method: wanted.method,
           path: wanted.path,
           ...(wanted.body === undefined ? {} : { body: wanted.body }),
-        }));
+        });
+        const result = fetched(reply);
         if (!result.ok) {
           // Never nothing. An operator looking at a panel that is simply
           // blank cannot tell "there is nothing to show" from "this never
           // loaded", and the second is the one they have to act on.
           node.status({ fill: "red", shape: "ring", text: "not answering" });
-          send({ payload: null, yonder: readFailure(result.message, Date.now()) });
+          /**
+           * **The refusal's own detail, kept.** `fetched()` reduces a
+           * non-200 to one sentence, which is right for a status badge and
+           * loses the one thing a *form* needs: `POST /cameras/:id/apply`
+           * answers `problems` — a message per draft path — precisely so the
+           * page can mark the field the operator has to change rather than
+           * showing a sentence about a form. Dropped here, that whole design
+           * stopped at the route: the deck cleared its draft, the operator
+           * retyped everything, and nothing anywhere read `problems`.
+           *
+           * On the message and not in the payload, because `payload` is
+           * `null` on a failure by design (an operator must be able to tell
+           * "nothing to show" from "this never loaded") and a widget's own
+           * report must not be overwritten by a refusal.
+           */
+          const problems = (reply.ok ? reply.body : undefined) as
+            { problems?: unknown } | undefined;
+          send({
+            payload: null,
+            yonder: readFailure(result.message, Date.now()),
+            ...(Array.isArray(problems?.problems) ? { problems: problems.problems } : {}),
+          });
           done();
           return;
         }

@@ -4396,7 +4396,7 @@
                 "t": "set",
                 "p": "camera",
                 "pt": "flow",
-                "to": "(payload.found[id != null].id)[0]",
+                "to": "$flowContext(\"camera\") in payload.found[id != null].id ? $flowContext(\"camera\") : (payload.found[id != null].id)[0]",
                 "tot": "jsonata"
             }
         ],
@@ -4657,7 +4657,7 @@
         "width": 12,
         "height": 0,
         "label": "",
-        "cells": "[{\"key\":\"state\",\"label\":\"RUNNING\",\"kind\":\"note\"},{\"key\":\"picture\",\"label\":\"PICTURE\"},{\"key\":\"rate\",\"label\":\"RATE\"},{\"key\":\"bitrate\",\"label\":\"BITRATE\"},{\"key\":\"uplink\",\"label\":\"UPLINK\"}]",
+        "cells": "[{\"key\":\"state\",\"label\":\"RUNNING\",\"kind\":\"note\"},{\"key\":\"identity\",\"label\":\"IDENTITY\",\"kind\":\"note\"},{\"key\":\"picture\",\"label\":\"PICTURE\"},{\"key\":\"rate\",\"label\":\"RATE\"},{\"key\":\"bitrate\",\"label\":\"BITRATE\"},{\"key\":\"uplink\",\"label\":\"UPLINK\"}]",
         "x": 1030,
         "y": 2080,
         "wires": []
@@ -4753,17 +4753,25 @@
                 "vt": "str"
             },
             {
+                "t": "eq",
+                "v": "rejected",
+                "vt": "str"
+            },
+            {
                 "t": "else"
             }
         ],
         "checkall": "false",
         "repair": false,
-        "outputs": 2,
+        "outputs": 3,
         "x": 1760,
         "y": 2385,
         "wires": [
             [
                 "cam-toast-text"
+            ],
+            [
+                "cam-refused-text"
             ],
             [
                 "cam-kept-text"
@@ -5438,6 +5446,13 @@
                 "pt": "msg",
                 "to": "payload.deck",
                 "tot": "jsonata"
+            },
+            {
+                "t": "set",
+                "p": "payload.problems",
+                "pt": "msg",
+                "to": "camproblems",
+                "tot": "flow"
             }
         ],
         "action": "",
@@ -5626,6 +5641,13 @@
         "rules": [
             {
                 "t": "set",
+                "p": "camproblems",
+                "pt": "flow",
+                "to": "[]",
+                "tot": "json"
+            },
+            {
+                "t": "set",
                 "p": "topic",
                 "pt": "msg",
                 "to": "apply",
@@ -5733,6 +5755,13 @@
         "rules": [
             {
                 "t": "set",
+                "p": "camera",
+                "pt": "flow",
+                "to": "payload.camera",
+                "tot": "jsonata"
+            },
+            {
+                "t": "set",
                 "p": "payload",
                 "pt": "msg",
                 "to": "{\"page\":\"Camera\"}",
@@ -5751,5 +5780,61 @@
                 "console-control"
             ]
         ]
+    },
+    {
+        "id": "cam-refused-text",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "the problems the daemon named",
+        "rules": [
+            {
+                "t": "set",
+                "p": "camproblems",
+                "pt": "flow",
+                "to": "problems",
+                "tot": "jsonata"
+            },
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "yonder.message",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 2020,
+        "y": 2480,
+        "wires": [
+            [
+                "toast-cam-refused"
+            ]
+        ]
+    },
+    {
+        "id": "toast-cam-refused",
+        "type": "ui-notification",
+        "z": "yonder-console",
+        "ui": "dashboard",
+        "name": "refused, and nothing changed",
+        "position": "top right",
+        "colorDefault": true,
+        "color": null,
+        "displayTime": "15",
+        "showCountdown": true,
+        "outputs": 0,
+        "allowDismiss": true,
+        "dismissText": "Dismiss",
+        "allowConfirm": false,
+        "confirmText": "",
+        "raw": false,
+        "className": "",
+        "x": 2300,
+        "y": 2480,
+        "wires": []
     }
 ]

@@ -1707,6 +1707,35 @@ describe("flows/flows.json camera pages", () => {
   });
 
   /**
+   * **R-CAM-05 in words, and the thing nothing in this repository rendered.**
+   *
+   * `byPathStable` was resolved, typed and tested from Task 4 onwards and no
+   * surface showed it — so an operator never learned whether the camera they
+   * configured would still be the one that name means after a reboot. It was
+   * a table column and a `ui-text` line; both went with the stock widgets,
+   * and for one commit the sentence was composed on two payloads and drawn on
+   * neither. It is a cell on the readout strip and a line on every index row
+   * now, both from `identityWords()`, which is where the sentence lives.
+   *
+   * A `note` cell, not a reading: the by-path name alone is 66 characters
+   * before the sentence starts (R-UI-25 — it wraps rather than being cut).
+   * The index's own half is a component fact and is held in
+   * `index.component.test.ts`; this holds the half that lives in the wiring.
+   */
+  it("shows each camera's identity, not only its /dev node", () => {
+    const bar = on(camera).find((n) => n.type === "ui-yonder-databar"
+      && String(n.cells).includes("\"key\":\"identity\""));
+    expect(bar, "the camera page never shows its identity").toBeDefined();
+    const cell = (JSON.parse(String(bar?.cells)) as { key: string; kind?: string }[])
+      .find((c) => c.key === "identity");
+    expect(cell?.kind, "a 130-character sentence is not a reading").toBe("note");
+    // Fed from the same read as the rest of the strip, so it can never be a
+    // value this file typed in.
+    expect((flows.find((n) => n.id === "pick-cam-strip")?.wires as string[][])[0])
+      .toContain(bar?.id);
+  });
+
+  /**
    * R-CAM-05 and R-CAM-12, both now composed in `video/present.ts` rather
    * than assembled out of table columns here: `cameraIndex()` puts
    * `identity` on every row and carries every rejection with its reason, and
@@ -1957,8 +1986,12 @@ describe("flows/flows.json camera pages", () => {
    */
   it("feeds both decks the whole report, and names no capability in the wiring", () => {
     const pick = flows.find((n) => n.id === "pick-cam-deck");
+    // Two moves and no composition: the whole report, then the problems a
+    // refused apply left in flow context — which the deck puts beside the
+    // field each names. Neither rule builds a value.
     expect((pick?.rules as { to: string; tot: string }[])).toEqual([
       { t: "set", p: "payload", pt: "msg", to: "payload.deck", tot: "jsonata" },
+      { t: "set", p: "payload.problems", pt: "msg", to: "camproblems", tot: "flow" },
     ]);
     expect(((pick?.wires as string[][])[0] ?? []).slice().sort())
       .toEqual(["deck-cam-live", "deck-cam-setup"]);
@@ -2102,6 +2135,75 @@ describe("flows/flows.json camera pages", () => {
           .toContain('"p":"camera"');
       }
     }
+  });
+
+  /**
+   * **The camera a row was pressed on is the camera the page then reads.**
+   *
+   * `ui-yonder-index` posts `{ camera: id }`, correctly. The flow behind it
+   * discarded that id and set the page alone, and `flow.camera` — which every
+   * `cam-at-*` node reads — was written in exactly one place, to the *first*
+   * configured camera in the sweep. So on a two-camera board both rows' OPEN
+   * keys opened camera one, and the development board has one camera, so it
+   * would have shipped invisible.
+   *
+   * Two halves, and both are needed: `cam-open` has to record the choice, and
+   * the sweep that runs every few seconds afterwards must not overwrite it.
+   */
+  it("opens the camera whose row was pressed, and keeps it open", () => {
+    const open = flows.find((n) => n.id === "cam-open");
+    const rules = open?.rules as { p: string; pt: string; to: string; tot: string }[];
+    // The choice is recorded before the page is set, and it comes off the
+    // press rather than out of a list.
+    expect(rules[0]).toEqual({
+      t: "set", p: "camera", pt: "flow", to: "payload.camera", tot: "jsonata",
+    });
+    expect(rules[1]?.p).toBe("payload");
+    expect(JSON.parse(String(rules[1]?.to))).toEqual({ page: "Camera" });
+    expect((flows.find((n) => n.type === "ui-yonder-index")?.wires as string[][])[0])
+      .toEqual(["cam-open"]);
+
+    // And the sweep seeds the id only when there is nothing chosen, or when
+    // what was chosen is no longer attached. Without this, the next poll puts
+    // the operator back on camera one a few seconds after they left it.
+    const identify = String((flows.find((n) => n.id === "cam-identify")
+      ?.rules as { to: string }[])[0]?.to);
+    expect(identify).toContain('$flowContext("camera")');
+    expect(identify).toContain("payload.found[id != null].id");
+  });
+
+  /**
+   * **A refused apply is its own answer.**
+   *
+   * Every non-pending answer used to land on `toast-cam-kept`, the node named
+   * "applied, and kept", and the `problems` the route answers with reached no
+   * surface at all. The route half was right and proven; the browser threw
+   * the draft away before the refusal arrived, so there was no field left to
+   * mark. Now: a third branch, its own toast, and the problems into flow
+   * context where `pick-cam-deck` puts them on the deck's payload.
+   */
+  it("routes a refused apply to its own answer, and carries its problems to the deck", () => {
+    const route = flows.find((n) => n.id === "cam-apply-route");
+    expect((route?.rules as { v?: string }[]).map((r) => r.v))
+      .toEqual(["pending", "rejected", undefined]);
+    const [armed, refused, kept] = route?.wires as string[][];
+    expect(armed).toEqual(["cam-toast-text"]);
+    expect(refused).toEqual(["cam-refused-text"]);
+    expect(kept).toEqual(["cam-kept-text"]);
+
+    const text = flows.find((n) => n.id === "cam-refused-text");
+    expect(JSON.stringify(text?.rules)).toContain('"p":"camproblems"');
+    const toast = flows.find((n) => n.id === String((text?.wires as string[][])[0][0]));
+    expect(toast?.type).toBe("ui-notification");
+    // Nothing about a refusal offers a confirm: there is nothing in force to
+    // keep, and a confirm control that does nothing is K-32.
+    expect(toast?.allowConfirm).toBe(false);
+    expect(String(toast?.name)).not.toMatch(/kept/i);
+
+    // Cleared when an apply is *sent*, so a problem from the last attempt
+    // cannot be read as one from this one.
+    expect(JSON.stringify(flows.find((n) => n.id === "cam-apply-msg")?.rules))
+      .toContain('"p":"camproblems"');
   });
 
   it("takes that id from the sweep, which is the only thing that knows it", () => {

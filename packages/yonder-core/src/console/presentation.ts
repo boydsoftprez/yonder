@@ -147,3 +147,30 @@ export {
   type StillsCapability,
   type VideoFormat,
 } from "../video/capability.js";
+
+/**
+ * The draft the deck stages, and the warning it owes an operator *before*
+ * Apply is pressed (R-CFG-03, spec §7 and §8.1).
+ *
+ * Runtime values, and safe here only because `apply/draft-shape.ts` was
+ * split out of `apply/draft.ts` to make them so: the latter imports
+ * `PREVIEW_RUNGS`, a runtime value from the config schema, and therefore
+ * zod — exactly what this file's opening comment keeps out of a browser
+ * bundle. `draft-shape.ts` imports nothing but a type.
+ *
+ * Both belong here by this file's own rule. `interruption()` is the sentence
+ * the deck shows before the press and the sentence the apply's answer
+ * carries; two copies would drift the first time §8.1's table changes.
+ * `deckDraft()` and `draftPathFor()` are the two directions of one seam
+ * between the deck's flat, UI-facing paths and the schema's nested ones —
+ * the deck translates its own draft to ask `interruption()` about it, and
+ * translates back to put a refusal's `problems` beside the field each names.
+ */
+export {
+  deckDraft,
+  draftPathFor,
+  interruption,
+  DRAFT_PATHS,
+  type CameraDraft,
+  type DeckDraft,
+} from "../apply/draft-shape.js";

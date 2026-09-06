@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
-import { applyCameraDraft, deckDraft, interruption, validateDraft } from "./draft.js";
+import { applyCameraDraft, deckDraft, draftPathFor, interruption, validateDraft } from "./draft.js";
+import { DRAFT_PATHS } from "./draft-shape.js";
 import { ConfigSchema, DEFAULT_CONFIG, PREVIEW_RUNGS, type Config } from "../schema/config.js";
 
 const RUNGS = [...PREVIEW_RUNGS];
@@ -238,5 +239,39 @@ describe("applyCameraDraft", () => {
   it("refuses a camera that is not configured", () => {
     const out = applyCameraDraft(configWithCamera(), "nose", { framerate: 25 });
     expect(out.ok).toBe(false);
+  });
+});
+
+describe("DRAFT_PATHS — one table, read in both directions", () => {
+  /**
+   * **The agreement check.** `deckDraft()` is a `switch` and `DRAFT_PATHS` is
+   * a map; nothing in the language holds them to each other, and two
+   * hand-kept lists of thirteen names are two chances to disagree. So every
+   * key in the map is fed to `deckDraft` and the resulting draft is walked to
+   * the dotted place the map claims it lands in. A path added to one and not
+   * the other fails here rather than as a refusal message that never finds
+   * its field.
+   */
+  it("puts every path it names where it says it does", () => {
+    for (const [ui, path] of Object.entries(DRAFT_PATHS)) {
+      // A value distinguishable from `undefined` for every field, whatever
+      // its type — a mode has to be a word `fromUiMode` recognises.
+      const value = ui.endsWith("Mode") ? "Adaptive" : 7;
+      const { draft, unknown } = deckDraft({ [ui]: value });
+      expect(unknown, `${ui} is in the table and unknown to deckDraft`).toEqual([]);
+      const landed = path.split(".").reduce<unknown>(
+        (o, k) => (o as Record<string, unknown> | undefined)?.[k], draft,
+      );
+      expect(landed, `${ui} should land at ${path}`).toBeDefined();
+    }
+  });
+
+  /** And the reverse, which is what puts a refusal's message on the row it
+   * belongs to: the deck knows `previewFloor`, the route answers
+   * `preview.floor_kbps`. */
+  it("finds the staged path a schema-keyed problem is about", () => {
+    expect(draftPathFor("preview.floor_kbps")).toBe("previewFloor");
+    expect(draftPathFor("bitrate_kbps")).toBe("streamBitrate");
+    expect(draftPathFor("somewhere.else")).toBeNull();
   });
 });

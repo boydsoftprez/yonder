@@ -60,10 +60,12 @@ function makeCapabilities(overrides: Record<string, unknown> = {}) {
 }
 
 interface CameraRow {
-    id: string;
+    id: string | null;
     name: string;
     bus: string;
     spec: string;
+    /** R-CAM-05 in words, from `identityWords()` — see the row test below. */
+    identity: string;
     state: string;
     tone: string;
     rate: number | null;
@@ -89,6 +91,8 @@ function makeReport(overrides: Partial<IndexReport> = {}): IndexReport {
                 name: "Nose",
                 bus: "USB · UVC",
                 spec: "1920×1080 · 30 fps · H.264 · hardware",
+                identity: "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0"
+                    + " — an enumeration number; it may mean a different camera after a reboot",
                 state: "Streaming",
                 tone: "good",
                 rate: 1.9,
@@ -99,6 +103,8 @@ function makeReport(overrides: Partial<IndexReport> = {}): IndexReport {
                 name: "Gimbal",
                 bus: "USB accessory",
                 spec: "1280×720 · 30 fps · H.264 · re-encoded",
+                identity: "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index2"
+                    + " — survives a reboot",
                 state: "Idle",
                 tone: "neutral",
                 rate: null,
@@ -160,6 +166,22 @@ describe("a found camera's row", () => {
         const nose = camRows(wrapper)[0]!;
         expect(nose.find(".y-idx__nm b").text()).toBe("Nose");
         expect(nose.find(".y-idx__nm span").text()).toBe("USB · UVC");
+    });
+
+    /**
+     * **R-CAM-05's sentence, on the page rather than only in the payload.**
+     *
+     * `cameraIndex()` composes `identity` on every row and `identityWords()`
+     * is where the wording lives — and for one commit nothing rendered it,
+     * which is precisely the state the requirement was written against: the
+     * stable-identity work stops at the type and an operator never learns
+     * whether the camera they configured will still be the one that name
+     * means after a reboot.
+     */
+    it("carries the identity sentence, which is the only form R-CAM-05 has", () => {
+        const { wrapper } = mountIndex(makeReport());
+        expect(camRows(wrapper)[0]!.find(".y-idx__id").text())
+            .toBe(makeReport().cameras[0]!.identity);
     });
 
     it("carries the spec", () => {

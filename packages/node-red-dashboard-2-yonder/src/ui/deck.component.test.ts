@@ -391,7 +391,13 @@ it("Apply posts the whole draft once; Discard clears it and posts nothing", asyn
     expect(emit).toHaveBeenCalledTimes(1);
     const [, , msg] = emit.mock.calls[0]!;
     expect(msg.payload.apply).toEqual({ streamMode: "Adaptive" });
-    expect((wrapper.vm as any).draftStore.get("elp")).toEqual({});
+    // **Kept, not cleared.** The daemon has not answered yet, and it may
+    // refuse: `POST /cameras/:id/apply` returns `problems` by path precisely
+    // so the page can mark the field, and a browser that has already dropped
+    // the draft has nothing left to mark. Nothing needs to clear it —
+    // `pending()` filters at read time, so a successful apply empties the
+    // block on its own when the re-read lands.
+    expect((wrapper.vm as any).draftStore.get("elp")).toEqual({ streamMode: "Adaptive" });
   }
 
   // Discard, on a fresh store so the previous Apply's own clear cannot be
@@ -412,18 +418,73 @@ it("Apply posts the whole draft once; Discard clears it and posts nothing", asyn
   }
 });
 
-it("shows the pending count and the interruption before Apply", async () => {
-  const report = makeReport({ interruption: ["restarts the pipeline"] });
-  const store = makeStore(report);
-  const { wrapper } = deck(store, "setup");
+/**
+ * **Computed here, from this deck's own draft.**
+ *
+ * This test used to hand the component `interruption: ["restarts the
+ * pipeline"]` on its report — a value the daemon composes as `[]` and can
+ * only ever compose as `[]`, because the interruption a draft would cause is
+ * a fact about a draft that has not been sent. So it passed while the warning
+ * spec §8.1 asks for could never appear on a real page. It now stages a real
+ * edit and expects the sentence `interruption()` itself returns for it:
+ * changing the preview's held size is the preview branch and nothing else.
+ */
+it("works out what a staged edit would interrupt, and says so before Apply", async () => {
+  const { wrapper } = deck(makeStore(makeReport()), "setup");
 
-  await segByLabel(wrapper, "Bitrate").findAll("button").find((b) => b.text() === "Adaptive")!.trigger("click");
+  const size = pickerByLabel(wrapper, "Size");
+  await size.find("select").setValue("854x480");
 
   expect(wrapper.find(".y-deck__pending-h").text()).toContain("1");
-  expect(wrapper.text()).toContain("restarts the pipeline");
+  expect(wrapper.text()).toContain("preview branch only");
   // Visible ahead of the Apply key, not merely present somewhere on the page.
   const html = wrapper.html();
   expect(html.indexOf("y-deck__pending")).toBeLessThan(html.indexOf("y-deck__rail"));
+});
+
+/** And silent when nothing staged would interrupt anything — a warning that
+ * is always on is a warning nobody reads. */
+it("says nothing about an interruption for an edit that causes none", async () => {
+  const { wrapper } = deck(makeStore(makeReport()), "setup");
+  await segByLabel(wrapper, "Bitrate").findAll("button")
+    .find((b) => b.text() === "Adaptive")!.trigger("click");
+  expect(wrapper.find(".y-deck__pending-h").text()).toContain("1");
+  expect(wrapper.find(".y-deck__interrupt").exists()).toBe(false);
+});
+
+/**
+ * **A refused apply keeps every edit and marks the field.**
+ *
+ * The route answers `problems` keyed by *schema* path; the deck knows its own
+ * flat names. `draftPathFor()` is the reverse of that seam, and this asserts
+ * the message lands on the row it belongs to rather than merely appearing
+ * somewhere on the page.
+ */
+it("puts a refusal's problem beside the staged edit it is about", async () => {
+  const { wrapper } = deck(makeStore(makeReport({
+    problems: [{ path: "preview.floor_kbps", message: "the floor is above the ceiling" }],
+  })), "setup");
+
+  // The *preview* Floor, not the stream's: both decks draw one and the
+  // problem names `preview.floor_kbps`.
+  const floor = wrapper.findAll(".y-sb").filter((b) => b.find(".y-sb__label").text() === "Floor").at(-1)!;
+  press(floor.find(".y-sb__trk").element, 40);
+  await wrapper.vm.$nextTick();
+
+  const row = wrapper.findAll(".y-deck__pending-row")
+    .find((r) => r.find(".y-deck__pending-path").text() === "previewFloor");
+  expect(row, "the staged edit must still be there to mark").toBeDefined();
+  expect(row!.find(".y-deck__pending-why").text()).toBe("the floor is above the ceiling");
+});
+
+/** A problem the deck cannot place is still drawn, with its own path — a
+ * refusal must never be silently dropped. */
+it("draws a problem it cannot match to a staged edit rather than losing it", () => {
+  const { wrapper } = deck(makeStore(makeReport({
+    problems: [{ path: "somewhere.else", message: "not a setting this device has" }],
+  })), "setup");
+  expect(wrapper.text()).toContain("not a setting this device has");
+  expect(wrapper.text()).toContain("somewhere.else");
 });
 
 it("groups flow into columns and no group is stranded on a row of its own", () => {

@@ -883,8 +883,11 @@ export function createRouter(deps: RouterDeps): Router {
         body: {
           ...await deps.engine.apply(next.config),
           // What this apply will interrupt, from the same function the deck
-          // draws before it is pressed — so the warning an operator read and
-          // the one the answer carries are one calculation, not two.
+          // calls over its own staged draft before the press — so the warning
+          // an operator read and the one the answer carries are one
+          // calculation, not two. (`YonderDeck.buildPending()` is the other
+          // caller; both reach `interruption()` through `apply/draft-shape.ts`,
+          // which exists so a browser can.)
           interruption: interruption(draft, {
             width: camera.width,
             height: camera.height,

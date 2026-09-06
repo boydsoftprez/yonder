@@ -16,6 +16,7 @@
                         <span class="y-idx__nm"><b>{{ cam.name }}</b><span>{{ cam.bus }}</span></span>
                         <span class="y-idx__sp">
                             <span class="y-idx__a">{{ cam.spec }}</span>
+                            <span v-if="cam.identity" class="y-idx__id">{{ cam.identity }}</span>
                             <span class="y-idx__b">{{ probeSummary(cam) }}</span>
                         </span>
                         <span class="y-idx__st">
@@ -347,6 +348,20 @@ export default {
 
 .y-idx__sp { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .y-idx__a { font-size: 12px; }
+/* **R-CAM-05, in the only form an operator can act on.** `identityWords()`
+   answers either "…-video-index0 — survives a reboot" or "…— an enumeration
+   number; it may mean a different camera after a reboot", and the second is
+   the whole reason the field exists: a camera held by an enumeration number
+   will mean a different device after the next boot, and the operator is the
+   only one who can move the plug or fix the configuration. It was composed on
+   every row and drawn on none. Wraps rather than being cut off — a by-path
+   name is 66 characters before the sentence starts. */
+.y-idx__id {
+    font-size: 10.5px;
+    font-family: var(--yonder-font-mono, ui-monospace, monospace);
+    color: var(--yonder-neutral, #7d7869);
+    overflow-wrap: break-word;
+}
 .y-idx__b {
     font-size: 10.5px;
     font-family: var(--yonder-font-mono, ui-monospace, monospace);

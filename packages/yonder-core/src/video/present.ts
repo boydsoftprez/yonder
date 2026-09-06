@@ -569,7 +569,6 @@ export interface CameraDeck {
   readonly applied: { readonly stream: Camera["stream"] & { bitrate_kbps: number }; readonly preview: Camera["preview"] };
   readonly outputs: readonly DeckOutput[];
   readonly captures: { readonly count: number };
-  readonly interruption: readonly string[];
 }
 
 /** The words for an output kind, once, so two pages cannot disagree. */
@@ -600,10 +599,17 @@ const OUTPUT_LABEL: Record<OutputKind, string> = {
  * comparison at `policy` would be right by coincidence and wrong the day a
  * runtime tracker exists.
  *
- * **`captures.count` is 0 and `interruption` is empty, both by construction.**
- * Board recording (§8.3) is unbuilt, so there is nothing to count; the
- * interruption a draft would cause is computed by `interruption()` from the
- * draft, which lives in the browser and is not sent until Apply.
+ * **`captures.count` is 0 by construction**: board recording (§8.3) is
+ * unbuilt, so there is nothing to count.
+ *
+ * **There is no `interruption` here, and there was never a value this
+ * function could put in it.** What a draft would interrupt is a fact about a
+ * draft that has not been sent, and this daemon has never seen one: the field
+ * was `[]` on every read, `YonderDeck` drew it, and the warning spec §8.1
+ * asks for *before* Apply is pressed could not appear while two doc comments
+ * said it did. The deck calls `interruption()` itself now, over its own
+ * staged draft, and the apply route calls the same function over the draft it
+ * was actually sent — one calculation, two callers, neither of them this one.
  */
 export function cameraDeck(view: {
   readonly camera: Camera;
@@ -656,7 +662,6 @@ export function cameraDeck(view: {
       reach: outputReach(output.kind, view.paths),
     })),
     captures: { count: 0 },
-    interruption: [],
   };
 }
 

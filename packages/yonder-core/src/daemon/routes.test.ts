@@ -1638,6 +1638,48 @@ describe("the camera routes", () => {
     expect(found[0].summary).toContain("formats: 2");
   });
 
+  /**
+   * **The one guarantee the brief names first, held where the daemon feeds
+   * the adapter** (R-VID-11).
+   *
+   * `present.test.ts` proves `cameraIndex()` answers `null` when it is handed
+   * no measurement. It cannot prove the daemon hands it none — and the review
+   * demonstrated exactly that gap: adding
+   * `egressKbps: (id) => the configured bitrate_kbps` to this route's single
+   * `cameraIndex({...})` call left all 1877 tests green. That one line is the
+   * defect the brief forbids, at the only place the seam is ever used, so the
+   * assertion belongs here as well as there.
+   *
+   * The camera below is configured at 2000 kb/s and the supervisor reports it
+   * `running`, which is the state that most invites a plausible-looking
+   * number. Nothing on this branch measures egress, so the honest answer is
+   * that there is none.
+   */
+  it("puts no rate on an index row, because nothing on this device measures one", async () => {
+    const r = provisioned({ cameras: fixtureDetection() });
+    await r("POST", "/cameras/cam0/run", { action: "start" });
+    const body = (await r("GET", "/cameras", undefined)).body as {
+      index: { cameras: { id: string | null; state: string; rate: number | null }[] };
+    };
+    const row = body.index.cameras[0]!;
+    expect(row.id).toBe("cam0");
+    // The state proves the row is live rather than a default: a stopped
+    // camera reading `null` would pass this test for the wrong reason. Either
+    // running word will do — which of the two the supervisor is on a
+    // millisecond after `start` is not this test's subject.
+    expect(["Starting", "Streaming"]).toContain(row.state);
+    expect(row.rate, "a rate nobody measured is a rate nobody should act on")
+      .toBeNull();
+  });
+
+  /** R-CAM-05: the sentence the daemon composes reaches the page's payload. */
+  it("carries each index row's identity sentence", async () => {
+    const body = (await provisioned({ cameras: fixtureDetection() })("GET", "/cameras", undefined))
+      .body as { index: { cameras: { identity: string }[] } };
+    expect(body.index.cameras[0]!.identity).toContain(CAMERA_BY_PATH);
+    expect(body.index.cameras[0]!.identity).toMatch(/survives a reboot|different camera after a reboot/);
+  });
+
   it("reports a camera plugged into a socket nothing is configured for", async () => {
     const route = provisioned({
       cameras: fixtureDetection(),
