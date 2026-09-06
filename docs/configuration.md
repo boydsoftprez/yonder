@@ -501,6 +501,14 @@ offending name and endpoint named (R-MAV-15). The console has no field for an en
 today, so this is reached by editing `config.yaml` directly — a fully supported path, and the
 one place a mistake here would otherwise be silent.
 
+**`mavlink.endpoints[].name`** is one word of letters, digits, `_`, `.` or `-`, starting
+with a letter or a digit, and **`mavlink.endpoints[].host`** is an IPv4 or IPv6 literal or a
+DNS name. Both are written verbatim into the `mavlink-router` configuration Yonder generates
+— the name as a section heading, the host as a field inside one — so a line break in either
+would be a new line of that file: a name carrying one opens a whole extra section, an
+unconfigured second copy of your telemetry that nothing here describes and nothing on the
+console shows. Refused at write time for that reason (R-MAV-18).
+
 **`mavlink.tcp_server.port`** must not be the same as `ui.port`. `mavlink-router` is started
 before the console, so a collision is not a race the console could win — it would lose its
 own port and strand the operator on the page they would fix it from. Refused at write time,

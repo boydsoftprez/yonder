@@ -1357,11 +1357,11 @@
             "properties": {
               "name": {
                 "type": "string",
-                "minLength": 1
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$"
               },
               "host": {
                 "type": "string",
-                "minLength": 1
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:%-]{0,252}$"
               },
               "port": {
                 "type": "integer",

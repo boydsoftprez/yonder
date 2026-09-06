@@ -723,12 +723,48 @@ const MavlinkSerial = z
   .strict();
 
 /**
+ * The shape a ground station's name and host may take — R-MAV-18.
+ *
+ * Both are interpolated verbatim into the `mavlink-router` configuration
+ * `router/config.ts` generates: `[UdpEndpoint <name>]` and `Address = <host>`.
+ * `z.string().min(1)` accepted a newline in either, and a newline is a new
+ * line of INI:
+ *
+ * - in `name`, it opens an entire extra section. `{ name: "gcs0\n[UdpEndpoint
+ *   evil]\nMode = Normal\nAddress = 10.0.0.9", ... }` renders a second,
+ *   unconfigured mirror of the aircraft's telemetry that `config.yaml` never
+ *   describes, that the console never shows, and that R-MAV-15's duplicate
+ *   check never sees, because the name it compares is the whole blob.
+ * - in `host`, it can open a `[General]` and strand the legitimate endpoint's
+ *   own `Port` line inside it.
+ *
+ * It is **not** command injection — `net/runner.ts` runs `execFile` with an
+ * argv and never a shell — and it is not remotely reachable, because the
+ * daemon listens on a `0660` Unix socket. What it breaks is the invariant the
+ * whole configuration model rests on: one declarative file is the only
+ * writer, and everything generated says what that file says and nothing else.
+ *
+ * Constrained the way `ZEROTIER_NETWORK_ID` and `system.hostname` already are
+ * in this file — a positive shape, not an escape. A name is a label for a
+ * section heading, so it is one word of the characters a heading can hold. A
+ * host is whatever the router will resolve or dial: an IPv4 or IPv6 literal
+ * (`%` and all, for a scoped link-local address) or a DNS name. Neither may
+ * carry whitespace, a bracket, or a line of its own.
+ */
+export const MAVLINK_ENDPOINT_NAME = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$/;
+export const MAVLINK_ENDPOINT_HOST = /^[A-Za-z0-9][A-Za-z0-9._:%-]{0,252}$/;
+
+/**
  * Three, because R-MAV-03 says three. The limit is in the schema rather than
  * in a renderer so a fourth is refused with the offending path named, at the
  * moment the operator writes it, rather than silently dropped later.
  */
 const MavlinkEndpoint = z
-  .object({ name: z.string().min(1), host: z.string().min(1), port: z.number().int().min(1).max(65535) })
+  .object({
+    name: z.string().regex(MAVLINK_ENDPOINT_NAME),
+    host: z.string().regex(MAVLINK_ENDPOINT_HOST),
+    port: z.number().int().min(1).max(65535),
+  })
   .strict();
 
 const Mavlink = z
@@ -900,9 +936,19 @@ export const ConfigSchema = z.object({
   // today, so this is reached by editing config.yaml directly — a fully
   // supported path, and the one place a typo like this would otherwise be
   // silent.
+  //
+  // Compared folded to lower case, both against the reserved list and
+  // against each other. `Yonder` is the same claim on the same section
+  // heading as `yonder`: either the router folds case, in which case one
+  // section silently replaces the other and this rule's whole harm is back,
+  // or it does not, in which case an operator has an endpoint named after
+  // Yonder's own. Neither is worth accepting to allow a name that differs
+  // from a taken one only in its capitals. The message quotes what was
+  // actually written, never the folded form.
   const seenAt = new Map<string, number>();
   config.mavlink.endpoints.forEach((endpoint, index) => {
-    if ((RESERVED_ENDPOINT_NAMES as readonly string[]).includes(endpoint.name)) {
+    const folded = endpoint.name.toLowerCase();
+    if ((RESERVED_ENDPOINT_NAMES as readonly string[]).includes(folded)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["mavlink", "endpoints", index, "name"],
@@ -910,7 +956,7 @@ export const ConfigSchema = z.object({
           + `(${RESERVED_ENDPOINT_NAMES.join(", ")} are all taken); choose a different name for this ground station`,
       });
     }
-    const firstIndex = seenAt.get(endpoint.name);
+    const firstIndex = seenAt.get(folded);
     if (firstIndex !== undefined) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -919,7 +965,7 @@ export const ConfigSchema = z.object({
           + "each ground station needs a name of its own",
       });
     } else {
-      seenAt.set(endpoint.name, index);
+      seenAt.set(folded, index);
     }
   });
 });

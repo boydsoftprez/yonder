@@ -61,6 +61,81 @@ describe("the mavlink section", () => {
     })).not.toThrow();
   });
 
+  /**
+   * R-MAV-15's reserved list is a claim on a section heading, and it is the
+   * same claim in every spelling. `z.string().min(1)` accepted `Yonder`
+   * alongside the reserved `yonder`: either mavlink-router folds case, in
+   * which case one section silently replaces the other and R-MAV-15's whole
+   * harm is back, or it does not, in which case the operator has an endpoint
+   * named after Yonder's own. Neither is worth accepting.
+   */
+  it("refuses a reserved name spelled with capitals, and a duplicate that differs only in them (R-MAV-15)", () => {
+    for (const reserved of RESERVED_ENDPOINT_NAMES) {
+      const shouted = reserved.charAt(0).toUpperCase() + reserved.slice(1);
+      expect(() => ConfigSchema.parse({
+        ...DEFAULT_CONFIG,
+        mavlink: { ...DEFAULT_CONFIG.mavlink, endpoints: [{ name: shouted, host: "192.168.2.10", port: 14550 }] },
+      }), shouted).toThrow(new RegExp(`${shouted}.*reserved`));
+    }
+    expect(() => ConfigSchema.parse({
+      ...DEFAULT_CONFIG,
+      mavlink: { ...DEFAULT_CONFIG.mavlink, endpoints: [
+        { name: "gcs0", host: "192.168.2.10", port: 14550 },
+        { name: "GCS0", host: "10.147.20.8", port: 14551 },
+      ] },
+    })).toThrow(/GCS0.*already/);
+  });
+
+  /**
+   * **R-MAV-18: a name and a host are values, never structure.**
+   *
+   * `router/config.ts` interpolates both verbatim — `[UdpEndpoint <name>]`
+   * and `Address = <host>` — so a newline in either is a new line of INI. A
+   * name carrying one adds an entire extra `[UdpEndpoint …]`: an
+   * unconfigured second copy of the aircraft's telemetry that `config.yaml`
+   * never described, that the console never draws, and that R-MAV-15's
+   * duplicate check cannot see, because the name it compares is the whole
+   * blob. A host carrying one opens a `[General]` and strands the
+   * legitimate endpoint's own `Port` line inside it.
+   *
+   * Both assertions run the generated file, not only the parse: refusing the
+   * document is the fix, and the file is the harm it prevents.
+   */
+  it.each([
+    ["a newline in the name adds a section", "gcs0\n[UdpEndpoint evil]\nMode = Normal\nAddress = 10.0.0.9", "192.168.2.10"],
+    ["a carriage return in the name", "gcs0\r[UdpEndpoint evil]", "192.168.2.10"],
+    ["a bracket in the name closes the heading early", "gcs0] extra", "192.168.2.10"],
+    ["a space in the name splits the heading", "gcs 0", "192.168.2.10"],
+    ["a newline in the host opens a section", "gcs0", "10.0.0.9\n[General]\nTcpServerPort = 5760"],
+    ["a space in the host", "gcs0", "10.0.0.9 evil"],
+    ["an empty name", "", "192.168.2.10"],
+    ["an empty host", "gcs0", ""],
+  ])("refuses %s (R-MAV-18)", (_what, name, host) => {
+    expect(() => ConfigSchema.parse({
+      ...DEFAULT_CONFIG,
+      mavlink: { ...DEFAULT_CONFIG.mavlink, endpoints: [{ name, host, port: 14550 }] },
+    })).toThrow();
+  });
+
+  /**
+   * The other half: what is refused must not be everything. A hostname, a
+   * dotted quad, an IPv6 literal and a scoped link-local address are all
+   * things `mavlink-router` will dial, and a name may carry the separators
+   * an operator actually reaches for.
+   */
+  it.each([
+    ["a dotted quad", "gcs0", "192.168.2.10"],
+    ["a DNS name", "gcs-0", "gcs.example.com"],
+    ["a single-label host", "gcs_0", "laptop"],
+    ["an IPv6 literal", "gcs.0", "fd00::1"],
+    ["a scoped link-local address", "GCS0", "fe80::1%eth0"],
+  ])("accepts %s (R-MAV-18)", (_what, name, host) => {
+    expect(() => ConfigSchema.parse({
+      ...DEFAULT_CONFIG,
+      mavlink: { ...DEFAULT_CONFIG.mavlink, endpoints: [{ name, host, port: 14550 }] },
+    })).not.toThrow();
+  });
+
   it("accepts a pinned device and baud, and refuses a baud outside the sweep", () => {
     const pinned = ConfigSchema.parse({
       ...DEFAULT_CONFIG,
