@@ -331,3 +331,42 @@ rejection, which is what happened here.
   unknown in the path.
 - The port-state handover from the sweep to the router.
 - Anything on `/dev/ttyACM0` — a USB-attached autopilot is a different driver.
+
+---
+
+# A real ground station, at last
+
+2026-09-06, same board and autopilot. `mavlink-router` was run from a configuration this
+repository's own `routerConfig()` generated, and **QGroundControl** connected to it over the
+local network. This is the last link in the path that had never been exercised: every earlier
+measurement answered a ground station this project wrote itself.
+
+<!-- yonder:hardware-observed -->
+
+| Endpoint | Received | Transmitted |
+|---|---|---|
+| `autopilot` — the UART | 54 317 (1661 KB) | 7 146 |
+| `gcs0` — **QGroundControl** | **7 146 (162 KB)** | 54 317 (1661 KB) |
+| `yonder` — the control plane's copy | 0 | 54 432 |
+
+**The number that matters is 7 146 received on `gcs0`.** Telemetry reaching a ground station
+only proves the outbound half; that count is QGroundControl heartbeating *back*, attributed to
+that endpoint by name, and forwarded on to the aircraft — which is the whole basis of §6's
+claim that the console can say **which** ground station is answering rather than only that one
+is. It had been measured against a purpose-built fake. It now holds against the real thing.
+
+Note the control plane's own copy shows `Received: 0`. That is correct and worth stating,
+because it looks like a fault: `yonder` is a listen-only mirror. Yonder relays commands, it
+never originates them (`R-CMD-04`), so nothing should ever arrive back on that endpoint.
+
+## One thing not understood
+
+`gcs0` reports **`Sequence lost: 130710, 94%`** on the receive side while telemetry is plainly
+healthy in both directions. The likeliest reading is that the counter is kept per endpoint
+while QGroundControl transmits as several components with independent sequence numbers, so
+interleaved streams read as gaps.
+
+It is recorded rather than explained because nothing here has established it, and because the
+console does not read that field today. If a future surface does, this is the first thing to
+settle — a figure that says 94% loss on a link that is working would be the wrong thing to
+put in front of an operator.
