@@ -1391,3 +1391,45 @@ console that says a change is waiting, with no way to confirm it and nothing
 that will time it out. R-CFG-03's whole point is that a change either confirms
 or reverts; a third state where it does neither is the one an operator cannot
 get out of.
+
+### K-51 · A camera reads *running* while its pipeline is emitting nothing
+
+**Status:** Open · **Requirements:** R-CAM-12, R-UI-05, R-VID-07
+
+Found on the development board while the operator was watching the console.
+
+The camera gadget stopped answering UVC negotiation:
+
+```
+uvcvideo 1-1.3:1.1: Failed to set UVC probe control : -75 (exp. 26).
+uvcvideo 1-1.3:1.1: Failed to set UVC probe control : -32 (exp. 26).
+uvcvideo 1-1.3:1.1: Failed to query (GET_MIN) UVC probe control : 19 (exp. 26).
+```
+
+and `v4l2-ctl --stream-mmap` answered `VIDIOC_STREAMON returned -1 (Connection
+timed out)`. The device was wedged — three `reset high-speed USB device`
+events preceded it, and `power/control` was `on` throughout, so this is not
+K-46's autosuspend fault returning.
+
+**What the console said about it: `{"state": "running", "restarts": 0}`.** The
+supervisor had a live `gst-launch-1.0` process, so it reported the camera as
+running. That process had accumulated **zero CPU time in 58 seconds** at 0.3%,
+because `STREAMON` never succeeded and no frame was ever encoded. A working
+pipeline on this board sits at 31–41% CPU.
+
+So the one question an operator asks — *is my camera working* — was answered
+`running` for a minute while nothing left the aircraft. A process that is alive
+is not a pipeline that is delivering, and only the second is worth reporting.
+Frames or bytes observed leaving the encoder is the measurement; the presence
+of a pid is not.
+
+Recovered by unbinding and rebinding the device
+(`/sys/bus/usb/drivers/usb/{unbind,bind}`), stopping the camera first so
+nothing held the node. Nothing in Yonder does that today, and R-CAM-19 is about
+keeping an attached camera attached — this is the neighbouring case where the
+device is attached, enumerated, and not answering.
+
+**Second, smaller gap, same session:** after the pipeline was restarted the
+operator had to reload the browser page to see the picture again. `YonderPicture`
+draws `RECONNECTING · ATTEMPT n`, so it knows the stream went away, but the
+WebRTC session did not recover on its own once the publisher returned.
