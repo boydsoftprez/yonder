@@ -1694,7 +1694,7 @@ requirements, their known-issue entries and their measurements are not this
 branch's to file. File the rest, and record the deferral itself — a plan that
 quietly drops seven tasks reads later as a plan that finished them.
 
-- [ ] Add every new requirement to `docs/requirements.md` verbatim from spec §12, inserting `R-CTL-11 … R-CTL-14` immediately after `R-CTL-10` so the table stays ordered around the `R-CTL-15` Phase 8 added; file `K-46…K-50` as fixed with their commits; record Task 31's thresholds and Task 39's measurements in the hardware notes; update the blueprint README with what each draft became; `npm test && npm run lint && ./scripts/verify-pages.sh`.
+- [ ] Add every new requirement to `docs/requirements.md` verbatim from spec §12 — **except `R-UI-22`, which Task 26 filed as it fixed the defect it describes; check before adding, do not file it twice** — inserting `R-CTL-11 … R-CTL-14` immediately after `R-CTL-10` so the table stays ordered around the `R-CTL-15` Phase 8 added; file `K-46…K-50` as fixed with their commits; record Task 31's thresholds and Task 39's measurements in the hardware notes; update the blueprint README with what each draft became; `npm test && npm run lint && ./scripts/verify-pages.sh`.
 - [ ] Commit — `git commit -s -m "docs: file the requirements, the known issues and the measurements this branch closed"`
 
 ---
