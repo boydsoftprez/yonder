@@ -18,14 +18,20 @@
     "RTSP password (R-VID-15) and R-UI-12 commits the captured images, so a capture taken",
     "against a real device would put a real secret in this repository for ever.",
     "capture-pages.mjs reads the device's own secrets.yaml and fails any page whose HTML",
-    "carries that value — this fake is what the pages render instead (R-SEC-10)."
+    "carries that value — this fake is what the pages render instead (R-SEC-10).",
+    "",
+    "`found[0].capabilities` is rebuilt from the committed v4l2-ctl capture named in",
+    "`recorded.capabilitiesRebuiltFrom`, by the same CONTROL_MAP loop probeCamera uses.",
+    "Regenerate it that way rather than editing states by hand: when the capability model",
+    "gains a key, a hand-edited fixture is a guess and a rebuilt one is the board's answer."
   ],
   "recorded": {
     "board": "Raspberry Pi 4 Model B",
     "kernel": "6.18.34+rpt-rpi-v8",
     "v4l2Ctl": "1.30.1",
     "camera": "Global Shutter Camera: Global S, on USB",
-    "at": "2026-09-04"
+    "at": "2026-09-04",
+    "capabilitiesRebuiltFrom": "packages/yonder-core/src/video/probe/fixtures/list-ctrls-menus-globalshutter.txt"
   },
   "camera": {
     "id": "front",
@@ -241,37 +247,53 @@
             "max": 60,
             "step": 1,
             "default": 0,
-            "current": 0
+            "current": 0,
+            "inactive": false
           }
         },
         "focus": {
-          "state": "present",
+          "state": "gated",
           "value": {
             "min": 0,
             "max": 1023,
             "step": 1,
             "default": 0,
-            "current": 348
+            "current": 348,
+            "inactive": true
+          },
+          "by": {
+            "id": "autoFocus",
+            "label": "auto focus"
           }
         },
         "exposure": {
-          "state": "present",
+          "state": "gated",
           "value": {
             "min": 1,
             "max": 10000,
             "step": 1,
             "default": 156,
-            "current": 156
+            "current": 156,
+            "inactive": true
+          },
+          "by": {
+            "id": "autoExposure",
+            "label": "auto exposure"
           }
         },
         "whiteBalance": {
-          "state": "present",
+          "state": "gated",
           "value": {
             "min": 2800,
             "max": 6500,
             "step": 1,
             "default": 4600,
-            "current": 4600
+            "current": 4600,
+            "inactive": true
+          },
+          "by": {
+            "id": "autoWhiteBalance",
+            "label": "auto white balance"
           }
         },
         "brightness": {
@@ -281,7 +303,8 @@
             "max": 64,
             "step": 1,
             "default": 0,
-            "current": 0
+            "current": 0,
+            "inactive": false
           }
         },
         "contrast": {
@@ -291,7 +314,8 @@
             "max": 95,
             "step": 1,
             "default": 0,
-            "current": 0
+            "current": 0,
+            "inactive": false
           }
         },
         "rotation": {
@@ -305,6 +329,140 @@
         },
         "stills": {
           "state": "not-offered"
+        },
+        "saturation": {
+          "state": "present",
+          "value": {
+            "min": 0,
+            "max": 255,
+            "step": 1,
+            "default": 56,
+            "current": 56,
+            "inactive": false
+          }
+        },
+        "hue": {
+          "state": "present",
+          "value": {
+            "min": -2000,
+            "max": 2000,
+            "step": 1,
+            "default": 0,
+            "current": 0,
+            "inactive": false
+          }
+        },
+        "autoWhiteBalance": {
+          "state": "present",
+          "value": {
+            "min": 0,
+            "max": 1,
+            "step": 1,
+            "default": 1,
+            "current": 1,
+            "inactive": false
+          }
+        },
+        "gamma": {
+          "state": "present",
+          "value": {
+            "min": 64,
+            "max": 300,
+            "step": 1,
+            "default": 110,
+            "current": 110,
+            "inactive": false
+          }
+        },
+        "gain": {
+          "state": "present",
+          "value": {
+            "min": 0,
+            "max": 1023,
+            "step": 1,
+            "default": 0,
+            "current": 0,
+            "inactive": false
+          }
+        },
+        "powerLineFrequency": {
+          "state": "present",
+          "value": {
+            "min": 0,
+            "max": 2,
+            "step": 1,
+            "default": 1,
+            "current": 1,
+            "inactive": false,
+            "menu": [
+              {
+                "id": 0,
+                "label": "Disabled"
+              },
+              {
+                "id": 1,
+                "label": "50 Hz"
+              },
+              {
+                "id": 2,
+                "label": "60 Hz"
+              }
+            ]
+          }
+        },
+        "sharpness": {
+          "state": "present",
+          "value": {
+            "min": 0,
+            "max": 7,
+            "step": 1,
+            "default": 0,
+            "current": 0,
+            "inactive": false
+          }
+        },
+        "backlightCompensation": {
+          "state": "present",
+          "value": {
+            "min": 36,
+            "max": 160,
+            "step": 1,
+            "default": 54,
+            "current": 54,
+            "inactive": false
+          }
+        },
+        "autoExposure": {
+          "state": "present",
+          "value": {
+            "min": 0,
+            "max": 3,
+            "step": 1,
+            "default": 3,
+            "current": 3,
+            "inactive": false,
+            "menu": [
+              {
+                "id": 1,
+                "label": "Manual Mode"
+              },
+              {
+                "id": 3,
+                "label": "Aperture Priority Mode"
+              }
+            ]
+          }
+        },
+        "autoFocus": {
+          "state": "present",
+          "value": {
+            "min": 0,
+            "max": 1,
+            "step": 1,
+            "default": 1,
+            "current": 1,
+            "inactive": false
+          }
         }
       }
     }
