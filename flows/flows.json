@@ -4279,7 +4279,7 @@
         "page": "page-camera",
         "width": 12,
         "height": 1,
-        "order": 5,
+        "order": 3,
         "showTitle": false,
         "className": "",
         "visible": true,
@@ -4293,7 +4293,7 @@
         "page": "page-camera",
         "width": 12,
         "height": 1,
-        "order": 3,
+        "order": 4,
         "showTitle": false,
         "className": "yonder-deck-live",
         "visible": true,
@@ -4307,7 +4307,7 @@
         "page": "page-camera",
         "width": 12,
         "height": 1,
-        "order": 6,
+        "order": 7,
         "showTitle": false,
         "className": "yonder-deck-setup",
         "visible": false,
@@ -4608,7 +4608,7 @@
         "name": "the picture",
         "order": 1,
         "width": 12,
-        "height": 5,
+        "height": 7,
         "path": "",
         "label": "",
         "stillsAfterMs": 12000,
@@ -4643,7 +4643,8 @@
         "y": 2080,
         "wires": [
             [
-                "bar-camera"
+                "bar-camera",
+                "bar-cam-facts"
             ]
         ]
     },
@@ -4657,7 +4658,7 @@
         "width": 12,
         "height": 0,
         "label": "",
-        "cells": "[{\"key\":\"name\",\"label\":\"CAMERA\"},{\"key\":\"state\",\"label\":\"RUNNING\",\"kind\":\"note\"},{\"key\":\"identity\",\"label\":\"IDENTITY\",\"kind\":\"note\"},{\"key\":\"picture\",\"label\":\"PICTURE\"},{\"key\":\"rate\",\"label\":\"RATE\"},{\"key\":\"bitrate\",\"label\":\"BITRATE\"},{\"key\":\"uplink\",\"label\":\"UPLINK\"}]",
+        "cells": "[{\"key\":\"name\",\"label\":\"CAMERA\"},{\"key\":\"picture\",\"label\":\"PICTURE\"},{\"key\":\"rate\",\"label\":\"RATE\"},{\"key\":\"bitrate\",\"label\":\"BITRATE\"},{\"key\":\"uplink\",\"label\":\"UPLINK\"}]",
         "x": 1030,
         "y": 2080,
         "wires": []
@@ -5455,7 +5456,7 @@
         "page": "page-camera",
         "width": 12,
         "height": 1,
-        "order": 4,
+        "order": 5,
         "showTitle": false,
         "className": "yonder-deck-setup",
         "visible": false,
@@ -5995,6 +5996,35 @@
         "className": "",
         "x": 2300,
         "y": 2480,
+        "wires": []
+    },
+    {
+        "id": "group-cam-facts",
+        "type": "ui-group",
+        "name": "What this camera is",
+        "page": "page-camera",
+        "width": 12,
+        "height": 1,
+        "order": 6,
+        "showTitle": false,
+        "className": "",
+        "visible": true,
+        "disabled": false,
+        "groupType": "default"
+    },
+    {
+        "id": "bar-cam-facts",
+        "type": "ui-yonder-databar",
+        "z": "yonder-console",
+        "name": "what it is doing, and which camera it is",
+        "group": "group-cam-facts",
+        "order": 1,
+        "width": 12,
+        "height": 0,
+        "label": "",
+        "cells": "[{\"key\":\"state\",\"label\":\"RUNNING\",\"kind\":\"note\"},{\"key\":\"identity\",\"label\":\"IDENTITY\",\"kind\":\"note\"}]",
+        "x": 1030,
+        "y": 2180,
         "wires": []
     }
 ]

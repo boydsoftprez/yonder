@@ -11,7 +11,7 @@
         "x": 268,
         "y": 76,
         "w": 492,
-        "h": 322
+        "h": 442
       }
     },
     {
@@ -20,7 +20,7 @@
         "x": 285,
         "y": 93,
         "w": 458,
-        "h": 288
+        "h": 408
       }
     },
     {
@@ -29,7 +29,7 @@
         "x": 772,
         "y": 76,
         "w": 240,
-        "h": 322
+        "h": 442
       }
     },
     {
@@ -51,10 +51,28 @@
       }
     },
     {
+      "key": "nrdb-ui-group#2",
+      "box": {
+        "x": 268,
+        "y": 530,
+        "w": 744,
+        "h": 112
+      }
+    },
+    {
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-databar",
+      "box": {
+        "x": 285,
+        "y": 547,
+        "w": 710,
+        "h": 78
+      }
+    },
+    {
       "key": "nrdb-ui-group.yonder-deck-live",
       "box": {
         "x": 268,
-        "y": 410,
+        "y": 654,
         "w": 744,
         "h": 1431
       }
@@ -63,34 +81,34 @@
       "key": "nrdb-ui-widget.nrdb-ui-yonder-deck",
       "box": {
         "x": 285,
-        "y": 427,
+        "y": 671,
         "w": 710,
         "h": 1397
       }
     },
     {
-      "key": "nrdb-ui-group#2",
+      "key": "nrdb-ui-group#3",
       "box": {
         "x": 268,
-        "y": 1853,
+        "y": 2097,
         "w": 744,
-        "h": 206
+        "h": 129
       }
     },
     {
       "key": "nrdb-ui-widget.nrdb-ui-yonder-databar",
       "box": {
         "x": 285,
-        "y": 1870,
+        "y": 2114,
         "w": 710,
-        "h": 172
+        "h": 95
       }
     },
     {
       "key": "nrdb-ui-group.yonder-deck-live.yonder-rail",
       "box": {
         "x": 268,
-        "y": 2071,
+        "y": 2238,
         "w": 744,
         "h": 211
       }
@@ -99,7 +117,7 @@
       "key": "nrdb-ui-widget.nrdb-ui-yonder-databar",
       "box": {
         "x": 285,
-        "y": 2088,
+        "y": 2255,
         "w": 710,
         "h": 57
       }
@@ -108,7 +126,7 @@
       "key": "nrdb-ui-widget.nrdb-ui-yonder-softkeys",
       "box": {
         "x": 285,
-        "y": 2157,
+        "y": 2324,
         "w": 469,
         "h": 108
       }
@@ -117,7 +135,7 @@
       "key": "nrdb-ui-widget.nrdb-ui-yonder-holdkey",
       "box": {
         "x": 766,
-        "y": 2157,
+        "y": 2324,
         "w": 229,
         "h": 108
       }

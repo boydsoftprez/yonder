@@ -738,8 +738,26 @@ for (const page of pages) {
       `add "${r.key}" to ${join("scripts/fixtures", "specimens.json")}, or list it under "masked" with a reason  (it reads "${r.was}")`,
     );
   }
+  // **The above-the-fold contract is the notebook's, and only the notebook's.**
+  // Spec §5 names one surface for it: "At 1440x900 with the sidebar open, the
+  // picture, Aim and Capture fit above the fold." The tablet row beside it asks
+  // for something different — "everything still reachable with a finger" — and
+  // §13 says the same, "no hidden controls ... at tablet widths". Reachable is
+  // what the rail check below and the clipping rules already measure.
+  //
+  // Applying the fold list at 1024x768 as well was stricter than anything
+  // asked for, and it was not free: it is what pushed the readout strip out
+  // from under the picture, where fold.1440.png draws it, down below the deck
+  // — because three lines of prose between the picture and the deck put the
+  // shutter key nine pixels past a 768px viewport. A gate rule nobody asked
+  // for moved the page away from the blueprint. The parts are checked where
+  // the contract is; the viewport is still photographed at both widths.
+  const foldContract = fold && shape.viewport.h >= 900;
   if (fold) {
-    for (const part of shape.fold.parts) {
+    // Only the parts list is the notebook's; the nested-scroller and rail
+    // checks below are asked for at tablet widths too (spec §13), so they stay
+    // outside this condition.
+    for (const part of foldContract ? shape.fold.parts : []) {
       if (!part.present) {
         report(
           { rule: "fold", page: page.name, palette, key: part.name },
@@ -784,7 +802,7 @@ for (const page of pages) {
       note(`  ok    ${page.title} (${palette}) keeps the rail in the viewport at the bottom of the page`);
     }
     const held = shape.fold.parts.filter((x) => x.present && x.inside);
-    if (held.length === shape.fold.parts.length) {
+    if (held.length === shape.fold.parts.length && foldContract) {
       note(`  ok    ${page.title} (${palette}) fits ${held.map((x) => x.name).join(", ")} above the fold`);
     }
   }

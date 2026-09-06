@@ -1805,23 +1805,43 @@ describe("flows/flows.json camera pages", () => {
    * rails sit at the foot.
    */
   /**
-   * **Picture, aim, deck — and the readings under the controls, not above
-   * them** (spec §5's viewport contract).
+   * **Picture, aim, strip, deck, rail — the blueprint's own order.**
    *
-   * The strip used to sit directly under the picture, which is where the
-   * blueprint draws it and where it belongs on a wide screen. It cannot stay
-   * there: at its widest honest value it is three lines of prose, and three
-   * lines between the picture and the deck put the shutter key nine pixels
-   * past a 1024×768 viewport — measured, not guessed. Spec §5 names the
-   * picture, the Aim panel and Capture as what fits above the fold and says
-   * the deck may run below it; the readings are not in that list. They are
-   * still under whichever deck is showing, above the rail, on both.
+   * `docs/console/design/instrument-library/fold.1440.png` draws the readings
+   * directly under the picture and above the deck, and this asserts that.
+   *
+   * It briefly did not. The strip was moved below both decks because three
+   * lines of prose between the picture and the deck put the shutter key nine
+   * pixels past a 1024×768 viewport — measured, and true. But the measurement
+   * was against a rule nobody asked for: spec §5 gives the above-the-fold
+   * contract to one surface, "at 1440×900 with the sidebar open", and asks a
+   * tablet for something else entirely — "everything still reachable with a
+   * finger", which §13 repeats as "no hidden controls ... at tablet widths".
+   * The gate was applying the notebook's fold list at 1024×768 as well, and
+   * the page was rearranged to satisfy it.
+   *
+   * That is the whole shape of the mistake worth remembering: a gate rule
+   * stricter than the specification silently became the specification, and
+   * moved the console away from the blueprint it was built to match.
+   * `capture-pages.mjs` now checks the parts where the contract is, and the
+   * rail and nested-scroller checks still run at both widths, because those
+   * two are asked for at both.
+   *
+   * **The strip above the deck is one row, and that is what pays for the
+   * picture.** `fold.1440.png` draws five compact readings there and no prose.
+   * Ours carried the run state and the identity sentence as full-width `note`
+   * cells too, 160 px of them, and with that above the deck the picture could
+   * not grow by a single row before the shutter key left the 1440x900
+   * viewport — measured, at 74 px over. The sentences are their own group
+   * below the deck (`group-cam-facts`), where a line of prose costs the
+   * picture nothing and R-CAM-05's sentence is still on the page.
    */
-  it("puts the picture on top, aim beside it, the deck under both and the rail at the foot", () => {
+  it("puts the picture on top, aim beside it, the readings under them, the deck below and the rail at the foot", () => {
     const ordered = groupsOn(camera).sort((a, b) => Number(a.order) - Number(b.order));
     expect(ordered.map((g) => g.id)).toEqual([
-      "group-cam-picture", "group-cam-aim", "group-cam-live", "group-cam-setup",
-      "group-cam-readout", "group-cam-receive",
+      "group-cam-picture", "group-cam-aim", "group-cam-readout",
+      "group-cam-live", "group-cam-setup",
+      "group-cam-facts", "group-cam-receive",
       "group-cam-rail-live", "group-cam-rail-setup",
     ]);
     // **Beside, not below** (spec §5): the picture and the Aim panel share
