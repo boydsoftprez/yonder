@@ -28,6 +28,18 @@ export interface EndpointStats {
   transmitted: number;
   crcErrors: number;
   sequenceLost: number;
+  /**
+   * Kilobytes, as `mavlink-router` itself prints them beside the message
+   * count on the same line (`Handled: 21 1KB`, `Total: 954 34KB`) — not
+   * converted to bytes, because nothing here has established whether the
+   * router means 1000 or 1024 to the KB, and guessing would be the same
+   * error as inventing a message count, in smaller clothing. Coarse and
+   * integer, exactly as printed: a slow link can go several seconds between
+   * this figure moving at all, which is the honest trade against a smooth
+   * series in a unit nobody measured.
+   */
+  receivedKb: number;
+  transmittedKb: number;
 }
 
 /** `UDP Endpoint [7]gcs0 {` → kind `UDP`, name `gcs0`. */
@@ -36,8 +48,8 @@ const BLOCK_HEADER = /^(UART|UDP|TCP) Endpoint \[\d+\](\S+) \{$/;
 const RECEIVED_HEADER = "Received messages {";
 const TRANSMITTED_HEADER = "Transmitted messages {";
 
-/** The block being built. Not yet an `EndpointStats`: any of the four
- * counters may still be missing, and a block that ends without all four is
+/** The block being built. Not yet an `EndpointStats`: any of the six
+ * counters may still be missing, and a block that ends without all six is
  * dropped rather than defaulted (see `parseStats`). */
 interface PartialEndpoint {
   name: string;
@@ -46,6 +58,8 @@ interface PartialEndpoint {
   transmitted?: number;
   crcErrors?: number;
   sequenceLost?: number;
+  receivedKb?: number;
+  transmittedKb?: number;
 }
 
 export function parseStats(text: string): EndpointStats[] {
@@ -87,18 +101,21 @@ export function parseStats(text: string): EndpointStats[] {
         // Closed "Received messages {" or "Transmitted messages {".
         section = null;
       } else if (depth === 0) {
-        // Closed the endpoint block itself. A block missing any of the four
-        // counters — most often the newest block in a journal tail, cut off
-        // mid-write — is dropped rather than defaulted to zero: reporting a
-        // truncated read as a ground station gone quiet would be a lamp
-        // changing colour because the read was cut, not because anything
-        // about the link changed.
+        // Closed the endpoint block itself. A block missing any of the six
+        // fields — most often the newest block in a journal tail, cut off
+        // mid-write, or a KB figure whose line matched but stopped short —
+        // is dropped rather than defaulted to zero: reporting a truncated
+        // read as a ground station gone quiet, or its traffic as nil, would
+        // be a lamp changing colour because the read was cut, not because
+        // anything about the link changed.
         if (
           current !== null
           && current.received !== undefined
           && current.transmitted !== undefined
           && current.crcErrors !== undefined
           && current.sequenceLost !== undefined
+          && current.receivedKb !== undefined
+          && current.transmittedKb !== undefined
         ) {
           results.push({
             name: current.name,
@@ -107,6 +124,8 @@ export function parseStats(text: string): EndpointStats[] {
             transmitted: current.transmitted,
             crcErrors: current.crcErrors,
             sequenceLost: current.sequenceLost,
+            receivedKb: current.receivedKb,
+            transmittedKb: current.transmittedKb,
           });
         }
         current = null;
@@ -135,15 +154,29 @@ export function parseStats(text: string): EndpointStats[] {
       // endpoint that routes nothing back would read as answering — which is
       // exactly the distinction §6's bench measurement turned on. `Total` is
       // therefore never read here, only in the transmitted section below.
-      const handled = /^Handled:\s*(\d+)/.exec(line);
-      if (handled !== null) { current.received = Number(handled[1]); continue; }
+      //
+      // The trailing `NKB` is the router's own byte figure for this same
+      // count (`Handled: 21 1KB`) — captured in the same match so a line
+      // that carries a count but no KB figure (or vice versa) cannot set
+      // one without the other, which would let a block through with a
+      // traffic figure nothing on this line actually gave it.
+      const handled = /^Handled:\s*(\d+)\s+(\d+)KB/.exec(line);
+      if (handled !== null) {
+        current.received = Number(handled[1]);
+        current.receivedKb = Number(handled[2]);
+        continue;
+      }
       const crc = /^CRC error:\s*(\d+)/.exec(line);
       if (crc !== null) { current.crcErrors = Number(crc[1]); continue; }
       const lost = /^Sequence lost:\s*(\d+)/.exec(line);
       if (lost !== null) { current.sequenceLost = Number(lost[1]); continue; }
     } else {
-      const total = /^Total:\s*(\d+)/.exec(line);
-      if (total !== null) { current.transmitted = Number(total[1]); continue; }
+      const total = /^Total:\s*(\d+)\s+(\d+)KB/.exec(line);
+      if (total !== null) {
+        current.transmitted = Number(total[1]);
+        current.transmittedKb = Number(total[2]);
+        continue;
+      }
     }
   }
 

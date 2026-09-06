@@ -43,9 +43,9 @@ describe("parseStats", () => {
   // its replies exactly, and the silent one stays at zero.
   it("attributes received messages to the endpoint that received them", () => {
     expect(parseStats(REAL)).toEqual([
-      { name: "gcs0", kind: "udp", received: 21, transmitted: 954, crcErrors: 0, sequenceLost: 0 },
-      { name: "gcs1", kind: "udp", received: 0, transmitted: 954, crcErrors: 0, sequenceLost: 0 },
-      { name: "autopilot", kind: "uart", received: 955, transmitted: 0, crcErrors: 0, sequenceLost: 0 },
+      { name: "gcs0", kind: "udp", received: 21, transmitted: 954, crcErrors: 0, sequenceLost: 0, receivedKb: 1, transmittedKb: 34 },
+      { name: "gcs1", kind: "udp", received: 0, transmitted: 954, crcErrors: 0, sequenceLost: 0, receivedKb: 0, transmittedKb: 34 },
+      { name: "autopilot", kind: "uart", received: 955, transmitted: 0, crcErrors: 0, sequenceLost: 0, receivedKb: 34, transmittedKb: 0 },
     ]);
   });
 
@@ -76,6 +76,23 @@ describe("parseStats", () => {
       .toEqual(["gcs0", "gcs1"]);
   });
 
+  // The KB figure is a second, independent measurement riding the same line
+  // as the message count (`Handled: 21 1KB`) — a format old enough, or cut
+  // short enough, to carry the count without it must drop the block exactly
+  // as a missing message count would, rather than default the traffic
+  // figure to a zero nobody printed.
+  it("drops a block whose Handled line carries a count but no KB figure", () => {
+    const text = REAL.replace("Handled: 21 1KB", "Handled: 21");
+    expect(parseStats(text).map((e) => e.name)).toEqual(["gcs1", "autopilot"]);
+  });
+
+  // Same failure, the transmitted side: a `Total` line with a count but no
+  // trailing KB must drop the block too, not credit it with silence.
+  it("drops a block whose transmitted Total carries a count but no KB figure", () => {
+    const text = REAL.replace("Total: 954 34KB", "Total: 954");
+    expect(parseStats(text).map((e) => e.name)).toEqual(["gcs1", "autopilot"]);
+  });
+
   // No bench has attached a TCP client yet (see the note at the end of this
   // file's companion task), so there is no captured fixture for a `TCP
   // Endpoint` block. This is not evidence about the real format — only that
@@ -87,7 +104,7 @@ describe("parseStats", () => {
       + "\tTransmitted messages {\n\t\tTotal: 5 1KB\n\t}\n"
       + "}\n";
     expect(parseStats(synthetic)).toEqual([
-      { name: "relay", kind: "tcp", received: 5, transmitted: 5, crcErrors: 0, sequenceLost: 0 },
+      { name: "relay", kind: "tcp", received: 5, transmitted: 5, crcErrors: 0, sequenceLost: 0, receivedKb: 1, transmittedKb: 1 },
     ]);
   });
 

@@ -1910,6 +1910,26 @@ describe("LinkTracker", () => {
     expect(new LinkTracker().state()).toMatchObject({ phase: "searching", device: null, vehicle: null });
   });
 
+  // The full shape of a tracker nobody has fed yet (§the brief's "state()
+  // called before any sample has arrived"), so a field a later task adds a
+  // reader for has a documented starting point rather than "whatever
+  // toMatchObject happened not to check".
+  it("reports every field as empty before anything has been observed, heard or sampled", () => {
+    expect(new LinkTracker().state()).toEqual({
+      phase: "searching",
+      device: null,
+      baud: null,
+      vehicle: null,
+      system: null,
+      heartbeatHz: null,
+      lastHeardMs: null,
+      groundStations: [],
+      triedBauds: [],
+      traffic: null,
+      tcpClients: null,
+    });
+  });
+
   it("carries silence through as the wiring case, with the rates tried", () => {
     const t = new LinkTracker();
     t.observed({ kind: "silent", device: "/dev/ttyAMA0", triedBauds: [57600, 115200, 230400, 921600] });
@@ -1928,6 +1948,17 @@ describe("LinkTracker", () => {
     expect(t.state()).toMatchObject({ phase: "linked", baud: 57600, vehicle: "ArduPlane", system: 1 });
   });
 
+  // A fresh sweep result is a new measurement of the link itself. Carrying a
+  // stale vehicle name through a sweep that just came back silent would be
+  // reporting something this observation never measured — the same mistake
+  // §6 made about ground stations, one level up.
+  it("drops the old vehicle when a later sweep finds silence instead", () => {
+    const t = new LinkTracker();
+    t.observed({ kind: "found", device: "/dev/ttyAMA0", baud: 57600, vehicle: "ArduPlane", system: 1 });
+    t.observed({ kind: "silent", device: "/dev/ttyAMA0", triedBauds: [57600] });
+    expect(t.state()).toMatchObject({ phase: "silent", vehicle: null, baud: null, system: null });
+  });
+
   it("computes a heartbeat rate from arrivals, not from a configured number", () => {
     const clock = fakeClock();
     const t = new LinkTracker({ clock });
@@ -1936,13 +1967,66 @@ describe("LinkTracker", () => {
     expect(t.state().heartbeatHz).toBeCloseTo(1, 1);
   });
 
+  // heartbeatHz demands two arrivals before it will claim a rate at all — a
+  // single beat fixes no interval, so no measurement backs a number yet.
+  it("reports no heartbeat rate from a single arrival", () => {
+    const clock = fakeClock();
+    const t = new LinkTracker({ clock });
+    t.observed({ kind: "found", device: "/dev/ttyAMA0", baud: 57600, vehicle: "ArduPlane", system: 1 });
+    t.heard(vehicle);
+    expect(t.state().heartbeatHz).toBeNull();
+    expect(t.state().lastHeardMs).toBe(0);
+  });
+
+  // lastHeardMs is asked, not pushed: state() has no timer of its own, so
+  // "how long ago" has to grow between calls even when nothing new arrived,
+  // or a console left open on a lost link would read the last good moment
+  // forever.
+  it("keeps aging lastHeardMs between state() calls when nothing new arrives", () => {
+    const clock = fakeClock();
+    const t = new LinkTracker({ clock });
+    t.observed({ kind: "found", device: "/dev/ttyAMA0", baud: 57600, vehicle: "ArduPlane", system: 1 });
+    t.heard(vehicle);
+    clock.advance(2_500);
+    expect(t.state().lastHeardMs).toBe(2_500);
+    clock.advance(2_500);
+    expect(t.state().lastHeardMs).toBe(5_000);
+  });
+
+  // frame.ts's `fromVehicle` is what separates the aircraft's own heartbeat
+  // from a ground station's — a GCS heartbeats back too (that is the whole
+  // premise of §6), and mixing one into this ring would corrupt the vehicle's
+  // own rate with an arrival that says nothing about it.
+  it("counts only the vehicle's own heartbeats toward the rate, never a ground station's", () => {
+    const clock = fakeClock();
+    const t = new LinkTracker({ clock });
+    t.observed({ kind: "found", device: "/dev/ttyAMA0", baud: 57600, vehicle: "ArduPlane", system: 1 });
+    t.heard(vehicle);
+    clock.advance(1_000);
+    t.heard(gcs);
+    clock.advance(1_000);
+    t.heard(vehicle);
+    // Only two vehicle heartbeats were ever heard, 2 s apart - a ground
+    // station's heartbeat arriving in between must not count as a second
+    // vehicle arrival at half the true interval.
+    expect(t.state().heartbeatHz).toBeCloseTo(0.5, 1);
+  });
+
   // §6: this is the whole point — "configured" is not "connected". The
   // attribution comes from the router's own counters (Task 8b), never from the
   // merged loopback copy, in which every ground station identifies itself the
   // same way. Measured on a board 2026-09-05: the answering endpoint's count
   // tracked its replies exactly and the silent one stayed at zero.
-  const udp = (name: string, received: number, transmitted: number): EndpointStats =>
-    ({ name, kind: "udp", received, transmitted, crcErrors: 0, sequenceLost: 0 });
+  //
+  // receivedKb/transmittedKb default to mirroring the message counts so
+  // every test that does not care about the traffic sparkline can ignore
+  // them entirely, while still keeping sampled()'s backwards-counter guard
+  // self-consistent (a call site that makes `received` decrease for a
+  // restart test gets a decreasing `receivedKb` for free, matching the real
+  // router where every counter resets together). Tests that exercise the
+  // traffic figure itself pass explicit, distinct values.
+  const udp = (name: string, received: number, transmitted: number, receivedKb = received, transmittedKb = transmitted): EndpointStats =>
+    ({ name, kind: "udp", received, transmitted, crcErrors: 0, sequenceLost: 0, receivedKb, transmittedKb });
 
   it("calls a ground station answering only once its own counter has moved", () => {
     const clock = fakeClock();
@@ -1964,17 +2048,67 @@ describe("LinkTracker", () => {
     ]);
   });
 
-  // The console must be able to say *which* one went quiet, which is the whole
-  // reason this is an array.
+  // The console must be able to say *which* one went quiet, which is the
+  // whole reason this is an array — and "went quiet" is a transition: both
+  // stations must be honestly established as answering first, with a real
+  // counter increase against a trustworthy prior, and only then does one
+  // keep replying while the other goes flat.
+  //
+  // Correction from review round two (2026-09-05), corrected again in round
+  // three: the brief's own version of this test seeded both stations at a
+  // non-zero `received` on their very first sampled() call and expected
+  // gcs1 — whose counter then never moved again — to still read
+  // `lastHeardMs: 7_000` at the end, crediting that first sighting itself as
+  // an answer. Round two's fix changed only the final expectation to
+  // `lastHeardMs: null`, which is correct under the rule but stopped this
+  // test from proving a transition at all: a station that never once
+  // increases was never answering to begin with, merely never-answering,
+  // which "reports a configured station absent from the statistics as never
+  // heard" and "never credits a first sighting as answering..." already
+  // cover. This version gives gcs1 a real, counter-verified answer before
+  // letting it go quiet, so the assertion exercises the one thing an array
+  // of per-station state exists for: naming the one that stopped while the
+  // other keeps going.
   it("names the station that went quiet, not merely that one did", () => {
     const clock = fakeClock();
     const t = new LinkTracker({ clock, windowMs: 5_000 });
-    t.sampled([udp("gcs0", 1, 60), udp("gcs1", 1, 60)], ["gcs0", "gcs1"]);
-    clock.advance(1_000);
-    t.sampled([udp("gcs0", 2, 120), udp("gcs1", 1, 120)], ["gcs0", "gcs1"]);
-    clock.advance(6_000);
-    t.sampled([udp("gcs0", 3, 480), udp("gcs1", 1, 480)], ["gcs0", "gcs1"]);
+    // gcs1's very first sighting is already non-zero - it may have answered
+    // the router at any point before this tracker existed (R-MAV-06) - and
+    // must not be credited as answering on that total alone. Checking this
+    // here, before any genuine increase would overwrite it, is what makes
+    // this test actually depend on that rule: a version of this test that
+    // starts every station at zero would pass even with the old, wrong
+    // "non-zero first sighting answers now" fallback reinstated, because a
+    // later genuine increase overwrites whatever a first sighting recorded
+    // regardless of which rule produced it.
+    t.sampled([udp("gcs0", 0, 60), udp("gcs1", 5, 60)], ["gcs0", "gcs1"]);
+    expect(t.state().groundStations).toEqual([
+      { name: "gcs0", answering: false, lastHeardMs: null },
+      { name: "gcs1", answering: false, lastHeardMs: null },
+    ]);
 
+    clock.advance(1_000);
+    // Both now genuinely answer - a real increase against a trustworthy
+    // prior, not a first-sighting total.
+    t.sampled([udp("gcs0", 1, 120), udp("gcs1", 6, 120)], ["gcs0", "gcs1"]);
+    expect(t.state().groundStations).toEqual([
+      { name: "gcs0", answering: true, lastHeardMs: 0 },
+      { name: "gcs1", answering: true, lastHeardMs: 0 },
+    ]);
+
+    clock.advance(1_000);
+    // gcs0 keeps answering; gcs1 goes flat, but is still within windowMs.
+    t.sampled([udp("gcs0", 2, 180), udp("gcs1", 6, 180)], ["gcs0", "gcs1"]);
+    expect(t.state().groundStations).toEqual([
+      { name: "gcs0", answering: true, lastHeardMs: 0 },
+      { name: "gcs1", answering: true, lastHeardMs: 1_000 },
+    ]);
+
+    clock.advance(6_000);
+    // gcs0 is still answering every sample; gcs1's silence has now outlasted
+    // windowMs, and the tracker must name gcs1, not gcs0, as the one that
+    // went quiet.
+    t.sampled([udp("gcs0", 3, 540), udp("gcs1", 6, 540)], ["gcs0", "gcs1"]);
     expect(t.state().groundStations).toEqual([
       { name: "gcs0", answering: true, lastHeardMs: 0 },
       { name: "gcs1", answering: false, lastHeardMs: 7_000 },
@@ -1994,12 +2128,142 @@ describe("LinkTracker", () => {
     const t = new LinkTracker({ clock: fakeClock() });
     t.sampled([
       udp("gcs0", 0, 954),
-      { name: "autopilot", kind: "uart", received: 955, transmitted: 0, crcErrors: 0, sequenceLost: 0 },
+      { name: "autopilot", kind: "uart", received: 955, transmitted: 0, crcErrors: 0, sequenceLost: 0, receivedKb: 34, transmittedKb: 0 },
       udp("yonder", 40, 40),
       udp("inbound", 0, 0),
       udp("gcs1", 0, 954),
     ], ["gcs0", "gcs1"]);
     expect(t.state().groundStations.map((g) => g.name)).toEqual(["gcs0", "gcs1"]);
+  });
+
+  // Even a `yonder`/`inbound` counter that happens to be *higher* than a real
+  // ground station's must never leak in: the filter is by name membership,
+  // not by "everything except the UART", so this must hold regardless of
+  // which numbers the reserved endpoints carry.
+  it("never attributes the reserved yonder or inbound endpoints, however their counters move", () => {
+    const clock = fakeClock();
+    const t = new LinkTracker({ clock });
+    t.sampled([udp("gcs0", 0, 10), udp("yonder", 40, 40), udp("inbound", 12, 0)], ["gcs0"]);
+    clock.advance(1_000);
+    t.sampled([udp("gcs0", 0, 20), udp("yonder", 90, 90), udp("inbound", 30, 0)], ["gcs0"]);
+    expect(t.state().groundStations).toEqual([{ name: "gcs0", answering: false, lastHeardMs: null }]);
+  });
+
+  // A ground station configured but not yet in the router's own statistics
+  // at all — the router has not started, or the endpoint was just added —
+  // must read as "nothing heard", not throw and not be silently omitted.
+  it("reports a configured station absent from the statistics as never heard", () => {
+    const t = new LinkTracker({ clock: fakeClock() });
+    t.sampled([], ["gcs0", "gcs1"]);
+    expect(t.state().groundStations).toEqual([
+      { name: "gcs0", answering: false, lastHeardMs: null },
+      { name: "gcs1", answering: false, lastHeardMs: null },
+    ]);
+  });
+
+  // A block missing from one particular reading — router/stats.ts drops a
+  // truncated block outright — must not be read as "went silent this
+  // instant": a station's last *genuine* answer keeps aging normally rather
+  // than being wiped by a read that simply did not carry it this time.
+  it("keeps a station's last answer when one reading omits it, rather than resetting it", () => {
+    const clock = fakeClock();
+    const t = new LinkTracker({ clock, windowMs: 5_000 });
+    // Establish a real answer for gcs1 first: its counter genuinely
+    // increases against a trustworthy prior, which is what makes the
+    // timestamp that follows an actual measurement rather than a total.
+    t.sampled([udp("gcs0", 0, 10), udp("gcs1", 0, 10)], ["gcs0", "gcs1"]);
+    clock.advance(500);
+    t.sampled([udp("gcs0", 0, 20), udp("gcs1", 5, 20)], ["gcs0", "gcs1"]);
+    clock.advance(500);
+    // gcs1's block was cut short this reading and parseStats dropped it.
+    t.sampled([udp("gcs0", 0, 30)], ["gcs0", "gcs1"]);
+    expect(t.state().groundStations).toEqual([
+      { name: "gcs0", answering: false, lastHeardMs: null },
+      { name: "gcs1", answering: true, lastHeardMs: 500 },
+    ]);
+  });
+
+  // The configured set can change between readings — an endpoint added or
+  // removed in config.yaml. Removed means gone from the report entirely, not
+  // carried forward as a stale row; added means it starts exactly like any
+  // other station seen for the first time.
+  it("drops a ground station's row the moment it leaves the configured set", () => {
+    const t = new LinkTracker({ clock: fakeClock() });
+    t.sampled([udp("gcs0", 0, 10), udp("gcs1", 5, 10)], ["gcs0", "gcs1"]);
+    t.sampled([udp("gcs0", 0, 10), udp("gcs1", 5, 10)], ["gcs0"]);
+    expect(t.state().groundStations).toEqual([{ name: "gcs0", answering: false, lastHeardMs: null }]);
+  });
+
+  // gcs1 already has a non-zero counter the first moment it is watched — it
+  // may have answered at any point since the router started, which could be
+  // long before this name was ever added to the configured set, so its
+  // first sighting is reported exactly like a brand new station's: not yet
+  // known to be answering. "Not backfilled" cuts both ways — no history is
+  // invented for it, including a plausible-looking "just now".
+  it("adds a newly configured ground station as freshly seen, not backfilled", () => {
+    const clock = fakeClock();
+    const t = new LinkTracker({ clock });
+    t.sampled([udp("gcs0", 0, 10)], ["gcs0"]);
+    clock.advance(1_000);
+    t.sampled([udp("gcs0", 0, 10), udp("gcs1", 3, 6)], ["gcs0", "gcs1"]);
+    expect(t.state().groundStations).toEqual([
+      { name: "gcs0", answering: false, lastHeardMs: null },
+      { name: "gcs1", answering: false, lastHeardMs: null },
+    ]);
+  });
+
+  // The router's counters are cumulative since it started (§the bench note):
+  // a lower reading than last time means the router itself restarted, not
+  // that a ground station un-answered. TrafficSampler (remote/sampler.ts)
+  // solves this exact problem by discarding the stale baseline; this follows
+  // the same rule, per endpoint — and, per the correction above, an
+  // immediate post-restart reading that is already non-zero is *still* only
+  // a total, not a rate: it is treated exactly like a first sighting, not
+  // credited as answering until a genuine increase is observed against it.
+  it("does not credit an immediate post-restart reading as answering, even when it is non-zero", () => {
+    const clock = fakeClock();
+    const t = new LinkTracker({ clock, windowMs: 5_000 });
+    t.sampled([udp("gcs0", 50, 100)], ["gcs0"]);
+    clock.advance(1_000);
+    // The router restarted: its counters are small again, but still
+    // non-zero. That alone says gcs0 answered *at some point* since the
+    // restart, not that it is answering *now*.
+    t.sampled([udp("gcs0", 2, 4)], ["gcs0"]);
+    expect(t.state().groundStations).toEqual([{ name: "gcs0", answering: false, lastHeardMs: null }]);
+
+    clock.advance(1_000);
+    // The next sample shows a genuine increase from the post-restart
+    // baseline — real, timestamped evidence, exactly like the ordinary case.
+    t.sampled([udp("gcs0", 5, 10)], ["gcs0"]);
+    expect(t.state().groundStations).toEqual([{ name: "gcs0", answering: true, lastHeardMs: 0 }]);
+  });
+
+  it("does not call a station answering the instant the router restarts silent", () => {
+    const clock = fakeClock();
+    const t = new LinkTracker({ clock, windowMs: 5_000 });
+    t.sampled([udp("gcs0", 50, 100)], ["gcs0"]);
+    clock.advance(1_000);
+    // Restarted, and nothing has answered yet since — 0 is 0, not a claim.
+    t.sampled([udp("gcs0", 0, 0)], ["gcs0"]);
+    expect(t.state().groundStations).toEqual([{ name: "gcs0", answering: false, lastHeardMs: null }]);
+  });
+
+  // Pins the rule directly, independent of any restart: a first sighting
+  // never counts as answering, however large the total is, and it takes
+  // nothing more than one further genuine increase to start counting.
+  it("never credits a first sighting as answering, whatever the counter already reads", () => {
+    const clock = fakeClock();
+    const t = new LinkTracker({ clock });
+    // A fresh tracker meeting a ground station the router has already been
+    // routing to for a long time (R-MAV-06: the router survives a
+    // yonder-core restart) — a large total that predates this tracker
+    // entirely.
+    t.sampled([udp("gcs0", 10_000, 10_000)], ["gcs0"]);
+    expect(t.state().groundStations).toEqual([{ name: "gcs0", answering: false, lastHeardMs: null }]);
+
+    clock.advance(1_000);
+    t.sampled([udp("gcs0", 10_001, 10_001)], ["gcs0"]);
+    expect(t.state().groundStations).toEqual([{ name: "gcs0", answering: true, lastHeardMs: 0 }]);
   });
 
   // Nothing has measured how a connected TCP client appears in the router's
@@ -2010,11 +2274,80 @@ describe("LinkTracker", () => {
     expect(t.state().tcpClients).toBeNull();
   });
 
+  it("reports no traffic before the router's statistics have ever been sampled", () => {
+    const t = new LinkTracker({ clock: fakeClock() });
+    t.observed({ kind: "found", device: "/dev/ttyAMA0", baud: 57600, vehicle: "ArduPlane", system: 1 });
+    t.heard(vehicle);
+    expect(t.state().traffic).toBeNull();
+  });
+
+  // The Throughput sparkline sits in the design under "Ground stations", not
+  // under the autopilot half (docs/console/design/telemetry/README.md), so
+  // it is the ground stations' own KB counters — the router's own unit,
+  // beside the message counts already read for `groundStations` — turned
+  // into a rate the way TrafficSampler turns interface byte counters into
+  // one: a delta between two readings, divided by the clock time between
+  // them. The very first reading is a total, not a rate, exactly as it is
+  // there. KB values here are deliberately different from the message
+  // counts, to prove this reads the router's own byte figure rather than
+  // relabelling the message-count delta.
+  it("turns the ground stations' own KB counters into a kB/s traffic rate once two readings exist", () => {
+    const clock = fakeClock();
+    const t = new LinkTracker({ clock });
+    t.sampled([udp("gcs0", 0, 0, 0, 0), udp("gcs1", 0, 0, 0, 0)], ["gcs0", "gcs1"]);
+    expect(t.state().traffic).toEqual({ rx: [], tx: [], peak: null, windowMs: 5_000 });
+
+    clock.advance(1_000);
+    // gcs0 answered 10 messages (1 KB) and both stations had 100 messages
+    // (34 KB each) of telemetry mirrored to them in that second.
+    t.sampled([udp("gcs0", 10, 100, 1, 34), udp("gcs1", 0, 100, 0, 34)], ["gcs0", "gcs1"]);
+    expect(t.state().traffic).toEqual({ rx: [1], tx: [68], peak: 68, windowMs: 5_000 });
+  });
+
+  // Traffic history ages out on the same recency window the ground stations'
+  // own `answering` flag uses — one clock, one meaning of "recent", rather
+  // than a second window invented just for the sparkline.
+  it("ages traffic history out of the window once it is older than windowMs", () => {
+    const clock = fakeClock();
+    const t = new LinkTracker({ clock, windowMs: 2_000 });
+    t.sampled([udp("gcs0", 0, 0, 0, 0)], ["gcs0"]);
+    clock.advance(1_000);
+    t.sampled([udp("gcs0", 5, 5, 2, 3)], ["gcs0"]);
+    clock.advance(3_000);
+    // No further traffic, but enough time has passed that the one point of
+    // history recorded so far is now outside the window and must not still
+    // be reported alongside this reading's own (zero) point.
+    t.sampled([udp("gcs0", 5, 5, 2, 3)], ["gcs0"]);
+    expect(t.state().traffic).toEqual({ rx: [0], tx: [0], peak: 0, windowMs: 2_000 });
+  });
+
   it("keeps the autopilot half alive when the operator stops telemetry (R-MAV-09)", () => {
     const t = new LinkTracker();
     t.observed({ kind: "found", device: "/dev/ttyAMA0", baud: 57600, vehicle: "ArduPlane", system: 1 });
     t.stopped();
     expect(t.state()).toMatchObject({ phase: "stopped", vehicle: "ArduPlane", baud: 57600 });
+  });
+
+  // R-MAV-09's other half: the loopback listener (Task 11) keeps handing the
+  // stopped tracker heartbeats the whole time telemetry is off, and that must
+  // not make the page claim telemetry is running again on its own.
+  it("does not let a heartbeat arriving while stopped revert the phase", () => {
+    const t = new LinkTracker({ clock: fakeClock() });
+    t.observed({ kind: "found", device: "/dev/ttyAMA0", baud: 57600, vehicle: "ArduPlane", system: 1 });
+    t.stopped();
+    t.heard(vehicle);
+    expect(t.state().phase).toBe("stopped");
+  });
+
+  // A fresh sweep is the one action that is unambiguously "telemetry is
+  // active again" — Task 10's renderer only re-detects as an explicit
+  // operator action, stopping and restarting the router around it.
+  it("clears stopped once a fresh detection sweep reports back", () => {
+    const t = new LinkTracker();
+    t.observed({ kind: "found", device: "/dev/ttyAMA0", baud: 57600, vehicle: "ArduPlane", system: 1 });
+    t.stopped();
+    t.observed({ kind: "found", device: "/dev/ttyAMA0", baud: 57600, vehicle: "ArduPlane", system: 1 });
+    expect(t.state().phase).toBe("linked");
   });
 });
 ```
@@ -2026,16 +2359,345 @@ Expected: FAIL — module not found.
 
 - [ ] **Step 3: Write it**
 
-Implement `LinkTracker` to satisfy exactly those tests: keep the last `DetectOutcome`, a ring of vehicle-heartbeat timestamps for the rate (`heartbeatHz = (n - 1) / (last - first)` in seconds, `null` below two samples — a rate from one arrival is a claim no measurement supports), and, for the ground-station half, **the last sample at which each endpoint's `received` counter increased** — not the last heartbeat with `fromVehicle === false`, which is what an earlier draft said and what Task 2 disproved. Keep the previous sample to difference against; an endpoint seen for the first time has `lastHeardMs: null`, and one whose counter has not moved within `windowMs` is no longer answering.
+Implement `LinkTracker` to satisfy exactly those tests: keep the last `DetectOutcome`, a ring of vehicle-heartbeat timestamps for the rate (`heartbeatHz = (n - 1) / (last - first)` in seconds, `null` below two samples — a rate from one arrival is a claim no measurement supports), and, for the ground-station half, **the last sample at which each endpoint's `received` counter increased** — not the last heartbeat with `fromVehicle === false`, which is what an earlier draft said and what Task 2 disproved. Keep the previous sample to difference against; an endpoint seen for the first time has `lastHeardMs: null`, and one whose counter has not moved within `windowMs` is no longer answering. A first sighting is never credited **whatever the counter already reads**, restart included: the router's counters are cumulative since it started and the router itself outlives a `yonder-core` restart by design (R-MAV-06), so a fresh `LinkTracker` meeting a long-running router — the ordinary boot case, not an edge one — sees a stale non-zero total that is evidence something happened *at some point*, never evidence of the present tense. Only a counter that *moves* against a trustworthy prior reading is; a version that credited the total itself shipped once already and was caught by review (see Task 9's commit history), so this is recorded here rather than left for the code alone to say.
 
 **Attribute `sampled`'s reading by name, never by `kind`.** An earlier draft of this step dropped endpoints whose `kind` was not `"udp"` or `"tcp"`, reasoning that this excludes the UART and nothing else needs excluding. That reasoning is wrong, and not at the margin: `router/config.ts` (Task 8) always emits `[UdpEndpoint yonder]`, the control plane's own loopback copy (R-MAV-05), and — once `mavlink.ingest.loopback_only` is opened — `[UdpEndpoint inbound]` (R-MAV-07) too, and both are `kind: "udp"` in `parseStats`'s output exactly like a real ground station, because both genuinely are UDP endpoints the router reports on. `yonder`'s `received` counter moves continuously whenever telemetry is flowing at all, so a `kind`-only filter would show Yonder's own control-plane feed as a permanently-answering ground station, on every device, on every boot, into a list the console budgets exactly three positional rows for. Filter instead by intersecting `stats` against the `groundStationNames` array the caller passes to `sampled()` on that call, keeping the result in the order `groundStationNames` gives — `LinkTracker` holds no `Config` of its own, so this name set is supplied fresh by Task 10's renderer (which does hold it) on every reading, not fixed at construction.
 
 `windowMs` defaults to `5_000`. `stopped()` sets the phase and leaves every autopilot-side field untouched.
 
+The shipped implementation, extracted from `packages/yonder-core/src/mav/link.ts` rather than retyped (this file went through two rounds of correction after review — see its commit history):
+
+```ts
+// packages/yonder-core/src/mav/link.ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+import type { Clock } from "../apply/types.js";
+import { systemClock } from "../apply/types.js";
+import type { DetectOutcome } from "./detect.js";
+import type { Heartbeat } from "./frame.js";
+import type { EndpointStats } from "./router/stats.js";
+
+/**
+ * One state, everything the console's Telemetry page reads (R-MAV-10).
+ *
+ * §6's governing idea, carried into the type: every field here is something
+ * that happened, not something that was configured. `heartbeatHz` comes from
+ * the spacing between arrivals, not from a MAVLink stream rate nobody asked
+ * the vehicle to honour. `groundStations[i].answering` comes from that one
+ * endpoint's own counter having moved in `mavlink-router`'s own statistics,
+ * never from the endpoint merely appearing in `config.yaml` — a lesson this
+ * design paid for once already: an earlier draft of this same file reasoned
+ * from the merged loopback copy, where every ground station looks identical,
+ * and could only report *that* one was answering, not which. A field this
+ * file cannot measure is `null`, never a plausible-looking zero.
+ *
+ * The same rule turned out to bind harder than it first looked: a counter
+ * being cumulative since the router started (`EndpointStats`) means a
+ * *non-zero* reading is not exempt from it either. The router survives a
+ * `yonder-core` restart by design (R-MAV-06), so a fresh `LinkTracker`
+ * meeting a long-running router with an already-large count is the ordinary
+ * case, not an edge one — and a total on its own says only "answered at
+ * some point", never "answering now". Only a counter *moving* between two
+ * readings is evidence of the present tense, which is why every "answering"
+ * decision below waits for a second sample before it will say yes.
+ */
+export interface LinkState {
+  phase: "searching" | "silent" | "noise" | "linked" | "stopped";
+  device: string | null;
+  baud: number | null;
+  vehicle: string | null;
+  system: number | null;
+  heartbeatHz: number | null;
+  lastHeardMs: number | null;
+  /**
+   * One entry per configured endpoint, in configuration order.
+   *
+   * Per-endpoint rather than a single flag, because the router turned out to
+   * keep the attribution itself: with ReportStats on, an answering endpoint's
+   * received count tracks its replies exactly and a silent one stays at zero.
+   * §6 originally reported only *that* someone was answering, having reasoned
+   * correctly that the merged loopback copy cannot distinguish them — and
+   * missed that it does not have to.
+   */
+  groundStations: { name: string; answering: boolean; lastHeardMs: number | null }[];
+  triedBauds: number[];
+  /**
+   * The sparkline's two series and the TCP client count, which the page
+   * needs and heartbeats cannot supply.
+   *
+   * An earlier draft defined this state from heartbeats alone and left a
+   * later, thinner layer to produce RX/TX history and a client count out of
+   * them, which no thin adapter could — every heartbeat stream looks the
+   * same. `rx`/`tx` are **kilobytes per second**, in the router's own coarse
+   * integer unit (`EndpointStats.receivedKb`/`.transmittedKb` — the figure
+   * `mavlink-router` prints beside every count, e.g. `Handled: 21 1KB`) —
+   * never a bytes-per-message conversion off the message counts, because
+   * MAVLink messages vary in size and any such factor would be a configured
+   * number smuggled in as a unit, the exact thing this file exists to
+   * refuse. Summed across the configured ground stations, where the design's
+   * Throughput instrument sits (`docs/console/design/telemetry/README.md`),
+   * and turned into a rate the way `TrafficSampler` (`remote/sampler.ts`)
+   * already turns an interface's byte counters into one: a delta between two
+   * readings, divided by the clock time between them, with the same "a
+   * counter that went backwards means a restart, not negative traffic"
+   * guard. Because the router's own KB figure is coarse and integer, a slow
+   * link can go several samples between it moving at all, so this series is
+   * honestly lumpy rather than smoothed into a shape nobody measured. `null`
+   * until that source has answered even once, rather than a zero that would
+   * draw a flat line nobody measured.
+   */
+  traffic: { rx: number[]; tx: number[]; peak: number | null; windowMs: number } | null;
+  tcpClients: number | null;
+}
+
+const DEFAULT_WINDOW_MS = 5_000;
+
+/**
+ * Heartbeats kept for the rate calculation. HEARTBEAT is nominally 1 Hz, so
+ * ten of them span roughly the last ten seconds — enough to smooth over one
+ * missed beat without a rate from long ago outliving its own relevance.
+ */
+const HEARTBEAT_RING_SIZE = 10;
+
+/** What is kept per ground station between `sampled()` calls, so the next
+    reading has something to difference against. */
+interface StationRecord {
+  received: number;
+  transmitted: number;
+  receivedKb: number;
+  transmittedKb: number;
+  /** When this endpoint's `received` count was last seen to *increase*
+      against a reading that was itself trustworthy. `null` until that has
+      genuinely happened — never seeded from a first or post-restart total
+      on its own, however large, because a total alone fixes no instant. */
+  lastAnsweredAtMs: number | null;
+}
+
+/** One traffic-rate reading, timestamped so it can age out of `windowMs`. */
+interface TrafficPoint {
+  atMs: number;
+  rx: number;
+  tx: number;
+}
+
+export class LinkTracker {
+  private readonly clock: Clock;
+  private readonly windowMs: number;
+
+  private lastOutcome: DetectOutcome | null = null;
+  private isStopped = false;
+
+  private heartbeatRing: number[] = [];
+  private lastHeartbeatAtMs: number | null = null;
+
+  private stationRecords = new Map<string, StationRecord>();
+  private lastGroundStationNames: string[] = [];
+
+  private lastSampledAtMs: number | null = null;
+  private hasSampled = false;
+  private trafficHistory: TrafficPoint[] = [];
+
+  constructor(opts: { clock?: Clock; windowMs?: number } = {}) {
+    this.clock = opts.clock ?? systemClock;
+    this.windowMs = opts.windowMs ?? DEFAULT_WINDOW_MS;
+  }
+
+  /**
+   * A fresh sweep result, from `detect()` (§3). It replaces whatever was
+   * known about the serial link outright, rather than layering on top of it:
+   * a sweep that comes back silent has disproved whatever vehicle a previous
+   * sweep found, so that vehicle's name must not survive into this reading
+   * (see link.test.ts's "drops the old vehicle" case) — carrying it forward
+   * would be reporting something this observation never measured, the same
+   * mistake §6 made about ground stations one level up.
+   *
+   * Having reported back at all is also proof that detection is running
+   * again, so a `stopped()` from before this call no longer applies —
+   * re-detection (Task 11's `/mav/detect`) is the one explicit operator
+   * action that stops and restarts the router around a fresh probe.
+   */
+  observed(outcome: DetectOutcome): void {
+    this.lastOutcome = outcome;
+    this.isStopped = false;
+    this.heartbeatRing = [];
+    this.lastHeartbeatAtMs = null;
+  }
+
+  /**
+   * A heartbeat off the loopback feed (Task 11). Only ones the vehicle
+   * itself sent count: a ground station heartbeats back too (frame.ts's
+   * `fromVehicle`, and the whole premise of §6), and mixing one into this
+   * ring would corrupt the vehicle's own rate with an arrival that says
+   * nothing about it.
+   */
+  heard(heartbeat: Heartbeat): void {
+    if (!heartbeat.fromVehicle) return;
+    const now = this.clock.now();
+    this.lastHeartbeatAtMs = now;
+    this.heartbeatRing.push(now);
+    if (this.heartbeatRing.length > HEARTBEAT_RING_SIZE) this.heartbeatRing.shift();
+  }
+
+  /**
+   * One reading of the router's own counters (Task 8b), attributed to
+   * ground stations by name against `groundStationNames` — never by `kind`.
+   * `yonder` (the control-plane's own loopback copy, R-MAV-05) and, once
+   * opened, `inbound` (R-MAV-07) are both legitimately UDP, exactly like a
+   * real ground station, so `kind` alone cannot tell them apart; only the
+   * caller's own configured names can, which is why this takes them fresh on
+   * every call rather than once at construction — `LinkTracker` holds no
+   * `Config` of its own.
+   */
+  sampled(stats: EndpointStats[], groundStationNames: string[]): void {
+    const now = this.clock.now();
+    const byName = new Map(stats.map((entry) => [entry.name, entry] as const));
+    this.lastGroundStationNames = [...groundStationNames];
+
+    const elapsedSeconds = this.lastSampledAtMs === null ? null : (now - this.lastSampledAtMs) / 1000;
+    let rxKbDelta = 0;
+    let txKbDelta = 0;
+    let haveDelta = false;
+
+    for (const name of groundStationNames) {
+      const entry = byName.get(name);
+      // Missing from this particular reading — a block router/stats.ts
+      // dropped as truncated, or an endpoint the router has not opened yet.
+      // Leave whatever is already on record exactly as it is: a station does
+      // not go silent because one read of the journal happened to cut it
+      // off mid-write.
+      if (entry === undefined) continue;
+
+      const prior = this.stationRecords.get(name);
+      // The router's counters are cumulative since it started (measured on a
+      // board, 2026-09-05), so a set of counters that has not gone backwards
+      // is a real prior total to difference against. One that *has* — the
+      // router restarted underneath this reading — is treated exactly like
+      // an endpoint seen for the very first time: TrafficSampler
+      // (remote/sampler.ts) discards its own baseline the same way when an
+      // interface's counters restart under it.
+      const validPrior = prior !== undefined
+        && entry.received >= prior.received
+        && entry.transmitted >= prior.transmitted
+        && entry.receivedKb >= prior.receivedKb
+        && entry.transmittedKb >= prior.transmittedKb;
+
+      let lastAnsweredAtMs: number | null;
+      if (validPrior && prior !== undefined) {
+        lastAnsweredAtMs = entry.received > prior.received ? now : prior.lastAnsweredAtMs;
+        if (elapsedSeconds !== null && elapsedSeconds > 0) {
+          rxKbDelta += entry.receivedKb - prior.receivedKb;
+          txKbDelta += entry.transmittedKb - prior.transmittedKb;
+          haveDelta = true;
+        }
+      } else {
+        // No usable prior: first sighting, or a restart just invalidated the
+        // old one. Either way this reading is a *total*, not a rate, and a
+        // total alone — however large — is evidence the endpoint answered
+        // *at some point*, not that it is answering *now*: the count could
+        // be minutes old (a fresh tracker meeting a router that has been
+        // running for hours, R-MAV-06) or seconds old (a restart whose very
+        // next reading already shows a reply) and this single number cannot
+        // tell those apart. `heartbeatHz` already refuses the equivalent
+        // claim for a single heartbeat; this is the same refusal for a
+        // single counter reading. The next sample, with a real prior to
+        // diff against, tells the truth either way.
+        lastAnsweredAtMs = null;
+      }
+
+      this.stationRecords.set(name, {
+        received: entry.received,
+        transmitted: entry.transmitted,
+        receivedKb: entry.receivedKb,
+        transmittedKb: entry.transmittedKb,
+        lastAnsweredAtMs,
+      });
+    }
+
+    if (haveDelta && elapsedSeconds !== null) {
+      this.trafficHistory.push({ atMs: now, rx: rxKbDelta / elapsedSeconds, tx: txKbDelta / elapsedSeconds });
+    }
+    const cutoff = now - this.windowMs;
+    this.trafficHistory = this.trafficHistory.filter((point) => point.atMs >= cutoff);
+
+    this.lastSampledAtMs = now;
+    this.hasSampled = true;
+  }
+
+  /**
+   * R-MAV-09. Ground-station routing and the serial link's own vehicle,
+   * speed and heartbeat history are all left exactly as they were: stopping
+   * telemetry is an operator choice about routing, not a fact about the
+   * autopilot, which never hears about it and keeps heartbeating over the
+   * UART regardless.
+   */
+  stopped(): void {
+    this.isStopped = true;
+  }
+
+  state(): LinkState {
+    const now = this.clock.now();
+    const outcome = this.lastOutcome;
+
+    const phase = this.isStopped
+      ? "stopped"
+      : outcome === null
+        ? "searching"
+        : outcome.kind === "found" ? "linked" : outcome.kind;
+
+    // Below two arrivals there is no interval to measure yet — a rate from
+    // one heartbeat is a claim no measurement supports.
+    const heartbeatHz = this.heartbeatRing.length >= 2
+      ? (this.heartbeatRing.length - 1)
+        / ((this.heartbeatRing[this.heartbeatRing.length - 1] - this.heartbeatRing[0]) / 1000)
+      : null;
+
+    // Asked, not pushed: state() carries no timer of its own, so "how long
+    // ago" is computed fresh against the current clock on every call rather
+    // than frozen at whichever sample last touched it — otherwise a console
+    // left open on a link that went quiet would read the last good moment
+    // forever.
+    const groundStations = this.lastGroundStationNames.map((name) => {
+      const record = this.stationRecords.get(name);
+      const lastHeardMs = record?.lastAnsweredAtMs != null ? now - record.lastAnsweredAtMs : null;
+      return { name, answering: lastHeardMs !== null && lastHeardMs < this.windowMs, lastHeardMs };
+    });
+
+    const traffic = this.hasSampled
+      ? {
+          rx: this.trafficHistory.map((point) => point.rx),
+          tx: this.trafficHistory.map((point) => point.tx),
+          peak: this.trafficHistory.length === 0
+            ? null
+            : Math.max(...this.trafficHistory.flatMap((point) => [Math.abs(point.rx), Math.abs(point.tx)])),
+          windowMs: this.windowMs,
+        }
+      : null;
+
+    return {
+      phase,
+      device: outcome?.device ?? null,
+      baud: outcome?.kind === "found" ? outcome.baud : null,
+      vehicle: outcome?.kind === "found" ? outcome.vehicle : null,
+      system: outcome?.kind === "found" ? outcome.system : null,
+      heartbeatHz,
+      lastHeardMs: this.lastHeartbeatAtMs === null ? null : now - this.lastHeartbeatAtMs,
+      groundStations,
+      triedBauds: outcome !== null && outcome.kind !== "found" ? outcome.triedBauds : [],
+      traffic,
+      // Nothing has measured how a connected TCP client appears in the
+      // router's output (Task 8b) — whether as its own block, a counter on
+      // the server's, or not at all. Reporting a derived count would be a
+      // number nobody measured, so this stays null until a bench session
+      // with a client attached says what to count.
+      tcpClients: null,
+    };
+  }
+}
+```
+
 - [ ] **Step 4: Run the tests**
 
 Run: `npx vitest run --root packages/yonder-core src/mav/link.test.ts`
-Expected: PASS, all ten.
+Expected: PASS, all twenty-eight — this file grew well past the ten the brief originally specified across two rounds of review (see the commit history: the KB-unit fix and the first-sighting/restart correction each added coverage, and one test was corrected in place rather than simply loosened, which is its own recorded lesson).
 
 - [ ] **Step 5: Commit**
 
