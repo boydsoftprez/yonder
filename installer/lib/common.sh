@@ -569,7 +569,22 @@ assert_daemon_can_write() {
         return 0
     fi
 
-    adcw_roots=$(sed -n 's/^ReadWritePaths=//p' "$adcw_unit" | tr ' ' '\n' | grep -v '^$' || true)
+    # A leading `-` on an entry is systemd's "tolerate this one being absent",
+    # not part of the path — `yonder-core.service` carries
+    # `-/etc/mavlink-router` for exactly that reason, because the directory
+    # exists only on a board whose installer carried the router. Left on, it
+    # becomes a literal root named `-/etc/mavlink-router` that no real path can
+    # ever be under, so the `case` below can never match and the first caller
+    # naming a file in there dies for a write the service can perfectly well
+    # make. `installer.test.ts` already reads the same field the right way;
+    # this is the copy that had drifted from it.
+    #
+    # Only `-` is stripped. systemd's other prefixes (`+`, `!`, `!!`) appear in
+    # no unit this repository ships, and a prefix this does not know stays
+    # literal — which fails loudly here rather than quietly widening what the
+    # sandbox is believed to allow.
+    adcw_roots=$(sed -n 's/^ReadWritePaths=//p' "$adcw_unit" \
+        | tr ' ' '\n' | sed 's/^-//' | grep -v '^$' || true)
     [ -n "$adcw_roots" ] \
         || die "$adcw_unit is ProtectSystem=strict and names no ReadWritePaths; it can write nothing at all"
 

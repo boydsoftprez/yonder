@@ -440,6 +440,69 @@ describe("the two units together", () => {
 });
 
 /**
+ * **The shell half of the same rule, run rather than read.**
+ *
+ * `assert_daemon_can_write` in `installer/lib/common.sh` and the TypeScript
+ * check below are two implementations of one rule — "every path the daemon
+ * writes is inside its `ReadWritePaths`" — and they had come to disagree.
+ * The shell one split the field but never stripped systemd's leading `-`,
+ * the "tolerate this one being absent" marker `yonder-core.service` carries
+ * on `-/etc/mavlink-router` because that directory exists only on a board
+ * whose installer carried the router. Left on, the entry becomes a literal
+ * root named `-/etc/mavlink-router`, no real path is ever under it, and the
+ * first caller naming a file in there dies for a write the service can
+ * perfectly well make — aborting the install of a board that is fine.
+ *
+ * Latent only because `30-console.sh` is the sole caller today and it names
+ * paths under an unprefixed root.
+ */
+describe("assert_daemon_can_write", () => {
+  function canWrite(body: string, paths: string[]) {
+    const path = join(dir, "unit.service");
+    writeFileSync(path, body);
+    return sh(
+      `set -eu; . '${COMMON}'; assert_daemon_can_write '${path}' ${paths.map((p) => `'${p}'`).join(" ")}`,
+      { DRY_RUN: "0" },
+    );
+  }
+
+  const STRICT = "[Service]\nProtectSystem=strict\nReadWritePaths=/etc/yonder /var/lib/yonder -/etc/mavlink-router\n";
+
+  it("accepts a path under a root systemd is told to tolerate the absence of", () => {
+    const r = canWrite(STRICT, ["/etc/mavlink-router/main.conf"]);
+    expect(r.code, r.out).toBe(0);
+    expect(r.out).toContain("/etc/mavlink-router/main.conf is inside");
+    // The `-` is a marker, never part of the name the operator is shown.
+    expect(r.out).not.toContain("-/etc/mavlink-router/");
+  });
+
+  it("still refuses a path under no root at all", () => {
+    const r = canWrite(STRICT, ["/opt/yonder/console/public/theme.css"]);
+    expect(r.code).not.toBe(0);
+    expect(r.out).toContain("EROFS from inside the service");
+  });
+
+  it("checks nothing when the unit is not sandboxed", () => {
+    const r = canWrite("[Service]\nExecStart=/bin/true\n", ["/anywhere/at/all"]);
+    expect(r.code, r.out).toBe(0);
+    expect(r.out).toContain("nothing constrains its writes");
+  });
+
+  /**
+   * The two implementations, against the units and paths actually shipped —
+   * so a `ReadWritePaths` edit that satisfies one and not the other fails
+   * here rather than on a board.
+   */
+  it("agrees with the TypeScript reading of the shipped unit", () => {
+    const r = canWrite(
+      readFileSync(join(ROOT, "systemd/yonder-core.service"), "utf8"),
+      [ROUTER_CONF_PATH, DEFAULT_CONSOLE_PATHS.settings, DEFAULT_CONSOLE_PATHS.publicDir],
+    );
+    expect(r.code, r.out).toBe(0);
+  });
+});
+
+/**
  * The invariant the first board taught us, pinned so it cannot come back.
  *
  * `yonder-core.service` is `ProtectSystem=strict`, so the daemon may only
