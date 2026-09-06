@@ -201,12 +201,24 @@ export function headInjection(markup: string): Middleware {
     const originalWriteHead = res.writeHead.bind(res);
     res.writeHead = ((...args: unknown[]) => {
       // (status), (status, headers) or (status, statusMessage, headers) —
-      // the headers object, whichever position it is in, is the only object
+      // the headers, whichever position they are in, are the only object
       // among otherwise numeric and string arguments.
-      const headers = args.find((a) => typeof a === "object" && a !== null) as
-        | Record<string, unknown>
-        | undefined;
-      if (headers) for (const [name, value] of Object.entries(headers)) noteContentType(name, value);
+      const headers = args.find((a) => typeof a === "object" && a !== null);
+      // **Node takes headers here as an object or as a flat array**, and the
+      // array is not a list of pairs: even offsets are names, odd offsets are
+      // the values beside them. `Object.entries` on one yields "0", "1", "2"
+      // as the names, so every header is missed, the response is never
+      // recognised as HTML, and the document goes out unstyled — R-UI-22
+      // failing silently for a caller that did nothing wrong.
+      if (Array.isArray(headers)) {
+        for (let i = 0; i + 1 < headers.length; i += 2) {
+          if (typeof headers[i] === "string") noteContentType(headers[i] as string, headers[i + 1]);
+        }
+      } else if (headers) {
+        for (const [name, value] of Object.entries(headers as Record<string, unknown>)) {
+          noteContentType(name, value);
+        }
+      }
       return (originalWriteHead as (...a: unknown[]) => ServerResponse)(...args);
     }) as unknown as ServerResponse["writeHead"];
 

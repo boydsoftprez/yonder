@@ -333,6 +333,22 @@ describe("headInjection", () => {
   });
 
   /**
+   * Node accepts `writeHead`'s headers as a flat array as well as an object,
+   * and the array is not a list of pairs — even offsets are names, odd offsets
+   * are the values beside them. Reading one with `Object.entries` yields "0",
+   * "1", "2" as the names, so the content type is missed, the response is
+   * never recognised as HTML, and the document goes out unstyled. A caller
+   * that did nothing wrong gets R-UI-22 failing silently.
+   */
+  it("recognises an HTML document announced through writeHead's array form", async () => {
+    const res = await serve(headInjection(TAG), (_req, res) => {
+      res.writeHead(200, ["content-type", "text/html; charset=UTF-8"]);
+      res.end(page);
+    });
+    expect(res.body).toBe(injected);
+  });
+
+  /**
    * The one response this must refuse. A handler that has already flushed a
    * header block stating a `Content-Length` has committed to a byte count,
    * and that count is of the document *without* this markup. Splicing it in
