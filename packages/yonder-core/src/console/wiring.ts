@@ -180,8 +180,15 @@ export function headInjection(markup: string): Middleware {
     patched.add(res);
 
     let contentType: string | undefined;
+    // Tracked beside the type and for the same reason: read back at `end`,
+    // when it decides whether this response can still be lengthened. Kept
+    // here rather than read from `res.getHeader` so it does not depend on
+    // what Node leaves reachable once a header block has been stored.
+    let declaredLength: string | undefined;
     const noteContentType = (name: string, value: unknown): void => {
-      if (name.toLowerCase() === "content-type" && typeof value === "string") contentType = value;
+      const key = name.toLowerCase();
+      if (key === "content-type" && typeof value === "string") contentType = value;
+      if (key === "content-length") declaredLength = String(value);
     };
     const isDocument = (): boolean => contentType !== undefined && contentType.includes("text/html");
 
@@ -231,20 +238,50 @@ export function headInjection(markup: string): Middleware {
       const buf = toBuffer(chunk, encoding);
       if (buf) chunks.push(buf);
       const html = Buffer.concat(chunks).toString("utf8");
+
+      // **A length already stated and no longer editable is the one case the
+      // markup cannot go in.** `Content-Length` counts the bytes of `html`,
+      // not of `html` plus this markup; sending the longer body against the
+      // shorter number leaves the extra bytes in the socket where the next
+      // response's status line should be, and the client reports a parse
+      // error rather than a styling problem — `Expected HTTP/, RTSP/ or ICE/`
+      // on a connection that was fine until the console tried to help.
+      //
+      // Both halves are needed. `headersSent` alone is too strict: it is true
+      // the moment a handler calls `writeHead`, and a `writeHead` that named
+      // no length is a chunked response that can carry any body at all — the
+      // test above sends exactly that. A declared length alone is too loose:
+      // while the headers are still editable, the length is simply corrected
+      // below, which is the ordinary path.
+      //
+      // An unstyled first paint is a bad frame. A corrupted response is a
+      // broken console, so this gives up the paint and keeps the console. It
+      // is unreachable through Dashboard's own handlers, which build the
+      // document through `send` and flush nothing early; it is here because
+      // "unreachable today" is not a property of this file.
+      const done = callbackOf(chunk, encoding, callback) as never;
+      if (res.headersSent && declaredLength !== undefined) {
+        return originalEnd(html, "utf8", done);
+      }
+
       const withMarkup = html.includes("</head>") ? html.replace("</head>", `${markup}\n</head>`) : html;
-      try {
-        // The response no longer describes the file on disk: its length
-        // changed, so an ETag or a Last-Modified that named that file now
-        // names a document that was never sent. Guarded: a caller that
-        // flushed its own headers before reaching here (unlike `send`, which
-        // never does) leaves nothing left to correct, and the alternative to
-        // catching that is a console that answers with no body at all.
-        res.removeHeader("ETag");
-        res.removeHeader("Last-Modified");
-        res.setHeader("Cache-Control", "no-store");
-        res.setHeader("Content-Length", Buffer.byteLength(withMarkup));
-      } catch { /* headers already sent; the body still carries the markup */ }
-      return originalEnd(withMarkup, "utf8", callbackOf(chunk, encoding, callback) as never);
+
+      // Headers stored but no length stated: a chunked response, which can
+      // carry the longer body without contradicting anything it has already
+      // said. The markup goes in; the header block is left exactly as it is,
+      // because touching it now throws `ERR_HTTP_HEADERS_SENT` — and a throw
+      // out of `end` is a request that never completes at all.
+      if (res.headersSent) return originalEnd(withMarkup, "utf8", done);
+
+      // The response no longer describes the file on disk: its length changed,
+      // so an ETag or a Last-Modified that named that file now names a
+      // document that was never sent. No try/catch: both conditions that made
+      // these throw return above.
+      res.removeHeader("ETag");
+      res.removeHeader("Last-Modified");
+      res.setHeader("Cache-Control", "no-store");
+      res.setHeader("Content-Length", Buffer.byteLength(withMarkup));
+      return originalEnd(withMarkup, "utf8", done);
     }) as unknown as ServerResponse["end"];
 
     next();

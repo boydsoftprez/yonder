@@ -309,4 +309,72 @@ describe("headInjection", () => {
     });
     expect(res.body).toBe(bare);
   });
+
+  /**
+   * The one response this must refuse. A handler that has already flushed a
+   * header block stating a `Content-Length` has committed to a byte count,
+   * and that count is of the document *without* this markup. Splicing it in
+   * anyway sends more bytes than were promised; the surplus lands in the
+   * socket where the next response's status line belongs, and the client
+   * fails to parse a connection that was working until the console tried to
+   * style it.
+   *
+   * So the assertion is not "the markup is absent" — it is that the response
+   * is intact and byte-exact. A broken console is a worse outcome than an
+   * unstyled one, and this is the trade being made.
+   */
+  it("refuses a document whose length is already stated and no longer editable", async () => {
+    const res = await serve(headInjection(TAG), (_req, res) => {
+      res.writeHead(200, {
+        "content-type": "text/html; charset=UTF-8",
+        "content-length": String(Buffer.byteLength(page)),
+      });
+      res.end(page);
+    });
+    expect(res.body).toBe(page);
+    expect(res.body).not.toContain(TAG);
+    // The promise the handler made, kept exactly.
+    expect(res.headers["content-length"]).toBe(String(Buffer.byteLength(page)));
+  });
+
+  /**
+   * **The guard is per response, and nothing proved it.** `headInjection`
+   * returns one middleware value which Dashboard mounts at several points in
+   * its own route table, so the same response object can pass through it more
+   * than once — hence the `WeakSet`. Replacing that `WeakSet` with a single
+   * `let patched = false` captured in the closure keeps every other test in
+   * this file green, because each of them serves exactly one request. It also
+   * means only the first document the console ever serves carries the theme
+   * and every reload after it flashes white, which is the whole of R-UI-22.
+   *
+   * Two requests through one middleware instance is the smallest thing that
+   * tells those two implementations apart.
+   */
+  it("injects into every response, not merely the first one it ever sees", async () => {
+    const middleware = headInjection(TAG);
+    const bodies = await new Promise<string[]>((resolve, reject) => {
+      server = createServer((req, res) => {
+        middleware(req, res, () => {
+          res.setHeader("content-type", "text/html; charset=UTF-8");
+          res.end(page);
+        });
+      });
+      server.listen(0, "127.0.0.1", () => {
+        const port = (server?.address() as { port: number }).port;
+        const get = (): Promise<string> => new Promise((ok, bad) => {
+          const req = request({ host: "127.0.0.1", port, method: "GET", path: "/" }, (res) => {
+            const chunks: Buffer[] = [];
+            res.on("data", (c: Buffer) => chunks.push(c));
+            res.on("end", () => { ok(Buffer.concat(chunks).toString("utf8")); });
+          });
+          req.on("error", bad);
+          req.end();
+        });
+        // Sequential, not concurrent: a shared-state bug that only the second
+        // request can show must not be able to hide behind interleaving.
+        get().then((first) => get().then((second) => resolve([first, second]))).catch(reject);
+      });
+    });
+    expect(bodies).toEqual([injected, injected]);
+  });
 });

@@ -672,16 +672,10 @@ Pressing NIGHT reaches the device and takes effect: the daemon regenerates
 outside the browser while an operator pressed the key showed the palette change
 day → night within seconds.
 
-**The open page does not change.** `flows/flows.json` carries the stylesheet as a
-`ui-template` at `site:style` scope:
-
-```
-@import url("/yonder/theme.css");
-```
-
-That import runs once, when the page loads. Nothing re-fetches it when the
-palette changes, and the URL carries no cache-busting, so an operator who
-presses the key sees their console do nothing at all. The setting is not lost —
+**The open page does not change.** The stylesheet is fetched once, when the
+page loads, and nothing re-fetches it when the palette changes. The URL carries
+no cache-busting either, so an operator who presses the key sees their console
+do nothing at all. The setting is not lost —
 it appears on the next reload — but R-UI-05 says show the operator when a
 control has taken effect, not merely that it was sent, and this shows them
 nothing.
@@ -692,9 +686,16 @@ hides this defect, so the gate that exists to look at both palettes cannot see
 it. The same shape of blind spot produced the tab-strip defect fixed in
 `d8dd994`: a check that only ever looks at a surface one way.
 
-Not introduced by M2a — the `style-link` template predates it. Found while
-proving M2a on a board, because that was the first time anyone pressed the key
-and then kept looking at the same page.
+Not introduced by M2a. Found while proving M2a on a board, because that was the
+first time anyone pressed the key and then kept looking at the same page.
+
+**The mechanism described here has since changed, and the defect has not.**
+This entry used to name a `ui-template` at `site:style` scope doing an
+`@import`. That template is gone: R-UI-22 moved the stylesheet into a `<link>`
+in the served document's head, so it now arrives with the first paint instead
+of after the app boots. A `<link>` in the head is fetched exactly once too, so
+an open page still does not follow a palette change. Whichever fix direction
+below is taken, it now applies to that `<link>`.
 
 **Fix direction:** make the palette's arrival at the page observable — a
 cache-busted stylesheet URL the theme change updates, or have the console

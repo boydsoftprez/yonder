@@ -15,7 +15,8 @@ import type { Config } from "../schema/config.js";
  * this one function rather than against a running Node-RED.
  *
  * The generated file is CommonJS, because Node-RED loads it with `require`,
- * and it is a *description*: values, and two calls into `wiring.ts`. Nothing
+ * and it is a *description*: values, and three calls into `wiring.ts` —
+ * `editorAuth`, `consoleGate` and `headInjection`. Nothing
  * with a decision in it is written here. A generated file carrying behaviour
  * is a file nobody can review a diff of, which is CLAUDE.md rule 2 applied to
  * the one other generated artefact this project ships.
