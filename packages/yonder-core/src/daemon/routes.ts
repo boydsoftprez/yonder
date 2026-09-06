@@ -1183,6 +1183,81 @@ export function createRouter(deps: RouterDeps): Router {
         };
       }
 
+      /**
+       * **Adopt a camera the board has already found** (R-UI-03, R-CAM-05).
+       *
+       * The one thing the Cameras page could not do. A detected camera on a
+       * socket nothing is configured for carries `id: null`, which is honest
+       * — `cameraIndex()` composes `state: "Not configured"` for it and
+       * `YonderIndex` disables OPEN, because a page for a camera the
+       * configuration has never heard of answers 404 on every widget. But
+       * nothing anywhere could give it an entry, so an operator who plugged
+       * a second camera in saw it listed, saw a dead key, and had no way
+       * forward. Found by the operator on a board, not by any test.
+       *
+       * Everything an entry needs is already in hand at this point and none
+       * of it is guessed: the socket is the detection's own `byPath`, the
+       * name is the card the device reported, and every other field has a
+       * schema default. Nothing is written that the device did not say.
+       *
+       * The socket, never `/dev/videoN` — R-CAM-05's whole subject. Unplug
+       * the camera and plug it into the same socket and the `by-path` name is
+       * the same string, so this entry still means this camera whatever
+       * enumeration number the kernel hands it next.
+       *
+       * Through `engine.apply` like every other configuration change, so it
+       * is journalled, confirmable and revertible (R-CFG-03). Adopting a
+       * camera is not load-bearing — it starts nothing and takes no path
+       * away — so it carries no confirmation window; the engine decides that,
+       * not this route.
+       */
+      if (method === "POST" && path === "/cameras") {
+        if (deps.cameras === undefined) return noCameraLayer("POST /cameras", say);
+        const device = (body as { device?: unknown } | undefined)?.device;
+        if (typeof device !== "string" || device === "") {
+          return { status: 400, body: { error: "name the camera to adopt with { device: \"<by-path name>\" }" } };
+        }
+        const config = loadConfig(deps.configPath);
+        if (config.cameras.some((c) => c.device === device)) {
+          return { status: 409, body: { error: "this socket already has a camera configured on it" } };
+        }
+        // Asked of the probe rather than taken from the body: a caller may
+        // name any string, and a configuration entry for a socket this board
+        // cannot see is a camera page that will never answer.
+        const { found } = await deps.cameras.detect();
+        const detected = found.find((d) => d.byPath === device);
+        if (detected === undefined) {
+          return { status: 404, body: { error: "no camera is attached to that socket" } };
+        }
+        if (config.cameras.length >= 8) {
+          return { status: 409, body: { error: "this board already has the eight cameras it can carry" } };
+        }
+        // `Cam N` on the lowest free number, which is R-UI-27's default and
+        // is what the operator renames from. Lowest free rather than
+        // next-highest: a board that has had cameras removed should not count
+        // upward for ever.
+        const taken = new Set(config.cameras.map((c) => c.id));
+        let n = 1;
+        while (taken.has(`cam${n}`)) n += 1;
+        const id = `cam${n}`;
+        const next = structuredClone(config);
+        next.cameras.push({
+          id,
+          // The card the device reported, at the schema's 48-character cap.
+          // Not the socket: an operator names a camera for where it points,
+          // and `Global Shutter Camera: Global S` is at least a thing they
+          // can recognise while they think of a better one.
+          name: detected.card.slice(0, 48),
+          source: "usb",
+          device,
+        } as (typeof next.cameras)[number]);
+        say(`cameras: adopted ${device} as ${id}`);
+        // `camera`, not `id`: the apply's own answer carries an `id` — the
+        // confirmation handle — and two different ids under one name in one
+        // body is how a caller confirms the wrong thing.
+        return { status: 200, body: { camera: id, ...(await deps.engine.apply(next)) } };
+      }
+
       const addressed = CAMERA_ROUTE.exec(path);
       if (addressed !== null) {
         const id = addressed[1];

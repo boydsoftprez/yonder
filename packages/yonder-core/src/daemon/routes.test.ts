@@ -124,6 +124,27 @@ function fixtureCapabilities(): CameraCapabilities {
   };
 }
 
+/**
+ * The operator's own case: a second camera plugged into a running board, on a
+ * socket the configuration has never heard of. `fixtureDetection()`'s camera
+ * is the configured one; this is the one beside it with no entry.
+ */
+const SECOND_BY_PATH = "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.1:1.0-video-index0";
+
+function detectionWithASecondCamera(): DetectResult {
+  const base = fixtureDetection();
+  return {
+    ...base,
+    found: [...base.found, {
+      device: "/dev/video2",
+      card: "Webcam gadget: UVC HD Camera",
+      byPath: SECOND_BY_PATH,
+      byPathStable: true,
+      capabilities: fixtureCapabilities(),
+    }],
+  };
+}
+
 /** One camera found, one hardware codec rejected — this board's actual pair. */
 function fixtureDetection(): DetectResult {
   return {
@@ -1671,6 +1692,68 @@ describe("the camera routes", () => {
    * number. Nothing on this branch measures egress, so the honest answer is
    * that there is none.
    */
+  /**
+   * **Adopting a camera the board has already found.**
+   *
+   * The operator plugged a second camera into a running board, saw it listed
+   * as *Not configured*, and had no way to do anything with it — the OPEN key
+   * is disabled for a row with no id, correctly, and nothing anywhere could
+   * give it one. Found by him on hardware; no test could have caught it,
+   * because a review reads a diff and nothing in a diff is missing.
+   */
+  it("adopts a detected camera onto the socket it was found on", async () => {
+    const r = provisioned({ cameras: detectionWithASecondCamera() });
+    const before = loadConfig(configPath).cameras.length;
+    const res = await r("POST", "/cameras", { device: SECOND_BY_PATH });
+    expect(res.status).toBe(200);
+    const cameras = loadConfig(configPath).cameras;
+    expect(cameras.length, "the camera reached the configuration").toBe(before + 1);
+    const added = cameras.find((c) => c.device === SECOND_BY_PATH);
+    // **The socket, never /dev/videoN** — R-CAM-05. The whole point of the
+    // entry is that it still means this camera after a replug.
+    expect(added?.device).toBe(SECOND_BY_PATH);
+    expect(added?.name).toBe("Webcam gadget: UVC HD Camera");
+    expect((res.body as { camera: string }).camera).toBe(added?.id);
+  });
+
+  it("gives the adopted camera an id, so it now has a page to open", async () => {
+    const r = provisioned({ cameras: detectionWithASecondCamera() });
+    const before = await r("GET", "/cameras", undefined);
+    const unconfigured = (before.body as { index: { cameras: { id: string | null }[] } })
+      .index.cameras.filter((c) => c.id === null);
+    expect(unconfigured.length, "the second camera starts with no id").toBe(1);
+
+    await r("POST", "/cameras", { device: SECOND_BY_PATH });
+    const res = await r("GET", "/cameras", undefined);
+    const rows = (res.body as { index: { cameras: { id: string | null; name: string }[] } }).index.cameras;
+    const row = rows.find((c) => c.name.startsWith("Webcam"));
+    // This is the whole defect, stated as an assertion: before this route
+    // existed every detected-but-unconfigured camera had a null id for ever,
+    // and `YonderIndex` disables OPEN on exactly that.
+    expect(row?.id, "an adopted camera has an id, and so a page").toBeTruthy();
+  });
+
+  it("refuses a socket that already carries a camera, rather than adding a second entry for it", async () => {
+    const r = provisioned({ cameras: detectionWithASecondCamera() });
+    await r("POST", "/cameras", { device: SECOND_BY_PATH });
+    const again = await r("POST", "/cameras", { device: SECOND_BY_PATH });
+    expect(again.status).toBe(409);
+    expect(loadConfig(configPath).cameras.filter((c) => c.device === SECOND_BY_PATH).length).toBe(1);
+  });
+
+  it("refuses a socket this board cannot see, because that entry could never answer", async () => {
+    const r = provisioned({ cameras: fixtureDetection() });
+    const res = await r("POST", "/cameras", { device: "platform-nothing-is-plugged-in-here" });
+    expect(res.status).toBe(404);
+    expect(loadConfig(configPath).cameras.some((c) => c.device.includes("nothing"))).toBe(false);
+  });
+
+  it("names the body it wants when given none", async () => {
+    const res = await provisioned({ cameras: fixtureDetection() })("POST", "/cameras", {});
+    expect(res.status).toBe(400);
+    expect(String((res.body as { error: string }).error)).toContain("device");
+  });
+
   it("puts no rate on an index row, because nothing on this device measures one", async () => {
     const r = provisioned({ cameras: fixtureDetection() });
     await r("POST", "/cameras/cam0/run", { action: "start" });
