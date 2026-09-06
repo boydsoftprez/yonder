@@ -1141,3 +1141,55 @@ held console is a deliberate act, and silently capturing someone else's is never
 
 Found by eye, not by the gate: the change under review was three widgets swapping type, and
 the picture still showed the widgets they replaced.
+
+---
+
+### K-46 · ~~The capture gate loaded its node packages from whatever workspace was above it~~ — CLOSED
+
+Sibling of K-45, and a worse one: K-45 photographs the wrong *console*, this photographs a
+console built from the wrong *packages*.
+
+`scripts/verify-pages.sh` stages the Yonder node packages into the console tree it builds,
+the way `installer/roles/30-console.sh` does on a board:
+
+```sh
+ln -s "$REPO/packages/$pkg" "$CONSOLE/node_modules/$pkg"
+```
+
+**Node-RED never looked there.** `@node-red/registry`'s `scanTreeForNodesModules` scans
+`<userDir>/node_modules`, then walks up from `settings.coreNodesDir` — the *real* path of
+its own installation — looking for a `node_modules` at each ancestor. The gate's `node-red`
+is a symlink into `vendor/console`, which node resolves, so that walk starts inside this
+repository and climbs out of it; `$CONSOLE` is a temporary directory and is nowhere on the
+path. The staged links were dead weight.
+
+What it found instead was the first `node_modules` above the checkout that had the packages
+in it. In a CI clone that is the repository's own, so the gate was right there and nothing
+noticed for as long as nothing differed. Run from a git worktree under a checkout that has
+its own `npm install`, the walk reaches **the parent checkout's** `node_modules`, whose
+workspace links point at the parent's `packages/` — so every yonder node loaded was the
+other tree's copy, and `node-red-contrib-yonder-mavlink`, which existed only on the branch
+under test, was not found at all.
+
+Observed 2026-09-06 while cutting the Telemetry page over to the daemon: Node-RED logged
+`Waiting for missing types to be registered: yonder-mav-state …` for four types whose
+package was symlinked into the console tree and built, and `ui-yonder-flow` — added on the
+same branch — was missing from `/nodes` while the seven older widgets in the same package
+were present, because the package being loaded was a different checkout's.
+
+**A board was never affected.** There the console tree *is* where Node-RED lives, so the
+walk up from its own directory reaches `/opt/yonder/console/node_modules` and finds exactly
+what `30-console.sh` put there. Only the gate, which runs Node-RED out of a symlink into
+`vendor/`, could resolve its way into somebody else's tree.
+
+**Closed in the same change**, by linking every package into `<userDir>/node_modules` as
+well. That directory is scanned first and its modules are marked `local`, which sorts them
+ahead of everything the walk-up finds and wins the dedupe outright — so the gate is pinned
+to the tree it is run from. The console tree's copies stay, because that is where a board
+has them and this script exists to run what a board runs.
+
+**What is not closed:** nothing asserts it. A test that the gate loads the packages under
+test would have to read Node-RED's own registry, and the honest version of that assertion
+is the one this gate already wants — `GET /nodes` after start-up, compared against the
+manifests `flows.test.ts` already reads for `R-UI-19`. Worth doing when something else
+brings a reader of that endpoint.

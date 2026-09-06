@@ -437,7 +437,8 @@
         "y": 540,
         "wires": [
             [
-                "seed-cell-form"
+                "seed-cell-form",
+                "seed-tel-endpoints"
             ]
         ]
     },
@@ -4676,7 +4677,7 @@
         "fontSize": 16,
         "color": "#717171",
         "wrapText": false,
-        "className": "",
+        "className": "yonder-fixed",
         "x": 300,
         "y": 2960,
         "wires": [],
@@ -4700,7 +4701,7 @@
         "fontSize": 16,
         "color": "#717171",
         "wrapText": false,
-        "className": "",
+        "className": "yonder-fixed",
         "x": 300,
         "y": 3000,
         "wires": [],
@@ -4720,7 +4721,9 @@
         "x": 300,
         "y": 3040,
         "wires": [
-            []
+            [
+                "route-tel-ingest"
+            ]
         ]
     },
     {
@@ -4755,7 +4758,9 @@
         "x": 300,
         "y": 3080,
         "wires": [
-            []
+            [
+                "run-telemetry"
+            ]
         ]
     },
     {
@@ -4765,7 +4770,7 @@
         "group": "group-tel-check",
         "order": 1,
         "width": 4,
-        "height": 1,
+        "height": 2,
         "name": "autopilot to yonder",
         "label": "Autopilot to Yonder",
         "format": "{{msg.payload}}",
@@ -4774,7 +4779,7 @@
         "font": "",
         "fontSize": 16,
         "color": "#717171",
-        "wrapText": false,
+        "wrapText": true,
         "className": "yonder-qualifier",
         "x": 300,
         "y": 3120,
@@ -4813,7 +4818,7 @@
         "group": "group-tel-check",
         "order": 2,
         "width": 4,
-        "height": 1,
+        "height": 2,
         "name": "yonder to ground stations",
         "label": "Yonder to stations",
         "format": "{{msg.payload}}",
@@ -4822,7 +4827,7 @@
         "font": "",
         "fontSize": 16,
         "color": "#717171",
-        "wrapText": false,
+        "wrapText": true,
         "className": "yonder-qualifier",
         "x": 300,
         "y": 3160,
@@ -4837,7 +4842,7 @@
         "group": "group-tel-check",
         "order": 3,
         "width": 4,
-        "height": 1,
+        "height": 2,
         "name": "ground station to yonder",
         "label": "Station to Yonder",
         "format": "{{msg.payload}}",
@@ -4846,7 +4851,7 @@
         "font": "",
         "fontSize": 16,
         "color": "#717171",
-        "wrapText": false,
+        "wrapText": true,
         "className": "yonder-qualifier",
         "x": 300,
         "y": 3200,
@@ -4886,7 +4891,9 @@
         "x": 300,
         "y": 3240,
         "wires": [
-            []
+            [
+                "check-path"
+            ]
         ]
     },
     {
@@ -4931,737 +4938,6 @@
         "x": 300,
         "y": 3360,
         "wires": []
-    },
-    {
-        "id": "mock-tel-ann-link",
-        "type": "change",
-        "z": "yonder-console",
-        "name": "mock tel-ann-link",
-        "rules": [
-            {
-                "t": "set",
-                "p": "payload",
-                "pt": "msg",
-                "to": "{\"state\": \"confirmed\", \"message\": \"Connected\"}",
-                "tot": "json"
-            }
-        ],
-        "action": "",
-        "property": "",
-        "from": "",
-        "to": "",
-        "reg": false,
-        "x": 1500,
-        "y": 2234,
-        "wires": [
-            [
-                "tel-ann-link"
-            ]
-        ]
-    },
-    {
-        "id": "mock-tel-port",
-        "type": "change",
-        "z": "yonder-console",
-        "name": "mock tel-port",
-        "rules": [
-            {
-                "t": "set",
-                "p": "payload",
-                "pt": "msg",
-                "to": "/dev/ttyAMA0",
-                "tot": "str"
-            }
-        ],
-        "action": "",
-        "property": "",
-        "from": "",
-        "to": "",
-        "reg": false,
-        "x": 1500,
-        "y": 2268,
-        "wires": [
-            [
-                "tel-port"
-            ]
-        ]
-    },
-    {
-        "id": "mock-tel-speed",
-        "type": "change",
-        "z": "yonder-console",
-        "name": "mock tel-speed",
-        "rules": [
-            {
-                "t": "set",
-                "p": "payload",
-                "pt": "msg",
-                "to": "57 600 baud",
-                "tot": "str"
-            }
-        ],
-        "action": "",
-        "property": "",
-        "from": "",
-        "to": "",
-        "reg": false,
-        "x": 1500,
-        "y": 2302,
-        "wires": [
-            [
-                "tel-speed"
-            ]
-        ]
-    },
-    {
-        "id": "mock-tel-vehicle",
-        "type": "change",
-        "z": "yonder-console",
-        "name": "mock tel-vehicle",
-        "rules": [
-            {
-                "t": "set",
-                "p": "payload",
-                "pt": "msg",
-                "to": "ArduPlane \u00b7 system 1",
-                "tot": "str"
-            }
-        ],
-        "action": "",
-        "property": "",
-        "from": "",
-        "to": "",
-        "reg": false,
-        "x": 1500,
-        "y": 2336,
-        "wires": [
-            [
-                "tel-vehicle"
-            ]
-        ]
-    },
-    {
-        "id": "mock-tel-hb",
-        "type": "change",
-        "z": "yonder-console",
-        "name": "mock tel-hb",
-        "rules": [
-            {
-                "t": "set",
-                "p": "payload",
-                "pt": "msg",
-                "to": "1.0 Hz",
-                "tot": "str"
-            }
-        ],
-        "action": "",
-        "property": "",
-        "from": "",
-        "to": "",
-        "reg": false,
-        "x": 1500,
-        "y": 2370,
-        "wires": [
-            [
-                "tel-hb"
-            ]
-        ]
-    },
-    {
-        "id": "mock-tel-heard",
-        "type": "change",
-        "z": "yonder-console",
-        "name": "mock tel-heard",
-        "rules": [
-            {
-                "t": "set",
-                "p": "payload",
-                "pt": "msg",
-                "to": "0.4 s ago",
-                "tot": "str"
-            }
-        ],
-        "action": "",
-        "property": "",
-        "from": "",
-        "to": "",
-        "reg": false,
-        "x": 1500,
-        "y": 2404,
-        "wires": [
-            [
-                "tel-heard"
-            ]
-        ]
-    },
-    {
-        "id": "mock-tel-ann-recv",
-        "type": "change",
-        "z": "yonder-console",
-        "name": "mock tel-ann-recv",
-        "rules": [
-            {
-                "t": "set",
-                "p": "payload",
-                "pt": "msg",
-                "to": "{\"state\": \"confirmed\", \"message\": \"Answering\"}",
-                "tot": "json"
-            }
-        ],
-        "action": "",
-        "property": "",
-        "from": "",
-        "to": "",
-        "reg": false,
-        "x": 1500,
-        "y": 2438,
-        "wires": [
-            [
-                "tel-ann-recv"
-            ]
-        ]
-    },
-    {
-        "id": "mock-tel-answered",
-        "type": "change",
-        "z": "yonder-console",
-        "name": "mock tel-answered",
-        "rules": [
-            {
-                "t": "set",
-                "p": "payload",
-                "pt": "msg",
-                "to": "GCS 0 \u00b7 0.3 s ago",
-                "tot": "str"
-            }
-        ],
-        "action": "",
-        "property": "",
-        "from": "",
-        "to": "",
-        "reg": false,
-        "x": 1500,
-        "y": 2472,
-        "wires": [
-            [
-                "tel-answered"
-            ]
-        ]
-    },
-    {
-        "id": "mock-tel-host-0",
-        "type": "change",
-        "z": "yonder-console",
-        "name": "mock tel-host-0",
-        "rules": [
-            {
-                "t": "set",
-                "p": "payload",
-                "pt": "msg",
-                "to": "192.168.191.40",
-                "tot": "str"
-            }
-        ],
-        "action": "",
-        "property": "",
-        "from": "",
-        "to": "",
-        "reg": false,
-        "x": 1500,
-        "y": 2506,
-        "wires": [
-            [
-                "tel-host-0"
-            ]
-        ]
-    },
-    {
-        "id": "mock-tel-port-0",
-        "type": "change",
-        "z": "yonder-console",
-        "name": "mock tel-port-0",
-        "rules": [
-            {
-                "t": "set",
-                "p": "payload",
-                "pt": "msg",
-                "to": "14550",
-                "tot": "str"
-            }
-        ],
-        "action": "",
-        "property": "",
-        "from": "",
-        "to": "",
-        "reg": false,
-        "x": 1500,
-        "y": 2540,
-        "wires": [
-            [
-                "tel-port-0"
-            ]
-        ]
-    },
-    {
-        "id": "mock-tel-host-1",
-        "type": "change",
-        "z": "yonder-console",
-        "name": "mock tel-host-1",
-        "rules": [
-            {
-                "t": "set",
-                "p": "payload",
-                "pt": "msg",
-                "to": "10.147.20.8",
-                "tot": "str"
-            }
-        ],
-        "action": "",
-        "property": "",
-        "from": "",
-        "to": "",
-        "reg": false,
-        "x": 1500,
-        "y": 2574,
-        "wires": [
-            [
-                "tel-host-1"
-            ]
-        ]
-    },
-    {
-        "id": "mock-tel-port-1",
-        "type": "change",
-        "z": "yonder-console",
-        "name": "mock tel-port-1",
-        "rules": [
-            {
-                "t": "set",
-                "p": "payload",
-                "pt": "msg",
-                "to": "14551",
-                "tot": "str"
-            }
-        ],
-        "action": "",
-        "property": "",
-        "from": "",
-        "to": "",
-        "reg": false,
-        "x": 1500,
-        "y": 2608,
-        "wires": [
-            [
-                "tel-port-1"
-            ]
-        ]
-    },
-    {
-        "id": "mock-tel-host-2",
-        "type": "change",
-        "z": "yonder-console",
-        "name": "mock tel-host-2",
-        "rules": [
-            {
-                "t": "set",
-                "p": "payload",
-                "pt": "msg",
-                "to": "",
-                "tot": "str"
-            }
-        ],
-        "action": "",
-        "property": "",
-        "from": "",
-        "to": "",
-        "reg": false,
-        "x": 1500,
-        "y": 2642,
-        "wires": [
-            [
-                "tel-host-2"
-            ]
-        ]
-    },
-    {
-        "id": "mock-tel-port-2",
-        "type": "change",
-        "z": "yonder-console",
-        "name": "mock tel-port-2",
-        "rules": [
-            {
-                "t": "set",
-                "p": "payload",
-                "pt": "msg",
-                "to": "",
-                "tot": "str"
-            }
-        ],
-        "action": "",
-        "property": "",
-        "from": "",
-        "to": "",
-        "reg": false,
-        "x": 1500,
-        "y": 2676,
-        "wires": [
-            [
-                "tel-port-2"
-            ]
-        ]
-    },
-    {
-        "id": "mock-tel-tcp",
-        "type": "change",
-        "z": "yonder-console",
-        "name": "mock tel-tcp",
-        "rules": [
-            {
-                "t": "set",
-                "p": "payload",
-                "pt": "msg",
-                "to": ":5760 \u00b7 1 client",
-                "tot": "str"
-            }
-        ],
-        "action": "",
-        "property": "",
-        "from": "",
-        "to": "",
-        "reg": false,
-        "x": 1500,
-        "y": 2710,
-        "wires": [
-            [
-                "tel-tcp"
-            ]
-        ]
-    },
-    {
-        "id": "mock-tel-spark",
-        "type": "change",
-        "z": "yonder-console",
-        "name": "mock tel-spark",
-        "rules": [
-            {
-                "t": "set",
-                "p": "payload",
-                "pt": "msg",
-                "to": "{\"series\": {\"rx\": [0.9, 1.0, 0.95, 1.1, 1.05, 1.2, 1.1, 1.25, 1.15, 1.3], \"tx\": [2.6, 2.8, 2.7, 3.0, 2.9, 3.1, 3.0, 3.2, 3.1, 3.3]}, \"peak\": \"4.1 kB/s\", \"span\": \"last 2 min\", \"known\": true}",
-                "tot": "json"
-            }
-        ],
-        "action": "",
-        "property": "",
-        "from": "",
-        "to": "",
-        "reg": false,
-        "x": 1500,
-        "y": 2744,
-        "wires": [
-            [
-                "tel-spark"
-            ]
-        ]
-    },
-    {
-        "id": "mock-tel-ann-state",
-        "type": "change",
-        "z": "yonder-console",
-        "name": "mock tel-ann-state",
-        "rules": [
-            {
-                "t": "set",
-                "p": "payload",
-                "pt": "msg",
-                "to": "{\"state\": \"confirmed\", \"message\": \"Running\"}",
-                "tot": "json"
-            }
-        ],
-        "action": "",
-        "property": "",
-        "from": "",
-        "to": "",
-        "reg": false,
-        "x": 1500,
-        "y": 2778,
-        "wires": [
-            [
-                "tel-ann-state"
-            ]
-        ]
-    },
-    {
-        "id": "mock-tel-atboot",
-        "type": "change",
-        "z": "yonder-console",
-        "name": "mock tel-atboot",
-        "rules": [
-            {
-                "t": "set",
-                "p": "payload",
-                "pt": "msg",
-                "to": "Automatic",
-                "tot": "str"
-            }
-        ],
-        "action": "",
-        "property": "",
-        "from": "",
-        "to": "",
-        "reg": false,
-        "x": 1500,
-        "y": 2812,
-        "wires": [
-            [
-                "tel-atboot"
-            ]
-        ]
-    },
-    {
-        "id": "mock-tel-ingest",
-        "type": "change",
-        "z": "yonder-console",
-        "name": "mock tel-ingest",
-        "rules": [
-            {
-                "t": "set",
-                "p": "payload",
-                "pt": "msg",
-                "to": "Loopback only",
-                "tot": "str"
-            }
-        ],
-        "action": "",
-        "property": "",
-        "from": "",
-        "to": "",
-        "reg": false,
-        "x": 1500,
-        "y": 2846,
-        "wires": [
-            [
-                "tel-ingest"
-            ]
-        ]
-    },
-    {
-        "id": "mock-tel-chain-1",
-        "type": "change",
-        "z": "yonder-console",
-        "name": "mock tel-chain-1",
-        "rules": [
-            {
-                "t": "set",
-                "p": "payload",
-                "pt": "msg",
-                "to": "OK \u00b7 1.0 Hz",
-                "tot": "str"
-            }
-        ],
-        "action": "",
-        "property": "",
-        "from": "",
-        "to": "",
-        "reg": false,
-        "x": 1500,
-        "y": 2880,
-        "wires": [
-            [
-                "tel-chain-1"
-            ]
-        ]
-    },
-    {
-        "id": "mock-tel-chain-2",
-        "type": "change",
-        "z": "yonder-console",
-        "name": "mock tel-chain-2",
-        "rules": [
-            {
-                "t": "set",
-                "p": "payload",
-                "pt": "msg",
-                "to": "OK \u00b7 3.1 kB/s",
-                "tot": "str"
-            }
-        ],
-        "action": "",
-        "property": "",
-        "from": "",
-        "to": "",
-        "reg": false,
-        "x": 1500,
-        "y": 2914,
-        "wires": [
-            [
-                "tel-chain-2"
-            ]
-        ]
-    },
-    {
-        "id": "mock-tel-chain-3",
-        "type": "change",
-        "z": "yonder-console",
-        "name": "mock tel-chain-3",
-        "rules": [
-            {
-                "t": "set",
-                "p": "payload",
-                "pt": "msg",
-                "to": "OK \u00b7 0.3 s ago",
-                "tot": "str"
-            }
-        ],
-        "action": "",
-        "property": "",
-        "from": "",
-        "to": "",
-        "reg": false,
-        "x": 1500,
-        "y": 2948,
-        "wires": [
-            [
-                "tel-chain-3"
-            ]
-        ]
-    },
-    {
-        "id": "mock-stat-ann-feed",
-        "type": "change",
-        "z": "yonder-console",
-        "name": "mock stat-ann-feed",
-        "rules": [
-            {
-                "t": "set",
-                "p": "payload",
-                "pt": "msg",
-                "to": "{\"state\": \"confirmed\", \"message\": \"Flowing\"}",
-                "tot": "json"
-            }
-        ],
-        "action": "",
-        "property": "",
-        "from": "",
-        "to": "",
-        "reg": false,
-        "x": 1500,
-        "y": 2982,
-        "wires": [
-            [
-                "stat-ann-feed"
-            ]
-        ]
-    },
-    {
-        "id": "mock-stat-flow",
-        "type": "change",
-        "z": "yonder-console",
-        "name": "mock stat-flow",
-        "rules": [
-            {
-                "t": "set",
-                "p": "payload",
-                "pt": "msg",
-                "to": "{\"from\": {\"label\": \"ArduPlane\", \"detail\": \"/dev/ttyAMA0 \\u00b7 57 600 baud\"}, \"through\": {\"label\": \"Yonder\", \"detail\": \"mavlink-router \\u00b7 up 16 min\"}, \"to\": {\"label\": \"2 ground stations\", \"detail\": \"192.168.191.40:14550 \\u00b7 +1 tcp\"}, \"legs\": [{\"rate\": \"1.0 Hz\", \"caption\": \"heartbeat\"}, {\"rate\": \"3.1 kB/s\", \"caption\": \"answering\"}]}",
-                "tot": "json"
-            }
-        ],
-        "action": "",
-        "property": "",
-        "from": "",
-        "to": "",
-        "reg": false,
-        "x": 1500,
-        "y": 3016,
-        "wires": [
-            [
-                "stat-flow"
-            ]
-        ]
-    },
-    {
-        "id": "mock-stat-tel-bar",
-        "type": "change",
-        "z": "yonder-console",
-        "name": "mock stat-tel-bar",
-        "rules": [
-            {
-                "t": "set",
-                "p": "payload",
-                "pt": "msg",
-                "to": "{\"atboot\": \"Automatic\", \"ingest\": \"Loopback only\", \"heard\": \"0.4 s ago\", \"vehicle\": \"ArduPlane \\u00b7 sys 1\"}",
-                "tot": "json"
-            }
-        ],
-        "action": "",
-        "property": "",
-        "from": "",
-        "to": "",
-        "reg": false,
-        "x": 1500,
-        "y": 3050,
-        "wires": [
-            [
-                "stat-tel-bar"
-            ]
-        ]
-    },
-    {
-        "id": "mock-telemetry-once",
-        "type": "inject",
-        "z": "yonder-console",
-        "name": "MOCKUP \u2014 static telemetry, until yonder-core feeds this",
-        "props": [
-            {
-                "p": "payload"
-            }
-        ],
-        "repeat": "",
-        "crontab": "",
-        "once": true,
-        "onceDelay": "1.2",
-        "topic": "",
-        "payload": "",
-        "payloadType": "date",
-        "x": 1120,
-        "y": 2200,
-        "wires": [
-            [
-                "mock-tel-ann-link",
-                "mock-tel-port",
-                "mock-tel-speed",
-                "mock-tel-vehicle",
-                "mock-tel-hb",
-                "mock-tel-heard",
-                "mock-tel-ann-recv",
-                "mock-tel-answered",
-                "mock-tel-host-0",
-                "mock-tel-port-0",
-                "mock-tel-host-1",
-                "mock-tel-port-1",
-                "mock-tel-host-2",
-                "mock-tel-port-2",
-                "mock-tel-tcp",
-                "mock-tel-spark",
-                "mock-tel-ann-state",
-                "mock-tel-atboot",
-                "mock-tel-ingest",
-                "mock-tel-chain-1",
-                "mock-tel-chain-2",
-                "mock-tel-chain-3",
-                "mock-stat-ann-feed",
-                "mock-stat-flow",
-                "mock-stat-tel-bar",
-                "mock-label-tel-ann-link",
-                "mock-label-tel-ann-recv",
-                "mock-label-tel-ann-state",
-                "mock-label-stat-ann-feed",
-                "mock-tel-gcs-0",
-                "mock-tel-gcs-1",
-                "mock-tel-gcs-2"
-            ]
-        ]
     },
     {
         "id": "group-tel-pending",
@@ -5761,44 +5037,44 @@
         ]
     },
     {
-        "id": "mock-label-tel-ann-link",
-        "type": "change",
+        "id": "tel-poll",
+        "type": "inject",
         "z": "yonder-console",
-        "name": "mock label-tel-ann-link",
-        "rules": [
+        "name": "poll the telemetry link",
+        "props": [
             {
-                "t": "set",
-                "p": "payload",
-                "pt": "msg",
-                "to": "",
-                "tot": "str"
+                "p": "payload"
             }
         ],
-        "action": "",
-        "property": "",
-        "from": "",
-        "to": "",
-        "reg": false,
-        "x": 1500,
-        "y": 3434,
+        "repeat": "2",
+        "crontab": "",
+        "once": true,
+        "onceDelay": "1.5",
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 200,
+        "y": 5500,
         "wires": [
             [
-                "label-tel-ann-link"
+                "tel-state",
+                "check-path",
+                "tel-labels"
             ]
         ]
     },
     {
-        "id": "mock-label-tel-ann-recv",
+        "id": "pick-tel-link",
         "type": "change",
         "z": "yonder-console",
-        "name": "mock label-tel-ann-recv",
+        "name": "the Link lamp",
         "rules": [
             {
                 "t": "set",
                 "p": "payload",
                 "pt": "msg",
-                "to": "",
-                "tot": "str"
+                "to": "payload.link",
+                "tot": "msg"
             }
         ],
         "action": "",
@@ -5806,26 +5082,26 @@
         "from": "",
         "to": "",
         "reg": false,
-        "x": 1500,
-        "y": 3468,
+        "x": 760,
+        "y": 5460,
         "wires": [
             [
-                "label-tel-ann-recv"
+                "tel-ann-link"
             ]
         ]
     },
     {
-        "id": "mock-label-tel-ann-state",
+        "id": "pick-tel-port",
         "type": "change",
         "z": "yonder-console",
-        "name": "mock label-tel-ann-state",
+        "name": "the serial port",
         "rules": [
             {
                 "t": "set",
                 "p": "payload",
                 "pt": "msg",
-                "to": "",
-                "tot": "str"
+                "to": "payload.port",
+                "tot": "msg"
             }
         ],
         "action": "",
@@ -5833,26 +5109,26 @@
         "from": "",
         "to": "",
         "reg": false,
-        "x": 1500,
-        "y": 3502,
+        "x": 760,
+        "y": 5494,
         "wires": [
             [
-                "label-tel-ann-state"
+                "tel-port"
             ]
         ]
     },
     {
-        "id": "mock-label-stat-ann-feed",
+        "id": "pick-tel-speed",
         "type": "change",
         "z": "yonder-console",
-        "name": "mock label-stat-ann-feed",
+        "name": "the speed it was found at",
         "rules": [
             {
                 "t": "set",
                 "p": "payload",
                 "pt": "msg",
-                "to": "",
-                "tot": "str"
+                "to": "payload.speed",
+                "tot": "msg"
             }
         ],
         "action": "",
@@ -5860,26 +5136,26 @@
         "from": "",
         "to": "",
         "reg": false,
-        "x": 1500,
-        "y": 3536,
+        "x": 760,
+        "y": 5528,
         "wires": [
             [
-                "label-stat-ann-feed"
+                "tel-speed"
             ]
         ]
     },
     {
-        "id": "mock-tel-gcs-0",
+        "id": "pick-tel-vehicle",
         "type": "change",
         "z": "yonder-console",
-        "name": "mock tel-gcs-0",
+        "name": "the vehicle and its system",
         "rules": [
             {
                 "t": "set",
                 "p": "payload",
                 "pt": "msg",
-                "to": "{\"state\": \"confirmed\", \"message\": \"GCS 0 \\u00b7 answering\"}",
-                "tot": "json"
+                "to": "payload.vehicle",
+                "tot": "msg"
             }
         ],
         "action": "",
@@ -5887,8 +5163,143 @@
         "from": "",
         "to": "",
         "reg": false,
-        "x": 1500,
-        "y": 3634,
+        "x": 760,
+        "y": 5562,
+        "wires": [
+            [
+                "tel-vehicle"
+            ]
+        ]
+    },
+    {
+        "id": "pick-tel-hb",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "the heartbeat rate",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "payload.heartbeat",
+                "tot": "msg"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 760,
+        "y": 5596,
+        "wires": [
+            [
+                "tel-hb"
+            ]
+        ]
+    },
+    {
+        "id": "pick-tel-heard",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "how long since the last one",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "payload.heard",
+                "tot": "msg"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 760,
+        "y": 5630,
+        "wires": [
+            [
+                "tel-heard"
+            ]
+        ]
+    },
+    {
+        "id": "pick-tel-recv",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "the Receiving lamp",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "payload.receiving",
+                "tot": "msg"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 760,
+        "y": 5664,
+        "wires": [
+            [
+                "tel-ann-recv"
+            ]
+        ]
+    },
+    {
+        "id": "pick-tel-answered",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "which station answered last",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "payload.answered",
+                "tot": "msg"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 760,
+        "y": 5698,
+        "wires": [
+            [
+                "tel-answered"
+            ]
+        ]
+    },
+    {
+        "id": "pick-tel-gcs-0",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "the first station's own mark",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "payload.groundStations[0]",
+                "tot": "msg"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 760,
+        "y": 5732,
         "wires": [
             [
                 "tel-gcs-0"
@@ -5896,17 +5307,17 @@
         ]
     },
     {
-        "id": "mock-tel-gcs-1",
+        "id": "pick-tel-gcs-1",
         "type": "change",
         "z": "yonder-console",
-        "name": "mock tel-gcs-1",
+        "name": "the second station's own mark",
         "rules": [
             {
                 "t": "set",
                 "p": "payload",
                 "pt": "msg",
-                "to": "{\"state\": \"pending\", \"message\": \"GCS 1 \\u00b7 silent\"}",
-                "tot": "json"
+                "to": "payload.groundStations[1]",
+                "tot": "msg"
             }
         ],
         "action": "",
@@ -5914,8 +5325,8 @@
         "from": "",
         "to": "",
         "reg": false,
-        "x": 1500,
-        "y": 3668,
+        "x": 760,
+        "y": 5766,
         "wires": [
             [
                 "tel-gcs-1"
@@ -5923,17 +5334,17 @@
         ]
     },
     {
-        "id": "mock-tel-gcs-2",
+        "id": "pick-tel-gcs-2",
         "type": "change",
         "z": "yonder-console",
-        "name": "mock tel-gcs-2",
+        "name": "the third station's own mark",
         "rules": [
             {
                 "t": "set",
                 "p": "payload",
                 "pt": "msg",
-                "to": "{\"state\": \"idle\", \"message\": \"GCS 2 \\u00b7 not set\"}",
-                "tot": "json"
+                "to": "payload.groundStations[2]",
+                "tot": "msg"
             }
         ],
         "action": "",
@@ -5941,11 +5352,652 @@
         "from": "",
         "to": "",
         "reg": false,
-        "x": 1500,
-        "y": 3702,
+        "x": 760,
+        "y": 5800,
         "wires": [
             [
                 "tel-gcs-2"
+            ]
+        ]
+    },
+    {
+        "id": "pick-tel-spark",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "the throughput series",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "payload.spark",
+                "tot": "msg"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 760,
+        "y": 5834,
+        "wires": [
+            [
+                "tel-spark"
+            ]
+        ]
+    },
+    {
+        "id": "pick-tel-running",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "the rail's State lamp",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "payload.running",
+                "tot": "msg"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 760,
+        "y": 5868,
+        "wires": [
+            [
+                "tel-ann-state"
+            ]
+        ]
+    },
+    {
+        "id": "pick-stat-feed",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "the Status page's Feed lamp",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "payload.feed",
+                "tot": "msg"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 760,
+        "y": 5902,
+        "wires": [
+            [
+                "stat-ann-feed"
+            ]
+        ]
+    },
+    {
+        "id": "pick-stat-flow",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "from, through, to",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "payload.flow",
+                "tot": "msg"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 760,
+        "y": 5936,
+        "wires": [
+            [
+                "stat-flow"
+            ]
+        ]
+    },
+    {
+        "id": "join-tel-tcp",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "the TCP server: its port, and who is on it",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "$flowContext(\"telTcpAddress\") & \" \u00b7 \" & payload.tcpClients",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 760,
+        "y": 5970,
+        "wires": [
+            [
+                "tel-tcp"
+            ]
+        ]
+    },
+    {
+        "id": "join-stat-tel-bar",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "the Status strip: two settings and two measurements",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "{\"atboot\": $flowContext(\"telAtBoot\"), \"ingest\": $flowContext(\"telIngest\"), \"heard\": payload.heard, \"vehicle\": payload.vehicleShort}",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 760,
+        "y": 6004,
+        "wires": [
+            [
+                "stat-tel-bar"
+            ]
+        ]
+    },
+    {
+        "id": "tel-state",
+        "type": "yonder-mav-state",
+        "z": "yonder-console",
+        "name": "the telemetry link, as it stands",
+        "x": 480,
+        "y": 5500,
+        "wires": [
+            [
+                "pick-tel-link",
+                "pick-tel-port",
+                "pick-tel-speed",
+                "pick-tel-vehicle",
+                "pick-tel-hb",
+                "pick-tel-heard",
+                "pick-tel-recv",
+                "pick-tel-answered",
+                "pick-tel-gcs-0",
+                "pick-tel-gcs-1",
+                "pick-tel-gcs-2",
+                "pick-tel-spark",
+                "pick-tel-running",
+                "pick-stat-feed",
+                "pick-stat-flow",
+                "join-tel-tcp",
+                "join-stat-tel-bar"
+            ]
+        ]
+    },
+    {
+        "id": "tel-labels",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "the four lamp captions, which have no value of their own",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 480,
+        "y": 5560,
+        "wires": [
+            [
+                "label-tel-ann-link",
+                "label-tel-ann-recv",
+                "label-tel-ann-state",
+                "label-stat-ann-feed"
+            ]
+        ]
+    },
+    {
+        "id": "seed-tel-endpoints",
+        "type": "yonder-mav-endpoints",
+        "z": "yonder-console",
+        "name": "what the configuration says these boxes hold",
+        "x": 260,
+        "y": 5620,
+        "wires": [
+            [
+                "remember-tel-facts",
+                "pick-tel-atboot",
+                "pick-tel-ingest",
+                "tel-keys-ingest"
+            ],
+            [
+                "tel-host-0"
+            ],
+            [
+                "tel-port-0"
+            ],
+            [
+                "tel-host-1"
+            ],
+            [
+                "tel-port-1"
+            ],
+            [
+                "tel-host-2"
+            ],
+            [
+                "tel-port-2"
+            ]
+        ]
+    },
+    {
+        "id": "remember-tel-facts",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "the three settings the two joins above read",
+        "rules": [
+            {
+                "t": "set",
+                "p": "telAtBoot",
+                "pt": "flow",
+                "to": "payload.atboot",
+                "tot": "msg"
+            },
+            {
+                "t": "set",
+                "p": "telIngest",
+                "pt": "flow",
+                "to": "payload.ingest",
+                "tot": "msg"
+            },
+            {
+                "t": "set",
+                "p": "telTcpAddress",
+                "pt": "flow",
+                "to": "payload.tcpAddress",
+                "tot": "msg"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 760,
+        "y": 5620,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "pick-tel-atboot",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "at boot",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "payload.atboot",
+                "tot": "msg"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 760,
+        "y": 5654,
+        "wires": [
+            [
+                "tel-atboot"
+            ]
+        ]
+    },
+    {
+        "id": "pick-tel-ingest",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "accepting from",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "payload.ingest",
+                "tot": "msg"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 760,
+        "y": 5688,
+        "wires": [
+            [
+                "tel-ingest"
+            ]
+        ]
+    },
+    {
+        "id": "check-path",
+        "type": "yonder-mav-check",
+        "z": "yonder-console",
+        "name": "the path, link by link",
+        "x": 480,
+        "y": 5760,
+        "wires": [
+            [
+                "pick-tel-chain-1",
+                "pick-tel-chain-2",
+                "pick-tel-chain-3"
+            ]
+        ]
+    },
+    {
+        "id": "pick-tel-chain-1",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "autopilot to Yonder",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "payload.autopilot",
+                "tot": "msg"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 760,
+        "y": 5760,
+        "wires": [
+            [
+                "tel-chain-1"
+            ]
+        ]
+    },
+    {
+        "id": "pick-tel-chain-2",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "Yonder to the stations",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "payload.outbound",
+                "tot": "msg"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 760,
+        "y": 5794,
+        "wires": [
+            [
+                "tel-chain-2"
+            ]
+        ]
+    },
+    {
+        "id": "pick-tel-chain-3",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "a station back to Yonder",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "payload.inbound",
+                "tot": "msg"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 760,
+        "y": 5828,
+        "wires": [
+            [
+                "tel-chain-3"
+            ]
+        ]
+    },
+    {
+        "id": "run-telemetry",
+        "type": "yonder-mav-run",
+        "z": "yonder-console",
+        "name": "stop it, or start it",
+        "action": "toggle",
+        "x": 480,
+        "y": 5880,
+        "wires": [
+            [
+                "pick-tel-link",
+                "pick-tel-port",
+                "pick-tel-speed",
+                "pick-tel-vehicle",
+                "pick-tel-hb",
+                "pick-tel-heard",
+                "pick-tel-recv",
+                "pick-tel-answered",
+                "pick-tel-gcs-0",
+                "pick-tel-gcs-1",
+                "pick-tel-gcs-2",
+                "pick-tel-spark",
+                "pick-tel-running",
+                "pick-stat-feed",
+                "pick-stat-flow",
+                "join-tel-tcp",
+                "join-stat-tel-bar"
+            ]
+        ]
+    },
+    {
+        "id": "route-tel-ingest",
+        "type": "switch",
+        "z": "yonder-console",
+        "name": "which key was pressed",
+        "property": "payload",
+        "propertyType": "msg",
+        "rules": [
+            {
+                "t": "eq",
+                "v": "loopback",
+                "vt": "str"
+            },
+            {
+                "t": "eq",
+                "v": "open",
+                "vt": "str"
+            }
+        ],
+        "checkall": "true",
+        "repair": false,
+        "outputs": 2,
+        "x": 260,
+        "y": 5940,
+        "wires": [
+            [
+                "want-tel-loopback"
+            ],
+            [
+                "want-tel-open"
+            ]
+        ]
+    },
+    {
+        "id": "want-tel-loopback",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "this device only",
+        "rules": [
+            {
+                "t": "set",
+                "p": "telLoopbackOnly",
+                "pt": "flow",
+                "to": "true",
+                "tot": "bool"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 560,
+        "y": 5920,
+        "wires": [
+            [
+                "read-tel-config"
+            ]
+        ]
+    },
+    {
+        "id": "want-tel-open",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "any network",
+        "rules": [
+            {
+                "t": "set",
+                "p": "telLoopbackOnly",
+                "pt": "flow",
+                "to": "false",
+                "tot": "bool"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 560,
+        "y": 5960,
+        "wires": [
+            [
+                "read-tel-config"
+            ]
+        ]
+    },
+    {
+        "id": "read-tel-config",
+        "type": "yonder-config",
+        "z": "yonder-console",
+        "name": "read",
+        "x": 820,
+        "y": 5940,
+        "wires": [
+            [
+                "patch-tel-ingest"
+            ]
+        ]
+    },
+    {
+        "id": "patch-tel-ingest",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "one setting changed, the whole document applied",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload.mavlink.ingest.loopback_only",
+                "pt": "msg",
+                "to": "telLoopbackOnly",
+                "tot": "flow"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 1020,
+        "y": 5940,
+        "wires": [
+            [
+                "apply-tel-ingest"
+            ]
+        ]
+    },
+    {
+        "id": "apply-tel-ingest",
+        "type": "yonder-apply",
+        "z": "yonder-console",
+        "name": "apply",
+        "x": 1320,
+        "y": 5940,
+        "wires": [
+            [
+                "say-tel"
+            ]
+        ]
+    },
+    {
+        "id": "say-tel",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "what happened, in words",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "yonder.message",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 1480,
+        "y": 5940,
+        "wires": [
+            [
+                "join-toast"
             ]
         ]
     }

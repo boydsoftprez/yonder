@@ -29,6 +29,7 @@ export {
   type ReadingBounds,
   type ReadingTone,
 } from "./console/reading.js";
+export { groupThousands } from "./console/digits.js";
 export { startServer } from "./daemon/server.js";
 export {
   systemRunner,

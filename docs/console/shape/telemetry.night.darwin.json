@@ -87,7 +87,7 @@
       }
     },
     {
-      "key": "nrdb-ui-text.nrdb-ui-widget#0",
+      "key": "nrdb-ui-text.nrdb-ui-widget",
       "box": {
         "x": 960,
         "y": 148,
@@ -105,7 +105,7 @@
       }
     },
     {
-      "key": "nrdb-ui-text.nrdb-ui-widget#1",
+      "key": "nrdb-ui-text.nrdb-ui-widget.yonder-fixed#0",
       "box": {
         "x": 960,
         "y": 208,
@@ -114,7 +114,7 @@
       }
     },
     {
-      "key": "nrdb-ui-text.nrdb-ui-widget#2",
+      "key": "nrdb-ui-text.nrdb-ui-widget.yonder-fixed#1",
       "box": {
         "x": 960,
         "y": 268,
@@ -299,35 +299,45 @@
         "x": 960,
         "y": 596,
         "w": 291,
-        "h": 48
+        "h": 108
       }
     },
     {
       "key": "nrdb-ui-text.nrdb-ui-widget.yonder-qualifier#1",
       "box": {
         "x": 960,
-        "y": 656,
+        "y": 716,
         "w": 291,
-        "h": 48
+        "h": 108
       }
     },
     {
       "key": "nrdb-ui-text.nrdb-ui-widget.yonder-qualifier#2",
       "box": {
         "x": 960,
-        "y": 716,
+        "y": 836,
         "w": 291,
-        "h": 48
+        "h": 108
       }
     },
     {
       "key": "nrdb-ui-button.nrdb-ui-widget",
       "box": {
         "x": 960,
-        "y": 776,
+        "y": 956,
         "w": 291,
         "h": 48
       }
+    }
+  ],
+  "fixed": [
+    {
+      "key": "nrdb-ui-text.nrdb-ui-widget.yonder-fixed#0",
+      "text": "At bootAutomatic"
+    },
+    {
+      "key": "nrdb-ui-text.nrdb-ui-widget.yonder-fixed#1",
+      "text": "Accepting fromLoopback only"
     }
   ]
 }

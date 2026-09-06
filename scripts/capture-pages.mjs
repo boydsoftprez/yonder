@@ -95,6 +95,16 @@ const LIVE = [
   // under it wear `yonder-fixed`, so what the banner is about is still
   // readable in the picture.
   ".yonder-live .y-ann__text",
+  // The telemetry instruments' own readings. A leg's rate and a sparkline's
+  // series are measurements that differ between two runs of this gate by
+  // construction — a heartbeat interval and a router's kB counter — so
+  // leaving them unmasked would leave both committed pictures dirty after
+  // every run, which is the failure this list exists to prevent. The places
+  // either side of a leg, its caption and the span under the chart are
+  // words rather than readings, and stay readable in the picture.
+  ".y-flow__rate",
+  ".y-spark__chart",
+  ".y-spark__ceiling",
 ];
 
 /**

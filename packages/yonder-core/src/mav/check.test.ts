@@ -64,7 +64,7 @@ describe("pathCheck — Autopilot to Yonder", () => {
     const { autopilot } = pathCheck(healthy());
     expect(autopilot.ok).toBe(true);
     expect(autopilot.detail).toMatch(/1\.0 Hz/);
-    expect(autopilot.detail).toMatch(/57600 baud/);
+    expect(autopilot.detail).toMatch(/57 600 baud/);
   });
 
   /**
@@ -129,7 +129,7 @@ describe("pathCheck — Autopilot to Yonder", () => {
     }));
     expect(autopilot.ok).toBe(true);
     expect(autopilot.detail).toMatch(/1\.0 Hz/);
-    expect(autopilot.detail).toMatch(/57600 baud/);
+    expect(autopilot.detail).toMatch(/57 600 baud/);
   });
 
   // And the honest limit of that: if the router really is down — the stop's

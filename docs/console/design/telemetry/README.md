@@ -47,6 +47,19 @@ states through the daemon and captures each under its own name. This page has si
 are enumerated here so the capture gate has a list to work from rather than a judgement to
 make.
 
+**Five of those six are what the gate captures, and the sixth is a different one.** When
+the page was wired to the daemon the six became `telemetry`, `telemetry-stopped`,
+`telemetry-searching`, `telemetry-not-mavlink`, `telemetry-pending` and
+`telemetry-ingest-open`. *Sent* is not among them and *a change pending* is, for one
+reason: **nothing on the built page changes when `Send telemetry here` is pressed.** There
+is no reading for it to move — the row beside the button that would say a change is unsent
+was designed and never drawn — and there is no route behind it either, so the press has
+nothing to report. A picture of it would be the linked page under a second name. *A change
+pending* is a real second shape of this page, it is the one `R-UI-15` asks to be visible on
+every surface, and pressing `ANY NETWORK` reaches it through the daemon like every other
+state here. The spec's own list of six — linked, searching, not-MAVLink, stopped, ingest
+open, a change pending — is the one the gate follows.
+
 ## Every control is an instrument, and here is the list
 
 **This section exists because of what happened to the camera view.** Its spec described the
@@ -128,6 +141,56 @@ is §6 of the spec.
 
 **Where the files below disagree with the built page, the built page is right** — it is the
 one that carries the measurement.
+
+## The path check's rows are two lines now, and the built page is right
+
+The drawings' `Path check` rows were written to fit the box as first drawn — `OK · 1.0 Hz`,
+`OK · 3.1 kB/s`, `OK · 0.3 s ago` in `flows/flows.json`'s own former mocks for
+`tel-chain-1..3`, each comfortably one line. `mav/check.ts`'s real sentences were always
+going to be longer than that: its own docstring calls a mock's payload "a rough placeholder
+for a page layout" and says the real sentences are "longer and more specific", because each
+one also carries the *reason* `R-DIA-04` asks for, not the mark alone. Wired to the device,
+the same three rows read `OK · Heartbeat at 1.0 Hz, 57 600 baud`, `OK · 3.1 kB/s leaving, one
+ground station configured` and `OK · Answering, last heard 0.3 s ago` — and a sentence that
+explains itself is longer than one that does not.
+
+Each row is one `ui-text`, so the extra words wrap: the captured shape
+(`docs/console/shape/telemetry.day.darwin.json`) has the three `yonder-qualifier` rows at
+108px tall where the drawings show 48px, and the button below them moved down to match, the
+same box growing taller rather than the page being rearranged around it.
+
+**The owner inspected the built page and chose the longer wording over the shorter box.**
+Every row now explains itself without sending an operator looking elsewhere on the page for
+what `OK` or `✕` means, and nothing else on the page had to move to make room for the extra
+height it costs. So the built page's wording stays exactly as it is, and the drawings below,
+not yet redrawn, are the ones that predate it — the same relationship the per-station marks
+above have with theirs.
+
+## Three places the drawings and the built page still disagree
+
+Recorded rather than quietly resolved, because each is a real limit rather than a slip.
+
+**The unset host box does not say `not set`.** The drawing renders it as dimmed placeholder
+text and `R-UI-17` is what it is drawn from. `yonder-mav-endpoints` emits `""` for an unset
+row and must: putting the words in the *value* would let an operator press **Send telemetry
+here** with `not set` as a host. The right place is a placeholder, and **Dashboard 2.x's
+`ui-text-input` has none** — its widget passes `label`, `type`, `rules`, `clearable` and the
+four icon slots to Vuetify's text field and never a `placeholder`, so the property would sit
+in `flows.json` doing nothing. `label` would show the words but would then caption the two
+*filled* boxes with them as well. Closing this needs either a Yonder instrument for the row
+or the property upstream; until then an unset box is empty, and the lamp beside it says
+`GCS 2 · not set` in words.
+
+**The TCP server line says `no clients` where the drawing says `1 client`.** Nothing has
+measured how a connected TCP client appears in `mavlink-router`'s own statistics — as its
+own block, as a counter on the server's, or not at all — so `LinkState.tcpClients` is
+`null` and stays that way until a bench session with a client attached says what to count.
+A number nobody measured is the one thing this page must not print.
+
+**The Status page's flow strip names its destination by count, not by address, and carries
+no uptime.** `LinkState` has neither field: an endpoint's host and port are configuration,
+read by a different node, and `mavlink-router`'s uptime is not exposed at all. Both are said
+at length in `state.ts`'s own comments, and neither is worth inventing.
 
 ## What these files are not
 

@@ -116,6 +116,29 @@ describe("flows/flows.json", () => {
   });
 
   /**
+   * **Every value on the Telemetry page came from the device.**
+   *
+   * The page was built against thirty-two `change` nodes carrying static
+   * payloads and one `inject` to set them off, because the arrangement had to
+   * be settled by looking at it before there was anything to read. Those
+   * payloads were the specification the nodes in
+   * `node-red-contrib-yonder-mavlink` were then written against — and a
+   * mockup left in place beside the real source is a page that goes on
+   * looking right on a device that is telling it nothing at all.
+   *
+   * Asserted by prefix rather than by a list, so a mock added later to settle
+   * some other arrangement is caught by the same line.
+   */
+  it("carries no mockup scaffolding", () => {
+    const mocks = flows.filter((n) => String(n.id).startsWith("mock-"));
+    expect(
+      mocks.map((n) => n.id),
+      "flows/flows.json still has mockup scaffolding in it. A static payload beside a real "
+      + "source is a page that reads correctly on a device that has told it nothing.",
+    ).toEqual([]);
+  });
+
+  /**
    * The other type `settings.ts` excludes. `exec` runs arbitrary commands as
    * the console's user, and nothing Yonder ships needs it (R-SEC-05).
    */
@@ -2061,5 +2084,207 @@ describe("flows/flows.json If you lose this console", () => {
     // And nothing anywhere in the shipped flows carries the published value,
     // which would be a second copy of it going stale beside profiles.ts.
     expect(text).not.toMatch(/yonder1234/);
+  });
+});
+
+/**
+ * The Telemetry page, against the artefact (R-MAV-10, R-DIA-04, R-UI-17).
+ *
+ * The page itself was settled by building it and looking at it; what this
+ * describes is the cutover underneath it — thirty-two static payloads
+ * replaced by four adapters over the daemon socket. Every assertion here is
+ * about a *wire*, because that is all this file may contain: the decisions
+ * are in `node-red-contrib-yonder-mavlink`, where they have source and tests
+ * of their own.
+ */
+describe("flows/flows.json Telemetry page", () => {
+  const byId = (id: string) => flows.find((n) => n.id === id);
+  const wiresOf = (id: string) => ((byId(id)?.wires ?? []) as string[][]);
+  /** Everything wired downstream of a node, however many hops away. */
+  const reaches = (from: string): Set<string> => {
+    const seen = new Set<string>();
+    const queue = [from];
+    while (queue.length > 0) {
+      const id = queue.shift() as string;
+      for (const target of wiresOf(id).flat()) {
+        if (seen.has(target)) continue;
+        seen.add(target);
+        queue.push(target);
+      }
+    }
+    return seen;
+  };
+
+  /**
+   * Every widget on the page, and where its value has to have come from.
+   *
+   * `label-*` are the four captions beside the annunciators: an
+   * `ui-yonder-annunciator` carries no label of its own, so the word beside
+   * it is a `ui-text` whose *value* is deliberately empty — it has nothing to
+   * read from the device and still needs a message to render its label.
+   */
+  const FROM_STATE = [
+    "tel-ann-link", "tel-port", "tel-speed", "tel-vehicle", "tel-hb", "tel-heard",
+    "tel-ann-recv", "tel-answered", "tel-gcs-0", "tel-gcs-1", "tel-gcs-2",
+    "tel-spark", "tel-ann-state", "stat-ann-feed", "stat-flow",
+  ];
+  const FROM_CONFIG = [
+    "tel-atboot", "tel-ingest",
+    "tel-host-0", "tel-port-0", "tel-host-1", "tel-port-1", "tel-host-2", "tel-port-2",
+  ];
+  const COMPOSITE = ["tel-tcp", "stat-tel-bar"];
+  const FROM_CHECK = ["tel-chain-1", "tel-chain-2", "tel-chain-3"];
+
+  it("reads the link from the daemon, and nothing on the page invents one", () => {
+    const measured = reaches("tel-state");
+    for (const widget of [...FROM_STATE, ...COMPOSITE]) {
+      expect(measured.has(widget), `${widget} is not downstream of yonder-mav-state`).toBe(true);
+    }
+    expect(byId("tel-state")?.type).toBe("yonder-mav-state");
+  });
+
+  it("seeds every box from the configuration the console already read (R-UI-17)", () => {
+    expect(byId("seed-tel-endpoints")?.type).toBe("yonder-mav-endpoints");
+    // One read of `/config` for both forms on this console. A second reader
+    // on its own schedule is what would overwrite a half-typed host box.
+    expect(wiresOf("read-config").flat()).toContain("seed-tel-endpoints");
+    const seeded = reaches("seed-tel-endpoints");
+    for (const widget of FROM_CONFIG) {
+      expect(seeded.has(widget), `${widget} is not downstream of yonder-mav-endpoints`).toBe(true);
+    }
+    // Seven outputs, in the order the node documents them: the rail's facts,
+    // then host and port for each of the three rows. A pair crossed here puts
+    // a port in a host box on a real device and nothing else would say so.
+    const outputs = wiresOf("seed-tel-endpoints");
+    expect(outputs).toHaveLength(7);
+    expect(outputs.slice(1).map((o) => o[0]))
+      .toEqual(["tel-host-0", "tel-port-0", "tel-host-1", "tel-port-1", "tel-host-2", "tel-port-2"]);
+  });
+
+  /**
+   * **Two readouts have no single source, and this is the wiring that joins
+   * them.**
+   *
+   * `tel-tcp` is the TCP server's port — configuration — beside how many
+   * clients are on it — a measurement. `stat-tel-bar` is two settings beside
+   * two measurements. `/mav/state` carries neither setting and `config.yaml`
+   * carries neither measurement, so no node could have sent either payload
+   * whole: the configured half is put in flow context when the console opens
+   * and the measured half arrives on every poll.
+   */
+  it("joins the two readouts that are half configured and half measured", () => {
+    const remember = byId("remember-tel-facts");
+    const rules = (remember?.rules ?? []) as { p: string; pt: string }[];
+    expect(rules.map((r) => `${r.pt}.${r.p}`))
+      .toEqual(["flow.telAtBoot", "flow.telIngest", "flow.telTcpAddress"]);
+    expect(reaches("seed-tel-endpoints").has("remember-tel-facts")).toBe(true);
+
+    for (const join of ["join-tel-tcp", "join-stat-tel-bar"]) {
+      const node = byId(join);
+      expect(node?.type, join).toBe("change");
+      expect(JSON.stringify(node), join).toMatch(/\$flowContext/);
+      expect(reaches("tel-state").has(join), `${join} never sees a measurement`).toBe(true);
+    }
+    // Only ever what those three names hold. Caching the configuration
+    // itself in flow context is the defect the top-level test forbids: a
+    // change node reads and writes context by reference, so the cache and
+    // the document being applied become one object.
+    expect(JSON.stringify(byId("join-tel-tcp"))).toMatch(/telTcpAddress/);
+    expect(JSON.stringify(byId("join-stat-tel-bar"))).toMatch(/telAtBoot/);
+  });
+
+  /**
+   * R-MAV-09's one control, and the reply it acts on.
+   *
+   * `toggle` — a button carrying no payload of its own, so the node reads the
+   * current state and acts on the opposite of `telemetryRunning`. Its answer
+   * is the same `MavlinkStateBody` the poll reads, so it feeds the same
+   * widgets: the page turns over on the reply instead of on the next poll.
+   */
+  it("wires the one Stop/Start control, and lets its answer redraw the page", () => {
+    expect(wiresOf("tel-runstop").flat()).toEqual(["run-telemetry"]);
+    const run = byId("run-telemetry");
+    expect(run?.type).toBe("yonder-mav-run");
+    expect(run?.action).toBe("toggle");
+    expect(wiresOf("run-telemetry")).toEqual(wiresOf("tel-state"));
+  });
+
+  it("wires Check the path to the chain, and draws all three links (R-DIA-04)", () => {
+    expect(wiresOf("tel-check").flat()).toEqual(["check-path"]);
+    expect(byId("check-path")?.type).toBe("yonder-mav-check");
+    const checked = reaches("check-path");
+    for (const row of FROM_CHECK) {
+      expect(checked.has(row), `${row} is not downstream of yonder-mav-check`).toBe(true);
+    }
+  });
+
+  /**
+   * R-MAV-07 and R-UI-15 together. Where MAVLink is accepted from is
+   * configuration and is **not** exempt from the confirmation window, so
+   * pressing either key applies a whole document and the change pends — which
+   * is why nothing here confirms anything: the banner every surface already
+   * carries is what offers that.
+   */
+  it("routes the ingest keys through a switch, and applies the whole document", () => {
+    expect(wiresOf("tel-keys-ingest").flat()).toEqual(["route-tel-ingest"]);
+    const route = byId("route-tel-ingest");
+    expect(route?.type).toBe("switch");
+    const offered = (JSON.parse(String(byId("tel-keys-ingest")?.keys ?? "[]")) as { action: string }[])
+      .map((k) => k.action);
+    const routed = ((route?.rules ?? []) as { v: string }[]).map((r) => r.v);
+    expect(routed, "a key the rail offers that the switch does not route is a dead control")
+      .toEqual(offered);
+    // Every branch ends at the apply, and the apply posts a whole document —
+    // `yonder-apply` is the node that starts the confirmation clock, and a
+    // fragment is not something the daemon will validate.
+    for (const branch of wiresOf("route-tel-ingest").flat()) {
+      expect(reaches(branch).has("apply-tel-ingest"), `${branch} never reaches the apply`).toBe(true);
+    }
+    expect(byId("apply-tel-ingest")?.type).toBe("yonder-apply");
+    expect(reaches("apply-tel-ingest").has("join-toast")).toBe(true);
+  });
+
+  /**
+   * **R-MAV-07's rail says which way it is set, and the capture can see it.**
+   *
+   * `ui-yonder-softkeys` lights whichever key its own configuration marks
+   * `active` unless a message carries a list — and that configuration lights
+   * `THIS DEVICE` always, which is right for the shipped default and a lie
+   * the moment ingest is opened. The seed node computes the list off the same
+   * field as the words above it, and this is the wire that delivers it.
+   *
+   * `yonder-fixed` on the two settings is the other half. Both are
+   * configuration, not readings, so their text is the same on every run — and
+   * without it the committed picture of the ingest-open state came out
+   * byte-identical to the base one, because the only thing that differs
+   * between them is inside a masked `.nrdb-ui-text-value`. A state captured
+   * under its own name that asserts nothing is worse than not capturing it.
+   */
+  it("tells the ingest rail which way the device is actually set", () => {
+    expect(wiresOf("seed-tel-endpoints")[0]).toContain("tel-keys-ingest");
+    for (const id of ["tel-atboot", "tel-ingest"]) {
+      expect(String(byId(id)?.className), id).toContain("yonder-fixed");
+    }
+  });
+
+  it("polls the link no faster than the floor, and only from one place", () => {
+    const poll = byId("tel-poll");
+    expect(poll?.type).toBe("inject");
+    expect(Number(poll?.repeat) * 1000).toBeGreaterThanOrEqual(MIN_POLL_MS);
+    expect(wiresOf("tel-poll").flat()).toContain("tel-state");
+    // Nothing else asks the daemon for the link state on a timer.
+    const askers = flows.filter((n) => n.type === "yonder-mav-state").map((n) => n.id);
+    expect(askers).toEqual(["tel-state"]);
+  });
+
+  it("ships no function node", () => {
+    const wiring = [
+      ...FROM_STATE, ...FROM_CONFIG, ...COMPOSITE, ...FROM_CHECK,
+      ...reaches("tel-poll"), ...reaches("tel-keys-ingest"),
+      ...reaches("tel-runstop"), ...reaches("tel-check"),
+    ];
+    for (const id of new Set(wiring)) {
+      expect(byId(id)?.type, id).not.toBe("function");
+    }
   });
 });

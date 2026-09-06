@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import { groupThousands } from "yonder-core/presentation";
 
 /**
  * Presentation arithmetic for the Telemetry page (R-MAV-10).
@@ -24,19 +25,27 @@
  * long digit string at arm's length, and grouping it is what turns it back
  * into a number.
  *
- * A plain ASCII space, not the thin space (U+2009) the pre-built mockups
- * used: `flows/flows.json`'s own mock for `tel-speed` is `"57 600 baud"`,
- * byte-checked, and the built page wins over a mockup that predates it.
+ * The grouping itself is `yonder-core/presentation`'s `groupThousands`, not
+ * a second copy of it. `mav/check.ts`'s own path-check sentence needs the
+ * identical decision about the identical measurement (`LinkState.baud`) and
+ * cannot import this file — the dependency between the two packages runs
+ * the other way — so both now call the one function in the package
+ * underneath both of them. Before `groupThousands` existed, each formatted
+ * the number its own way, and the built page could read "57 600 baud" in
+ * the Autopilot panel and "57600 baud" a few pixels away in the rail's path
+ * check, for the same link. `console/digits.test.ts` in `yonder-core`, and
+ * the cross-package check below, are what keep that from coming back.
  *
  * `unknown` in, `null` out for anything that is not a finite number — the
  * same reasoning `yonder-core`'s `formatBytes`/`formatRate` give at length:
  * this value crosses a process boundary from a daemon that may be older
  * than this console, and a field that daemon has never heard of arrives as
- * `undefined` rather than a number.
+ * `undefined` rather than a number. That guard is this package's own to
+ * make; the grouping behind it is not.
  */
 export function formatBaud(baud: unknown): string | null {
   if (typeof baud !== "number" || !Number.isFinite(baud)) return null;
-  return Math.trunc(baud).toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+  return groupThousands(baud);
 }
 
 /**

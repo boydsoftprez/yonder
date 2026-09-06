@@ -63,6 +63,51 @@ describe("endpointsMessage — R-UI-17: opens showing what is actually configure
   it("carries the TCP server's own address, already in words", () => {
     expect((endpointsMessage(configured)[0]?.payload as { tcpAddress: unknown })?.tcpAddress).toBe(":5760");
   });
+
+  /**
+   * **The rail has to agree with the line above it** (R-MAV-07, R-MAV-09).
+   *
+   * `ui-yonder-softkeys` lights whichever key its configuration marks
+   * `active` unless a message carries a list, and that configuration lights
+   * `THIS DEVICE` always. So a device accepting MAVLink from the network read
+   * *Any network* above a rail claiming the opposite — the one confusion
+   * R-MAV-09 names by hand. Both keys come off the same predicate as the
+   * words, so they cannot come apart.
+   */
+  type Key = { label: string; action: string; tone: string; active: boolean };
+  const keysOf = (config: unknown): Key[] =>
+    (endpointsMessage(config)[0]?.payload as { keys: Key[] }).keys;
+
+  it("lights the ingest key that is actually in force", () => {
+    expect(keysOf(configured)).toEqual([
+      { label: "THIS DEVICE", action: "loopback", tone: "act", active: true },
+      { label: "ANY NETWORK", action: "open", tone: "caution", active: false },
+    ]);
+    expect(keysOf(config({
+      autocast: true, ingest: { loopback_only: false }, tcp_server: { enabled: true, port: 5760 }, endpoints: [],
+    }))).toEqual([
+      { label: "THIS DEVICE", action: "loopback", tone: "act", active: false },
+      { label: "ANY NETWORK", action: "open", tone: "caution", active: true },
+    ]);
+  });
+
+  /**
+   * The lit key and the word are one reading, so they are asserted together:
+   * a change that moved one and not the other would leave the page saying two
+   * things about the same setting, which is the defect this closed.
+   */
+  it("never lights a key the words disagree with", () => {
+    for (const loopbackOnly of [true, false]) {
+      const seeded = endpointsMessage(config({
+        autocast: true,
+        ingest: { loopback_only: loopbackOnly },
+        tcp_server: { enabled: true, port: 5760 },
+        endpoints: [],
+      }))[0]?.payload as { ingest: string; keys: Key[] };
+      const lit = seeded.keys.find((key) => key.active);
+      expect(lit?.label).toBe(seeded.ingest === "Any network" ? "ANY NETWORK" : "THIS DEVICE");
+    }
+  });
 });
 
 describe("endpointsMessage — a read that found nothing to seed", () => {

@@ -52,6 +52,8 @@ command -v node >/dev/null 2>&1 || die "node is needed"
     || die "the contrib packages are not built; run: npm run build"
 [ -f "$REPO/packages/node-red-contrib-yonder-modem/dist/state.js" ] \
     || die "the modem package is not built; run: npm run build"
+[ -f "$REPO/packages/node-red-contrib-yonder-mavlink/dist/state.js" ] \
+    || die "the mavlink package is not built; run: npm run build"
 [ -f "$CONSOLE_TREE/node_modules/node-red/red.js" ] \
     || die "no console tree at $CONSOLE_TREE; run: ./installer/make-payload.sh --arch linux-arm64"
 [ -d "$CONSOLE_TREE/node_modules/@flowfuse/node-red-dashboard" ] \
@@ -76,9 +78,49 @@ mkdir -p "$ETC" "$RUN" "$STATE" "$CONSOLE" "$USERDIR" "$BIN"
 # development machine, and their absence would stop the run before it reached
 # anything under test. `ping` answers the way a host that replied does, so the
 # diagnostics route has something real to parse.
-cat > "$BIN/systemctl" <<'FAKE'
+# Where `mavlink-router` stands, as far as anything on this device can tell.
+#
+# Every other unit this daemon touches is fire-and-forget, and the stand-in
+# used to exit 0 for all of them — including `is-active`, which made the
+# telemetry renderer believe a router was already holding the serial port
+# before one had ever been started. It then declined to sweep (adopting a
+# link it could not read is the one thing that would take a port off a
+# working router), so the Telemetry page could never be captured with
+# anything on it. Only `mavlink-router` is tracked, because it is the only
+# unit anything here asks a question about.
+ROUTER_STATE="$ROOT/router-state"
+echo inactive > "$ROUTER_STATE"
+# What the router prints to its journal once a second with `ReportStats =
+# true`, written by the router stand-in in scripts/pages-daemon.mjs and read
+# back through `journalctl` — the path the renderer actually uses.
+ROUTER_STATS="$ROOT/router-stats"
+: > "$ROUTER_STATS"
+# What is on the other end of the serial port for this part of the run:
+# `linked`, `silent` or `noise` — R-MAV-13's three answers, and three of the
+# six states the Telemetry page has to be captured in. Read on every open,
+# never captured, the way $PROBE_ANSWER is.
+MAV_MODE="$ROOT/mav-mode"
+echo linked > "$MAV_MODE"
+
+cat > "$BIN/systemctl" <<FAKE
 #!/bin/sh
-printf '%s\n' "$*" >> "$SYSTEMCTL_LOG"
+printf '%s\n' "\$*" >> "\$SYSTEMCTL_LOG"
+case "\$*" in
+    *mavlink-router*)
+        case "\$1" in
+            is-active)      [ "\$(cat "$ROUTER_STATE")" = active ] || exit 3 ;;
+            start|restart)  echo active   > "$ROUTER_STATE" ;;
+            stop)           echo inactive > "$ROUTER_STATE" ;;
+        esac ;;
+esac
+exit 0
+FAKE
+# journalctl, which is how the renderer reads the router's own per-endpoint
+# counters (R-MAV-10, and the measurement §6 was reversed by). Nothing else
+# on this daemon runs it.
+cat > "$BIN/journalctl" <<FAKE
+#!/bin/sh
+cat "$ROUTER_STATS" 2>/dev/null
 exit 0
 FAKE
 # Which board this run is describing: 1 with a modem in the slot, 0 without.
@@ -218,7 +260,7 @@ printf 'rtt min/avg/max/mdev = 8.294/9.117/10.352/0.884 ms\n'
 exit 0
 FAKE
 chmod +x "$BIN/systemctl" "$BIN/nmcli" "$BIN/mmcli" "$BIN/curl" "$BIN/rfkill" \
-    "$BIN/hostnamectl" "$BIN/ping"
+    "$BIN/hostnamectl" "$BIN/ping" "$BIN/journalctl"
 
 # The modem password this run puts on the device, and the one string that must
 # never come back out of it (R-SEC-10).
@@ -279,6 +321,22 @@ sed -e "s/^  port: .*/  port: $PORT/" "$REPO/config/defaults/config.yaml" \
       modem && /^    apn:/      { print "    apn: ereseller";     next }
       modem && /^    username:/ { print "    username: sim-user"; next }
       modem && /^    password:/ { print "    password:"; print "      secret: modem_password"; next }
+      # Two ground stations, and deliberately not three. The Telemetry page
+      # has three rows whether or not all three are configured, and an unset
+      # one is a different reading from a configured one that has gone quiet
+      # (R-UI-17, and `groundStationRow`s three answers) — so the third row
+      # stays empty and the page is captured saying so. The addresses are the
+      # ones the page was designed against.
+      /^  endpoints: \[\]$/ {
+          print "  endpoints:";
+          print "    - name: gcs0";
+          print "      host: 192.168.191.40";
+          print "      port: 14550";
+          print "    - name: gcs1";
+          print "      host: 10.147.20.8";
+          print "      port: 14551";
+          next
+      }
       { print }
     ' > "$ETC/config.yaml"
 grep -q "port: $PORT" "$ETC/config.yaml" || die "could not set the console port in $ETC/config.yaml"
@@ -325,6 +383,17 @@ give_up() {
     die "$1"
 }
 
+# scripts/pages-daemon.mjs, not dist/daemon/server.js, and only here.
+#
+# `MavlinkRenderer` is assembled only when a caller hands `startServer` a way
+# to open a serial port, and nothing in this repository implements one — so
+# the shipped `main()` supplies none and every `/mav/*` route answers 503.
+# That is the true state of every device built to date and it is also a
+# Telemetry page with nothing on it, which is the failure R-UI-12 exists to
+# prevent. The harness entry point builds the same daemon from the same
+# environment and adds the serial stand-in, exactly as the files above stand
+# in for nmcli, mmcli, curl and ping. `scripts/verify-console.sh` still
+# starts the production entry point, so `main()`'s own wiring stays covered.
 start_daemon() {
     SYSTEMCTL_LOG="$SYSTEMCTL_LOG" \
     YONDER_SOCKET="$SOCKET" \
@@ -335,8 +404,13 @@ start_daemon() {
     YONDER_CONSOLE_USERDIR="$USERDIR" \
     YONDER_CONSOLE_CORE_TREE="$CORE" \
     YONDER_CONSOLE_UNIT="yonder-console.service" \
+    YONDER_PAGES_MAV_MODE="$MAV_MODE" \
+    YONDER_PAGES_MAV_CONF="$ETC/mavlink-router/main.conf" \
+    YONDER_PAGES_MAV_HINT="$STATE/mavlink-link.json" \
+    YONDER_PAGES_ROUTER_STATE="$ROUTER_STATE" \
+    YONDER_PAGES_ROUTER_STATS="$ROUTER_STATS" \
     PATH="$BIN:$PATH" \
-        node "$CORE/dist/daemon/server.js" >>"$JOURNAL" 2>&1 &
+        node "$REPO/scripts/pages-daemon.mjs" >>"$JOURNAL" 2>&1 &
     DAEMON_PID=$!
 }
 
@@ -382,6 +456,24 @@ expect_contains() {
         *) bad "$what: '$needle' is not in the reply" ;;
     esac
 }
+# One field out of a JSON reply, parsed rather than pattern-matched.
+#
+# `sed -n 's/.*"id":"\([^"]*\)".*/\1/p'` is greedy, and `GET /status` carries
+# two ids: the pending change's and `lastResult`'s, left over from the apply
+# before it. So the pattern read the *previous* apply's id, confirmed a change
+# that was already over, and left the real one pending — which then refused
+# every apply after it and took the rest of the run with it.
+json_field() {
+    node -e '
+        let raw = "";
+        process.stdin.on("data", (d) => { raw += d; });
+        process.stdin.on("end", () => {
+            try { process.stdout.write(String(JSON.parse(raw)[process.argv[1]] ?? "")); }
+            catch { process.stdout.write(""); }
+        });
+    ' "$1"
+}
+
 expect_missing() {
     what="$1"; needle="$2"; haystack="$3"
     case "$haystack" in
@@ -423,6 +515,28 @@ expect_missing  "and carries no key"                 'psk'         "$(sock /net/
 expect_contains "GET /log has the daemon's own start-up" '"level"' "$(sock /log)"
 expect_contains "GET /diag/reachable probes"         '"reachable":true' "$(sock /diag/reachable)"
 
+# The telemetry layer, which every device built to date does not have. See
+# start_daemon: this run has a serial stand-in, so these five routes answer
+# rather than 503, and the Telemetry page can be captured with something on it.
+wait_for_phase() {
+    i=0
+    while [ "$i" -lt "$TRIES" ]; do
+        case "$(sock /mav/state)" in *"\"phase\":\"$1\""*) return 0 ;; esac
+        sleep "$POLL"; i=$((i + 1))
+    done
+    return 1
+}
+if wait_for_phase linked; then
+    ok "GET /mav/state found the autopilot and says so"
+else
+    bad "GET /mav/state never reported a link: $(sock /mav/state)"
+fi
+mav=$(sock /mav/state)
+expect_contains "and names the port it was found on"   '"device":"/dev/ttyAMA0"' "$mav"
+expect_contains "and the speed the sweep settled at"   '"baud":57600' "$mav"
+expect_contains "with telemetry flowing to the ground stations" '"telemetryRunning":true' "$mav"
+expect_contains "GET /mav/check answers as a chain, not a verdict" '"autopilot"' "$(sock /mav/check)"
+
 ping_json=$(curl -s -H 'content-type: application/json' --data '{"host":"1.1.1.1"}' \
     --unix-socket "$SOCKET" http://localhost/diag/ping)
 expect_contains "POST /diag/ping parses what ping printed" '"rttMs":9.117' "$ping_json"
@@ -436,26 +550,40 @@ say "the shipped flows, in a real Node-RED with the real dashboard"
 # What 30-console.sh does on a board: place the flows, and put the contrib
 # packages where the console's own node resolution will find them.
 cp "$REPO/flows/flows.json" "$USERDIR/flows.json"
-mkdir -p "$CONSOLE/node_modules"
+mkdir -p "$CONSOLE/node_modules" "$USERDIR/node_modules"
+# **Into the user directory as well as the console tree, and that is what
+# makes this gate photograph the packages under test** (K-46).
+#
+# Node-RED finds a node module by walking up from its *own* directory looking
+# for `node_modules`, and `node-red` here is a symlink into `vendor/console`
+# — which node resolves, so the walk starts in this repository and climbs out
+# of it. On a checkout whose parent directory happens to hold another
+# workspace's `node_modules`, the packages it finds are that other one's:
+# every yonder node loaded from a different tree, silently, and a package
+# this branch added was simply absent. `$CONSOLE/node_modules` is not on that
+# path at all, so the careful staging below was never what got loaded.
+#
+# `<userDir>/node_modules` is scanned first and its modules win the dedupe
+# outright (`localfilesystem.scanTreeForNodesModules` marks them `local` and
+# sorts them ahead), so linking them there is what pins the gate to this
+# tree. The console tree's copy stays, because that is where a board has them
+# and this script exists to run what a board runs.
+#
 # rm then ln, never `ln -sfn`: -n is not POSIX, and without it `ln -sf` onto an
 # existing symlink-to-a-directory creates the link inside it.
 for pkg in node-red-contrib-yonder-system node-red-contrib-yonder-network \
            node-red-contrib-yonder-remote node-red-contrib-yonder-modem \
-           node-red-dashboard-2-yonder; do
-    rm -f "$CONSOLE/node_modules/$pkg"
+           node-red-contrib-yonder-mavlink node-red-dashboard-2-yonder; do
+    rm -f "$CONSOLE/node_modules/$pkg" "$USERDIR/node_modules/$pkg"
     ln -s "$REPO/packages/$pkg" "$CONSOLE/node_modules/$pkg"
+    # Dashboard discovers a third-party widget package by reading the *user
+    # directory's* package.json for a dependency and resolving it beneath that
+    # directory, so the widget package has to be here whatever else is (K-28).
+    ln -s "$REPO/packages/$pkg" "$USERDIR/node_modules/$pkg"
 done
-rm -f "$CONSOLE/node_modules/yonder-core"
+rm -f "$CONSOLE/node_modules/yonder-core" "$USERDIR/node_modules/yonder-core"
 ln -s "$CORE" "$CONSOLE/node_modules/yonder-core"
-# What 30-console.sh also does, and what the widgets do not appear without:
-# Dashboard discovers a third-party widget package by reading the *user
-# directory's* package.json for a dependency and resolving it beneath that
-# directory. A package in the console tree's node_modules is where Node-RED
-# finds the nodes and is invisible to that scan (K-28).
-mkdir -p "$USERDIR/node_modules"
-rm -f "$USERDIR/node_modules/node-red-dashboard-2-yonder"
-ln -s "$REPO/packages/node-red-dashboard-2-yonder" \
-      "$USERDIR/node_modules/node-red-dashboard-2-yonder"
+ln -s "$CORE" "$USERDIR/node_modules/yonder-core"
 cat > "$USERDIR/package.json" <<'MANIFEST'
 { "name": "yonder-console-state", "version": "0.0.0", "private": true,
   "dependencies": { "node-red-dashboard-2-yonder": "0.1.0" } }
@@ -1042,6 +1170,162 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
         sleep 7
     }
 
+    # ---- the Telemetry page, in each of the states it hides ---------------
+    #
+    # R-UI-12: a surface that hides part of itself is captured in each of
+    # those parts, and this page hides five of its six behind live readings.
+    # The design README enumerates them, so the gate works from a list rather
+    # than from a judgement — and every one is reached the way an operator
+    # reaches it, through the daemon, never by writing a payload into a widget.
+    #
+    # `telemetry` itself is the sixth: the base capture above, taken with an
+    # autopilot answering and telemetry flowing.
+    capture_telemetry() {
+        # $1 palette, $2 the name this state is filed under
+        if node "$REPO/scripts/capture-pages.mjs" \
+                --base-url "http://127.0.0.1:$PORT" \
+                --password "$PASSWORD" \
+                --palette "$1" \
+                --only telemetry \
+                --as "$2" \
+                --artifacts "$REPO/vendor/capture" \
+                ${ACCEPT_SHAPE:+--accept}; then
+            ok "the $1 palette: $2"
+        else
+            bad "the $1 palette: $2, see above"
+        fi
+    }
+
+    # R-MAV-09, and the distinction the two running fields exist for: a stop
+    # takes the ground stations out of what is generated and leaves the
+    # flight-controller link and the loopback copy up. So the Autopilot half
+    # of the page stays lit and only the Ground stations half goes quiet — a
+    # page that greyed the aircraft out here would be the defect
+    # `routerRunning` was separated from `telemetryRunning` to prevent.
+    capture_telemetry_stopped() {
+        sock_post /mav/stop "{}" >/dev/null
+        stopped=$(sock /mav/state)
+        expect_contains "stopping telemetry stops the sending" \
+            '"telemetryRunning":false' "$stopped"
+        expect_contains "and leaves mavlink-router carrying the aircraft" \
+            '"routerRunning":true' "$stopped"
+        # One poll of the page, so it is showing the stop and not the moment
+        # before it.
+        sleep 7
+        capture_telemetry "$1" telemetry-stopped
+        sock_post /mav/start "{}" >/dev/null
+        if wait_for_phase linked; then
+            ok "and starting it again brings the link back"
+        else
+            bad "telemetry never came back after the stop: $(sock /mav/state)"
+        fi
+        sleep 7
+    }
+
+    # R-MAV-13's two kinds of nothing, which are two different pictures and
+    # two different things to do about them. Driven by changing what is on the
+    # other end of the serial stand-in and asking the device to look again —
+    # `POST /mav/detect` is the only route that takes the port back off the
+    # router, which is why nothing else in this run re-probes.
+    capture_telemetry_nothing() {
+        # $1 palette, $2 the mode the stand-in answers in, $3 the phase that
+        # produces, $4 the name this state is filed under
+        echo "$2" > "$MAV_MODE"
+        sock_post /mav/detect "{}" >/dev/null
+        if wait_for_phase "$3"; then
+            ok "the sweep came back $3 with $2 on the wire"
+        else
+            bad "the sweep never reported $3: $(sock /mav/state)"
+        fi
+        sleep 7
+        capture_telemetry "$1" "$4"
+    }
+
+    # R-MAV-07 and R-UI-15, in one press.
+    #
+    # Where MAVLink is accepted from is configuration and is **not** exempt
+    # from the confirmation window, so pressing ANY NETWORK applies a whole
+    # document and the change pends — which is two states, not one: the page
+    # with the banner up, and the page once the change is in force.
+    #
+    # The press is the point. This rail was wired in the change that captured
+    # it, and every soft key on this console shipped dead once, because
+    # Dashboard drops a widget-action from a widget that did not register
+    # onAction and says nothing. Only pressing it says otherwise.
+    capture_telemetry_ingest() {
+        node "$REPO/scripts/capture-pages.mjs" \
+            --base-url "http://127.0.0.1:$PORT" --password "$PASSWORD" \
+            --palette "$1" --only telemetry --as telemetry \
+            --artifacts "$REPO/vendor/capture" \
+            --press "ANY NETWORK" >/dev/null 2>&1 || true
+        i=0
+        while [ "$i" -lt "$TRIES" ]; do
+            case "$(sock /status)" in *'"state":"pending"'*) break ;; esac
+            sleep "$POLL"; i=$((i + 1))
+        done
+        pending=$(sock /status)
+        expect_contains "pressing ANY NETWORK on the rail reached the device" \
+            '"state":"pending"' "$pending"
+        expect_missing "and it is an ordinary change, not one that moves the radio" \
+            '"movesRadio":true' "$pending"
+        sleep 7
+        capture_telemetry "$1" telemetry-pending
+        pending_id=$(printf '%s' "$pending" | json_field id)
+        [ -n "$pending_id" ] && sock_post /confirm "{\"id\":\"$pending_id\"}" >/dev/null
+        # Confirmed, not idle: the engine's state after a confirm is
+        # `confirmed`, and only a revert ends at `idle`. Waiting for the wrong
+        # word here spent forty seconds and then carried on regardless.
+        i=0
+        while [ "$i" -lt "$TRIES" ]; do
+            case "$(sock /status)" in *'"state":"pending"'*) ;; *) break ;; esac
+            sleep "$POLL"; i=$((i + 1))
+        done
+        sleep 7
+        expect_contains "confirming it leaves MAVLink accepted from any network" \
+            '"loopback_only":false' "$(sock /config)"
+        capture_telemetry "$1" telemetry-ingest-open
+
+        # Back to loopback before anything else is captured: every other
+        # picture in this run describes a device that accepts MAVLink from
+        # itself alone, which is the shipped default (R-MAV-07).
+        sock /config > "$ROOT/config.json"
+        node -e '
+            const config = require(process.argv[1]);
+            config.mavlink.ingest.loopback_only = true;
+            process.stdout.write(JSON.stringify(config));
+        ' "$ROOT/config.json" > "$ROOT/closed.json"
+        closed=$(curl -s -H 'content-type: application/json' --data @"$ROOT/closed.json" \
+            --unix-socket "$SOCKET" http://localhost/apply)
+        closed_id=$(printf '%s' "$closed" | json_field id)
+        [ -n "$closed_id" ] && sock_post /confirm "{\"id\":\"$closed_id\"}" >/dev/null
+        i=0
+        while [ "$i" -lt "$TRIES" ]; do
+            case "$(sock /status)" in *'"state":"pending"'*) ;; *) break ;; esac
+            sleep "$POLL"; i=$((i + 1))
+        done
+        expect_contains "the ingest path is closed again for the rest of the run" \
+            '"loopback_only":true' "$(sock /config)"
+        sleep 7
+    }
+
+    # Every state this page hides, in one palette. Called from both.
+    capture_telemetry_states() {
+        capture_telemetry_stopped "$1"
+        capture_telemetry_ingest "$1"
+        capture_telemetry_nothing "$1" silent silent telemetry-searching
+        capture_telemetry_nothing "$1" noise  noise  telemetry-not-mavlink
+        # Back to an autopilot on the wire, so the next palette starts where
+        # this one did and the base capture is of a linked device.
+        echo linked > "$MAV_MODE"
+        sock_post /mav/detect "{}" >/dev/null
+        if wait_for_phase linked; then
+            ok "the autopilot is back on the wire for the rest of the run"
+        else
+            bad "the link never came back: $(sock /mav/state)"
+        fi
+        sleep 7
+    }
+
     # ---- the way back in, once the operator has set their own -------------
     #
     # **There is no route that changes the access-point passphrase.**
@@ -1103,6 +1387,7 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
         capture_unplugged night
         capture_status_pending night
         capture_pending_radio night
+        capture_telemetry_states night
     else
         bad "the console never regenerated theme.css as night, so it was not captured"
     fi
@@ -1118,6 +1403,7 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
         capture_unplugged day
         capture_status_pending day
         capture_pending_radio day
+        capture_telemetry_states day
     else
         bad "the console is still in the night palette; a held run will be wrong"
     fi

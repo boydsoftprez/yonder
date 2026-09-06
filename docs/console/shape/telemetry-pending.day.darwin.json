@@ -10,6 +10,51 @@
       "box": {
         "x": 268,
         "y": 76,
+        "w": 1000,
+        "h": 317
+      }
+    },
+    {
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-annunciator.yonder-live.yonder-pending",
+      "box": {
+        "x": 285,
+        "y": 148,
+        "w": 966,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-text.nrdb-ui-widget.yonder-fixed.yonder-pending.yonder-qualifier#0",
+      "box": {
+        "x": 285,
+        "y": 208,
+        "w": 966,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-text.nrdb-ui-widget.yonder-fixed.yonder-pending.yonder-qualifier#1",
+      "box": {
+        "x": 285,
+        "y": 268,
+        "w": 966,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-softkeys.yonder-pending",
+      "box": {
+        "x": 285,
+        "y": 328,
+        "w": 966,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-group#1",
+      "box": {
+        "x": 268,
+        "y": 405,
         "w": 663,
         "h": 437
       }
@@ -18,7 +63,7 @@
       "key": "nrdb-ui-text.nrdb-ui-widget#0",
       "box": {
         "x": 285,
-        "y": 148,
+        "y": 476,
         "w": 308,
         "h": 48
       }
@@ -27,7 +72,7 @@
       "key": "nrdb-ui-widget.nrdb-ui-yonder-annunciator",
       "box": {
         "x": 605,
-        "y": 148,
+        "y": 476,
         "w": 308,
         "h": 48
       }
@@ -36,7 +81,7 @@
       "key": "nrdb-ui-text.nrdb-ui-widget#1",
       "box": {
         "x": 285,
-        "y": 208,
+        "y": 536,
         "w": 629,
         "h": 48
       }
@@ -45,7 +90,7 @@
       "key": "nrdb-ui-text.nrdb-ui-widget#2",
       "box": {
         "x": 285,
-        "y": 268,
+        "y": 596,
         "w": 629,
         "h": 48
       }
@@ -54,7 +99,7 @@
       "key": "nrdb-ui-text.nrdb-ui-widget#3",
       "box": {
         "x": 285,
-        "y": 328,
+        "y": 656,
         "w": 629,
         "h": 48
       }
@@ -63,7 +108,7 @@
       "key": "nrdb-ui-text.nrdb-ui-widget#4",
       "box": {
         "x": 285,
-        "y": 388,
+        "y": 716,
         "w": 629,
         "h": 48
       }
@@ -72,16 +117,16 @@
       "key": "nrdb-ui-text.nrdb-ui-widget#5",
       "box": {
         "x": 285,
-        "y": 448,
+        "y": 776,
         "w": 629,
         "h": 48
       }
     },
     {
-      "key": "nrdb-ui-group#1",
+      "key": "nrdb-ui-group#2",
       "box": {
         "x": 943,
-        "y": 76,
+        "y": 405,
         "w": 325,
         "h": 437
       }
@@ -90,7 +135,7 @@
       "key": "nrdb-ui-text.nrdb-ui-widget",
       "box": {
         "x": 960,
-        "y": 148,
+        "y": 476,
         "w": 140,
         "h": 48
       }
@@ -99,7 +144,7 @@
       "key": "nrdb-ui-widget.nrdb-ui-yonder-annunciator",
       "box": {
         "x": 1111,
-        "y": 148,
+        "y": 476,
         "w": 140,
         "h": 48
       }
@@ -108,7 +153,7 @@
       "key": "nrdb-ui-text.nrdb-ui-widget.yonder-fixed#0",
       "box": {
         "x": 960,
-        "y": 208,
+        "y": 536,
         "w": 291,
         "h": 48
       }
@@ -117,7 +162,7 @@
       "key": "nrdb-ui-text.nrdb-ui-widget.yonder-fixed#1",
       "box": {
         "x": 960,
-        "y": 268,
+        "y": 596,
         "w": 291,
         "h": 48
       }
@@ -126,7 +171,7 @@
       "key": "nrdb-ui-widget.nrdb-ui-yonder-softkeys",
       "box": {
         "x": 960,
-        "y": 328,
+        "y": 656,
         "w": 291,
         "h": 48
       }
@@ -135,16 +180,16 @@
       "key": "nrdb-ui-button.nrdb-ui-widget",
       "box": {
         "x": 960,
-        "y": 388,
+        "y": 716,
         "w": 291,
         "h": 48
       }
     },
     {
-      "key": "nrdb-ui-group#2",
+      "key": "nrdb-ui-group#3",
       "box": {
         "x": 268,
-        "y": 525,
+        "y": 853,
         "w": 663,
         "h": 557
       }
@@ -153,7 +198,7 @@
       "key": "nrdb-ui-text.nrdb-ui-widget#0",
       "box": {
         "x": 285,
-        "y": 596,
+        "y": 925,
         "w": 308,
         "h": 48
       }
@@ -162,7 +207,7 @@
       "key": "nrdb-ui-widget.nrdb-ui-yonder-annunciator#0",
       "box": {
         "x": 605,
-        "y": 596,
+        "y": 925,
         "w": 308,
         "h": 48
       }
@@ -171,7 +216,7 @@
       "key": "nrdb-ui-text.nrdb-ui-widget#1",
       "box": {
         "x": 285,
-        "y": 656,
+        "y": 985,
         "w": 629,
         "h": 48
       }
@@ -180,7 +225,7 @@
       "key": "nrdb-ui-widget.nrdb-ui-yonder-annunciator#1",
       "box": {
         "x": 285,
-        "y": 716,
+        "y": 1045,
         "w": 228,
         "h": 48
       }
@@ -189,7 +234,7 @@
       "key": "nrdb-ui-text-input.nrdb-ui-widget#0",
       "box": {
         "x": 525,
-        "y": 716,
+        "y": 1045,
         "w": 228,
         "h": 48
       }
@@ -198,7 +243,7 @@
       "key": "nrdb-ui-text-input.nrdb-ui-widget#1",
       "box": {
         "x": 765,
-        "y": 716,
+        "y": 1045,
         "w": 148,
         "h": 48
       }
@@ -207,7 +252,7 @@
       "key": "nrdb-ui-widget.nrdb-ui-yonder-annunciator#2",
       "box": {
         "x": 285,
-        "y": 776,
+        "y": 1105,
         "w": 228,
         "h": 48
       }
@@ -216,7 +261,7 @@
       "key": "nrdb-ui-text-input.nrdb-ui-widget#2",
       "box": {
         "x": 525,
-        "y": 776,
+        "y": 1105,
         "w": 228,
         "h": 48
       }
@@ -225,7 +270,7 @@
       "key": "nrdb-ui-text-input.nrdb-ui-widget#3",
       "box": {
         "x": 765,
-        "y": 776,
+        "y": 1105,
         "w": 148,
         "h": 48
       }
@@ -234,7 +279,7 @@
       "key": "nrdb-ui-widget.nrdb-ui-yonder-annunciator#3",
       "box": {
         "x": 285,
-        "y": 836,
+        "y": 1165,
         "w": 228,
         "h": 48
       }
@@ -243,7 +288,7 @@
       "key": "nrdb-ui-text-input.nrdb-ui-widget#4",
       "box": {
         "x": 525,
-        "y": 836,
+        "y": 1165,
         "w": 228,
         "h": 48
       }
@@ -252,7 +297,7 @@
       "key": "nrdb-ui-text-input.nrdb-ui-widget#5",
       "box": {
         "x": 765,
-        "y": 836,
+        "y": 1165,
         "w": 148,
         "h": 48
       }
@@ -261,7 +306,7 @@
       "key": "nrdb-ui-button.nrdb-ui-widget",
       "box": {
         "x": 285,
-        "y": 896,
+        "y": 1225,
         "w": 388,
         "h": 48
       }
@@ -270,7 +315,7 @@
       "key": "nrdb-ui-text.nrdb-ui-widget#2",
       "box": {
         "x": 285,
-        "y": 956,
+        "y": 1285,
         "w": 629,
         "h": 48
       }
@@ -279,16 +324,16 @@
       "key": "nrdb-ui-widget.nrdb-ui-yonder-sparkline",
       "box": {
         "x": 285,
-        "y": 1016,
+        "y": 1345,
         "w": 629,
         "h": 48
       }
     },
     {
-      "key": "nrdb-ui-group#3",
+      "key": "nrdb-ui-group#4",
       "box": {
         "x": 943,
-        "y": 525,
+        "y": 853,
         "w": 325,
         "h": 557
       }
@@ -297,7 +342,7 @@
       "key": "nrdb-ui-text.nrdb-ui-widget.yonder-qualifier#0",
       "box": {
         "x": 960,
-        "y": 596,
+        "y": 925,
         "w": 291,
         "h": 108
       }
@@ -306,7 +351,7 @@
       "key": "nrdb-ui-text.nrdb-ui-widget.yonder-qualifier#1",
       "box": {
         "x": 960,
-        "y": 716,
+        "y": 1045,
         "w": 291,
         "h": 108
       }
@@ -315,7 +360,7 @@
       "key": "nrdb-ui-text.nrdb-ui-widget.yonder-qualifier#2",
       "box": {
         "x": 960,
-        "y": 836,
+        "y": 1165,
         "w": 291,
         "h": 108
       }
@@ -324,13 +369,21 @@
       "key": "nrdb-ui-button.nrdb-ui-widget",
       "box": {
         "x": 960,
-        "y": 956,
+        "y": 1285,
         "w": 291,
         "h": 48
       }
     }
   ],
   "fixed": [
+    {
+      "key": "nrdb-ui-text.nrdb-ui-widget.yonder-fixed.yonder-pending.yonder-qualifier#0",
+      "text": "A configuration change is in force on this device and has not been confirmed."
+    },
+    {
+      "key": "nrdb-ui-text.nrdb-ui-widget.yonder-fixed.yonder-pending.yonder-qualifier#1",
+      "text": "Confirm it to keep it. If you do not, the device puts the previous configuration back by itself — which is what gets you back in if this change was the wrong one."
+    },
     {
       "key": "nrdb-ui-text.nrdb-ui-widget.yonder-fixed#0",
       "text": "At bootAutomatic"

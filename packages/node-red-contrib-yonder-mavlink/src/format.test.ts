@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
+import { pathCheck, type LinkState, type PathCheckInput } from "yonder-core";
+import { groupThousands } from "yonder-core/presentation";
 import { formatBaud, formatKbRate, formatSeconds, formatSpan } from "./format.js";
 
 /**
@@ -9,9 +11,11 @@ import { formatBaud, formatKbRate, formatSeconds, formatSpan } from "./format.js
  */
 describe("formatBaud", () => {
   it("groups the thousands with a plain space, matching the built page", () => {
-    // The mock's own reading is "57 600 baud" — an ordinary space, not the
-    // thin space (U+2009) the earlier mockup HTML used. Byte-checked against
-    // flows/flows.json, which wins over the mockup.
+    // An ordinary space, not the thin space (U+2009) the earlier mockup HTML
+    // used. `flows/flows.json` carried this exact reading, byte-checked, as
+    // a mock for `tel-speed` while the page was being designed; the mock is
+    // gone now that the page reads the device, but the convention it
+    // settled stuck.
     expect(formatBaud(57600)).toBe("57 600");
     expect(formatBaud(115200)).toBe("115 200");
     expect(formatBaud(921600)).toBe("921 600");
@@ -29,6 +33,51 @@ describe("formatBaud", () => {
     expect(formatBaud(undefined)).toBeNull();
     expect(formatBaud("57600")).toBeNull();
     expect(formatBaud(Number.NaN)).toBeNull();
+  });
+
+  it("is yonder-core's groupThousands under this package's own boundary guard", () => {
+    // Not a coincidence that these agree: `formatBaud` calls `groupThousands`
+    // directly. This is the regression the delegation exists to prevent — if
+    // a future edit gave `formatBaud` its own copy of the arithmetic again,
+    // the two would be free to drift apart the way they already did once.
+    for (const baud of [0, 600, 57600, 115200, 230400, 921600]) {
+      expect(formatBaud(baud)).toBe(groupThousands(baud));
+    }
+  });
+});
+
+/**
+ * **This is the bug, written as a test.** The Autopilot panel's Speed
+ * reading (`formatBaud`, above, read by `state.ts`'s `messageFor`) and the
+ * path check's own "Autopilot to Yonder" sentence (`yonder-core`'s
+ * `mav/check.ts`) draw the *same measurement* — one `LinkState.baud` — on
+ * the same page. Before both called `yonder-core/presentation`'s
+ * `groupThousands`, `check.ts` built its fragment with `String(state.baud)`
+ * and this file grouped the thousands, so a board could read "57 600 baud"
+ * in the Autopilot panel and "57600 baud" a few pixels away in the rail's
+ * path check, for the same link.
+ *
+ * This constructs one `LinkState` and reads the baud rate both ways: through
+ * this package's own `formatBaud`, and through `yonder-core`'s `pathCheck`,
+ * which `mav/check.ts` cannot be imported around (the dependency between
+ * the two packages runs the other way). If either file ever stops calling
+ * the shared helper, the two spellings part company again and this fails.
+ */
+describe("formatBaud agrees with mav/check.ts's path-check sentence", () => {
+  const LINKED: LinkState = {
+    phase: "linked", device: "/dev/ttyAMA0", baud: 57600, vehicle: "ArduPlane", system: 1,
+    heartbeatHz: 1, lastHeardMs: 300, groundStations: [], triedBauds: [],
+    traffic: null, tcpClients: null,
+  };
+
+  it("spells the same baud rate the same way in both surfaces", () => {
+    const input: PathCheckInput = {
+      state: LINKED, telemetryRunning: true, routerRunning: true, endpoints: [], autocast: true,
+    };
+    const { autopilot } = pathCheck(input);
+    const grouped = formatBaud(LINKED.baud);
+    expect(grouped).not.toBeNull();
+    expect(autopilot.detail).toContain(`${grouped} baud`);
   });
 });
 

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import type { LinkState } from "./link.js";
+import { groupThousands } from "../console/digits.js";
 
 /**
  * R-DIA-04 — verify the MAVLink path end to end — drawn as the three-link
@@ -146,7 +147,12 @@ function autopilotLink(state: LinkState, routerRunning: boolean): CheckLink {
   // Linked, or linked and deliberately not broadcasting. Either way the
   // heartbeats that would confirm this row arrive over the loopback copy,
   // which exists whenever the router does.
-  const speed = state.baud === null ? "" : `, ${String(state.baud)} baud`;
+  //
+  // Grouped with `groupThousands` — the same function the Autopilot panel's
+  // Speed reading uses (`node-red-contrib-yonder-mavlink/src/format.ts`'s
+  // `formatBaud`) — so this sentence and that reading cannot spell the same
+  // baud rate two different ways again (`console/digits.ts`).
+  const speed = state.baud === null ? "" : `, ${groupThousands(state.baud)} baud`;
   if (!routerRunning) {
     return { ok: null, detail: `Not checked — mavlink-router is not running, so nothing is listening${speed}` };
   }

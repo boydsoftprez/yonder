@@ -34,3 +34,5 @@ export {
   type ReadingBounds,
   type ReadingTone,
 } from "./reading.js";
+
+export { groupThousands } from "./digits.js";
