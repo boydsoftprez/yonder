@@ -1381,6 +1381,45 @@ a program owning the pipeline has.
 ---
 
 
+### What the hardware actually does — measured 2026-09-06, and it changed the plan
+
+Written up in `docs/hardware/ffmpeg-as-the-pipeline-composer.md` (bench branch,
+not yet merged here). Every figure below was read off a board that session.
+
+**A bitrate moves on a running encode in GStreamer, on both boards, and in
+ffmpeg on neither.**
+
+| | GStreamer | ffmpeg |
+|---|---|---|
+| Live retune, Pi 4 | ✔ 0.99 → 3.02 Mb/s, zero timestamp gaps | ✘ `ENOSYS` |
+| Live retune, RK3566 H.264 | ✔ 0.98 → 3.92 Mb/s, zero gaps | ✘ |
+| Live retune, RK3566 H.265 | ✔ 0.97 → 3.91 Mb/s, zero gaps | ✘ |
+| CPU, Pi, two branches | +10.5 points | +18.8 points |
+| Latency, Pi, sender side | ~31 ms | ~153 ms |
+| Hardware preview scaler, Pi | `v4l2convert` ✔ | none — software |
+| Delivery | build MPP and the plugin from source | one published package |
+
+ffmpeg refuses **at every level, including from a program holding the
+`AVCodecContext`** — the best case any host could have. Its CLI command
+channels reach filters, not encoders, and `h264_rkmpp`'s fifteen options carry
+no runtime flag.
+
+**Two claims the Rockchip design rests on are false**, and were tested rather
+than argued: the `gstreamer-rockchip` trees were last committed **August 2026**,
+and the plugin builds against **1.26.2 with no patches**. `mpph264enc` and
+`mpph265enc` encode clean, decodable streams on the RK3566.
+
+**What follows for this plan.** Task 30a's host is not a stopgap and is not
+made redundant by any composer decision — the capability it reaches exists only
+in GStreamer. Task 31 has a subject because of it. If the composer is ever
+changed to ffmpeg, Task 31 has no subject at all and R-VID-07 cannot be met:
+that trade is the operator's, and it is not this plan's to make.
+
+**Also measured and still true regardless of composer:** a direct translation
+of `compose()` into ffmpeg does not run on the Pi — `h264_v4l2m2m` refuses the
+`yuvj420p` its MJPEG decoder emits — and under ffmpeg the Pi loses its hardware
+scaler, since `v4l2convert` is a GStreamer element with no ffmpeg equivalent.
+
 ### Task 31: The rate controller and the size ladder
 
 **Status: unblocked by Task 30a, not before it.** This was blocked on a real
