@@ -400,3 +400,56 @@ describe("EncoderChannel, where there is nothing to control", () => {
     expect(await pending).toMatchObject({ requested: 700, observed: 400 });
   });
 });
+
+/**
+ * The read a rate controller does before it decides anything (`video/rate.ts`).
+ *
+ * Its whole value is that it is *not* the caller's memory of what it asked
+ * for: every assertion below is about the channel disagreeing with what was
+ * last requested, because agreeing with it is the failure.
+ */
+describe("EncoderChannel.inForce", () => {
+  it("reports what the launch line is running before anything has been retuned", () => {
+    const { channel } = running();
+    expect(channel.inForce("cam0")).toEqual({
+      stream: 2000, preview: 400, shape: { size: "640x360", fps: 15 },
+    });
+  });
+
+  it("reports what the encoder confirmed, never what it was asked for", async () => {
+    const { channel, spawned, camera } = running();
+    const pending = channel.retune(camera, "stream", 3000);
+    spawned[0].answer({ observed: 2870 });      // the encoder's own idea of 3000
+    await pending;
+    expect(channel.inForce("cam0")).toMatchObject({ stream: 2870 });
+  });
+
+  it("re-reads the launch line when the pipeline it was seeded from was replaced", async () => {
+    // The guard: a pipeline that stopped and started again is running its
+    // launch line from the top, and the rate the process before it confirmed
+    // is not the rate this one is carrying. `Supervisor.start()` resets the
+    // restart counter, so the run's own timestamp is what expires the seed.
+    const { channel, supervisor, spawned, camera, advance } = running();
+    const line = supervisor.argv("cam0");
+    expect(line).not.toBeNull();
+    const pending = channel.retune(camera, "stream", 3000);
+    spawned[0].answer();
+    await pending;
+    // The rate the process confirmed, which is not the launch line's.
+    expect(channel.inForce("cam0")).toMatchObject({ stream: 3000 });
+
+    supervisor.stop("cam0");
+    advance(1_000);
+    supervisor.start("cam0", [...(line ?? [])]);
+    advance(2_000);
+    expect(channel.inForce("cam0")).toMatchObject({ stream: 2000 });
+  });
+
+  it("says nothing is in force when nothing is running", () => {
+    const { clock } = fakeClock();
+    const { spawner } = fakeSpawner();
+    const supervisor = new Supervisor({ spawner, clock });
+    const channel = new EncoderChannel({ supervisor, clock });
+    expect(channel.inForce("cam0")).toBeNull();
+  });
+});

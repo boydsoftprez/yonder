@@ -1467,10 +1467,9 @@ setting appeared to make no difference to the picture.
 preview's Size picker offers `Auto — steps with the link` (`YonderDeck.vue`'s
 `PREVIEW_SIZE_OPTIONS`), whose contract in spec §8.1 is to step down a rung
 after `tDown` pinned at the floor and up after `tUp` of headroom. Nothing
-steps it: there is no `video/rate.ts`, no ladder, and no `RateController`
-anywhere in `yonder-core`. Choosing `Auto` therefore holds whatever rung the
-preview last had, exactly as choosing Adaptive holds whatever rate it last
-had — and reads to an operator as a working automatic mode.
+steps it. Choosing `Auto` therefore holds whatever rung the preview last had,
+exactly as choosing Adaptive holds whatever rate it last had — and reads to an
+operator as a working automatic mode.
 
 Both are plan Task 31, which was **blocked**: an adaptive controller that moved
 a rate on the respawn path would restart the picture every time the link moved,
@@ -1496,6 +1495,21 @@ Two faults, and they are separable:
 - Validation accepted a bitrate below the floor declared beside it. A draft
   whose fields contradict each other is refused with the field named
   (`validateDraft`); this pair is not among the contradictions it checks.
+
+**The mechanism now exists and nothing feeds it yet** (plan Task 31).
+`video/rate.ts` holds a `RateController` that reads the applied envelope,
+reserves the stream's spend, moves each encode through `EncoderChannel`, walks
+the size ladder with hysteresis, and reports every decision with its reason —
+including the decision to change nothing, and why. It is tested against a
+pipeline that answers, and every guard is mutation-checked.
+
+What it has no source of is **evidence**: it acts on `LinkReport`s from the
+browsers watching a camera, and nothing in the daemon collects or delivers
+one. That is plan Task 32 (`video/viewers.ts`, a viewer id on the WHEP
+session, and the route the browser's statistics arrive on), which also carries
+the decisions to the picture. Until Task 32 lands this entry stays open and
+both faults above stand: a controller that is never told anything holds, which
+is the right behaviour and the same thing an operator sees.
 
 ### K-50 · An apply can be left pending for ever, and two routes disagree about it
 

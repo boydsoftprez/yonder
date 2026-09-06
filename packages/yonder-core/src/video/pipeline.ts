@@ -157,13 +157,12 @@ const H264_LEVEL = "video/x-h264,level=(string)4";
  * The concrete pixel size to bake into today's respawn-only pipeline.
  *
  * `preview.size` names one of three offered resolutions directly, or
- * `"auto"` for the rate controller (spec §8.1) to choose at runtime — and
- * that controller does not exist yet: this pipeline is composed once, from
- * `config.yaml`, and respawned on Apply, with no live resizing in between.
- * Until a real controller replaces this respawn path, `"auto"` resolves to
- * `ladder_bottom` — the conservative end an adaptive algorithm starts from
- * before it has proven more capacity is safe — rather than to a size baked
- * in independently of it, so the two cannot silently disagree.
+ * `"auto"` for the rate controller (`video/rate.ts`, spec §8.1) to move at
+ * runtime. A launch line still has to carry a concrete size, and for `"auto"`
+ * that is `ladder_bottom` — **the rung the controller starts from**, being
+ * the conservative end an adaptive algorithm climbs from before it has proven
+ * more capacity is safe. Baking in a size chosen independently of the ladder
+ * would let the two silently disagree about where the picture began.
  */
 /** The rung `preview.size` is holding, with `"auto"` resolved (see above). */
 function heldRung(preview: Camera["preview"]): PreviewRung {

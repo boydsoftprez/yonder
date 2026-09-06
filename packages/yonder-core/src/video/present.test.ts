@@ -4,6 +4,7 @@ import {
   aimPanel,
   ASSUMED_UPLINK_KBPS,
   atIp,
+  fromIp,
   cameraDeck,
   cameraIndex,
   cameraStrip,
@@ -53,6 +54,33 @@ describe("atIp", () => {
   it("counts the layer an uplink actually carries", () => {
     expect(atIp(2000)).toBe(2067);
     expect(atIp(400)).toBe(413);
+  });
+});
+
+describe("fromIp", () => {
+  /**
+   * The exact inverse, and it has to be exact: `video/rate.ts` divides a
+   * measured link between two encodes with it, and a kilobit lost to
+   * `kbps / IP_OVERHEAD`'s rounding is a kilobit of a cellular uplink left
+   * unspent on every allocation for ever.
+   */
+  it("gives the largest rate whose IP cost fits, and never one that does not", () => {
+    for (let budget = 0; budget <= 4200; budget += 1) {
+      const rate = fromIp(budget);
+      expect(atIp(rate), `${budget} kb/s at IP`).toBeLessThanOrEqual(budget);
+      expect(atIp(rate + 1), `${budget} kb/s at IP`).toBeGreaterThan(budget);
+    }
+  });
+
+  it("round-trips every rate an encoder in this schema can be set to", () => {
+    for (let kbps = 100; kbps <= 20_000; kbps += 1) {
+      expect(fromIp(atIp(kbps)), `${kbps} kb/s`).toBe(kbps);
+    }
+  });
+
+  it("has nothing to give out of nothing", () => {
+    expect(fromIp(0)).toBe(0);
+    expect(fromIp(-5)).toBe(0);
   });
 });
 

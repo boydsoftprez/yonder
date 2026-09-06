@@ -57,6 +57,24 @@ export function atIp(kbps: number): number {
   return Math.round(kbps * IP_OVERHEAD);
 }
 
+/**
+ * The other way: the largest encoder rate whose IP cost fits in `kbps`.
+ *
+ * The exact inverse of `atIp`, and it has to be exact rather than
+ * `kbps / IP_OVERHEAD`: `atIp` rounds, so plain division loses a kb/s
+ * wherever the rounding went down, and the rate controller that divides a
+ * budget up (`video/rate.ts`) would then leave a kilobit of a cellular uplink
+ * unspent on every allocation for ever. `atIp(w) ≤ k` exactly when
+ * `w × overhead < k + 0.5`, which is what this computes.
+ *
+ * Here rather than beside its caller because it is the same measured
+ * overhead read backwards, and a second copy of that number is a number that
+ * can drift from this one.
+ */
+export function fromIp(kbps: number): number {
+  return Math.max(0, Math.ceil((kbps + 0.5) / IP_OVERHEAD) - 1);
+}
+
 /** One output leaving over the path the budget measures (R-VID-11). */
 export interface BudgetSegment {
   readonly label: string;

@@ -3,7 +3,7 @@ import { systemClock, type Clock } from "../apply/types.js";
 import { PREVIEW_RUNGS, type Camera, type PreviewRung } from "../schema/config.js";
 import {
   encodeControl, encodesIn, previewCaps,
-  type ElementProperty, type EncodeName, type PreviewShape,
+  type ElementProperty, type EncodeName, type PreviewShape, type RunningEncodes,
 } from "./pipeline.js";
 import type { CameraRun, Supervisor } from "./supervisor.js";
 
@@ -142,10 +142,20 @@ type Answer =
 const RETUNE_MS = 2_000;
 const RECONFIGURE_MS = 5_000;
 
-/** The last state this camera's encoder actually confirmed. Seeded from the
- *  launch line it is running under, and moved only by the process. */
+/**
+ * The last state this camera's encoder actually confirmed. Seeded from the
+ * launch line it is running under, and moved only by the process.
+ *
+ * `since` is the supervisor's own timestamp for the run this was seeded
+ * from, and it is what makes the seed expire: a pipeline that stopped and
+ * started again — a crash and its retry, or an operator pressing Stop then
+ * Start — is running its launch line from the top, and what the process
+ * before it confirmed is not what this one is doing. The restart counter
+ * alone will not do, because `Supervisor.start()` resets it to zero.
+ */
 interface Confirmed {
   pid: number | null;
+  since: number;
   stream: number | null;
   preview: number | null;
   shape: PreviewShape | null;
@@ -246,14 +256,50 @@ export class EncoderChannel {
     };
   }
 
+  /**
+   * What this camera's encoder is running now — the launch line the process
+   * is under, moved by every acknowledgement since (R-VID-07, R-VID-11).
+   *
+   * **The read a rate controller does before it decides anything**
+   * (`video/rate.ts`). It is deliberately not a number the caller keeps: a
+   * controller holding its own copy of the encoder's rate would compare its
+   * next target against its own bookkeeping, and the moment the pipeline
+   * restarted — at the rate its launch line carries, not the rate that was
+   * last commanded — the two would part company silently. That is K-48's
+   * shape exactly, one level up.
+   *
+   * `null` when nothing is running on this camera: there is no encoder to
+   * have a rate.
+   */
+  inForce(camera: string): RunningEncodes | null {
+    const argv = this.supervisor.argv(camera);
+    if (argv === null) return null;
+    const held = this.hold(camera, argv);
+    return { stream: held.stream, preview: held.preview, shape: held.shape };
+  }
+
   /** What this camera's encoder last confirmed, seeded from the launch line
-   *  the process is running under the first time it is asked for. */
+   *  the process is running under — the first time it is asked for, and again
+   *  whenever the pipeline it was seeded from has been replaced (`since`). */
   private hold(camera: string, argv: readonly string[]): Confirmed {
+    const since = this.supervisor.state(camera).since;
     const held = this.confirmed.get(camera);
-    if (held !== undefined) return held;
-    const seed = { pid: null, ...encodesIn(argv) };
-    this.confirmed.set(camera, seed);
-    return seed;
+    if (held === undefined) {
+      const seed = { pid: null, since, ...encodesIn(argv) };
+      this.confirmed.set(camera, seed);
+      return seed;
+    }
+    if (held.since !== since) {
+      const fresh = encodesIn(argv);
+      held.since = since;
+      // A new process has no pid to be compared against the old one's, and
+      // `settle` is told so rather than left to read a break into the change.
+      held.pid = null;
+      held.stream = fresh.stream;
+      held.preview = fresh.preview;
+      held.shape = fresh.shape;
+    }
+    return held;
   }
 
   private ask(
