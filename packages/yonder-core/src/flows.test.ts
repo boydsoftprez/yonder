@@ -2440,7 +2440,15 @@ describe("flows/flows.json camera pages", () => {
       .toEqual(["cam-index-route"]);
     const route = flows.find((n) => n.id === "cam-index-route");
     expect(route?.property).toBe("payload.adopt");
-    // Second output is the fall-through: everything that is not an adoption.
+    // **A switch's second output exists only if a second rule feeds it.**
+    // Shipped once without the `else` and OPEN silently did nothing: the press
+    // matched no rule, so it went nowhere, and every test here passed because
+    // they all read wires rather than rules. The operator found it in a
+    // browser within minutes.
+    const routeRules = route?.rules as { t: string }[];
+    expect(routeRules.length, "one rule per output, or an output is unreachable")
+      .toBe((route?.wires as string[][]).length);
+    expect(routeRules.at(-1)?.t, "the fall-through is a real rule").toBe("else");
     expect((route?.wires as string[][])[1]).toEqual(["cam-open"]);
 
     // And the sweep seeds the id only when there is nothing chosen, or when
