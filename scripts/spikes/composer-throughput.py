@@ -221,20 +221,29 @@ def run_arm(name: str, argv: list[str], outs: list[str], guard: str) -> dict:
 
 
 def main() -> int:
+    global PREVIEW_SCALER, WIDTH, HEIGHT                          # noqa: PLW0603
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--device", default=DEV_DEFAULT)
     ap.add_argument("--repeat", type=int, default=3)
     ap.add_argument("--workdir", default="/tmp/yonder-spike")
     ap.add_argument("--camguard", default=str(pathlib.Path(__file__).with_name("camguard.sh")))
+    # Running only the arms a question needs keeps the board out of thermal
+    # throttling, which at 1920x1080 it enters under the ffmpeg arms and which
+    # makes every number after it a measurement of the heatsink.
+    ap.add_argument("--arms", default="all",
+                    help="comma-separated substrings of arm names to run, e.g. 'gst  2'")
+    ap.add_argument("--capture", default=f"{WIDTH}x{HEIGHT}",
+                    help="capture size, e.g. 1920x1080 — the case where a software "
+                         "scaler has the most pixels to move")
     ap.add_argument("--preview-scaler", default="v4l2convert",
                     help="v4l2convert (hardware, cannot be reconfigured live) or "
                          "videoscale (software, can)")
     ap.add_argument("--differences", action="store_true",
                     help="print how the ffmpeg line differs from the GStreamer one, and exit")
     args = ap.parse_args()
-    global PREVIEW_SCALER                                         # noqa: PLW0603
     PREVIEW_SCALER = args.preview_scaler
+    WIDTH, HEIGHT = (int(x) for x in args.capture.split("x"))
 
     if args.differences:
         for title, body in DIFFERENCES:
@@ -254,6 +263,13 @@ def main() -> int:
         ("ff   1-branch", lambda: ff(args.device, False, o1, o2), [o1]),
         ("ff   2-branch", lambda: ff(args.device, True, o1, o2), [o1, o2]),
     ]
+
+    if args.arms != "all":
+        wanted = [a.strip() for a in args.arms.split(",")]
+        arms = [a for a in arms if any(w in a[0] for w in wanted)]
+        if not arms:
+            print("no arm matched --arms", file=sys.stderr)
+            return 2
 
     b_busy, b_total = cpu_snapshot()
     time.sleep(5)

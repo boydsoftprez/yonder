@@ -556,29 +556,55 @@ node "Not needed". The GPU scaler `glcolorscale` exists as an element; it failed
 in `video` but not `render` — and then, with that removed, on GL context creation in a
 headless session. **It is not established either way and should not be written off.**
 
-### What the trade costs, measured
+### What the trade costs — and it is not a cost
 
 Since adaptive resolution on a Pi means giving up `v4l2convert` for a software scaler, the
-two were measured in the same two-branch shape:
+two were measured against each other in the same two-branch shape. First from a 1280×720
+capture, preview at 640×360:
 
-| preview scaler | 300 frames | cpu (4 cores) | above idle |
+| preview scaler | cpu (4 cores), two runs | above idle |
+|---|---|---|
+| `v4l2convert` (hardware) | 23.6%, 22.5% | ~+12.7 |
+| `videoconvert ! videoscale` (software) | 22.4%, 21.8% | ~+11.8 |
+
+Indistinguishable — the software figure is nominally lower, which at this size is noise.
+Then from a **1920×1080** capture, which is where a software scaler has the most pixels to
+move and where it should lose:
+
+| preview scaler | cpu (4 cores), three runs | median above idle | preview bytes per 300 frames |
 |---|---|---|---|
-| `v4l2convert` (hardware) | 10.23 s, 12.24 s | 23.6%, 22.5% | ~+12.7 |
-| `videoconvert ! videoscale` (software) | 12.24 s, 10.26 s | 22.4%, 21.8% | ~+11.8 |
+| `v4l2convert` (hardware) | 40.9%, 45.1%, **53.4%** | **~+34.7** | 836 k, 844 k, 893 k |
+| `videoconvert ! videoscale` (software) | 32.0%, 31.2%, 31.8% | **~+20.4** | **1031 k, 1031 k, 1192 k** |
 
-Baselines 10.5% and 10.1%. **The two are indistinguishable at this rung** — the software
-figure is nominally lower, which is noise, not a result. At 640×360 the downscale is cheap
-enough that giving up the ISP for it costs nothing this method can measure. That is a
-statement about 640×360 on this board and not about scaling in general; a preview at
-1280×720, which is what the board's configuration currently holds, was not measured.
+Baselines 10.4% and 11.4%; `throttled` read `0x80000` throughout both sets, with no
+throttling bit active — the ffmpeg arms were excluded from these runs precisely because they
+drive this board into `0x80008` at 1080p and every number after that measures the heatsink.
 
-**On Rockchip the same trade does not arise, because there is nothing to trade.** No RGA or
+**The software scaler is cheaper, steadier and delivers more.** It costs about fourteen
+points less of a four-core board; its three runs sit within 0.8 points of each other while
+the hardware scaler's climb from 40.9% to 53.4% as the board warms; and it produced
+**about 20% more preview bytes for the same 300 frames at the same target bitrate**, which
+means the hardware path was dropping preview frames into the leaky queue while the software
+path kept up.
+
+**This is not a new discovery, and the repository already said so.**
+[`usb-camera-on-a-pi-4.md`](usb-camera-on-a-pi-4.md) records *"Defect 2 — the ISP converter
+is pure overhead, and looks like the opposite"*, and marks `/dev/video12` in its device
+table as *"Works, and **should not be used**"*. `compose()` uses it in the preview branch
+anyway. What is new here is that the same finding holds in the *preview* branch at 1080p,
+and that it removes the only apparent reason to keep an element that cannot be reconfigured
+live.
+
+So the trade an adaptive controller was supposed to make — give up hardware scaling, pay CPU
+for it — **does not exist on this board.** Dropping `v4l2convert` for `videoconvert !
+videoscale` buys live resolution changes and costs nothing; it gives CPU back.
+
+**On Rockchip the question does not arise, because there is nothing to trade.** No RGA or
 other hardware scaler element exists in GStreamer on that board — `gst-inspect-1.0` offers
 only `videoscale`, `videoconvert` and `videoconvertscale`, all software, and the two extra
 plugins the Rockchip build produces are a display sink (`rkximagesink`) and a DRM source
 (`kmssrc`). ffmpeg has `scale_rkrga` there and GStreamer does not, which is the mirror image
-of the Pi, where GStreamer has `v4l2convert` and ffmpeg has nothing. **Each framework holds
-the hardware scaler on exactly one of the two boards.**
+of the Pi — except that on the Pi the hardware scaler turns out to be the slower option.
 
 ## The recommendation to §2
 
@@ -599,7 +625,7 @@ the other way on every axis that was measured:
 | H.265 encode (R-CAM-08, R-HW-03) | `mpph265enc` ✔ Main/4.0, clean | `hevc_rkmpp` ✔ |
 | CPU, Pi two-branch | **+10.5 points** | +18.8 points |
 | Latency, Pi, sender side | **~31 ms** | ~153 ms |
-| Hardware preview scaler, Pi | `v4l2convert` ✔ *(but see below)* | none — software `scale` |
+| Hardware preview scaler, Pi | `v4l2convert` — present, and **measurably worse than software** | none — software `scale` |
 | Hardware preview scaler, RK3566 | none — software `videoscale` | `scale_rkrga` ✔ |
 | **Live resolution change** | **✔** both boards, both codecs, no gap — via a software scaler | **✘** no channel reaches the encoder at all |
 | Delivery | build MPP and the plugin from source | one pinned `.deb` |
