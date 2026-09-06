@@ -264,7 +264,19 @@ export function headInjection(markup: string): Middleware {
         return originalEnd(html, "utf8", done);
       }
 
-      const withMarkup = html.includes("</head>") ? html.replace("</head>", `${markup}\n</head>`) : html;
+      // **No head, nothing to do, and nothing to say about it.** Returning the
+      // bytes untouched — rather than passing them on with a recomputed length
+      // and a `Cache-Control` — is what keeps this correct for the responses
+      // that are not documents at all but still answer `text/html`: a `HEAD`
+      // request, whose body is empty by definition, and a `304`, which must
+      // not carry a body and was being handed `Content-Length: 0`. Both used
+      // to fall through to the rewrite below and have their headers edited for
+      // a splice that never happened.
+      if (!html.includes("</head>")) {
+        return originalEnd(html, "utf8", done);
+      }
+
+      const withMarkup = html.replace("</head>", `${markup}\n</head>`);
 
       // Headers stored but no length stated: a chunked response, which can
       // carry the longer body without contradicting anything it has already

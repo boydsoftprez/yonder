@@ -76,7 +76,13 @@ export interface ProbeOptions {
 }
 
 /** Formats that carry compressed video, and are therefore flyable (R-CAM-02). */
-const COMPRESSED = new Set(["MJPG", "JPEG", "H264", "HEVC"]);
+/**
+ * Exported so the harness fixture can be rebuilt against the same set the
+ * probe filters by, rather than against a second copy of it. A hand-kept
+ * duplicate of a list like this is the drift `controls.ts` warns about at
+ * length: the copy stays green while the original moves.
+ */
+export const COMPRESSED = new Set(["MJPG", "JPEG", "H264", "HEVC"]);
 
 /** Words a driver uses for a codec function. Whole words only — see below. */
 const CODEC_WORD = /^(codec|decoder?|encoder?|isp|hevc)$/i;

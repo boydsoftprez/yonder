@@ -3,9 +3,9 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { CAPABILITY_KEYS, summarise, type CameraCapabilities } from "./capability.js";
-import { CONTROL_MAP, gateIfInactive } from "./probe/camera.js";
-import { parseControls } from "./probe/parse.js";
+import { CAPABILITY_KEYS, present, summarise, type CameraCapabilities } from "./capability.js";
+import { COMPRESSED, CONTROL_MAP, gateIfInactive } from "./probe/camera.js";
+import { parseControls, parseFormats } from "./probe/parse.js";
 import { noCapabilities } from "./capability.js";
 
 /**
@@ -30,7 +30,7 @@ import { noCapabilities } from "./capability.js";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..");
 const FIXTURE = join(ROOT, "scripts", "fixtures", "camera-globalshutter.json");
 const fixture = JSON.parse(readFileSync(FIXTURE, "utf8")) as {
-  recorded: { capabilitiesRebuiltFrom: string };
+  recorded: { capabilitiesRebuiltFrom: string; formatsRebuiltFrom: string };
   found: { device: string; capabilities: CameraCapabilities }[];
 };
 
@@ -55,9 +55,14 @@ describe("the harness camera fixture", () => {
     // the capture disagree here, loudly, before the guess reaches a page.
     const capture = readFileSync(join(ROOT, fixture.recorded.capabilitiesRebuiltFrom), "utf8");
     const ranges = parseControls(capture);
+    // `formats` is derived too, and from its own capture. Copying it across
+    // from the fixture would have exempted the one capability the pages build
+    // their whole resolution picker from.
+    const formatsText = readFileSync(join(ROOT, fixture.recorded.formatsRebuiltFrom), "utf8");
+    const compressed = parseFormats(formatsText).filter((f) => COMPRESSED.has(f.fourcc));
     const rebuilt: CameraCapabilities = {
       ...noCapabilities(),
-      formats: fixture.found[0].capabilities.formats,
+      formats: present(compressed),
     };
     for (const [v4l2Name, key] of CONTROL_MAP) {
       const range = ranges.get(v4l2Name);

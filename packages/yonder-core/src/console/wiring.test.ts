@@ -308,6 +308,28 @@ describe("headInjection", () => {
       res.end(bare);
     });
     expect(res.body).toBe(bare);
+    // Nothing to splice is nothing to say. A body left alone must not come
+    // back wearing a `Cache-Control` this middleware invented for a rewrite
+    // that never happened.
+    expect(res.headers["cache-control"]).toBeUndefined();
+  });
+
+  /**
+   * A `text/html` response with no body at all still reaches this middleware,
+   * and used to leave it with its headers edited for a splice that could not
+   * have happened. `304` is the one that matters: it must not carry a body,
+   * and it was being handed `Content-Length: 0`.
+   */
+  it("leaves a bodyless html response alone", async () => {
+    const res = await serve(headInjection(TAG), (_req, res) => {
+      res.setHeader("content-type", "text/html; charset=UTF-8");
+      res.statusCode = 304;
+      res.end();
+    });
+    expect(res.status).toBe(304);
+    expect(res.body).toBe("");
+    expect(res.headers["content-length"]).toBeUndefined();
+    expect(res.headers["cache-control"]).toBeUndefined();
   });
 
   /**
