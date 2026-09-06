@@ -601,7 +601,7 @@ fi
 # that stopped watching.
 for type in yonder-status yonder-activity yonder-diag yonder-config yonder-scan \
             yonder-apply yonder-join yonder-pending yonder-confirm yonder-revert \
-            yonder-cameras yonder-camera yonder-stream yonder-receive-line; do
+            yonder-cameras yonder-camera yonder-stream yonder-stream-address; do
     if grep -q "\"$type\"" "$USERDIR/flows.json" || grep -q "$type" "$REPO/flows/flows.json"; then
         ok "the flows use $type"
     else
@@ -1236,7 +1236,7 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
     # **`--secrets`, because these runs write committed images too.**
     # `deviceSecret()` answers `null` without it, which switches off both
     # R-SEC-10 guards — the page-HTML check and the specimen-file check — and
-    # these are the two pages that carry the resolved receive line. Sixteen
+    # these are the two pages that carry the resolved stream address. Sixteen
     # images went into `docs/console/capture/` from this function with neither
     # guard running. `--synthetic-cameras` goes with it: without `--secrets`
     # it is what makes the gate say "nothing checked the real credential"

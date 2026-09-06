@@ -142,7 +142,7 @@ export interface ServerOptions {
 export interface CameraLayer {
   cameras: CameraProbes;
   encoder: () => Promise<Encoder>;
-  /** What `GET /cameras/:id/receive-line` resolves. See ServerOptions.cameraLayer. */
+  /** What `GET /cameras/:id/stream-address` resolves. See ServerOptions.cameraLayer. */
   rtspPassword: () => string | null;
 }
 
@@ -902,12 +902,12 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
       // One supervisor, for the process's lifetime. See buildRenderers.
       supervisor: built.supervisor,
       // The one value this router can reach in the secret store, and the one
-      // route that spends it is GET /cameras/:id/receive-line (R-SEC-10).
+      // route that spends it is GET /cameras/:id/stream-address (R-SEC-10).
       // Absent until the media server has been configured once, which the
       // rendering says in words rather than printing a URL that would not work.
       rtspPassword: () => built.secrets.get("rtsp_password") ?? null,
       // Every address this device answers on: what the radio holds, then what
-      // the mesh assigned. The receive line names one of these and lists the
+      // the mesh assigned. The stream address names one of these and lists the
       // rest beneath it, because a board on a mesh has several and only one of
       // them is the one the operator is actually reaching it on (R-VID-15).
       addresses: async () => {

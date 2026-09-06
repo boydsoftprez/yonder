@@ -48,7 +48,7 @@
 //      scrollbar of its own, and asserts the rail is still in the viewport at
 //      the bottom of the page.
 //   6. **A credential check**, which is the one thing here that is not a mask.
-//      The receive-line surface shows a *resolved* RTSP password (R-VID-15) and
+//      The stream-address surface shows a *resolved* RTSP password (R-VID-15) and
 //      these images are committed, so a capture taken against a real device
 //      would put a real secret in the repository for ever. R-SEC-10 says never
 //      in a log, an error, or a support bundle; a committed page is all three.
@@ -195,7 +195,7 @@ const LIVE = [
  * **`.y-id__v` is deliberately not on that list**, and this is where that is
  * written down rather than left as an omission.
  *
- * `YonderIdentity` draws the resolved RTSP receive line, and R-SEC-10's whole
+ * `YonderIdentity` draws the resolved RTSP stream address, and R-SEC-10's whole
  * evidence in this repository is that the committed `camera-setup` capture
  * shows the fixture's `FIXTURE-NOT-A-REAL-PASSWORD` and not a device's real
  * one. A specimen written over that field would erase the only picture that
@@ -434,7 +434,7 @@ if (!password) {
 /**
  * The value that must never appear in a captured page.
  *
- * R-VID-15 puts a *resolved* RTSP URL on the receive-line surface, R-UI-12
+ * R-VID-15 puts a *resolved* RTSP URL on the stream-address surface, R-UI-12
  * commits these images, and R-SEC-10 says a credential belongs in none of a
  * log, an error or a support bundle — a committed page image is all three at
  * once. So the fixture the harness seeds carries a visibly fake password and
@@ -672,7 +672,7 @@ for (const page of pages) {
 
   // ---- R-SEC-10, and this one is a check rather than a mask ----
   //
-  // The receive-line surface shows a resolved credential. R-UI-12 commits
+  // The stream-address surface shows a resolved credential. R-UI-12 commits
   // these images, so a captured page carrying the real one would put a secret
   // in the repository for ever — and R-SEC-10 says never in a log, an error,
   // or a support bundle. The fixture carries a visibly fake value; this is
@@ -976,7 +976,7 @@ if (syntheticCameras !== undefined) {
   }
   if (secretsPath === undefined) {
     note("  FAIL  --synthetic-cameras without --secrets: nothing checked the real credential");
-    note("          the receive line resolves one, and these images are committed (R-SEC-10)");
+    note("          the stream address resolves one, and these images are committed (R-SEC-10)");
     failures += 1;
   }
   // Only on a full pass, and for the reason the stale-debt check gives one

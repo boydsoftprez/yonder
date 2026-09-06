@@ -261,6 +261,17 @@ export function capabilityFacts(
  * compose a resolution — see the file's opening note.
  */
 export interface CameraStrip {
+  /**
+   * The camera's own name — the operator's, never a label typed into a page
+   * (R-UI-27).
+   *
+   * It is on the readout strip and not only on the deck's placard because the
+   * deck is exchanged: Live and Setup swap, and for the moment between them
+   * the only thing on the page saying *which camera this is* was a literal in
+   * `flows.json` (`"label": "Front camera"`, this fixture's name, frozen at
+   * deploy time on every device). The strip is on screen whichever deck is.
+   */
+  readonly name: string;
   /** What the supervisor observed, never what the configuration asked for. */
   readonly state: string;
   readonly picture: string;
@@ -349,6 +360,7 @@ export function cameraStrip(view: {
   // does, so it exists exactly where that output does.
   const fullRate = camera.outputs.some((o) => o.kind === "rtsp");
   return {
+    name: camera.name,
     state: runWords(view.run.state, view.run.reason),
     picture: `${camera.width} × ${camera.height}`,
     // Units keep their case, always: `FPS` says nothing and `KB/S` says

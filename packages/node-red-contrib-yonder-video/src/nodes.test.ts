@@ -37,7 +37,7 @@ vi.mock("yonder-core", async (importOriginal) => {
 const camerasNode = (await import("./cameras.js")).default ?? await import("./cameras.js");
 const cameraNode = (await import("./camera.js")).default ?? await import("./camera.js");
 const streamNode = (await import("./stream.js")).default ?? await import("./stream.js");
-const receiveNode = (await import("./receive-line.js")).default ?? await import("./receive-line.js");
+const addressNode = (await import("./stream-address.js")).default ?? await import("./stream-address.js");
 
 const ok = (body: unknown): DaemonReply => ({ ok: true, status: 200, body });
 /** The daemon answering, and refusing. `ok` here is the *transport*: the
@@ -306,22 +306,63 @@ describe("yonder-stream", () => {
   });
 });
 
-describe("yonder-receive-line", () => {
+describe("yonder-stream-address", () => {
   it("asks the daemon for the finished text and never resolves a secret itself", async () => {
     // Node-RED must never read /etc/yonder/secrets.yaml. The daemon owns it;
     // this node receives text that already has the credential in it.
     replies.push(ok({ renderings: [{ kind: "url", body: "rtsp://yonder:Kx7@10.0.0.1:8554/cam0" }] }));
-    const msg = await send(receiveNode, "yonder-receive-line", { camera: "cam0" });
-    expect(asked).toEqual([{ method: "GET", path: "/cameras/cam0/receive-line" }]);
+    const msg = await send(addressNode, "yonder-stream-address", { camera: "cam0" });
+    expect(asked).toEqual([{ method: "GET", path: "/cameras/cam0/stream-address" }]);
     expect(msg.payload).toBeDefined();
   });
 
   it("carries the address this session arrived on, when the page knows it", async () => {
     replies.push(ok({ renderings: [] }));
-    await send(receiveNode, "yonder-receive-line", { camera: "cam0", address: "10.147.17.42" });
+    await send(addressNode, "yonder-stream-address", { camera: "cam0", address: "10.147.17.42" });
     expect(asked).toEqual([
-      { method: "GET", path: "/cameras/cam0/receive-line?address=10.147.17.42" },
+      { method: "GET", path: "/cameras/cam0/stream-address?address=10.147.17.42" },
     ]);
+  });
+
+  /**
+   * **R-UI-24 on the node's own badge.** "4 ways to receive" on a board
+   * reachable only over cellular is the node saying four things work when one
+   * does — which is exactly the statement this whole surface exists to stop
+   * the console making. The verdict itself is `outputReach()`'s, resolved by
+   * the daemon; this only counts what came back.
+   */
+  it("counts what can be used, not what was offered", async () => {
+    const line = (kind: string, usable: boolean): Record<string, unknown> =>
+      ({ kind, body: "x", usable, note: usable ? "fine" : "unusable — no" });
+    replies.push(ok({
+      renderings: [
+        line("gstreamer", true), line("dialog", true),
+        line("appsink", true), line("url", false),
+      ],
+    }));
+    const msg = await send(addressNode, "yonder-stream-address", { camera: "cam0" });
+    expect(msg.yonder?.message).toBe("3 of 4 ways to receive");
+  });
+
+  it("says four plainly when all four can be used", async () => {
+    replies.push(ok({
+      renderings: ["gstreamer", "dialog", "appsink", "url"]
+        .map((kind) => ({ kind, body: "x", usable: true, note: "fine" })),
+    }));
+    const msg = await send(addressNode, "yonder-stream-address", { camera: "cam0" });
+    expect(msg.yonder?.message).toBe("4 ways to receive");
+  });
+
+  /**
+   * A refusal names the camera it is about, like every other camera route's
+   * — the node emits a fresh message, so the `msg.camera` that addressed it
+   * does not survive the round trip on its own.
+   */
+  it("says which camera a refusal is about", async () => {
+    replies.push(refused(404, { error: 'no camera is configured with the id "cam9"' }));
+    const msg = await send(addressNode, "yonder-stream-address", { camera: "cam9" });
+    expect(msg.yonder?.state).toBe("rejected");
+    expect(msg.camera).toBe("cam9");
   });
 
   /**

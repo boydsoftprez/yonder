@@ -2,7 +2,7 @@
   "name": "node-red-contrib-yonder-video",
   "version": "0.1.0",
   "license": "GPL-3.0-or-later",
-  "description": "Yonder console nodes for cameras: detection, capability, run state and the receive line. Thin adapters over the yonder-core daemon socket; every decision lives in yonder-core.",
+  "description": "Yonder console nodes for cameras: detection, capability, run state and the stream address. Thin adapters over the yonder-core daemon socket; every decision lives in yonder-core.",
   "keywords": [
     "node-red",
     "yonder"
@@ -13,7 +13,7 @@
       "yonder-cameras": "dist/cameras.js",
       "yonder-camera": "dist/camera.js",
       "yonder-stream": "dist/stream.js",
-      "yonder-receive-line": "dist/receive-line.js"
+      "yonder-stream-address": "dist/stream-address.js"
     }
   },
   "scripts": {

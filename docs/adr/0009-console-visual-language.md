@@ -198,7 +198,7 @@ written for:
   the component that owns the thing, so it cannot drift away from it.
 - **The rail carries the page's own actions** — the ones whose subject is the
   page rather than any one control on it: start and stop the pipeline, flip
-  between Live and Setup, re-probe, show the receive line, hold the full rate.
+  between Live and Setup, re-probe, show the stream address, hold the full rate.
   The rail is also where an irreversible action goes, because it is the one strip
   an operator reads before leaving a page.
 

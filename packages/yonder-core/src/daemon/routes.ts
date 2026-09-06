@@ -157,7 +157,7 @@ export interface RouterDeps {
    * The RTSP credential, resolved from `secrets.yaml`.
    *
    * A function returning one value rather than the whole store, because the
-   * narrowness *is* the guarantee: `GET /cameras/:id/receive-line` is the one
+   * narrowness *is* the guarantee: `GET /cameras/:id/stream-address` is the one
    * route allowed to spend it, and nothing else in this router can reach a
    * secret at all (R-SEC-10). `null` before the media server has ever been
    * configured, which the rendering says in words rather than printing a URL
@@ -167,7 +167,7 @@ export interface RouterDeps {
   /**
    * Every address this device answers on, most-used first.
    *
-   * R-VID-15 wants the receive line to carry the address the operator is
+   * R-VID-15 wants the stream address to carry the address the operator is
    * actually reaching the device on. A Unix socket carries no Host header, so
    * the caller may name one with `?address=` — and it is honoured only if it
    * is in this list, which makes the allowed set the set of real addresses
@@ -447,7 +447,7 @@ const CAMERA_ID = /^[a-z0-9][a-z0-9-]{0,31}$/;
  * matching at all. The difference is not cosmetic: a guard nothing can reach
  * is a guard no test can prove.
  */
-const CAMERA_ROUTE = /^\/cameras\/(.+?)(?:\/(run|probe|receive-line|controls|settings|apply|outputs\/(?:rtp|rtsp|srt)))?$/;
+const CAMERA_ROUTE = /^\/cameras\/(.+?)(?:\/(run|probe|stream-address|controls|settings|apply|outputs\/(?:rtp|rtsp|srt)))?$/;
 
 /**
  * Where a pipeline publishes: mediamtx, on loopback.
@@ -930,7 +930,7 @@ export function createRouter(deps: RouterDeps): Router {
     // answers with the reference the configuration holds, never the value
     // (R-SEC-10). This one is allowed it because the operator is being handed
     // a URL to copy, which is the whole of R-VID-15.
-    if (method === "GET" && verb === "receive-line") {
+    if (method === "GET" && verb === "stream-address") {
       const addresses = deps.addresses === undefined ? [] : await deps.addresses();
       // A Unix socket carries no Host header, so the caller may name the
       // address it arrived on — honoured only when this device actually
@@ -949,6 +949,13 @@ export function createRouter(deps: RouterDeps): Router {
         alternatives: addresses.filter((a) => a !== address),
         rtspPassword: deps.rtspPassword?.() ?? null,
         rtspPort: RTSP_PORT,
+        // **The device's own paths, at the moment the line was asked for**
+        // (R-UI-24). The same `reachPaths()` the deck's outputs are drawn
+        // from, so an output the deck says nothing can dial in to and the
+        // address for that output cannot disagree — a page saying
+        // *unreachable* beside a line offered as usable is the console
+        // contradicting itself about one fact.
+        paths: await reachPaths(),
       });
       return { status: 200, body: { renderings } };
     }

@@ -374,6 +374,49 @@ it("tabbing out of a preview picker posts nothing", () => {
   expect((wrapper.vm as any).draftStore.get("elp")).toMatchObject({ previewSize: "1280x720" });
 });
 
+/**
+ * **R-UI-27, through the one hop the browser owns.**
+ *
+ * `deckDraft()` translates a staged `name` and `POST /cameras/:id/apply`
+ * writes it, and both have tests in `yonder-core` — over a draft they build
+ * themselves. None of that reaches a camera unless the Name field actually
+ * stages into the shared draft and the Apply press actually carries it, which
+ * is this component's half and was untested: a field wired to nothing, or one
+ * that posted on every keystroke, would leave every test in that package
+ * green.
+ *
+ * Typing must also post nothing on its own. That is defect 1 — a value
+ * reaching the aircraft the moment focus left a field — and a name is a field
+ * an operator types slowly.
+ */
+it("stages the camera's name and sends it only when Apply is pressed", async () => {
+  const { wrapper, emit } = deck(makeStore(makeReport()), "setup");
+  const field = wrapper.findAll(".y-tf").find((f) => f.find(".y-tf__label").text() === "Name")!;
+  const input = field.find("input");
+  expect(input.element.value, "the field draws the applied name").toBe("Cam 1");
+
+  await input.setValue("Nose mast");
+  expect(emit, "typing a name must not post").not.toHaveBeenCalled();
+  input.element.dispatchEvent(new Event("blur", { bubbles: true, cancelable: true }));
+  expect(emit, "leaving the field must not post either").not.toHaveBeenCalled();
+  expect((wrapper.vm as any).draftStore.get("elp")).toMatchObject({ name: "Nose mast" });
+
+  await wrapper.findAll(".y-deck__key").find((b) => b.text() === "Apply")!.trigger("click");
+  expect(emit).toHaveBeenCalledTimes(1);
+  const [, , msg] = emit.mock.calls[0]!;
+  expect(msg.payload.apply).toEqual({ name: "Nose mast" });
+});
+
+/**
+ * The Name field is a bench setting (spec §3): it belongs on Setup, with the
+ * other three, and not on the deck an operator flies from.
+ */
+it("offers the name on Setup and nowhere on Live", () => {
+  const { wrapper } = deck(makeStore(makeReport()), "live");
+  expect(wrapper.findAll(".y-tf").map((f) => f.find(".y-tf__label").text()))
+    .not.toContain("Name");
+});
+
 it("Apply posts the whole draft once; Discard clears it and posts nothing", async () => {
   const report = makeReport();
   const store = makeStore(report);

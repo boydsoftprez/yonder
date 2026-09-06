@@ -252,6 +252,28 @@ describe("cameraStrip", () => {
   });
 
   /**
+   * **R-UI-27: the camera's own name, on the one part of the page that never
+   * goes away.**
+   *
+   * The deck's placard carries it too, but the deck is exchanged — Live and
+   * Setup swap — and until this, the only thing on the page saying which
+   * camera you were looking at while they swapped was a literal in
+   * `flows.json`: `"label": "Front camera"`, the capture fixture's name,
+   * frozen at deploy time on every device. A page cannot compose this for
+   * itself (see this file's opening note), so it is composed here.
+   */
+  it("names the camera, from the configuration and not from a page", () => {
+    const strip = cameraStrip({
+      camera: camera({ name: "Nose mast" }),
+      run: { state: "running" },
+      device: "/dev/video0",
+      byPathStable: true,
+      encoder,
+    });
+    expect(strip.name).toBe("Nose mast");
+  });
+
+  /**
    * A row labelled "cannot start" with nothing after it reads as *this camera
    * cannot start*, which is the opposite of what a null refusal means. So the
    * strip carries a sentence either way.

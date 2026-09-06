@@ -314,7 +314,7 @@ stale accepted violation does.
 at all — and a capture taken with the short value on the page shows nothing either way. With
 the widest value rendered, a box that cuts its text off or lets it escape over what is drawn
 beside it fails. `YonderIdentity`'s value is the one exemption, named in the check: a
-GStreamer receive line is 2169 px of text that no box on any console holds, and the component
+GStreamer receive command is 2169 px of text that no box on any console holds, and the component
 gives it a copy control for exactly that reason.
 
 **And a page in more than one state, where it has them.** R-UI-12 says a surface that hides

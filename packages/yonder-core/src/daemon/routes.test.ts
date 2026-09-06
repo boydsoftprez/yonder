@@ -147,7 +147,7 @@ const ENCODER: Encoder = {
   detail: "hardware H.264 on /dev/video11 — raw in, H.264 out",
 };
 
-/** The value the receive-line route resolves, and no other route may. */
+/** The value the stream-address route resolves, and no other route may. */
 const RTSP_PASSWORD = "an-actual-generated-rtsp-password";
 
 const ADDRESSES = ["192.168.77.1", "10.147.17.42"];
@@ -1586,7 +1586,7 @@ describe("the way back in", () => {
 /**
  * The camera routes: `GET /cameras`, `GET /cameras/:id`,
  * `POST /cameras/:id/probe`, `POST /cameras/:id/run` and
- * `GET /cameras/:id/receive-line`.
+ * `GET /cameras/:id/stream-address`.
  *
  * Three properties these exist for, in the order they matter:
  *
@@ -1598,7 +1598,7 @@ describe("the way back in", () => {
  * fails to start says `Internal data stream error` and nothing else.
  *
  * **The credential leaves the daemon on exactly one route** (R-SEC-10). The
- * receive line is the one place the value is allowed out, because the
+ * stream address is the one place the value is allowed out, because the
  * operator is being handed a URL to copy; every other route answers with the
  * reference the configuration holds.
  */
@@ -1608,7 +1608,7 @@ describe("the camera routes", () => {
     expect((await r("GET", "/cameras", undefined)).status).toBe(403);
     expect((await r("GET", "/cameras/cam0", undefined)).status).toBe(403);
     expect((await r("POST", "/cameras/cam0/run", { action: "start" })).status).toBe(403);
-    expect((await r("GET", "/cameras/cam0/receive-line", undefined)).status).toBe(403);
+    expect((await r("GET", "/cameras/cam0/stream-address", undefined)).status).toBe(403);
     expect((await r("POST", "/cameras/cam0/controls", { brightness: 10 })).status).toBe(403);
     expect((await r("POST", "/cameras/cam0/settings", { framerate: 25 })).status).toBe(403);
     expect(spawned).toEqual([]);
@@ -1832,7 +1832,7 @@ describe("the camera routes", () => {
     const r = provisioned({ cameras: fixtureDetection() });
     expect((await r("GET", "/cameras/cam9", undefined)).status).toBe(404);
     expect((await r("POST", "/cameras/cam9/run", { action: "start" })).status).toBe(404);
-    expect((await r("GET", "/cameras/cam9/receive-line", undefined)).status).toBe(404);
+    expect((await r("GET", "/cameras/cam9/stream-address", undefined)).status).toBe(404);
     expect((await r("POST", "/cameras/cam9/controls", { brightness: 10 })).status).toBe(404);
   });
 
@@ -1845,12 +1845,12 @@ describe("the camera routes", () => {
     expect(spawned).toEqual([]);
   });
 
-  it("resolves the RTSP credential into the receive line, and nowhere else", async () => {
+  it("resolves the RTSP credential into the stream address, and nowhere else", async () => {
     // R-SEC-10: never in a log, an error, or a support bundle. This route is
     // the one place the value is allowed out, because the operator is being
     // handed a URL to copy.
     const r = provisioned({ cameras: fixtureDetection() });
-    const line = await r("GET", "/cameras/cam0/receive-line", undefined);
+    const line = await r("GET", "/cameras/cam0/stream-address", undefined);
     expect(JSON.stringify(line.body)).toContain("rtsp://yonder:");
     expect(JSON.stringify(line.body)).toContain(RTSP_PASSWORD);
 
@@ -2093,7 +2093,7 @@ describe("the camera routes", () => {
   /** R-VID-15: the command carries the address the operator is reaching this device on. */
   it("names the address the request arrived on, and lists the others beneath it", async () => {
     const r = provisioned({ cameras: fixtureDetection() });
-    const chosen = await r("GET", "/cameras/cam0/receive-line?address=10.147.17.42", undefined);
+    const chosen = await r("GET", "/cameras/cam0/stream-address?address=10.147.17.42", undefined);
     const text = JSON.stringify(chosen.body);
     expect(text).toContain("10.147.17.42:8554/cam0");
     expect(text).toContain("192.168.77.1");
@@ -2106,15 +2106,78 @@ describe("the camera routes", () => {
    */
   it("ignores an address this device does not answer on", async () => {
     const r = provisioned({ cameras: fixtureDetection() });
-    const out = await r("GET", "/cameras/cam0/receive-line?address=evil.example", undefined);
+    const out = await r("GET", "/cameras/cam0/stream-address?address=evil.example", undefined);
     expect(JSON.stringify(out.body)).not.toContain("evil.example");
     expect(JSON.stringify(out.body)).toContain("192.168.77.1:8554/cam0");
+  });
+
+  /**
+   * **R-UI-24 at the join, which is where it was unguarded.**
+   *
+   * `renderReceive()` decides whether a line can be used and `receive.test.ts`
+   * holds it to that — over paths *it* supplies. None of that is worth
+   * anything if this route hands it a set of paths that is not the device's:
+   * a hardcoded `{ lan: true, mesh: true, cellular: true }` here would leave
+   * every test in that file green and every line on a flying aircraft marked
+   * usable. So the guarantee is tested through the one hop that carries it,
+   * in both directions, from the same `reachState` the deck's own outputs
+   * are drawn from.
+   */
+  describe("the stream address is drawn against this device's own paths", () => {
+    const only = (path: PathName): ReachState => ({
+      inUse: path,
+      carrying: true,
+      paths: [{
+        path, device: "x", standing: "in-use", since: null,
+        evidence: "reaching", detail: "Carrying traffic",
+      }],
+    });
+    const lineOf = async (state: ReachState, kind: string): Promise<{ usable: boolean; note: string }> => {
+      const r = provisioned({ cameras: fixtureDetection(), reachState: async () => state });
+      const out = await r("GET", "/cameras/cam0/stream-address", undefined);
+      const found = (out.body as { renderings: { kind: string; usable: boolean; note: string }[] })
+        .renderings.find((x) => x.kind === kind);
+      if (found === undefined) throw new Error(`no ${kind} rendering`);
+      return found;
+    };
+
+    it("marks the RTSP URL unusable when the only path up is the modem", async () => {
+      const url = await lineOf(only("modem"), "url");
+      expect(url.usable).toBe(false);
+      expect(url.note).toMatch(/^unusable — /);
+      expect(url.note).toMatch(/cellular/);
+    });
+
+    it("marks it usable on ethernet, so the mark follows the paths and is not always on", async () => {
+      expect((await lineOf(only("ethernet"), "url")).usable).toBe(true);
+    });
+
+    it("leaves the outbound push usable on the modem, because it dials out", async () => {
+      expect((await lineOf(only("modem"), "gstreamer")).usable).toBe(true);
+    });
+  });
+
+  /**
+   * R-UI-27: everywhere the camera is named, including the address for it.
+   *
+   * In the rendering a person reads, not as a field beside it: a ground
+   * station's dialog holds one feed and the operator filling it in has to
+   * know which camera they are pointing it at. A `camera` on the body that no
+   * surface drew would be the name composed and never shown, which is the
+   * shape R-CAM-05's identity sentence had for a whole commit.
+   */
+  it("names the camera the address is for, from the configuration", async () => {
+    const r = provisioned({ cameras: fixtureDetection() });
+    const out = await r("GET", "/cameras/cam0/stream-address", undefined);
+    const dialog = (out.body as { renderings: { kind: string; body: string }[] })
+      .renderings.find((x) => x.kind === "dialog");
+    expect(dialog?.body).toContain("Nose");
   });
 
   it("never writes the RTSP credential to the journal", async () => {
     const written = await captureLog(async () => {
       const r = provisioned({ cameras: fixtureDetection() });
-      await r("GET", "/cameras/cam0/receive-line", undefined);
+      await r("GET", "/cameras/cam0/stream-address", undefined);
       await r("POST", "/cameras/cam0/run", { action: "start" });
     });
     expect(written).not.toContain(RTSP_PASSWORD);
@@ -2126,7 +2189,7 @@ describe("the camera routes", () => {
     expect((await r("GET", "/cameras", undefined)).status).toBe(503);
     expect((await r("GET", "/cameras/cam0", undefined)).status).toBe(503);
     expect((await r("POST", "/cameras/cam0/run", { action: "start" })).status).toBe(503);
-    expect((await r("GET", "/cameras/cam0/receive-line", undefined)).status).toBe(503);
+    expect((await r("GET", "/cameras/cam0/stream-address", undefined)).status).toBe(503);
     expect((await r("POST", "/cameras/cam0/controls", { brightness: 10 })).status).toBe(503);
   });
 });

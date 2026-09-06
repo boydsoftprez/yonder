@@ -4303,7 +4303,7 @@
     {
         "id": "group-cam-receive",
         "type": "ui-group",
-        "name": "Receive this feed",
+        "name": "Stream address",
         "page": "page-camera",
         "width": 12,
         "height": 1,
@@ -4610,7 +4610,7 @@
         "width": 12,
         "height": 5,
         "path": "",
-        "label": "Front camera",
+        "label": "",
         "stillsAfterMs": 12000,
         "stillsUrl": "",
         "cost": "",
@@ -4657,7 +4657,7 @@
         "width": 12,
         "height": 0,
         "label": "",
-        "cells": "[{\"key\":\"state\",\"label\":\"RUNNING\",\"kind\":\"note\"},{\"key\":\"identity\",\"label\":\"IDENTITY\",\"kind\":\"note\"},{\"key\":\"picture\",\"label\":\"PICTURE\"},{\"key\":\"rate\",\"label\":\"RATE\"},{\"key\":\"bitrate\",\"label\":\"BITRATE\"},{\"key\":\"uplink\",\"label\":\"UPLINK\"}]",
+        "cells": "[{\"key\":\"name\",\"label\":\"CAMERA\"},{\"key\":\"state\",\"label\":\"RUNNING\",\"kind\":\"note\"},{\"key\":\"identity\",\"label\":\"IDENTITY\",\"kind\":\"note\"},{\"key\":\"picture\",\"label\":\"PICTURE\"},{\"key\":\"rate\",\"label\":\"RATE\"},{\"key\":\"bitrate\",\"label\":\"BITRATE\"},{\"key\":\"uplink\",\"label\":\"UPLINK\"}]",
         "x": 1030,
         "y": 2080,
         "wires": []
@@ -4920,9 +4920,9 @@
     },
     {
         "id": "receive-camera",
-        "type": "yonder-receive-line",
+        "type": "yonder-stream-address",
         "z": "yonder-console",
-        "name": "how to receive this",
+        "name": "the stream address for this camera",
         "camera": "",
         "x": 780,
         "y": 2620,
@@ -4936,8 +4936,29 @@
         "id": "pick-cam-receive",
         "type": "change",
         "z": "yonder-console",
-        "name": "the two an operator copies",
+        "name": "the four receivers, and what each of them can do",
         "rules": [
+            {
+                "t": "set",
+                "p": "payload.gstreamer",
+                "pt": "msg",
+                "to": "payload.renderings[kind=\"gstreamer\"].body",
+                "tot": "jsonata"
+            },
+            {
+                "t": "set",
+                "p": "payload.dialog",
+                "pt": "msg",
+                "to": "payload.renderings[kind=\"dialog\"].body",
+                "tot": "jsonata"
+            },
+            {
+                "t": "set",
+                "p": "payload.appsink",
+                "pt": "msg",
+                "to": "payload.renderings[kind=\"appsink\"].body",
+                "tot": "jsonata"
+            },
             {
                 "t": "set",
                 "p": "payload.rtsp",
@@ -4947,9 +4968,16 @@
             },
             {
                 "t": "set",
-                "p": "payload.gstreamer",
+                "p": "payload.pushNote",
                 "pt": "msg",
-                "to": "payload.renderings[kind=\"gstreamer\"].body",
+                "to": "payload.renderings[kind=\"gstreamer\"].note",
+                "tot": "jsonata"
+            },
+            {
+                "t": "set",
+                "p": "payload.listenNote",
+                "pt": "msg",
+                "to": "payload.renderings[kind=\"url\"].note",
                 "tot": "jsonata"
             }
         ],
@@ -4962,8 +4990,11 @@
         "y": 2620,
         "wires": [
             [
+                "identity-cam-gstreamer",
+                "identity-cam-dialog",
+                "identity-cam-appsink",
                 "identity-cam-rtsp",
-                "identity-cam-gstreamer"
+                "bar-cam-reach"
             ]
         ]
     },
@@ -4972,14 +5003,14 @@
         "type": "ui-yonder-identity",
         "z": "yonder-console",
         "group": "group-cam-receive",
-        "order": 1,
+        "order": 4,
         "width": 12,
         "height": 1,
         "name": "rtsp url",
         "label": "RTSP URL",
         "key": "rtsp",
         "x": 1360,
-        "y": 2600,
+        "y": 2750,
         "wires": []
     },
     {
@@ -4987,14 +5018,59 @@
         "type": "ui-yonder-identity",
         "z": "yonder-console",
         "group": "group-cam-receive",
-        "order": 2,
+        "order": 1,
         "width": 12,
         "height": 1,
         "name": "gstreamer",
         "label": "GStreamer",
         "key": "gstreamer",
         "x": 1360,
+        "y": 2600,
+        "wires": []
+    },
+    {
+        "id": "identity-cam-dialog",
+        "type": "ui-yonder-identity",
+        "z": "yonder-console",
+        "group": "group-cam-receive",
+        "order": 2,
+        "width": 12,
+        "height": 1,
+        "name": "ground station settings",
+        "label": "Ground station",
+        "key": "dialog",
+        "x": 1360,
         "y": 2650,
+        "wires": []
+    },
+    {
+        "id": "identity-cam-appsink",
+        "type": "ui-yonder-identity",
+        "z": "yonder-console",
+        "group": "group-cam-receive",
+        "order": 3,
+        "width": 12,
+        "height": 1,
+        "name": "appsink pipeline",
+        "label": "Application sink",
+        "key": "appsink",
+        "x": 1360,
+        "y": 2700,
+        "wires": []
+    },
+    {
+        "id": "bar-cam-reach",
+        "type": "ui-yonder-databar",
+        "z": "yonder-console",
+        "group": "group-cam-receive",
+        "name": "what each of these can reach",
+        "order": 5,
+        "width": 12,
+        "height": 0,
+        "label": "",
+        "cells": "[{\"key\":\"pushNote\",\"label\":\"UDP · RTP\",\"kind\":\"note\"},{\"key\":\"listenNote\",\"label\":\"RTSP\",\"kind\":\"note\"}]",
+        "x": 1360,
+        "y": 2800,
         "wires": []
     },
     {
@@ -5178,7 +5254,7 @@
         "order": 1,
         "width": 12,
         "height": 1,
-        "keys": "[{\"label\":\"LIVE\",\"action\":\"live\",\"tone\":\"act\"},{\"label\":\"RE-PROBE\",\"action\":\"probe\",\"tone\":\"plain\"},{\"label\":\"RECEIVE LINE\",\"action\":\"receive\",\"tone\":\"plain\"}]",
+        "keys": "[{\"label\":\"LIVE\",\"action\":\"live\",\"tone\":\"act\"},{\"label\":\"RE-PROBE\",\"action\":\"probe\",\"tone\":\"plain\"},{\"label\":\"STREAM ADDRESS\",\"action\":\"address\",\"tone\":\"plain\"}]",
         "x": 260,
         "y": 2850,
         "wires": [
@@ -5207,7 +5283,7 @@
             },
             {
                 "t": "eq",
-                "v": "receive",
+                "v": "address",
                 "vt": "str"
             }
         ],

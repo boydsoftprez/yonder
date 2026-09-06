@@ -9,7 +9,7 @@ import type { NodeMessage, RED, RedNode } from "./red.js";
  * Written once, as `node-red-contrib-yonder-network/src/read.ts` is, because
  * these four nodes differ only in the route they call and the sentence they
  * put on the status. **Nothing here decides anything about a camera**:
- * detection, capability, refusal, composition and the receive line are all
+ * detection, capability, refusal, composition and the stream address are all
  * `yonder-core`'s, where they have tests that need neither a running Node-RED
  * nor a camera. A node that started deciding would be a decision reviewable
  * only by running a runtime — which is CLAUDE.md rule 2 one layer up.

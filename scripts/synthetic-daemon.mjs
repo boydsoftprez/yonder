@@ -88,7 +88,7 @@ await startServer({
     cameras: { detect, probe },
     encoder: async () => structuredClone(fixture.encoder),
     // The visibly fake value, and the whole reason it is in the fixture: the
-    // receive line resolves a credential (R-VID-15) and R-UI-12 commits the
+    // stream address resolves a credential (R-VID-15) and R-UI-12 commits the
     // picture of it. capture-pages.mjs reads the device's own secrets.yaml and
     // fails any page carrying *that* value, so this is what a committed image
     // is allowed to show (R-SEC-10).

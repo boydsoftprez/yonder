@@ -2018,16 +2018,156 @@ describe("flows/flows.json camera pages", () => {
   });
 
   /**
-   * R-VID-15, and the reason the capture gate checks every committed page for
-   * the device's real credential: this line carries a resolved one.
+   * **The stream address: all four receivers, each with a means of copying
+   * it** (R-VID-15, spec §3 — *"Receive line" is Stream address*).
+   *
+   * The page drew two of the four. `renderReceive()` has answered a GStreamer
+   * command line, a ground station's own settings, an appsink pipeline and an
+   * RTSP URL since M4, and the wiring picked the first and the last — so an
+   * operator holding a Mission Planner or a QGroundControl, which are the two
+   * the other two renderings exist for, found nothing on the page and had to
+   * read a document. That is R-VID-10's world, which R-VID-15 exists to
+   * replace.
+   *
+   * This is also the reason the capture gate checks every committed page for
+   * the device's real credential: the RTSP line carries a resolved one.
    */
-  it("shows the receive line with a means of copying it", () => {
-    const rtsp = flows.find((n) => n.id === "identity-cam-rtsp");
-    expect(rtsp?.type).toBe("ui-yonder-identity");
-    const line = flows.find((n) => n.type === "yonder-receive-line");
+  it("shows all four receivers, each with a means of copying it", () => {
+    const line = flows.find((n) => n.type === "yonder-stream-address");
+    expect(line, "there is no stream address node").toBeDefined();
     expect((line?.wires as string[][])[0]).toEqual(["pick-cam-receive"]);
-    expect((flows.find((n) => n.id === "pick-cam-receive")?.wires as string[][])[0])
-      .toContain("identity-cam-rtsp");
+
+    const pick = flows.find((n) => n.id === "pick-cam-receive");
+    const fed = (pick?.wires as string[][])[0];
+    // One identity per rendering `renderReceive()` produces, keyed on the
+    // property the pick node sets — so a rendering added there and not drawn
+    // here is a widget bound to nothing, which renders an em dash for ever.
+    for (const [id, key] of [
+      ["identity-cam-gstreamer", "gstreamer"],
+      ["identity-cam-dialog", "dialog"],
+      ["identity-cam-appsink", "appsink"],
+      ["identity-cam-rtsp", "rtsp"],
+    ]) {
+      const widget = flows.find((n) => n.id === id);
+      expect(widget?.type, `${id} is not an identity`).toBe("ui-yonder-identity");
+      expect(widget?.key, `${id} reads the wrong property`).toBe(key);
+      expect(fed, `${id} is never fed`).toContain(id);
+      expect(JSON.stringify(pick?.rules), `nothing sets payload.${key}`)
+        .toContain(`"p":"payload.${key}"`);
+    }
+  });
+
+  /**
+   * **R-UI-24: an output nothing can reach has its address marked unusable
+   * rather than offered** — and the mark is on the page, not only in the
+   * payload.
+   *
+   * The verdict and its sentence are `video/receive.ts`'s, from
+   * `outputReach()`; what this holds is that the page actually draws them.
+   * A `usable: false` nobody renders is R-UI-24 satisfied in a type and
+   * failed in front of the operator, which is the shape K-32 had.
+   *
+   * Two cells and not four, because the three UDP renderings are three ways
+   * of writing one output and share one verdict — three copies of one
+   * sentence is three chances to disagree about one fact.
+   */
+  it("draws each address's verdict beside it, in the words yonder-core chose", () => {
+    const bar = flows.find((n) => n.id === "bar-cam-reach");
+    expect(bar?.type, "nothing draws whether an address can be used").toBe("ui-yonder-databar");
+    expect(bar?.group).toBe("group-cam-receive");
+    const cells = JSON.parse(String(bar?.cells)) as { key: string; kind?: string }[];
+    expect(cells.map((c) => c.key)).toEqual(["pushNote", "listenNote"]);
+    // A sentence, declared as one: a reading's cell is `white-space: nowrap`
+    // and would take the strip off the side of the page (R-UI-25).
+    for (const c of cells) expect(c.kind, `${c.key} is a sentence, not a reading`).toBe("note");
+
+    const pick = flows.find((n) => n.id === "pick-cam-receive");
+    expect((pick?.wires as string[][])[0]).toContain("bar-cam-reach");
+    // **The daemon's own note, moved and never composed here.** A JSONata
+    // expression joining "unusable" to a reason beside a wire coordinate is
+    // CLAUDE.md rule 2, so `receive.ts` puts the word in the sentence and
+    // this file only carries it.
+    const rules = pick?.rules as { p: string; to: string }[];
+    for (const [p, to] of [
+      ["payload.pushNote", 'payload.renderings[kind="gstreamer"].note'],
+      ["payload.listenNote", 'payload.renderings[kind="url"].note'],
+    ]) {
+      expect(rules.find((r) => r.p === p)?.to, `${p} is not a move`).toBe(to);
+    }
+  });
+
+  /**
+   * **No camera's *name* is written into this file either** (R-UI-27).
+   *
+   * The companion to "names no camera in the wiring" below, which closed the
+   * same hole for a camera's *id*. The picture carried `"label": "Front
+   * camera"` — the capture fixture's name, frozen at deploy time — so a board
+   * whose camera the operator has called anything else had a page labelled
+   * with somebody else's camera. R-UI-27 makes the name the operator's; a
+   * name in this file is a name they cannot change.
+   *
+   * The name reaches the page the way every other fact about the camera does:
+   * composed in `video/present.ts` from the configuration, read whole.
+   */
+  it("writes no camera's name into the wiring, and draws the one it is sent", () => {
+    expect(flows.find((n) => n.id === "pic-camera")?.label,
+      "the picture is labelled with a camera name this file typed in").toBe("");
+    const bar = flows.find((n) => n.id === "bar-camera");
+    const cells = JSON.parse(String(bar?.cells)) as { key: string }[];
+    expect(cells.map((c) => c.key), "the readout strip never names its camera")
+      .toContain("name");
+    // From the same composed payload as the rest of the strip, so it can
+    // never be a value this file typed in.
+    expect((flows.find((n) => n.id === "pick-cam-strip")?.wires as string[][])[0])
+      .toContain("bar-camera");
+  });
+
+  /**
+   * **R-UI-03, per camera: the page the index opens is the page navigation
+   * shows, and it exists.**
+   *
+   * Dashboard 2 cannot create a page at run time — `ui-control` sets a page's
+   * `visible` and `disabled` and nothing else, and `ui_base.js` merges only
+   * that state into what it sends the browser — so "one page per detected
+   * camera" is served by the camera pages this file carries, shown and hidden
+   * from the sweep. That makes the join between them load-bearing and, until
+   * this test, unwatched: `cameras-show-page` names a page by **id**,
+   * `cam-open` navigates to one by **name**, and neither was resolved against
+   * the pages that exist. A page renamed in the editor leaves `ui-control`
+   * logging *No page with the name 'Camera' found* and the OPEN key doing
+   * nothing at all — at run time, on a board, with every test green.
+   *
+   * The last clause is what makes a second camera page a data change: a
+   * camera page nothing shows, or nothing hides, fails here.
+   */
+  it("shows and opens the same camera page, and leaves none of them unreachable", () => {
+    const pages = new Map(flows.filter((n) => n.type === "ui-page").map((p) => [p.id, p]));
+    const listed = (id: string, which: "show" | "hide"): string[] => {
+      const to = (flows.find((n) => n.id === id)?.rules as { to: string }[])[0].to;
+      return (JSON.parse(to) as { pages: Record<string, string[]> }).pages[which] ?? [];
+    };
+    const shown = listed("cameras-show-page", "show");
+    const hidden = listed("cameras-hide-page", "hide");
+    expect(shown.length).toBeGreaterThan(0);
+    expect(shown.slice().sort()).toEqual(hidden.slice().sort());
+    for (const id of shown) {
+      expect(pages.has(id), `navigation names ${id}, which is not a page`).toBe(true);
+    }
+    // Every camera page in the file is in that set. One that is not would be
+    // a section for a camera that is not there — R-UI-03 exactly backwards.
+    const cameraPages = [...pages.values()].filter((p) => p.id !== "page-cameras"
+      && groupsOn(p).some((g) => String(g.id).startsWith("group-cam-")));
+    expect(cameraPages.length).toBeGreaterThan(0);
+    for (const p of cameraPages) {
+      expect(shown, `${String(p.name)} is a camera page nothing shows`).toContain(p.id);
+    }
+    // And the index opens one of them, by the name that page actually has.
+    const open = (flows.find((n) => n.id === "cam-open")?.rules as { p: string; to: string }[])
+      .find((r) => r.p === "payload");
+    const named = (JSON.parse(String(open?.to)) as { page: string }).page;
+    const target = [...pages.values()].find((p) => p.name === named);
+    expect(target, `OPEN navigates to "${named}", which no page is called`).toBeDefined();
+    expect(shown, "the index opens a page navigation never shows").toContain(target?.id);
   });
 
   /**
@@ -2087,7 +2227,7 @@ describe("flows/flows.json camera pages", () => {
       (JSON.parse(String(flows.find((n) => n.id === id)?.keys)) as { action: string }[])
         .map((k) => k.action);
     expect(keysOf("keys-cam-live")).toEqual(["start", "stop", "setup"]);
-    expect(keysOf("keys-cam-setup")).toEqual(["live", "probe", "receive"]);
+    expect(keysOf("keys-cam-setup")).toEqual(["live", "probe", "address"]);
   });
 
   /**
@@ -2098,7 +2238,7 @@ describe("flows/flows.json camera pages", () => {
   it("sends only start and stop to the pipeline", () => {
     const route = flows.find((n) => n.id === "cam-live-keys");
     const [setup, rest] = route?.wires as string[][];
-    // Setup also fetches the receive line: the deck an operator opens to find
+    // Setup also fetches the stream address: the deck an operator opens to find
     // it should already have it, and the committed capture of that deck is
     // what makes the gate's credential check bite (R-SEC-10).
     expect(setup).toEqual(["deck-setup", "cam-at-receive"]);
@@ -2121,7 +2261,7 @@ describe("flows/flows.json camera pages", () => {
    */
   it("names no camera in the wiring, and addresses every camera node by message", () => {
     const nodes = flows.filter(
-      (n) => ["yonder-camera", "yonder-stream", "yonder-receive-line"].includes(n.type),
+      (n) => ["yonder-camera", "yonder-stream", "yonder-stream-address"].includes(n.type),
     );
     expect(nodes.length).toBeGreaterThan(0);
     for (const n of nodes) {
@@ -2257,7 +2397,7 @@ describe("flows/flows.json camera pages", () => {
    * **R-UI-26: an action lives beside the thing it acts on.**
    *
    * The rail carries the page's own actions — start, stop, the deck flip,
-   * re-probe, the receive line, the full-rate hold. Record and Recentre are
+   * re-probe, the stream address, the full-rate hold. Record and Recentre are
    * not among them and must not become so: Record belongs under the picture
    * it is recording, in the deck's own Capture column, and Recentre belongs
    * on the Aim panel beside the gimbal it moves. On a rail they would be two

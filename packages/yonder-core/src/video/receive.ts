@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import type { Camera } from "../schema/config.js";
+import type { Camera, CameraOutput } from "../schema/config.js";
+import { outputReach, type OutputKind, type ReachPaths } from "./outputs.js";
 import { RTP_PAYLOAD_TYPE } from "./pipeline.js";
 
 /**
- * The exact receive-side command, in the interface (R-VID-15).
+ * The stream address — the exact receive-side command, in the interface
+ * (R-VID-15, R-UI-24).
  *
  * R-VID-10 makes a ground station configurable from the documentation alone,
  * which is what you need before the device is in front of anyone. This is the
@@ -14,6 +16,15 @@ import { RTP_PAYLOAD_TYPE } from "./pipeline.js";
  * **The address is the one the operator is actually reaching the device on.**
  * A board on a mesh has several and only one of them is in use; the command
  * carries that one and lists the others beneath it rather than guessing.
+ *
+ * **Every line says whether it can be used right now** (R-UI-24). A line an
+ * operator copies, pastes into a ground station and watches do nothing is
+ * worse than no line at all: they have no way to tell a mistyped command from
+ * a path that cannot carry it. So each rendering carries `usable` and the
+ * sentence behind it — from `outputReach()`, which is where that judgement
+ * lives — and the console draws the sentence. **It states and never acts**
+ * (R-CMD-04): nothing here stops an output, hides a line or recommends a
+ * path.
  *
  * Pure, and therefore fully testable — which matters because the one thing
  * this must never do is print a command that does not work.
@@ -27,12 +38,40 @@ export interface ReceiveFacts {
   /** Resolved from secrets.yaml, or null before it has been generated. */
   readonly rtspPassword: string | null;
   readonly rtspPort: number;
+  /**
+   * Which ways off this board a peer could use, for `outputReach()`.
+   *
+   * Required rather than optional, and deliberately: a default here would be
+   * a claim about this device's network made by a rendering function, and
+   * every line it drew would inherit it. The daemon reads the paths; this
+   * only restates what they mean for one output.
+   */
+  readonly paths: ReachPaths;
 }
 
 export interface Rendering {
   readonly kind: "gstreamer" | "dialog" | "appsink" | "url";
   readonly title: string;
   readonly body: string;
+  /**
+   * Whether a receiver holding this line could use it right now (R-UI-24).
+   *
+   * Three separate ways it can be false, and the note says which: the output
+   * this line is for is not configured, it is configured and stopped, or it
+   * is running and no path this device has can carry it.
+   */
+  readonly usable: boolean;
+  /**
+   * Why, in an operator's words. States a fact and recommends nothing.
+   *
+   * **It carries the word *unusable* itself when it is one**, because that is
+   * what R-UI-24 asks the console to say and the console cannot compose it:
+   * the surface is `flows.json`, and a JSONata expression joining a verdict to
+   * a sentence beside a wire coordinate is exactly CLAUDE.md rule 2. `usable`
+   * stays beside it as the machine-readable half — the node's status badge
+   * counts it — so nothing has to parse this string to learn the verdict.
+   */
+  readonly note: string;
 }
 
 /**
@@ -49,12 +88,52 @@ const CODEC = {
   h264: { depay: "rtph264depay", parse: "h264parse", decode: "avdec_h264" },
 } as const;
 
+/**
+ * Whether the output a line is for can carry it, and the sentence that says
+ * so — the one place all four lines get their verdict from.
+ *
+ * **`outputReach()` answers only the last of the three questions**, which is
+ * the one it was written for: can a peer reach a listener, or leave with an
+ * outbound push, over the paths this device has. It knows nothing about
+ * whether the output exists in the configuration or has been stopped, and it
+ * says so in its own doc comment — "It is not wired to `CameraOutput.enabled`
+ * … an output can be enabled and unreachable at once". Both of those are
+ * still reasons a copied line does nothing, so they are answered here, before
+ * reach, and each with its own sentence: *there is no such output*, *it is
+ * stopped*, and *nothing can dial in to it* are three different things for an
+ * operator to do something about.
+ */
+function usability(
+  output: CameraOutput | undefined,
+  kind: OutputKind,
+  paths: ReachPaths,
+): { usable: boolean; note: string } {
+  const what = kind.toUpperCase();
+  /** R-UI-24's own word, in front of the reason, exactly once. */
+  const no = (why: string): { usable: false; note: string } =>
+    ({ usable: false, note: `unusable — ${why}` });
+  if (output === undefined) {
+    return no(`this camera has no ${what} output; add one in Setup`);
+  }
+  if (!output.enabled) {
+    return no(`this camera's ${what} output is stopped; start it in Setup and nothing has to be typed again`);
+  }
+  const reach = outputReach(kind, paths);
+  return reach.reachable ? { usable: true, note: reach.note } : no(reach.note);
+}
+
 export function renderReceive(facts: ReceiveFacts): Rendering[] {
-  const { camera, address, alternatives, rtspPassword, rtspPort } = facts;
+  const { camera, address, alternatives, rtspPassword, rtspPort, paths } = facts;
   const c = CODEC[camera.codec];
   const rtp = camera.outputs.find((o) => o.kind === "rtp");
   const rtsp = camera.outputs.find((o) => o.kind === "rtsp");
   const port = rtp?.port ?? 5600;
+
+  // The three UDP renderings are three ways of writing down one output: this
+  // device pushing RTP to a ground station. They stand or fall together, so
+  // they take one verdict rather than three that could disagree.
+  const push = usability(rtp, "rtp", paths);
+  const listen = usability(rtsp, "rtsp", paths);
 
   const caps =
     `application/x-rtp,media=video,clock-rate=90000,encoding-name=${camera.codec.toUpperCase()},payload=${RTP_PAYLOAD_TYPE}`;
@@ -68,11 +147,17 @@ export function renderReceive(facts: ReceiveFacts): Rendering[] {
         `  ! rtpjitterbuffer latency=100 ! ${c.depay} ! ${c.parse} ! ${c.decode}`,
         `  ! videoconvert ! autovideosink sync=false`,
       ].join(" \\\n"),
+      ...push,
     },
     {
       kind: "dialog",
       title: "A ground station's own video settings",
       body: [
+        // The camera's name first, because a ground station's dialog has one
+        // feed in it and the operator filling it in has to know which camera
+        // they are pointing it at (R-UI-27). It is the operator's own name,
+        // read from the configuration, never a label typed into a page.
+        `Camera:          ${camera.name}`,
         `Video source:    UDP`,
         `Listen port:     ${port}`,
         `Codec:           ${camera.codec.toUpperCase()}`,
@@ -81,25 +166,47 @@ export function renderReceive(facts: ReceiveFacts): Rendering[] {
         ``,
         `This device also answers on: ${alternatives.length ? alternatives.join(", ") : "no other address"}`,
       ].join("\n"),
+      ...push,
     },
     {
       kind: "appsink",
       title: "A pipeline ending in an application sink",
       body:
-        `udpsrc port=${port} caps="${caps}" ` +
-        `! rtpjitterbuffer latency=100 ! ${c.depay} ! ${c.parse} ! ${c.decode} ` +
-        `! videoconvert ! video/x-raw,format=BGRA ! appsink name=sink emit-signals=true sync=false`,
+        `udpsrc port=${port} caps="${caps}" `
+        + `! rtpjitterbuffer latency=100 ! ${c.depay} ! ${c.parse} ! ${c.decode} `
+        + `! videoconvert ! video/x-raw,format=BGRA ! appsink name=sink emit-signals=true sync=false`,
+      ...push,
     },
     {
       kind: "url",
       title: "An RTSP URL",
+      /**
+       * **The credential is in the URL, and it has to be.** This device's
+       * media server grants anonymous read from loopback only
+       * (`media/config.ts`'s `authInternalUsers`, measured against mediamtx
+       * on a board): a player dialling in from anywhere else without the
+       * credential is answered `401 Unauthorized`, which most players report
+       * as nothing at all. So an address printed without it is an address
+       * that looks right and silently does not work — worse than saying
+       * there is none.
+       */
       body: rtsp === undefined || rtsp.kind !== "rtsp"
         ? "This camera has no RTSP output configured. Add one in Setup to receive over RTSP."
         : rtspPassword === null
-          ? `rtsp://yonder:<password>@${address}:${rtspPort}/${camera.id}\n\n` +
-            "This device's RTSP password is not yet generated; it is created the first " +
-            "time the media server is configured."
+          ? `rtsp://yonder:<password>@${address}:${rtspPort}/${camera.id}\n\n`
+          + "This device's RTSP password is not yet generated; it is created the first "
+          + "time the media server is configured."
           : `rtsp://yonder:${rtspPassword}@${address}:${rtspPort}/${camera.id}`,
+      // A URL with `<password>` where the credential goes is not a URL
+      // anybody can use, whatever the paths say, so an unresolved secret is
+      // its own unusable case ahead of reach.
+      ...(rtsp !== undefined && rtspPassword === null
+        ? {
+          usable: false,
+          note: "unusable — this device's RTSP password has not been generated yet, "
+            + "so there is no URL to copy",
+        }
+        : listen),
     },
   ];
 }

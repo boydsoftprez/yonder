@@ -14,7 +14,7 @@
     "the pages are about, the encoder `probeEncoder()` found, and a deliberately fake",
     "RTSP credential.",
     "",
-    "**The credential is fake on purpose.** The receive-line surface shows a *resolved*",
+    "**The credential is fake on purpose.** The stream-address surface shows a *resolved*",
     "RTSP password (R-VID-15) and R-UI-12 commits the captured images, so a capture taken",
     "against a real device would put a real secret in this repository for ever.",
     "capture-pages.mjs reads the device's own secrets.yaml and fails any page whose HTML",
