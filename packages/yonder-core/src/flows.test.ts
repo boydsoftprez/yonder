@@ -2775,6 +2775,54 @@ describe("flows/flows.json Telemetry page", () => {
     expect(wiresOf("run-telemetry")).toEqual(wiresOf("tel-state"));
   });
 
+  /**
+   * **R-MAV-16's operator action, which had no operator.**
+   *
+   * Re-detection has to stop `mavlink-router` to get the serial port back, so
+   * the requirement makes it "an operator action with the interruption stated
+   * first, never something Yonder decides on its own". Every half of it was
+   * built — the mockups draw the button, `yonder-mav-run` implements and
+   * documents `detect`, the daemon implements `POST /mav/detect`,
+   * `detectNow()`, `SweepInProgressError` and its 409 — and the only
+   * `yonder-mav-run` in this file was configured `toggle`. So `detectNow`,
+   * the 409 branch, `outcomeMessage()` and `payload.outcome` were all
+   * unreachable from the console, and R-MAV-16's operator action did not
+   * exist. The second unwired control found on this page; the Send button was
+   * the first, and both were found by a person pressing them.
+   *
+   * The interruption is stated in a row of its own above the button, in the
+   * same shape the two settings above it already use, rather than in prose
+   * the page has no budget for — and the sweep's own answer goes to the toast
+   * the console already uses for what just happened, because it is one
+   * sentence about an action, not a reading that stays on the page.
+   */
+  it("wires Look again now to a re-detect, states what it costs, and says what it found (R-MAV-16)", () => {
+    expect(wiresOf("tel-detect").flat()).toEqual(["detect-telemetry"]);
+    const detect = byId("detect-telemetry");
+    expect(detect?.type).toBe("yonder-mav-run");
+    expect(detect?.action).toBe("detect");
+
+    // Its answer is the same MavlinkStateBody the poll reads, plus the one
+    // extra sentence, so the page turns over on the reply — everything
+    // `tel-state` feeds, and nothing skipped.
+    for (const target of wiresOf("tel-state").flat()) {
+      expect(wiresOf("detect-telemetry").flat(), `${target} is not redrawn after a re-detect`)
+        .toContain(target);
+    }
+    expect(reaches("detect-telemetry").has("join-toast"), "the sweep's outcome reaches nobody").toBe(true);
+    expect(JSON.stringify(byId("say-tel-outcome"))).toMatch(/payload\.outcome/);
+
+    // R-MAV-16's "with the interruption stated first": a row above the
+    // button, on the page, before it is pressed.
+    const note = byId("tel-detect-note");
+    expect(note?.type).toBe("ui-text");
+    expect(note?.group).toBe(byId("tel-detect")?.group);
+    expect(Number(note?.order)).toBeLessThan(Number(byId("tel-detect")?.order));
+    expect(reaches("tel-poll").has("tel-detect-note"), "the cost line is never filled in").toBe(true);
+    const said = ((byId("note-tel-detect")?.rules ?? []) as { to: string }[])[0]?.to ?? "";
+    expect(said).toMatch(/stops receiving/i);
+  });
+
   it("wires Check the path to the chain, and draws all three links (R-DIA-04)", () => {
     expect(wiresOf("tel-check").flat()).toEqual(["check-path"]);
     expect(byId("check-path")?.type).toBe("yonder-mav-check");
@@ -2847,7 +2895,7 @@ describe("flows/flows.json Telemetry page", () => {
     const wiring = [
       ...FROM_STATE, ...FROM_CONFIG, ...COMPOSITE, ...FROM_CHECK,
       ...reaches("tel-poll"), ...reaches("tel-keys-ingest"),
-      ...reaches("tel-runstop"), ...reaches("tel-check"),
+      ...reaches("tel-runstop"), ...reaches("tel-check"), ...reaches("tel-detect"),
     ];
     for (const id of new Set(wiring)) {
       expect(byId(id)?.type, id).not.toBe("function");

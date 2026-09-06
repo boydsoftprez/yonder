@@ -5921,6 +5921,67 @@
         ]
     },
     {
+        "id": "tel-detect-note",
+        "type": "ui-text",
+        "z": "yonder-console",
+        "group": "group-tel-run",
+        "order": 6,
+        "width": 12,
+        "height": 2,
+        "name": "what looking again costs",
+        "label": "Look again",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "style": false,
+        "font": "",
+        "fontSize": 16,
+        "color": "#717171",
+        "wrapText": true,
+        "className": "yonder-fixed",
+        "x": 300,
+        "y": 3100,
+        "wires": [],
+        "value": "payload",
+        "valueType": "msg"
+    },
+    {
+        "id": "tel-detect",
+        "type": "ui-button",
+        "z": "yonder-console",
+        "group": "group-tel-run",
+        "order": 7,
+        "width": 5,
+        "height": 1,
+        "label": "Look again now",
+        "tooltip": "",
+        "color": "",
+        "bgcolor": "",
+        "className": "",
+        "icon": "",
+        "iconPosition": "left",
+        "payload": "",
+        "payloadType": "str",
+        "topic": "",
+        "topicType": "str",
+        "buttonColor": "",
+        "textColor": "",
+        "iconColor": "",
+        "enableClick": true,
+        "enablePointerdown": false,
+        "pointerdownPayload": "",
+        "pointerdownPayloadType": "str",
+        "enablePointerup": false,
+        "pointerupPayload": "",
+        "pointerupPayloadType": "str",
+        "x": 300,
+        "y": 3110,
+        "wires": [
+            [
+                "detect-telemetry"
+            ]
+        ]
+    },
+    {
         "id": "tel-chain-1",
         "type": "ui-text",
         "z": "yonder-console",
@@ -6216,7 +6277,8 @@
             [
                 "tel-state",
                 "check-path",
-                "tel-labels"
+                "tel-labels",
+                "note-tel-detect"
             ]
         ]
     },
@@ -6739,6 +6801,33 @@
         ]
     },
     {
+        "id": "note-tel-detect",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "the interruption, stated before the button that causes it",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "Every ground station stops receiving until the link is back",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 480,
+        "y": 5580,
+        "wires": [
+            [
+                "tel-detect-note"
+            ]
+        ]
+    },
+    {
         "id": "seed-tel-endpoints",
         "type": "yonder-mav-endpoints",
         "z": "yonder-console",
@@ -6995,6 +7084,64 @@
                 "pick-stat-flow",
                 "join-tel-tcp",
                 "join-stat-tel-bar"
+            ]
+        ]
+    },
+    {
+        "id": "detect-telemetry",
+        "type": "yonder-mav-run",
+        "z": "yonder-console",
+        "name": "stop the router, sweep the port again, put it back",
+        "action": "detect",
+        "x": 480,
+        "y": 5910,
+        "wires": [
+            [
+                "pick-tel-link",
+                "pick-tel-port",
+                "pick-tel-speed",
+                "pick-tel-vehicle",
+                "pick-tel-hb",
+                "pick-tel-heard",
+                "pick-tel-recv",
+                "pick-tel-answered",
+                "pick-tel-gcs-0",
+                "pick-tel-gcs-1",
+                "pick-tel-gcs-2",
+                "pick-tel-spark",
+                "pick-tel-running",
+                "pick-stat-feed",
+                "pick-stat-flow",
+                "join-tel-tcp",
+                "join-stat-tel-bar",
+                "say-tel-outcome"
+            ]
+        ]
+    },
+    {
+        "id": "say-tel-outcome",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "what the sweep found",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "payload.outcome",
+                "tot": "msg"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 760,
+        "y": 5910,
+        "wires": [
+            [
+                "join-toast"
             ]
         ]
     },

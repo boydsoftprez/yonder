@@ -99,7 +99,8 @@ of decisions made in advance instead.
 | At boot · Accepting from | `ui-text` row-spread | |
 | This device / Any network | `ui-yonder-softkeys` | **A `caution` tone is added to the component** — it has `act` and `warn` today and neither means *deliberately on and hazardous*. Amber, matching the band |
 | The ingest warning | `ui-text`, `className: "yonder-warning"` | |
-| Stop / Start telemetry, Check the path | `ui-button` | |
+| What looking again costs | `ui-text` row-spread, `className: "yonder-fixed"` | `R-MAV-16` asks for the interruption *stated first*, and this is where it is stated: a fixed row above the button, in the same shape as the two settings above it |
+| Stop / Start telemetry, Look again now, Check the path | `ui-button` | |
 | The path chain | `ui-text` × 3, `className: "yonder-qualifier"` | Mark, claim, reason. A link nobody attempted shows a dash, never a cross |
 
 ### Status page — `Telemetry`
@@ -196,6 +197,20 @@ drawing says `1 client`.** Nothing has measured how a connected TCP client appea
 at all — so `LinkState.tcpClients` is `null` and stays that way until a bench session with a
 client attached says what to count. A number nobody measured is the one thing this page must
 not print.
+
+**`Look again now` is a second button beside `Stop telemetry`, not the same slot swapping
+between three labels.** The drawings put all three — `Stop telemetry`, `Start telemetry`,
+`Look again now` — in one `nrdb-ui-button` block, showing whichever the link's state calls
+for, which is `R-MAV-09`'s "one control reading the current state" extended to a third case.
+The built page shows two: `yonder-mav-run`'s `toggle` is the whole of `R-MAV-09`'s control
+and it reads `telemetryRunning`, while re-detection is a different question about a different
+thing — `R-MAV-16` calls it an operator action of its own, and it is the one action on this
+page that takes a working link down. Folding it into the same button would make the control's
+meaning depend on `link.phase`, so an operator who pressed it while the page was mid-poll
+could get the other action. Dashboard 2.x can retitle a `ui-button` from `msg.ui_update`, so
+the drawing is buildable; what is not yet decided is whether one button should mean three
+things. Until it is, the interruption is stated in a row of its own and the action is its own
+button.
 
 **The Status page's flow strip names its destination by count, not by address, and carries
 no uptime.** `LinkState` has neither field: an endpoint's host and port are configuration,
