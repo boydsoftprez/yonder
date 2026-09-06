@@ -54,6 +54,8 @@ async function sideways(body) {
       .hid { overflow-x: hidden; }
       .vis { overflow-x: visible; }
       .badge { position: absolute; left: 90px; width: 60px; height: 8px; background: #ccc; }
+      .ghost { position: relative; }
+      .ghost::after { content: ""; position: absolute; left: 90px; width: 60px; height: 8px; background: #ccc; }
       .host { position: relative; }
     </style>
     <div class="nrdb-ui-widget">${body}</div>`);
@@ -106,6 +108,25 @@ const LONG = "a value far too long for one hundred pixels of box to hold";
     bad(
       "text cut off is still reported with a placed overlay on it",
       `this is the shipped false negative — got ${JSON.stringify(found)}`,
+    );
+  }
+}
+
+// **A pseudo-element overlay, which is the case that rules out the other fix.**
+// The rejected approach measured the counterfactual — hide everything placed,
+// re-read `scrollWidth` — and a `::after` is not a child that can be hidden, so
+// a box that fits reported as cut off. Every other overlay case here uses a
+// real `<i>`, which that approach handles correctly, so without this pair the
+// suite passes under both implementations and pins neither.
+{
+  const fits = await sideways(`<div class="box hid ghost">fits</div>`);
+  const cut = await sideways(`<div class="box hid ghost">${LONG}</div>`);
+  if (fits.length === 0 && cut.length === 1 && cut[0].how === "cuts off") {
+    ok(`a pseudo-element overlay is exempt over a box that fits, and silent over one that is cut (${cut[0].content}px in 100px)`);
+  } else {
+    bad(
+      "a pseudo-element overlay is exempt over a box that fits",
+      `fits -> ${JSON.stringify(fits)}; cut -> ${JSON.stringify(cut)}`,
     );
   }
 }

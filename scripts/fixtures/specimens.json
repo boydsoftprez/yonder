@@ -62,7 +62,7 @@
     },
     "nrdb-ui-yonder-databar · UP FOR": {
       "value": "59 minutes 59 seconds",
-      "why": "formatUptime (system/format.ts:46) prints the largest two units, which is not the same as the widest string: `365 days 23 hours` is 17 characters and this is 21. Derived by calling the built formatUptime(3599). A day count would need six digits to beat it."
+      "why": "formatUptime (system/format.ts:46) prints the largest two units, which is not the same as the widest string: `365 days 23 hours` is 17 characters and this is 21. Derived by calling the built formatUptime(3599). A day count would need eight digits to beat it."
     },
     "nrdb-ui-yonder-databar · YONDER": {
       "value": "1.0.0-rc.1+build.42",
@@ -94,7 +94,7 @@
     },
     "nrdb-ui-yonder-databar · RSRQ": {
       "value": "-20 dB",
-      "why": "formatDb (node-red-contrib-yonder-modem/src/format.ts:44) is `${Math.round(value)} dB`, so this field can never print a decimal. -20 dB is the floor of the LTE RSRQ range and the widest integer it can draw."
+      "why": "formatDb (node-red-contrib-yonder-modem/src/format.ts:44) is `${Math.round(value)} dB`, so this field can never print a decimal and its width is a shape rather than a reading: a minus sign and two digits. LTE's own range bottoms out at -19.5 dB, which `Math.round` renders as -19, not -20 — JavaScript rounds a negative half towards zero. -20 is kept as the specimen because it is the same width and does not invite anyone to read a rounding rule out of it."
     },
     "nrdb-ui-yonder-databar · MTU": {
       "value": "9000",
@@ -229,8 +229,8 @@
       "why": "cameraStrip's startCheck at refuse()'s widest branch, video/pipeline.ts:305 — not the SRT branch, which is 182 characters. This is its narrowest honest form: one camera, the bench's own 66-character by-path in both positions, 196 characters. It is unbounded above — schema/config.ts:562 caps `device` at 128 and `offered` joins every by-path name the board can see — so this is a floor for this field, not a ceiling."
     },
     "nrdb-ui-text · Camera": {
-      "value": "Forward observation camera, port side pod, no. 2",
-      "why": "the camera's name at schema/config.ts:558's cap of 48 characters. An operator types it, so the cap is the honest ceiling."
+      "value": "Nose mast downward wide-angle mapping camera two",
+      "why": "the camera's name at schema/config.ts:558's cap of 48 characters. An operator types it, so the cap is the honest ceiling. **The cap counts characters and the gate measures pixels**, so 48 of them is not one width: this is a realistic name chosen for wide glyphs rather than the narrowest 48 that will fit, because a name padded out with commas, spaces and digits measures about 30px narrower on the page and would have the next task build a box 30px too small. A name of 48 wide glyphs is wider still and is not a name anyone types."
     },
     "nrdb-ui-text · Identity": {
       "value": "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0 — an enumeration number; it may mean a different camera after a reboot",
