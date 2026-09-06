@@ -5556,7 +5556,7 @@
         "y": 1740,
         "wires": [
             [
-                "cam-open"
+                "cam-index-route"
             ]
         ]
     },
@@ -6026,5 +6026,69 @@
         "x": 1030,
         "y": 2180,
         "wires": []
+    },
+    {
+        "id": "cam-index-route",
+        "type": "switch",
+        "z": "yonder-console",
+        "name": "configure it, or open it",
+        "property": "payload.adopt",
+        "propertyType": "msg",
+        "rules": [
+            {
+                "t": "nempty"
+            }
+        ],
+        "checkall": "false",
+        "repair": false,
+        "outputs": 2,
+        "x": 1080,
+        "y": 1700,
+        "wires": [
+            [
+                "cameras-adopt"
+            ],
+            [
+                "cam-open"
+            ]
+        ]
+    },
+    {
+        "id": "cameras-adopt",
+        "type": "yonder-cameras",
+        "z": "yonder-console",
+        "name": "configure the camera that was pressed",
+        "x": 1340,
+        "y": 1660,
+        "wires": [
+            [
+                "cameras-read-again"
+            ]
+        ]
+    },
+    {
+        "id": "cameras-read-again",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "sweep again, so the row redraws with its id",
+        "rules": [
+            {
+                "t": "delete",
+                "p": "payload",
+                "pt": "msg"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 1620,
+        "y": 1660,
+        "wires": [
+            [
+                "cameras-read"
+            ]
+        ]
     }
 ]

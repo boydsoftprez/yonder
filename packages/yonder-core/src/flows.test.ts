@@ -2396,6 +2396,31 @@ describe("flows/flows.json camera pages", () => {
    * Two halves, and both are needed: `cam-open` has to record the choice, and
    * the sweep that runs every few seconds afterwards must not overwrite it.
    */
+  /**
+   * **The dead end, wired shut.**
+   *
+   * The operator plugged a second camera into a running board. Its row was
+   * drawn, marked *Not configured*, its OPEN key inert — correctly, since a
+   * camera with no configuration entry has no page — and nothing anywhere
+   * could give it one. He found that by using the console; no review could,
+   * because a review reads a diff and nothing in a diff is missing.
+   */
+  it("routes an ADD press to the one request that configures a camera", () => {
+    const route = flows.find((n) => n.id === "cam-index-route");
+    expect(route?.type).toBe("switch");
+    expect(route?.property, "routed on the press, not on a page name").toBe("payload.adopt");
+    // First output is the adoption; it must reach a node that talks to the
+    // daemon, not another page switch.
+    const adoptTarget = (route?.wires as string[][])[0]?.[0];
+    const adopt = flows.find((n) => n.id === adoptTarget);
+    expect(adopt?.type, "an adoption reaches the camera adapter").toBe("yonder-cameras");
+    // And afterwards the list is read again, or the row keeps the null id it
+    // was drawn with and the operator presses ADD twice.
+    const after = flows.find((n) => n.id === (adopt?.wires as string[][])[0]?.[0]);
+    expect(String(after?.name)).toContain("sweep again");
+    expect((after?.wires as string[][])[0]).toEqual(["cameras-read"]);
+  });
+
   it("opens the camera whose row was pressed, and keeps it open", () => {
     const open = flows.find((n) => n.id === "cam-open");
     const rules = open?.rules as { p: string; pt: string; to: string; tot: string }[];
@@ -2407,8 +2432,16 @@ describe("flows/flows.json camera pages", () => {
     const page = rules.at(-1);
     expect(page?.p).toBe("payload");
     expect(JSON.parse(String(page?.to))).toEqual({ page: "Camera" });
+    // **A press is routed before it is acted on**, because a row now sends
+    // two different things: `camera` to open one, `adopt` to configure one the
+    // board found and nothing is configured for. The index reaches `cam-open`
+    // through that switch rather than directly.
     expect((flows.find((n) => n.type === "ui-yonder-index")?.wires as string[][])[0])
-      .toEqual(["cam-open"]);
+      .toEqual(["cam-index-route"]);
+    const route = flows.find((n) => n.id === "cam-index-route");
+    expect(route?.property).toBe("payload.adopt");
+    // Second output is the fall-through: everything that is not an adoption.
+    expect((route?.wires as string[][])[1]).toEqual(["cam-open"]);
 
     // And the sweep seeds the id only when there is nothing chosen, or when
     // what was chosen is no longer attached. Without this, the next poll puts

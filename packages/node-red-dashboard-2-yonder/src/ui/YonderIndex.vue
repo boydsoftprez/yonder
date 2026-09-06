@@ -26,12 +26,19 @@
                             <YonderReadout :rows="[{ label: '', value: rateValue(cam), unit: 'Mb/s' }]" />
                         </span>
                         <button
+                            v-if="cam.id"
                             type="button"
                             class="y-idx__open"
-                            :disabled="!cam.id"
-                            :title="cam.id ? 'Open ' + cam.name : 'No page: this camera is not configured'"
+                            :title="'Open ' + cam.name"
                             @click="open(cam.id)"
                         >OPEN<i aria-hidden="true">&rsaquo;</i></button>
+                        <button
+                            v-else
+                            type="button"
+                            class="y-idx__open y-idx__adopt"
+                            :title="'Configure ' + cam.name + ', so it has a page'"
+                            @click="adopt(cam)"
+                        >ADD<i aria-hidden="true">&plus;</i></button>
                     </div>
                 </template>
                 <p v-else class="y-idx__none">No camera.</p>
@@ -223,6 +230,25 @@ export default {
         open (id) {
             if (!id) return
             this.post({ camera: id })
+        },
+        /**
+         * **Configure a camera the board has already found.**
+         *
+         * A row with no id used to carry a disabled OPEN and nothing else, so
+         * an operator who plugged a second camera in saw it listed, saw a dead
+         * key, and had no way forward. He found that on a board; no test could
+         * have, because a review reads a diff and nothing in a diff is missing.
+         *
+         * Posts the **socket**, not the row's index and not `/dev/videoN`
+         * (R-CAM-05): the by-path name is what still means this camera after a
+         * replug, and it is the only identifier the daemon will accept for an
+         * adoption. Guarded on the same value the template branches on, for
+         * the reason `YonderShutter` gives for guarding twice — a dispatched
+         * click reaches a listener in a real browser whatever the markup says.
+         */
+        adopt (cam) {
+            if (!cam || cam.id || !cam.device) return
+            this.post({ adopt: cam.device })
         },
         toneClass (tone) {
             return TONE_CLASS[tone] || ''

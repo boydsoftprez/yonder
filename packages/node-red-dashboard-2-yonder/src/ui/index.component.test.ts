@@ -279,15 +279,27 @@ describe("a found camera's row", () => {
      * `YonderShutter` gives: a dispatched click reaches a disabled button's
      * listener in a real browser even though `.click()` does not.
      */
-    it("draws an inert key for a camera nothing is configured for, and posts nothing", () => {
+    /**
+     * **This used to assert a dead end, and the dead end was the defect.**
+     *
+     * The key was inert because a camera with no id has no page to open, which
+     * is true and still is. What was missing was anything else to press. The
+     * operator plugged a second camera into a running board, saw the row, saw
+     * the greyed key, and had nowhere to go. So the row now carries a key that
+     * *configures* it rather than one that does nothing, and OPEN is not drawn
+     * at all until there is a page to open.
+     */
+    it("offers a key that configures a camera nothing is configured for, never a dead one", async () => {
         const report = makeReport();
         report.cameras[0]!.id = null;
+        report.cameras[0]!.device = "platform-usb-0:1.1:1.0-video-index0";
         const { wrapper, emit } = mountIndex(report);
-        const key = camRows(wrapper)[0]!.find(".y-idx__open");
-        expect(key.exists()).toBe(true);
-        expect(key.attributes("disabled")).toBeDefined();
-        key.trigger("click");
-        expect(emit).not.toHaveBeenCalled();
+        const row = camRows(wrapper)[0]!;
+        expect(row.find(".y-idx__adopt").exists(), "there is something to press").toBe(true);
+        expect(row.find(".y-idx__adopt").attributes("disabled"), "and it is live").toBeUndefined();
+        await row.find(".y-idx__adopt").trigger("click");
+        expect(emit).toHaveBeenCalledTimes(1);
+        expect(emit.mock.calls[0]![2]).toEqual({ payload: { adopt: report.cameras[0]!.device } });
     });
 });
 
@@ -390,4 +402,43 @@ it("a camera sending nothing reads 0, not none", () => {
     expect(w.text()).toContain("0");
     expect(w.text(), "0 Mb/s is a reading; none is the absence of one").not.toContain("none");
 });
+});
+
+/**
+ * **The dead end the operator found.**
+ *
+ * He plugged a second camera into a running board. The row appeared, marked
+ * *Not configured*, its OPEN key disabled with a correct reason — a page for a
+ * camera the configuration has never heard of answers 404 on every widget —
+ * and nothing anywhere could give it an entry. No test could have caught it:
+ * a review reads a diff, and nothing in a diff is missing.
+ */
+describe("a camera the board found and nothing is configured for", () => {
+  /** The socket, which is what R-CAM-05 says survives a replug. */
+  const SOCKET = "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.1:1.0-video-index0";
+
+  function unconfiguredReport() {
+    const report = makeReport();
+    report.cameras[0]!.id = null;
+    report.cameras[0]!.device = SOCKET;
+    return report;
+  }
+
+  it("posts the socket, never the enumeration name, because that is what survives a replug", async () => {
+    const { wrapper, emit } = mountIndex(unconfiguredReport());
+    await camRows(wrapper)[0]!.find(".y-idx__adopt").trigger("click");
+    const [event, id, msg] = emit.mock.calls[0]!;
+    expect(event).toBe("widget-action");
+    expect(id).toBe("i1");
+    expect(msg).toEqual({ payload: { adopt: SOCKET } });
+    // `/dev/video2` is this boot's answer and means nothing tomorrow.
+    expect(JSON.stringify(msg)).not.toContain("/dev/video");
+  });
+
+  it("still opens a configured camera, and never offers to configure it twice", () => {
+    const { wrapper } = mountIndex(makeReport());
+    const row = camRows(wrapper)[0]!;
+    expect(row.find(".y-idx__adopt").exists()).toBe(false);
+    expect(row.find(".y-idx__open").exists()).toBe(true);
+  });
 });

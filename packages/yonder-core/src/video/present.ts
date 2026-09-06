@@ -455,6 +455,18 @@ export interface CameraRow {
    * draws `null` as "none" rather than as a gap, so absence is stated.
    */
   readonly rate: number | null;
+  /**
+   * The `by-path` socket this camera was found on — **not `/dev/videoN`**
+   * (R-CAM-05).
+   *
+   * Carried so a row with no `id` has something to act on. A detected camera
+   * on a socket nothing is configured for used to be a dead end: the row was
+   * drawn, its OPEN key disabled with a correct reason, and nothing anywhere
+   * could give it an entry. `POST /cameras { device }` takes exactly this
+   * string, and it is the socket rather than the enumeration name because
+   * that is what still means this camera after a replug.
+   */
+  readonly device: string;
   readonly capabilities: CameraCapabilities;
 }
 
@@ -546,12 +558,17 @@ export function cameraIndex(input: {
         state: "Not configured",
         tone: "neutral",
         rate: null,
+        device: detected.byPath,
         capabilities: detected.capabilities,
       };
     }
     const measured = input.egressKbps?.(configured.id) ?? null;
     return {
       id: configured.id,
+      // The socket the camera was found on, which is the socket the
+      // configuration matched — carried on both branches so the row's shape
+      // does not depend on whether it happens to be configured.
+      device: detected.byPath,
       name: configured.name,
       bus,
       spec: `${configured.codec.toUpperCase()} · ${configured.width}×${configured.height}p${configured.framerate}`,
