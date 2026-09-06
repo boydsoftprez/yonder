@@ -1341,6 +1341,25 @@ describe("the drag-to-slew layer — orb only (spec §6)", () => {
     expect(stops[0]![2]).toEqual({ payload: { stop: { gesture: last.payload.slew.gesture } } });
   });
 
+  it("draws the orb in front of the video too — it only exists mid-gesture", async () => {
+    // **The one overlay the list above cannot reach**, and review caught its
+    // absence: setting the orb's z-index to 0 left all sixty-seven tests
+    // green. It is drawn only while a drag is in flight, so a test that does
+    // not hold a pointer down never sees it — which makes it the easiest of
+    // the nine to break unnoticed, on the task named for stacking.
+    const { wrapper, press } = mountWithRail();
+    await settle();
+    await press({ aim: { state: "present", pan: 0, tilt: 0 } });
+
+    const el = frameEl(wrapper);
+    el.dispatchEvent(dragPoint("pointerdown", 200, 150));
+    el.dispatchEvent(dragPoint("pointermove", 240, 150));
+    await settle();
+
+    expect(wrapper.find(".y-pic__orb").exists(), "the orb must be drawn for this to mean anything").toBe(true);
+    expect(z(wrapper, ".y-pic__orb"), ".y-pic__orb").toBeGreaterThan(z(wrapper, ".y-pic__video"));
+  });
+
   it("measures from where the pointer went down, not the centre of the frame (coordinator resolution 5)", async () => {
     // Two presses starting in very different places, moved by the *same*
     // 40px to the right, must command the identical rate: an operator whose

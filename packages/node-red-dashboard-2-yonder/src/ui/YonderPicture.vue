@@ -1148,13 +1148,17 @@ export default {
    instead of overlapping a neighbour that was never sharing a line with
    them on a wider picture. */
 .y-pic__foot {
-    /* `right: 104px` clears `.y-pic__osd`'s own right-anchored box (roughly
-       90px wide at its own widest reading) — a horizontal split, not a
-       vertical one, because it holds regardless of how many lines either
-       box wraps to: verified on the gallery's own narrowest specimen card,
-       where four readings genuinely do wrap, and a vertical-only clearance
-       guess still let a wrapped line land inside the OSD box's own height. */
-    position: absolute; left: 8px; right: 104px; bottom: 34px; z-index: 5;
+    /* Clears `.y-pic__osd`'s own right-anchored box — a horizontal split, not
+       a vertical one, because it holds however many lines either box wraps
+       to, where a vertical-only guess let a wrapped line land inside the OSD
+       box's own height.
+       
+       **136px, not the 104px this first carried.** Review measured the OSD's
+       real footprint at about 118px across several frame widths, not the 90px
+       this had assumed, leaving a ~14px shortfall that a two- or three-digit
+       zoom reading would close. Measured rather than estimated, with room
+       left over. */
+    position: absolute; left: 8px; right: 136px; bottom: 34px; z-index: 5;
     display: flex; flex-wrap: wrap; column-gap: 12px; row-gap: 2px;
     font-family: var(--yonder-font-mono, ui-monospace, monospace);
     font-size: 11.5px; font-variant-numeric: tabular-nums;
