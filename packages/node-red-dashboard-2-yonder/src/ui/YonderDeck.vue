@@ -472,6 +472,25 @@ export default {
     setControl (key, value) {
       this.post({ control: key, value })
     },
+    /**
+     * **A turn goes where the turning happens** (R-CTL-05, R-CTL-15).
+     *
+     * The sensor's own flip is a live control: it goes to the device and
+     * changes the picture, exactly like brightness. The board's is not — it
+     * is a `videoflip` in the launch line, so it is a configuration change,
+     * it restarts the picture, and it belongs on the staged draft behind an
+     * Apply that can say so first.
+     *
+     * Shipped once with both going to `/controls`, and the operator found it
+     * in minutes: on a camera whose sensor cannot turn its own picture — the
+     * bench ELP answers no flip control at all — every press came back
+     * *"this camera does not offer horizontalFlip"*. A refusal for something
+     * Yonder can do, which is the worst answer of the three available.
+     */
+    turn (t, value) {
+      if (t && t.by === 'sensor') { this.setControl(t.key, value); return }
+      this.stage(t.key, value)
+    },
     setMode (mode) {
       this.post({ mode })
     },
@@ -729,7 +748,7 @@ export default {
             value: String(turn.value === null || turn.value === undefined ? 0 : turn.value),
             options: ROTATION_OPTIONS,
             reason: turn.says || '',
-            onChange: (v) => this.setControl(turn.key, Number(v)),
+            onChange: (v) => this.turn(turn, Number(v)),
           })
         }
         return h(YonderSegmented, {
@@ -738,7 +757,7 @@ export default {
           value: turn.value === 1 ? 'On' : 'Off',
           options: ['Off', 'On'],
           reason: turn.says || '',
-          onChange: (v) => this.setControl(turn.key, v === 'On'),
+          onChange: (v) => this.turn(turn, v === 'On'),
         })
       })
       children.push(h('div', { class: 'y-deck__turnnote', key: 'note' }, o.says || ''))

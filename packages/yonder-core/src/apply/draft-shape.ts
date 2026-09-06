@@ -43,6 +43,15 @@ export interface CameraDraft {
    */
   bitrate_kbps?: number;
   stream?: Partial<Camera["stream"]>;
+  /**
+   * The turns the **board** performs, and only those (R-CTL-05).
+   *
+   * A turn the sensor can do is a live device write and never reaches a
+   * draft. A turn the board does is a `videoflip` in the launch line — a
+   * pipeline change, so it restarts the picture, so it is an Apply like a
+   * bitrate rather than a press like brightness.
+   */
+  controls?: Partial<Camera["controls"]>;
   preview?: Partial<Camera["preview"]>;
 }
 
@@ -80,6 +89,24 @@ export const DRAFT_PATHS: Record<string, string> = {
   previewCeiling: "preview.ceiling_kbps",
   previewBitrate: "preview.bitrate_kbps",
   previewRate: "preview.framerate",
+  /**
+   * **The three turns, when the board is doing the turning** (R-CTL-05).
+   *
+   * A turn the *sensor* performs is a live control: it goes to the device and
+   * changes the picture, like brightness. A turn the *board* performs is a
+   * change to the pipeline — `compose()` puts a `videoflip` after the decode
+   * and before the tee — so it is a configuration change like a bitrate, it
+   * restarts the picture, and it belongs on the staged draft with an Apply
+   * behind it.
+   *
+   * Shipped once without this, and it was the operator who found it: the
+   * controls drew, the press went to `/controls`, and a camera whose sensor
+   * cannot turn its own picture answered *"this camera does not offer
+   * horizontalFlip"* — a refusal for a thing Yonder can do perfectly well.
+   */
+  rotation: "controls.rotation",
+  horizontalFlip: "controls.horizontalFlip",
+  verticalFlip: "controls.verticalFlip",
 };
 
 /** The staged path a schema-keyed problem is about, or `null`. */
@@ -134,6 +161,9 @@ export function deckDraft(staged: Record<string, unknown>): DeckDraft {
   const draft: CameraDraft = {};
   const stream: Record<string, unknown> = {};
   const preview: Record<string, unknown> = {};
+  // The three turns the *board* performs. They are a pipeline change, not a
+  // device write, so they travel on the draft and land under `controls`.
+  const controls: Record<string, unknown> = {};
   let name: string | undefined;
   const unknown: string[] = [];
 
@@ -167,9 +197,13 @@ export function deckDraft(staged: Record<string, unknown>): DeckDraft {
       case "previewCeiling": preview.ceiling_kbps = value; break;
       case "previewBitrate": preview.bitrate_kbps = value; break;
       case "previewRate": preview.framerate = value; break;
+      case "rotation": controls.rotation = value; break;
+      case "horizontalFlip": controls.horizontalFlip = value; break;
+      case "verticalFlip": controls.verticalFlip = value; break;
       default: unknown.push(path);
     }
   }
+  if (Object.keys(controls).length > 0) draft.controls = controls as CameraDraft["controls"];
   if (Object.keys(stream).length > 0) draft.stream = stream as CameraDraft["stream"];
   if (Object.keys(preview).length > 0) draft.preview = preview as CameraDraft["preview"];
   return { draft, ...(name === undefined ? {} : { name }), unknown };

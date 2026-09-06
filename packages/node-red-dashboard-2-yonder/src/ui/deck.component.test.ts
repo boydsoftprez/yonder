@@ -845,8 +845,20 @@ describe("the three that turn the picture", () => {
     expect(options.map((o) => o.text())).toEqual(["0°", "90°", "180°", "270°"]);
   });
 
-  it("posts a press through the socket, the way every other image control does", async () => {
-    const report = makeReport({ orientation: turns() });
+  /**
+   * **A turn goes where the turning happens, and this test asserted otherwise.**
+   *
+   * It used to say every turn posts through the socket "the way every other
+   * image control does". That is true only of a turn the *sensor* performs.
+   * A board turn is a `videoflip` in the launch line — a pipeline change that
+   * restarts the picture — and posting it as a live control sent it to a
+   * device that does not have the control at all. The bench ELP answers none
+   * of the three, so on the board every press came back *"this camera does
+   * not offer horizontalFlip"*: a refusal for something Yonder can do. The
+   * operator found it minutes after the deploy.
+   */
+  it("posts a sensor turn live, because the device really is doing it", async () => {
+    const report = makeReport({ orientation: turns({ by: { horizontalFlip: "sensor", verticalFlip: "sensor", rotation: "sensor" } }) });
     const { wrapper, emit } = deck(makeStore(report), "live");
 
     await segByLabel(wrapper, "Mirror").findAll("button")[1].trigger("click");
@@ -858,9 +870,22 @@ describe("the three that turn the picture", () => {
     // `applyControls` writes them; a string would reach `v4l2-ctl` as one.
     expect(emit).toHaveBeenCalledTimes(1);
     expect(emit).toHaveBeenCalledWith("widget-action", "d1", { payload: { control: "rotation", value: 270 } });
-    // And nothing was staged: an orientation control is a live command, not
-    // a policy edit, so it never reaches the draft.
-    expect(wrapper.vm.pendingEdits).toHaveLength(0);
+    expect(wrapper.vm.pendingEdits, "a device write is not a policy edit").toHaveLength(0);
+  });
+
+  it("stages a board turn, because it restarts the picture like any other pipeline change", async () => {
+    // `turns()` defaults every carrier to the board, which is this bench.
+    const report = makeReport({ orientation: turns() });
+    const { wrapper, emit } = deck(makeStore(report), "live");
+
+    await segByLabel(wrapper, "Mirror").findAll("button")[1].trigger("click");
+    // **Nothing is posted.** Posting sent it to a sensor that refuses it.
+    expect(emit).not.toHaveBeenCalled();
+    expect(wrapper.vm.pendingEdits.map((e: { path: string }) => e.path)).toContain("horizontalFlip");
+
+    await pickerByLabel(wrapper, "Rotation").find("select").setValue("270");
+    expect(emit).not.toHaveBeenCalled();
+    expect(wrapper.vm.pendingEdits.map((e: { path: string }) => e.path)).toContain("rotation");
   });
 
   it("draws no orientation group at all for a report that carries none", () => {
