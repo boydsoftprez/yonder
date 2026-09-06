@@ -5,7 +5,7 @@ import { JOIN_TOPIC } from "./net/join.js";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { CONSOLE_HOME, EXCLUDED_NODES, THEME_HREF } from "./console/settings.js";
+import { CONSOLE_HOME, EXCLUDED_NODES } from "./console/settings.js";
 import { MIN_POLL_MS, PENDING_KEYS } from "./console/node.js";
 
 /**
@@ -149,14 +149,16 @@ describe("flows/flows.json", () => {
     expect(text).not.toMatch(/@import\s+url\(\s*["']?(?:https?:)?\/\//i);
   });
 
-  it("imports exactly one stylesheet, and it is the one generated on the device", () => {
-    const imports = [...text.matchAll(/@import\s+url\(([^)]*)\)/g)].map((m) => m[1]);
-    expect(imports).toHaveLength(1);
-    expect(imports[0]).toContain(THEME_HREF);
-    expect(THEME_HREF.startsWith("/")).toBe(true);
-    // Root-relative, so it is same-origin whatever address the operator
-    // reached the console on - the access point, the LAN, or a mesh address.
-    expect(imports[0]).not.toMatch(/https?:|\/\//);
+  /**
+   * The theme used to reach the page through exactly this: a `ui-template`'s
+   * `@import`, injected over Dashboard's own socket connection after the SPA
+   * had already booted — which is what made the console flash white on every
+   * load (R-UI-22). It is linked from the served document's head now
+   * (`ConsoleRenderer`, `wiring.ts`'s `headInjection`), so the flows do not
+   * need to import it at all any more.
+   */
+  it("loads the theme from the served document's head, not by importing it here", () => {
+    expect(text).not.toMatch(/@import/);
   });
 
   /**
@@ -538,43 +540,59 @@ describe("flows/flows.json dashboard path", () => {
 });
 
 /**
- * The generated stylesheet has to actually reach the page.
+ * **No `ui-template` survives (R-UI-22, CLAUDE.md rule 2).**
  *
- * It did not. A `ui-template` node carried
- * `<link rel="stylesheet" href="/yonder/theme.css">` with
- * `templateScope: "site"` — and `"site"` is not one of the scopes Dashboard
- * 2.x accepts (`site:style`, `site:script`, `page:style`, `page:script`), so
- * the template was never injected at all. Every `--yonder-*` variable was
- * undefined in the document, the app bar stayed Vuetify white in both
- * palettes, and the `.yonder-tone-*` classes that ADR-0005 calls the shared
- * command-state language matched nothing.
+ * The generated stylesheet used to reach the page through one: a node
+ * carrying `<link rel="stylesheet" href="/yonder/theme.css">` inside an
+ * `@import`, with `templateScope: "site:style"`. That node was itself the
+ * fix for an earlier defect — an *older* `ui-template` had shipped with
+ * `templateScope: "site"`, which is not a scope Dashboard 2.x accepts at all,
+ * so it was never injected and every `--yonder-*` variable was undefined in
+ * the document. Both versions shared the one property that actually mattered:
+ * a `ui-template` is markup serialised into this file beside wire
+ * coordinates, so a pull request against either one was unreadable, and it
+ * cannot be reviewed if it cannot be read.
  *
- * It was invisible because the file *was* served, correctly, at its URL: a
- * check that fetched it got 200 and the right bytes. Only the page knew it
- * was never linked.
- *
- * `site:style` sets the `<style>` element's innerHTML, so the content has to
- * be CSS. A `<link>` tag inside a stylesheet is nothing.
+ * The theme is linked from the served document's head now — `ConsoleRenderer`
+ * writes it into `settings.js`, and `wiring.ts`'s `headInjection` is what
+ * actually splices it in — which is also the only way that link reaches the
+ * page *before* the browser paints it, rather than after Dashboard's own
+ * socket connects. Nothing a `ui-template` could do remains a reason to have
+ * one, so none may exist: this is the assertion that keeps the door CLAUDE.md
+ * rule 2 shut. If it fails, the fix is to find another way to reach Dashboard,
+ * not to add the node back.
  */
-describe("flows/flows.json stylesheet injection", () => {
-  const link = flows.find((n) => n.id === "style-link");
-
-  it("exists", () => {
-    expect(link, "the flows must carry the generated stylesheet").toBeDefined();
-    expect(link?.type).toBe("ui-template");
+describe("flows/flows.json ui-template", () => {
+  it("does not exist, so markup cannot be pasted into one", () => {
+    const offenders = flows.filter((n) => n.type === "ui-template").map((n) => n.id);
+    expect(
+      offenders,
+      "the shipped flows contain a ui-template. Markup lives in Vue components under "
+      + "node-red-dashboard-2-yonder, never pasted into flows.json (CLAUDE.md rule 2): a diff "
+      + "against serialised markup cannot be reviewed.",
+    ).toEqual([]);
   });
+});
 
-  it("uses a scope Dashboard actually honours", () => {
-    expect(["site:style", "page:style"]).toContain(link?.templateScope);
-  });
-
-  it("imports the path the console serves it from", () => {
-    // THEME_HREF is what settings.js mounts. Two files that have to agree.
-    expect(String(link?.format)).toContain(`@import url("${THEME_HREF}")`);
-  });
-
-  it("carries CSS, not markup, because site:style is a style element", () => {
-    expect(String(link?.format)).not.toMatch(/<link|<style|rel=/i);
+/**
+ * `ui-markdown` is not banned the way `ui-template` is: it renders the
+ * content a node carries, nothing else, so there is no scope to get wrong and
+ * no way for it to hide behaviour. What it can still do is grow — the same
+ * shape of defect R-UI-16's word budget below is for — so this names *where*
+ * every surviving instance is rather than only counting them: a second one
+ * added anywhere but Diagnostics should fail here, specifically, and say so.
+ */
+describe("flows/flows.json ui-markdown", () => {
+  it("survives only on Diagnostics", () => {
+    const pageNameOf = (groupId: unknown): string | undefined => {
+      const group = flows.find((n) => n.type === "ui-group" && n.id === groupId);
+      const page = flows.find((n) => n.type === "ui-page" && n.id === group?.page);
+      return page?.name;
+    };
+    const notes = flows.filter((n) => n.type === "ui-markdown");
+    expect(notes.map((n) => `${String(n.id)} (${String(pageNameOf(n.group))})`)).toEqual([
+      `note-reach (Diagnostics)`,
+    ]);
   });
 });
 

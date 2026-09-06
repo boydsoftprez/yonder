@@ -1,17 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, it, expect, afterEach } from "vitest";
-import { createServer, request, type Server } from "node:http";
+import { createServer, request, type Server, type IncomingMessage, type ServerResponse } from "node:http";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { consoleGate, editorAuth, ADMIN_USERNAME } from "./wiring.js";
+import { consoleGate, editorAuth, headInjection, ADMIN_USERNAME } from "./wiring.js";
+import type { Middleware } from "./middleware.js";
 
 /**
- * The two functions a generated settings.js calls, and the only surface
- * between a description of a console and the code that is one.
+ * The functions a generated settings.js calls, and the only surface between
+ * a description of a console and the code that is one.
  *
- * Every test here points at a socket path with nothing behind it. That is the
- * state a console is in whenever the daemon is down, and everything below has
- * to be correct in it.
+ * Every test against `consoleGate`/`editorAuth` points at a socket path with
+ * nothing behind it. That is the state a console is in whenever the daemon is
+ * down, and everything below has to be correct in it.
  */
 const DEAD_SOCKET = join(tmpdir(), "yonder-no-such-daemon.sock");
 
@@ -149,5 +150,163 @@ describe("editorAuth", () => {
     // an editor that returns a stack trace instead of a login form.
     const auth = editorAuth({ socketPath: "/dev/null/not-a-socket" });
     await expect(auth.authenticate(ADMIN_USERNAME, "x")).resolves.toBeNull();
+  });
+});
+
+/**
+ * `headInjection` is `RED.settings.dashboard.middleware` — the hook
+ * `@flowfuse/node-red-dashboard`'s `ui_base.js` runs in front of everything
+ * it serves, static bundle and document alike. Driven here against a real
+ * `node:http` server and a handler that stands in for what that package
+ * actually does downstream, the same way `consoleGate` above is driven
+ * against a real gate rather than trusted from its source.
+ */
+describe("headInjection", () => {
+  function serve(
+    middleware: Middleware,
+    handler: (req: IncomingMessage, res: ServerResponse) => void,
+  ): Promise<{ status: number; headers: Record<string, string | string[] | undefined>; body: string }> {
+    return new Promise((resolve, reject) => {
+      server = createServer((req, res) => { middleware(req, res, () => { handler(req, res); }); });
+      server.listen(0, "127.0.0.1", () => {
+        const port = (server?.address() as { port: number }).port;
+        const req = request({ host: "127.0.0.1", port, method: "GET", path: "/" }, (res) => {
+          const chunks: Buffer[] = [];
+          res.on("data", (c: Buffer) => chunks.push(c));
+          res.on("end", () => {
+            resolve({ status: res.statusCode ?? 0, headers: res.headers, body: Buffer.concat(chunks).toString("utf8") });
+          });
+        });
+        req.on("error", reject);
+        req.end();
+      });
+    });
+  }
+
+  const TAG = '<link rel="stylesheet" href="/yonder/theme.css">';
+  const page = "<!doctype html><html><head><title>t</title></head><body></body></html>";
+  const injected = page.replace("</head>", `${TAG}\n</head>`);
+
+  /**
+   * `res.setHeader` then an unadorned `res.end`/`res.write` — never a single
+   * `res.writeHead(status, headers)` — is what the `send` package Dashboard's
+   * own `express.static` wraps actually calls, confirmed by tracing a real
+   * request through a real Dashboard 1.31.0 rather than assumed. It matters
+   * here specifically: Node flushes headers immediately when `writeHead` is
+   * given a headers object, and `res.getHeader` after a flush answers
+   * nothing — which this exists to fix, not to depend on.
+   */
+  it("puts the markup in the head of an HTML document sent in one write", async () => {
+    const res = await serve(headInjection(TAG), (_req, res) => {
+      res.setHeader("content-type", "text/html; charset=UTF-8");
+      res.write(Buffer.from(page));
+      res.end();
+    });
+    expect(res.status).toBe(200);
+    expect(res.body).toBe(injected);
+  });
+
+  it("puts the markup in the head of a document sent as a single end(chunk)", async () => {
+    // express.static's own automatic index.html serving for a bare directory
+    // request — which is what a request for the console's own root path
+    // actually gets, and the one shape a fix that only patches res.sendFile
+    // never sees at all (see this function's own doc comment).
+    const res = await serve(headInjection(TAG), (_req, res) => {
+      res.setHeader("content-type", "text/html; charset=UTF-8");
+      res.end(page);
+    });
+    expect(res.body).toBe(injected);
+  });
+
+  it("assembles a document handed over in several writes before it looks for the head", () => {
+    const chunks = [page.slice(0, 20), page.slice(20, 40), page.slice(40)];
+    return serve(headInjection(TAG), (_req, res) => {
+      res.setHeader("content-type", "text/html; charset=UTF-8");
+      for (const c of chunks) res.write(c);
+      res.end();
+    }).then((res) => {
+      expect(res.body).toBe(injected);
+    });
+  });
+
+  /**
+   * The other legal way to answer with a content type: `writeHead(status,
+   * headers)` in one call, rather than `setHeader` beforehand. Node flushes
+   * immediately in this shape, which is exactly what defeated the first
+   * version of this (see the doc comment on `headInjection`) — so this
+   * proves the fix, not just the common case above.
+   */
+  it("still recognises an HTML document announced through writeHead's own headers argument", async () => {
+    const res = await serve(headInjection(TAG), (_req, res) => {
+      res.writeHead(200, { "content-type": "text/html; charset=UTF-8" });
+      res.end(page);
+    });
+    expect(res.body).toBe(injected);
+  });
+
+  /**
+   * The gate this exists for: `express.static` and the `send` package it
+   * wraps write the SPA's JS, CSS and image bundles through the exact same
+   * response object, and none of them may come back with markup spliced into
+   * them — nor with a length recomputed for a body that never changed.
+   */
+  it("leaves a non-HTML response, and its own Content-Length, byte-for-byte alone", async () => {
+    const script = 'var x = 1; var head = "</head>";';
+    const res = await serve(headInjection(TAG), (_req, res) => {
+      res.setHeader("content-type", "application/javascript; charset=UTF-8");
+      res.setHeader("content-length", Buffer.byteLength(script));
+      res.end(script);
+    });
+    expect(res.body).toBe(script);
+    expect(res.headers["content-length"]).toBe(String(Buffer.byteLength(script)));
+  });
+
+  /**
+   * The bytes sent no longer match the file the original validators
+   * described, so a conditional request must not be answered out of a cache
+   * keyed on them.
+   */
+  it("drops the stale validators and states the length it actually sent", async () => {
+    const res = await serve(headInjection(TAG), (_req, res) => {
+      res.setHeader("content-type", "text/html; charset=UTF-8");
+      res.setHeader("etag", 'W/"deadbeef"');
+      res.setHeader("last-modified", "Mon, 01 Jan 2024 00:00:00 GMT");
+      res.setHeader("cache-control", "public, max-age=0");
+      res.end(page);
+    });
+    expect(res.headers.etag).toBeUndefined();
+    expect(res.headers["last-modified"]).toBeUndefined();
+    expect(res.headers["cache-control"]).toBe("no-store");
+    expect(res.headers["content-length"]).toBe(String(Buffer.byteLength(injected)));
+    expect(res.body).toBe(injected);
+  });
+
+  /**
+   * `RED.settings.dashboard.middleware` is the same function value mounted at
+   * three separate points in Dashboard's own route table (the static bundle,
+   * the exact index route, and the SPA's catch-all). A request that falls
+   * through to the second mount point on the same response must not be
+   * spliced twice — that is the shape a deep-linked page reload actually
+   * takes, once `express.static` has looked for a file that is not there and
+   * called `next()`.
+   */
+  it("does not splice the markup in twice when it runs on the same response twice", async () => {
+    const mw = headInjection(TAG);
+    const res = await serve(mw, (req, res) => {
+      mw(req, res, () => {
+        res.setHeader("content-type", "text/html; charset=UTF-8");
+        res.end(page);
+      });
+    });
+    expect(res.body).toBe(injected);
+  });
+
+  it("does nothing to a document with no head to speak of", async () => {
+    const bare = "<html><body>hello</body></html>";
+    const res = await serve(headInjection(TAG), (_req, res) => {
+      res.setHeader("content-type", "text/html; charset=UTF-8");
+      res.end(bare);
+    });
+    expect(res.body).toBe(bare);
   });
 });

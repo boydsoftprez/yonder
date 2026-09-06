@@ -317,26 +317,6 @@
         "groupType": "default"
     },
     {
-        "id": "style-link",
-        "type": "ui-template",
-        "z": "yonder-console",
-        "name": "the generated shell stylesheet",
-        "group": "",
-        "page": "",
-        "ui": "dashboard",
-        "format": "@import url(\"/yonder/theme.css\");\n",
-        "storeOutMessages": false,
-        "passthru": false,
-        "resendOnRefresh": false,
-        "templateScope": "site:style",
-        "className": "",
-        "x": 180,
-        "y": 60,
-        "wires": [
-            []
-        ]
-    },
-    {
         "id": "status-poll",
         "type": "yonder-status",
         "z": "yonder-console",

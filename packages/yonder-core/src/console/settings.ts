@@ -274,6 +274,18 @@ export function renderSettings(config: Config, opts: RenderSettingsOptions): str
     lines.push("  // page and nothing else (R-SEC-09).");
     lines.push(`  httpStatic: [{ path: ${literal(paths.publicDir)}, root: ${literal(STATIC_ROOT)} }],`);
     lines.push("");
+
+    lines.push("  // The theme in the head, fetched with the document rather than after it.");
+    lines.push("  // A ui-template used to pull this in from inside its own style block,");
+    lines.push("  // injected over Dashboard's own socket connection — which does not exist");
+    lines.push("  // until the SPA has already booted, so the browser always painted an");
+    lines.push("  // unstyled page first and the console flashed white on every load");
+    lines.push("  // (R-UI-22). dashboard.middleware is the hook @flowfuse/node-red-dashboard");
+    lines.push("  // reads out of this file and runs in front of the document it serves;");
+    lines.push("  // yonder.headInjection is what it does with it. The value is markup, not");
+    lines.push("  // a decision — see wiring.ts.");
+    lines.push(`  dashboard: { middleware: yonder.headInjection('<link rel="stylesheet" href="${THEME_HREF}">') },`);
+    lines.push("");
   }
 
   lines.push("  // Where the yonder-* nodes find the configuration daemon. Read as");
