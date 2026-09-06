@@ -1411,6 +1411,14 @@ already says what happens meanwhile — *the current implementation respawns*
 for a fixed bitrate, *pipeline respawn on Apply* for a resolution — and a
 respawn survives that pivot untouched.
 
+**That reasoning has since been withdrawn, and K-53 records why.** ffmpeg
+cannot retune a live encode on either board, so the pivot it rests on would
+have made respawn-on-apply permanent; and the pipeline host is now built
+(`installer/payload/yonder-pipeline`), so a live retune is no longer blocked
+by the runner. The respawn below is not superseded by it — it is what still
+happens for every field a running pipeline cannot be told, and it is what
+carries a board with no host installed.
+
 `video/renderer.ts` is that respawn, as a `Renderer`. For each configured
 camera it composes the line the applied configuration implies and compares it,
 token for token, against the line `supervisor.argv(id)` says the running
@@ -1434,7 +1442,10 @@ attempts*, which `argv()` deliberately does not.
 
 **Not yet proven on the board.** What closes this entry is the measurement
 that opened it, run again: change a bitrate on Setup, apply, confirm, and read
-`video_bitrate=` out of the running `gst-launch-1.0` command line.
+`video_bitrate=` out of the running pipeline's command line — which on a board
+carrying the pipeline host is `yonder-pipeline`'s rather than
+`gst-launch-1.0`'s, since `systemSpawner` hands the same argv to whichever of
+the two it spawned.
 
 ### K-49 · Adaptive is offered — for the rate and for the size — and nothing implements either
 
@@ -1704,6 +1715,51 @@ no runtime flag.
 So the host is not merely still viable: it is the only route to R-VID-07 that
 exists, and it works on both boards. Its shape is unchanged from what this entry
 already describes. What has changed is that it is worth building.
+
+**Built, and not yet proven on a board.**
+`installer/payload/yonder-pipeline` is the host, installed to
+`/usr/local/bin/yonder-pipeline` by `installer/roles/55-pipeline-host.sh`. It
+takes the argv `compose()` emits verbatim, plays it through GStreamer's own
+`parse_launchv` — the call `gst-launch-1.0` itself parses its argv with — and
+answers the NDJSON protocol `video/encoder.ts` already had tests for.
+`video/supervisor.ts` spawns it where it is executable and falls back to
+`gst-launch-1.0` where it is not, or where it is and will not start.
+
+**It probes the `main` tee, not an `identity`.** This entry, the plan and the
+spike all say `identity name=tap`, and that was the spike's substrate showing
+through: a `gst-launch` string has no other way to hang a probe. `compose()`
+already emits `… enc-stream ! h264parse ! tee name=main` unconditionally, a
+probe on that tee's **sink** pad sees exactly the buffers every ground-station
+output and every board recording are fed, and the host holds the graph object
+rather than a string — so nothing is added to the pipeline that ships. A host
+that inserted an element would be running a graph the daemon does not.
+
+Three things it refuses to do rather than doing blind, each of which costs the
+control channel and not the picture, because the fallback is right there:
+
+- start at all without `gi`, GStreamer, or a GStreamer carrying
+  `parse_launchv` and `util_set_object_arg`;
+- run a pipeline with no `main` tee in it — every `continuous` it reported
+  would be a claim it could not witness;
+- restart a preview branch whose walk found no fork, or whose walk reaches the
+  main chain. The branch is discovered by walking the graph from the elements
+  the instruction names, not from a list of element names, and a walk that
+  comes back holding the operator's stream is refused: the picture is worth
+  more than the reconfigure.
+
+`continuous` is now measured. A buffer probe on the `main` tee's sink pad
+counts pts gaps against three frame periods taken from the pad's own
+negotiated caps, and — separately — that frames are still arriving at all,
+because a branch that stopped delivering leaves no gap, having left nothing.
+
+**What is still open:** the board proof. Nothing here has run on hardware.
+CI has no GStreamer, so `packages/yonder-core/src/video/host.test.ts` runs the
+real Python host against a stand-in PyGObject
+(`packages/yonder-core/src/video/fake-gi`) — which proves the host's own
+behaviour and that a rate travels from `EncoderChannel` to an element and
+back, and proves nothing about `v4l2h264enc`. What closes this entry is a Pi
+running the daemon's own pipeline under this host, an operator moving a
+bitrate from the console, and the picture not breaking.
 
 ### K-54 · A detected camera cannot be configured from the console
 

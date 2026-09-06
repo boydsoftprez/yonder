@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { spawn } from "node:child_process";
+import { accessSync, constants } from "node:fs";
 import { systemClock, type Clock } from "../apply/types.js";
 
 /**
@@ -46,7 +47,8 @@ export interface SpawnedProcess {
    * `gst-launch-1.0` reads its pipeline from its arguments and then listens
    * to nobody, so a spawner for it offers no `send` and the channel above it
    * answers `notControllable` rather than writing into a pipe nothing reads.
-   * A process that *does* answer sets both this and `onMessage`.
+   * A process that *does* answer sets both this and `onMessage`, and
+   * `installer/payload/yonder-pipeline` is that process.
    */
   send?(line: string): void;
   /** Lines the process sends back — its acknowledgements. See `send`. */
@@ -61,7 +63,86 @@ export interface SpawnedProcess {
 export type ProcessSpawner = (argv: string[]) => SpawnedProcess;
 
 /**
- * The real one, and the only place in this package that starts a pipeline.
+ * The program that carries a pipeline **and can be told things while it is
+ * carrying it** (R-VID-07; closes K-53).
+ *
+ * `installer/payload/yonder-pipeline`, installed here by
+ * `installer/roles/55-pipeline-host.sh`. It takes the argv `compose()` emits,
+ * plays it through GStreamer's own `parse_launchv`, and answers the NDJSON
+ * protocol `video/encoder.ts` speaks. Absent, everything below falls back to
+ * the program that has always run these pipelines.
+ *
+ * A constant rather than a setting, for the reason `YONDER_NODE_LINK` is one
+ * in the installer: it is half of a pair with the role that installs it, and
+ * a value the two halves can disagree about is a control channel that is
+ * silently never there.
+ */
+export const PIPELINE_HOST = "/usr/local/bin/yonder-pipeline";
+
+/** Whether this path is something this account can actually run. Executable,
+ *  not merely present: a payload copied without its mode bit is a file that
+ *  exists and cannot be spawned, and the difference decides which spawner a
+ *  camera gets. */
+function executable(path: string): boolean {
+  try {
+    accessSync(path, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Spawn `command` with the pipeline's own arguments, over a control channel.
+ *
+ * **`argv.slice(1)` is deliberate and is the whole contract**: the host is
+ * handed exactly what `gst-launch-1.0` would have been handed, so the two
+ * programs run the same pipeline and this file composes nothing. A spike
+ * whose pipeline differed from the daemon's cost this branch three fix rounds
+ * and produced video that never started.
+ *
+ * stdout is the reply channel and is read as lines, because a pipe hands over
+ * whatever it has: two replies can arrive in one chunk and one reply can
+ * arrive in two, and a listener fed raw chunks would drop both.
+ *
+ * **stdin errors are swallowed on purpose.** Writing to a child that has just
+ * died raises EPIPE on the stream, and an unhandled `error` on a stream takes
+ * the *daemon* down — the whole device, for a camera. The command is lost
+ * either way, and a lost command is already reported: `EncoderChannel` hears
+ * no reply and says the request did not land.
+ */
+export function controlledSpawner(command: string, env?: NodeJS.ProcessEnv): ProcessSpawner {
+  return (argv) => {
+    const child = spawn(command, argv.slice(1), {
+      stdio: ["pipe", "pipe", "inherit"],
+      ...(env === undefined ? {} : { env: { ...process.env, ...env } }),
+    });
+    const listeners: ((line: string) => void)[] = [];
+    let held = "";
+    child.stdin.on("error", () => { /* see above */ });
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("error", () => { /* see above */ });
+    child.stdout.on("data", (chunk: string) => {
+      held += chunk;
+      for (;;) {
+        const at = held.indexOf("\n");
+        if (at < 0) break;
+        const line = held.slice(0, at);
+        held = held.slice(at + 1);
+        for (const fn of [...listeners]) fn(line);
+      }
+    });
+    return {
+      kill: (signal) => { child.kill(signal as NodeJS.Signals | undefined); },
+      on: (event, fn) => { child.on(event, (arg: unknown) => { fn(arg); }); },
+      send: (line) => { child.stdin.write(`${line}\n`); },
+      onMessage: (fn) => { listeners.push(fn); },
+    };
+  };
+}
+
+/**
+ * The pipeline runner this project has always had, unchanged.
  *
  * **stdout discarded, stderr inherited.** `gst-launch-1.0 -q` says nothing on
  * stdout worth keeping and everything worth keeping on stderr: the encoder
@@ -71,10 +152,6 @@ export type ProcessSpawner = (argv: string[]) => SpawnedProcess;
  * diagnostic half, exactly where `trace()` puts an nmcli command line, and
  * deliberately not the activity pane an operator reads.
  *
- * **Untested, and it has to be.** Nothing in this repository's suite spawns a
- * process — that is what `ProcessSpawner` exists for — so this function is the
- * seam's far side. It is four lines for exactly that reason.
- *
  * **It offers no `send`, because `gst-launch-1.0` has none to offer.** The
  * program reads its pipeline from argv, plays it, and takes no instruction
  * afterwards: there is no property to set, no socket, no stdin protocol.
@@ -82,16 +159,133 @@ export type ProcessSpawner = (argv: string[]) => SpawnedProcess;
  * controllable and changes nothing, which is the true answer. Giving the
  * child a stdin pipe and writing commands into it would produce the same
  * silence with none of the report — K-48's failure exactly, one layer down.
- * The program that does answer is not in this repository yet; when it is,
- * it arrives here, as a spawner that sets `send` and `onMessage`.
  */
-export const systemSpawner: ProcessSpawner = (argv) => {
+export const plainSpawner: ProcessSpawner = (argv) => {
   const child = spawn(argv[0], argv.slice(1), { stdio: ["ignore", "ignore", "inherit"] });
   return {
     kill: (signal) => { child.kill(signal as NodeJS.Signals | undefined); },
     on: (event, fn) => { child.on(event, (arg: unknown) => { fn(arg); }); },
   };
 };
+
+/**
+ * How long a runner has to prove it started before this file stops trusting
+ * it. Longer than an interpreter needs to fail an import and shorter than a
+ * pipeline that is genuinely running will live.
+ */
+const GRACE_MS = 3_000;
+
+/**
+ * `first` where it can be run and does run; `second` everywhere else
+ * (R-VID-07, and rule 6: nothing may take the picture away).
+ *
+ * **This replaces the one part of the video path that is known to work on
+ * hardware, so the old part stays reachable in both the ways it is needed.**
+ * A board with no host installed never spawns one. A board where the host is
+ * installed but *cannot start* — no `python3-gi`, a GStreamer too old to
+ * address, a pipeline it will not witness — is not left with a dead camera
+ * either: the runner that has always worked is spawned in its place, in the
+ * same wrapper, and the supervisor is never told the first one exited,
+ * because from the camera's point of view nothing did.
+ *
+ * **The fallback costs the control channel, and says so rather than hiding
+ * it.** `send` is taken off the wrapper the moment `second` takes over, so
+ * `Supervisor.send` answers false and `EncoderChannel` reports *no control
+ * channel* — the true statement about what is now running. Leaving `send` in
+ * place would write commands into a program that reads none, and answer an
+ * operator's bitrate change with a silence: K-48 again, one layer down.
+ *
+ * **One fallback, and only inside the grace window.** A host that ran for an
+ * hour and then died is a pipeline that failed, which is the supervisor's
+ * business and gets its backoff; a second fallback would be this file
+ * retrying a decision it has already made, so falling back closes the window
+ * it was allowed by. And a process killed by `stop()` exited because it was
+ * told to, so a kill disarms the window too.
+ */
+export function preferring(opts: {
+  first: ProcessSpawner;
+  second: ProcessSpawner;
+  usable: () => boolean;
+  clock?: Clock;
+  graceMs?: number;
+  note?: (message: string) => void;
+}): ProcessSpawner {
+  const clock = opts.clock ?? systemClock;
+  const graceMs = opts.graceMs ?? GRACE_MS;
+  const note = opts.note ?? ((message: string) => process.stderr.write(`${message}\n`));
+
+  return (argv) => {
+    if (!opts.usable()) return opts.second(argv);
+
+    const exits: ((arg: unknown) => void)[] = [];
+    const errors: ((arg: unknown) => void)[] = [];
+    const inbox: ((line: string) => void)[] = [];
+    let child = opts.first(argv);
+    let early = true;
+    let killed = false;
+
+    const timer = clock.setTimer(graceMs, () => { early = false; });
+
+    const wrapper: SpawnedProcess = {
+      kill: (signal) => {
+        killed = true;
+        clock.clearTimer(timer);
+        child.kill(signal);
+      },
+      on: (event, fn) => { (event === "exit" ? exits : errors).push(fn); },
+      send: (line) => { child.send?.(line); },
+      onMessage: (fn) => { inbox.push(fn); },
+    };
+
+    const ended = (fns: ((arg: unknown) => void)[], arg: unknown, why: string): void => {
+      if (early && !killed) {
+        // Closing the window here is what makes the fallback once-only: the
+        // second runner's own early exit is a pipeline that failed, which is
+        // the supervisor's business. A separate `fell` flag beside this line
+        // would say the same thing and could never be made to fail a test.
+        early = false;
+        clock.clearTimer(timer);
+        delete wrapper.send;
+        note(`the pipeline host ${why}; falling back to ${argv[0]}, `
+          + "which carries video but takes no instruction once it is running");
+        child = opts.second(argv);
+        attach(child);
+        return;
+      }
+      for (const fn of [...fns]) fn(arg);
+    };
+
+    function attach(proc: SpawnedProcess): void {
+      proc.onMessage?.((line) => { for (const fn of [...inbox]) fn(line); });
+      proc.on("exit", (arg) => { ended(exits, arg, `exited with code ${String(arg)}`); });
+      proc.on("error", (arg) => { ended(errors, arg, `could not be started: ${String(arg)}`); });
+    }
+
+    attach(child);
+    return wrapper;
+  };
+}
+
+/**
+ * The real one, and the only place in this package that starts a pipeline.
+ *
+ * **Untested, and it has to be.** Nothing in this repository's suite spawns a
+ * process from *this* value — that is what `ProcessSpawner` exists for — so
+ * this line is the seam's far side. It is an assembly of three pieces that
+ * are each tested on their own, for exactly that reason: `preferring` against
+ * fake spawners, `controlledSpawner` against the real host with a fake
+ * GStreamer under it, and `plainSpawner` unchanged from the shape that has
+ * run every pipeline this project has ever run.
+ *
+ * `usable` is asked on **every** spawn rather than once at load, so a device
+ * that has just had the host installed picks it up the next time a camera
+ * starts, without the daemon being restarted underneath a flying aircraft.
+ */
+export const systemSpawner: ProcessSpawner = preferring({
+  first: controlledSpawner(PIPELINE_HOST),
+  second: plainSpawner,
+  usable: () => executable(PIPELINE_HOST),
+});
 
 /** How long a pipeline must hold before it counts as running (R-UI-05). */
 const SETTLE_MS = 2_000;

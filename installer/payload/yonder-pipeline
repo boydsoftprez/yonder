@@ -1,0 +1,613 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""
+The program that carries a Yonder video pipeline and can be told things while
+it is carrying it (R-VID-07, R-VID-09; closes K-53).
+
+**It replaces `gst-launch-1.0`, and it runs the same pipeline.** The argv is
+the one `video/pipeline.ts`'s `compose()` emits, taken verbatim and handed to
+`Gst.parse_launchv()` -- the very call `gst-launch-1.0` makes with its own
+argv. Nothing here composes, edits, completes or second-guesses a pipeline. A
+spike whose pipeline differed from the daemon's cost this project three fix
+rounds and produced video that never started, because it dropped the level
+capsfilter, `io-mode=4` and the leaky queue; the way not to repeat that is to
+have no opinion about the line at all.
+
+**What it adds is a mouth and an ear.** One line of JSON per command on stdin,
+one line per reply on stdout, matched by `id` -- the protocol
+`packages/yonder-core/src/video/encoder.ts` already speaks and already has
+tests for. stdout carries replies and nothing else; every diagnostic goes to
+stderr, which the daemon inherits and systemd hands to the journal.
+
+**It relays; it decides nothing** (R-CMD-04, R-CMD-05). No rate is chosen
+here, no envelope is applied, nothing reacts to a link or a battery. A
+`retune` sets the properties it is given on the elements it names; a
+`reconfigure-preview` does the same and, only where the running elements will
+not take them, restarts the preview branch alone.
+
+**Continuity is measured, not inferred.** A buffer probe sits on the *sink*
+pad of the `main` tee -- the fork every ground-station output and every board
+recording hangs off -- so `continuous` is a statement about the frames that
+actually reached them. The tee is already in the line `compose()` emits, which
+is why nothing is inserted to hold the probe: an `identity` element added here
+would be a change to the graph under test, and the spike only needed one
+because a `gst-launch` string has no other way to hang a probe. This program
+holds the pipeline object and has no such limitation.
+
+**Three refusals, each of which is this program declining to run rather than
+running blind.** They matter because `systemSpawner` falls back to
+`gst-launch-1.0` when this program will not start, so a refusal costs the
+control channel and not the picture:
+
+  * no `gi`, no GStreamer, or a GStreamer without `parse_launchv` /
+    `util_set_object_arg`;
+  * a pipeline with no `main` tee to witness -- every `continuous` it reported
+    would then be a claim it could not see;
+  * a pipeline that will not parse or will not play.
+"""
+from __future__ import annotations
+
+import json
+import os
+import sys
+import threading
+import time
+import traceback
+
+
+# stderr, always: stdout is the reply channel and a stray line on it is a
+# malformed reply to a command nobody sent.
+def note(message):
+    sys.stderr.write("yonder-pipeline: %s\n" % message)
+    sys.stderr.flush()
+
+
+def die(message):
+    note(message)
+    raise SystemExit(1)
+
+
+try:
+    import gi
+
+    gi.require_version("Gst", "1.0")
+    from gi.repository import Gst
+except Exception as exc:                                  # noqa: BLE001
+    die("no GStreamer bindings here (%s); the daemon will fall back to "
+        "gst-launch-1.0, which carries video but takes no instruction" % exc)
+
+# The two calls this program is built out of. `parse_launchv` is what
+# `gst-launch-1.0` itself parses its argv with, and `util_set_object_arg` is
+# what `gst-launch-1.0` sets a property from a string with -- so a launch-line
+# token and a runtime instruction carrying the same string mean the same
+# thing. Checked here rather than discovered at the first command, because a
+# missing one costs the control channel and the fallback can only be taken at
+# start-up.
+for _needed in ("parse_launchv", "util_set_object_arg"):
+    if not hasattr(Gst, _needed):
+        die("this GStreamer has no Gst.%s; the pipeline could be played but "
+            "not addressed, so it is left to gst-launch-1.0" % _needed)
+
+# The tee `compose()` forks the ground station's outputs off. Its sink pad is
+# where continuity is witnessed.
+MAIN_TEE = "main"
+
+# How long the main branch is watched after an instruction, before the reply
+# goes out. `continuous` is a claim about what happened *after* the request,
+# so a reply sent the instant the property was written would be claiming it
+# about no elapsed time at all -- and the stall half of that claim cannot be
+# made at all without a window to see nothing arrive in.
+#
+# Every path sits well inside the budgets `encoder.ts` gives it -- 2 s for a
+# retune, 5 s for a reconfigure, whose worst case here is one settle, a
+# branch restart, a second settle and this watch -- because a reply arriving
+# after the budget is a silence, and a silence is reported as a request that
+# did not land.
+RETUNE_WATCH_S = 0.3
+RECONFIGURE_WATCH_S = 0.4
+RECONFIGURE_SETTLE_S = 1.2
+POLL_S = 0.02
+# How long a fork pad is given to come to rest before its branch is taken
+# down. Best effort: a probe that has not fired is a branch with nothing
+# flowing through it, which is the easy case, not a reason to give up.
+BLOCK_WAIT_S = 0.25
+
+# What counts as a gap in the main branch's timestamps: three frame periods,
+# taken from the framerate the pad actually negotiated. Where the caps carry
+# no framerate there is no frame period to multiply, so half a second stands
+# in -- long enough that no ordinary rate reports a gap it did not have, short
+# enough that a real interruption is still caught.
+GAP_FRAMES = 3
+GAP_FALLBACK_NS = 500000000
+CLOCK_TIME_NONE = 18446744073709551615
+
+
+class MainBranch(object):
+    """
+    The ground station's frames, counted where they fork.
+
+    On the **sink** pad of the `main` tee, which is one pad upstream of every
+    consumer: what passes here is exactly what each output branch is given, so
+    a claim made from it is a claim about the stream an operator is watching
+    and about a recording taken off the same fork. A probe on one output's
+    branch would answer for that output only.
+    """
+
+    def __init__(self, pipeline):
+        self.count = 0
+        self.gaps = 0
+        self._last_pts = None
+        self._gap_ns = None
+        self._lock = threading.Lock()
+        tee = pipeline.get_by_name(MAIN_TEE)
+        self.pad = tee.get_static_pad("sink") if tee is not None else None
+        if self.pad is not None:
+            self.pad.add_probe(Gst.PadProbeType.BUFFER, self._saw)
+
+    def _saw(self, pad, info):
+        buf = info.get_buffer()
+        pts = None if buf is None else buf.pts
+        with self._lock:
+            self.count += 1
+            if pts is not None and pts != CLOCK_TIME_NONE:
+                last = self._last_pts
+                if last is not None and pts > last and (pts - last) > self._threshold(pad):
+                    self.gaps += 1
+                self._last_pts = pts
+        return Gst.PadProbeReturn.OK
+
+    def _threshold(self, pad):
+        """Three frame periods, from the caps the pad negotiated."""
+        if self._gap_ns is None:
+            self._gap_ns = GAP_FALLBACK_NS
+            caps = pad.get_current_caps()
+            if caps is not None and caps.get_size() > 0:
+                ok, num, den = caps.get_structure(0).get_fraction("framerate")
+                if ok and num > 0 and den > 0:
+                    self._gap_ns = int(GAP_FRAMES * den * Gst.SECOND / num)
+        return self._gap_ns
+
+    def mark(self):
+        with self._lock:
+            return (self.count, self.gaps)
+
+    def broke_over(self, mark, seconds):
+        """
+        Whether the ground station's stream was interrupted, watched for
+        `seconds` and judged against the `mark` taken before the instruction.
+
+        Two ways for it to have been, and the second is the one a gap count
+        alone misses: frames that arrived late leave a gap, and frames that
+        stopped arriving leave no gap at all, because they leave nothing.
+        Hence the window -- *delivered nothing since* is only a fact about a
+        stretch of time, and a reply sent the instant a property was written
+        would be reporting an empty one.
+
+        The gap half is judged from before the instruction, because a break
+        the instruction itself caused belongs to it. The stall half is judged
+        from after it, because the question is whether frames are still
+        coming *now*, and a branch that was delivering nothing before the
+        instruction is not one this instruction broke.
+        """
+        opened = self.mark()
+        time.sleep(seconds)
+        count, gaps = self.mark()
+        return gaps > mark[1] or (mark[0] > 0 and count == opened[0])
+
+
+def parse_options(args):
+    """
+    The pipeline description, with `gst-launch-1.0`'s own leading options
+    taken off.
+
+    An option this program does not know is refused rather than skipped: a
+    flag silently dropped is a pipeline running under instructions nobody
+    honoured, and the daemon's fallback to `gst-launch-1.0` is right there and
+    understands every flag this does not.
+    """
+    tokens = list(args)
+    while tokens and tokens[0].startswith("-"):
+        option = tokens.pop(0)
+        if option not in ("-q", "--quiet"):
+            die("unknown option %s; this program takes the argv "
+                "video/pipeline.ts composes and nothing else" % option)
+    if not tokens:
+        die("no pipeline given")
+    return tokens
+
+
+class Host(object):
+    def __init__(self, pipeline):
+        self.pipeline = pipeline
+        self.main = MainBranch(pipeline)
+
+    # -- instructions -----------------------------------------------------
+
+    def obey(self, command):
+        """One command in, one reply out, or None where there is no reply to
+        make. An `op` this program does not implement is answered with
+        silence rather than with a reply saying nothing happened: the channel
+        reports an unanswered request as a request that did not land, which
+        is exactly what it was."""
+        op = command.get("op")
+        sets = command.get("sets")
+        if not isinstance(sets, list):
+            note("a command with no sets in it: %r" % (command,))
+            return None
+
+        mark = self.main.mark()
+        if op == "retune":
+            self.apply(sets)
+            broke = self.main.broke_over(mark, RETUNE_WATCH_S)
+            observed = self.rate_of(sets)
+        elif op == "reconfigure-preview":
+            observed = self.reconfigure(sets)
+            broke = self.main.broke_over(mark, RECONFIGURE_WATCH_S)
+        else:
+            note("no such op: %r" % (op,))
+            return None
+
+        return {
+            "id": command.get("id"),
+            "pid": os.getpid(),
+            "continuous": not broke,
+            "observed": observed,
+        }
+
+    def apply(self, sets):
+        """Set each property on the element that carries it, exactly as the
+        launch line's own token would have. An element that is not there is
+        said so and skipped; the read-back below is then the old value, and
+        the channel reports `requested` against `observed`."""
+        for one in sets:
+            element = self.pipeline.get_by_name(one.get("element"))
+            if element is None:
+                note("no element named %r in this pipeline" % (one.get("element"),))
+                continue
+            Gst.util_set_object_arg(element, one.get("property"), one.get("value"))
+
+    def elements_of(self, sets):
+        found = []
+        for one in sets:
+            element = self.pipeline.get_by_name(one.get("element"))
+            if element is not None:
+                found.append((element, one))
+        return found
+
+    # -- what the encoder is actually running ------------------------------
+
+    def rate_of(self, sets):
+        """
+        The rate the encoder holds now, in kb/s, read off the element.
+
+        Never the rate that was asked for: K-48 is what an answer from the
+        request looks like. The two shapes are the two `pipeline.ts` composes
+        and `bitrateIn()` reads back out of a launch line -- `x264enc` counts
+        in kb/s in a plain property, `v4l2h264enc` counts in bits per second
+        inside its controls structure -- and the end-to-end test drives a real
+        one of each through this function, so the two files cannot drift into
+        different units without going red.
+        """
+        for element, one in self.elements_of(sets):
+            try:
+                value = element.get_property(one.get("property"))
+            except Exception:                             # noqa: BLE001
+                note("%s has no %r to read back"
+                     % (name_of(element), one.get("property")))
+                continue
+            if isinstance(value, bool):
+                continue
+            if isinstance(value, int):
+                return value
+            bits = structure_field(value, "video_bitrate")
+            if bits is not None:
+                return int(round(bits / 1000.0))
+        return None
+
+    def reconfigure(self, sets):
+        """
+        Hold the preview at the size and rate it was given, and say what it
+        actually holds (R-VID-13, spec 8.1).
+
+        A capsfilter takes a `caps` property while playing; whether anything
+        downstream *renegotiates* is a different question, and the only honest
+        answer to it is the caps the pad settled on. So the properties are set,
+        the pads are watched, and only if they do not come round is the preview
+        branch alone taken down and brought back -- which always renegotiates,
+        because a NULL element has nothing to keep.
+        """
+        self.apply(sets)
+        shape = self.settle(sets, RECONFIGURE_SETTLE_S)
+        if shape is None:
+            self.restart_branch(sets)
+            shape = self.settle(sets, RECONFIGURE_SETTLE_S)
+        return shape
+
+    def settle(self, sets, budget):
+        """The shape the preview's pads have negotiated, once they agree with
+        what their capsfilters were told, or None if they never do within
+        `budget`."""
+        deadline = time.monotonic() + budget
+        while True:
+            shape = negotiated_shape(self.elements_of(sets))
+            if shape is not None:
+                return shape
+            if time.monotonic() >= deadline:
+                return None
+            time.sleep(POLL_S)
+
+    # -- restarting one branch and nothing else ----------------------------
+
+    def restart_branch(self, sets):
+        """
+        Take the preview branch down and bring it back, leaving the main
+        branch and its outputs running (spec 8.1).
+
+        **The branch is discovered by walking the graph**, from the elements
+        the instruction names outward: upstream by static sink pads until a
+        pad that a fork had to be *requested* for -- which is what a tee's
+        output is and what makes it the edge of a branch -- and downstream by
+        static src pads to the sink. A list of element names written here
+        would be a second copy of `compose()`'s shape, and the copy that goes
+        stale is the one nothing runs.
+
+        **Two conditions, and it does nothing at all unless both hold.** A
+        walk that found no fork did not find a branch; a walk whose result
+        touches the main chain is not describing the preview. Either way the
+        picture the operator is watching is worth more than the reconfigure,
+        so nothing is restarted and the reply reports the shape the pipeline
+        is really in.
+        """
+        seeds = [element for element, _ in self.elements_of(sets)]
+        if not seeds:
+            return
+        branch, fork = self.walk(seeds)
+        if fork is None:
+            note("the preview elements are not on a branch of their own; "
+                 "nothing restarted")
+            return
+        trespass = branch & self.main_chain()
+        if trespass:
+            note("that branch runs through the main stream (%s); nothing restarted"
+                 % ", ".join(sorted(name_of(e) for e in trespass)))
+            return
+
+        ordered = order_downstream(branch)
+        blocked = threading.Event()
+
+        def hold(pad, info):
+            blocked.set()
+            return Gst.PadProbeReturn.OK
+
+        probe = fork.add_probe(Gst.PadProbeType.BLOCK_DOWNSTREAM, hold)
+        # Best effort, and it says so. A fork pad that has not come to rest
+        # within the wait is a branch with nothing flowing down it, which is
+        # the easy case rather than a reason to refuse.
+        blocked.wait(BLOCK_WAIT_S)
+        for element in reversed(ordered):
+            element.set_state(Gst.State.NULL)
+        for element in ordered:
+            element.sync_state_with_parent()
+        if probe:
+            fork.remove_probe(probe)
+
+    def walk(self, seeds):
+        """Every element on the seeds' branch, and the fork pad it hangs off."""
+        branch = set()
+        fork = None
+        for seed in seeds:
+            element = seed
+            while element is not None and element not in branch:
+                branch.add(element)
+                peer = peer_of(element, "sink")
+                if peer is None:
+                    break
+                if is_request_pad(peer):
+                    fork = peer
+                    break
+                element = peer.get_parent_element()
+        for seed in list(branch):
+            element = seed
+            while element is not None:
+                branch.add(element)
+                peer = peer_of(element, "src")
+                if peer is None:
+                    break
+                element = peer.get_parent_element()
+                if element in branch:
+                    break
+        return branch, fork
+
+    def main_chain(self):
+        """The `main` tee and everything feeding it -- the capture, the turn,
+        the fork they are shared through and the full-rate encode. Nothing in
+        here may be restarted to move a preview."""
+        chain = set()
+        tee = self.pipeline.get_by_name(MAIN_TEE)
+        element = tee
+        while element is not None and element not in chain:
+            chain.add(element)
+            peer = peer_of(element, "sink")
+            if peer is None:
+                break
+            element = peer.get_parent_element()
+        return chain
+
+
+# -- small graph helpers ---------------------------------------------------
+
+def name_of(element):
+    try:
+        return element.get_name()
+    except Exception:                                     # noqa: BLE001
+        return repr(element)
+
+
+def peer_of(element, pad_name):
+    pad = element.get_static_pad(pad_name)
+    return None if pad is None else pad.get_peer()
+
+
+def is_request_pad(pad):
+    template = pad.get_pad_template()
+    return template is not None and template.presence == Gst.PadPresence.REQUEST
+
+
+def order_downstream(branch):
+    """The branch, from its upstream end to its sink. An element whose sink
+    peer is outside the set is the head; each next one is its src peer."""
+    heads = [e for e in branch
+             if (peer_of(e, "sink") is None
+                 or peer_of(e, "sink").get_parent_element() not in branch)]
+    ordered = []
+    for head in heads:
+        element = head
+        while element is not None and element in branch and element not in ordered:
+            ordered.append(element)
+            peer = peer_of(element, "src")
+            element = None if peer is None else peer.get_parent_element()
+    for element in branch:
+        if element not in ordered:
+            ordered.append(element)
+    return ordered
+
+
+def structure_field(value, field):
+    """One field of a `Gst.Structure`, or None where the value is not one or
+    does not carry it."""
+    getter = getattr(value, "get_value", None)
+    if getter is None:
+        return None
+    try:
+        got = getter(field)
+    except Exception:                                     # noqa: BLE001
+        return None
+    return got if isinstance(got, (int, float)) and not isinstance(got, bool) else None
+
+
+def negotiated_shape(pairs):
+    """
+    `{size, fps}` from the caps the preview's pads have actually settled on,
+    or None until every capsfilter's own pad agrees with what it was told.
+
+    `is_subset` rather than a comparison of parsed strings: the filter's caps
+    are the instruction and the pad's are what the branch negotiated, and one
+    being a subset of the other is GStreamer's own answer to *has this been
+    taken*. Nothing here reads a width out of a string the daemon sent.
+    """
+    fields = {}
+    for element, one in pairs:
+        if one.get("property") != "caps":
+            continue
+        want = element.get_property("caps")
+        pad = element.get_static_pad("src")
+        got = None if pad is None else pad.get_current_caps()
+        if got is None or want is None or got.get_size() < 1:
+            return None
+        if not got.is_subset(want):
+            return None
+        structure = got.get_structure(0)
+        ok, width = structure.get_int("width")
+        if ok:
+            fields["width"] = width
+        ok, height = structure.get_int("height")
+        if ok:
+            fields["height"] = height
+        ok, num, den = structure.get_fraction("framerate")
+        if ok and den:
+            fields["fps"] = num // den if num % den == 0 else num / den
+    if "width" not in fields or "height" not in fields or "fps" not in fields:
+        return None
+    return {"size": "%dx%d" % (fields["width"], fields["height"]), "fps": fields["fps"]}
+
+
+# -- the process ------------------------------------------------------------
+
+def watch_bus(pipeline):
+    """`gst-launch-1.0`'s own behaviour: an error or an end of stream ends the
+    process. The supervisor is what restarts a pipeline (R-CTL-01), and a host
+    that stayed up holding a dead pipeline would be a camera reported running
+    with nothing coming out of it."""
+    bus = pipeline.get_bus()
+    if bus is None:
+        return
+    while True:
+        message = bus.timed_pop_filtered(
+            Gst.SECOND, Gst.MessageType.ERROR | Gst.MessageType.EOS)
+        if message is None:
+            continue
+        if message.type == Gst.MessageType.ERROR:
+            error, debug = message.parse_error()
+            note("the pipeline failed: %s (%s)" % (error, debug))
+        else:
+            note("the pipeline ended")
+        pipeline.set_state(Gst.State.NULL)
+        os._exit(1)
+
+
+def main(args):
+    tokens = parse_options(args)
+    Gst.init(None)
+    try:
+        pipeline = Gst.parse_launchv(tokens)
+    except Exception as exc:                              # noqa: BLE001
+        die("that pipeline will not parse: %s" % exc)
+    if pipeline is None:
+        die("that pipeline will not parse")
+
+    if not hasattr(pipeline, "get_by_name"):
+        die("that description is a single element, not a pipeline this "
+            "program can address")
+
+    host = Host(pipeline)
+    if host.main.pad is None:
+        die("this pipeline has no `%s` tee to watch, so every continuity "
+            "claim would be one this program could not witness; it is left to "
+            "gst-launch-1.0" % MAIN_TEE)
+
+    if pipeline.set_state(Gst.State.PLAYING) == Gst.StateChangeReturn.FAILURE:
+        die("that pipeline will not play")
+
+    thread = threading.Thread(target=watch_bus, args=(pipeline,))
+    thread.daemon = True
+    thread.start()
+
+    # Stdin is also the daemon's liveness: when yonder-core goes away the pipe
+    # closes, readline returns nothing, and this pipeline is taken down rather
+    # than left holding the camera's /dev/video node open.
+    while True:
+        line = sys.stdin.readline()
+        if line == "":
+            break
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            command = json.loads(line)
+        except ValueError:
+            note("not a command: %r" % (line,))
+            continue
+        if not isinstance(command, dict):
+            note("not a command: %r" % (line,))
+            continue
+        # **A command that goes wrong must not take the camera with it.** An
+        # unhandled exception here would end this process, and ending this
+        # process is the picture stopping — for a bitrate change. The
+        # instruction is lost either way, and a lost instruction is already
+        # reported: no reply is a request the channel says did not land.
+        try:
+            reply = host.obey(command)
+        except Exception:                                 # noqa: BLE001
+            note("that command went wrong, and the pipeline is still running:\n%s"
+                 % traceback.format_exc())
+            continue
+        if reply is not None:
+            sys.stdout.write(json.dumps(reply) + "\n")
+            sys.stdout.flush()
+
+    pipeline.set_state(Gst.State.NULL)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it, vi } from "vitest";
-import { Supervisor, type ProcessSpawner, type SpawnedProcess } from "./supervisor.js";
+import {
+  Supervisor, preferring, type ProcessSpawner, type SpawnedProcess,
+} from "./supervisor.js";
 
 function fakeClock() {
   let now = 1_000_000;
@@ -22,6 +24,8 @@ interface Spawned {
   argv: string[];
   proc: SpawnedProcess;
   exit(code: number): void;
+  /** A spawn that never got as far as a process: ENOENT, EACCES. */
+  error(reason: unknown): void;
   /** Every line the supervisor wrote to this process's control channel. */
   sent: string[];
   /** One line back from this process, as its own acknowledgement would be. */
@@ -51,6 +55,7 @@ function fakeSpawner(opts: { channel?: boolean } = {}) {
     spawned.push({
       argv, proc, sent,
       exit: (code) => handlers.exit.forEach((h) => h(code)),
+      error: (reason) => handlers.error.forEach((h) => h(reason)),
       emit: (line) => inbox.forEach((fn) => { fn(line); }),
     });
     return proc;
@@ -370,5 +375,156 @@ describe("Supervisor's control channel", () => {
     expect(s.argv("cam0")).toEqual(ARGV);
     s.stop("cam0");
     expect(s.argv("cam0")).toBeNull();
+  });
+});
+
+/**
+ * Choosing a runner, and surviving the one that is new.
+ *
+ * `installer/payload/yonder-pipeline` replaces the one part of the video path
+ * that is known to work on hardware, so the rule this describes is rule 6's:
+ * **nothing may take the picture away.** Two ways the host can be unavailable
+ * and they are different facts about the device — it was never installed, and
+ * it is installed and will not start — and a board hitting either must still
+ * carry video, on the runner that has always carried it.
+ */
+describe("preferring one runner over another", () => {
+  function pair() {
+    const host = fakeSpawner();
+    const plain = fakeSpawner({ channel: false });
+    return { host, plain };
+  }
+
+  function build(opts: { usable: boolean; graceMs?: number }) {
+    const { host, plain } = pair();
+    const { clock, advance } = fakeClock();
+    const notes: string[] = [];
+    const spawner = preferring({
+      first: host.spawner, second: plain.spawner,
+      usable: () => opts.usable, clock,
+      ...(opts.graceMs === undefined ? {} : { graceMs: opts.graceMs }),
+      note: (m) => { notes.push(m); },
+    });
+    return { spawner, host, plain, advance, clock, notes };
+  }
+
+  it("runs the host, over a channel, where the host can be run", () => {
+    const { spawner, host, plain } = build({ usable: true });
+    const proc = spawner(ARGV);
+    expect(host.spawned).toHaveLength(1);
+    expect(host.spawned[0].argv).toEqual(ARGV);
+    expect(plain.spawned).toHaveLength(0);
+    proc.send?.('{"id":1}');
+    expect(host.spawned[0].sent).toEqual(['{"id":1}']);
+  });
+
+  it("runs the old runner, and offers no channel, where there is no host", () => {
+    // Not a degraded control channel: none at all. `EncoderChannel` reads
+    // the absence and reports `notControllable`, which is the true answer
+    // and is the whole difference from K-48.
+    const { spawner, host, plain } = build({ usable: false });
+    const proc = spawner(ARGV);
+    expect(plain.spawned).toHaveLength(1);
+    expect(host.spawned).toHaveLength(0);
+    expect(proc.send).toBeUndefined();
+  });
+
+  it("carries video on the old runner when the host will not start", () => {
+    // A board with no python3-gi, or a GStreamer too old to address: the
+    // host exits at once and the camera must still stream.
+    const { spawner, host, plain, notes } = build({ usable: true, graceMs: 3_000 });
+    const exits: unknown[] = [];
+    const proc = spawner(ARGV);
+    proc.on("exit", (code) => exits.push(code));
+
+    host.spawned[0].exit(1);
+    expect(plain.spawned).toHaveLength(1);
+    expect(plain.spawned[0].argv).toEqual(ARGV);
+    // The supervisor is never told the first one died, because from the
+    // camera's point of view nothing did — a reported exit here would count
+    // a restart and burn one of the five a camera is allowed.
+    expect(exits).toEqual([]);
+    expect(notes.join(" ")).toContain("falling back");
+  });
+
+  it("takes the channel away when it falls back, rather than writing into a pipe nothing reads", () => {
+    const { spawner, host } = build({ usable: true });
+    const proc = spawner(ARGV);
+    expect(proc.send).toBeDefined();
+    host.spawned[0].exit(1);
+    expect(proc.send).toBeUndefined();
+  });
+
+  it("passes on what the runner it fell back to says", () => {
+    const { spawner, host, plain } = build({ usable: true });
+    const exits: unknown[] = [];
+    const proc = spawner(ARGV);
+    proc.on("exit", (code) => exits.push(code));
+    host.spawned[0].exit(1);
+    plain.spawned[0].exit(9);
+    // Falls back once. The second failure is a pipeline that failed, which
+    // is the supervisor's business and gets its backoff.
+    expect(plain.spawned).toHaveLength(1);
+    expect(exits).toEqual([9]);
+  });
+
+  it("reports an exit the host takes after it has proved itself", () => {
+    // A host that ran for an hour and then died is not a host that would not
+    // start, and swapping runners under a working camera would be this file
+    // making a decision it already made.
+    const { spawner, host, plain, advance } = build({ usable: true, graceMs: 3_000 });
+    const exits: unknown[] = [];
+    const proc = spawner(ARGV);
+    proc.on("exit", (code) => exits.push(code));
+    advance(3_001);
+    host.spawned[0].exit(1);
+    expect(plain.spawned).toHaveLength(0);
+    expect(exits).toEqual([1]);
+    expect(proc.send).toBeDefined();
+  });
+
+  it("does not fall back over a process it was told to kill", () => {
+    // stop() kills, the child exits because it was told to, and a fallback
+    // here would start a pipeline the operator had just stopped.
+    const { spawner, host, plain } = build({ usable: true });
+    const proc = spawner(ARGV);
+    proc.kill("SIGTERM");
+    host.spawned[0].exit(0);
+    expect(plain.spawned).toHaveLength(0);
+  });
+
+  it("falls back on a spawn that errors, not only on one that exits", () => {
+    // ENOENT and EACCES arrive as `error`, never as `exit`, and they are the
+    // likeliest shape of "the host is not really there".
+    const { spawner, host, plain } = build({ usable: true });
+    spawner(ARGV);
+    host.spawned[0].error(new Error("ENOENT"));
+    expect(plain.spawned).toHaveLength(1);
+  });
+
+  it("gives the supervisor one process, whichever runner ends up behind it", () => {
+    // The supervisor holds the wrapper and compares it by identity to decide
+    // whether a message is stale (see `ended` above). A fallback that handed
+    // back a different object would make every later line look stale.
+    const { spawner, host } = build({ usable: true });
+    const { clock } = fakeClock();
+    const s = new Supervisor({ spawner, clock });
+    const heard: string[] = [];
+    s.onMessage((_, line) => heard.push(line));
+    s.start("cam0", ARGV);
+    host.spawned[0].emit('{"id":1,"pid":2,"continuous":true,"observed":3000}');
+    expect(heard).toEqual(['{"id":1,"pid":2,"continuous":true,"observed":3000}']);
+    expect(s.send("cam0", { id: 1 })).toBe(true);
+  });
+
+  it("stops offering the channel to the supervisor once it has fallen back", () => {
+    const { spawner, host } = build({ usable: true });
+    const { clock } = fakeClock();
+    const s = new Supervisor({ spawner, clock });
+    s.start("cam0", ARGV);
+    expect(s.send("cam0", { id: 1 })).toBe(true);
+    host.spawned[0].exit(1);
+    expect(s.send("cam0", { id: 2 })).toBe(false);
+    expect(s.state("cam0")).toMatchObject({ restarts: 0 });
   });
 });

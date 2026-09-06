@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { DEFAULT_CONSOLE_PATHS } from "./console/settings.js";
 import { MEDIA_CONFIG_PATH } from "./media/renderer.js";
+import { PIPELINE_HOST } from "./video/supervisor.js";
 
 /**
  * The installer's shell helpers, exercised rather than read.
@@ -282,6 +283,77 @@ describe("installer/roles/50-mediamtx.sh", () => {
 
   it("proves the daemon can write the file it is going to be asked to write", () => {
     expect(role).toContain("assert_daemon_can_write");
+  });
+});
+
+/**
+ * The runner that can be spoken to, and the two halves it is a pair with.
+ *
+ * K-53: video is run by `gst-launch-1.0`, which plays a pipeline and then
+ * answers nothing, so an applied bitrate never reaches the running encoder
+ * however correct every layer above it is. `installer/payload/yonder-pipeline`
+ * is the program that answers, and this role puts it where the daemon spawns
+ * it. Everything below is a way for those two halves to be checked against
+ * each other rather than typed twice.
+ */
+describe("installer/roles/55-pipeline-host.sh", () => {
+  const role = readFileSync(join(ROOT, "installer", "roles", "55-pipeline-host.sh"), "utf8");
+  const host = join(ROOT, "installer", "payload", "yonder-pipeline");
+  const fakeGi = join(ROOT, "packages", "yonder-core", "src", "video", "fake-gi");
+
+  it("installs the bindings the host imports, from Debian rather than the payload", () => {
+    // Both are in Debian main, on the footing 50-mediamtx.sh states for
+    // gstreamer1.0-rtsp. make-payload.sh vendors what Debian does not carry,
+    // against pinned fingerprints, and has no apt mechanism at all.
+    expect(role).toMatch(/^ensure_pkgs python3-gi gir1\.2-gstreamer-1\.0$/m);
+  });
+
+  it("asks Python whether it can import them, not dpkg whether they are there", () => {
+    // The same distinction 50-mediamtx.sh draws by resolving rtspclientsink
+    // through the GStreamer registry: a package that is installed and a
+    // binding that imports are different questions.
+    expect(role).toContain('gi.require_version("Gst", "1.0")');
+    expect(role).toContain("from gi.repository import Gst");
+  });
+
+  it("installs the host at the path the daemon spawns, and executable", () => {
+    // Two halves of a pair, and a value they can disagree about is a control
+    // channel that is silently never there. `preferring` chooses this runner
+    // on the executable bit specifically, so the mode is half of the same
+    // pair.
+    expect(role).toContain(`host_bin=${PIPELINE_HOST}`);
+    expect(role).toMatch(/install -m 0755 "\$host_src" "\$host_bin"/);
+  });
+
+  it("stops rather than skipping when the host is not in the tree", () => {
+    // Committed source, not a downloaded artefact: unlike a payload built
+    // without mediamtx, a checkout missing this file is broken.
+    expect(role).toMatch(/\[ -f "\$host_src" \] \|\| die/);
+  });
+
+  it("proves the install by running what it installed", () => {
+    expect(role).toContain('"$host_bin" 2>&1 | grep -q');
+  });
+
+  it("greps for a message the host really prints", () => {
+    // The post-condition above is a string. Reworded on one side and not the
+    // other it is a check that passes on a device where nothing works — so
+    // the real program is run here, with a stand-in GStreamer, and asked.
+    const wanted = /grep -q '([^']+)'/.exec(role)?.[1];
+    expect(wanted, "the role no longer greps for anything").toBeDefined();
+    const ran = spawnSync(host, [], {
+      encoding: "utf8",
+      env: { ...process.env, PYTHONPATH: fakeGi },
+    });
+    expect(ran.status).not.toBe(0);
+    expect(`${ran.stdout ?? ""}${ran.stderr ?? ""}`).toContain(wanted);
+  });
+
+  it("enables nothing, because the host is not a service", () => {
+    // One per running camera, spawned and supervised by yonder-core
+    // (video/supervisor.ts). A unit here would be a second thing starting
+    // pipelines.
+    expect(role).not.toMatch(/systemctl/);
   });
 });
 

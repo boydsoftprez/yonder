@@ -21,16 +21,22 @@ import type { Supervisor } from "./supervisor.js";
  * worse than refusing the change.
  *
  * **Why a respawn and not a live retune.** `EncoderChannel` exists
- * (`video/encoder.ts`) and it is right: on this board every retune answers
- * `notControllable`, because `gst-launch-1.0` reads its pipeline from argv
- * and then takes no instruction — no property interface, no socket, no stdin
- * protocol — and `v4l2h264enc`'s controls are per-open-handle, so no outside
- * process can reach the encoder either (K-53). The program that would answer
- * is not in this repository, and the GStreamer composer is being replaced by
- * ffmpeg besides, so building one now would be thrown away. A respawn is the
- * sanctioned path and it survives that pivot untouched: the spec's own
- * control table says *the current implementation respawns* for a fixed
- * bitrate and *pipeline respawn on Apply* for a resolution.
+ * (`video/encoder.ts`) and it is right: it answered `notControllable` on this
+ * board because `gst-launch-1.0` reads its pipeline from argv and then takes
+ * no instruction — no property interface, no socket, no stdin protocol — and
+ * `v4l2h264enc`'s controls are per-open-handle, so no outside process can
+ * reach the encoder either (K-53).
+ *
+ * **The program that answers is now in this repository**
+ * (`installer/payload/yonder-pipeline`), so that reasoning no longer holds as
+ * written, and this comment says so rather than leaving a citation that has
+ * gone dead. **Nothing here changes on the strength of it.** A respawn is
+ * still the sanctioned path for an apply, and still the only path on a board
+ * with no host installed or one where the host will not start — both of
+ * which `systemSpawner` supports on purpose. Whether an apply should prefer a
+ * live retune where the running pipeline can take one, and what a rollback
+ * then means, is a decision about the apply engine and not one this file may
+ * make on its own.
  *
  * **Why a `Renderer` and not a hook on the apply route.** The apply engine
  * drives renderers inside validate → snapshot → apply → confirm-or-revert, so
