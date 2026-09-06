@@ -912,21 +912,34 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
       // rest beneath it, because a board on a mesh has several and only one of
       // them is the one the operator is actually reaching it on (R-VID-15).
       addresses: async () => {
-        const [local, mesh, standing] = await Promise.all([
+        const config = reachConfig();
+        const [local, mesh, devices, net] = await Promise.all([
           client.activeIpv4(),
-          readRemoteState(loadConfig(opts.configPath), built.zerotier, { readTraffic }),
-          reach.state(),
+          readRemoteState(config, built.zerotier, { readTraffic }),
+          client.devices(),
+          modemPort.interfaceFor(config),
         ]);
-        // **Which address a peer can dial in to** (R-UI-24, `RouterDeps.
-        // addresses`). Assembled here because the two readings it needs are
-        // here — the interface each address is held on, from nmcli, and the
-        // interface the modem is on, from the reach monitor — and decided in
-        // `net/dial-in.ts`, because that decision is the join the whole of
-        // R-UI-24 rests on and a pure function is a join a test can stand on.
+        /**
+         * **Which path a peer would reach each address over** (R-UI-24,
+         * `RouterDeps.addresses`). Assembled here because every reading it
+         * needs is here, and decided in `net/dial-in.ts`, because that
+         * decision is the join the whole of R-UI-24 rests on.
+         *
+         * **The same pair of device maps `holding` and `down` take**, and for
+         * the identical reason: NetworkManager binds the modem's address to
+         * the control port `cdc-wdm0` and ModemManager names the net port
+         * `wwan0`, so a comparison against one of them alone is trivially
+         * true. `pathDevices(config, devices, net)` names the second and
+         * `pathDevices(config, devices)` the first. Passing only the first was
+         * this join's own defect: it marked the CGNAT address dialable on
+         * every board in auto mode, which is the flying case.
+         */
         return answerableAddresses({
           local,
           mesh: mesh.addresses,
-          modemDevice: standing.paths.find((p) => p.path === "modem")?.device ?? null,
+          devices: pathDevices(config, devices, net),
+          alsoKnownAs: pathDevices(config, devices),
+          apAddress: config.network.ap.address,
         });
       },
     }),

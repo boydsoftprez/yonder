@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import type { Camera, CameraOutput } from "../schema/config.js";
 import { outputReach, type OutputKind, type ReachPaths } from "./outputs.js";
+import type { AddressPath, AnswerableAddress } from "../net/dial-in.js";
 import { RTP_PAYLOAD_TYPE } from "./pipeline.js";
 
 /**
@@ -36,8 +37,8 @@ export interface ReceiveFacts {
   /** Every other address this device answers on. */
   readonly alternatives: readonly string[];
   /**
-   * Every address a peer could open a socket **to** — the mesh's, and a LAN's,
-   * never the modem's (R-UI-24).
+   * Every address this device answers on, and the path a peer would reach each
+   * one over (R-UI-24). See `net/dial-in.ts`.
    *
    * Only the RTSP line uses it, and only the RTSP line needs it: the three UDP
    * renderings carry no address at all, because the ground station listens and
@@ -46,8 +47,14 @@ export interface ReceiveFacts {
    * from "the address this console session arrived on" is wrong precisely when
    * the console is being reached over cellular, which is the flying case
    * R-UI-24 exists for.
+   *
+   * **A path per address, not a flag**, because the verdict rests on a path:
+   * *reachable because of the mesh* is only satisfied by a mesh address, and
+   * the access point's — which `activeIpv4()` reports first on every board
+   * whose radio is serving — satisfies nothing a `ReachPaths` field is ever
+   * true because of.
    */
-  readonly dialIn: readonly string[];
+  readonly answering: readonly AnswerableAddress[];
   /** Resolved from secrets.yaml, or null before it has been generated. */
   readonly rtspPassword: string | null;
   readonly rtspPort: number;
@@ -136,7 +143,7 @@ function usability(
 }
 
 export function renderReceive(facts: ReceiveFacts): Rendering[] {
-  const { camera, address, alternatives, rtspPassword, rtspPort, paths, dialIn } = facts;
+  const { camera, address, alternatives, rtspPassword, rtspPort, paths, answering } = facts;
   const c = CODEC[camera.codec];
   const rtp = camera.outputs.find((o) => o.kind === "rtp");
   const rtsp = camera.outputs.find((o) => o.kind === "rtsp");
@@ -162,13 +169,40 @@ export function renderReceive(facts: ReceiveFacts): Rendering[] {
    * differ in exactly one case — the console reached over cellular — where the
    * console's own address is behind the carrier's NAT and no peer can use it.
    *
-   * So: the console's address when it is one a peer can dial, otherwise the
-   * first that is. When there is none, the console's own address is printed
-   * and `listen` has already marked the line unusable — a URL with an address
-   * nobody can reach, plainly labelled, beats a URL with no address at all.
+   * So: **the address is chosen from the path the verdict rests on.** A
+   * listener is reachable on a LAN or the mesh (`outputReach`), so the
+   * candidates are this device's addresses on whichever of those is actually
+   * up; the console's own is preferred when it is one of them, and the first
+   * that is otherwise. The access point's address is never a candidate — no
+   * `ReachPaths` field is ever true because of it — which is what stops a
+   * board whose radio is serving printing `192.168.77.1` under a verdict that
+   * rests on the mesh.
+   *
+   * When there is no candidate the console's own address is printed and the
+   * line is marked unusable either way: a URL with an address nobody can
+   * reach, plainly labelled, beats a URL with no address at all.
    */
-  const listenAt = dialIn.includes(address) ? address : dialIn[0] ?? address;
-  const substituted = listenAt !== address;
+  const rests: AddressPath[] = [
+    ...(paths.lan ? ["lan" as const] : []),
+    ...(paths.mesh ? ["mesh" as const] : []),
+  ];
+  const candidates = answering.filter((a) => rests.includes(a.path));
+  const chosen = candidates.find((a) => a.address === address) ?? candidates[0];
+  /**
+   * **And when there is no candidate, still never the modem's.**
+   *
+   * The line is marked unusable either way, but it prints an address, and the
+   * modem's is the one address this device holds that is *known* never to be
+   * dialable — an unattributed one merely has nothing established about it.
+   * Printing the known-useless one while holding others is the worst choice
+   * available, and on a board reached over cellular it is the one
+   * `activeIpv4()` reports first.
+   */
+  const notCellular = (a: string): boolean =>
+    !answering.some((x) => x.address === a && x.path === "cellular");
+  const listenAt = chosen?.address
+    ?? (notCellular(address) ? address : answering.find((a) => a.path !== "cellular")?.address ?? address);
+  const substituted = chosen !== undefined && chosen.address !== address;
 
   const caps =
     `application/x-rtp,media=video,clock-rate=90000,encoding-name=${camera.codec.toUpperCase()},payload=${RTP_PAYLOAD_TYPE}`;
@@ -247,17 +281,18 @@ export function renderReceive(facts: ReceiveFacts): Rendering[] {
         // a claim that a peer can reach this output while no address is known
         // to be dialable is a claim about nothing, so it is withdrawn rather
         // than left standing over an address that cannot serve it.
-        : listen.usable && dialIn.length === 0
+        : listen.usable && chosen === undefined
           ? {
             usable: false,
-            note: "unusable — nothing this device answers on can be dialled in to; "
-              + "the only address it has is the one it is reached on, and no peer can open a socket to it",
+            note: "unusable — this device holds no address on a path a peer could dial in over, "
+              + "so there is no URL to hand anyone even though the path itself is up",
           }
           : listen.usable && substituted
             ? {
               usable: true,
-              note: `${listen.note}; the URL carries ${listenAt} rather than the address `
-                + "this console is being reached on, which is behind a carrier's NAT and cannot be dialled in to",
+              note: `${listen.note}; the URL carries ${listenAt}, this device's address on `
+                + `${chosen.path === "mesh" ? "the mesh" : "a local network"}, rather than the one `
+                + "this console is being reached on, which no peer can dial in to",
             }
             : listen),
     },

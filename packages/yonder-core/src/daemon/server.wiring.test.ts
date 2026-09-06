@@ -1015,3 +1015,151 @@ describe("the daemon drives the reach watch", () => {
     }
   });
 });
+
+/**
+ * **The stream address, at the socket, on the board this join was wrong on**
+ * (R-UI-24, R-VID-15).
+ *
+ * `answerableAddresses()` decides which path each address is on and
+ * `dial-in.test.ts` holds it to that over readings *it* supplies;
+ * `renderReceive()` chooses from the path the verdict rests on and
+ * `receive.test.ts` holds it to that over a set *it* supplies. Neither is
+ * worth anything if the one production assembly hands them the wrong
+ * readings — and it did: it compared each address's interface against the
+ * modem's *net* port, `wwan0`, while NetworkManager binds the address to the
+ * *control* port, `cdc-wdm0`, so the comparison was trivially true and the
+ * CGNAT address came back dialable on every board in auto mode.
+ *
+ * `server.ts` is the only caller. Turning the exclusion off entirely left the
+ * whole suite green, because nothing tested `addresses` at the assembly. This
+ * is that test: a real daemon, a real router, and the same fixtures the mmcli
+ * client's own tests read.
+ */
+describe("the stream address is built from an address a peer can dial", () => {
+  let socketPath: string, configPath: string, journalPath: string, secretsPath: string;
+  const noop: Renderer = { name: "noop", async render() {} };
+
+  /** What `nmcli -t -f GENERAL.DEVICE,IP4.ADDRESS device show` reports here. */
+  const DEVICE_SHOW = [
+    // Real captures lead with loopback — `fixtures/device-show-ip4.txt` does.
+    "GENERAL.DEVICE:lo",
+    "IP4.ADDRESS[1]:127.0.0.1/8",
+    "",
+    // The modem, under the name NetworkManager binds it to. First of the real
+    // addresses, which is what makes this the one a flat list would print.
+    "GENERAL.DEVICE:cdc-wdm0",
+    "IP4.ADDRESS[1]:10.31.95.33/30",
+    "",
+    "GENERAL.DEVICE:eth0",
+    "IP4.ADDRESS[1]:192.168.1.8/24",
+    "",
+    // The radio, serving the access point, holding its address for ever.
+    "GENERAL.DEVICE:wlan0",
+    "IP4.ADDRESS[1]:192.168.77.1/24",
+    "",
+  ].join("\n");
+
+  beforeEach(() => {
+    socketPath = join(dir, "core.sock");
+    configPath = join(dir, "config.yaml");
+    journalPath = join(dir, "apply.json");
+    secretsPath = join(dir, "secrets.yaml");
+    const config = structuredClone(DEFAULT_CONFIG);
+    // Auto mode: the operator has not named an adapter, so the two names have
+    // to be reconciled. Appliance mode is the case that never needed it.
+    config.network.modem.enabled = true;
+    config.network.modem.apn = "ereseller";
+    config.cameras = [{
+      id: "cam0",
+      name: "Nose",
+      source: "usb",
+      device: "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0",
+      outputs: [
+        { kind: "rtp", host: "192.168.1.50", port: 5600 },
+        { kind: "rtsp", password: { secret: "rtsp_password" } },
+      ],
+    }] as unknown as typeof config.cameras;
+    saveConfig(configPath, config);
+    new SecretStore(secretsPath).ensureValue(ADMIN_PASSWORD_SECRET, hashPassword("an operator's password"));
+  });
+
+  async function serve(): Promise<{ close(): Promise<void> }> {
+    const seen: string[][] = [];
+    const board = boardRunner(seen);
+    const runner: CommandRunner = async (argv) => {
+      if (argv[0] === "nmcli" && argv.includes("device") && argv.includes("show")) {
+        return { code: 0, stdout: DEVICE_SHOW, stderr: "" };
+      }
+      return board(argv);
+    };
+    return startServer({
+      socketPath, configPath, journalPath, renderers: [noop], secretsPath,
+      runner, counters: noCounters,
+      cameraLayer: {
+        cameras: {
+          detect: async () => ({ found: [], rejected: [] }),
+          probe: async (node: string, card: string) => ({ device: node, card, reason: "not in this fixture" }),
+        },
+        encoder: async () => ({
+          element: "v4l2h264enc", device: "/dev/video11", hardware: true,
+          codec: "h264" as const, detail: "hardware H.264",
+        }),
+        rtspPassword: () => "FIXTURE-NOT-A-REAL-PASSWORD",
+      },
+    });
+  }
+
+  async function url(): Promise<{ body: string; usable: boolean; note: string }> {
+    const res = await call(socketPath, "GET", "/cameras/cam0/stream-address");
+    expect(res.status).toBe(200);
+    const found = (res.body as { renderings: { kind: string; body: string; usable: boolean; note: string }[] })
+      .renderings.find((r) => r.kind === "url");
+    if (found === undefined) throw new Error("no RTSP rendering");
+    return found;
+  }
+
+  it("never builds it from the modem's address, whichever of its two names holds it", async () => {
+    const server = await serve();
+    try {
+      // The ethernet path is probed on demand, so the verdict has something
+      // to rest on rather than the daemon's untested start-up state.
+      expect((await call(socketPath, "POST", "/reach/test", { path: "ethernet" })).body)
+        .toEqual({ path: "ethernet", reached: true });
+      const line = await url();
+      expect(line.usable, "ethernet is reaching, so a peer on it can dial the listener").toBe(true);
+      expect(line.body).toContain("@192.168.1.8:8554/cam0");
+      // The two that must never be chosen: the modem's, which nothing dials,
+      // and the access point's, which no LAN or mesh peer is on.
+      expect(line.body, "the CGNAT address is not one a peer can dial").not.toContain("10.31.95.33");
+      expect(line.body, "the access point is not a LAN").not.toContain("192.168.77.1");
+    } finally {
+      await server.close();
+    }
+  });
+
+  /**
+   * With no path up the line is unusable either way — but it still prints an
+   * address, and *which* one is where the two modem names become load-bearing
+   * again: a modem address recognised as the modem's is skipped, and one this
+   * assembly failed to recognise is printed. Dropping `alsoKnownAs` here
+   * leaves the daemon serving `10.31.95.33`, which is the finding.
+   */
+  it("prints the least-wrong address when no path is up, and never the modem's", async () => {
+    const server = await serve();
+    try {
+      const line = await url();
+      expect(line.usable).toBe(false);
+      expect(line.note).toMatch(/^unusable — /);
+      // The console arrived on the modem's address and it is first in the
+      // list; the ethernet address is what a person could conceivably use.
+      expect(line.body).toContain("@192.168.1.8:8554/cam0");
+      expect(line.body, "the modem's address is known never to be dialable")
+        .not.toContain("10.31.95.33");
+      // A real `device show` leads with loopback, and it used to be
+      // `addresses[0]` — the address this device claimed to answer on.
+      expect(line.body).not.toContain("127.0.0.1");
+    } finally {
+      await server.close();
+    }
+  });
+});

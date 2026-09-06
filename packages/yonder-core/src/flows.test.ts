@@ -2286,10 +2286,21 @@ describe("flows/flows.json camera pages", () => {
         .toBe("else");
       expect(wires[rules.length - 1]).toEqual(["cam-key-unrouted"]);
     }
-    // The reporter reaches a toast, so an unanswered press is visible rather
-    // than a key that looks pressed and does nothing.
-    expect((flows.find((n) => n.id === "cam-key-unrouted")?.wires as string[][])[0])
-      .toEqual(["toast-cam-refused"]);
+    // The reporter reaches a toast **and has something to put on it**. Wires
+    // alone are not the guard: emptying its rules leaves a toast raised with
+    // whatever payload the press happened to carry — the action name — which
+    // is a notification that tells an operator nothing at all.
+    const reporter = flows.find((n) => n.id === "cam-key-unrouted");
+    expect((reporter?.wires as string[][])[0]).toEqual(["toast-cam-refused"]);
+    const said = (reporter?.rules as { t: string; p: string; tot: string; to: string }[])
+      .find((r) => r.p === "payload");
+    expect(said?.t, "the reporter does not set the words").toBe("set");
+    expect(said?.tot, "a literal sentence, not an expression over the press").toBe("str");
+    // A sentence about *this console*, in an operator's words: it names what
+    // did not happen and says nothing reached the camera, which is the one
+    // thing they need to know before pressing it again.
+    expect(said?.to).toMatch(/not wired to anything/);
+    expect(said?.to).toMatch(/nothing was sent to the camera/);
   });
 
   /**

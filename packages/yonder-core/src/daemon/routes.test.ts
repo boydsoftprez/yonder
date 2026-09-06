@@ -26,6 +26,7 @@ import type { Clock, Renderer } from "../apply/types.js";
 import type { ModemState } from "../net/modem/state.js";
 import type { PathName, ReachState } from "../net/reach/standing.js";
 import type { RemoteState } from "../remote/state.js";
+import type { AnswerableAddress } from "../net/dial-in.js";
 
 /**
  * The routes that own the administrator password, and the gate R-SEC-09 puts
@@ -151,15 +152,18 @@ const ENCODER: Encoder = {
 const RTSP_PASSWORD = "an-actual-generated-rtsp-password";
 
 /**
- * What this device answers on, and which of them a peer could dial in to.
+ * What this device answers on, and the path a peer would reach each one over.
  *
- * The access point's own address and a mesh address, both dialable — the
- * modem's is the one that never is, and the case where it is the only address
- * has its own test below.
+ * The three a bench board actually holds at once: the access point it is
+ * raising, the mesh it has joined, and the ethernet it is plugged into.
+ * Deliberately not three interchangeable ones — a verdict that rests on the
+ * mesh is satisfied by exactly one of them, and the access point's, which
+ * `activeIpv4()` reports first, satisfies none.
  */
-const ADDRESSES = [
-  { address: "192.168.77.1", dialIn: true },
-  { address: "10.147.17.42", dialIn: true },
+const ADDRESSES: AnswerableAddress[] = [
+  { address: "192.168.77.1", path: "access-point" },
+  { address: "10.147.17.42", path: "mesh" },
+  { address: "192.168.1.50", path: "lan" },
 ];
 
 /** A configuration with one camera in it, on the by-path name above. */
@@ -200,8 +204,8 @@ interface RouterOptions {
   remoteState?: () => Promise<RemoteState>;
   /** Tests one path now, over the same ReachMonitor the automatic probes use. */
   testPath?: (path: PathName) => Promise<boolean>;
-  /** What this device answers on, and which of those a peer can dial in to. */
-  addresses?: { address: string; dialIn: boolean }[];
+  /** What this device answers on, and the path a peer would reach each over. */
+  addresses?: AnswerableAddress[];
   /**
    * What the camera probe answers.
    *
@@ -2184,9 +2188,12 @@ describe("the camera routes", () => {
       cameras: fixtureDetection(),
       addresses: [
         // The console arrived on the modem's address — first in the list, as
-        // `server.ts` orders it — and nothing can dial in to that one.
-        { address: "100.72.14.9", dialIn: false },
-        { address: "10.147.17.42", dialIn: true },
+        // `server.ts` orders it — and nothing can dial in to that one. The
+        // access point's is reported before the mesh's on every board whose
+        // radio is serving, and satisfies no verdict.
+        { address: "100.72.14.9", path: "cellular" },
+        { address: "192.168.77.1", path: "access-point" },
+        { address: "10.147.17.42", path: "mesh" },
       ],
       remoteState: () => Promise.resolve(
         { online: true, addresses: ["10.147.17.42"] } as unknown as RemoteState,
@@ -2198,6 +2205,7 @@ describe("the camera routes", () => {
     expect(url?.usable, "the mesh is up, so a peer can reach the listener").toBe(true);
     expect(url?.body).toContain("@10.147.17.42:8554/cam0");
     expect(url?.body).not.toContain("100.72.14.9");
+    expect(url?.body, "the access point is not the mesh").not.toContain("192.168.77.1");
   });
 
   /**

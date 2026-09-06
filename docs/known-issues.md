@@ -1272,7 +1272,7 @@ with neither guard running."* Two invocations were fixed; this one was not
 looked at, because it is not in that function and its purpose is a key press
 rather than a capture.
 
-**It is also one of two mechanisms behind the capture drift** that four separate
+**It is one mechanism behind the capture drift** that four separate
 runs have recorded as noise — `camera-live-tablet.day.fold.png` and
 `status-pending-radio.day.png` after Task 28; `status.night.png`,
 `status-psk-changed.night.png`, `camera-live-notebook.day.png` and
@@ -1281,16 +1281,27 @@ pages whose shape references never moved and whose bytes did. This entry
 accounts for the day-palette base captures: they are rewritten last by a run
 whose output nobody reads.
 
-**The second mechanism is a palette switch the page has not finished applying.**
-`camera-live-notebook.day.png` was compared against its committed version pixel
-by pixel after Task 29's fix round: identical text, identical geometry, and the
-whole page uniformly washed out — the day palette's own colours missing rather
-than the night palette's present. The fold captures run immediately after
-`reach_theme day`, which waits for `theme.css` to be *regenerated on disk* and
-not for a browser to have fetched and applied it, so a screenshot can be taken
-over a stylesheet that is still being written. That is a separate fix from this
-one and belongs with it: both are the gate writing a committed artefact from a
-moment nobody checked.
+**A first diagnosis of a second mechanism was wrong, and is recorded here so it
+is not reached for again.** `camera-live-notebook.day.png` came back byte-
+different with identical text and geometry and the whole page uniformly washed
+out, and this entry claimed a screenshot taken over a half-written `theme.css`.
+It cannot be that. `reach_theme` does only grep the file on disk, but the writer
+is atomic — `ConsoleRenderer` goes through `writeFileDurable`
+(`fs/durable.ts:32-56`: write `.tmp`, `fsyncSync`, `renameSync`) — so no reader
+can see a partial stylesheet and a grep match means the whole file is in place.
+The ordering is wrong too: the fold captures do not run straight after
+`reach_theme day`. `capture_state`, `capture_without_modem`, `capture_unplugged`,
+`capture_status_pending` and `capture_pending_radio` all run first, and both
+drifted images came from the *end* of that block — a palette not yet applied
+would drift the earliest captures, not the last.
+
+**What is real and adjacent: nothing asserts the palette a page rendered in.**
+`capture-pages.mjs` treats `--palette` as a filename label and an expectation
+filter, and each invocation is a fresh browser launch. No capture checks that
+the page in front of it is actually drawn in the palette its filename claims,
+so a run against the wrong one produces a correctly named file with the wrong
+picture in it and nothing says a word. That belongs with the fix above: both
+are the gate writing a committed artefact from a state nobody checked.
 
 **Not fixed here, deliberately.** It is the gate's own defect and wants its own
 change rather than a fix smuggled into a console commit — and the fix has to
