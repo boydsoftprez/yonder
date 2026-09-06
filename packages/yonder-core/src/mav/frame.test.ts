@@ -1,28 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
 import { HeartbeatScanner, describeVehicle } from "./frame.js";
-
-/** Build a MAVLink v2 HEARTBEAT so the test states its own input exactly. */
-function heartbeatV2(system: number, vehicleType: number, autopilot: number): Uint8Array {
-  const payload = new Uint8Array(9);
-  new DataView(payload.buffer).setUint32(0, 0, true); // custom_mode
-  payload[4] = vehicleType;
-  payload[5] = autopilot;
-  payload[6] = 0;  // base_mode
-  payload[7] = 4;  // system_status
-  payload[8] = 3;  // mavlink_version
-  const head = Uint8Array.from([payload.length, 0, 0, 0, system, 1, 0, 0, 0]);
-  let crc = 0xffff;
-  const acc = (b: number) => {
-    let t = (b ^ (crc & 0xff)) & 0xff;
-    t = (t ^ (t << 4)) & 0xff;
-    crc = ((crc >> 8) ^ (t << 8) ^ (t << 3) ^ (t >> 4)) & 0xffff;
-  };
-  for (const b of head) acc(b);
-  for (const b of payload) acc(b);
-  acc(50); // CRC_EXTRA for HEARTBEAT
-  return Uint8Array.from([0xfd, ...head, ...payload, crc & 0xff, crc >> 8]);
-}
+import { heartbeatV2 } from "./testing.js";
 
 describe("HeartbeatScanner", () => {
   it("finds a heartbeat and reports the vehicle it came from", () => {
