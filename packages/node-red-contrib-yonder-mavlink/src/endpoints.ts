@@ -32,7 +32,7 @@ import type { NodeMessage, RED, RedNode } from "./red.js";
 interface MavlinkSection {
   autocast?: unknown;
   ingest?: { loopback_only?: unknown };
-  tcp_server?: { port?: unknown };
+  tcp_server?: { enabled?: unknown; port?: unknown };
   endpoints?: { host?: unknown; port?: unknown }[];
 }
 
@@ -94,12 +94,52 @@ function ingestKeys(open: boolean): { label: string; action: string; tone: strin
 }
 
 /**
+ * The TCP server line, told the truth (R-MAV-04, R-MAV-07, R-UI-20).
+ *
+ * **The port alone is not whether there is a listener.** `router/config.ts`
+ * writes `TcpServerPort = mavlink.tcp_server.enabled && !loopback_only ?
+ * port : 0`, and `0` is how mavlink-router is told to run no TCP server at
+ * all. The two gates are independent and both real: the switch is the
+ * operator's own, and the ingest gate is R-MAV-07's, because a listening
+ * MAVLink TCP server binds every interface and MAVLink is bidirectional —
+ * an accepted connection is an unauthenticated command path to the vehicle,
+ * so it is not opened by a switch that never mentioned the network.
+ *
+ * With the shipped defaults — `enabled: true`, `loopback_only: true` — that
+ * means **nothing is bound**, and this line read `:5760 · no clients` on a
+ * device with no listener: a port an operator could hand a ground station,
+ * and a client count for a socket that does not exist. R-MAV-04 is priority
+ * 1 and off out of the box, so the page has to say both that it is off and
+ * what would turn it on; saying neither is how it stayed unnoticed.
+ *
+ * `tcpServing` travels beside the words because the row is half
+ * configuration and half measurement — the client count comes from
+ * `/mav/state`, joined in `flows.json` — and a count of clients on a socket
+ * nothing is listening on is not a measurement of anything. The flow appends
+ * it only when there is a server to be on.
+ *
+ * The gating itself is deliberately **not** what changed. Turning the
+ * listener on regardless of ingest would open the command path R-MAV-07
+ * exists to keep shut, from a switch whose name says nothing about the
+ * network — see `router/config.ts`, which reasons it out where the file is
+ * generated.
+ */
+function tcpServer(mavlink: MavlinkSection, open: boolean): { tcpAddress: string; tcpServing: boolean } {
+  const enabled = mavlink.tcp_server?.enabled === true;
+  if (enabled && open) return { tcpAddress: `:${box(mavlink.tcp_server?.port)}`, tcpServing: true };
+  // Why, not just that — the words the ingest rail directly above already
+  // uses, so an operator reads one setting named the same way twice rather
+  // than two settings they have to connect themselves.
+  return { tcpAddress: enabled ? "Off · ingest is this device only" : "Off", tcpServing: false };
+}
+
+/**
  * The eight readings the Telemetry rail and the three ground-station rows
  * show when the page opens (R-UI-17), one per output, in the order the
  * flows wire them:
  *
- * 0. `{ atboot, ingest, tcpAddress, keys }` — the rail's read-only facts
- *    (`tel-atboot`, `tel-ingest`), the TCP server's own address fragment
+ * 0. `{ atboot, ingest, tcpAddress, tcpServing, keys }` — the rail's
+ *    read-only facts (`tel-atboot`, `tel-ingest`), the TCP server's own address fragment
  *    (`tel-tcp` needs this beside `state.ts`'s own client-count fragment,
  *    since the port is configuration and the client count is a measurement —
  *    two different questions this route answers and `/mav/state` does not),
@@ -134,7 +174,7 @@ export function endpointsMessage(config: unknown): (NodeMessage | null)[] {
   const facts = {
     atboot: mavlink.autocast === true ? "Automatic" : "Manual",
     ingest: open ? "Any network" : "Loopback only",
-    tcpAddress: `:${box(mavlink.tcp_server?.port)}`,
+    ...tcpServer(mavlink, open),
     keys: ingestKeys(open),
   };
 

@@ -146,7 +146,7 @@ mavlink:
     baud: auto                  # auto sweeps 57600, 115200, 230400, 921600, slowest first
   endpoints: []                 # up to three, e.g. { name: gcs0, host: 192.168.2.10, port: 14550 }
   tcp_server:
-    enabled: true
+    enabled: true               # and no listener until ingest.loopback_only is false — see below
     port: 5760                  # must not be ui.port — the console always wins that collision
   autocast: true                # start telemetry at boot without operator action
   ingest:
@@ -508,6 +508,18 @@ DNS name. Both are written verbatim into the `mavlink-router` configuration Yond
 would be a new line of that file: a name carrying one opens a whole extra section, an
 unconfigured second copy of your telemetry that nothing here describes and nothing on the
 console shows. Refused at write time for that reason (R-MAV-18).
+
+**`mavlink.tcp_server.enabled: true` is not on its own enough to get a TCP server.** The
+listener needs `enabled: true` *and* `ingest.loopback_only: false`; with the shipped defaults
+— which are `enabled: true` and `loopback_only: true` — nothing is listening on port 5760,
+and the Telemetry page says so rather than showing the port.
+
+The two are coupled because a MAVLink TCP server cannot be bound to loopback alone: it binds
+every interface the device has, and MAVLink is bidirectional, so an accepted connection is an
+unauthenticated command path to the vehicle — the exact thing `ingest.loopback_only` exists
+to keep shut (R-MAV-07). Turning it on from a switch that says nothing about the network
+would open that path silently, so it takes both. The switch is still its own: opening ingest
+does not turn a TCP server you deliberately disabled back on.
 
 **`mavlink.tcp_server.port`** must not be the same as `ui.port`. `mavlink-router` is started
 before the console, so a collision is not a race the console could win — it would lose its

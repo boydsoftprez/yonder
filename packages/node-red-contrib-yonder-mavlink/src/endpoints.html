@@ -26,7 +26,7 @@ be a second read of the same document, on its own schedule, which is exactly
 what would overwrite an operator's own half-typed host or port box while
 they are still editing it.</p>
 <p>Seven outputs, in order: the rail's facts
-(<code>{ atboot, ingest, tcpAddress }</code>), then host and port for rows
+(<code>{ atboot, ingest, tcpAddress, tcpServing, keys }</code>), then host and port for rows
 0, 1 and 2. A row nothing has configured is an empty box, never a
 fabricated value — <code>mavlink.autocast</code> and
 <code>mavlink.ingest.loopback_only</code> are configuration, never

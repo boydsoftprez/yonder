@@ -2716,7 +2716,7 @@ describe("flows/flows.json Telemetry page", () => {
     const remember = byId("remember-tel-facts");
     const rules = (remember?.rules ?? []) as { p: string; pt: string }[];
     expect(rules.map((r) => `${r.pt}.${r.p}`))
-      .toEqual(["flow.telAtBoot", "flow.telIngest", "flow.telTcpAddress"]);
+      .toEqual(["flow.telAtBoot", "flow.telIngest", "flow.telTcpAddress", "flow.telTcpServing"]);
     expect(reaches("seed-tel-endpoints").has("remember-tel-facts")).toBe(true);
 
     for (const join of ["join-tel-tcp", "join-stat-tel-bar"]) {
@@ -2725,12 +2725,38 @@ describe("flows/flows.json Telemetry page", () => {
       expect(JSON.stringify(node), join).toMatch(/\$flowContext/);
       expect(reaches("tel-state").has(join), `${join} never sees a measurement`).toBe(true);
     }
-    // Only ever what those three names hold. Caching the configuration
+    // Only ever what those four names hold. Caching the configuration
     // itself in flow context is the defect the top-level test forbids: a
     // change node reads and writes context by reference, so the cache and
     // the document being applied become one object.
     expect(JSON.stringify(byId("join-tel-tcp"))).toMatch(/telTcpAddress/);
     expect(JSON.stringify(byId("join-stat-tel-bar"))).toMatch(/telAtBoot/);
+  });
+
+  /**
+   * **The TCP line never counts clients on a socket nothing is listening on**
+   * (R-MAV-04, R-MAV-07).
+   *
+   * `router/config.ts` writes `TcpServerPort = 0` — mavlink-router's way of
+   * being told to run no TCP server — unless `tcp_server.enabled` *and*
+   * `ingest.loopback_only === false`. On the shipped defaults that is no
+   * listener at all, and this row read `:5760 · no clients`: a port an
+   * operator could hand a ground station, beside a count of connections to a
+   * socket that does not exist.
+   *
+   * `yonder-mav-endpoints` decides — it is the only node that sees the
+   * configuration — and sends `tcpServing` beside the words. All this join
+   * does is stop appending a measurement when there is nothing to measure.
+   */
+  it("appends the TCP client count only when there is a server to be on", () => {
+    const rule = ((byId("join-tel-tcp")?.rules ?? []) as { to: string; tot: string }[])[0];
+    expect(rule?.tot).toBe("jsonata");
+    expect(rule?.to).toContain("telTcpServing");
+    // The count is inside the branch the flag guards, and never outside it.
+    const branches = rule.to.split(" : ");
+    expect(branches, "expected one `cond ? serving : off` conditional").toHaveLength(2);
+    expect(branches[0]).toContain("tcpClients");
+    expect(branches[1]).not.toContain("tcpClients");
   });
 
   /**

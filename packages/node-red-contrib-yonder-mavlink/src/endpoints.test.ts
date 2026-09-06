@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
+import { routerConfig } from "yonder-core";
 import { endpointsMessage } from "./endpoints.js";
 
 /**
@@ -60,8 +61,75 @@ describe("endpointsMessage — R-UI-17: opens showing what is actually configure
     expect((opened[0]?.payload as { ingest: unknown })?.ingest).toBe("Any network");
   });
 
-  it("carries the TCP server's own address, already in words", () => {
-    expect((endpointsMessage(configured)[0]?.payload as { tcpAddress: unknown })?.tcpAddress).toBe(":5760");
+  /**
+   * **The line must not advertise a listener the device does not run**
+   * (R-MAV-04, R-MAV-07).
+   *
+   * `router/config.ts` writes `TcpServerPort = enabled && !loopback_only ?
+   * port : 0`, and `0` tells mavlink-router to run no TCP server at all. On
+   * the shipped defaults — `enabled: true`, `loopback_only: true` — nothing
+   * is bound, and this line read `:5760 · no clients`: a port an operator
+   * could hand a ground station, beside a client count for a socket that
+   * does not exist. The fixture above is exactly the shipped default.
+   */
+  const tcpOf = (cfg: unknown) => {
+    const { tcpAddress, tcpServing } = endpointsMessage(cfg)[0]?.payload as
+      { tcpAddress: string; tcpServing: boolean };
+    return { tcpAddress, tcpServing };
+  };
+
+  it("says the TCP server is off, and why, when ingest has not been opened", () => {
+    expect(tcpOf(configured)).toEqual({ tcpAddress: "Off · ingest is this device only", tcpServing: false });
+  });
+
+  it("carries the TCP server's own address once there is actually a listener", () => {
+    expect(tcpOf(config({
+      autocast: true,
+      ingest: { loopback_only: false },
+      tcp_server: { enabled: true, port: 5760 },
+      endpoints: [],
+    }))).toEqual({ tcpAddress: ":5760", tcpServing: true });
+  });
+
+  /**
+   * Two independent gates, and the words tell them apart: a switch the
+   * operator turned off is not the same fact as R-MAV-07 keeping the command
+   * path shut, and only the second names something they can change here.
+   */
+  it("says only Off when the switch itself is off, whatever ingest says", () => {
+    for (const loopbackOnly of [true, false]) {
+      expect(tcpOf(config({
+        autocast: true,
+        ingest: { loopback_only: loopbackOnly },
+        tcp_server: { enabled: false, port: 5760 },
+        endpoints: [],
+      })), String(loopbackOnly)).toEqual({ tcpAddress: "Off", tcpServing: false });
+    }
+  });
+
+  /**
+   * The same rule the generator applies, asserted against the generator's own
+   * predicate rather than against a second copy of it: whatever combination
+   * is put in, the page claims a port exactly when `routerConfig` writes a
+   * non-zero `TcpServerPort`.
+   */
+  it("claims a port exactly when the generated router configuration binds one", () => {
+    for (const enabled of [true, false]) {
+      for (const loopbackOnly of [true, false]) {
+        const mavlink = {
+          serial: { device: "/dev/ttyAMA0", baud: 57600 as const },
+          autocast: true,
+          ingest: { loopback_only: loopbackOnly },
+          tcp_server: { enabled, port: 5760 },
+          endpoints: [],
+        };
+        const generated = routerConfig(mavlink, { device: "/dev/ttyAMA0", baud: 57600 });
+        const bound = !generated.includes("TcpServerPort = 0");
+        const shown = tcpOf(config(mavlink));
+        expect(shown.tcpServing, `enabled=${String(enabled)} loopback_only=${String(loopbackOnly)}`).toBe(bound);
+        expect(shown.tcpAddress.startsWith(":"), shown.tcpAddress).toBe(bound);
+      }
+    }
   });
 
   /**

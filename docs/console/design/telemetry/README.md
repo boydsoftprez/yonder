@@ -166,7 +166,7 @@ height it costs. So the built page's wording stays exactly as it is, and the dra
 not yet redrawn, are the ones that predate it — the same relationship the per-station marks
 above have with theirs.
 
-## Three places the drawings and the built page still disagree
+## Where the drawings and the built page still disagree
 
 Recorded rather than quietly resolved, because each is a real limit rather than a slip.
 
@@ -181,11 +181,21 @@ in `flows.json` doing nothing. `label` would show the words but would then capti
 or the property upstream; until then an unset box is empty, and the lamp beside it says
 `GCS 2 · not set` in words.
 
-**The TCP server line says `no clients` where the drawing says `1 client`.** Nothing has
-measured how a connected TCP client appears in `mavlink-router`'s own statistics — as its
-own block, as a counter on the server's, or not at all — so `LinkState.tcpClients` is
-`null` and stays that way until a bench session with a client attached says what to count.
-A number nobody measured is the one thing this page must not print.
+**The TCP server line says `Off · ingest is this device only` where the drawing says
+`:5760 · 1 client`.** The drawing is of a device with the TCP server actually running, and
+on the shipped defaults there is none: `router/config.ts` writes `TcpServerPort = 0` unless
+`tcp_server.enabled` **and** `ingest.loopback_only: false`, because a MAVLink TCP server
+binds every interface and an accepted connection is an unauthenticated command path to the
+vehicle (R-MAV-07). The page showed `:5760 · no clients` on a board with nothing bound — a
+port an operator could hand a ground station, beside a client count for a socket that does
+not exist. It now says that it is off, and which setting would turn it on.
+
+**On a device where the server *is* running, the count still reads `no clients` where the
+drawing says `1 client`.** Nothing has measured how a connected TCP client appears in
+`mavlink-router`'s own statistics — as its own block, as a counter on the server's, or not
+at all — so `LinkState.tcpClients` is `null` and stays that way until a bench session with a
+client attached says what to count. A number nobody measured is the one thing this page must
+not print.
 
 **The Status page's flow strip names its destination by count, not by address, and carries
 no uptime.** `LinkState` has neither field: an endpoint's host and port are configuration,

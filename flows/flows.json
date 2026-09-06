@@ -6629,13 +6629,13 @@
         "id": "join-tel-tcp",
         "type": "change",
         "z": "yonder-console",
-        "name": "the TCP server: its port, and who is on it",
+        "name": "the TCP server: its port and who is on it, or why there is none",
         "rules": [
             {
                 "t": "set",
                 "p": "payload",
                 "pt": "msg",
-                "to": "$flowContext(\"telTcpAddress\") & \" \u00b7 \" & payload.tcpClients",
+                "to": "$flowContext(\"telTcpServing\") ? $flowContext(\"telTcpAddress\") & \" \u00b7 \" & payload.tcpClients : $flowContext(\"telTcpAddress\")",
                 "tot": "jsonata"
             }
         ],
@@ -6797,6 +6797,13 @@
                 "p": "telTcpAddress",
                 "pt": "flow",
                 "to": "payload.tcpAddress",
+                "tot": "msg"
+            },
+            {
+                "t": "set",
+                "p": "telTcpServing",
+                "pt": "flow",
+                "to": "payload.tcpServing",
                 "tot": "msg"
             }
         ],
