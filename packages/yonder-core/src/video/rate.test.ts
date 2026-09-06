@@ -235,20 +235,49 @@ describe("RateController, when the floor does not fit", () => {
     expect(sizeFor(decisions)).toMatchObject({ action: "hold-size", size: "640x360" });
   });
 
-  it("goes on changing nothing however long the floor does not fit for", async () => {
-    // The ladder is part of "changes nothing". A link too thin for the
-    // preview's floor is exactly a link that looks pinned to it, so a
-    // controller that only refused the *rate* would step the picture down a
-    // rung every tDown while reporting that it had changed nothing.
+  /**
+   * **The picture steps down when the floor will not fit — the operator's
+   * decision, 2026-09-06.**
+   *
+   * This asserted the opposite: that "report the shortfall and change
+   * nothing" covered the ladder as well as the rate. He judged that the wrong
+   * way round, and the reasoning is the point — a smaller picture is what
+   * makes a floor's worth of bits go further, so the moment the floor will not
+   * fit is the moment stepping down is worth most. Holding leaves a picture
+   * that breaks up instead of one that degrades.
+   */
+  it("steps the picture down when the floor will not fit, so the bits go further", async () => {
     const { controller, clock, fake } = controllerOn({ camera: LADDER });
     fake.running.shape = { size: "1280x720", fps: 15 } as never;
-    for (let i = 0; i < 5; i += 1) {
+
+    // Not on the first tick: a step down still waits tDown, so a moment's
+    // narrowing does not shrink the picture.
+    controller.observe(report({ at: clock.at(), capacity: STREAM_COST + 100 }));
+    expect(sizeFor(controller.tick(clock.at())))
+      .toMatchObject({ action: "hold-size", size: "1280x720" });
+    await controller.settled();
+
+    clock.advance(9_000);
+    controller.observe(report({ at: clock.at(), capacity: STREAM_COST + 100 }));
+    const decisions = controller.tick(clock.at());
+    await controller.settled();
+    expect(sizeFor(decisions)).toMatchObject({ action: "size", size: "854x480" });
+    // The rate still changes nothing — there is no rate that fits, which is
+    // what the shortfall says. Only the size moves.
+    expect(fake.retunes).toHaveLength(0);
+  });
+
+  it("stops at the smallest size the operator allowed, and says that is why", async () => {
+    const { controller, clock, fake } = controllerOn({ camera: LADDER });
+    fake.running.shape = { size: LADDER.preview.ladder_bottom, fps: 15 } as never;
+    for (let i = 0; i < 4; i += 1) {
       clock.advance(9_000);
       controller.observe(report({ at: clock.at(), capacity: STREAM_COST + 100 }));
       const decisions = controller.tick(clock.at());
       await controller.settled();
-      expect(sizeFor(decisions)).toMatchObject({ action: "hold-size", size: "1280x720" });
+      expect(sizeFor(decisions)).toMatchObject({ action: "hold-size" });
     }
+    // Never below the operator's own floor, however long the link stays thin.
     expect(fake.reshapes).toHaveLength(0);
     expect(fake.retunes).toHaveLength(0);
   });

@@ -1447,7 +1447,7 @@ carrying the pipeline host is `yonder-pipeline`'s rather than
 `gst-launch-1.0`'s, since `systemSpawner` hands the same argv to whichever of
 the two it spawned.
 
-### K-49 · Adaptive is offered — for the rate and for the size — and nothing implements either
+### K-49 · ~~Adaptive is offered — for the rate and for the size — and nothing implements either~~ — BUILT, not yet proven on a board
 
 **Status:** Open · **Requirements:** R-UI-20, R-VID-07
 

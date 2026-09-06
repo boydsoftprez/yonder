@@ -526,9 +526,41 @@ export class RateController {
         "the preview is Fixed: its rate and its size are the operator's");
     }
     if (ctx.shortfall) {
+      /**
+       * **A link too thin for the floor is the one case the ladder must
+       * still move** — the operator's decision, made 2026-09-06.
+       *
+       * This held the size and reported the shortfall, on the reading that
+       * "report the shortfall and change nothing" covers the ladder too. It
+       * is the wrong way round: a smaller picture is exactly what makes a
+       * floor's worth of bits go further, so the moment the floor will not
+       * fit is the moment stepping down is worth most. Holding leaves a
+       * picture that breaks up rather than one that degrades.
+       *
+       * The *rate* still changes nothing — there is no rate that fits, which
+       * is what the shortfall says. Only the size moves, and only downward:
+       * a link that cannot carry the floor is never evidence of headroom.
+       * `tDown` still applies, so this is not a step per tick.
+       */
+      const rungsNow = PREVIEW_RUNGS as readonly PreviewRung[];
+      const bottomNow = rungsNow.indexOf(camera.preview.ladder_bottom);
+      const hereNow = rungsNow.indexOf(shape.size);
+      // A shortfall *is* being pinned at the floor and worse, so it starts the
+      // same clock a pin does rather than a second one beside it.
+      this.pinnedSince ??= at;
+      this.headroomSince = null;
+      const held = at - this.pinnedSince;
+      if (hereNow >= 0 && bottomNow >= 0 && hereNow < bottomNow && held >= this.tDown) {
+        return this.step(camera, shape, rungsNow[hereNow + 1], at,
+          "the preview's floor does not fit in what the link is carrying, so the "
+          + "picture steps down to make those bits go further");
+      }
       return this.holdSize(camera, current, at,
-        "the preview's floor does not fit in what the link is carrying; nothing is "
-        + "changed, including the picture's size");
+        hereNow >= 0 && hereNow >= bottomNow
+          ? "the preview's floor does not fit in what the link is carrying, and the "
+            + "picture is already at the smallest size the operator allowed"
+          : "the preview's floor does not fit in what the link is carrying; the rate "
+            + "cannot change, and the picture is stepping down");
     }
 
     const rungs = PREVIEW_RUNGS as readonly PreviewRung[];
