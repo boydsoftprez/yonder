@@ -312,4 +312,19 @@ describe("the placard", () => {
         const { wrapper } = mountIndex(makeReport());
         expect(wrapper.find(".y-idx__summary").text()).toBe("2 found · 1 rejected");
     });
+
+it("a camera sending nothing reads 0, not none", () => {
+    // The falsy-zero bug, which this project has been burned by before and
+    // which no fixture here could catch: both cameras carry a real rate, so
+    // `cam.rate || null` — a genuine 0 collapsing to "none" — passed every
+    // test. Zero is a camera that is up and sending nothing; none is a camera
+    // that reported no rate at all. An operator must be able to tell them
+    // apart, which is the whole posture of this console.
+    const { wrapper: w } = mountIndex(makeReport({
+        cameras: [{ id: "cam-idle", name: "Idle", bus: "usb-1.2", spec: "1280×720",
+                    summary: "", state: "Streaming", tone: "good", rate: 0 }],
+    }));
+    expect(w.text()).toContain("0");
+    expect(w.text(), "0 Mb/s is a reading; none is the absence of one").not.toContain("none");
+});
 });

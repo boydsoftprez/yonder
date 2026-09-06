@@ -1270,6 +1270,23 @@ if (clipped.length) fail(`text is clipped:\n  ${clipped.join("\n  ")}`);
 
 ### Task 28: Rebuild both camera pages; wire the draft, Apply and Discard; prove defect 1
 
+**Task 28 owns the probe-to-row adapter, and it is not in this task's
+interface block yet.** Task 24 built `ui-yonder-index` against a row shape —
+`{ id, name, bus, spec, summary, state, tone, rate }` — and deliberately did
+not invent the wiring, because its own plan entry carries no interfaces block
+to specify one. Task 24's review confirmed the gap is real: `Detection` and
+`Rejection` in `video/probe/camera.ts` carry `{ device, card, reason }` and
+`{ device, card, byPath, … }` today, with no `id`, `name`, `bus`, `state`,
+`tone` or `rate` between them, and `node-red-contrib-yonder-video`'s
+`camera.ts` mentions neither the index nor rejections at all.
+
+So this task must enumerate that mapping the way Task 22's block enumerated
+the deck's payload, and answer three things the row shape asks and the probe
+does not yet: what `state` and `tone` are derived from, whether `rate` is a
+measured egress or a configured target — it must be measured, per Task 19's
+own rule that a number nobody measured is a number nobody should act on — and
+how a camera's `id` survives a replug, which is R-CAM-05's whole subject.
+
 **Files:** `flows/flows.json`; `packages/yonder-core/src/flows.test.ts`; `packages/node-red-contrib-yonder-video/src/camera.ts`; `daemon/routes.ts`; `docs/adr/0009-console-visual-language.md`; `docs/requirements.md` (R-UI-10 amended)
 
 **Interfaces:**
