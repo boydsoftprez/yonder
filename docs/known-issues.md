@@ -1467,7 +1467,9 @@ which is not a controller but a stutter generator. It needs the runtime channel
 K-53 records.
 
 **That channel is now measured and it exists**
-(`docs/hardware/ffmpeg-as-the-pipeline-composer.md`): GStreamer retunes a live
+(`docs/hardware/ffmpeg-as-the-pipeline-composer.md`, written on the bench
+branch and not yet merged here — read it with `git show` against that branch
+until it lands): GStreamer retunes a live
 encode with zero timestamp gaps on both boards — Pi `v4l2h264enc` 0.99 to 3.02
 Mb/s, RK3566 `mpph264enc` 0.98 to 3.92, `mpph265enc` 0.97 to 3.91. Task 31 is
 therefore no longer blocked on *whether*, only on building the host K-53
@@ -1680,7 +1682,9 @@ throttled link and has nothing to measure until a pipeline answers. This should
 land before it.
 
 **Measured, and it changes the answer**
-(`docs/hardware/ffmpeg-as-the-pipeline-composer.md`). This entry was very nearly
+(`docs/hardware/ffmpeg-as-the-pipeline-composer.md`, written on the bench
+branch and not yet merged here — read it with `git show` against that branch
+until it lands). This entry was very nearly
 closed as won't-fix, on the reasoning that a GStreamer pipeline host would be
 thrown away by the agreed pivot to an ffmpeg composer. **That reasoning is
 void**, because the retune the host exists to reach is a thing only GStreamer
