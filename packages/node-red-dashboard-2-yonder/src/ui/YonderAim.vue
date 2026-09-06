@@ -306,14 +306,27 @@ export default {
         /** `not-offered` when the device offers no choice at all — the same
          * silence `YonderSegmented` already draws for that state, so an
          * empty `modes` list never renders a labelled control with nothing
-         * inside its own group. Otherwise mirrors `aimState`, except a live
-         * capability under a temporary guard (`inhibited`) reads as
-         * `advertised` here too: §8.7's own guard covers rate, mode and
-         * Recentre together, from every surface. */
+         * inside its own group. Otherwise mirrors `aimState`.
+         *
+         * **A live capability under a temporary guard reads `gated`, not
+         * `advertised`.** This said `advertised` and review caught it: in
+         * this codebase's own vocabulary `advertised` means a fault — the
+         * device accepts the command and does not deliver it — and it draws
+         * in the caution tone. `inhibited` is not that. Everywhere else on
+         * this same panel it is drawn neutral, and the amber here put two
+         * different severity signals on one screen for one condition;
+         * measured in the running gallery, the panel's reason computed to
+         * the neutral colour while this control and its reason computed to
+         * the caution one. `gated` is the state `YonderSegmented` already
+         * has for exactly this — not broken, not available right now — and
+         * R-UI-21 says why: drawing it in caution would tell an operator
+         * something is broken when nothing is. §8.7's guard still covers
+         * rate, mode and Recentre together; that is about *what* is
+         * inhibited, not about how severe it looks. */
         modeControlState () {
             if (!this.modes.length) return 'not-offered'
             if (this.aimState !== 'present') return this.aimState
-            if (this.inhibited) return 'advertised'
+            if (this.inhibited) return 'gated'
             return 'present'
         },
         /** A full sentence, not a bare label — see this component's own

@@ -2,6 +2,8 @@
 import { mount, type VueWrapper } from "@vue/test-utils";
 import { describe, expect, it, vi } from "vitest";
 import YonderAim from "./YonderAim.vue";
+import YonderAimPad from "./YonderAimPad.vue";
+import YonderSegmented from "./YonderSegmented.vue";
 
 /**
  * `task-23-brief.md`'s own Step 1 names ten behaviours in prose and gives no
@@ -519,13 +521,32 @@ describe("at the limit relays straight through", () => {
 describe("every emission goes through the socket", () => {
     it("relays slew verbatim, with gesture and seq, exactly as the pad computed them", () => {
         const { wrapper, emit } = mountAim(makeReport());
-        press(dial(wrapper), 20, 0);
-        expect(slewCalls(emit).length).toBeGreaterThan(0);
-        const [event, id, msg] = slewCalls(emit)[0]!;
+        // **More than one slew, deliberately.** Comparing only the first
+        // relayed event let a hardcoded `seq: 1` through, because the first
+        // slew's own seq is 1 — the assertion agreed with the mutant by
+        // coincidence. Drag on so the counter advances past any constant
+        // somebody might have frozen it at.
+        const el = dial(wrapper);
+        press(el, 20, 0);
+        drag(el, 30, 0);
+        drag(el, 40, 0);
+        expect(slewCalls(emit).length).toBeGreaterThan(2);
+        const [event, id, msg] = slewCalls(emit).at(-1)!;
         expect(event).toBe("widget-action");
         expect(id).toBe("a1");
-        expect(typeof msg.payload.slew.seq).toBe("number");
-        expect(typeof msg.payload.slew.gesture).toBe("string");
+        // **The pad's own values, not merely values of the right type.**
+        // This asserted `typeof` only, and review proved that hollow: a
+        // hardcoded `seq: 1` and a hardcoded `gesture: "fixed"` each left all
+        // thirty-six tests green. The daemon discards a stale or duplicated
+        // command by the compound (gesture, seq) pair, so a refactor breaking
+        // this relay would silently defeat that on a live gimbal command with
+        // nothing here able to notice. Compare against what the pad emitted.
+        const padSlew = wrapper.findComponent(YonderAimPad).emitted("slew");
+        expect(padSlew, "the pad must have emitted for this to mean anything").toBeTruthy();
+        const fromPad = padSlew!.at(-1)![0] as { seq: number; gesture: string };
+        expect(fromPad.seq, "the pad's counter must have moved for this to discriminate").toBeGreaterThan(1);
+        expect(msg.payload.slew.seq).toBe(fromPad.seq);
+        expect(msg.payload.slew.gesture).toBe(fromPad.gesture);
         expect(typeof msg.payload.slew.pan).toBe("number");
         expect(typeof msg.payload.slew.tilt).toBe("number");
     });
@@ -558,4 +579,19 @@ describe("every emission goes through the socket", () => {
         const keys = new Set(emit.mock.calls.map((c) => Object.keys(c[2].payload)[0]));
         expect(keys).toEqual(new Set(["slew", "stop", "mode", "recentre"]));
     });
+
+describe("an inhibition is not a fault, on every control that shows one", () => {
+    it("draws the mode control gated, never in the caution tone", () => {
+        // Review found this reading `advertised` — which in this codebase
+        // means a fault, drawn in caution — while the panel and the pad drew
+        // the same inhibition neutral. Two severity signals for one condition
+        // on one screen. R-UI-21: drawing a gate in caution tells an operator
+        // something is broken when nothing is.
+        //
+        // It had no test at all: swapping the state left all thirty-six green.
+        const w = mountAim(makeReport({ inhibited: "gimbal not responding" })).wrapper;
+        const seg = w.findComponent(YonderSegmented);
+        expect(seg.props("state"), "an inhibition is a gate, not a fault").toBe("gated");
+    });
+});
 });
