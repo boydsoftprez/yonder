@@ -26,6 +26,20 @@
 #
 # Matched on the video interface class rather than a vendor id, so it covers
 # whatever camera an operator attaches rather than the one this was found on.
+#
+# **The attribute is set on the parent, and that is the whole trick.**
+# `bInterfaceClass` exists only on a `usb_interface` node and `power/control`
+# exists only on the `usb_device` above it, so a rule naming both on one node
+# matches nothing at all. The first version of this file did exactly that and
+# was a no-op on every board it ever reached; it was caught by asking the
+# development board which of its sysfs nodes actually carry each attribute,
+# not by reading the rule again. Match the interface, write through `../` to
+# the device. `TEST==` first, so a node without the file is skipped rather
+# than logged as a failure on every plug-in.
+#
+# `bind` as well as `add`: a camera whose interface declares a vendor-specific
+# class is bound to `uvcvideo` by a quirk after the `add` event has already
+# gone past, and `DRIVER` is not set yet at `add` time.
 usb_rules=/etc/udev/rules.d/50-yonder-usb-video-power.rules
 
 if [ "$DRY_RUN" = "1" ]; then
@@ -39,18 +53,29 @@ else
 # power management suspends it after two seconds and resumes it on the next
 # access. Cameras that resume badly are dropped from the bus by the host,
 # which reads as a cable fault and is not one (R-CAM-19).
-ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{bInterfaceClass}=="0e", ATTR{power/control}="on"
-ACTION=="add", SUBSYSTEM=="usb", DRIVERS=="uvcvideo", ATTR{power/control}="on"
+# `bInterfaceClass` is on the interface; `power/control` is on the device
+# above it. Match the first, write through `../` to the second — a rule
+# naming both on one node matches nothing.
+ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_interface", ATTR{bInterfaceClass}=="0e", TEST=="../power/control", ATTR{../power/control}="on"
+ACTION=="add|bind", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_interface", DRIVER=="uvcvideo", TEST=="../power/control", ATTR{../power/control}="on"
 RULES
     run chmod 0644 "$usb_rules"
 fi
 
 if [ "$DRY_RUN" != "1" ] && command -v udevadm >/dev/null 2>&1; then
     run udevadm control --reload-rules
+    # `--action=add`, not the default. `udevadm trigger` sends `change` unless
+    # told otherwise, and the rules above are `add` rules, so the default
+    # trigger reloads them and applies them to nothing — a camera already
+    # plugged in at install time stays on `auto` until it is unplugged and
+    # returned. That is the state this fix exists to prevent, so the install
+    # has to reach it. Verified on the development board: with `change` the
+    # attribute stayed `auto`; with `add` it went to `on`.
+    #
     # Only the usb subsystem: 40-modem.sh explains why *its* trigger is
     # deliberately unfiltered, and that reasoning is about ModemManager's
     # tagging, not about this rule.
-    run udevadm trigger --subsystem-match=usb
+    run udevadm trigger --action=add --subsystem-match=usb
 else
     log "skipping udev reload (dry run or no udevadm)"
 fi

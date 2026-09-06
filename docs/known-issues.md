@@ -1193,6 +1193,25 @@ reboot that followed it. Nothing has yet matched a camera on the interface
 class and set it at plug-in time, which is the one thing the rule does that
 the hand-write did not.
 
+**The rule as first written did nothing at all, and neither did the install.**
+Two faults, found on 2026-09-06 by asking the board which of its sysfs nodes
+carries which attribute rather than by reading the rule again:
+
+- `bInterfaceClass` exists only on a `usb_interface` node; `power/control`
+  exists only on the `usb_device` above it. A rule naming both on one node
+  matches nothing. No node on the board carries both — checked, not assumed.
+  The rule now matches the interface and writes through `../` to the device.
+- `udevadm trigger` sends `change` unless told otherwise, and these are `add`
+  rules. The install reloaded the rules and applied them to nothing, so a
+  camera already plugged in when the installer ran stayed on `auto` — which is
+  every install that matters. The trigger now names `--action=add`.
+
+Both are fixed and the corrected rule is proved on the board: a USB device
+presenting interface class `0e` went from `power/control=auto` to `on` when the
+rule was installed and triggered, while the hub and both host controllers
+correctly stayed on `auto`. `udevadm verify` passes the old rule and the new
+one alike, so nothing but sysfs would have caught this.
+
 Two claims the rule still owes, and neither can be settled without a camera
 attached: that a device arriving after boot is caught by the `add` rule, and
 that the setting survives the re-enumeration this fault consists of. Check both
