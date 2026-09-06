@@ -385,6 +385,8 @@ code and unit tests and an explicit note that it has never run on hardware.
 - Three ground-station endpoints, settable from the console — R-MAV-03
 - Loopback-only ingest by default — R-MAV-07
 - Autocast: telemetry up at boot with no operator action — R-MAV-08, R-MAV-09
+- **An ordinary apply never interrupts telemetry, and a telemetry fault never fails an apply**
+  — R-MAV-16
 - Link state reporting — R-MAV-10
 - Attitude, heading, altitude, GPS, speeds, mode, arm state — R-TEL-01 … R-TEL-07
 - Per-cell voltage — R-TEL-08

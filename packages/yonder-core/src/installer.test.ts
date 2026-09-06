@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { DEFAULT_CONSOLE_PATHS } from "./console/settings.js";
+import { ROUTER_CONF_PATH } from "./mav/renderer.js";
 
 /**
  * The installer's shell helpers, exercised rather than read.
@@ -324,6 +325,35 @@ describe("the daemon can write everything the console renderer writes", () => {
     for (const p of [DEFAULT_CONSOLE_PATHS.settings, DEFAULT_CONSOLE_PATHS.publicDir]) {
       expect(inside(p), `${p} must be inside one of: ${roots.join(" ")}`).toBe(true);
     }
+  });
+
+  /**
+   * The same invariant, for the file `MavlinkRenderer` generates.
+   *
+   * `/etc/mavlink-router/main.conf` is written from inside the daemon on
+   * every apply that changes it, and `ProtectSystem=strict` mounts the rest
+   * of /etc read-only in this process's own namespace — so without the entry
+   * the very first render on a board fails EROFS and says nothing else. The
+   * leading `-` matters as much as the path does: systemd refuses to start a
+   * unit whose ReadWritePaths names a directory that is not there, and this
+   * one exists only on a board whose installer carried mavlink-router, so an
+   * unprefixed entry would take the console and the access point off every
+   * device flashed before that (rule 6).
+   */
+  it("keeps the generated mavlink-router configuration inside them too, without hard-requiring it", () => {
+    const unit = readFileSync(join(ROOT, "systemd/yonder-core.service"), "utf8");
+    const entries = unit
+      .split("\n")
+      .filter((l) => l.startsWith("ReadWritePaths="))
+      .flatMap((l) => l.slice("ReadWritePaths=".length).trim().split(/\s+/))
+      .filter(Boolean);
+
+    const optional = entries.filter((e) => e.startsWith("-")).map((e) => e.slice(1));
+    const roots = entries.map((e) => (e.startsWith("-") ? e.slice(1) : e));
+    const inside = (p: string): boolean => roots.some((r) => p === r || p.startsWith(`${r}/`));
+
+    expect(inside(ROUTER_CONF_PATH), `${ROUTER_CONF_PATH} must be inside one of: ${roots.join(" ")}`).toBe(true);
+    expect(optional).toContain(dirname(ROUTER_CONF_PATH));
   });
 
   it("starts the console from the same path the daemon regenerates", () => {

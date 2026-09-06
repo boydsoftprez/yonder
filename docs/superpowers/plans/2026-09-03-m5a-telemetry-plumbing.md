@@ -2721,7 +2721,29 @@ git commit -s -m "feat(mav): one link state, measured rather than configured —
 
 **Interfaces:**
 - Consumes: everything from Tasks 5–9; `CommandRunner`, `Clock`, `Renderer`
-- Produces: `export class MavlinkRenderer implements Renderer { readonly name = "mavlink"; render(config: Config): Promise<void>; state(): LinkState; detectNow(): Promise<DetectOutcome>; }`
+- Produces:
+
+```ts
+export class MavlinkRenderer implements Renderer {
+  readonly name = "mavlink";
+  constructor(opts: {
+    run: CommandRunner; open: OpenPort; confPath: string; hintPath: string;
+    // Injected because two things write to it: this renderer supplies the
+    // sweep's outcome and the router's counters, Task 11's listener supplies
+    // heartbeats. One tracker, two writers, one reader.
+    tracker?: LinkTracker; clock?: Clock; log?: (line: string) => void;
+    retryMs?: number; statsIntervalMs?: number;
+  });
+  render(config: Config): Promise<void>;   // never throws
+  state(): LinkState;
+  detectNow(): Promise<DetectOutcome>;     // the operator's re-probe
+  startTelemetry(): Promise<void>;         // R-MAV-09, outranks autocast
+  stopTelemetry(): Promise<void>;          // R-MAV-09, outranks the next apply
+  get telemetryRunning(): boolean;         // LinkState cannot say this
+  startSampling(): void;                   // the router's own statistics
+  close(): void;                           // every timer this renderer owns
+}
+```
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2760,12 +2782,78 @@ So `render(config)` is written as **adopt, then act only on difference**:
    outright. Otherwise, if the service is active *and* the configuration it is running under
    matches what `routerConfig` would now produce, there is nothing to do — return. **A running
    router is evidence of a working link and is never re-probed to confirm it.**
-2. Only when there is no running router, or its rendered configuration differs, resolve the
-   link — hint first, then the sweep — and write the new file.
+2. **When the service is active, adopt the link out of the file it was started with** —
+   `[UartEndpoint autopilot]`'s own `Device` and `Baud`. Only when there is no running
+   router is the link resolved by probing: hint first, then the sweep.
+
+   *This point said "or its rendered configuration differs" until Task 10 was written, and
+   that contradicted point 1 in the case it exists for. A ground station added mid-flight
+   makes the rendered configuration differ while the router is still running and still
+   holding the port — so "resolve the link" there means sweeping a port that is not
+   available, which comes back `silent`, forgets the hint, leaves the file unwritten and the
+   operator's change unapplied, and paints the page as though the autopilot had gone. What
+   a differing configuration calls for is a **restart**, not a re-probe; the port and speed
+   are already known and are recovered by reading them back.*
 3. Restart the service **only if the file changed**, and log that it is about to, because
    restarting interrupts every ground station already receiving.
 4. On `silent` or `noise`: forget the hint, do **not** start the service, and schedule the
    next attempt 30 s out on the injected `Clock`.
+5. **Sweep every device `device: auto` allows**, not one. `detect()` takes a single device
+   and `auto` is the shipped default, so the loop belongs here; `R-MAV-02` asks for a USB
+   CDC-ACM device as well as the header UART. A node that will not open is `R-MAV-13`'s
+   silence for that device (Task 15's post-condition says so), never an exception out of
+   the middle of an apply — and between two failed devices the outcome reported is the one
+   that tells an operator the most: `noise` over `silence`, and a device actually swept over
+   one that was not there to sweep.
+6. **A pinned field the router is not honouring is a real difference.** `device` and `baud`
+   are independent, and half-pinning is the natural way to say "I know the port, find the
+   speed". Adopting the running link outright makes `desired === current`, so an operator
+   who moves their flight controller to USB and pins it gets a successful apply, no restart,
+   nothing in the log, and a page still reporting the dead UART as linked — the mirror image
+   of the bug adoption exists to prevent. A pinned **speed** needs no sweep at all (the port
+   is known, the speed was just supplied); a pinned **device** the router is not on is by
+   definition a port the router is not holding, so it is swept **while the current link keeps
+   running**, and telemetry is interrupted only if the sweep finds something to switch to.
+   Nothing on the pinned port leaves the working link exactly as it was.
+7. **An operator's stop outranks the next apply** (`R-MAV-09`). `settle()` consulting only
+   `autocast` meant a stopped router left the port free, the next render swept it, and
+   `autocast` started it again because somebody changed the palette. The flag lives on the
+   renderer — not in `LinkTracker`, which has no way back out of `stopped()` except a sweep —
+   and is deliberately **not** persisted, because `autocast` is the answer to "should
+   telemetry be on after a boot".
+8. **A failed start, and a failed write, are retried on the same cadence a failed sweep is.**
+   Nothing is flowing and nothing holds the port, so the retry costs what §3 says it costs,
+   and `R-MAV-08` is a P1 that one refused `systemctl` should not defeat until the next apply.
+9. **Nothing here throws** — not the sweep, and not anything else. `K-19` is the near
+   reason; §5 is the far one. Beyond that, `mavlink-router` is not installed on any board
+   built before Task 16, so a renderer that failed the apply when its unit was missing would
+   make every one of those devices unconfigurable. `R-MAV-16` writes this down.
+
+- [ ] **Step 3b: Read the router's own statistics, because nothing else can**
+
+`LinkState.groundStations`, `.traffic` and `.tcpClients` are measurements only
+`mavlink-router` holds, and `router/stats.ts`'s `parseStats(text)` reads them out of the
+block it prints once a second under `ReportStats = true` — but **nothing fetches that text**,
+and this is where it belongs, because ADR-0006 says nothing shells out except a renderer and
+this renderer owns the router process.
+
+The router runs under systemd, so its stdout is in the journal: fetch it through the injected
+`CommandRunner` (`journalctl -u mavlink-router -n 200 --no-pager -o cat` — **`-o cat` is
+load-bearing**, since journald's default prefixes every line and no block header would then
+match), on the injected `Clock`, on a cadence of its own the way `TrafficSampler` samples
+`/sys/class/net`, and hand it to `LinkTracker.sampled(stats, groundStationNames)`.
+
+**Re-ask `systemctl is-active` on the sampling tick**, rather than carrying the answer from
+the last apply: a router that died between two applies otherwise leaves the page reporting a
+link that is not flowing, indefinitely, while this method differences a journal tail that has
+stopped growing (`R-MAV-10`). And **the tick must not be able to reject** — nobody awaits it,
+and an unhandled rejection takes the daemon down under Node's default.
+
+`groundStationNames` comes from `config.mavlink.endpoints[].name`. **That argument exists for
+a reason**: `router/config.ts` always emits a `yonder` endpoint — the control plane's own
+loopback copy — which is `kind: "udp"` exactly like a real ground station and whose counter
+moves whenever telemetry flows at all, so filtering by kind would report Yonder's own feed as
+a permanently-answering ground station on every device.
 
 **Re-detection is an explicit operator action, never a side effect of an apply.** It arrives
 on its own route (`POST /mav/detect`, Task 11), stops the router, probes, and restarts —
@@ -2777,7 +2865,14 @@ with the interruption stated on the page first.
 `ReadWritePaths=/etc/yonder /var/lib/yonder`, so the first real render would fail with a
 read-only filesystem and no other clue. Add `/etc/mavlink-router` to that list, in the same
 commit as the renderer that needs it, and assert it the way the unit's other accounts are
-asserted. **A renderer whose write is denied by the sandbox is a failure that only appears on
+asserted.
+
+**Add it as `-/etc/mavlink-router`, with the dash.** systemd refuses to start a unit whose
+`ReadWritePaths` names a directory that does not exist, and this one is created by the role
+that installs `mavlink-router` (Task 16, Step 2a) — so an unprefixed entry would stop
+`yonder-core` starting at all on every board flashed before that role existed: no console, no
+access point, no way in. The dash makes a missing path ignored instead, which is rule 6's
+direction. Assert both halves, or the safe one is the half that silently comes off. **A renderer whose write is denied by the sandbox is a failure that only appears on
 a board**, which is precisely the class of defect this milestone keeps finding late.
 
 - [ ] **Step 4: Run the tests, then the whole suite**
@@ -2787,15 +2882,36 @@ Expected: everything green. `K-19` matters here — a renderer that throws stops
 
 - [ ] **Step 5: Register and export it**
 
-In `daemon/server.ts`, build it alongside `RemoteRenderer` and add it to the renderer list. In `index.ts`, export `MavlinkRenderer`, `type LinkState`, `type DetectOutcome`.
+In `daemon/server.ts`, build it alongside `RemoteRenderer` and add it to the renderer list —
+**last**, behind the console: telemetry rides on a network that has already settled, and this
+is the renderer that can spend longest. In `index.ts`, export `MavlinkRenderer`, `type
+LinkState`, `type DetectOutcome`.
+
+**And note what stops this being wired in production.** `detect()` needs an `OpenPort`, and
+**nothing in this repository implements one against real hardware** — every existing use is a
+fake in a test. So `buildRenderers` assembles a `MavlinkRenderer` only when a caller supplies
+one, exactly as it assembles a `ConsoleRenderer` only when a caller says where the console
+is, and `main()` supplies neither an opener nor the two paths. Writing that opener is a task
+of its own, with a bench session behind it (the framing-error count Task 1 measured comes
+from `TIOCGICOUNT`, which is an ioctl Node cannot make without help) — and it is the last
+thing between this renderer and telemetry actually coming up on a board.
 
 - [ ] **Step 6: Commit**
 
 ```bash
 rm -f node_modules
-git add packages/yonder-core/src/mav/renderer.ts packages/yonder-core/src/mav/renderer.test.ts packages/yonder-core/src/daemon/server.ts packages/yonder-core/src/index.ts
-git commit -s -m "feat(mav): the renderer — detect, then render, then start — R-MAV-01, R-MAV-06, R-MAV-08"
+git add packages/yonder-core/src/mav/renderer.ts packages/yonder-core/src/mav/renderer.test.ts \
+        packages/yonder-core/src/mav/router/config.ts packages/yonder-core/src/daemon/server.ts \
+        packages/yonder-core/src/daemon/server.wiring.test.ts packages/yonder-core/src/index.ts \
+        packages/yonder-core/src/installer.test.ts systemd/yonder-core.service \
+        docs/requirements.md docs/roadmap.md
+git commit -s -m "feat(mav): the renderer — adopt, then act only on difference — R-MAV-01, R-MAV-06, R-MAV-08, R-MAV-16"
 ```
+
+`router/config.ts` is in the list because the renderer reads back the section it
+generates and imports the name rather than repeating it; `installer.test.ts` and the unit
+for Step 3a; `requirements.md` and `roadmap.md` because this task adds **R-MAV-16**, which
+is the property Step 3 is built around and which nothing had written down.
 
 ---
 

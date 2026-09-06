@@ -49,8 +49,16 @@ export const LOOPBACK_PORT = 14559;
  */
 const INGEST_PORT = 14540;
 
-/** The UART endpoint's name — the flight controller's own link. */
-const AUTOPILOT_ENDPOINT_NAME = "autopilot";
+/**
+ * The UART endpoint's name — the flight controller's own link.
+ *
+ * Exported because `../renderer.ts` reads this same section back out of the
+ * file it wrote, to learn the port and speed a router that is already running
+ * is using without re-probing a port that router is holding. Two literals
+ * that must agree are how they stop agreeing, which is the reasoning
+ * `SECRET_KEYS` records for its own single list.
+ */
+export const AUTOPILOT_ENDPOINT_NAME = "autopilot";
 /** The unconditional loopback endpoint's name — see `LOOPBACK_PORT` above. */
 const LOOPBACK_ENDPOINT_NAME = "yonder";
 /** The ingest endpoint's name — see `INGEST_PORT` above. */

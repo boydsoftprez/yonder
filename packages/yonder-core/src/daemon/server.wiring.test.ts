@@ -99,6 +99,67 @@ describe("buildRenderers", () => {
    * configuration gives it, which is the board most likely to be searched for
    * by name.
    */
+  /**
+   * Last, and behind the console: telemetry rides on a network that has
+   * already settled, and this is the renderer that can spend longest — a full
+   * sweep is four speeds on each of two devices.
+   */
+  it("puts the telemetry renderer last, when it is given a way to open a serial port", () => {
+    const run: CommandRunner = async () => ({ code: 0, stdout: "", stderr: "" });
+    const built = buildRenderers({
+      secretsPath: join(dir, "secrets.yaml"),
+      runner: run,
+      remoteStatePath: join(dir, "remote.json"),
+      console: { settings: join(dir, "console", "settings.js") },
+      mavlink: {
+        open: async () => { throw new Error("no test opens a serial port"); },
+        confPath: join(dir, "mavlink", "main.conf"),
+        hintPath: join(dir, "mavlink-link.json"),
+      },
+    });
+    expect(built.renderers.map((r) => r.name)).toEqual(["hostname", "network", "remote", "console", "mavlink"]);
+    expect(built.mavlinkRenderer).toBeDefined();
+  });
+
+  /**
+   * And when it is not, the operator has to be told. `detect()` needs an
+   * `OpenPort` and nothing in this repository implements one against real
+   * hardware, so a build without one configures no telemetry at all — and
+   * doing that silently means an apply that sets three ground stations
+   * succeeds, writes no main.conf, starts no router, and says nothing
+   * anywhere about why the Telemetry page is empty.
+   */
+  it("says so when it has no way to configure telemetry at all", () => {
+    const run: CommandRunner = async () => ({ code: 0, stdout: "", stderr: "" });
+    const said: string[] = [];
+    const built = buildRenderers({
+      secretsPath: join(dir, "secrets.yaml"),
+      runner: run,
+      remoteStatePath: join(dir, "remote.json"),
+      log: (line) => { said.push(line); },
+    });
+    expect(built.mavlinkRenderer).toBeUndefined();
+    expect(said.join("\n")).toMatch(/telemetry is not configured on this device/);
+    expect(said.join("\n")).toMatch(/serial port/);
+  });
+
+  it("says nothing of the sort when telemetry is configured", () => {
+    const run: CommandRunner = async () => ({ code: 0, stdout: "", stderr: "" });
+    const said: string[] = [];
+    buildRenderers({
+      secretsPath: join(dir, "secrets.yaml"),
+      runner: run,
+      remoteStatePath: join(dir, "remote.json"),
+      log: (line) => { said.push(line); },
+      mavlink: {
+        open: async () => { throw new Error("no test opens a serial port"); },
+        confPath: join(dir, "mavlink", "main.conf"),
+        hintPath: join(dir, "mavlink-link.json"),
+      },
+    });
+    expect(said.join("\n")).not.toMatch(/telemetry is not configured/);
+  });
+
   it("puts the hostname renderer in front of everything, because it cannot fail", () => {
     const run: CommandRunner = async () => ({ code: 0, stdout: "", stderr: "" });
     const built = buildRenderers({
@@ -549,7 +610,14 @@ describe("buildRenderers and the modem", () => {
       seen.push(argv);
       return { code: 0, stdout: "modem-list.length   : 0\n", stderr: "" };
     };
-    const built = buildRenderers({ secretsPath: join(dir, "secrets.yaml"), runner: run });
+    // `remoteStatePath` is required and was missing here: test files are
+    // excluded from tsconfig.json and vitest does not typecheck, so the call
+    // ran with `undefined` for a path the remote renderer records into.
+    const built = buildRenderers({
+      secretsPath: join(dir, "secrets.yaml"),
+      runner: run,
+      remoteStatePath: join(dir, "remote.json"),
+    });
     expect(built.modemClient).toBeDefined();
     await built.modemClient.modems();
     expect(seen.some((a) => a[0] === "mmcli")).toBe(true);

@@ -32,6 +32,8 @@ import { RemoteRenderer } from "../remote/renderer.js";
 import { ZeroTierCli } from "../remote/zerotier/cli.js";
 import { readTraffic } from "../remote/traffic.js";
 import { TrafficSampler } from "../remote/sampler.js";
+import { MavlinkRenderer } from "../mav/renderer.js";
+import type { OpenPort } from "../mav/detect.js";
 import { AP_CONNECTION, DEFAULT_AP_PASSPHRASE } from "../net/profiles.js";
 import { scanForNetworks } from "../net/scan.js";
 import { ping, reachable } from "../diag/probe.js";
@@ -97,6 +99,12 @@ export interface ServerOptions {
    * Absent means no ConsoleRenderer is assembled — see BuildRenderersOptions.
    */
   console?: Partial<ConsolePaths>;
+  /**
+   * How to open a serial port, and where the two telemetry files live.
+   * Absent means no MavlinkRenderer is assembled — see
+   * BuildRenderersOptions.mavlink, which explains why it is not defaulted.
+   */
+  mavlink?: BuildRenderersOptions["mavlink"];
 }
 
 export interface BuildRenderersOptions {
@@ -142,6 +150,24 @@ export interface BuildRenderersOptions {
    * one would be `/var/lib/yonder`.
    */
   remoteStatePath: string;
+  /**
+   * Everything the telemetry renderer needs, or nothing at all.
+   *
+   * **Present only when a caller supplies a way to open a serial port.**
+   * `MavlinkRenderer` resolves the autopilot's port and speed by sweeping it
+   * (R-MAV-01), and nothing in this repository implements `OpenPort` against
+   * real hardware yet — so a renderer built without one could not do the
+   * first thing it exists for. The same shape as `console` above, and the
+   * same "given, never defaulted" rule for its two paths, so no test writes
+   * to `/etc/mavlink-router` by forgetting to override one.
+   */
+  mavlink?: {
+    open: OpenPort;
+    /** `/etc/mavlink-router/main.conf` in production — `ROUTER_CONF_PATH`. */
+    confPath: string;
+    /** The remembered port and speed, under /var/lib/yonder (R-MAV-13). */
+    hintPath: string;
+  };
 }
 
 /**
@@ -172,6 +198,8 @@ export function buildRenderers(opts: BuildRenderersOptions): {
   /** Talks to the installed zerotier-cli, over the same runner as everything else. */
   zerotier: ZeroTierCli;
   remoteRenderer: RemoteRenderer;
+  /** Present only when `opts.mavlink` said how to open a serial port. */
+  mavlinkRenderer?: MavlinkRenderer;
   generated: string[];
 } {
   const log = opts.log ?? note;
@@ -226,6 +254,38 @@ export function buildRenderers(opts: BuildRenderersOptions): {
       log,
     });
 
+  // Last, and deliberately. Telemetry rides on a network that has already
+  // settled, and this is the renderer that can take longest — a full sweep is
+  // four speeds on each of two devices, and §3's whole point is that spending
+  // it costs nothing. Nothing is behind it to be stopped by a failure, which
+  // matters less than it looks because render() does not throw at all (K-19,
+  // and §5: no telemetry fault is worth reverting a whole configuration for).
+  if (opts.mavlink === undefined) {
+    // **Say it.** Without this, a device with no serial opener accepted an
+    // apply that configured three ground stations, wrote no
+    // /etc/mavlink-router/main.conf, started no router, and put nothing
+    // anywhere saying why — a successful apply that did nothing, which is the
+    // worst shape a missing capability can take. Not `degraded`: that refuses
+    // *every* apply, and a board without telemetry must still be configurable
+    // (rule 6). One line an operator can act on, on the same channel the rest
+    // of the renderers report on.
+    log(
+      "mavlink: telemetry is not configured on this device — this build has no way to open a serial port, "
+        + "so mavlink-router is neither configured nor started and the Telemetry page will stay empty "
+        + "(R-MAV-01, R-MAV-08)",
+    );
+  }
+  const mavlinkRenderer = opts.mavlink === undefined
+    ? undefined
+    : new MavlinkRenderer({
+      run: opts.runner ?? systemRunner,
+      open: opts.mavlink.open,
+      confPath: opts.mavlink.confPath,
+      hintPath: opts.mavlink.hintPath,
+      log,
+      clock: opts.clock,
+    });
+
   // First, and deliberately.
   //
   // K-19: renderers run in sequence and a failure stops the ones behind it,
@@ -238,10 +298,12 @@ export function buildRenderers(opts: BuildRenderersOptions): {
   // hostname on the DHCP request the network render is about to make.
   const hostname = new HostnameRenderer({ runner: opts.runner ?? systemRunner, log });
 
+  const ordered: Renderer[] = [hostname, renderer, remoteRenderer];
+  if (consoleRenderer !== undefined) ordered.push(consoleRenderer);
+  if (mavlinkRenderer !== undefined) ordered.push(mavlinkRenderer);
+
   return {
-    renderers: consoleRenderer === undefined
-      ? [hostname, renderer, remoteRenderer]
-      : [hostname, renderer, remoteRenderer, consoleRenderer],
+    renderers: ordered,
     renderer,
     ...(consoleRenderer === undefined ? {} : { consoleRenderer }),
     secrets,
@@ -249,6 +311,7 @@ export function buildRenderers(opts: BuildRenderersOptions): {
     modemClient,
     zerotier,
     remoteRenderer,
+    ...(mavlinkRenderer === undefined ? {} : { mavlinkRenderer }),
     generated,
   };
 }
@@ -410,6 +473,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
       // directory for this daemon, not a second one this renderer invented.
       remoteStatePath: join(dirname(opts.journalPath), "remote.json"),
       ...(opts.console === undefined ? {} : { console: opts.console }),
+      ...(opts.mavlink === undefined ? {} : { mavlink: opts.mavlink }),
     });
   } catch (e) {
     const message = (e as Error).message;
@@ -485,6 +549,13 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   // traffic; readRemoteState only ever reads what the sampler already has.
   const sampler = new TrafficSampler({ clock });
   sampler.start();
+
+  // The telemetry equivalent, and on its own clock for the same reason
+  // (R-NET-10's argument, applied to the router's own counters): the sparkline
+  // and the per-station lamps must already be drawn when the Telemetry page is
+  // opened, not start flat and fill in while an operator watches. Absent on a
+  // device with no serial opener — see BuildRenderersOptions.mavlink.
+  built?.mavlinkRenderer?.startSampling();
 
   // No secret is ever printed. That mechanism existed to surface a random
   // per-device access-point passphrase and there is no longer one to surface
@@ -893,6 +964,9 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
         // would go on reading sysfs for an interface this process no longer
         // answers questions about.
         sampler.stop();
+        // The fifth: the telemetry sampler, and with it any sweep this
+        // renderer had scheduled for thirty seconds' time.
+        built?.mavlinkRenderer?.close();
         server.close(() => {
           if (existsSync(opts.socketPath)) unlinkSync(opts.socketPath);
           resolve();
