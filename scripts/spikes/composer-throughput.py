@@ -51,6 +51,14 @@ QUEUE = "queue leaky=downstream max-size-time=200000000 max-size-buffers=0 max-s
 H264_LEVEL = "video/x-h264,level=(string)4"
 
 
+# The preview scaler the GStreamer arms use. `compose()` names `v4l2convert`,
+# the board's ISP hardware. It cannot be reconfigured on a running pipeline —
+# `reconfigure-resolution.py` shows it failing `S_FMT` and taking the pipeline
+# down — so an adaptive controller that moves resolution has to use software
+# `videoscale` instead. This option exists to price that trade.
+PREVIEW_SCALER = "v4l2convert"
+
+
 def gst(dev: str, two_branch: bool, out1: str, out2: str) -> list[str]:
     """`compose()`'s graph, with the sinks replaced by a discard-to-file.
 
@@ -76,7 +84,7 @@ def gst(dev: str, two_branch: bool, out1: str, out2: str) -> list[str]:
     if two_branch:
         p += [
             "raw.", "!", *QUEUE.split(), "!",
-            "v4l2convert", "!",
+            *PREVIEW_SCALER.split(), "!",
             "capsfilter", "name=preview-scale",
             f"caps=video/x-raw,width={PREVIEW_W},height={PREVIEW_H}", "!",
             "videorate", "!",
@@ -219,9 +227,14 @@ def main() -> int:
     ap.add_argument("--repeat", type=int, default=3)
     ap.add_argument("--workdir", default="/tmp/yonder-spike")
     ap.add_argument("--camguard", default=str(pathlib.Path(__file__).with_name("camguard.sh")))
+    ap.add_argument("--preview-scaler", default="v4l2convert",
+                    help="v4l2convert (hardware, cannot be reconfigured live) or "
+                         "videoscale (software, can)")
     ap.add_argument("--differences", action="store_true",
                     help="print how the ffmpeg line differs from the GStreamer one, and exit")
     args = ap.parse_args()
+    global PREVIEW_SCALER                                         # noqa: PLW0603
+    PREVIEW_SCALER = args.preview_scaler
 
     if args.differences:
         for title, body in DIFFERENCES:

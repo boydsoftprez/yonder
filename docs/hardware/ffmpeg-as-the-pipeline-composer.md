@@ -489,6 +489,97 @@ retuned:
 `8x8dct`, `udu_sei`, `prefix_mode` — and **none carries the runtime flag**. Neither does the
 generic `-b`, which reads `E..VA......`. Same answer as the Pi, by the same mechanism.
 
+## Adaptive resolution, which is the other half of the controller
+
+A rate controller for a flying datalink needs more than a bitrate. Below roughly 800 kb/s a
+720p encode stops being worth sending and the right move is fewer pixels rather than worse
+ones — which is what spec §8.1 asks for, and what K-53 lists among the things a pipeline
+that cannot be spoken to makes impossible. So the retune question was put a second time,
+about resolution.
+
+**It is not the same question as bitrate, and it is harder.** A bitrate is a property on
+the encoder. A resolution is *caps*: changing it renegotiates the pipeline and reconfigures
+the encoder's input, which on a V4L2 M2M or MPP encoder means tearing the encode session
+down and standing it back up. That is where a gap would appear, and a gap in flight is a
+frozen picture.
+
+Script: [`reconfigure-resolution.py`](../../scripts/spikes/reconfigure-resolution.py). It
+drives `capsfilter name=preview-scale` — the element `compose()` already names and
+`previewCaps()` already builds — from 1280×720 to 640×360 on a running pipeline, and then
+**decodes the output and counts frame sizes**, because setting a property that is silently
+ignored looks identical from the encoder's byte count.
+
+| board | scaler ahead of the encoder | resolution changed in the bitstream | gap |
+|---|---|---|---|
+| Pi | **`v4l2convert`** — the hardware ISP scaler `compose()` uses | **NO** — the pipeline dies | — |
+| Pi | `videoscale` (software) | **YES** — 300 frames at 720p, then 300 at 360p | **none** |
+| Pi | `videoconvert ! videoscale` (software) | **YES** — 300 then 300 | **none** |
+| Pi | `v4l2video18convert` — the *other* hardware M2M converter | cannot scale **at all**, even set at start | — |
+| Pi | `glcolorscale` (V3D GPU) | **unsettled** — no headless GL context obtained | — |
+| RK3566 | `videoscale` + `mpph264enc` | **YES** — 300 then 299 | **none** |
+| RK3566 | `videoscale` + `mpph265enc` | **YES** — 300 then 299 | **none** |
+
+**Zero timestamp gaps in every case that worked**, on either board, for either codec. An
+adaptive controller can move bitrate *and* resolution on a live GStreamer pipeline without
+the operator seeing a freeze.
+
+### The Pi's hardware scaler cannot be reconfigured, and that is not a hardware limit
+
+`v4l2convert` fails the same way every time, reproduced four times across three pixel
+formats:
+
+```
+v4l2convert0: error: Call to S_FMT failed for YU12 @ 640x360: Invalid argument
+basetransform: FAILED to configure incaps … and outcaps … width=640, height=360
+videotestsrc0: error: streaming stopped, reason not-negotiated (-4)
+```
+
+It takes the whole pipeline down, not just the branch. It fails identically for `YUY2`,
+`I420` and `NV12`, so it is not the pixel format — the first run of this test used `YUY2`
+because `videotestsrc` negotiated it, and pinning the format to the `I420` that `jpegdec`
+actually hands the daemon's scaler changed nothing.
+
+**The silicon is not the constraint, and this was checked rather than assumed.** The same
+element scales 1280×720 to 640×360 without complaint when the size is set before the
+pipeline starts — the two-branch throughput runs in this note do exactly that, and produce
+a preview branch of about a megabyte per 300 frames. What fails is only `S_FMT` *while the
+device is streaming*, which is the V4L2 M2M contract: `STREAMOFF` must come first, and
+GStreamer's `v4l2transform` does not perform that stop-reconfigure-restart dance.
+
+**Nor is `v4l2convert` the only hardware converter on the board.** `pipeline.ts`'s own
+comment names a second, and it was tested: `v4l2video18convert` on `/dev/video18`
+(`bcm2835-codec-image_fx`) refuses to scale at start and refuses an `I420` → `NV12`
+conversion at a fixed size too. It advertises `width: [1, 32768]` in its template and
+negotiates neither, which is consistent with `usb-camera-on-a-pi-4.md` already marking that
+node "Not needed". The GPU scaler `glcolorscale` exists as an element; it failed first on
+`/dev/dri/renderD128: Permission denied` — the node is `root:render` and the service user is
+in `video` but not `render` — and then, with that removed, on GL context creation in a
+headless session. **It is not established either way and should not be written off.**
+
+### What the trade costs, measured
+
+Since adaptive resolution on a Pi means giving up `v4l2convert` for a software scaler, the
+two were measured in the same two-branch shape:
+
+| preview scaler | 300 frames | cpu (4 cores) | above idle |
+|---|---|---|---|
+| `v4l2convert` (hardware) | 10.23 s, 12.24 s | 23.6%, 22.5% | ~+12.7 |
+| `videoconvert ! videoscale` (software) | 12.24 s, 10.26 s | 22.4%, 21.8% | ~+11.8 |
+
+Baselines 10.5% and 10.1%. **The two are indistinguishable at this rung** — the software
+figure is nominally lower, which is noise, not a result. At 640×360 the downscale is cheap
+enough that giving up the ISP for it costs nothing this method can measure. That is a
+statement about 640×360 on this board and not about scaling in general; a preview at
+1280×720, which is what the board's configuration currently holds, was not measured.
+
+**On Rockchip the same trade does not arise, because there is nothing to trade.** No RGA or
+other hardware scaler element exists in GStreamer on that board — `gst-inspect-1.0` offers
+only `videoscale`, `videoconvert` and `videoconvertscale`, all software, and the two extra
+plugins the Rockchip build produces are a display sink (`rkximagesink`) and a DRM source
+(`kmssrc`). ffmpeg has `scale_rkrga` there and GStreamer does not, which is the mirror image
+of the Pi, where GStreamer has `v4l2convert` and ffmpeg has nothing. **Each framework holds
+the hardware scaler on exactly one of the two boards.**
+
 ## The recommendation to §2
 
 **The evidence does not support "one composer, and it is ffmpeg". It removes the premise the
@@ -508,7 +599,9 @@ the other way on every axis that was measured:
 | H.265 encode (R-CAM-08, R-HW-03) | `mpph265enc` ✔ Main/4.0, clean | `hevc_rkmpp` ✔ |
 | CPU, Pi two-branch | **+10.5 points** | +18.8 points |
 | Latency, Pi, sender side | **~31 ms** | ~153 ms |
-| Hardware preview scaler, Pi | `v4l2convert` ✔ | none — software `scale` |
+| Hardware preview scaler, Pi | `v4l2convert` ✔ *(but see below)* | none — software `scale` |
+| Hardware preview scaler, RK3566 | none — software `videoscale` | `scale_rkrga` ✔ |
+| **Live resolution change** | **✔** both boards, both codecs, no gap — via a software scaler | **✘** no channel reaches the encoder at all |
 | Delivery | build MPP and the plugin from source | one pinned `.deb` |
 
 **What §2 gets right, and it is the only column ffmpeg wins:** delivery. `jellyfin-ffmpeg7`
@@ -558,6 +651,16 @@ and were measured there:
   built by hand here, as root, with nine build packages installed. Doing it in CI, pinning
   it, and staging it in the offline payload is real work that §3's single `.deb` avoids —
   and it is now the honest trade, rather than the false one §2 stated.
+- **Whether the GPU can scale on a Pi.** `glcolorscale` exists; the render-node permission
+  that blocked it first was removed and it then failed on GL context creation in a headless
+  session. If it works it is a hardware scaler that *can* be reconfigured live, which would
+  remove the Pi's trade entirely. Untested, not disproven.
+- **Whether a preview at 1280×720 changes the scaler trade.** The software and hardware
+  scalers were indistinguishable at 640×360. That is the rung measured, and the board's own
+  configuration currently holds 1280×720, which was not.
+- **Resolution changes in the other direction, and repeatedly.** Every run here steps down
+  once, 1280×720 to 640×360. An adaptive controller steps up as well and does so repeatedly
+  with hysteresis; whether a long sequence of changes ever produces a gap is untested.
 - **The two-second QGroundControl observation.** This note shows the composer is not the
   cause; it does not find what is. A real network, a real ground station and H.265 over the
   air are all outside it.
@@ -624,6 +727,20 @@ Then ask GStreamer the same question, of each encoder:
 ```bash
 gst-inspect-1.0 rockchipmpp && python3 retune-bitrate-mpp.py --element mpph264enc && python3 retune-bitrate-mpp.py --element mpph265enc
 ```
+
+### Adaptive resolution, on either board
+
+```bash
+python3 reconfigure-resolution.py --element v4l2h264enc --scaler "videoconvert ! videoscale" --format I420
+```
+
+```bash
+python3 reconfigure-resolution.py --element mpph265enc --scaler videoscale --ffprobe /usr/lib/jellyfin-ffmpeg/ffprobe
+```
+
+Substituting `--scaler v4l2convert` on the Pi reproduces the failure recorded above. The
+cost of the software scaler in the two-branch shape is measured with
+`composer-throughput.py --preview-scaler "videoconvert ! videoscale"`.
 
 Put the Pi's camera back afterwards by starting it from the console, or with the same `POST`
 carrying `{"action":"start"}`.
