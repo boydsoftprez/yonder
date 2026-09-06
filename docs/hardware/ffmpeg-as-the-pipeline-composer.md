@@ -606,6 +606,125 @@ plugins the Rockchip build produces are a display sink (`rkximagesink`) and a DR
 (`kmssrc`). ffmpeg has `scale_rkrga` there and GStreamer does not, which is the mirror image
 of the Pi — except that on the Pi the hardware scaler turns out to be the slower option.
 
+## What the published guidance says, and where it disagrees
+
+The measurements above were taken before this was researched, and the general guidance for
+both SoCs says the *opposite* of one of them. That disagreement is worth resolving rather
+than picking whichever answer is convenient.
+
+### The Pi: hardware scaling is right, until the ISP runs out
+
+Raspberry Pi's own forums are unambiguous that `v4l2convert` should be preferred to software
+scaling — *"use of videoscale and videoconvert means all the processing is on the ARM"* —
+and report software scaling collapsing to single-digit frame rates. That is the opposite of
+what this note measured at 1080p.
+
+**The reconciliation is one sentence in the same source**, and it is the sentence that
+matters here: *"libcamera, v4l2convert and v4l2h264enc all pass the images through the ISP
+hardware block, so you're likely exceeding the hardware's capabilities when using multiple
+ISP-based components in series."* The block is shared, and its ceiling is quoted in
+macroblocks per second — nominally 1080p30, *"generally 1080p50 for encode"*.
+
+`compose()` puts **three** consumers on that block: the full-rate encode, the preview encode,
+and `v4l2convert`. Against a 408,000 macroblock/s ceiling:
+
+| | ISP load | verdict | what was measured |
+|---|---|---|---|
+| 720p capture, with `v4l2convert` | 243,600 mb/s | within budget | hardware ≈ software |
+| **1080p capture, with `v4l2convert`** | **517,200 mb/s** | **over budget** | hardware slower, dropping preview frames |
+| 1080p capture, software scaler | 272,400 mb/s | within budget | steady, no drops |
+
+The arithmetic predicts the crossover this note measured, from the other side. **The guidance
+is right and so is the measurement**: hardware scaling wins while the ISP has headroom, and
+loses once the pipeline has spent that headroom on two encodes. Moving the scale to the CPU
+is not a defeat — it buys ISP capacity back for the encodes, which are the part that cannot
+move.
+
+This also explains `usb-camera-on-a-pi-4.md`'s *"Defect 2 — the ISP converter is pure
+overhead, and looks like the opposite"*, which observed the effect without naming the cause.
+
+### The Pi: why the live change is refused, and it is the driver
+
+The V4L2 memory-to-memory specification states that to support dynamic resolution changes,
+`S_FMT` **should be allowed even when OUTPUT buffers are already allocated**. The Pi's
+`bcm2835-codec` refuses it — `Call to S_FMT failed for YU12 @ 640x360: Invalid argument`.
+So this is a driver gap measured against a published contract, not a GStreamer defect and
+not a hardware limit; the same element scales to the same size happily when told before it
+starts.
+
+The documented remedy was tried and does not help. GStreamer's `capsfilter` carries
+`caps-change-mode=delayed` for exactly this case; with it, the pipeline no longer dies —
+it simply never changes size, producing 180 frames all at 1280×720. Better behaviour, same
+answer.
+
+**And the GPU is not a way round it.** `glcolorscale` exists, but headless GL on a Pi is a
+known-bad path — the Raspberry Pi forums carry a thread titled precisely *"support for
+glcolorscale on raspberry pi (headless)"*, and report that no basic decode-scale-stream
+pipeline commonly works. Reported DRM/EGL throughput of about 20 fps at 1080p would not be
+enough here even if it did. This note's own attempt failed first on a render-node permission
+and then on GL context creation, which matches. **Not a promising avenue.**
+
+### Rockchip: RGA is real, reachable, and about twice as fast
+
+RK3566 carries **RGA2-Enhance**, whose documented scaling range is **1/16 to 16×** with
+average filtering on downscale — so 1280×720 to 640×360 is comfortably inside it.
+
+**The RGA path is reachable from GStreamer, and this note's first pass said otherwise.**
+That was wrong for a mechanical reason: `gstreamer-rockchip`'s `meson_options.txt` carries
+`option('rga', type: 'feature', value: 'auto')`, `librga` was not installed, and the build
+silently skipped it. With `librga` 1.10.0 installed the option reports `rga: enabled`, and
+`mpph264enc`/`mpph265enc` gain `width`, `height` and `rotation` properties that scale
+**inside the encoder**, through RGA, with no scaler element in the pipeline at all.
+
+It works and it is much faster. 300 frames, 1920×1080 down to 640×360, encoded:
+
+| | wall clock, two runs |
+|---|---|
+| RGA, via the encoder's `width`/`height` | **6.82 s, 6.97 s** |
+| `videoconvert ! videoscale`, software | 14.12 s, 14.20 s |
+
+**Roughly twice the throughput.** (CPU read about 49% in both, because `videotestsrc`
+generating 1080p dominates it; wall clock is the honest signal here and the CPU figure is
+not quoted as a result.)
+
+**But `width` and `height` cannot be changed on a running pipeline.** Setting them mid-stream
+is accepted silently and ignored: 600 frames came out, all at 1280×720, with no gap and no
+error. Only the bitstream check catches that — a test that asked whether the property took
+would have reported success. So RGA gives a *fixed* hardware downscale, not an adaptive one.
+
+A standalone `rgaconvert` element does exist, but not in this fork: the JeffyCN mirror has
+no `-extra` branch, and `rgaconvert` lives in third-party repositories. It was not built or
+tested here.
+
+### What comparable projects do
+
+RubyFPV and OpenHD solve this exact problem — adaptive video over a variable radio link on
+Pi-class hardware — and both are **bitrate-centric**. Ruby *"automatically adjusts the video
+bitrate, the video encoding quality, the radio datarates and radio modulation schemes"* and
+makes *"small, discrete adjustment steps in error correction rate, H264 parameters and video
+bitrate"*, escalating to radio datarate changes only when those do not suffice. Resolution is
+not in that fast loop. OpenHD offers variable bitrate and states that resolution and frame
+rate can be changed without a reboot — which is not the same claim as without a pipeline
+restart, and this note does not read it as one.
+
+**That matches what is measurable here.** Bitrate moves live, everywhere, with no gap.
+Resolution does not, on either board, through any hardware path.
+
+### The best practice this converges on
+
+1. **Adapt bitrate continuously and live.** It is the one control that works on every
+   encoder measured — `v4l2h264enc`, `mpph264enc`, `mpph265enc` — with zero timestamp gaps,
+   and it is what the peer projects lean on.
+2. **Treat resolution as a coarse, infrequent step, and respawn for it.** `video/renderer.ts`
+   already respawns on an applied change and carries the confirmation window and rollback.
+   That is the honest mechanism for a rung change on either board.
+3. **Where the resolution is fixed, take the hardware scaler** — RGA via the MPP encoder's
+   `width`/`height` on Rockchip, which is free and twice as fast; `v4l2convert` on a Pi
+   **only while the ISP has headroom**, which the macroblock table above decides.
+4. **Where live resolution changes are genuinely wanted, use the software scaler**, accept
+   that it is CPU, and know it costs nothing on a Pi at 1080p because it hands ISP capacity
+   back.
+
 ## The recommendation to §2
 
 **The evidence does not support "one composer, and it is ffmpeg". It removes the premise the

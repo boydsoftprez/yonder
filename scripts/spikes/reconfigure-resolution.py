@@ -85,25 +85,40 @@ def main() -> int:
     # latter by a test which did not pin this.
     ap.add_argument("--format", default="I420",
                     help="the raw format entering the scaler; I420 is what jpegdec emits")
+    # **Two ways to ask for a smaller picture, and they are not equivalent.**
+    # `capsfilter` renegotiates the graph and makes a separate scaler do the
+    # work. `encoder-property` sets `width`/`height` on the MPP encoder, which
+    # scales internally through Rockchip's RGA block — hardware scale and
+    # hardware encode in one element, with no scaler in the pipeline at all.
+    # Only the second is available on Rockchip, and only the first on a Pi.
+    ap.add_argument("--via", default="capsfilter",
+                    choices=["capsfilter", "encoder-property"],
+                    help="how the resize is requested")
     args = ap.parse_args()
     os.makedirs(args.workdir, exist_ok=True)
     out = os.path.join(args.workdir, f"reconf-{args.element}.bin")
 
-    # The preview branch of `compose()`: the scaler, then the capsfilter named
-    # `preview-scale` whose value `previewCaps()` builds, then the encode.
-    desc = (
-        f"videotestsrc is-live=true pattern=smpte "
-        f"! video/x-raw,format={args.format},width={FROM_W},height={FROM_H},"
-        f"framerate={FPS}/1 "
-        f"! queue leaky=downstream max-size-time=200000000 "
-        f"max-size-buffers=0 max-size-bytes=0 "
-        f"! {args.scaler} "
-        f"! capsfilter name=preview-scale caps=video/x-raw,width={FROM_W},height={FROM_H} "
-        f"! {encoder_tokens(args.element)} "
-        f"! {PARSER[args.element]} ! identity name=tap ! filesink location={out}")
+    src = (f"videotestsrc is-live=true pattern=smpte "
+           f"! video/x-raw,format={args.format},width={FROM_W},height={FROM_H},"
+           f"framerate={FPS}/1 "
+           f"! queue leaky=downstream max-size-time=200000000 "
+           f"max-size-buffers=0 max-size-bytes=0 ")
+    tail = f"! {PARSER[args.element]} ! identity name=tap ! filesink location={out}"
+    if args.via == "capsfilter":
+        # The preview branch of `compose()`: the scaler, then the capsfilter
+        # named `preview-scale` whose value `previewCaps()` builds.
+        desc = (f"{src}! {args.scaler} "
+                f"! capsfilter name=preview-scale "
+                f"caps=video/x-raw,width={FROM_W},height={FROM_H} "
+                f"! {encoder_tokens(args.element)} {tail}")
+    else:
+        # No scaler at all: the encoder is asked to emit a smaller picture and
+        # does the resize itself, in hardware.
+        desc = (f"{src}! {encoder_tokens(args.element)} "
+                f"width={FROM_W} height={FROM_H} {tail}")
     p = Gst.parse_launch(desc)
     tap = p.get_by_name("tap")
-    scale = p.get_by_name("preview-scale")
+    scale = p.get_by_name("preview-scale") if args.via == "capsfilter" else p.get_by_name("enc")
 
     start = time.monotonic()
     seen, last_pts, gaps = [0], [None], []
@@ -132,14 +147,19 @@ def main() -> int:
     before = rate(WINDOW)
     at = time.monotonic() - start
     # ---- the reconfigure under test ----
-    scale.set_property(
-        "caps", Gst.Caps.from_string(f"video/x-raw,width={TO_W},height={TO_H}"))
+    if args.via == "capsfilter":
+        scale.set_property(
+            "caps", Gst.Caps.from_string(f"video/x-raw,width={TO_W},height={TO_H}"))
+    else:
+        scale.set_property("width", TO_W)
+        scale.set_property("height", TO_H)
     after = rate(WINDOW)
     p.set_state(Gst.State.NULL)
     time.sleep(1)
 
     late = [g for g in gaps if g[0] > at]
-    print(f"{args.element} via {args.scaler} ({args.format}): "
+    label = args.scaler if args.via == "capsfilter" else "encoder width/height (RGA)"
+    print(f"{args.element} via {label} ({args.format}): "
           f"{FROM_W}x{FROM_H} -> {TO_W}x{TO_H} at {at:.2f}s   "
           f"before {before:.2f} Mb/s  after {after:.2f} Mb/s")
     print(f"  gaps: {[f'{t:.2f}s/{d*1000:.0f}ms' for t, d in gaps] or 'none'}"
