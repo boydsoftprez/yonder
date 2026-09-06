@@ -1314,3 +1314,80 @@ that anything has leaked. Every committed capture has been read by eye and by
 the guarded run and carries the fixture value.
 
 Found by review during Task 29 (`75f8c46`).
+
+### K-48 · An applied bitrate never reaches the running encoder
+
+**Status:** Open · **Requirements:** R-VID-07, R-UI-05
+
+Found by the operator on the development board, then reproduced at the daemon.
+
+Change a camera's bitrate on Setup, Apply, confirm. `config.yaml` takes the new
+value and the confirmation reports `confirmed`. **The running pipeline keeps the
+old one.** Measured: config at `bitrate_kbps: 2000` and
+`preview.bitrate_kbps: 1350`, while `gst-launch-1.0` was still running
+
+```
+extra-controls=controls,video_bitrate=100000
+extra-controls=controls,video_bitrate=100000,h264_i_frame_period=15
+```
+
+— 100 kb/s on both branches. The pid did not change over the following twenty
+seconds and the daemon logged no restart. A manual `POST /cameras/cam0/run
+{"action":"stop"}` then `start` picked the new values up immediately:
+`video_bitrate=2000000` and `1350000`.
+
+`video/pipeline.ts:170` bakes the rate into the launch line, so today the only
+way a new rate can reach the encoder is a respawn. Nothing performs one on an
+apply. **R-VID-07's runtime channel (plan Task 30) is the fix**, and Task 1
+already proved on this board that `v4l2h264enc` takes a runtime bitrate change
+without a respawn — 0.97 to 3.01 Mb/s with zero timestamp gaps after the retune.
+Until that exists an apply is silently a no-op for the picture, which is worse
+than refusing the change.
+
+### K-49 · Adaptive is offered, nothing implements it, and choosing it freezes the rate
+
+**Status:** Open · **Requirements:** R-UI-20, R-VID-07
+
+The stream and preview both offer **Fixed / Adaptive**. Selecting Adaptive
+makes the bitrate bar read-only — correctly, since in Adaptive the rate is not
+the operator's to set — but no rate controller exists to move it (plan Task 31).
+The rate therefore stays at whatever value it last held, and no control on the
+page can change it.
+
+The development board was found in exactly that state: `stream.mode: adaptive`,
+`preview.mode: adaptive`, both at `bitrate_kbps: 100`, with
+`preview.floor_kbps: 300`. **The applied rate was below the camera's own
+declared floor** and nothing on the page could raise it, which is why every
+setting appeared to make no difference to the picture.
+
+Two faults, and they are separable:
+
+- A capability nothing implements is being drawn as a working choice. This
+  project has a vocabulary for exactly this (§4's four states): until Task 31
+  lands, Adaptive is *advertised* — the control stays, marked inoperative, with
+  the reason — not a selectable mode.
+- Validation accepted a bitrate below the floor declared beside it. A draft
+  whose fields contradict each other is refused with the field named
+  (`validateDraft`); this pair is not among the contradictions it checks.
+
+### K-50 · An apply can be left pending for ever, and two routes disagree about it
+
+**Status:** Open · **Requirements:** R-CFG-03, R-UI-05
+
+`POST /cameras/cam0/outputs/rtsp {"enabled": false}` answered
+
+```
+{"id": "b23b9f8b-059b-445c-be92-92deb1409f27", "expiresAt": null}
+```
+
+`expiresAt: null` — no confirmation window, so nothing reverts it. Every later
+apply was then refused with `an apply is already pending; confirm or wait for it
+to revert`, while `POST /confirm` with that id answered `nothing is pending
+confirmation`. The board could not be configured at all until the state cleared
+on its own.
+
+The two answers cannot both be right, and the operator sees the first: a
+console that says a change is waiting, with no way to confirm it and nothing
+that will time it out. R-CFG-03's whole point is that a change either confirms
+or reverts; a third state where it does neither is the one an operator cannot
+get out of.
