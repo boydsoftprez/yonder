@@ -33,6 +33,8 @@ import { ZeroTierCli } from "../remote/zerotier/cli.js";
 import { readTraffic } from "../remote/traffic.js";
 import { TrafficSampler } from "../remote/sampler.js";
 import { MavlinkRenderer } from "../mav/renderer.js";
+import { LinkTracker } from "../mav/link.js";
+import { LoopbackListener } from "../mav/listener.js";
 import type { OpenPort } from "../mav/detect.js";
 import { AP_CONNECTION, DEFAULT_AP_PASSPHRASE } from "../net/profiles.js";
 import { scanForNetworks } from "../net/scan.js";
@@ -101,7 +103,8 @@ export interface ServerOptions {
   console?: Partial<ConsolePaths>;
   /**
    * How to open a serial port, and where the two telemetry files live.
-   * Absent means no MavlinkRenderer is assembled — see
+   * Absent means neither a `MavlinkRenderer` nor the loopback listener is
+   * assembled, and every `/mav/*` route says so — see
    * BuildRenderersOptions.mavlink, which explains why it is not defaulted.
    */
   mavlink?: BuildRenderersOptions["mavlink"];
@@ -167,6 +170,15 @@ export interface BuildRenderersOptions {
     confPath: string;
     /** The remembered port and speed, under /var/lib/yonder (R-MAV-13). */
     hintPath: string;
+    /**
+     * Overrides `LOOPBACK_PORT` for the listener on the control plane's own
+     * feed. **Test-only**, exactly like `runner` and `clock` above: a test
+     * binds an ephemeral port (`0`) so the suite neither collides with a
+     * daemon that is already running nor depends on a fixed port being free
+     * on whatever machine it runs on. There is deliberately no matching
+     * override for the *address* — see `LOOPBACK_ADDRESS` and R-MAV-07.
+     */
+    loopbackPort?: number;
   };
 }
 
@@ -200,6 +212,13 @@ export function buildRenderers(opts: BuildRenderersOptions): {
   remoteRenderer: RemoteRenderer;
   /** Present only when `opts.mavlink` said how to open a serial port. */
   mavlinkRenderer?: MavlinkRenderer;
+  /**
+   * The control plane's own feed off `127.0.0.1:14559` (R-MAV-05), sharing
+   * one `LinkTracker` with the renderer above. Assembled here and *started*
+   * by `startServer`, the same division `TrafficSampler` follows: this
+   * function builds, the daemon opens sockets.
+   */
+  mavlinkListener?: LoopbackListener;
   generated: string[];
 } {
   const log = opts.log ?? note;
@@ -275,16 +294,39 @@ export function buildRenderers(opts: BuildRenderersOptions): {
         + "(R-MAV-01, R-MAV-08)",
     );
   }
-  const mavlinkRenderer = opts.mavlink === undefined
-    ? undefined
-    : new MavlinkRenderer({
+  // **One tracker, two writers.** The renderer supplies the sweep's outcome
+  // and the router's own counters (`observed`, `sampled`); the listener
+  // supplies heartbeats off the loopback copy (`heard`). Handing both the same
+  // instance is what makes GET /mav/state one answer rather than two halves
+  // stitched together at the route — and it is why the listener depends on
+  // `LinkTracker` rather than on the renderer. Built here, where both are, so
+  // no caller can get it wrong by forgetting.
+  //
+  // The two are built together rather than each on its own line, because the
+  // tracker is what they share and a block is the only shape that says so.
+  // The listener exists exactly when the renderer does: without one, no
+  // /etc/mavlink-router/main.conf is written and no router is started, so
+  // nothing anywhere sends to :14559 — a socket held open for a feed that
+  // cannot exist is a port held for nothing.
+  let mavlinkRenderer: MavlinkRenderer | undefined;
+  let mavlinkListener: LoopbackListener | undefined;
+  if (opts.mavlink !== undefined) {
+    const tracker = new LinkTracker({ clock: opts.clock ?? systemClock });
+    mavlinkRenderer = new MavlinkRenderer({
       run: opts.runner ?? systemRunner,
       open: opts.mavlink.open,
       confPath: opts.mavlink.confPath,
       hintPath: opts.mavlink.hintPath,
+      tracker,
       log,
       clock: opts.clock,
     });
+    mavlinkListener = new LoopbackListener({
+      tracker,
+      log,
+      ...(opts.mavlink.loopbackPort === undefined ? {} : { port: opts.mavlink.loopbackPort }),
+    });
+  }
 
   // First, and deliberately.
   //
@@ -312,6 +354,7 @@ export function buildRenderers(opts: BuildRenderersOptions): {
     zerotier,
     remoteRenderer,
     ...(mavlinkRenderer === undefined ? {} : { mavlinkRenderer }),
+    ...(mavlinkListener === undefined ? {} : { mavlinkListener }),
     generated,
   };
 }
@@ -556,6 +599,16 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   // opened, not start flat and fill in while an operator watches. Absent on a
   // device with no serial opener — see BuildRenderersOptions.mavlink.
   built?.mavlinkRenderer?.startSampling();
+
+  // The control plane's own copy of the traffic (R-MAV-05), bound to loopback
+  // and nothing else (R-MAV-07). Awaited because binding a socket takes
+  // microseconds and a daemon whose state is settled before it serves is one
+  // less race — and safe to await because `start()` never rejects: K-19's rule
+  // says nothing on this path may be able to take the daemon down, and a port
+  // already in use costs a Telemetry page its heartbeat, never a device its
+  // console (rule 6). The ground stations are unaffected either way; raw
+  // MAVLink never passes through this process (R-MAV-06).
+  await built?.mavlinkListener?.start();
 
   // No secret is ever printed. That mechanism existed to surface a random
   // per-device access-point passphrase and there is no longer one to surface
@@ -863,6 +916,11 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
     // working — which is most of what an operator needs to fix it.
     reachState: () => reach.state(),
     testPath: async (path) => reach.test(path),
+    // The renderer itself: it already has the shape `MavlinkControl` asks for,
+    // and it is the only object that knows both what was measured and whether
+    // `mavlink-router` is on the air. Absent on a device with no serial
+    // opener, and every /mav/* route then says so.
+    ...(built?.mavlinkRenderer === undefined ? {} : { mavlink: built.mavlinkRenderer }),
     ...(onProvisioned === undefined ? {} : { onProvisioned }),
   });
 
@@ -967,6 +1025,9 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
         // The fifth: the telemetry sampler, and with it any sweep this
         // renderer had scheduled for thirty seconds' time.
         built?.mavlinkRenderer?.close();
+        // And the socket it shares a tracker with. A listener outliving its
+        // daemon would hold :14559 against the next one to start.
+        built?.mavlinkListener?.close();
         server.close(() => {
           if (existsSync(opts.socketPath)) unlinkSync(opts.socketPath);
           resolve();

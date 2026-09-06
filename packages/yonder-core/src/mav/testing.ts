@@ -4,8 +4,13 @@ import type { Clock } from "../apply/types.js";
 /**
  * Fixtures shared by this directory's tests: byte builders and a clock that
  * never touches the wall clock. Not part of the package's public surface —
- * not exported from `index.ts` — because nothing outside `src/mav/` needs a
- * hand-built MAVLink frame.
+ * not exported from `index.ts` — because a hand-built MAVLink frame is a test
+ * input, never something a consumer of this package should be handed. The
+ * daemon's own wiring test reads `heartbeatV2` from here too: the datagram it
+ * sends at `127.0.0.1` is the one thing that proves the loopback listener,
+ * the shared `LinkTracker` and `GET /mav/state` are joined rather than merely
+ * present, and a second copy of these bytes over there would be two builders
+ * that must agree.
  */
 
 /** X25 / CRC-16-MCRF4XX, one byte at a time — MAVLink's own accumulator. */

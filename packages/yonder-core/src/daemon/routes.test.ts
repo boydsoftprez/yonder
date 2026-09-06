@@ -20,6 +20,10 @@ import type { Clock, Renderer } from "../apply/types.js";
 import type { ModemState } from "../net/modem/state.js";
 import type { PathName, ReachState } from "../net/reach/standing.js";
 import type { RemoteState } from "../remote/state.js";
+import type { MavlinkControl, MavlinkStateBody, MavlinkDetectBody } from "./routes.js";
+import type { LinkState } from "../mav/link.js";
+import type { DetectOutcome } from "../mav/detect.js";
+import type { PathCheck } from "../mav/check.js";
 
 /**
  * The routes that own the administrator password, and the gate R-SEC-09 puts
@@ -97,6 +101,8 @@ interface RouterOptions {
   remoteState?: () => Promise<RemoteState>;
   /** Tests one path now, over the same ReachMonitor the automatic probes use. */
   testPath?: (path: PathName) => Promise<boolean>;
+  /** The telemetry link. Undefined, as in production today, unless a test says otherwise. */
+  mavlink?: MavlinkControl;
 }
 
 function router(opts: RouterOptions = {}): Router {
@@ -125,6 +131,7 @@ function router(opts: RouterOptions = {}): Router {
     ...(opts.reachState === undefined ? {} : { reachState: opts.reachState }),
     ...(opts.remoteState === undefined ? {} : { remoteState: opts.remoteState }),
     ...(opts.testPath === undefined ? {} : { testPath: opts.testPath }),
+    ...(opts.mavlink === undefined ? {} : { mavlink: opts.mavlink }),
   });
 }
 
@@ -1434,4 +1441,281 @@ describe("the way back in", () => {
     const res = await provisioned({})("GET", "/status", undefined);
     expect((res.body as { state: string }).state).toBe("idle");
   });
+});
+
+/**
+ * The Telemetry page's five routes (R-MAV-09, R-MAV-10, R-DIA-04).
+ *
+ * Two properties carry this block. **`GET /mav/state` answers with both
+ * halves** — what was measured about the aircraft, and whether this device is
+ * actually putting it on the air — because `phase` reads `linked` whether
+ * telemetry is running or deliberately switched off, and a page handed only
+ * the first half cannot tell those apart. And **`ok: null` is not `false`**:
+ * the path check draws a dash for a link nobody attempted and a cross only
+ * for one that was attempted and is not working.
+ *
+ * Nothing here touches a serial port, a `systemctl` or a real renderer:
+ * `MavlinkControl` is an injected interface for exactly the reason
+ * `DiagProbes` is.
+ */
+describe("the telemetry routes", () => {
+  const LINKED: LinkState = {
+    phase: "linked",
+    device: "/dev/ttyAMA0",
+    baud: 57600,
+    vehicle: "ArduPlane",
+    system: 1,
+    heartbeatHz: 1,
+    lastHeardMs: 300,
+    groundStations: [{ name: "gcs0", answering: true, lastHeardMs: 300 }],
+    triedBauds: [],
+    traffic: { rx: [0.4], tx: [3.1], peak: 3.1, windowMs: 5_000 },
+    tcpClients: null,
+  };
+
+  const FOUND: DetectOutcome = {
+    kind: "found", device: "/dev/ttyAMA0", baud: 57600, vehicle: "ArduPlane", system: 1,
+  };
+
+  /**
+   * A telemetry layer with no renderer behind it.
+   *
+   * `telemetryRunning` is a **getter**, exactly as it is on `MavlinkRenderer`
+   * — so a route that captured it once instead of reading it per request
+   * fails here rather than on a board.
+   */
+  function fakeMavlink(opts: {
+    link?: LinkState; running?: boolean; router?: boolean; outcome?: DetectOutcome; detectThrows?: string;
+  } = {}) {
+    let running = opts.running ?? true;
+    let link = opts.link ?? LINKED;
+    const calls: string[] = [];
+    const control: MavlinkControl = {
+      state: () => link,
+      get telemetryRunning() { return running; },
+      // Two facts, not one. A stop leaves the router up carrying the flight
+      // controller link, so `router` defaults to true and stays true while
+      // `running` goes false — which is the pair the Autopilot row reads.
+      get routerRunning() { return opts.router ?? true; },
+      detectNow: async () => {
+        calls.push("detect");
+        if (opts.detectThrows !== undefined) throw new Error(opts.detectThrows);
+        return opts.outcome ?? FOUND;
+      },
+      startTelemetry: async () => { calls.push("start"); running = true; },
+      stopTelemetry: async () => { calls.push("stop"); running = false; },
+    };
+    return Object.assign(control, {
+      calls,
+      /** Move what the tracker would be reporting, the way a sweep would. */
+      reports(next: LinkState) { link = next; },
+    });
+  }
+
+  const ROUTES: [string, string][] = [
+    ["GET", "/mav/state"], ["GET", "/mav/check"],
+    ["POST", "/mav/detect"], ["POST", "/mav/start"], ["POST", "/mav/stop"],
+  ];
+
+  // R-SEC-09. A link state, a path check and a stop button are all function,
+  // and a device with no administrator password on it offers none.
+  it.each(ROUTES)("%s %s is behind the administrator password", async (method, path) => {
+    const res = await router({ mavlink: fakeMavlink() })(method, path, undefined);
+    expect(res.status).toBe(403);
+  });
+
+  /**
+   * The ordinary state of every device built to date: `MavlinkRenderer` needs
+   * a way to open a serial port and this repository implements none, so
+   * `buildRenderers` assembles no telemetry layer at all. A 503 naming the
+   * absence — never a 500, and never an empty link state a page would draw as
+   * a device patiently searching.
+   */
+  it.each(ROUTES)("%s %s says so plainly when this build has no telemetry layer", async (method, path) => {
+    const res = await provisioned({})(method, path, undefined);
+    expect(res.status).toBe(503);
+    expect((res.body as { error: string }).error).toMatch(/no telemetry layer/);
+  });
+
+  it("GET /mav/state answers with the measured link", async () => {
+    const res = await provisioned({ mavlink: fakeMavlink() })("GET", "/mav/state", undefined);
+    expect(res.status).toBe(200);
+    expect((res.body as MavlinkStateBody).link).toEqual(LINKED);
+  });
+
+  /**
+   * **The one way this route could be quietly wrong.**
+   *
+   * `phase` reads `linked` both when telemetry is flowing and when a link was
+   * found and telemetry is deliberately switched off (R-MAV-09) or never
+   * started (`autocast: false`, R-MAV-08). Answering with the link state alone
+   * would drop the only field that tells those apart, and the page would
+   * report a link that is carrying nothing as one that is carrying.
+   */
+  it("GET /mav/state tells a link that is switched off from one that is flowing", async () => {
+    const flowing = await provisioned({ mavlink: fakeMavlink({ running: true }) })(
+      "GET", "/mav/state", undefined,
+    );
+    const off = await provisioned({ mavlink: fakeMavlink({ running: false }) })(
+      "GET", "/mav/state", undefined,
+    );
+    expect((flowing.body as MavlinkStateBody).link.phase).toBe("linked");
+    expect((off.body as MavlinkStateBody).link.phase).toBe("linked");
+    expect((flowing.body as MavlinkStateBody).telemetryRunning).toBe(true);
+    expect((off.body as MavlinkStateBody).telemetryRunning).toBe(false);
+  });
+
+  // Read afresh per request, not captured when the router was assembled: the
+  // renderer exposes it as a getter and it moves under the routes' feet.
+  it("GET /mav/state re-reads whether telemetry is running on every request", async () => {
+    const mavlink = fakeMavlink({ running: true });
+    const route = provisioned({ mavlink });
+    expect(((await route("GET", "/mav/state", undefined)).body as MavlinkStateBody).telemetryRunning).toBe(true);
+    await route("POST", "/mav/stop", undefined);
+    expect(((await route("GET", "/mav/state", undefined)).body as MavlinkStateBody).telemetryRunning).toBe(false);
+  });
+
+  it("POST /mav/stop takes telemetry off the air and answers with the state that produced", async () => {
+    const mavlink = fakeMavlink({ running: true });
+    const res = await provisioned({ mavlink })("POST", "/mav/stop", undefined);
+    expect(res.status).toBe(200);
+    expect(mavlink.calls).toEqual(["stop"]);
+    expect((res.body as MavlinkStateBody).telemetryRunning).toBe(false);
+  });
+
+  it("POST /mav/start puts it back and answers with the state that produced", async () => {
+    const mavlink = fakeMavlink({ running: false });
+    const res = await provisioned({ mavlink })("POST", "/mav/start", undefined);
+    expect(res.status).toBe(200);
+    expect(mavlink.calls).toEqual(["start"]);
+    expect((res.body as MavlinkStateBody).telemetryRunning).toBe(true);
+  });
+
+  it("POST /mav/detect sweeps the port and reports what it found, with the state it left behind", async () => {
+    const mavlink = fakeMavlink();
+    const res = await provisioned({ mavlink })("POST", "/mav/detect", undefined);
+    expect(res.status).toBe(200);
+    expect(mavlink.calls).toEqual(["detect"]);
+    const body = res.body as MavlinkDetectBody;
+    expect(body.outcome).toEqual(FOUND);
+    expect(body.link).toEqual(LINKED);
+    expect(body.telemetryRunning).toBe(true);
+  });
+
+  // R-MAV-13's two kinds of nothing reach the page as themselves, so the
+  // §3 diagnosis can name the pins or the autopilot's own parameters.
+  it("POST /mav/detect reports a sweep that found nothing as what it was", async () => {
+    const outcome: DetectOutcome = { kind: "noise", device: "/dev/ttyAMA0", triedBauds: [57600, 115200], bytes: 913 };
+    const res = await provisioned({ mavlink: fakeMavlink({ outcome }) })("POST", "/mav/detect", undefined);
+    expect((res.body as MavlinkDetectBody).outcome).toEqual(outcome);
+  });
+
+  /**
+   * Re-detection stops `mavlink-router` to get the serial port back, so it
+   * drops every ground station that is receiving (R-MAV-16). The console
+   * states that before the operator commits — which is only honest if the
+   * routes a page *polls* cannot do it. A read that re-probed would take
+   * telemetry down every few seconds, on an aircraft, with nothing on the
+   * page having asked for it.
+   */
+  it("never re-probes from a route the page polls", async () => {
+    const mavlink = fakeMavlink();
+    const route = provisioned({ mavlink });
+    await route("GET", "/mav/state", undefined);
+    await route("GET", "/mav/check", undefined);
+    await route("GET", "/mav/state", undefined);
+    expect(mavlink.calls).toEqual([]);
+  });
+
+  it("GET /mav/check answers with the three links of the chain", async () => {
+    const config = structuredClone(DEFAULT_CONFIG);
+    config.mavlink.endpoints = [{ name: "gcs0", host: "192.168.1.50", port: 14550 }];
+    saveConfig(configPath, config);
+    const res = await provisioned({ mavlink: fakeMavlink() })("GET", "/mav/check", undefined);
+    expect(res.status).toBe(200);
+    const check = res.body as PathCheck;
+    expect([check.autopilot.ok, check.outbound.ok, check.inbound.ok]).toEqual([true, true, true]);
+    expect(check.autopilot.detail).toMatch(/1\.0 Hz/);
+  });
+
+  /**
+   * Both running facts reach the page, and they differ exactly where it
+   * matters: a stopped device is still hearing its aircraft.
+   */
+  it("GET /mav/state carries both running facts, which a stop pulls apart", async () => {
+    const mavlink = fakeMavlink({ link: { ...LINKED, phase: "stopped" }, running: false, router: true });
+    const body = (await provisioned({ mavlink })("GET", "/mav/state", undefined)).body as MavlinkStateBody;
+    expect(body.telemetryRunning).toBe(false);
+    expect(body.routerRunning).toBe(true);
+  });
+
+  /**
+   * §8: a link nobody attempted shows a dash rather than a cross, and
+   * "stopped is not broken". An operator who switched telemetry off on
+   * purpose must not open the page to a column of red.
+   */
+  it("GET /mav/check leaves the aircraft visible on a device stopped on purpose", async () => {
+    const config = structuredClone(DEFAULT_CONFIG);
+    config.mavlink.endpoints = [{ name: "gcs0", host: "192.168.1.50", port: 14550 }];
+    saveConfig(configPath, config);
+    const mavlink = fakeMavlink({ link: { ...LINKED, phase: "stopped" }, running: false, router: true });
+    const res = await provisioned({ mavlink })("GET", "/mav/check", undefined);
+    const check = res.body as PathCheck;
+    // A tick and two dashes: the loopback copy is still delivering, nobody is
+    // being sent to, and nothing anywhere has failed.
+    expect([check.autopilot.ok, check.outbound.ok, check.inbound.ok]).toEqual([true, null, null]);
+    expect(check.outbound.detail).toMatch(/stopped by you/i);
+  });
+
+  /**
+   * The ground stations come from `config.yaml`, not from the measured state.
+   * `LinkState.groundStations` is filled in from the router's own counters, so
+   * for the first couple of seconds of every daemon's life it is empty on a
+   * device with three endpoints configured — and "none configured" is a
+   * different answer from "no reading yet".
+   */
+  it("GET /mav/check counts the ground stations the configuration names", async () => {
+    const config = structuredClone(DEFAULT_CONFIG);
+    config.mavlink.endpoints = [
+      { name: "gcs0", host: "192.168.1.50", port: 14550 },
+      { name: "gcs1", host: "192.168.1.51", port: 14551 },
+    ];
+    saveConfig(configPath, config);
+    // Nothing sampled yet: the measured state names no stations at all.
+    const mavlink = fakeMavlink({ link: { ...LINKED, groundStations: [] } });
+    const res = await provisioned({ mavlink })("GET", "/mav/check", undefined);
+    expect((res.body as PathCheck).outbound.detail).toMatch(/2 ground stations configured/);
+  });
+
+  // The default configuration names none, which is a setting rather than a
+  // fault — a dash, and a sentence saying which.
+  it("GET /mav/check says so when no ground station is configured", async () => {
+    const res = await provisioned({ mavlink: fakeMavlink() })("GET", "/mav/check", undefined);
+    const check = res.body as PathCheck;
+    expect(check.outbound.ok).toBeNull();
+    expect(check.outbound.detail).toMatch(/no ground stations are configured/i);
+  });
+
+  /**
+   * The rule the whole catch-all exists for: an error out of a renderer can
+   * carry a subprocess's own stderr, and echoing one into an HTTP body is how
+   * it leaves the device. The detail goes to the journal, which needs being
+   * on the device to read.
+   */
+  it("does not put a renderer's own error text in the response body", async () => {
+    const mavlink = fakeMavlink({ detectThrows: "systemctl: Failed to stop mavlink-router at /etc/secret" });
+    const res = await provisioned({ mavlink })("POST", "/mav/detect", undefined);
+    expect(res.status).toBe(500);
+    expect(JSON.stringify(res.body)).not.toMatch(/systemctl|\/etc\/secret/);
+  });
+
+  // A read is a read and a write is a write: nothing that interrupts a ground
+  // station is reachable with a GET.
+  it.each([["GET", "/mav/detect"], ["GET", "/mav/stop"], ["POST", "/mav/state"]])(
+    "has no route for %s %s",
+    async (method, path) => {
+      const res = await provisioned({ mavlink: fakeMavlink() })(method, path, undefined);
+      expect(res.status).toBe(404);
+    },
+  );
 });

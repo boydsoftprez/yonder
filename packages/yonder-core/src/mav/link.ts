@@ -30,6 +30,18 @@ import type { EndpointStats } from "./router/stats.js";
  * decision below waits for a second sample before it will say yes.
  */
 export interface LinkState {
+  /**
+   * What the *serial link* is doing, plus one value this class never produces
+   * itself: `stopped`.
+   *
+   * R-MAV-09's flag belongs to whoever performed the stop, and that is
+   * `MavlinkRenderer` — it is the only thing that can put telemetry back on
+   * the air, and a stop it holds survives a pinned or adopted link that never
+   * sweeps again. So `MavlinkRenderer.state()` overlays `stopped` on the way
+   * past, and this class has no setter for it. One fact, one owner: an
+   * earlier draft kept a second copy of it here with no production caller,
+   * which is how two sources of truth start.
+   */
   phase: "searching" | "silent" | "noise" | "linked" | "stopped";
   device: string | null;
   baud: number | null;
@@ -113,7 +125,6 @@ export class LinkTracker {
   private readonly windowMs: number;
 
   private lastOutcome: DetectOutcome | null = null;
-  private isStopped = false;
 
   private heartbeatRing: number[] = [];
   private lastHeartbeatAtMs: number | null = null;
@@ -138,15 +149,9 @@ export class LinkTracker {
    * (see link.test.ts's "drops the old vehicle" case) — carrying it forward
    * would be reporting something this observation never measured, the same
    * mistake §6 made about ground stations one level up.
-   *
-   * Having reported back at all is also proof that detection is running
-   * again, so a `stopped()` from before this call no longer applies —
-   * re-detection (Task 11's `/mav/detect`) is the one explicit operator
-   * action that stops and restarts the router around a fresh probe.
    */
   observed(outcome: DetectOutcome): void {
     this.lastOutcome = outcome;
-    this.isStopped = false;
     this.heartbeatRing = [];
     this.lastHeartbeatAtMs = null;
   }
@@ -252,25 +257,20 @@ export class LinkTracker {
   }
 
   /**
-   * R-MAV-09. Ground-station routing and the serial link's own vehicle,
-   * speed and heartbeat history are all left exactly as they were: stopping
-   * telemetry is an operator choice about routing, not a fact about the
-   * autopilot, which never hears about it and keeps heartbeating over the
-   * UART regardless.
+   * What was measured. **Never `stopped`** — see `LinkState.phase`: R-MAV-09's
+   * flag has one owner and it is `MavlinkRenderer`, which overlays that value
+   * on the way past. Stopping telemetry is an operator choice about routing,
+   * not a fact about the autopilot, which never hears about it and keeps
+   * heartbeating over the UART regardless — so nothing here changes when one
+   * happens.
    */
-  stopped(): void {
-    this.isStopped = true;
-  }
-
   state(): LinkState {
     const now = this.clock.now();
     const outcome = this.lastOutcome;
 
-    const phase = this.isStopped
-      ? "stopped"
-      : outcome === null
-        ? "searching"
-        : outcome.kind === "found" ? "linked" : outcome.kind;
+    const phase = outcome === null
+      ? "searching"
+      : outcome.kind === "found" ? "linked" : outcome.kind;
 
     // Below two arrivals there is no interval to measure yet — a rate from
     // one heartbeat is a claim no measurement supports.

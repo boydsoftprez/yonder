@@ -2918,18 +2918,87 @@ is the property Step 3 is built around and which nothing had written down.
 ## Task 11: The loopback listener and the `/mav/*` routes
 
 **Files:**
-- Create: `packages/yonder-core/src/mav/listener.ts`, `listener.test.ts`
-- Modify: `packages/yonder-core/src/daemon/routes.ts`, `routes.test.ts`
+- Create: `packages/yonder-core/src/mav/listener.ts`, `listener.test.ts`, `check.ts`, `check.test.ts`
+- Modify: `packages/yonder-core/src/daemon/routes.ts`, `routes.test.ts`, `server.ts`, `server.wiring.test.ts`, `mav/link.ts`, `mav/renderer.ts`
 
 **Interfaces:**
 - Consumes: `HeartbeatScanner`, `LinkTracker`, `LOOPBACK_PORT`
-- Produces: routes `GET /mav/state` → `LinkState`; `POST /mav/detect`; `POST /mav/start`; `POST /mav/stop`; `GET /mav/check` → `{ autopilot, outbound, inbound }`, each `{ ok: boolean | null; detail: string }` — `null` meaning not attempted, which is what draws the dash rather than the cross (§8)
+- Produces: routes `GET /mav/state` → **`MavlinkStateBody`**, which is `{ link: LinkState; telemetryRunning: boolean; routerRunning: boolean }` and **not** a bare `LinkState` — see *What this task settled* below; `POST /mav/start` and `POST /mav/stop` → the same body; `POST /mav/detect` → that body plus `outcome: DetectOutcome` (`MavlinkDetectBody`); `GET /mav/check` → `PathCheck`, i.e. `{ autopilot, outbound, inbound }`, each `{ ok: boolean | null; detail: string }` — `null` meaning not attempted, which is what draws the dash rather than the cross (§8)
 
 - [ ] **Step 1: Write the failing tests** — a UDP socket on an ephemeral port fed a crafted heartbeat, asserting `LinkTracker` saw it; and route tests following the existing `/remote/state` cases in `routes.test.ts`.
 - [ ] **Step 2: Run and watch fail.**
 - [ ] **Step 3: Implement** the `dgram` listener bound to `127.0.0.1` only, and the five routes.
 - [ ] **Step 4: Run** `npx vitest run --root packages/yonder-core` — expected green, including the existing 69 route tests.
 - [ ] **Step 5: Commit** — `feat(mav): the loopback feed and the console's routes — R-MAV-05, R-MAV-10, R-DIA-04`
+
+### What this task settled, because the brief was silent and Task 12 builds on it
+
+**`GET /mav/state` answers with named halves, not one flat record:**
+`{ link: LinkState, telemetryRunning: boolean, routerRunning: boolean }`. `LinkState` is
+deliberately nothing but measurements about the *aircraft* (`mav/link.ts`, first paragraph)
+and what this device is doing with them is not; spreading them together would re-mix what was
+separated on purpose and would invite a later contributor to tidy the fields into `LinkState`,
+where the first thing to report a stale one would be a page in flight. `POST /mav/start`,
+`/mav/stop` and `/mav/detect` answer with the same body — `/mav/detect` adding `outcome` — so
+the page binds one shape and its Start/Stop key flips on the reply rather than on the next
+poll.
+
+**Two running fields, because a stop pulls them apart.** `telemetryRunning` is *is anything
+reaching the ground stations*; `routerRunning` is *is `mavlink-router` up at all*. They differ
+exactly while telemetry is stopped — see the next item — and folding them back into one
+boolean gives a console that claims telemetry is flowing whenever the process happens to be
+alive.
+
+**Stopping telemetry stops the sending, not the service.** `stopTelemetry()` does no
+`systemctl stop`. It regenerates `main.conf` with the ground-station endpoints removed and
+the TCP server off and restarts the router onto it; the `[UartEndpoint autopilot]` block and
+the `yonder` loopback copy stay, so the control plane goes on hearing the aircraft and the
+page shows *OK · Autopilot to Yonder* beside *— · Stopped by you*. An operator stops
+broadcasting; they do not ask to be blinded, and coming back is a restart rather than a full
+port-and-speed re-detection. `settle()` renders that stopped configuration whenever the flag
+is set (`toRender`), so no apply can put telemetry back on the air behind the operator — and
+`detectNow()` renders through the same function, or the *Look again now* button would have
+been a way to resume broadcasting. **`mavlink.ingest` is deliberately not touched**: it is a
+listening socket the operator opened behind its own R-MAV-07 warning and it is not a
+ground-station path, so the stop says out loud that it is still open rather than silently
+reversing another control's security decision. The only `systemctl stop` left in the class is
+`detectNow()`'s, which needs the serial port back.
+
+**`/mav/check` is a pure function in `mav/check.ts`, not logic in a route handler.** Choosing
+between `true`, `false` and `null` for three links across every phase is a decision, and this
+repository puts decisions in tested modules and calls them from routes — exactly as
+`networkState`, `modemState` and `displayFacts` already are. `routes.ts` reads the configured
+endpoints and `autocast` out of `config.yaml` and hands them in: `LinkState.groundStations`
+comes from the router's own counters and is empty for the first couple of seconds of every
+daemon's life, so "none configured" and "no reading yet" are different answers only the
+configuration can tell apart.
+
+**A datagram is a message, not a slice of a stream.** The listener gives each datagram its own
+`HeartbeatScanner`. Carrying the scanner's buffer across datagrams — right for a serial port —
+joins bytes that were never adjacent on the wire, and can therefore produce a heartbeat
+spanning a boundary that never existed. (It is *not* an unbounded-memory argument, though it
+reads like one: the scanner resyncs one byte at a time on a checksum mismatch and only waits
+within MAVLink's own 280-byte maximum, so the retained tail is bounded. Bounded and pointless
+to hold; the frame it can invent is the reason.)
+
+**`LinkTracker.stopped()` was withdrawn.** It had no production caller: `MavlinkRenderer`
+holds the operator-stop flag and overlays `phase: "stopped"` itself, because it is the only
+object that can undo one — with a pinned or an adopted link there is no sweep to come back
+through, so a flag in the tracker could never be cleared again. One fact, one owner.
+
+**The listener binds before the first render, not after the router starts.** §4's boot order
+puts it at step 5; binding it at step 0 costs nothing, cannot miss the first heartbeats, and
+avoids a router sending to a port with nothing behind it. Nothing depends on the ordering the
+other way.
+
+**Two requirements were sharpened**, both to write down a property the code now has and
+nothing said. **R-DIA-04**: the path check reports three links rather than a verdict, and a
+link nothing has attempted is reported as not attempted rather than as failed — without that
+written down, a later change could collapse the third state and nothing would say why that is
+wrong. **R-MAV-09**: a stop stops the sending rather than the service, the interface goes on
+reporting the aircraft throughout, and the R-MAV-07 ingest path is not reversed by it but is
+said out loud — otherwise "simplifying" the stop back to a `systemctl stop` would look like
+tidying.
 
 ---
 
@@ -2940,8 +3009,40 @@ is the property Step 3 is built around and which nothing had written down.
 - Nodes: `yonder-mav-state`, `yonder-mav-endpoints`, `yonder-mav-run`, `yonder-mav-check`
 
 **Interfaces:**
-- Consumes: `LinkState`, `DaemonClient`, `clientFor`, `fetched`, `readFailure` from `yonder-core`
+- Consumes, from `yonder-core`: `MavlinkStateBody`, `MavlinkDetectBody`, `PathCheck`, `CheckLink`, `LinkState`, `DetectOutcome`, plus `DaemonClient`, `clientFor`, `fetched`, `readFailure`
 - Produces: message payloads shaped for the widgets — every string already in words, so no widget learns a vocabulary (the rule `messageFor` in the remote package follows)
+
+**What Task 11 actually shipped, because these nodes are built against it.** The routes do not
+answer with a bare `LinkState`, and `messageFor` is not handed one by the daemon:
+
+| Route | Body |
+|---|---|
+| `GET /mav/state` | `MavlinkStateBody` — `{ link: LinkState; telemetryRunning: boolean; routerRunning: boolean }` |
+| `POST /mav/start`, `POST /mav/stop` | the same `MavlinkStateBody`, reflecting the action just taken |
+| `POST /mav/detect` | `MavlinkDetectBody` — that body plus `outcome: DetectOutcome` |
+| `GET /mav/check` | `PathCheck` — `{ autopilot, outbound, inbound }`, each a `CheckLink` `{ ok: boolean \| null; detail: string }` |
+
+So **`messageFor(state: LinkState, now?: number)` keeps its signature and the node passes it
+`body.link`**, reading `body.telemetryRunning` and `body.routerRunning` beside it. Three
+consequences worth having in front of you before writing the nodes:
+
+- **`telemetryRunning` is what `tel-runstop` and `stat-tel-bar.atboot` want**, not
+  `routerRunning`: it means *is anything reaching the ground stations*. `phase` reads `linked`
+  whether telemetry is flowing or deliberately switched off, so `messageFor` cannot answer this
+  from the link state alone.
+- **`routerRunning` is what says whether a heartbeat can arrive at all.** The two differ
+  exactly while telemetry is stopped: the router stays up carrying the flight controller link
+  and the loopback copy, so a stopped device still shows a live Autopilot row. A node that
+  greys the aircraft out on `!telemetryRunning` is the bug this distinction exists to prevent.
+- **`GET /mav/check` is already decided.** `pathCheck` (`yonder-core/src/mav/check.ts`) is a
+  pure function with its own tests and it has already chosen `true`/`false`/`null` and written
+  the sentence. `tel-chain-1..3` is `${mark} · ${detail}` — the node picks the mark from `ok`
+  (`—` for `null`, never a cross) and prints `detail` unchanged. Do not re-derive the wording
+  here; if a sentence is wrong, it is wrong in `check.ts`.
+
+`mavlink.autocast` and `mavlink.ingest.loopback_only` are **configuration**, not state, and
+come from `GET /config` — they are deliberately not on `/mav/state`. Note that a stop does not
+close the ingest path, so the *Accepting from* readout keeps agreeing with `config.yaml`.
 
 **The contract is already on the page.** Each node must emit exactly what the `mock-*` node
 it replaces emits today, so the page does not move when the fake is deleted:

@@ -433,32 +433,37 @@ describe("LinkTracker", () => {
     expect(t.state().traffic).toEqual({ rx: [0], tx: [0], peak: 0, windowMs: 2_000 });
   });
 
-  it("keeps the autopilot half alive when the operator stops telemetry (R-MAV-09)", () => {
-    const t = new LinkTracker();
-    t.observed({ kind: "found", device: "/dev/ttyAMA0", baud: 57600, vehicle: "ArduPlane", system: 1 });
-    t.stopped();
-    expect(t.state()).toMatchObject({ phase: "stopped", vehicle: "ArduPlane", baud: 57600 });
-  });
-
-  // R-MAV-09's other half: the loopback listener (Task 11) keeps handing the
-  // stopped tracker heartbeats the whole time telemetry is off, and that must
-  // not make the page claim telemetry is running again on its own.
-  it("does not let a heartbeat arriving while stopped revert the phase", () => {
+  /**
+   * R-MAV-09 has no setter here, and that is the point.
+   *
+   * An operator's stop is a fact about *this device's routing*, and the only
+   * object that can undo one is the renderer that performed it — with a
+   * pinned or an adopted link there is no sweep to come back through, so a
+   * flag held here could never be cleared again. It lived here with **no
+   * production caller at all** until it was withdrawn; `MavlinkRenderer`
+   * holds the flag and overlays `phase: "stopped"` itself, and this asserts
+   * that nothing in this class can produce that value on its own.
+   */
+  it("never reports a phase only the renderer can know about (R-MAV-09)", () => {
     const t = new LinkTracker({ clock: fakeClock() });
     t.observed({ kind: "found", device: "/dev/ttyAMA0", baud: 57600, vehicle: "ArduPlane", system: 1 });
-    t.stopped();
     t.heard(vehicle);
-    expect(t.state().phase).toBe("stopped");
+    expect(t.state().phase).toBe("linked");
+    expect("stopped" in t).toBe(false);
   });
 
-  // A fresh sweep is the one action that is unambiguously "telemetry is
-  // active again" — Task 10's renderer only re-detects as an explicit
-  // operator action, stopping and restarting the router around it.
-  it("clears stopped once a fresh detection sweep reports back", () => {
-    const t = new LinkTracker();
+  /**
+   * The other half of the same division. The loopback listener goes on
+   * handing heartbeats to this tracker the whole time telemetry is stopped —
+   * the autopilot never hears about the stop and keeps heartbeating over the
+   * UART — so everything measured here stays exactly as it was, and the
+   * page's "stopped" comes from the layer above rather than from a
+   * measurement being suppressed.
+   */
+  it("keeps the autopilot half alive whatever the operator did", () => {
+    const t = new LinkTracker({ clock: fakeClock() });
     t.observed({ kind: "found", device: "/dev/ttyAMA0", baud: 57600, vehicle: "ArduPlane", system: 1 });
-    t.stopped();
-    t.observed({ kind: "found", device: "/dev/ttyAMA0", baud: 57600, vehicle: "ArduPlane", system: 1 });
-    expect(t.state().phase).toBe("linked");
+    t.heard(vehicle);
+    expect(t.state()).toMatchObject({ vehicle: "ArduPlane", baud: 57600, lastHeardMs: 0 });
   });
 });

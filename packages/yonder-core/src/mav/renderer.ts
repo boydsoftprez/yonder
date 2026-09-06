@@ -195,11 +195,14 @@ export class MavlinkRenderer implements Renderer {
    * telemetry, somebody changed the palette, and the next render probed the
    * now-free port and started the router again on its own.
    *
-   * **Held here rather than in `LinkTracker`, and this class does not call
-   * `LinkTracker.stopped()`.** Two places holding one fact is how they stop
-   * agreeing, and the tracker has no way back out of `stopped()` except
-   * `observed()`, which only a sweep produces — so a pinned or adopted link,
-   * which never sweeps, would be stuck stopped for ever after one stop.
+   * **Held here, and nowhere else.** `LinkTracker` carried a `stopped()` of
+   * its own for a while, with no production caller: two places holding one
+   * fact is how they stop agreeing, and the tracker had no way back out of it
+   * except `observed()`, which only a sweep produces — so a pinned or adopted
+   * link, which never sweeps, would have been stuck stopped for ever after one
+   * stop. It was withdrawn rather than left dead, because a dead setter for a
+   * flag this class already owns is an invitation to wire it back in. This is
+   * the only owner, and `state()` below is the only thing that reports it.
    *
    * **And deliberately not persisted.** `autocast` is the answer to "should
    * telemetry be on after a boot" (R-MAV-08); a runtime stop that outlived a
@@ -235,33 +238,59 @@ export class MavlinkRenderer implements Renderer {
    */
   state(): LinkState {
     const measured = this.tracker.state();
-    // R-MAV-09. Reported over everything else: the autopilot may still be
-    // heartbeating happily down the wire, and what the page has to say is
-    // that nothing is being sent on.
-    if (this.stoppedByOperator) return { ...measured, phase: "stopped" };
     // A probe in this process has spoken (`device` is set by every outcome,
-    // found or not), or the operator stopped telemetry on purpose (R-MAV-09),
-    // or there is no router running to have adopted anything from. In all
-    // three the tracker's answer is the whole answer.
-    if (this.adopted === null || !this.running || measured.device !== null || measured.phase === "stopped") {
-      return measured;
-    }
-    return { ...measured, phase: "linked", device: this.adopted.device, baud: this.adopted.baud };
+    // found or not), or there is no router running to have adopted anything
+    // from. In both the tracker's answer is the whole answer. There is no
+    // case here for a stopped tracker: `stopped` is this class's own overlay
+    // below, and `LinkTracker` has no way to produce it.
+    const seen = this.adopted === null || !this.running || measured.device !== null
+      ? measured
+      : { ...measured, phase: "linked" as const, device: this.adopted.device, baud: this.adopted.baud };
+    // R-MAV-09, last and over everything else — and **after** the adopted link
+    // is merged rather than instead of it. A stop no longer takes the router
+    // down (`stopTelemetry`), so the flight controller link and the loopback
+    // copy are still up and the page goes on showing the port, the speed and
+    // the heartbeat while saying that nothing is being sent on. Returning
+    // early here would have thrown the port and speed away at exactly the
+    // moment the operator still wants to see them.
+    return this.stoppedByOperator ? { ...seen, phase: "stopped" } : seen;
   }
 
   /**
-   * Whether the router is on the air, as of the last time systemd was asked.
+   * **Whether anything is being sent to the ground stations.**
    *
-   * `LinkState` has no field for it, deliberately: every field there is a
-   * measurement about the *autopilot*, and whether the service is running is
-   * a fact about this device. But the page needs both — a link that was found
-   * while telemetry is deliberately off (R-MAV-09), or while the generated
-   * file could not be written, reads `linked` and is not flowing — and this
-   * is the only object that knows. Exposed rather than re-asked, because
-   * ADR-0006 puts every `systemctl` behind a renderer and the routes are not
-   * one.
+   * Not the same question as "is the process alive", and the two came apart
+   * the moment a stop stopped meaning `systemctl stop`: while telemetry is
+   * stopped `mavlink-router` is *running*, carrying the flight controller link
+   * and the loopback copy, and sending to nobody. This is the one that answers
+   * R-MAV-09 and drives the page's Start/Stop key; `routerRunning` below is
+   * the other one. **They must not be reunified** — a reader who folds them
+   * back together gets a page that says telemetry is flowing whenever the
+   * service happens to be up.
+   *
+   * `LinkState` has no field for either, deliberately: every field there is a
+   * measurement about the *autopilot*, and both of these are facts about this
+   * device. But the page needs them — a link that was found while telemetry is
+   * deliberately off, or while the generated file could not be written, reads
+   * `linked` and is not flowing — and this is the only object that knows.
+   * Exposed rather than re-asked, because ADR-0006 puts every `systemctl`
+   * behind a renderer and the routes are not one.
    */
   get telemetryRunning(): boolean {
+    return this.running && !this.stoppedByOperator;
+  }
+
+  /**
+   * Whether `mavlink-router` is on the air at all, as of the last time systemd
+   * was asked.
+   *
+   * The question the *path check* needs and `telemetryRunning` no longer
+   * answers: the loopback copy this device hears the autopilot on is carried
+   * by the router whether or not the ground stations are being sent to, so
+   * "can anything arrive on `:14559`" and "is telemetry flowing" are now two
+   * facts. Under a stop they differ, which is the entire point of the stop.
+   */
+  get routerRunning(): boolean {
     return this.running;
   }
 
@@ -316,9 +345,15 @@ export class MavlinkRenderer implements Renderer {
     this.cancelRetry();
 
     if (await this.isActive()) {
+      // **The only `systemctl stop` left in this class.** Re-detection needs
+      // the serial port and the router is holding it, which is why this one
+      // survives — a stop of telemetry no longer does (`stopTelemetry`).
       this.log(
         `mavlink: stopping ${ROUTER_UNIT} to look for the autopilot again — `
-          + "every ground station receiving now is interrupted until it comes back",
+          + (this.stoppedByOperator
+            ? "telemetry is already stopped, so nothing is interrupted, but this device stops hearing "
+              + "the aircraft until it comes back"
+            : "every ground station receiving now is interrupted until it comes back"),
       );
       await this.systemctl("stop");
       this.running = false;
@@ -339,28 +374,76 @@ export class MavlinkRenderer implements Renderer {
 
     const link = { device: outcome.device, baud: outcome.baud };
     this.remember(link);
-    if (this.write(config.mavlink, link)) {
+    // Through `toRender`, like every other write. Rendering `config.mavlink`
+    // here would put the ground stations — and the TCP server — back on the
+    // air on an operator who had switched them off, from a button that only
+    // asked to look for the flight controller again.
+    const wanted = this.toRender(config.mavlink);
+    if (this.write(wanted, link)) {
       this.adopted = link;
-      await this.startRouter(config.mavlink, "start");
+      await this.startRouter(wanted, "start");
     }
     return outcome;
   }
 
   /**
-   * Take telemetry off the air, and keep it off until someone says otherwise
+   * Stop *sending*, and keep it stopped until someone says otherwise
    * (R-MAV-09).
    *
-   * The flag is set **before** the `systemctl`, deliberately: a stop that
-   * failed still means the operator asked for one, and the next apply must
-   * not read a still-running router as consent to leave it running.
+   * **This does not stop `mavlink-router`.** An operator stops telemetry to
+   * stop broadcasting, not to blind themselves: killing the service would take
+   * the flight controller link and the loopback copy down with the ground
+   * stations, so the console would lose all sight of whether the aircraft is
+   * even alive, and coming back would cost a full port-and-speed re-detection.
+   * Instead the *configuration* changes — the ground-station endpoints come
+   * out and the TCP server they connect to goes off — and the router is
+   * restarted onto it. The UART endpoint and the `yonder` loopback copy stay,
+   * so `heard()` goes on being called and the Autopilot row of the page stays
+   * lit beside a Ground stations row that reads *stopped by you*.
+   *
+   * Both directions are now a configuration change plus a restart, which is
+   * the mechanism every other change in this class already uses — `settle()`
+   * does the whole of it, and `toRender` is the one place that knows a stop
+   * is in force.
+   *
+   * The flag is set **before** the render, deliberately: a stop that failed
+   * still means the operator asked for one, and the next apply must not read a
+   * still-broadcasting router as consent to go on broadcasting.
    */
   async stopTelemetry(): Promise<void> {
+    const config = this.lastConfig;
+    if (config === null) {
+      throw new Error("no configuration has been rendered yet, so there is nothing to stop telemetry from");
+    }
     this.stoppedByOperator = true;
-    // Any sweep waiting to run would start the router again on its way out.
+    // A sweep waiting to run would render against the configuration as
+    // written; it is re-armed by settle() below if there is still nothing to
+    // find, and will then render the stopped configuration instead.
     this.cancelRetry();
-    this.log(`mavlink: stopping telemetry — every ground station receiving now stops receiving`);
-    await this.systemctl("stop");
-    this.running = await this.isActive();
+    this.log(
+      "mavlink: stopping telemetry — every ground station receiving now stops receiving; "
+        + "the flight controller link stays up, so this device goes on hearing the aircraft",
+    );
+    // **R-MAV-07 is not part of this decision, and silence about that would be
+    // its own hazard.** Ingest is a command path the operator opened
+    // deliberately, behind its own warning, and it is not a ground-station
+    // path — so stopping the broadcast does not retract it. Said at the moment
+    // of the stop rather than left for the operator to infer, because
+    // "telemetry is off" and "nothing can command the vehicle" are exactly the
+    // two things that would otherwise be confused.
+    if (!config.mavlink.ingest.loopback_only) {
+      this.log(
+        "mavlink: MAVLink ingest is still open on every interface — stopping telemetry does not close it, "
+          + "and anything that can reach this device can still command the vehicle (R-MAV-07)",
+      );
+    }
+    try {
+      await this.settle(config, { force: true });
+    } catch (error) {
+      // Same reason render() cannot throw: this arrives on a route, and a
+      // telemetry fault is worth a line, never an exception nobody catches.
+      this.log(`mavlink: telemetry could not be stopped: ${(error as Error).message}`);
+    }
   }
 
   /**
@@ -378,7 +461,14 @@ export class MavlinkRenderer implements Renderer {
     }
     this.stoppedByOperator = false;
     this.cancelRetry();
+    this.log("mavlink: starting telemetry — the configured ground stations begin receiving again");
     try {
+      // The mirror image of stopTelemetry: the operator's own configuration is
+      // rendered again, verbatim, and the router restarted onto it. Nothing was
+      // edited in config.yaml by the stop, so nothing has to be recovered — and
+      // `startRouter` re-announces an open ingest path at the moment it is bound
+      // again (R-MAV-07), rather than leaving the log's last word on the subject
+      // to be the stop's.
       await this.settle(config, { force: true });
     } catch (error) {
       this.log(`mavlink: telemetry could not be brought up: ${(error as Error).message}`);
@@ -387,31 +477,81 @@ export class MavlinkRenderer implements Renderer {
 
   // ---------------------------------------------------------------- internals
 
+  /**
+   * The `mavlink` section to *render*, which is not always the one the
+   * operator wrote.
+   *
+   * R-MAV-09's stop is a change to what is sent, not a service that is killed
+   * (see `stopTelemetry`), and this is the one place that knows it. The three
+   * ground-station endpoints come out and the TCP server goes off — R-MAV-04
+   * calls that server a way for ground stations that prefer TCP to connect, so
+   * it is one of their paths and it goes with them. What stays is everything
+   * the console needs to keep watching: the `[UartEndpoint autopilot]` block
+   * and, by R-MAV-05, the `yonder` loopback copy, which `routerConfig` emits
+   * unconditionally and gives no setting that could remove.
+   *
+   * **`ingest` is deliberately untouched.** It is not a ground-station path —
+   * it is a listening socket an operator opened on purpose, having read a
+   * warning band that says every device on every network can then command the
+   * aircraft (R-MAV-07). Reversing that from a different control would mean one
+   * switch silently overriding another's explicit security decision, and would
+   * leave the page's "Accepting from" readout disagreeing with `config.yaml`.
+   * `stopTelemetry` says out loud that the path is still open instead. Note
+   * that removing the endpoints *does* close every command path that existed
+   * because telemetry was being sent: a `Mode = Normal` UDP peer is
+   * bidirectional, and the TCP server is gone with it.
+   *
+   * No new parameter on `routerConfig`: the shape wanted is exactly what that
+   * pure function already produces from a section with no endpoints and no TCP
+   * server, so this asks for it in its own vocabulary rather than teaching it a
+   * second one.
+   */
+  private toRender(mavlink: Config["mavlink"]): Config["mavlink"] {
+    if (!this.stoppedByOperator) return mavlink;
+    return {
+      ...mavlink,
+      endpoints: [],
+      // Redundant today — `routerConfig` already writes `TcpServerPort = 0`
+      // whenever ingest is closed — and stated anyway, because this says what
+      // a stop means rather than relying on how that function happens to gate
+      // two switches together.
+      tcp_server: { ...mavlink.tcp_server, enabled: false },
+    };
+  }
+
   private async settle(config: Config, opts: { force?: boolean } = {}): Promise<void> {
     const mavlink = config.mavlink;
+    // What is actually rendered. Everything below reads this rather than
+    // `mavlink`, deliberately: a single miss would put the ground stations
+    // back on the air behind an operator who had switched them off.
+    const wanted = this.toRender(mavlink);
     this.running = await this.isActive();
 
     // Whether a router that is *not* running may be started by this pass.
     //
-    // `autocast` is the boot-time answer (R-MAV-08) and `force` is an
-    // operator pressing Start (R-MAV-09) — but an operator who pressed Stop
-    // outranks `autocast` until they say otherwise, or this apply would put
-    // telemetry back on the air because somebody changed the palette.
-    const mayStart = (opts.force === true || mavlink.autocast) && !this.stoppedByOperator;
+    // `autocast` is the boot-time answer (R-MAV-08) and `force` is an operator
+    // pressing Start or Stop (R-MAV-09). **No longer gated on
+    // `stoppedByOperator`:** what that flag now controls is *what is rendered*,
+    // and the configuration rendered under a stop sends to nobody — so starting
+    // it cannot put telemetry back on the air, and refusing to start it would
+    // only cost the operator the sight of their own aircraft. The flag still
+    // outranks `autocast` in the sense that matters: no apply can make this
+    // device broadcast again while it is set.
+    const mayStart = opts.force === true || mavlink.autocast;
 
     const link = await this.resolve(mavlink);
     if (link === null) return;
 
-    const desired = routerConfig(mavlink, link);
+    const desired = routerConfig(wanted, link);
     const current = this.read();
     if (desired === current) {
       this.adopted = link;
       // Nothing about the router's configuration changed.
-      if (!this.running && mayStart) await this.startRouter(mavlink, "start");
+      if (!this.running && mayStart) await this.startRouter(wanted, "start");
       return;
     }
 
-    if (!this.write(mavlink, link)) {
+    if (!this.write(wanted, link)) {
       // Nothing is flowing and nothing holds the port, so trying again costs
       // exactly what §3 says a retry costs. A full disk that empties, or a
       // directory an installer creates a minute later, both heal here.
@@ -423,10 +563,10 @@ export class MavlinkRenderer implements Renderer {
     if (this.running) {
       // The only restart this class performs on an apply, and only because
       // the file the router is running under is no longer the file the
-      // configuration asks for.
-      await this.startRouter(mavlink, "restart");
+      // configuration asks for. A stop and a start are both that same case.
+      await this.startRouter(wanted, "restart");
     } else if (mayStart) {
-      await this.startRouter(mavlink, "start");
+      await this.startRouter(wanted, "start");
     }
   }
 
@@ -645,9 +785,16 @@ export class MavlinkRenderer implements Renderer {
 
   private async startRouter(mavlink: Config["mavlink"], verb: "start" | "restart"): Promise<void> {
     if (verb === "restart") {
+      // `mavlink` here is always the *rendered* section, so an empty endpoint
+      // list is the honest test for "nobody is receiving": it covers a stop
+      // (`toRender` empties it) and a device that has none configured, and in
+      // both "interrupted while it comes back" would promise a return that is
+      // not coming.
       this.log(
-        `mavlink: restarting ${ROUTER_UNIT} because its configuration changed — `
-          + "every ground station receiving now is interrupted while it comes back",
+        mavlink.endpoints.length === 0
+          ? `mavlink: restarting ${ROUTER_UNIT} — the flight controller link stays up and nothing is sent on`
+          : `mavlink: restarting ${ROUTER_UNIT} because its configuration changed — `
+            + "every ground station receiving now is interrupted while it comes back",
       );
     }
     const ok = await this.systemctl(verb);

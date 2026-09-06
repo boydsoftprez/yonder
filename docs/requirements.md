@@ -23,7 +23,7 @@ land later.
 | R-MAV-06 | Never place ground-station MAVLink traffic on a path that a control-plane restart can interrupt | 1 |
 | R-MAV-07 | Bind MAVLink ingest to loopback by default; accepting MAVLink from a non-loopback interface requires explicit configuration and is logged | 1 |
 | R-MAV-08 | Start telemetry automatically at boot, to the configured endpoints, with no operator action | 1 |
-| R-MAV-09 | Allow telemetry to be stopped and started at runtime | 2 |
+| R-MAV-09 | **Allow telemetry to be stopped and started at runtime, and stop the sending rather than the service.** An operator stops telemetry to stop broadcasting, not to lose sight of the aircraft — so stopping takes the ground stations, and the TCP server they connect to, out of what is generated, and leaves the flight-controller link and the control plane's own loopback copy running. The interface goes on reporting heartbeat, port, speed and vehicle throughout, and starting again is a restart rather than a fresh port-and-speed detection. **A stop is not a security control**: the separately-configured path by which MAVLink is accepted from the network (R-MAV-07) is an explicit decision of the operator's and is not reversed by this one — so the moment telemetry is stopped, the interface says plainly that the path is still open, because *telemetry is off* and *nothing can command the vehicle* are otherwise exactly the two things that get confused. No configuration change may resume sending while a stop is in force | 2 |
 | R-MAV-10 | Report link state: heartbeat present, telemetry running, endpoints in use | 1 |
 | R-MAV-11 | Support all ArduPilot vehicle types, not fixed-wing alone | 1 |
 | R-MAV-12 | Support PX4 | 3 |
@@ -204,7 +204,7 @@ Parameter writes are vehicle commands. R-CMD applies to every requirement here.
 | R-DIA-01 | Ping an arbitrary host from the device | 2 |
 | R-DIA-02 | Check general internet reachability | 2 |
 | R-DIA-03 | Measure available uplink bandwidth on demand | 2 |
-| R-DIA-04 | Verify the MAVLink path end to end | 2 |
+| R-DIA-04 | **Verify the MAVLink path end to end, and report it as a chain rather than a verdict.** The three links — the flight controller to Yonder, Yonder to the ground stations, and a ground station back to Yonder — are reported separately, each carrying the reason for its own state, because they fail for different reasons and send the operator to different places. **A link nothing has attempted is reported as not attempted, never as failed.** Telemetry an operator deliberately stopped, a device that has been powered for two seconds, and a ground station that has never sent anything are all cases where nothing has gone wrong and nothing has been established either; reporting any of them as a failure teaches an operator that the check is noise, which costs them the one time it is not. That is a third state in the answer itself, not a shade of colour a page chooses — a page given only pass and fail cannot draw the difference | 2 |
 | R-DIA-05 | Show a live, timestamped activity log | 1 |
 | R-DIA-06 | Produce a support bundle containing logs and configuration, with secrets removed | 2 |
 

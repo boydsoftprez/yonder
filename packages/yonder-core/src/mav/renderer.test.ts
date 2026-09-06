@@ -9,6 +9,7 @@ import type { OpenPort } from "./detect.js";
 import { routerConfig } from "./router/config.js";
 import { fakeClock, heartbeatV2, validSysStatusBytes } from "./testing.js";
 import { MAVLINK_DEVICES, MavlinkRenderer, ROUTER_CONF_PATH, ROUTER_UNIT, linkFromConf } from "./renderer.js";
+import { LinkTracker } from "./link.js";
 
 /**
  * Every command this renderer runs is answered by a fake, and every byte it
@@ -78,7 +79,12 @@ const systemctl = (calls: string[][]) => calls.filter((a) => a[0] === "systemctl
  * serial table is mutable, so one test can unplug a flight controller between
  * two renders — which is the case a hint has to survive being wrong about.
  */
-function harness(opts: { reply?: Reply; serial?: Record<string, Record<number, Uint8Array>> } = {}) {
+function harness(opts: {
+  reply?: Reply;
+  serial?: Record<string, Record<number, Uint8Array>>;
+  /** The shared tracker, when a test needs to play the loopback listener. */
+  tracker?: LinkTracker;
+} = {}) {
   const dir = mkdtempSync(join(tmpdir(), "yonder-mav-"));
   const confPath = join(dir, "etc", "main.conf");
   const hintPath = join(dir, "var", "mavlink-link.json");
@@ -109,7 +115,10 @@ function harness(opts: { reply?: Reply; serial?: Record<string, Record<number, U
 
   const clock = fakeClock();
   const log = vi.fn();
-  const make = () => new MavlinkRenderer({ run, open, confPath, hintPath, clock, log });
+  const make = () => new MavlinkRenderer({
+    run, open, confPath, hintPath, clock, log,
+    ...(opts.tracker === undefined ? {} : { tracker: opts.tracker }),
+  });
 
   return { dir, confPath, hintPath, calls, opened, serial, clock, log, make, renderer: make() };
 }
@@ -570,29 +579,136 @@ describe("MavlinkRenderer — a pinned field the router is not honouring", () =>
 });
 
 /**
- * R-MAV-09. Stopping telemetry is an operator's decision about routing, and an
- * apply that has nothing to do with telemetry must not overturn it — which is
- * what happened while `settle()` consulted only `autocast`: the stopped router
- * left the port free, the next render swept it, and `autocast` started it
- * again because somebody changed the palette.
+ * R-MAV-09. **Stopping telemetry stops the sending, not the service.**
+ *
+ * An operator stops telemetry to stop broadcasting, not to blind themselves.
+ * `systemctl stop` would take the flight controller link and the loopback copy
+ * down with the ground stations — no sight of whether the aircraft is even
+ * alive, and a full port-and-speed re-detection to come back. So a stop is a
+ * configuration change like every other: the ground-station endpoints come out,
+ * the TCP server they connect to goes off, the router is restarted onto the
+ * remainder, and the console goes on hearing the aircraft the whole time.
+ *
+ * The apply that has nothing to do with telemetry must still not overturn it,
+ * which is what happened while `settle()` consulted only `autocast`.
  */
 describe("MavlinkRenderer — telemetry stopped at runtime", () => {
+  const withStation = () => config({ endpoints: [{ name: "gcs0", host: "10.0.0.9", port: 14550 }] });
+
+  /**
+   * The mechanism, asserted as a mechanism: **no `systemctl stop` at all.**
+   * Mutate the stop back to one and this is the test that says so.
+   */
+  it("stops the sending without stopping the service", async () => {
+    const u = unit("inactive");
+    const h = harness({ reply: u.reply, serial: heartbeatAt("/dev/ttyAMA0", 57600) });
+
+    await h.renderer.render(withStation());
+    expect(readConf(h.confPath)).toContain("Address = 10.0.0.9");
+
+    await h.renderer.stopTelemetry();
+
+    expect(systemctl(h.calls)).not.toContain("stop");
+    expect(u.active).toBe(true);
+    // The ground stations are gone from the generated file, which is what
+    // "nothing is being sent" actually consists of.
+    expect(readConf(h.confPath)).not.toContain("Address = 10.0.0.9");
+    expect(readConf(h.confPath)).not.toContain("[UdpEndpoint gcs0]");
+    // R-MAV-04's TCP server is one of the ground stations' own paths, so it
+    // goes with them — written as `0`, never omitted, or the router would
+    // start its own default listener.
+    expect(readConf(h.confPath)).toContain("TcpServerPort = 0");
+    // And the restart it performs must not promise a return that is not
+    // coming: "interrupted while it comes back" is the right line for a
+    // configuration change and exactly the wrong one for a deliberate stop.
+    const said = h.log.mock.calls.map((c) => String(c[0])).join("\n");
+    expect(said).toMatch(/nothing is sent on/);
+    expect(said).not.toMatch(/interrupted while it comes back/);
+    h.renderer.close();
+  });
+
+  /** And what stays: everything the console needs to keep watching. */
+  it("keeps the flight controller link and the loopback copy up (R-MAV-05)", async () => {
+    const u = unit("inactive");
+    const h = harness({ reply: u.reply, serial: heartbeatAt("/dev/ttyAMA0", 57600) });
+    await h.renderer.render(withStation());
+
+    await h.renderer.stopTelemetry();
+
+    const conf = readConf(h.confPath) ?? "";
+    expect(conf).toContain("[UartEndpoint autopilot]");
+    expect(conf).toContain("Device = /dev/ttyAMA0");
+    expect(conf).toContain("[UdpEndpoint yonder]");
+    expect(conf).toContain("Port = 14559");
+    h.renderer.close();
+  });
+
+  /**
+   * The point of all of it. The loopback listener goes on handing heartbeats
+   * to the shared tracker while telemetry is stopped, and the page shows the
+   * aircraft — port, speed, rate and all — beside a ground-station half that
+   * reads *stopped by you*.
+   */
+  it("goes on hearing the aircraft while telemetry is stopped", async () => {
+    const u = unit("inactive");
+    const clockedTracker = new LinkTracker();
+    const h = harness({ reply: u.reply, serial: heartbeatAt("/dev/ttyAMA0", 57600), tracker: clockedTracker });
+    await h.renderer.render(withStation());
+
+    await h.renderer.stopTelemetry();
+    // What the listener does, every second, the whole time telemetry is off.
+    clockedTracker.heard({ system: 1, component: 1, vehicleType: 1, autopilot: 3, fromVehicle: true });
+
+    const state = h.renderer.state();
+    expect(state.phase).toBe("stopped");
+    expect(state.lastHeardMs).not.toBeNull();
+    // And the link's own identity survives the overlay, because the operator
+    // still wants to see which port and speed their aircraft is on.
+    expect(state).toMatchObject({ device: "/dev/ttyAMA0", baud: 57600, vehicle: "ArduPlane" });
+    h.renderer.close();
+  });
+
+  /**
+   * Two facts, and a stop is what pulls them apart. Folding them back into one
+   * boolean gives a page that claims telemetry is flowing whenever the process
+   * happens to be alive.
+   */
+  it("reports telemetry off and the router up at the same time", async () => {
+    const u = unit("inactive");
+    const h = harness({ reply: u.reply, serial: heartbeatAt("/dev/ttyAMA0", 57600) });
+    await h.renderer.render(withStation());
+    expect(h.renderer.telemetryRunning).toBe(true);
+    expect(h.renderer.routerRunning).toBe(true);
+
+    await h.renderer.stopTelemetry();
+
+    expect(h.renderer.telemetryRunning).toBe(false);
+    expect(h.renderer.routerRunning).toBe(true);
+    h.renderer.close();
+  });
+
   it("stays stopped through an apply that has nothing to do with it", async () => {
     const u = unit("inactive");
     const h = harness({ reply: u.reply, serial: heartbeatAt("/dev/ttyAMA0", 57600) });
 
-    await h.renderer.render(config({}, { ui: { editor: {}, theme: "day" } }));
+    await h.renderer.render(withStation());
     expect(systemctl(h.calls).filter((v) => v === "start")).toHaveLength(1);
 
     await h.renderer.stopTelemetry();
     const before = h.calls.length;
 
-    await h.renderer.render(config({}, { ui: { editor: {}, theme: "night" } }));
+    await h.renderer.render(config(
+      { endpoints: [{ name: "gcs0", host: "10.0.0.9", port: 14550 }] },
+      { ui: { editor: {}, theme: "night" } },
+    ));
 
+    // Not even a restart: the stopped configuration is already what is on
+    // disk, so an unrelated apply is a no-op exactly as it is when telemetry
+    // is running.
     const after = systemctl(h.calls.slice(before));
     expect(after).not.toContain("start");
     expect(after).not.toContain("restart");
-    expect(u.active).toBe(false);
+    expect(readConf(h.confPath)).not.toContain("Address = 10.0.0.9");
     expect(h.renderer.telemetryRunning).toBe(false);
     expect(h.renderer.state().phase).toBe("stopped");
     h.renderer.close();
@@ -614,32 +730,143 @@ describe("MavlinkRenderer — telemetry stopped at runtime", () => {
     expect(h.renderer.state().phase).toBe("linked");
   });
 
-  it("refuses to be restarted by a sweep it had already scheduled", async () => {
-    // Nothing found, so a retry is armed; the operator then stops telemetry
-    // before it fires. The retry must not be what puts the router back.
+  /** The round trip: the operator's own endpoints come back, verbatim. */
+  it("puts the ground stations back exactly as they were configured", async () => {
+    const u = unit("inactive");
+    const h = harness({ reply: u.reply, serial: heartbeatAt("/dev/ttyAMA0", 57600) });
+    await h.renderer.render(withStation());
+    const flowing = readConf(h.confPath);
+
+    await h.renderer.stopTelemetry();
+    expect(readConf(h.confPath)).not.toBe(flowing);
+    await h.renderer.startTelemetry();
+
+    expect(readConf(h.confPath)).toBe(flowing);
+    expect(h.renderer.telemetryRunning).toBe(true);
+    h.renderer.close();
+  });
+
+  /**
+   * **R-MAV-07 is not part of this decision, and the operator is told so.**
+   *
+   * Ingest is a listening socket an operator opened deliberately, behind a
+   * warning band that says every device on every network can then command the
+   * aircraft. It is not a ground-station path, so stopping the broadcast does
+   * not retract it — and leaving that unsaid is how "telemetry is off" gets
+   * confused with "nothing can command the vehicle".
+   */
+  it("leaves the ingest path exactly as the operator set it, and says so", async () => {
+    const u = unit("inactive");
+    const h = harness({ reply: u.reply, serial: heartbeatAt("/dev/ttyAMA0", 57600) });
+    const open = config({
+      endpoints: [{ name: "gcs0", host: "10.0.0.9", port: 14550 }],
+      ingest: { loopback_only: false },
+    });
+    await h.renderer.render(open);
+    expect(readConf(h.confPath)).toContain("[UdpEndpoint inbound]");
+
+    await h.renderer.stopTelemetry();
+
+    expect(readConf(h.confPath)).toContain("[UdpEndpoint inbound]");
+    const said = h.log.mock.calls.map((c) => String(c[0])).join("\n");
+    expect(said).toMatch(/ingest is still open/i);
+    expect(said).toMatch(/can still command the vehicle/i);
+    h.renderer.close();
+  });
+
+  /**
+   * **The case where taking the TCP server down is a decision rather than a
+   * coincidence.**
+   *
+   * `routerConfig` writes `TcpServerPort = 0` on its own whenever ingest is
+   * closed, so with the shipped defaults a stop that forgot the server would
+   * look identical. With ingest open the server is genuinely listening, and
+   * R-MAV-04 calls it a way for ground stations that prefer TCP to connect —
+   * so it is one of their paths and it goes with them, or "stopped" would
+   * leave a ground station still able to attach and receive.
+   */
+  it("takes the TCP server down even where nothing else would have", async () => {
+    const u = unit("inactive");
+    const h = harness({ reply: u.reply, serial: heartbeatAt("/dev/ttyAMA0", 57600) });
+    const open = config({
+      endpoints: [{ name: "gcs0", host: "10.0.0.9", port: 14550 }],
+      tcp_server: { enabled: true, port: 5760 },
+      ingest: { loopback_only: false },
+    });
+    await h.renderer.render(open);
+    expect(readConf(h.confPath)).toContain("TcpServerPort = 5760");
+
+    await h.renderer.stopTelemetry();
+
+    expect(readConf(h.confPath)).toContain("TcpServerPort = 0");
+    h.renderer.close();
+  });
+
+  // A closed ingest path must not draw the warning: a line an operator reads
+  // every time they press Stop is a line they stop reading.
+  it("says nothing about ingest when it is closed", async () => {
+    const u = unit("inactive");
+    const h = harness({ reply: u.reply, serial: heartbeatAt("/dev/ttyAMA0", 57600) });
+    await h.renderer.render(withStation());
+
+    await h.renderer.stopTelemetry();
+
+    expect(h.log.mock.calls.map((c) => String(c[0])).join("\n")).not.toMatch(/ingest is still open/i);
+    h.renderer.close();
+  });
+
+  /**
+   * A button that only asked to look for the flight controller again must not
+   * be a way to put the ground stations back on the air.
+   */
+  it("does not resume broadcasting when a re-probe is asked for while stopped", async () => {
+    const u = unit("inactive");
+    const h = harness({ reply: u.reply, serial: heartbeatAt("/dev/ttyAMA0", 57600) });
+    await h.renderer.render(withStation());
+    await h.renderer.stopTelemetry();
+
+    await h.renderer.detectNow();
+
+    expect(readConf(h.confPath)).not.toContain("Address = 10.0.0.9");
+    expect(h.renderer.telemetryRunning).toBe(false);
+    expect(h.renderer.state().phase).toBe("stopped");
+    h.renderer.close();
+  });
+
+  /**
+   * A sweep armed before the stop still runs, and **the router it finds a link
+   * for is started** — §3's cadence costs nothing, and a device whose operator
+   * switched off broadcasting has not asked to stop being shown their
+   * aircraft. This is why `settle()` no longer gates starting on the stop
+   * flag: what that flag decides is *what is rendered*, and the configuration
+   * rendered under a stop sends to nobody, so starting it cannot put telemetry
+   * back on the air.
+   *
+   * Both halves are asserted, because each without the other is a different
+   * bug: the link coming up with nobody being sent to, and nobody being sent
+   * to with the link never coming up.
+   */
+  it("lets a sweep it had already scheduled bring the link up, and send to nobody", async () => {
     const u = unit("inactive");
     const h = harness({ reply: u.reply, serial: { "/dev/ttyAMA0": SILENT } });
 
-    await h.renderer.render(config());
+    await h.renderer.render(withStation());
     await h.renderer.stopTelemetry();
+    expect(u.active).toBe(false);
 
     h.serial["/dev/ttyAMA0"] = { 57600: heartbeatV2(1, 1, 3) };
-    const commands = h.calls.length;
-    const opens = h.opened.length;
     h.clock.advance(30_000);
     await settle();
 
-    expect(systemctl(h.calls)).not.toContain("start");
-    expect(u.active).toBe(false);
-    // Two independent guards, asserted independently. The sweep is cancelled,
-    // so nothing runs at all — a device an operator switched off must not go
-    // on opening its serial port every thirty seconds for ever …
-    expect(h.calls).toHaveLength(commands);
-    expect(h.opened).toHaveLength(opens);
-    // … and `settle()` would refuse to start it even if one did fire, which is
-    // what protects a sweep that was armed by some other path.
-    await h.renderer.render(config());
-    expect(systemctl(h.calls)).not.toContain("start");
+    // The autopilot half is alive again: the router is up, so the loopback
+    // copy can deliver and the page has something to show …
+    expect(systemctl(h.calls)).toContain("start");
+    expect(u.active).toBe(true);
+    expect(h.renderer.routerRunning).toBe(true);
+    expect(h.renderer.state()).toMatchObject({ phase: "stopped", device: "/dev/ttyAMA0", baud: 57600 });
+    // … and nothing is being sent on.
+    expect(readConf(h.confPath)).not.toContain("Address = 10.0.0.9");
+    expect(h.renderer.telemetryRunning).toBe(false);
     h.renderer.close();
   });
 });

@@ -23,6 +23,9 @@ import type { Versions } from "../system/versions.js";
 import { DEFAULT_CONFIG, ZEROTIER_NETWORK_ID } from "../schema/config.js";
 import { publishableApPassphrase } from "../net/profiles.js";
 import type { RemoteState } from "../remote/state.js";
+import { pathCheck } from "../mav/check.js";
+import type { LinkState } from "../mav/link.js";
+import type { DetectOutcome } from "../mav/detect.js";
 
 export interface RouterDeps {
   engine: ApplyEngine;
@@ -105,6 +108,95 @@ export interface RouterDeps {
    * operator asked for and one the device ran itself are the same evidence.
    */
   testPath?: (path: PathName) => Promise<boolean>;
+  /**
+   * The telemetry link, read and driven. **Absent when this build has no way
+   * to do telemetry at all**, which is the ordinary state of every device
+   * today: `MavlinkRenderer` is assembled only when a caller supplies a way
+   * to open a serial port, and nothing in this repository implements one yet
+   * (`BuildRenderersOptions.mavlink`). Every `/mav/*` route then says so with
+   * a 503 naming the absence.
+   */
+  mavlink?: MavlinkControl;
+}
+
+/**
+ * The telemetry link as the console's routes need it.
+ *
+ * Injected as an interface rather than taken as a `MavlinkRenderer`, exactly
+ * as `DiagProbes` is and for the same reason: ADR-0006 puts every `systemctl`
+ * behind a renderer, and a route is not one. This router asks systemd nothing,
+ * opens no serial port and runs no command — and a route test needs a plain
+ * object rather than a whole renderer.
+ *
+ * `MavlinkRenderer` satisfies this shape as it stands; `daemon/server.ts`
+ * passes the renderer straight in.
+ */
+export interface MavlinkControl {
+  /** Everything measured about the aircraft's link. */
+  state(): LinkState;
+  /**
+   * Whether anything is being sent to the ground stations (R-MAV-09).
+   *
+   * A property rather than a method because the renderer exposes it as a
+   * getter — which also means a route reads it afresh on every request rather
+   * than capturing whatever it was when the router was assembled.
+   */
+  readonly telemetryRunning: boolean;
+  /**
+   * Whether `mavlink-router` is on the air at all.
+   *
+   * Not the same question. A stop takes the ground stations out of the
+   * generated file and restarts the router onto it, so the service stays up
+   * carrying the flight controller link and the loopback copy: telemetry is
+   * off and the console goes on hearing the aircraft. The path check needs
+   * both and would draw the Autopilot row wrong with either alone.
+   */
+  readonly routerRunning: boolean;
+  /** Stop the router, sweep the port it was holding, start it again. */
+  detectNow(): Promise<DetectOutcome>;
+  /** R-MAV-09, both halves. */
+  startTelemetry(): Promise<void>;
+  stopTelemetry(): Promise<void>;
+}
+
+/**
+ * What `GET /mav/state` answers with — and what the two run routes and the
+ * re-probe answer with too, so the page binds one shape.
+ *
+ * **Two named halves, not one flat record.** `LinkState` is deliberately
+ * nothing but measurements about the *aircraft* (`mav/link.ts` says so in its
+ * first paragraph); whether `mavlink-router` is on the air is a fact about
+ * *this device*, and only the renderer that started it knows. Spreading the
+ * two into one object would re-mix exactly what was separated on purpose, and
+ * would invite a later contributor to tidy the field into `LinkState`, where
+ * the first thing to report a stale one would be a page in flight.
+ *
+ * **And `telemetryRunning` is not optional.** Without it the console cannot
+ * tell *an autopilot was found and telemetry is deliberately switched off*
+ * from *an autopilot was found and telemetry is running* — `phase` reads
+ * `linked` in both, and R-MAV-10 asks for both. Answering with the link state
+ * alone is the one way this route can be quietly wrong, so the shape makes
+ * omitting it impossible rather than merely discouraged.
+ *
+ * **Two running fields, because there are two facts.** A stop removes the
+ * ground-station endpoints and restarts the router onto the remainder, so the
+ * service is up and nothing is being sent: `telemetryRunning` is false and
+ * `routerRunning` is true, and the page shows a live Autopilot row beside a
+ * Ground stations row reading *stopped by you*. Folding them back into one
+ * boolean gives a console that claims telemetry is flowing whenever the
+ * process happens to be alive.
+ */
+export interface MavlinkStateBody {
+  link: LinkState;
+  /** Is anything reaching the ground stations? Drives the Start/Stop key. */
+  telemetryRunning: boolean;
+  /** Is `mavlink-router` up at all? Decides whether heartbeats can arrive. */
+  routerRunning: boolean;
+}
+
+/** `POST /mav/detect`: the same two halves, plus what the sweep found. */
+export interface MavlinkDetectBody extends MavlinkStateBody {
+  outcome: DetectOutcome;
 }
 
 /** What GET /system answers with. */
@@ -244,6 +336,26 @@ export function createRouter(deps: RouterDeps): Router {
       ...(passphrase === undefined ? {} : { passphrase }),
     };
   };
+
+  /**
+   * What every `/mav/*` route answers when this build has no telemetry layer.
+   *
+   * The same shape `/modem/state` and `/remote/state` use: a 503 naming the
+   * absence, never a 500 and never an empty link state — a page handed one of
+   * those would draw a device patiently searching for an autopilot it has no
+   * means of finding.
+   */
+  const noTelemetry = (): RouteResult => ({
+    status: 503,
+    body: { error: "this device has no telemetry layer; see the device journal for the reason" },
+  });
+
+  /** Both halves of the telemetry answer. See MavlinkStateBody. */
+  const mavlinkState = (mavlink: MavlinkControl): MavlinkStateBody => ({
+    link: mavlink.state(),
+    telemetryRunning: mavlink.telemetryRunning,
+    routerRunning: mavlink.routerRunning,
+  });
 
   return async (method, rawPath, body) => {
     // `req.url` carries the query string, and every comparison below is an
@@ -616,6 +728,105 @@ export function createRouter(deps: RouterDeps): Router {
           return { status: 503, body: { error: "this device cannot report its mesh state" } };
         }
         return { status: 200, body: await deps.remoteState() };
+      }
+
+      // ---- telemetry: what the Telemetry page reads and drives ----------
+      //
+      // Five routes over one injected object (`MavlinkControl`). None of them
+      // shells out, re-implements a measurement or holds state of its own:
+      // the renderer owns the router and the tracker owns what was measured,
+      // and these carry the answers to a page.
+
+      if (method === "GET" && path === "/mav/state") {
+        const mavlink = deps.mavlink;
+        if (mavlink === undefined) {
+          say("GET /mav/state: there is no telemetry layer on this daemon to ask");
+          return noTelemetry();
+        }
+        // R-MAV-10, all of it: heartbeat present, telemetry running, and the
+        // endpoints in use. Never `mavlink.state()` on its own — see
+        // MavlinkStateBody for what that would silently drop.
+        return { status: 200, body: mavlinkState(mavlink) };
+      }
+
+      /**
+       * R-DIA-04 — verify the MAVLink path end to end — as the three-link
+       * chain §8 draws rather than a single verdict, and computed by a pure
+       * function with tests of its own (`mav/check.ts`). The distinction that
+       * matters is `ok: null`: a link nobody attempted draws a dash, never a
+       * cross.
+       */
+      if (method === "GET" && path === "/mav/check") {
+        const mavlink = deps.mavlink;
+        if (mavlink === undefined) {
+          say("GET /mav/check: there is no telemetry layer on this daemon to ask");
+          return noTelemetry();
+        }
+        // The ground stations and `autocast` come from the configuration, not
+        // from the measured state: a station that is configured and has never
+        // been sampled is a different answer from one that was never
+        // configured at all, and `LinkState.groundStations` — which is filled
+        // in from the router's own counters — cannot tell those apart for the
+        // first couple of seconds of every daemon's life.
+        const config = loadConfig(deps.configPath).mavlink;
+        return {
+          status: 200,
+          body: pathCheck({
+            state: mavlink.state(),
+            telemetryRunning: mavlink.telemetryRunning,
+            routerRunning: mavlink.routerRunning,
+            endpoints: config.endpoints.map((endpoint) => endpoint.name),
+            autocast: config.autocast,
+          }),
+        };
+      }
+
+      /**
+       * The one route in this file that takes a working link down.
+       *
+       * Re-detecting means stopping `mavlink-router` to get the serial port
+       * back, so **every ground station receiving now stops receiving until
+       * it comes back** (R-MAV-16, and R-NET-12's instinct). The console says
+       * so before the operator commits and the renderer logs it at the moment
+       * it happens. Nothing else here re-probes: the two read routes above
+       * are reads, and a page polling one of them must never be able to seize
+       * the port from a router that is working.
+       */
+      if (method === "POST" && path === "/mav/detect") {
+        const mavlink = deps.mavlink;
+        if (mavlink === undefined) {
+          say("POST /mav/detect: there is no telemetry layer on this daemon to ask");
+          return noTelemetry();
+        }
+        const outcome = await mavlink.detectNow();
+        // Both halves of the answer moved — what the sweep found, and whether
+        // the router came back — so both are returned with it, rather than
+        // leaving a page to discover the rest on its next poll.
+        return { status: 200, body: { outcome, ...mavlinkState(mavlink) } satisfies MavlinkDetectBody };
+      }
+
+      // R-MAV-09, both halves. Each answers with the state its own action
+      // produced, so the page's Start/Stop key flips on the reply rather than
+      // on the next poll — and `telemetryRunning` is the field that says which
+      // it now is, because `phase` reads `linked` either way.
+      if (method === "POST" && path === "/mav/start") {
+        const mavlink = deps.mavlink;
+        if (mavlink === undefined) {
+          say("POST /mav/start: there is no telemetry layer on this daemon to ask");
+          return noTelemetry();
+        }
+        await mavlink.startTelemetry();
+        return { status: 200, body: mavlinkState(mavlink) };
+      }
+
+      if (method === "POST" && path === "/mav/stop") {
+        const mavlink = deps.mavlink;
+        if (mavlink === undefined) {
+          say("POST /mav/stop: there is no telemetry layer on this daemon to ask");
+          return noTelemetry();
+        }
+        await mavlink.stopTelemetry();
+        return { status: 200, body: mavlinkState(mavlink) };
       }
 
       if (method === "GET" && path === "/config") {

@@ -257,7 +257,12 @@ export {
   type ActivityLogOptions,
 } from "./log/activity.js";
 export { scanForNetworks, type ScanResult } from "./net/scan.js";
-export type { DiagProbes, SystemReport, WayBackIn } from "./daemon/routes.js";
+export type {
+  DiagProbes, SystemReport, WayBackIn,
+  // What the Telemetry page binds. `MavlinkStateBody` is deliberately two
+  // named halves rather than one flat record — see its own docstring.
+  MavlinkControl, MavlinkStateBody, MavlinkDetectBody,
+} from "./daemon/routes.js";
 export { HostnameRenderer, HOSTNAME_FILE, type HostnameRendererOptions } from "./system/hostname.js";
 export {
   idle,
@@ -361,3 +366,11 @@ export {
   AUTOPILOT_ENDPOINT_NAME,
 } from "./mav/router/config.js";
 export { parseStats, type EndpointStats } from "./mav/router/stats.js";
+export { LoopbackListener, LOOPBACK_ADDRESS, type LoopbackListenerOptions } from "./mav/listener.js";
+export {
+  pathCheck,
+  HEARTBEAT_STALE_MS,
+  type PathCheck,
+  type CheckLink,
+  type PathCheckInput,
+} from "./mav/check.js";
