@@ -1857,11 +1857,28 @@ is most of the 51 counted above.
 Three things worth separating, because they have different fixes:
 
 - **The duplicate poll is a plain mistake** and the cheapest thing to remove.
-  **Done.** The Status page's `Remote` line now reads from the same
-  `yonder-remote-state` the Network page uses, and the second reader and its
-  5 s timer are gone: 12 fewer reads a minute, 36 fewer `zerotier-cli`
-  invocations. `flows.test.ts` fails if any Yonder reader type is polled twice
-  again.
+  **Done, and it barely moved the needle.** The Status page's `Remote` line
+  now reads from the same `yonder-remote-state` the Network page uses, and the
+  second reader and its 5 s timer are gone. `flows.test.ts` fails if any
+  Yonder reader type is polled twice again.
+
+  Measured on the board before and after, over 60 s each, console open:
+
+  | | before | after |
+  |---|---|---|
+  | `zerotier-cli` | 153 | **126** |
+  | `mmcli` | 222 | 236 |
+  | `nmcli` | 147 | 153 |
+  | total | 547 | **515** |
+
+  About 27 invocations a minute, or 5 % of the total. The board still holds
+  80.8 °C with `throttled=0x80000` set. **The duplicate was the cheap mistake,
+  not the cause** — `mmcli` alone is nearly half the traffic, and the two items
+  below are where the load actually lives.
+
+  One thing the numbers show that the flows do not: 126 `zerotier-cli` a
+  minute is 42 mesh reads, and a single 2 s poller accounts for 30. Something
+  other than an `inject` is also asking. Not yet chased.
 - **The rate is a design choice nobody made deliberately.** Nothing on a status
   page needs the mesh twice a second; a page an operator is looking at is not a
   control loop.
