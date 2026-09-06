@@ -624,6 +624,21 @@ dash=$(body /dashboard/)
 expect_missing "the dashboard is past the gate with a session" "Sign in" "$dash"
 expect_contains "and it is the dashboard" "id=\"app\"" "$dash"
 
+# R-UI-22. The stylesheet has to be *in the document the browser is handed*,
+# not fetched by something the document later runs: a link the SPA adds after
+# boot is a link that arrives after the first paint, and the console flashes
+# white on every load. So this asks the two questions separately — is it there
+# at all, and is it there before the browser has anything to paint.
+expect_contains "the theme is in the served document" "/yonder/theme.css" "$dash"
+head_of_dash=${dash%%</head>*}
+[ "$head_of_dash" = "$dash" ] && head_of_dash=""
+expect_contains "and it is in the head, so the first paint has it" \
+    "/yonder/theme.css" "$head_of_dash"
+# The way it used to arrive. A ui-template's @import is injected over
+# Dashboard's own socket, which does not exist until the SPA has booted.
+expect_missing "and nothing imports it from inside a style block" \
+    "@import" "$dash"
+
 # ---------------------------------------------------------------------------
 say "R-SEC-10: the password is nowhere in the journal"
 
