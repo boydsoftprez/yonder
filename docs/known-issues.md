@@ -1820,7 +1820,8 @@ missing. Only somebody using the console finds an action that is not there.
 
 ### K-55 · The console polls the daemon into shelling out nine times a second
 
-**Status:** Open · **Requirements:** R-HW-03, R-UI-05
+**Status:** Open — the duplicate poll is fixed; the rate and the shelling out are not
+· **Requirements:** R-HW-03, R-UI-05
 
 Found by the operator asking why the board's CPU load was high, on a Pi 4
 carrying one 1280×720 encode.
@@ -1856,6 +1857,11 @@ is most of the 51 counted above.
 Three things worth separating, because they have different fixes:
 
 - **The duplicate poll is a plain mistake** and the cheapest thing to remove.
+  **Done.** The Status page's `Remote` line now reads from the same
+  `yonder-remote-state` the Network page uses, and the second reader and its
+  5 s timer are gone: 12 fewer reads a minute, 36 fewer `zerotier-cli`
+  invocations. `flows.test.ts` fails if any Yonder reader type is polled twice
+  again.
 - **The rate is a design choice nobody made deliberately.** Nothing on a status
   page needs the mesh twice a second; a page an operator is looking at is not a
   control loop.
@@ -1873,3 +1879,70 @@ second camera. The encode is the work; the polling is not.
 figure above was taken with a browser on the Camera page. Worth repeating with
 no browser attached, because that separates the daemon's own appetite from the
 console's.
+
+---
+
+### K-56 · The JPEG decode is in software while the board has a hardware one idle
+
+**Status:** Open — the choice is the operator's · **Requirements:** R-VID-02, R-HW-03
+
+Found by the operator asking why the video encode was not using the hardware
+path. It is: `compose()` probes for an encoder and gets `v4l2h264enc` on
+`/dev/video11`, and that is what runs on the board. **The encode was never the
+problem.** The decode is.
+
+`compose()` writes `jpegdec` as a literal — the decoder is the one element in
+the pipeline that is never probed for. `jpegdec` is software. The same board
+carries `v4l2jpegdec`, which drives `/dev/video10` (`bcm2835-codec-decode`,
+accepts `MJPG`), and GStreamer even ranks it *above* `jpegdec` at
+`primary + 1`. Nothing chooses it because nothing asks.
+
+Measured on the board, 2026-09-06 — camera → decode → `v4l2h264enc`, 20 s each,
+1280×720 at 30 fps:
+
+| Front end | CPU | Delivered | Dropped |
+|---|---|---|---|
+| `jpegdec` (ships today) | **26.6 %** of one core | 30.2 fps | 0 |
+| `v4l2jpegdec` (hardware) | **13.7 %** of one core | 30.1 fps | 0 |
+
+**But it does not survive the board-side flip.** `v4l2jpegdec` outputs
+`video/x-raw(memory:DMABuf)`, and `videoflip` — the software element
+`compose()` adds for a board turn — cannot consume that at rate:
+
+| With the vertical flip in the path | CPU | Delivered |
+|---|---|---|
+| `jpegdec ! videoflip` (ships today) | 27.8 % of one core | 30.4 fps |
+| `v4l2jpegdec ! videoflip` | 1.0 % | **25.5 fps** |
+| `v4l2jpegdec ! v4l2convert ! videoflip` | 1.0 % | **19.1 fps** |
+
+The low CPU beside the low frame rate is the tell: the pipeline is not working
+harder, it is stalling on the buffer download. Inserting `v4l2convert` makes it
+worse, not better.
+
+There is no hardware flip to fall back on. `/dev/video18`
+(`bcm2835-codec-image_fx`) lists no controls, and `v4l2convert` exposes no
+`rotation` or flip property, so on this board a board-side turn means
+`videoflip` in software or nothing.
+
+**The camera can also skip both.** It offers `H264` and `HEVC` natively at
+640×480, 1280×720 and 1920×1080. Taking H.264 straight from it removes the
+decode *and* the encode. It also removes everything that needs raw frames:
+runtime bitrate retune (K-48, and the adaptive controller built on it),
+board-side flip and mirror, and the scaled preview — the camera would emit one
+stream at one rate and the console could no longer change it while it ran.
+
+**Three ways forward, and they are not equivalent:**
+
+1. **Probe for the decoder the way the encoder is probed**, and use the
+   hardware one **only when no board-side turn is composed.** Keeps every
+   capability; costs a branch in `compose()` and a rule an operator cannot see
+   — turning the picture would silently cost 13 % of a core.
+2. **Probe unconditionally, and drop the board-side flip**, leaving turns to
+   the sensor's own controls where the camera has them. Simpler pipeline,
+   fewer frames dropped; some cameras then cannot be turned at all.
+3. **Leave `jpegdec` in place.** 26.6 % of one core is real but it is not what
+   put the board at 3.52 load — the polling was. Costs nothing and changes
+   nothing.
+
+Not decided here (CLAUDE.md rule 8). The measurements are what the choice
+should be made on.
