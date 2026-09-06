@@ -13,6 +13,15 @@
 # inside the root it is installing to, chroot or board alike.
 : "${YONDER_SYSTEMD_DIRS:=/etc/systemd/system /usr/lib/systemd/system /lib/systemd/system}"
 
+# The Raspberry Pi boot-firmware directory: config.txt and cmdline.txt live
+# here on every board R-HW-01 and R-HW-02 name. R-HW-03's Radxa boards do
+# not use this layout at all and are out of scope until M8 (docs/roadmap.md),
+# which is why 40-uart.sh treats its absence as "nothing to do" rather than
+# a failure. Overridable for the same reason YONDER_SYSTEMD_DIRS is: a role
+# that owns a stanza in config.txt is worth testing against a fixture
+# directory, not the real /boot/firmware. An install never sets it.
+: "${YONDER_BOOT_DIR:=/boot/firmware}"
+
 # The one path the systemd unit's ExecStart names, and a symlink this
 # installer points at whichever node the install actually resolved.
 #

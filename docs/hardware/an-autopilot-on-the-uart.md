@@ -113,6 +113,16 @@ they are consistent across six.
 
 ## The bench procedure
 
+**Wiring — header pin, Pi signal, to the autopilot:**
+
+| Header pin | Pi signal | To the autopilot |
+|---|---|---|
+| 6 | GND | GND |
+| 8 | GPIO 14 — UART0 TXD | **RX** |
+| 10 | GPIO 15 — UART0 RXD | **TX** |
+
+No power wire: the autopilot has its own supply and both ends are 3.3 V logic.
+
 The probe is a short Python program using `termios` and the `TIOCGICOUNT` ioctl
 (`0x545D`, `struct serial_icounter_struct`, `frame` at index 6). It opens the port
 non-blocking at each rate in turn, settles, flushes, reads for a fixed window, and counts
@@ -121,7 +131,10 @@ trusting an unverified length.
 
 1. `enable_uart=1` and `dtoverlay=disable-bt` in `/boot/firmware/config.txt`, under a
    `# yonder-uart` marker of its own; `console=serial0,115200` removed from `cmdline.txt`;
-   `serial-getty@ttyAMA0` and `hciuart` disabled. Reboot.
+   `serial-getty@ttyAMA0` and `hciuart` disabled. Reboot. Done by hand for this note;
+   `installer/roles/40-uart.sh` is the same four changes as an idempotent installer role,
+   with a post-condition that checks the configuration it wrote rather than the hardware a
+   chroot build cannot see (R-MAV-02, R-HW-04).
 2. Wire pin 6 to the autopilot's ground, pin 8 to its **RX**, pin 10 to its **TX**.
 3. Run the probe as root. Reverse the order and repeat a rate: an ascending sweep hides the
    stale-buffer trap above.
