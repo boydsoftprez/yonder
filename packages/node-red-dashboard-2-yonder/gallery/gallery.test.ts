@@ -77,9 +77,23 @@ describe("a specimen is a real state, not a stub", () => {
         .filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"))
         .map((f) => f.replace(/\.ts$/, "")),
     );
+    /**
+     * `strip "Yonder", lowercase` names every registration file except one.
+     * `ui-yonder-index`'s is `index-widget.ts`, not `index.ts` (Task 24,
+     * `index-widget.ts`'s own module comment): a file named `index.ts` here
+     * would compile to `dist/index.js`, which is exactly the path Node's own
+     * module resolution falls back to as this package's default entry since
+     * `package.json` states no `main` — a camera-list widget becoming this
+     * package's own implicit `require()` target purely on account of its
+     * filename. Recorded here rather than silently special-cased, so the
+     * mechanical rule stays visible for the other thirteen.
+     */
+    const REGISTRATION_OVERRIDE: Record<string, string> = { Index: "index-widget" };
     for (const s of SPECIMENS) {
       const name = String(s.component?.name ?? s.component?.__name ?? "");
-      const isWidget = registrations.has(name.replace(/^Yonder/, "").toLowerCase());
+      const bare = name.replace(/^Yonder/, "");
+      const registrationFile = REGISTRATION_OVERRIDE[bare] ?? bare.toLowerCase();
+      const isWidget = registrations.has(registrationFile);
       expect(
         Boolean(s.part),
         isWidget

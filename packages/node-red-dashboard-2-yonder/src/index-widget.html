@@ -1,0 +1,47 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!--
+  The editor half of the Cameras page. Node-RED finds this by basename beside
+  the node's .js; without it the widget registers and shows as "unknown
+  node". A form and a registration, nothing else (CLAUDE.md rule 2, R-UI-01).
+-->
+<script type="text/html" data-template-name="ui-yonder-index">
+  <div class="form-row"><label for="node-input-group"><i class="fa fa-table"></i> Group</label>
+    <input type="text" id="node-input-group" /></div>
+  <div class="form-row"><label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name" /></div>
+  <div class="form-tips">
+    <b>What the probe found, and what it refused (R-CAM-12).</b> This node
+    draws the found-camera list and the rejection list entirely from
+    <code>msg.payload</code> &mdash; there is no other configuration.
+  </div>
+</script>
+<script type="text/html" data-help-name="ui-yonder-index">
+<p>The Cameras page &mdash; every camera the probe found, and every device it
+rejected, with the reason (R-CAM-12).</p>
+<p>Reads one <code>msg.payload</code>:</p>
+<pre>{ cameras: { id, name, bus, spec, state, tone, rate, capabilities }[],
+  rejected: { device, reason }[] }</pre>
+<p><b>A rejection is drawn with its reason, never silently dropped.</b> A
+camera that is plugged in and simply missing from this page, with nothing
+explaining it, is the failure R-CAM-12 exists to prevent. An empty found
+list draws <i>No camera.</i> rather than a blank pane, so an operator can
+tell a genuinely empty result from a page that failed to load.</p>
+<p><b>Pressing a found camera's row</b> sends <code>{ camera: id }</code>
+&mdash; the camera's own id, never its position in the list.</p>
+<p><b>This node originates nothing</b> (R-CMD-04): it relays a press, and
+draws exactly what the probe reported, including every rejection.</p>
+</script>
+<script type="text/javascript">
+  RED.nodes.registerType("ui-yonder-index", {
+    category: "dashboard 2", color: "#c7e0d4",
+    defaults: {
+      name: { value: "" },
+      group: { type: "ui-group", required: true },
+      order: { value: 0 }, width: { value: 0 }, height: { value: 0 }
+    },
+    inputs: 1, outputs: 1,
+    icon: "font-awesome/fa-search",
+    paletteLabel: "yonder cameras index",
+    label: function () { return this.name || "yonder cameras index"; }
+  });
+</script>

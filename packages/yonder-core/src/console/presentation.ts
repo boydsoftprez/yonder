@@ -124,9 +124,21 @@ export {
  * the real 21 keys instead of a second, hand-typed list that could quietly
  * fall out of step with it — precisely the reason that array is written down
  * in `capability.ts` rather than derived.
+ *
+ * **`summarise` joins them for the same reason (R-CAM-12, Task 24).** It is
+ * `capability.ts`'s own one-line-per-camera probe summary for the Cameras
+ * index page — `exposure: auto exposure has it`, `aim: none` — and until
+ * this line it had no way to reach a component at all: not re-exported from
+ * this package's main entry either, so `ui-yonder-index` would otherwise
+ * have had to compose a second sentence with the same job, which is exactly
+ * what the coordinator's own resolution for that task warns against. A pure
+ * function of a `CameraCapabilities`, imported from the identical
+ * zero-import module the rest of this block already re-exports — nothing
+ * new for a browser bundle to carry.
  */
 export {
   CAPABILITY_KEYS,
+  summarise,
   type Capability,
   type CameraCapabilities,
   type ControlRange,

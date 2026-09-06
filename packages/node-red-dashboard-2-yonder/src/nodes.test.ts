@@ -21,6 +21,7 @@ const factsNode = (await import("./facts.js")).default ?? await import("./facts.
 const budgetNode = (await import("./budget.js")).default ?? await import("./budget.js");
 const deckNode = (await import("./deck.js")).default ?? await import("./deck.js");
 const aimNode = (await import("./aim.js")).default ?? await import("./aim.js");
+const indexNode = (await import("./index-widget.js")).default ?? await import("./index-widget.js");
 
 /**
  * What is tested here, and what honestly cannot be.
@@ -534,6 +535,42 @@ describe("the aim panel", () => {
     // intermediate state in the editor, not a fault — Node-RED must load
     // the rest of the flow either way.
     const { node } = build(aimNode as (RED: RED) => void, {}, null);
+    expect(node.error).toHaveBeenCalledWith(expect.stringContaining("no dashboard group"));
+  });
+});
+
+describe("the cameras index", () => {
+  /**
+   * `emitsActions` is load-bearing here exactly as it is for the deck and
+   * the aim panel (`widget.ts`'s own note): Dashboard drops a
+   * `widget-action` from a widget that never registered `onAction` —
+   * silently, with no error anywhere. Pressing a found camera's row depends
+   * on it.
+   *
+   * **This is the test `index.component.test.ts` cannot write, by
+   * construction** (task-24-brief.md, coordinator resolution 2, the same
+   * point task-23's own review established for the aim panel): a component
+   * test mounts `YonderIndex.vue` directly against a mocked `$socket` and
+   * never touches `index-widget.ts`'s own registration at all, so a
+   * mutation to `emitsActions` there is invisible to it. This one imports
+   * the real registration module and asserts what it actually passes to
+   * `group.register`.
+   *
+   * Confirmed directly, not merely asserted here (see task-24-report.md):
+   * flipping `emitsActions: true` to `false` in `index-widget.ts` turns
+   * exactly this test red and nothing else in this package's suite.
+   */
+  it("registers as a widget that sends", () => {
+    const { type, events } = build(indexNode as (RED: RED) => void, {});
+    expect(type).toBe("ui-yonder-index");
+    expect(events).toMatchObject({ onAction: true });
+  });
+
+  it("does not draw itself when it has no dashboard group", () => {
+    // A widget dragged onto a flow before it has a group is a normal
+    // intermediate state in the editor, not a fault — Node-RED must load
+    // the rest of the flow either way.
+    const { node } = build(indexNode as (RED: RED) => void, {}, null);
     expect(node.error).toHaveBeenCalledWith(expect.stringContaining("no dashboard group"));
   });
 });

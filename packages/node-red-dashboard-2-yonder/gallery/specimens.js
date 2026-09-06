@@ -10,6 +10,7 @@ import YonderFacts from "../src/ui/YonderFacts.vue";
 import YonderGauge from "../src/ui/YonderGauge.vue";
 import YonderHoldKey from "../src/ui/YonderHoldKey.vue";
 import YonderIdentity from "../src/ui/YonderIdentity.vue";
+import YonderIndex from "../src/ui/YonderIndex.vue";
 import YonderPicker from "../src/ui/YonderPicker.vue";
 import YonderPicture from "../src/ui/YonderPicture.vue";
 import YonderPlacard from "../src/ui/YonderPlacard.vue";
@@ -233,6 +234,36 @@ const POCKET2_REPORT = {
   ],
   captures: { count: 0 },
   interruption: ["current respawn path only"],
+};
+
+/**
+ * A second, plainer camera for the Cameras index (Task 24) — a CSI sensor
+ * with none of the ELP's three gates, so `summarise()`'s own output beside
+ * it in the gallery reads mostly `not-offered`, the same contrast
+ * `ELP_REPORT`/`POCKET2_REPORT` already draw for the deck.
+ */
+const BELLY_CAPABILITIES = {
+  formats: present([{ fourcc: "H264", width: 1280, height: 720, rates: [30, 25, 20] }]),
+  zoom: notOffered(),
+  focus: notOffered(),
+  exposure: present(range({ min: 1, max: 33000, step: 1, current: 10000, default: 10000 })),
+  whiteBalance: notOffered(),
+  brightness: present(range({ min: -1, max: 1, step: 1, current: 0, default: 0 })),
+  contrast: present(range({ min: -1, max: 1, step: 1, current: 0, default: 0 })),
+  rotation: present(range({ min: 0, max: 270, step: 90, current: 0, default: 0 })),
+  aim: notOffered(),
+  recording: notOffered(),
+  stills: notOffered(),
+  saturation: notOffered(),
+  hue: notOffered(),
+  autoWhiteBalance: notOffered(),
+  gamma: notOffered(),
+  gain: present(range({ min: 0, max: 16, step: 1, current: 1, default: 1 })),
+  powerLineFrequency: notOffered(),
+  sharpness: notOffered(),
+  backlightCompensation: notOffered(),
+  autoExposure: present(range({ min: 0, max: 1, step: 1, current: 1, default: 1 })),
+  autoFocus: notOffered(),
 };
 
 export const SPECIMENS = [
@@ -792,6 +823,67 @@ export const SPECIMENS = [
         modes: ["Follow", "Tilt lock", "FPV"],
         inhibited: null,
       },
+    },
+    payload: undefined,
+    part: false,
+  },
+  {
+    title: "Cameras index — two found",
+    note: "Task 24: ui-yonder-index, R-CAM-12's 'what was found' half. The ELP again (compare the Deck and Aim specimens above) alongside a second, plainer CSI camera — one streaming (the good-tone badge, a real Mb/s reading from YonderReadout) and one idle (the neutral-tone badge, and the rate reads none rather than a blank gap, since an idle camera has nothing to measure). Each row's mono second line is summarise()'s own literal output over all 21 capability keys, not a second sentence composed here — the ELP's own reads 'exposure: auto exposure has it' partway through, exactly as capability.ts's own doc comment quotes it.",
+    component: YonderIndex,
+    props: {
+      report: {
+        cameras: [
+          {
+            id: "elp", name: "Nose", bus: "USB · UVC",
+            spec: "1280×720 · 30 fps · MJPG · hardware",
+            state: "Streaming", tone: "good", rate: 1.9,
+            capabilities: ELP_REPORT.capabilities,
+          },
+          {
+            id: "csi0", name: "Belly", bus: "CSI",
+            spec: "1280×720 · 30 fps · H.264 · hardware",
+            state: "Idle", tone: "neutral", rate: null,
+            capabilities: BELLY_CAPABILITIES,
+          },
+        ],
+        rejected: [],
+      },
+    },
+    payload: undefined,
+    part: false,
+  },
+  {
+    title: "Cameras index — one found, one rejected",
+    note: "The half of R-CAM-12 this page exists for: a device the probe saw and refused, drawn with its reason rather than simply missing. The reason is this board's own real K-40 finding, verbatim from probe/camera.ts's own module comment — the board's JPEG decoder advertises formats it cannot capture and looks like a camera to everything that asks.",
+    component: YonderIndex,
+    props: {
+      report: {
+        cameras: [
+          {
+            id: "elp", name: "Nose", bus: "USB · UVC",
+            spec: "1280×720 · 30 fps · MJPG · hardware",
+            state: "Streaming", tone: "good", rate: 1.9,
+            capabilities: ELP_REPORT.capabilities,
+          },
+        ],
+        rejected: [
+          {
+            device: "/dev/video10",
+            reason: "bcm2835-codec-decode is a hardware codec on this board, not a camera; it advertises formats it cannot capture (K-40)",
+          },
+        ],
+      },
+    },
+    payload: undefined,
+    part: false,
+  },
+  {
+    title: "Cameras index — empty",
+    note: "Coordinator resolution 4: an operator whose camera has fallen off the bus must be able to tell an empty list from a page that failed. Drawn as 'No camera.' rather than a blank pane — the same instrument, given a report that genuinely found nothing, not a broken one given no report at all.",
+    component: YonderIndex,
+    props: {
+      report: { cameras: [], rejected: [] },
     },
     payload: undefined,
     part: false,

@@ -23,7 +23,8 @@
       "ui-yonder-facts": "dist/facts.js",
       "ui-yonder-budget": "dist/budget.js",
       "ui-yonder-deck": "dist/deck.js",
-      "ui-yonder-aim": "dist/aim.js"
+      "ui-yonder-aim": "dist/aim.js",
+      "ui-yonder-index": "dist/index-widget.js"
     }
   },
   "node-red-dashboard-2": {
@@ -41,7 +42,8 @@
       "ui-yonder-facts": { "output": "ui-yonder-facts.umd.js", "component": "YonderFacts" },
       "ui-yonder-budget": { "output": "ui-yonder-budget.umd.js", "component": "YonderBudget" },
       "ui-yonder-deck": { "output": "ui-yonder-deck.umd.js", "component": "YonderDeck" },
-      "ui-yonder-aim": { "output": "ui-yonder-aim.umd.js", "component": "YonderAim" }
+      "ui-yonder-aim": { "output": "ui-yonder-aim.umd.js", "component": "YonderAim" },
+      "ui-yonder-index": { "output": "ui-yonder-index.umd.js", "component": "YonderIndex" }
     }
   },
   "scripts": {
