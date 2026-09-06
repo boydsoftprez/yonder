@@ -1338,11 +1338,27 @@ seconds and the daemon logged no restart. A manual `POST /cameras/cam0/run
 
 `video/pipeline.ts:170` bakes the rate into the launch line, so today the only
 way a new rate can reach the encoder is a respawn. Nothing performs one on an
-apply. **R-VID-07's runtime channel (plan Task 30) is the fix**, and Task 1
-already proved on this board that `v4l2h264enc` takes a runtime bitrate change
-without a respawn — 0.97 to 3.01 Mb/s with zero timestamp gaps after the retune.
-Until that exists an apply is silently a no-op for the picture, which is worse
-than refusing the change.
+apply. Until that changes an apply is silently a no-op for the picture, which
+is worse than refusing the change.
+
+**Update — the channel is built and it cannot reach today's pipeline.** Plan
+Task 30 (`6e1d4e2`) implemented `EncoderChannel` and its supervisor hop. On this
+board every retune now answers
+
+> *cam0's pipeline has no control channel: it was started by a program that
+> takes no instruction once it is running.*
+
+which is honest, and still not the fix. The reason is worth recording because
+it was missed when Task 1's result was accepted: **the spike proved the encoder,
+not the runner.** `scripts/spikes/retune-bitrate.py` holds the pipeline itself —
+`Gst.parse_launch`, then `enc.set_property("extra-controls", s)` on the live
+element — and that handle exists only inside a program that owns the pipeline.
+The daemon runs `gst-launch-1.0`, a command-line tool with no property
+interface, no socket and no stdin protocol; and `v4l2h264enc`'s controls are
+per-open-handle, so no outside process can reach the encoder either. Both facts
+had to hold for the retune to work and only one was checked.
+
+See K-53 for what closes it.
 
 ### K-49 · Adaptive is offered, nothing implements it, and choosing it freezes the rate
 
@@ -1487,3 +1503,50 @@ paths staged into the draft like every other Setup edit; and the respawn on
 Apply the spec names — which stays a respawn even after the runtime bitrate
 channel (K-48, plan Task 30) lands, because a size or frame-rate change is not
 something `extra-controls` can retune.
+
+### K-53 · The video pipeline is run by a program that cannot be spoken to
+
+**Status:** Open · **Requirements:** R-VID-07, R-VID-09
+
+`video/pipeline.ts` composes a GStreamer launch line and `systemSpawner` hands
+it to **`gst-launch-1.0`**. That tool plays a pipeline and then answers nothing:
+no property interface, no control socket, no stdin protocol. `v4l2h264enc`'s
+controls are per-open-handle, so no process outside the pipeline can reach the
+encoder either.
+
+Everything that wants to change a running pipeline therefore cannot:
+
+- **A bitrate retune** (K-48). The channel exists and is tested; it answers
+  *no control channel* on real hardware.
+- **A preview-branch reconfigure** — size or frame rate for the browser alone,
+  without disturbing the main stream or a board recording (§8.1).
+- **Timestamp continuity as an observation.** The `Ack` reports `continuous`,
+  and today it can only be inferred from pid and restart count. The spike
+  measured it properly with an `identity` pad probe, from inside.
+- **The rate controller** (plan Task 31), whose whole subject is moving a rate
+  on a live pipeline.
+
+**Task 1 proved the encoder, not the runner, and that distinction was missed.**
+`scripts/spikes/retune-bitrate.py` calls `Gst.parse_launch`, keeps the pipeline
+object, and sets `extra-controls` on the live element. Two things had to be true
+for a runtime retune to reach production — that the codec honours it, and that
+the daemon's runner can address it — and only the first was tested. The spike
+was accepted as settling the question for the branch.
+
+**What closes it:** a small pipeline host that replaces `gst-launch-1.0` in
+`systemSpawner`. It reads the same argv `compose()` already emits, plays it
+through `Gst.parse_launch`, and answers an NDJSON protocol on stdin — the one
+`EncoderChannel` already speaks and has tests for. It taps `identity` for pts
+continuity so `continuous` is measured rather than inferred, and restarts the
+preview branch alone where a reconfigure needs it. The spike is most of its
+guts.
+
+It costs `python3-gi` and `gir1.2-gstreamer-1.0` in the installer and the
+offline payload, and it replaces the one part of the video path that is known
+to work on hardware — so it wants its own task, its own board proof, and a
+fallback to the current spawner if the host is absent. It is in no task's file
+list in the plan today.
+
+**Sequencing:** plan Task 31 (the rate controller) measures thresholds on a
+throttled link and has nothing to measure until a pipeline answers. This should
+land before it.
