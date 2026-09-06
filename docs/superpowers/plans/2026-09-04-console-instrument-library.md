@@ -1340,6 +1340,18 @@ it("Record and Recentre are not on the rail", ...);                            /
 
 ### Task 30a: A pipeline that answers — replacing `gst-launch-1.0`
 
+**Status: unblocked, and now the only route to R-VID-07.** This task was
+stopped once, on the reasoning that a GStreamer host would be discarded by the
+agreed pivot to an ffmpeg composer. The bench spike
+(`docs/hardware/ffmpeg-as-the-pipeline-composer.md`) measured that assumption
+and it does not hold: a live bitrate change works in GStreamer on **both**
+boards with zero timestamp gaps — Pi `v4l2h264enc` 0.99 → 3.02 Mb/s, RK3566
+`mpph264enc` 0.98 → 3.92, `mpph265enc` 0.97 → 3.91 — and fails in ffmpeg on
+both, at every level, including from a program holding the `AVCodecContext`.
+
+So the capability this host exists to reach is the one thing only GStreamer
+offers, and the host survives whatever is decided about the composer. Build it.
+
 **Inserted after Task 30 found the reason its channel cannot work (K-53).**
 `EncoderChannel` is built and tested; on hardware every retune answers *"no
 control channel"*, because `systemSpawner` runs `gst-launch-1.0` and that tool
@@ -1370,6 +1382,17 @@ a program owning the pipeline has.
 
 
 ### Task 31: The rate controller and the size ladder
+
+**Status: unblocked by Task 30a, not before it.** This was blocked on a real
+question — whether a rate can move on a running pipeline at all — because a
+controller that respawned the pipeline on every change would restart the picture
+each time the link moved, which is a stutter generator rather than a controller.
+The spike answered it: the rate moves, on both boards, with no visible break.
+Task 31 now needs only the host from Task 30a to move it through.
+
+Until then the console offers **Adaptive** and **Auto** and neither does
+anything, which K-49 records: choosing either holds whatever rate or rung the
+camera last had, and reads to an operator as a working automatic mode.
 
 **Files:** `video/rate.ts` + `rate.test.ts` (a controllable clock)
 
