@@ -132,6 +132,18 @@ export function applyCameraDraft(
   if (draft.codec !== undefined) camera.codec = draft.codec;
   if (draft.stream !== undefined) camera.stream = { ...camera.stream, ...draft.stream };
   if (draft.preview !== undefined) camera.preview = { ...camera.preview, ...draft.preview };
+  // **Merged, never replaced** — as `stream` and `preview` are, and for the
+  // same reason: a draft names the one control the operator moved, and
+  // assigning the object would set every other control on this camera to the
+  // schema's `null` and undo them.
+  //
+  // Missing here once, and the omission was silent: `deckDraft()` translated
+  // the staged turn, `validateDraft()` passed it, the route answered 200, and
+  // the value never reached the camera. That is exactly the "an Apply that
+  // reported success and left one of the operator's edits unmade" this route's
+  // own comment says the draft mechanism exists to remove — one layer below
+  // where it says it.
+  if (draft.controls !== undefined) camera.controls = { ...camera.controls, ...draft.controls };
 
   return { ok: true, config };
 }

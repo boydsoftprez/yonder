@@ -242,6 +242,36 @@ describe("applyCameraDraft", () => {
   });
 });
 
+describe("a turn the board performs", () => {
+  /**
+   * **Every other field was carried and this one was dropped, silently.**
+   *
+   * `deckDraft()` translated it, `validateDraft()` passed it, the route
+   * answered 200 with a confirmation id — and the value never reached the
+   * camera. The operator would have pressed Mirror, watched it confirm, and
+   * seen nothing turn.
+   */
+  it("reaches the camera, so an Apply that says it worked did", () => {
+    const before = configWithCamera();
+    const out = applyCameraDraft(before, "front", { controls: { horizontalFlip: true } });
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(out.config.cameras[0]?.controls.horizontalFlip).toBe(true);
+  });
+
+  it("leaves every other control alone, because a draft names one thing", () => {
+    const before = configWithCamera();
+    before.cameras[0]!.controls.brightness = 40;
+    const out = applyCameraDraft(before, "front", { controls: { verticalFlip: true } });
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    // Assigning rather than merging would set this back to the schema's null
+    // and quietly undo a control the operator had set.
+    expect(out.config.cameras[0]?.controls.brightness).toBe(40);
+    expect(out.config.cameras[0]?.controls.verticalFlip).toBe(true);
+  });
+});
+
 describe("DRAFT_PATHS — one table, read in both directions", () => {
   /**
    * **The agreement check.** `deckDraft()` is a `switch` and `DRAFT_PATHS` is
