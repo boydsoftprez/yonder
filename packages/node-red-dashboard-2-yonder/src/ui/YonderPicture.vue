@@ -1,29 +1,77 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <template>
-    <div class="y-pic" :class="'y-pic--' + mode">
-        <video
-            ref="video"
-            class="y-pic__video"
-            :style="{ filter: degradeFilter }"
-            autoplay
-            muted
-            playsinline
-        ></video>
-        <img v-if="mode === 'stills' && stillSrc" class="y-pic__video" :src="stillSrc" alt="" />
-        <div v-if="staleFor > 0" class="y-pic__hatch"></div>
-        <div class="y-pic__hud">
-            <span class="y-pic__badge" :class="'tone-' + tone">{{ caption }}</span>
-            <span v-if="staleFor > 0" class="y-pic__age">{{ ageText }}</span>
-            <span v-if="cost" class="y-pic__cost">{{ cost }}</span>
+    <div class="y-pic">
+        <div
+            ref="frame"
+            class="y-pic__frame"
+            :class="{ 'is-aiming': aimable }"
+            :style="{ aspectRatio: videoAspect }"
+            @pointerdown="dragDown"
+            @pointermove="dragMove"
+            @pointerup="onDragEnd"
+            @pointercancel="onDragEnd"
+            @pointerleave="onDragEnd"
+            @lostpointercapture="onDragEnd"
+        >
+            <video
+                ref="video"
+                class="y-pic__video"
+                :style="{ filter: degradeFilter }"
+                autoplay
+                muted
+                playsinline
+            ></video>
+            <img v-if="mode === 'stills' && stillSrc" class="y-pic__video" :src="stillSrc" alt="" />
+            <div v-if="staleFor > 0" class="y-pic__hatch"></div>
+
+            <div class="y-pic__hud">
+                <span class="y-pic__badge" :class="'tone-' + tone">{{ caption }}</span>
+                <span v-if="staleFor > 0" class="y-pic__age">{{ ageText }}</span>
+                <span v-if="cost" class="y-pic__cost">{{ cost }}</span>
+            </div>
+
+            <!-- R-VID-18: what the shared preview encode is doing, composed
+                 verbatim from Task 19's own part — see this file's own doc
+                 comment on why this is a second, orthogonal fact from the
+                 badge above rather than a replacement for it. -->
+            <YonderStateOverlay v-if="previewState" class="y-pic__state" v-bind="previewState" />
+
+            <div v-if="recording" class="y-pic__rec"><i class="y-pic__rec-dot"></i>REC {{ recording.elapsed }}</div>
+
+            <div v-if="footItems.length" class="y-pic__foot">
+                <span v-for="item in footItems" :key="item.key" class="y-pic__foot-item">
+                    <span class="y-pic__foot-k">{{ item.label }}</span>{{ item.text }}
+                </span>
+            </div>
+
+            <div v-if="stats" class="y-pic__osd">
+                <span class="y-pic__foot-k">LINK</span>{{ stats.linkMbps.toFixed(2) }} Mb/s<br />
+                <span class="y-pic__foot-k">DROP</span>{{ stats.dropPct.toFixed(1) }} %
+            </div>
+
+            <div v-if="dragGesture" class="y-pic__orb" :style="{ left: orbX + 'px', top: orbY + 'px' }"></div>
+
+            <div v-if="reason" class="y-pic__reason">{{ reason }}</div>
+            <div v-if="mode === 'off'" class="y-pic__off">
+                not requested · this changes nothing the aircraft sends anyone else
+            </div>
         </div>
-        <div v-if="reason" class="y-pic__reason">{{ reason }}</div>
-        <div v-if="mode === 'off'" class="y-pic__off">
-            not requested · this changes nothing the aircraft sends anyone else
-        </div>
+
+        <YonderThumbStrip
+            v-if="cameras.length"
+            class="y-pic__strip"
+            :cameras="cameras"
+            :downlink="downlink"
+            @go="onThumbGo"
+        />
     </div>
 </template>
 
 <script>
+import YonderStateOverlay from './YonderStateOverlay.vue'
+import YonderThumbStrip from './YonderThumbStrip.vue'
+import { DESCRIPTORS } from 'yonder-core/presentation'
+
 /**
  * The live picture, and the three things that happen to it (R-VID-03).
  *
@@ -48,11 +96,11 @@
  * inventing a fact.
  *
  * **The session reconnects on its own, with backoff, showing the attempt
- * count.** No button: the operator asked for a live picture and never withdrew
- * the request. The picture returns immediately when it does, because the
- * preview branch runs a short keyframe interval of its own (pipeline.ts) — so
- * a reconnecting browser is a late joiner that does not have to wait out a
- * group of pictures.
+ * count.** No button: the operator asked for a live picture and never
+ * withdrew the request. The picture returns immediately when it does, because
+ * the preview branch runs a short keyframe interval of its own (pipeline.ts)
+ * — so a reconnecting browser is a late joiner that does not have to wait out
+ * a group of pictures.
  *
  * **Falling back to stills happens without being asked**, twelve seconds after
  * live video fails to establish: long enough for a slow negotiation to finish,
@@ -93,11 +141,229 @@
  * `requestVideoFrameCallback` is not in every browser, and polling
  * `getStats()` for `framesDecoded` needs a timer of its own and reports the
  * decoder rather than the thing on screen.
+ *
+ * ---
+ *
+ * **Three more defects, fixed together (R-VID-18, R-UI-28), because this
+ * component already exists and this task is fixing and extending it rather
+ * than starting over.**
+ *
+ * **1. The picture is the shape of the picture.** `.y-pic__frame` used to be
+ * `.y-pic` itself, filling whatever box the page gave it (`height: 100%`) and
+ * trusting `object-fit: contain` to letterbox or crop whatever the camera's
+ * real aspect ratio turned out to be. That box was never this component's own
+ * fact to assume: a camera that is not 16:9 was silently letterboxed or
+ * cropped inside a page built for one that is, and an operator looking at a
+ * badly-shaped picture had no way to tell a badly-aimed camera from a badly-
+ * built page. `videoAspect` is read from the `<video>` element's own
+ * `loadedmetadata` event — `videoWidth`/`videoHeight`, the decoder's own
+ * report of the stream it just negotiated — and drives `aspect-ratio`
+ * directly, so the box takes the shape of what is actually arriving. It holds
+ * its last known value across a reconnect rather than resetting to the 16:9
+ * default, for the same reason `blank()` leaves the last frame on screen:
+ * the shape of the picture is exactly as much "the one thing still held" as
+ * the pixels are.
+ *
+ * **2. Every overlay is in front of the video, by an explicit `z-index`, not
+ * by DOM order alone.** This is the defect the task is named for: a
+ * hardware-decoded `<video>` element can composite in a layer of its own that
+ * ignores the paint order later siblings would otherwise get for free, so
+ * this file no longer leaves that to chance. `.y-pic__video` and the stills
+ * `<img>` that can replace it sit at `z-index: 1`; the hatch — which must
+ * wash over the video but never obscure a reading drawn on top of it — sits
+ * at `z-index: 2`; every informational overlay (the hud, the state overlay,
+ * the REC pill, the foot strip, the link/drop readout, the drag orb, the
+ * reason and off panels) sits at `z-index: 5`. Declared, not measured:
+ * `jsdom` performs no layout, so `picture.component.test.ts` compares these
+ * declared values against each other rather than anything it would have to
+ * render to see.
+ *
+ * **3. The picture wears its own state**, rather than staying silent about a
+ * preview that has quietly stepped down to a smaller size or a lower rate.
+ * `YonderStateOverlay` (Task 19) is composed with plain props, exactly the
+ * way that component's own doc comment says this rework would — the whole
+ * daemon-formatted preview-state message (§8.2), never redrawn or
+ * reformatted here. It is a **second, orthogonal fact** from the existing
+ * mode badge above it: the badge reports *this browser's own WebRTC session*
+ * (observed entirely from `RTCPeerConnection` events and the video's own
+ * `timeupdate`, with no daemon message involved at all — live, reconnecting,
+ * no contact, stills, off) while the state overlay reports *the shared
+ * preview encode's policy* (adaptive, pinned at its floor, holding a chosen
+ * size, full rate because an operator is holding the key, or itself in a
+ * stills fallback). A healthy session can be showing a stepped-down picture,
+ * and a session busy reconnecting says nothing about what size the encode
+ * last held — collapsing the two into one badge would silently drop
+ * whichever fact lost.
+ *
+ * **The REC pill, the foot strip and the link/drop readout are the same
+ * "picture" table from the spec (§7), each drawing what it is given and
+ * deciding nothing new:** `recording` is `{ elapsed }`, pre-formatted by
+ * whichever source is authoritative for it (§8.5 — the camera's own state
+ * push, or the board recorder's observed state, according to destination);
+ * this component does not compute a duration from a start time. `stats` is
+ * `{ linkMbps, dropPct }` — "WebRTC stats in the browser" per the spec's own
+ * words, a live reading this component would compute itself from
+ * `RTCPeerConnection.getStats()`, wired up where the rest of the rate
+ * controller is (§8.1, a later phase); until then it draws whatever the
+ * message channel below hands it, which is enough to prove the drawing is
+ * right without inventing a polling loop this task was not asked to build.
+ *
+ * **The foot strip's PAN/TILT read a fixed `°`, unstyled by any capability
+ * descriptor — `DESCRIPTORS.aim` carries no sub-unit for either axis, the
+ * same reason `YonderAim.vue`'s own gauges hardcode it — but ZOOM and the
+ * exposure reading are display units and a label read straight from
+ * `video/descriptors.ts` via `yonder-core/presentation`, never reformatted
+ * by hand here.** `DESCRIPTORS.zoom.toDisplay`/`DESCRIPTORS.exposure.toDisplay`
+ * are the exact functions the config schema and the write path already use
+ * (a raw exposure count of 156 is 15600 µs both places); a second, hand-
+ * rolled multiply-by-100 living in this file as well is precisely the second
+ * source of truth that drifts the moment one of the two is changed and the
+ * other is not. `sentenceLabel` is not used here — these labels are a
+ * heading, not mid-sentence — so `.label` is read directly and uppercased in
+ * script, the identical technique `YonderStateOverlay`'s own `headWord`
+ * fallback uses and for the same stated reason: what a test reads through
+ * `.text()` must be exactly what is on screen, not a capitalisation only a
+ * stylesheet rule performs.
+ *
+ * **The thumb strip sits *beneath* the picture, not on top of it**
+ * (`docs/console/design/instrument-library/README.md`'s own round-2
+ * correction: "a strip under the picture with the other cameras… A press on
+ * a thumbnail switches"), so it is a normal-flow sibling of `.y-pic__frame`
+ * rather than one more absolutely-positioned overlay — it never enters the
+ * front-of-the-video z-index question at all, because it never shares the
+ * video's own stacking context. `YonderThumbStrip` (Task 19) is composed
+ * with plain props, exactly as that component's own doc comment states this
+ * rework would. A press names the camera whose thumbnail was pressed —
+ * `YonderThumbStrip`'s own contract is an id, never a position in the array
+ * — and this component treats it exactly the way it already treats being
+ * *told* a camera by an incoming message: `sentPath` is updated directly, so
+ * the existing `streamPath` watcher renegotiates through the exact path this
+ * file already had for that (`told`, above), and the flow is also notified,
+ * the same "so the flow knows what the operator asked for" reasoning
+ * `setMode` already gives for its own press.
+ *
+ * **The drag-to-slew layer is "the orb only"** (spec §6: "the drag-to-slew
+ * layer (orb only, measured from where the finger landed)") — a full pan/
+ * tilt/mode/Recentre panel is `YonderAim.vue`'s own job (Task 23), composed
+ * beside this picture wherever a page has room for both; duplicating any of
+ * that here would be two controls able to disagree about the same gimbal.
+ * What this component draws is a single affordance: press anywhere on the
+ * picture and drag, and a haloed orb tracks the pointer while a rate is
+ * commanded proportional to *how far the pointer has moved from where it
+ * first went down* — never from the centre of the frame, because an operator
+ * whose thumb lands near an edge is asking for a rate proportional to their
+ * own drag distance, not to their thumb's incidental starting position
+ * (coordinator resolution 5). This is exactly the blueprint's own
+ * `DraftPicture.vue` reasoning ("Rate is measured from where the finger went
+ * down, not from the centre of the frame: a thumb starts wherever it lands"),
+ * carried into a component whose box no longer has a fixed pixel size to
+ * measure against (defect 1, above) — so unlike that draft, and unlike
+ * `YonderAimPad`'s own dial, the rate here is computed from the raw
+ * `clientX`/`clientY` delta alone, with **no division by any measured
+ * `getBoundingClientRect()` width or height anywhere in the tested path**.
+ * That sidesteps this whole plan's own recurring `jsdom`-measures-everything-
+ * zero trap entirely, rather than working around it with a constant the way
+ * `YonderAimPad`'s own `DIAL_SIZE` has to: a constant stood in for a *fixed*
+ * SVG viewport there; this box has no fixed size to stand in for, by design.
+ * The dead zone and the full-rate distance (`DRAG_DEAD`, `DRAG_RANGE` below)
+ * are themselves in raw CSS pixels for the same reason, and `DRAG_MAX_RATE`
+ * matches `YonderAimPad`'s own `MAX_RATE` so a rate commanded from the
+ * picture and a rate commanded from the aim panel mean the same thing to
+ * whatever reads them.
+ *
+ * **The emitted events are the pad's own gesture contract, relayed by a
+ * second, independent state machine, not a shared one.** `slew` carries
+ * `pan`, `tilt`, a lifetime-monotonic `seq` and a `gesture` id minted fresh
+ * only when a drag leaves the dead zone; `stop` carries `gesture` alone —
+ * `YonderAimPad`'s own design (Task 20), and `YonderAim.vue`'s own doc
+ * comment on why `stop` never gains a `pan: 0, tilt: 0` of its own invention.
+ * This is a **second implementation of that same shape**, not a shared one,
+ * because this component draws a full video frame with no SVG dial inside
+ * it to delegate to — but the state machine itself mirrors `YonderAimPad`'s
+ * own proven one method-for-method (`dragDown`/`dragMove` ~ `down`/`move`,
+ * `updateDrag` ~ `updateFromEvent`, `endDragGesture` ~ `endGesture`,
+ * `onDragEnd` ~ `onEnd`), including the two traps Task 20's own review
+ * found: **exactly one `stop` for every ending**, with idempotency living in
+ * exactly one guard (`endDragGesture`'s own `dragGesture === null` check,
+ * never duplicated in `onDragEnd`), and **all eight endings** — the four
+ * pointer events bound on `.y-pic__frame` in the template above, plus
+ * `blur`, `visibilitychange` turning the tab hidden, and `pagehide`, attached
+ * in `mounted()`/removed in `beforeUnmount()` below, plus the dead zone
+ * itself ending the gesture on `updateDrag`. And **inhibited emits nothing**:
+ * `dragDown` refuses the press outright while `aimable` is false, and the
+ * `watch: { aimable }` below ends an in-flight gesture immediately if aim
+ * stops being available mid-drag, the identical second guard
+ * `YonderAimPad`'s own `updateFromEvent` needs for a fault arriving between
+ * presses. `aimable` gates on `aim.state === 'present'` alone: `not-offered`,
+ * `advertised` and `gated` all mean no drag layer here, because a struck or
+ * dead orb duplicating `YonderAim.vue`'s own four-state vocabulary a second
+ * time would be exactly the coupling this split into two components exists
+ * to avoid — a camera whose aim is not fully live draws that fact once, on
+ * the aim panel, not twice.
+ *
+ * **The trap Task 23's own review found, named directly so it is not
+ * repeated a third time:** comparing only the *first* relayed event against
+ * the pad's *first* emitted event lets a hardcoded `seq: 1` through, because
+ * the first slew's own `seq` genuinely is 1 — the assertion would agree with
+ * a mutant by coincidence. `picture.component.test.ts`'s own drag tests drag
+ * far enough that the counter has visibly moved past 1, assert that it
+ * moved, and only then compare — the same fix, independently re-derived for
+ * a second gesture engine with the identical shape.
+ *
+ * **The three-tier fallback this file already had for `cost` and the
+ * camera's own name — the live message, then the last message that set it,
+ * then a configured default — is generalised here to eight more fields
+ * rather than hand-written eight more times.** `fromPayload(key)` reads
+ * `this.command` directly first (so a field arriving on *this* message is
+ * never stale for even one tick behind its own watcher), falls back to
+ * `sentExtra` (refreshed by the `command` watcher below, exactly the way
+ * `sentCost`/`sentPath` already are, so a field set by an *earlier* message
+ * survives a *later* one that does not repeat it), and finally falls back to
+ * `this.props.report` — a static, editor-configured object with the same
+ * shape, so a page that draws this picture with **no store at all** (R-UI-
+ * 28: the Cockpit embeds it without a deck) still has a way to show a real
+ * state rather than an empty one. `YonderAim.vue`'s own `report` computed is
+ * the direct precedent: this is the identical live-then-configured
+ * precedence, generalised across a wider payload instead of one field.
  */
 const BACKOFF_MS = [1000, 2000, 4000, 8000, 15000]
 
+/** The picture's own richer facts (R-VID-18), cached the same way `cost`
+ * and the camera's own name already are — see `fromPayload`'s own doc
+ * comment above for why one loop replaces eight hand-written pairs. */
+const PAYLOAD_KEYS = ['state', 'recording', 'cameras', 'downlink', 'aim', 'zoom', 'exposure', 'stats']
+
+/** `+12.4` / `−12.4` — a proper minus sign, matching every other signed
+ * reading this console already draws (`YonderAim.vue`'s own gauges, the
+ * blueprint's own `fmt()`), never a hyphen. */
+function signed (n, digits = 1) {
+    return (n >= 0 ? '+' : '−') + Math.abs(n).toFixed(digits)
+}
+
+/**
+ * The drag-to-slew layer's own geometry, in raw CSS pixels — see this
+ * file's own doc comment on why nothing here divides by a measured
+ * `getBoundingClientRect()` width or height.
+ */
+const DRAG_DEAD = 12
+const DRAG_RANGE = 120
+/** Degrees per second at full extension — matches `YonderAimPad`'s own
+ * `MAX_RATE`, so a rate commanded from here and one commanded from the aim
+ * panel mean the same thing to whatever reads them. */
+const DRAG_MAX_RATE = 30
+
+/** A fresh id for a new drag gesture — module-scoped for the identical
+ * reason `YonderAimPad`'s own `newGestureId` is: two mounted pictures, and
+ * two separate drags within one, must never collide or share an id. */
+let dragGestureCounter = 0
+function newDragGestureId () {
+    dragGestureCounter += 1
+    return 'drag-' + dragGestureCounter
+}
+
 export default {
     name: 'YonderPicture',
+    components: { YonderStateOverlay, YonderThumbStrip },
     inject: ['$socket', '$dataTracker'],
     props: {
         id: { type: String, required: true },
@@ -142,7 +408,25 @@ export default {
              * would have no reason to suspect it. The full rate is reached by
              * *holding* a key — held, not toggled, so nobody leaves it on.
              */
-            rate: 'preview'
+            rate: 'preview',
+            /** The `<video>`'s own reported shape (defect 1, see this file's
+             * own doc comment) — `videoWidth / videoHeight` from
+             * `loadedmetadata`, holding its last value across a reconnect
+             * rather than resetting. 16:9 until a stream has ever answered. */
+            videoAspect: 16 / 9,
+            /** The last message's own richer facts (R-VID-18) — see
+             * `fromPayload`'s own doc comment above. */
+            sentExtra: {},
+            /** The drag-to-slew layer's own gesture state — see this file's
+             * own doc comment on why this mirrors `YonderAimPad` method-for-
+             * method rather than sharing its implementation. */
+            dragPointerId: null,
+            dragGesture: null,
+            dragSeq: 0,
+            orbX: 0,
+            orbY: 0,
+            downX: 0,
+            downY: 0
         }
     },
     computed: {
@@ -242,6 +526,87 @@ export default {
         ageText () {
             const s = this.staleFor
             return s < 60 ? `${s} s ago` : `${Math.floor(s / 60)} min ${s % 60} s ago`
+        },
+        /**
+         * `payload.state` (R-VID-18, R-UI-28) — see this file's own top-of-
+         * file doc comment on why this is a three-tier read rather than
+         * eight hand-written `cost`-shaped pairs.
+         *
+         * **Named `previewState`, not `state`.** This component already
+         * declares a prop called `state` — Dashboard's own standard per-node
+         * object, unused here, exactly as `YonderAim.vue`'s own doc comment
+         * notes for its identically-named `aimState`. A computed of the same
+         * name does not error; it warns once ("Computed property 'state' is
+         * already defined in Props") and then silently loses to the prop, so
+         * `v-if="state"` would have been permanently truthy against the
+         * prop's own `{}` default and every overlay below it would have
+         * rendered from an empty object on every single mount — the kind of
+         * defect this whole plan's own mutation-testing discipline exists to
+         * catch, caught here before a single test was written against it by
+         * simply running the *existing* suite first and reading the warning.
+         */
+        previewState () {
+            const v = this.fromPayload('state')
+            return v && typeof v === 'object' ? v : null
+        },
+        recording () {
+            const v = this.fromPayload('recording')
+            return v && typeof v === 'object' && typeof v.elapsed === 'string' ? v : null
+        },
+        cameras () {
+            const v = this.fromPayload('cameras')
+            return Array.isArray(v) ? v : []
+        },
+        downlink () {
+            const v = this.fromPayload('downlink')
+            return typeof v === 'string' ? v : ''
+        },
+        aim () {
+            const v = this.fromPayload('aim')
+            return v && typeof v === 'object' ? v : null
+        },
+        /** `not-offered`, `advertised` and `gated` all mean no drag layer
+         * here — see this file's own doc comment on why the full four-state
+         * vocabulary is `YonderAim.vue`'s own territory, not drawn twice. */
+        aimable () {
+            return Boolean(this.aim && this.aim.state === 'present')
+        },
+        stats () {
+            const v = this.fromPayload('stats')
+            return v && typeof v === 'object'
+                && typeof v.linkMbps === 'number' && typeof v.dropPct === 'number'
+                ? v
+                : null
+        },
+        /**
+         * `PAN`/`TILT` (a fixed `°`, this console's own established
+         * convention for the two axes `DESCRIPTORS.aim` has no sub-unit for)
+         * then `ZOOM`/the exposure reading — both read from
+         * `video/descriptors.ts` via `yonder-core/presentation`, converted
+         * through the identical `toDisplay` the config schema and the write
+         * path already use. See this file's own top-of-file doc comment.
+         */
+        footItems () {
+            const items = []
+            if (this.aimable) {
+                if (typeof this.aim.pan === 'number') {
+                    items.push({ key: 'pan', label: 'PAN', text: signed(this.aim.pan) + '°' })
+                }
+                if (typeof this.aim.tilt === 'number') {
+                    items.push({ key: 'tilt', label: 'TILT', text: signed(this.aim.tilt) + '°' })
+                }
+            }
+            const zoom = this.fromPayload('zoom')
+            if (typeof zoom === 'number') {
+                const d = DESCRIPTORS.zoom
+                items.push({ key: 'zoom', label: d.label.toUpperCase(), text: String(d.toDisplay(zoom)) + d.unit })
+            }
+            const exposure = this.fromPayload('exposure')
+            if (typeof exposure === 'number') {
+                const d = DESCRIPTORS.exposure
+                items.push({ key: 'exposure', label: d.label.toUpperCase(), text: String(d.toDisplay(exposure)) + d.unit })
+            }
+            return items
         }
     },
     watch: {
@@ -280,6 +645,13 @@ export default {
             if (value && typeof value === 'object') {
                 if (typeof value.cost === 'string') this.sentCost = value.cost
                 if (typeof value.path === 'string') this.sentPath = value.path
+                // R-VID-18: the picture's own richer facts, each cached
+                // independently so a later message naming only one of them
+                // (a path update, say) does not blank the rest — the same
+                // reasoning `sentCost`/`sentPath` already state, generalised.
+                for (const key of PAYLOAD_KEYS) {
+                    if (key in value) this.sentExtra[key] = value[key]
+                }
                 return
             }
             if (typeof value !== 'string') return
@@ -292,6 +664,13 @@ export default {
                 const rate = value.slice(5)
                 if (rate === 'full' || rate === 'preview') this.setRate(rate)
             }
+        },
+        /** R-CMD-04: aim becoming unavailable mid-drag stops the aircraft
+         * immediately, the identical second guard `YonderAimPad`'s own
+         * `updateFromEvent` needs for a fault arriving between presses (see
+         * this file's own top-of-file doc comment). */
+        aimable (now) {
+            if (!now) this.endDragGesture()
         }
     },
     created () {
@@ -301,17 +680,51 @@ export default {
         this.tick = setInterval(() => { this.now = Date.now() }, 1000)
         // The media clock, which is the only honest source for the age this
         // component draws. See the note on `lastFrameAt` above.
-        if (this.$refs.video) this.$refs.video.addEventListener('timeupdate', this.onFrame)
+        if (this.$refs.video) {
+            this.$refs.video.addEventListener('timeupdate', this.onFrame)
+            this.$refs.video.addEventListener('loadedmetadata', this.onMetadata)
+        }
+        // The drag layer's own four non-pointer endings — see this file's
+        // own doc comment on "all eight endings".
+        this.onDragBlur = () => this.onDragEnd()
+        this.onDragVisibility = () => { if (document.hidden) this.onDragEnd() }
+        this.onDragPageHide = () => this.onDragEnd()
+        window.addEventListener('blur', this.onDragBlur)
+        document.addEventListener('visibilitychange', this.onDragVisibility)
+        window.addEventListener('pagehide', this.onDragPageHide)
         this.requestLive()
     },
     beforeUnmount () {
         clearInterval(this.tick)
         clearTimeout(this.retryTimer)
         clearTimeout(this.stillsTimer)
-        if (this.$refs.video) this.$refs.video.removeEventListener('timeupdate', this.onFrame)
+        if (this.$refs.video) {
+            this.$refs.video.removeEventListener('timeupdate', this.onFrame)
+            this.$refs.video.removeEventListener('loadedmetadata', this.onMetadata)
+        }
+        window.removeEventListener('blur', this.onDragBlur)
+        document.removeEventListener('visibilitychange', this.onDragVisibility)
+        window.removeEventListener('pagehide', this.onDragPageHide)
+        // A component torn down mid-hold must still stop the aircraft —
+        // navigating away from the page is not a reason to keep slewing.
+        this.onDragEnd()
         this.teardown()
     },
     methods: {
+        /**
+         * One field of this picture's own richer state (R-VID-18, R-UI-28):
+         * the live message first, then the last message that set it, then a
+         * configured default — see this file's own top-of-file doc comment
+         * on why this is one generalised read rather than eight hand-written
+         * `cost`-shaped pairs.
+         */
+        fromPayload (key) {
+            const payload = this.command
+            if (payload && typeof payload === 'object' && key in payload) return payload[key]
+            if (key in this.sentExtra) return this.sentExtra[key]
+            const report = this.props.report
+            return report && typeof report === 'object' ? report[key] : undefined
+        },
         /**
          * A frame reached the screen (R-VID-03).
          *
@@ -325,6 +738,16 @@ export default {
             this.lastFrameAt = Date.now()
             this.attempt = 0
             this.reason = ''
+        },
+        /**
+         * The decoder's own report of the stream it just negotiated (defect
+         * 1) — see this file's own top-of-file doc comment. Guarded against
+         * a spurious zero reading, which would otherwise collapse the shape
+         * to `NaN`/0 and hold it there.
+         */
+        onMetadata () {
+            const v = this.$refs.video
+            if (v && v.videoWidth && v.videoHeight) this.videoAspect = v.videoWidth / v.videoHeight
         },
         /**
          * Nothing in flight: the session, and the handshake that was setting
@@ -547,32 +970,138 @@ export default {
                 this.stillSrc = mode === 'stills' ? (this.props.stillsUrl || '') : ''
             }
             this.$socket.emit('widget-action', this.id, { payload: `mode:${mode}`, topic: this.props.label })
+        },
+        /** Every new emission this task adds leaves through here — one seam,
+         * the same reasoning `YonderAim.vue`'s own `post()` gives for having
+         * exactly one, and the reason neither carries a `topic`: the second
+         * argument to `emit` already identifies this node to the flow. */
+        post (payload) {
+            this.$socket.emit('widget-action', this.id, { payload })
+        },
+        /**
+         * A press on the thumb strip: treated exactly like *being told* a
+         * camera by an incoming message (`told`, above), because a press
+         * naming a camera and a message naming one are the same fact from
+         * two different sources. The flow is also told, the same "so the
+         * flow knows what the operator asked for" reasoning `setMode`
+         * already gives for its own press.
+         */
+        onThumbGo (id) {
+            this.sentPath = id
+            this.post({ path: id })
+        },
+        /**
+         * The drag-to-slew layer (spec §6: "orb only") — see this file's own
+         * top-of-file doc comment for why this mirrors `YonderAimPad` method-
+         * for-method rather than sharing its implementation, and why the
+         * rate math below never divides by a measured rect.
+         */
+        dragAt (e) {
+            const dx = e.clientX - this.downX
+            const dy = e.clientY - this.downY
+            const d = Math.hypot(dx, dy)
+            if (d <= DRAG_DEAD) return null
+            const k = Math.min(1, (d - DRAG_DEAD) / DRAG_RANGE)
+            return {
+                // Screen y grows downward; tilt does not, hence the sign flip
+                // — the identical convention `YonderAimPad.at()` states.
+                pan: (dx / d) * k * DRAG_MAX_RATE,
+                tilt: -(dy / d) * k * DRAG_MAX_RATE
+            }
+        },
+        dragDown (e) {
+            // Inhibited: nothing happens at all, not even capture — the
+            // identical resolution `YonderAimPad.down()` states for its own
+            // first guard.
+            if (!this.aimable) return
+            // One active gesture at a time, the same reasoning
+            // `YonderAimPad.down()` gives for its own identical guard.
+            if (this.dragPointerId !== null) return
+            this.dragPointerId = e.pointerId
+            this.downX = e.clientX
+            this.downY = e.clientY
+            this.$refs.frame?.setPointerCapture?.(e.pointerId)
+            this.updateDrag(e)
+        },
+        dragMove (e) {
+            if (this.dragPointerId === null) return
+            if (e.pointerId !== undefined && e.pointerId !== this.dragPointerId) return
+            this.updateDrag(e)
+        },
+        /** The one place a pointer event becomes a slew or a stop — see
+         * `YonderAimPad.updateFromEvent`'s own doc comment for why `aimable`
+         * is checked here too, not only in `dragDown`. */
+        updateDrag (e) {
+            if (!this.aimable) { this.endDragGesture(); return }
+            const a = this.dragAt(e)
+            if (!a) { this.endDragGesture(); return }
+            if (this.dragGesture === null) this.dragGesture = newDragGestureId()
+            // Cosmetic only, and never read by the rate math above: the
+            // orb's on-screen position, which measuring zero under `jsdom`
+            // leaves harmlessly parked at the frame's own top-left corner.
+            const rect = this.$refs.frame ? this.$refs.frame.getBoundingClientRect() : { left: 0, top: 0 }
+            this.orbX = e.clientX - rect.left
+            this.orbY = e.clientY - rect.top
+            this.dragSeq += 1
+            this.post({ slew: { pan: a.pan, tilt: a.tilt, seq: this.dragSeq, gesture: this.dragGesture } })
+        },
+        /** Ends the active gesture, if there is one — idempotent, and the
+         * single place that idempotency lives, the identical shape
+         * `YonderAimPad.endGesture`'s own doc comment states and justifies. */
+        endDragGesture () {
+            this.orbX = 0
+            this.orbY = 0
+            if (this.dragGesture === null) return
+            const g = this.dragGesture
+            this.dragGesture = null
+            this.post({ stop: { gesture: g } })
+        },
+        /** Every one of the eight endings reaches here — see this file's own
+         * top-of-file doc comment. No `pointerId` guard of its own, for the
+         * identical reason `YonderAimPad.onEnd`'s own doc comment gives:
+         * provably redundant with `endDragGesture`'s own `dragGesture ===
+         * null` check for every state this component can reach. */
+        onDragEnd () {
+            this.dragPointerId = null
+            this.endDragGesture()
         }
     }
 }
 </script>
 
 <style scoped>
-/* **Fills the box the page gave it, and never sets its own height.**
-   `aspect-ratio: 16/9` looked right and was not: the widget's height is a
-   whole number of grid rows, the width is a fraction of the viewport, and the
-   two agree at exactly one window size. Everywhere else the frame was taller
-   than its widget and spilled over what followed — 543 px of picture in a
+.y-pic { position: relative; }
+/* **Takes the shape of the video it is showing, and never sets its own
+   fixed height** (defect 1 — see this file's own top-of-file doc comment).
+   `aspect-ratio: 16/9` looked right once and was not: the widget's height
+   was a whole number of grid rows, the width a fraction of the viewport,
+   and the two agreed at exactly one window size — 543 px of picture in a
    468 px box, with the reason for the missing picture among the 75 px that
-   escaped. The video letterboxes itself inside whatever box it gets
-   (`object-fit: contain`), so the aspect ratio was never this element's to
-   hold. */
-.y-pic { position: relative; background: var(--yonder-display, #04060a); height: 100%; min-height: 160px; overflow: hidden; }
-.y-pic__video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; transition: filter 1s linear; }
+   escaped. Filling the given box (`height: 100%`) was the fix for *that*,
+   and was still wrong: it let the *page* impose an aspect ratio the camera
+   never agreed to, so a camera that is not 16:9 was quietly letterboxed or
+   cropped inside a box built for one that is. `videoAspect` — the decoder's
+   own `loadedmetadata` report — now drives the box directly, so the shape
+   on screen is the camera's own shape, and a badly-shaped picture is never
+   confused with a badly-aimed one again. */
+.y-pic__frame { position: relative; width: 100%; background: var(--yonder-display, #04060a); overflow: hidden; }
+.y-pic__frame.is-aiming { cursor: crosshair; touch-action: none; }
+/* **Every overlay below is given an explicit `z-index`** (defect 2 — this
+   file's own top-of-file doc comment). A hardware-decoded `<video>` can
+   composite in a layer of its own that ignores DOM order, so nothing here
+   is left to rely on painting later than its siblings by accident. */
+.y-pic__video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; transition: filter 1s linear; z-index: 1; }
 /* The hatch is the third of four signals, and the one that cannot be mistaken
-   for a dark scene or a badly exposed shot. */
+   for a dark scene or a badly exposed shot. Above the video, below every
+   reading drawn on top of it: it must wash over the picture, never obscure
+   a count or a badge. */
 .y-pic__hatch {
-    position: absolute; inset: 0; pointer-events: none;
+    position: absolute; inset: 0; z-index: 2; pointer-events: none;
     background: repeating-linear-gradient(45deg,
         transparent 0 14px,
         color-mix(in srgb, var(--yonder-bad, #ff4034) 22%, transparent) 14px 16px);
 }
-.y-pic__hud { position: absolute; top: 8px; left: 8px; display: flex; gap: 8px; align-items: baseline; }
+.y-pic__hud { position: absolute; top: 8px; left: 8px; z-index: 5; display: flex; gap: 8px; align-items: baseline; pointer-events: none; }
 .y-pic__badge {
     font-family: var(--yonder-font, system-ui, sans-serif);
     font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
@@ -592,15 +1121,87 @@ export default {
     font-size: 11px; text-transform: none;
     color: var(--yonder-label, #7f8a95);
 }
+/* `YonderStateOverlay`'s own root (`.y-ov`) receives this class as a Vue
+   fallthrough attribute — positioned here rather than inside that
+   component, which draws only what it is given and decides nothing about
+   where it sits on a page (its own doc comment). */
+.y-pic__state { position: absolute; top: 34px; left: 8px; z-index: 5; max-width: calc(100% - 16px); pointer-events: none; }
+.y-pic__rec {
+    position: absolute; top: 8px; right: 8px; z-index: 5;
+    display: flex; align-items: center; gap: 6px;
+    font-family: var(--yonder-font, system-ui, sans-serif);
+    font-size: 11px; letter-spacing: 0.06em;
+    padding: 3px 8px; border-radius: 2px;
+    background: color-mix(in srgb, var(--yonder-display, #04060a) 70%, transparent);
+    border: 1px solid var(--yonder-bad, #ff4034);
+    color: var(--yonder-bad, #ff4034);
+    pointer-events: none;
+}
+.y-pic__rec-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--yonder-bad, #ff4034); display: inline-block; }
+/* `left`/`right` both set, rather than a shrink-to-fit box growing from
+   `left` alone — a narrow picture (defect 1 means there is no fixed width
+   to assume any more) left four readings on one unbroken line wide enough
+   to run straight into `.y-pic__osd`'s own right-anchored box, sharing
+   almost the same bottom edge. `flex-wrap` on the real per-reading elements
+   below (not on bare text nodes, which a wrapping flex container cannot
+   size individually) lets PAN/TILT/ZOOM/SHUTTER fold onto a second line
+   instead of overlapping a neighbour that was never sharing a line with
+   them on a wider picture. */
+.y-pic__foot {
+    /* `right: 104px` clears `.y-pic__osd`'s own right-anchored box (roughly
+       90px wide at its own widest reading) — a horizontal split, not a
+       vertical one, because it holds regardless of how many lines either
+       box wraps to: verified on the gallery's own narrowest specimen card,
+       where four readings genuinely do wrap, and a vertical-only clearance
+       guess still let a wrapped line land inside the OSD box's own height. */
+    position: absolute; left: 8px; right: 104px; bottom: 34px; z-index: 5;
+    display: flex; flex-wrap: wrap; column-gap: 12px; row-gap: 2px;
+    font-family: var(--yonder-font-mono, ui-monospace, monospace);
+    font-size: 11.5px; font-variant-numeric: tabular-nums;
+    color: var(--yonder-value, #ffffff);
+    background: color-mix(in srgb, var(--yonder-display, #04060a) 70%, transparent);
+    padding: 4px 8px; border-radius: 2px;
+    pointer-events: none;
+}
+.y-pic__foot-item { white-space: nowrap; }
+.y-pic__foot-k {
+    font-family: var(--yonder-font, system-ui, sans-serif);
+    font-size: 10px; letter-spacing: 0.1em;
+    color: var(--yonder-label, #7f8a95);
+    margin-right: 5px;
+}
+.y-pic__osd {
+    position: absolute; right: 8px; bottom: 8px; z-index: 5;
+    font-family: var(--yonder-font-mono, ui-monospace, monospace);
+    font-size: 11.5px; font-variant-numeric: tabular-nums; line-height: 1.5;
+    color: var(--yonder-value, #ffffff);
+    background: color-mix(in srgb, var(--yonder-display, #04060a) 70%, transparent);
+    padding: 4px 8px; border-radius: 2px;
+    text-align: right;
+    pointer-events: none;
+}
+.y-pic__orb {
+    position: absolute; z-index: 5;
+    width: 28px; height: 28px; margin-left: -14px; margin-top: -14px;
+    border-radius: 50%;
+    border: 2px solid var(--yonder-select, #2ad4f0);
+    background: color-mix(in srgb, var(--yonder-select, #2ad4f0) 18%, transparent);
+    pointer-events: none;
+}
 .y-pic__reason, .y-pic__off {
-    position: absolute; left: 8px; right: 8px; bottom: 8px;
+    position: absolute; left: 8px; right: 8px; bottom: 8px; z-index: 5;
     font-family: var(--yonder-font, system-ui, sans-serif); font-size: 12px;
     color: var(--yonder-label, #7f8a95);
     background: color-mix(in srgb, var(--yonder-display, #04060a) 70%, transparent);
     padding: 4px 6px; border-radius: 2px;
+    pointer-events: none;
 }
 .tone-neutral { color: var(--yonder-neutral, #7d7869); }
 .tone-waiting { color: var(--yonder-waiting, #ffcf28); }
 .tone-good    { color: var(--yonder-good, #35d06a); }
 .tone-bad     { color: var(--yonder-bad, #ff4034); }
+/* The strip sits *beneath* the picture, not on top of it — see this file's
+   own top-of-file doc comment on why it is a normal-flow sibling of
+   `.y-pic__frame` rather than one more absolutely-positioned overlay. */
+.y-pic__strip { margin-top: 8px; }
 </style>

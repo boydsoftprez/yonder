@@ -3,6 +3,8 @@ import { mount, type VueWrapper } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { nextTick, reactive } from "vue";
 import YonderPicture from "./YonderPicture.vue";
+import YonderStateOverlay from "./YonderStateOverlay.vue";
+import YonderThumbStrip from "./YonderThumbStrip.vue";
 
 /**
  * `YonderPicture` is the most behavioural thing on the console, and none of
@@ -985,5 +987,554 @@ describe("what the soft-key rail sends it", () => {
       expect(wrapper.find(".y-pic__badge").text(), JSON.stringify(junk)).toBe("live · preview");
     }
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * Task 25: three defects the task is named for, fixed together (R-VID-18,
+ * R-UI-28) — see `YonderPicture.vue`'s own top-of-file doc comment for the
+ * full reasoning behind each. Six of the seven behaviours below had no
+ * dictated test body in `task-25-brief.md`; the coordinator's resolutions
+ * specify behaviour and leave the assertions here, on the same evidence
+ * Tasks 19-23 already recorded: a body dictated verbatim has twice carried a
+ * mistake about JavaScript an implementer had to find.
+ */
+
+/**
+ * The frame's own declared `aspect-ratio`, read from its raw `style`
+ * attribute rather than `getComputedStyle` — confirmed empirically before
+ * writing a test against it, the same discipline `YonderAimPad`'s own
+ * `DIAL_SIZE` comment describes for its own environment check: `jsdom` (this
+ * project's installed v30) caches `getComputedStyle`'s result per element
+ * the *first* time it is queried while the element is detached from
+ * `document` — which every `@vue/test-utils` `mount()` without `attachTo`
+ * is — so a second query after the value has actually changed keeps
+ * reporting the first answer, exactly the "jsdom measures nothing" trap
+ * this whole plan has hit before, in a different shape. The raw attribute
+ * has no
+ * such trap: Vue writes it fresh on every patch, and this file's own
+ * existing tests already read inline styles this way (`.y-pic__video`'s own
+ * `filter`, throughout this file) rather than through `getComputedStyle`.
+ */
+function frameAspect(wrapper: VueWrapper): number {
+  const style = wrapper.find(".y-pic__frame").attributes("style") ?? "";
+  const match = style.match(/aspect-ratio:\s*([\d.]+)/);
+  return match ? parseFloat(match[1]!) : NaN;
+}
+
+describe("the picture is the shape of the picture (defect 1)", () => {
+  it("takes the video's aspect ratio from loadedmetadata and has no fixed height", async () => {
+    const { wrapper } = mountPicture();
+    await settle();
+
+    // A sensible default before any stream has ever answered, not "no shape
+    // at all" — a `0` or `NaN` aspect-ratio would collapse the box.
+    expect(frameAspect(wrapper)).toBeCloseTo(16 / 9, 5);
+
+    // The ratio comes from `loadedmetadata` with real dimensions, never from
+    // a prop: `jsdom`'s own `<video>` reports `videoWidth`/`videoHeight` as
+    // 0 until told otherwise, exactly the way it reports every measured
+    // rect as zero, so the event is dispatched with the decoder's own
+    // reported shape overridden by hand.
+    const videoEl = wrapper.find("video").element as HTMLVideoElement;
+    Object.defineProperty(videoEl, "videoWidth", { value: 640, configurable: true });
+    Object.defineProperty(videoEl, "videoHeight", { value: 480, configurable: true });
+    videoEl.dispatchEvent(new Event("loadedmetadata"));
+    await nextTick();
+
+    expect(frameAspect(wrapper)).toBeCloseTo(640 / 480, 5);
+
+    // No fixed height anywhere this component states about itself: the box
+    // is shaped by `aspect-ratio` and whatever width its own page gives it.
+    expect(wrapper.find(".y-pic__frame").attributes("style") ?? "").not.toContain("height:");
+  });
+
+  it("a camera that is not 16:9 reshapes the box instead of being letterboxed inside one built for 16:9", async () => {
+    const { wrapper } = mountPicture();
+    await settle();
+    const videoEl = wrapper.find("video").element as HTMLVideoElement;
+    // A portrait sensor, deliberately far from 16:9 — the exact shape a
+    // fixed-aspect box would have hidden the badly-shaped-ness of.
+    Object.defineProperty(videoEl, "videoWidth", { value: 480, configurable: true });
+    Object.defineProperty(videoEl, "videoHeight", { value: 640, configurable: true });
+    videoEl.dispatchEvent(new Event("loadedmetadata"));
+    await nextTick();
+
+    expect(frameAspect(wrapper)).toBeCloseTo(480 / 640, 5);
+    expect(frameAspect(wrapper)).toBeLessThan(1);
+  });
+
+  it("holds its last known shape across a reconnect, rather than resetting to the 16:9 default", async () => {
+    const { wrapper } = mountPicture({ stillsAfterMs: 600_000 });
+    await settle();
+    const videoEl = wrapper.find("video").element as HTMLVideoElement;
+    Object.defineProperty(videoEl, "videoWidth", { value: 1920, configurable: true });
+    Object.defineProperty(videoEl, "videoHeight", { value: 1080, configurable: true });
+    videoEl.dispatchEvent(new Event("loadedmetadata"));
+    await nextTick();
+    expect(frameAspect(wrapper)).toBeCloseTo(1920 / 1080, 5);
+
+    pc().goes("failed");
+    await advance(1_000);
+
+    // Reconnecting tears down and rebuilds the session — exactly the case
+    // `blank()`'s own doc comment says must not delete the last frame — and
+    // a fresh negotiation has not yet delivered a new `loadedmetadata`.
+    expect(frameAspect(wrapper)).toBeCloseTo(1920 / 1080, 5);
+  });
+});
+
+/** Every overlay's declared `z-index`, read straight off the stylesheet —
+ * `jsdom` performs no layout, so this compares the declared values against
+ * each other rather than measuring anything (coordinator resolution 2). */
+function z(wrapper: VueWrapper, sel: string): number {
+  const el = wrapper.find(sel);
+  expect(el.exists(), `${sel} must exist to have a z-index at all`).toBe(true);
+  const value = parseInt(getComputedStyle(el.element).zIndex, 10);
+  expect(Number.isNaN(value), `${sel} must declare a numeric z-index`).toBe(false);
+  return value;
+}
+
+describe("every overlay is drawn in front of the video (defect 2)", () => {
+  /** Every overlay this component can draw at once, under one deliberately
+   * fully-populated state: a live, stale (hatched) picture carrying a
+   * preview-state message, a recording, a foot-strip reading and stats. */
+  const OVERLAYS = [
+    ".y-pic__hud",
+    ".y-pic__hatch",
+    ".y-pic__state",
+    ".y-pic__rec",
+    ".y-pic__foot",
+    ".y-pic__osd",
+  ];
+
+  it("draws every overlay in front of the video", async () => {
+    const { wrapper, press } = mountWithRail();
+    await settle();
+    pc().deliverTrack();
+    frames(wrapper);
+    await settle();
+    await advance(5_000); // stale enough for the hatch to join the rest
+
+    await press({
+      state: { head: "adaptive", size: "1280×720", rate: "15 fps", bitrate: "1.8 Mb/s" },
+      recording: { elapsed: "00:13:47" },
+      zoom: 156,
+      stats: { linkMbps: 3.1, dropPct: 0.4 },
+    });
+
+    const videoZ = z(wrapper, ".y-pic__video");
+    for (const sel of OVERLAYS) {
+      expect(z(wrapper, sel), sel).toBeGreaterThan(videoZ);
+    }
+  });
+
+  it("draws the off panel, and the no-picture reason panel, in front of the video too", async () => {
+    const { wrapper } = mountPicture();
+    await settle();
+    setMode(wrapper, "off");
+    await settle();
+    expect(z(wrapper, ".y-pic__off")).toBeGreaterThan(z(wrapper, ".y-pic__video"));
+
+    reply = { status: 404 };
+    const second = mountPicture();
+    await settle();
+    expect(z(second.wrapper, ".y-pic__reason")).toBeGreaterThan(z(second.wrapper, ".y-pic__video"));
+  });
+});
+
+describe("the picture wears its own state (defect 3)", () => {
+  it("mounts the state overlay from payload.state, and the step line only on a change", async () => {
+    const { wrapper, press } = mountWithRail();
+    await settle();
+    expect(wrapper.findComponent(YonderStateOverlay).exists()).toBe(false);
+
+    await press({
+      state: {
+        head: "floor",
+        size: "854×480",
+        rate: "10 fps",
+        bitrate: "0.3 Mb/s",
+        step: "Stepped down to 854×480: pinned at the floor for 4 s",
+      },
+    });
+    const overlay = wrapper.findComponent(YonderStateOverlay);
+    expect(overlay.exists()).toBe(true);
+    expect(overlay.props("head")).toBe("floor");
+    expect(overlay.props("size")).toBe("854×480");
+    expect(wrapper.find(".y-ov__step").exists()).toBe(true);
+    expect(wrapper.find(".y-ov__step").text()).toContain("Stepped down");
+
+    // The very next message carries no step of its own (§8.2: "the last
+    // step with its reason" is a fact about a change, not a permanent
+    // fixture). A component that merged fields across messages instead of
+    // caching the whole object as a unit would leave a stale step line
+    // showing forever, on every message after the one that actually stepped.
+    await press({ state: { head: "floor", size: "854×480", rate: "10 fps", bitrate: "0.3 Mb/s" } });
+    expect(wrapper.find(".y-ov__step").exists()).toBe(false);
+    // And the rest of the overlay is unaffected by that same message.
+    expect(wrapper.findComponent(YonderStateOverlay).props("head")).toBe("floor");
+  });
+
+  /**
+   * The scenario above proves the *live* read is right, but on its own that
+   * is not enough: `fromPayload` reads the current message first whenever it
+   * carries `state` at all, so a message that always repeats `state` can
+   * mask a caching bug entirely — confirmed by hand, not assumed: merging
+   * the cache field-by-field instead of replacing it as a whole left the
+   * test above green, because neither of its two `press()` calls ever
+   * leaves the live-read path. This test forces the *cached* copy to be
+   * read — a later message that omits `state` altogether — at two different
+   * points either side of a step, which only a whole-object replace gets
+   * right.
+   */
+  it("the cached state (read when a later message omits `state` entirely) never resurrects a stale step from an earlier message", async () => {
+    const { wrapper, press } = mountWithRail();
+    await settle();
+    await press({ state: { head: "floor", step: "Stepped down to 854×480" } });
+    expect(wrapper.find(".y-ov__step").exists()).toBe(true);
+
+    // Says nothing about `state` at all — correctly falls back to the
+    // cache, which still legitimately carries the step (nothing has said
+    // the state changed since).
+    await press({ path: "cam0" });
+    expect(wrapper.find(".y-ov__step").exists()).toBe(true);
+
+    // A fresh state message, with no step this time. The cache must be
+    // replaced as a whole here, or the first message's step would survive
+    // merged inside the cached object indefinitely.
+    await press({ state: { head: "floor" } });
+    expect(wrapper.find(".y-ov__step").exists()).toBe(false);
+
+    // And a message that omits `state` again must now read the *replaced*
+    // cache, not one still quietly carrying the first message's step.
+    await press({ path: "cam1" });
+    expect(wrapper.find(".y-ov__step").exists()).toBe(false);
+  });
+
+  it("draws the REC pill from recording, the foot strip from the descriptor's own label, LINK · DROP from stats", async () => {
+    const { wrapper, press } = mountWithRail();
+    await settle();
+    expect(wrapper.find(".y-pic__rec").exists()).toBe(false);
+    expect(wrapper.find(".y-pic__foot").exists()).toBe(false);
+    expect(wrapper.find(".y-pic__osd").exists()).toBe(false);
+
+    await press({
+      recording: { elapsed: "00:13:47" },
+      zoom: 156,
+      exposure: 156,
+      stats: { linkMbps: 3.1, dropPct: 0.4 },
+    });
+
+    expect(wrapper.find(".y-pic__rec").text()).toBe("REC 00:13:47");
+
+    const foot = wrapper.find(".y-pic__foot").text();
+    // Zoom: device-native passthrough, no unit at all (R-CTL-14 — no ×
+    // ratio until the device's own scale is established), read from
+    // `DESCRIPTORS.zoom` rather than a literal "ZOOM" written by hand here.
+    expect(foot).toContain("ZOOM");
+    expect(foot).toContain("156");
+    // Exposure: `DESCRIPTORS.exposure`'s own real label and its own real
+    // conversion — 100 µs per raw unit, so a raw reading of 156 shows 15600
+    // µs. A hand-rolled "×100" living in this component too would be the
+    // second source of truth this file's own doc comment warns drifts the
+    // moment one of the two copies of the factor changes and the other does
+    // not.
+    expect(foot).toContain("SHUTTER");
+    expect(foot).toContain("15600");
+    expect(foot).toContain("µs");
+
+    const osd = wrapper.find(".y-pic__osd").text();
+    expect(osd).toContain("LINK");
+    expect(osd).toContain("3.10 Mb/s");
+    expect(osd).toContain("DROP");
+    expect(osd).toContain("0.4 %");
+    // A unit is never uppercased (CLAUDE.md, project-wide) — proven against
+    // what `.text()` actually sees, not merely against a stylesheet rule
+    // that could be the only thing making it look right.
+    expect(osd).not.toContain("MB/S");
+  });
+
+  it("draws the thumb strip from payload.cameras, and a press switches this picture's own camera", async () => {
+    const { wrapper, press, emit } = mountWithRail();
+    await settle();
+    expect(wrapper.findComponent(YonderThumbStrip).exists()).toBe(false);
+
+    await press({
+      cameras: [
+        { id: "cam0", name: "Nose", active: true, ageSeconds: 0 },
+        { id: "cam1", name: "Tail", active: false, ageSeconds: 4, thumbSrc: "/stills/cam1.jpg" },
+      ],
+      downlink: "0.41 Mb/s",
+    });
+
+    const strip = wrapper.findComponent(YonderThumbStrip);
+    expect(strip.exists()).toBe(true);
+    expect(strip.props("cameras")).toHaveLength(2);
+    expect(strip.props("downlink")).toBe("0.41 Mb/s");
+
+    emit.mockClear();
+    await strip.vm.$emit("go", "cam1");
+    await settle();
+
+    // A press names the camera it was a press on, never its position in the
+    // array (`YonderThumbStrip`'s own contract) — and this picture treats
+    // that exactly like being *told* a camera by an incoming message: it
+    // renegotiates against it, and tells the flow, so a control that can be
+    // pressed is a control that is actually reachable rather than one that
+    // shipped dead.
+    expect(fetchMock.mock.calls.at(-1)?.[0]).toBe("/video/cam1-preview/whep");
+    const pathCalls = emit.mock.calls.filter(([, , msg]) => msg?.payload?.path);
+    expect(pathCalls).toHaveLength(1);
+    expect(pathCalls[0]![2].payload.path).toBe("cam1");
+  });
+});
+
+describe("the drag-to-slew layer — orb only (spec §6)", () => {
+  function frameEl(wrapper: VueWrapper): Element {
+    return wrapper.find(".y-pic__frame").element;
+  }
+  function dragPoint(type: string, x: number, y: number, pointerId = 1): PointerEvent {
+    return new PointerEvent(type, { clientX: x, clientY: y, pointerId, bubbles: true, cancelable: true });
+  }
+  function slewCalls(emit: ReturnType<typeof vi.fn>) {
+    return emit.mock.calls.filter(([, , msg]) => msg?.payload?.slew);
+  }
+  function stopCalls(emit: ReturnType<typeof vi.fn>) {
+    return emit.mock.calls.filter(([, , msg]) => msg?.payload?.stop);
+  }
+
+  it("emits slew/stop with the pad's gesture contract, measured from where the pointer went down", async () => {
+    const { wrapper, emit, press } = mountWithRail();
+    await settle();
+    await press({ aim: { state: "present", pan: 0, tilt: 0 } });
+
+    const el = frameEl(wrapper);
+    // The press itself is always distance-zero from where it landed (this is
+    // what "measured from where the pointer went down" means), so it alone
+    // never emits — three moves past the dead zone are what put three slews
+    // on the wire.
+    el.dispatchEvent(dragPoint("pointerdown", 200, 150));
+    el.dispatchEvent(dragPoint("pointermove", 240, 150)); // 40px right of the press point
+    el.dispatchEvent(dragPoint("pointermove", 280, 150)); // further right
+    el.dispatchEvent(dragPoint("pointermove", 320, 150)); // further still — the counter must advance
+
+    const slews = slewCalls(emit);
+    expect(slews.length).toBeGreaterThan(2);
+    const last = slews.at(-1)![2];
+    // **The trap Task 23's own review found**: comparing only the *first*
+    // relayed event against the pad's first emitted event let a hardcoded
+    // `seq: 1` through, because the first slew's own seq genuinely is 1 —
+    // the assertion agreed with the mutant by coincidence. Drag on so the
+    // counter has visibly moved past any constant somebody might have
+    // frozen it at, assert that it moved, and only then compare.
+    expect(last.payload.slew.seq, "the sequence counter must have advanced for this to discriminate").toBeGreaterThan(1);
+    expect(last.payload.slew.pan).toBeGreaterThan(0); // moved right -> positive pan rate
+    expect(last.payload.slew.tilt).toBeCloseTo(0, 5); // no vertical movement at all
+    expect(typeof last.payload.slew.gesture).toBe("string");
+
+    el.dispatchEvent(dragPoint("pointerup", 280, 150));
+    const stops = stopCalls(emit);
+    expect(stops).toHaveLength(1);
+    // `stop` carries `gesture` alone — the pad's own design, not this
+    // component's own invention of a `pan: 0, tilt: 0` enrichment.
+    expect(stops[0]![2]).toEqual({ payload: { stop: { gesture: last.payload.slew.gesture } } });
+  });
+
+  it("measures from where the pointer went down, not the centre of the frame (coordinator resolution 5)", async () => {
+    // Two presses starting in very different places, moved by the *same*
+    // 40px to the right, must command the identical rate: an operator whose
+    // thumb lands near an edge is asking for a rate proportional to how far
+    // they dragged, not to where their thumb happened to land.
+    const { wrapper: w1, emit: e1, press: p1 } = mountWithRail();
+    await settle();
+    await p1({ aim: { state: "present" } });
+    const el1 = frameEl(w1);
+    el1.dispatchEvent(dragPoint("pointerdown", 50, 50));
+    el1.dispatchEvent(dragPoint("pointermove", 90, 50));
+    const rate1 = slewCalls(e1).at(-1)![2];
+
+    const { wrapper: w2, emit: e2, press: p2 } = mountWithRail();
+    await settle();
+    await p2({ aim: { state: "present" } });
+    const el2 = frameEl(w2);
+    el2.dispatchEvent(dragPoint("pointerdown", 600, 400));
+    el2.dispatchEvent(dragPoint("pointermove", 640, 400));
+    const rate2 = slewCalls(e2).at(-1)![2];
+
+    expect(rate1.payload.slew.pan).toBeCloseTo(rate2.payload.slew.pan, 5);
+    expect(rate1.payload.slew.tilt).toBeCloseTo(rate2.payload.slew.tilt, 5);
+  });
+
+  /**
+   * Every other drag test in this file moves the pointer purely
+   * horizontally, so `tilt` is always the negation of zero — 0 either way —
+   * and the sign convention on the vertical axis is exercised by none of
+   * them. Confirmed by hand: flipping the sign in `dragAt` left the whole
+   * suite green until this test existed. Screen `y` grows downward; tilt
+   * does not (`YonderAimPad.at()`'s own identical convention) — dragging
+   * *up* (a smaller `clientY`) must read a *positive* tilt rate.
+   */
+  it("moving up commands a positive tilt rate — screen y grows downward, tilt does not", async () => {
+    const { wrapper, emit, press } = mountWithRail();
+    await settle();
+    await press({ aim: { state: "present" } });
+    const el = frameEl(wrapper);
+    el.dispatchEvent(dragPoint("pointerdown", 100, 100));
+    el.dispatchEvent(dragPoint("pointermove", 100, 60)); // 40px up, no horizontal movement
+    const last = slewCalls(emit).at(-1)![2];
+    expect(last.payload.slew.tilt).toBeGreaterThan(0);
+    expect(last.payload.slew.pan).toBeCloseTo(0, 5);
+  });
+
+  it("emits nothing while aim is not present, and starts nothing by drawing an orb nobody can push", async () => {
+    const { wrapper, emit } = mountWithRail(); // no `aim` in the payload at all
+    await settle();
+    const el = frameEl(wrapper);
+    el.dispatchEvent(dragPoint("pointerdown", 100, 100));
+    el.dispatchEvent(dragPoint("pointermove", 200, 100));
+    expect(slewCalls(emit)).toHaveLength(0);
+    expect(wrapper.find(".y-pic__orb").exists()).toBe(false);
+  });
+
+  /**
+   * The mirror image of Task 20's own finding, run against `dragDown`
+   * instead of `updateDrag`. Confirmed by hand: removing `dragDown`'s own
+   * `if (!this.aimable) return` guard leaves every other test in this file
+   * green, because `updateDrag`'s own identical check still blocks the
+   * emission at the time of the press — but it does nothing about
+   * `dragPointerId` and `downX`/`downY` being recorded anyway, so a press
+   * that started before aim was available, held through aim *becoming*
+   * available, would resume slewing on the very next move with no fresh
+   * press at all. Two guards, and this proves the first one is load-bearing
+   * on its own, not merely a duplicate of the second.
+   */
+  it("a press that started before aim was available must not resume slewing once aim arrives, without a fresh press", async () => {
+    const { wrapper, emit, press } = mountWithRail(); // starts with no `aim` at all
+    await settle();
+    const el = frameEl(wrapper);
+    el.dispatchEvent(dragPoint("pointerdown", 100, 100));
+    el.dispatchEvent(dragPoint("pointermove", 140, 100));
+    expect(slewCalls(emit)).toHaveLength(0);
+
+    await press({ aim: { state: "present" } }); // aim arrives mid-hold
+    el.dispatchEvent(dragPoint("pointermove", 180, 100)); // still physically held, no fresh press
+    expect(slewCalls(emit)).toHaveLength(0);
+
+    // A genuinely fresh press, now that it is allowed, does slew.
+    el.dispatchEvent(dragPoint("pointerup", 180, 100));
+    el.dispatchEvent(dragPoint("pointerdown", 100, 100));
+    el.dispatchEvent(dragPoint("pointermove", 140, 100));
+    expect(slewCalls(emit).length).toBeGreaterThan(0);
+  });
+
+  /**
+   * A press is always distance-zero from itself by construction, so the
+   * dead zone is what stands between an ordinary press-and-hold and a
+   * malformed command: confirmed by hand, not assumed — breaking the dead
+   * zone check (so `d <= DEAD` never short-circuits) leaves `dx / d`
+   * computing `0 / 0`, `NaN`, on the down event alone, and every other test
+   * in this file only ever inspects the *last* relayed slew, so a `NaN`
+   * hiding in the first one goes unnoticed everywhere else.
+   */
+  it("a press with no movement at all commands nothing — the dead zone, not merely 'no test checked'", async () => {
+    const { wrapper, emit, press } = mountWithRail();
+    await settle();
+    await press({ aim: { state: "present" } });
+    const el = frameEl(wrapper);
+    el.dispatchEvent(dragPoint("pointerdown", 100, 100));
+    expect(slewCalls(emit)).toHaveLength(0);
+    expect(stopCalls(emit)).toHaveLength(0);
+  });
+
+  it("stops the instant aim stops being available mid-drag, without a second stop when the pointer is then released", async () => {
+    const { wrapper, emit, press } = mountWithRail();
+    await settle();
+    await press({ aim: { state: "present" } });
+    const el = frameEl(wrapper);
+    el.dispatchEvent(dragPoint("pointerdown", 100, 100));
+    el.dispatchEvent(dragPoint("pointermove", 140, 100));
+    expect(slewCalls(emit).length).toBeGreaterThan(0);
+
+    await press({ aim: { state: "gated", reason: "recording has it" } });
+    expect(stopCalls(emit)).toHaveLength(1);
+
+    // Still physically held — releasing now must not emit a second stop for
+    // a gesture that already ended.
+    el.dispatchEvent(dragPoint("pointerup", 140, 100));
+    expect(stopCalls(emit)).toHaveLength(1);
+  });
+
+  /**
+   * The subtler half of the identical trap Task 20's own review found in
+   * `YonderAimPad`: `dragDown`'s own guard cannot reach a pointer that is
+   * already down when the inhibition arrives. The `watch: { aimable }`
+   * below ends the gesture the instant aim goes away, but the *physical*
+   * pointer can still be held and still moving — without `updateDrag`'s own
+   * second `aimable` check, a further move past the dead zone would mint a
+   * **fresh** gesture and resume slewing under a control that was just
+   * disabled.
+   */
+  it("does not reintroduce Task 20's own defect: aim going unavailable mid-hold must not let a held pointer resume slewing without a fresh press", async () => {
+    const { wrapper, emit, press } = mountWithRail();
+    await settle();
+    await press({ aim: { state: "present" } });
+    const el = frameEl(wrapper);
+    el.dispatchEvent(dragPoint("pointerdown", 100, 100));
+    el.dispatchEvent(dragPoint("pointermove", 140, 100));
+    expect(slewCalls(emit).length).toBeGreaterThan(0);
+
+    await press({ aim: { state: "gated", reason: "recording has it" } });
+    expect(stopCalls(emit)).toHaveLength(1);
+    const slewsBeforeFurtherMove = slewCalls(emit).length;
+
+    // Still physically held, still moving — no fresh press.
+    el.dispatchEvent(dragPoint("pointermove", 180, 100));
+    expect(slewCalls(emit).length).toBe(slewsBeforeFurtherMove);
+    expect(stopCalls(emit)).toHaveLength(1); // no second stop either
+
+    // A genuinely fresh press, now that aim is present again, is allowed.
+    await press({ aim: { state: "present" } });
+    el.dispatchEvent(dragPoint("pointerup", 180, 100)); // let go of the stale gesture first
+    el.dispatchEvent(dragPoint("pointerdown", 100, 100));
+    el.dispatchEvent(dragPoint("pointermove", 140, 100));
+    expect(slewCalls(emit).length).toBeGreaterThan(slewsBeforeFurtherMove);
+  });
+});
+
+describe("stands alone, with no deck at all (R-UI-28)", () => {
+  it("draws the state overlay, REC pill, foot strip, thumb strip and LINK · DROP from props.report with no store at all", async () => {
+    const { wrapper } = mountPicture({
+      report: {
+        state: { head: "adaptive", size: "1280×720", rate: "15 fps", bitrate: "1.8 Mb/s" },
+        recording: { elapsed: "00:01:04" },
+        cameras: [{ id: "cam1", name: "Tail", active: false, ageSeconds: 4 }],
+        aim: { state: "present", pan: 12, tilt: -4 },
+        zoom: 2,
+        stats: { linkMbps: 3.1, dropPct: 0 },
+      },
+    });
+    await settle();
+
+    expect(wrapper.findComponent(YonderStateOverlay).exists()).toBe(true);
+    expect(wrapper.findComponent(YonderStateOverlay).props("head")).toBe("adaptive");
+    expect(wrapper.find(".y-pic__rec").text()).toContain("00:01:04");
+    const foot = wrapper.find(".y-pic__foot").text();
+    expect(foot).toContain("PAN");
+    expect(foot).toContain("TILT");
+    expect(foot).toContain("ZOOM");
+    expect(wrapper.findComponent(YonderThumbStrip).exists()).toBe(true);
+    expect(wrapper.findComponent(YonderThumbStrip).props("cameras")).toHaveLength(1);
+    expect(wrapper.find(".y-pic__osd").text()).toContain("LINK");
+
+    // Drawn, not merely present without throwing — the actual bar this
+    // whole task sets (`YonderAim.vue`'s own R-UI-28 test states it first).
+    // And the drag layer itself is reachable the same way: `aimable` comes
+    // from the identical three-tier read as everything else here.
+    const el = wrapper.find(".y-pic__frame").element;
+    el.dispatchEvent(new PointerEvent("pointerdown", { clientX: 10, clientY: 10, pointerId: 9, bubbles: true }));
+    el.dispatchEvent(new PointerEvent("pointermove", { clientX: 60, clientY: 10, pointerId: 9, bubbles: true }));
+    await nextTick(); // the emission is synchronous; the DOM's own `v-if` is not
+    expect(wrapper.find(".y-pic__orb").exists()).toBe(true);
   });
 });

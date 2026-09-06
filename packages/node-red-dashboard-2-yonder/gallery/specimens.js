@@ -339,6 +339,33 @@ export const SPECIMENS = [
     payload: undefined,
   },
   {
+    title: "Picture — wearing its own state, composed (Task 25)",
+    note: "Task 25's own rework: every overlay this component can draw at once, on one picture, proving the composition and the stacking rather than any one part alone — each already has its own narrow specimen above (State overlay, Thumb strip). Numbers are shared with those specimens on purpose, not reinvented: the state overlay's 1.8 Mb/s of 0.3–2.0 and its three-cost row is the identical 'adaptive, inside the envelope' specimen above; the thumb strip is the identical Nose/Belly/Tail three-camera row; pan 12.4°/tilt −6.0° are the Aim panel's own reported-position specimen. `REC 00:13:47` is the blueprint's (`DraftPicture.vue`) own demo string, kept as a small deliberate echo of what this component is a rework of. This gallery has no media server, so `path` stays empty here too (R-VID-14's fallback reason is the honest thing to show behind the overlays, not a frame this page would have to invent) — the drag-to-slew layer is live and can be dragged directly, the same way the Aim pad's own 'pushing' specimen documents for a gesture no static prop can capture.",
+    component: YonderPicture,
+    props: { label: "Camera 1" },
+    payload: {
+      state: {
+        head: "adaptive", size: "1280×720", rate: "15 fps", bitrate: "1.8 Mb/s", detail: "1.8 of 0.3–2.0",
+        cost: { view: "0.6 Mb/s", encode: "1.8 Mb/s", path: "3.9 Mb/s" },
+      },
+      recording: { elapsed: "00:13:47" },
+      aim: { state: "present", pan: 12.4, tilt: -6.0 },
+      zoom: 3,
+      exposure: 156,
+      stats: { linkMbps: 3.1, dropPct: 0 },
+      cameras: [
+        { id: "cam-nose", name: "Nose", active: false, ageSeconds: 4,
+          thumbSrc: "data:image/svg+xml;charset=utf-8," + encodeURIComponent(
+            '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="36">' +
+            '<rect width="64" height="18" fill="%23a8c4de"/>' +
+            '<rect y="18" width="64" height="18" fill="%238a9a5b"/></svg>') },
+        { id: "cam-belly", name: "Belly", active: true, ageSeconds: 0 },
+        { id: "cam-tail", name: "Tail", active: false, ageSeconds: 11 },
+      ],
+      downlink: "3.9 Mb/s",
+    },
+  },
+  {
     title: "Soft keys — cameras rail",
     note: "Sized to their own words, never a stretched half-page button (R-UI-10) — one raised, one plain, one in the warn tone.",
     component: YonderSoftKeys,
