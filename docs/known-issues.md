@@ -1214,6 +1214,13 @@ was installed and the `add` path was run, while the hub and both host
 controllers correctly stayed on `auto`. `udevadm verify` passes the old rule
 and the new one alike, so nothing but sysfs would have caught either fault.
 
+**The `add` rule is now proved against a real camera plugged in after boot.**
+2026-09-06: the operator attached the ELP global-shutter camera to a running
+board, and `/sys/bus/usb/devices/1-1.1/power/control` read `on` without anyone
+touching it — while the hub above it and both host controllers stayed `auto`.
+That is the claim this entry said it was owed: a device arriving after boot is
+caught by the rule, not merely by an install-time trigger.
+
 **One claim is still owed:** that the setting survives the re-enumeration this
 fault consists of. The rule fires on `add`, and a re-enumeration is an `add`,
 so it should — but "should" is what the first version of this rule had going

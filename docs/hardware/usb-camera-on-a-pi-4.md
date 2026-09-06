@@ -363,3 +363,22 @@ dmesg | grep 'Failed enabling i/p port'
 - **Anything over the modem.** The EC25 is attached and unconfigured. No video has crossed
   a cellular link.
 - **Sustained thermal load in an enclosure.**
+
+## The ELP offers no way to turn its own picture
+
+Read off the camera on 2026-09-06, with it attached to a running board:
+
+```sh
+v4l2-ctl -d /dev/video2 --list-ctrls-menus | grep -iE 'flip|rotate|mirror'
+```
+
+answers nothing. The camera lists eighteen controls and not one of them turns,
+mirrors or rotates the picture.
+
+This is why `video/orientation.ts` exists and why the board does the turning
+after decoding (R-CTL-05). It also means the *sensor* path in that module has
+no camera on this bench to exercise it — every correction on this hardware
+falls to the board, and the sensor case can only be drawn from a fixture.
+
+Recorded from the device rather than carried forward from the earlier capture,
+which said the same thing.
