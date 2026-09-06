@@ -834,6 +834,74 @@ and were measured there:
 - **Under ffmpeg the Pi loses its hardware scaler.** §4 gives Rockchip `scale_rkrga` and the
   Pi `v4l2convert`, but `v4l2convert` is a *GStreamer* element with no ffmpeg equivalent.
 
+## What this changes in the code, whichever composer wins
+
+Three of these are independent of the §2 decision: they are measured properties of the
+boards and of the daemon's own pipeline, and they hold under either composer.
+
+### 1. Read every control back after setting it
+
+`video/encoder.ts` sets a control and treats the absence of an error as success.
+**On this hardware that is not safe, and there is a measured case.** Setting `width` on a
+live `mpph264enc` is accepted, returns nothing, logs nothing — and is ignored. Six hundred
+frames came out at the original size with no gap and no complaint. Only decoding the output
+revealed it.
+
+An `Ack` that reports a change which did not happen is K-48's failure with the layers
+swapped: there, `config.yaml` disagreed with the encoder and every file that answered from
+the config was wrong. Here the *encoder* would disagree with itself.
+
+OpenHD does this and Yonder does not — it reads the property back after writing it and warns
+`"Cannot change bitrate to {}kbit/s, got {}kBit/s"` when the two disagree. The same read-back
+belongs in `EncoderChannel`'s apply path, and the `Ack` should carry what the encoder
+actually reports rather than what it was asked for.
+
+### 2. Probe whether live control works, rather than deriving it
+
+`encodeControl()` returns `null` where the launch line carries no encoder element, and
+`video/encoder.ts` turns that into the `notControllable` an operator sees. That is a good
+answer to *"is there something to address"* and not an answer to *"will it listen"* — the
+`mpph264enc` case above has an element, a name, and a property, and does not listen.
+
+OpenHD probes at start-up by reading the property back before relying on it, and reports the
+control as absent when that fails rather than offering one that quietly does nothing. That
+check needs a pipeline the daemon can address at all, so it belongs with K-53's host.
+
+### 3. Take `v4l2convert` out of the preview branch
+
+`compose()` builds the preview branch with `v4l2convert`. Three measured reasons to replace
+it with `videoconvert ! videoscale`, and none of them depend on the composer:
+
+- **It cannot be reconfigured on a running pipeline**, so it blocks a live resolution change
+  outright — `S_FMT` fails and the whole pipeline stops, not just the branch.
+- **It is not buying performance.** Equal to software from a 720p capture; from 1080p it
+  costs about fourteen points more of the board *and* delivers about 20% fewer preview bytes,
+  because the ISP is over budget and dropping frames.
+- **`usb-camera-on-a-pi-4.md` already says so** — "Defect 2 — the ISP converter is pure
+  overhead" — and marks the device "should not be used".
+
+The substitution is `videoconvert ! videoscale` and not `videoscale` alone: `v4l2convert`
+converts as well as scales, and the Radxa note records the same trap from the other side.
+
+**On Rockchip the opposite applies.** There the hardware scaler is reached through the MPP
+encoder's own `width`/`height` properties, it is about twice as fast as software, and it is
+configured at start — which is exactly how a respawn-on-rung-change design uses it anyway.
+
+### 4. Make the Pi's ISP budget a refusal, not a symptom
+
+`v4l2convert` and `v4l2h264enc` share one hardware block whose ceiling is quoted in
+macroblocks per second — generally 1080p50 for encode. `compose()` puts three consumers on
+it, and at a 1920×1080 capture the two-branch pipeline asks for about 517,000 mb/s against a
+ceiling near 408,000. **The symptom of exceeding it is silently dropped frames**, which is
+precisely the class of failure R-CAM-10 exists to refuse before Start rather than meet in
+flight.
+
+`refuse()` is the right place and it is already pure: capture size, frame rate, preview rung
+and branch count are all in `ComposeOptions`, so the load is arithmetic on values it already
+holds. Spec §11 lists per-board encoder limits as unsettled and asks how a limit is
+*discovered* rather than tabulated; on a Pi this is one multiplication, and the probe already
+knows which board it is on.
+
 ## What this does not settle
 
 - **The picture quality question, properly.** Both MPP encoders produced clean, decodable
