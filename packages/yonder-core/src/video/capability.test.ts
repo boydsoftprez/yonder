@@ -2,7 +2,8 @@
 import { describe, expect, it } from "vitest";
 import {
   present, notOffered, advertised, gated, summarise, noCapabilities, CAPABILITY_KEYS,
-  type CameraCapabilities,
+  captureRefusal, captureSizes,
+  type CameraCapabilities, type VideoFormat,
 } from "./capability.js";
 
 const FIXED: CameraCapabilities = {
@@ -141,5 +142,100 @@ describe("the capabilities the devices answer", () => {
    */
   it("has one key per field, and no field without a key", () => {
     expect([...CAPABILITY_KEYS].sort()).toEqual(Object.keys(noCapabilities()).sort());
+  });
+});
+
+/**
+ * The two menus the Resolution and Frame rate pickers are built from, and the
+ * one sentence that refuses a pair (R-CAM-14, R-VID-07).
+ *
+ * The shape is the bench camera's own, cut down: the ELP lists every size
+ * under MJPG *and* under YUYV, and answers a different set of rates under
+ * each — eight at 1920x1080 in MJPG, one in YUYV. Which of the two a menu
+ * takes is not a detail, because `video/pipeline.ts` captures `image/jpeg`
+ * and can only deliver the compressed entry's rates.
+ */
+describe("captureSizes", () => {
+  const TWO_FORMATS: VideoFormat[] = [
+    { fourcc: "MJPG", width: 1920, height: 1080, rates: [30, 15] },
+    { fourcc: "MJPG", width: 1280, height: 720, rates: [60, 30, 15] },
+    // The same two sizes again, as a second pixel format answers them.
+    { fourcc: "H264", width: 1920, height: 1080, rates: [5] },
+    { fourcc: "H264", width: 1280, height: 720, rates: [5] },
+  ];
+
+  it("lists each size once, in the order the device gave", () => {
+    expect(captureSizes(TWO_FORMATS).map((s) => s.size)).toEqual(["1920x1080", "1280x720"]);
+  });
+
+  /**
+   * **The first entry's rates, never a union of the two.** A union would put
+   * 5 fps in the 1920x1080 menu on the strength of an H264 entry the pipeline
+   * never selects, and the operator would choose a rate that made the
+   * pipeline refuse to start. Asserted as the absence, because a union and a
+   * first-entry rule agree about everything except exactly this.
+   */
+  it("carries the rates of the first entry for a size, not every entry's", () => {
+    const big = captureSizes(TWO_FORMATS).find((s) => s.size === "1920x1080");
+    expect(big?.rates).toEqual([30, 15]);
+    expect(big?.rates).not.toContain(5);
+  });
+
+  it("answers nothing for a camera that offered no format at all", () => {
+    expect(captureSizes([])).toEqual([]);
+  });
+});
+
+describe("captureRefusal", () => {
+  const FORMATS: VideoFormat[] = [
+    { fourcc: "MJPG", width: 1920, height: 1080, rates: [30, 15] },
+    { fourcc: "MJPG", width: 1280, height: 720, rates: [60, 30, 15] },
+  ];
+
+  it("says nothing about a pair this camera offers", () => {
+    expect(captureRefusal(FORMATS, { width: 1280, height: 720, framerate: 60 })).toBeNull();
+  });
+
+  it("names the size, and what is on offer instead", () => {
+    const why = captureRefusal(FORMATS, { width: 3840, height: 2160, framerate: 30 });
+    expect(why).toContain("3840x2160");
+    expect(why).toContain("1920x1080");
+    expect(why).toContain("1280x720");
+  });
+
+  /**
+   * The case the two pickers exist for: 30 is a rate this camera makes, and
+   * not at every size. A check that asked only "is this rate anywhere in the
+   * format list" would pass 60 at 1920x1080 and the pipeline would not start.
+   */
+  it("refuses a rate the camera makes at another size but not at this one", () => {
+    expect(captureRefusal(FORMATS, { width: 1920, height: 1080, framerate: 60 }))
+      .toContain("60 fps at 1920x1080");
+    // ...and the same rate at the size that does make it is fine, so this is
+    // about the pair and not about the number.
+    expect(captureRefusal(FORMATS, { width: 1280, height: 720, framerate: 60 })).toBeNull();
+  });
+
+  it("names the rates that size does offer, so the operator can pick one", () => {
+    const why = captureRefusal(FORMATS, { width: 1920, height: 1080, framerate: 60 });
+    expect(why).toContain("30");
+    expect(why).toContain("15");
+  });
+
+  /**
+   * **Every pair the menus offer is a pair this refuses nothing about.** The
+   * join the two pickers rest on: `captureSizes()` composes the menus and
+   * `captureRefusal()` judges the choice, and a disagreement between them is
+   * a control that offers a value the device then rejects.
+   */
+  it("accepts every pair captureSizes offers, over the whole menu", () => {
+    for (const size of captureSizes(FORMATS)) {
+      for (const rate of size.rates) {
+        expect(
+          captureRefusal(FORMATS, { width: size.width, height: size.height, framerate: rate }),
+          `${size.size} at ${rate} fps is offered and must not be refused`,
+        ).toBeNull();
+      }
+    }
   });
 });

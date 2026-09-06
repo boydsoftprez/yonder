@@ -4,7 +4,7 @@ import {
   compose, encodeControl, encodesIn, previewCaps, refuse,
   ENCODE_ELEMENT, PREVIEW_CAPS_ELEMENT, QUEUE,
 } from "./pipeline.js";
-import { present, noCapabilities } from "./capability.js";
+import { present, noCapabilities, captureSizes } from "./capability.js";
 import type { ControlRange } from "./capability.js";
 import type { Camera, CameraOutput } from "../schema/config.js";
 
@@ -314,6 +314,36 @@ describe("refuse", () => {
 
   it("says nothing about a configuration the board can sustain", () => {
     expect(refuse(opts)).toBeNull();
+  });
+
+  /**
+   * **The join between the pickers and this refusal** (R-CAM-14, R-VID-07).
+   *
+   * The deck's Resolution and Frame rate menus are `captureSizes()` over the
+   * same format list this function judges against, so every pair a menu
+   * offers must be one this accepts. Written as a sweep of the whole menu
+   * rather than a spot check, because a disagreement between the two would
+   * show up on exactly one pair — the operator's — and a console that offers
+   * a mode and then will not start on it is worse than one that never
+   * offered it.
+   *
+   * The other direction matters too and is `captureRefusal`'s own test: this
+   * one would still pass if the menus were empty.
+   */
+  it("accepts every size and rate the deck's own menus offer", () => {
+    const menu = captureSizes(CAPS.formats.value);
+    expect(menu.length, "an empty menu would pass this vacuously").toBeGreaterThan(0);
+    let pairs = 0;
+    for (const size of menu) {
+      for (const rate of size.rates) {
+        pairs += 1;
+        expect(
+          refuse({ ...opts, camera: { ...CAMERA, width: size.width, height: size.height, framerate: rate } }),
+          `the deck offers ${size.size} at ${rate} fps`,
+        ).toBeNull();
+      }
+    }
+    expect(pairs).toBe(3);
   });
 
   /**

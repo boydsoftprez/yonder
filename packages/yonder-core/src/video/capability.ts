@@ -105,6 +105,88 @@ export interface VideoFormat {
   readonly rates: readonly number[];
 }
 
+/**
+ * One capture size the camera offered, and the rates it offers **at that
+ * size** — the two menus the deck's Resolution and Frame rate pickers are
+ * built from (R-CAM-14, R-VID-07).
+ *
+ * A size and its rates rather than a flat list of every pair, because the
+ * pair is not what an operator chooses: the bench camera answers ten sizes
+ * and eight rates, and one combined menu of the eighty is eight rows in
+ * every ten that differ only in a trailing number, scanned while an aircraft
+ * is flying.
+ */
+export interface CaptureSize {
+  /** `"1280x720"` — written the way a rung is, so one reading serves both. */
+  readonly size: string;
+  readonly width: number;
+  readonly height: number;
+  /** Exactly the rates the device listed at this size, in its own order. */
+  readonly rates: readonly number[];
+}
+
+/**
+ * The sizes this camera offers, once each, with the rates each one carries
+ * (R-CAM-14).
+ *
+ * **First entry wins, and that is not an arbitrary tie-break.** A device
+ * lists a size once per pixel format, and the same size can carry different
+ * rates under each: the bench camera offers 1920x1080 at eight rates in
+ * MJPG and at one in YUYV. `video/pipeline.ts` caps the source at
+ * `image/jpeg` and `refuse()` resolves a size with `formats.find()`, so the
+ * entry the pipeline will actually run is the first match — and a menu built
+ * from a *union* of the two would offer rates that camera cannot deliver in
+ * the format Yonder captures. Same rule, one function, so the picker and the
+ * refusal cannot disagree about what is on offer.
+ *
+ * Nothing is invented, nothing is sorted and nothing is filled in between:
+ * the device's own order is the order an operator reads.
+ */
+export function captureSizes(formats: readonly VideoFormat[]): readonly CaptureSize[] {
+  const out: CaptureSize[] = [];
+  const seen = new Set<string>();
+  for (const format of formats) {
+    const size = `${format.width}x${format.height}`;
+    if (seen.has(size)) continue;
+    seen.add(size);
+    out.push({ size, width: format.width, height: format.height, rates: format.rates });
+  }
+  return out;
+}
+
+/**
+ * Why this camera cannot capture that size at that rate, or `null`
+ * (R-CAM-10, R-CAM-14).
+ *
+ * **One sentence, three callers.** `video/pipeline.ts`'s `refuse()` is the
+ * last line of defence, at the moment a pipeline would be composed;
+ * `daemon/routes.ts` calls it over a staged draft so an Apply that cannot
+ * run is refused by name instead of being written and rolled back; and
+ * `YonderDeck` calls it over its own draft so the operator reads it *before*
+ * the press. Three copies of this comparison would be three chances to
+ * offer, accept and then refuse the same configuration.
+ *
+ * A camera that has answered no format at all is not judged here — that is a
+ * fact about the probe, not about the operator's choice, and `refuse()`
+ * states it in its own words before reaching this.
+ */
+export function captureRefusal(
+  formats: readonly VideoFormat[],
+  want: { readonly width: number; readonly height: number; readonly framerate: number },
+): string | null {
+  const sizes = captureSizes(formats);
+  const hit = sizes.find((s) => s.width === want.width && s.height === want.height);
+  if (hit === undefined) {
+    return `this camera does not offer ${want.width}x${want.height}; `
+      + `it offers ${sizes.map((s) => s.size).join(", ")}`;
+  }
+  if (!hit.rates.includes(want.framerate)) {
+    return `this camera does not offer ${want.framerate} fps at ${hit.size}; `
+      + `it offers ${hit.rates.join(", ")}`;
+  }
+  return null;
+}
+
 /** A V4L2 control's range, as the device reported it (R-CTL-10). */
 export interface ControlRange {
   readonly min: number;

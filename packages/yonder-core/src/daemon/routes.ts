@@ -33,6 +33,7 @@ import {
   type AimPanel, type CameraDeck, type CameraStrip, type CapabilityFact,
 } from "../video/present.js";
 import { applyCameraDraft, deckDraft, interruption, validateDraft } from "../apply/draft.js";
+import { captureRefusal, captureSizes } from "../video/capability.js";
 import type { ReachPaths } from "../video/outputs.js";
 import type { AnswerableAddress } from "../net/dial-in.js";
 import { CONTROL_NAMES, type ApplyControlsOptions, type ApplyControlsResult } from "../video/controls.js";
@@ -867,7 +868,49 @@ export function createRouter(deps: RouterDeps): Router {
         const [w, h] = rung.split("x").map(Number);
         return offers.some((f) => f.width === w && f.height === h);
       });
-      const problems = validateDraft(draft, rungs);
+      /**
+       * **And the capture itself, against what this camera answered**
+       * (R-CAM-14, R-VID-07). `validateDraft` owns the cross-field rules the
+       * schema cannot express; this is the one rule the schema cannot express
+       * *and* cannot know — 1920x1080 is inside every bound in the schema and
+       * still wrong for a camera that does not make it.
+       *
+       * Judged over the draft **laid on the applied values**, not over the
+       * draft alone: an operator who changes only the rate has staged no size,
+       * and the size the rate has to be legal at is the one already running.
+       *
+       * Refused here rather than left to `video/pipeline.ts`'s `refuse()`,
+       * which would catch the same pair one layer later — after the engine had
+       * written the document and armed the window, with the picture gone until
+       * the rollback took it back. Same function, so the two cannot disagree
+       * about what this camera offers.
+       */
+      const wanted = {
+        width: draft.width ?? camera.width,
+        height: draft.height ?? camera.height,
+        framerate: draft.framerate ?? camera.framerate,
+      };
+      const staged = draft.width !== undefined || draft.height !== undefined
+        || draft.framerate !== undefined;
+      // Only against a list this camera actually answered. `offers` is also
+      // `[]` for a camera that has not been probed, and refusing every size on
+      // the strength of an empty list would make an unprobed camera
+      // unconfigurable — `refuse()` states *that* fact, in its own words, at
+      // the moment a pipeline is composed.
+      const refusal = staged && offers.length > 0 ? captureRefusal(offers, wanted) : null;
+      // Named for the picker that has to change, so `draftPathFor()` puts the
+      // sentence under a control rather than under the form: `width` when the
+      // size itself is not on offer, `framerate` when the size is fine and the
+      // rate is not made at it. Decided from the two lists, never by reading
+      // the sentence back.
+      const sizeOffered = captureSizes(offers)
+        .some((sz) => sz.width === wanted.width && sz.height === wanted.height);
+      const problems = [
+        ...validateDraft(draft, rungs),
+        ...(refusal === null
+          ? []
+          : [{ path: sizeOffered ? "framerate" : "width", message: refusal }]),
+      ];
       if (problems.length > 0) {
         return {
           status: 400,

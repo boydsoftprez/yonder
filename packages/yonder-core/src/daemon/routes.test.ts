@@ -2075,6 +2075,119 @@ describe("the camera routes", () => {
       expect(JSON.stringify(out.body)).toContain("does not offer 854x480");
     });
 
+    /**
+     * **The Resolution and Frame rate pickers, followed to `config.yaml`**
+     * (R-VID-07, R-CAM-14, R-CTL-05).
+     *
+     * Not to `GET /config`, which is the router answering out of its own
+     * memory, but to the bytes on disk: four separate defects on this branch
+     * were a control that drew, posted and changed nothing, the last of them
+     * a draft field the apply silently dropped while answering 200. The file
+     * is the only place that cannot lie about it.
+     */
+    it("writes a staged size and rate through to config.yaml", async () => {
+      const r = provisioned({ cameras: fixtureDetection() });
+      const out = await r("POST", "/cameras/cam0/apply", {
+        width: 1920, height: 1080, framerate: 30,
+      });
+      expect(out.status).toBe(200);
+      const onDisk = loadConfig(configPath).cameras[0];
+      expect(onDisk?.width).toBe(1920);
+      expect(onDisk?.height).toBe(1080);
+      expect(onDisk?.framerate).toBe(30);
+      // And the deck the console reads next carries it back as values, which
+      // is what a picker is drawn from and what a staged edit is compared
+      // against — a `spec` string is neither.
+      const deck = ((await r("GET", "/cameras/cam0", undefined)).body as {
+        deck: { policy: { capture: unknown }; applied: { capture: unknown } };
+      }).deck;
+      expect(deck.policy.capture).toEqual({ width: 1920, height: 1080, framerate: 30, codec: "h264" });
+      expect(deck.applied.capture).toEqual(deck.policy.capture);
+    });
+
+    /**
+     * **A pair this camera cannot make is refused here, not by the pipeline**
+     * (R-CAM-14, R-CFG-03).
+     *
+     * The fixture offers 30, 24 and 15 at 1280×720 and 30 alone at
+     * 1920×1080. Left to `video/pipeline.ts`'s `refuse()`, the same pair
+     * would be caught one layer later — after the engine had written the
+     * document and armed the window, with the picture gone until the rollback
+     * took it back. Refused by name instead, so the deck marks the picker.
+     */
+    it("refuses a rate this camera does not make at the size being staged", async () => {
+      const r = provisioned({ cameras: fixtureDetection() });
+      const before = readFileSync(configPath, "utf8");
+      const out = await r("POST", "/cameras/cam0/apply", {
+        width: 1920, height: 1080, framerate: 24,
+      });
+      expect(out.status).toBe(400);
+      const { problems } = out.body as { problems: { path: string; message: string }[] };
+      // Named for the picker that has to change — the rate, because the size
+      // is one the camera does offer.
+      expect(problems.map((p) => p.path)).toEqual(["framerate"]);
+      expect(problems[0]?.message).toContain("24 fps at 1920x1080");
+      expect(readFileSync(configPath, "utf8"), "a refused apply writes nothing").toBe(before);
+      // 24 is a rate this camera makes, at the size it is running now, so the
+      // refusal is about the pair and not about the number — a guard that
+      // rejected 24 outright would pass every assertion above.
+      expect((await r("POST", "/cameras/cam0/apply", { framerate: 24 })).status).toBe(200);
+      expect(loadConfig(configPath).cameras[0]?.framerate).toBe(24);
+    });
+
+    /**
+     * The other half of the same guard, and the half only a hand-edited
+     * request can reach: the picker is built from `captureSizes()` and offers
+     * nothing else.
+     */
+    it("refuses a size this camera never offered, and names the size picker", async () => {
+      const r = provisioned({ cameras: fixtureDetection() });
+      const out = await r("POST", "/cameras/cam0/apply", { width: 3840, height: 2160 });
+      expect(out.status).toBe(400);
+      const { problems } = out.body as { problems: { path: string; message: string }[] };
+      expect(problems.map((p) => p.path)).toEqual(["width"]);
+      expect(problems[0]?.message).toContain("3840x2160");
+      expect(loadConfig(configPath).cameras[0]?.width).toBe(1280);
+    });
+
+    /**
+     * **Judged over the draft laid on what is applied, not over the draft
+     * alone.** An operator who changes only the rate has staged no size, and
+     * the size that rate has to be legal at is the one already running — so a
+     * check that looked at the draft by itself would let every lone rate
+     * through and leave the pair to the pipeline.
+     */
+    it("checks a lone staged rate against the size already running", async () => {
+      const r = provisioned({ cameras: fixtureDetection(), camera: { width: 1920, height: 1080 } });
+      // 24 is legal at 1280×720 and this camera is running 1920×1080, where
+      // only 30 is offered. Nothing in the draft says 1920×1080.
+      const out = await r("POST", "/cameras/cam0/apply", { framerate: 24 });
+      expect(out.status).toBe(400);
+      expect(JSON.stringify(out.body)).toContain("24 fps at 1920x1080");
+      expect(loadConfig(configPath).cameras[0]?.framerate).toBe(30);
+    });
+
+    /**
+     * A capture change restarts the picture, and the operator is told —
+     * `interruption()`, the same function the deck calls over its own staged
+     * draft before the press. It was empty for a board turn once and the
+     * operator met the cut with nothing having warned of it.
+     */
+    it("says a staged size restarts the picture", async () => {
+      const r = provisioned({ cameras: fixtureDetection() });
+      const out = await r("POST", "/cameras/cam0/apply", { width: 1920, height: 1080 });
+      expect(out.status).toBe(200);
+      expect((out.body as { interruption: string[] }).interruption)
+        .toEqual(["restarts the picture"]);
+      // ...and not for a size that is already the one running: a warning
+      // about a restart that will not happen teaches an operator to stop
+      // reading them.
+      const same = await provisioned({ cameras: fixtureDetection() })(
+        "POST", "/cameras/cam0/apply", { width: 1280, height: 720 },
+      );
+      expect((same.body as { interruption: string[] }).interruption).toEqual([]);
+    });
+
     it("applies a whole draft at once, and says what it interrupts", async () => {
       const r = provisioned({ cameras: fixtureDetection() });
       const out = await r("POST", "/cameras/cam0/apply", {
@@ -2113,8 +2226,13 @@ describe("the camera routes", () => {
       // A change the engine's own `CAMERA_EXEMPT_LEAVES` exempts is kept, with
       // nothing to confirm — the page draws a countdown exactly where one
       // armed because it draws the engine's answer, never a prediction.
+      //
+      // **15 and not 25, and the difference is a second guarantee**: this
+      // fixture offers 30, 24 and 15 at 1280x720 and the route now refuses a
+      // rate the camera does not make, so 25 answers 400 and would exercise
+      // nothing about the window. See the two tests that own that refusal.
       const kept = await provisioned({ cameras: fixtureDetection() })(
-        "POST", "/cameras/cam0/apply", { framerate: 25 },
+        "POST", "/cameras/cam0/apply", { framerate: 15 },
       );
       expect((kept.body as { expiresAt: number | null }).expiresAt).toBeNull();
 

@@ -6,12 +6,11 @@ import YonderColumn from './YonderColumn.vue'
 import YonderPicker from './YonderPicker.vue'
 import YonderSegmented from './YonderSegmented.vue'
 import YonderSetBar from './YonderSetBar.vue'
-import YonderReadout from './YonderReadout.vue'
 import YonderTextField from './YonderTextField.vue'
 import YonderShutter from './YonderShutter.vue'
 import YonderAimPad from './YonderAimPad.vue'
 import { createDraftStore } from './draft.ts'
-import { LABELS, deckDraft, draftPathFor, interruption } from 'yonder-core/presentation'
+import { LABELS, captureRefusal, captureSizes, deckDraft, draftPathFor, interruption } from 'yonder-core/presentation'
 
 /**
  * `ui-yonder-deck` — a camera's whole control surface, composed from what it
@@ -75,10 +74,12 @@ import { LABELS, deckDraft, draftPathFor, interruption } from 'yonder-core/prese
  *   descriptors: Record<key, DescriptorView>,   // present/advertised/gated keys only
  *   values: Record<key, number|boolean|null>,   // display units; null when unreported
  *   commanded: Record<key, number|null>,
- *   policy: { stream: { mode, floor_kbps, ceiling_kbps, bitrate_kbps },
+ *   policy: { capture: { width, height, framerate, codec },
+ *             stream: { mode, floor_kbps, ceiling_kbps, bitrate_kbps },
  *             preview: { mode, size, ladder_bottom, ladder_top, floor_kbps,
  *                        ceiling_kbps, bitrate_kbps, framerate } },
- *   applied: { stream: <same shape as policy.stream>,
+ *   applied: { capture: <same shape as policy.capture>,
+ *              stream: <same shape as policy.stream>,
  *              preview: <same shape as policy.preview> },
  *   outputs: { kind, label, enabled, costKbps, reach: OutputReach }[],
  *   captures: { count },
@@ -119,8 +120,11 @@ import { LABELS, deckDraft, draftPathFor, interruption } from 'yonder-core/prese
  *
  * `kind`: `bar` (a bounded value, `YonderSetBar`), `pick` (the device's own
  * menu, `YonderPicker`), `seg` (a plain on/off, `YonderSegmented`), or one of
- * the three that are not an image control at all and draw through their own
- * branch in `drawCapability()`: `formats`, `shutter-video`, `shutter-photo`.
+ * the ones that are not an image control at all and draw through a branch of
+ * their own: `shutter-video` and `shutter-photo` in `drawCapability()`,
+ * `turn` in `buildOrientation()`, and `capture` — the format list, drawn as
+ * the Stream column's Resolution and Frame rate pickers by
+ * `buildCaptureShape()`.
  *
  * `setupOnly` marks the four housekeeping controls this deck draws only on
  * Setup — mains frequency, backlight compensation, gain and sharpness: real
@@ -132,7 +136,15 @@ import { LABELS, deckDraft, draftPathFor, interruption } from 'yonder-core/prese
  * blueprint gives it, and never appears on Setup.
  */
 export const CAPABILITY_LAYOUT = {
-  formats: { group: 'capture', kind: 'formats' },
+  /* **`formats` is drawn by the Stream column's two pickers** (R-CAM-14,
+   * R-VID-07, blueprint L-51/L-56). It was a `CAPTURE FORMATS 10` readout
+   * here, which states a number where the requirement asks for the formats
+   * themselves: ten is not a fact an operator can act on, and it sat beside
+   * no control that offered any of them. The formats are now the Resolution
+   * and Frame rate menus, so this key's home is `buildStream()` — its own
+   * branch, like `turn`'s, because a size and its rates are two menus rather
+   * than one `pick`. */
+  formats: { group: 'stream', kind: 'capture' },
   zoom: { group: 'optics', kind: 'bar' },
   focus: { group: 'optics', kind: 'bar' },
   exposure: { group: 'exposure', kind: 'bar' },
@@ -298,6 +310,25 @@ export function appliedForDraft (payload) {
     const v = values[key]
     if (v === null || v === undefined) continue
     flat[key] = v
+  }
+  /**
+   * **The capture, under the three names the draft already uses for it.**
+   * `DRAFT_PATHS` has carried `width`, `height` and `framerate` since it was
+   * written and both conventions spell them the same, so no translation is
+   * needed here — only the values, which this payload did not carry at all
+   * until the Resolution and Frame rate pickers needed them. Without them
+   * every staged size stayed pending for ever (nothing to compare against)
+   * and `interruption()` warned "restarts the picture" even for the size
+   * already running. `codec` travels for the same reason though nothing
+   * stages it today: the schema allows one value, and a comparison that
+   * silently lacked its side would be the same defect waiting for the second.
+   */
+  const capture = payload && payload.applied && payload.applied.capture
+  if (capture) {
+    flat.width = capture.width
+    flat.height = capture.height
+    flat.framerate = capture.framerate
+    flat.codec = capture.codec
   }
   const stream = payload && payload.applied && payload.applied.stream
   if (stream) {
@@ -568,9 +599,11 @@ export default {
     /**
      * One capability, drawn from `capabilities[key]` and nothing this file
      * assumes about the camera (R-CAM-14). `not-offered` is a fact and
-     * nothing else; `formats`/the two shutter kinds draw through their own
-     * branch below rather than a `bar`/`pick`/`seg`, because none of the
-     * three is a bounded value, a menu or a plain on/off.
+     * nothing else; the two shutter kinds draw through their own branch
+     * below rather than a `bar`/`pick`/`seg`, because neither is a bounded
+     * value, a menu or a plain on/off. `capture` and `turn` never reach
+     * here at all — `buildCaptureShape()` and `buildOrientation()` own
+     * them, for reasons each states.
      */
     drawCapability (key) {
       const layout = CAPABILITY_LAYOUT[key]
@@ -579,10 +612,6 @@ export default {
       const label = this.label(key)
       if (!cap || cap.state === 'not-offered') return this.fact(key, label, 'this camera has none')
 
-      if (layout.kind === 'formats') {
-        if (cap.state !== 'present') return this.fact(key, label, this.stateAndReason(cap).reason)
-        return h(YonderReadout, { key, rows: [{ label, value: (cap.value || []).length }] })
-      }
       /**
        * **The key stays, whatever state the capability is in** — spec §4,
        * which every other kind on this deck already follows and this branch
@@ -763,15 +792,23 @@ export default {
       children.push(h('div', { class: 'y-deck__turnnote', key: 'note' }, o.says || ''))
       return h(YonderColumn, { legend: GROUP_LEGEND.orientation, key: 'orientation' }, () => children)
     },
+    /**
+     * Record, Photo and the captures count — **and no formats row**
+     * (blueprint L-51).
+     *
+     * `CAPTURE FORMATS 10` drew here and the blueprint never drew it: a bare
+     * count states a number where R-CAM-14 asks for the formats offered, and
+     * leaving it beside a Stream column that now offers those same formats in
+     * two pickers would say the same fact twice, once uselessly. See
+     * `CAPABILITY_LAYOUT.formats`, which is where that key went.
+     */
     buildCapture () {
       const r = this.report
       const recording = r.capabilities && r.capabilities.recording
       const stills = r.capabilities && r.capabilities.stills
-      const formats = r.capabilities && r.capabilities.formats
-      const anyPresent = [recording, stills, formats].some((c) => c && c.state !== 'not-offered')
+      const anyPresent = [recording, stills].some((c) => c && c.state !== 'not-offered')
       if (!anyPresent) return null
       const children = []
-      if (formats) children.push(this.drawCapability('formats'))
       if (recording) children.push(this.drawCapability('recording'))
       if (stills) children.push(this.drawCapability('stills'))
       if (r.captures && typeof r.captures.count === 'number') {
@@ -852,7 +889,115 @@ export default {
         requested: adaptive ? null : this.stagedValue('streamBitrate'),
         onSet: adaptive ? undefined : (v) => this.stage('streamBitrate', v),
       }))
+      // Beneath the bitrate bar, which is where spec §7 lists Resolution and
+      // where the blueprint draws it — in this column and not in Capture,
+      // because it is what leaves for the ground station.
+      for (const child of this.buildCaptureShape()) children.push(child)
       return h(YonderColumn, { legend: GROUP_LEGEND.stream, qualifier: 'to the ground station', key: 'stream' }, () => children)
+    },
+    /**
+     * **Resolution and Frame rate — two pickers, not one** (R-CAM-14,
+     * R-VID-07, R-CTL-05; blueprint L-56 and its recorded divergence in
+     * `docs/console/design/blueprint-manifest.md`).
+     *
+     * The blueprint draws a single combined picker reading `1280×720 · 30
+     * fps`, and that works in the mock because its camera offers one rate per
+     * size. The bench camera offers eight, at ten sizes: eighty rows, of
+     * which eight in every ten differ only in a trailing number, read on a
+     * page an operator reaches for while an aircraft is flying. Two pickers
+     * is ten rows and eight, and mirrors the Size + Rate pair the Preview
+     * column already has. **This is a deliberate departure from an approved
+     * render, decided by the operator under CLAUDE.md rule 8** — written down
+     * here and in the manifest, because a departure nobody wrote down is how
+     * this console drifted from the blueprint in the first place.
+     *
+     * **Both menus are the device's own** (R-CAM-14). `captureSizes()` is
+     * `yonder-core`'s, not a list composed here: it takes the first format
+     * entry for each size, which is the entry `video/pipeline.ts` will
+     * actually run, so this never offers a rate the pipeline would refuse.
+     * The rate menu carries only the rates *that size* reported, which is the
+     * whole reason the pair is two controls.
+     *
+     * **A staged pair this camera cannot make is said here, before Apply.**
+     * `captureRefusal()` is the same function the apply route refuses with
+     * and `refuse()` returns at compose time — one comparison, three callers.
+     * A hand-edited `config.yaml` is the only way to reach the size branch,
+     * since the picker offers nothing else; the rate branch is reachable by
+     * choosing a size that does not make the rate now held.
+     *
+     * Drawn in both modes, as the blueprint draws it: `live.elp.night.png`
+     * and `setup.elp.night.png` both carry it. Staging still changes nothing
+     * until Apply — `stage()`, never `setControl()`, like everything else in
+     * this column.
+     */
+    buildCaptureShape () {
+      const r = this.report
+      const cap = r.capabilities && r.capabilities.formats
+      // The one state that draws no control: a camera that answered no format
+      // has no menu to offer, and a picker over an empty list is a control
+      // that cannot be used. The fact says so, in `fact()`'s own words.
+      if (!cap || cap.state === 'not-offered') {
+        return [this.fact('formats', 'Resolution', 'this camera has answered no capture format')]
+      }
+      const { state, reason } = this.stateAndReason(cap)
+      const formats = cap.value || []
+      const sizes = captureSizes(formats)
+      const capture = (r.policy && r.policy.capture) || {}
+      // **A report with no `capture` block draws a fact, not two pickers.**
+      // `cameraDeck()` always composes one, so this is the older-daemon case —
+      // and without it the pickers compose `NaNxNaN`, offer a menu nothing in
+      // it is selected from, and say "this camera does not offer NaNxNaN". A
+      // control that draws over a value it does not have is the failure this
+      // whole deck was rewritten to remove.
+      if (typeof capture.width !== 'number' || typeof capture.height !== 'number'
+        || typeof capture.framerate !== 'number') {
+        return [this.fact('formats', 'Resolution', 'this device has not said what it is capturing')]
+      }
+      const width = Number(this.draftValue('width', capture.width))
+      const height = Number(this.draftValue('height', capture.height))
+      const framerate = Number(this.draftValue('framerate', capture.framerate))
+      const size = `${width}x${height}`
+      const held = sizes.find((s) => s.size === size)
+      const refusal = captureRefusal(formats, { width, height, framerate })
+      // Which control the refusal belongs under, decided from the menus and
+      // never by reading the sentence back — the same split the apply route
+      // makes when it names the path a problem is about.
+      const sizeWrong = held === undefined
+      return [
+        h(YonderPicker, {
+          key: 'captureSize',
+          label: 'Resolution',
+          value: size,
+          options: sizes.map((s) => ({ value: s.size, label: `${s.width}×${s.height}` })),
+          state,
+          reason: state !== 'present'
+            ? reason
+            : (sizeWrong ? refusal : this.stagedReason('width', this.stagedReason('height'))),
+          // Two paths from one press, because a size is two schema leaves and
+          // `DRAFT_PATHS` keeps them apart — the config has no `size` field to
+          // stage, and inventing one here would be a fourteenth name for the
+          // apply route to learn.
+          onChange: (v) => {
+            const [w, hgt] = String(v).split('x').map(Number)
+            this.stage('width', w)
+            this.stage('height', hgt)
+          },
+        }),
+        h(YonderPicker, {
+          key: 'captureRate',
+          label: 'Frame rate',
+          value: String(framerate),
+          // Only the rates this size reported. Empty when the held size is one
+          // the camera does not offer at all — there is no size to read rates
+          // from, and the picker above is where that is said.
+          options: (held ? held.rates : []).map((v) => ({ value: String(v), label: `${v} fps` })),
+          state,
+          reason: state !== 'present'
+            ? reason
+            : (sizeWrong ? '' : (refusal || this.stagedReason('framerate'))),
+          onChange: (v) => this.stage('framerate', Number(v)),
+        }),
+      ]
     },
     buildPreview () {
       const r = this.report

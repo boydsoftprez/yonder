@@ -55,6 +55,21 @@ function noCapabilities(): Record<string, unknown> {
   return out;
 }
 
+/** The capture the fixture camera is running, and what `FORMATS` offers at
+ * it — so a test that stages a size or a rate is staging a real one. */
+const BASE_CAPTURE_POLICY = { width: 1280, height: 720, framerate: 30, codec: "h264" };
+/**
+ * A format list with the property the two pickers exist for: the same rate is
+ * not offered at every size. 1920×1080 makes 30 and 15 only; 1280×720 makes
+ * 60 as well. A single combined picker cannot express that without listing
+ * every pair, which is the eighty-row menu the operator refused.
+ */
+const FORMATS = [
+  { fourcc: "MJPG", width: 1920, height: 1080, rates: [30, 15] },
+  { fourcc: "MJPG", width: 1280, height: 720, rates: [60, 30, 15] },
+  { fourcc: "MJPG", width: 640, height: 480, rates: [30] },
+];
+
 const BASE_STREAM_POLICY = { mode: "fixed", floor_kbps: 1000, ceiling_kbps: 6000, bitrate_kbps: 3000 };
 const BASE_PREVIEW_POLICY = {
   mode: "adaptive", size: "auto", ladder_bottom: "640x360", ladder_top: "1280x720",
@@ -75,10 +90,12 @@ function makeReport(overrides: Record<string, unknown> = {}) {
     values: values || {},
     commanded: commanded || {},
     policy: {
+      capture: { ...BASE_CAPTURE_POLICY, ...((policy && policy.capture) || {}) },
       stream: { ...BASE_STREAM_POLICY, ...((policy && policy.stream) || {}) },
       preview: { ...BASE_PREVIEW_POLICY, ...((policy && policy.preview) || {}) },
     },
     applied: {
+      capture: { ...BASE_CAPTURE_POLICY, ...((applied && applied.capture) || {}) },
       stream: { ...BASE_STREAM_POLICY, ...((applied && applied.stream) || {}) },
       preview: { ...BASE_PREVIEW_POLICY, ...((applied && applied.preview) || {}) },
     },
@@ -909,5 +926,226 @@ describe("the three that turn the picture", () => {
     expect(factLabels(wrapper)).not.toContain("Mirror");
     expect(wrapper.html()).not.toContain(">Mirror<");
     expect(wrapper.find(".y-deck__turnnote").exists()).toBe(false);
+  });
+});
+
+/**
+ * **The Resolution and Frame rate pickers** (R-CAM-14, R-VID-07, R-CTL-05;
+ * blueprint L-56, and the divergence recorded against it in
+ * `docs/console/design/blueprint-manifest.md`).
+ *
+ * The blueprint draws one combined picker reading `1280×720 · 30 fps`. The
+ * operator decided two, under CLAUDE.md rule 8, because a combined menu on
+ * the bench camera is eighty rows in which eight of every ten differ only in
+ * a trailing number. Every test here is about the pair being two controls
+ * that agree — a single picker would satisfy several of them.
+ */
+describe("the size and rate the camera captures", () => {
+  const withFormats = (over: Record<string, unknown> = {}) =>
+    makeReport({ capabilities: { formats: present(FORMATS) }, ...over });
+
+  it("offers each size the camera reported, once, and no size it did not", () => {
+    const { wrapper } = deck(makeStore(withFormats()), "setup");
+    const options = pickerByLabel(wrapper, "Resolution").findAll("option");
+    expect(options.map((o) => o.attributes("value")))
+      .toEqual(["1920x1080", "1280x720", "640x480"]);
+    // R-CAM-14: exactly the device's list, never a range filled in between.
+    expect(options.map((o) => o.text())).not.toContain("1600×1200");
+  });
+
+  /**
+   * **The whole reason there are two pickers.** The rate menu is the rates
+   * *this size* reported — not every rate the camera makes anywhere. A single
+   * combined picker cannot say this, and a rate menu built from the union
+   * would offer 60 fps at 1920×1080, which this camera does not make.
+   */
+  it("offers only the rates the held size reported", async () => {
+    const { wrapper } = deck(makeStore(withFormats()), "setup");
+    const rates = () => pickerByLabel(wrapper, "Frame rate").findAll("option")
+      .map((o) => o.attributes("value"));
+    expect(rates(), "1280×720 makes 60, 30 and 15").toEqual(["60", "30", "15"]);
+
+    await pickerByLabel(wrapper, "Resolution").find("select").setValue("1920x1080");
+    expect(rates(), "1920×1080 makes 30 and 15 only").toEqual(["30", "15"]);
+    expect(rates()).not.toContain("60");
+  });
+
+  it("draws the size and rate the configuration holds", () => {
+    const { wrapper } = deck(makeStore(withFormats({
+      policy: { capture: { width: 640, height: 480, framerate: 30 } },
+      applied: { capture: { width: 640, height: 480, framerate: 30 } },
+    })), "setup");
+    expect(pickerByLabel(wrapper, "Resolution").find(".y-pick__value").text()).toBe("640×480");
+    expect(pickerByLabel(wrapper, "Frame rate").find(".y-pick__value").text()).toBe("30 fps");
+  });
+
+  /**
+   * **In the Stream column, beneath the bitrate** — spec §7 lists Resolution
+   * under *Stream · to the ground station* and the blueprint draws it there.
+   * An earlier reading put it in Capture; this asserts the column, not merely
+   * that the control exists somewhere on the page.
+   */
+  it("draws both in the Stream column, after the bitrate bar", () => {
+    const { wrapper } = deck(makeStore(withFormats()), "setup");
+    const stream = wrapper.findAll(".y-col")
+      .find((c) => c.find(".y-col__legend").text().toLowerCase().startsWith("stream"))
+    expect(stream, "there is a Stream column").toBeTruthy();
+    const html = stream!.html();
+    expect(html).toContain("Resolution");
+    expect(html).toContain("Frame rate");
+    expect(html.indexOf("Bitrate")).toBeLessThan(html.indexOf("Resolution"));
+    expect(html.indexOf("Resolution")).toBeLessThan(html.indexOf("Frame rate"));
+  });
+
+  /**
+   * **A size is two schema leaves, and one press stages both.** `DRAFT_PATHS`
+   * keeps `width` and `height` apart because `config.yaml` does; a picker
+   * that staged only one would apply half a size, which is the shape of four
+   * separate defects on this branch.
+   */
+  it("stages width and height together, and posts nothing", async () => {
+    const { wrapper, emit } = deck(makeStore(withFormats()), "setup");
+    await pickerByLabel(wrapper, "Resolution").find("select").setValue("1920x1080");
+    expect((wrapper.vm as any).draftStore.get("elp"))
+      .toMatchObject({ width: 1920, height: 1080 });
+    expect(emit, "a capture edit is a draft, never a device write").not.toHaveBeenCalled();
+  });
+
+  it("stages the rate on its own, and posts nothing", async () => {
+    const { wrapper, emit } = deck(makeStore(withFormats()), "setup");
+    await pickerByLabel(wrapper, "Frame rate").find("select").setValue("15");
+    expect((wrapper.vm as any).draftStore.get("elp")).toMatchObject({ framerate: 15 });
+    expect((wrapper.vm as any).draftStore.get("elp").width).toBeUndefined();
+    expect(emit).not.toHaveBeenCalled();
+  });
+
+  /**
+   * **Both pickers read the draft first, then what is applied.** A picker
+   * that drew the applied value would snap back to 30 fps the instant the
+   * operator chose 15 — the value would still be staged and the control
+   * would deny it, which is the "drew, posted, and changed nothing" shape
+   * this branch has met four times. Asserted on the drawn text, not on the
+   * store, because the store is where the mutant still succeeds.
+   */
+  it("draws the staged size and rate, not the ones still applied", async () => {
+    const { wrapper } = deck(makeStore(withFormats()), "setup");
+    await pickerByLabel(wrapper, "Frame rate").find("select").setValue("15");
+    expect(pickerByLabel(wrapper, "Frame rate").find(".y-pick__value").text()).toBe("15 fps");
+    expect(pickerByLabel(wrapper, "Frame rate").find(".y-pick__why").text())
+      .toContain("Pending");
+
+    // 1920×1080 and not 640×480: the latter makes 30 alone, so it would put a
+    // refusal on the rate picker and this test would stop being about the two
+    // pickers drawing what was staged.
+    await pickerByLabel(wrapper, "Resolution").find("select").setValue("1920x1080");
+    expect(pickerByLabel(wrapper, "Resolution").find(".y-pick__value").text()).toBe("1920×1080");
+    expect(pickerByLabel(wrapper, "Resolution").find(".y-pick__why").text())
+      .toContain("Pending");
+    expect(pickerByLabel(wrapper, "Frame rate").find(".y-pick__value").text()).toBe("15 fps");
+  });
+
+  /**
+   * **The warning before the press** (spec §8.1). It was missing for a board
+   * turn and the operator met the cut with nothing having said it would
+   * happen; a size change is the same mechanism — the launch line differs, so
+   * `PipelineRenderer` respawns.
+   */
+  it("says a staged size restarts the picture, before Apply", async () => {
+    const { wrapper } = deck(makeStore(withFormats()), "setup");
+    await pickerByLabel(wrapper, "Resolution").find("select").setValue("1920x1080");
+    expect(wrapper.find(".y-deck__pending-h").text()).toContain("2");
+    expect(wrapper.text()).toContain("restarts the picture");
+  });
+
+  /**
+   * **And says nothing for the size already applied** — the join
+   * `appliedForDraft()` had to carry. With no `applied.capture` on the
+   * payload there was nothing for a staged `width` to equal, so every staged
+   * size read pending for ever and the restart warning was permanent.
+   */
+  it("is silent, and shows nothing pending, for the size already running", async () => {
+    const { wrapper } = deck(makeStore(withFormats()), "setup");
+    await pickerByLabel(wrapper, "Resolution").find("select").setValue("1280x720");
+    expect((wrapper.vm as any).draftStore.get("elp"))
+      .toMatchObject({ width: 1280, height: 720 });
+    expect(wrapper.find(".y-deck__pending").exists(), "nothing is pending").toBe(false);
+    expect(wrapper.text()).not.toContain("restarts the picture");
+  });
+
+  /**
+   * **A pair this camera cannot make is said on the picker, before Apply**,
+   * in `captureRefusal()`'s own words — the same sentence the apply route
+   * refuses with and `refuse()` returns at compose time. Reachable by staging
+   * a size that does not make the rate now held.
+   */
+  it("names the rate the staged size will not make, on the rate picker", async () => {
+    const { wrapper } = deck(makeStore(withFormats({
+      policy: { capture: { framerate: 60 } },
+      applied: { capture: { framerate: 60 } },
+    })), "setup");
+    // 60 is fine at 1280×720, which is what this camera is running.
+    expect(pickerByLabel(wrapper, "Frame rate").find(".y-pick__why").exists()).toBe(false);
+
+    await pickerByLabel(wrapper, "Resolution").find("select").setValue("1920x1080");
+    const why = pickerByLabel(wrapper, "Frame rate").find(".y-pick__why");
+    expect(why.exists()).toBe(true);
+    expect(why.text()).toContain("60 fps at 1920x1080");
+    // Under the control the operator has to change, not under the size.
+    expect(pickerByLabel(wrapper, "Resolution").find(".y-pick__why").text())
+      .not.toContain("fps at");
+  });
+
+  /**
+   * **A report whose `policy` carries no `capture` block draws a fact too.**
+   * `cameraDeck()` always composes one, so this is the older-daemon case —
+   * and without the guard the pickers compose `NaNxNaN`, draw a menu with
+   * nothing selected in it, and say "this camera does not offer NaNxNaN".
+   */
+  it("draws a fact when the report says nothing about what is being captured", () => {
+    const report = withFormats() as Record<string, any>;
+    delete report.policy.capture;
+    delete report.applied.capture;
+    const { wrapper } = deck(makeStore(report), "setup");
+    expect(wrapper.text()).not.toContain("NaN");
+    expect(factLabels(wrapper)).toContain("Resolution");
+    expect(wrapper.findAll(".y-pick").some((x) => x.find(".y-pick__label").text() === "Frame rate"))
+      .toBe(false);
+  });
+
+  /**
+   * A camera that answered no format has no menu to draw, and a picker over
+   * an empty list is a control that cannot be used — so it is a fact, the way
+   * R-UI-20 has every other absence stated.
+   */
+  it("draws a fact, not an empty picker, for a camera that answered no format", () => {
+    const { wrapper } = deck(makeStore(makeReport()), "setup");
+    expect(wrapper.findAll(".y-pick").some((p) => p.find(".y-pick__label").text() === "Resolution"))
+      .toBe(false);
+    expect(factLabels(wrapper)).toContain("Resolution");
+  });
+
+  /**
+   * **Live too, as the blueprint draws it**: `live.elp.night.png` carries the
+   * picker as well as `setup.elp.night.png`, so it is not a Setup-only
+   * control. Staging still changes nothing until Apply.
+   */
+  it("draws on Live as well as Setup", () => {
+    const { wrapper } = deck(makeStore(withFormats()), "live");
+    expect(pickerByLabel(wrapper, "Resolution").exists()).toBe(true);
+    expect(pickerByLabel(wrapper, "Frame rate").exists()).toBe(true);
+  });
+
+  /**
+   * **And the Capture column no longer counts them** (blueprint L-51).
+   * `CAPTURE FORMATS 10` stated a number where R-CAM-14 asks for the formats
+   * offered; the formats are now these two menus, and the count beside them
+   * would say the same fact twice, once uselessly.
+   */
+  it("states no bare formats count in the Capture column", () => {
+    const { wrapper } = deck(makeStore(withFormats({
+      capabilities: { formats: present(FORMATS), recording: present({ medium: "board" }) },
+    })), "setup");
+    expect(wrapper.text()).not.toContain("Capture formats");
+    expect(factLabels(wrapper)).not.toContain("Capture formats");
   });
 });

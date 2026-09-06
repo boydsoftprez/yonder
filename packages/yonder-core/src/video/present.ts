@@ -653,6 +653,29 @@ export interface DeckOrientation {
   readonly turns: readonly DeckTurn[];
 }
 
+/**
+ * What this camera is configured to capture — the third policy block, beside
+ * `stream` and `preview` (R-VID-07, R-CAM-14).
+ *
+ * **Schema-shaped and schema-cased**, exactly as the other two are: these are
+ * `Camera`'s own four leaves, not a composed sentence. The `spec` string on
+ * `CameraDeck.camera` says the same numbers in words for the placard, and
+ * that is all it can do — a string is not a value a picker can be set from
+ * and not a value `appliedForDraft()` can compare a staged edit against.
+ *
+ * It was absent, and the absence had teeth: the deck stages `width`,
+ * `height` and `framerate` under those exact names, so with nothing to
+ * compare them to every staged size stayed pending for ever and
+ * `interruption()` warned of a restart even when the operator picked the
+ * size already running.
+ */
+export interface DeckCapture {
+  readonly width: number;
+  readonly height: number;
+  readonly framerate: number;
+  readonly codec: Camera["codec"];
+}
+
 /** `ui-yonder-deck`'s whole payload — `YonderDeck.vue`'s own documented shape. */
 export interface CameraDeck {
   readonly camera: { readonly id: string; readonly name: string; readonly spec: string };
@@ -660,8 +683,16 @@ export interface CameraDeck {
   readonly descriptors: Record<string, DescriptorView>;
   readonly values: Record<string, number | null>;
   readonly commanded: Record<string, number | null>;
-  readonly policy: { readonly stream: Camera["stream"] & { bitrate_kbps: number }; readonly preview: Camera["preview"] };
-  readonly applied: { readonly stream: Camera["stream"] & { bitrate_kbps: number }; readonly preview: Camera["preview"] };
+  readonly policy: {
+    readonly capture: DeckCapture;
+    readonly stream: Camera["stream"] & { bitrate_kbps: number };
+    readonly preview: Camera["preview"];
+  };
+  readonly applied: {
+    readonly capture: DeckCapture;
+    readonly stream: Camera["stream"] & { bitrate_kbps: number };
+    readonly preview: Camera["preview"];
+  };
   readonly outputs: readonly DeckOutput[];
   readonly captures: { readonly count: number };
   readonly orientation: DeckOrientation;
@@ -734,6 +765,12 @@ export function cameraDeck(view: {
     commanded[key] = typeof raw === "number" ? raw : raw === null ? null : raw ? 1 : 0;
   }
   const policy = {
+    capture: {
+      width: camera.width,
+      height: camera.height,
+      framerate: camera.framerate,
+      codec: camera.codec,
+    },
     stream: { ...camera.stream, bitrate_kbps: camera.bitrate_kbps },
     preview: camera.preview,
   };

@@ -706,6 +706,40 @@ describe("cameraDeck", () => {
     expect(deck.applied).toEqual(deck.policy);
   });
 
+  /**
+   * **The capture, as values and not only as a sentence** (R-VID-07,
+   * R-CAM-14).
+   *
+   * `camera.spec` said `1280×720p30` before this block existed and that is
+   * all it said: a string for a placard, which no picker can be set from and
+   * which `YonderDeck.appliedForDraft()` cannot compare a staged `width`
+   * against. The deck stages `width`, `height` and `framerate` under exactly
+   * these names, so with nothing here to compare them to every staged size
+   * would read pending for ever and `interruption()` would warn of a restart
+   * for the size already running.
+   */
+  it("carries the capture the configuration holds, beside stream and preview", () => {
+    const deck = cameraDeck({ camera: camera(), capabilities: null, encoder, paths });
+    expect(deck.policy.capture).toEqual({ width: 1280, height: 720, framerate: 30, codec: "h264" });
+    expect(deck.applied.capture).toEqual(deck.policy.capture);
+  });
+
+  /**
+   * The values, not a restatement of the schema's defaults — a mutant that
+   * wrote `1280`/`720`/`30` in this function would pass the test above and
+   * fail this one.
+   */
+  it("carries this camera's own capture, not the shipped defaults", () => {
+    const deck = cameraDeck({
+      camera: camera({ width: 1920, height: 1080, framerate: 15 } as Partial<Camera>),
+      capabilities: null, encoder, paths,
+    });
+    expect(deck.policy.capture).toEqual({ width: 1920, height: 1080, framerate: 15, codec: "h264" });
+    // ...and the placard still says the same thing in words, so the two
+    // cannot drift into disagreeing about one camera.
+    expect(deck.camera.spec).toContain("1920×1080p15");
+  });
+
   /** R-UI-24: an output states which way it has to travel and whether it can. */
   it("states each output's reach, from the paths this board actually has", () => {
     const behindNat = cameraDeck({

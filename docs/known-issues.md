@@ -1550,7 +1550,7 @@ WebRTC session did not recover on its own once the publisher returned.
 
 ### K-52 · The ground station's stream has no resolution or frame-rate control
 
-**Status:** Open · **Requirements:** R-CAM-14, R-VID-07, R-UI-20
+**Status:** Closed · **Requirements:** R-CAM-14, R-VID-07, R-UI-20
 
 Found by the operator on the board: the preview has **Size** and **Rate**
 pickers; the stream to the ground station has neither. Its resolution and frame
@@ -1601,6 +1601,36 @@ paths staged into the draft like every other Setup edit; and the respawn on
 Apply the spec names — which stays a respawn even after the runtime bitrate
 channel (K-48, plan Task 30) lands, because a size or frame-rate change is not
 something `extra-controls` can retune.
+
+**Closed, as two pickers rather than one.** `Resolution` then `Frame rate`, in
+the Stream column beneath the bitrate bar, both menus taken from
+`captureSizes()` over the probe's own format list — and the rate menu carries
+**only the rates that size reported**, which is the whole reason it is a second
+control. The blueprint draws one combined picker and the operator decided the
+split under CLAUDE.md rule 8: the bench camera offers ten sizes and eight rates,
+and one menu of the eighty is eight rows in every ten differing by a trailing
+number, scanned while an aircraft is flying. The divergence is recorded against
+**L-56** in `docs/console/design/blueprint-manifest.md`.
+
+Both smaller cases above are closed with it. `CAPTURE FORMATS 10` is gone —
+those formats are what the two pickers now offer — and the Pocket 2's own row
+inherits the same control, drawing `formats` in whatever state it answers.
+
+Three things came with it, because a picker that offers a mode the device then
+refuses is the same defect one layer down:
+
+- `policy.capture`/`applied.capture` on the deck payload. The camera's size and
+  rate reached the page only inside the `spec` *string* before this, which no
+  picker can be set from and no staged edit can be compared against — every
+  staged size would have read pending for ever.
+- `captureRefusal()` in `video/capability.ts`, called by the deck before Apply,
+  by `POST /cameras/:id/apply` instead of applying, and by `video/pipeline.ts`'s
+  own `refuse()` at compose time. One comparison, three callers.
+- The apply route refuses a size or rate this camera does not make, judging the
+  draft **laid on the applied values** so a lone staged rate is checked against
+  the size already running. Without it the pair reached the engine, the document
+  was written, the window armed and the picture stayed down until the rollback
+  took it back.
 
 ### K-53 · The video pipeline is run by a program that cannot be spoken to
 

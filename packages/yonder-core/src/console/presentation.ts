@@ -136,9 +136,22 @@ export {
  * zero-import module the rest of this block already re-exports — nothing
  * new for a browser bundle to carry.
  */
+/**
+ * **`captureSizes` and `captureRefusal` travel too, and for this file's own
+ * reason** (R-CAM-14, R-VID-07). The deck's Resolution and Frame rate
+ * pickers are built from the first; the second is the sentence it draws when
+ * a staged pair is one this camera cannot make, the sentence the apply route
+ * refuses with, and the sentence `video/pipeline.ts`'s own `refuse()`
+ * returns. One comparison, three callers — a second copy in the browser
+ * would offer a rate the device would then refuse, which is a control that
+ * draws and cannot work.
+ */
 export {
   CAPABILITY_KEYS,
+  captureRefusal,
+  captureSizes,
   summarise,
+  type CaptureSize,
   type Capability,
   type CameraCapabilities,
   type ControlRange,

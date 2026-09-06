@@ -198,7 +198,7 @@ the capture and was checked against `YonderAim.vue` instead.**
 | L-48 | **The captures popover**: `CAPTURES · THIS BOARD` / `4 SAVED`, one row per still with a thumbnail, `just now`, `1280×720 · 1.1 MB`, and `VIEW · DOWNLOAD · DELETE` | Absent | owned — **Task 33** | |
 | L-49 | A `DEVICE` readout: `usb-1.2 · ELP-USBFHD01M` | Absent from the column; a by-path string appears in a separate `IDENTITY` panel below the deck | drifted | |
 | L-50 | An `ENCODER` readout: `v4l2h264enc · hardware` | Absent from the column; folded into the placard (L-08), without the `hardware`/`re-encoded` qualifier | drifted | |
-| L-51 | *(Not in the blueprint)* `CAPTURE FORMATS 10` | Present | drifted | K-52's own smaller case: "a count offers nothing". R-CAM-14 wants the formats offered, not counted |
+| L-51 | *(Not in the blueprint)* `CAPTURE FORMATS 10` | **Gone.** The formats are offered, in the Stream column's two pickers (L-56) | present | Was K-52's own smaller case: "a count offers nothing". R-CAM-14 asks for the formats offered, not counted, and the row that counted them is removed rather than reworded — the Stream column now offers those same formats, and a count beside it would state the fact twice |
 | L-52 | On the Pocket 2: `BATTERY 99 %` and `CARD none` readouts | Not applicable — no Pocket 2 on the bench | deferred — Phase 5 | Gimbal work waits for the camera to return |
 
 ### 1.7 The Stream column — *to the ground station*
@@ -208,10 +208,34 @@ the capture and was checked against `YonderAim.vue` instead.**
 | L-53 | A `STREAM` legend with the qualifier `TO THE GROUND STATION` | Present | present | |
 | L-54 | A `BITRATE` segmented control, `Fixed │ Adaptive`, Fixed by default | Present | present | |
 | L-55 | In Fixed: a `BITRATE` set bar reading `3.0 Mb/s` with `going out 3.0` beneath | Present, reading `2000 kb/s` | drifted | Unit: the blueprint states Mb/s for a megabit-scale value; the console states kb/s. Same for Preview's Ceiling (L-66) |
-| L-56 | **A `RESOLUTION` picker beneath the bitrate, reading `1280×720 · 30 fps`, its options drawn from the probe's own format list** | **Absent** | **unbuilt** — this is **K-52** | Confirmed against `YonderDeck.vue`: the deck stages thirteen paths and not one of them is `width`, `height` or `framerate`. The daemon accepts all three; `probeCamera()` has carried the format list since Task 3. K-52 records that no plan step adds it |
+| L-56 | **A `RESOLUTION` picker beneath the bitrate, reading `1280×720 · 30 fps`, its options drawn from the probe's own format list** | **Built, as two pickers** — `RESOLUTION` then `FRAME RATE`, in that order, beneath the bitrate bar in the Stream column | **diverges from the render — the operator's decision** | See the note below the table. K-52 is closed |
 | L-57 | In Adaptive: the bar becomes a `GOING OUT` readout | Present (`label: adaptive ? 'Going out' : 'Bitrate'`) | present | |
 | L-58 | In Adaptive: `FLOOR` and `CEILING` **pickers** appear (`1.0 Mb/s`, …) | Present, but drawn as **set bars**, not pickers | drifted | `columns.adaptive.png` is the reference |
 | L-59 | A staged edit shows `Pending · apply on Setup` beneath the control it was made on | Present (`YonderSetBar.vue:17`, `YonderDeck.vue:440`) | present | |
+
+**L-56 diverges from the approved render, deliberately. The operator decided
+it, under CLAUDE.md rule 8, and this row is the record of it.**
+
+The blueprint draws **one** picker combining the two — `1280×720 · 30 fps` —
+and that works in `gallery/cameras.js` because the mock camera offers one rate
+per size. The bench camera offers eight, at ten sizes. A combined picker is
+then an **eighty-row menu in which eight rows in every ten differ only in a
+trailing number**, read on a page an operator reaches for while an aircraft is
+flying. Two pickers is a menu of ten and a menu of eight, and it mirrors the
+`SIZE` + `RATE` pair the Preview column already draws (L-64, L-65).
+
+What the render asks for is otherwise met exactly: both menus are the probe's
+own list and nothing else (R-CAM-14), the frame-rate menu carries **only the
+rates that size reported**, and the pair sits beneath the bitrate bar in the
+Stream column as drawn — spec §7 lists Resolution under *Stream · to the
+ground station*, and `columns.adaptive.png` draws it in Adaptive too, so it is
+not mode-conditional here either.
+
+**Written down because a departure nobody wrote down is how this console
+drifted from the blueprint in the first place** — the failure this whole file
+exists to make loud. A future reviewer comparing `live.elp.night.png` to a
+capture will find one control where the render has one; this row says why, and
+who decided.
 
 ### 1.8 The Preview column — *to this browser*
 
@@ -599,13 +623,17 @@ question about what R-UI-03 requires.
 ## The two filed defects, confirmed against the blueprint
 
 **K-52 — the ground station's stream has no resolution or frame-rate control.
-Confirmed.** `live.elp.night.png` and `setup.elp.night.png` both draw a
-`RESOLUTION` picker in the Stream column reading `1280×720 · 30 fps`, directly
-beneath the bitrate bar; `columns.adaptive.png` draws it in Adaptive too, so it
-is not a mode-conditional control. No committed capture shows it, and
-`YonderDeck.vue` stages no `width`, `height` or `framerate`. Recorded as
-**L-56, unbuilt, no owner.** K-52's smaller case is recorded as **L-51**:
-`CAPTURE FORMATS 10` states a number where R-CAM-14 asks for the formats.
+Confirmed, and since closed.** `live.elp.night.png` and `setup.elp.night.png`
+both draw a `RESOLUTION` picker in the Stream column reading `1280×720 · 30
+fps`, directly beneath the bitrate bar; `columns.adaptive.png` draws it in
+Adaptive too, so it is not a mode-conditional control. No committed capture
+showed it, and `YonderDeck.vue` staged no `width`, `height` or `framerate`.
+
+It is now built — **as two pickers rather than one, which the operator decided
+under rule 8**; the reasoning and the record are under §1.7's table. K-52's
+smaller case was **L-51**, `CAPTURE FORMATS 10` stating a number where R-CAM-14
+asks for the formats: that row is gone, because those formats are what the two
+pickers now offer.
 
 **K-54 — a detected camera cannot be configured from the console. Confirmed,
 and it is two gaps, not one.** `cameras.night.png` draws a rail of three keys,
@@ -658,19 +686,26 @@ so has never been seen in a picture anybody reviews (B-02).
 
 | Surface | Elements | Present | Absent (unbuilt) | Absent (owned) | Drifted | Deferred | Not checkable |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| Camera · Live | 105 | 39 | 12 | 15 | 35 | 3 | 1 |
+| Camera · Live | 105 | 41 | 11 | 15 | 34 | 3 | 1 |
 | Camera · Setup | 17 | 5 | 3 | 0 | 8 | 0 | 1 |
 | Cameras | 26 | 8 | 7 | 0 | 10 | 0 | 1 |
-| **Compared against a blueprint** | **148** | **52** | **22** | **15** | **53** | **3** | **3** |
+| **Compared against a blueprint** | **148** | **54** | **21** | **15** | **52** | **3** | **3** |
 | Status | 20 | — | — | — | — | — | 20 |
 | Network | 24 | — | — | — | — | — | 24 |
 | Log | 8 | — | — | — | — | — | 8 |
 | Diagnostics | 11 | — | — | — | — | — | 11 |
 | **Inventoried, no blueprint** | **63** | — | — | — | — | — | **63** |
-| **Total** | **211** | **52** | **22** | **15** | **53** | **3** | **66** |
+| **Total** | **211** | **54** | **21** | **15** | **52** | **3** | **66** |
 
 **Conflicts: 5** (C-1 … C-5), listed above. They are counted in their
 surface's other columns as well, where they describe a concrete difference.
+
+**L-56 is counted *present*, and it is the one row where that word needs a
+qualification.** It is built and it does not match the render: one combined
+picker in the blueprint, two on the console, the operator's decision under rule
+7's own escape hatch in rule 8. Counting it *drifted* would file a decided
+divergence with the accidents, and counting it *unbuilt* would be false. The
+row and the note under §1.7 carry what the count cannot.
 
 Rows are counted once. *Deferred* is Phase 5 only — the Pocket 2, which the
 operator has already deferred until the camera returns; those elements are
@@ -689,7 +724,7 @@ check against.
 | 34 — the stills strip, per viewer | L-20, L-21, L-22 |
 | Phase 5 (deferred, Pocket 2) | L-52, L-79, L-83 |
 
-**Unbuilt, with no owner — twenty-two rows**
+**Unbuilt, with no owner — twenty-one rows**
 
 Under CLAUDE.md rule 7 these are not deferred. They are missing, and until each
 has a named owner or is built, no camera surface is finished.
@@ -702,7 +737,6 @@ has a named owner or is built, no camera surface is finished.
 | L-18 | The photo flash and the `● SAVED · TO THIS BOARD` banner |
 | L-23 | The `● CONFIRMED` pill on the camera page's strip |
 | L-43 | The `MODE` segmented control, `Video │ Photo` |
-| L-56 | **The Stream `RESOLUTION` picker — K-52** |
 | L-92 | `stop or start them on Setup ›` on Live |
 | L-93 | The `SRT` output row |
 | L-97 | The sticky rail |
@@ -716,5 +750,6 @@ has a named owner or is built, no camera surface is finished.
 | C-24 | The Cameras page's `APPLY` key |
 
 Three of those — L-56, C-15/C-16 and C-22/C-23 — are the three CLAUDE.md rule 7
-names as the reason this file exists. **They are still open.** The other
-seventeen are the same shape and had not been found before this audit.
+names as the reason this file exists. **L-56 is now built** (as two pickers, the
+operator's decision — see §1.7); the other two are still open. The remaining
+seventeen rows are the same shape and had not been found before this audit.

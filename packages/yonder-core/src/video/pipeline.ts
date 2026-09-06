@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { PREVIEW_RUNGS, type Camera, type CameraOutput, type PreviewRung } from "../schema/config.js";
-import type { CameraCapabilities } from "./capability.js";
+import { captureRefusal, type CameraCapabilities } from "./capability.js";
 import { orientation } from "./orientation.js";
 import type { Encoder } from "./probe/encoder.js";
 
@@ -565,14 +565,13 @@ export function refuse(opts: ComposeOptions): string | null {
   if (capabilities.formats.state !== "present") {
     return "this camera has not answered with any capture format";
   }
-  const formats = capabilities.formats.value;
-  const size = formats.find((f) => f.width === camera.width && f.height === camera.height);
-  if (!size) {
-    const offered = formats.map((f) => `${f.width}x${f.height}`).join(", ");
-    return `this camera does not offer ${camera.width}x${camera.height}; it offers ${offered}`;
-  }
-  if (!size.rates.includes(camera.framerate)) {
-    return `this camera does not offer ${camera.framerate} fps at ${camera.width}x${camera.height}; it offers ${size.rates.join(", ")}`;
-  }
-  return null;
+  // **`captureRefusal()` and not a comparison of its own** (R-CAM-14). The
+  // deck builds its Resolution and Frame rate pickers from `captureSizes()`
+  // and the apply route judges a staged draft with this same function, so a
+  // size or rate this refuses is one neither of them ever offered — which is
+  // the whole difference between a second line of defence and a second
+  // opinion. Written twice, the picker would eventually offer a pair only
+  // this copy knew to reject, and the operator would meet it as a pipeline
+  // that would not start.
+  return captureRefusal(capabilities.formats.value, camera);
 }
