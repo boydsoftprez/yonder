@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
-import { compose, refuse, QUEUE } from "./pipeline.js";
+import {
+  compose, encodeControl, encodesIn, previewCaps, refuse,
+  ENCODE_ELEMENT, PREVIEW_CAPS_ELEMENT, QUEUE,
+} from "./pipeline.js";
 import { present, noCapabilities } from "./capability.js";
 import type { Camera, CameraOutput } from "../schema/config.js";
 
@@ -260,5 +263,107 @@ describe("refuse", () => {
     const disabledSrt = { ...withSrt, outputs: [{ ...withSrt.outputs[0], enabled: false }] };
     expect(() => compose({ ...opts, camera: disabledSrt })).not.toThrow();
     expect(compose({ ...opts, camera: disabledSrt }).join(" ")).not.toContain("srtsink");
+  });
+});
+
+describe("the runtime channel's half of the launch line", () => {
+  // R-VID-07. Everything here exists so a bitrate can reach an encoder that
+  // is already running (K-48), and every one of these is a join: the same
+  // fact written once and read from two places, so the launch line and the
+  // command that changes it cannot drift into disagreeing.
+
+  it("names both encodes, so a running one can be addressed at all", () => {
+    expect(text()).toContain(`name=${ENCODE_ELEMENT.stream}`);
+    expect(text()).toContain(`name=${ENCODE_ELEMENT.preview}`);
+    // Each name belongs to exactly one element in the line it is meant to
+    // pick out of.
+    for (const name of Object.values(ENCODE_ELEMENT)) {
+      expect(argv().filter((t) => t === `name=${name}`)).toHaveLength(1);
+    }
+  });
+
+  it("builds a retune from the pipeline that is running, in the encoder's own units", () => {
+    expect(encodeControl(argv(), "stream", 3000)).toEqual({
+      element: "enc-stream", property: "extra-controls",
+      value: "controls,video_bitrate=3000000",
+    });
+    const soft = compose({ ...opts, encoder: {
+      element: "x264enc", device: null, hardware: false, codec: "h264", detail: "software",
+    } });
+    expect(encodeControl(soft, "stream", 3000)).toEqual({
+      element: "enc-stream", property: "bitrate", value: "3000",
+    });
+  });
+
+  it("keeps the preview's short keyframe interval in every retune of it", () => {
+    // `extra-controls` is a whole GstStructure and setting it replaces every
+    // control in it. A retune carrying video_bitrate alone would silently
+    // drop h264_i_frame_period and stretch the preview's GOP back to the
+    // encoder's default — R-VID-09 undone by a bitrate change. The stream's
+    // encode has no short GOP and must not acquire one here either.
+    expect(encodeControl(argv(), "preview", 800)?.value)
+      .toBe("controls,video_bitrate=800000,h264_i_frame_period=15");
+    expect(encodeControl(argv(), "stream", 800)?.value).not.toContain("i_frame_period");
+  });
+
+  it("offers no retune for an encode the running pipeline does not carry", () => {
+    // A fixed-passthrough feed has no encoder element in its line, so there
+    // is nothing named to address. Derived from the pipeline rather than
+    // declared anywhere, so a passthrough feed answers correctly the day one
+    // is composed.
+    const at = argv().indexOf(`name=${ENCODE_ELEMENT.stream}`);
+    const passthrough = argv().filter((_, i) => i < at - 1 || i > at + 1);
+    expect(encodeControl(passthrough, "stream", 3000)).toBeNull();
+    expect(encodeControl(passthrough, "preview", 700)).not.toBeNull();
+  });
+
+  it("reads back the rates the line is actually running, on either encoder", () => {
+    // The seed for "last confirmed": what the process was told when it was
+    // started, not what config.yaml says now. K-48 is the difference.
+    expect(encodesIn(argv())).toEqual({
+      stream: 2000, preview: 400, shape: { size: "640x360", fps: 15 },
+    });
+    const soft = compose({ ...opts, encoder: {
+      element: "x264enc", device: null, hardware: false, codec: "h264", detail: "software",
+    } });
+    expect(encodesIn(soft)).toMatchObject({ stream: 2000, preview: 400 });
+  });
+
+  it("reads the rung the preview is actually held at, auto resolved", () => {
+    const pinned = compose({ ...opts, camera: {
+      ...CAMERA, preview: { ...CAMERA.preview, size: "854x480", framerate: 10 },
+    } });
+    expect(encodesIn(pinned).shape).toEqual({ size: "854x480", fps: 10 });
+  });
+
+  it("sends a reconfigure exactly the caps compose would have baked in", () => {
+    // The join that matters most: a rung change and a fresh start must
+    // produce the same picture. Composed for a size, read back off the
+    // composed line, and asked for by a reconfigure — three routes, one
+    // answer.
+    for (const shape of [
+      { size: "1280x720" as const, fps: 30 },
+      { size: "854x480" as const, fps: 10 },
+      { size: "640x360" as const, fps: 15 },
+    ]) {
+      const baked = compose({ ...opts, camera: {
+        ...CAMERA, preview: { ...CAMERA.preview, size: shape.size, framerate: shape.fps },
+      } });
+      for (const set of previewCaps(shape)) {
+        const at = baked.indexOf(`name=${set.element}`);
+        expect(at).toBeGreaterThan(0);
+        expect(baked[at + 1]).toBe(`${set.property}=${set.value}`);
+      }
+      expect(encodesIn(baked).shape).toEqual(shape);
+    }
+  });
+
+  it("names the preview's capsfilters without changing what they filter", () => {
+    // `capsfilter name=x caps=C` and a bare `C` build the same element; the
+    // difference is that this one can be addressed while it is running.
+    expect(text()).toContain(`capsfilter name=${PREVIEW_CAPS_ELEMENT.scale}`);
+    expect(text()).toContain("caps=video/x-raw,width=640,height=360");
+    expect(text()).toContain(`capsfilter name=${PREVIEW_CAPS_ELEMENT.rate}`);
+    expect(text()).toContain("caps=video/x-raw,framerate=15/1");
   });
 });

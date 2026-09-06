@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import type { Camera, CameraOutput } from "../schema/config.js";
+import { PREVIEW_RUNGS, type Camera, type CameraOutput, type PreviewRung } from "../schema/config.js";
 import type { CameraCapabilities } from "./capability.js";
 import type { Encoder } from "./probe/encoder.js";
 
@@ -151,30 +151,139 @@ const H264_LEVEL = "video/x-h264,level=(string)4";
  * before it has proven more capacity is safe — rather than to a size baked
  * in independently of it, so the two cannot silently disagree.
  */
+/** The rung `preview.size` is holding, with `"auto"` resolved (see above). */
+function heldRung(preview: Camera["preview"]): PreviewRung {
+  return preview.size === "auto" ? preview.ladder_bottom : preview.size;
+}
+
 function previewSize(preview: Camera["preview"]): { width: number; height: number } {
-  const held = preview.size === "auto" ? preview.ladder_bottom : preview.size;
-  const [width, height] = held.split("x").map(Number) as [number, number];
+  const [width, height] = heldRung(preview).split("x").map(Number) as [number, number];
   return { width, height };
 }
 
-function encode(encoder: Encoder, kbps: number, shortGop: boolean): string[] {
+/**
+ * The two encodes, and the name each one carries in the launch line.
+ *
+ * **A name is what makes an element addressable while it is running**
+ * (R-VID-07). `gst-launch-1.0`'s `name=` is how anything holding the pipeline
+ * finds one element among the dozen this file composes, so the runtime
+ * channel's commands are addressed to these names and nothing else — see
+ * `encodeControl` below and `video/encoder.ts`.
+ *
+ * Exported because the channel and the launch line must agree about them
+ * exactly: a name typed twice is a name that can drift, and a command
+ * addressed to an element that is not there does nothing and says nothing.
+ */
+export const ENCODE_ELEMENT = { stream: "enc-stream", preview: "enc-preview" } as const;
+export type EncodeName = keyof typeof ENCODE_ELEMENT;
+
+/**
+ * Which encode runs the short keyframe interval (R-VID-09), in one place.
+ *
+ * `compose()` reads it to build the launch line and `encodeControl()` reads
+ * it to build a retune. **On `v4l2h264enc` that is not a convenience.**
+ * `extra-controls` is a whole `GstStructure`: setting it at runtime replaces
+ * every control in it, so a retune that carried only `video_bitrate` would
+ * silently drop the preview's `h264_i_frame_period` and stretch its GOP back
+ * to the encoder's default — the browser-side guarantee of R-VID-09, undone
+ * by a bitrate change, with nothing to see in any log. One table, read twice.
+ */
+const SHORT_GOP: Record<EncodeName, boolean> = { stream: false, preview: true };
+
+/**
+ * The preview's two capsfilters, named for the same reason the encodes are.
+ *
+ * Written as an explicit `capsfilter name=… caps=…` rather than as the bare
+ * caps string `gst-launch` would turn into an anonymous one. The element the
+ * pipeline gets is identical either way; the difference is that this one has
+ * a name a reconfigure can address (`previewCaps` below).
+ */
+export const PREVIEW_CAPS_ELEMENT = { scale: "preview-scale", rate: "preview-rate" } as const;
+
+/** One property of one named element: what a launch line bakes in, and what a
+ *  runtime command carries. The two are built by the same functions here. */
+export interface ElementProperty {
+  readonly element: string;
+  readonly property: string;
+  readonly value: string;
+}
+
+/** The size and rate the preview branch is asked to hold. */
+export interface PreviewShape {
+  readonly size: PreviewRung;
+  readonly fps: number;
+}
+
+/** `prop=value`, as the launch line's own token. */
+function token(set: ElementProperty): string {
+  return `${set.property}=${set.value}`;
+}
+
+/** The controls `v4l2h264enc` carries, for a launch line and for a retune alike. */
+function extraControls(kbps: number, shortGop: boolean): string {
+  return [
+    "controls", `video_bitrate=${kbps * 1000}`,
+    ...(shortGop ? ["h264_i_frame_period=15"] : []),
+  ].join(",");
+}
+
+/**
+ * What sets one encode's bitrate, by element kind.
+ *
+ * Exhaustive over `Encoder["element"]` with no `default:`, so a board whose
+ * encoder is neither of these cannot be added without this function being
+ * made to answer for it.
+ */
+function bitrateOf(
+  kind: Encoder["element"], element: string, kbps: number, shortGop: boolean,
+): ElementProperty {
+  switch (kind) {
+    case "x264enc":
+      // x264enc counts in kb/s, and its `bitrate` is settable while playing.
+      return { element, property: "bitrate", value: String(kbps) };
+    case "v4l2h264enc":
+      return { element, property: "extra-controls", value: extraControls(kbps, shortGop) };
+  }
+}
+
+function encode(encoder: Encoder, name: EncodeName, kbps: number): string[] {
+  const element = ENCODE_ELEMENT[name];
+  const bitrate = token(bitrateOf(encoder.element, element, kbps, SHORT_GOP[name]));
   if (encoder.element === "x264enc") {
-    // x264enc counts in kb/s and takes key-int-max in frames. `tune=zerolatency`
-    // because a B-frame reorder buffer is latency on a link that already has
-    // 300 ms of it (R-UI-06).
+    // key-int-max is in frames. `tune=zerolatency` because a B-frame reorder
+    // buffer is latency on a link that already has 300 ms of it (R-UI-06).
     return [
-      "x264enc", `bitrate=${kbps}`, "speed-preset=veryfast", "tune=zerolatency",
-      ...(shortGop ? ["key-int-max=15"] : []),
+      "x264enc", `name=${element}`, bitrate, "speed-preset=veryfast", "tune=zerolatency",
+      ...(SHORT_GOP[name] ? ["key-int-max=15"] : []),
     ];
   }
-  const controls = [`video_bitrate=${kbps * 1000}`, ...(shortGop ? ["h264_i_frame_period=15"] : [])];
   // No `device=`: the property is read-only and `encoder.device` cannot be
   // applied — see the module comment. The capsfilter is welded on here rather
   // than added at the two call sites, because an encoder that reaches one of
   // them without it does not survive its first frame.
+  return ["v4l2h264enc", `name=${element}`, bitrate, LINK, H264_LEVEL];
+}
+
+/**
+ * The caps the preview branch is scaled and timed by — one function, read by
+ * `compose()` when it bakes them in and by a reconfigure when it changes them
+ * (R-VID-07, spec §8.1).
+ *
+ * Two properties rather than one: `v4l2convert` fixes the size and
+ * `videorate` fixes the rate, and a rung change moves the first without
+ * touching the second.
+ */
+export function previewCaps(shape: PreviewShape): readonly [ElementProperty, ElementProperty] {
+  const [width, height] = shape.size.split("x").map(Number) as [number, number];
   return [
-    "v4l2h264enc", `extra-controls=controls,${controls.join(",")}`,
-    LINK, H264_LEVEL,
+    {
+      element: PREVIEW_CAPS_ELEMENT.scale, property: "caps",
+      value: `video/x-raw,width=${width},height=${height}`,
+    },
+    {
+      element: PREVIEW_CAPS_ELEMENT.rate, property: "caps",
+      value: `video/x-raw,framerate=${shape.fps}/1`,
+    },
   ];
 }
 
@@ -226,7 +335,7 @@ export function compose(opts: ComposeOptions): string[] {
   );
 
   // The full-rate encode, then the fork to its consumers.
-  push("raw.", LINK, ...QUEUE, LINK, ...encode(encoder, camera.bitrate_kbps, false), LINK,
+  push("raw.", LINK, ...QUEUE, LINK, ...encode(encoder, "stream", camera.bitrate_kbps), LINK,
     "h264parse", LINK, "tee", "name=main");
   // A disabled output contributes no branch at all (R-VID-16) — not a branch
   // that opens a socket and sits muted, which is a different claim to an
@@ -237,18 +346,119 @@ export function compose(opts: ComposeOptions): string[] {
 
   // The cheap copy the interface watches (R-VID-13), always published, always
   // under its own path so the console can never subscribe to the wrong one.
-  const preview = previewSize(camera.preview);
+  const [scale, rate] = previewCaps({
+    size: heldRung(camera.preview), fps: camera.preview.framerate,
+  });
   push(
     "raw.", LINK, ...QUEUE, LINK,
     "v4l2convert", LINK,
-    `video/x-raw,width=${preview.width},height=${preview.height}`, LINK,
-    "videorate", LINK, `video/x-raw,framerate=${camera.preview.framerate}/1`, LINK,
-    ...encode(encoder, camera.preview.bitrate_kbps, true), LINK,
+    "capsfilter", `name=${scale.element}`, token(scale), LINK,
+    "videorate", LINK,
+    "capsfilter", `name=${rate.element}`, token(rate), LINK,
+    ...encode(encoder, "preview", camera.preview.bitrate_kbps), LINK,
     "h264parse", LINK,
     "rtspclientsink", `location=${rtspBase}/${camera.id}-preview`, "latency=0",
   );
 
   return argv;
+}
+
+/**
+ * The properties one named element carries in a launch line, or null where
+ * that line has no such element.
+ *
+ * **Read from the argv the process is actually running, never from the
+ * configuration.** K-48 is what the other choice looks like: `config.yaml`
+ * said 2000 kb/s while the encoder ran 100, and every file that answered
+ * from the config agreed with the config and was wrong. The launch line is
+ * the only record of what the running pipeline was actually told.
+ *
+ * `element` is the token before `name=…` because that is how `compose()`
+ * writes it and how `gst-launch` parses it — the element, then its
+ * properties, until the next `!`.
+ */
+function elementIn(
+  argv: readonly string[], element: string,
+): { readonly kind: string; readonly props: readonly string[] } | null {
+  const at = argv.indexOf(`name=${element}`);
+  if (at < 1) return null;
+  const props: string[] = [];
+  for (let i = at + 1; i < argv.length && argv[i] !== LINK; i++) props.push(argv[i]);
+  return { kind: argv[at - 1], props };
+}
+
+/**
+ * What retunes one encode of a **running** pipeline to `kbps`, or null where
+ * that pipeline carries no such encode to retune (R-VID-07).
+ *
+ * Null is the fixed-passthrough answer, and it is derived rather than
+ * declared: a feed that carries the source's own encoding has no encoder
+ * element in its launch line, so there is nothing named to address and
+ * nothing this function can offer. `video/encoder.ts` turns that into the
+ * `notControllable` an operator is shown, rather than a control that appears
+ * to work.
+ */
+export function encodeControl(
+  argv: readonly string[], name: EncodeName, kbps: number,
+): ElementProperty | null {
+  const element = ENCODE_ELEMENT[name];
+  const found = elementIn(argv, element);
+  if (found === null) return null;
+  if (found.kind !== "v4l2h264enc" && found.kind !== "x264enc") return null;
+  return bitrateOf(found.kind, element, kbps, SHORT_GOP[name]);
+}
+
+/**
+ * What a running pipeline was told at the moment it was started: the bitrate
+ * of each encode it carries, and the shape its preview branch holds.
+ *
+ * This is the **last confirmed state** before anything has been retuned —
+ * the seed `video/encoder.ts` starts from, so a failed retune reports what
+ * the encoder is doing rather than what the configuration wishes it were.
+ * A `null` field means the running pipeline has no such encode at all.
+ */
+export interface RunningEncodes {
+  readonly stream: number | null;
+  readonly preview: number | null;
+  readonly shape: PreviewShape | null;
+}
+
+function bitrateIn(argv: readonly string[], name: EncodeName): number | null {
+  const found = elementIn(argv, ENCODE_ELEMENT[name]);
+  if (found === null) return null;
+  for (const prop of found.props) {
+    // v4l2h264enc, in bits per second, inside the controls structure.
+    const controls = /^extra-controls=.*\bvideo_bitrate=(\d+)/.exec(prop);
+    if (controls) return Math.round(Number(controls[1]) / 1000);
+    // x264enc, already in kb/s.
+    const plain = /^bitrate=(\d+)$/.exec(prop);
+    if (plain) return Number(plain[1]);
+  }
+  return null;
+}
+
+function shapeIn(argv: readonly string[]): PreviewShape | null {
+  const scale = elementIn(argv, PREVIEW_CAPS_ELEMENT.scale);
+  const rate = elementIn(argv, PREVIEW_CAPS_ELEMENT.rate);
+  if (scale === null || rate === null) return null;
+  const size = /\bwidth=(\d+),height=(\d+)/.exec(scale.props.join(" "));
+  const fps = /\bframerate=(\d+)\/1/.exec(rate.props.join(" "));
+  if (size === null || fps === null) return null;
+  const rung = `${size[1]}x${size[2]}`;
+  // A size this schema does not offer is not reported as one it does. The
+  // pipeline could only be carrying it if something outside `compose()` built
+  // the line, and inventing a fourth rung to name it would be the repair
+  // R-CMD-04 refuses everywhere else.
+  if (!(PREVIEW_RUNGS as readonly string[]).includes(rung)) return null;
+  return { size: rung as PreviewRung, fps: Number(fps[1]) };
+}
+
+export function encodesIn(argv: readonly string[]): RunningEncodes {
+  return {
+    stream: bitrateIn(argv, "stream"),
+    preview: bitrateIn(argv, "preview"),
+    shape: shapeIn(argv),
+  };
 }
 
 /**

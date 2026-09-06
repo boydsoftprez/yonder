@@ -5,12 +5,14 @@ import { systemClock, type Clock } from "../apply/types.js";
 /**
  * Spawning and supervising one pipeline per camera (R-CTL-01).
  *
- * **This is the whole runtime surface in M4.** Start and stop are process
- * lifecycle; resolution, codec and bitrate are a respawn; a keyframe on
- * reconnect is arranged in the pipeline rather than commanded. What M4
- * therefore does not build is a control channel into a running pipeline —
- * R-VID-07's adaptive bitrate in M9 cannot be built without one, so it carries
- * that cost rather than this milestone paying it early.
+ * **Start and stop are process lifecycle; a keyframe on reconnect is arranged
+ * in the pipeline rather than commanded.** M4 left it there and said so: a
+ * control channel into a running pipeline was R-VID-07's cost to carry, not
+ * that milestone's. R-VID-07 is now being built, so `send()` and `argv()`
+ * below are that channel's half of this file — a line to the process and the
+ * command line it is running under. Everything they mean is in
+ * `video/encoder.ts`; this file carries them and knows nothing about
+ * encoders, exactly as it knows nothing about pipelines.
  *
  * **Stopping is a runtime action, not a configuration write.** It survives no
  * apply and no reboot: a camera configured to autostart comes back streaming.
@@ -35,6 +37,20 @@ export interface CameraRun {
 export interface SpawnedProcess {
   kill(signal?: string): void;
   on(event: "exit" | "error", fn: (arg: unknown) => void): void;
+  /**
+   * One line to the process's control channel — how a bitrate reaches an
+   * encoder that is already running (R-VID-07).
+   *
+   * **Optional, and that is the honest shape.** Not every program that can
+   * carry a pipeline can be told anything once it is carrying it:
+   * `gst-launch-1.0` reads its pipeline from its arguments and then listens
+   * to nobody, so a spawner for it offers no `send` and the channel above it
+   * answers `notControllable` rather than writing into a pipe nothing reads.
+   * A process that *does* answer sets both this and `onMessage`.
+   */
+  send?(line: string): void;
+  /** Lines the process sends back — its acknowledgements. See `send`. */
+  onMessage?(fn: (line: string) => void): void;
 }
 
 /**
@@ -58,6 +74,16 @@ export type ProcessSpawner = (argv: string[]) => SpawnedProcess;
  * **Untested, and it has to be.** Nothing in this repository's suite spawns a
  * process — that is what `ProcessSpawner` exists for — so this function is the
  * seam's far side. It is four lines for exactly that reason.
+ *
+ * **It offers no `send`, because `gst-launch-1.0` has none to offer.** The
+ * program reads its pipeline from argv, plays it, and takes no instruction
+ * afterwards: there is no property to set, no socket, no stdin protocol.
+ * `EncoderChannel` therefore reports every camera on this spawner as not
+ * controllable and changes nothing, which is the true answer. Giving the
+ * child a stdin pipe and writing commands into it would produce the same
+ * silence with none of the report — K-48's failure exactly, one layer down.
+ * The program that does answer is not in this repository yet; when it is,
+ * it arrives here, as a spawner that sets `send` and `onMessage`.
  */
 export const systemSpawner: ProcessSpawner = (argv) => {
   const child = spawn(argv[0], argv.slice(1), { stdio: ["ignore", "ignore", "inherit"] });
@@ -87,6 +113,7 @@ export class Supervisor {
   private readonly spawner: ProcessSpawner;
   private readonly clock: Clock;
   private readonly entries = new Map<string, Entry>();
+  private readonly listeners: ((id: string, line: string) => void)[] = [];
 
   constructor(opts: { spawner?: ProcessSpawner; clock?: Clock } = {}) {
     this.clock = opts.clock ?? systemClock;
@@ -160,10 +187,65 @@ export class Supervisor {
     return [...this.entries.values()].map((e) => e.run);
   }
 
+  /**
+   * One line to this camera's running pipeline. False where there is nothing
+   * to send it to (R-VID-07).
+   *
+   * **Both refusals are the same sentence to a caller** — *this camera cannot
+   * be told anything right now* — and they are kept apart here anyway,
+   * because they are different facts about the device: `proc` is null when no
+   * pipeline is running, and `send` is absent when one is running under a
+   * program that takes no instruction. A caller that cannot tell them apart
+   * cannot explain either, so `EncoderChannel` asks `argv()` first and this
+   * second, and names whichever answered.
+   */
+  send(id: string, msg: unknown): boolean {
+    const proc = this.entries.get(id)?.proc;
+    if (proc?.send === undefined) return false;
+    proc.send(JSON.stringify(msg));
+    return true;
+  }
+
+  /**
+   * The command line this camera's pipeline is **running under**, or null
+   * when none is.
+   *
+   * Deliberately not part of `CameraRun`: `state()` is served to the console
+   * on every camera read, and a launch line is a diagnostic rather than
+   * something every page needs to carry. The one caller is the runtime
+   * channel, which reads the running encodes out of it rather than trusting a
+   * configuration that may have been applied since (K-48).
+   *
+   * Null while stopped, and it must be: `entry.argv` outlives the process
+   * that ran it — `stop()` keeps it so a later `start()` has something to
+   * spawn — so returning it unconditionally would let a channel address an
+   * encoder that exited minutes ago.
+   */
+  argv(id: string): readonly string[] | null {
+    const entry = this.entries.get(id);
+    return entry?.proc ? entry.argv : null;
+  }
+
+  /** Lines the running pipelines send back, tagged with the camera each came
+   *  from. Registered once; survives every restart of every pipeline. */
+  onMessage(fn: (id: string, line: string) => void): void {
+    this.listeners.push(fn);
+  }
+
   private spawn(id: string, entry: Entry): void {
     entry.run = { ...entry.run, state: "starting", since: this.clock.now() };
     const proc = this.spawner(entry.argv);
     entry.proc = proc;
+
+    // The same stale-process guard `ended` carries, for the same reason: a
+    // superseded pipeline can still be draining its output pipe, and its late
+    // acknowledgement must not be read as the *new* process answering. That
+    // one is a restart mistaken for a crash; this one would be a bitrate the
+    // dead encoder confirmed, reported as the live encoder's own.
+    proc.onMessage?.((line) => {
+      if (entry.proc !== proc) return;
+      for (const fn of this.listeners) fn(id, line);
+    });
 
     // R-UI-05: a spawn call is the command being sent. A pipeline that exits
     // after 200 ms was never running, and a page that turned green on the

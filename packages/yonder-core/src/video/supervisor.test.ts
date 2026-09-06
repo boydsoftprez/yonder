@@ -18,15 +18,41 @@ function fakeClock() {
   };
 }
 
-function fakeSpawner() {
-  const spawned: { argv: string[]; proc: SpawnedProcess; exit(code: number): void }[] = [];
+interface Spawned {
+  argv: string[];
+  proc: SpawnedProcess;
+  exit(code: number): void;
+  /** Every line the supervisor wrote to this process's control channel. */
+  sent: string[];
+  /** One line back from this process, as its own acknowledgement would be. */
+  emit(line: string): void;
+}
+
+/**
+ * `channel: false` is `gst-launch-1.0`: a process that carries a pipeline and
+ * takes no instruction once it is carrying it. The distinction is the point
+ * of `SpawnedProcess.send` being optional at all, so both shapes are spawnable
+ * here.
+ */
+function fakeSpawner(opts: { channel?: boolean } = {}) {
+  const spawned: Spawned[] = [];
   const spawner: ProcessSpawner = (argv) => {
     const handlers: Record<string, ((a: unknown) => void)[]> = { exit: [], error: [] };
+    const sent: string[] = [];
+    const inbox: ((line: string) => void)[] = [];
     const proc: SpawnedProcess = {
       kill: vi.fn(),
       on: (event, fn) => { handlers[event].push(fn); },
+      ...(opts.channel === false ? {} : {
+        send: (line: string) => { sent.push(line); },
+        onMessage: (fn: (line: string) => void) => { inbox.push(fn); },
+      }),
     };
-    spawned.push({ argv, proc, exit: (code) => handlers.exit.forEach((h) => h(code)) });
+    spawned.push({
+      argv, proc, sent,
+      exit: (code) => handlers.exit.forEach((h) => h(code)),
+      emit: (line) => inbox.forEach((fn) => { fn(line); }),
+    });
     return proc;
   };
   return { spawner, spawned };
@@ -260,5 +286,89 @@ describe("Supervisor, the two guards in ended()", () => {
     advance(60_000);
     expect(spawned).toHaveLength(1);
     expect(s.state("cam0").state).toBe("stopped");
+  });
+});
+
+describe("Supervisor's control channel", () => {
+  // R-VID-07's half of this file. Tested here rather than only through
+  // `EncoderChannel`, because a channel's whole promise passes through this
+  // one hop: a command that never leaves the supervisor, or an answer that
+  // never reaches it, is a green suite and a picture that does not change.
+
+  it("writes one line to the running process, and says it did", () => {
+    const { spawner, spawned } = fakeSpawner();
+    const { clock } = fakeClock();
+    const s = new Supervisor({ spawner, clock });
+    s.start("cam0", ARGV);
+    expect(s.send("cam0", { op: "retune", kbps: 3000 })).toBe(true);
+    expect(spawned[0].sent).toEqual(['{"op":"retune","kbps":3000}']);
+  });
+
+  it("refuses to send to a camera that is not running, and sends nothing", () => {
+    const { spawner, spawned } = fakeSpawner();
+    const { clock } = fakeClock();
+    const s = new Supervisor({ spawner, clock });
+    s.start("cam0", ARGV);
+    s.stop("cam0");
+    expect(s.send("cam0", { op: "retune" })).toBe(false);
+    expect(spawned[0].sent).toEqual([]);
+    expect(s.send("cam9", { op: "retune" })).toBe(false);
+  });
+
+  it("refuses to send to a process that takes no instruction", () => {
+    // The honest answer for `gst-launch-1.0`, and the reason `send` is
+    // optional on SpawnedProcess: a pipe nothing reads would swallow every
+    // command in silence, which is K-48 one layer down.
+    const { spawner } = fakeSpawner({ channel: false });
+    const { clock } = fakeClock();
+    const s = new Supervisor({ spawner, clock });
+    s.start("cam0", ARGV);
+    expect(s.send("cam0", { op: "retune" })).toBe(false);
+  });
+
+  it("delivers a line from a pipeline tagged with the camera it came from", () => {
+    const { spawner, spawned } = fakeSpawner();
+    const { clock } = fakeClock();
+    const s = new Supervisor({ spawner, clock });
+    const heard: [string, string][] = [];
+    s.onMessage((id, line) => heard.push([id, line]));
+    s.start("cam0", ARGV);
+    s.start("cam1", ARGV);
+    spawned[1].emit('{"id":1}');
+    expect(heard).toEqual([["cam1", '{"id":1}']]);
+  });
+
+  it("drops a line from a process a restart has already superseded", () => {
+    // A dying pipeline can still be draining its output. Its late
+    // acknowledgement carries a bitrate the *dead* encoder confirmed, and
+    // delivering it as the live one's would be a reading of an encoder that
+    // no longer exists.
+    const { spawner, spawned } = fakeSpawner();
+    const { clock, advance } = fakeClock();
+    const s = new Supervisor({ spawner, clock });
+    const heard: string[] = [];
+    s.onMessage((_, line) => heard.push(line));
+    s.start("cam0", ARGV);
+    advance(3000);
+    spawned[0].exit(1);
+    advance(1000);                    // the backoff fires; a second process
+    expect(spawned).toHaveLength(2);
+    spawned[0].emit('{"stale":true}');
+    spawned[1].emit('{"live":true}');
+    expect(heard).toEqual(['{"live":true}']);
+  });
+
+  it("hands out the line a running pipeline was started with, and nothing else", () => {
+    // `entry.argv` outlives the process that ran it, so a stopped camera
+    // must answer null rather than a command line for an encoder that
+    // exited: it is what the channel addresses its commands by.
+    const { spawner } = fakeSpawner();
+    const { clock } = fakeClock();
+    const s = new Supervisor({ spawner, clock });
+    expect(s.argv("cam0")).toBeNull();
+    s.start("cam0", ARGV);
+    expect(s.argv("cam0")).toEqual(ARGV);
+    s.stop("cam0");
+    expect(s.argv("cam0")).toBeNull();
   });
 });
