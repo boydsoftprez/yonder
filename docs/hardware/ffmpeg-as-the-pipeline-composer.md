@@ -606,6 +606,85 @@ plugins the Rockchip build produces are a display sink (`rkximagesink`) and a DR
 (`kmssrc`). ffmpeg has `scale_rkrga` there and GStreamer does not, which is the mirror image
 of the Pi — except that on the Pi the hardware scaler turns out to be the slower option.
 
+## The Rockchip camera path, with the real camera
+
+Everything measured on Rockchip above came from `videotestsrc`. That settled what the
+encoders do and left the actual chain untested — MJPEG off a USB camera, decoded, encoded,
+in the two-branch shape `compose()` builds. Spec §5 rests on that chain: *"on a board with a
+hardware decoder for the source format, the composer decodes in hardware too, so frames
+never leave the SoC between capture and encode"*. It is asserted there and was never
+measured. It is measured here.
+
+Script: [`rockchip-camera-path.py`](../../scripts/spikes/rockchip-camera-path.py).
+
+### Conditions
+
+<!-- yonder:hardware-observed -->
+
+| Field | Observed |
+|---|---|
+| Camera | ELP `Global Shutter Camera: Global S`, USB id `32e4:0234`, `uvcvideo` |
+| Formats used | MJPG 1280×720; the camera also offers 1920×1080, 1920×1200 and 1600×1200, all to 90 fps |
+| Stable path | `platform-xhci-hcd.4.auto-usb-0:1:1.0-video-index0` — **still `.4.auto` after this session's reboot**, unchanged |
+| Board idle | **21.3% busy** with `yonder-core` and Node-RED running; `cam0` was `failed` after 5 restarts and had stopped retrying, so it contended for nothing |
+| SoC temperature | 64.4 °C |
+
+The idle figure is high because the Yonder stack is running on a four-core Cortex-A55, and it
+is subtracted from every row below rather than ignored. `cam0`'s failure is the known one:
+`compose()` names `v4l2convert`, which this board does not have.
+
+**One small data point for spec §11.** It lists as unsettled whether the camera's by-path
+name survives a reboot on this SoC, the `.N.auto` counter having moved once before. It did
+not move across this session's reboot. One clean reboot is not the two that question asks
+for, and it is recorded as one observation rather than as an answer.
+
+### 300 frames, five ways
+
+| pipeline | 300 frames | effective | cpu (4 cores) | above idle |
+|---|---|---|---|---|
+| **hw decode, 1 branch** | 10.48 s | ~29 fps | 24% | **+3** |
+| sw decode, 1 branch | 10.44 s | ~29 fps | 29% | +8 |
+| **hw decode, 2 branch, RGA preview** | 10.47 s | ~29 fps | 26% | **+4** |
+| hw decode, 2 branch, software preview | 10.60 s | ~28 fps | 47% | +25 |
+| sw decode, 2 branch, RGA preview | 10.47 s | ~29 fps | 35% | +14 |
+
+**Fifteen runs, none failed, none void.** Every arm holds real time — 300 frames at 30 fps
+cannot take less than 10.00 s, and every median sits between 10.44 and 10.60 s including
+process start-up. Output was verified rather than assumed: the full-rate file probes as
+`1280,720,300` frames and the preview as `640,360,300` in every two-branch arm.
+
+**§5 is right, and now measured.** Hardware MJPEG decode costs **+3** points against
+software's **+8** — better than half again — and the gap widens in the two-branch shape,
++4 against +14.
+
+**The whole preview branch costs one point.** Going from one branch to two — a second
+H.264 encode *and* a 1280×720 → 640×360 downscale — moves the board from +3 to +4. That is
+R-VID-13's cheap second copy arriving very nearly free, and it is the strongest evidence yet
+for §5's argument that keeping frames on the SoC is what makes the preview branch viable
+here.
+
+**And the scaler choice dominates everything else.** The same graph with a software preview
+scaler costs **+25** instead of +4 — six times as much — and is the only arm that drops
+below 29 fps. On this board the preview must be scaled by RGA inside the encoder.
+
+For comparison, the Pi's GStreamer two-branch measured **+10.5** points earlier in this note.
+The Rockchip board, with its full hardware path, does the same work for **+4**.
+
+### The retune still works with a camera in front of it
+
+Four runs, both codecs, the ELP camera through `mppjpegdec`:
+
+| element | before | after | gaps |
+|---|---|---|---|
+| `mpph264enc` | 0.96, 0.96 Mb/s | 3.93, 3.93 Mb/s | one at 0.32 s / 0.34 s, **none after the retune** |
+| `mpph265enc` | 0.96, 0.97 Mb/s | 3.93, 3.93 Mb/s | one at 0.34 s / 0.35 s, **none after the retune** |
+
+The single gap in each run sits at about a third of a second, against a retune at 10.01 s —
+it is the start-up transient `runtime-encoder-control.md` already records on the Pi
+(*"a freshly started pipeline shows a single-frame-scale timing gap immediately after
+reaching PLAYING"*), reproduced here on different silicon. **Zero gaps follow the retune in
+any run.**
+
 ## What the published guidance says, and where it disagrees
 
 The measurements above were taken before this was researched, and the general guidance for
@@ -909,12 +988,15 @@ knows which board it is on.
   size**. Radxa's reported `mpph264enc` defect did not reproduce, which establishes that it
   is not unconditional and nothing more. A camera source, other resolutions and a look at
   the actual image are all owed before this is leaned on.
-- **The camera path on Rockchip.** Everything measured there came from `videotestsrc`. The
-  ELP camera on that board emits MJPEG, so the real chain is `mppjpegdec` → `mpph26xenc`,
-  and none of it was exercised. §5's zero-copy `drm_prime` claim is likewise untested here.
-- **CPU and latency on Rockchip.** Measured on the Pi only. The recommendation leans on the
-  Pi's figures plus the Rockchip retune result; a two-branch and latency comparison on the
-  Radxa would make the comparison symmetric, and it has not been run.
+- **Latency on Rockchip.** The 2×2 sender/receiver measurement was run on the Pi only.
+  Throughput and CPU on the Radxa are now measured with the real camera, but its end-to-end
+  latency is not, and the two boards' latency figures are therefore not comparable.
+- **§5's zero-copy claim specifically.** Hardware decode is measured and is cheaper, which
+  is what §5 predicts. Whether frames genuinely never leave the SoC — the `drm_prime` path —
+  was not instrumented; only its cost was.
+- **The camera path at 1080p and above.** The ELP offers 1920×1200 to 90 fps and everything
+  here ran at 1280×720p30. The Radxa note records three simultaneous encodes failing at
+  native resolution, so the headroom above this rung is not established.
 - **What shipping a from-source GStreamer path actually costs.** MPP and the plugin were
   built by hand here, as root, with nine build packages installed. Doing it in CI, pinning
   it, and staging it in the offline payload is real work that §3's single `.deb` avoids —

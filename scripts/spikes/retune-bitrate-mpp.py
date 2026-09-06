@@ -38,11 +38,22 @@ PARSER = {"mpph264enc": "h264parse", "mpph265enc": "h265parse"}
 
 ap = argparse.ArgumentParser(description=__doc__)
 ap.add_argument("--element", default="mpph264enc", choices=sorted(PARSER))
+# A test pattern answers the question about the encoder; a camera answers it
+# about the pipeline the aircraft actually flies. `--camera` swaps in the real
+# capture and hardware MJPEG decode, so a retune is measured with the whole
+# chain in front of it rather than a generator.
+ap.add_argument("--camera", default=None,
+                help="capture from this device through mppjpegdec instead of videotestsrc")
 args = ap.parse_args()
 
+SOURCE = (f"v4l2src device={args.camera} io-mode=4 "
+          f"! image/jpeg,width=1280,height=720,framerate=30/1 ! mppjpegdec "
+          if args.camera else
+          "videotestsrc is-live=true pattern=smpte "
+          "! video/x-raw,width=1280,height=720,framerate=30/1 ")
+
 p = Gst.parse_launch(
-    "videotestsrc is-live=true pattern=smpte "
-    "! video/x-raw,width=1280,height=720,framerate=30/1 "
+    SOURCE +
     "! queue leaky=downstream max-size-time=200000000 max-size-buffers=0 max-size-bytes=0 "
     f"! {args.element} name=enc bps={FROM_BPS} "
     f"! {PARSER[args.element]} ! identity name=tap ! fakesink sync=false")
@@ -80,7 +91,8 @@ after = rate(WINDOW)
 p.set_state(Gst.State.NULL)
 
 late = [g for g in gaps if g > retune_at]
-print(f"{args.element}: before {before:.2f} Mb/s  after {after:.2f} Mb/s  "
+print(f"{args.element} ({'camera' if args.camera else 'testsrc'}): "
+      f"before {before:.2f} Mb/s  after {after:.2f} Mb/s  "
       f"retune at {retune_at:.2f}s  gaps at {['%.2fs' % g for g in gaps]}  "
       f"after the retune {len(late)}")
 # A zero is a pipeline that never emitted a frame, and is not a bitrate.
