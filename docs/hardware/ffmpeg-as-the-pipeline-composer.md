@@ -696,19 +696,70 @@ A standalone `rgaconvert` element does exist, but not in this fork: the JeffyCN 
 no `-extra` branch, and `rgaconvert` lives in third-party repositories. It was not built or
 tested here.
 
-### What comparable projects do
+### What comparable projects do — read from their source, not their documentation
 
-RubyFPV and OpenHD solve this exact problem — adaptive video over a variable radio link on
-Pi-class hardware — and both are **bitrate-centric**. Ruby *"automatically adjusts the video
-bitrate, the video encoding quality, the radio datarates and radio modulation schemes"* and
-makes *"small, discrete adjustment steps in error correction rate, H264 parameters and video
-bitrate"*, escalating to radio datarate changes only when those do not suffice. Resolution is
-not in that fast loop. OpenHD offers variable bitrate and states that resolution and frame
-rate can be changed without a reboot — which is not the same claim as without a pipeline
-restart, and this note does not read it as one.
+Two open-source projects solve this exact problem — adaptive video over a variable radio
+link on Pi-class hardware. Their documentation is vague about restarts, so both were cloned
+and read. Both are current: OpenHD's last commit is 2026-02-28, RubyFPV's 2026-02-19.
 
-**That matches what is measurable here.** Bitrate moves live, everywhere, with no gap.
-Resolution does not, on either board, through any hardware path.
+**OpenHD holds the pipeline in its own process**, which is the architecture K-53 proposes
+for Yonder and which the daemon does not have today:
+
+```c
+m_gst_pipeline = gst_parse_launch(pipeline_content.str().c_str(), &error);
+```
+*(`ohd_video/src/gstreamerstream.cpp:312`.* `gst-launch` appears in that repository only in
+debug scripts and test files.)
+
+It then keeps a reference to the encoder, found **by name**, and changes the bitrate on it.
+Its own comments state the policy plainly:
+
+> *"Bitrate is one of the few params we want to support changing dynamically at run time
+> without the need for a pipeline restart."* — `gst_bitrate_controll_wrapper.hpp`
+>
+> *"Bitrate is the only value we (NEED) to support changing without a restart"* —
+> `gstreamerstream.cpp:518`
+
+Everything else calls `request_restart()`.
+
+**Two details there are worth copying, and Yonder has neither.**
+
+- **It asks at start-up whether dynamic control actually works**, by reading the property
+  back before relying on it, and degrades gracefully when it does not: a `-1` yields
+  *"dynamic bitrate control element doesn't work"* and the control is reported as absent
+  rather than silently doing nothing.
+- **It verifies every change by reading the value back** after setting it, and warns
+  *"Cannot change bitrate to {}kbit/s, got {}kBit/s"* when the encoder disagreed.
+
+This note measured exactly why the second one matters: setting `width`/`height` on
+`mpph264enc` mid-stream is **accepted without error and ignored**, and only decoding the
+output revealed it. A control that reports success it did not achieve is K-48's failure
+mode, one layer down.
+
+Its structure otherwise matches `pipeline.ts` closely — a per-encoder struct carrying
+`property_name` and `takes_kbit`, because *"Some elements take kbit/s, some take bit/s"* and
+*"Not all encoders / elements call the bitrate property 'bitrate'"*, which is what
+`bitrateOf()` switches on.
+
+**RubyFPV reaches the same conclusion by a completely different route.** It uses no
+GStreamer at all: it drives `majestic` (the OpenIPC streamer), Rockchip's MPP directly, and
+`raspivid`. A bitrate change is an HTTP call to the encoder daemon —
+
+```
+curl -s localhost/api/v1/set?video0.bitrate=%u
+```
+
+*(`base/hardware_cam_maj.cpp:1113`,* with a `cli -s .video0.bitrate` fallback when the
+control thread is not running.) So the encoder is a separate service with a control API
+rather than an element in a pipeline. And its radio protocol carries an explicit
+notification for what a resolution change costs:
+
+> *"7 - notif: video recording restarted due to resolution change"* — `radio/radiopackets2.h:828`
+
+**Neither project changes resolution without a restart.** Searched for, in both trees, and
+absent. Two independent designs — an in-process GStreamer host and an out-of-process encoder
+daemon with an HTTP API — converge on the same split: **bitrate live, resolution by
+restart.**
 
 ### The best practice this converges on
 
@@ -717,11 +768,15 @@ Resolution does not, on either board, through any hardware path.
    and it is what the peer projects lean on.
 2. **Treat resolution as a coarse, infrequent step, and respawn for it.** `video/renderer.ts`
    already respawns on an applied change and carries the confirmation window and rollback.
-   That is the honest mechanism for a rung change on either board.
-3. **Where the resolution is fixed, take the hardware scaler** — RGA via the MPP encoder's
+   That is the honest mechanism for a rung change on either board, and it is what both peer
+   projects do.
+3. **Read every control back after setting it.** OpenHD does; Yonder does not. `mpph264enc`
+   accepts a `width` change mid-stream, reports nothing, and ignores it — a control that
+   claims a success it did not achieve is the shape of K-48.
+4. **Where the resolution is fixed, take the hardware scaler** — RGA via the MPP encoder's
    `width`/`height` on Rockchip, which is free and twice as fast; `v4l2convert` on a Pi
    **only while the ISP has headroom**, which the macroblock table above decides.
-4. **Where live resolution changes are genuinely wanted, use the software scaler**, accept
+5. **Where live resolution changes are genuinely wanted, use the software scaler**, accept
    that it is CPU, and know it costs nothing on a Pi at 1080p because it hands ISP capacity
    back.
 
