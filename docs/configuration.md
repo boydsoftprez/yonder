@@ -224,6 +224,15 @@ anything else is refused rather than passed to the router untried.
 **`mavlink.endpoints`** takes up to three ground stations, each with its own name, host and
 port; a fourth is refused rather than silently dropped (R-MAV-03).
 
+**`mavlink.endpoints[].name`** may not be `autopilot`, `yonder` or `inbound` — the names the
+generated `mavlink-router` configuration already uses for the flight-controller link, the
+control-plane's loopback copy and the ingest listener — and no two ground stations may share
+a name with each other. Either one produces two identically-headed sections in the generated
+file, and the router keeps one and silently drops the other. Refused at write time, with the
+offending name and endpoint named (R-MAV-15). The console has no field for an endpoint's name
+today, so this is reached by editing `config.yaml` directly — a fully supported path, and the
+one place a mistake here would otherwise be silent.
+
 **`mavlink.tcp_server.port`** must not be the same as `ui.port`. `mavlink-router` is started
 before the console, so a collision is not a race the console could win — it would lose its
 own port and strand the operator on the page they would fix it from. Refused at write time,

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { z } from "zod";
+import { RESERVED_ENDPOINT_NAMES } from "../mav/router/config.js";
 
 /**
  * A dotted-quad octet, 0–255. Pinned to the range an octet actually has
@@ -309,6 +310,41 @@ export const ConfigSchema = z.object({
       message: `port ${config.ui.port} is the console's own (ui.port); MAVLink cannot take it`,
     });
   }
+
+  // R-MAV-15. `router/config.ts` keys mavlink-router's own generated sections
+  // by name — `autopilot`, `yonder` and `inbound` — and a ground station
+  // reusing one of them, or two ground stations sharing a name with each
+  // other, produces two identically-headed sections in the generated file.
+  // The router keeps one and silently drops the other, with nothing anywhere
+  // saying which. Refused here, at write time: a renderer runs only after
+  // the apply has already been accepted, by which point the confirmation
+  // window is the only thing left to catch it (the same reasoning R-MAV-14
+  // above is built on). The console has no field for an endpoint's name
+  // today, so this is reached by editing config.yaml directly — a fully
+  // supported path, and the one place a typo like this would otherwise be
+  // silent.
+  const seenAt = new Map<string, number>();
+  config.mavlink.endpoints.forEach((endpoint, index) => {
+    if ((RESERVED_ENDPOINT_NAMES as readonly string[]).includes(endpoint.name)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["mavlink", "endpoints", index, "name"],
+        message: `"${endpoint.name}" is reserved for mavlink-router's own generated endpoint of that name `
+          + `(${RESERVED_ENDPOINT_NAMES.join(", ")} are all taken); choose a different name for this ground station`,
+      });
+    }
+    const firstIndex = seenAt.get(endpoint.name);
+    if (firstIndex !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["mavlink", "endpoints", index, "name"],
+        message: `"${endpoint.name}" is already the name of endpoint ${firstIndex}; `
+          + "each ground station needs a name of its own",
+      });
+    } else {
+      seenAt.set(endpoint.name, index);
+    }
+  });
 });
 
 export type Config = z.infer<typeof ConfigSchema>;

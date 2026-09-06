@@ -1827,7 +1827,10 @@ zero nobody measured. Recorded so the gap is a known one rather than a wrong rea
 - Test: `packages/yonder-core/src/mav/link.test.ts`
 
 **Interfaces:**
-- Consumes: `Heartbeat` (Task 5), `DetectOutcome` (Task 6), `EndpointStats` (Task 8b), `Clock`
+- Consumes: `Heartbeat` (Task 5), `DetectOutcome` (Task 6), `EndpointStats` (Task 8b), `Clock`, the configured
+  ground-station names (`Config["mavlink"]["endpoints"]`, Task 3) — `LinkTracker` never reads `Config` itself;
+  its caller (Task 10's renderer, which holds the `Config` passed to `render()`) supplies the current names on
+  every `sampled()` call
 - Produces:
   ```ts
   export interface LinkState {
@@ -1866,8 +1869,14 @@ zero nobody measured. Recorded so the gap is a known one rather than a wrong rea
     constructor(opts?: { clock?: Clock; windowMs?: number });
     observed(outcome: DetectOutcome): void;
     heard(heartbeat: Heartbeat): void;
-    /** One reading of the router's own counters (Task 8b). */
-    sampled(stats: EndpointStats[]): void;
+    /**
+     * One reading of the router's own counters (Task 8b), attributed to
+     * ground stations by name against `groundStationNames` — never by
+     * `kind`. `yonder` (the control-plane's own loopback copy, R-MAV-05) and,
+     * once opened, `inbound` (R-MAV-07) are both legitimately UDP, exactly
+     * like a real ground station, so `kind` alone cannot tell them apart.
+     */
+    sampled(stats: EndpointStats[], groundStationNames: string[]): void;
     stopped(): void;
     state(): LinkState;
   }
@@ -1941,14 +1950,14 @@ describe("LinkTracker", () => {
     t.observed({ kind: "found", device: "/dev/ttyAMA0", baud: 57600, vehicle: "ArduPlane", system: 1 });
     t.heard(vehicle);
 
-    t.sampled([udp("gcs0", 0, 954), udp("gcs1", 0, 954)]);
+    t.sampled([udp("gcs0", 0, 954), udp("gcs1", 0, 954)], ["gcs0", "gcs1"]);
     expect(t.state().groundStations).toEqual([
       { name: "gcs0", answering: false, lastHeardMs: null },
       { name: "gcs1", answering: false, lastHeardMs: null },
     ]);
 
     clock.advance(1_000);
-    t.sampled([udp("gcs0", 21, 1008), udp("gcs1", 0, 1008)]);
+    t.sampled([udp("gcs0", 21, 1008), udp("gcs1", 0, 1008)], ["gcs0", "gcs1"]);
     expect(t.state().groundStations).toEqual([
       { name: "gcs0", answering: true, lastHeardMs: 0 },
       { name: "gcs1", answering: false, lastHeardMs: null },
@@ -1960,11 +1969,11 @@ describe("LinkTracker", () => {
   it("names the station that went quiet, not merely that one did", () => {
     const clock = fakeClock();
     const t = new LinkTracker({ clock, windowMs: 5_000 });
-    t.sampled([udp("gcs0", 1, 60), udp("gcs1", 1, 60)]);
+    t.sampled([udp("gcs0", 1, 60), udp("gcs1", 1, 60)], ["gcs0", "gcs1"]);
     clock.advance(1_000);
-    t.sampled([udp("gcs0", 2, 120), udp("gcs1", 1, 120)]);
+    t.sampled([udp("gcs0", 2, 120), udp("gcs1", 1, 120)], ["gcs0", "gcs1"]);
     clock.advance(6_000);
-    t.sampled([udp("gcs0", 3, 480), udp("gcs1", 1, 480)]);
+    t.sampled([udp("gcs0", 3, 480), udp("gcs1", 1, 480)], ["gcs0", "gcs1"]);
 
     expect(t.state().groundStations).toEqual([
       { name: "gcs0", answering: true, lastHeardMs: 0 },
@@ -1972,14 +1981,24 @@ describe("LinkTracker", () => {
     ]);
   });
 
-  // The UART is in the same output and is not a ground station.
-  it("keeps only the endpoints that are ground stations, in configuration order", () => {
+  // `kind` cannot do this filtering: `yonder` (the control plane's own
+  // loopback copy, always present, R-MAV-05) and `inbound` (the ingest
+  // listener, present once R-MAV-07 is opened) are both legitimately UDP,
+  // indistinguishable from a real ground station by kind alone — and
+  // `yonder`'s counter moves continuously whenever telemetry is flowing at
+  // all, so a kind-only filter would show Yonder's own control-plane copy as
+  // a permanently-answering ground station, on every device, every boot.
+  // Attribution is by name against the configured set instead, which is why
+  // `sampled` takes it as a second argument.
+  it("keeps only the endpoints in the configured ground-station set, in that order", () => {
     const t = new LinkTracker({ clock: fakeClock() });
     t.sampled([
       udp("gcs0", 0, 954),
       { name: "autopilot", kind: "uart", received: 955, transmitted: 0, crcErrors: 0, sequenceLost: 0 },
+      udp("yonder", 40, 40),
+      udp("inbound", 0, 0),
       udp("gcs1", 0, 954),
-    ]);
+    ], ["gcs0", "gcs1"]);
     expect(t.state().groundStations.map((g) => g.name)).toEqual(["gcs0", "gcs1"]);
   });
 
@@ -1987,7 +2006,7 @@ describe("LinkTracker", () => {
   // output (Task 8b), so this reports nothing rather than a zero.
   it("leaves the TCP client count unmeasured rather than reporting zero", () => {
     const t = new LinkTracker({ clock: fakeClock() });
-    t.sampled([udp("gcs0", 0, 954)]);
+    t.sampled([udp("gcs0", 0, 954)], ["gcs0"]);
     expect(t.state().tcpClients).toBeNull();
   });
 
@@ -2007,7 +2026,11 @@ Expected: FAIL — module not found.
 
 - [ ] **Step 3: Write it**
 
-Implement `LinkTracker` to satisfy exactly those tests: keep the last `DetectOutcome`, a ring of vehicle-heartbeat timestamps for the rate (`heartbeatHz = (n - 1) / (last - first)` in seconds, `null` below two samples — a rate from one arrival is a claim no measurement supports), and, for the ground-station half, **the last sample at which each endpoint's `received` counter increased** — not the last heartbeat with `fromVehicle === false`, which is what an earlier draft said and what Task 2 disproved. Keep the previous sample to difference against; an endpoint seen for the first time has `lastHeardMs: null`, and one whose counter has not moved within `windowMs` is no longer answering. Drop endpoints whose `kind` is not `"udp"` or `"tcp"` — the UART is in the same output and is not a ground station. `windowMs` defaults to `5_000`. `stopped()` sets the phase and leaves every autopilot-side field untouched.
+Implement `LinkTracker` to satisfy exactly those tests: keep the last `DetectOutcome`, a ring of vehicle-heartbeat timestamps for the rate (`heartbeatHz = (n - 1) / (last - first)` in seconds, `null` below two samples — a rate from one arrival is a claim no measurement supports), and, for the ground-station half, **the last sample at which each endpoint's `received` counter increased** — not the last heartbeat with `fromVehicle === false`, which is what an earlier draft said and what Task 2 disproved. Keep the previous sample to difference against; an endpoint seen for the first time has `lastHeardMs: null`, and one whose counter has not moved within `windowMs` is no longer answering.
+
+**Attribute `sampled`'s reading by name, never by `kind`.** An earlier draft of this step dropped endpoints whose `kind` was not `"udp"` or `"tcp"`, reasoning that this excludes the UART and nothing else needs excluding. That reasoning is wrong, and not at the margin: `router/config.ts` (Task 8) always emits `[UdpEndpoint yonder]`, the control plane's own loopback copy (R-MAV-05), and — once `mavlink.ingest.loopback_only` is opened — `[UdpEndpoint inbound]` (R-MAV-07) too, and both are `kind: "udp"` in `parseStats`'s output exactly like a real ground station, because both genuinely are UDP endpoints the router reports on. `yonder`'s `received` counter moves continuously whenever telemetry is flowing at all, so a `kind`-only filter would show Yonder's own control-plane feed as a permanently-answering ground station, on every device, on every boot, into a list the console budgets exactly three positional rows for. Filter instead by intersecting `stats` against the `groundStationNames` array the caller passes to `sampled()` on that call, keeping the result in the order `groundStationNames` gives — `LinkTracker` holds no `Config` of its own, so this name set is supplied fresh by Task 10's renderer (which does hold it) on every reading, not fixed at construction.
+
+`windowMs` defaults to `5_000`. `stopped()` sets the phase and leaves every autopilot-side field untouched.
 
 - [ ] **Step 4: Run the tests**
 

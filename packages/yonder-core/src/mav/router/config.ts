@@ -49,6 +49,33 @@ export const LOOPBACK_PORT = 14559;
  */
 const INGEST_PORT = 14540;
 
+/** The UART endpoint's name — the flight controller's own link. */
+const AUTOPILOT_ENDPOINT_NAME = "autopilot";
+/** The unconditional loopback endpoint's name — see `LOOPBACK_PORT` above. */
+const LOOPBACK_ENDPOINT_NAME = "yonder";
+/** The ingest endpoint's name — see `INGEST_PORT` above. */
+const INGEST_ENDPOINT_NAME = "inbound";
+
+/**
+ * The three names this file hardcodes for its own sections, gathered in one
+ * place so `schema/config.ts` can import them rather than repeat them
+ * (R-MAV-15). A ground station sharing one of these produces two
+ * identically-headed sections in the generated file, and the router keeps
+ * one and silently drops the other — for `yonder` and `inbound` that is a
+ * byte-for-byte collision, since a configured ground station is always a
+ * `UdpEndpoint` too (R-MAV-03); `autopilot` heads a `UartEndpoint` section
+ * instead, so whether it collides depends on how mavlink-router's own parser
+ * treats two differently-typed sections sharing a name, which nothing in
+ * this repository has measured. Reserved regardless, rather than only where
+ * the collision is proven: the risk of confusing an operator with an
+ * endpoint named after their own flight controller costs nothing to avoid.
+ */
+export const RESERVED_ENDPOINT_NAMES = [
+  AUTOPILOT_ENDPOINT_NAME,
+  LOOPBACK_ENDPOINT_NAME,
+  INGEST_ENDPOINT_NAME,
+] as const;
+
 export function routerConfig(mavlink: Config["mavlink"], link: { device: string; baud: number }): string {
   // R-MAV-07 gates two independent listening sockets the same way: the TCP
   // server below (its own switch too — see tcpPort) and this UDP one, which
@@ -70,13 +97,16 @@ export function routerConfig(mavlink: Config["mavlink"], link: { device: string;
 
   sections.push(["[General]", "ReportStats = true", `TcpServerPort = ${tcpPort}`].join("\n"));
 
-  sections.push(["[UartEndpoint autopilot]", `Device = ${link.device}`, `Baud = ${link.baud}`].join("\n"));
+  sections.push(
+    [`[UartEndpoint ${AUTOPILOT_ENDPOINT_NAME}]`, `Device = ${link.device}`, `Baud = ${link.baud}`].join("\n"),
+  );
 
   // Not optional, not configurable — see the module docstring. Emitted
   // before the ground stations so the control plane's own feed is never the
   // block a truncated file (or a truncated read of one) would lose.
   sections.push(
-    ["[UdpEndpoint yonder]", "Mode = Normal", "Address = 127.0.0.1", `Port = ${LOOPBACK_PORT}`].join("\n"),
+    [`[UdpEndpoint ${LOOPBACK_ENDPOINT_NAME}]`, "Mode = Normal", "Address = 127.0.0.1", `Port = ${LOOPBACK_PORT}`]
+      .join("\n"),
   );
 
   // R-MAV-03: up to three, each named for it. The name is what makes
@@ -102,7 +132,8 @@ export function routerConfig(mavlink: Config["mavlink"], link: { device: string;
   // and it is asserted in config.test.ts rather than merely assumed.
   if (ingestOpen) {
     sections.push(
-      ["[UdpEndpoint inbound]", "Mode = Server", "Address = 0.0.0.0", `Port = ${INGEST_PORT}`].join("\n"),
+      [`[UdpEndpoint ${INGEST_ENDPOINT_NAME}]`, "Mode = Server", "Address = 0.0.0.0", `Port = ${INGEST_PORT}`]
+        .join("\n"),
     );
   }
 

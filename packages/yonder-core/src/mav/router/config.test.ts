@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
 import { DEFAULT_CONFIG } from "../../schema/config.js";
-import { routerConfig } from "./config.js";
+import { RESERVED_ENDPOINT_NAMES, routerConfig } from "./config.js";
 
 const link = { device: "/dev/ttyAMA0", baud: 57600 };
 const base = DEFAULT_CONFIG.mavlink;
@@ -101,5 +101,16 @@ describe("routerConfig", () => {
   it("always emits ReportStats = true, the only source the console has for per-endpoint traffic", () => {
     expect(routerConfig(base, link)).toContain("ReportStats = true");
     expect(routerConfig({ ...base, ingest: { loopback_only: false } }, link)).toContain("ReportStats = true");
+  });
+
+  // schema/config.ts imports this array to refuse a ground station reusing
+  // one of these names (R-MAV-15) — pinned here so the exported list cannot
+  // silently drift from the names this file actually emits above.
+  it("reserves exactly the names this file hardcodes for its own sections", () => {
+    expect(RESERVED_ENDPOINT_NAMES).toEqual(["autopilot", "yonder", "inbound"]);
+    const open = routerConfig({ ...base, ingest: { loopback_only: false } }, link);
+    for (const name of RESERVED_ENDPOINT_NAMES) {
+      expect(open).toContain(`Endpoint ${name}]`);
+    }
   });
 });
