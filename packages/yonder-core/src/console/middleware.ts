@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import { createHash } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { renderPage } from "./assets.js";
 import { CONSOLE_HOME } from "./settings.js";
@@ -230,15 +231,49 @@ function wantsPage(req: IncomingMessage): boolean {
 }
 
 /**
- * Whether this request carries a live session, refreshing its idle timer.
+ * The live session this request carries, refreshing its idle timer, or
+ * undefined where it carries none.
  *
  * The one notion of "logged in" on this device. Every route that needs the
  * answer asks this, so there is nowhere a second, weaker version of the
  * question could grow.
  */
-function hasSession(req: IncomingMessage, sessions: SessionStore): boolean {
+function sessionOf(req: IncomingMessage, sessions: SessionStore): string | undefined {
   const token = cookieValue(req.headers.cookie, SESSION_COOKIE);
-  return token !== undefined && sessions.check(token);
+  return token !== undefined && sessions.check(token) ? token : undefined;
+}
+
+function hasSession(req: IncomingMessage, sessions: SessionStore): boolean {
+  return sessionOf(req, sessions) !== undefined;
+}
+
+/**
+ * The header the stream handshake answers with: **which viewer this browser
+ * is** (R-VID-11, R-VID-13; spec §8.2).
+ *
+ * A viewer is a browser session, not a camera page component. Two pages of
+ * one camera open in one session are one viewer watching one camera, and
+ * they share one subscription and one transmission — so the id has to be a
+ * property of the *session*, which is the only thing on this device with
+ * that lifetime.
+ */
+export const VIEWER_HEADER = "x-yonder-viewer";
+
+/**
+ * A viewer id, from a session token.
+ *
+ * **Derived rather than issued**, so there is no second register to keep in
+ * step with the session store: the id exists exactly as long as the session
+ * does, dies with it, and cannot outlive a logout.
+ *
+ * **And it is not the token.** It goes into messages the page carries around
+ * and posts back to the daemon, so handing out the session token under
+ * another name would be putting the credential somewhere any script on the
+ * page could read it. A SHA-256 of the token, truncated, is stable for that
+ * session, distinct between sessions, and reversible to nothing.
+ */
+export function viewerFor(token: string): string {
+  return createHash("sha256").update(`yonder-viewer:${token}`).digest("hex").slice(0, 16);
 }
 
 /** An answer relayed from the media server, or this console's refusal of one. */
@@ -378,7 +413,8 @@ export function consoleMiddleware(deps: ConsoleMiddlewareDeps): Middleware {
     // route that is authenticated by where it sits in this function is a
     // route that stops being authenticated the day the function is reordered.
     if (path === WHEP_PREFIX || path.startsWith(`${WHEP_PREFIX}/`)) {
-      const authenticated = hasSession(req, deps.sessions);
+      const token = sessionOf(req, deps.sessions);
+      const authenticated = token !== undefined;
       void (async () => {
         // Nothing reads the body until the credential has been checked, so an
         // unauthenticated request cannot make this process do work either.
@@ -386,12 +422,21 @@ export function consoleMiddleware(deps: ConsoleMiddlewareDeps): Middleware {
           ? await readBody(req, MAX_OFFER_BYTES)
           : { text: "", tooLarge: false };
         if (offer.tooLarge) { tooLarge(res); return; }
-        sendProxied(res, await whep({
+        const answer = await whep({
           method: req.method ?? "",
           path,
           body: offer.text,
           authenticated,
-        }));
+        });
+        // Which viewer this browser is, on the one exchange every picture
+        // makes before it can show anything (spec §8.2). On the handshake
+        // rather than on a route of its own, because a browser that has just
+        // negotiated a stream is exactly the browser that is about to start
+        // reporting on it — and an unauthenticated caller never reaches this
+        // line, so the id is never handed to somebody who could not watch.
+        sendProxied(res, token === undefined
+          ? answer
+          : { ...answer, headers: { ...answer.headers, [VIEWER_HEADER]: viewerFor(token) } });
       })();
       return;
     }

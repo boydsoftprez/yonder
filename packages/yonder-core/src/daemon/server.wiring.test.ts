@@ -38,7 +38,8 @@ import { loadConfig } from "../config/load.js";
 import { saveConfig } from "../config/save.js";
 import { DEFAULT_CONFIG, type Camera } from "../schema/config.js";
 import { compose } from "../video/pipeline.js";
-import { noCapabilities } from "../video/capability.js";
+import { noCapabilities, present } from "../video/capability.js";
+import type { ProcessSpawner } from "../video/supervisor.js";
 import { RTSP_BASE } from "../media/ports.js";
 import type { Encoder } from "../video/probe/encoder.js";
 
@@ -1246,6 +1247,221 @@ describe("the stream address is built from an address a peer can dial", () => {
       // A real `device show` leads with loopback, and it used to be
       // `addresses[0]` — the address this device claimed to answer on.
       expect(line.body).not.toContain("127.0.0.1");
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+/**
+ * The video layer's runtime half, assembled in `startServer` and nowhere
+ * else (R-VID-07, R-VID-11; spec §8.1, §8.2).
+ *
+ * **This is the join that was missing, asserted where it can actually be
+ * broken.** `video/rate.ts` was built, proved on a board and left with no
+ * production caller at all: nothing constructed a controller, nothing gave it
+ * a link measurement, nothing ticked it. Every layer beneath kept passing —
+ * which is the whole point of a test at this level, and the reason the rest
+ * of this file exists.
+ *
+ * So the journey here starts where a browser's own statistic starts, at this
+ * daemon's socket, and ends inside the `extra-controls` property of a
+ * `v4l2h264enc` that is already playing.
+ */
+describe("the daemon runs the rate controller", () => {
+  let socketPath: string, configPath: string, journalPath: string, secretsPath: string;
+  const noop: Renderer = { name: "noop", async render() {} };
+
+  const ADAPTIVE = {
+    id: "cam0", name: "Nose", source: "usb",
+    device: "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0",
+    enabled: true, autostart: false,
+    width: 1280, height: 720, framerate: 30, codec: "h264", bitrate_kbps: 2000,
+    preview: {
+      mode: "adaptive", size: "auto", ladder_top: "1280x720", ladder_bottom: "640x360",
+      floor_kbps: 300, ceiling_kbps: 2000, bitrate_kbps: 400, framerate: 15,
+    },
+    controls: { brightness: null, contrast: null, rotation: 0 },
+    outputs: [],
+    stream: { mode: "adaptive", floor_kbps: 500, ceiling_kbps: 4000 },
+  } as unknown as Camera;
+
+  interface Sent {
+    id: number;
+    op: string;
+    sets: { element: string; property: string; value: string }[];
+  }
+
+  /** Timers this daemon armed, fired only when the test says so: nothing here
+   *  waits on a wall clock, and no assertion below depends on one. */
+  let now: number;
+  let timers: { at: number; fn: () => void }[];
+  let sent: Sent[];
+  let spawns: string[][];
+  let pids: number[];
+
+  const clock: Clock = {
+    now: () => now,
+    setTimer: (ms, fn) => { const t = { at: now + ms, fn }; timers.push(t); return t; },
+    clearTimer: (h) => { const i = timers.indexOf(h as never); if (i >= 0) timers.splice(i, 1); },
+  };
+  function advance(ms: number): void {
+    now += ms;
+    for (const t of [...timers]) if (t.at <= now) { timers.splice(timers.indexOf(t), 1); t.fn(); }
+  }
+
+  beforeEach(() => {
+    socketPath = join(dir, "core.sock");
+    configPath = join(dir, "config.yaml");
+    journalPath = join(dir, "apply.json");
+    secretsPath = join(dir, "secrets.yaml");
+    now = 1_000_000;
+    timers = [];
+    sent = [];
+    spawns = [];
+    pids = [];
+    saveConfig(configPath, { ...DEFAULT_CONFIG, cameras: [ADAPTIVE] } as never);
+    new SecretStore(secretsPath).ensureValue(ADMIN_PASSWORD_SECRET, hashPassword("an operator's password"));
+  });
+
+  /** A pipeline that answers, the way `installer/payload/yonder-pipeline`
+   *  does: it takes a property write while playing, echoes the rate it ended
+   *  up at, and keeps the same process id — which is what makes "the picture
+   *  did not restart" a fact rather than an assumption. */
+  const spawner: ProcessSpawner = (argv) => {
+    spawns.push([...argv]);
+    const mine = 5000 + spawns.length;
+    pids.push(mine);
+    const inbox: ((line: string) => void)[] = [];
+    return {
+      kill: () => {}, on: () => {},
+      onMessage: (fn: (line: string) => void) => { inbox.push(fn); },
+      send: (line: string) => {
+        const command = JSON.parse(line) as Sent;
+        sent.push(command);
+        const kbps = Number(/video_bitrate=(\d+)/.exec(command.sets[0]?.value ?? "")?.[1] ?? 0) / 1000;
+        for (const fn of inbox) {
+          fn(JSON.stringify({ id: command.id, pid: mine, continuous: true, observed: kbps }));
+        }
+      },
+    } as never;
+  };
+
+  async function serve(): Promise<{ close(): Promise<void> }> {
+    return startServer({
+      socketPath, configPath, journalPath, renderers: [noop], secretsPath,
+      runner: async () => ({ code: 0, stdout: "", stderr: "" }),
+      counters: noCounters,
+      clock,
+      spawner,
+      cameraLayer: {
+        cameras: {
+          detect: async () => ({
+            found: [{
+              device: "/dev/video0",
+              card: "Global Shutter Camera: Global S",
+              byPath: ADAPTIVE.device,
+              byPathStable: true,
+              capabilities: {
+                ...noCapabilities(),
+                formats: present([{ fourcc: "MJPG", width: 1280, height: 720, rates: [30, 24, 15] }]),
+              },
+            }],
+            rejected: [],
+          }),
+          probe: async (node: string, card: string) => ({ device: node, card, reason: "not re-probed here" }),
+        },
+        encoder: async () => ({
+          element: "v4l2h264enc", device: "/dev/video11", hardware: true,
+          codec: "h264" as const, detail: "hardware H.264 on /dev/video11",
+        }),
+        rtspPassword: () => null,
+      },
+    });
+  }
+
+  const retunes = (): Sent[] =>
+    sent.filter((s) => s.op === "retune" && s.sets[0]?.element === "enc-stream");
+
+  it("moves a running encoder from a statistic that arrived on this socket", async () => {
+    const server = await serve();
+    try {
+      // The camera on the air, exactly the way the console starts one.
+      expect((await call(socketPath, "POST", "/cameras/cam0/run", { action: "start" })).status).toBe(200);
+      expect(spawns).toHaveLength(1);
+      expect(spawns[0].join(" ")).toContain("bitrate=2000");
+      expect(retunes()).toEqual([]);
+
+      // A browser opens the picture and posts what its own WebRTC statistics
+      // say the path is carrying — the shape `console/middleware.ts`'s viewer
+      // id addresses, and the only measurement of that path anything has.
+      const answer = await call(socketPath, "POST", "/cameras/cam0/viewers/1f2e3d4c5b6a7089", {
+        want: "video",
+        stats: { rtt: 38, loss: 0, egress: 900, capacity: 40_000, frameAge: 90 },
+      });
+      expect(answer.status).toBe(200);
+      expect(answer.body).toMatchObject({
+        camera: "cam0", viewer: "1f2e3d4c5b6a7089",
+        mine: { delivery: "video", source: "cam0-preview" },
+      });
+
+      // One tick of the daemon's own clock, which is the thing that did not
+      // exist before this change.
+      advance(1_000);
+      await Promise.resolve();
+
+      const moved = retunes();
+      expect(moved).toHaveLength(1);
+      // Its own applied ceiling, not the link's 40 Mb/s.
+      expect(moved[0].sets[0].value).toBe("controls,video_bitrate=4000000");
+      // And the picture never restarted: one process, one launch line, one pid.
+      expect(spawns).toHaveLength(1);
+      expect(new Set(pids).size).toBe(1);
+      expect((await call(socketPath, "GET", "/cameras/cam0")).body)
+        .toMatchObject({ run: { restarts: 0 } });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("does nothing at all until a browser has measured something", async () => {
+    const server = await serve();
+    try {
+      await call(socketPath, "POST", "/cameras/cam0/run", { action: "start" });
+      for (let i = 0; i < 10; i += 1) advance(1_000);
+      expect(retunes()).toEqual([]);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("stops deciding when the daemon closes", async () => {
+    const server = await serve();
+    await call(socketPath, "POST", "/cameras/cam0/run", { action: "start" });
+    await call(socketPath, "POST", "/cameras/cam0/viewers/1f2e3d4c5b6a7089", {
+      want: "video",
+      stats: { rtt: 38, loss: 0, egress: 900, capacity: 40_000 },
+    });
+    advance(1_000);
+    const moved = retunes().length;
+    expect(moved).toBe(1);
+
+    await server.close();
+    // A rate controller outliving its daemon would go on writing bitrates
+    // into a running pipeline on behalf of a process that has let go of its
+    // socket — and, unlike every other timer here, it would be commanding
+    // hardware while it did it.
+    for (let i = 0; i < 10; i += 1) advance(1_000);
+    expect(retunes()).toHaveLength(moved);
+  });
+
+  it("refuses a viewer report about a camera this device does not have", async () => {
+    const server = await serve();
+    try {
+      const answer = await call(socketPath, "POST", "/cameras/nope/viewers/1f2e3d4c5b6a7089", {
+        want: "video",
+      });
+      expect(answer.status).toBe(404);
     } finally {
       await server.close();
     }

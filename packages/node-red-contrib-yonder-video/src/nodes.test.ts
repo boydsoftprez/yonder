@@ -234,6 +234,53 @@ describe("yonder-camera", () => {
     expect(msg.camera).toBe("cam0");
   });
 
+  /**
+   * The browser's own report (spec §8.2). `msg.viewer` is part of the
+   * address, like `msg.camera` — a report whose subject was inside its own
+   * body could name a browser the route was not built for.
+   */
+  it("posts a viewer report to the route for that browser", async () => {
+    replies.push(ok({ camera: "cam0", viewer: "1f2e3d4c", overlay: { head: "adaptive", cost: { view: "0.93 Mb/s" } } }));
+    const msg = await send(cameraNode, "yonder-camera", {
+      topic: "viewer",
+      camera: "cam0",
+      viewer: "1f2e3d4c",
+      payload: { want: "video", stats: { rtt: 38, loss: 0, egress: 900, capacity: 40_000 } },
+    });
+    expect(asked).toEqual([{
+      method: "POST",
+      path: "/cameras/cam0/viewers/1f2e3d4c",
+      body: { want: "video", stats: { rtt: 38, loss: 0, egress: 900, capacity: 40_000 } },
+    }]);
+    expect(msg.yonder?.state).toBe("confirmed");
+    expect(msg.yonder?.message).toBe("cam0: adaptive · this view 0.93 Mb/s");
+  });
+
+  it("posts an empty report, which is a reconnect asking for the state", async () => {
+    replies.push(ok({ camera: "cam0", viewer: "1f2e3d4c", overlay: { head: "stills", cost: {} } }));
+    await send(cameraNode, "yonder-camera", { topic: "viewer", camera: "cam0", viewer: "1f2e3d4c" });
+    expect(asked).toEqual([{ method: "POST", path: "/cameras/cam0/viewers/1f2e3d4c", body: {} }]);
+  });
+
+  it.each([["../run"], ["a/b"], [""], [7], [undefined]])(
+    "refuses %o as a viewer id, because it goes straight into a path, and calls nothing",
+    async (viewer) => {
+      const msg = await send(cameraNode, "yonder-camera", {
+        topic: "viewer", camera: "cam0", viewer, payload: { want: "video" },
+      });
+      expect(asked).toEqual([]);
+      expect(msg.yonder?.state).toBe("rejected");
+    },
+  );
+
+  it("refuses a viewer report whose payload could not be one, and calls nothing", async () => {
+    const msg = await send(cameraNode, "yonder-camera", {
+      topic: "viewer", camera: "cam0", viewer: "1f2e3d4c", payload: "video please",
+    });
+    expect(asked).toEqual([]);
+    expect(msg.yonder?.state).toBe("rejected");
+  });
+
   it("takes the camera from the node when the message names none", async () => {
     replies.push(ok({ camera: { id: "nose" }, run: { state: "stopped" } }));
     const flow = [

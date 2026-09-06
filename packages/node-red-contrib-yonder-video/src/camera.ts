@@ -75,6 +75,46 @@ export = function register(RED: RED): void {
         return { method: "POST", path: `/cameras/${id}/apply`, body: draft, camera: id };
       }
       /**
+       * What this browser is watching, and what it measured (spec §8.2).
+       *
+       * `msg.viewer` names the browser, never `msg.payload`: a viewer is part
+       * of the address, the same way `msg.camera` and `msg.output` are, and a
+       * report whose subject was inside its own body could name a different
+       * browser from the one the route was built for.
+       *
+       * The id itself is minted by the console from the browser's own session
+       * (`console/middleware.ts`) and comes back on the stream handshake, so
+       * nothing on this side of the wire chooses one. What this node does is
+       * refuse a value that could not be one: it goes straight into a path,
+       * and a string with a slash in it would address a different route
+       * entirely. The daemon checks it again, where it means something.
+       *
+       * **Nothing here decides what the report means.** Whether a statistic
+       * is believable, whether this browser's measurement is evidence, and
+       * what any of it does to an encoder are all `yonder-core`'s, where they
+       * have tests that need neither a Node-RED nor a browser.
+       */
+      if (msg.topic === "viewer") {
+        const viewer = msg.viewer;
+        if (typeof viewer !== "string" || !/^[a-z0-9][a-z0-9-]{0,63}$/.test(viewer)) {
+          return { refuse: "name the viewer this report is from on msg.viewer; the stream handshake answers with one" };
+        }
+        const report = msg.payload;
+        if (report !== undefined && report !== null
+          && (typeof report !== "object" || Array.isArray(report))) {
+          return {
+            refuse: "a viewer report is an object naming what this browser wants, whether full "
+              + "rate is held, and what it measured",
+          };
+        }
+        // An empty body is a reconnect, and a legitimate one: it asks for
+        // this picture's state as it now stands without changing anything.
+        return {
+          method: "POST", path: `/cameras/${id}/viewers/${viewer}`,
+          body: report ?? {}, camera: id,
+        };
+      }
+      /**
        * One output stopped or started (R-UI-24). `msg.output` names which,
        * because the kind is part of the route rather than of the body — the
        * same addressing shape `msg.camera` already has, one level down.
@@ -138,6 +178,19 @@ export = function register(RED: RED): void {
           : [];
         const said = [...applied, ...refused];
         return said.length > 0 ? said.join(" · ") : "nothing changed";
+      }
+      // A preview-state message: `camera` is an id rather than an object, and
+      // the overlay is the sentence the picture is about to draw. Reported as
+      // what it is, so a badge does not read "camera: unknown" for a report
+      // the daemon accepted.
+      const picture = value as {
+        viewer?: unknown; camera?: unknown;
+        overlay?: { head?: unknown; cost?: { view?: unknown } };
+      } | undefined;
+      if (typeof picture?.viewer === "string" && typeof picture.camera === "string") {
+        const head = typeof picture.overlay?.head === "string" ? picture.overlay.head : "unknown";
+        const view = typeof picture.overlay?.cost?.view === "string" ? picture.overlay.cost.view : "";
+        return `${picture.camera}: ${head}${view === "" ? "" : ` · this view ${view}`}`;
       }
       const id = typeof body?.camera?.id === "string" ? body.camera.id : "camera";
       const state = typeof body?.run?.state === "string" ? body.run.state : "unknown";

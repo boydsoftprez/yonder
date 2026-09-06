@@ -40,6 +40,7 @@ import { CONTROL_NAMES, type ApplyControlsOptions, type ApplyControlsResult } fr
 import { setCameraSettings, type CameraSettings } from "../video/settings.js";
 import { renderReceive, type Rendering } from "../video/receive.js";
 import type { CameraRun, Supervisor } from "../video/supervisor.js";
+import type { ViewerStats, Viewers, Want } from "../video/viewers.js";
 import type { Detection, DetectResult, Rejection } from "../video/probe/camera.js";
 import type { Encoder } from "../video/probe/encoder.js";
 import type { SupplyFlags, SupplyState } from "../system/supply.js";
@@ -155,6 +156,22 @@ export interface RouterDeps {
    * station is watching.
    */
   supervisor?: Supervisor;
+  /**
+   * Who is watching each camera, and what each of them is being sent
+   * (R-VID-11, R-VID-13; spec §8.2).
+   *
+   * It lives for the daemon's lifetime beside the supervisor, and for the
+   * same reason: a redeploy destroys every Node-RED node, and a register of
+   * who is watching that was emptied whenever somebody edited a flow would
+   * make every open picture cost nothing on paper while it went on costing
+   * the uplink.
+   *
+   * Injected like every other camera-layer part. Absent means this daemon
+   * has no video layer to report on, which `POST …/viewers/:viewer` says
+   * rather than answering with an empty state that would read as *nobody is
+   * watching*.
+   */
+  viewers?: Viewers;
   /**
    * The RTSP credential, resolved from `secrets.yaml`.
    *
@@ -456,7 +473,18 @@ export function requestedControls(body: unknown): Partial<Camera["controls"]> | 
 const CAMERA_ID = /^[a-z0-9][a-z0-9-]{0,31}$/;
 
 /**
- * `/cameras/<id>` and its four suffixes.
+ * A viewer id, off a URL, matched rather than trusted — the same reasoning
+ * as `CAMERA_ID` above.
+ *
+ * The console mints these from the browser's own session (`console/
+ * middleware.ts`), so what actually arrives is hexadecimal. The pattern is
+ * wider than that on purpose: it is a statement of what this route will
+ * accept as a key in a map, not a restatement of one minter's format.
+ */
+const VIEWER_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
+
+/**
+ * `/cameras/<id>` and its suffixes.
  *
  * Deliberately permissive about the id — `.+?` rather than the pattern above —
  * so that a traversal is refused by `CAMERA_ID` with a 404 that means "no such
@@ -464,7 +492,32 @@ const CAMERA_ID = /^[a-z0-9][a-z0-9-]{0,31}$/;
  * matching at all. The difference is not cosmetic: a guard nothing can reach
  * is a guard no test can prove.
  */
-const CAMERA_ROUTE = /^\/cameras\/(.+?)(?:\/(run|probe|stream-address|controls|settings|apply|outputs\/(?:rtp|rtsp|srt)))?$/;
+const CAMERA_ROUTE = /^\/cameras\/(.+?)(?:\/(run|probe|stream-address|controls|settings|apply|outputs\/(?:rtp|rtsp|srt)|viewers\/[^/]+))?$/;
+
+const WANTS: readonly Want[] = ["video", "stills", "off"];
+
+/**
+ * A browser's statistic, off the wire, or null where it is not one.
+ *
+ * Rejected here as well as inside `RateController.observe`, which silently
+ * drops a reading it will not believe. The two are not the same guard: the
+ * controller's refusal keeps bad evidence out of a decision, and this one
+ * makes a browser sending nonsense visible as a 400 rather than as an
+ * adaptive mode that mysteriously never acts.
+ */
+function viewerStats(camera: string, raw: unknown): ViewerStats | null {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
+  const { rtt, loss, egress, capacity, frameAge, size, fps } = raw as Record<string, unknown>;
+  const finite = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+  if (!finite(rtt) || !finite(loss) || !finite(egress) || !finite(capacity)) return null;
+  if (loss < 0 || loss > 1 || rtt < 0 || egress < 0 || capacity < 0) return null;
+  return {
+    camera, rtt, loss, egress, capacity,
+    ...(finite(frameAge) && frameAge >= 0 ? { frameAge } : {}),
+    ...(typeof size === "string" ? { size } : {}),
+    ...(finite(fps) && fps > 0 ? { fps } : {}),
+  };
+}
 
 /** The latched supply bits, and the words the log uses for each (R-SYS-09). */
 const LATCHED_BITS: readonly (readonly [keyof SupplyFlags, string])[] = [
@@ -594,6 +647,92 @@ export function createRouter(deps: RouterDeps): Router {
   };
 
   /**
+   * One browser's own statistic, and what it wants (spec §8.2).
+   *
+   * `POST /cameras/<id>/viewers/<viewer>` carries any of three things, each
+   * optional and each independent of the others:
+   *
+   *   - `want` — `"video"`, `"stills"` or `"off"`, what this browser is
+   *     asking this camera for;
+   *   - `fullRate` — true while the operator holds the key, false the moment
+   *     they let go (R-VID-13);
+   *   - `stats` — the browser's own WebRTC measurement of the path its
+   *     picture is arriving on, which is the evidence the rate controller
+   *     acts on and the only measurement of that path anything has.
+   *
+   * A post carrying none of them is a **reconnect**: the answer is the state
+   * as it now stands, which is what §8.2 means by publishing on reconnect.
+   *
+   * `DELETE` is one page closing: it ends that browser's subscription to
+   * *this* camera and touches none of its others — and, emphatically, no
+   * configured RTSP, SRT or RTP output. Those are stored decisions of the
+   * operator's and they go on leaving the aircraft whether or not anyone
+   * has a browser open (§8.6).
+   *
+   * **The freshness of a statistic is not this route's to state.** It carries
+   * what the browser measured and lets `Viewers` stamp the arrival in this
+   * daemon's own clock. A browser cannot tell this device how fresh to
+   * consider its own reading, and nothing here re-dates one.
+   */
+  const viewerRoute = async (
+    method: string,
+    id: string,
+    viewer: string,
+    body: unknown,
+    say: (line: string) => void,
+  ): Promise<RouteResult> => {
+    const viewers = deps.viewers;
+    if (viewers === undefined) {
+      return noCameraLayer(`${method} /cameras/${id}/viewers/${viewer}`, say);
+    }
+    if (!VIEWER_ID.test(viewer)) {
+      return { status: 404, body: { error: "that is not a viewer this device would have issued" } };
+    }
+    const config = loadConfig(deps.configPath);
+    if (!config.cameras.some((c) => c.id === id)) {
+      return { status: 404, body: { error: `no camera is configured with the id "${id}"` } };
+    }
+
+    if (method === "DELETE") {
+      viewers.leave(viewer, id);
+      return { status: 200, body: viewers.state(id, viewer) };
+    }
+    if (method !== "POST") {
+      return { status: 404, body: { error: `no route for ${method} /cameras/${id}/viewers/${viewer}` } };
+    }
+
+    if (body !== undefined && (typeof body !== "object" || body === null || Array.isArray(body))) {
+      return { status: 400, body: { error: "a viewer report is an object" } };
+    }
+    const sent = (body ?? {}) as { want?: unknown; fullRate?: unknown; stats?: unknown };
+    if (sent.want !== undefined && !WANTS.includes(sent.want as Want)) {
+      return { status: 400, body: { error: 'want is "video", "stills" or "off"' } };
+    }
+    if (sent.fullRate !== undefined && typeof sent.fullRate !== "boolean") {
+      return { status: 400, body: { error: "fullRate is true while the key is held and false when it is let go" } };
+    }
+    const stats = sent.stats === undefined ? undefined : viewerStats(id, sent.stats);
+    if (sent.stats !== undefined && stats === null) {
+      return {
+        status: 400,
+        body: {
+          error: "a statistic carries rtt, loss, egress and capacity as finite numbers, "
+            + "with loss between 0 and 1",
+        },
+      };
+    }
+
+    // In the order a browser means them: what it is asking for, then whether
+    // the key is held (which only a video subscriber may hold), then what it
+    // measured — so a report arriving in the same post as the subscription
+    // that made it evidence is treated as evidence.
+    if (sent.want !== undefined) viewers.subscribe(viewer, id, sent.want as Want);
+    if (sent.fullRate !== undefined) viewers.fullRate(viewer, id, sent.fullRate);
+    if (stats !== undefined && stats !== null) viewers.report(viewer, stats);
+    return { status: 200, body: viewers.state(id, viewer) };
+  };
+
+  /**
    * Everything under `/cameras/<id>`.
    *
    * The id has already been matched against `CAMERA_ID` by the caller, before
@@ -607,6 +746,14 @@ export function createRouter(deps: RouterDeps): Router {
     query: string,
     say: (line: string) => void,
   ): Promise<RouteResult> => {
+    // Before the probes, deliberately. A browser saying what it is watching
+    // and what it is measuring needs no `v4l2-ctl` run on its behalf, and a
+    // sweep of the board on every statistic — at a report a second, per
+    // viewer — would be this route spending the device on bookkeeping.
+    if (verb.startsWith("viewers/")) {
+      return viewerRoute(method, id, verb.slice("viewers/".length), body, say);
+    }
+
     const probes = deps.cameras;
     const supervisor = deps.supervisor;
     const readEncoder = deps.encoder;

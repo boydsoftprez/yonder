@@ -9,7 +9,9 @@ import {
   setupMiddleware,
   consoleMiddleware,
   cookieValue,
+  viewerFor,
   SESSION_COOKIE,
+  VIEWER_HEADER,
   type ConsoleMiddlewareDeps,
   type Middleware,
 } from "./middleware.js";
@@ -484,6 +486,48 @@ describe("consoleMiddleware", () => {
     expect(passedThrough).toEqual([]);
   });
 
+  /**
+   * Which viewer this browser is (spec §8.2, R-VID-11).
+   *
+   * A viewer is a browser *session*, and this is the one exchange every
+   * picture makes before it can show anything — so the id rides back on it
+   * rather than on a route of its own.
+   */
+  it("answers the stream handshake with this browser's viewer id", async () => {
+    const proxy = recordingWhep();
+    await serve(consoleWith(answering(200, '{"ok":true}'), undefined, proxy.handler).middleware);
+    const login = await call("POST", "/login", { form: { password: GOOD } });
+    const cookie = (login.headers["set-cookie"] as string[])[0]!.split(";")[0]!;
+    const token = cookieValue(cookie, SESSION_COOKIE)!;
+
+    const first = await call("POST", "/video/cam0-preview/whep", {
+      raw: OFFER, type: "application/sdp", cookie,
+    });
+    expect(first.headers[VIEWER_HEADER]).toBe(viewerFor(token));
+
+    // Two pages of one camera in one session are one viewer, which is what
+    // makes them share a subscription and one transmission rather than two.
+    const second = await call("POST", "/video/cam0/whep", {
+      raw: OFFER, type: "application/sdp", cookie,
+    });
+    expect(second.headers[VIEWER_HEADER]).toBe(first.headers[VIEWER_HEADER]);
+  });
+
+  it("gives a second session a different viewer, and an unauthenticated caller none", async () => {
+    const proxy = recordingWhep();
+    const sessions = new SessionStore({ clock: fakeClock() });
+    await serve(consoleWith(answering(200, '{"ok":true}'), sessions, proxy.handler).middleware);
+
+    const one = `${SESSION_COOKIE}=${encodeURIComponent(sessions.mint())}`;
+    const two = `${SESSION_COOKIE}=${encodeURIComponent(sessions.mint())}`;
+    const a = await call("POST", "/video/cam0-preview/whep", { raw: OFFER, type: "application/sdp", cookie: one });
+    const b = await call("POST", "/video/cam0-preview/whep", { raw: OFFER, type: "application/sdp", cookie: two });
+    expect(a.headers[VIEWER_HEADER]).not.toBe(b.headers[VIEWER_HEADER]);
+
+    const none = await call("POST", "/video/cam0-preview/whep", { raw: OFFER, type: "application/sdp" });
+    expect(none.headers[VIEWER_HEADER]).toBeUndefined();
+  });
+
   it("does not cache a page carrying a password field", async () => {
     await serve(consoleWith(answering(200, '{"ok":true}')).middleware);
     const res = await call("GET", "/");
@@ -493,6 +537,29 @@ describe("consoleMiddleware", () => {
 });
 
 // ---------------------------------------------------------------------------
+
+describe("viewerFor", () => {
+  /**
+   * It goes into messages the page carries around and posts back, so the one
+   * thing it must not be is the credential it is derived from.
+   */
+  it("is not the session token, and cannot be read back to it", () => {
+    const token = "abc.def-a-real-looking-session-token";
+    const id = viewerFor(token);
+    expect(id).not.toContain(token);
+    expect(token).not.toContain(id);
+    expect(id).toMatch(/^[0-9a-f]{16}$/);
+  });
+
+  it("is stable for one session and different for another", () => {
+    expect(viewerFor("one")).toBe(viewerFor("one"));
+    expect(viewerFor("one")).not.toBe(viewerFor("two"));
+  });
+
+  it("is a shape the daemon's viewer route will accept", () => {
+    expect(viewerFor("one")).toMatch(/^[a-z0-9][a-z0-9-]{0,63}$/);
+  });
+});
 
 describe("cookieValue", () => {
   it("finds one cookie among several", () => {

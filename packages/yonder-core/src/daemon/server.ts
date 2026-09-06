@@ -36,6 +36,9 @@ import { PipelineRenderer } from "../video/renderer.js";
 import { detectCameras, probeCamera } from "../video/probe/camera.js";
 import { probeEncoder, type Encoder } from "../video/probe/encoder.js";
 import { applyControls } from "../video/controls.js";
+import { EncoderChannel } from "../video/encoder.js";
+import { Viewers } from "../video/viewers.js";
+import { Adaptation } from "../video/adaptation.js";
 import { readSupply } from "../system/supply.js";
 import { ZeroTierCli } from "../remote/zerotier/cli.js";
 import { readTraffic } from "../remote/traffic.js";
@@ -133,6 +136,23 @@ export interface ServerOptions {
    * the one thing the Cameras page exists to report honestly (R-CAM-05).
    */
   cameraLayer?: CameraLayer;
+  /**
+   * How a pipeline is started, handed straight to `buildRenderers`.
+   *
+   * **Test-only, and `main()` never supplies it**, exactly like `cameraLayer`
+   * above and for the same reason: with a default, a test of this daemon
+   * would run `gst-launch-1.0` on whatever machine the suite is on.
+   *
+   * It exists because the runtime half of the video layer — the rate
+   * controller and the register of who is watching — is assembled in
+   * `startServer` and nowhere else, and the only honest way to prove that a
+   * browser's statistic arriving at this socket reaches a running encoder is
+   * to have a pipeline this daemon actually started and can actually talk to.
+   * Without this option that join could only be asserted one layer down,
+   * which is precisely the layer where every part already worked and nothing
+   * connected them.
+   */
+  spawner?: ProcessSpawner;
 }
 
 /**
@@ -559,6 +579,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
       remoteStatePath: join(dirname(opts.journalPath), "remote.json"),
       ...(opts.mediaConfigPath === undefined ? {} : { mediaConfigPath: opts.mediaConfigPath }),
       ...(opts.console === undefined ? {} : { console: opts.console }),
+      ...(opts.spawner === undefined ? {} : { spawner: opts.spawner }),
     });
   } catch (e) {
     const message = (e as Error).message;
@@ -634,6 +655,73 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   // traffic; readRemoteState only ever reads what the sampler already has.
   const sampler = new TrafficSampler({ clock });
   sampler.start();
+
+  /**
+   * The video layer's runtime half: who is watching, and the rate that
+   * follows from it (R-VID-07, R-VID-11; spec §8.1, §8.2).
+   *
+   * **This is the join that was missing.** `video/rate.ts` was built, proved
+   * on a board and left with no production caller at all: every link
+   * measurement it reasoned about was supplied by hand, so an operator who
+   * turned Adaptive on got a switch that changed nothing. Three parts and one
+   * seam between them:
+   *
+   *   - `EncoderChannel` is how a rate reaches an encoder that is already
+   *     running, without respawning the pipeline (K-48). Constructed here,
+   *     once, because it holds what each camera's encoder last confirmed and
+   *     registers a listener on the supervisor that must survive every
+   *     restart of every pipeline.
+   *   - `Viewers` is who is watching and what it costs. It stamps a browser's
+   *     statistic with **this** clock as it arrives and hands it on once,
+   *     then. Nothing re-dates it: `rate.ts` refuses to read a stale report as
+   *     headroom, and that refusal is only worth anything if what feeds it
+   *     cannot manufacture freshness.
+   *   - `Adaptation` runs one controller per camera on this daemon's own
+   *     clock and carries every decision back to `Viewers`, which is what
+   *     puts the reason on the picture.
+   *
+   * Assembled here rather than in `buildRenderers`, and deliberately: none of
+   * it is a renderer — an apply must not wait on it and a rollback must not
+   * re-run it — and all three need the applied configuration read fresh,
+   * which is what `reachConfig()` above already is. Beside the sampler,
+   * because it is the other thing this daemon runs on a timer of its own.
+   *
+   * Absent when `buildRenderers` threw, which is a `secrets.yaml` this daemon
+   * could not read: there is no supervisor to command an encoder through, and
+   * `POST …/viewers/:viewer` says so rather than accepting statistics nothing
+   * would act on.
+   */
+  const encoders = built === undefined
+    ? undefined
+    : new EncoderChannel({ supervisor: built.supervisor, clock });
+  let viewers: Viewers | undefined;
+  let adaptation: Adaptation | undefined;
+  if (encoders !== undefined) {
+    const channel = encoders;
+    const watching = new Viewers({
+      cameras: () => reachConfig().cameras,
+      // What the pipeline is running, never what the configuration asks for.
+      // The pair that disagrees is K-48, and this is the side of it that is
+      // true.
+      inForce: (id) => channel.inForce(id),
+      clock,
+      // Handed on as it arrives, with the stamp it arrived under. `Viewers`
+      // has already decided whether this browser is an active video
+      // subscriber of that camera, which is the filter §8.2 asks for.
+      onReport: (report) => { adaptation?.observe(report); },
+    });
+    viewers = watching;
+    adaptation = new Adaptation({
+      channel,
+      cameras: () => reachConfig().cameras,
+      clock,
+      // Before anything is decided, so a Full rate hold nobody renewed is not
+      // still being charged to the path when the allowance is worked out.
+      onTick: (now) => { watching.sweep(now); },
+      onDecisions: (decisions) => { watching.decided(decisions); },
+    });
+    adaptation.start();
+  }
 
   // No secret is ever printed. That mechanism existed to surface a random
   // per-device access-point passphrase and there is no longer one to surface
@@ -1000,6 +1088,10 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
       encoder: opts.cameraLayer.encoder,
       rtspPassword: opts.cameraLayer.rtspPassword,
     }),
+    // Outside the `built` block above because it is a `let` that block
+    // cannot narrow, and the condition is the same one: no supervisor, no
+    // register of who is watching.
+    ...(viewers === undefined ? {} : { viewers }),
     // Not behind `built`: the reach monitor is assembled from the runner and
     // the nmcli client, neither of which depends on the secret store, so a
     // board whose secrets.yaml is unreadable can still say which way out is
@@ -1107,6 +1199,11 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
         // would go on reading sysfs for an interface this process no longer
         // answers questions about.
         sampler.stop();
+        // The fifth. A rate controller still ticking after close() would go
+        // on writing bitrates into a running pipeline on behalf of a process
+        // that has already let go of its socket — and, unlike the others,
+        // it would be commanding hardware while it did it.
+        adaptation?.stop();
         server.close(() => {
           if (existsSync(opts.socketPath)) unlinkSync(opts.socketPath);
           resolve();
