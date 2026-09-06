@@ -1207,14 +1207,15 @@ carries which attribute rather than by reading the rule again:
   camera already plugged in when the installer ran stayed on `auto` — which is
   every install that matters. The trigger now names `--action=add`.
 
-Both are fixed and the corrected rule is proved on the board: a USB device
-presenting interface class `0e` went from `power/control=auto` to `on` when the
-rule was installed and triggered, while the hub and both host controllers
-correctly stayed on `auto`. `udevadm verify` passes the old rule and the new
-one alike, so nothing but sysfs would have caught this.
+Both are fixed and the corrected rule is proved on the board against a real
+UVC camera — a device `uvcvideo` has bound and `v4l2-ctl` reads formats and
+controls from. Its parent went from `power/control=auto` to `on` when the rule
+was installed and the `add` path was run, while the hub and both host
+controllers correctly stayed on `auto`. `udevadm verify` passes the old rule
+and the new one alike, so nothing but sysfs would have caught either fault.
 
-Two claims the rule still owes, and neither can be settled without a camera
-attached: that a device arriving after boot is caught by the `add` rule, and
-that the setting survives the re-enumeration this fault consists of. Check both
-on the first install that has the ELP plugged in, and record the interval the
-same way.
+**One claim is still owed:** that the setting survives the re-enumeration this
+fault consists of. The rule fires on `add`, and a re-enumeration is an `add`,
+so it should — but "should" is what the first version of this rule had going
+for it too. It needs a drop to happen with the rule in place and the interval
+measured afterwards, and no drop has happened since it was installed.
