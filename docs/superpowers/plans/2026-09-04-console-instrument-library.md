@@ -1338,6 +1338,37 @@ it("Record and Recentre are not on the rail", ...);                            /
 
 ---
 
+### Task 30a: A pipeline that answers — replacing `gst-launch-1.0`
+
+**Inserted after Task 30 found the reason its channel cannot work (K-53).**
+`EncoderChannel` is built and tested; on hardware every retune answers *"no
+control channel"*, because `systemSpawner` runs `gst-launch-1.0` and that tool
+answers nothing once playing. `v4l2h264enc`'s controls are per-open-handle, so
+no outside process can reach the encoder either. **Task 1 proved the encoder,
+not the runner** — its spike holds the pipeline itself (`Gst.parse_launch`, then
+`set_property("extra-controls", …)` on the live element), which is a handle only
+a program owning the pipeline has.
+
+**Files:**
+- Create: `installer/payload/yonder-pipeline` (the host), `scripts/spikes/` is its reference
+- Modify: `packages/yonder-core/src/video/supervisor.ts` (`systemSpawner` gains `send`/`onMessage`); `installer/roles/50-mediamtx.sh` or a new role for `python3-gi`, `gir1.2-gstreamer-1.0`; `installer/make-payload.sh`
+
+**Interfaces:**
+- Consumes: the argv `compose()` already emits, unchanged — the host must not
+  reinterpret the pipeline, only carry it.
+- Produces: the NDJSON protocol `EncoderChannel` already speaks and has tests
+  for. One object per line on stdin, one per line on stdout. No new vocabulary.
+
+- [ ] **Step 1: Write the failing tests** — the host plays the argv it is given and reports playing; a `retune` line sets `extra-controls` on the named encode and answers with the value read back from the element; an `identity` pad probe reports a pts break and the answer carries `continuous: false`; a preview reconfigure restarts that branch alone, asserted by the main branch's pts running unbroken across it; an unparseable line is answered, never fatal.
+- [ ] **Step 2: `systemSpawner` gains the hop** — `send`/`onMessage` over stdin/stdout, and **a fallback**: where the host is absent the spawner behaves exactly as it does today and `EncoderChannel` keeps answering `notControllable`. This replaces the one part of the video path known to work on hardware; it must degrade to that path, not to nothing.
+- [ ] **Step 3: Installer and payload** — `python3-gi` and `gir1.2-gstreamer-1.0` installed and vendored offline; `assert_module_graph`'s equivalent for the host, which is that `gi` and `Gst` import on the board.
+- [ ] **Step 4: Pass; mutation-check** the continuity witness and the fallback.
+- [ ] **Step 5: The board proof — the controller runs this, not the implementer.** Deploy; read the pipeline's argv; retune the main stream from the console and confirm the encoder's rate changed **without the pid changing**; confirm the picture did not break. This is K-48's own acceptance test and the first time R-VID-07 will be true end to end.
+- [ ] **Step 6: Commit** — `git commit -s -m "feat(video): a pipeline that answers, so a rate can change without a respawn — R-VID-07, R-VID-09"`
+
+---
+
+
 ### Task 31: The rate controller and the size ladder
 
 **Files:** `video/rate.ts` + `rate.test.ts` (a controllable clock)
