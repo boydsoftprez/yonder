@@ -1,0 +1,263 @@
+{
+  "why": [
+    "The widest honest value every reading on a page is photographed at (R-UI-23).",
+    "",
+    "The capture gate used to paint a grey box over every reading, because a load",
+    "average is different on two runs and would leave the committed picture",
+    "permanently dirty. That kept the file clean and it hid the defect the pictures",
+    "exist to catch: a readout row is only ever as wrong as its *longest* value, and",
+    "the value that happens to be on the page during a capture is never the longest",
+    "one. `2000 kb/s` fits. `20000 kb/s`, which `schema/config.ts` allows, is what an",
+    "operator's page actually has to hold — and nothing in this repository had ever",
+    "drawn one.",
+    "",
+    "So each field is given one value here and the gate renders that instead of a",
+    "mask. The picture is still identical on two runs, which is what the masking was",
+    "for, and it is now a picture of the hardest case rather than of the easiest.",
+    "",
+    "**A page of specimens is not a board.** Every field is at its own widest, so",
+    "the lamp can read NOTHING beside a sentence about a path that is carrying",
+    "traffic. That is what the picture is for: it is not a portrait of one device",
+    "in one state, it is the layout under the hardest content each of its fields",
+    "can hold. The unmasked copy under `vendor/capture/` is the page as it really",
+    "was, taken before any of this is written.",
+    "",
+    "**Honest means the value can actually arrive.** Every entry names where its",
+    "value comes from: a bound in `schema/config.ts`, the longest branch of the",
+    "function that composes the sentence, or the widest reading a real board has",
+    "produced. A value invented to be long would fail the gate on a defect the",
+    "console does not have, which costs the gate its credibility faster than",
+    "missing one.",
+    "",
+    "**A field is named by the instrument it is drawn in and the caption beside**",
+    "**it** — `nrdb-ui-yonder-databar · UPLINK`. Not a DOM path and not a node id,",
+    "because this file has to be checkable against the page by a person. Rename a",
+    "caption and the specimen goes missing, loudly, which is the right failure: the",
+    "widest honest value for UPLINK is not automatically the widest honest value for",
+    "whatever it was renamed to.",
+    "",
+    "`masked` is the other half, and it is what stops this file from being a list of",
+    "the easy ones. Every reading the gate finds is either specified here or listed",
+    "there with a reason; a reading that is neither fails the build and names the key",
+    "to add. An entry on either list that matches no reading on any page also fails —",
+    "the same rule `accepted-violations.json` is held to, for the same reason.",
+    "",
+    "**No credential belongs in here (R-SEC-10).** These values are rendered into",
+    "pages that are screenshotted and committed. The receive line resolves a real",
+    "RTSP password on a real device, so the fixture carries a visibly fake one and",
+    "the specimen for a stream address carries no password at all."
+  ],
+
+  "fields": {
+    "nrdb-ui-yonder-databar · BOARD": {
+      "value": "Raspberry Pi Compute Module 4 Rev 1.1",
+      "why": "displayFacts' `model`, verbatim from /proc/device-tree/model. The Compute Module's string is the longest of the boards this project is built for."
+    },
+    "nrdb-ui-yonder-databar · UP FOR": {
+      "value": "365 days 23 hours",
+      "why": "formatUptime, which prints the largest two units only. Days is the largest unit it has and a board left flying a season is three digits of them."
+    },
+    "nrdb-ui-yonder-databar · YONDER": {
+      "value": "1.0.0-rc.1+build.42",
+      "why": "the version out of package.json. A pre-release with build metadata is the longest semver this project can publish."
+    },
+    "nrdb-ui-yonder-databar · SYSTEM": {
+      "value": "Debian GNU/Linux 12 (bookworm)",
+      "why": "the OS version string, verbatim from /etc/os-release PRETTY_NAME on the distribution the installer targets."
+    },
+
+    "nrdb-ui-yonder-databar · OPERATOR": {
+      "value": "Telefonica Moviles Espana SAU",
+      "why": "the operator name ModemManager reports. 3GPP allows 24 characters of long alphanumeric name plus a service-provider suffix; this is a real one at that width."
+    },
+    "nrdb-ui-yonder-databar · NETWORK": {
+      "value": "5GNR",
+      "why": "formatTechnology, which uppercases ModemManager's identifier. `5gnr` is the longest of the ones it reports."
+    },
+    "nrdb-ui-yonder-databar · REGISTERED": {
+      "value": "searching",
+      "why": "the registration state, in ModemManager's own words. `searching` is the longest of home / roaming / searching / denied / idle."
+    },
+    "nrdb-ui-yonder-databar · APN": {
+      "value": "internet.mnc001.mcc234.gprs",
+      "why": "an APN as carriers publish them. 3GPP allows 100 characters; this is the longest form actually issued — a full operator-scoped name."
+    },
+    "nrdb-ui-yonder-databar · RSSI": {
+      "value": "-113 dBm",
+      "why": "the floor of the RSSI range a modem reports, which is the widest because it is the only three-digit one."
+    },
+    "nrdb-ui-yonder-databar · RSRQ": {
+      "value": "-19.5 dB",
+      "why": "the floor of the LTE RSRQ range (-3 to -19.5 dB), which is the widest value the field can carry."
+    },
+    "nrdb-ui-yonder-databar · MTU": {
+      "value": "9000",
+      "why": "a jumbo frame. The link MTU is read from the interface and nothing caps it below this."
+    },
+    "nrdb-ui-yonder-databar · COMPOSITION": {
+      "value": "MBIM",
+      "why": "R-CEL-03's answer, one word, and MBIM is the longer of the two modes this device chooses between."
+    },
+    "nrdb-ui-yonder-databar · ADDRESS": {
+      "value": "255.255.255.255",
+      "why": "the widest IPv4 address. The link address on Status and on the Cellular tab is the same field asked twice."
+    },
+
+    "nrdb-ui-text.yonder-qualifier": {
+      "value": "Ethernet is carrying traffic, and nothing has stood down",
+      "why": "reachWhy's longest sentence, with the longest of PATH_WORDS' names (`ethernet`) raised by pathName."
+    },
+    "nrdb-ui-text": {
+      "value": "The modem reported a failure: sim-pin-incorrect",
+      "why": "modemSummary's longest branch (yonder-core/src/net/modem/state.ts), with the longest failure reason ModemManager gives. Drawn on the Interfaces tab and on the Cellular tab, which is why one specimen serves two widgets."
+    },
+    "nrdb-ui-text · Address": {
+      "value": "255.255.255.255/32",
+      "why": "the widest IPv4 address with its prefix length, which is the form NetworkManager reports."
+    },
+    "nrdb-ui-text · Remote": {
+      "value": "Authorised, not reaching the network",
+      "why": "messageFor's `label` (node-red-contrib-yonder-remote/src/state.ts). The longest of its seven phases."
+    },
+    "nrdb-ui-text · Status": {
+      "value": "Authorised, not reaching the network",
+      "why": "the same messageFor `label`, drawn again at the top of the ZeroTier tab."
+    },
+    "nrdb-ui-text · Path": {
+      "value": "Relayed",
+      "why": "R-VPN-03's two words, in words rather than a boolean. `Relayed` is the longer."
+    },
+    "nrdb-ui-text · Latency": {
+      "value": "9999 ms",
+      "why": "messageFor's `${ms} ms`. Four digits is a relayed hop over a congested cellular uplink, and the widest worth reporting."
+    },
+    "nrdb-ui-text · Network name": {
+      "value": "Yonder field operations mesh",
+      "why": "the name the mesh controller published. Nothing caps it, so this is the longest a controller has been configured with here."
+    },
+    "nrdb-ui-text · Network": {
+      "value": "8286ac0e47d5f2c1",
+      "why": "a ZeroTier network id, which is always sixteen hex characters."
+    },
+    "nrdb-ui-text · Traffic": {
+      "value": "1023.9 GB in · 1023.9 GB out",
+      "why": "messageFor's `traffic`, at formatBytes' top tier (GB) with the one decimal it prints from MB up."
+    },
+    "nrdb-ui-text · Throughput": {
+      "value": "999.9 Gbps down · 999.9 Gbps up",
+      "why": "messageFor's `throughput`, at formatRate's top tier (Gbps) with its one decimal. R-NET-10."
+    },
+    "nrdb-ui-text · Last heard": {
+      "value": "59 min ago",
+      "why": "formatLastHeard's longest branch. Minutes is where its digits and its unit are both widest."
+    },
+
+    "nrdb-ui-table · Time": {
+      "value": "23:59:59",
+      "why": "a clock, at the widest hour. Fixed width, so this is both the widest and the only honest value."
+    },
+    "nrdb-ui-table · Time (UTC)": {
+      "value": "23:59:59",
+      "why": "the same clock on the Log page, under its own column title."
+    },
+    "nrdb-ui-table · Level": {
+      "value": "error",
+      "why": "the longest of the levels the daemon writes: info, warn, error."
+    },
+    "nrdb-ui-table · What happened": {
+      "value": "network: a check of which way out is working did not finish in time; going on without it",
+      "why": "the longest line the daemon actually writes to its journal, verbatim from net/watchdog.ts."
+    },
+    "nrdb-ui-table": {
+      "value": "network: a check of which way out is working did not finish in time; going on without it",
+      "why": "the same journal line in the Activity table's second column, whose title is deliberately empty."
+    },
+
+    "nrdb-ui-table · Camera": {
+      "value": "Global Shutter Camera: Global Shutter",
+      "why": "a V4L2 card name, which the kernel caps at 32 characters plus the bus suffix v4l2-ctl prints after it."
+    },
+    "nrdb-ui-table · Configured as": {
+      "value": "forward-observation-camera",
+      "why": "the camera's id in config.yaml. Nothing caps it, so this is the longest an operator writes by hand."
+    },
+    "nrdb-ui-table · Identity": {
+      "value": "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0 — an enumeration number; it may mean a different camera after a reboot",
+      "why": "identityWords' longer branch, on the by-path name the bench board really answered. The schema permits 128 characters of device name; this is the widest one observed."
+    },
+    "nrdb-ui-table · What it offers": {
+      "value": "formats: 10 · zoom: yes · focus: auto focus has it · exposure: aperture priority has it · whiteBalance: auto white balance has it · rotation: none · aim: advertised · recording: none · stills: none",
+      "why": "the capability summary with every key present, which is what a camera answering all of them composes to."
+    },
+    "nrdb-ui-table · Device": {
+      "value": "/dev/video63",
+      "why": "the highest V4L2 device node the kernel enumerates, and so the widest this column carries."
+    },
+    "nrdb-ui-table · Card": {
+      "value": "Global Shutter Camera: Global Shutter",
+      "why": "the same V4L2 card name, in the rejection table's own column."
+    },
+    "nrdb-ui-table · Why": {
+      "value": "bcm2835-codec-decode is a hardware codec on this board, not a camera; it appears in the device list and answers nothing a camera would",
+      "why": "the longest rejection reason detectCameras composes, on the node a Raspberry Pi really offers."
+    },
+
+    "nrdb-ui-yonder-databar · RUNNING": {
+      "value": "failed — the pipeline exited with code 1; gave up after 5 restarts",
+      "why": "runWords with the supervisor's longest reason: the exit branch plus the MAX_RESTARTS = 5 suffix it adds when it stops trying."
+    },
+    "nrdb-ui-yonder-databar · PICTURE": {
+      "value": "3840 × 2160",
+      "why": "cameraStrip's `width × height` at the schema's ceilings (width max 3840, height max 2160)."
+    },
+    "nrdb-ui-yonder-databar · RATE": {
+      "value": "60 fps",
+      "why": "cameraStrip's `framerate fps` at the schema's ceiling of 60."
+    },
+    "nrdb-ui-yonder-databar · BITRATE": {
+      "value": "20000 kb/s",
+      "why": "cameraStrip's `bitrate_kbps kb/s` at the schema's ceiling of 20000. This is the defect spec §10 lists second: 2000 fits and 20000 does not."
+    },
+    "nrdb-ui-yonder-databar · UPLINK": {
+      "value": "169.49 Mb/s at IP",
+      "why": "cameraStrip's uplink: atIp(20000) × 8 outputs + atIp(4000) preview, at the schema's ceilings (outputs max 8, preview bitrate max 4000), in Mb/s to two places."
+    },
+    "nrdb-ui-text · Before you press Start": {
+      "value": "this device cannot serve SRT yet: the output on port 8890 would listen with no password on it (R-VID-06). Remove it, or use an RTSP output, which carries this device's own credential",
+      "why": "cameraStrip's startCheck at refuse()'s longest branch, verbatim from video/pipeline.ts."
+    },
+    "nrdb-ui-text · Camera": {
+      "value": "Forward observation camera, port side pod",
+      "why": "the camera's name. `schema/config.ts` caps it at 48 characters and an operator types it, so the cap is the honest ceiling."
+    },
+    "nrdb-ui-text · Identity": {
+      "value": "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0 — an enumeration number; it may mean a different camera after a reboot",
+      "why": "identityWords' longer branch again, on the Setup deck rather than in the Cameras table."
+    },
+    "nrdb-ui-text · Encoder": {
+      "value": "v4l2h264enc · hardware",
+      "why": "cameraStrip's encoder line. The board's hardware element is the longer of the two probeEncoder returns."
+    }
+  },
+
+  "masked": {
+    "nrdb-ui-yonder-gauge · CPU LOAD": {
+      "why": "A gauge draws the same number twice — once as text and once as a needle — and this gate can move only one of them. A specimen here would commit a picture of a needle at one value with another value written beside it, which is a worse record than a grey box. The gauges are the one instrument whose reading cannot be substituted from outside; a widest-value gauge has to be driven through the daemon."
+    },
+    "nrdb-ui-yonder-gauge · CPU TEMP": { "why": "As CPU LOAD: text and needle, and only the text can be written from here." },
+    "nrdb-ui-yonder-gauge · MEMORY": { "why": "As CPU LOAD: text and needle, and only the text can be written from here." },
+    "nrdb-ui-yonder-gauge · SIGNAL": { "why": "As CPU LOAD: text and needle, and only the text can be written from here." },
+    "nrdb-ui-yonder-gauge · QUALITY": { "why": "As CPU LOAD: text and needle, and only the text can be written from here." },
+
+    "nrdb-ui-yonder-annunciator.yonder-live.yonder-pending": {
+      "why": "The confirmation countdown. It has a widest honest value — the full window, at three digits — and writing it would put CHANGE PENDING on every page captured with nothing pending, which is the one thing about this annunciator a picture has to get right. The pending captures (status-pending, network-cellular-pending) exist to photograph the other state, and they are the reason a single specimen cannot be honest for both."
+    },
+
+    "nrdb-ui-text · Host": {
+      "why": "Nothing composes a value for this field yet. The widget binds {{msg.payload}} straight from yonder-diag, which sends the daemon's whole reply object, so the field renders nothing until a probe runs and an object afterwards. A specimen would state a format this console does not have."
+    },
+    "nrdb-ui-text · Replies": { "why": "As Host: bound to the whole yonder-diag payload, with no composed value to be the widest of." },
+    "nrdb-ui-text · Round trip (ms)": { "why": "As Host: bound to the whole yonder-diag payload, with no composed value to be the widest of." },
+    "nrdb-ui-text · Probed": { "why": "As Host: bound to the whole yonder-diag payload, with no composed value to be the widest of." }
+  }
+}

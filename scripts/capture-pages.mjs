@@ -26,10 +26,14 @@
 //      Geometry rather than pixels, because "shape" is what the requirement
 //      says and because a pixel diff across macOS and CI is a coin toss about
 //      font rasterisation, not a check.
-//   3. **A picture.** Written on every run so somebody can look. The committed
-//      copy masks live readings — a load average changes between two runs and
-//      would make the file dirty forever — so what it records is the layout.
-//      The unmasked copy goes to an artifact directory for the full view.
+//   3. **A picture.** Written on every run so somebody can look. Every reading
+//      on it is its **widest honest specimen** (R-UI-23) rather than the value
+//      that happened to be there, so the file is the same on two runs of the
+//      same console *and* shows what the page does with the longest value the
+//      field can actually carry. A reading with no specimen is masked and
+//      named, because a load average changes between two runs and would make
+//      the file dirty for ever. The unmasked copy goes to an artifact
+//      directory for the full view.
 //
 //   4. **A camera.** R-UI-03 builds navigation from detected hardware, so with
 //      none attached there is no camera page — and this gate then covers none
@@ -37,7 +41,13 @@
 //      view there is nothing there. `--synthetic-cameras` names the fixture the
 //      harness seeded the daemon from, and this checks that those pages really
 //      were photographed rather than quietly skipped.
-//   5. **A credential check**, which is the one thing here that is not a mask.
+//   5. **The viewport contract** (`--fold`, spec §5). A tall full-page PNG is
+//      not evidence that anything fits above the fold, so `--fold` also
+//      photographs the viewport alone, asserts the picture, the Aim panel and
+//      the shutter key are inside it, asserts nothing inside a deck has a
+//      scrollbar of its own, and asserts the rail is still in the viewport at
+//      the bottom of the page.
+//   6. **A credential check**, which is the one thing here that is not a mask.
 //      The receive-line surface shows a *resolved* RTSP password (R-VID-15) and
 //      these images are committed, so a capture taken against a real device
 //      would put a real secret in the repository for ever. R-SEC-10 says never
@@ -49,6 +59,7 @@
 //   node scripts/capture-pages.mjs ... --accept     # adopt the new shape
 //   node scripts/capture-pages.mjs ... --synthetic-cameras scripts/fixtures/camera-globalshutter.json
 //   node scripts/capture-pages.mjs ... --secrets /etc/yonder/secrets.yaml
+//   node scripts/capture-pages.mjs ... --viewport 1440x900 --fold
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join, dirname, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -123,18 +134,30 @@ function pagesFromFlows() {
 }
 
 /**
- * What carries a live reading.
+ * What carries a reading.
  *
- * These are masked in the committed picture and excluded from the shape
- * manifest's text, because their content changes between two runs of the same
- * console and neither the picture nor the manifest is about their values.
+ * Each of these is photographed at the widest honest value its field can show
+ * (R-UI-23) — see `scripts/fixtures/specimens.json`. A field with no specimen
+ * there is masked instead, and named on every run, because its content changes
+ * between two runs of the same console and neither the picture nor the shape
+ * manifest is about its value.
+ *
+ * The two are the same list on purpose. A reading that is worth freezing is a
+ * reading that is worth photographing, and a second list of "things that carry
+ * a value" is a second list to forget to add to.
  */
 const LIVE = [
   ".nrdb-ui-text-value",
   ".v-data-table td",
   ".y-gauge__value",
   ".y-bar__v",
-  ".tape__box",
+  // `.y-tape__box`, with the prefix every other class in this file has.
+  // It was `.tape__box` here, which is a class no component in this
+  // repository has ever had, so it matched nothing — and matched nothing
+  // silently, because there is no tape on a page yet either. A selector that
+  // is wrong and a selector that has nothing to find look identical until
+  // the day they stop being the same thing.
+  ".y-tape__box",
   // An annunciator caption is normally a state word — NOTHING, CONNECTED —
   // and those are exactly what somebody looking at these pictures needs to
   // read, so the widget is not masked as a kind. `CHANGE PENDING`'s is the
@@ -172,6 +195,37 @@ const FIXED = ".yonder-fixed";
 
 /** Fixed, so geometry means the same thing on a laptop and on a CI runner. */
 const VIEWPORT = { width: 1280, height: 900 };
+
+/**
+ * The three things spec §5 says fit above the fold on a notebook, by the
+ * class each component's own root carries rather than by the Node-RED node
+ * that happens to hold it today.
+ *
+ * `ui-yonder-aim` is a node and the shutter key is a part inside the deck, so
+ * a check written against node types would go blind the moment one of them
+ * moved. A component's root class is the one thing that is true wherever it
+ * is mounted.
+ *
+ * A part that is not on the page at all is a finding, not a pass. A check that
+ * cannot tell "there was nothing to find" from "I did not look" is not a
+ * check — and the camera pages do not carry the Aim panel or the shutter key
+ * yet, so this reports them missing on every run until they arrive. It goes
+ * through `report()` like every other rule, so the debt list *could* hold one
+ * with a reason and a way out; nothing is on it, deliberately. These are the
+ * pages being rebuilt, and a finding accepted the week before it is fixed is
+ * a line somebody has to remember to delete.
+ */
+const ABOVE_THE_FOLD = [
+  ["the picture", ".y-pic"],
+  ["the Aim panel", ".y-aimpanel"],
+  ["the shutter key", ".y-shutter"],
+];
+
+/** A deck, however it is drawn: groups wearing the class today, one node later. */
+const DECK = '[class*="yonder-deck"], .nrdb-ui-yonder-deck';
+
+/** The soft-key rail, which must be reachable at the bottom of the page. */
+const RAIL = ".yonder-rail";
 
 /**
  * The debt list.
@@ -277,6 +331,69 @@ const syntheticCameras = arg("synthetic-cameras");
  */
 const secretsPath = arg("secrets");
 
+/**
+ * The widest honest value every reading is photographed at (R-UI-23).
+ *
+ * **This is the difference between a picture of a layout and a picture of a
+ * page.** The committed captures used to paint a grey box over every reading,
+ * because a load average is different on two runs and would leave the file
+ * permanently dirty. That kept the file clean and it hid the defect the
+ * pictures existed to catch: a readout row is only ever as wrong as its
+ * *longest* value, and the value that happened to be on the page during a
+ * capture is never the longest one. `2000 kb/s` fits; `20000 kb/s`, which the
+ * schema allows, is what an operator's page actually has to hold.
+ *
+ * So each field is given one value here — the widest the code that composes
+ * it can produce — and the gate renders that instead. The picture is still
+ * identical on two runs, which is what the masking was for, and it is now a
+ * picture of the hardest case rather than of the easiest.
+ *
+ * A field with no entry is masked exactly as before and **named on every
+ * run**, so the list of things still hidden is visible rather than implied,
+ * and can only shrink. An entry that matches no field on any page fails, the
+ * way a stale accepted violation does: a specimen for a reading that no longer
+ * exists is a value nobody is checking.
+ */
+const specimensPath = under(arg("specimens"), "scripts/fixtures/specimens.json");
+const specimens = (() => {
+  const parsed = JSON.parse(readFileSync(specimensPath, "utf8"));
+  const fields = {};
+  for (const [key, entry] of Object.entries(parsed.fields ?? {})) fields[key] = entry.value;
+  return { fields, masked: Object.keys(parsed.masked ?? {}) };
+})();
+
+/**
+ * The viewport this run measures in.
+ *
+ * Fixed at 1280x900 for the shape references, which is what makes geometry
+ * mean the same thing twice. `--viewport` is for the surfaces spec §5 names
+ * separately — a notebook at 1440x900 and a landscape tablet below the 1100 px
+ * breakpoint — and each of those records a shape reference of its own under
+ * its own `--as` name, so a width is never compared against a different width.
+ */
+const viewport = (() => {
+  const given = arg("viewport");
+  if (given === undefined) return VIEWPORT;
+  const parsed = /^(\d+)x(\d+)$/.exec(given);
+  if (parsed === null) {
+    process.stderr.write(`capture-pages: --viewport wants WIDTHxHEIGHT, not "${given}"\n`);
+    process.exit(2);
+  }
+  return { width: Number(parsed[1]), height: Number(parsed[2]) };
+})();
+
+/**
+ * Hold the page to the viewport contract in spec §5, and photograph the
+ * viewport on its own.
+ *
+ * Separate from the full-page capture rather than replacing it, because the
+ * two answer different questions and the spec asks both: the full page proves
+ * every control is reachable, and only the viewport proves what an operator
+ * sees before scrolling. A tall PNG is not evidence that anything fits above
+ * the fold.
+ */
+const fold = has("fold");
+
 if (!password) {
   process.stderr.write("capture-pages: --password is required\n");
   process.exit(2);
@@ -330,7 +447,7 @@ try {
  * Runs in the browser, so it can only use what is on the page. Returns plain
  * data; every judgement about it is made out here where it can be read.
  */
-function measure([liveSelectors, fixedSelector]) {
+function measure([liveSelectors, fixedSelector, specimenValues, maskedKeys, aboveTheFold, deckSelector]) {
   const round = (n) => Math.round(n);
   const boxOf = (el) => {
     const r = el.getBoundingClientRect();
@@ -356,6 +473,99 @@ function measure([liveSelectors, fixedSelector]) {
   };
 
   const widgets = [...document.querySelectorAll('[class*="nrdb-ui-widget"], [class*="nrdb-ui-group"]')];
+
+  /**
+   * Every reading, rendered at its widest honest value (R-UI-23).
+   *
+   * **First, before anything is measured**, because every check below this
+   * line is about what the page does with what is on it — and what is on it
+   * during a capture is whatever the daemon last said, which is never the
+   * longest thing the field can hold. Measuring the easy case and committing
+   * a picture of it is how a readout row ships truncating.
+   *
+   * A field is named by the instrument it is drawn in and the caption beside
+   * it — `nrdb-ui-yonder-databar · UPLINK` — rather than by a DOM path or a
+   * node id, because that is the name a person reviewing
+   * `scripts/fixtures/specimens.json` can check against the page. Rename the
+   * caption and the specimen goes missing, loudly, which is the right failure:
+   * the widest honest value for `UPLINK` is not automatically the widest
+   * honest value for whatever it was renamed to.
+   *
+   * A field with no specimen is *marked* with `data-yonder-mask` rather than
+   * returned, because the caller needs a Playwright locator and this needs an
+   * ancestor test — "not inside a widget that declared itself fixed" — which
+   * CSS has no combinator for and `element.closest` does in one call. One
+   * decision about what is hidden, made once, applied by one mechanism.
+   */
+  const words = (node) => (node?.textContent ?? "").replace(/\s+/g, " ").trim();
+  const captionOf = (el) => {
+    const cell = el.closest(".y-bar__cell");
+    if (cell !== null) return words(cell.querySelector(".y-bar__k"));
+    const row = el.closest(".y-ro__row");
+    if (row !== null) return words(row.querySelector(".y-ro__l"));
+    const gauge = el.closest(".y-gauge");
+    if (gauge !== null) return words(gauge.querySelector(".y-gauge__label"));
+    // A table cell's field is its column, not the cell: every row of one
+    // column holds the same kind of value, so one specimen is what a column
+    // is owed and the widest of them is what the column has to fit.
+    const td = el.closest("td");
+    if (td !== null) {
+      const columns = [...(td.parentElement?.children ?? [])];
+      const heads = td.closest("table")?.querySelectorAll("thead th") ?? [];
+      return words(heads[columns.indexOf(td)]);
+    }
+    return words(el.closest('[class*="nrdb-ui-widget"]')?.querySelector(".nrdb-ui-text-label"));
+  };
+  const kindOf = (el) => {
+    const widget = el.closest('[class*="nrdb-ui-widget"]');
+    if (widget === null) return [...el.classList].sort().join(".");
+    return [...widget.classList]
+      .filter((c) => (c.startsWith("nrdb-ui-") && c !== "nrdb-ui-widget") || c.startsWith("yonder-"))
+      .sort()
+      .join(".");
+  };
+  const fieldKey = (el) => {
+    const caption = captionOf(el);
+    return caption === "" ? kindOf(el) : `${kindOf(el)} · ${caption}`;
+  };
+
+  /**
+   * Writes the specimen without deleting the instrument around it.
+   *
+   * A gauge draws its unit as an element inside the value — `19` and a `<i>dB`
+   * — so `textContent = value` would delete the unit and photograph a reading
+   * that no page can produce. Only the element's own text is replaced.
+   */
+  const write = (el, value) => {
+    const texts = [...el.childNodes].filter((n) => n.nodeType === 3);
+    if (texts.length === 0) { el.textContent = value; return; }
+    texts[0].textContent = value;
+    for (const spare of texts.slice(1)) spare.textContent = "";
+  };
+
+  const live = new Set();
+  const readings = [];
+  const done = new Set();
+  for (const sel of liveSelectors) {
+    for (const el of document.querySelectorAll(sel)) {
+      if (el.closest(fixedSelector)) continue;
+      if (done.has(el)) continue;
+      done.add(el);
+      const key = fieldKey(el);
+      if (Object.prototype.hasOwnProperty.call(specimenValues, key)) {
+        write(el, specimenValues[key]);
+        readings.push({ key, state: "rendered" });
+        continue;
+      }
+      live.add(el);
+      el.setAttribute("data-yonder-mask", "");
+      readings.push({
+        key,
+        state: maskedKeys.includes(key) ? "masked" : "unspecified",
+        was: words(el).slice(0, 60),
+      });
+    }
+  }
 
   /**
    * Content that does not fit its box, either way it fails.
@@ -393,6 +603,133 @@ function measure([liveSelectors, fixedSelector]) {
       hidden: Math.round((1 - el.clientHeight / el.scrollHeight) * 100),
       text: (el.textContent ?? "").trim().slice(0, 80),
     });
+  }
+
+  /**
+   * Text wider than the box it is in (R-UI-23).
+   *
+   * The check above is the same question asked vertically, and it could not
+   * see this one at all: a value that does not fit *sideways* leaves
+   * `scrollHeight` exactly equal to `clientHeight` and every rule on this page
+   * passing. It is the defect spec §10 lists second — a readout row truncating
+   * — and it is invisible in a capture taken with the short value on the page,
+   * which is why the specimens above come first.
+   *
+   * Both outcomes fail. A box with `overflow: hidden` cuts the value off,
+   * with or without an ellipsis to admit it; a box without one lets the value
+   * escape over whatever is drawn beside it. A number an operator reads half
+   * of is worse than either, because half a number still looks like a number.
+   */
+  const truncated = [];
+  for (const el of document.querySelectorAll("*")) {
+    // The page's own sideways scroll is a page-level finding, reported once
+    // from `scrollWidth` below rather than once per element on the way down.
+    if (el === document.documentElement || el === document.body) continue;
+    if (el.clientWidth === 0) continue;
+    if (el.scrollWidth <= el.clientWidth + 1) continue;
+    // A table wider than its own scroller is a table doing its job. **Only
+    // the wrapper itself is skipped**, not what is inside it: a cell that
+    // cuts off its own text is the defect this check is for, and excluding
+    // the whole subtree — which is what the vertical check does — would hide
+    // exactly the case a log message or a rejection reason produces.
+    if (el.classList.contains("v-table__wrapper")) continue;
+    if (el.classList.contains("v-data-table__wrapper")) continue;
+    // **Text**, which is what the rule is about. A track, a rail or a band is
+    // drawn to a width and a pixel of rounding against its border is not a
+    // reading anybody is missing: `y-budget__track` reported 420px of nothing
+    // in 418px, which is 0% hidden and 100% noise.
+    if (words(el) === "") continue;
+    // An identity is a value to **copy**, not to read, and `YonderIdentity`
+    // gives it a copy control for exactly that reason: a GStreamer receive
+    // line is 2169px of text and no box on any console holds it. R-UI-25
+    // forbids an ellipsis on a *reading*, where shortening the value loses
+    // the answer; here the whole value is one press away and the ellipsis is
+    // the component saying so. Nothing else is exempt: this is one class,
+    // named, not a rule that any page can opt out of by adding an ellipsis.
+    if (el.classList.contains("y-id__v")) continue;
+    // The innermost box only. An ancestor of an overflowing box reports the
+    // same overflow one level out, and three lines about one defect is a gate
+    // people learn to skim.
+    if ([...el.children].some((c) => c.clientWidth > 0 && c.scrollWidth > c.clientWidth + 1)) continue;
+    // **An overlay is not content that does not fit.** A Vuetify slider thumb
+    // is a 20px circle that is the containing block for its own 31px value
+    // bubble, so `scrollWidth` counts a label the thumb was never meant to
+    // hold and the gate reported 35% of a slider hidden, twice a page. An
+    // absolutely positioned child is placed rather than laid out, and where a
+    // *positioned* box is placed relative to its parent's edge is the
+    // author's arrangement, not an overflow. Text is in flow, so a readout
+    // that does not fit still reports: this skips only the boxes where
+    // everything sticking out is out of flow.
+    {
+      const box = el.getBoundingClientRect();
+      const spilling = [...el.children].filter((c) => {
+        const r = c.getBoundingClientRect();
+        return r.right > box.right + 1 || r.left < box.left - 1;
+      });
+      const placed = spilling.length > 0
+        && spilling.every((c) => /absolute|fixed/.test(getComputedStyle(c).position));
+      if (placed) continue;
+    }
+    const style = getComputedStyle(el);
+    truncated.push({
+      // `keyOf` drops framework classes, which leaves nothing at all for a
+      // Vuetify element — the same hole `unreadable` below had, and the same
+      // fix: a finding with an empty key cannot be told from another finding
+      // with an empty key, by a reader or by the debt list.
+      key: keyOf(el) || `${el.tagName.toLowerCase()}.${[...el.classList].filter((c) => /^v-/.test(c)).slice(0, 2).join(".")}`,
+      how: /hidden|clip|auto|scroll/.test(style.overflowX) ? "cuts off" : "spills past",
+      visible: el.clientWidth,
+      content: el.scrollWidth,
+      hidden: Math.round((1 - el.clientWidth / el.scrollWidth) * 100),
+      text: words(el).slice(0, 80),
+    });
+  }
+
+  /**
+   * The viewport contract, spec §5 (R-UI-23, R-UI-12).
+   *
+   * Measured on every run and reported only under `--fold`, so the numbers
+   * cost nothing and the claim is made exactly where a run was taken at a
+   * width the contract is written for.
+   *
+   * The rail is measured by the caller, at the bottom of the page, because
+   * "still reachable while the deck scrolls" is a statement about a scrolled
+   * page and this function runs on an unscrolled one.
+   */
+  const parts = aboveTheFold.map(([name, sel]) => {
+    const el = document.querySelector(sel);
+    if (el === null) return { name, sel, present: false };
+    const r = el.getBoundingClientRect();
+    return {
+      name,
+      sel,
+      present: true,
+      inside: r.top >= -1 && r.left >= -1 && r.bottom <= window.innerHeight + 1 && r.right <= window.innerWidth + 1,
+      box: { x: round(r.x), y: round(r.y), w: round(r.width), h: round(r.height) },
+    };
+  });
+
+  /**
+   * A scrollbar inside the deck.
+   *
+   * One vertical page scroll is the contract; a deck that scrolls inside a
+   * page that also scrolls is two scrollbars for one list of controls, and
+   * the inner one is the one nobody finds. This is K-13 again, in the place
+   * spec §5 says it must not happen.
+   */
+  const nested = [];
+  for (const deck of document.querySelectorAll(deckSelector)) {
+    for (const el of [deck, ...deck.querySelectorAll("*")]) {
+      const style = getComputedStyle(el);
+      const scrollsDown = /auto|scroll/.test(style.overflowY) && el.scrollHeight > el.clientHeight + 2;
+      const scrollsAcross = /auto|scroll/.test(style.overflowX) && el.scrollWidth > el.clientWidth + 2;
+      if (!scrollsDown && !scrollsAcross) continue;
+      if (el.clientHeight === 0 || el.clientWidth === 0) continue;
+      nested.push({
+        key: keyOf(el) || `${el.tagName.toLowerCase()}.${[...el.classList].filter((c) => /^v-/.test(c)).slice(0, 2).join(".")}`,
+        across: scrollsAcross,
+      });
+    }
   }
 
   /**
@@ -513,24 +850,6 @@ function measure([liveSelectors, fixedSelector]) {
   }
 
   /**
-   * What the committed picture masks, decided here and marked on the page.
-   *
-   * Marked rather than returned, because the caller needs Playwright locators
-   * and this needs an ancestor test — "not inside a widget that declared
-   * itself fixed" — which CSS has no combinator for and `element.closest`
-   * does in one call. One attribute, set once, and the screenshot masks
-   * exactly the elements this decided on.
-   */
-  const live = new Set();
-  for (const sel of liveSelectors) {
-    for (const el of document.querySelectorAll(sel)) {
-      if (el.closest(fixedSelector)) continue;
-      live.add(el);
-      el.setAttribute("data-yonder-mask", "");
-    }
-  }
-
-  /**
    * The words on anything that has declared itself fixed.
    *
    * Geometry alone could not tell four of these states apart. The `Way out`
@@ -559,8 +878,32 @@ function measure([liveSelectors, fixedSelector]) {
     liveBoxes: [...live].map(boxOf).filter((b) => b.w > 0 && b.h > 0),
     fixed,
     clipped,
+    truncated,
     spanning,
     unreadable,
+    readings,
+    fold: { parts, nested },
+  };
+}
+
+/**
+ * Where the rail is once the page is at the bottom of its scroll.
+ *
+ * Its own pass, because it is the one measurement in the contract that is
+ * about a *scrolled* page: "the rail remains reachable while the deck
+ * scrolls" (spec §5) is not a claim any measurement of an unscrolled page can
+ * make, and a rail at the foot of a short page satisfies it by accident.
+ */
+function railAtBottom([railSelector]) {
+  const el = document.querySelector(railSelector);
+  if (el === null) return { present: false };
+  const r = el.getBoundingClientRect();
+  const round = (n) => Math.round(n);
+  return {
+    present: true,
+    inside: r.top >= -1 && r.bottom <= window.innerHeight + 1,
+    box: { x: round(r.x), y: round(r.y), w: round(r.width), h: round(r.height) },
+    viewport: { w: window.innerWidth, h: window.innerHeight },
   };
 }
 
@@ -584,7 +927,7 @@ const seen = new Set();
 
 const browser = await chromium.launch();
 const context = await browser.newContext({
-  viewport: VIEWPORT,
+  viewport,
   deviceScaleFactor: 1,
   reducedMotion: "reduce",
   colorScheme: "light",
@@ -603,6 +946,8 @@ let failures = 0;
 let changed = 0;
 /** What every captured page rendered, for the whole-run checks at the end. */
 const seenText = [];
+/** Every field name a reading was found under, for the stale-specimen check. */
+const fieldsSeen = new Set();
 const note = (s) => process.stdout.write(s + "\n");
 
 for (const page of pages) {
@@ -684,15 +1029,43 @@ for (const page of pages) {
     }
   }
 
-  const shape = await tab.evaluate(measure, [LIVE, FIXED]);
+  // **Read before anything is rewritten.** The specimens below replace the
+  // text of every reading on the page, and the R-SEC-10 check further down
+  // asks whether the device's real RTSP password is in the page's HTML — so
+  // taking the HTML after the substitution would ask that question of a page
+  // the gate had already overwritten, and it would always answer no. The
+  // guard would still be there, still green, and checking nothing.
+  const html = await tab.content();
+
+  // **From the top of the page, always.** Every box in the shape manifest is a
+  // `getBoundingClientRect`, which is measured from the viewport and not from
+  // the document — so a page that happens to be scrolled records a different
+  // geometry for the same layout. Reaching a deck presses a soft key on the
+  // rail, and the browser scrolls that key into view to click it: `Camera ·
+  // Setup` was measured 366 px down its own page, and the viewport contract
+  // below duly reported the picture as outside the viewport when it was in it.
+  await tab.evaluate(() => { window.scrollTo(0, 0); });
+  await tab.waitForTimeout(150);
+
   const stem = `${page.name}.${palette}`;
 
-  // The picture. Masked for the committed copy — a load average changes
-  // between two runs and would leave the file permanently dirty — and whole
-  // for the artifact a person actually looks at.
+  // **The page as it really was**, before a specimen is written into it and
+  // before anything is masked. The committed copy below is the layout under
+  // the hardest value each field can hold, which is a different and equally
+  // honest picture — and it is not a portrait of one board in one state, so
+  // this is the copy to look at when the question is what the device was
+  // actually doing.
+  await tab.screenshot({ path: join(artifacts, `${stem}.png`), fullPage: true });
+
+  const shape = await tab.evaluate(measure, [LIVE, FIXED, specimens.fields, specimens.masked, ABOVE_THE_FOLD, DECK]);
+  for (const reading of shape.readings) fieldsSeen.add(reading.key);
+
+  // The committed picture: every reading at its widest honest specimen, and a
+  // mask over the few that have none — a load average changes between two runs
+  // and would leave the file permanently dirty.
   //
   // The elements were marked by `measure()` a moment ago rather than selected
-  // again here, so there is one decision about what is live rather than the
+  // again here, so there is one decision about what is hidden rather than the
   // same list applied twice by two mechanisms that can drift.
   const masks = [tab.locator("[data-yonder-mask]")];
   await tab.screenshot({
@@ -706,7 +1079,28 @@ for (const page of pages) {
     // through is not a mask, it is a tint.
     maskColor: "#8b8f94",
   });
-  await tab.screenshot({ path: join(artifacts, `${stem}.png`), fullPage: true });
+
+  // ---- the viewport contract, spec §5 ----
+  //
+  // The viewport on its own, and then the page scrolled to the bottom. The
+  // full-page picture above proves every control is *reachable*; neither of
+  // these two is evidence for the other, and the requirement asks for both.
+  let rail = null;
+  if (fold) {
+    await tab.screenshot({
+      path: join(refs, "capture", `${stem}.fold.png`),
+      fullPage: false,
+      mask: masks,
+      maskColor: "#8b8f94",
+    });
+    await tab.screenshot({ path: join(artifacts, `${stem}.fold.png`), fullPage: false });
+    await tab.evaluate(() => { window.scrollTo(0, document.documentElement.scrollHeight); });
+    // A sticky rail is placed by the browser after the scroll settles, so a
+    // measurement taken in the same tick is of where it used to be.
+    await tab.waitForTimeout(300);
+    rail = await tab.evaluate(railAtBottom, [RAIL]);
+    await tab.evaluate(() => { window.scrollTo(0, 0); });
+  }
 
   // ---- R-SEC-10, and this one is a check rather than a mask ----
   //
@@ -717,7 +1111,6 @@ for (const page of pages) {
   // what proves the real one never got in.
   //
   // Same shape as K-32: a rule nobody notices is broken until it already is.
-  const html = await tab.content();
   seenText.push(html);
   const secret = deviceSecret("rtsp_password");
   if (secret !== null && html.includes(secret)) {
@@ -759,6 +1152,62 @@ for (const page of pages) {
       `${page.title} (${palette}) ${c.how}: ${c.content}px of content in ${c.visible}px (${c.hidden}%)`,
       `${c.key}  "${c.text}"`,
     );
+  }
+  for (const t of shape.truncated) {
+    report(
+      { rule: "truncated", page: page.name, palette, key: t.key },
+      `${page.title} (${palette}) ${t.how}: ${t.content}px of text in ${t.visible}px (${t.hidden}%)`,
+      `${t.key}  "${t.text}"`,
+    );
+  }
+  // A reading nobody has chosen a widest value for. Not an error in the page —
+  // an error in `scripts/fixtures/specimens.json`, which is why it names the
+  // key to add rather than the widget to fix.
+  for (const r of shape.readings.filter((x) => x.state === "unspecified")) {
+    report(
+      { rule: "unspecified", page: page.name, palette, key: r.key },
+      `${page.title} (${palette}) photographs a masked reading with no specimen`,
+      `add "${r.key}" to ${join("scripts/fixtures", "specimens.json")}, or list it under "masked" with a reason  (it reads "${r.was}")`,
+    );
+  }
+  if (fold) {
+    for (const part of shape.fold.parts) {
+      if (!part.present) {
+        report(
+          { rule: "fold", page: page.name, palette, key: part.name },
+          `${page.title} (${palette}) has no ${part.name} on it at ${shape.viewport.w}x${shape.viewport.h}`,
+          `spec §5 puts it above the fold; nothing matched ${part.sel}`,
+        );
+        continue;
+      }
+      if (part.inside) continue;
+      report(
+        { rule: "fold", page: page.name, palette, key: part.name },
+        `${page.title} (${palette}) draws ${part.name} outside the ${shape.viewport.w}x${shape.viewport.h} viewport`,
+        `${part.box.w}x${part.box.h} at ${part.box.x},${part.box.y}`,
+      );
+    }
+    for (const n of shape.fold.nested) {
+      report(
+        { rule: "nested", page: page.name, palette, key: n.key },
+        `${page.title} (${palette}) scrolls ${n.across ? "sideways" : "inside"} the deck: ${n.key}`,
+        "one vertical page scroll, and no scroller of its own inside it (spec §5)",
+      );
+    }
+    if (rail === null || !rail.present) {
+      note(`  FAIL  ${page.title} (${palette}) has no rail to keep reachable`);
+      failures += 1;
+    } else if (!rail.inside) {
+      note(`  FAIL  ${page.title} (${palette}) puts the rail outside the viewport at the bottom of the page`);
+      note(`          ${rail.box.w}x${rail.box.h} at ${rail.box.x},${rail.box.y} in ${rail.viewport.w}x${rail.viewport.h}`);
+      failures += 1;
+    } else {
+      note(`  ok    ${page.title} (${palette}) keeps the rail in the viewport at the bottom of the page`);
+    }
+    const held = shape.fold.parts.filter((x) => x.present && x.inside);
+    if (held.length === shape.fold.parts.length) {
+      note(`  ok    ${page.title} (${palette}) fits ${held.map((x) => x.name).join(", ")} above the fold`);
+    }
   }
   for (const a of shape.spanning) {
     report(
@@ -890,6 +1339,46 @@ for (const e of stale) {
 }
 
 /**
+ * R-SEC-10, asked of the specimen file itself.
+ *
+ * These values are written into pages that are screenshotted and committed, so
+ * a specimen carrying a credential is the same leak the page check further up
+ * exists to prevent, arriving by the one route that check cannot see: it reads
+ * the page *before* the substitution, precisely so the substitution cannot
+ * hide a real value, which means it is also reading it before a specimen could
+ * introduce one.
+ */
+{
+  const secret = deviceSecret("rtsp_password");
+  const carrying = secret === null
+    ? []
+    : Object.entries(specimens.fields).filter(([, value]) => String(value).includes(secret));
+  for (const [key] of carrying) {
+    note(`  FAIL  the specimen for "${key}" carries this device's RTSP credential`);
+    note(`          it would be rendered into a committed page image (R-SEC-10)`);
+    failures += 1;
+  }
+}
+
+/**
+ * A specimen for a field that no page has.
+ *
+ * The same rule the accepted-violations list is held to, for the same reason:
+ * a value nobody is checking looks exactly like a value that is being checked,
+ * and the file stops being a description of the console. Only on a full pass —
+ * a run of one page has not been near the other ten, and calling their
+ * specimens dead would delete a real one.
+ */
+if (only === undefined) {
+  const declared = [...Object.keys(specimens.fields), ...specimens.masked];
+  for (const key of declared.filter((k) => !fieldsSeen.has(k))) {
+    note(`  FAIL  no reading on any page is called "${key}"`);
+    note(`          nothing is photographed by it — delete that entry from ${join("scripts/fixtures", "specimens.json")}`);
+    failures += 1;
+  }
+}
+
+/**
  * The claim `--synthetic-cameras` exists to make true.
  *
  * The fixture is only worth having if the camera pages were actually
@@ -918,7 +1407,11 @@ if (syntheticCameras !== undefined) {
 }
 
 note("");
-note(`  captured ${pages.length} pages in the ${palette} palette`);
+note(`  captured ${pages.length} pages in the ${palette} palette at ${viewport.width}x${viewport.height}`);
+{
+  const rendered = [...fieldsSeen].filter((k) => Object.prototype.hasOwnProperty.call(specimens.fields, k));
+  note(`  ${rendered.length} of ${fieldsSeen.size} field(s) photographed at their widest honest value`);
+}
 if (failures) note(`  ${failures} rule failure(s)`);
 if (changed) note(`  ${changed} page(s) changed shape without being accepted`);
 process.exit(failures + changed === 0 ? 0 : 1);

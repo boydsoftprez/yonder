@@ -1,0 +1,135 @@
+{
+  "platform": "darwin",
+  "viewport": {
+    "w": 1024,
+    "h": 768
+  },
+  "widgets": [
+    {
+      "key": "nrdb-ui-group#0",
+      "box": {
+        "x": 268,
+        "y": 76,
+        "w": 744,
+        "h": 442
+      }
+    },
+    {
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-picture",
+      "box": {
+        "x": 285,
+        "y": 93,
+        "w": 710,
+        "h": 408
+      }
+    },
+    {
+      "key": "nrdb-ui-group#1",
+      "box": {
+        "x": 268,
+        "y": 530,
+        "w": 744,
+        "h": 142
+      }
+    },
+    {
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-databar",
+      "box": {
+        "x": 285,
+        "y": 547,
+        "w": 710,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-text.nrdb-ui-widget",
+      "box": {
+        "x": 285,
+        "y": 607,
+        "w": 710,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-group.yonder-deck-live#0",
+      "box": {
+        "x": 268,
+        "y": 684,
+        "w": 366,
+        "h": 377
+      }
+    },
+    {
+      "key": "nrdb-ui-slider.nrdb-ui-widget#0",
+      "box": {
+        "x": 285,
+        "y": 756,
+        "w": 332,
+        "h": 108
+      }
+    },
+    {
+      "key": "nrdb-ui-slider.nrdb-ui-widget#1",
+      "box": {
+        "x": 285,
+        "y": 876,
+        "w": 332,
+        "h": 108
+      }
+    },
+    {
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-annunciator",
+      "box": {
+        "x": 285,
+        "y": 996,
+        "w": 332,
+        "h": 48
+      }
+    },
+    {
+      "key": "nrdb-ui-group.yonder-deck-live#1",
+      "box": {
+        "x": 646,
+        "y": 684,
+        "w": 366,
+        "h": 377
+      }
+    },
+    {
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-facts",
+      "box": {
+        "x": 663,
+        "y": 756,
+        "w": 332,
+        "h": 228
+      }
+    },
+    {
+      "key": "nrdb-ui-group.yonder-deck-live.yonder-rail",
+      "box": {
+        "x": 268,
+        "y": 1073,
+        "w": 744,
+        "h": 142
+      }
+    },
+    {
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-softkeys",
+      "box": {
+        "x": 285,
+        "y": 1090,
+        "w": 469,
+        "h": 108
+      }
+    },
+    {
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-holdkey",
+      "box": {
+        "x": 766,
+        "y": 1090,
+        "w": 229,
+        "h": 108
+      }
+    }
+  ]
+}

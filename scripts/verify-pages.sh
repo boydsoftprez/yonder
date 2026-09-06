@@ -18,6 +18,12 @@
 # checks that nothing is clipped and no action spans its surface, and fails when
 # a page changed shape without somebody accepting it.
 #
+# Since R-UI-23 every reading in those captures is its **widest honest value**
+# (scripts/fixtures/specimens.json) rather than a grey box, so the pictures show
+# what each page does with the longest value its fields can carry — and the
+# camera pages are captured again at the two widths spec §5 writes a viewport
+# contract for, with the viewport photographed separately from the full page.
+#
 # What it does NOT prove: that a widget is usable on a tablet, that a reading is
 # legible in sunlight, or anything at all about hardware, systemd,
 # NetworkManager or a radio. Those need a board and a person holding it.
@@ -1187,6 +1193,50 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
         fi
     }
 
+    # ---------------------------------------------------------------------
+    # The viewport contract, spec §5 (R-UI-23, R-UI-12).
+    #
+    # Every capture above is at 1280x900, which is what makes the shape
+    # references comparable. It is also a width nobody flies with. Spec §5
+    # names two surfaces the camera pages have to hold their shape on and
+    # states a different promise for each: a notebook at 1440x900 with the
+    # sidebar open, where the picture, the Aim panel and the shutter key fit
+    # above the fold and the deck may run past it; and a landscape tablet
+    # below the 1100 px breakpoint, where the Aim panel drops beneath the
+    # picture and the groups flow into fewer columns.
+    #
+    # **A tall full-page PNG is not evidence that anything fits above the
+    # fold**, which is the sentence spec §13 ends that paragraph with, so
+    # `--fold` photographs the viewport on its own beside the full page and
+    # asserts what is inside it.
+    #
+    # Only the camera pages, because that is what the contract is written
+    # about — the picture, the Aim panel, the shutter key, one deck and one
+    # rail. Every other page is checked for sideways scroll and clipped text
+    # at 1280 like everything else.
+    #
+    # Each width records a shape reference of its own, under its own `--as`
+    # name, so a 1440 rendering is never compared against a 1024 one.
+    capture_fold() {
+        # $1 palette, $2 surface name, $3 viewport
+        for camera_page in camera-live camera-setup; do
+            if node "$REPO/scripts/capture-pages.mjs" \
+                    --base-url "http://127.0.0.1:$PORT" \
+                    --password "$PASSWORD" \
+                    --palette "$1" \
+                    --only "$camera_page" \
+                    --as "$camera_page-$2" \
+                    --viewport "$3" \
+                    --fold \
+                    --artifacts "$REPO/vendor/capture" \
+                    ${ACCEPT_SHAPE:+--accept}; then
+                ok "the $1 palette: $camera_page holds its shape on a $2 at $3"
+            else
+                bad "the $1 palette: $camera_page on a $2 at $3, see above"
+            fi
+        done
+    }
+
     if reach_theme night; then
         ok "the device reached the night palette through /ui/theme"
         capture night
@@ -1199,6 +1249,8 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
         capture_unplugged night
         capture_status_pending night
         capture_pending_radio night
+        capture_fold night notebook 1440x900
+        capture_fold night tablet 1024x768
     else
         bad "the console never regenerated theme.css as night, so it was not captured"
     fi
@@ -1214,6 +1266,8 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
         capture_unplugged day
         capture_status_pending day
         capture_pending_radio day
+        capture_fold day notebook 1440x900
+        capture_fold day tablet 1024x768
     else
         bad "the console is still in the night palette; a held run will be wrong"
     fi

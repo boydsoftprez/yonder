@@ -287,10 +287,34 @@ committed reference is a `.darwin.json` and the runner is Linux, so the gate tak
 *record* branch and writes `.linux.json` files that are **untracked** — which `git diff`
 does not see, and did not, on every run since the job was written.
 
-**A picture**, in `docs/console/capture/`, written every run. The committed copy masks live
-readings — a load average changes between two runs and would leave the file permanently
-dirty — so what it records is the layout. The unmasked copy goes to `vendor/capture/`, which
-CI uploads as an artifact.
+**A picture**, in `docs/console/capture/`, written every run. Since R-UI-23 every reading on
+the committed copy is its **widest honest value** rather than a grey box: one specimen per
+field in `scripts/fixtures/specimens.json`, each naming where its value comes from — a bound
+in `schema/config.ts`, the longest branch of the function that composes the sentence, or the
+widest reading a board has actually produced. The file is still identical on two runs, which
+is what the masking was for, and it is now a picture of the hardest case rather than of the
+easiest: `2000 kb/s` fits the readout row and `20000 kb/s`, which the schema allows, does
+not, and nothing in this repository had ever drawn one.
+
+A page of specimens is not a portrait of a board. Every field is at its own widest, so the
+lamp can read `NOTHING` beside a sentence about a path that is carrying traffic — the
+picture is the layout under the hardest content each field can hold. The copy under
+`vendor/capture/`, which CI uploads as an artifact, is taken **before** any of that is
+written and is the page as it really was.
+
+A reading with no specimen is masked, as before, and **named on every run**, so the list of
+what is still hidden is visible rather than implied and can only shrink. A reading that is
+neither specified nor listed under `masked` with a reason fails the build and names the key
+to add; an entry on either list that matches no reading on any page also fails, the way a
+stale accepted violation does.
+
+**The text rule this made possible.** A value that does not fit *sideways* leaves
+`scrollHeight` exactly equal to `clientHeight`, so the clipping rule above could not see it
+at all — and a capture taken with the short value on the page shows nothing either way. With
+the widest value rendered, a box that cuts its text off or lets it escape over what is drawn
+beside it fails. `YonderIdentity`'s value is the one exemption, named in the check: a
+GStreamer receive line is 2169 px of text that no box on any console holds, and the component
+gives it a copy control for exactly that reason.
 
 **And a page in more than one state, where it has them.** R-UI-12 says a surface that hides
 part of itself is captured in each of those parts. A tabbed page hides its other tabs, which
@@ -388,25 +412,53 @@ status-pending-radio.day.png                and one only the device can confirm
 status-psk-changed.day.png                  the same board, on a passphrase the operator set
 ```
 
-The countdown is masked in the committed picture and only there: it is the one annunciator
-caption on this console that is a *reading*, so without masking that file would differ by a
-second or two on every run. The widget says so about itself with `className: "yonder-live"`,
-which is what the mask list matches — the lamp and its box are untouched, and the unmasked
-copy under `vendor/capture/` carries the digits. The *caption* goes whole, the word with the
-digits: the annunciator draws both in one element and there is no smaller one to mask. The
-two lines under it wear `yonder-fixed`, so what the banner is about is still readable.
+The countdown is one of the few readings still masked, and `specimens.json` says why: it has
+a widest honest value — the full window, at three digits — and writing it would put `CHANGE
+PENDING` on every page captured with nothing pending, which is the one thing about this
+annunciator a picture has to get right. The pending captures exist to photograph the other
+state. The widget says so about itself with `className: "yonder-live"`, which is what the
+mask list matches — the lamp and its box are untouched, and the copy under `vendor/capture/`
+carries the digits. The *caption* goes whole, the word with the digits: the annunciator draws
+both in one element and there is no smaller one to mask. The two lines under it wear
+`yonder-fixed`, so what the banner is about is still readable.
+
+The five gauges are the other exemption. A gauge draws the same number twice — once as text
+and once as a needle — and a specimen written from outside moves only one of them, which
+would commit a picture of a needle at one value with another written beside it. A
+widest-value gauge has to be driven through the daemon.
 
 `className: "yonder-fixed"` is the mirror of that. `If you lose this console` wears it, and
-so does every row of `Way out`. Data-bar cells and text values are masked as *kinds*,
-because most of them carry readings; those two panels carry none — an SSID, an address, a
-hostname and either the published passphrase or the sentence that stands in for a changed
-one; an interface name from a device list and one of five fixed sentences. Masked, each
-panel's states were the same picture, which is most of the reason for taking the second one.
+so does every row of `Way out`. Data-bar cells and text values are found as *kinds*, because
+most of them carry readings; those two panels carry none — an SSID, an address, a hostname
+and either the published passphrase or the sentence that stands in for a changed one; an
+interface name from a device list and one of five fixed sentences. It exempts them from both
+halves: no specimen is written over them and no mask is painted on them, so each panel's
+states are different pictures, which is most of the reason for taking the second one.
 
 `capture-pages.mjs --only <page> --as <name>` is what takes one of them, so a state capture
 is held to exactly the rules and the shape reference every other page is. The shape manifest
 is what proves the degradation rather than the picture: the two gauges appear in the
 without-modem reference carrying `d-none` and a zero box, and the panel is 120 px shorter.
+
+### The viewport contract
+
+Every capture above is taken at 1280×900, which is what makes the shape references
+comparable and is also a width nobody flies with. The camera pages are captured again at the
+two surfaces the console is designed for: a notebook at 1440×900 with the sidebar open,
+where the picture, the Aim panel and the shutter key have to fit above the fold and the deck
+may run past it; and a landscape tablet at 1024×768, below the 1100 px breakpoint where the
+Aim panel drops beneath the picture.
+
+Those runs photograph the **viewport on its own**, beside the full page, because a tall
+full-page PNG is not evidence that anything fits above the fold — it is evidence that
+everything is reachable, which is a different claim and also worth having. Each records a
+shape reference under its own name, so a 1440 rendering is never compared against a 1024 one.
+
+Three assertions come with them: each named part is inside the viewport (and a part that is
+not on the page at all is a finding, not a pass — a check that cannot tell *nothing to find*
+from *did not look* is not a check); nothing inside a deck has a scrollbar of its own, since
+one vertical page scroll is the contract and an inner scrollbar is the one nobody finds; and
+the rail is still in the viewport with the page scrolled to the bottom.
 
 ```
 ./scripts/verify-pages.sh                    # capture, and gate
