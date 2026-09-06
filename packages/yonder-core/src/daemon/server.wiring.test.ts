@@ -36,7 +36,39 @@ import {
 } from "../net/profiles.js";
 import { loadConfig } from "../config/load.js";
 import { saveConfig } from "../config/save.js";
-import { DEFAULT_CONFIG } from "../schema/config.js";
+import { DEFAULT_CONFIG, type Camera } from "../schema/config.js";
+import { compose } from "../video/pipeline.js";
+import { noCapabilities } from "../video/capability.js";
+import { RTSP_BASE } from "../media/ports.js";
+import type { Encoder } from "../video/probe/encoder.js";
+
+/**
+ * What `buildRenderers` probes for on a board with no `v4l2-ctl` to answer:
+ * the fake runner above returns code 0 and empty output for every candidate
+ * node, so `probeEncoder` falls through to software. The wiring test composes
+ * with the same answer, so the line it starts a pipeline on is the line the
+ * renderer will compose for an unchanged configuration.
+ */
+const WIRED_ENCODER: Encoder = {
+  element: "x264enc", device: null, hardware: false, codec: "h264",
+  detail: "software H.264 (x264enc) — this board offers no hardware encoder",
+};
+
+function wiredCamera(kbps: number): Camera {
+  return {
+    id: "cam0", name: "Nose", source: "usb",
+    device: "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0",
+    enabled: true, autostart: false,
+    width: 1280, height: 720, framerate: 30, codec: "h264", bitrate_kbps: kbps,
+    preview: {
+      mode: "fixed", size: "auto", ladder_top: "1280x720", ladder_bottom: "640x360",
+      floor_kbps: 300, ceiling_kbps: 2000, bitrate_kbps: 400, framerate: 15,
+    },
+    controls: { brightness: null, contrast: null, rotation: 0 },
+    outputs: [],
+    stream: { mode: "fixed", floor_kbps: kbps, ceiling_kbps: kbps },
+  } as never;
+}
 import type { CommandRunner } from "../net/runner.js";
 
 let dir: string;
@@ -52,7 +84,7 @@ describe("buildRenderers", () => {
       runner: run,
       remoteStatePath: join(dir, "remote.json"),
     });
-    expect(renderers.map((r) => r.name)).toEqual(["hostname", "network", "remote"]);
+    expect(renderers.map((r) => r.name)).toEqual(["hostname", "network", "remote", "video"]);
   });
 
   /**
@@ -69,7 +101,7 @@ describe("buildRenderers", () => {
       remoteStatePath: join(dir, "remote.json"),
     });
     expect(built.consoleRenderer).toBeUndefined();
-    expect(built.renderers.map((r) => r.name)).toEqual(["hostname", "network", "remote"]);
+    expect(built.renderers.map((r) => r.name)).toEqual(["hostname", "network", "remote", "video"]);
   });
 
   /**
@@ -87,7 +119,7 @@ describe("buildRenderers", () => {
       remoteStatePath: join(dir, "remote.json"),
       console: { settings: join(dir, "console", "settings.js") },
     });
-    expect(built.renderers.map((r) => r.name)).toEqual(["hostname", "network", "remote", "console"]);
+    expect(built.renderers.map((r) => r.name)).toEqual(["hostname", "network", "remote", "console", "video"]);
     expect(built.consoleRenderer).toBeDefined();
   });
 
@@ -131,7 +163,8 @@ describe("buildRenderers", () => {
       console: { settings: join(dir, "console", "settings.js") },
       mediaConfigPath: join(dir, "mediamtx.yml"),
     });
-    expect(built.renderers.map((r) => r.name)).toEqual(["hostname", "network", "remote", "console", "media"]);
+    expect(built.renderers.map((r) => r.name))
+      .toEqual(["hostname", "network", "remote", "console", "media", "video"]);
     expect(built.mediaRenderer).toBeDefined();
   });
 
@@ -162,6 +195,61 @@ describe("buildRenderers", () => {
       console: { settings: join(dir, "console", "settings.js") },
     });
     expect(built.renderers[0]?.name).toBe("hostname");
+  });
+
+  /**
+   * **The join K-48's fix actually depends on, tested where it lives.**
+   *
+   * `PipelineRenderer` has its own file of tests and every one of them would
+   * stay green with this renderer left out of the sequence, or built over a
+   * second supervisor that holds no running pipeline — which is the shape
+   * this branch has now been bitten by five times, most recently with 1916
+   * tests passing over a feature that did nothing at all. So this asserts the
+   * two facts the class's own tests cannot: that the daemon puts it in the
+   * list, and that the supervisor it drives is the same object the camera
+   * routes are handed.
+   *
+   * The spawner is injected for the reason the runner is: nothing in this
+   * suite may start a real `gst-launch-1.0`.
+   */
+  it("wires the pipeline renderer to the supervisor the camera routes are given", async () => {
+    const run: CommandRunner = async () => ({ code: 0, stdout: "", stderr: "" });
+    const spawned: string[][] = [];
+    const killed: number[] = [];
+    let pid = 0;
+    const built = buildRenderers({
+      secretsPath: join(dir, "secrets.yaml"),
+      runner: run,
+      remoteStatePath: join(dir, "remote.json"),
+      spawner: (argv) => {
+        const mine = ++pid;
+        spawned.push([...argv]);
+        return { kill: () => { killed.push(mine); }, on: () => { /* never exits */ } };
+      },
+    });
+
+    const video = built.renderers.find((r) => r.name === "video");
+    expect(video).toBeDefined();
+    // Last of all: a camera that cannot be restarted must be able to cost
+    // nothing behind it, and nothing is behind it.
+    expect(built.renderers[built.renderers.length - 1]).toBe(video);
+
+    // A camera on the air, started the way POST /cameras/:id/run starts one:
+    // through the supervisor buildRenderers returned and the routes are
+    // handed, composed against the same RTSP base the route composes with.
+    const cam = wiredCamera(2000);
+    built.supervisor.start("cam0", compose({
+      camera: cam, capabilities: noCapabilities(), encoder: WIRED_ENCODER, rtspBase: RTSP_BASE,
+    }));
+    expect(spawned).toHaveLength(1);
+    expect(spawned[0]!.join(" ")).toContain("x264enc name=enc-stream bitrate=2000");
+
+    // The operator halves it and the apply lands.
+    await video!.render({ ...DEFAULT_CONFIG, cameras: [wiredCamera(1000)] } as never);
+
+    expect(killed).toEqual([1]);
+    expect(spawned).toHaveLength(2);
+    expect(built.supervisor.argv("cam0")?.join(" ")).toContain("x264enc name=enc-stream bitrate=1000");
   });
 });
 

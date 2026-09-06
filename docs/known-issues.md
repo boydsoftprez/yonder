@@ -1360,6 +1360,40 @@ had to hold for the retune to work and only one was checked.
 
 See K-53 for what closes it.
 
+**Update — the respawn is built, and it is the sanctioned path.** A live
+retune is blocked for as long as `gst-launch-1.0` carries the pipeline, and
+the GStreamer composer is being replaced by ffmpeg anyway
+(`docs/superpowers/specs/2026-09-05-rockchip-hardware-encode-design.md`), so a
+control host built now would be thrown away. The spec's own control table
+already says what happens meanwhile — *the current implementation respawns*
+for a fixed bitrate, *pipeline respawn on Apply* for a resolution — and a
+respawn survives that pivot untouched.
+
+`video/renderer.ts` is that respawn, as a `Renderer`. For each configured
+camera it composes the line the applied configuration implies and compares it,
+token for token, against the line `supervisor.argv(id)` says the running
+pipeline was actually started with. Differ, `stop()` then `start()`; same,
+nothing at all. Being a renderer is what buys the confirmation window and the
+rollback: a bitrate the operator does not confirm takes the pipeline back with
+it, which is R-CFG-03 applied to the picture. It knows which fields matter by
+not knowing — nothing in it reads a field name — so a field added to the
+launch line is carried with no edit there.
+
+**Two things it does not do, both deliberate.** It never starts a camera that
+is not running: Start and Stop survive no apply (R-CTL-01), and a
+configuration change must not put a camera on the air that the operator took
+off it. And it reaches no camera it cannot see running — `argv()` is null for a
+stopped camera and **also null in the gap between a failed spawn and its
+retry**, so a camera that is in backoff when an apply lands keeps climbing the
+old ladder, and a rollback arriving in that gap does not bring it back. That
+window is one backoff step wide (1 s to 30 s) and closing it needs the
+supervisor to distinguish *the operator stopped this* from *this is between
+attempts*, which `argv()` deliberately does not.
+
+**Not yet proven on the board.** What closes this entry is the measurement
+that opened it, run again: change a bitrate on Setup, apply, confirm, and read
+`video_bitrate=` out of the running `gst-launch-1.0` command line.
+
 ### K-49 · Adaptive is offered, nothing implements it, and choosing it freezes the rate
 
 **Status:** Open · **Requirements:** R-UI-20, R-VID-07

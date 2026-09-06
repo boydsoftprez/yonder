@@ -44,3 +44,20 @@ export const SRT_PORT = 8890;
  * them: it is the reason there are four of these and not an expression.
  */
 export const WEBRTC_LOCAL_UDP_PORT = 8189;
+
+/**
+ * Where a pipeline publishes: mediamtx, on loopback.
+ *
+ * No credential in it, and that is deliberate. `media/config.ts` grants
+ * publish to the anonymous user from 127.0.0.1 only, so the board's own
+ * pipeline needs none — and a credential here would be a credential in the
+ * argv of a long-running process, which is a credential in `ps` output.
+ *
+ * **One constant, because two would cost a picture.** `POST /cameras/:id/run`
+ * composes a launch line with it, and `video/renderer.ts` composes the line a
+ * new configuration implies with it and restarts the camera when the two
+ * differ. Restated on either side, every apply would find every running
+ * pipeline different from the line it now composes and would drop every
+ * camera's picture — on an aircraft, for a change to the Wi-Fi.
+ */
+export const RTSP_BASE = `rtsp://127.0.0.1:${RTSP_PORT}`;

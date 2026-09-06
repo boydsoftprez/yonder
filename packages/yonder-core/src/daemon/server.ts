@@ -31,7 +31,8 @@ import { networkState } from "../net/state.js";
 import { readRemoteState } from "../remote/state.js";
 import { RemoteRenderer } from "../remote/renderer.js";
 import { MediaRenderer, MEDIA_CONFIG_PATH } from "../media/renderer.js";
-import { Supervisor, systemSpawner } from "../video/supervisor.js";
+import { Supervisor, systemSpawner, type ProcessSpawner } from "../video/supervisor.js";
+import { PipelineRenderer } from "../video/renderer.js";
 import { detectCameras, probeCamera } from "../video/probe/camera.js";
 import { probeEncoder, type Encoder } from "../video/probe/encoder.js";
 import { applyControls } from "../video/controls.js";
@@ -198,6 +199,18 @@ export interface BuildRenderersOptions {
    * a real media server's configuration, credential and all.
    */
   mediaConfigPath?: string;
+  /**
+   * How a pipeline is started. Defaults to `systemSpawner`, which runs
+   * `gst-launch-1.0`.
+   *
+   * Injected for exactly the reason `runner` is: **no test in this repository
+   * spawns a real pipeline.** Without it, the only way to see whether
+   * `PipelineRenderer` is genuinely wired to the supervisor the camera routes
+   * use would be to start `gst-launch-1.0` on the machine running the suite —
+   * so the join would go untested, which is the failure this renderer exists
+   * to end, one layer up.
+   */
+  spawner?: ProcessSpawner;
 }
 
 /**
@@ -241,6 +254,13 @@ export function buildRenderers(opts: BuildRenderersOptions): {
    * Not a renderer. Starting and stopping a stream is a runtime action that
    * survives no apply and no reboot (R-CTL-01), so it has no place in a
    * sequence whose whole purpose is to make a configuration true.
+   *
+   * **A renderer drives it, which is a different claim.** `PipelineRenderer`
+   * below restarts a pipeline that is *already running* when the applied
+   * configuration would compose a different launch line for it (K-48), and
+   * starts nothing that is not running. The runtime action stays the
+   * operator's; what the apply owns is that a camera on the air is on the air
+   * with the settings that were kept.
    */
   supervisor: Supervisor;
   generated: string[];
@@ -328,13 +348,43 @@ export function buildRenderers(opts: BuildRenderersOptions): {
   // Nothing is spawned by constructing it: a Supervisor holds no process
   // until something calls start(), which only POST /cameras/:id/run does.
   const supervisor = new Supervisor({
-    spawner: systemSpawner,
+    spawner: opts.spawner ?? systemSpawner,
     ...(opts.clock === undefined ? {} : { clock: opts.clock }),
+  });
+
+  /**
+   * K-48: an applied bitrate reaching the running encoder.
+   *
+   * **Last of all, behind the media server**, for two reasons that point the
+   * same way. A pipeline publishes into mediamtx, so the server has to be in
+   * the shape this configuration asks for before a pipeline is restarted into
+   * it. And a camera that cannot be restarted must be able to cost nothing
+   * else: nothing runs behind this, so nothing is at risk from it — the same
+   * reasoning that put the media renderer behind the console, one step
+   * further along.
+   *
+   * **Unconditional, unlike the console and media renderers.** Those are
+   * built only when a caller says where their file goes, because a defaulted
+   * path is a path a test writes to by accident. This one writes nothing and
+   * reads no path: it holds the supervisor built above and does nothing at
+   * all until something has actually started a pipeline. A renderer that is
+   * assembled only sometimes is a fix that is applied only sometimes, and
+   * this branch has been bitten by exactly that before.
+   */
+  const pipelineRenderer = new PipelineRenderer({
+    supervisor,
+    // The same probe the start route composes with, over the same runner as
+    // everything else here — so a test injecting a fake runner cannot reach a
+    // real `v4l2-ctl`, and the line this renderer builds for a camera and the
+    // line a Start would build for it cannot differ by their encoder.
+    encoder: () => probeEncoder({ runner: opts.runner ?? systemRunner }),
+    log,
   });
 
   const renderers: Renderer[] = [hostname, renderer, remoteRenderer];
   if (consoleRenderer !== undefined) renderers.push(consoleRenderer);
   if (mediaRenderer !== undefined) renderers.push(mediaRenderer);
+  renderers.push(pipelineRenderer);
 
   return {
     renderers,

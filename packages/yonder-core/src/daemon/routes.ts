@@ -42,7 +42,7 @@ import type { CameraRun, Supervisor } from "../video/supervisor.js";
 import type { Detection, DetectResult, Rejection } from "../video/probe/camera.js";
 import type { Encoder } from "../video/probe/encoder.js";
 import type { SupplyFlags, SupplyState } from "../system/supply.js";
-import { RTSP_PORT } from "../media/ports.js";
+import { RTSP_BASE, RTSP_PORT } from "../media/ports.js";
 
 export interface RouterDeps {
   engine: ApplyEngine;
@@ -464,16 +464,6 @@ const CAMERA_ID = /^[a-z0-9][a-z0-9-]{0,31}$/;
  * is a guard no test can prove.
  */
 const CAMERA_ROUTE = /^\/cameras\/(.+?)(?:\/(run|probe|stream-address|controls|settings|apply|outputs\/(?:rtp|rtsp|srt)))?$/;
-
-/**
- * Where a pipeline publishes: mediamtx, on loopback.
- *
- * No credential in it, and that is deliberate. `media/config.ts` grants
- * publish to the anonymous user from 127.0.0.1 only, so the board's own
- * pipeline needs none — and a credential here would be a credential in the
- * argv of a long-running process, which is a credential in `ps` output.
- */
-const RTSP_BASE = `rtsp://127.0.0.1:${RTSP_PORT}`;
 
 /** The latched supply bits, and the words the log uses for each (R-SYS-09). */
 const LATCHED_BITS: readonly (readonly [keyof SupplyFlags, string])[] = [
