@@ -1217,7 +1217,7 @@ git commit -s -m "feat(mav): find the autopilot, and say which kind of nothing i
 ```ts
 // packages/yonder-core/src/mav/hint.test.ts
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -1257,12 +1257,109 @@ describe("the remembered port and speed", () => {
     expect(readHint(p)).toBeUndefined();
   });
 
+  // The other half of "valid json of the wrong shape": a device field of the
+  // right *type* but a value nothing should ever open. Deleting just the
+  // length check (keeping the type check) lets this through as a real hint —
+  // verified in task-7-report.md's review-round-2 section by actually
+  // deleting it and watching this test fail.
+  it("refuses an empty-string device", () => {
+    const p = scratch();
+    writeFileSync(p, JSON.stringify({ device: "", baud: 57600 }));
+    expect(readHint(p)).toBeUndefined();
+  });
+
   it("can be forgotten, and forgetting one that is not there is not an error", () => {
     const p = scratch();
     writeHint(p, { device: "/dev/ttyAMA0", baud: 57600 });
     forgetHint(p);
     expect(readHint(p)).toBeUndefined();
     expect(() => forgetHint(p)).not.toThrow();
+  });
+
+  // --- Beyond the brief: gaps in the failure modes above --------------------
+
+  // JSON.parse happily returns a non-object top-level value — a bare literal
+  // is exactly what a naive "clear the hint" writer might produce instead of
+  // deleting the file. This exercises the `parsed === null` guard, which
+  // "wrong shape" above never reaches because that test keeps an object at
+  // the top level and only breaks a field inside it.
+  it("is undefined when the file holds valid json that is not an object", () => {
+    const p = scratch();
+    writeFileSync(p, "null");
+    expect(readHint(p)).toBeUndefined();
+  });
+
+  // A bare non-null primitive at the top level (as opposed to null, above).
+  // Kept as a characterization test of the whole read path rather than of one
+  // guard clause — see task-7-report.md's review-round-2 section for why:
+  // destructuring a primitive box-converts it and yields undefined fields
+  // rather than throwing, so `typeof device !== "string"` catches this on its
+  // own even without a top-level `typeof parsed !== "object"` check. Both
+  // guard shapes were tried against this exact case; only the one that
+  // survives is in hint.ts now.
+  it("is undefined when the file holds a bare top-level primitive", () => {
+    const p = scratch();
+    writeFileSync(p, "42");
+    expect(readHint(p)).toBeUndefined();
+  });
+
+  // An array is also `typeof … === "object"` and not null, so it passes the
+  // top-level guard and has to be caught by the per-field checks instead —
+  // a distinct branch from both the null case above and the wrong-field-type
+  // case the brief covers.
+  it("is undefined when the json is an array rather than a record", () => {
+    const p = scratch();
+    writeFileSync(p, JSON.stringify(["/dev/ttyAMA0", 57600]));
+    expect(readHint(p)).toBeUndefined();
+  });
+
+  // Distinct from "corrupt" above: a write torn off by a power cut or a full
+  // disk leaves a *prefix* of valid-looking JSON, not scrambled bytes. Still
+  // caught by the same JSON.parse/catch, but worth pinning by name since it
+  // is the failure mode this file's atomic write exists to make rare, not
+  // the one it makes impossible — the hint could still predate this code, or
+  // be dropped there by something other than writeHint.
+  it("is undefined when the file was truncated mid-write", () => {
+    const p = scratch();
+    const full = JSON.stringify({ device: "/dev/ttyAMA0", baud: 57600 });
+    writeFileSync(p, full.slice(0, full.length - 5));
+    expect(readHint(p)).toBeUndefined();
+  });
+
+  // The brief's scratch() always hands writeHint a path whose parent
+  // (the mkdtemp directory itself) already exists, so it never exercises
+  // directory creation. A real board's first boot writes this file before
+  // anything else has necessarily created its parent, so this has to work.
+  it("creates the hint's directory when it does not exist yet", () => {
+    const base = mkdtempSync(join(tmpdir(), "yonder-hint-"));
+    const nested = join(base, "state", "mav", "link.json");
+    writeHint(nested, { device: "/dev/ttyAMA0", baud: 115200 });
+    expect(readHint(nested)).toEqual({ device: "/dev/ttyAMA0", baud: 115200 });
+  });
+
+  // The other half of the same gap: forgetting a hint that was never written
+  // under a directory that was never created either — still not an error.
+  it("forgetting a hint under a directory that was never created is not an error", () => {
+    const base = mkdtempSync(join(tmpdir(), "yonder-hint-"));
+    const nested = join(base, "never", "created", "link.json");
+    expect(() => forgetHint(nested)).not.toThrow();
+    expect(readHint(nested)).toBeUndefined();
+  });
+
+  // Pins the file-mode choice: a port and a baud rate are not a secret (they
+  // are already visible in an unauthenticated /status reply), unlike
+  // secrets.yaml's 0600, so this should read 0644 the way the ZeroTier
+  // membership record and config.yaml itself do.
+  it("writes the hint at mode 0644", () => {
+    const p = scratch();
+    writeHint(p, { device: "/dev/ttyAMA0", baud: 57600 });
+    expect(statSync(p).mode & 0o777).toBe(0o644);
+  });
+
+  it("leaves no temporary file behind after writing", () => {
+    const p = scratch();
+    writeHint(p, { device: "/dev/ttyAMA0", baud: 57600 });
+    expect(existsSync(`${p}.tmp`)).toBe(false);
   });
 });
 ```
@@ -1274,32 +1371,66 @@ Expected: FAIL — `Cannot find module './hint.js'`.
 
 - [ ] **Step 3: Write it**
 
+`writeHint` and `forgetHint` go through `writeFileDurable`/`unlinkDurable` (`fs/durable.ts`) rather than a plain `writeFileSync`/`rmSync` — the same primitives every other state writer in this package uses (`config/save.ts`, `secrets/store.ts`, `apply/journal.ts`, `remote/renderer.ts`'s own membership record). The reason is `forgetHint`, not `writeHint`: a discarded hint must not be resurrected by a crash immediately afterward, and an `unlinkSync` sitting only in the page cache when power is cut would do exactly that; the directory fsync inside `unlinkDurable` is what rules it out.
+
 ```ts
 // packages/yonder-core/src/mav/hint.ts
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
+import { unlinkDurable, writeFileDurable } from "../fs/durable.js";
 import { MAVLINK_BAUDS } from "../schema/config.js";
 
 /**
  * The port and speed that worked last time — state, never configuration (§3).
  *
- * R-CAM-06 was withdrawn for the encoder version of this idea, and the
- * reasoning transfers without a change: the installer seeds `config.yaml`
- * only when it is absent, so a probed value written there goes stale on
- * upgrade; and an image built in a chroot on a build host would bake the
- * build machine's answer into every board. So this is a cache under
- * /var/lib/yonder that an operator never edits and nothing reads as truth.
+ * R-MAV-13: a probe's answer is remembered as a hint that is tried first and
+ * discarded when it fails, so replacing a flight controller heals on the next
+ * boot rather than needing a file edited. That is the reasoning R-CAM-06 was
+ * withdrawn for, applied to a serial port: writing a probed value into
+ * config.yaml fails twice over, because the installer seeds config.yaml only
+ * when it is absent (so the value goes stale on upgrade) and an image built
+ * in a chroot on a build host would bake that build machine's answer into
+ * every board flashed from it. So this is a cache under /var/lib/yonder that
+ * an operator never edits and nothing reads as truth.
  *
- * Every failure here returns `undefined` rather than throwing. A hint is an
- * optimisation on the path to telemetry starting at all (R-MAV-08): the worst
- * a bad one may cost is one wasted read before the ordinary sweep.
+ * Every read failure here returns `undefined` rather than throwing. A hint is
+ * an optimisation on the path to telemetry starting at all (R-MAV-08): the
+ * worst a bad one may cost is one wasted read before the ordinary sweep, so a
+ * corrupt file, a truncated one, a wrong shape, or a baud nothing sweeps for
+ * must all degrade the same way — never to a failed boot. A hint naming a
+ * device that no longer exists degrades the same way too, but not by any
+ * check in this file: this module only ever touches the state file, never the
+ * serial device itself ("this file does filesystem I/O only"), so a vanished
+ * port is invisible here and is instead just an ordinary failure the next
+ * detect() attempt reports.
+ *
+ * Written and removed the way every other state file in this package is —
+ * through writeFileDurable/unlinkDurable (fs/durable.ts): a fresh temp file,
+ * fsync, atomic rename, fsync the directory, so a power cut leaves either the
+ * whole old hint or the whole new one, never a torn file that readHint would
+ * then have to treat as corrupt anyway. remote/renderer.ts's own record of
+ * which mesh network it joined is the closest sibling to this file — an
+ * unauthoritative fact about the world, cached under /var/lib/yonder in
+ * exactly this style — and this matches that rather than the apply journal's
+ * heavier, logging discard: nothing here is safety-critical enough to warrant
+ * a warning, and nothing depends on a bad file being actively removed rather
+ * than merely ignored, because the next successful probe overwrites it.
  */
 
 export interface LinkHint {
   device: string;
   baud: number;
 }
+
+/**
+ * 0750, matching the installer's mode for /var/lib/yonder itself
+ * (installer/roles/10-base.sh: `ensure_dir /var/lib/yonder 0750`). This is
+ * only ever reached when the hint's directory does not already exist; the
+ * ordinary case is that the installer created it at install time and this
+ * mkdir is a no-op.
+ */
+const HINT_DIR_MODE = 0o750;
 
 export function readHint(path: string): LinkHint | undefined {
   let parsed: unknown;
@@ -1308,7 +1439,16 @@ export function readHint(path: string): LinkHint | undefined {
   } catch {
     return undefined;
   }
-  if (typeof parsed !== "object" || parsed === null) return undefined;
+  // Only null needs catching explicitly. Every other non-object JSON value —
+  // a bare string, number or boolean — survives destructuring (JS boxes a
+  // primitive rather than throwing) and comes out as `device: undefined`,
+  // which the type check below already rejects; null is the one primitive
+  // that destructuring throws on, and the one for which `typeof x` lies
+  // ("object"). A `typeof parsed !== "object"` clause here once stood beside
+  // this line and was deleted: every JSON value it caught, the checks below
+  // already caught the same way, so no test could tell the two versions
+  // apart (see hint.test.ts's "bare top-level primitive" case).
+  if (parsed === null) return undefined;
   const { device, baud } = parsed as Record<string, unknown>;
   if (typeof device !== "string" || device.length === 0) return undefined;
   if (typeof baud !== "number" || !(MAVLINK_BAUDS as readonly number[]).includes(baud)) return undefined;
@@ -1316,26 +1456,30 @@ export function readHint(path: string): LinkHint | undefined {
 }
 
 export function writeHint(path: string, hint: LinkHint): void {
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify(hint)}\n`, { mode: 0o644 });
+  // writeFileDurable fsyncs the containing directory, so it has to exist
+  // first — config/defaults.ts's seedConfigIfAbsent creates /etc/yonder for
+  // the same reason before it writes config.yaml into a fresh one.
+  mkdirSync(dirname(path), { recursive: true, mode: HINT_DIR_MODE });
+  // 0644: a port and a baud rate are not a secret.
+  writeFileDurable(path, `${JSON.stringify(hint)}\n`, 0o644);
 }
 
 export function forgetHint(path: string): void {
-  rmSync(path, { force: true });
+  unlinkDurable(path);
 }
 ```
 
 - [ ] **Step 4: Run the tests**
 
 Run: `npx vitest run --root packages/yonder-core src/mav/hint.test.ts`
-Expected: PASS, all six.
+Expected: PASS, all fifteen.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 rm -f node_modules
 git add packages/yonder-core/src/mav/hint.ts packages/yonder-core/src/mav/hint.test.ts
-git commit -s -m "feat(mav): remember the port and speed as a hint, never as configuration — R-MAV-01"
+git commit -s -m "feat(mav): remember the port and speed as a hint, never as configuration — R-MAV-13"
 ```
 
 ---
