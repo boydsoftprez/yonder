@@ -370,3 +370,31 @@ It is recorded rather than explained because nothing here has established it, an
 console does not read that field today. If a future surface does, this is the first thing to
 settle — a figure that says 94% loss on a link that is working would be the wrong thing to
 put in front of an operator.
+
+## And a second ground station, over the mesh
+
+Repointed the same generated configuration at **Mission Planner** on a ZeroTier peer —
+`10.113.83.38`, 24 ms away, sharing no local network with the board. This is the path that
+matters, because it is the shape of the cellular case: the aircraft's board and the operator's
+laptop reaching each other over an overlay rather than a LAN.
+
+<!-- yonder:hardware-observed -->
+
+| Endpoint | Received | Transmitted | Sequence lost |
+|---|---|---|---|
+| `gcs0` — **Mission Planner**, over ZeroTier | **70** | 3 988 (136 KB) | **0 — 0%** |
+| `gcs0` — QGroundControl, over the LAN (earlier) | 7 146 | 54 317 | 130 710 — 94% |
+
+Both answer. Two different ground-station programs, two different paths, and in each case the
+router attributes the replies to the endpoint by name — which is what `§6` needs and what the
+console's per-station marks read.
+
+**The mesh run also settles the sequence-loss figure left open above.** Same board, same
+router, same autopilot, and the *harder* path reports **zero** loss where QGroundControl
+reported 94%. So the figure is an artifact of QGroundControl transmitting as several
+components with independent sequence numbers against a counter kept per endpoint — not a
+link measurement, and not something to put in front of an operator as one.
+
+Before Mission Planner connected, the same endpoint read `Transmitted: 1889, Received: 0` —
+telemetry going out, nothing answering. That is precisely the distinction `§6` exists to
+draw, observed live: **configured and being sent to is not the same as answering.**
