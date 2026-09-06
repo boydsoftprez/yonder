@@ -34,25 +34,54 @@ const ANSWER = "v=0\r\no=- 2 2 IN IP4 0.0.0.0\r\n(answer)\r\n";
 const PATH = "cam0-preview";
 const LABEL = "Nose";
 
+/** This suite's own copy of `VIEWER_HEADER` — see the component's own doc
+ * comment on why that constant is not imported from anywhere. */
+const VIEWER_HEADER = "x-yonder-viewer";
+
 /**
  * What the media server is answering with on the next negotiation.
  *
  * `"gated"` answers nothing until a test says so, which is the only way to
- * hold a handshake open across the thing that abandons it.
+ * hold a handshake open across the thing that abandons it. `viewerHeader` is
+ * this session's own answer to `VIEWER_HEADER` — present by default, as a
+ * real console's would be, so a test that does not care about reporting
+ * still gets a realistic handshake; `undefined` is what an older console's
+ * handshake looked like, before this task.
  */
-let reply: { status: number; sdp?: string } | "throws" | "gated" = { status: 201, sdp: ANSWER };
+let reply: { status: number; sdp?: string; viewerHeader?: string } | "throws" | "gated" =
+  { status: 201, sdp: ANSWER, viewerHeader: "viewer-1" };
 
 /** Handshakes the media server has not answered yet, in the order they were made. */
-const gates: ((answer: { status: number; sdp?: string }) => void)[] = [];
+const gates: ((answer: { status: number; sdp?: string; viewerHeader?: string }) => void)[] = [];
 
-const fetchMock = vi.fn(async (_url: string, init: unknown) => {
+/** Every `POST /video/<path>/report` this suite's fake `fetch` received, in
+ * the order it received them — the path reported on and the parsed body. */
+const reportCalls: { path: string; body: unknown }[] = [];
+
+/** Whether the next `/report` post this fake `fetch` sees succeeds, or fails
+ * the way a dropped connection would — silently, from `sendReport`'s own
+ * point of view, and never as a `reason` on screen. */
+let reportOutcome: "ok" | "fails" = "ok";
+
+const fetchMock = vi.fn(async (url: string, init: unknown) => {
+  // A viewer's own report, and the handshake, are two different exchanges
+  // over the identical global `fetch` this suite stubs once — branched on
+  // the URL the real `sendReport`/`connect` each build, exactly as a real
+  // browser's network layer would tell the two apart.
+  const report = /^\/video\/([^/]+)\/report$/.exec(url);
+  if (report) {
+    const body: unknown = JSON.parse(String((init as { body?: string } | undefined)?.body ?? "{}"));
+    reportCalls.push({ path: report[1]!, body });
+    if (reportOutcome === "fails") throw new TypeError("Failed to fetch");
+    return { ok: true, status: 200, text: async () => "{}", headers: { get: () => null } };
+  }
   if (reply === "throws") throw new TypeError("Failed to fetch");
   // A gated request answers when a test says so — or rejects with
   // `AbortError`, which is what a real `fetch` does the moment its signal is
   // aborted, and which lands in `connect()`'s catch.
   const signal = (init as { signal?: AbortSignal } | undefined)?.signal;
   const answered = reply === "gated"
-    ? await new Promise<{ status: number; sdp?: string }>((resolve, reject) => {
+    ? await new Promise<{ status: number; sdp?: string; viewerHeader?: string }>((resolve, reject) => {
       gates.push(resolve);
       signal?.addEventListener("abort", () => {
         const aborted = new Error("The user aborted a request.");
@@ -61,11 +90,12 @@ const fetchMock = vi.fn(async (_url: string, init: unknown) => {
       });
     })
     : reply;
-  const { status, sdp } = answered;
+  const { status, sdp, viewerHeader } = answered;
   return {
     ok: status >= 200 && status < 300,
     status,
     text: async () => sdp ?? "",
+    headers: { get: (name: string) => (name.toLowerCase() === VIEWER_HEADER ? viewerHeader ?? null : null) },
   };
 });
 
@@ -85,6 +115,14 @@ class FakePeerConnection {
   local: unknown = null;
   remote: unknown = null;
   transceivers: Array<{ kind: string; init: unknown }> = [];
+  /** What `getStats()` answers with next — set by `report()`, below, before
+   * a test advances the clock a tick. Never consumed automatically: a real
+   * `RTCStatsReport` does not change under its own reader, so this fake
+   * holds whatever a test last set until the test sets it again. */
+  statsReport: Map<string, unknown> = new Map();
+  /** Made to reject the way a real `getStats()` on a connection torn down
+   * mid-call might. */
+  statsFail = false;
 
   constructor() {
     FakePeerConnection.made.push(this);
@@ -135,6 +173,38 @@ class FakePeerConnection {
     this.connectionState = state;
     this.onconnectionstatechange?.();
   }
+
+  /** The `Map`-like object `RTCStatsReport` really is (it supports `forEach`
+   * and `values()`) — a plain `Map` satisfies that without a hand-rolled
+   * stand-in. */
+  async getStats(): Promise<Map<string, unknown>> {
+    if (this.statsFail) throw new Error("could not read statistics");
+    return this.statsReport;
+  }
+}
+
+/**
+ * One `getStats()` reading: the succeeded candidate pair actually carrying
+ * the inbound video, and the inbound-rtp entry for it — realistic values a
+ * report can be built from, with each individually overridable so a test can
+ * move exactly the counter it means to. Named apart from `pc().statsReport`
+ * (what this becomes) and from `fetchMock`'s own local `report` (the regex
+ * match on a `/report` URL) so the three cannot be misread for one another.
+ */
+function fakeStats (over: { inbound?: Record<string, unknown>; pair?: Record<string, unknown> } = {}): Map<string, unknown> {
+  return new Map<string, unknown>([
+    ["inbound1", {
+      type: "inbound-rtp", kind: "video",
+      packetsLost: 0, packetsReceived: 1000, bytesReceived: 125_000,
+      frameWidth: 1280, frameHeight: 720, framesPerSecond: 30,
+      ...over.inbound,
+    }],
+    ["pair1", {
+      type: "candidate-pair", state: "succeeded",
+      currentRoundTripTime: 0.05, availableIncomingBitrate: 4_000_000,
+      ...over.pair,
+    }],
+  ]);
 }
 
 function mountPicture(props: Record<string, unknown> = {}) {
@@ -243,7 +313,9 @@ beforeEach(() => {
   FakePeerConnection.made.length = 0;
   gates.length = 0;
   fetchMock.mockClear();
-  reply = { status: 201, sdp: ANSWER };
+  reply = { status: 201, sdp: ANSWER, viewerHeader: "viewer-1" };
+  reportCalls.length = 0;
+  reportOutcome = "ok";
   vi.stubGlobal("RTCPeerConnection", FakePeerConnection);
   vi.stubGlobal("fetch", fetchMock);
 });
@@ -841,6 +913,220 @@ describe("teardown", () => {
 function setMode(wrapper: VueWrapper, mode: string): void {
   (wrapper.vm as unknown as { setMode(mode: string): void }).setMode(mode);
 }
+
+/** This browser's own attempt counter and report timer — internal state with
+ * no element to read it from, exactly the reason `setMode` above reaches
+ * into `wrapper.vm` directly rather than through the template. */
+function internals(wrapper: VueWrapper): { attempt: number; reportTimer: unknown } {
+  return wrapper.vm as unknown as { attempt: number; reportTimer: unknown };
+}
+
+/**
+ * **Wiring up the rate controller's own inbox (R-VID-07, R-VID-11, R-VID-19).**
+ *
+ * Task 32 built the whole adaptation machine and proved it by tests and by
+ * mutation; nothing fed it, because this component neither read
+ * `VIEWER_HEADER` off the handshake nor called `RTCPeerConnection.getStats()`.
+ * These are the tests for the half that was missing — this component's own
+ * side of "wire it up so it runs on its own".
+ *
+ * `RTCPeerConnection.getStats()` does not exist in `jsdom`, and is not what
+ * is under test: `FakePeerConnection.getStats()` returns whatever
+ * `fakeStats()` a test last set on it, exactly the reason the suite's own
+ * top-of-file comment gives for stubbing `RTCPeerConnection` at all. The
+ * fake is deliberately the `Map` `RTCStatsReport` really is, not a
+ * hand-rolled shape only this suite would recognise.
+ */
+describe("reporting what this browser is measuring", () => {
+  it("captures no viewer id and reports nothing at all when the console never answers with one", async () => {
+    // An older console's handshake: no `VIEWER_HEADER` at all.
+    reply = { status: 201, sdp: ANSWER };
+    const { wrapper } = mountPicture();
+    await settle();
+    // No timer at all — not merely one whose every tick declines to post.
+    expect(internals(wrapper).reportTimer).toBeNull();
+
+    pc().statsReport = fakeStats();
+    await advance(1000);
+    pc().statsReport = fakeStats({ inbound: { bytesReceived: 999_999 } });
+    await advance(5000);
+    expect(reportCalls).toHaveLength(0);
+  });
+
+  it("reports nothing on the first tick, then the interval rate — not the session average — on the second", async () => {
+    mountPicture();
+    await settle();
+
+    pc().statsReport = fakeStats({ inbound: { bytesReceived: 1_000_000, packetsReceived: 1000, packetsLost: 0 } });
+    await advance(1000);
+    // The very first sample: nothing to diff against yet.
+    expect(reportCalls).toHaveLength(0);
+
+    pc().statsReport = fakeStats({ inbound: { bytesReceived: 1_125_000, packetsReceived: 1000, packetsLost: 0 } });
+    await advance(1000);
+    expect(reportCalls).toHaveLength(1);
+    // The URL path is the stream path this session actually negotiated —
+    // `-preview` and all; `cameraFor` strips it only for `stats.camera`,
+    // asserted below, not for the route this posts to.
+    expect(reportCalls[0]!.path).toBe("cam0-preview");
+    const first = reportCalls[0]!.body as { stats: Record<string, unknown> };
+    // 125,000 bytes over the one-second interval since the previous tick —
+    // never against the 1,000,000-byte baseline or any total since the
+    // session began.
+    expect(first.stats).toMatchObject({ camera: "cam0", rtt: 50, egress: 1034, loss: 0, size: "1280x720", fps: 30 });
+    expect(first.stats).not.toHaveProperty("frameAge");
+
+    // A second, smaller interval must read its own rate, not fold the first
+    // one in — which is what a session-average implementation would do.
+    pc().statsReport = fakeStats({ inbound: { bytesReceived: 1_255_000, packetsReceived: 2000, packetsLost: 0 } });
+    await advance(1000);
+    expect(reportCalls).toHaveLength(2);
+    const second = reportCalls[1]!.body as { stats: Record<string, unknown> };
+    expect(second.stats.egress).toBe(1075); // atIp(130,000 bytes over 1 s), not atIp(255,000 bytes over 2 s)
+  });
+
+  it("reports loss as the fraction over the interval, and a burst does not persist into a later tick", async () => {
+    mountPicture();
+    await settle();
+
+    pc().statsReport = fakeStats({ inbound: { packetsReceived: 1000, packetsLost: 0 } });
+    await advance(1000); // tick 1 — baseline, no report
+
+    pc().statsReport = fakeStats({ inbound: { packetsReceived: 1980, packetsLost: 20 } });
+    await advance(1000); // tick 2 — a burst: 20 lost of 1000 sent this interval
+    const burst = (reportCalls[0]!.body as { stats: Record<string, unknown> }).stats;
+    expect(burst.loss).toBeCloseTo(0.02, 10);
+
+    for (const [packetsReceived, packetsLost] of [[2980, 20], [3980, 20], [4980, 20]] as const) {
+      pc().statsReport = fakeStats({ inbound: { packetsReceived, packetsLost } });
+      await advance(1000);
+    }
+    // Tick 5: the same 20 lost total, but zero more lost *this interval* —
+    // a cumulative reading would still show the tick-2 burst; the interval
+    // reading does not.
+    expect(reportCalls).toHaveLength(4);
+    const fifth = (reportCalls[3]!.body as { stats: Record<string, unknown> }).stats;
+    expect(fifth.loss).toBe(0);
+  });
+
+  it("omits the whole stats object, not a partial one, when the browser has no capacity estimate", async () => {
+    mountPicture();
+    await settle();
+
+    pc().statsReport = fakeStats({ pair: { availableIncomingBitrate: undefined } });
+    await advance(1000); // baseline
+
+    pc().statsReport = fakeStats({ inbound: { bytesReceived: 200_000 }, pair: { availableIncomingBitrate: undefined } });
+    await advance(1000);
+
+    expect(reportCalls).toHaveLength(1);
+    expect(reportCalls[0]!.body).toEqual({});
+  });
+
+  it("includes frameAge once a frame has painted, and carries none before one ever has", async () => {
+    const { wrapper } = mountPicture();
+    await settle();
+    pc().deliverTrack();
+    await settle();
+
+    pc().statsReport = fakeStats();
+    await advance(1000); // baseline — no frame yet
+
+    pc().statsReport = fakeStats({ inbound: { bytesReceived: 200_000 } });
+    await advance(1000);
+    expect((reportCalls[0]!.body as { stats: Record<string, unknown> }).stats).not.toHaveProperty("frameAge");
+
+    frames(wrapper); // a frame paints — `lastFrameAt` is now set
+    pc().statsReport = fakeStats({ inbound: { bytesReceived: 300_000 } });
+    await advance(1000);
+    const withFrame = (reportCalls[1]!.body as { stats: Record<string, unknown> }).stats;
+    expect(withFrame.frameAge).toBeTypeOf("number");
+    expect(withFrame.frameAge as number).toBeGreaterThanOrEqual(0);
+  });
+
+  it("stops the timer, and stops producing reports, once the component is destroyed", async () => {
+    const { wrapper } = mountPicture();
+    await settle();
+    pc().statsReport = fakeStats();
+    await advance(1000); // baseline — the timer now exists
+    expect(internals(wrapper).reportTimer).not.toBeNull();
+
+    wrapper.unmount();
+    expect(internals(wrapper).reportTimer).toBeNull();
+
+    pc().statsReport = fakeStats({ inbound: { bytesReceived: 999_999 } });
+    await advance(10_000);
+    expect(reportCalls).toHaveLength(0);
+  });
+
+  it("stops the timer, and stops producing reports, once mode leaves 'live'", async () => {
+    const { wrapper } = mountPicture();
+    await settle();
+    pc().statsReport = fakeStats();
+    await advance(1000);
+    expect(internals(wrapper).reportTimer).not.toBeNull();
+
+    setMode(wrapper, "off");
+    expect(internals(wrapper).reportTimer).toBeNull();
+
+    pc().statsReport = fakeStats({ inbound: { bytesReceived: 999_999 } });
+    await advance(10_000);
+    expect(reportCalls).toHaveLength(0);
+  });
+
+  /**
+   * The peer connection replaced — the `streamPath` watcher's own
+   * renegotiation, using the `session` counter so a stale timer from the
+   * connection it superseded cannot post against the one that replaced it.
+   */
+  it("replaces the timer, rather than letting a stale one post, when the connection is renegotiated onto another camera", async () => {
+    const { wrapper, press } = mountWithRail();
+    await settle();
+    pc(0).statsReport = fakeStats();
+    await advance(1000); // baseline on the cam0 session
+    const before = internals(wrapper).reportTimer;
+    expect(before).not.toBeNull();
+
+    await press({ path: "nose" });
+    expect(FakePeerConnection.made).toHaveLength(2);
+    // A new timer belongs to the new session — not merely a live one, a
+    // *different* one from the cam0 session's own.
+    expect(internals(wrapper).reportTimer).not.toBeNull();
+    expect(internals(wrapper).reportTimer).not.toBe(before);
+
+    // If the old session's timer were still the one running, this jump on
+    // the *old* connection is what the next tick would report.
+    pc(0).statsReport = fakeStats({ inbound: { bytesReceived: 9_999_999 } });
+    pc(1).statsReport = fakeStats({ inbound: { bytesReceived: 140_000 } });
+    await advance(1000); // the new session's own first tick — baseline, no report
+    await advance(1000); // the new session's own second tick — its own report
+
+    expect(reportCalls).toHaveLength(1);
+    expect(reportCalls[0]!.path).toBe("nose-preview");
+    expect((reportCalls[0]!.body as { stats: Record<string, unknown> }).stats.camera).toBe("nose");
+  });
+
+  it("is silent about a report that fails, and does not retry-storm", async () => {
+    const { wrapper } = mountPicture();
+    await settle();
+    pc().statsReport = fakeStats();
+    await advance(1000); // baseline
+
+    reportOutcome = "fails";
+    pc().statsReport = fakeStats({ inbound: { bytesReceived: 300_000 } });
+    await advance(1000); // one failing attempt
+    expect(reportCalls).toHaveLength(1);
+    expect(reasonText(wrapper)).toBe("");
+    expect(internals(wrapper).attempt).toBe(0);
+
+    reportOutcome = "ok";
+    pc().statsReport = fakeStats({ inbound: { bytesReceived: 430_000 } });
+    await advance(1000); // exactly one more attempt, one second later — no storm
+    expect(reportCalls).toHaveLength(2);
+    expect(reasonText(wrapper)).toBe("");
+    expect(internals(wrapper).attempt).toBe(0);
+  });
+});
 
 /**
  * **The rail, reaching the picture.**

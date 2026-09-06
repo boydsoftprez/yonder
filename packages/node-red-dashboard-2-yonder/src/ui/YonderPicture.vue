@@ -72,7 +72,7 @@
 <script>
 import YonderStateOverlay from './YonderStateOverlay.vue'
 import YonderThumbStrip from './YonderThumbStrip.vue'
-import { DESCRIPTORS } from 'yonder-core/presentation'
+import { atIp, cameraFor, DESCRIPTORS } from 'yonder-core/presentation'
 
 /**
  * The live picture, and the three things that happen to it (R-VID-03).
@@ -379,6 +379,124 @@ function newDragGestureId () {
     return 'drag-' + dragGestureCounter
 }
 
+/**
+ * The header the console's stream handshake answers with — this
+ * component's own copy of `VIEWER_HEADER` (`console/middleware.ts`).
+ *
+ * **Not imported.** That file opens with `import { createHash } from
+ * "node:crypto"`, which is exactly what `yonder-core/presentation`'s own
+ * doc comment keeps out of a browser bundle — the first attempt to reach a
+ * runtime value past that boundary failed there once already (see that
+ * file's own account of `reading()` and rollup following the barrel to
+ * `readFileSync`). A header *name* cannot drift the quiet way the `-preview`
+ * suffix could: the moment the two disagree, every report from every
+ * session stops reaching the daemon at once, on a header `middleware.test.ts`
+ * already asserts by this exact string — not a silent divergence on one
+ * camera's id, but a total, immediately visible one.
+ */
+const VIEWER_HEADER = 'x-yonder-viewer'
+
+/** How often a live session tells the device what it is measuring (R-VID-07,
+ * R-VID-11, R-VID-19). One second, matching the tick the rate controller
+ * itself runs on (`video/adaptation.ts`) — a slower report would leave that
+ * tick reasoning about a reading older than the decision it feeds. */
+const REPORT_INTERVAL_MS = 1000
+
+/**
+ * One tick's own raw numbers off `RTCPeerConnection.getStats()` — the
+ * inbound video RTP stream and the candidate pair actually carrying it,
+ * reduced to exactly what a report needs to diff against the previous tick.
+ *
+ * Null whenever either is missing — which is ordinary for the first calls
+ * after a handshake, before the browser has picked a pair or decoded a
+ * frame — and this component reports nothing for a tick it is null on
+ * rather than sending a partial reading `ViewerStats` does not allow (every
+ * one of `rtt`/`loss`/`egress`/`capacity` is required).
+ *
+ * `report` is the `RTCStatsReport` itself: a `Map`-like object, iterated with
+ * `forEach` because that is the one method every implementation (real and
+ * this suite's own fake) agrees on.
+ */
+function sampleReport (report) {
+    let inbound = null
+    let pair = null
+    report.forEach((entry) => {
+        if (!inbound && entry.type === 'inbound-rtp' && (entry.kind === 'video' || entry.mediaType === 'video')) {
+            inbound = entry
+        }
+        if (!pair && entry.type === 'candidate-pair' && entry.state === 'succeeded') {
+            pair = entry
+        }
+    })
+    if (!inbound || !pair) return null
+    if (typeof inbound.packetsLost !== 'number' || typeof inbound.packetsReceived !== 'number'
+        || typeof inbound.bytesReceived !== 'number' || typeof pair.currentRoundTripTime !== 'number') {
+        return null
+    }
+    return {
+        at: Date.now(),
+        packetsLost: inbound.packetsLost,
+        packetsReceived: inbound.packetsReceived,
+        bytesReceived: inbound.bytesReceived,
+        currentRoundTripTime: pair.currentRoundTripTime,
+        availableIncomingBitrate: typeof pair.availableIncomingBitrate === 'number'
+            ? pair.availableIncomingBitrate
+            : null,
+        frameWidth: typeof inbound.frameWidth === 'number' ? inbound.frameWidth : null,
+        frameHeight: typeof inbound.frameHeight === 'number' ? inbound.frameHeight : null,
+        framesPerSecond: typeof inbound.framesPerSecond === 'number' ? inbound.framesPerSecond : null
+    }
+}
+
+/**
+ * `sample`, `prev` (the same shape, one tick earlier), the camera this
+ * report is about and this browser's own `lastFrameAt`, turned into the body
+ * `POST /video/<streamPath>/report` sends — or `null`, when the interval
+ * between the two samples was not positive (a stopped clock is not a rate)
+ * or nothing about this pair of ticks is a delta yet.
+ *
+ * A pure function, and tested as one directly: everything about *what a
+ * report says*, kept out of the timer/session bookkeeping around it.
+ */
+function reportBody (camera, prev, sample, lastFrameAt) {
+    const dtSeconds = (sample.at - prev.at) / 1000
+    if (!(dtSeconds > 0)) return null
+    const lostDelta = Math.max(0, sample.packetsLost - prev.packetsLost)
+    const recvDelta = Math.max(0, sample.packetsReceived - prev.packetsReceived)
+    const loss = lostDelta + recvDelta > 0 ? Math.min(1, lostDelta / (lostDelta + recvDelta)) : 0
+    const byteDelta = Math.max(0, sample.bytesReceived - prev.bytesReceived)
+    // `bytesReceived` is this inbound-rtp entry's own payload bytes — the
+    // same layer `IP_OVERHEAD` (yonder-core/presentation, `video/present.ts`)
+    // was measured from on the way out — so the interval rate is converted
+    // through the identical `atIp()` the rate controller already reasons in,
+    // rather than a second, unmeasured overhead figure invented here.
+    const egress = atIp((byteDelta * 8) / 1000 / dtSeconds)
+    if (sample.availableIncomingBitrate === null) {
+        // ViewerStats.capacity is required, and a guessed one is worse than
+        // none: the rate controller would be acting on a number nobody
+        // measured. Reporting nothing this tick is the honest answer, not a
+        // reason to invent a figure this browser does not have.
+        return {}
+    }
+    return {
+        stats: {
+            camera,
+            rtt: sample.currentRoundTripTime * 1000,
+            loss,
+            egress,
+            // The browser's own bandwidth estimate, already expressed at the
+            // channel level GCC/BWE reasons about — unlike `egress` above, it
+            // is not run through `atIp()`, which is calibrated for a
+            // configured *encoder* rate and would double-count an overhead
+            // this figure does not carry in the first place.
+            capacity: sample.availableIncomingBitrate / 1000,
+            ...(lastFrameAt !== null ? { frameAge: Math.max(0, sample.at - lastFrameAt) } : {}),
+            ...(sample.frameWidth && sample.frameHeight ? { size: `${sample.frameWidth}x${sample.frameHeight}` } : {}),
+            ...(sample.framesPerSecond ? { fps: sample.framesPerSecond } : {})
+        }
+    }
+}
+
 export default {
     name: 'YonderPicture',
     components: { YonderStateOverlay, YonderThumbStrip },
@@ -444,7 +562,22 @@ export default {
             orbX: 0,
             orbY: 0,
             downX: 0,
-            downY: 0
+            downY: 0,
+            /**
+             * This session's own viewer id, captured off the handshake's
+             * `VIEWER_HEADER` (R-VID-07, R-VID-11, R-VID-19) — null until a
+             * handshake answers with one, which an older console's will not.
+             * Reset on every new connection, in `stopReporting()`.
+             */
+            viewerId: null,
+            /** `setInterval`'s id while a live session is reporting once a
+             * second — see `startReporting`/`stopReporting`, below. */
+            reportTimer: null,
+            /** The previous tick's own raw numbers, so the next one has
+             * something to compute a delta against — see `sampleReport`'s
+             * own doc comment on why the first tick after any reset has
+             * none. Reset on every new connection alongside `viewerId`. */
+            reportBaseline: null
         }
     },
     computed: {
@@ -479,7 +612,11 @@ export default {
         streamPath () {
             const configured = this.props.path || ''
             const path = this.told || configured
-            const base = path.endsWith('-preview') ? path.slice(0, -8) : path
+            // `cameraFor` (`yonder-core/presentation`) is the one place
+            // `-preview` is stripped — the console's own viewer-report route
+            // strips it the identical way, from the identical function, so
+            // the two cannot disagree about which camera a path is about.
+            const base = cameraFor(path)
             if (!base) return ''
             return this.rate === 'full' ? base : `${base}-preview`
         },
@@ -776,12 +913,99 @@ export default {
          * attempts — the one thing still held, and what "holds the picture
          * rather than blanking it" means. `blank()` is the other half, and it
          * is called only where the operator has actually left live video.
+         *
+         * **Every ending this component has funnels through here first**
+         * (R-VID-07, R-VID-11, R-VID-19): `beforeUnmount` (the component is
+         * destroyed), `setMode`/`toStills` (mode leaves `'live'`), and
+         * `connect` itself (the peer connection is about to be replaced,
+         * whether by the `streamPath` watcher or by a reconnect's own
+         * backoff). `stopReporting()` belongs here rather than duplicated at
+         * each of those call sites for the identical reason `session += 1`
+         * already is: one seam, so a stale timer from a session that ended
+         * any of those ways cannot go on posting against the one that
+         * replaces it.
          */
         teardown () {
             // Anything still in flight belongs to nobody from here on.
             this.session += 1
+            this.stopReporting()
             if (this.abort) { this.abort.abort(); this.abort = null }
             if (this.pc) { this.pc.close(); this.pc = null }
+        },
+        /**
+         * Once a second while a live session is up, this browser's own
+         * measurement of the path its picture is arriving on (R-VID-07,
+         * R-VID-11, R-VID-19) — called only after a handshake has both
+         * succeeded and answered with a viewer id (`connect`, below); an
+         * older console that never sends `VIEWER_HEADER` gets no timer at
+         * all, which is this component's own "report nothing rather than
+         * regress the picture" rule.
+         *
+         * `session` is captured now rather than read fresh from `this` on
+         * every tick, for the same reason `connect`'s own `mine()` is: the
+         * closure is what lets `sendReport` tell a tick that still belongs
+         * to this connection from one that has been superseded, without
+         * caring whether `clearInterval` has actually run yet.
+         */
+        startReporting () {
+            const session = this.session
+            this.reportBaseline = null
+            this.reportTimer = setInterval(() => { this.sendReport(session) }, REPORT_INTERVAL_MS)
+        },
+        /** The other half of `startReporting`, and where the delta baseline
+         * is reset — see `teardown`'s own doc comment on why every ending
+         * this component has arrives here. */
+        stopReporting () {
+            clearInterval(this.reportTimer)
+            this.reportTimer = null
+            this.reportBaseline = null
+            this.viewerId = null
+        },
+        /**
+         * One tick: read `getStats()`, diff against the previous tick, and
+         * post — or do nothing, silently, whenever there is nothing yet to
+         * diff against or nothing this browser can measure.
+         *
+         * **A failed report is silent and never retries early.** Unlike
+         * `connect()`'s own failures, nothing here is a fault in the
+         * picture: `reason` and `retry()` are about whether a session is
+         * up, and a session that is up but could not tell the device what
+         * it measured this one time is still up. The next tick, one second
+         * away, is this method's own retry.
+         */
+        async sendReport (session) {
+            if (session !== this.session || !this.viewerId || !this.pc) return
+            const pc = this.pc
+            let raw
+            try {
+                raw = await pc.getStats()
+            } catch {
+                return
+            }
+            // The session this tick belongs to may have ended while
+            // `getStats()` was in flight — the identical check `connect()`
+            // makes after every await of its own, for the identical reason.
+            if (session !== this.session) return
+            const sample = sampleReport(raw)
+            const prev = this.reportBaseline
+            // The baseline moves on every usable tick, whether or not this
+            // particular one goes on to produce a report — so the *next*
+            // tick always diffs against the most recent reading, never one
+            // an unreportable tick in between left behind.
+            if (sample) this.reportBaseline = sample
+            if (!prev || !sample) return
+            const body = reportBody(cameraFor(this.negotiated), prev, sample, this.lastFrameAt)
+            if (!body) return
+            try {
+                await fetch(`/video/${this.negotiated}/report`, {
+                    method: 'POST',
+                    headers: { 'content-type': 'application/json' },
+                    body: JSON.stringify(body)
+                })
+            } catch {
+                // Silent, and no retry-storm: the next tick is one second
+                // away regardless of whether this one reached the network.
+            }
         },
         /**
          * Let go of the last live frame.
@@ -919,6 +1143,14 @@ export default {
                     signal: abort.signal
                 })
                 if (!mine()) return
+                // Which viewer this session is (R-VID-07, R-VID-11,
+                // R-VID-19) — captured off the handshake regardless of
+                // whether it succeeded, because it costs nothing to read
+                // and `startReporting()` below is what actually gates on it
+                // being set. No header at all — an older console — leaves
+                // it null, and this browser reports nothing rather than
+                // treat a missing channel as a reason the picture is wrong.
+                this.viewerId = answer.headers.get(VIEWER_HEADER)
                 if (!answer.ok) {
                     // Distinguished deliberately. Only one of these is worth
                     // walking outside for.
@@ -933,6 +1165,8 @@ export default {
                 const sdp = await answer.text()
                 if (!mine()) return
                 await pc.setRemoteDescription({ type: 'answer', sdp })
+                if (!mine()) return
+                if (this.viewerId) this.startReporting()
             } catch (e) {
                 // An abandoned handshake is not a fault, and must not report
                 // one: this is the branch that used to draw a reason under the

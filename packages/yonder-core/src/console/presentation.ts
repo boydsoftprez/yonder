@@ -53,6 +53,33 @@ export {
 export type { CapabilityFact, BudgetSegment } from "../video/present.js";
 
 /**
+ * The measured cost of what is actually arriving, in the units the rate
+ * controller reasons in (R-VID-07, R-VID-11, R-VID-19).
+ *
+ * `atIp` is a runtime value and belongs here anyway: `video/present.ts`'s own
+ * `import type { Camera }` is erased entirely at build time, the identical
+ * reasoning `LABELS` below already relies on. `YonderPicture.vue` is the
+ * first browser-side caller — its own once-a-second report of what
+ * `RTCPeerConnection.getStats()` says arrived needs the same kb/s-at-IP
+ * figure the rest of this codebase already reasons in, and a second,
+ * hand-rolled overhead constant living in a Vue file would be exactly the
+ * drift this file's opening comment exists to prevent.
+ */
+export { atIp } from "../video/present.js";
+
+/**
+ * The camera a media path is about (R-VID-19, R-SEC-13).
+ *
+ * `YonderPicture.vue`'s own `streamPath` computed and the console's
+ * viewer-report route (`console/middleware.ts`) both have to strip the same
+ * `-preview` suffix off the same path, and `video/media-path.ts`'s own doc
+ * comment is the one place that rule is written down — see it for why a
+ * second copy of the eight characters to slice is exactly what this file
+ * exists to rule out.
+ */
+export { cameraFor } from "../video/media-path.js";
+
+/**
  * The operator-facing word for each capability key — `whiteBalance` is not a
  * label, and a page that showed one would be showing its own field name.
  *

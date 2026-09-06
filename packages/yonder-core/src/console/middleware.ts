@@ -6,6 +6,7 @@ import { CONSOLE_HOME } from "./settings.js";
 import type { DaemonClient } from "./client.js";
 import type { SessionStore } from "./session.js";
 import { whepHandler, WHEP_PREFIX, type WhepRequest, type WhepResponse } from "./whep.js";
+import { cameraFor } from "../video/media-path.js";
 
 /**
  * The gate on the front of the console.
@@ -57,6 +58,18 @@ const MAX_BODY_BYTES = 8 * 1024;
  * whatever it likes, and no body on this device is read without a limit.
  */
 const MAX_OFFER_BYTES = 64 * 1024;
+
+/**
+ * The most of a viewer's own statistic this will read: 4 KiB.
+ *
+ * Its own bound, smaller than either figure above, because a `ViewerStats` is
+ * a handful of numbers and a short string — comfortably under a kilobyte
+ * written out as JSON. This route is polled once a second for as long as a
+ * picture is open, so a limit sized for an SDP offer would be a 1 Hz route
+ * this device would go on buffering 64 KiB for, for ever, rather than a
+ * bound that actually costs an authenticated caller something to reach.
+ */
+const MAX_REPORT_BYTES = 4 * 1024;
 
 /** The path, without the query string, and never empty. */
 function pathOf(req: IncomingMessage): string {
@@ -413,6 +426,68 @@ export function consoleMiddleware(deps: ConsoleMiddlewareDeps): Middleware {
     // route that is authenticated by where it sits in this function is a
     // route that stops being authenticated the day the function is reordered.
     if (path === WHEP_PREFIX || path.startsWith(`${WHEP_PREFIX}/`)) {
+      // One browser's own measurement of the path its picture is arriving on
+      // (R-VID-07, R-VID-11, R-VID-19), relayed to the daemon's rate
+      // controller (spec §8.2). Matched before the handshake below rather
+      // than after it: `/report` is not a WHEP verb, and falling through to
+      // `whep()` would only have it refused there as "no such camera
+      // stream" — a 404 this route can both avoid and answer more usefully.
+      const report = /^\/video\/([^/]+)\/report$/.exec(path);
+      if (report !== null) {
+        const streamPath = report[1];
+        if (req.method !== "POST") {
+          sendProxied(res, { status: 405, body: "only POST reports a viewer's statistic" });
+          return;
+        }
+        // Resolved exactly as the handshake below resolves it, and for the
+        // same reason nothing reads the body before this: an unauthenticated
+        // request must not be able to make this process do work either.
+        const token = sessionOf(req, deps.sessions);
+        if (token === undefined) {
+          sendProxied(res, { status: 401, body: "log in to report on this camera" });
+          return;
+        }
+        void (async () => {
+          const submission = await readBody(req, MAX_REPORT_BYTES);
+          if (submission.tooLarge) { tooLarge(res); return; }
+          let body: unknown = {};
+          try {
+            body = submission.text === "" ? {} : JSON.parse(submission.text);
+          } catch {
+            // Not a shape the daemon would accept as a statistic either, and
+            // it will say so below — falling back to an empty submission
+            // only keeps a malformed body from throwing uncaught here.
+          }
+          // Only the three fields the daemon's own route reads are ever
+          // relayed. **Never a viewer id from the body, in any field**: the
+          // one thing that stops a script on the page reporting as, or
+          // steering the rate of, a viewer that is not its own is that
+          // nothing above reads the body before `viewerFor(token)` below is
+          // already decided, and nothing here reads it afterwards either.
+          let relay: unknown = body;
+          if (typeof body === "object" && body !== null && !Array.isArray(body)) {
+            const sent = body as { want?: unknown; fullRate?: unknown; stats?: unknown };
+            relay = { want: sent.want, fullRate: sent.fullRate, stats: sent.stats };
+          }
+          const reply = await deps.client.request({
+            method: "POST",
+            path: `/cameras/${cameraFor(streamPath)}/viewers/${viewerFor(token)}`,
+            body: relay,
+          });
+          if (!reply.ok) {
+            sendJson(res, 503, {
+              error: "the device's configuration service is not answering; the report was not recorded",
+            });
+            return;
+          }
+          // The daemon's own status and body, unchanged: it owns what a
+          // valid statistic is, and restating that here would be a second
+          // source of truth for those rules to drift from.
+          sendJson(res, reply.status, reply.body);
+        })();
+        return;
+      }
+
       const token = sessionOf(req, deps.sessions);
       const authenticated = token !== undefined;
       void (async () => {

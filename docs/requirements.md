@@ -122,6 +122,7 @@ Parameter writes are vehicle commands. R-CMD applies to every requirement here.
 | R-VID-13 | **Serve the interface a separate, cheaper copy by default**, encoded from the frames already decoded for the main output, so watching in a browser costs a fraction of what a ground-station feed costs. The full-rate picture stays available on request, and the interface states what requesting it would cost before it is requested. R-VID-05 makes simultaneous outputs possible; this is what keeps them affordable on a cellular uplink | 1 |
 | R-VID-14 | **Where live video cannot be established, serve periodic stills instead**, at a stated cost and with the age of the current frame shown. The fall-back happens without being asked for and reports why it happened, and stills are also offered as a deliberate choice on a link that cannot carry video | 2 |
 | R-VID-15 | **Show the exact receive-side command in the interface**, generated from what the camera is doing at that moment and carrying the address the operator is actually reaching the device on. R-VID-10 makes a ground station configurable from the documentation; this removes the need to read it | 2 |
+| R-VID-19 | **Take in a browser's own measurement of the path its picture is arriving on** — round-trip time, loss and throughput it observed itself, reported continuously while its session is live — as evidence for R-VID-07's adaptation, on top of what the device can measure of its own output. A report always speaks for the session that sent it, and never another's | 2 |
 
 ## R-CTL — Live camera control
 

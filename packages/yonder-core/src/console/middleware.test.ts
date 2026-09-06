@@ -15,7 +15,7 @@ import {
   type ConsoleMiddlewareDeps,
   type Middleware,
 } from "./middleware.js";
-import { DaemonClient, type Transport } from "./client.js";
+import { DaemonClient, type DaemonRequest, type Transport } from "./client.js";
 import { SessionStore } from "./session.js";
 import type { Clock } from "../apply/types.js";
 
@@ -119,6 +119,21 @@ function answering(status: number, body: string): Transport & { calls: number } 
     return Promise.resolve({ status, body });
   };
   t.calls = 0;
+  return t;
+}
+
+/**
+ * A transport that answers with exactly this and records every request it
+ * was actually asked to make — which path, and which body — so a test can
+ * assert on the daemon call the report route made rather than only on what
+ * came back from it.
+ */
+function recording(status: number, body: string): Transport & { calls: DaemonRequest[] } {
+  const t = (req: DaemonRequest): Promise<{ status: number; body: string }> => {
+    t.calls.push(req);
+    return Promise.resolve({ status, body });
+  };
+  t.calls = [];
   return t;
 }
 
@@ -533,6 +548,161 @@ describe("consoleMiddleware", () => {
     const res = await call("GET", "/");
     expect(res.headers["cache-control"]).toBe("no-store");
     expect(res.headers["x-frame-options"]).toBe("DENY");
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+/**
+ * `POST /video/<streamPath>/report` — the browser telling this device what it
+ * is actually measuring on the path its own picture arrived on (R-VID-07,
+ * R-VID-11, R-VID-19; spec §8.2). It sits in the same authenticated block as
+ * the handshake above and follows the identical pattern: resolved before
+ * anything reads a body, capped the same way, and never trusting the body
+ * for who is reporting.
+ */
+describe("consoleMiddleware — a viewer's own report", () => {
+  function sessionCookie(sessions: SessionStore): { cookie: string; token: string } {
+    const token = sessions.mint();
+    return { cookie: `${SESSION_COOKIE}=${encodeURIComponent(token)}`, token };
+  }
+
+  it("relays a report to the daemon, camera derived from the stream path, viewer from the session", async () => {
+    const transport = recording(200, '{"mine":{},"shared":{}}');
+    const sessions = new SessionStore({ clock: fakeClock() });
+    await serve(consoleMiddleware({ client: new DaemonClient({ transport }), sessions }));
+    const { cookie, token } = sessionCookie(sessions);
+
+    const res = await call("POST", "/video/cam0-preview/report", {
+      json: { stats: { rtt: 40, loss: 0, egress: 900, capacity: 4000 } },
+      cookie,
+    });
+
+    expect(transport.calls).toHaveLength(1);
+    expect(transport.calls[0]!.method).toBe("POST");
+    // The `-preview` stripped, through the one shared function — not a
+    // second `.slice(0, -8)` living in this test's own expectations.
+    expect(transport.calls[0]!.path).toBe(`/cameras/cam0/viewers/${viewerFor(token)}`);
+    expect(transport.calls[0]!.body).toEqual({ stats: { rtt: 40, loss: 0, egress: 900, capacity: 4000 } });
+    expect(res.status).toBe(200);
+    expect(JSON.parse(res.body)).toEqual({ mine: {}, shared: {} });
+  });
+
+  it("leaves a path with no -preview suffix alone", async () => {
+    const transport = recording(200, "{}");
+    const sessions = new SessionStore({ clock: fakeClock() });
+    await serve(consoleMiddleware({ client: new DaemonClient({ transport }), sessions }));
+    const { cookie } = sessionCookie(sessions);
+
+    await call("POST", "/video/cam0/report", { json: {}, cookie });
+
+    expect(transport.calls[0]!.path).toMatch(/^\/cameras\/cam0\/viewers\//);
+  });
+
+  /**
+   * The load-bearing one (R-SEC-13). The viewer id travels in the page, so a
+   * body-supplied id must never be able to steer another session's rate —
+   * only `viewerFor(token)` may name whose subscription this post is.
+   */
+  it("ignores a body claiming another viewer's id; the id used is the one derived from the session", async () => {
+    const transport = recording(200, "{}");
+    const sessions = new SessionStore({ clock: fakeClock() });
+    await serve(consoleMiddleware({ client: new DaemonClient({ transport }), sessions }));
+    const { cookie, token } = sessionCookie(sessions);
+
+    await call("POST", "/video/cam0-preview/report", {
+      json: {
+        viewer: "someone-elses-viewer-id",
+        viewerId: "someone-elses-viewer-id",
+        stats: { rtt: 1, loss: 0, egress: 1, capacity: 1 },
+      },
+      cookie,
+    });
+
+    expect(transport.calls).toHaveLength(1);
+    expect(transport.calls[0]!.path).toBe(`/cameras/cam0/viewers/${viewerFor(token)}`);
+    expect(transport.calls[0]!.path).not.toContain("someone-elses-viewer-id");
+    expect(JSON.stringify(transport.calls[0]!.body)).not.toContain("someone-elses-viewer-id");
+  });
+
+  it("refuses an unauthenticated report, and never calls the daemon", async () => {
+    const transport = recording(200, "{}");
+    await serve(consoleWith(transport).middleware);
+
+    const res = await call("POST", "/video/cam0-preview/report", {
+      json: { stats: { rtt: 1, loss: 0, egress: 1, capacity: 1 } },
+    });
+
+    expect(res.status).toBe(401);
+    expect(transport.calls).toHaveLength(0);
+  });
+
+  it("relays the daemon's own 400 unchanged, rather than restating its rules", async () => {
+    const transport = recording(
+      400,
+      '{"error":"a statistic carries rtt, loss, egress and capacity as finite numbers, with loss between 0 and 1"}',
+    );
+    const sessions = new SessionStore({ clock: fakeClock() });
+    await serve(consoleMiddleware({ client: new DaemonClient({ transport }), sessions }));
+    const { cookie } = sessionCookie(sessions);
+
+    const res = await call("POST", "/video/cam0-preview/report", { json: { stats: { rtt: -1 } }, cookie });
+
+    expect(res.status).toBe(400);
+    expect(res.body).toContain("finite numbers");
+  });
+
+  it("says the service is not answering, rather than inventing a result, when the daemon is unreachable", async () => {
+    const transport: Transport = () => Promise.reject(new Error("connect ENOENT"));
+    const sessions = new SessionStore({ clock: fakeClock() });
+    await serve(consoleMiddleware({ client: new DaemonClient({ transport }), sessions }));
+    const { cookie } = sessionCookie(sessions);
+
+    const res = await call("POST", "/video/cam0-preview/report", { json: {}, cookie });
+
+    expect(res.status).toBe(503);
+  });
+
+  it("refuses a report far larger than a statistic, and never calls the daemon", async () => {
+    const transport = recording(200, "{}");
+    const sessions = new SessionStore({ clock: fakeClock() });
+    await serve(consoleMiddleware({ client: new DaemonClient({ transport }), sessions }));
+    const { cookie } = sessionCookie(sessions);
+
+    const res = await call("POST", "/video/cam0-preview/report", {
+      raw: `{"pad":"${"x".repeat(8 * 1024)}"}`,
+      type: "application/json",
+      cookie,
+    });
+
+    expect(res.status).toBe(413);
+    expect(transport.calls).toHaveLength(0);
+  });
+
+  it("treats a body it cannot parse as an empty submission rather than falling over", async () => {
+    const transport = recording(200, "{}");
+    const sessions = new SessionStore({ clock: fakeClock() });
+    await serve(consoleMiddleware({ client: new DaemonClient({ transport }), sessions }));
+    const { cookie } = sessionCookie(sessions);
+
+    const res = await call("POST", "/video/cam0-preview/report", {
+      raw: "not json", type: "application/json", cookie,
+    });
+
+    expect(res.status).toBe(200);
+    expect(transport.calls[0]!.body).toEqual({});
+  });
+
+  it("answers 405 to anything but POST, and never calls the daemon", async () => {
+    const transport = recording(200, "{}");
+    const sessions = new SessionStore({ clock: fakeClock() });
+    await serve(consoleMiddleware({ client: new DaemonClient({ transport }), sessions }));
+    const { cookie } = sessionCookie(sessions);
+
+    const res = await call("GET", "/video/cam0-preview/report", { cookie });
+
+    expect(res.status).toBe(405);
+    expect(transport.calls).toHaveLength(0);
   });
 });
 
