@@ -381,6 +381,8 @@ code and unit tests and an explicit note that it has never run on hardware.
 
 - MAVLink routing configured from the config file — R-MAV-03, R-MAV-04, R-MAV-05
 - Ground-station traffic on a path a control-plane restart cannot interrupt — R-MAV-06
+- The router carried in the offline payload, installed off, started by the control plane —
+  R-MAV-17, R-CFG-07
 - Flight-controller autodetect by baud sweep — R-MAV-01, R-MAV-02
 - Three ground-station endpoints, settable from the console — R-MAV-03
 - Loopback-only ingest by default — R-MAV-07

@@ -229,8 +229,8 @@ suspicion than one that fails outright.**
 - **`SIGUSR1` is not a statistics trigger.** There is no handler for it in `src/`, so the
   default action applies and the signal terminates the process. Statistics are a
   configuration setting, not a signal.
-- Nothing about the router under `systemd` sandboxing, or surviving a `yonder-core` restart.
-  That is Task 16.
+- Nothing about the router under `systemd` at all — as a unit, with a journal, surviving a
+  `yonder-core` restart. That is the section below.
 
 ---
 
@@ -398,3 +398,95 @@ link measurement, and not something to put in front of an operator as one.
 Before Mission Planner connected, the same endpoint read `Transmitted: 1889, Received: 0` —
 telemetry going out, nothing answering. That is precisely the distinction `§6` exists to
 draw, observed live: **configured and being sent to is not the same as answering.**
+
+---
+
+# The router as a systemd unit
+
+2026-09-06, same board and autopilot. Everything above ran `mavlink-routerd` by hand from a
+shell. This is the last step of the path: the router as its own service, started by
+`yonder-core` rather than by a person. Task 16.
+
+## The unit, and what it costs to be wrong about it
+
+<!-- yonder:hardware-observed -->
+
+The binary was installed to `/usr/bin/mavlink-routerd`, `/etc/mavlink-router` created, and a
+unit put in place by hand, before `systemd/mavlink-router.service` existed as a file in this
+repository: `Description`, `After=network.target`, `ExecStart`, `Restart=on-failure`,
+`RestartSec=2`, `WantedBy=multi-user.target`, and nothing else. It is equivalent to the shipped
+unit in exactly those parts; the shipped file additionally states `Documentation=` and
+`StandardOutput=journal`, neither of which this hand-written one carried — the statistics
+section below says what that means for what has and has not been checked. **Left disabled** —
+`yonder-core` starts it, and only once a link has been found, which is the `R-VPN-08`
+precedent that installing a thing must not start it, applied to a serial port instead of to a
+company's root servers.
+
+With that in place `yonder-core` detected `/dev/ttyAMA0` at 115200 unaided, wrote
+`/etc/mavlink-router/main.conf` itself, started the router through the installed unit, and
+**two configured ground stations both reported `answering: true`**, with `telemetryRunning`
+and `routerRunning` both true.
+
+## The trap, and it is the reason the role has the number it has
+
+The first render failed:
+
+```
+EROFS: read-only file system, open '/etc/mavlink-router/main.conf.tmp'
+```
+
+on a board where the directory plainly existed. `yonder-core.service` runs
+`ProtectSystem=strict` with `ReadWritePaths`, and **a unit's mount namespace is built when the
+unit starts** — so a directory created underneath a *running* daemon is on the filesystem and
+read-only inside that process, for as long as it lives. Creating it is not enough; it has to
+exist before the namespace that must contain it is built.
+
+That is why `installer/roles/15-mavlink-router.sh` sorts before `20-yonder-core.sh`, which
+ends by restarting the daemon. The number is the fix.
+
+## The statistics parse cleanly — from a hand-run unit, not the shipped one
+
+`ReportStats = true` and `journalctl -u mr-bench -n 200 -o cat` read back by the renderer:
+**six consecutive blocks parsed cleanly.** `mr-bench` was a transient unit started by hand with
+`systemd-run` while testing, ahead of `systemd/mavlink-router.service` existing as an installed
+unit at all. So this proves `parseStats` against real journal output, on this board — the path
+`LinkState.groundStations`, `.traffic` and `.tcpClients` take — and nothing more.
+
+**What it does not prove is that the shipped unit's own stdout reaches the journal the same
+way.** The unit states `StandardOutput=journal` rather than inheriting it, precisely because
+where a service's stdout goes is otherwise decided by `DefaultStandardOutput=` in
+`system.conf`, which a distribution or an operator may set to anything — if it is ever not the
+journal, `parseStats` finds nothing, indistinguishable from a router that has not printed yet,
+with no error and no log line anywhere. That line has not itself been run under
+`mavlink-router.service` and read back; see the bench list in Task 16's report.
+
+## Two things checked off the board, because they did not need one
+
+Not hardware measurements — a Debian 13 **arm64 container**, which is the same userland the
+board runs and is enough to settle both.
+
+| | |
+|---|---|
+| Install with `--network none` | the role completes; nothing calls a package manager. `R-CFG-07` holds by construction rather than by a dead proxy |
+| The binary's dependencies | `libc6`, `libstdc++6`, `libgcc-s1`, `libm` — no `libsystemd`, despite `systemd-dev` being needed to *build* it |
+| `cp` over a **running** `/usr/bin/mavlink-routerd` | `cp: cannot create regular file: Text file busy` |
+| The role's copy-then-rename, over the same running router | succeeds; the process is still alive afterwards and the path's inode has changed |
+
+The third and fourth are the same fact from both sides. This installer is re-run to upgrade,
+and on an upgrade the destination is a running executable — so a plain copy stops the install,
+and a rename replaces the directory entry while the running router keeps its own inode. Which
+is also what should happen: an upgrade must not drop every ground station in flight to install
+a version of a program that is already working.
+
+## Still not proven
+
+- **Nothing here has been run from an image build.** The install path was exercised in a
+  container, not in the chroot `install.sh` runs in when an image is made.
+- **`Restart=on-failure` has never fired on a board.** A router that dies is systemd's to
+  restart, and nothing has yet killed one to watch it come back.
+- **The `stop`-then-sweep sequence has not been run against this unit.** Re-detection stops
+  the router to get the port back, and `on-failure` is what should leave it stopped; that is
+  reasoned from systemd's semantics rather than observed.
+- **The shipped unit's own `StandardOutput=journal` has not been read back.** The six
+  statistics blocks above came from `mr-bench`, a transient hand-run unit, not from
+  `mavlink-router.service` itself.

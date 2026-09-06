@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, readdirSync, symlinkSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, readdirSync, statSync, symlinkSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { DEFAULT_CONSOLE_PATHS } from "./console/settings.js";
-import { ROUTER_CONF_PATH } from "./mav/renderer.js";
+import { ROUTER_CONF_PATH, ROUTER_UNIT } from "./mav/renderer.js";
 
 /**
  * The installer's shell helpers, exercised rather than read.
@@ -652,7 +652,576 @@ describe("role registration", () => {
   it("40-uart.sh sits alongside the installer's other hardware-enablement roles", () => {
     const files = readdirSync(join(ROOT, "installer", "roles"));
     expect(files).toEqual(
-      expect.arrayContaining(["10-base.sh", "20-yonder-core.sh", "30-console.sh", "40-modem.sh", "40-uart.sh", "40-zerotier.sh"]),
+      expect.arrayContaining([
+        "10-base.sh", "15-mavlink-router.sh", "20-yonder-core.sh",
+        "30-console.sh", "40-modem.sh", "40-uart.sh", "40-zerotier.sh",
+      ]),
     );
+  });
+
+  /**
+   * The number prefix is the ordering, and here it is the whole of one
+   * defect.
+   *
+   * `20-yonder-core.sh` ends by restarting the daemon, and
+   * `yonder-core.service` is `ProtectSystem=strict`: a unit's mount
+   * namespace is built **when the unit starts**, so a `ReadWritePaths`
+   * directory created after that is present on the filesystem and read-only
+   * inside the running service. Creating /etc/mavlink-router from a 40-*
+   * role therefore left the very first render failing EROFS on a board where
+   * every check in this installer had passed. Sorting before 20 is the fix,
+   * and a filename is not the kind of thing anybody re-derives, so it is
+   * pinned here.
+   */
+  it("15-mavlink-router.sh runs before the daemon whose sandbox has to contain its directory", () => {
+    const roles = readdirSync(join(ROOT, "installer", "roles")).sort();
+    expect(roles.indexOf("15-mavlink-router.sh")).toBeGreaterThanOrEqual(0);
+    expect(
+      roles.indexOf("15-mavlink-router.sh"),
+      "the daemon would be restarted before /etc/mavlink-router existed, and could not write there until the next restart",
+    ).toBeLessThan(roles.indexOf("20-yonder-core.sh"));
+  });
+});
+
+/**
+ * `elf_machine`, exercised against headers built byte by byte.
+ *
+ * It is the only new arithmetic this milestone's installer work added, and
+ * the failure it stands between is one nothing else in this repository can
+ * see: an x86-64 `mavlink-routerd` staged into an arm64 payload is a file
+ * that exists, is executable, and is named correctly by its unit's
+ * ExecStart — every check the installer makes passes, and the board answers
+ * `Exec format error`, status=203, on every start.
+ *
+ * The fixtures are 64-byte headers rather than real binaries, so the test
+ * asserts what the function reads rather than what this machine happens to
+ * have lying about in /bin.
+ */
+describe("elf_machine", () => {
+  /** An ELF header: `machine` at e_machine, `data` at EI_DATA (1 = little-endian). */
+  function elfHeader(machine: number, data = 1): Buffer {
+    const h = Buffer.alloc(64);
+    h.write("\x7fELF", 0, "binary");
+    h[4] = 2; // 64-bit
+    h[5] = data;
+    h[6] = 1;
+    h.writeUInt16LE(2, 16); // e_type: ET_EXEC
+    if (data === 1) h.writeUInt16LE(machine, 18); else h.writeUInt16BE(machine, 18);
+    return h;
+  }
+
+  function elfFile(name: string, body: Buffer): string {
+    const path = join(dir, name);
+    writeFileSync(path, body);
+    return path;
+  }
+
+  function machineOf(path: string) {
+    return sh(`set -eu; . '${COMMON}'; elf_machine '${path}'`).out.trim();
+  }
+
+  it("reads e_machine out of a little-endian ELF header", () => {
+    // 183 is EM_AARCH64 — a Raspberry Pi — and 62 is EM_X86_64.
+    expect(machineOf(elfFile("aarch64", elfHeader(183)))).toBe("183");
+    expect(machineOf(elfFile("x86_64", elfHeader(62)))).toBe("62");
+  });
+
+  it("says nothing about a file that is not an ELF at all", () => {
+    expect(machineOf(elfFile("script", Buffer.alloc(64, "#".charCodeAt(0))))).toBe("");
+  });
+
+  it("declines a big-endian ELF rather than misreading it", () => {
+    // Nothing this installer supports is big-endian, and a function that
+    // guessed at a byte order would answer 46848 for aarch64 — a number that
+    // is wrong in a way no caller could detect.
+    expect(machineOf(elfFile("bigendian", elfHeader(183, 2)))).toBe("");
+  });
+
+  it("says nothing about a file too short to have a header, or one that is not there", () => {
+    expect(machineOf(elfFile("truncated", Buffer.from("\x7fELF", "binary")))).toBe("");
+    expect(machineOf(join(dir, "absent"))).toBe("");
+  });
+});
+
+/**
+ * The router's unit, read rather than trusted.
+ *
+ * It is the one unit in this repository that was written down from a board
+ * rather than designed at a desk: this exact text was run on a Raspberry
+ * Pi 4 with a live ArduPlane and two ground stations answering on
+ * 2026-09-06 (docs/hardware/an-autopilot-on-the-uart.md). Every assertion
+ * below is a property that would otherwise only be discovered by flying.
+ */
+describe("systemd/mavlink-router.service", () => {
+  const unit = readFileSync(join(SYSTEMD, "mavlink-router.service"), "utf8");
+
+  it("is the unit the renderer starts and reads statistics from", () => {
+    // Two halves of one statement. `systemctl start mavlink-router` and
+    // `journalctl -u mavlink-router` both come from ROUTER_UNIT; a unit file
+    // under any other name is a renderer talking to nothing.
+    expect(`${ROUTER_UNIT}.service`).toBe("mavlink-router.service");
+    expect(readdirSync(SYSTEMD)).toContain(`${ROUTER_UNIT}.service`);
+  });
+
+  it("starts the binary the installer stages, with the configuration the daemon generates", () => {
+    const exec = /^ExecStart=(.*)$/m.exec(unit)?.[1] ?? "";
+    // The other half of YONDER_MAVLINK_BIN in installer/lib/common.sh; the
+    // role's own assert_unit_exec compares the pair at install time, and
+    // this is what compares them in CI, on a machine with no systemd.
+    expect(exec.split(" ")[0]).toBe("/usr/bin/mavlink-routerd");
+    expect(readFileSync(COMMON, "utf8")).toMatch(/^: "\$\{YONDER_MAVLINK_BIN:=\/usr\/bin\/mavlink-routerd\}"$/m);
+    // And the other half of ROUTER_CONF_PATH. A unit reading one file while
+    // the daemon writes another is a router that never sees a change an
+    // operator made, with nothing anywhere saying so.
+    expect(exec).toContain(`-c ${ROUTER_CONF_PATH}`);
+  });
+
+  /**
+   * `Restart=on-failure`, and not `always`, is load-bearing in two
+   * directions at once.
+   *
+   * The renderer deliberately notices a dead router and does not restart it,
+   * because restarting a service is the service manager's job — a control
+   * plane that did it would make the router's lifetime depend on its own,
+   * which is what R-MAV-06 forbids. So something has to restart it, and this
+   * is that something.
+   *
+   * And `on-failure` rather than `always` is what leaves a *clean* exit
+   * exited. Systemd does not restart a unit after `systemctl stop` or an
+   * equivalent operation under any Restart= setting — `always` included —
+   * so re-detection's stop of the router (R-MAV-16) stays stopped either
+   * way, and that is not what the choice turns on. What differs is a router
+   * that exits 0 on its own: told to, or because the configuration it was
+   * started with leaves it nothing to do. `on-failure` leaves that router
+   * exited; `always` would bring it back regardless.
+   */
+  it("is restarted by systemd on failure, with a delay, and never restarted always", () => {
+    expect(unit).toMatch(/^Restart=on-failure$/m);
+    expect(unit).not.toMatch(/^Restart=always$/m);
+    const delay = /^RestartSec=(\d+)/m.exec(unit)?.[1];
+    expect(delay, "a restart with no delay is a busy loop on a 905 MiB board").toBeDefined();
+    expect(Number(delay)).toBeGreaterThan(0);
+  });
+
+  /**
+   * The line the console's per-station marks hang from.
+   *
+   * `ReportStats = true` prints a block per endpoint to stdout once a
+   * second and the renderer reads it back out of the journal; where stdout
+   * goes is otherwise decided by `DefaultStandardOutput=` in system.conf,
+   * which a distribution or an operator may set to anything. If it is ever
+   * not the journal, `parseStats` finds nothing — which is indistinguishable
+   * from a router that has not printed yet, so there is no error, no log
+   * line, and a page that simply never says which ground station is
+   * answering.
+   */
+  it("puts the router's statistics in the journal rather than wherever the host defaults", () => {
+    expect(unit).toMatch(/^StandardOutput=journal$/m);
+  });
+
+  it("can be enabled deliberately, even though the installer leaves it disabled", () => {
+    // Kept so `systemctl enable mavlink-router` on a bench does something
+    // rather than failing with "unit has no installation config" and reading
+    // like a broken unit file. R-MAV-17 is enforced by the role, which
+    // disables it and asserts the result — not by omitting this section.
+    expect(unit).toMatch(/^WantedBy=multi-user\.target$/m);
+  });
+
+  it("starts with the shared SPDX header", () => {
+    expect(unit.startsWith("# SPDX-License-Identifier: GPL-3.0-or-later\n")).toBe(true);
+  });
+});
+
+/**
+ * R-MAV-06, which is the whole reason `mavlink-router` is its own service:
+ * **restarting yonder-core must leave the router running.** Raw MAVLink
+ * never passes through the control plane on its way to a ground station, so
+ * a Node-RED restart — or a daemon upgrade, or a crash — is invisible to
+ * Mission Planner.
+ *
+ * Nothing in either unit's *code* makes that true; it is true because of
+ * what the two unit files do **not** say to each other. systemd propagates a
+ * restart along exactly one kind of edge — `PartOf=`, and the stop
+ * propagation of `BindsTo=`, `Requires=`, `Requisite=`, `StopPropagatedFrom=`
+ * and `PropagatesStopTo=` — so the property is the absence of every one of
+ * them between these two units, and that is what is asserted here.
+ *
+ * This is a static check and it is honest about being one: the behaviour
+ * itself is proven on a board with
+ *
+ *     systemctl show -p MainPID mavlink-router
+ *     systemctl restart yonder-core
+ *     systemctl show -p MainPID mavlink-router     # the same number
+ *
+ * What this test buys is that nobody can quietly add `PartOf=` later — which
+ * would read like tidiness and would drop every ground station in flight
+ * every time the daemon was restarted.
+ */
+describe("a yonder-core restart leaves the router running", () => {
+  /** `Key=value` pairs, with comments and blank lines dropped. */
+  function directives(text: string): Array<[string, string]> {
+    const out: Array<[string, string]> = [];
+    for (const raw of text.split("\n")) {
+      const line = raw.trim();
+      if (line === "" || line.startsWith("#") || line.startsWith(";")) continue;
+      const m = /^([A-Za-z][A-Za-z0-9]*)=(.*)$/.exec(line);
+      if (m?.[1] !== undefined && m[2] !== undefined) out.push([m[1], m[2]]);
+    }
+    return out;
+  }
+
+  const router = directives(readFileSync(join(SYSTEMD, "mavlink-router.service"), "utf8"));
+  const core = directives(readFileSync(join(SYSTEMD, "yonder-core.service"), "utf8"));
+
+  it("the router's unit says nothing at all about yonder-core", () => {
+    const naming = router.filter(([, value]) => value.includes("yonder-core"));
+    expect(
+      naming.map(([key, value]) => `${key}=${value}`),
+      "a setting that names yonder-core is a router whose lifetime follows the control plane's",
+    ).toEqual([]);
+  });
+
+  it("yonder-core's unit names the router in nothing but a writable path", () => {
+    // ReadWritePaths=-/etc/mavlink-router is a *directory*, not a unit, and
+    // it is what lets the daemon generate main.conf under
+    // ProtectSystem=strict. Every other mention would be a dependency.
+    const naming = core.filter(([, value]) => value.includes("mavlink-router"));
+    expect(naming.map(([key]) => key)).toEqual(["ReadWritePaths"]);
+  });
+
+  it("the router's unit declares no dependency that could propagate a stop or a restart", () => {
+    const propagating = [
+      "Requires", "Requisite", "BindsTo", "PartOf", "Upholds",
+      "StopPropagatedFrom", "PropagatesStopTo", "PropagatesReloadTo",
+    ];
+    for (const [key, value] of router) {
+      expect(
+        propagating,
+        `${key}=${value} can make another unit's lifecycle this one's; R-MAV-06 says it must not`,
+      ).not.toContain(key);
+    }
+  });
+
+  it("neither unit stops the other from a lifecycle hook", () => {
+    // The other route to the same defect: an ExecStopPost= that tidies up
+    // by stopping the router would take telemetry down on every daemon
+    // restart, and would not be a dependency directive at all.
+    for (const [key, value] of [...router, ...core]) {
+      if (!key.startsWith("Exec")) continue;
+      expect(value, `${key} runs a command that touches the other service`).not.toMatch(/systemctl/);
+    }
+  });
+});
+
+/**
+ * The mavlink-router role, run rather than read.
+ *
+ * It carries the one component of the offline payload that is *built* rather
+ * than downloaded, and it has three jobs that each close a defect somebody
+ * has already met: create the directory the daemon generates `main.conf`
+ * into **before** the daemon's sandbox is built around it, refuse a binary
+ * for the wrong architecture, and leave the service installed and off.
+ *
+ * Exercised against fixture paths — `YONDER_MAVLINK_ETC` and
+ * `YONDER_ELF_REFERENCE`, both overridable for exactly this reason — so the
+ * paths that need root are reached only on a dry run, where nothing is
+ * written and the command sequence is what is asserted.
+ */
+describe("the mavlink-router role", () => {
+  const MR_ROLE = join(ROOT, "installer", "roles", "15-mavlink-router.sh");
+
+  /** An ELF header for `machine`, as a staged payload binary would be. */
+  function elfBytes(machine: number): Buffer {
+    const h = Buffer.alloc(64);
+    h.write("\x7fELF", 0, "binary");
+    h[4] = 2;
+    h[5] = 1;
+    h[6] = 1;
+    h.writeUInt16LE(2, 16);
+    h.writeUInt16LE(machine, 18);
+    return h;
+  }
+
+  /**
+   * A stub PATH: systemd tools that only record, and an **apt that always
+   * fails**.
+   *
+   * The apt stub is this test's version of M2a's dead proxy. R-CFG-07 says
+   * the install path needs no network, and the way to prove it of a role is
+   * to make every package manager it could reach for fail loudly and then
+   * watch the role finish anyway.
+   */
+  function stubTools(): { path: string; log: string } {
+    const bin = join(dir, "mrbin");
+    const log = join(dir, "mr.log");
+    mkdirSync(bin, { recursive: true });
+    const recorder = [
+      "#!/bin/sh",
+      `printf '%s %s\\n' "$(basename "$0")" "$*" >> '${log}'`,
+      "exit 0",
+      "",
+    ].join("\n");
+    writeFileSync(join(bin, "systemctl"), recorder, { mode: 0o755 });
+    writeFileSync(join(bin, "deb-systemd-helper"), recorder, { mode: 0o755 });
+    for (const name of ["apt-get", "apt", "dpkg"]) {
+      writeFileSync(join(bin, name), [
+        "#!/bin/sh",
+        `printf '%s %s\\n' "$(basename "$0")" "$*" >> '${log}'`,
+        'printf "the network is not here\\n" >&2',
+        "exit 100",
+        "",
+      ].join("\n"), { mode: 0o755 });
+    }
+    writeFileSync(log, "");
+    return { path: `${bin}:${process.env.PATH ?? ""}`, log };
+  }
+
+  /**
+   * A staged repository: `vendor/mavlink-router/` and `systemd/`, exactly
+   * what install.sh points $YONDER_SRC at. The unit is the **shipped** one,
+   * so `assert_unit_exec`'s comparison of ExecStart against the installer's
+   * own destination is the real pair being checked.
+   */
+  function payload(opts: { binary?: Buffer | null } = {}): string {
+    const src = join(dir, "src");
+    mkdirSync(join(src, "systemd"), { recursive: true });
+    writeFileSync(
+      join(src, "systemd", "mavlink-router.service"),
+      readFileSync(join(SYSTEMD, "mavlink-router.service")),
+    );
+    if (opts.binary !== null) {
+      mkdirSync(join(src, "vendor", "mavlink-router"), { recursive: true });
+      writeFileSync(
+        join(src, "vendor", "mavlink-router", "mavlink-routerd"),
+        opts.binary ?? elfBytes(183),
+        { mode: 0o755 },
+      );
+    }
+    return src;
+  }
+
+  function runRole(opts: {
+    src: string;
+    path: string;
+    dryRun?: boolean;
+    etc?: string;
+    reference?: string;
+  }) {
+    return sh(
+      `set -eu; . '${COMMON}'; . '${MR_ROLE}'`,
+      {
+        DRY_RUN: opts.dryRun === true ? "1" : "0",
+        YONDER_SRC: opts.src,
+        YONDER_MAVLINK_ETC: opts.etc ?? join(dir, "etc-mavlink-router"),
+        YONDER_SYSTEMD_DIRS: join(dir, "no-systemd-here"),
+        ...(opts.reference === undefined ? {} : { YONDER_ELF_REFERENCE: opts.reference }),
+      },
+      opts.path,
+    );
+  }
+
+  /**
+   * Step 2a, and the defect it exists for. `yonder-core.service` runs
+   * `ProtectSystem=strict` and a unit's mount namespace is built **when the
+   * unit starts**, so a directory created afterwards is on the filesystem
+   * and read-only inside the running service. The first render on a board
+   * failed `EROFS: read-only file system` for exactly this reason.
+   */
+  it("creates the directory the daemon generates main.conf into before it judges the payload at all", () => {
+    // Deliberately not inside the payload check: a board with no usable
+    // router still renders, and it must fail with "the service is not
+    // installed" rather than with EROFS — which names the wrong problem and
+    // sends whoever reads it looking at systemd sandboxing instead of at an
+    // empty vendor directory. Run here against a payload that is refused, so
+    // the directory being there afterwards is the whole point.
+    const { path } = stubTools();
+    const etc = join(dir, "etc-mr");
+    const r = runRole({ src: payload({ binary: Buffer.from("not an elf") }), path, etc });
+    expect(r.code).not.toBe(0);
+    expect(statSync(etc).isDirectory(), `${etc} was not created`).toBe(true);
+  });
+
+  it("skips cleanly when the payload carries no router, and still leaves the directory", () => {
+    const { path } = stubTools();
+    const etc = join(dir, "etc-none");
+    const r = runRole({ src: payload({ binary: null }), path, etc });
+    expect(r.code, r.out).toBe(0);
+    expect(r.out).toContain("no mavlink-router in the payload; skipping");
+    expect(r.out).toContain("make-payload.sh");
+    expect(statSync(etc).isDirectory()).toBe(true);
+  });
+
+  /**
+   * The warning that exists because the failure it names is silent. A
+   * running daemon keeps the mount namespace it started with, so a directory
+   * created underneath it is read-only inside the service until it is
+   * restarted — and `--only 15-mavlink-router` is exactly the invocation
+   * somebody reaches for when they are fixing this by hand, with no
+   * 20-yonder-core.sh behind it to do the restart.
+   */
+  it("says so when it creates the directory under a yonder-core that is already running", () => {
+    const { path } = stubTools(); // its systemctl answers is-active with 0
+    const r = runRole({ src: payload({ binary: null }), path, etc: join(dir, "etc-live") });
+    expect(r.code, r.out).toBe(0);
+    expect(r.out).toContain("it cannot write there yet");
+    expect(r.out).toContain("systemctl restart yonder-core");
+  });
+
+  it("puts it exactly where the renderer writes, and where the daemon is allowed to", () => {
+    // Three files name this directory — the renderer, yonder-core.service's
+    // ReadWritePaths and this role — and the first two are already tied
+    // together above. This is the third knot.
+    expect(readFileSync(COMMON, "utf8"))
+      .toMatch(new RegExp(`^: "\\$\\{YONDER_MAVLINK_ETC:=${dirname(ROUTER_CONF_PATH)}\\}"$`, "m"));
+  });
+
+  /**
+   * R-CFG-07, proved the way it can be proved without a board: every package
+   * manager on PATH fails, and the role finishes anyway. On hardware the
+   * same claim is made by pointing apt at a dead proxy and reading
+   * `Need to get 0 B`.
+   */
+  it("installs with every package manager on PATH failing, because it never calls one", () => {
+    const { path, log } = stubTools();
+    const r = runRole({ src: payload(), path, dryRun: true, reference: join(dir, "ref") });
+    expect(r.code, r.out).toBe(0);
+    expect(readFileSync(log, "utf8")).not.toMatch(/^(apt-get|apt|dpkg) /m);
+    // And the role text names none of the helpers that would reach for one.
+    const role = readFileSync(MR_ROLE, "utf8");
+    expect(role).not.toMatch(/ensure_pkgs|apt_update_once|apt-get/);
+  });
+
+  it("refuses a payload binary that is not an executable at all", () => {
+    const { path } = stubTools();
+    const r = runRole({ src: payload({ binary: Buffer.from("#!/bin/sh\nexit 0\n") }), path });
+    expect(r.code).not.toBe(0);
+    expect(r.out).toContain("not a little-endian ELF executable");
+  });
+
+  /**
+   * The failure that only a board would otherwise report, and it would
+   * report it as `status=203/EXEC` on every start with nothing saying why.
+   */
+  it("refuses a payload built for another architecture, naming both", () => {
+    const { path } = stubTools();
+    const reference = join(dir, "reference-x86_64");
+    writeFileSync(reference, elfBytes(62));
+    const r = runRole({ src: payload({ binary: elfBytes(183) }), path, reference });
+    expect(r.code).not.toBe(0);
+    expect(r.out).toContain("183");
+    expect(r.out).toContain("62");
+    expect(r.out).toContain("Exec format error");
+  });
+
+  it("installs a payload whose architecture matches, and says so", () => {
+    const { path } = stubTools();
+    const reference = join(dir, "reference-aarch64");
+    writeFileSync(reference, elfBytes(183));
+    const r = runRole({ src: payload({ binary: elfBytes(183) }), path, dryRun: true, reference });
+    expect(r.code, r.out).toBe(0);
+    // A bare `toContain("ELF machine 183")` also passes if this branch's log
+    // line is replaced by the "no reference, installing unchecked" branch's
+    // wording — both interpolate the same `$mr_have`. "the same as
+    // <reference>" is the phrase only the match branch prints, and
+    // "unchecked" is the tell if the wrong branch's text has been swapped in.
+    expect(r.out).toContain(`ELF machine 183, the same as ${reference}`);
+    expect(r.out).not.toContain("unchecked");
+    expect(r.out).toContain("/usr/bin/mavlink-routerd");
+    expect(r.out).toContain("/etc/systemd/system/mavlink-router.service");
+  });
+
+  /**
+   * R-MAV-17. The serial port is the resource the router and detection
+   * contend for: a unit enabled here would open it at every boot before the
+   * sweep could, and on a freshly flashed board there is no generated
+   * configuration for it to read at all.
+   */
+  it("leaves the unit disabled, and never starts or enables it", () => {
+    const { path, log } = stubTools();
+    const r = runRole({ src: payload(), path, dryRun: true, reference: join(dir, "ref") });
+    expect(r.code, r.out).toBe(0);
+    expect(r.out).toContain("yonder-core starts it, and only once a link has been found");
+    const everything = `${r.out}\n${readFileSync(log, "utf8")}`;
+    expect(everything).not.toMatch(/systemctl (start|enable|restart) mavlink-router/);
+    expect(everything).toMatch(/deb-systemd-helper disable mavlink-router\.service/);
+  });
+
+  /**
+   * The difference from 40-zerotier.sh, which does stop the thing it
+   * installs. Disabling arms the next boot and leaves this one alone, so an
+   * operator upgrading a device that is carrying telemetry keeps carrying
+   * it — R-MAV-06 again, and the K-37 irony that the tool for reaching a
+   * device is what takes it away.
+   */
+  it("never stops a router that is already running", () => {
+    const { path, log } = stubTools();
+    const r = runRole({ src: payload(), path, dryRun: true, reference: join(dir, "ref") });
+    expect(r.code, r.out).toBe(0);
+    const everything = `${r.out}\n${readFileSync(log, "utf8")}`;
+    expect(everything).not.toMatch(/systemctl stop/);
+    expect(readFileSync(MR_ROLE, "utf8")).not.toMatch(/systemctl stop/);
+  });
+
+  it("replaces the binary by rename, so an upgrade over a running router is not ETXTBSY", () => {
+    // Writing into a running executable is "Text file busy" and stops the
+    // install; a rename replaces the directory entry and leaves the running
+    // process on its own inode.
+    const role = readFileSync(MR_ROLE, "utf8");
+    expect(role).toMatch(/cp "\$1" "\$2\.new"/);
+    expect(role).toMatch(/mv "\$2\.new" "\$2"/);
+  });
+
+  /**
+   * `mr_install_bin`, called directly rather than through the whole role —
+   * the role's own last step copies the unit to /etc/systemd/system, which
+   * is real outside a chroot, so exercising it end to end here would either
+   * write there or need DRY_RUN, and DRY_RUN never calls this function at
+   * all (`run` only prints). Extracting the function by its brace lines and
+   * sourcing that is what lets the rest of it be tested for real.
+   */
+  function mrInstallBin(): string {
+    const fn = join(dir, "mr_install_bin.sh");
+    const { code, out } = sh(`sed -n '/^mr_install_bin() {/,/^}/p' '${MR_ROLE}' > '${fn}'`);
+    if (code !== 0) throw new Error(`could not extract mr_install_bin: ${out}`);
+    return fn;
+  }
+
+  it("removes a stale .new left by an earlier run before installing", () => {
+    // A run that died between its cp and its mv leaves "$2.new" behind, and
+    // nothing else in the role ever looks for it again — so the next run
+    // has to, rather than leaving it for cp to silently overwrite (or not,
+    // if whatever stopped the mv also stops the cp).
+    const fn = mrInstallBin();
+    const src = join(dir, "new-binary");
+    writeFileSync(src, "the new binary");
+    const dest = join(dir, "installed-binary");
+    writeFileSync(`${dest}.new`, "stale: a run that died before its mv");
+    const r = sh(`set -eu; . '${fn}'; mr_install_bin '${src}' '${dest}'`);
+    expect(r.code, r.out).toBe(0);
+    expect(readFileSync(dest, "utf8")).toBe("the new binary");
+    expect(existsSync(`${dest}.new`)).toBe(false);
+  });
+
+  it("leaves no .new behind when the copy itself fails", () => {
+    const fn = mrInstallBin();
+    const dest = join(dir, "installed-binary-2");
+    writeFileSync(`${dest}.new`, "stale: a run that died before its mv");
+    const r = sh(`. '${fn}'; mr_install_bin '${join(dir, "does-not-exist")}' '${dest}'`);
+    expect(r.code).not.toBe(0);
+    expect(existsSync(dest)).toBe(false);
+    expect(existsSync(`${dest}.new`)).toBe(false);
+  });
+
+  it("traces to R-CFG-07, R-MAV-06 and R-MAV-17, and starts with the shared SPDX header", () => {
+    const role = readFileSync(MR_ROLE, "utf8");
+    expect(role.startsWith("# SPDX-License-Identifier: GPL-3.0-or-later\n")).toBe(true);
+    for (const id of ["R-CFG-07", "R-MAV-06", "R-MAV-17"]) {
+      expect(role).toContain(id);
+    }
+    const requirements = readFileSync(join(ROOT, "docs", "requirements.md"), "utf8");
+    for (const id of ["R-CFG-07", "R-MAV-06", "R-MAV-17"]) {
+      expect(requirements, `${id} is cited by a role and is not in docs/requirements.md`)
+        .toContain(`| ${id} |`);
+    }
   });
 });

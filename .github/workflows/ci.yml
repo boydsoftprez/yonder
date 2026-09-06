@@ -69,7 +69,8 @@ jobs:
         run: |
           command -v shellcheck >/dev/null \
             || { sudo apt-get update && sudo apt-get install -y shellcheck; }
-          shellcheck installer/install.sh installer/lib/*.sh installer/roles/*.sh scripts/*.sh
+          shellcheck installer/install.sh installer/make-payload.sh \
+            installer/lib/*.sh installer/roles/*.sh scripts/*.sh
       - name: Installer dry run
         run: ./installer/install.sh --dry-run
       # The failure paths a dry run cannot reach. `run` short-circuits to a
@@ -141,8 +142,17 @@ jobs:
       - run: npm run build
       # The same staged tree a board gets. linux-x64 here rather than the
       # arm64 a Pi runs, because this runner has to execute it.
+      #
+      # `--only console`, because that is genuinely all this job reads:
+      # verify-pages.sh wants vendor/console/node_modules/node-red/red.js and
+      # the dashboard beside it, and nothing else. Before mavlink-router
+      # joined the payload this job also downloaded a Node runtime and a
+      # ZeroTier .deb it never opened, which was merely wasteful; the router
+      # is a C++ build in a container, which would have made a page-capture
+      # job depend on a Docker daemon being present on the runner. The
+      # payload-mavlink-router job below is where that build is proven.
       - name: Stage the console tree
-        run: ./installer/make-payload.sh --arch linux-x64
+        run: ./installer/make-payload.sh --arch linux-x64 --only console
       # --with-deps is an apt install under sudo. A GitHub-hosted VM is new
       # every run and needs it; a persistent runner had those libraries
       # installed once, so asking for them per job is sudo and bandwidth spent
@@ -221,3 +231,83 @@ jobs:
       # is then exercised.
       - run: npm ci
       - run: npx vitest run --root packages/yonder-core
+
+  # mavlink-router, built for the architecture a board actually runs.
+  #
+  # It is the one payload component that is *built* rather than downloaded: it
+  # is not in Debian and publishes no binary. Task 2 measured what building it
+  # on the board costs — three packages missing from a stock image, one of them
+  # (`systemd-dev`) named nothing like the error it produces, and a default
+  # parallel build killed by the OOM killer on a 905 MiB Pi 4 — against a
+  # 325 KB result. So it is built here and carried, which is R-VPN-08's shape
+  # applied to a source build (R-CFG-07, R-MAV-17).
+  #
+  # arm64, under emulation, because that is what flies. The runner is x86 on
+  # the hosted image, and `make-payload.sh` builds inside a debian:trixie
+  # container for `linux/arm64`; setup-qemu-action is what registers the
+  # handlers that makes that container runnable. **A runner with no Docker
+  # daemon cannot run this job** — that is the one thing to watch if CI_RUNNER
+  # is ever pointed at a machine without one.
+  payload-mavlink-router:
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The whole history, so the step below can ask what this pull
+          # request actually changed.
+          fetch-depth: 0
+      # An emulated C++ build is minutes, and unlike the page capture below
+      # its inputs are provably narrow: the pinned commit, the container image
+      # and the recipe all live in installer/make-payload.sh, and nothing else
+      # in this repository can change a byte of the result. A role or a unit
+      # file changing does not rebuild it, because neither is an input.
+      #
+      # The job still runs and still reports, so a required check is never
+      # left pending.
+      - name: Decide whether anything in this change could alter the binary
+        id: scope
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "not a pull request; building"
+            echo "run=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          base=$(git merge-base "origin/${{ github.base_ref }}" HEAD)
+          if git diff --name-only "$base"...HEAD | grep -qxF 'installer/make-payload.sh'; then
+            echo "the pin or the recipe changed; building"
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "nothing that feeds this build changed; skipping it"
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Set up the emulation an arm64 container needs
+        if: steps.scope.outputs.run == 'true'
+        uses: docker/setup-qemu-action@v3
+      # Verifies the pinned commit, builds in debian:trixie for linux/arm64,
+      # and refuses to stage a binary whose own --version does not report the
+      # pinned commit. See the step's comments for why the fingerprint is the
+      # commit rather than a hash of the binary.
+      - name: Build it from the pinned commit
+        if: steps.scope.outputs.run == 'true'
+        run: ./installer/make-payload.sh --arch linux-arm64 --only mavlink-router
+      # ELF's own e_machine, read out of the header: 183 is aarch64. This is
+      # the check installer/roles/15-mavlink-router.sh makes against a binary
+      # this root already runs, exercised here where the answer is known —
+      # an x86 binary staged into an arm64 payload otherwise passes every
+      # check an installer makes and is `Exec format error` on a board.
+      - name: It is an aarch64 binary
+        if: steps.scope.outputs.run == 'true'
+        run: |
+          m=$(/bin/sh -c '. ./installer/lib/common.sh; elf_machine "$1"' sh \
+                vendor/mavlink-router/mavlink-routerd)
+          echo "ELF e_machine: $m"
+          [ "$m" = "183" ] || { echo "::error::not an aarch64 binary"; exit 1; }
+      # So a payload can be assembled on a machine with no Docker: download
+      # this, drop it in vendor/mavlink-router/, and the install role takes it
+      # from there.
+      - uses: actions/upload-artifact@v4
+        if: steps.scope.outputs.run == 'true'
+        with:
+          name: mavlink-routerd-arm64
+          path: vendor/mavlink-router/mavlink-routerd
+          if-no-files-found: error
+          retention-days: 7
