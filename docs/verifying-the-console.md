@@ -298,9 +298,10 @@ not, and nothing in this repository had ever drawn one.
 
 A page of specimens is not a portrait of a board. Every field is at its own widest, so the
 lamp can read `NOTHING` beside a sentence about a path that is carrying traffic — the
-picture is the layout under the hardest content each field can hold. The copy under
+picture is the layout under the hardest content each field can hold. The full-page copy under
 `vendor/capture/`, which CI uploads as an artifact, is taken **before** any of that is
-written and is the page as it really was.
+written and is the page as it really was. The `--fold` artifact beside it is not: the
+viewport picture is of the contract, and the contract is about the widest values.
 
 A reading with no specimen is masked, as before, and **named on every run**, so the list of
 what is still hidden is visible rather than implied and can only shrink. A reading that is

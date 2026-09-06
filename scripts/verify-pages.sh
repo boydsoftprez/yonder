@@ -747,6 +747,21 @@ say "R-UI-12: capture every page, in both palettes, and look at them"
 # machine — so a missing playwright is a loud skip rather than a failure, and
 # CI installs it so that there it is neither.
 if node -e 'import("playwright")' >/dev/null 2>&1; then
+    # The gate's own rules, before the console is asked anything.
+    #
+    # Everything below this line proves the rules against the pages this
+    # console happens to have, which is the claim that matters and is also the
+    # claim's limit: a rule can only be seen working on a defect that is
+    # actually there. `measure-page.test.mjs` builds the defect instead — six
+    # lines of HTML per case, each written as a mutation, so a case that
+    # passes because the rule never fires cannot pass quietly. The sideways
+    # rule shipped with a false negative that no page here reaches.
+    if node "$REPO/scripts/measure-page.test.mjs"; then
+        ok "the rules that run inside a page hold against a page built to break them"
+    else
+        bad "the rules that run inside a page: see the output above"
+    fi
+
     capture() {
         if node "$REPO/scripts/capture-pages.mjs" \
                 --base-url "http://127.0.0.1:$PORT" \
@@ -1217,6 +1232,15 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
     #
     # Each width records a shape reference of its own, under its own `--as`
     # name, so a 1440 rendering is never compared against a 1024 one.
+    #
+    # **`--secrets`, because these runs write committed images too.**
+    # `deviceSecret()` answers `null` without it, which switches off both
+    # R-SEC-10 guards — the page-HTML check and the specimen-file check — and
+    # these are the two pages that carry the resolved receive line. Sixteen
+    # images went into `docs/console/capture/` from this function with neither
+    # guard running. `--synthetic-cameras` goes with it: without `--secrets`
+    # it is what makes the gate say "nothing checked the real credential"
+    # rather than pass quietly, and the pair is what the base capture uses.
     capture_fold() {
         # $1 palette, $2 surface name, $3 viewport
         for camera_page in camera-live camera-setup; do
@@ -1229,6 +1253,8 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
                     --viewport "$3" \
                     --fold \
                     --artifacts "$REPO/vendor/capture" \
+                    --synthetic-cameras "$CAMERAS" \
+                    --secrets "$ETC/secrets.yaml" \
                     ${ACCEPT_SHAPE:+--accept}; then
                 ok "the $1 palette: $camera_page holds its shape on a $2 at $3"
             else
