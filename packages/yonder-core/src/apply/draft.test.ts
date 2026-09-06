@@ -243,6 +243,24 @@ describe("applyCameraDraft", () => {
 });
 
 describe("a turn the board performs", () => {
+  it("warns that it restarts the picture, because it does", () => {
+    // It is an element in the launch line, so the line differs, so the
+    // pipeline respawns. This reached the operator empty once: the Apply
+    // confirmed, the picture cut, and nothing had said it would.
+    expect(interruption({ controls: { horizontalFlip: true } }, { controls: { horizontalFlip: false } }))
+      .toContain("restarts the picture");
+    expect(interruption({ controls: { rotation: 90 } }, { controls: { rotation: 0 } }))
+      .toContain("restarts the picture");
+  });
+
+  it("says nothing when the turn is the one the camera already has", () => {
+    // Staged and unstaged before Apply. A warning about a restart that will
+    // not happen teaches an operator to stop reading them.
+    expect(interruption({ controls: { horizontalFlip: true } }, { controls: { horizontalFlip: true } }))
+      .toEqual([]);
+  });
+
+
   /**
    * **Every other field was carried and this one was dropped, silently.**
    *

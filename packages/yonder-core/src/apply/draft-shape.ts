@@ -244,7 +244,19 @@ export function interruption(draft: CameraDraft, applied: CameraDraft): string[]
     || (draft.height !== undefined && draft.height !== applied.height)
     || (draft.framerate !== undefined && draft.framerate !== applied.framerate)
     || (draft.codec !== undefined && draft.codec !== applied.codec);
-  if (sourceChanged) out.push("restarts the picture");
+  // **A turn the board performs restarts the picture too**, and for the same
+  // reason a size change does: it is an element in the launch line, so the
+  // line differs, so `PipelineRenderer` respawns. It reached the operator
+  // with an empty interruption list once — the Apply confirmed, the picture
+  // cut, and nothing had said it would.
+  //
+  // Only a turn that actually moves. Staging Mirror and unstaging it before
+  // Apply leaves the draft naming a value the camera already holds, and a
+  // warning about a restart that will not happen is the kind of noise that
+  // teaches an operator to stop reading them.
+  const turnChanged = (["rotation", "horizontalFlip", "verticalFlip"] as const)
+    .some((k) => draft.controls?.[k] !== undefined && draft.controls[k] !== applied.controls?.[k]);
+  if (sourceChanged || turnChanged) out.push("restarts the picture");
 
   const previewBranchChanged =
     (draft.preview?.size !== undefined && draft.preview.size !== applied.preview?.size)
