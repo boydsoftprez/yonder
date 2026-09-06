@@ -32,6 +32,7 @@ interface FlowNode {
   ui?: string;
   theme?: string;
   interval?: number;
+  repeat?: string;
   [key: string]: unknown;
 }
 
@@ -185,6 +186,38 @@ describe("flows/flows.json", () => {
     for (const node of pollers) {
       expect((node.interval ?? 0) * 1000, `${node.id} polls every ${String(node.interval)} s`)
         .toBeGreaterThanOrEqual(MIN_POLL_MS);
+    }
+  });
+
+  /**
+   * Every Yonder reader costs the daemon a request, and the daemon answers
+   * most of them by shelling out. So a second timer aimed at a second copy of
+   * the same reader is that whole cost paid twice, forever, for one answer -
+   * and it is invisible on the page, because both copies show the same thing.
+   *
+   * That is exactly what happened: the Status page's one-line mesh summary and
+   * the Network page's mesh panel each had their own `yonder-remote-state` on
+   * its own timer, at 2 s and 5 s, both reading `GET /remote/state`. One
+   * reader feeds both pages; nothing about a second copy was load-bearing.
+   *
+   * Only Yonder types are checked. A `change` or a `switch` on two timers is
+   * plumbing and costs nothing off-board.
+   */
+  it("reads each thing once, however many pages show it", () => {
+    const byId = new Map(flows.map((n) => [n.id, n]));
+    const polled = new Map<string, string[]>();
+    for (const node of flows) {
+      if (node.type !== "inject" || !node.repeat) continue;
+      for (const target of node.wires?.[0] ?? []) {
+        const type = byId.get(target)?.type ?? "";
+        if (!type.startsWith("yonder-")) continue;
+        polled.set(type, [...(polled.get(type) ?? []), `${node.id} every ${String(node.repeat)} s -> ${target}`]);
+      }
+    }
+    expect(polled.size).toBeGreaterThan(0);
+    for (const [type, pollers] of polled) {
+      expect(pollers, `${type} is polled ${String(pollers.length)} times: ${pollers.join(", ")}`)
+        .toHaveLength(1);
     }
   });
 
@@ -1405,11 +1438,22 @@ describe("flows/flows.json status page remote line", () => {
     expect(line?.value).toBe("payload.summary");
   });
 
-  // The Status page reads independently of which Network tab is open, so it
-  // carries its own state node and its own inject rather than depending on
-  // the ZeroTier tab's.
-  it("has its own state node, fed by its own poll no tighter than the floor (R-UI-06)", () => {
-    expect(flows.filter((n) => n.type === "yonder-remote-state").length).toBeGreaterThanOrEqual(2);
+  /**
+   * Fed by the mesh reader, whichever page is in front.
+   *
+   * This line used to carry a second `yonder-remote-state` and a second timer,
+   * on the reasoning that the Status page must read "independently of which
+   * Network tab is open". That reasoning does not hold: an `inject` fires on
+   * the runtime's clock, and a Dashboard page that nobody is looking at does
+   * not stop it. Both copies therefore ran all the time, and the second one
+   * bought a duplicate `GET /remote/state` — 12 more a minute, each shelling
+   * out — for a value the first already had.
+   */
+  it("is fed by the mesh reader, on a poll no tighter than the floor (R-UI-06)", () => {
+    const readers = flows.filter((n) => n.type === "yonder-remote-state");
+    expect(readers).toHaveLength(1);
+    expect(readers[0]?.wires?.[0] ?? [], "the Remote line is wired to nothing that reads the mesh")
+      .toContain("text-status-remote");
 
     const periodic = flows.filter(
       (n) => n.type === "inject" && typeof n.repeat === "string" && n.repeat !== "",

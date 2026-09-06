@@ -37,8 +37,8 @@ interface Baseline {
  * graph the moment it is opened, not one that starts flat and fills in while
  * an operator watches. Node-RED's own poll keeps `GET /remote/state` coming
  * whether or not a browser is attached, but nothing guarantees it lands every
- * `intervalMs` on the nose - two pollers share this route at different
- * periods, and either can be late. Sampling on a dedicated timer keeps the
+ * `intervalMs` on the nose - a poll can be late, and the interval is the
+ * console's to change. Sampling on a dedicated timer keeps the
  * two-minute window's spacing exact regardless of when a page asks to see it,
  * and means history is already there from whenever `start()` ran, not from
  * whenever the first request happened to arrive.

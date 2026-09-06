@@ -4,7 +4,7 @@
         "type": "tab",
         "label": "Yonder console",
         "disabled": false,
-        "info": "The shipped console.\n\nWIRING ONLY (CLAUDE.md rule 2). Every node here is either a Dashboard\nwidget, a core node moving a value from one place to another, or one of\nthe `yonder-*` adapters from packages/node-red-contrib-yonder-*. There is\nno `function` node and there cannot be one: `settings.js` excludes the\ntype, and `src/flows.test.ts` asserts against this file.\n\nAnything that needed a decision was written in yonder-core instead —\nthe number formatting on the status page, the folding of a Wi-Fi scan, the\nmerge that turns a form into a configuration, and the command-state\nlanguage that decides what pending, confirmed and rejected look like.",
+        "info": "The shipped console.\n\nWIRING ONLY (CLAUDE.md rule 2). Every node here is either a Dashboard\nwidget, a core node moving a value from one place to another, or one of\nthe `yonder-*` adapters from packages/node-red-contrib-yonder-*. There is\nno `function` node and there cannot be one: `settings.js` excludes the\ntype, and `src/flows.test.ts` asserts against this file.\n\nAnything that needed a decision was written in yonder-core instead \u2014\nthe number formatting on the status page, the folding of a Wi-Fi scan, the\nmerge that turns a form into a configuration, and the command-state\nlanguage that decides what pending, confirmed and rejected look like.",
         "env": []
     },
     {
@@ -1029,7 +1029,8 @@
                 "text-zt-traffic",
                 "text-zt-throughput",
                 "sparkline-zt-throughput",
-                "text-zt-lastheard"
+                "text-zt-lastheard",
+                "text-status-remote"
             ]
         ]
     },
@@ -1599,7 +1600,7 @@
         "width": 12,
         "height": 1,
         "label": "CPU TEMP",
-        "unit": "°C",
+        "unit": "\u00b0C",
         "min": 0,
         "max": 85,
         "caution": 60,
@@ -1766,44 +1767,6 @@
             ]
         ],
         "z": "yonder-console"
-    },
-    {
-        "id": "status-remote-poll",
-        "type": "inject",
-        "z": "yonder-console",
-        "name": "poll the mesh state",
-        "props": [
-            {
-                "p": "payload"
-            }
-        ],
-        "repeat": "5",
-        "crontab": "",
-        "once": true,
-        "onceDelay": "1",
-        "topic": "",
-        "payload": "",
-        "payloadType": "date",
-        "x": 800,
-        "y": 1680,
-        "wires": [
-            [
-                "status-remote-state"
-            ]
-        ]
-    },
-    {
-        "id": "status-remote-state",
-        "type": "yonder-remote-state",
-        "z": "yonder-console",
-        "name": "mesh state",
-        "x": 1000,
-        "y": 1680,
-        "wires": [
-            [
-                "text-status-remote"
-            ]
-        ]
     },
     {
         "id": "text-status-remote",
@@ -5069,7 +5032,7 @@
         "width": 12,
         "height": 0,
         "label": "",
-        "cells": "[{\"key\":\"pushNote\",\"label\":\"UDP · RTP\",\"kind\":\"note\"},{\"key\":\"listenNote\",\"label\":\"RTSP\",\"kind\":\"note\"}]",
+        "cells": "[{\"key\":\"pushNote\",\"label\":\"UDP \u00b7 RTP\",\"kind\":\"note\"},{\"key\":\"listenNote\",\"label\":\"RTSP\",\"kind\":\"note\"}]",
         "x": 1360,
         "y": 2800,
         "wires": []
@@ -5337,7 +5300,7 @@
                 "t": "set",
                 "p": "payload",
                 "pt": "msg",
-                "to": "that key is not wired to anything on this console — the rail and the flow disagree about what it does, and nothing was sent to the camera",
+                "to": "that key is not wired to anything on this console \u2014 the rail and the flow disagree about what it does, and nothing was sent to the camera",
                 "tot": "str"
             }
         ],
