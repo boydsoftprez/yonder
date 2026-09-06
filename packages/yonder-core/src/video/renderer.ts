@@ -160,10 +160,32 @@ export class PipelineRenderer implements Renderer {
       try {
         next = compose({
           camera,
-          // Read by `refuse()` and by nothing in `compose()`. This renderer
-          // probes no camera — a device round trip per apply, to re-derive
-          // what the Setup page already shows the operator — so it has no
-          // capability set to offer and says so rather than inventing one.
+          // This renderer probes no camera — a device round trip per apply,
+          // inside the confirmation window, to re-derive what the Setup page
+          // already shows the operator — so it has no capability set to offer
+          // and says so rather than inventing one.
+          //
+          // **That was free until R-CTL-05, and it is not any more.**
+          // `compose()` now reads `capabilities` as well as `refuse()` does:
+          // it composes a `videoflip` for a camera whose *sensor* cannot turn
+          // the picture, and none for one whose sensor can. The start route
+          // composes with what it probed; this composes with `noCapabilities`,
+          // which claims the camera offers nothing. For a camera that really
+          // offers no `horizontal_flip`, `vertical_flip` or `rotate` — every
+          // camera on the bench today — the two agree and nothing is wrong.
+          // For a camera that offers one of the three and has it set, they do
+          // not: this line carries a board correction the running line does
+          // not, so the pipeline is restarted once for a configuration that
+          // did not change, and comes back turning the picture twice — once
+          // at the sensor, once on the board.
+          //
+          // The fix is a capability answer both composers share, and it is
+          // not this task's to choose: probing here costs a v4l2 sweep inside
+          // an apply, and an apply that hangs is the failure R-CFG-03 and
+          // R-NET-07 exist to prevent. Until then this is a known defect with
+          // no camera on the bench that can reach it, recorded rather than
+          // papered over. `pipeline.test.ts` pins the disagreement so that it
+          // cannot become invisible.
           capabilities: noCapabilities(),
           encoder,
           rtspBase: this.rtspBase,

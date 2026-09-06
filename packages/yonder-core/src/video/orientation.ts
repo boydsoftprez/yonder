@@ -1,0 +1,259 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+import type { Camera } from "../schema/config.js";
+import type { Capability, CameraCapabilities, ControlRange } from "./capability.js";
+
+/**
+ * Which way up the picture leaves this board, and who turned it (R-CTL-05).
+ *
+ * **The sensor first, the board only when it must.** `video/controls.ts`
+ * writes `horizontal_flip`, `vertical_flip` and `rotate` to the capture
+ * device, and a sensor that turns its own readout costs nothing at all. The
+ * bench camera implements none of the three — `probe/camera.ts` reads all
+ * three names and this ELP answers `not-offered` to every one — so a mount
+ * that needs the picture turned has nowhere to turn it, and the operator is
+ * offered a control that cannot move. That is the whole reason this file
+ * exists: when the sensor cannot, the board does, in the pipeline.
+ *
+ * **What the board's correction costs, and what it does not.** It is a
+ * `videoflip` on already-decoded frames, so it adds no decode and no encode
+ * — those are already there. A half-turn and either flip are memory moves.
+ * A quarter-turn is a transpose, and a transpose is the dearest of the
+ * eight. **No figure is written here or in `docs/hardware/`: this has not
+ * been measured on a board**, and this project's hardware notes carry only
+ * observed numbers. The measurement is owed.
+ *
+ * **Two things this file must never do, each with its own failure:**
+ *
+ * 1. **Turn the picture twice.** `applyControls` writes to the sensor
+ *    whatever the sensor offers, whether or not this file is consulted. A
+ *    board correction that repeated the sensor's would mirror a mirror —
+ *    which is no mirror at all, silently, with `config.yaml`, the page and
+ *    the launch line all agreeing that the picture is mirrored. So the board
+ *    is given the *remainder*: the turn that takes what the sensor is
+ *    actually doing to what the operator actually asked for, and nothing
+ *    more. `orientation()` below does that subtraction as group arithmetic
+ *    rather than by a table of cases, because eight orientations times eight
+ *    is sixty-four cases and a table of sixty-four is a table with a mistake
+ *    in it.
+ *
+ * 2. **Disagree with the sensor about which way round a quarter-turn goes.**
+ *    A mirror and a half-turn commute with everything here, so splitting
+ *    them between the sensor and the board is safe in any order. A
+ *    quarter-turn does not commute with a mirror: mirror-then-quarter and
+ *    quarter-then-mirror are two different pictures. The order is fixed
+ *    below and stated, once, so the two halves cannot each pick their own.
+ */
+
+/**
+ * `videoflip`'s `video-direction`, and the whole of it — the eight
+ * symmetries of a rectangle, which is every orientation a camera on a mount
+ * can be in. `auto` is deliberately absent: it reads the JPEG's own
+ * orientation tag, which is a claim made by the camera about itself rather
+ * than a correction the operator asked for, and R-CMD-04's rule that Yonder
+ * relays and never originates applies to the picture as much as to a
+ * command — the board turns the picture the operator asked it to turn, not
+ * the one a file's metadata suggested.
+ */
+export type VideoDirection =
+  | "identity" | "90r" | "180" | "90l"
+  | "horiz" | "vert" | "ul-lr" | "ur-ll";
+
+/** Who turns this camera's picture, and what the board adds to do its part. */
+export interface Orientation {
+  /**
+   * `sensor` — the camera is doing all of it and the pipeline adds nothing.
+   * `board` — some or all of it falls to the pipeline.
+   * `none` — the picture is not turned at all.
+   */
+  readonly method: "sensor" | "board" | "none";
+  /** The `videoflip` `video-direction` to compose, or null for no element. */
+  readonly flip: VideoDirection | null;
+  /** One sentence, for an operator, about which of them is turning it. */
+  readonly note: string;
+}
+
+/**
+ * One of the eight orientations, in the normal form the arithmetic below
+ * needs: **mirror first, then quarter-turns** — `R^quarters ∘ H^mirrored`.
+ *
+ * Every one of the eight is exactly one such pair, so `then` and `undo` are
+ * total and there is no orientation this type cannot name.
+ */
+interface Turn {
+  /** Quarter-turns **clockwise**, applied after the mirror. */
+  readonly quarters: 0 | 1 | 2 | 3;
+  /** A left-for-right mirror, applied first. */
+  readonly mirrored: boolean;
+}
+
+const STILL: Turn = { quarters: 0, mirrored: false };
+
+/** Whether a turn leaves the picture exactly as it found it. */
+function isStill(turn: Turn): boolean {
+  return turn.quarters === STILL.quarters && turn.mirrored === STILL.mirrored;
+}
+
+/** Two quarter-turn counts, added into the four the group has. */
+function quartersOf(n: number): 0 | 1 | 2 | 3 {
+  return (((n % 4) + 4) % 4) as 0 | 1 | 2 | 3;
+}
+
+/**
+ * `first`, and then `second` — the composition, in the order a frame meets
+ * them, so `then(sensor, board)` reads the way the pipeline is built.
+ *
+ * The one identity the arithmetic rests on is that a mirror reverses the
+ * sense of a rotation: `H ∘ R^k = R^-k ∘ H`. Pushing `second`'s mirror back
+ * past `first`'s rotation therefore negates `first.quarters` exactly when
+ * `second` is mirrored, and the two mirrors then meet and cancel or do not.
+ * That is the whole rule, and it is why a quarter-turn cannot simply be
+ * added to a mirror and left in either order.
+ */
+function then(first: Turn, second: Turn): Turn {
+  return {
+    quarters: quartersOf(second.quarters + (second.mirrored ? -first.quarters : first.quarters)),
+    mirrored: first.mirrored !== second.mirrored,
+  };
+}
+
+/** The turn that puts `turn` back — `then(turn, undo(turn))` is `STILL`. */
+function undo(turn: Turn): Turn {
+  // A mirrored turn is its own inverse: reflections have order two, whatever
+  // axis they are about. An unmirrored one is undone by turning back.
+  return { quarters: turn.mirrored ? turn.quarters : quartersOf(-turn.quarters), mirrored: turn.mirrored };
+}
+
+/**
+ * The eight, named as `videoflip` names them.
+ *
+ * Derived rather than believed, with x to the right and y **down** the
+ * frame, `R` a clockwise quarter-turn `(x, y) -> (-y, x)` and `H` the mirror
+ * `(x, y) -> (-x, y)`:
+ *
+ * - `R¹ ∘ H` sends `(x, y)` to `(-y, -x)` — the reflection about the line
+ *   from the upper *right* to the lower left, which is `ur-ll`.
+ * - `R² ∘ H` sends `(x, y)` to `(x, -y)` — top for bottom, which is `vert`.
+ *   **This is the brief's third case and it holds: a mirror followed by a
+ *   half-turn is a vertical flip**, and because a half-turn commutes with
+ *   everything, it is a vertical flip in either order.
+ * - `R³ ∘ H` sends `(x, y)` to `(y, x)` — the transpose, the reflection
+ *   about the upper-left-to-lower-right diagonal, which is `ul-lr`.
+ */
+const DIRECTION: Readonly<Record<"plain" | "mirrored", readonly VideoDirection[]>> = {
+  plain: ["identity", "90r", "180", "90l"],
+  mirrored: ["horiz", "ur-ll", "vert", "ul-lr"],
+};
+
+function directionOf(turn: Turn): VideoDirection {
+  return DIRECTION[turn.mirrored ? "mirrored" : "plain"][turn.quarters];
+}
+
+/**
+ * The turn a set of controls asks for: **the flips first, then the
+ * rotation.**
+ *
+ * The order is a decision, not a discovery, and it is made here once because
+ * the sensor and the board each perform a share of it (see rule 2 in the
+ * header). It follows the physical chain — a mirror describes the optics,
+ * which are fixed in the camera, and a rotation describes how the camera is
+ * bolted to the airframe, which happens afterwards — and it is the order the
+ * two flips would be read out of a sensor in before anything downstream
+ * turned the result. The two flips commute with each other, so `horizontal`
+ * and `vertical` need no order between them.
+ *
+ * `rotation` is degrees **clockwise**. V4L2's own `V4L2_CID_ROTATE` does not
+ * state a direction, so this is a convention rather than a fact about the
+ * kernel — written down because the sensor's share and the board's share
+ * must agree about it, and because no camera on the bench implements
+ * `rotate` for it to be checked against.
+ */
+function asked(controls: Partial<Camera["controls"]>, offered: (key: FlipKey) => boolean): Turn {
+  // `null` is the schema's own "leave the camera alone" and `undefined` is a
+  // key a `Partial` simply does not carry. Neither asks for anything, so
+  // neither contributes a turn — the same reading `applyControls` gives them.
+  const horizontal = controls.horizontalFlip === true && offered("horizontalFlip");
+  const vertical = controls.verticalFlip === true && offered("verticalFlip");
+  // A vertical flip is a mirror and a half-turn, which is how both flips
+  // together come out as a plain half-turn and neither alone comes out as
+  // any rotation at all — the fact `schema/config.ts` gives as its reason
+  // for storing two switches rather than more degrees on `rotation`.
+  const flips: Turn = {
+    quarters: vertical ? 2 : 0,
+    mirrored: horizontal !== vertical,
+  };
+  const degrees = offered("rotation") ? controls.rotation ?? 0 : 0;
+  return then(flips, { quarters: quartersOf(degrees / 90), mirrored: false });
+}
+
+/** The three controls that turn a picture, as `CameraCapabilities` names them. */
+type FlipKey = "horizontalFlip" | "verticalFlip" | "rotation";
+
+/**
+ * Whether the **sensor** will carry out `key` — which is exactly the
+ * question `applyControls` answers when it decides to run `v4l2-ctl`, and
+ * is answered here the same way so the two cannot disagree about who is
+ * turning the picture.
+ *
+ * Exhaustive over `Capability`'s states with the return type written out and
+ * no `default:`, for the reason `capability.ts`'s own `summarise` gives: a
+ * fifth state must fail to compile here rather than fall through to a
+ * silent `false` and hand the board a correction the sensor is already
+ * making.
+ */
+function sensorWillDo(capability: Capability<ControlRange>): boolean {
+  switch (capability.state) {
+    case "present":
+      return true;
+    case "not-offered":
+      // The device does not have the control. This is the bench camera's
+      // answer to all three, and the case this file was built for.
+      return false;
+    case "advertised":
+      // It lists the control, takes the command and does nothing (R-UI-21).
+      // `applyControls` refuses it, so the sensor turns nothing.
+      return false;
+    case "gated":
+      // Real, working, and another control has charge of it right now.
+      // `applyControls` refuses it too, so again the sensor turns nothing.
+      return false;
+  }
+}
+
+/**
+ * Who turns this camera's picture, and what the pipeline must add.
+ *
+ * The board's share is `asked ∘ sensor⁻¹` — the turn that takes the picture
+ * the sensor is producing to the picture the operator asked for. When the
+ * sensor is doing all of it that is the identity and no element is composed;
+ * when the sensor is doing none of it, it is the whole correction; and when
+ * the sensor is doing part of it, it is the rest, computed rather than
+ * guessed. Rule 1 in the header is what that expression is for.
+ */
+export function orientation(
+  capabilities: CameraCapabilities,
+  controls: Partial<Camera["controls"]>,
+): Orientation {
+  const sensor = asked(controls, (key) => sensorWillDo(capabilities[key]));
+  const wanted = asked(controls, () => true);
+  const board = then(undo(sensor), wanted);
+
+  if (isStill(board)) {
+    return isStill(wanted)
+      ? { method: "none", flip: null, note: "this picture is not turned" }
+      : { method: "sensor", flip: null, note: "the camera turns this picture itself" };
+  }
+
+  const flip = directionOf(board);
+  // A quarter-turn is the one correction that transposes every frame rather
+  // than moving it, and it is the one that also swaps the picture's width
+  // and height — both worth saying to whoever is choosing it. Stated as a
+  // kind of cost, never as a number: nothing here has been measured.
+  const transposes = board.quarters === 1 || board.quarters === 3;
+  return {
+    method: "board",
+    flip,
+    note: transposes
+      ? "this camera cannot turn the picture itself, so the board turns it after decoding — a quarter turn transposes every frame, and swaps its width and height"
+      : "this camera cannot turn the picture itself, so the board turns it after decoding",
+  };
+}

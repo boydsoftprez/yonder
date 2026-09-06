@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { PREVIEW_RUNGS, type Camera, type CameraOutput, type PreviewRung } from "../schema/config.js";
 import type { CameraCapabilities } from "./capability.js";
+import { orientation } from "./orientation.js";
 import type { Encoder } from "./probe/encoder.js";
 
 /**
@@ -18,7 +19,7 @@ import type { Encoder } from "./probe/encoder.js";
  *
  * So the graph forks twice:
  *
- *     v4l2src ! image/jpeg ! jpegdec ! tee name=raw
+ *     v4l2src ! image/jpeg ! jpegdec ! [videoflip] ! tee name=raw
  *       raw. ! queue ! ENCODE(full) ! h264parse ! tee name=main
  *         main. ! queue ! rtph264pay ! udpsink        (R-VID-01)
  *         main. ! queue ! rtspclientsink              (R-VID-03/04, via mediamtx)
@@ -84,6 +85,19 @@ export const QUEUE = [
 
 export interface ComposeOptions {
   readonly camera: Camera;
+  /**
+   * What the device answered (R-CAM-14).
+   *
+   * **Read by `refuse()`, and since R-CTL-05 by `compose()` too**, which is a
+   * change worth stating rather than leaving to be discovered: whether the
+   * board must turn the picture depends on whether the *sensor* can, so two
+   * callers who disagree about this camera's capabilities compose two
+   * different launch lines for one configuration. `video/renderer.ts`
+   * compares the line a configuration implies against the line the running
+   * pipeline was started with and respawns on any difference, so a caller
+   * that cannot answer this honestly must not be the one deciding — see the
+   * note there.
+   */
   readonly capabilities: CameraCapabilities;
   readonly encoder: Encoder;
   /** Where mediamtx listens, on loopback. */
@@ -322,6 +336,33 @@ function sink(output: CameraOutput, rtspBase: string, cameraId: string): string[
   }
 }
 
+/**
+ * The board's share of turning the picture, as launch-line tokens, or none
+ * at all (R-CTL-05).
+ *
+ * **Between `jpegdec` and `tee name=raw`, and that placement is the point.**
+ * One correction, applied once, to the frames both branches are forked from
+ * — so the full-rate stream and the preview cannot disagree about which way
+ * up the world is. After the tee it would have to be composed twice, on two
+ * branches that could then be changed independently, and an operator
+ * watching the preview would be told the ground station is seeing something
+ * it is not.
+ *
+ * Unnamed, unlike the encodes and the preview's capsfilters. A name here
+ * would be a name nothing addresses: this correction is baked in and only a
+ * respawn changes it, so there is no runtime command to point at it and a
+ * name would only suggest there were one.
+ *
+ * `orientation()` returns null for the sensor's own doing and for a picture
+ * nobody asked to turn, and both of those compose no element rather than an
+ * `identity` one — a `videoflip` that turns nothing still copies every
+ * frame.
+ */
+function turn(opts: ComposeOptions): string[] {
+  const board = orientation(opts.capabilities, opts.camera.controls);
+  return board.flip === null ? [] : ["videoflip", `video-direction=${board.flip}`, LINK];
+}
+
 export function compose(opts: ComposeOptions): string[] {
   const { camera, encoder, rtspBase } = opts;
   const argv: string[] = ["gst-launch-1.0", "-q"];
@@ -331,6 +372,7 @@ export function compose(opts: ComposeOptions): string[] {
     "v4l2src", `device=/dev/v4l/by-path/${camera.device}`, "io-mode=4", LINK,
     `image/jpeg,width=${camera.width},height=${camera.height},framerate=${camera.framerate}/1`, LINK,
     "jpegdec", LINK,
+    ...turn(opts),
     "tee", "name=raw",
   );
 

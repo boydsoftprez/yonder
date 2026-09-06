@@ -5,6 +5,7 @@ import {
   ENCODE_ELEMENT, PREVIEW_CAPS_ELEMENT, QUEUE,
 } from "./pipeline.js";
 import { present, noCapabilities } from "./capability.js";
+import type { ControlRange } from "./capability.js";
 import type { Camera, CameraOutput } from "../schema/config.js";
 
 // Named so a test can disable one kind and leave the other running, without
@@ -169,6 +170,105 @@ describe("compose", () => {
   it("never shells out — the composition is a value", () => {
     expect(Array.isArray(argv())).toBe(true);
     expect(argv()[0]).toBe("gst-launch-1.0");
+  });
+});
+
+describe("the board's share of turning the picture (R-CTL-05)", () => {
+  // A switch as `v4l2-ctl --list-ctrls` reports one. The bench ELP lists
+  // neither flip name at all, which is the whole reason the board has to be
+  // able to do this — see `video/orientation.ts`.
+  const boolRange: ControlRange = { min: 0, max: 1, step: 1, default: 0, current: 0, inactive: false };
+  /** The operator has asked for a mirror; who performs it depends on the caps. */
+  const mirroredCamera: Camera = { ...CAMERA, controls: { ...CAMERA.controls, horizontalFlip: true } };
+  /** A mirror and a half-turn, against a camera that offers neither control. */
+  const boardMirroredCamera: Camera = {
+    ...CAMERA, controls: { ...CAMERA.controls, horizontalFlip: true, rotation: 180 },
+  };
+  const sensorMirrors = { ...CAPS, horizontalFlip: present(boolRange) };
+
+  it("adds no element when the sensor is the thing doing the turning", () => {
+    // The sensor's correction costs nothing; the board's costs a pass over
+    // every decoded frame. Confusing the two is the failure `capability.ts`
+    // names where `horizontalFlip` is defined.
+    expect(compose({ ...opts, camera: mirroredCamera, capabilities: sensorMirrors }).join(" "))
+      .not.toContain("videoflip");
+  });
+
+  it("adds one when the sensor cannot, for the very same camera settings", () => {
+    // Same camera, same controls — only the capabilities differ. Without
+    // this pair the test above would pass for a `compose()` that had simply
+    // never learned to turn a picture at all.
+    expect(compose({ ...opts, camera: mirroredCamera }).join(" "))
+      .toContain("videoflip video-direction=horiz");
+  });
+
+  it("adds nothing at all when nothing is asked for", () => {
+    expect(compose(opts).join(" ")).not.toContain("videoflip");
+  });
+
+  it("applies the correction once, before the tee, so both branches agree", () => {
+    // One correction on the frames both branches fork from. After the tee it
+    // would have to be composed twice, on two branches that could then be
+    // changed independently — and an operator watching the preview would be
+    // told the ground station is seeing something it is not.
+    const argv = compose({ ...opts, camera: boardMirroredCamera });
+    expect(argv.join(" ").match(/videoflip/g)).toHaveLength(1);
+    expect(argv.indexOf("videoflip")).toBeLessThan(argv.indexOf("tee"));
+  });
+
+  it("sits between the decode and the tee, with a link on each side", () => {
+    // `indexOf("videoflip") < indexOf("tee")` alone would still pass with the
+    // element in front of `jpegdec`, or anywhere else upstream. This pins the
+    // two neighbours it actually has, which is what makes it one correction
+    // on decoded frames rather than a filter on JPEG.
+    const argv = compose({ ...opts, camera: boardMirroredCamera });
+    const at = argv.indexOf("videoflip");
+    expect(argv[at - 2]).toBe("jpegdec");
+    expect(argv[at - 1]).toBe("!");
+    // A mirror and a half-turn, neither of which this camera offers, so the
+    // board carries the whole of it — as one direction, `vert`.
+    expect(argv[at + 1]).toBe("video-direction=vert");
+    expect(argv[at + 2]).toBe("!");
+    expect(argv[at + 3]).toBe("tee");
+  });
+
+  it("composes one videoflip for a flip and a rotation together, not two", () => {
+    // A mirror and a half-turn are a vertical flip, and the pipeline carries
+    // the composed answer rather than two elements that each cost a pass.
+    const argv = compose({
+      ...opts,
+      camera: { ...CAMERA, controls: { ...CAMERA.controls, horizontalFlip: true, rotation: 180 } },
+      capabilities: sensorMirrors,
+    });
+    // The sensor mirrors, so only the half-turn is left for the board.
+    expect(argv.join(" ")).toContain("videoflip video-direction=180");
+    expect(argv.join(" ").match(/videoflip/g)).toHaveLength(1);
+  });
+
+  /**
+   * **The join `video/renderer.ts` carries, pinned so it cannot go quiet.**
+   *
+   * That renderer composes the line a configuration implies and compares it,
+   * token for token, against the line the running pipeline was started with —
+   * and it composes with `noCapabilities()` while the start route composes
+   * with what it probed. Since R-CTL-05 the two are not the same line for a
+   * camera whose sensor can turn the picture: one apply restarts a pipeline
+   * nothing asked to change, and it comes back turned twice.
+   *
+   * No camera on the bench can reach it — the ELP offers no `horizontal_flip`,
+   * no `vertical_flip` and no `rotate` — so this states the disagreement
+   * rather than asserting the bug is absent. A future change that gives both
+   * composers one capability answer should make this test fail, and its
+   * replacement is `toEqual`.
+   */
+  it("composes a different line for one configuration when the callers disagree about the camera", () => {
+    const probed = compose({ ...opts, camera: mirroredCamera, capabilities: sensorMirrors });
+    const unprobed = compose({ ...opts, camera: mirroredCamera, capabilities: noCapabilities() });
+    expect(unprobed).not.toEqual(probed);
+    // ...and for the camera the bench actually has, they agree, which is why
+    // this is a recorded defect rather than a broken board.
+    expect(compose({ ...opts, camera: mirroredCamera, capabilities: CAPS }))
+      .toEqual(unprobed);
   });
 });
 
