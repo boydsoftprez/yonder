@@ -81,3 +81,13 @@ export function stillUrl(camera: string): string {
  */
 export const STILL_AT_HEADER = "x-yonder-still-at";
 export const STILL_AGE_HEADER = "x-yonder-still-age";
+
+/**
+ * A viewer id, as the daemon issues and checks one and the console relays
+ * one. The daemon's minter is `crypto.randomBytes(16).toString("hex")`, so
+ * what actually arrives is hexadecimal; the pattern is wider than that on
+ * purpose — a statement of what the routes accept as a key in a map, not a
+ * restatement of one minter's format. Defined once, here, so the daemon's
+ * route and the console's relay cannot drift apart on what a viewer is.
+ */
+export const VIEWER_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;

@@ -34,7 +34,7 @@ import {
   type AimPanel, type CameraDeck, type CameraStrip, type CapabilityFact, type ThumbStrip,
 } from "../video/present.js";
 import type { Stills } from "../video/stills.js";
-import { STILL_AGE_HEADER, STILL_AT_HEADER } from "../video/media-path.js";
+import { STILL_AGE_HEADER, STILL_AT_HEADER, VIEWER_ID } from "../video/media-path.js";
 import { systemClock, type Clock } from "../apply/types.js";
 import { applyCameraDraft, deckDraft, interruption, validateDraft } from "../apply/draft.js";
 import { captureRefusal, captureSizes } from "../video/capability.js";
@@ -668,16 +668,9 @@ export function requestedControls(body: unknown): Partial<Camera["controls"]> | 
  */
 const CAMERA_ID = /^[a-z0-9][a-z0-9-]{0,31}$/;
 
-/**
- * A viewer id, off a URL, matched rather than trusted — the same reasoning
- * as `CAMERA_ID` above.
- *
- * The console mints these from the browser's own session (`console/
- * middleware.ts`), so what actually arrives is hexadecimal. The pattern is
- * wider than that on purpose: it is a statement of what this route will
- * accept as a key in a map, not a restatement of one minter's format.
- */
-const VIEWER_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
+// `VIEWER_ID` — what a viewer id is — lives in `video/media-path.ts` with the
+// rest of the address family, so this route and the console's relay share it.
+
 
 /**
  * `/cameras/<id>` and its suffixes.

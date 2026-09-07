@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { request } from "node:http";
 import type { IncomingMessage } from "node:http";
-import { cameraFor, STILL_AGE_HEADER, STILL_AT_HEADER } from "../video/media-path.js";
+import { cameraFor, STILL_AGE_HEADER, STILL_AT_HEADER, VIEWER_ID } from "../video/media-path.js";
 
 /**
  * A capture's bytes, on their way from the daemon to a browser (R-CAM-18,
@@ -101,9 +101,6 @@ export interface StillRequest {
 }
 
 export type StillHandler = (req: StillRequest) => Promise<CaptureAnswer>;
-
-/** A viewer id, as `daemon/routes.ts` issues and checks one. */
-const VIEWER_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 function refused(status: number, line: string): CaptureAnswer {
   return { status, contentType: "text/plain; charset=utf-8", body: line };

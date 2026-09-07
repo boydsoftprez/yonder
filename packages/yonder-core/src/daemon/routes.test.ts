@@ -2049,6 +2049,26 @@ describe("the camera routes", () => {
     expect(pillOf((await route("GET", "/cameras/cam0", undefined)).body)).toBeNull();
   });
 
+  /**
+   * R-CFG-12: a change that can affect nothing reachable is kept outright,
+   * and the engine records it `confirmed` with nobody asked. The pill shows
+   * for it too, and this is the test that says so on purpose: its claim is
+   * that the configuration in force is not going to revert — not that a
+   * person pressed CONFIRM (`confirmedPill()`'s own note). Where a person's
+   * decision is being waited for, the banner is on the page and the pill is
+   * not, which the test above holds.
+   */
+  it("carries the pill for a change the engine kept because nothing reachable moved", async () => {
+    const route = provisioned({ cameras: fixtureDetection() });
+    const config = structuredClone((await route("GET", "/config", undefined)).body as Config);
+    // The palette: the one exemption `affectsReachability()` has earned.
+    config.ui.theme = config.ui.theme === "night" ? "day" : "night";
+    const kept = await route("POST", "/apply", config);
+    expect(kept.status).toBe(200);
+    expect((kept.body as { expiresAt: number | null }).expiresAt).toBeNull();
+    expect(pillOf((await route("GET", "/cameras/cam0", undefined)).body)).toBe("Confirmed");
+  });
+
   /** The Setup deck's *Re-probe* key: this one device, read again. */
   it("re-probes one camera and answers with what it said this time", async () => {
     const detection = fixtureDetection();

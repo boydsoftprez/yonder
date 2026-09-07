@@ -412,6 +412,17 @@ export interface StripApplyStatus {
  * true about the configuration in force, and that stays true until the next
  * apply. A device that booted from its file and has applied nothing this
  * boot shows no pill — the honest state, not a defect.
+ *
+ * **`confirmed` is the engine's word for kept as well as for confirmed.** A
+ * change that can affect nothing reachable — a palette, a camera's bitrate —
+ * is kept outright (R-CFG-12), and the engine records that `confirmed` with
+ * nobody asked. The pill shows for it too, and that is the claim it makes:
+ * *this configuration is in force and is not going to revert underneath
+ * you* — not *a person pressed CONFIRM*. Where a person's decision is being
+ * waited for, R-UI-15's banner is on the page saying so, and this pill is
+ * not. Telling the two apart on the strip would need the engine to record
+ * `kept` and `confirmed` as two outcomes; that is a change to what an
+ * `ApplyResult` says, and the operator's to make.
  */
 const APPLY_AT_REST = ["idle", "confirmed"];
 
