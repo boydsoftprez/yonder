@@ -396,6 +396,13 @@ code and unit tests and an explicit note that it has never run on hardware.
 
 ## M5 — Telemetry
 
+**2026-09-07 cockpit integration:** R-FLT-01…10 brings the existing authored PFD,
+mission editor, map and terrain into the native console, with field-age-aware
+MAVLink telemetry, optional public data, and the fixed-camera display seam. This
+implementation is verified in browser fixtures and isolated ArduPlane SITL;
+physical camera calibration and aircraft checks remain separate. See the
+[cockpit guide](cockpit-user-guide.md) and [control evidence](cockpit-control-integration-audit.md).
+
 *Now attach an aircraft.*
 
 - MAVLink routing configured from the config file — R-MAV-03, R-MAV-04, R-MAV-05
@@ -451,6 +458,12 @@ board in the matrix boots and streams.
 ---
 
 ## M7 — Commanding and the rest of the console
+
+The cockpit integration now supplies explicit reviewed ArduPlane mode/arm/GUIDED
+requests, mission transfer/readback, and six immediate command forms. Its 55-form
+mission catalog does not prove peripheral support. Dynamic advertised command
+discovery, signed MAVLink, other vehicle command families and direct terrain-datum
+GUIDED targets remain outside that verified slice; these do not mark M7 complete.
 
 - **Command safety in place before any command ships** — R-CMD-04 … R-CMD-09
 - Flight-mode set and the autopilot's advertised command set — R-CMD-01 … R-CMD-03

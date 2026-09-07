@@ -755,3 +755,27 @@ Three of those — L-56, C-15/C-16 and C-22/C-23 — are the three CLAUDE.md rul
 names as the reason this file exists. **L-56 is now built** (as two pickers, the
 operator's decision — see §1.7); the other two are still open. The remaining
 seventeen rows are the same shape and had not been found before this audit.
+
+## Touch cockpit — approved September 2026 extension
+
+The approved cockpit behavior is recorded in [the integration design](../../cockpit-integration-design.md).
+It preserves the existing authored PFD and mission controls in the native
+`ui-yonder-cockpit` widget. This table covers the new page; it does not close older
+camera-page findings above.
+
+| ID | Approved behavior | Implementation / evidence |
+|---|---|---|
+| F-01 | One PFD with translucent instruments, measured VSI, HSI/CDI and reported flight-director cues | `PrimaryFlightDisplay.vue`; telemetry/context tests and cockpit browser matrix |
+| F-02 | Left mission inset and right satellite/hybrid moving map; expand with the same PFD still present | `YonderCockpit.vue`, `YonderCockpitMap.vue`; landscape/portrait browser checks |
+| F-03 | Tap instruments for references/settings, distinguish local bugs from actual autopilot targets | Preserved PFD control forms and `cockpit-state.mjs` adapter |
+| F-04 | Import/edit/export Mission Planner missions, contextual waypoint/map actions, explicit review before transmission | Preserved mission catalog/forms; authenticated operation service and byte-level tests |
+| F-05 | Real ADS-B map/vision targets with selected range, stale state and observed trails | `TrafficFeed`, map/vision components; geometric datum and timestamp regressions |
+| F-06 | Detailed terrain with source/age/coverage, smooth independent pose updates | Prepared USGS ground/surface pack, retained Terrarium renderer and bounded tile service |
+| F-07 | Fixed ELP camera selection and registered terrain overlays | Existing Yonder camera stream plus calibrated projection component. Physical lens/mount and frame-time verification remains required; unavailable registration is stated |
+| F-08 | Time/distance projected path and waypoint ETE | Original prediction adapter. No invented autopilot turn countdown; source-missing intent is unavailable |
+| F-09 | Authenticated production page and ongoing config-revert indication | Shipped `page-cockpit`, `group-cockpit-pending`; routing and flow contract tests |
+| F-10 | Source fidelity without importing restricted simulator assets | Attribution file beside cockpit components; retained permissive/GPL assets and original behavior adapters |
+
+The component fixture explicitly identifies synthetic telemetry and has no vehicle
+transport. Browser imagery is an artifact, not a committed pixel reference. The
+normal page uses the daemon's actual telemetry and authenticated operations.

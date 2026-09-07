@@ -282,7 +282,7 @@ Parameter writes are vehicle commands. R-CMD applies to every requirement here.
 | R-SEC-03 | Run the control plane as a dedicated unprivileged user, using narrowly scoped helpers for privileged operations | 2 |
 | R-SEC-04 | Expose no unauthenticated write path to configuration or to the vehicle from a non-loopback interface by default | 1 |
 | R-SEC-05 | Gate any code-execution surface behind a password set during setup, and expose it on no public-facing interface by default | 1 |
-| R-SEC-06 | Contact no external service, ever. No activation, no licence check, no usage reporting | 1 |
+| R-SEC-06 | Make no activation, licence-check, analytics or usage-reporting request. External terrain, imagery and traffic data are allowed only when explicitly enabled by the operator under R-FLT-06; executable interface assets remain local. Disabled sources make no requests | 1 |
 | R-SEC-07 | Include no credential material in a published image | 1 |
 | R-SEC-08 | Offer TLS for the web interface | 2 |
 | R-SEC-09 | **Until an administrator password has been set, the console offers no function but setting one.** No configuration read, no command, and no status beyond two things: whether a password has been set, and whether the device is healthy enough to set one. The second is a deliberate carve-out — a board that cannot say *why* it is refusing is a board that goes back in a box — and it is bounded to state that names no configuration, no interface, no address and no credential | 1 |
@@ -295,7 +295,7 @@ Parameter writes are vehicle commands. R-CMD applies to every requirement here.
 
 | ID | Requirement | P |
 |---|---|---|
-| R-UI-01 | Serve the entire interface from the device, with no asset fetched from the internet at runtime | 1 |
+| R-UI-01 | Serve all executable interface assets from the device, including scripts, fonts, component styles and instrument graphics. Optional geographic and traffic data follow R-FLT-06; no runtime script CDN is permitted | 1 |
 | R-UI-02 | Work fully in a browser with no installed software beyond the browser | 1 |
 | R-UI-03 | Build navigation from detected hardware, so a camera that is not present has no section | 2 |
 | R-UI-04 | Remain usable on a tablet in the field | 2 |
@@ -319,6 +319,23 @@ Parameter writes are vehicle commands. R-CMD applies to every requirement here.
 
 ---
 
+## R-FLT — Touch cockpit and flight display
+
+| ID | Requirement | P |
+|---|---|---|
+| R-FLT-01 | Preserve the existing instrument behavior in a native, browser-served PFD. Tablet landscape and laptop layouts default to one PFD with mission and moving-map insets that expand without losing the attitude display | 1 |
+| R-FLT-02 | Authenticate flight reads and writes through the console. Attach server-derived session provenance and an operation ID to each explicit operator request; require review and confirmation for commands that change aircraft behavior. Opening a page, polling or reconnecting never issues a flight command | 1 |
+| R-FLT-03 | Decode validated MAVLink with per-field source and freshness. Depict measured vertical speed, CDI, flight director and actual mode/target only when their source and navigation context are valid; local reference bugs remain visibly distinct | 1 |
+| R-FLT-04 | Serialize mission transfers and command transactions. Validate target vehicle generation and mission revision; distinguish sent, acknowledged, observed, rejected and unknown outcomes. Preserve Mission Planner item parameters, sequence references, frames and home semantics during import/edit/export | 1 |
+| R-FLT-05 | Provide contextual mission waypoint and arbitrary map-point actions, including go-to and loiter. State altitude datum explicitly as MSL, home-relative or terrain-relative; refuse unsupported or unverified datum handling. The autopilot owns flight control, mission execution and failsafes | 1 |
+| R-FLT-06 | Permit operator-enabled public geographic and ADS-B data with visible provider, attribution, age and failure state. Bound downloads, polling, cache size and target history. No external service is needed to authenticate or use local telemetry, commands or camera video | 1 |
+| R-FLT-07 | Show traffic within an operator-selected depiction radius on the map and synthetic view. Breadcrumbs represent actual observations, with gaps and stale positions retained as such. Vision placement requires a verified altitude datum; pressure altitude is never silently treated as geometric MSL | 1 |
+| R-FLT-08 | Render terrain with bounded levels of detail and independent pose updates. Support prepared high-resolution ground and LiDAR-derived surface data with source, survey date, units, vertical datum, coverage and nodata metadata. Missing coverage is never invented terrain | 1 |
+| R-FLT-09 | Offer terrain, fixed forward camera and registered camera-overlay backgrounds using the existing camera transport. Registered overlays require valid lens/mount/crop calibration, frame/pose timing and datum alignment. Unknown registration or missing data produces a stated unavailable state rather than an apparently aligned warning | 1 |
+| R-FLT-10 | Distinguish waypoint ETE from turn anticipation and actual autopilot cues. Time/distance path prediction states its assumptions and uses available motion data; no calculated timer is presented as autopilot intent. Expose cockpit settings, command outcomes and a complete walkthrough | 2 |
+
+---
+
 ## Non-requirements
 
 Stated explicitly, because each has been asked for and each is declined:
@@ -330,8 +347,9 @@ Stated explicitly, because each has been asked for and each is declined:
   autonomous reactions to link loss or battery state, and no failsafe logic; the autopilot
   owns all of that. Every command Yonder sends is one an operator asked for, and the
   autopilot remains free to reject it.
-- **Yonder is not a ground station.** Mission Planner and QGroundControl exist; Yonder
-  interoperates with them.
+- **Yonder interoperates with Mission Planner and QGroundControl.** Its touch cockpit
+  exposes operator mission and flight commands under R-FLT; it does not replace the
+  autopilot or independently execute flight behaviors.
 - **Yonder has no cloud component**, no account, no fleet management and no telemetry
   reporting.
 - **Yonder does not gate features behind a licence.** There is no activation step and no

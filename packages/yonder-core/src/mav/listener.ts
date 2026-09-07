@@ -14,10 +14,9 @@ import { LOOPBACK_PORT } from "./router/config.js";
  * `describeVehicle` — the vehicle's own identity become measurements rather
  * than settings.
  *
- * **This is a consumer and nothing else.** The socket is never sent on. Yonder
- * relays commands and never originates them (`R-CMD-04`, `R-CMD-05`), and a
- * class whose only job is to read a feed has no business holding a way to
- * write to the vehicle.
+ * The cockpit also relays explicit operator transactions through this socket
+ * (R-FLT-02). Receiving traffic never sends anything. The router remains the
+ * owner of the vehicle link and the only peer to which replies are sent.
  *
  * **It is not in the ground stations' path.** R-MAV-06: raw MAVLink reaches
  * Mission Planner without passing through `yonder-core`, so this listener
@@ -53,6 +52,8 @@ export interface LoopbackListenerOptions {
    * rather than two halves stitched together at the route.
    */
   tracker: LinkTracker;
+  /** Complete datagrams for the validated cockpit decoder. */
+  onDatagram?: (bytes: Uint8Array) => void;
   /**
    * Overrides `LOOPBACK_PORT`. **Test-only**, the same way the renderer's
    * `retryMs` and `statsIntervalMs` are: a test binds an ephemeral port (`0`)
@@ -61,6 +62,7 @@ export interface LoopbackListenerOptions {
    * on. There is no matching override for the address — see LOOPBACK_ADDRESS.
    */
   port?: number;
+  now?: () => number;
   log?: (line: string) => void;
 }
 
@@ -68,6 +70,10 @@ export class LoopbackListener {
   private readonly tracker: LinkTracker;
   private readonly log: (line: string) => void;
   private socket: Socket | undefined;
+  private peer: {address: string; port: number} | undefined;
+  private peerHeartbeatAt = -Infinity;
+  private readonly now: () => number;
+  private readonly onDatagram: ((bytes: Uint8Array) => void) | undefined;
   private boundTo: { address: string; port: number } | null = null;
 
   /** The port this listener asks for. `LOOPBACK_PORT` unless a test says otherwise. */
@@ -75,6 +81,8 @@ export class LoopbackListener {
 
   constructor(opts: LoopbackListenerOptions) {
     this.tracker = opts.tracker;
+    this.onDatagram = opts.onDatagram;
+    this.now = opts.now ?? Date.now;
     this.port = opts.port ?? LOOPBACK_PORT;
     this.log = opts.log ?? (() => {});
   }
@@ -119,6 +127,7 @@ export class LoopbackListener {
       // process with it.
       socket.on("error", (error: Error) => {
         this.boundTo = null;
+        this.peer = undefined;
         this.socket = undefined;
         // A socket whose bind failed was never running, and close() on one
         // throws ERR_SOCKET_DGRAM_NOT_RUNNING. Nothing here may throw.
@@ -135,7 +144,19 @@ export class LoopbackListener {
         done();
       });
 
-      socket.on("message", (datagram) => { this.receive(datagram); });
+      socket.on("message", (datagram, peer) => {
+        if (peer.address !== LOOPBACK_ADDRESS) return;
+        const heartbeat = new HeartbeatScanner().push(datagram).some(h => h.fromVehicle);
+        const samePeer = this.peer?.address === peer.address && this.peer?.port === peer.port;
+        // A restarted router may have a new source port, but only after the
+        // old vehicle heartbeat expires. Noise cannot choose a command peer.
+        if (!samePeer) {
+          if (!heartbeat || (this.peer && this.now() - this.peerHeartbeatAt < 10000)) return;
+          this.peer = {address: peer.address, port: peer.port};
+        }
+        if (heartbeat) this.peerHeartbeatAt = this.now();
+        this.receive(datagram);
+      });
 
       socket.on("listening", () => {
         const where = socket.address();
@@ -171,6 +192,7 @@ export class LoopbackListener {
    * to make it; the socket handler above is its only production caller.
    */
   receive(datagram: Uint8Array): void {
+    this.onDatagram?.(datagram);
     for (const heartbeat of new HeartbeatScanner().push(datagram)) {
       // `heard` keeps only the vehicle's own beats: the loopback copy is
       // merged traffic, so a ground station's heartbeat arrives here too and
@@ -180,10 +202,22 @@ export class LoopbackListener {
     }
   }
 
+  /** Send only an explicitly admitted transaction to the observed router peer. */
+  async send(bytes: Uint8Array): Promise<void> {
+    const socket = this.socket;
+    const peer = this.peer;
+    if (!socket || !this.boundTo || !peer || this.now() - this.peerHeartbeatAt >= 10000) throw new Error("No loopback router peer is available.");
+    if (bytes.byteLength > 280 || bytes.byteLength === 0) throw new Error("Invalid MAVLink frame length.");
+    await new Promise<void>((resolve, reject) => {
+      socket.send(bytes, peer.port, peer.address, error => error ? reject(error) : resolve());
+    });
+  }
+
   /** Close the socket. Safe before `start()`, and safe twice. */
   close(): void {
     const socket = this.socket;
     this.socket = undefined;
+    this.peer = undefined;
     this.boundTo = null;
     if (socket === undefined) return;
     try {

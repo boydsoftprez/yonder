@@ -2,9 +2,12 @@
 import { createServer, type Server } from "node:http";
 import { unlinkSync, existsSync, mkdirSync, chmodSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { ApplyEngine } from "../apply/engine.js";
 import { warn, note, trace } from "../log.js";
+import { VehicleService } from "../mav/vehicle.js";
+import { TerrainPackService } from "../terrain/service.js";
+import { CockpitData } from "../cockpit/data.js";
 import { createRouter, type CameraProbes, type DiagProbes } from "./routes.js";
 import { AdminCredential } from "../console/credential.js";
 import { ConsoleRenderer } from "../console/renderer.js";
@@ -335,6 +338,7 @@ export function buildRenderers(opts: BuildRenderersOptions): {
    * function builds, the daemon opens sockets.
    */
   mavlinkListener?: LoopbackListener;
+  vehicle?: VehicleService;
   generated: string[];
 } {
   const log = opts.log ?? note;
@@ -441,6 +445,7 @@ export function buildRenderers(opts: BuildRenderersOptions): {
   // cannot exist is a port held for nothing.
   let mavlinkRenderer: MavlinkRenderer | undefined;
   let mavlinkListener: LoopbackListener | undefined;
+  let vehicle: VehicleService | undefined;
   if (opts.mavlink !== undefined) {
     const tracker = new LinkTracker({ clock: opts.clock ?? systemClock });
     mavlinkRenderer = new MavlinkRenderer({
@@ -452,7 +457,10 @@ export function buildRenderers(opts: BuildRenderersOptions): {
       log,
       clock: opts.clock,
     });
+    vehicle = new VehicleService({clock: opts.clock ?? systemClock, log, send: bytes => mavlinkListener!.send(bytes)});
     mavlinkListener = new LoopbackListener({
+      onDatagram: bytes => vehicle!.receive(bytes),
+      now: () => (opts.clock ?? systemClock).now(),
       tracker,
       log,
       ...(opts.mavlink.loopbackPort === undefined ? {} : { port: opts.mavlink.loopbackPort }),
@@ -531,6 +539,7 @@ export function buildRenderers(opts: BuildRenderersOptions): {
     supervisor,
     ...(mavlinkRenderer === undefined ? {} : { mavlinkRenderer }),
     ...(mavlinkListener === undefined ? {} : { mavlinkListener }),
+    ...(vehicle === undefined ? {} : { vehicle }),
     generated,
   };
 }
@@ -1182,7 +1191,12 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
     reachable: () => reachable({ runner: probeRunner, clock }),
   };
 
+  const cockpitData = new CockpitData({now: () => clock.now()});
+  let terrainPack: TerrainPackService | undefined;
+  try { terrainPack = await TerrainPackService.open(fileURLToPath(new URL("../terrain/assets/cove", import.meta.url))); }
+  catch { note("cockpit: prepared terrain pack unavailable; regional terrain remains optional"); }
   const route = createRouter({
+    cockpit: {vehicle: built?.vehicle, data: cockpitData, terrain: terrainPack},
     engine,
     configPath: opts.configPath,
     credential,
@@ -1320,8 +1334,15 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
 
   const server: Server = createServer((req, res) => {
     const chunks: Buffer[] = [];
-    req.on("data", (c: Buffer) => chunks.push(c));
+    let cockpitLength = 0;
+    let cockpitTooLarge = false;
+    req.on("data", (c: Buffer) => {
+      cockpitLength += c.length;
+      if ((req.url ?? "").startsWith("/cockpit/") && cockpitLength > 512 * 1024) { cockpitTooLarge = true; chunks.length = 0; }
+      if (!cockpitTooLarge) chunks.push(c);
+    });
     req.on("end", () => {
+      if (cockpitTooLarge) { res.writeHead(413, {"content-type": "application/json"}); res.end(JSON.stringify({error: "Cockpit request exceeds size limit"})); return; }
       let body: unknown;
       if (chunks.length > 0) {
         try {
@@ -1440,6 +1461,9 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
         built?.mavlinkRenderer?.close();
         // And the socket it shares a tracker with. A listener outliving its
         // daemon would hold :14559 against the next one to start.
+        built?.vehicle?.close();
+        cockpitData.close();
+        terrainPack?.clearCache();
         built?.mavlinkListener?.close();
         server.close(() => {
           if (existsSync(opts.socketPath)) unlinkSync(opts.socketPath);

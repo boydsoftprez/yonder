@@ -15,6 +15,7 @@
     "defaults": "tsc -p tsconfig.json && node dist/config/defaults.js ../../config/defaults/config.yaml"
   },
   "dependencies": {
+    "node-mavlink": "2.3.0",
     "yaml": "^2.5.0",
     "zod": "^3.23.0",
     "zod-to-json-schema": "^3.25.2"
@@ -32,6 +33,14 @@
       "types": "./dist/console/presentation.d.ts",
       "default": "./dist/console/presentation.js"
     },
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./terrain": {
+      "types": "./dist/terrain/index.d.ts",
+      "default": "./dist/terrain/index.js"
+    },
+    "./terrain/service": {
+      "types": "./dist/terrain/service.d.ts",
+      "default": "./dist/terrain/service.js"
+    }
   }
 }

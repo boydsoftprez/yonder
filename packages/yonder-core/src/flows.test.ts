@@ -401,7 +401,7 @@ describe("flows/flows.json", () => {
     // purpose: a page added without a line here is a page nobody decided to
     // ship, and the capture gate would photograph it anyway.
     expect(pages.map((p) => p.name).sort())
-      .toEqual(["Camera", "Cameras", "Diagnostics", "Log", "Network", "Status", "Telemetry"]);
+      .toEqual(["Camera", "Cameras", "Cockpit", "Diagnostics", "Log", "Network", "Status", "Telemetry"]);
 
     const groups = flows.filter((n) => n.type === "ui-group");
     for (const page of pages) {
@@ -1731,6 +1731,7 @@ describe("flows/flows.json camera pages", () => {
     { group: "group-log-pending", suffix: "-log", hidden: "group" },
     { group: "group-diag-pending", suffix: "-diag", hidden: "group" },
     { group: "group-tel-pending", suffix: "-tel", hidden: "group" },
+    { group: "group-cockpit-pending", suffix: "-cockpit", hidden: "group" },
     // The two camera pages, reached by R-UI-15 on merge, in their own idiom.
     // The Camera page states it on the single lamp it already has — one lamp
     // for the page is this page-set's own rule, and a second annunciator is

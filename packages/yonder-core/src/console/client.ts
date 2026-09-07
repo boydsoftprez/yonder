@@ -74,7 +74,7 @@ export function unixTransport(socketPath: string, timeoutMs = REQUEST_TIMEOUT_MS
         let length = 0;
         res.on("data", (c: Buffer) => {
           length += c.length;
-          if (length > MAX_REPLY_BYTES) {
+          if (length > (req.path === "/cockpit/state" ? 4 * MAX_REPLY_BYTES : MAX_REPLY_BYTES)) {
             res.destroy();
             reject(new Error("the reply was larger than this console will read"));
             return;
