@@ -178,6 +178,17 @@ A `cameras:` list validates, gets its defaults, and goes through apply and rollb
 any other section; since M4 it also runs — the pipeline, the media server's configuration
 and the console's camera pages are all generated from it ([roadmap](roadmap.md)).
 
+Set `enabled: true` and `autostart: true` on each camera that must return after a
+power cycle. Yonder resolves the saved device identity, checks its capture capabilities,
+and starts the pipeline in the background. Missing hardware is retried every five seconds;
+automatically started pipelines retry failures with backoff capped at thirty seconds.
+Runtime Stop cancels startup and pipeline retries until the daemon next starts. Changing
+`autostart` on a camera that was off at boot selects the next boot's behavior; Start runs it
+immediately. A configuration change that suspends an automatic camera is reversible.
+
+At boot, a failed modem activation is logged and initialization continues to telemetry,
+media, and cameras. Normal configuration changes retain apply and rollback behavior.
+
 ```yaml
 cameras:
   - id: cam0
@@ -185,7 +196,7 @@ cameras:
     source: usb                    # usb only today — csi, hdmi and a second camera arrive later
     device: platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0  # the by-path name (R-CAM-05) — not the bus id v4l2-ctl prints, which resolves to nothing
     enabled: true
-    autostart: false               # off by default; video has no equivalent of R-MAV-08
+    autostart: false               # set true to restore this camera automatically at boot
     width: 1280
     height: 720
     framerate: 30

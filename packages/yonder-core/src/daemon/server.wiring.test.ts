@@ -301,7 +301,7 @@ describe("buildRenderers", () => {
       runner: run,
       remoteStatePath: join(dir, "remote.json"),
     });
-    expect(renderers.map((r) => r.name)).toEqual(["hostname", "network", "remote", "video"]);
+    expect(renderers.map((r) => r.name)).toEqual(["hostname", "network", "remote", "video", "camera-autostart"]);
   });
 
   /**
@@ -318,7 +318,7 @@ describe("buildRenderers", () => {
       remoteStatePath: join(dir, "remote.json"),
     });
     expect(built.consoleRenderer).toBeUndefined();
-    expect(built.renderers.map((r) => r.name)).toEqual(["hostname", "network", "remote", "video"]);
+    expect(built.renderers.map((r) => r.name)).toEqual(["hostname", "network", "remote", "video", "camera-autostart"]);
   });
 
   /**
@@ -336,7 +336,7 @@ describe("buildRenderers", () => {
       remoteStatePath: join(dir, "remote.json"),
       console: { settings: join(dir, "console", "settings.js") },
     });
-    expect(built.renderers.map((r) => r.name)).toEqual(["hostname", "network", "remote", "console", "video"]);
+    expect(built.renderers.map((r) => r.name)).toEqual(["hostname", "network", "remote", "console", "video", "camera-autostart"]);
     expect(built.consoleRenderer).toBeDefined();
   });
 
@@ -381,7 +381,7 @@ describe("buildRenderers", () => {
       mediaConfigPath: join(dir, "mediamtx.yml"),
     });
     expect(built.renderers.map((r) => r.name))
-      .toEqual(["hostname", "network", "remote", "console", "media", "video"]);
+      .toEqual(["hostname", "network", "remote", "console", "media", "video", "camera-autostart"]);
     expect(built.mediaRenderer).toBeDefined();
   });
 
@@ -452,9 +452,9 @@ describe("buildRenderers", () => {
 
     const video = built.renderers.find((r) => r.name === "video");
     expect(video).toBeDefined();
-    // Last of all: a camera that cannot be restarted must be able to cost
-    // nothing behind it, and nothing is behind it.
-    expect(built.renderers[built.renderers.length - 1]).toBe(video);
+    // Video is followed only by background camera startup, which cannot fail an apply.
+    expect(built.renderers[built.renderers.length - 2]).toBe(video);
+    expect(built.renderers.at(-1)).toBe(built.cameraAutostart);
 
     // A camera on the air, started the way POST /cameras/:id/run starts one:
     // through the supervisor buildRenderers returned and the routes are

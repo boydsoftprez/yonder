@@ -33,6 +33,7 @@ import { RemoteRenderer } from "../remote/renderer.js";
 import { MediaRenderer, MEDIA_CONFIG_PATH } from "../media/renderer.js";
 import { Supervisor, systemSpawner, type ProcessSpawner } from "../video/supervisor.js";
 import { PipelineRenderer } from "../video/renderer.js";
+import { CameraAutostart } from "../video/autostart.js";
 import { detectCameras, probeCamera } from "../video/probe/camera.js";
 import { probeEncoder, type Encoder } from "../video/probe/encoder.js";
 import { applyControls } from "../video/controls.js";
@@ -215,6 +216,7 @@ export interface CameraLayer {
 }
 
 export interface BuildRenderersOptions {
+  cameraLayer?: CameraLayer;
   secretsPath: string;
   runner?: CommandRunner;
   log?: (line: string) => void;
@@ -362,6 +364,7 @@ export function buildRenderers(opts: BuildRenderersOptions): {
   supervisor: Supervisor;
   encoders: EncoderChannel;
   pipelineRenderer: PipelineRenderer;
+  cameraAutostart: CameraAutostart;
   /** Present only when `opts.mavlink` said how to open a serial port. */
   mavlinkRenderer?: MavlinkRenderer;
   /**
@@ -507,8 +510,7 @@ export function buildRenderers(opts: BuildRenderersOptions): {
   // hostname on the DHCP request the network render is about to make.
   const hostname = new HostnameRenderer({ runner: opts.runner ?? systemRunner, log });
 
-  // Nothing is spawned by constructing it: a Supervisor holds no process
-  // until something calls start(), which only POST /cameras/:id/run does.
+  // One supervisor for automatic boot startup and the runtime Start/Stop routes.
   const supervisor = new Supervisor({
     spawner: opts.spawner ?? systemSpawner,
     ...(opts.clock === undefined ? {} : { clock: opts.clock }),
@@ -553,11 +555,20 @@ export function buildRenderers(opts: BuildRenderersOptions): {
   // depend on a configured device — media, telemetry — and the camera
   // pipelines last, because a pipeline is composed from what the renderers
   // above it have already settled.
+  const cameraAutostart = new CameraAutostart({
+    supervisor,
+    detect: () => opts.cameraLayer?.cameras.detect()
+      ?? detectCameras({ runner: opts.runner ?? systemRunner }),
+    encoder: () => opts.cameraLayer?.encoder() ?? encoder(),
+    clock: opts.clock,
+    log,
+  });
+
   const renderers: Renderer[] = [hostname, renderer, remoteRenderer];
   if (consoleRenderer !== undefined) renderers.push(consoleRenderer);
   if (mediaRenderer !== undefined) renderers.push(mediaRenderer);
   if (mavlinkRenderer !== undefined) renderers.push(mavlinkRenderer);
-  renderers.push(pipelineRenderer);
+  renderers.push(pipelineRenderer, cameraAutostart);
 
   return {
     renderers,
@@ -573,6 +584,7 @@ export function buildRenderers(opts: BuildRenderersOptions): {
     supervisor,
     encoders,
     pipelineRenderer,
+    cameraAutostart,
     ...(mavlinkRenderer === undefined ? {} : { mavlinkRenderer }),
     ...(mavlinkListener === undefined ? {} : { mavlinkListener }),
     generated,
@@ -782,6 +794,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
       ...(opts.console === undefined ? {} : { console: opts.console }),
       ...(opts.spawner === undefined ? {} : { spawner: opts.spawner }),
       ...(opts.mavlink === undefined ? {} : { mavlink: opts.mavlink }),
+      ...(opts.cameraLayer === undefined ? {} : { cameraLayer: opts.cameraLayer }),
     });
   } catch (e) {
     const message = (e as Error).message;
@@ -1463,6 +1476,8 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
         // other timer this daemon owns, and a poll loop outliving its daemon
         // would go on questioning NetworkManager — and could still reach a
         // render — on behalf of a process that has already closed.
+        built?.cameraAutostart.close();
+        for (const run of built?.supervisor.all() ?? []) built?.supervisor.stop(run.id);
         watchdog.stop();
         // Stopped with it, and for the same reason one step further: a tick
         // loop outliving its daemon would go on running `curl` on somebody's

@@ -524,7 +524,25 @@ export class ApplyEngine {
     if (BUSY.includes(this.state)) {
       throw new ConfigError("an apply is in flight; the configuration is already being rendered");
     }
-    await this.renderAll(loadConfig(this.configPath));
+    const previousState = this.state;
+    this.state = "applying";
+    try {
+      const config = loadConfig(this.configPath);
+      const failures: string[] = [];
+      // Boot restores an already saved configuration. A modem that is not
+      // ready must not prevent telemetry, media, or the console from being
+      // initialized. Normal apply and rollback retain their fail-fast path.
+      for (const r of this.renderers) {
+        try {
+          await this.withTimeout(r.render(config), this.renderTimeoutMs, `renderer "${r.name}"`);
+        } catch (e) {
+          failures.push(`${r.name}: ${(e as Error).message}`);
+        }
+      }
+      if (failures.length > 0) throw new ConfigError(failures.join("; "));
+    } finally {
+      this.state = previousState;
+    }
   }
 
   /**

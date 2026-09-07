@@ -301,6 +301,8 @@ interface Entry {
   retry: unknown;
   /** Set while an operator's stop is in flight, so an exit is not a failure. */
   stopping: boolean;
+  /** Boot intent persists through a slow device or media-server startup. */
+  retryForever: boolean;
 }
 
 export class Supervisor {
@@ -338,17 +340,18 @@ export class Supervisor {
    * second `clearTimer` beside it would be a guard no test could ever turn
    * red. The test below pins the guard the reasoning rests on.
    */
-  start(id: string, argv: string[]): void {
+  start(id: string, argv: string[], opts: { retryForever?: boolean } = {}): void {
     const existing = this.entries.get(id);
     if (existing && (existing.run.state === "starting" || existing.run.state === "running")) return;
     const entry: Entry = existing ?? {
       run: { id, state: "stopped", since: this.clock.now(), restarts: 0 },
-      argv, proc: null, settle: null, retry: null, stopping: false,
+      argv, proc: null, settle: null, retry: null, stopping: false, retryForever: false,
     };
     this.clock.clearTimer(entry.retry);
     entry.retry = null;
     entry.argv = argv;
     entry.stopping = false;
+    entry.retryForever = opts.retryForever ?? entry.retryForever;
     entry.run = { ...entry.run, restarts: 0, reason: undefined };
     this.entries.set(id, entry);
     this.spawn(id, entry);
@@ -359,7 +362,7 @@ export class Supervisor {
     if (!entry) {
       this.entries.set(id, {
         run: { id, state: "stopped", since: this.clock.now(), restarts: 0 },
-        argv: [], proc: null, settle: null, retry: null, stopping: false,
+        argv: [], proc: null, settle: null, retry: null, stopping: false, retryForever: false,
       });
       return;
     }
@@ -443,7 +446,14 @@ export class Supervisor {
   private spawn(id: string, entry: Entry): void {
     this.generations.set(id, this.generation(id) + 1);
     entry.run = { ...entry.run, state: "starting", since: this.clock.now() };
-    const proc = this.spawner(entry.argv);
+    let proc: SpawnedProcess;
+    try {
+      proc = this.spawner(entry.argv);
+    } catch (e) {
+      if (!entry.retryForever) throw e;
+      this.failed(id, entry, `the pipeline could not be started: ${String(e)}`);
+      return;
+    }
     entry.proc = proc;
 
     // The same stale-process guard `ended` carries, for the same reason: a
@@ -476,24 +486,28 @@ export class Supervisor {
       this.clock.clearTimer(entry.settle);
       entry.proc = null;
       if (entry.stopping) return;
-      if (entry.run.restarts >= MAX_RESTARTS) {
-        entry.run = {
-          ...entry.run, state: "failed", since: this.clock.now(),
-          reason: `${why}; gave up after ${MAX_RESTARTS} restarts`,
-        };
-        return;
-      }
-      const attempt = entry.run.restarts;
-      entry.run = {
-        ...entry.run, state: entry.run.state === "running" ? "starting" : "failed",
-        since: this.clock.now(), reason: why, restarts: attempt + 1,
-      };
-      entry.retry = this.clock.setTimer(BACKOFF_MS[Math.min(attempt, BACKOFF_MS.length - 1)], () => {
-        this.spawn(id, entry);
-      });
+      this.failed(id, entry, why);
     };
 
     proc.on("exit", (code) => ended(`the pipeline exited with code ${String(code)}`));
     proc.on("error", (e) => ended(`the pipeline could not be started: ${String(e)}`));
+  }
+
+  private failed(id: string, entry: Entry, why: string): void {
+    if (!entry.retryForever && entry.run.restarts >= MAX_RESTARTS) {
+      entry.run = {
+        ...entry.run, state: "failed", since: this.clock.now(),
+        reason: `${why}; gave up after ${MAX_RESTARTS} restarts`,
+      };
+      return;
+    }
+    const attempt = entry.run.restarts;
+    entry.run = {
+      ...entry.run, state: entry.run.state === "running" ? "starting" : "failed",
+      since: this.clock.now(), reason: why, restarts: attempt + 1,
+    };
+    entry.retry = this.clock.setTimer(BACKOFF_MS[Math.min(attempt, BACKOFF_MS.length - 1)], () => {
+      this.spawn(id, entry);
+    });
   }
 }
