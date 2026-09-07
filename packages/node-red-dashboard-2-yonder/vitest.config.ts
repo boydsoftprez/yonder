@@ -38,6 +38,7 @@ export default defineConfig({
   },
   resolve: {
     alias: {
+      "yonder-core/terrain": fileURLToPath(new URL("../yonder-core/src/terrain/index.ts", import.meta.url)),
       "yonder-core/presentation": fileURLToPath(
         new URL("../yonder-core/src/console/presentation.ts", import.meta.url),
       ),

@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import YonderCockpit from "../src/ui/YonderCockpit.vue";
+import {fixture as cockpitFixture} from "../cockpit/fixture.mjs";
 import YonderAim from "../src/ui/YonderAim.vue";
 import YonderAimPad from "../src/ui/YonderAimPad.vue";
 import YonderAnnunciator from "../src/ui/YonderAnnunciator.vue";
@@ -286,6 +288,14 @@ const BELLY_CAPABILITIES = {
 };
 
 export const SPECIMENS = [
+  {
+    title: "Cockpit — cove mission, synthetic telemetry",
+    note: "The production full-viewport cockpit mounted with the user's cove mission and explicitly synthetic flight data. Source feeds and aircraft transport are absent. Instrument dialogs, mission authoring and inset expansion remain interactive. Use the dedicated cockpit harness for viewport comparisons.",
+    component: YonderCockpit,
+    props: { report: cockpitFixture(), embedded: true },
+    payload: undefined,
+    part: false,
+  },
   {
     title: "Gauge — encoding used",
     note: "R-UI-09: caution at 60%, limit at 85%. 72% sits in the caution band, drawn amber.",
