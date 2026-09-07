@@ -2159,3 +2159,51 @@ Not fixed here because the wording is the operator's call: whether a stale
 reading is shown greyed, shown with the age beside it, or shown with the step
 line alone doing the work.
 
+---
+
+### K-61 · A configured camera matches on its socket alone, so a different camera in the same socket inherits its identity
+
+**Status:** Open — the choice is the operator's · **Requirements:** R-CAM-05, R-CAM-12, R-UI-20
+
+Found on the board on 2026-09-07. `cam1` was configured for the ELP Global
+Shutter Camera on USB port 1.1. The operator plugged a different device into
+that port — a `Webcam gadget: UVC HD Camera`, Linux Foundation `1d6b:0102` — and
+the Cameras page read:
+
+```
+cam1   Global Shutter Camera: Global S   Idle
+```
+
+The gadget had silently become `cam1`: the ELP's name, its 1280×720p30, its
+H.264, its 2000 kb/s, its controls. Every reading on the Camera page was about
+a device that was no longer there. The probe reports the card name — the page
+itself lists `Webcam gadget: UVC HD Camera` under *found* — and nothing compares
+it with the name the configuration was made against.
+
+**Why it is this way.** A camera's identity is its USB path, and that is the
+right answer to the question R-CAM-05 asks — *is this the same camera after a
+reboot* — because the by-path name is what survives one. It is the wrong answer
+to *is this the same camera I configured*, which is a different question with a
+different witness: the card name, and the serial where the device offers one.
+
+**Why it matters on an aircraft.** Swap a camera between flights and the console
+presents it under the previous camera's name and settings without a word. The
+exposure and colour controls are written to a sensor they were never tuned for;
+the stream address names a camera that is not the one streaming.
+
+Two ways to close it, and neither is this file's to choose:
+
+1. **Match on socket, and say loudly when the card has changed.** The row keeps
+   its id and settings, and gains a caution — *configured as a Global Shutter
+   Camera; a UVC HD Camera is in that socket now* — with the recorded card name
+   stored beside the device path so there is something to compare. Least
+   disruptive; a replaced camera still works immediately, under the old name.
+2. **Match on both, and treat a mismatch as absent.** The old entry reads *Not
+   attached* and the new device appears as *not configured*, with `ADD` beside
+   it. Nothing is ever presented as a camera it is not; the cost is that a
+   deliberately replaced camera has to be adopted again, and the old entry
+   forgotten.
+
+The second is the honest one and the first is the convenient one. Recorded
+rather than decided.
+
