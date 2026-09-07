@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, it, expect } from "vitest";
 import {
+  absentIdentityWords,
   aimPanel,
   ASSUMED_UPLINK_KBPS,
   atIp,
@@ -15,6 +16,7 @@ import {
   heldWords,
   identityWords,
   LABELS,
+  removalRefusal,
   uplinkBudget,
 } from "./present.js";
 import { advertised, gated, noCapabilities, notOffered, present } from "./capability.js";
@@ -265,6 +267,27 @@ describe("identityWords", () => {
 
   it("says nothing was resolved when the camera did not answer", () => {
     expect(identityWords(null, false)).toBe("not resolved — this camera did not answer");
+  });
+
+  /**
+   * **The socket is kept, and it is the whole point of the sentence.**
+   * `identityWords(null, …)` drops it — right on a camera's own page, where
+   * the socket is stated beside it, and wrong on an index row, where the
+   * socket is the one thing an operator can act on: move a plug back to it,
+   * or remove the entry that names it.
+   */
+  it("keeps the socket a configured camera expects when nothing answered on it", () => {
+    expect(absentIdentityWords(BY_PATH)).toContain(BY_PATH);
+    expect(absentIdentityWords(BY_PATH)).toContain("nothing there answered");
+  });
+
+  /**
+   * "Nothing there answered", never "nothing is attached": the board cannot
+   * tell an empty socket from a camera that refused to enumerate, and the
+   * second claims more than it saw.
+   */
+  it("claims only what the board actually observed", () => {
+    expect(absentIdentityWords(BY_PATH)).not.toContain("nothing is attached");
   });
 });
 
@@ -554,6 +577,173 @@ describe("cameraIndex — the probe-to-row adapter", () => {
     expect(rejected).toEqual([
       { device: "/dev/video10", reason: "a hardware codec, not a camera (K-40)" },
     ]);
+  });
+
+  /**
+   * **The state the operator found a board in** (R-CAM-20, R-CAM-05).
+   *
+   * A camera had been moved between USB ports. Identity is the socket, so
+   * each move made it a *different* camera as far as the configuration was
+   * concerned and nothing removed the old one — two configured cameras on
+   * empty ports and the camera in his hand matching neither. This function
+   * mapped `input.found` alone, so it drew **no row at all** for either of
+   * the two, while the navigation, built from the same configuration,
+   * carried both. The page whose whole job is to say what cameras this
+   * device has was the one leaving them out.
+   */
+  it("draws a row for a configured camera the sweep matched to nothing", () => {
+    const { cameras } = cameraIndex({
+      found: [], rejected: [], cameras: [camera()], run: () => "stopped",
+    });
+    expect(cameras, "the camera is on the page at all, which is the defect").toHaveLength(1);
+    expect(cameras[0]?.id).toBe("front");
+    expect(cameras[0]?.name).toBe("Front camera");
+    // The socket it expects — the one string an operator can act on: move a
+    // plug back to it, or remove the entry that names it.
+    expect(cameras[0]?.device).toBe(BY_PATH);
+    expect(cameras[0]?.identity).toContain(BY_PATH);
+    expect(cameras[0]?.identity).toContain("nothing there answered");
+    // And what it is configured to send is still stated: the configuration
+    // has not stopped saying it.
+    expect(cameras[0]?.spec).toBe("H264 · 1280×720p30");
+  });
+
+  /**
+   * **`stopped` is what the supervisor answers for a camera that is idle and
+   * for a camera that is not on the bus**, and drawing both as `Idle` is the
+   * confusion this row exists to remove. An idle camera is one an operator
+   * can start; an absent one is a plug to move or an entry to clear.
+   */
+  it("says a camera is not attached rather than idle, which is what the supervisor calls both", () => {
+    const absent = cameraIndex({
+      found: [], rejected: [], cameras: [camera()], run: () => "stopped",
+    }).cameras[0];
+    const idle = cameraIndex({
+      found: [detection()], rejected: [], cameras: [camera()], run: () => "stopped",
+    }).cameras[0];
+    expect(idle).toMatchObject({ state: "Idle", tone: "neutral" });
+    expect(absent?.state).not.toBe(idle?.state);
+    expect(absent).toMatchObject({ state: "Not attached", tone: "bad" });
+  });
+
+  /**
+   * **A row of `aim: none · zoom: none` would be twenty-one claims about a
+   * camera this board cannot see** (R-CAM-14, R-UI-20). Nothing answered, so
+   * nothing was asked, and an operator has to be able to tell *this camera
+   * cannot* from *this camera was not there to ask*.
+   */
+  it("reports no capabilities at all for a camera that answered nothing, never a row of none", () => {
+    const { cameras } = cameraIndex({
+      found: [], rejected: [], cameras: [camera()], run: () => "stopped",
+    });
+    expect(cameras[0]?.capabilities).toBeNull();
+    // And a camera that *was* found still carries what it answered.
+    expect(cameraIndex({
+      found: [detection()], rejected: [], cameras: [camera()], run: () => "stopped",
+    }).cameras[0]?.capabilities).not.toBeNull();
+  });
+
+  /**
+   * The mutation this pair is checked against: appending an absent row for
+   * every configured camera rather than for every *unmatched* one. A board
+   * with its camera plugged in would then draw that camera twice — once
+   * streaming, once as missing — which is a page contradicting itself about
+   * the camera in front of the operator.
+   */
+  it("draws a configured camera that is present exactly once, and never also as absent", () => {
+    const { cameras } = cameraIndex({
+      found: [detection()], rejected: [], cameras: [camera()], run: () => "running",
+    });
+    expect(cameras).toHaveLength(1);
+    expect(cameras[0]).toMatchObject({ id: "front", state: "Streaming" });
+  });
+
+  /**
+   * Both kinds of row at once, which is the board's actual state: the ELP on
+   * a socket nothing is configured for, and two entries left behind by the
+   * ports it used to be in. Found rows first — what is attached to this board
+   * is still the page's first subject, and an operator scanning for the
+   * camera in their hand should not read past two that are not there.
+   */
+  it("draws what is attached first, and what is configured and absent after it", () => {
+    const { cameras } = cameraIndex({
+      found: [detection({ byPath: "/dev/v4l/by-path/elp", card: "ELP" })],
+      rejected: [],
+      cameras: [
+        camera({ id: "cam0", name: "Cam1" }),
+        // The other port the same physical camera had been in — a different
+        // camera, as far as the configuration is concerned (R-CAM-05).
+        camera({ id: "cam1", name: "Global Shutter Camera", device: BY_PATH.replace("1.3", "1.1") }),
+      ],
+      run: () => "stopped",
+    });
+    expect(cameras.map((c) => c.id)).toEqual([null, "cam0", "cam1"]);
+    expect(cameras[0]?.state).toBe("Not configured");
+    expect(cameras.slice(1).map((c) => c.state)).toEqual(["Not attached", "Not attached"]);
+  });
+
+  /**
+   * **Removing a camera is not a way to stop it** (R-CAM-21). The reason is
+   * composed here rather than left to the daemon's 409, because this page
+   * reads the camera list again after every press — a refusal travelling back
+   * on the message is overwritten by the next sweep before anything could
+   * draw it, so "with the reason in words" would come to no words at all.
+   */
+  it("refuses to have a running camera removed, and says why on the row", () => {
+    const row = (state: "running" | "starting" | "failed" | "stopped") =>
+      cameraIndex({
+        found: [detection()], rejected: [], cameras: [camera()], run: () => state,
+      }).cameras[0];
+    expect(row("running")?.removal).toContain("streaming");
+    expect(row("starting")?.removal).toContain("starting");
+    // A camera whose pipeline exited is very often one whose device is not
+    // there — refusing exactly the entries an operator most needs to clear
+    // would be the guard defeating its own purpose.
+    expect(row("failed")?.removal).toBeNull();
+    expect(row("stopped")?.removal).toBeNull();
+  });
+
+  /**
+   * The refusal reaches an *absent* row too. A pipeline can outlive the
+   * device it was reading from — a camera falling off the bus mid-flight is
+   * K-46's whole subject — and the camera being gone is not a reason to pull
+   * a running pipeline's configuration out from under it.
+   */
+  it("still refuses a removal while the pipeline is up, even with no device on the bus", () => {
+    const { cameras } = cameraIndex({
+      found: [], rejected: [], cameras: [camera()], run: () => "running",
+    });
+    expect(cameras[0]?.state, "the row says what is true of the device").toBe("Not attached");
+    expect(cameras[0]?.removal, "and the key says what is true of the pipeline")
+      .toContain("streaming");
+  });
+
+  /** A socket nothing is configured for has no entry to remove; it has one to add. */
+  it("has nothing to remove on a row that is configured nowhere", () => {
+    const { cameras } = cameraIndex({
+      found: [detection()], rejected: [], cameras: [], run: () => "stopped",
+    });
+    expect(cameras[0]?.id).toBeNull();
+    expect(cameras[0]?.removal).toContain("nothing to remove");
+  });
+});
+
+describe("removalRefusal", () => {
+  /**
+   * One sentence, two readers: `cameraIndex()` puts it on the row so the key
+   * is drawn inoperative carrying it, and `daemon/routes.ts` answers its 409
+   * with it. Two wordings for one rule is how a page and a daemon come to
+   * disagree about why something did not happen.
+   */
+  it("is exhaustive over the supervisor's four states", () => {
+    expect(removalRefusal("running")).toBeTypeOf("string");
+    expect(removalRefusal("starting")).toBeTypeOf("string");
+    expect(removalRefusal("failed")).toBeNull();
+    expect(removalRefusal("stopped")).toBeNull();
+  });
+
+  it("names the state and what to do about it, never just 'no'", () => {
+    expect(removalRefusal("running")).toContain("stop it");
   });
 });
 

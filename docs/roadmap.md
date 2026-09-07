@@ -350,6 +350,9 @@ until M8.
 - **Detect cameras on demand, and say what was rejected and why** — R-CAM-12
 - **Capabilities built from what the device answers, never from a stored list** — R-CAM-14
 - Stable camera identity, so the detected camera is the configured one — R-CAM-05
+- **Every configured camera on the list, present or not**, and a way to take one off it —
+  R-CAM-20, R-CAM-21. Both are the same fact seen twice: identity is the socket, so moving a
+  camera between ports leaves an entry behind that nothing removed and nothing drew
 - **Encoder chosen by probing the board** — R-CAM-13, R-CAM-07
 - The Raspberry Pi family: hardware H.264, and software where the board has none — R-HW-01, R-HW-02
 - RTP/UDP H.264 to a ground station, and the document that configures one — R-VID-01, R-VID-10
