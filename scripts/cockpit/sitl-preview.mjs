@@ -198,6 +198,7 @@ try {
     ),
   );
   const vehicle = {
+    trailPage:(...args)=>service.trailPage(...args),
     submit: (request) => service.submit(request),
     snapshot: (options) => {
       const state = service.snapshot(options);

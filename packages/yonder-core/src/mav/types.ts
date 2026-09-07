@@ -71,6 +71,7 @@ export interface VehicleSnapshot {
   at: number; sequence: number; identity: VehicleIdentity | null; connected: boolean; ready: boolean;
   /** Stable across flight samples; identifies the separately transferable details. */
   detailKey?: string;
+  trail?: OwnTrailSummary;
   telemetry: FlightTelemetry; mission: MissionSnapshot; operations: VehicleOperation[]; busy: boolean;
   capabilities: { modes: { name: string; customMode: number; source: "advertised" | "firmware-known" }[]; commands: { command: number; source: "advertised" | "firmware-known" }[]; terrainTargets: boolean; signing: "unsigned-only";
     flightControl: { kind: "heading" | "altitude" | "speed" | "loiter"; command: number; source: "firmware-known"; available: boolean; reason: string | null; requiredMode: 15; entersGuided: true; confirmation: "acknowledgement" }[] };
@@ -78,3 +79,10 @@ export interface VehicleSnapshot {
 }
 export type OperationAdmission = { accepted: true; operationId: string } | { accepted: false; status: 400 | 409 | 503; message: string };
 export interface VehicleServiceOptions { send: (bytes: Uint8Array) => Promise<void>; clock: Clock; log?: (line: string) => void }
+/** Serial, autopilot boot milliseconds (unwrapped), lat, lon, observed path metres, segment. */
+export type OwnTrailPoint = [number,number,number,number,number,number];
+export interface OwnTrailSummary {
+  epoch:string; revision:number; latest:number; bootMs:number|null; clockAt:number|null; startBootMs:number|null;
+  simplified:boolean; truncated:boolean; gaps:number; tail:OwnTrailPoint|null;
+}
+export interface OwnTrailPage extends OwnTrailSummary { points:OwnTrailPoint[]; next:number; more:boolean; reset:boolean }

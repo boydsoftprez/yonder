@@ -40,6 +40,7 @@ describe("authenticated cockpit boundary", () => {
   it("refuses unauthenticated reads and writes before contacting the daemon", async () => {
     const { url, calls } = await harness(null);
     expect((await fetch(url + "/cockpit/api/state")).status).toBe(401);
+    expect((await fetch(url + "/cockpit/api/trail")).status).toBe(401);
     expect((await fetch(url + "/cockpit/api/command", post({}))).status).toBe(
       401,
     );
@@ -116,6 +117,15 @@ describe("authenticated cockpit boundary", () => {
     await fetch(url + "/cockpit/api/state");
     expect(calls[0]).toEqual({ method: "GET", path: "/cockpit/state" });
   });
+});
+
+it('permits bounded read-only aircraft trail cursors behind the same session',async()=>{
+  const {url,calls}=await harness();
+  expect((await fetch(url+'/cockpit/api/trail/epoch-one/123')).status).toBe(202);
+  expect(calls).toEqual([{method:'GET',path:'/cockpit/trail/epoch-one/123'}]);
+  expect((await fetch(url+'/cockpit/api/trail/epoch-one/-1')).status).toBe(404);
+  expect((await fetch(url+'/cockpit/api/trail/epoch-one/123',post({}))).status).toBe(405);
+  expect(calls).toHaveLength(1);
 });
 
 it("uses the real console session and rejects a revoked cookie", async () => {

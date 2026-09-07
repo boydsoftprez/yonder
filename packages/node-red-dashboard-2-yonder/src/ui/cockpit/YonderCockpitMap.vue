@@ -44,6 +44,7 @@ export default {
     picking: Boolean,
     online: Boolean,
     dataProvider: Object,
+    ownTrail: Object,
     traffic: {
       default: () => ({
         tracks: [],
@@ -62,6 +63,8 @@ export default {
     map: null,
     route: null,
     tracks: null,
+    ownTrailLine: null,
+    ownTrailHalo: null,
     base: null,
     basemap: "grid",
     follow: true,
@@ -84,6 +87,17 @@ export default {
         markerZoomAnimation: false,
       }).setView([0, 0], 2),
     );
+    const trailPane=this.map.createPane('own-aircraft-trail');
+    trailPane.style.zIndex='450';trailPane.style.pointerEvents='none';
+    this.ownTrailHalo=markRaw(L.polyline([],{
+      color:'#07131b',weight:6,opacity:.95,dashArray:'1 8',lineCap:'round',
+      interactive:false,pane:'own-aircraft-trail',
+    }).addTo(this.map));
+    this.ownTrailLine=markRaw(L.polyline([],{
+      color:'#ffd16b',weight:3,opacity:1,dashArray:'1 8',lineCap:'round',
+      interactive:false,pane:'own-aircraft-trail',className:'cockpit-own-trail',
+    }).addTo(this.map));
+    this.renderOwnTrail();
     this.route = markRaw(L.layerGroup().addTo(this.map));
     this.tracks = markRaw(L.layerGroup().addTo(this.map));
     this.map.on("dragstart", () => {
@@ -157,6 +171,7 @@ export default {
     this.map = null;
   },
   watch: {
+    ownTrail(value,previous){if(value?.key!==previous?.key)this.renderOwnTrail();},
     snapshot: {
       handler() {
         this.render();
@@ -191,6 +206,7 @@ export default {
     },
   },
   methods: {
+    renderOwnTrail(){const segments=this.ownTrail?.segments||[];this.ownTrailHalo?.setLatLngs(segments);this.ownTrailLine?.setLatLngs(segments);},
     zoom(d) {
       this.map?.setZoom(this.map.getZoom() + d);
     },

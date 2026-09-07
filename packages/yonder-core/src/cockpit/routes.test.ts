@@ -28,6 +28,16 @@ it('serves compact flight and separate details without triggering public traffic
  expect((details?.body as {detailKey:string}).detailKey).toBe((one?.body as {d:string}).d);
  expect(poll).not.toHaveBeenCalled();vehicle.close();data.close();
 });
+it('serves recorded trail pages without public-data calls or aircraft commands',async()=>{
+ const send=vi.fn(async()=>{}),vehicle=new VehicleService({clock,send}),data=new CockpitData();
+ const poll=vi.spyOn(data,'snapshot');
+ const page=await cockpitRoute({vehicle,data},'GET','/cockpit/trail',undefined);
+ expect(page).toMatchObject({status:200,body:{points:[],more:false}});
+ const wire=await cockpitRoute({vehicle,data},'GET','/cockpit/flight',undefined);
+ expect((wire?.body as object)).toHaveProperty('r.tail',null);
+ expect((wire?.body as object)).not.toHaveProperty('r.points');
+ expect(send).not.toHaveBeenCalled();expect(poll).not.toHaveBeenCalled();vehicle.close();data.close();
+});
 it('changes the detail token for source selection while attitude receipt is independent',async()=>{
  const vehicle=new VehicleService({clock,send:async()=>{}}),data=new CockpitData();
  const services={vehicle,data};

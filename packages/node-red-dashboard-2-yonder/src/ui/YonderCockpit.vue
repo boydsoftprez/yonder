@@ -189,13 +189,14 @@
         :traffic="trafficReport"
         :range="trafficRange"
         :trail-seconds="trailSeconds"
+        :own-trail="ownTrailDisplay"
         :now="now"
         @select="seq=>openMission({seq})"
         @location="mapLocation"
         @traffic-select="selectedTraffic=$event;panel='traffic'"
       />
       <div v-if="flightPicking" class="cockpit-target-prompt" role="status">Select {{flightPicking.kind==='loiter'?'loiter center':'Direct-To target'}} on the map<button @click="flightPicking=null">Cancel target selection</button></div>
-      <footer><button @click="panel='traffic'">{{trafficReport.message||'Traffic feed off'}}</button><button
+      <footer><button aria-label="Aircraft breadcrumb settings" @click="panel='trail'">Trail</button><button @click="panel='traffic'">{{trafficReport.message||'Traffic feed off'}}</button><button
           v-if="layout==='map'"
           @click="openMission(null)"
         >Mission actions</button></footer>
@@ -334,17 +335,18 @@
       class="cockpit-dialog"
       role="dialog"
       aria-modal="true"
-      :aria-label="panel==='display'?'Cockpit display and data sources':panel==='traffic'?'Traffic display':'Aircraft status'"
+      :aria-label="panel==='display'?'Cockpit display and data sources':panel==='traffic'?'Traffic display':panel==='trail'?'Aircraft breadcrumb settings':'Aircraft status'"
       @keydown="trap"
     >
       <header>
-        <h2>{{panel==='display'?'Display & data':panel==='traffic'?'Traffic':'Aircraft status'}}</h2><button
+        <h2>{{panel==='display'?'Display & data':panel==='traffic'?'Traffic':panel==='trail'?'Aircraft breadcrumbs':'Aircraft status'}}</h2><button
           @click="panel=null"
           aria-label="Close cockpit panel"
         >×</button>
       </header>
       <div class="cockpit-dialog-body">
         <template v-if="panel==='display'">
+          <OwnTrailSettings :options="ownTrailOptions" :status="ownTrailDisplay" @change="setOwnTrailOptions" @clear="clearOwnTrail" @restore="restoreOwnTrail" />
           <fieldset class="cockpit-data-settings"><legend>Connection & offline data</legend>
             <label>Public data connection<select v-model="sourceMode" aria-label="Public data connection">
               <option value="ground">Ground browser internet</option>
@@ -467,6 +469,8 @@
             :disabled="!canCommand"
             @click="captureDraftContext();panel=null;reviewUpload()"
           >Keep this draft for the current aircraft and review upload</button>
+        </template><template v-else-if="panel==='trail'">
+          <OwnTrailSettings :options="ownTrailOptions" :status="ownTrailDisplay" @change="setOwnTrailOptions" @clear="clearOwnTrail" @restore="restoreOwnTrail" />
         </template><template v-else-if="panel==='traffic'"><label>Display range<select v-model.number="trafficRange">
               <option
                 v-for="range in [1,2,5,10,25,50,100]"
@@ -561,6 +565,8 @@ import PrimaryFlightDisplay from './cockpit/PrimaryFlightDisplay.vue'
 import FlightControlPanel from './cockpit/FlightControlPanel.vue'
 import MissionTouch from './cockpit/MissionTouch.vue'
 import YonderCockpitMap from './cockpit/YonderCockpitMap.vue'
+import OwnTrailSettings from './cockpit/OwnTrailSettings.vue'
+import {selectOwnTrail,trailPreferences} from './cockpit/own-trail.mjs'
 import YonderPicture from './YonderPicture.vue'
 import {
   agedTelemetry,
@@ -615,6 +621,7 @@ export default {
     FlightControlPanel,
     MissionTouch,
     YonderCockpitMap,
+    OwnTrailSettings,
     YonderPicture
   },
   inject: {
@@ -682,6 +689,8 @@ export default {
       calibrationCandidate: null,
       trafficRange: 10,
       trailSeconds: 120,
+      ownTrailOptions:trailPreferences(),
+      ownTrailCleared:null,
       optionsLoaded: false,
       selectedTraffic: null,
       terrainStatus: null,
@@ -713,6 +722,7 @@ export default {
     }
   },
   computed: {
+    ownTrailDisplay(){return selectOwnTrail(this.snapshot.ownTrail,this.ownTrailOptions,this.ownTrailCleared,this.snapshot.at+Math.floor(Math.max(0,this.elapsed)/1000)*1000)},
     draftContextChanged(){return !!this.draft&&(!this.draftContext||this.draftContext.generation!==(this.snapshot.identity?.generation||null)||this.draftContext.revision!==(this.snapshot.mission?.revision||null))},
     telemetry() {
       return agedTelemetry(this.snapshot.telemetry || {}, this.elapsed)
@@ -887,7 +897,10 @@ export default {
     try {
       const saved = JSON.parse(localStorage.getItem('yonder-cockpit-v1') || 'null');
       if (saved) this.preferences = validatePfdPreferences(saved)
+      const trail=JSON.parse(localStorage.getItem('yonder-own-trail-v1')||'null');
+      if(trail){this.ownTrailOptions=trailPreferences(trail.options);this.ownTrailCleared=trail.cleared}
     } catch {}
+    this.source?.setTrailOptions?.(this.ownTrailOptions);
     this.timer = setInterval(() => {
       this.now = Date.now();
       this.connectionStats=this.source?.stats?.()||null;
@@ -907,6 +920,10 @@ export default {
     this.groundData.close()
   },
   methods: {
+    saveOwnTrail(){try{localStorage.setItem('yonder-own-trail-v1',JSON.stringify({options:this.ownTrailOptions,cleared:this.ownTrailCleared}))}catch{this.error='Trail preferences could not be saved; this session still works'}},
+    setOwnTrailOptions(options){this.ownTrailOptions=trailPreferences(options);this.source?.setTrailOptions?.(this.ownTrailOptions);this.saveOwnTrail()},
+    clearOwnTrail(){const trail=this.snapshot.ownTrail;if(trail)this.ownTrailCleared={epoch:trail.epoch,after:trail.latest};this.saveOwnTrail()},
+    restoreOwnTrail(){this.ownTrailCleared=null;this.saveOwnTrail()},
     fitViewport() {
       if (!this.$el || this.props.embedded) return;
       const top = this.$el.getBoundingClientRect().top;
@@ -932,7 +949,7 @@ export default {
       11: 'above terrain'
     } [frame] || `frame ${frame}`),
     ingest(value) {
-      this.snapshot = value;
+      this.snapshot = value.ownTrail?{...value,ownTrail:markRaw(value.ownTrail)}:value;
       this.receivedAt = Date.now();
       if(this.pendingOperationId){
         const operation=value.operations?.find(op=>op.id===this.pendingOperationId);

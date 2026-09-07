@@ -5,6 +5,7 @@ import { decodeDatagram, type DecodedFrame } from "./protocol.js";
 import { decodeMissionItem, encodeMissionItem, MAX_MISSION_ITEMS, missionFrame, missionRevision, validateCommandParameters, validateMission, verifyMission } from "./mission.js";
 import { isPlane, PLANE_MODES, VehicleTelemetry } from "./vehicle-telemetry.js";
 import type { MissionItem, MissionSnapshot, OperatorRequest, OperationAdmission, VehicleAction, VehicleIdentity, VehicleOperation, VehicleServiceOptions, VehicleSnapshot } from "./types.js";
+import { OwnTrail } from './own-trail.js';
 
 export const VEHICLE_SOURCE_SYSTEM = 254;
 export const VEHICLE_SOURCE_COMPONENT = 191;
@@ -29,6 +30,7 @@ export class VehicleService {
   private lastHeartbeat: number | null = null;
   private flightSwVersion: number | null = null;
   private telemetry = new VehicleTelemetry();
+  private ownTrail = new OwnTrail();
   private mission = emptyMission();
   private missionAt: number | null = null;
   private missionOpaqueId = 0;
@@ -62,6 +64,8 @@ export class VehicleService {
       if (this.connected() && !samePeer) return;
       const changed = !this.connected() || !samePeer || this.identity?.autopilot !== m.autopilot || this.identity.vehicleType !== m.type;
       if (changed) {
+        if(!samePeer||this.identity?.autopilot!==m.autopilot||this.identity.vehicleType!==m.type)this.ownTrail=new OwnTrail();
+        else this.ownTrail.break();
         this.abort("Selected autopilot changed or reconnected; previous outcome is unknown");
         this.identity = { system: frame.system, component: frame.component, autopilot: m.autopilot, vehicleType: m.type, generation: randomUUID() };
         this.telemetry = new VehicleTelemetry(); this.mission = emptyMission(); this.missionAt = null; this.missionOpaqueId = 0;
@@ -84,6 +88,10 @@ export class VehicleService {
     }
     const current = this.missionAt !== null && now - this.missionAt < 2000 && this.mission.synchronization !== "receiving" ? this.mission.currentSeq : null;
     this.telemetry.receive(frame, now, this.identity, current);
+    if(m instanceof common.GlobalPositionInt){
+      const fix=this.telemetry.snapshot(now,true,this.identity).fixType;
+      this.ownTrail.observe(m.timeBootMs,m.lat/1e7,m.lon/1e7,fix!==null&&fix>=3,now);
+    }
     if (m instanceof common.HomePosition && isPlane(this.identity) && this.mission.synchronization === "verified") {
       const home = this.telemetry.snapshot(now, true, this.identity).homePosition, first = this.mission.items[0];
       if (home && first?.seq === 0 && first.command === 16 && missionFrame(first.frame) === 0) {
@@ -125,13 +133,14 @@ export class VehicleService {
       this.mission.revision, this.mission.synchronization, this.mission.message, this.mission.transfer,
       this.operations.length, lastOperation, this.texts.length, lastText])).digest("hex").slice(0, 24);
     return structuredClone({ at: now, sequence: this.sequence, detailKey, identity: this.identity, connected, ready: connected,
-      telemetry, mission: { ...this.mission, items: options.details === false ? [] : this.mission.items, currentFresh: connected && this.missionAt !== null && now - this.missionAt < 2000 && this.mission.synchronization === "verified" },
+      telemetry, trail:this.ownTrail.summary(), mission: { ...this.mission, items: options.details === false ? [] : this.mission.items, currentFresh: connected && this.missionAt !== null && now - this.missionAt < 2000 && this.mission.synchronization === "verified" },
       operations: options.details === false ? [] : this.operations, busy: this.active !== null,
       capabilities: { modes: isPlane(this.identity) ? Object.entries(PLANE_MODES).map(([id, name]) => ({ name, customMode: Number(id), source: "firmware-known" as const })) : [],
         commands: isPlane(this.identity) ? [...IMMEDIATE].map(command => ({ command, source: "firmware-known" as const })) : [], terrainTargets: false, signing: "unsigned-only" as const,
         flightControl: Object.entries(FLIGHT_COMMANDS).map(([kind, command]) => ({ kind: kind as keyof typeof FLIGHT_COMMANDS, command, source: "firmware-known" as const, available: reason === null, reason, requiredMode: 15 as const, entersGuided: true as const, confirmation: "acknowledgement" as const })) },
       statustext: options.details === false ? [] : this.texts });
   }
+  trailPage(epoch?:string,after=0,minimumBootMs=0,minimumDistanceM=0){return this.ownTrail.page(epoch,after,minimumBootMs,minimumDistanceM);}
   submit(request: OperatorRequest): OperationAdmission {
     this.tick();
     const reject = (status: 400 | 409 | 503, message: string): OperationAdmission => ({ accepted: false, status, message });

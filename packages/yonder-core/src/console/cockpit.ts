@@ -60,9 +60,10 @@ export function cockpitProxy(options: CockpitProxyOptions) {
       /^\/cockpit\/api\/tiles\/(elevation|imagery|places|roads)\/\d{1,2}\/\d{1,7}\/\d{1,7}$/.test(
         path,
       );
+    const trail=/^\/cockpit\/api\/trail(?:\/[a-zA-Z0-9-]{1,64}\/\d{1,12}(?:\/\d{1,12}\/\d{1,12})?)?$/.test(path);
     const route =
       routes[path] ??
-      (tile
+      (tile||trail
         ? { method: "GET", path: path.replace("/cockpit/api/", "/cockpit/") }
         : undefined);
     if (!route) return false;

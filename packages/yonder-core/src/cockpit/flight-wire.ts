@@ -11,6 +11,7 @@ export interface FlightWire {
   a: [number|null,number,boolean][]; src: string[];
   n: FlightTelemetry['navController']; p: FlightTelemetry['positionTarget']; h: FlightTelemetry['homePosition'];
   m: Omit<VehicleSnapshot['mission'],'items'>;
+  r?: VehicleSnapshot['trail'];
 }
 export function packFlight(snapshot:VehicleSnapshot,detailKey:string):FlightWire {
   const t=snapshot.telemetry, src:string[]=[];
@@ -22,7 +23,7 @@ export function packFlight(snapshot:VehicleSnapshot,detailKey:string):FlightWire
   const {items:_,...mission}=snapshot.mission;
   return {v:1,at:snapshot.at,s:snapshot.sequence,g:snapshot.identity?.generation??null,c:snapshot.connected,b:snapshot.busy,d:detailKey,
     source:t.source,ready:t.ready,fd:t.fdReady,age:t.ageMs,datum:t.altitudeDatum??'UNKNOWN',
-    t:FLIGHT_COLUMNS.map(key=>t[key]??null),a,src,n:t.navController,p:t.positionTarget,h:t.homePosition,m:mission};
+    t:FLIGHT_COLUMNS.map(key=>t[key]??null),a,src,n:t.navController,p:t.positionTarget,h:t.homePosition,m:mission,...(snapshot.trail?{r:snapshot.trail}:{})};
 }
 /** Reconstruct the existing PFD view while refusing another generation's details. */
 export function unpackFlight(wire:FlightWire,details:Partial<VehicleSnapshot>={}):VehicleSnapshot {
@@ -39,7 +40,7 @@ export function unpackFlight(wire:FlightWire,details:Partial<VehicleSnapshot>={}
     values[key]=valid?value:null;
     fields[key]={source:wire.src[sourceIndex]??'Aircraft telemetry',ageMs:age,receivedAt:age===null?null:wire.at-age,valid:valid&&value!==null};
   });
-  return {at:wire.at,sequence:wire.s,detailKey:wire.d,identity:sameVehicle?details.identity??null:null,connected:wire.c,ready:wire.c,busy:wire.b,
+  return {at:wire.at,sequence:wire.s,detailKey:wire.d,trail:wire.r,identity:sameVehicle?details.identity??null:null,connected:wire.c,ready:wire.c,busy:wire.b,
     telemetry:{...values,source:wire.source,ready:wire.ready,fdReady:wire.fd,ageMs:wire.age,altitudeDatum:wire.datum,
       fields,navController:wire.n,positionTarget:wire.p,homePosition:wire.h} as FlightTelemetry,
     mission:{...wire.m,currentFresh:wire.m.currentFresh&&sameMission,items:sameMission?details.mission!.items:[]},

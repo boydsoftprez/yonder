@@ -227,6 +227,39 @@ Press **Save draft item**, inspect the mission order and jump references, then
 selecting the new aircraft item or resuming the mission. Editing radius,
 direction, duration, coordinates or action changes only the local draft.
 
+## Our aircraft breadcrumbs
+
+Press **Trail** below the map, or open **Display & data → Our aircraft
+breadcrumbs**. A gold dotted line shows the aircraft's observed path, separately
+from the magenta mission and dashed cyan future-motion forecast.
+
+- **Last X minutes:** choose 1–1,440 minutes; the default is 10 minutes.
+- **Last X miles:** choose 0.1–1,000 and either miles (mi) or nautical miles (NM).
+  This follows distance along the observed path, including turns and circles,
+  rather than a radius around the aircraft.
+- **Since power-on:** display the retained observations for this autopilot boot.
+- **Show aircraft trail:** hide/show the depiction. **Clear displayed trail**
+  hides earlier points in this browser; **Restore recorded trail** shows them
+  again using the selected window. These controls do not erase the service's
+  recording or send flight commands. Display preferences survive page reloads.
+
+Yonder records received positions even while the browser is closed. Ordinary
+flight updates carry one latest trail point; a missing portion is recovered in
+bounded pages, filtered to the selected time or distance window at the aircraft.
+Since power-on can download the full retained path once. Public ADS-B and map
+providers are not involved in this recording or recovery.
+
+The recorder uses the autopilot's reported boot clock, with delayed-packet and
+clock-rollover handling. A detected reboot or a replacement aircraft starts new
+history. Reconnecting to the same aircraft retains history with a line break.
+Invalid positions and telemetry gaps are never joined into an invented path.
+The status gives the first recorded point's time after power-on: missing earlier
+observations cannot be recovered. Service restart loses its in-memory history.
+The 20,000-point recording retains up to one moving observation per second;
+older paths are simplified when necessary. Extreme fragmentation may discard
+oldest history, which is explicitly reported. This is a display trail, not a
+replacement for the aircraft's flight log.
+
 ## Terrain, imagery and traffic
 
 Public-data placement, offline preparation and the explicit aircraft-proxy option

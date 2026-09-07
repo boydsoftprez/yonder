@@ -19,6 +19,10 @@ export async function cockpitRoute(
   body: unknown,
 ): Promise<{ status: number; body: unknown } | null> {
   if (!path.startsWith("/cockpit/")) return null;
+  const trail=/^\/cockpit\/trail(?:\/([a-zA-Z0-9-]{1,64})\/(\d{1,12})(?:\/(\d{1,12})\/(\d{1,12}))?)?$/.exec(path);
+  if(trail&&method==='GET')return services.vehicle
+    ?{status:200,body:services.vehicle.trailPage(trail[1],Number(trail[2]??0),Number(trail[3]??0),Number(trail[4]??0))}
+    :{status:503,body:{error:'Vehicle trail service unavailable'}};
   if(['/cockpit/flight','/cockpit/details','/cockpit/mission','/cockpit/traffic'].includes(path)&&method==='GET'){
     if(!services.vehicle)return {status:503,body:{error:'Vehicle telemetry service is unavailable'}};
     if(path==='/cockpit/mission'){

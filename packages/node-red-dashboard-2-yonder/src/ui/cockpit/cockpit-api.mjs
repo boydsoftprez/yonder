@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import {unpackFlight} from 'yonder-core/cockpit-wire';
+import {createOwnTrailClient} from './own-trail.mjs';
 
 /** Flight reads never wait for mission/history downloads or retransmit commands. */
 export function createCockpitApi(fetchFn=(...args)=>fetch(...args)){
@@ -7,6 +8,7 @@ export function createCockpitApi(fetchFn=(...args)=>fetch(...args)){
   let detailsRetry=0,missionRetry=0,detailsError='',missionError='',closed=false;
   let receivedBytes=0,flightBytes=0,detailsTransfers=0,missionTransfers=0;
   const controllers=new Set(),samples=[];
+  const trail=createOwnTrailClient(request);
   async function request(url,init={}){
     const controller=new AbortController();controllers.add(controller);
     const timer=setTimeout(()=>controller.abort(),5000);
@@ -46,14 +48,16 @@ export function createCockpitApi(fetchFn=(...args)=>fetch(...args)){
       unpackFlight(wire,{});
       if(latest&&latest.g!==wire.g){details=null;mission=null;missionKey=null;detailsRetry=0;missionRetry=0;}
       latest=wire;refreshDetails(wire);refreshMission(wire);
+      trail.observe(wire.r);
       const cached={...(details||{}),mission:missionKey===JSON.stringify([wire.g,wire.m.revision])?mission:undefined};
       const snapshot=unpackFlight(wire,cached);
-      return {...details,...snapshot,_detailsReady:details?.detailKey===wire.d,_missionReady:!!cached.mission,
+      return {...details,...snapshot,ownTrail:trail.view(),_detailsReady:details?.detailKey===wire.d,_missionReady:!!cached.mission,
         detailError:detailsError||missionError};
     },
     dataOptions:options=>request('/cockpit/api/data-options',{method:'POST',headers:{'content-type':'application/json','x-yonder-cockpit':'1'},body:JSON.stringify(options)}),
+    setTrailOptions:options=>trail.configure(options),
     command:body=>request('/cockpit/api/command',{method:'POST',headers:{'content-type':'application/json','x-yonder-cockpit':'1'},body:JSON.stringify(body)}),
     stats(){const now=Date.now(),recent=samples.filter(s=>s.at>=now-10000);const span=recent.length?Math.max(1,(now-recent[0].at)/1000):1;return {transport:'compact-v1',flightBytes,receivedBytes,bytesPerSecond:recent.reduce((sum,s)=>sum+s.bytes,0)/span,detailsTransfers,missionTransfers};},
-    close(){closed=true;for(const controller of controllers)controller.abort();controllers.clear();}
+    close(){closed=true;trail.close();for(const controller of controllers)controller.abort();controllers.clear();}
   };
 }
