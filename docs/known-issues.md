@@ -1474,6 +1474,32 @@ carrying the pipeline host is `yonder-pipeline`'s rather than
 `gst-launch-1.0`'s, since `systemSpawner` hands the same argv to whichever of
 the two it spawned.
 
+**Update — the reasoning that made respawn the sanctioned path no longer
+holds, and a second defect is now visible.** The paragraph above accepts
+respawn-only because the GStreamer composer "is being replaced by ffmpeg
+anyway", so a control host built now "would be thrown away". A spike measured
+both halves of that on both boards
+([`ffmpeg-as-the-pipeline-composer.md`](hardware/ffmpeg-as-the-pipeline-composer.md)):
+
+- **ffmpeg cannot retune at all**, on either board, from any channel — the
+  CLI's interactive keys and the `zmq` filter reach filters and the encoder
+  answers `ENOSYS`, a second process cannot reach per-handle V4L2 controls, and
+  a program holding `AVCodecContext` outright moves nothing.
+- **GStreamer retunes on both** — `v4l2h264enc` 0.99 → 3.02 Mb/s on the Pi,
+  `mpph264enc` and `mpph265enc` 0.96 → 3.93 Mb/s on a Radxa with a real camera,
+  with no timestamp gap after the change in any run.
+
+So the composer pivot does not remove the capability this entry wants; it is the
+only thing that has it. A control host is not thrown-away work.
+
+**And the fix as designed can report a success it did not achieve.**
+`video/encoder.ts` sets a control and treats the absence of an error as
+proof. On this hardware that is not safe: setting `width` on a live
+`mpph264enc` is accepted, logs nothing, and is ignored — 600 frames came out at
+the original size with no gap and no complaint. That is this entry's own fault
+with the layers swapped, and it is caught only by reading the value back after
+writing it, which OpenHD does and this daemon does not.
+
 ### K-49 · ~~Adaptive is offered — for the rate and for the size — and nothing implements either~~ — BUILT, not yet proven on a board
 
 **Status:** Open · **Requirements:** R-UI-20, R-VID-07
@@ -1801,6 +1827,32 @@ behaviour and that a rate travels from `EncoderChannel` to an element and
 back, and proves nothing about `v4l2h264enc`. What closes this entry is a Pi
 running the daemon's own pipeline under this host, an operator moving a
 bitrate from the console, and the picture not breaking.
+
+**Update — the remedy above is the right one, and the argument for deferring it
+was wrong.** K-48 defers this on the grounds that an ffmpeg composer would throw
+it away. A spike measured that
+([`ffmpeg-as-the-pipeline-composer.md`](hardware/ffmpeg-as-the-pipeline-composer.md))
+and found the opposite: ffmpeg can change nothing on a running pipeline on
+either board, and GStreamer can change bitrate on both. **This host is what
+unlocks the adaptive video work, not what the pivot discards.**
+
+Two things support the shape it already describes:
+
+- **The closest comparable project is built exactly this way.** OpenHD holds its
+  pipeline in-process with `gst_parse_launch`, keeps a reference to the encoder
+  found by name, and changes bitrate on it; `gst-launch` appears in that
+  repository only in debug scripts. Its own comment: *"Bitrate is the only value
+  we (NEED) to support changing without a restart"*. Everything else restarts.
+  RubyFPV reaches the same split from an entirely different architecture.
+- **Resolution should not be in scope for live reconfigure.** Measured on both
+  boards, no hardware path changes resolution on a running pipeline: the Pi's
+  `v4l2convert` fails `S_FMT` and takes the pipeline down (see K-61), and the
+  MPP encoders accept `width`/`height` mid-stream and ignore them. Only a
+  software scaler can, and both peer projects respawn instead. The preview-branch
+  reconfigure this entry lists should be read as *bitrate live, size by respawn*.
+
+The host should also **read every control back after setting it** and report
+what the encoder says rather than what it was asked for — see K-48.
 
 ### K-54 · A detected camera cannot be configured from the console
 
@@ -2158,4 +2210,58 @@ withdrawn. `YonderPicture`'s own mode badge distinguishes *no contact* from
 Not fixed here because the wording is the operator's call: whether a stale
 reading is shown greyed, shown with the age beside it, or shown with the step
 line alone doing the work.
+
+---
+
+### K-61 · The Pi's ISP scaler is over budget in the preview branch, and drops frames to say so
+
+**Status:** Open · **Requirements:** R-CAM-10, R-HW-05, R-VID-13
+
+`compose()` scales the preview branch with `v4l2convert`, the Pi 4's ISP
+converter at `/dev/video12`. That element and `v4l2h264enc` share one hardware
+block whose throughput ceiling is quoted in macroblocks per second — nominally
+1080p30, generally 1080p50 for encode. The pipeline puts **three** consumers on
+it: the full-rate encode, the preview encode, and the conversion.
+
+At a 1280×720 capture that fits. At 1920×1080 it does not, and the arithmetic
+says so before the board does — roughly 517,000 macroblocks/s against a ceiling
+near 408,000. **The symptom is not an error. It is dropped frames.** Measured
+against a software scaler in the same two-branch shape, from a 1080p capture:
+
+| preview scaler | cpu, three runs | above idle | preview bytes / 300 frames |
+|---|---|---|---|
+| `v4l2convert` | 40.9%, 45.1%, 53.4% | ~+34.7 | 836 k, 844 k, 893 k |
+| `videoconvert ! videoscale` | 32.0%, 31.2%, 31.8% | ~+20.4 | 1031 k, 1031 k, 1192 k |
+
+The software scaler costs about fourteen points *less* of the board, holds
+steady where the hardware path climbs as it warms, and delivers about 20% more
+preview data for the same 300 frames at the same target — the difference being
+frames the ISP path dropped into the leaky queue.
+
+**This is not a new observation.** `usb-camera-on-a-pi-4.md` records *"Defect 2
+— the ISP converter is pure overhead, and looks like the opposite"* and marks
+that device "should not be used". `compose()` uses it anyway. What is new is
+that it holds in the preview branch at 1080p, and that the same element **also
+blocks a live resolution change**: `S_FMT` fails while streaming
+(`Call to S_FMT failed for YU12 @ 640x360: Invalid argument`) and the whole
+pipeline stops with `not-negotiated`, not just the branch. The V4L2 M2M
+specification says `S_FMT` should be permitted with buffers allocated; this
+driver refuses, so it is a driver gap against a published contract rather than a
+hardware limit — the same element scales to the same size happily when told
+before it starts.
+
+**Two things close this.** Replace `v4l2convert` with `videoconvert !
+videoscale` in the preview branch — the substitution is both, not `videoscale`
+alone, because `v4l2convert` converts as well as scales. And give `refuse()` the
+macroblock arithmetic, so a configuration that would exceed the block's ceiling
+is refused before Start with a sentence naming the limit, which is what R-CAM-10
+asks for and what R-HW-05 wants documented and enforced. `refuse()` is already
+pure and already holds capture size, frame rate, preview rung and branch count.
+
+**On Rockchip the opposite applies and no change is wanted:** there the preview
+is scaled by RGA inside the encoder through its `width`/`height` properties, at
+about twice the throughput of software, and the whole preview branch costs one
+point of a four-core board.
+
+Evidence: [`ffmpeg-as-the-pipeline-composer.md`](hardware/ffmpeg-as-the-pipeline-composer.md).
 
