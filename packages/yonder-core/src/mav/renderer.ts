@@ -26,20 +26,25 @@ export const ROUTER_UNIT = "mavlink-router";
 export const ROUTER_CONF_PATH = "/etc/mavlink-router/main.conf";
 
 /**
- * What `device: auto` sweeps, in order.
+ * What `device: auto` sweeps, in order: the header UARTs of both board
+ * families, then a USB CDC-ACM device.
  *
- * §2 makes `/dev/ttyAMA0` the designed home for an autopilot on both board
- * families — UART0 on pins 8 and 10 of a Pi, UART2 on the same three pins of
- * a Rockchip board. `R-MAV-02` requires a USB CDC-ACM device to work too, and
- * `docs/configuration.md` documents exactly these two as the values `device`
- * takes besides `auto`, so this list is that documentation and not a wider
- * guess: `/dev/ttyUSB*` is an FTDI or CP210x bridge, which is neither a
- * hardware UART nor CDC-ACM, and nothing in this repository asks for one.
+ * §2 of the telemetry-plumbing design puts the autopilot on the same three
+ * header pins on both families — UART0 on pins 8 and 10 of a Pi, UART2 on the
+ * same pins of a Rockchip board. The Pi's is `/dev/ttyAMA0`. The Rockchip
+ * board's is **`/dev/ttyS2`** on Armbian — `serial2` in the device tree's
+ * aliases, the 8250 driver's `ttyS` — once the `uart2-m0` overlay has taken
+ * it back from the boot console (40-uart.sh). `R-MAV-02` requires a USB
+ * CDC-ACM device to work too, and `docs/configuration.md` documents exactly
+ * these three as the values `device` takes besides `auto`, so this list is
+ * that documentation and not a wider guess: `/dev/ttyUSB*` is an FTDI or
+ * CP210x bridge, which is neither a hardware UART nor CDC-ACM, and nothing
+ * in this repository asks for one.
  *
  * A node that is not there is not an error — it is silence, which is what
  * Task 15's post-condition says an un-rebooted UART overlay must look like.
  */
-export const MAVLINK_DEVICES = ["/dev/ttyAMA0", "/dev/ttyACM0"] as const;
+export const MAVLINK_DEVICES = ["/dev/ttyAMA0", "/dev/ttyS2", "/dev/ttyACM0"] as const;
 
 /**
  * How long after a sweep that found nothing before another one is tried.

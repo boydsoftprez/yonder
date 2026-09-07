@@ -142,7 +142,7 @@ storage:
 
 mavlink:
   serial:
-    device: auto                # auto | /dev/ttyAMA0 | /dev/ttyACM0
+    device: auto                # auto | /dev/ttyAMA0 (Pi) | /dev/ttyS2 (Rockchip, Armbian) | /dev/ttyACM0 (USB)
     baud: auto                  # auto sweeps 57600, 115200, 230400, 921600, slowest first
   endpoints: []                 # up to three, e.g. { name: gcs0, host: 192.168.2.10, port: 14550 }
   tcp_server:
@@ -359,7 +359,7 @@ vehicle:
 
 mavlink:
   serial:
-    device: auto                # auto | /dev/ttyAMA0 | /dev/ttyACM0
+    device: auto                # auto | /dev/ttyAMA0 (Pi) | /dev/ttyS2 (Rockchip, Armbian) | /dev/ttyACM0 (USB)
     baud: auto                  # auto sweeps 57600, 115200, 230400, 921600
   endpoints:                    # up to three ground stations
     - { name: gcs0, host: 192.168.2.10, port: 14550 }

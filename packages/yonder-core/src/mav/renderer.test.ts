@@ -1334,9 +1334,8 @@ describe("MavlinkRenderer — the constants it publishes", () => {
     expect(ROUTER_CONF_PATH).toBe("/etc/mavlink-router/main.conf");
   });
 
-  // R-MAV-02, and the values docs/configuration.md documents for `device`.
-  it("sweeps the header UART and a USB CDC-ACM device", () => {
-    expect([...MAVLINK_DEVICES]).toEqual(["/dev/ttyAMA0", "/dev/ttyACM0"]);
+  it("sweeps both boards' header UARTs before the USB CDC-ACM device (R-MAV-02)", () => {
+    expect([...MAVLINK_DEVICES]).toEqual(["/dev/ttyAMA0", "/dev/ttyS2", "/dev/ttyACM0"]);
   });
 
   it("reads past ordinary traffic at the right rate rather than settling for it", async () => {
