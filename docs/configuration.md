@@ -189,7 +189,7 @@ cameras:
     width: 1280
     height: 720
     framerate: 30
-    codec: h264                    # h264 only today
+    codec: h264                    # h264 | h265 — h265 needs a board whose encoder offers it (Rockchip); refused otherwise
     bitrate_kbps: 2000
     stream:                        # the bitrate policy for the ground-station stream (R-VID-07, R-VID-17)
       mode: fixed                  # fixed | adaptive — fixed by default
@@ -401,6 +401,14 @@ gpio:
 ```
 
 ## Notes on specific keys
+
+**`cameras[].codec: h265`** encodes the ground-station stream in H.265 on a board whose
+probed encoder offers it — a Rockchip board's MPP does; a Raspberry Pi's V4L2 encoder does
+not, and the camera page refuses Start with the encoder named rather than letting the
+pipeline die (R-CAM-08, R-CAM-10). It changes only what leaves for the ground station: the
+copy the console watches is always H.264, because a browser reaches it over WebRTC
+(R-VID-20). Changing it restarts the camera's pipeline and does not arm the confirmation
+window. There is no control for it on the camera page yet (K-65); it is set here.
 
 **`mavlink.serial.baud: auto`** sweeps the rates ArduPilot is actually configured for in
 the field, fastest-last so a slow link is found before a fast one is guessed at. A pinned

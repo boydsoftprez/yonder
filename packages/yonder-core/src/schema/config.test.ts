@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, it, expect } from "vitest";
+import { parse as parseYaml } from "yaml";
 import {
   Camera, CameraControls, ConfigSchema, DEFAULT_CONFIG,
 } from "./config.js";
@@ -788,5 +792,39 @@ describe("CameraControls", () => {
     expect(() => CameraControls.parse({ verticalFlip: 0 })).toThrow();
     // And the converse still holds — rotation is degrees, never a switch.
     expect(() => CameraControls.parse({ rotation: true })).toThrow();
+  });
+});
+
+describe("cameras[].codec", () => {
+  const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..");
+  const seed = parseYaml(readFileSync(join(ROOT, "config", "defaults", "config.yaml"), "utf8")) as Record<string, unknown>;
+  const camera = (codec: string) => ({
+    id: "cam0", name: "Nose", source: "usb",
+    device: "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0",
+    enabled: true, autostart: false,
+    width: 1280, height: 720, framerate: 30, codec, bitrate_kbps: 2000,
+    preview: {
+      mode: "adaptive", size: "auto", ladder_top: "1280x720", ladder_bottom: "640x360",
+      floor_kbps: 300, ceiling_kbps: 2000, bitrate_kbps: 400, framerate: 15,
+    },
+    controls: { brightness: null, contrast: null, rotation: 0 },
+    outputs: [],
+    stream: { mode: "fixed", floor_kbps: 2000, ceiling_kbps: 2000 },
+  });
+
+  it("accepts h265 (R-CAM-08)", () => {
+    const r = ConfigSchema.safeParse({ ...seed, cameras: [camera("h265")] });
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.cameras[0].codec).toBe("h265");
+  });
+
+  it("still defaults to h264, and still refuses a codec it does not have", () => {
+    const { codec: _dropped, ...without } = camera("h264");
+    const r = ConfigSchema.safeParse({ ...seed, cameras: [without] });
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.cameras[0].codec).toBe("h264");
+    const bad = ConfigSchema.safeParse({ ...seed, cameras: [camera("hevc")] });
+    expect(bad.success).toBe(false);
+    if (!bad.success) expect(bad.error.issues[0].path).toEqual(["cameras", 0, "codec"]);
   });
 });

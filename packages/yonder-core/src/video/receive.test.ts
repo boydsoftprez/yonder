@@ -70,6 +70,15 @@ describe("renderReceive", () => {
     expect(gst).toContain("port=5600");
   });
 
+  it("writes the ground station an H.265 line when that is what leaves (R-VID-02)", () => {
+    const gst = renderReceive({ ...FACTS, camera: { ...CAMERA, codec: "h265" } })[0].body;
+    expect(gst).toContain("encoding-name=H265");
+    expect(gst).toContain("rtph265depay");
+    expect(gst).toContain("h265parse");
+    expect(gst).toContain("avdec_h265");
+    expect(gst).not.toContain("rtph264depay");
+  });
+
   it("carries the address the operator is actually reaching the device on", () => {
     // A board on a mesh has several and only one is in use. The command
     // carries that one; the others are listed beneath rather than guessed at.

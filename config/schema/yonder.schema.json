@@ -421,7 +421,8 @@
           "codec": {
             "type": "string",
             "enum": [
-              "h264"
+              "h264",
+              "h265"
             ],
             "default": "h264"
           },

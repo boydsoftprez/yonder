@@ -619,7 +619,12 @@ export const CameraShape = z.object({
   width: z.number().int().min(160).max(3840).default(1280),
   height: z.number().int().min(90).max(2160).default(720),
   framerate: z.number().int().min(1).max(60).default(30),
-  codec: z.enum(["h264"]).default("h264"),
+  // R-CAM-08. H.265 is refused by `video/pipeline.ts`'s refuse() on a board
+  // whose probed encoder has none — a schema cannot know what the board in
+  // front of it can encode (R-CAM-13), and a refusal with the encoder named
+  // is what R-CAM-10 asks for. The interface's own copy stays H.264 whatever
+  // is chosen here (R-VID-20).
+  codec: z.enum(["h264", "h265"]).default("h264"),
   bitrate_kbps: z.number().int().min(100).max(20000).default(2000),
   preview: Preview.default({}),
   controls: CameraControls.default({}),

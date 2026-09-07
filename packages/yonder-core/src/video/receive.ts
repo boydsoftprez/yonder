@@ -106,6 +106,7 @@ export interface Rendering {
  */
 const CODEC = {
   h264: { depay: "rtph264depay", parse: "h264parse", decode: "avdec_h264" },
+  h265: { depay: "rtph265depay", parse: "h265parse", decode: "avdec_h265" },
 } as const;
 
 /**
