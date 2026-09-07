@@ -440,3 +440,38 @@ it("still says a draft is pending when the control cannot be pressed", () => {
     }
 });
 });
+
+/**
+ * **The mark follows the pointer, before the device has answered.**
+ *
+ * `actual` and `requested` are both props: a press goes to the device, the
+ * device answers, and the answer arrives as a new prop. Drawn from those alone
+ * the mark cannot move until that round trip is complete, and over a mesh link
+ * that is a lag on every pixel of a drag — which reads as a control that
+ * ignores you. The operator's words, twice: *I can't move it at all*.
+ */
+it("draws the mark where the pointer is while a drag is in flight, not where the device last was", async () => {
+  const w = mount(YonderSetBar, {
+    props: { label: "Brightness", state: "present", min: 0, max: 100, step: 1, actual: 66 },
+  });
+  const trk = w.find(".y-sb__trk");
+  const at = (el: Element) => (el as HTMLElement).style.left;
+
+  // Where the device says it is, before anything is touched.
+  expect(at(w.find("[data-grab]").element)).toBe("66%");
+
+  // A press a quarter along, and no answer from the device yet.
+  press(trk.element, 55);              // a quarter of the 220px track
+  await w.vm.$nextTick();
+  expect(w.emitted("set")).toBeTruthy();
+  expect(at(w.find("[data-grab]").element)).toBe("25%");
+
+  // Dragged on, still with nothing back from the device.
+  trk.element.dispatchEvent(new PointerEvent("pointermove", { clientX: 165, bubbles: true }));
+  await w.vm.$nextTick();
+  expect(at(w.find("[data-grab]").element)).toBe("75%");
+
+  // The device answers, and its word is the one that counts from then on.
+  await w.setProps({ actual: 71 });
+  expect(at(w.find("[data-grab]").element)).toBe("71%");
+});
