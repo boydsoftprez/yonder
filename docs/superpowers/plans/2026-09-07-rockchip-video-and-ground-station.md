@@ -56,8 +56,10 @@ those two notes and from the board on 2026-09-07, not from documentation.
   document; the ground station is `<gs>`; the RTSP password is `<rtsp-password>`.
 - **Run tests with `npx vitest run --root packages/yonder-core <file>`**; the whole suite is
   `npx vitest run --root packages/yonder-core` (113 files, 2670 tests, ~32 s on this
-  branch). Type-check with `npx tsc --noEmit -p packages/yonder-core/tsconfig.json` — CI
-  type-checks the test files too, so a widened type is enforced across every fixture.
+  branch). Type-check with `npx tsc --noEmit -p packages/yonder-core/tsconfig.json` — on this
+  branch that tsconfig excludes test files (main's `8098927` type-checks them; it is not an
+  ancestor here), so a widened type is enforced by the fixture list and the test suite, not
+  by the compiler.
 - **Shell roles pass `shellcheck`** (`shellcheck installer/install.sh installer/make-payload.sh installer/lib/*.sh installer/roles/*.sh scripts/*.sh`)
   and `./installer/install.sh --dry-run` on a machine with no payload and no Rockchip.
 - **Work in this worktree on branch `claude/radxa-video-telemetry-test-624039`**, which Task 0
