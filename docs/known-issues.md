@@ -1488,9 +1488,17 @@ carrying the pipeline host is `yonder-pipeline`'s rather than
 `gst-launch-1.0`'s, since `systemSpawner` hands the same argv to whichever of
 the two it spawned.
 
-### K-49 · ~~Adaptive is offered — for the rate and for the size — and nothing implements either~~ — BUILT, not yet proven on a board
+### K-49 · ~~Adaptive is offered — for the rate and for the size — and nothing implements either~~ — CLOSED
 
-**Status:** Open · **Requirements:** R-UI-20, R-VID-07
+**Status:** Closed on 2026-09-07 — proven on the board · **Requirements:** R-UI-20, R-VID-07
+
+**Proven on hardware, 2026-09-06/07.** With a real browser as the only viewer,
+its own `getStats()` drove the preview to 1389 kb/s; with a synthetic link
+swept 2600 → 1600 kb/s the preview went 1591 → 633 kb/s, each measured on the
+wire with `ffmpeg` and the pipeline pid unchanged throughout; freeing the link
+by cutting the main stream took it 0.51 → 0.83 → 1.37 → 2.07 Mb/s, stopping at
+the applied ceiling. The size ladder steps down at the floor (`53a8342`). What
+it will not do — hold the ceiling on a link too thin for the floor — is K-59.
 
 The stream and preview both offer **Fixed / Adaptive**. Selecting Adaptive
 makes the bitrate bar read-only — correctly, since in Adaptive the rate is not
