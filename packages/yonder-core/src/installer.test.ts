@@ -1566,3 +1566,31 @@ describe("the mavlink-router role", () => {
   });
 
 });
+
+describe("installer/make-payload.sh stages gst-rockchip", () => {
+  const script = readFileSync(join(ROOT, "installer", "make-payload.sh"), "utf8");
+
+  it("pins each of the three sources to a full commit", () => {
+    for (const name of ["MPP_COMMIT", "LIBRGA_COMMIT", "GST_ROCKCHIP_COMMIT"]) {
+      expect(script).toMatch(new RegExp(`^${name}=\\$\\{${name}:-[0-9a-f]{40}\\}$`, "m"));
+    }
+  });
+
+  it("lists it as a component, staged before the console", () => {
+    expect(script).toMatch(/^COMPONENTS="node zerotier mavlink-router gst-rockchip console"$/m);
+  });
+
+  it("stages it only for arm64, which is every Rockchip board there is", () => {
+    expect(script).toContain('if [ "$ARCH" != "linux-arm64" ]');
+  });
+
+  it("proves the built plugin registers before staging it", () => {
+    expect(script).toContain("gst-inspect-1.0 rockchipmpp");
+    expect(script).toContain("grep -q mppjpegdec");
+  });
+
+  it("never reads a variable in the summary that only one component sets (K-64)", () => {
+    const summary = script.slice(script.indexOf('step "done"'));
+    expect(summary).not.toContain("$ZT_DEB");
+  });
+});

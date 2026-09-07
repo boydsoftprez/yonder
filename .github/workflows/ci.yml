@@ -311,3 +311,52 @@ jobs:
           path: vendor/mavlink-router/mavlink-routerd
           if-no-files-found: error
           retention-days: 7
+
+  # MPP, librga and gstreamer-rockchip, built for the board that has the
+  # hardware. No repository packages them (R-HW-03, R-CFG-07); the pins and
+  # the recipe live in installer/make-payload.sh, so as for mavlink-router
+  # only a change to that file rebuilds this.
+  payload-gst-rockchip:
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Decide whether anything in this change could alter the plugin
+        id: scope
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "not a pull request; building"
+            echo "run=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          base=$(git merge-base "origin/${{ github.base_ref }}" HEAD)
+          if git diff --name-only "$base"...HEAD | grep -qxF 'installer/make-payload.sh'; then
+            echo "the pins or the recipe changed; building"
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "nothing that feeds this build changed; skipping it"
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Set up the emulation an arm64 container needs
+        if: steps.scope.outputs.run == 'true'
+        uses: docker/setup-qemu-action@v3
+      - name: Build MPP, librga and the plugin from the pinned commits
+        if: steps.scope.outputs.run == 'true'
+        run: ./installer/make-payload.sh --arch linux-arm64 --only gst-rockchip
+      # Every real object staged is an aarch64 ELF. 183 is aarch64; the check
+      # is the one 52-gst-rockchip.sh makes on the board, exercised where the
+      # answer is known.
+      - name: They are aarch64 objects
+        if: steps.scope.outputs.run == 'true'
+        run: |
+          find vendor/gst-rockchip -type f -name '*.so*' | while read -r f; do
+            m=$(/bin/sh -c '. ./installer/lib/common.sh; elf_machine "$1"' sh "$f")
+            echo "$f: ELF e_machine $m"
+            [ "$m" = "183" ] || { echo "::error::$f is not an aarch64 object"; exit 1; }
+          done
+      - uses: actions/upload-artifact@v4
+        if: steps.scope.outputs.run == 'true'
+        with:
+          name: gst-rockchip-arm64
+          path: vendor/gst-rockchip
+          if-no-files-found: error

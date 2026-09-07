@@ -107,8 +107,35 @@ MAVLINK_ROUTER_REPO=${MAVLINK_ROUTER_REPO:-https://github.com/mavlink-router/mav
 # glibc it will actually meet rather than one that merely happens to be newer.
 MAVLINK_ROUTER_IMAGE=${MAVLINK_ROUTER_IMAGE:-debian:trixie}
 
-# The four things a payload can carry, in the order they are staged.
-COMPONENTS="node zerotier mavlink-router console"
+# gstreamer-rockchip, and the two libraries it links: the second component
+# that is *built* rather than downloaded, for mavlink-router's reason — no
+# repository a board has carries any of the three, Debian or Armbian, and the
+# vendor publishes no binary for trixie. Rejected on the way here, so they are
+# not revisited: the vendor's prebuilt plugin (bullseye, GStreamer 1.14, not
+# guaranteed against 1.26), and building on the board (nine build packages
+# and a from-source MPP on a 1.9 GB board — done once by hand for the bench,
+# not a thing an installer does).
+#
+# Three pins, one commit each, fingerprinted as mavlink-router's is: a commit
+# is a hash over the whole tree. These are what the bench built on 2026-09-06:
+# mpph264enc and mpph265enc both encode clean, decodable streams and take a
+# live bitrate change with no gap. See docs/hardware/ffmpeg-as-the-pipeline-composer.md.
+MPP_COMMIT=${MPP_COMMIT:-0986d01294d5c2449c14cf13af9b740368c33967}
+MPP_REPO=${MPP_REPO:-https://github.com/rockchip-linux/mpp}
+# librga ships its library already built under libs/Linux/gcc-aarch64/; its
+# headers and a pkg-config file are what turn the plugin's `rga` option on,
+# which is what puts `width`/`height` on the encoders (spec §4).
+LIBRGA_COMMIT=${LIBRGA_COMMIT:-2b32edcb97b601b25683e2941d888c8515da6d55}
+LIBRGA_REPO=${LIBRGA_REPO:-https://github.com/airockchip/librga}
+# rockchip-linux/gstreamer-rockchip is a 404; JeffyCN's mirror carries it on
+# a branch of that name, committed to twelve days before the bench built it.
+GST_ROCKCHIP_COMMIT=${GST_ROCKCHIP_COMMIT:-a0d45af504099b4b82f3d3377019a63d357e7cef}
+GST_ROCKCHIP_REPO=${GST_ROCKCHIP_REPO:-https://github.com/JeffyCN/mirrors}
+GST_ROCKCHIP_BRANCH=${GST_ROCKCHIP_BRANCH:-gstreamer-rockchip}
+GST_ROCKCHIP_IMAGE=${GST_ROCKCHIP_IMAGE:-debian:trixie}
+
+# The five things a payload can carry, in the order they are staged.
+COMPONENTS="node zerotier mavlink-router gst-rockchip console"
 
 ARCH=""
 OUT="$REPO/vendor"
@@ -121,10 +148,11 @@ Usage: make-payload.sh --arch <linux-arm64|linux-x64> [--out DIR] [--only LIST]
   --arch ARCH        the board's architecture; required
   --out DIR          where to stage the payload (default: vendor/ in this repo)
   --only LIST        stage only these components, comma-separated:
-                     node, zerotier, mavlink-router, console. Default: all of
-                     them. What is not staged in this run is left exactly as
-                     an earlier run left it, so --only is an update of one
-                     part of a payload rather than a smaller payload.
+                     node, zerotier, mavlink-router, gst-rockchip, console.
+                     Default: all of them. What is not staged in this run is
+                     left exactly as an earlier run left it, so --only is an
+                     update of one part of a payload rather than a smaller
+                     payload.
   --node-version V   override the pinned Node version
   -h, --help         this message
 
@@ -135,6 +163,8 @@ Produces:
   DIR/node/bin/node                               the runtime both services use
   DIR/zerotier/zerotier-one_<version>_<arch>.deb  the primary mesh client
   DIR/mavlink-router/mavlink-routerd              the service that owns the serial port
+  DIR/gst-rockchip/gstreamer-1.0/libgstrockchipmpp.so   Rockchip's encoders, for GStreamer
+  DIR/gst-rockchip/lib/                                   MPP and librga, which it links
   DIR/console/node_modules/node-red/red.js        the console
 USAGE
 }
@@ -520,6 +550,121 @@ register the emulation handlers (Linux: qemu-user-static and binfmt-support) and
 fi
 
 # ---------------------------------------------------------------------------
+if wanted gst-rockchip; then
+    if [ "$ARCH" != "linux-arm64" ]; then
+        step "gst-rockchip: not for $ARCH"
+        log "every Rockchip board is arm64; an $ARCH payload carries no MPP plugin and the role skips it"
+    else
+    GR_PINS="MPP $(printf '%s' "$MPP_COMMIT" | cut -c1-7), librga $(printf '%s' "$LIBRGA_COMMIT" | cut -c1-7), plugin $(printf '%s' "$GST_ROCKCHIP_COMMIT" | cut -c1-7)"
+    step "gst-rockchip: $GR_PINS for $ARCH"
+    command -v git >/dev/null 2>&1 || die "git is needed to fetch the Rockchip sources"
+    GR_ENGINE=$(command -v docker 2>/dev/null || command -v podman 2>/dev/null || true)
+    [ -n "$GR_ENGINE" ] || die "no docker or podman here, and gst-rockchip is a source build.
+  install Docker or Podman, or stage the rest with:
+    make-payload.sh --arch $ARCH --only node,zerotier,mavlink-router,console
+  and expect a Rockchip board to encode in software."
+    GR="$WORK/gst-rockchip"
+    rm -rf "$GR"
+    mkdir -p "$GR"
+    # repo commit dir. A shallow fetch of exactly the pinned commit: the pin
+    # is verified by construction, and what crosses the network is the tree,
+    # not the history — JeffyCN/mirrors carries many projects' histories on
+    # separate branches, and a full clone of it is gigabytes, which is what
+    # timed out the first time this ran. GitHub serves a reachable commit by
+    # id. The branch name stays recorded in the MANIFEST as where that
+    # commit lives.
+    gr_fetch() {
+        mkdir -p "$3"
+        git -C "$3" init --quiet
+        git -C "$3" remote add origin "$1"
+        git -C "$3" fetch --quiet --depth=1 origin "$2" \
+            || die "could not fetch $2 from $1"
+        git -C "$3" checkout --quiet --detach FETCH_HEAD
+        gr_head=$(git -C "$3" rev-parse HEAD)
+        [ "$gr_head" = "$2" ] || die "the fetch of $1 is at $gr_head, not the pinned $2"
+        log "$(basename "$3") is $gr_head, exactly the pinned commit"
+    }
+    gr_fetch "$MPP_REPO" "$MPP_COMMIT" "$GR/mpp"
+    gr_fetch "$LIBRGA_REPO" "$LIBRGA_COMMIT" "$GR/librga"
+    gr_fetch "$GST_ROCKCHIP_REPO" "$GST_ROCKCHIP_COMMIT" "$GR/plugin"
+    [ -f "$GR/librga/libs/Linux/gcc-aarch64/librga.so" ] \
+        || die "librga at $LIBRGA_COMMIT carries no libs/Linux/gcc-aarch64/librga.so"
+    log "building in $GST_ROCKCHIP_IMAGE for $OCI_PLATFORM; MPP is a large C build, so give it several minutes"
+    # shellcheck disable=SC2016 # GR_OWNER is expanded by the container's shell, not this one
+    "$GR_ENGINE" run --rm --platform "$OCI_PLATFORM" \
+        -v "$GR:/src" -w /src \
+        -e DEBIAN_FRONTEND=noninteractive \
+        -e "GR_OWNER=$(id -u):$(id -g)" \
+        "$GST_ROCKCHIP_IMAGE" sh -c '
+            set -eu
+            apt-get update -qq
+            apt-get install -y --no-install-recommends \
+                build-essential cmake meson ninja-build pkg-config git ca-certificates \
+                libdrm-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+                gstreamer1.0-tools >/dev/null
+            git config --global --add safe.directory "*"
+            lib=/usr/lib/aarch64-linux-gnu
+            # MPP, installed into the container so the plugin can link it.
+            cmake -S /src/mpp -B /src/mpp/build -DCMAKE_BUILD_TYPE=Release \
+                -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_INSTALL_LIBDIR=lib/aarch64-linux-gnu \
+                -DBUILD_TEST=OFF >/dev/null
+            make -C /src/mpp/build -j"$(nproc)" install >/dev/null
+            # librga, already built by its authors; the headers and a
+            # pkg-config file are what the plugin build asks for.
+            install -m 0644 /src/librga/libs/Linux/gcc-aarch64/librga.so "$lib/librga.so.2"
+            ln -sf librga.so.2 "$lib/librga.so"
+            mkdir -p /usr/include/rga
+            cp -r /src/librga/include/. /usr/include/rga/
+            printf "prefix=/usr\nlibdir=%s\nincludedir=/usr/include/rga\n\nName: librga\nDescription: Rockchip RGA 2D raster graphic acceleration\nVersion: 1.10.6\nLibs: -L%s -lrga\nCflags: -I/usr/include/rga\n" \
+                "$lib" "$lib" > "$lib/pkgconfig/librga.pc"
+            ldconfig
+            # The plugin, with only the MPP element set: rkximage wants X11
+            # and kmssrc a display, and neither is on an aircraft.
+            meson setup /src/plugin/build /src/plugin --prefix=/usr --libdir=lib/aarch64-linux-gnu \
+                --buildtype=release -Drockchipmpp=enabled -Drga=enabled \
+                -Drkximage=disabled -Dkmssrc=disabled -Dvpxalphadec=disabled >/dev/null
+            ninja -C /src/plugin/build >/dev/null
+            strip /src/plugin/build/gst/rockchipmpp/libgstrockchipmpp.so
+            # It registers. Without /dev/mpp_service the encoders stay
+            # unregistered and only the decoders show, so the decoder is what
+            # is asked for here; the role asks for the encoders on the board.
+            GST_PLUGIN_PATH=/src/plugin/build/gst/rockchipmpp gst-inspect-1.0 rockchipmpp > /src/inspect.txt
+            grep -q mppjpegdec /src/inspect.txt
+            mkdir -p /src/out/lib /src/out/gstreamer-1.0
+            cp -a "$lib"/librockchip_mpp.so* /src/out/lib/
+            cp -a "$lib"/librga.so* /src/out/lib/
+            cp /src/plugin/build/gst/rockchipmpp/libgstrockchipmpp.so /src/out/gstreamer-1.0/
+            # Only what this container created: the host wrote the three
+            # source trees with its own git, and a bind mount will not chown
+            # the read-only objects git writes. These four are what the host
+            # cleanup trap has to be able to remove.
+            chown -R "$GR_OWNER" /src/out /src/inspect.txt /src/mpp/build /src/plugin/build
+        ' || die "the gst-rockchip build failed in $GST_ROCKCHIP_IMAGE for $OCI_PLATFORM.
+If it stopped at 'exec format error', this host cannot run $OCI_PLATFORM containers:
+register the emulation handlers (Linux: qemu-user-static and binfmt-support) and try again."
+    [ -f "$GR/out/gstreamer-1.0/libgstrockchipmpp.so" ] || die "the build reported success and produced no plugin"
+    grep -q mppjpegdec "$GR/inspect.txt" || die "the built plugin registers no mppjpegdec; it is not the plugin"
+    rm -rf "$OUT/gst-rockchip"
+    mkdir -p "$OUT/gst-rockchip"
+    cp -a "$GR/out/lib" "$OUT/gst-rockchip/lib"
+    cp -a "$GR/out/gstreamer-1.0" "$OUT/gst-rockchip/gstreamer-1.0"
+    cp "$GR/inspect.txt" "$OUT/gst-rockchip/inspect.txt"
+    {
+        printf 'mpp %s %s\n' "$MPP_COMMIT" "$MPP_REPO"
+        printf 'librga %s %s\n' "$LIBRGA_COMMIT" "$LIBRGA_REPO"
+        printf 'gstreamer-rockchip %s %s %s\n' "$GST_ROCKCHIP_COMMIT" "$GST_ROCKCHIP_REPO" "$GST_ROCKCHIP_BRANCH"
+        if [ -n "$SHA_SUM" ]; then
+            find "$OUT/gst-rockchip" -type f -name '*.so*' | sort | while read -r f; do
+                printf 'sha256 %s %s\n' "$($SHA_SUM "$f" | cut -d' ' -f1)" "${f#"$OUT/gst-rockchip/"}"
+            done
+        fi
+    } > "$OUT/gst-rockchip/MANIFEST"
+    log "staged $OUT/gst-rockchip ($GR_PINS)"
+    cat "$OUT/gst-rockchip/MANIFEST" | while read -r line; do log "  $line"; done
+    fi
+fi
+
+# ---------------------------------------------------------------------------
 if wanted console; then
     step "the console: node-red and the dashboard"
 
@@ -588,7 +733,13 @@ fi
 # ---------------------------------------------------------------------------
 step "done"
 log "node:    $OUT/node/bin/node"
-log "zerotier: $OUT/zerotier/$ZT_DEB"
+zt_staged="none staged"
+for f in "$OUT"/zerotier/zerotier-one_*.deb; do
+    [ -e "$f" ] && zt_staged="$f"
+    break
+done
+log "zerotier: $zt_staged"
+log "gst-rockchip: $([ -f "$OUT/gst-rockchip/gstreamer-1.0/libgstrockchipmpp.so" ] && printf '%s' "$OUT/gst-rockchip/gstreamer-1.0/libgstrockchipmpp.so" || printf 'none staged')"
 log "mediamtx: $OUT/mediamtx/mediamtx"
 log "console: $OUT/console/node_modules/node-red/red.js"
 
@@ -597,10 +748,11 @@ log "console: $OUT/console/node_modules/node-red/red.js"
 # them, and reporting only this run's work would describe a payload that is
 # not the one on disk.
 #
-# It also has to be a lookup rather than a variable: `$ZT_DEB` is set inside
-# the zerotier step, so under `set -u` printing it after a run that skipped
-# that step is an unbound variable and a non-zero exit at the very last line
-# of a payload that built perfectly.
+# It also has to be a lookup rather than a variable: ZT_DEB (K-64's variable,
+# fixed above by reading the staged .deb off disk instead) is set inside the
+# zerotier step, so under `set -u` printing it after a run that skipped that
+# step is an unbound variable and a non-zero exit at the very last line of a
+# payload that built perfectly.
 carries() {
     if [ -e "$2" ]; then
         log "$1 $2"
