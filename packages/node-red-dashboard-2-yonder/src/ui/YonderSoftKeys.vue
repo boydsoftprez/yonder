@@ -99,15 +99,18 @@ export default {
 }
 
 .y-keys__key {
-    /* Sized to its words, with a floor for a gloved finger — never `flex: 1`.
-       Two keys stretched across a 1256px rail are the slab this whole design
-       language replaced, wearing a rail for a hat. */
+    /* Sized to its words, never `flex: 1`. Two keys stretched across a 1256px
+       rail are the slab this whole design language replaced, wearing a rail
+       for a hat. */
     flex: 0 0 auto;
     min-width: 8rem;
     padding-inline: 1.25rem;
-    /* Deep enough for a gloved finger (R-UI-04) without becoming a slab: the
-       rail is the full width, a key within it never is. */
-    min-height: 34px;
+    /* A key is a control, so it takes the same floor every other control
+       takes. This was 34px, under a comment that justified it the same way
+       `--yonder-touch: 44px` was justified — so the two numbers disagreed
+       while their reasons matched, and the shared fiction is what kept that
+       invisible. The rail is the full width; a key within it never is. */
+    min-height: var(--yonder-touch, 44px);
     padding: 7px 6px;
     border: 0;
     border-right: 1px solid var(--yonder-divider, #2b333c);
@@ -139,6 +142,19 @@ export default {
 
 .tone-act { color: var(--yonder-select, #2ad4f0); }
 .tone-warn { color: var(--yonder-irreversible, #f03fce); }
+/*
+ * `caution` is for a key that is deliberately on and hazardous — opening the
+ * MAVLink command path to the network is the case it was added for (R-MAV-07).
+ *
+ * Neither existing tone says that. `warn` is the irreversible mark, reserved
+ * for the one control that takes the page away from the operator, and spending
+ * it twice makes it mean less. `bad` on the annunciator means *failed*, and
+ * this has not failed — it is doing exactly what it was told. Amber already
+ * carries "the boundary you have to understand before you cross it" in the
+ * generated stylesheet, which is what this is.
+ */
+.tone-caution { color: var(--yonder-waiting, #ffcf28); }
+.tone-caution.on { box-shadow: inset 0 2px 0 var(--yonder-waiting, #ffcf28); }
 
 .y-keys__key:hover { background: var(--yonder-raised, rgba(255, 255, 255, 0.04)); }
 .y-keys__key:focus-visible {

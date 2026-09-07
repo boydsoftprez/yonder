@@ -76,6 +76,74 @@ let dir: string;
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), "yonder-wire-")); });
 afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
 
+import { buildRenderers, consolePathsFromEnv, mavlinkFromEnv, startServer, SIGNAL_POLL_SECONDS } from "./server.js";
+
+import { createSocket } from "node:dgram";
+
+import { heartbeatV2 } from "../mav/testing.js";
+
+import type { MavlinkStateBody } from "./routes.js";
+
+import type { OpenPort } from "../mav/detect.js";
+
+import { SETTLE_MS } from "../mav/serial.js";
+
+import { DEFAULT_CONFIG } from "../schema/config.js";
+
+/**
+ * The telemetry fixtures. **No test opens a serial port**, so the opener
+ * throws; `MavlinkRenderer` treats a device that will not open as R-MAV-13's
+ * silence for that device and carries on, which is what a board with nothing
+ * plugged into it does too.
+ */
+const neverOpens: OpenPort = async () => { throw new Error("no test opens a serial port"); };
+
+/** A vehicle's heartbeat: ArduPilot on a fixed wing, system 1. */
+const HEARTBEAT = heartbeatV2(1, 1, 3);
+
+/**
+ * A UDP port on loopback that was free a moment ago.
+ *
+ * The listener's own tests bind `0` and read back what they got; a daemon
+ * gives no such handle back, so a test that wants to send it a datagram has
+ * to choose the number first. Asking the kernel for an ephemeral one and
+ * letting it go is how that number is chosen rather than picked.
+ */
+async function freePort(): Promise<number> {
+  const probe = createSocket({ type: "udp4" });
+  const port = await new Promise<number>((resolve) => {
+    probe.bind({ address: "127.0.0.1", port: 0 }, () => { resolve(probe.address().port); });
+  });
+  await new Promise<void>((resolve) => { probe.close(() => { resolve(); }); });
+  return port;
+}
+
+/** One datagram, from a socket of the test's own, to a port on loopback. */
+async function sendTo(port: number, bytes: Uint8Array): Promise<void> {
+  const from = createSocket({ type: "udp4" });
+  await new Promise<void>((resolve, reject) => {
+    from.send(Buffer.from(bytes), port, "127.0.0.1", (error) => {
+      if (error === null) resolve(); else reject(error);
+    });
+  });
+  from.close();
+}
+
+/**
+ * Read until the answer settles, **without consulting the wall clock**:
+ * `setImmediate` spends a turn of the event loop, which is where a loopback
+ * datagram is delivered, so this counts turns rather than milliseconds and
+ * cannot be made to pass or fail by how fast the machine running it is.
+ */
+async function eventually<T>(read: () => Promise<T>, settled: (value: T) => boolean): Promise<T> {
+  let last = await read();
+  for (let turn = 0; turn < 100 && !settled(last); turn += 1) {
+    await new Promise<void>((resolve) => { setImmediate(resolve); });
+    last = await read();
+  }
+  return last;
+}
+
 describe("buildRenderers", () => {
   it("produces a network renderer", () => {
     saveConfig(join(dir, "config.yaml"), DEFAULT_CONFIG);
@@ -1466,4 +1534,364 @@ describe("the daemon runs the rate controller", () => {
       await server.close();
     }
   });
+});
+
+
+/*
+ * The telemetry branch's own tests for this file, appended whole on merge
+ * rather than interleaved: both branches grew this file by adding to it,
+ * and a line-level merge cuts through test bodies. Each block below is
+ * that branch's, unedited, with the describe-level setup it was written
+ * against.
+ */
+describe("buildRenderers", () => {
+
+
+
+
+
+
+
+
+
+  /**
+   * In front of the network, and for the mirror image of the reason the
+   * console is behind it. K-19: a failing renderer stops the ones behind it.
+   * HostnameRenderer cannot fail, so nothing is put at risk by going first —
+   * and a board whose NetworkManager is wedged still gets the name its
+   * configuration gives it, which is the board most likely to be searched for
+   * by name.
+   */
+  /**
+   * Last, and behind the console: telemetry rides on a network that has
+   * already settled, and this is the renderer that can spend longest — a full
+   * sweep is four speeds on each of two devices.
+   */
+  it("puts the telemetry renderer last, when it is given a way to open a serial port", () => {
+    const run: CommandRunner = async () => ({ code: 0, stdout: "", stderr: "" });
+    const built = buildRenderers({
+      secretsPath: join(dir, "secrets.yaml"),
+      runner: run,
+      remoteStatePath: join(dir, "remote.json"),
+      console: { settings: join(dir, "console", "settings.js") },
+      mavlink: {
+        open: async () => { throw new Error("no test opens a serial port"); },
+        confPath: join(dir, "mavlink", "main.conf"),
+        hintPath: join(dir, "mavlink-link.json"),
+      },
+    });
+    // `video` joins the list on merge: the camera pipelines are pushed last
+    // and unconditionally, behind telemetry, because a pipeline is composed
+    // from what the renderers above it have already settled.
+    expect(built.renderers.map((r) => r.name))
+      .toEqual(["hostname", "network", "remote", "console", "mavlink", "video"]);
+    expect(built.mavlinkRenderer).toBeDefined();
+  });
+
+  /**
+   * And when it is not, the operator has to be told. `detect()` needs an
+   * `OpenPort`; `mav/serial.ts` implements one against real hardware and
+   * `main()` passes it, so anything reaching this branch is a caller that
+   * supplied none — a test, or a new construction site that forgot.
+   * Configuring no telemetry silently means an apply that sets three ground
+   * stations succeeds, writes no main.conf, starts no router, and says
+   * nothing anywhere about why the Telemetry page is empty.
+   */
+  it("says so when it has no way to configure telemetry at all", () => {
+    const run: CommandRunner = async () => ({ code: 0, stdout: "", stderr: "" });
+    const said: string[] = [];
+    const built = buildRenderers({
+      secretsPath: join(dir, "secrets.yaml"),
+      runner: run,
+      remoteStatePath: join(dir, "remote.json"),
+      log: (line) => { said.push(line); },
+    });
+    expect(built.mavlinkRenderer).toBeUndefined();
+    expect(said.join("\n")).toMatch(/telemetry is not configured on this device/);
+    expect(said.join("\n")).toMatch(/serial port/);
+  });
+
+  it("says nothing of the sort when telemetry is configured", () => {
+    const run: CommandRunner = async () => ({ code: 0, stdout: "", stderr: "" });
+    const said: string[] = [];
+    buildRenderers({
+      secretsPath: join(dir, "secrets.yaml"),
+      runner: run,
+      remoteStatePath: join(dir, "remote.json"),
+      log: (line) => { said.push(line); },
+      mavlink: {
+        open: async () => { throw new Error("no test opens a serial port"); },
+        confPath: join(dir, "mavlink", "main.conf"),
+        hintPath: join(dir, "mavlink-link.json"),
+      },
+    });
+    expect(said.join("\n")).not.toMatch(/telemetry is not configured/);
+  });
+
+  /**
+   * R-MAV-05's other end. The generated router configuration always emits
+   * `[UdpEndpoint yonder]` at `LOOPBACK_PORT`; this is the socket that reads
+   * it. Assembled only alongside the renderer, because without one no
+   * main.conf is written and no router is started, so nothing anywhere sends
+   * to that port — a socket held for a feed that cannot exist.
+   */
+  it("produces a loopback listener exactly when it produces a telemetry renderer", () => {
+    const run: CommandRunner = async () => ({ code: 0, stdout: "", stderr: "" });
+    const without = buildRenderers({
+      secretsPath: join(dir, "secrets.yaml"),
+      runner: run,
+      remoteStatePath: join(dir, "remote.json"),
+    });
+    expect(without.mavlinkListener).toBeUndefined();
+
+    const withOne = buildRenderers({
+      secretsPath: join(dir, "secrets.yaml"),
+      runner: run,
+      remoteStatePath: join(dir, "remote.json"),
+      mavlink: {
+        open: neverOpens,
+        confPath: join(dir, "mavlink", "main.conf"),
+        hintPath: join(dir, "mavlink-link.json"),
+        loopbackPort: 0,
+      },
+    });
+    expect(withOne.mavlinkListener).toBeDefined();
+  });
+
+  /**
+   * **One tracker, two writers**, asserted by making one of them write.
+   *
+   * The renderer supplies the sweep's outcome and the router's counters; the
+   * listener supplies heartbeats off the loopback copy. If they held trackers
+   * of their own, `GET /mav/state` would have to stitch two halves together —
+   * and a heartbeat sent here would reach a state object nothing serves.
+   * Rather than compare object identity, this sends a real datagram and reads
+   * the answer out of the *renderer*.
+   */
+  it("gives the listener and the telemetry renderer the same link tracker", async () => {
+    const run: CommandRunner = async () => ({ code: 0, stdout: "", stderr: "" });
+    const built = buildRenderers({
+      secretsPath: join(dir, "secrets.yaml"),
+      runner: run,
+      remoteStatePath: join(dir, "remote.json"),
+      mavlink: {
+        open: neverOpens,
+        confPath: join(dir, "mavlink", "main.conf"),
+        hintPath: join(dir, "mavlink-link.json"),
+        loopbackPort: 0,
+      },
+    });
+    const listener = built.mavlinkListener;
+    const renderer = built.mavlinkRenderer;
+    expect(listener).toBeDefined();
+    expect(renderer).toBeDefined();
+    if (listener === undefined || renderer === undefined) return;
+
+    await listener.start();
+    try {
+      // R-MAV-07, at the one place production actually binds it.
+      expect(listener.bound?.address).toBe("127.0.0.1");
+      await sendTo(listener.bound?.port ?? 0, HEARTBEAT);
+      const state = await eventually(
+        async () => Promise.resolve(renderer.state()),
+        (s) => s.lastHeardMs !== null,
+      );
+      expect(state.lastHeardMs).not.toBeNull();
+    } finally {
+      listener.close();
+      renderer.close();
+    }
+  });
+
+});
+
+describe("mavlinkFromEnv", () => {
+
+
+
+  /**
+   * **This block is what makes telemetry happen at all.** Before it, every
+   * caller of `buildRenderers` passed no `mavlink`, so a real board assembled
+   * no `MavlinkRenderer`, answered 503 on every `/mav/*` route and started no
+   * router. `main()` cannot be called from a test, so the values it decides
+   * are asserted here instead — the same reason `consolePathsFromEnv` exists.
+   */
+  it("names the installed router configuration and puts the hint beside the journal", () => {
+    const { confPath, hintPath } = mavlinkFromEnv(async () => ({ code: 0, stdout: "", stderr: "" }), {});
+    expect(confPath).toBe("/etc/mavlink-router/main.conf");
+    expect(hintPath).toBe("/var/lib/yonder/mavlink-link.json");
+  });
+
+  it("keeps the hint with the journal when the state directory is moved", () => {
+    // One variable for the daemon's state, so a board running out of an
+    // alternate directory does not leave the hint behind in /var/lib/yonder,
+    // where nothing would ever read it and every boot would sweep afresh.
+    const { hintPath } = mavlinkFromEnv(
+      async () => ({ code: 0, stdout: "", stderr: "" }),
+      { YONDER_JOURNAL: "/srv/yonder/apply.json" },
+    );
+    expect(hintPath).toBe("/srv/yonder/mavlink-link.json");
+  });
+
+  it("hands back an opener that runs stty through the runner it was given", async () => {
+    // The ADR-0006 seam, asserted where it is actually established: the
+    // opener `main()` builds shells out only through the injected runner, so
+    // a test that hands it a fake reaches no real `stty` and no real /dev.
+    const calls: string[][] = [];
+    const { open } = mavlinkFromEnv(async (argv) => { calls.push(argv); return { code: 0, stdout: "", stderr: "" }; }, {});
+    // A path that is not there: the opener fails before it ever runs the
+    // command, which is itself the assertion that nothing here touches /dev.
+    await expect(open(join(dir, "ttyNOPE"), 115200)).rejects.toThrow(/ENOENT/);
+    expect(calls).toEqual([]);
+  });
+
+  /**
+   * **The clock and the journal reach the opener too, or nothing can test it.**
+   *
+   * `openPortWith` settles for 50 ms and polls every 10 ms *on an injected
+   * clock*, and it has one thing to say — a flush that hit its bound, which
+   * means bytes from the previous speed surviving into this speed's window.
+   * With no way through this function, the first test that wires the
+   * production opener up sleeps on real time and hears none of that. `main()`
+   * passes the daemon's own.
+   */
+  it("passes the clock and the journal down to the opener it builds", async () => {
+    const waits: number[] = [];
+    const said: string[] = [];
+    const clock: Clock = {
+      now: () => 0,
+      setTimer: (ms, fn) => { waits.push(ms); queueMicrotask(fn); return waits.length; },
+      clearTimer: () => {},
+    };
+    const path = join(dir, "ttyFAKE0");
+    // More than the flush's 64 x 8 KiB bound, so the one line the opener has
+    // to say is actually said and the journal seam is proven, not assumed.
+    writeFileSync(path, "x".repeat(600 * 1024));
+
+    const { open } = mavlinkFromEnv(
+      async () => ({ code: 0, stdout: "", stderr: "" }),
+      {},
+      { clock, log: (line) => { said.push(line); } },
+    );
+    const port = await open(path, 115200);
+    await port.settleAndFlush();
+    await port.close();
+
+    // The settle came off this clock and not the wall clock.
+    expect(waits[0]).toBe(SETTLE_MS);
+    expect(said.join("\n")).toMatch(/would not go quiet/);
+  });
+
+});
+
+/**
+ * The whole telemetry path, at the socket: a datagram on the loopback feed,
+ * through the listener, into the one `LinkTracker`, out of the renderer and
+ * onto `GET /mav/state` over the Unix socket the console talks to.
+ *
+ * Task 10 left this untestable — `buildRenderers` needed an `OpenPort` and no
+ * test could hand it one usefully — and it is the assertion that says the
+ * pieces are joined rather than merely present.
+ */
+describe("the daemon serves the telemetry it measures", () => {
+  let socketPath: string, configPath: string, journalPath: string, secretsPath: string;
+  const noop: Renderer = { name: "noop", async render() {} };
+
+  beforeEach(() => {
+    socketPath = join(dir, "core.sock");
+    configPath = join(dir, "config.yaml");
+    journalPath = join(dir, "apply.json");
+    secretsPath = join(dir, "secrets.yaml");
+    saveConfig(configPath, DEFAULT_CONFIG);
+    new SecretStore(secretsPath).ensureValue(ADMIN_PASSWORD_SECRET, hashPassword("an operator's password"));
+  });
+
+  /** Every command answers, and none of them is real. */
+  const quiet: CommandRunner = async () => ({ code: 0, stdout: "", stderr: "" });
+
+  async function serveTelemetry(loopbackPort: number): Promise<{ close(): Promise<void> }> {
+    return startServer({
+      socketPath, configPath, journalPath, secretsPath,
+      renderers: [noop], runner: quiet, counters: noCounters,
+      mavlink: {
+        open: neverOpens,
+        confPath: join(dir, "mavlink", "main.conf"),
+        hintPath: join(dir, "mavlink-link.json"),
+        loopbackPort,
+      },
+    });
+  }
+
+
+
+
+  it("carries a heartbeat off the loopback feed all the way to GET /mav/state", async () => {
+    const port = await freePort();
+    const server = await serveTelemetry(port);
+    try {
+      await sendTo(port, HEARTBEAT);
+      const res = await eventually(
+        async () => call(socketPath, "GET", "/mav/state"),
+        (r) => (r.body as MavlinkStateBody | undefined)?.link.lastHeardMs != null,
+      );
+      expect(res.status).toBe(200);
+      const body = res.body as MavlinkStateBody;
+      expect(body.link.lastHeardMs).not.toBeNull();
+      // R-MAV-10's other half, and the field a flat body would have dropped.
+      expect(typeof body.telemetryRunning).toBe("boolean");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("serves the path check beside it (R-DIA-04)", async () => {
+    const port = await freePort();
+    const server = await serveTelemetry(port);
+    try {
+      const res = await call(socketPath, "GET", "/mav/check");
+      expect(res.status).toBe(200);
+      expect(Object.keys(res.body as object).sort()).toEqual(["autopilot", "inbound", "outbound"]);
+    } finally {
+      await server.close();
+    }
+  });
+
+  /**
+   * Rule 6, and the one thing this route must never do: a daemon that cannot
+   * do telemetry at all — every device built to date — still serves, still
+   * has a console, and says plainly why the Telemetry page is empty.
+   */
+  it("says so, and serves anyway, on a device with no way to do telemetry", async () => {
+    const server = await startServer({
+      socketPath, configPath, journalPath, secretsPath,
+      renderers: [noop], runner: quiet, counters: noCounters,
+    });
+    try {
+      const res = await call(socketPath, "GET", "/mav/state");
+      expect(res.status).toBe(503);
+      expect((await call(socketPath, "GET", "/config")).status).toBe(200);
+    } finally {
+      await server.close();
+    }
+  });
+
+  /**
+   * A listener outliving its daemon would hold `:14559` against the next one
+   * to start — which, under `Restart=always`, is a restart loop with a
+   * Telemetry page that never fills in again.
+   */
+  it("lets go of the loopback socket when the daemon closes", async () => {
+    const port = await freePort();
+    const server = await serveTelemetry(port);
+    await server.close();
+
+    const after = createSocket({ type: "udp4" });
+    const bound = await new Promise<boolean>((resolve) => {
+      after.once("error", () => { resolve(false); });
+      after.bind({ address: "127.0.0.1", port }, () => { resolve(true); });
+    });
+    if (bound) after.close();
+    expect(bound).toBe(true);
+  });
+
 });

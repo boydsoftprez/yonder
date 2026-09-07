@@ -400,10 +400,14 @@ code and unit tests and an explicit note that it has never run on hardware.
 
 - MAVLink routing configured from the config file — R-MAV-03, R-MAV-04, R-MAV-05
 - Ground-station traffic on a path a control-plane restart cannot interrupt — R-MAV-06
+- The router carried in the offline payload, installed off, started by the control plane —
+  R-MAV-17, R-CFG-07
 - Flight-controller autodetect by baud sweep — R-MAV-01, R-MAV-02
 - Three ground-station endpoints, settable from the console — R-MAV-03
 - Loopback-only ingest by default — R-MAV-07
 - Autocast: telemetry up at boot with no operator action — R-MAV-08, R-MAV-09
+- **An ordinary apply never interrupts telemetry, and a telemetry fault never fails an apply**
+  — R-MAV-16
 - Link state reporting — R-MAV-10
 - Attitude, heading, altitude, GPS, speeds, mode, arm state — R-TEL-01 … R-TEL-07
 - Per-cell voltage — R-TEL-08

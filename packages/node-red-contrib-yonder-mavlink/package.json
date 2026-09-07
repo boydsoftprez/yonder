@@ -1,0 +1,23 @@
+{
+  "name": "node-red-contrib-yonder-mavlink",
+  "version": "0.1.0",
+  "license": "GPL-3.0-or-later",
+  "description": "Yonder console nodes for the MAVLink telemetry link: link state, endpoint configuration, start/stop/detect and the path check. Thin adapters over the yonder-core daemon socket; every decision lives in yonder-core.",
+  "keywords": ["node-red", "yonder"],
+  "node-red": {
+    "version": ">=5.0.0",
+    "nodes": {
+      "yonder-mav-state": "dist/state.js",
+      "yonder-mav-endpoints": "dist/endpoints.js",
+      "yonder-mav-run": "dist/run.js",
+      "yonder-mav-check": "dist/check.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node ../../scripts/copy-node-html.mjs",
+    "test": "vitest run"
+  },
+  "dependencies": { "yonder-core": "^0.1.0" },
+  "devDependencies": { "@types/node": "^20.19.43", "typescript": "^5.6.0" },
+  "engines": { "node": ">=22.12" }
+}

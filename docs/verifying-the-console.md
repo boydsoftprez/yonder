@@ -287,35 +287,19 @@ committed reference is a `.darwin.json` and the runner is Linux, so the gate tak
 *record* branch and writes `.linux.json` files that are **untracked** — which `git diff`
 does not see, and did not, on every run since the job was written.
 
-**A picture**, in `docs/console/capture/`, written every run. Since R-UI-23 every reading on
-the committed copy is its **widest honest value** rather than a grey box: one specimen per
-field in `scripts/fixtures/specimens.json`, each naming where its value comes from — a bound
-in `schema/config.ts`, the longest branch of the function that composes the sentence, or the
-widest reading a board has actually produced. The file is still identical on two runs, which
-is what the masking was for, and it is now a picture of the hardest case rather than of the
-easiest: `2000 kb/s` fits the readout row and `20000 kb/s`, which the schema allows, does
-not, and nothing in this repository had ever drawn one.
+**A picture**, written every run — a masked copy under `docs/console/capture/` and the whole
+one under `vendor/capture/`, which CI uploads as the artifact a reviewer downloads. **Neither
+is committed**, and that is a correction rather than an omission: the masked set *was*
+tracked, all 7.3 MB of it, growing two files per page per state.
 
-A page of specimens is not a portrait of a board. Every field is at its own widest, so the
-lamp can read `NOTHING` beside a sentence about a path that is carrying traffic — the
-picture is the layout under the hardest content each field can hold. The full-page copy under
-`vendor/capture/`, which CI uploads as an artifact, is taken **before** any of that is
-written and is the page as it really was. The `--fold` artifact beside it is not: the
-viewport picture is of the contract, and the contract is about the widest values.
-
-A reading with no specimen is masked, as before, and **named on every run**, so the list of
-what is still hidden is visible rather than implied and can only shrink. A reading that is
-neither specified nor listed under `masked` with a reason fails the build and names the key
-to add; an entry on either list that matches no reading on any page also fails, the way a
-stale accepted violation does.
-
-**The text rule this made possible.** A value that does not fit *sideways* leaves
-`scrollHeight` exactly equal to `clientHeight`, so the clipping rule above could not see it
-at all — and a capture taken with the short value on the page shows nothing either way. With
-the widest value rendered, a box that cuts its text off or lets it escape over what is drawn
-beside it fails. `YonderIdentity`'s value is the one exemption, named in the check: a
-GStreamer receive command is 2169 px of text that no box on any console holds, and the component
-gives it a copy control for exactly that reason.
+It was removed because **no job ever compared it**. CI checks `docs/console/shape/` — the
+geometry — and nothing else; the pictures went to an artifact instead. An earlier version of
+this paragraph said nothing wrote that directory, which was wrong: `capture-pages.mjs` writes
+it on every run and always has. What was true is the part that mattered — the file was
+produced, committed, and never read. The evidence that is kept and compared is the geometry, in
+`docs/console/shape/`; the picture is per-platform pixels, and the defect that provoked the
+legibility rule showed its words plainly at 1.05:1. A picture is committed only when it is
+*evidence* for a known issue rather than a gate artifact, and then one file at a time.
 
 **And a page in more than one state, where it has them.** R-UI-12 says a surface that hides
 part of itself is captured in each of those parts. A tabbed page hides its other tabs, which
@@ -496,5 +480,5 @@ debt list nobody prunes stops being a list of debts and becomes a list of excuse
   problem for the same reason.
 
 **What it still does not prove.** That a reading is legible in sunlight, that a target is
-big enough for a gloved finger, or that any of it works on a board. A headless browser at
-1280×900 is not a tablet on a wing.
+comfortable to hit, or that any of it works on a board. A headless browser at 1280×900 is
+one viewport on one machine, and no substitute for the screen somebody is holding.

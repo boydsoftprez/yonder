@@ -7,6 +7,7 @@ import YonderColumn from "../src/ui/YonderColumn.vue";
 import YonderDataBar from "../src/ui/YonderDataBar.vue";
 import YonderDeck from "../src/ui/YonderDeck.vue";
 import YonderFacts from "../src/ui/YonderFacts.vue";
+import YonderFlow from "../src/ui/YonderFlow.vue";
 import YonderGauge from "../src/ui/YonderGauge.vue";
 import YonderHoldKey from "../src/ui/YonderHoldKey.vue";
 import YonderIdentity from "../src/ui/YonderIdentity.vue";
@@ -913,6 +914,35 @@ export const SPECIMENS = [
       report: { cameras: [], rejected: [] },
     },
     payload: undefined,
+    part: false,
+  },
+  {
+    title: "Telemetry flow — carrying",
+    note: "R-MAV-10, R-UI-13. The only instrument in the set that draws a relationship rather than a quantity: what an operator reads off it is which leg is dead, a reading three separate rows would leave them to assemble. Values here are a real board's — an ArduPilot on the UART at 115 200, mavlink-router in the middle, two ground stations out over the mesh.",
+    component: YonderFlow,
+    props: {},
+    payload: {
+      from: { label: "Autopilot", detail: "/dev/ttyAMA0 · 115 200 baud" },
+      through: { label: "Yonder", detail: "mavlink-router" },
+      to: { label: "2 ground stations", detail: "no TCP clients" },
+      legs: [
+        { rate: "1.0 Hz", caption: "heartbeat" },
+        { rate: "4.7 kB/s", caption: "answering" },
+      ],
+    },
+    part: false,
+  },
+  {
+    title: "Telemetry flow — nothing on the wire",
+    note: "An absent leg is dashed and grey, never red: nothing has failed when no autopilot has been wired yet, and red would be the same lie the path check refuses to tell for a link nobody attempted. The three places are still drawn, so the shape an operator is looking for does not move between the two readings.",
+    component: YonderFlow,
+    props: {},
+    payload: {
+      from: { label: "No autopilot", detail: "nothing answering on /dev/ttyAMA0", absent: true },
+      through: { label: "Yonder", detail: "mavlink-router" },
+      to: { label: "2 ground stations", detail: "no TCP clients" },
+      legs: [{ absent: true }, { absent: true }],
+    },
     part: false,
   },
 ];

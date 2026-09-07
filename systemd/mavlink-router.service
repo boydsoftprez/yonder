@@ -1,0 +1,104 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[Unit]
+Description=MAVLink router
+Documentation=https://github.com/boydsoftprez/yonder
+After=network.target
+
+# Stated for the same reason as StandardOutput=journal below: these two
+# numbers are already systemd's own compiled-in defaults
+# (systemd-system.conf(5) DefaultStartLimitIntervalSec=,
+# DefaultStartLimitBurst=), so writing them here changes nothing on a host
+# that has not overridden them — it only stops the limit from being
+# something a distribution or an operator could silently move. Restart=
+# meets this limit before it meets anything else: a router failing
+# immediately gets five tries inside ten seconds, then systemd leaves it
+# `failed` rather than trying a sixth, and a later `systemctl start` or
+# `restart` — including the renderer's own — is refused with "start request
+# repeated too quickly" until `systemctl reset-failed` runs or the interval
+# passes.
+StartLimitIntervalSec=10s
+StartLimitBurst=5
+
+[Service]
+# The one path installer/roles/15-mavlink-router.sh stages the payload binary
+# to, and the pair assert_unit_exec compares. /usr/bin rather than
+# /usr/local/bin because that is where the project's own `ninja install` puts
+# it, so a board that ever gets this from a package lands on the same path
+# instead of shadowing it — and because it is the path the whole route was
+# proven on by hand (docs/hardware/an-autopilot-on-the-uart.md).
+#
+# The configuration it is started with is generated, from scratch, on every
+# apply that changes it (MavlinkRenderer, R-CFG-13). It is not present on a
+# freshly flashed board at all, which is the second reason this unit ships
+# disabled: there would be nothing for it to read.
+ExecStart=/usr/bin/mavlink-routerd -c /etc/mavlink-router/main.conf
+
+# on-failure, not always, and with a delay. Three things rest on this line.
+#
+# **A dead router is systemd's to restart, not the control plane's.** The
+# renderer deliberately notices a router that has died and does not restart
+# it (src/mav/renderer.ts) — a control plane that restarted the service would
+# make the router's lifetime depend on the control plane's, which is exactly
+# what R-MAV-06 forbids and what this unit exists to prevent.
+#
+# **on-failure is what leaves a *clean* exit exited.** `systemctl stop` (or
+# an equivalent operation) is not auto-restarted under any Restart= setting —
+# `always` included; systemd.service(5) says so for all of them, so that is
+# not what this line decides. Re-detection's stop (R-MAV-16) stays stopped
+# either way. What differs is a router that exits 0 on its own — told to, or
+# because the configuration it was started with leaves it nothing to do.
+# on-failure leaves that router exited; always would bring it back
+# regardless.
+#
+# **RestartSec is not decoration.** Without a delay a router whose
+# configuration names a device that is not there restarts as fast as it can
+# fail, which is a busy loop on a board with 905 MiB of RAM and an aircraft
+# on the other end of the wire.
+Restart=on-failure
+RestartSec=2
+
+# Stated rather than inherited, and this is the line the console's per-station
+# marks hang from.
+#
+# `ReportStats = true` makes the router print a block per endpoint to stdout
+# once a second, and the renderer reads them back with
+# `journalctl -u mavlink-router -o cat` — that journal is the only source
+# LinkState.groundStations, .traffic and .tcpClients have. Where stdout goes
+# is otherwise decided by DefaultStandardOutput= in system.conf, which a
+# distribution or an operator may set to anything; if it is ever not the
+# journal, `parseStats` finds nothing and reports nothing, which is
+# indistinguishable from a router that has not printed yet. There is no error
+# and no log line — the page simply never shows which ground station is
+# answering. One line removes the dependency on a system-wide default.
+#
+# StandardError= is left alone deliberately: its default, `inherit`,
+# duplicates this setting, so the router's own diagnostics reach the same
+# journal without a second line saying so.
+StandardOutput=journal
+
+# No sandboxing directives. What ran on a board with a real ArduPlane and two
+# real ground stations on 2026-09-06 was a unit written by hand, before this
+# file existed, and it is equivalent to this one only in the parts it
+# actually had: Description, After=network.target, ExecStart,
+# Restart=on-failure, RestartSec=2 and WantedBy=multi-user.target. This file
+# additionally states Documentation= and StandardOutput=journal, neither of
+# which that hand-written unit carried — see
+# docs/hardware/an-autopilot-on-the-uart.md for what each of those parts
+# proved. What both share is having no sandboxing: every ProtectSystem,
+# DeviceAllow or RestrictAddressFamilies that could be added is a way to take
+# the serial port, a UDP socket or the TCP server away from a process nobody
+# has yet watched fail under one. Hardening this unit is worth doing and is
+# worth doing on a bench, with an autopilot attached, one directive at a
+# time.
+
+[Install]
+# Present, and never used by an install. The role installs this unit stopped
+# and **disabled** (R-MAV-17): yonder-core starts the router, and only after
+# detection has found a port and a speed and written the configuration above.
+# A unit enabled here would open the serial port at boot before the sweep
+# could, which is the one resource the two of them contend for.
+#
+# Kept rather than removed so that `systemctl enable mavlink-router` remains
+# something an operator can do deliberately on a bench, instead of failing
+# with "unit has no installation config" and looking like a broken unit file.
+WantedBy=multi-user.target

@@ -50,7 +50,20 @@ ProtectSystem=strict
 # purpose-made directory is the smaller of the two widenings.
 # assert_daemon_can_write in 50-mediamtx.sh checks this line against
 # MEDIA_CONFIG_PATH, so the two cannot drift apart.
-ReadWritePaths=/etc/yonder /var/lib/yonder /etc/mediamtx
+#
+# /etc/mavlink-router is where MavlinkRenderer generates the router's own
+# configuration (src/mav/renderer.ts, R-MAV-01). Without it the first real
+# render fails EROFS with no other clue — the class of defect that only ever
+# appears on a board.
+#
+# **The leading `-` is load-bearing.** systemd fails a unit outright when a
+# path named here does not exist, and this directory is created by the role
+# that installs mavlink-router — so on a board flashed before that role
+# existed, an unprefixed entry would stop yonder-core starting at all: no
+# console, no access point, no way in. A `-` makes a missing path ignored
+# instead, which is the safe direction for a directory the daemon writes only
+# when telemetry is installed at all.
+ReadWritePaths=/etc/yonder /var/lib/yonder /etc/mediamtx -/etc/mavlink-router
 ProtectHome=yes
 NoNewPrivileges=yes
 PrivateTmp=yes

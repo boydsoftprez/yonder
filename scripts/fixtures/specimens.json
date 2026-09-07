@@ -8,7 +8,7 @@
     "exist to catch: a readout row is only ever as wrong as its *longest* value, and",
     "the value that happens to be on the page during a capture is never the longest",
     "one. `2000 kb/s` fits. `20000 kb/s`, which `schema/config.ts` allows, is what an",
-    "operator's page actually has to hold — and nothing in this repository had ever",
+    "operator's page actually has to hold \u2014 and nothing in this repository had ever",
     "drawn one.",
     "",
     "So each field is given one value here and the gate renders that instead of a",
@@ -26,19 +26,19 @@
     "that emits it and names the line it was derived from: a bound in `schema/config.ts`, the",
     "widest branch of the function that composes the sentence, or the widest reading a real",
     "board has produced. Several were derived by *calling* that code rather than by typing",
-    "the string out — `summarise()` for `What it offers`, `formatUptime` for `UP FOR`.",
+    "the string out \u2014 `summarise()` for `What it offers`, `formatUptime` for `UP FOR`.",
     "A value invented to be long would fail the gate on a defect the console does not have,",
     "which costs the gate its credibility faster than missing one.",
     "",
     "**Where a field has no bound, the entry says so.** Several sentences are composed from",
-    "strings nothing in this repository caps — a Node error inside a supervisor reason, a",
+    "strings nothing in this repository caps \u2014 a Node error inside a supervisor reason, a",
     "joined list of every by-path name a board can see, ModemManager's own failure word. For",
     "those the value here is the widest *producible* form, and its `why` says it is a floor",
     "and not a ceiling, so a number this gate prints is never read as the worst case when it",
     "is only the worst case anyone has written down.",
     "",
     "**A field is named by the instrument it is drawn in and the caption beside**",
-    "**it** — `nrdb-ui-yonder-databar · UPLINK`. Not a DOM path and not a node id,",
+    "**it** \u2014 `nrdb-ui-yonder-databar \u00b7 UPLINK`. Not a DOM path and not a node id,",
     "because this file has to be checkable against the page by a person. Rename a",
     "caption and the specimen goes missing, loudly, which is the right failure: the",
     "widest honest value for UPLINK is not automatically the widest honest value for",
@@ -47,7 +47,7 @@
     "`masked` is the other half, and it is what stops this file from being a list of",
     "the easy ones. Every reading the gate finds is either specified here or listed",
     "there with a reason; a reading that is neither fails the build and names the key",
-    "to add. An entry on either list that matches no reading on any page also fails —",
+    "to add. An entry on either list that matches no reading on any page also fails \u2014",
     "the same rule `accepted-violations.json` is held to, for the same reason.",
     "",
     "**No credential belongs in here (R-SEC-10).** These values are rendered into",
@@ -56,55 +56,55 @@
     "the specimen for a stream address carries no password at all."
   ],
   "fields": {
-    "nrdb-ui-yonder-databar · BOARD": {
+    "nrdb-ui-yonder-databar \u00b7 BOARD": {
       "value": "Raspberry Pi Compute Module 4 Rev 1.1",
       "why": "displayFacts' `model`, verbatim from /proc/device-tree/model. The Compute Module's string is the longest of the boards this project is built for."
     },
-    "nrdb-ui-yonder-databar · UP FOR": {
+    "nrdb-ui-yonder-databar \u00b7 UP FOR": {
       "value": "59 minutes 59 seconds",
       "why": "formatUptime (system/format.ts:46) prints the largest two units, which is not the same as the widest string: `365 days 23 hours` is 17 characters and this is 21. Derived by calling the built formatUptime(3599). A day count would need eight digits to beat it."
     },
-    "nrdb-ui-yonder-databar · YONDER": {
+    "nrdb-ui-yonder-databar \u00b7 YONDER": {
       "value": "1.0.0-rc.1+build.42",
       "why": "the version out of package.json. A pre-release with build metadata is the longest semver this project can publish."
     },
-    "nrdb-ui-yonder-databar · SYSTEM": {
+    "nrdb-ui-yonder-databar \u00b7 SYSTEM": {
       "value": "Debian GNU/Linux 12 (bookworm)",
       "why": "the OS version string, verbatim from /etc/os-release PRETTY_NAME on the distribution the installer targets."
     },
-    "nrdb-ui-yonder-databar · OPERATOR": {
+    "nrdb-ui-yonder-databar \u00b7 OPERATOR": {
       "value": "Telefonica Moviles Espana SAU",
       "why": "the operator name ModemManager reports, passed through verbatim by the parser. Nothing in this repository bounds it, so this is a real registered long name rather than a cap."
     },
-    "nrdb-ui-yonder-databar · NETWORK": {
+    "nrdb-ui-yonder-databar \u00b7 NETWORK": {
       "value": "5GNR",
       "why": "formatTechnology, which uppercases ModemManager's identifier. `5gnr` is the longest of the ones it reports."
     },
-    "nrdb-ui-yonder-databar · REGISTERED": {
+    "nrdb-ui-yonder-databar \u00b7 REGISTERED": {
       "value": "searching",
       "why": "the registration state, in ModemManager's own words. `searching` is the longest of home / roaming / searching / denied / idle."
     },
-    "nrdb-ui-yonder-databar · APN": {
+    "nrdb-ui-yonder-databar \u00b7 APN": {
       "value": "internet.mnc001.mcc234.gprs",
       "why": "an APN as carriers publish them, out of config.yaml. `schema/config.ts` puts no length on it and 3GPP allows 100 characters, so this is a real operator-scoped name rather than a cap."
     },
-    "nrdb-ui-yonder-databar · RSSI": {
+    "nrdb-ui-yonder-databar \u00b7 RSSI": {
       "value": "-113 dBm",
       "why": "the floor of the RSSI range a modem reports, which is the widest because it is the only three-digit one."
     },
-    "nrdb-ui-yonder-databar · RSRQ": {
+    "nrdb-ui-yonder-databar \u00b7 RSRQ": {
       "value": "-20 dB",
-      "why": "formatDb (node-red-contrib-yonder-modem/src/format.ts:44) is `${Math.round(value)} dB`, so this field can never print a decimal and its width is a shape rather than a reading: a minus sign and two digits. LTE's own range bottoms out at -19.5 dB, which `Math.round` renders as -19, not -20 — JavaScript rounds a negative half towards zero. -20 is kept as the specimen because it is the same width and does not invite anyone to read a rounding rule out of it."
+      "why": "formatDb (node-red-contrib-yonder-modem/src/format.ts:44) is `${Math.round(value)} dB`, so this field can never print a decimal and its width is a shape rather than a reading: a minus sign and two digits. LTE's own range bottoms out at -19.5 dB, which `Math.round` renders as -19, not -20 \u2014 JavaScript rounds a negative half towards zero. -20 is kept as the specimen because it is the same width and does not invite anyone to read a rounding rule out of it."
     },
-    "nrdb-ui-yonder-databar · MTU": {
+    "nrdb-ui-yonder-databar \u00b7 MTU": {
       "value": "9000",
       "why": "a jumbo frame. The link MTU is read from the interface and nothing caps it below this."
     },
-    "nrdb-ui-yonder-databar · COMPOSITION": {
+    "nrdb-ui-yonder-databar \u00b7 COMPOSITION": {
       "value": "MBIM",
       "why": "R-CEL-03's answer, one word, and MBIM is the longer of the two modes this device chooses between."
     },
-    "nrdb-ui-yonder-databar · ADDRESS": {
+    "nrdb-ui-yonder-databar \u00b7 ADDRESS": {
       "value": "255.255.255.255",
       "why": "the widest IPv4 address. The link address on Status and on the Cellular tab is the same field asked twice."
     },
@@ -114,61 +114,61 @@
     },
     "nrdb-ui-text": {
       "value": "The modem reported a failure: esim-without-profiles",
-      "why": "modemState's widest branch (net/modem/state.ts:73), with the longest value ModemManager publishes for state-failed-reason. Nothing in this repository bounds that string — it is passed through verbatim from mmcli (mmcli/client.ts:140) — so this is a floor, not a ceiling. Drawn on the Interfaces tab and on the Cellular tab, which is why one specimen serves two widgets."
+      "why": "modemState's widest branch (net/modem/state.ts:73), with the longest value ModemManager publishes for state-failed-reason. Nothing in this repository bounds that string \u2014 it is passed through verbatim from mmcli (mmcli/client.ts:140) \u2014 so this is a floor, not a ceiling. Drawn on the Interfaces tab and on the Cellular tab, which is why one specimen serves two widgets."
     },
-    "nrdb-ui-text · Address": {
+    "nrdb-ui-text \u00b7 Address": {
       "value": "255.255.255.255/32",
       "why": "the widest IPv4 address with its prefix length, which is the form NetworkManager reports."
     },
-    "nrdb-ui-text · Remote": {
+    "nrdb-ui-text \u00b7 Remote": {
       "value": "Authorised, not reaching the network",
       "why": "messageFor's `label` (node-red-contrib-yonder-remote/src/state.ts). The longest of its seven phases."
     },
-    "nrdb-ui-text · Status": {
+    "nrdb-ui-text \u00b7 Status": {
       "value": "Authorised, not reaching the network",
       "why": "the same messageFor `label`, drawn again at the top of the ZeroTier tab."
     },
-    "nrdb-ui-text · Path": {
+    "nrdb-ui-text \u00b7 Path": {
       "value": "Relayed",
       "why": "R-VPN-03's two words, in words rather than a boolean. `Relayed` is the longer."
     },
-    "nrdb-ui-text · Latency": {
+    "nrdb-ui-text \u00b7 Latency": {
       "value": "9999 ms",
       "why": "messageFor's `${ms} ms`. Four digits is a relayed hop over a congested cellular uplink, and the widest worth reporting."
     },
-    "nrdb-ui-text · Network name": {
+    "nrdb-ui-text \u00b7 Network name": {
       "value": "Yonder field operations mesh",
       "why": "the name the mesh controller published. Nothing caps it, so this is the longest a controller has been configured with here."
     },
-    "nrdb-ui-text · Network": {
+    "nrdb-ui-text \u00b7 Network": {
       "value": "8286ac0e47d5f2c1",
       "why": "a ZeroTier network id, which is always sixteen hex characters."
     },
-    "nrdb-ui-text · Traffic": {
-      "value": "1023.9 GB in · 1023.9 GB out",
+    "nrdb-ui-text \u00b7 Traffic": {
+      "value": "1023.9 GB in \u00b7 1023.9 GB out",
       "why": "messageFor's `traffic`, at formatBytes' top tier (GB) with the one decimal it prints from MB up."
     },
-    "nrdb-ui-text · Throughput": {
-      "value": "999.9 Gbps down · 999.9 Gbps up",
+    "nrdb-ui-text \u00b7 Throughput": {
+      "value": "999.9 Gbps down \u00b7 999.9 Gbps up",
       "why": "messageFor's `throughput`, at formatRate's top tier (Gbps) with its one decimal. R-NET-10."
     },
-    "nrdb-ui-text · Last heard": {
-      "value": "59 min ago",
-      "why": "formatLastHeard's longest branch. Minutes is where its digits and its unit are both widest."
+    "nrdb-ui-text \u00b7 Last heard": {
+      "value": "3600.0 s ago",
+      "why": "Two widgets share this key, because a field is named by its instrument and its caption and both of these are a `ui-text` captioned `Last heard`: the mesh tab's `text-zt-lastheard` and the Telemetry page's `tel-heard`. They are formatted by different functions, so the value here has to be the wider of the two. formatLastHeard (node-red-contrib-yonder-remote/src/format.ts) tops out at `59 min ago` \u2014 minutes is where its digits and its unit are both widest. `tel-heard` is formatSeconds + ` ago` (node-red-contrib-yonder-mavlink/src/state.ts:180, format.ts:64), which prints one decimal place and has no upper bound at all, so it wins and this is a floor rather than a ceiling: an hour of silence is the widest a real flight has produced, and a longer one prints wider."
     },
-    "nrdb-ui-table · Time": {
+    "nrdb-ui-table \u00b7 Time": {
       "value": "23:59:59",
       "why": "a clock, at the widest hour. Fixed width, so this is both the widest and the only honest value."
     },
-    "nrdb-ui-table · Time (UTC)": {
+    "nrdb-ui-table \u00b7 Time (UTC)": {
       "value": "23:59:59",
       "why": "the same clock on the Log page, under its own column title."
     },
-    "nrdb-ui-table · Level": {
+    "nrdb-ui-table \u00b7 Level": {
       "value": "error",
       "why": "the longest of the levels the daemon writes: info, warn, error."
     },
-    "nrdb-ui-table · What happened": {
+    "nrdb-ui-table \u00b7 What happened": {
       "value": "network: cellular is reaching the internet again at 2026-09-06T23:59:59.999Z; ethernet goes on carrying traffic and cellular is back in the running behind it",
       "why": "the widest line the daemon writes to its journal: standing.ts:247's recovery message with andThen's third branch (standing.ts:334), which is the only one naming three paths. 157 characters with the longest of PATH_WORDS. watch.ts:173's `network: could not check which way out is working (<message>)` is unbounded above."
     },
@@ -176,81 +176,159 @@
       "value": "network: cellular is reaching the internet again at 2026-09-06T23:59:59.999Z; ethernet goes on carrying traffic and cellular is back in the running behind it",
       "why": "the same journal line in the Activity table's second column, whose title is deliberately empty."
     },
-    "nrdb-ui-yonder-databar · RUNNING": {
-      "value": "failed — the pipeline could not be started: Error: spawn gst-launch-1.0 ENOENT; gave up after 5 restarts",
-      "why": "runWords (video/present.ts:309) over the wider of the supervisor's two producers: supervisor.ts:206's `the pipeline could not be started: ${String(e)}` — not :205's exit code — plus the `; gave up after 5 restarts` suffix :191 adds at MAX_RESTARTS. `String(e)` is a Node error and is unbounded, so this is a floor."
+    "nrdb-ui-yonder-databar \u00b7 RUNNING": {
+      "value": "failed \u2014 the pipeline could not be started: Error: spawn gst-launch-1.0 ENOENT; gave up after 5 restarts",
+      "why": "runWords (video/present.ts:309) over the wider of the supervisor's two producers: supervisor.ts:206's `the pipeline could not be started: ${String(e)}` \u2014 not :205's exit code \u2014 plus the `; gave up after 5 restarts` suffix :191 adds at MAX_RESTARTS. `String(e)` is a Node error and is unbounded, so this is a floor."
     },
-    "nrdb-ui-yonder-databar · IDENTITY": {
-      "value": "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0 — an enumeration number; it may mean a different camera after a reboot",
-      "why": "identityWords' longer branch (video/present.ts) on the by-path name the bench board really answered — R-CAM-05's own sentence, drawn as a note cell on the readout strip. schema/config.ts caps `device` at 128 characters, so this is the widest observed rather than the widest permitted."
+    "nrdb-ui-yonder-databar \u00b7 IDENTITY": {
+      "value": "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0 \u2014 an enumeration number; it may mean a different camera after a reboot",
+      "why": "identityWords' longer branch (video/present.ts) on the by-path name the bench board really answered \u2014 R-CAM-05's own sentence, drawn as a note cell on the readout strip. schema/config.ts caps `device` at 128 characters, so this is the widest observed rather than the widest permitted."
     },
-    "nrdb-ui-yonder-databar · CAMERA": {
+    "nrdb-ui-yonder-databar \u00b7 CAMERA": {
       "value": "Nose mast, forward of the airspeed probe",
       "why": "the camera's own name out of config.yaml (R-UI-27). `schema/config.ts` caps it at 48 characters and the Setup deck's field at 24; a hand-written configuration can carry the schema's, so that is the one a page has to hold. 40 characters of a name somebody would plausibly type, rather than 48 of filler."
     },
-    "nrdb-ui-yonder-databar · PICTURE": {
-      "value": "3840 × 2160",
-      "why": "cameraStrip's `width × height` at the schema's ceilings (width max 3840, height max 2160)."
+    "nrdb-ui-yonder-databar \u00b7 PICTURE": {
+      "value": "3840 \u00d7 2160",
+      "why": "cameraStrip's `width \u00d7 height` at the schema's ceilings (width max 3840, height max 2160)."
     },
-    "nrdb-ui-yonder-databar · RATE": {
+    "nrdb-ui-yonder-databar \u00b7 RATE": {
       "value": "60 fps",
       "why": "cameraStrip's `framerate fps` at the schema's ceiling of 60."
     },
-    "nrdb-ui-yonder-databar · BITRATE": {
+    "nrdb-ui-yonder-databar \u00b7 BITRATE": {
       "value": "20000 kb/s",
-      "why": "cameraStrip's `bitrate_kbps kb/s` at the schema's ceiling of 20000. This is the defect spec §10 lists second: 2000 fits and 20000 does not."
+      "why": "cameraStrip's `bitrate_kbps kb/s` at the schema's ceiling of 20000. This is the defect spec \u00a710 lists second: 2000 fits and 20000 does not."
     },
-    "nrdb-ui-yonder-databar · UPLINK": {
+    "nrdb-ui-yonder-databar \u00b7 UPLINK": {
       "value": "169.49 Mb/s at IP",
-      "why": "cameraStrip's uplink: atIp(20000) × 8 outputs + atIp(4000) preview, at the schema's ceilings (outputs max 8, preview bitrate max 4000), in Mb/s to two places."
+      "why": "cameraStrip's uplink: atIp(20000) \u00d7 8 outputs + atIp(4000) preview, at the schema's ceilings (outputs max 8, preview bitrate max 4000), in Mb/s to two places."
     },
-    "nrdb-ui-yonder-databar · BEFORE YOU PRESS START": {
+    "nrdb-ui-yonder-databar \u00b7 BEFORE YOU PRESS START": {
       "value": "this board has no /dev/v4l/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0; the cameras it can see are platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0",
-      "why": "cameraStrip's startCheck at refuse()'s widest branch, video/pipeline.ts:305 — not the SRT branch, which is 182 characters. This is its narrowest honest form: one camera, the bench's own 66-character by-path in both positions, 196 characters. It is unbounded above — schema/config.ts:562 caps `device` at 128 and `offered` joins every by-path name the board can see — so this is a floor for this field, not a ceiling."
+      "why": "cameraStrip's startCheck at refuse()'s widest branch, video/pipeline.ts:305 \u2014 not the SRT branch, which is 182 characters. This is its narrowest honest form: one camera, the bench's own 66-character by-path in both positions, 196 characters. It is unbounded above \u2014 schema/config.ts:562 caps `device` at 128 and `offered` joins every by-path name the board can see \u2014 so this is a floor for this field, not a ceiling."
     },
     "nrdb-ui-yonder-budget": {
       "value": "1356.0 of 5.0 Mb/s",
       "why": "YonderBudget's head line at the configuration schema/config.ts permits most of: eight cameras, eight outputs each, every one at the 20000 kb/s ceiling with a 4000 kb/s preview. Derived by calling the built uplinkBudget() on that configuration; the capacity is ASSUMED_UPLINK_KBPS (video/present.ts:46)."
     },
-    "nrdb-ui-yonder-databar · UDP · RTP": {
+    "nrdb-ui-yonder-databar \u00b7 UDP \u00b7 RTP": {
       "value": "an outbound push to the configured ground station; it leaves over whichever path is active, cellular included",
       "why": "the widest of the four notes `video/receive.ts` gives an RTP output, derived by calling renderReceive() over every combination of paths, output states and credential it can be asked about (109 characters). The reachable one is the widest, which is worth knowing: the unusable sentences are not the hard case."
     },
-    "nrdb-ui-yonder-databar · RTSP": {
-      "value": "unusable — nothing can dial in to this RTSP listener over cellular; it is reachable on the mesh or a LAN",
+    "nrdb-ui-yonder-databar \u00b7 RTSP": {
+      "value": "unusable \u2014 nothing can dial in to this RTSP listener over cellular; it is reachable on the mesh or a LAN",
       "why": "the widest of the five notes `video/receive.ts` gives an RTSP output, derived the same way (104 characters). This is the one an aircraft in flight actually draws, and R-UI-24 is the requirement it exists for."
+    },
+    "nrdb-ui-yonder-databar \u00b7 At boot": {
+      "value": "Automatic",
+      "why": "endpoints.ts:135 composes this from one boolean \u2014 `mavlink.autocast === true ? \"Automatic\" : \"Manual\"` \u2014 so the field has exactly two producible values and this is the longer."
+    },
+    "nrdb-ui-yonder-databar \u00b7 Accepting from": {
+      "value": "Loopback only",
+      "why": "endpoints.ts:136, the other of the same pair \u2014 `open ? \"Any network\" : \"Loopback only\"`. The longer branch is the closed one, which is also the shipped default (R-MAV-05)."
+    },
+    "nrdb-ui-yonder-databar \u00b7 Vehicle": {
+      "value": "Vehicle type 255 \u00b7 sys 255",
+      "why": "state.ts:173 composes `${state.vehicle} \u00b7 sys ${system}`, and `state.vehicle` is describeVehicle (mav/frame.ts:49), which falls back to `Vehicle type ${n}` for a type it has no name for. That fallback is wider than every name in VEHICLES \u2014 the longest a vehicle row can carry is `Octocopter`, since `Ground station` is excluded by frame.ts's own `fromVehicle`. Both numbers are MAVLink uint8 fields, so 255 is the bound and not a guess."
+    },
+    "nrdb-ui-yonder-databar \u00b7 Last heard": {
+      "value": "3600.0 s ago",
+      "why": "state.ts:180 appends ` ago` to formatSeconds (format.ts:64), which prints `${(ms/1000).toFixed(1)} s` with no upper bound \u2014 nothing caps `lastHeardMs`, so this is a floor and not a ceiling. An hour out of contact is the widest a real flight has produced; a longer silence would print wider still."
+    },
+    "nrdb-ui-text \u00b7 Heartbeat": {
+      "value": "1000.0 Hz",
+      "why": "state.ts:176-178 formats `${heartbeatHz.toFixed(1)} Hz`. heartbeatHz (link.ts:277-280) is (ringLength-1)/((last-first)/1000) and nothing bounds it above. The smallest non-zero span two arrivals can register is 1 ms \u2014 the exact edge check.ts's own comment (check.ts:169-171) names beside the Infinity case it guards against \u2014 which gives 1000 Hz, crossing from three to four integer digits: this field's whole width class, since a larger burst prints the same width or wider. A floor, not a ceiling. Derived by calling messageFor with heartbeatHz: 1000."
+    },
+    "nrdb-ui-text \u00b7 Last answered": {
+      "value": "Nothing has answered yet",
+      "why": "state.ts:191-197 composes `answered`: the literal 'Nothing has answered yet' when no ground station has ever answered, else `GCS ${i} \u00b7 ${formatSeconds(lastHeardMs)} ago` for whichever answered most recently \u2014 and that second form's own seconds are unbounded, the same floor the databar's own Last heard already admits. Calling messageFor both ways shows the numeric branch stays narrower even at a real flight's longest silence (GCS 0 \u00b7 3600.0 s ago, 20 characters) than the fixed literal (24), so the literal is the field's widest, not the composed one."
+    },
+    "nrdb-ui-text \u00b7 Port": {
+      "value": "/dev/ttyAMA0",
+      "why": "tel-port reads payload.port, which is state.device verbatim (state.ts:220). Every DetectOutcome (mav/detect.ts:78-81) passes device through unchanged from what was asked for, and renderer.ts:29-42's MAVLINK_DEVICES \u2014 /dev/ttyAMA0, /dev/ttyACM0 \u2014 is both what device: auto sweeps and the whole of what docs/configuration.md:142 documents besides auto; the two tie at 12 characters, so this keeps the one the gate observed. schema/config.ts:637's MavlinkSerial.device has no .max() (contrast the Camera schema's own device at :581, capped at 128), so a hand-typed device string outside the documented two would pass validation and print wider \u2014 flagged in the accompanying report rather than specified here, since nothing in this file's own conventions settles whether an undocumented-but-schema-legal string counts as honest."
+    },
+    "nrdb-ui-text \u00b7 Speed": {
+      "value": "921 600 baud",
+      "why": "messageFor's speed (state.ts:168-169): `${formatBaud(state.baud)} baud`. state.baud (link.ts:307) is only ever null or one of MAVLINK_BAUDS (schema/config.ts:633: 57600, 115200, 230400, 921600) \u2014 the pinned config value or whichever the sweep found. formatBaud (format.ts:46-49) is groupThousands (console/digits.ts:49-50); three of the four bauds group to seven characters, tied for widest. Derived by calling formatBaud(921600) rather than typing the grouped form by hand."
+    },
+    "nrdb-ui-text \u00b7 TCP server": {
+      "value": ":65535 \u00b7 no clients",
+      "why": "join-tel-tcp (flows.json) renders `${flowContext(telTcpAddress)} \u00b7 ${payload.tcpClients}`. telTcpAddress is payload.tcpAddress from yonder-mav-endpoints: `:${box(mavlink.tcp_server?.port)}` (endpoints.ts:137, box at :56-59) is a bare String(port), and schema/config.ts:656 bounds tcp_server.port to [1, 65535], so ':65535' is the schema's own ceiling against the shipped default's ':5760'. payload.tcpClients is messageFor's own field (state.ts:199): state.tcpClients === null ? 'no clients' : count(...) \u2014 and state.tcpClients is hard-coded null in link.ts:320, whose own comment says nothing yet measures a connected TCP client, so 'no clients' is not just the widest observed branch, it is currently the only one this code can produce. Derived by calling box(65535) and messageFor."
+    },
+    "nrdb-ui-text \u00b7 Vehicle": {
+      "value": "Vehicle type 255 \u00b7 system 255",
+      "why": "state.ts:170-172 composes the long form of vehicle (its sibling vehicleShort, already specified on the databar, uses 'sys' instead): `${state.vehicle} \u00b7 system ${system}`. state.vehicle is describeVehicle (mav/frame.ts:49-51), whose fallback `Vehicle type ${n}` for a type it has no name for is longer than every name in VEHICLES \u2014 Octocopter/Helicopter/Hexacopter all tie at 10 characters, against 16 for the fallback. Both numbers are MAVLink uint8 fields, so 255 is a real bound and not a guess. Derived by calling describeVehicle({vehicleType: 255, ...}) and messageFor."
+    },
+    "nrdb-ui-text.yonder-qualifier \u00b7 Autopilot to Yonder": {
+      "value": "\u2014 \u00b7 Not checked \u2014 mavlink-router is not running, so nothing is listening, 921 600 baud",
+      "why": "mav/check.ts's autopilotLink (yonder-core, :127-176), the !routerRunning branch at :155-158: `Not checked \u2014 mavlink-router is not running, so nothing is listening${speed}`, with speed the widest baud (schema/config.ts:633) grouped by groupThousands. Checked by calling pathCheck over all nine of the function's branches \u2014 the next-longest is 57 characters, for the 'Linked...waiting for the first heartbeat' sentence \u2014 so this one, at 86, is the widest. node-red-contrib-yonder-mavlink/src/check.ts's mark()/line() (:19-28) add the leading mark and separator. Derived by calling pathCheck and the contrib messageFor, not typed out."
+    },
+    "nrdb-ui-text.yonder-qualifier \u00b7 Station to Yonder": {
+      "value": "OK \u00b7 Answering, last heard 0.5 s ago",
+      "why": "mav/check.ts's inboundLink (:237-258), the answering branch at :244-247. link.ts:290 only marks a ground station answering while its lastHeardMs is under the 5 s window, so formatSeconds here is always one digit before the point \u2014 a longer silence cannot widen this sentence, unlike the databar's own Last heard. Checked by calling pathCheck over all six of the function's branches (three read 'Not checked'; the other two, at 25 and 28 characters, are narrower); this one, at 36, is the widest, and 0.5 s is the value the gate itself observed. check.ts's mark()/line() (contrib, :19-28) add the leading mark."
+    },
+    "nrdb-ui-text.yonder-qualifier \u00b7 Yonder to stations": {
+      "value": "\u2014 \u00b7 Waiting for the first reading of the router's own counters",
+      "why": "mav/check.ts's outboundLink (:185-227), the traffic === null branch at :210-213. Checked by calling pathCheck over every branch \u2014 stopped, not linked, telemetry off with autocast either way, no endpoints, this one, and the zero-traffic and real-traffic sentences at one and three ground stations \u2014 this is the widest at 62 characters, eight ahead of the next. Nothing in this repository bounds the router's own kB/s counters the way it bounds a baud or a bitrate, so the traffic-bearing branches could in principle widen further, but only by widening a number already small on real hardware (see the sparkline's own ceiling, below), not enough to reach this one."
+    },
+    "nrdb-ui-yonder-sparkline \u00b7 ceiling": {
+      "value": "3.0 kB/s",
+      "why": "state.ts:205: `peak: formatKbRate(state.traffic.peak)`. peak (link.ts:297-299) is Math.max of every |rx|/|tx| sample in the 5 s window, and nothing in this repository bounds a MAVLink router's own kB/s counters the way schema/config.ts bounds a camera's bitrate_kbps \u2014 no baud-to-bytes ceiling is computed anywhere in mav/, so this is a genuine floor rather than a derived ceiling. The widest either series has read across the six captured telemetry states is 3.0 kB/s (observed-values.txt); a busier link, or more ground stations each carrying a full copy of the same stream, would print wider still."
+    },
+    "nrdb-ui-yonder-sparkline \u00b7 span": {
+      "value": "last 5 s",
+      "why": "state.ts:214: `span: formatSpan(state.traffic.windowMs)`. windowMs is LinkTracker's own retention window (link.ts:93: DEFAULT_WINDOW_MS = 5_000, taken at link.ts:141 when no override is given), and renderer.ts:245 constructs the one LinkTracker this daemon runs with no windowMs override \u2014 so this is not the widest of several branches, it is the only value this build can ever produce. formatSpan's own seconds branch (format.ts:95-102) renders it 'last 5 s'. Derived by calling formatSpan(5000)."
     }
   },
   "masked": {
-    "nrdb-ui-yonder-gauge · CPU LOAD": {
-      "why": "A gauge draws the same number twice — once as text and once as a needle — and this gate can move only one of them. A specimen here would commit a picture of a needle at one value with another value written beside it, which is a worse record than a grey box. The gauges are the one instrument whose reading cannot be substituted from outside; a widest-value gauge has to be driven through the daemon."
+    "nrdb-ui-yonder-gauge \u00b7 CPU LOAD": {
+      "why": "A gauge draws the same number twice \u2014 once as text and once as a needle \u2014 and this gate can move only one of them. A specimen here would commit a picture of a needle at one value with another value written beside it, which is a worse record than a grey box. The gauges are the one instrument whose reading cannot be substituted from outside; a widest-value gauge has to be driven through the daemon."
     },
-    "nrdb-ui-yonder-gauge · CPU TEMP": {
+    "nrdb-ui-yonder-gauge \u00b7 CPU TEMP": {
       "why": "As CPU LOAD: text and needle, and only the text can be written from here."
     },
-    "nrdb-ui-yonder-gauge · MEMORY": {
+    "nrdb-ui-yonder-gauge \u00b7 MEMORY": {
       "why": "As CPU LOAD: text and needle, and only the text can be written from here."
     },
-    "nrdb-ui-yonder-gauge · SIGNAL": {
+    "nrdb-ui-yonder-gauge \u00b7 SIGNAL": {
       "why": "As CPU LOAD: text and needle, and only the text can be written from here."
     },
-    "nrdb-ui-yonder-gauge · QUALITY": {
+    "nrdb-ui-yonder-gauge \u00b7 QUALITY": {
       "why": "As CPU LOAD: text and needle, and only the text can be written from here."
     },
     "nrdb-ui-yonder-annunciator.yonder-live.yonder-pending": {
-      "why": "The confirmation countdown. It has a widest honest value — the full window, at three digits — and writing it would put CHANGE PENDING on every page captured with nothing pending, which is the one thing about this annunciator a picture has to get right. The pending captures (status-pending, network-cellular-pending) exist to photograph the other state, and they are the reason a single specimen cannot be honest for both."
+      "why": "The confirmation countdown. It has a widest honest value \u2014 the full window, at three digits \u2014 and writing it would put CHANGE PENDING on every page captured with nothing pending, which is the one thing about this annunciator a picture has to get right. The pending captures (status-pending, network-cellular-pending) exist to photograph the other state, and they are the reason a single specimen cannot be honest for both."
     },
-    "nrdb-ui-text · Host": {
+    "nrdb-ui-text \u00b7 Host": {
       "why": "Nothing composes a value for this field yet. The widget binds {{msg.payload}} straight from yonder-diag, which sends the daemon's whole reply object, so the field renders nothing until a probe runs and an object afterwards. A specimen would state a format this console does not have."
     },
-    "nrdb-ui-text · Replies": {
+    "nrdb-ui-text \u00b7 Replies": {
       "why": "As Host: bound to the whole yonder-diag payload, with no composed value to be the widest of."
     },
-    "nrdb-ui-text · Round trip (ms)": {
+    "nrdb-ui-text \u00b7 Round trip (ms)": {
       "why": "As Host: bound to the whole yonder-diag payload, with no composed value to be the widest of."
     },
-    "nrdb-ui-text · Probed": {
+    "nrdb-ui-text \u00b7 Probed": {
       "why": "As Host: bound to the whole yonder-diag payload, with no composed value to be the widest of."
+    },
+    "nrdb-ui-text \u00b7 Feed": {
+      "why": "Not a reading. `tel-labels` sets this widget's payload to the empty string and never anything else, so the only thing it draws is its own caption, naming the annunciator beside it. A specimen here would put a value on a page where the console never shows one."
+    },
+    "nrdb-ui-yonder-flow": {
+      "why": "The one instrument that draws a relationship rather than a value: three places and two legs, each with its own label, detail and rate. This gate can write one value into a reading, and writing it into a flow would commit a picture of one leg labelled at its widest beside four that are not \u2014 a worse record than the dash. As the gauges: an instrument whose reading cannot be substituted from outside has to be driven through the daemon. Its widest content is held instead by the two gallery specimens (R-UI-25)."
+    },
+    "nrdb-ui-text \u00b7 Link": {
+      "why": "Not a reading. tel-labels (flows.json \u2014 the change node named \"the four lamp captions, which have no value of their own\") sets this widget's payload to the empty string and never anything else, so the only thing it draws is its own caption, naming the tel-ann-link annunciator beside it \u2014 the same node `nrdb-ui-text \u00b7 Feed` already names, one of its four identical captions."
+    },
+    "nrdb-ui-text \u00b7 Receiving": {
+      "why": "As `nrdb-ui-text \u00b7 Link`: tel-labels sets this widget's payload to the empty string and never anything else. It only names the tel-ann-recv annunciator beside it."
+    },
+    "nrdb-ui-text \u00b7 State": {
+      "why": "As `nrdb-ui-text \u00b7 Link`: tel-labels sets this widget's payload to the empty string and never anything else. It only names the tel-ann-state annunciator on the rail."
+    },
+    "nrdb-ui-yonder-sparkline": {
+      "why": "YonderSparkline.vue draws two live series (rx/tx) as SVG polylines, scaled client-side from the raw arrays, and its own `known` (series.rx.length >= 2) decides whether that chart or the fixed placeholder 'not enough data yet' shows, independent of anything this gate could set as a single string. As the gauges and nrdb-ui-yonder-flow: an instrument drawing several values at once \u2014 here, an unbounded pair of arrays \u2014 cannot be substituted from outside with one widest reading. The one text branch it can show on its own is already the whole of it, with nothing left to widen. `\u00b7 ceiling` and `\u00b7 span`, the two numbers actually printed beside the chart, are specified as ordinary readings below."
     }
   }
 }

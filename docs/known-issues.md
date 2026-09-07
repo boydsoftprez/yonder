@@ -430,7 +430,7 @@ the `127.0.1.1` line, and tests for both — which is why it is here rather than
 the change that found it. `assert_daemon_can_write` must be given `/etc/hosts` at the same
 time, or the fix reproduces K-19 in a new place.
 
-### K-25 · A control keeps showing a value the device rolled back
+### K-25 · ~~A control keeps showing a value the device rolled back~~ — CLOSED
 `flows/flows.json`, `src/console/renderer.ts`
 
 Change the theme and let the confirmation window expire. The apply reverts — `lastResult.outcome`
@@ -445,11 +445,38 @@ the widget keeps whatever it last held. The gap is that a rollback is exactly th
 operator most needs the interface to be honest about what the device is doing, and instead the one
 control they touched is the one telling them the wrong thing.
 
-The fix is a way for a page to learn that an apply reached a terminal state and re-read the
-configuration. That is a real piece of work — the apply engine has the state and `GET /status`
-already reports it, but no page subscribes to anything today. It belongs with whatever milestone
-makes the console reactive rather than poll-and-hope, and it should be built once for every
-control rather than patched onto the theme dropdown.
+**Found again, on a control where it is dangerous.** The Telemetry page's `Accepting from`
+readout says whether the board takes MAVLink from anything that can reach it or only from
+itself — the setting deciding who can command the aircraft (R-MAV-07). A capture run opened
+ingest, the daemon took the change, and the page went on reading `Loopback only` with
+`THIS DEVICE` lit. The committed reference for that state
+(`docs/console/shape/telemetry-ingest-open.{day,night}.darwin.json`) was therefore a picture
+of the opposite state, byte-identical to the base capture. Same fault, same cause: `flows.json`
+read `/config` from an `inject` with `once: true` and an empty `repeat`, so *every* value on
+the console that comes from the configuration was read at deploy and never again.
+
+**Closed by R-UI-20 and `yonder-config-watch`.** The tempting fix — learn that an apply
+reached a terminal state, then re-read — was rejected on evidence: R-CFG-12 names
+`mavlink.ingest` as deliberately *not* exempt from the confirmation window, so opening ingest
+**pends**, and the new configuration is in force for the whole window (up to five minutes,
+R-CFG-10). A console waiting for the terminal state would have held `Loopback only` on screen
+for five minutes while the board really was accepting MAVLink from the network. The node reads
+`GET /config` on the ordinary two-second poll and **sends only when the document changed**,
+which also catches what no apply of this console's ever announces: a rollback the device
+performed by itself, and a change made from somewhere else.
+
+That shape is what made it safe to do for every control at once rather than only the readouts.
+The same read seeds ten boxes an operator types into, and re-seeding those on a clock — the
+reason the one-shot was chosen — would have been worse than the defect. Because the read
+repeats and the *message* does not, a form is disturbed at exactly the moment the setting under
+it moved, which is the moment R-UI-17 wants it disturbed.
+
+**The dropdown this was first found on no longer exists**, and that is worth saying plainly
+rather than letting it read as fixed. The palette is a soft-key rail now (`keys-status`), and
+that rail lights neither key — it offers `DAY` and `NIGHT` and shows which is in force nowhere,
+so there is no longer a control on that page holding a value that could go stale. Should it
+ever be made to light the palette in force, it is seeded from the configuration like everything
+else and the watch above carries it.
 
 ### K-26 · ~~The scan list looks tappable and is not~~ — CLOSED
 
@@ -1009,7 +1036,7 @@ NetworkManager now say, so `/reach/state` keeps reporting a cellular path on an 
 that has been unplugged, and the Cellular tab draws a green `READY` lamp over the words
 "No modem found".
 
-Visible in `docs/console/capture/network-cellular-without-modem.*.png`, which is why those
+Visible in `docs/console/evidence/k42-no-modem.*.png`, which is why those
 two pictures are read with this entry beside them. On a board that never had a modem — the
 hardware this was found on — the tab reads `NO MODEM` correctly, so it is a defect about
 hardware being *removed* rather than about hardware being absent.
@@ -1315,7 +1342,7 @@ change rather than a fix smuggled into a console commit — and the fix has to
 answer a question this entry does not: whether the press run should capture at
 all (`--only` on one page, or a `--no-capture`), or should simply be given
 `--secrets` and `--synthetic-cameras` like its neighbours. In this harness the
-daemon is always `scripts/synthetic-daemon.mjs`, so what renders is always the
+daemon is always `scripts/pages-daemon.mjs`, so what renders is always the
 fixture's `FIXTURE-NOT-A-REAL-PASSWORD` — the hole is that nothing checks, not
 that anything has leaked. Every committed capture has been read by eye and by
 the guarded run and carries the fixture value.
@@ -1963,3 +1990,97 @@ stream at one rate and the console could no longer change it while it ran.
 
 Not decided here (CLAUDE.md rule 8). The measurements are what the choice
 should be made on.
+---
+
+### K-57 · The capture gate photographs whatever answers on the port, and calls it green
+
+*Filed on the telemetry branch as K-45, renumbered on merge: this repository had already issued that number. Ids are never reused.*
+
+`scripts/verify-pages.sh` waits for the console by polling until *something* replies:
+
+```sh
+if curl -s -o /dev/null --max-time 1 "http://127.0.0.1:$PORT/"; then return 0; fi
+```
+
+Then `scripts/capture-pages.mjs` is pointed at `--base-url http://127.0.0.1:$PORT` and
+photographs whatever is there.
+
+`HOLD=1` leaves a console running on that port on purpose, so a developer can look at it.
+If a second run starts while the first is still held, the new run's Node-RED cannot bind
+the port — and **the new run's capture connects to the old run's console instead.** Every
+check passes. Every page is captured. The shape comparison finds no change, because
+nothing changed: it re-photographed a server built from the flows as they were when the
+*first* run started.
+
+Observed 2026-09-05: a held console from 14:21 was still listening; a run at 16:17 wrote
+`flows.json` at 16:17:35, served the new file to its own daemon at 16:17:58, captured at
+16:19, and reported *"every page captured, and none changed shape"* — while the PNG showed
+the four-hour-old page. The edit under test was invisible in a gate that had just declared
+itself green.
+
+**This is worse than a flaky check**, because the failure mode is a false pass on the one
+gate whose entire purpose is to notice that a page changed. The `R-UI-12` machinery exists
+because nothing in this repository had ever looked at a page; a gate that looks at the
+wrong page restores that condition while appearing not to.
+
+**The fix is to make the run own the port rather than share it:** fail immediately when
+`$PORT` is already listening (naming the stale process), or bind an ephemeral port and
+capture against that. Refusing to start is the smaller change and the more honest one — a
+held console is a deliberate act, and silently capturing someone else's is never wanted.
+
+Found by eye, not by the gate: the change under review was three widgets swapping type, and
+the picture still showed the widgets they replaced.
+
+---
+
+### K-58 · ~~The capture gate loaded its node packages from whatever workspace was above it~~ — CLOSED
+
+*Filed on the telemetry branch as K-46, renumbered on merge: this repository had already issued that number. Ids are never reused.*
+
+Sibling of K-45, and a worse one: K-45 photographs the wrong *console*, this photographs a
+console built from the wrong *packages*.
+
+`scripts/verify-pages.sh` stages the Yonder node packages into the console tree it builds,
+the way `installer/roles/30-console.sh` does on a board:
+
+```sh
+ln -s "$REPO/packages/$pkg" "$CONSOLE/node_modules/$pkg"
+```
+
+**Node-RED never looked there.** `@node-red/registry`'s `scanTreeForNodesModules` scans
+`<userDir>/node_modules`, then walks up from `settings.coreNodesDir` — the *real* path of
+its own installation — looking for a `node_modules` at each ancestor. The gate's `node-red`
+is a symlink into `vendor/console`, which node resolves, so that walk starts inside this
+repository and climbs out of it; `$CONSOLE` is a temporary directory and is nowhere on the
+path. The staged links were dead weight.
+
+What it found instead was the first `node_modules` above the checkout that had the packages
+in it. In a CI clone that is the repository's own, so the gate was right there and nothing
+noticed for as long as nothing differed. Run from a git worktree under a checkout that has
+its own `npm install`, the walk reaches **the parent checkout's** `node_modules`, whose
+workspace links point at the parent's `packages/` — so every yonder node loaded was the
+other tree's copy, and `node-red-contrib-yonder-mavlink`, which existed only on the branch
+under test, was not found at all.
+
+Observed 2026-09-06 while cutting the Telemetry page over to the daemon: Node-RED logged
+`Waiting for missing types to be registered: yonder-mav-state …` for four types whose
+package was symlinked into the console tree and built, and `ui-yonder-flow` — added on the
+same branch — was missing from `/nodes` while the seven older widgets in the same package
+were present, because the package being loaded was a different checkout's.
+
+**A board was never affected.** There the console tree *is* where Node-RED lives, so the
+walk up from its own directory reaches `/opt/yonder/console/node_modules` and finds exactly
+what `30-console.sh` put there. Only the gate, which runs Node-RED out of a symlink into
+`vendor/`, could resolve its way into somebody else's tree.
+
+**Closed in the same change**, by linking every package into `<userDir>/node_modules` as
+well. That directory is scanned first and its modules are marked `local`, which sorts them
+ahead of everything the walk-up finds and wins the dedupe outright — so the gate is pinned
+to the tree it is run from. The console tree's copies stay, because that is where a board
+has them and this script exists to run what a board runs.
+
+**What is not closed:** nothing asserts it. A test that the gate loads the packages under
+test would have to read Node-RED's own registry, and the honest version of that assertion
+is the one this gate already wants — `GET /nodes` after start-up, compared against the
+manifests `flows.test.ts` already reads for `R-UI-19`. Worth doing when something else
+brings a reader of that endpoint.

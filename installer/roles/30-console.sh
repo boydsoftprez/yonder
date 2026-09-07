@@ -100,6 +100,7 @@ fi
 for pkg in node-red-contrib-yonder-system node-red-contrib-yonder-network \
            node-red-contrib-yonder-remote node-red-contrib-yonder-modem \
            node-red-contrib-yonder-video \
+           node-red-contrib-yonder-mavlink \
            node-red-dashboard-2-yonder; do
     pkg_src="$YONDER_SRC/packages/$pkg"
     pkg_dest="$con_dest/node_modules/$pkg"

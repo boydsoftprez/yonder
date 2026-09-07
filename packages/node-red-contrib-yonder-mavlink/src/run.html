@@ -1,0 +1,56 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!--
+  The editor half of starting, stopping and re-detecting telemetry.
+
+  Node-RED finds this by basename beside the node's .js, and without it the
+  flow editor shows the node as "unknown" even though the runtime registered
+  it. It is a form and a registration, and deliberately nothing else: no
+  behaviour lives here (CLAUDE.md rule 2 in spirit — a diff has to be
+  readable), and no asset is fetched from anywhere (R-UI-01).
+-->
+<script type="text/html" data-template-name="yonder-mav-run">
+  <div class="form-row">
+    <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-action"><i class="fa fa-power-off"></i> Action</label>
+    <select id="node-input-action">
+      <option value="toggle">Start or stop (reads the current state)</option>
+      <option value="start">Always start</option>
+      <option value="stop">Always stop</option>
+      <option value="detect">Look again now</option>
+    </select>
+  </div>
+</script>
+
+<script type="text/html" data-help-name="yonder-mav-run">
+<p>Acts on the telemetry link when a message arrives, and only then.</p>
+<p><b>Start or stop</b> is what today's single "Stop telemetry" button wants
+(R-MAV-09: one control reading the current state, never an ON beside an
+OFF). It reads <code>GET /mav/state</code> first and acts on the opposite of
+<code>telemetryRunning</code> — never <code>routerRunning</code>, which is a
+different question that comes apart exactly while telemetry is stopped.</p>
+<p><b>Always start</b>/<b>Always stop</b> call <code>POST /mav/start</code>/
+<code>/mav/stop</code> directly, with no state read first.</p>
+<p><b>Look again now</b> calls <code>POST /mav/detect</code> — stopping
+<code>mavlink-router</code> to get the serial port back, sweeping again, and
+restarting it. Every ground station receiving now stops receiving until it
+comes back (R-MAV-16), which is why this is the one action a flow should
+warn about before sending.</p>
+<p>Every action answers with the same reading <code>yonder-mav-state</code>
+emits — the state after the action, not before — plus, for <b>Look again
+now</b>, one more sentence naming what the sweep found.</p>
+</script>
+
+<script type="text/javascript">
+  RED.nodes.registerType("yonder-mav-run", {
+    category: "yonder",
+    color: "#c7d4e0",
+    defaults: { name: { value: "" }, action: { value: "toggle" } },
+    inputs: 1,
+    outputs: 1,
+    icon: "font-awesome/fa-power-off",
+    label: function () { return this.name || "mav run"; },
+  });
+</script>

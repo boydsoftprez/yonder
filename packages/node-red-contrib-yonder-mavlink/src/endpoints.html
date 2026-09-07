@@ -1,0 +1,46 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!--
+  The editor half of the Telemetry page's configured settings.
+
+  Node-RED finds this by basename beside the node's .js, and without it the
+  flow editor shows the node as "unknown" even though the runtime registered
+  it. It is a form and a registration, and deliberately nothing else: no
+  behaviour lives here (CLAUDE.md rule 2 in spirit — a diff has to be
+  readable), and no asset is fetched from anywhere (R-UI-01).
+-->
+<script type="text/html" data-template-name="yonder-mav-endpoints">
+  <div class="form-row">
+    <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name" />
+  </div>
+</script>
+
+<script type="text/html" data-help-name="yonder-mav-endpoints">
+<p>Takes the whole configuration document on <code>msg.payload</code> — the
+same one <code>yonder-config</code> reads with <code>GET /config</code> — and
+seeds the Telemetry page's read-only facts and its three ground-station
+host/port boxes from <code>config.mavlink</code> (R-UI-17).</p>
+<p><b>Holds no daemon client of its own.</b> The flows already read
+<code>/config</code> once when the console opens; a second reader here would
+be a second read of the same document, on its own schedule, which is exactly
+what would overwrite an operator's own half-typed host or port box while
+they are still editing it.</p>
+<p>Seven outputs, in order: the rail's facts
+(<code>{ atboot, ingest, tcpAddress }</code>), then host and port for rows
+0, 1 and 2. A row nothing has configured is an empty box, never a
+fabricated value — <code>mavlink.autocast</code> and
+<code>mavlink.ingest.loopback_only</code> are configuration, never
+<code>/mav/state</code>, so this is the only node that can say them.</p>
+</script>
+
+<script type="text/javascript">
+  RED.nodes.registerType("yonder-mav-endpoints", {
+    category: "yonder",
+    color: "#c7d4e0",
+    defaults: { name: { value: "" } },
+    inputs: 1,
+    outputs: 7,
+    icon: "font-awesome/fa-map-marker",
+    label: function () { return this.name || "mav endpoints"; },
+  });
+</script>

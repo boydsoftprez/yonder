@@ -214,3 +214,5 @@ export {
   type CameraDraft,
   type DeckDraft,
 } from "../apply/draft-shape.js";
+
+export { groupThousands } from "./digits.js";

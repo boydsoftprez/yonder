@@ -251,3 +251,67 @@ describe("camera leaf enumeration", () => {
     expect(affectsReachability(before, after)).toBe(true);
   });
 });
+describe("mavlink (R-CFG-12, R-MAV-03)", () => {
+  const withMav = (mavlink: Config["mavlink"]): Config => ({ ...DEFAULT_CONFIG, mavlink });
+
+  it("adding a ground station is kept, not held", () => {
+    const before = withMav(DEFAULT_CONFIG.mavlink);
+    const after = withMav({ ...DEFAULT_CONFIG.mavlink, endpoints: [{ name: "gcs0", host: "10.147.20.8", port: 14550 }] });
+    expect(affectsReachability(before, after)).toBe(false);
+  });
+
+  it("turning the tcp server off is kept", () => {
+    const before = withMav(DEFAULT_CONFIG.mavlink);
+    const after = withMav({ ...DEFAULT_CONFIG.mavlink, tcp_server: { enabled: false, port: 5760 } });
+    expect(affectsReachability(before, after)).toBe(false);
+  });
+
+  it("autocast is kept", () => {
+    expect(affectsReachability(withMav(DEFAULT_CONFIG.mavlink), withMav({ ...DEFAULT_CONFIG.mavlink, autocast: false }))).toBe(false);
+  });
+
+  // The port is not like `enabled`: the schema accepts any value in range, and
+  // a value the schema accepts can still be a port some other service on the
+  // device already holds. R-MAV-14 only refuses the one collision it can see
+  // - with `ui.port`, the console's own - so a bind failure against sshd,
+  // mediamtx or the mesh client is invisible to the schema and would
+  // otherwise ship kept. Still held, on purpose.
+  it("moving the tcp server's port is still held", () => {
+    const before = withMav(DEFAULT_CONFIG.mavlink);
+    const after = withMav({ ...DEFAULT_CONFIG.mavlink, tcp_server: { enabled: true, port: 5761 } });
+    expect(affectsReachability(before, after)).toBe(true);
+  });
+
+  // The exemption is earned per leaf. These two are not exempt and must not
+  // become so by sitting next to ones that are.
+  it("pinning the serial port is still held", () => {
+    const after = withMav({ ...DEFAULT_CONFIG.mavlink, serial: { device: "/dev/ttyAMA0", baud: 57600 } });
+    expect(affectsReachability(withMav(DEFAULT_CONFIG.mavlink), after)).toBe(true);
+  });
+
+  it("opening ingest to the network is still held (R-MAV-07)", () => {
+    const after = withMav({ ...DEFAULT_CONFIG.mavlink, ingest: { loopback_only: false } });
+    expect(affectsReachability(withMav(DEFAULT_CONFIG.mavlink), after)).toBe(true);
+  });
+
+  // The exemption is three named leaves, not the subtree they sit in - the
+  // same regression `remote.zerotier` guards against above. A field added
+  // directly under `mavlink`, or under `mavlink.tcp_server` specifically,
+  // must not inherit a kept-not-held apply from its neighbours with nobody
+  // deciding it should.
+  it("holds a field added directly under mavlink that nobody has measured", () => {
+    const before = withMav(DEFAULT_CONFIG.mavlink);
+    const after = structuredClone(before) as Config & { mavlink: Record<string, unknown> };
+    after.mavlink.somethingNew = { invented: "later" };
+    expect(affectsReachability(before, after)).toBe(true);
+  });
+
+  it("holds a field added under mavlink.tcp_server that nobody has measured", () => {
+    const before = withMav(DEFAULT_CONFIG.mavlink);
+    const after = structuredClone(before) as Config & {
+      mavlink: { tcp_server: Record<string, unknown> };
+    };
+    after.mavlink.tcp_server.somethingNew = true;
+    expect(affectsReachability(before, after)).toBe(true);
+  });
+});

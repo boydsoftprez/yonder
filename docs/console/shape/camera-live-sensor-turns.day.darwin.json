@@ -139,6 +139,15 @@
         "w": 314,
         "h": 108
       }
+    },
+    {
+      "key": "d-none.nrdb-ui-widget.nrdb-ui-yonder-softkeys.yonder-pending",
+      "box": {
+        "x": 0,
+        "y": 0,
+        "w": 0,
+        "h": 0
+      }
     }
   ]
 }

@@ -362,8 +362,15 @@ ${chromeCss(theme)}
   --yonder-space-5: 1.5rem;
   --yonder-radius: 4px;
 
-  /* Anything an operator has to hit. A gloved finger on a tablet strapped to
-     a leg is the input device this number is for (R-UI-04). */
+  /* Anything an operator has to hit.
+
+     44px is WCAG 2.5.5's enhanced target size: a floor that holds for a mouse,
+     a trackpad and a finger alike, which is why it can be stated without
+     knowing who is pointing. An earlier version of this comment justified the
+     number with a user nobody had — a gloved finger on a tablet strapped to a
+     leg — and cited R-UI-04 for it. R-UI-04 says "remain usable on a tablet in
+     the field" and nothing else. Recorded here because a fiction with a
+     requirement id beside it is the kind that gets rebuilt. */
   --yonder-touch: 44px;
 
   /* ---- the dashboard's own variables, pointed at ours ---------------- */

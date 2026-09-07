@@ -27,19 +27,26 @@ a vendored Node runtime rather than reaching for the distro package,
 one, and `30-console.sh` copies a prebuilt console rather than fetching
 Node-RED. None of those is present in a checkout. This is how to make them.
 
-**Everything that is downloaded — the Node runtime, ZeroTier, and the
-console — comes from one script:**
+**Everything an install needs and this repository does not carry — the Node
+runtime, ZeroTier, `mavlink-router` and the console — comes from one
+script:**
 
 ```sh
 ./installer/make-payload.sh --arch linux-arm64     # a Raspberry Pi or Radxa
 ./installer/make-payload.sh --arch linux-x64       # a PC
+./installer/make-payload.sh --arch linux-arm64 --only console   # just one part
 ```
 
 It stages `vendor/node/bin/node`,
-`vendor/zerotier/zerotier-one_<version>_<arch>.deb`, and
+`vendor/zerotier/zerotier-one_<version>_<arch>.deb`,
+`vendor/mavlink-router/mavlink-routerd` and
 `vendor/console/node_modules/node-red/red.js`, and it is re-runnable: each run
-replaces what the last one left. `vendor/` is downloaded binaries rather than
-source, so `.gitignore` keeps it out of the repository.
+replaces what the last one left. `--only` narrows a run to one or more of
+`node`, `zerotier`, `mavlink-router` and `console`; what it does not stage it
+leaves exactly as an earlier run left it, so it is a way to update one part of
+a payload rather than a way to build a smaller one. `vendor/` is downloaded
+and built binaries rather than source, so `.gitignore` keeps it out of the
+repository.
 
 What it stages:
 
@@ -62,6 +69,45 @@ What it stages:
   libraries that a board does not have, and switches four `update-alternatives`
   entries. It is fetched over the network and installed when Tailscale is
   configured (R-VPN-08).
+
+- `vendor/mavlink-router/mavlink-routerd` — the service that owns the serial
+  port and fans MAVLink out to the ground stations. One file, 325 KB stripped,
+  needing nothing but `libc6`, `libstdc++6` and `libgcc-s1`, which every Debian
+  board already has — so the role that installs it calls no package manager at
+  all. Installed by role `15-mavlink-router`, which leaves it **stopped and
+  disabled** (R-MAV-17): `yonder-core` starts it, and only once detection has
+  found a port and a speed and generated `/etc/mavlink-router/main.conf`. A
+  unit enabled at install would open the serial port at every boot before the
+  sweep could, which is the one resource the two of them contend for.
+
+  **It is the only component that is built rather than downloaded.** It is not
+  in Debian and publishes no binary, so `make-payload.sh` clones the pinned
+  commit, checks that the checkout *is* that commit, and builds it inside a
+  `debian:trixie` container for the target's architecture — Docker or Podman,
+  and there is no third option, because a C++ build for another architecture
+  needs that architecture's toolchain. The post-condition is the built binary's
+  own `--version` reporting the pinned commit, run inside the same container,
+  which is the only place an arm64 binary can be executed on an x86 build host.
+
+  **The pin is a commit, and that commit is the fingerprint.** Node and
+  ZeroTier are downloads, so a recorded `sha256` is what says the bytes are the
+  bytes. Here the bytes come out of a compiler, and a compiler's output moves
+  with its version — a hash of the *binary* would fail the day Debian updated
+  gcc rather than the day somebody changed the source. A git commit id is a
+  hash over the complete tree, every submodule included, so checking it checks
+  precisely the input the build consumes.
+
+  Building on the board was measured and rejected: a stock image is missing
+  `meson`, `ninja-build`, `libsystemd-dev` **and** `systemd-dev` — the build
+  asks pkg-config for `systemd`, not `libsystemd`, so installing the obvious
+  one still fails with a message naming neither — and a default parallel build
+  is killed by the OOM killer on a 905 MiB Pi 4. See
+  [an autopilot on the UART](../docs/hardware/an-autopilot-on-the-uart.md).
+
+  The `payload-mavlink-router` job in CI builds the arm64 binary on every
+  change to `make-payload.sh` and uploads it, so a payload can be assembled on
+  a machine with no container runtime: download the artifact into
+  `vendor/mavlink-router/` and the role takes it from there.
 
 Two things it does that a by-hand download does not:
 

@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   RTSP_PORT, SRT_PORT, WEBRTC_LOCAL_UDP_PORT, WEBRTC_PORT,
 } from "../media/ports.js";
+import { RESERVED_ENDPOINT_NAMES } from "../mav/router/config.js";
 
 /**
  * A dotted-quad octet, 0–255. Pinned to the range an octet actually has
@@ -625,6 +626,44 @@ export const Camera = CameraShape.transform((camera) => ({
 export type Camera = z.infer<typeof Camera>;
 
 /**
+ * The rates ArduPilot is actually configured for in the field, slowest first.
+ * Slowest first so a slow link is *found* rather than a fast one guessed at —
+ * a wrong fast rate produces noise that a slow one would have decoded.
+ */
+export const MAVLINK_BAUDS = [57600, 115200, 230400, 921600] as const;
+
+const MavlinkSerial = z
+  .object({
+    device: z.string().min(1).default("auto"),
+    baud: z.union([z.literal("auto"), z.union(MAVLINK_BAUDS.map((b) => z.literal(b)) as [z.ZodLiteral<number>, z.ZodLiteral<number>, ...z.ZodLiteral<number>[]])])
+      .default("auto"),
+  })
+  .strict();
+
+/**
+ * Three, because R-MAV-03 says three. The limit is in the schema rather than
+ * in a renderer so a fourth is refused with the offending path named, at the
+ * moment the operator writes it, rather than silently dropped later.
+ */
+const MavlinkEndpoint = z
+  .object({ name: z.string().min(1), host: z.string().min(1), port: z.number().int().min(1).max(65535) })
+  .strict();
+
+const Mavlink = z
+  .object({
+    serial: MavlinkSerial.default({}),
+    endpoints: z.array(MavlinkEndpoint).max(3).default([]),
+    tcp_server: z.object({ enabled: z.boolean().default(true), port: z.number().int().min(1).max(65535).default(5760) })
+      .strict().default({}),
+    autocast: z.boolean().default(true),
+    // R-MAV-07: an open MAVLink port on a routable address is an
+    // unauthenticated command path to the vehicle. Closed unless asked for,
+    // and the asking is logged.
+    ingest: z.object({ loopback_only: z.boolean().default(true) }).strict().default({}),
+  })
+  .strict();
+
+/**
  * Strict, deliberately: an unrecognised key is a misspelling, and a
  * misspelling silently ignored is a setting an operator believes is in force
  * and is not.
@@ -667,7 +706,8 @@ export const ConfigSchema = z.object({
   system: System.default({}),
   remote: Remote.default({}),
   cameras: z.array(Camera).max(8).default([]),
-}).strict().superRefine((cfg, ctx) => {
+  mavlink: Mavlink.default({}),
+}).strict().superRefine((config, ctx) => {
   const seen = new Set<string>();
   // Every name this configuration would ask the media server to serve. Two
   // cameras cannot share one: mediamtx takes one publisher per path, so the
@@ -686,7 +726,7 @@ export const ConfigSchema = z.object({
     }
     mediaPaths.add(name);
   };
-  for (const [i, cam] of cfg.cameras.entries()) {
+  for (const [i, cam] of config.cameras.entries()) {
     if (seen.has(cam.id)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -716,7 +756,7 @@ export const ConfigSchema = z.object({
       // `ui.port` is refused now, at a keyboard, rather than when somebody
       // switches it on: that may be in flight, and the console it would
       // collide with is the only way left to reach the aircraft. Rule 6.
-      if (out.kind === "srt" && out.port === cfg.ui.port) {
+      if (out.kind === "srt" && out.port === config.ui.port) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["cameras", i, "outputs", j, "port"],
@@ -747,6 +787,53 @@ export const ConfigSchema = z.object({
       }
     }
   }
+
+  // R-MAV-14. The router is started by yonder-core before the console is, so
+  // a collision is not a race the console can win. Refused here rather than
+  // in a renderer: a renderer runs after the apply has been accepted, and by
+  // then the confirmation window is the only thing left to catch it.
+  if (config.mavlink.tcp_server.enabled && config.mavlink.tcp_server.port === config.ui.port) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["mavlink", "tcp_server", "port"],
+      message: `port ${config.ui.port} is the console's own (ui.port); MAVLink cannot take it`,
+    });
+  }
+
+  // R-MAV-15. `router/config.ts` keys mavlink-router's own generated sections
+  // by name — `autopilot`, `yonder` and `inbound` — and a ground station
+  // reusing one of them, or two ground stations sharing a name with each
+  // other, produces two identically-headed sections in the generated file.
+  // The router keeps one and silently drops the other, with nothing anywhere
+  // saying which. Refused here, at write time: a renderer runs only after
+  // the apply has already been accepted, by which point the confirmation
+  // window is the only thing left to catch it (the same reasoning R-MAV-14
+  // above is built on). The console has no field for an endpoint's name
+  // today, so this is reached by editing config.yaml directly — a fully
+  // supported path, and the one place a typo like this would otherwise be
+  // silent.
+  const seenAt = new Map<string, number>();
+  config.mavlink.endpoints.forEach((endpoint, index) => {
+    if ((RESERVED_ENDPOINT_NAMES as readonly string[]).includes(endpoint.name)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["mavlink", "endpoints", index, "name"],
+        message: `"${endpoint.name}" is reserved for mavlink-router's own generated endpoint of that name `
+          + `(${RESERVED_ENDPOINT_NAMES.join(", ")} are all taken); choose a different name for this ground station`,
+      });
+    }
+    const firstIndex = seenAt.get(endpoint.name);
+    if (firstIndex !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["mavlink", "endpoints", index, "name"],
+        message: `"${endpoint.name}" is already the name of endpoint ${firstIndex}; `
+          + "each ground station needs a name of its own",
+      });
+    } else {
+      seenAt.set(endpoint.name, index);
+    }
+  });
 });
 
 export type Config = z.infer<typeof ConfigSchema>;

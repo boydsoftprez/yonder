@@ -102,12 +102,28 @@ mavlink-router
    ├── UDP  → ground station 1        (default :14551)
    ├── UDP  → ground station 2        (default :14552)
    ├── TCP  server                    (default :5760)
-   └── UDP  → 127.0.0.1:14559         → Node-RED
+   └── UDP  → 127.0.0.1:14559         → yonder-core
 ```
 
 **Raw MAVLink never passes through Node-RED on its way to a ground station.**
 mavlink-router fans it out directly. If Node-RED restarts, Mission Planner does not
-notice. Node-RED is a *consumer* of a loopback copy, plus a producer of commands.
+notice. The control plane is a *consumer* of a loopback copy, plus a producer of commands.
+
+**The router is its own systemd unit, and it ships installed and off.** `mavlink-router` is
+not in Debian, so it is built for the board's architecture and carried in the offline
+payload; the role that installs it leaves the unit stopped and disabled. `yonder-core` starts
+it, and only once detection has found a port and a speed and generated
+`/etc/mavlink-router/main.conf` — because the router opens the serial port and keeps it, and
+detection needs the same port. A unit enabled at install would win that race at every boot.
+Once running, its lifetime is systemd's: a router that dies is restarted by
+`Restart=on-failure`, never by the control plane, which is the other half of the sentence
+above (R-MAV-17).
+
+The end of that loopback copy is a socket in `yonder-core`, not in Node-RED: the daemon
+reads the heartbeats and Node-RED asks it what they said, over the same Unix socket every
+other reading arrives on. **That socket binds `127.0.0.1` and nothing else, and there is no
+setting that can move it** — MAVLink is bidirectional and carries no credential, so the
+address it is bound to is the whole of what keeps it off the network.
 
 Flight-controller detection sweeps the baud rates above in order — these are the rates
 ArduPilot is actually configured for in the field — and reports the port and baud it

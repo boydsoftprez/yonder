@@ -839,6 +839,104 @@
       },
       "maxItems": 8,
       "default": []
+    },
+    "mavlink": {
+      "type": "object",
+      "properties": {
+        "serial": {
+          "type": "object",
+          "properties": {
+            "device": {
+              "type": "string",
+              "minLength": 1,
+              "default": "auto"
+            },
+            "baud": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "auto"
+                },
+                {
+                  "type": "number",
+                  "enum": [
+                    57600,
+                    115200,
+                    230400,
+                    921600
+                  ]
+                }
+              ],
+              "default": "auto"
+            }
+          },
+          "additionalProperties": false,
+          "default": {}
+        },
+        "endpoints": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "host": {
+                "type": "string",
+                "minLength": 1
+              },
+              "port": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535
+              }
+            },
+            "required": [
+              "name",
+              "host",
+              "port"
+            ],
+            "additionalProperties": false
+          },
+          "maxItems": 3,
+          "default": []
+        },
+        "tcp_server": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": true
+            },
+            "port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535,
+              "default": 5760
+            }
+          },
+          "additionalProperties": false,
+          "default": {}
+        },
+        "autocast": {
+          "type": "boolean",
+          "default": true
+        },
+        "ingest": {
+          "type": "object",
+          "properties": {
+            "loopback_only": {
+              "type": "boolean",
+              "default": true
+            }
+          },
+          "additionalProperties": false,
+          "default": {}
+        }
+      },
+      "additionalProperties": false,
+      "default": {}
     }
   },
   "required": [

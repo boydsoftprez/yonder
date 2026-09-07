@@ -43,6 +43,11 @@ import { readSupply } from "../system/supply.js";
 import { ZeroTierCli } from "../remote/zerotier/cli.js";
 import { readTraffic } from "../remote/traffic.js";
 import { TrafficSampler } from "../remote/sampler.js";
+import { MavlinkRenderer, ROUTER_CONF_PATH } from "../mav/renderer.js";
+import { openPortWith } from "../mav/serial.js";
+import { LinkTracker } from "../mav/link.js";
+import { LoopbackListener } from "../mav/listener.js";
+import type { OpenPort } from "../mav/detect.js";
 import { AP_CONNECTION, DEFAULT_AP_PASSPHRASE } from "../net/profiles.js";
 import { scanForNetworks } from "../net/scan.js";
 import { ping, reachable } from "../diag/probe.js";
@@ -125,7 +130,7 @@ export interface ServerOptions {
    * than the ones the board has is a device lying about its own hardware, and
    * an aircraft is the wrong place to discover that somebody set it.
    * Supplying it takes writing a different program, which is what
-   * `scripts/synthetic-daemon.mjs` is.
+   * `scripts/pages-daemon.mjs` is.
    *
    * It exists because the capture gate (R-UI-12) has no camera. With none
    * attached there is no camera page, so the gate covers none of the camera
@@ -153,6 +158,13 @@ export interface ServerOptions {
    * connected them.
    */
   spawner?: ProcessSpawner;
+   /**
+   * How to open a serial port, and where the two telemetry files live.
+   * Absent means neither a `MavlinkRenderer` nor the loopback listener is
+   * assembled, and every `/mav/*` route says so — see
+   * BuildRenderersOptions.mavlink, which explains why it is not defaulted.
+   */
+  mavlink?: BuildRenderersOptions["mavlink"];
 }
 
 /**
@@ -231,6 +243,35 @@ export interface BuildRenderersOptions {
    * to end, one layer up.
    */
   spawner?: ProcessSpawner;
+   /**
+   * Everything the telemetry renderer needs, or nothing at all.
+   *
+   * **Present only when a caller supplies a way to open a serial port.**
+   * `MavlinkRenderer` resolves the autopilot's port and speed by sweeping it
+   * (R-MAV-01), so a renderer built without an `OpenPort` could not do the
+   * first thing it exists for. `mav/serial.ts` implements one against real
+   * hardware and `main()` supplies it; this stays given-and-never-defaulted
+   * so that a *test* which forgets to override it gets no telemetry renderer
+   * rather than a real `/dev` and a real `stty`. The same shape as `console`
+   * above, and the same rule for its two paths, so no test writes to
+   * `/etc/mavlink-router` by forgetting to override one.
+   */
+  mavlink?: {
+    open: OpenPort;
+    /** `/etc/mavlink-router/main.conf` in production — `ROUTER_CONF_PATH`. */
+    confPath: string;
+    /** The remembered port and speed, under /var/lib/yonder (R-MAV-13). */
+    hintPath: string;
+    /**
+     * Overrides `LOOPBACK_PORT` for the listener on the control plane's own
+     * feed. **Test-only**, exactly like `runner` and `clock` above: a test
+     * binds an ephemeral port (`0`) so the suite neither collides with a
+     * daemon that is already running nor depends on a fixed port being free
+     * on whatever machine it runs on. There is deliberately no matching
+     * override for the *address* — see `LOOPBACK_ADDRESS` and R-MAV-07.
+     */
+    loopbackPort?: number;
+  };
 }
 
 /**
@@ -283,6 +324,15 @@ export function buildRenderers(opts: BuildRenderersOptions): {
    * with the settings that were kept.
    */
   supervisor: Supervisor;
+  /** Present only when `opts.mavlink` said how to open a serial port. */
+  mavlinkRenderer?: MavlinkRenderer;
+  /**
+   * The control plane's own feed off `127.0.0.1:14559` (R-MAV-05), sharing
+   * one `LinkTracker` with the renderer above. Assembled here and *started*
+   * by `startServer`, the same division `TrafficSampler` follows: this
+   * function builds, the daemon opens sockets.
+   */
+  mavlinkListener?: LoopbackListener;
   generated: string[];
 } {
   const log = opts.log ?? note;
@@ -352,6 +402,60 @@ export function buildRenderers(opts: BuildRenderersOptions): {
       secrets,
       log,
     });
+  // Last, and deliberately. Telemetry rides on a network that has already
+  // settled, and this is the renderer that can take longest — a full sweep is
+  // four speeds on each of two devices, and §3's whole point is that spending
+  // it costs nothing. Nothing is behind it to be stopped by a failure, which
+  // matters less than it looks because render() does not throw at all (K-19,
+  // and §5: no telemetry fault is worth reverting a whole configuration for).
+  if (opts.mavlink === undefined) {
+    // **Say it.** Without this, a device with no serial opener accepted an
+    // apply that configured three ground stations, wrote no
+    // /etc/mavlink-router/main.conf, started no router, and put nothing
+    // anywhere saying why — a successful apply that did nothing, which is the
+    // worst shape a missing capability can take. Not `degraded`: that refuses
+    // *every* apply, and a board without telemetry must still be configurable
+    // (rule 6). One line an operator can act on, on the same channel the rest
+    // of the renderers report on.
+    log(
+      "mavlink: telemetry is not configured on this device — this daemon was started without a way to open "
+        + "a serial port, so mavlink-router is neither configured nor started and the Telemetry page will "
+        + "stay empty (R-MAV-01, R-MAV-08)",
+    );
+  }
+  // **One tracker, two writers.** The renderer supplies the sweep's outcome
+  // and the router's own counters (`observed`, `sampled`); the listener
+  // supplies heartbeats off the loopback copy (`heard`). Handing both the same
+  // instance is what makes GET /mav/state one answer rather than two halves
+  // stitched together at the route — and it is why the listener depends on
+  // `LinkTracker` rather than on the renderer. Built here, where both are, so
+  // no caller can get it wrong by forgetting.
+  //
+  // The two are built together rather than each on its own line, because the
+  // tracker is what they share and a block is the only shape that says so.
+  // The listener exists exactly when the renderer does: without one, no
+  // /etc/mavlink-router/main.conf is written and no router is started, so
+  // nothing anywhere sends to :14559 — a socket held open for a feed that
+  // cannot exist is a port held for nothing.
+  let mavlinkRenderer: MavlinkRenderer | undefined;
+  let mavlinkListener: LoopbackListener | undefined;
+  if (opts.mavlink !== undefined) {
+    const tracker = new LinkTracker({ clock: opts.clock ?? systemClock });
+    mavlinkRenderer = new MavlinkRenderer({
+      run: opts.runner ?? systemRunner,
+      open: opts.mavlink.open,
+      confPath: opts.mavlink.confPath,
+      hintPath: opts.mavlink.hintPath,
+      tracker,
+      log,
+      clock: opts.clock,
+    });
+    mavlinkListener = new LoopbackListener({
+      tracker,
+      log,
+      ...(opts.mavlink.loopbackPort === undefined ? {} : { port: opts.mavlink.loopbackPort }),
+    });
+  }
 
   // First, and deliberately.
   //
@@ -401,9 +505,15 @@ export function buildRenderers(opts: BuildRenderersOptions): {
     log,
   });
 
+  // One list, both subsystems. The order is the order they run in: the
+  // hostname and the network first, then the console, then the things that
+  // depend on a configured device — media, telemetry — and the camera
+  // pipelines last, because a pipeline is composed from what the renderers
+  // above it have already settled.
   const renderers: Renderer[] = [hostname, renderer, remoteRenderer];
   if (consoleRenderer !== undefined) renderers.push(consoleRenderer);
   if (mediaRenderer !== undefined) renderers.push(mediaRenderer);
+  if (mavlinkRenderer !== undefined) renderers.push(mavlinkRenderer);
   renderers.push(pipelineRenderer);
 
   return {
@@ -417,6 +527,8 @@ export function buildRenderers(opts: BuildRenderersOptions): {
     remoteRenderer,
     ...(mediaRenderer === undefined ? {} : { mediaRenderer }),
     supervisor,
+    ...(mavlinkRenderer === undefined ? {} : { mavlinkRenderer }),
+    ...(mavlinkListener === undefined ? {} : { mavlinkListener }),
     generated,
   };
 }
@@ -436,6 +548,49 @@ export function consolePathsFromEnv(env: NodeJS.ProcessEnv = process.env): Conso
   if (env.YONDER_CONSOLE_CORE_TREE !== undefined) overrides.coreTree = env.YONDER_CONSOLE_CORE_TREE;
   if (env.YONDER_CONSOLE_UNIT !== undefined) overrides.unit = env.YONDER_CONSOLE_UNIT;
   return consolePaths(overrides);
+}
+
+/**
+ * The apply journal's own path on a real device.
+ *
+ * A constant rather than a literal in `main()` because two production
+ * decisions are derived from it — the mesh record and the telemetry hint both
+ * live beside it — and a second copy of the default is how the three come to
+ * disagree on a board whose `YONDER_JOURNAL` is set.
+ */
+export const DEFAULT_JOURNAL_PATH = "/var/lib/yonder/apply.json";
+
+/**
+ * Everything the telemetry renderer needs on a real device (R-MAV-01).
+ *
+ * The same shape and the same purpose as `consolePathsFromEnv` above: the
+ * only thing that decides a production path is this function, and the only
+ * thing that decides a test path is the test. Without it these three values
+ * would live inside `main()`, which nothing can call and nothing therefore
+ * checks — and a hint written to the wrong place is a sweep on every boot,
+ * silently, for ever.
+ *
+ * `run` is a parameter for the same reason every renderer takes one: nothing
+ * in a test may reach a real `stty`. `opts` is there for the same reason
+ * again, one level down: without it the opener this function builds is welded
+ * to the wall clock and to no journal at all, so the first test that wires
+ * this function through would sleep on real time and lose whatever the opener
+ * had to say. `main()` passes the real ones.
+ */
+export function mavlinkFromEnv(
+  run: CommandRunner = systemRunner,
+  env: NodeJS.ProcessEnv = process.env,
+  opts: { clock?: Clock; log?: (line: string) => void } = {},
+): NonNullable<ServerOptions["mavlink"]> {
+  return {
+    open: openPortWith(run, opts),
+    confPath: ROUTER_CONF_PATH,
+    // Beside the apply journal and the mesh record — one state directory for
+    // this daemon, not a third one the telemetry renderer invented. It
+    // follows YONDER_JOURNAL so a board running out of an alternate state
+    // directory keeps all three together.
+    hintPath: join(dirname(env.YONDER_JOURNAL ?? DEFAULT_JOURNAL_PATH), "mavlink-link.json"),
+  };
 }
 
 export async function startServer(opts: ServerOptions): Promise<{ close(): Promise<void> }> {
@@ -580,6 +735,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
       ...(opts.mediaConfigPath === undefined ? {} : { mediaConfigPath: opts.mediaConfigPath }),
       ...(opts.console === undefined ? {} : { console: opts.console }),
       ...(opts.spawner === undefined ? {} : { spawner: opts.spawner }),
+      ...(opts.mavlink === undefined ? {} : { mavlink: opts.mavlink }),
     });
   } catch (e) {
     const message = (e as Error).message;
@@ -722,6 +878,22 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
     });
     adaptation.start();
   }
+  // The telemetry equivalent, and on its own clock for the same reason
+  // (R-NET-10's argument, applied to the router's own counters): the sparkline
+  // and the per-station lamps must already be drawn when the Telemetry page is
+  // opened, not start flat and fill in while an operator watches. Absent on a
+  // device with no serial opener — see BuildRenderersOptions.mavlink.
+  built?.mavlinkRenderer?.startSampling();
+
+  // The control plane's own copy of the traffic (R-MAV-05), bound to loopback
+  // and nothing else (R-MAV-07). Awaited because binding a socket takes
+  // microseconds and a daemon whose state is settled before it serves is one
+  // less race — and safe to await because `start()` never rejects: K-19's rule
+  // says nothing on this path may be able to take the daemon down, and a port
+  // already in use costs a Telemetry page its heartbeat, never a device its
+  // console (rule 6). The ground stations are unaffected either way; raw
+  // MAVLink never passes through this process (R-MAV-06).
+  await built?.mavlinkListener?.start();
 
   // No secret is ever printed. That mechanism existed to surface a random
   // per-device access-point passphrase and there is no longer one to surface
@@ -1098,6 +1270,11 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
     // working — which is most of what an operator needs to fix it.
     reachState: () => reach.state(),
     testPath: async (path) => reach.test(path),
+    // The renderer itself: it already has the shape `MavlinkControl` asks for,
+    // and it is the only object that knows both what was measured and whether
+    // `mavlink-router` is on the air. Absent on a device with no serial
+    // opener, and every /mav/* route then says so.
+    ...(built?.mavlinkRenderer === undefined ? {} : { mavlink: built.mavlinkRenderer }),
     ...(onProvisioned === undefined ? {} : { onProvisioned }),
   });
 
@@ -1204,6 +1381,12 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
         // that has already let go of its socket — and, unlike the others,
         // it would be commanding hardware while it did it.
         adaptation?.stop();
+        // The fifth: the telemetry sampler, and with it any sweep this
+        // renderer had scheduled for thirty seconds' time.
+        built?.mavlinkRenderer?.close();
+        // And the socket it shares a tracker with. A listener outliving its
+        // daemon would hold :14559 against the next one to start.
+        built?.mavlinkListener?.close();
         server.close(() => {
           if (existsSync(opts.socketPath)) unlinkSync(opts.socketPath);
           resolve();
@@ -1216,7 +1399,7 @@ async function main(): Promise<void> {
   await startServer({
     socketPath: process.env.YONDER_SOCKET ?? "/run/yonder/core.sock",
     configPath: process.env.YONDER_CONFIG ?? "/etc/yonder/config.yaml",
-    journalPath: process.env.YONDER_JOURNAL ?? "/var/lib/yonder/apply.json",
+    journalPath: process.env.YONDER_JOURNAL ?? DEFAULT_JOURNAL_PATH,
     secretsPath: process.env.YONDER_SECRETS ?? "/etc/yonder/secrets.yaml",
     renderers: [],
     // The one place production console paths are decided. Everywhere else
@@ -1228,6 +1411,21 @@ async function main(): Promise<void> {
     // literally, and a daemon writing somewhere else would be a media server
     // whose listeners never change with the configuration.
     mediaConfigPath: MEDIA_CONFIG_PATH,
+    /**
+     * **The one place a real serial port is opened** (R-MAV-01), and the
+     * line that stops the telemetry renderer being inert: without it
+     * `buildRenderers` assembles no `MavlinkRenderer` at all, every `/mav/*`
+     * route answers 503 and no `mavlink-router` is ever started.
+     *
+     * Given here rather than defaulted inside `buildRenderers`, for the same
+     * reason `console` is: a default that touches hardware is a default a
+     * test reaches by forgetting to override it, and this one would open a
+     * node under `/dev` and run a real `stty`. Every call to what
+     * `openPortWith` returns comes from `MavlinkRenderer` by way of
+     * `detect()`, so every `stty` still runs on a renderer's stack and
+     * through the injected runner (ADR-0006).
+     */
+    mavlink: mavlinkFromEnv(systemRunner, process.env, { log: warn }),
   });
   note("yonder-core listening");
 }

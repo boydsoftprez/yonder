@@ -1,0 +1,42 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!--
+  The editor half of the flow strip. Node-RED finds this by basename beside the
+  node's .js; without it the widget registers and shows as "unknown node".
+  A form and a registration, nothing else (CLAUDE.md rule 2, R-UI-01).
+-->
+<script type="text/html" data-template-name="ui-yonder-flow">
+  <div class="form-row"><label for="node-input-group"><i class="fa fa-table"></i> Group</label>
+    <input type="text" id="node-input-group" /></div>
+  <div class="form-row"><label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name" /></div>
+  <div class="form-row"><label for="node-input-label"><i class="fa fa-font"></i> Label</label>
+    <input type="text" id="node-input-label" placeholder="(none)" /></div>
+  <div class="form-tips">
+    Send <code>msg.payload</code> as <code>{ from, through, to, legs }</code>.
+    Each place is <code>{ label, detail, absent }</code>; each leg is
+    <code>{ rate, caption, absent }</code>. A leg marked absent draws dashed
+    and grey &mdash; nothing has failed when telemetry is merely stopped.
+  </div>
+</script>
+<script type="text/html" data-help-name="ui-yonder-flow">
+<p>Where telemetry comes from, what it passes through and where it goes, with
+the rate on each leg (R-MAV-10).</p>
+<p>The one instrument in this set that draws a <em>relationship</em> rather
+than a quantity or a state: what an operator reads off it is which leg is
+dead.</p>
+</script>
+<script type="text/javascript">
+  RED.nodes.registerType("ui-yonder-flow", {
+    category: "dashboard 2", color: "#c7e0d4",
+    defaults: {
+      name: { value: "" },
+      group: { type: "ui-group", required: true },
+      order: { value: 0 }, width: { value: 0 }, height: { value: 0 },
+      label: { value: "" }
+    },
+    inputs: 1, outputs: 0,
+    icon: "font-awesome/fa-long-arrow-right",
+    paletteLabel: "yonder flow",
+    label: function () { return this.name || this.label || "yonder flow"; }
+  });
+</script>
