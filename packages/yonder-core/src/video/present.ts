@@ -769,13 +769,21 @@ export function cameraIndex(input: {
       spec: `${camera.codec.toUpperCase()} · ${camera.width}×${camera.height}p${camera.framerate}`,
       identity: absentIdentityWords(camera.device),
       state: "Not attached",
-      // The strongest of the four, and deliberately: this is an aircraft
-      // configured for a camera it does not have. It is either a camera that
-      // fell off the bus — the failure K-46 is about, which an operator has
-      // to know about while they can still act on it — or an entry left
-      // behind by a replug, which is wrong and now has a key to clear it.
-      // Drawn neutral, it is what nobody noticed for three configurations.
-      tone: "bad",
+      // **Neutral, and that is the operator's call** — taken on 2026-09-07,
+      // against the argument for the strongest tone.
+      //
+      // The case for red: this is an aircraft configured for a camera it does
+      // not have, either one that fell off the bus (K-46) or an entry left by
+      // a replug — and drawn quietly, a stale entry is exactly what nobody
+      // noticed through three configurations of the same camera.
+      //
+      // The case that won: somebody who unplugs a camera between flights sees
+      // red on a healthy board, and a warning that fires when nothing is wrong
+      // stops being read at all — including on the day it means something. The
+      // row already says *Not attached* in words, names the socket it expects,
+      // and now carries a key to clear it. That is the telling; the colour was
+      // only ever the alarm.
+      tone: "neutral",
       rate: null,
       // The socket it expects. The one string an operator can act on: move a
       // plug back to it, or remove the entry that names it.

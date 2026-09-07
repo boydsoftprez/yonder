@@ -623,7 +623,11 @@ describe("cameraIndex — the probe-to-row adapter", () => {
     }).cameras[0];
     expect(idle).toMatchObject({ state: "Idle", tone: "neutral" });
     expect(absent?.state).not.toBe(idle?.state);
-    expect(absent).toMatchObject({ state: "Not attached", tone: "bad" });
+    // Neutral, by the operator's decision on 2026-09-07: a warning that fires
+    // every time somebody unplugs a camera between flights is a warning that
+    // stops being read. The row says *Not attached* in words, names the socket
+    // it expects and carries a key to clear it — the colour was only the alarm.
+    expect(absent).toMatchObject({ state: "Not attached", tone: "neutral" });
   });
 
   /**
