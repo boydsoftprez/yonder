@@ -1651,7 +1651,7 @@ WebRTC session did not recover on its own once the publisher returned.
 
 ### K-52 · ~~The ground station's stream has no resolution or frame-rate control~~ — CLOSED
 
-**Status:** Closed on 2026-09-07 — closed by the resolution and frame-rate pickers on the ground station's stream (2e4787c), proven on the board: the capture caps moved 1280×720@30 → 640×480@15 and the pipeline respawned to them · **Requirements:** R-CAM-14, R-VID-07, R-UI-20
+**Status:** Closed on 2026-09-07 — closed by the resolution and frame-rate pickers on the ground station's stream (bb19ce7), proven on the board: the capture caps moved 1280×720@30 → 640×480@15 and the pipeline respawned to them · **Requirements:** R-CAM-14, R-VID-07, R-UI-20
 
 Found by the operator on the board: the preview has **Size** and **Rate**
 pickers; the stream to the ground station has neither. Its resolution and frame
