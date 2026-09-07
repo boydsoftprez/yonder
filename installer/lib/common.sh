@@ -43,6 +43,17 @@
 : "${YONDER_MAVLINK_BIN:=/usr/bin/mavlink-routerd}"
 : "${YONDER_MAVLINK_ETC:=/etc/mavlink-router}"
 
+# Where 52-gst-rockchip.sh puts the MPP plugin and the two libraries it links,
+# the device node whose presence says this is a Rockchip board (R-HW-04: the
+# board decides at boot, by what it has), and the registry caches GStreamer
+# keeps per user. Overridable for the same reason YONDER_BOOT_DIR is: a role
+# that copies into /usr/lib is worth running against a fixture directory. An
+# install never sets any of them.
+: "${YONDER_MPP_DEVICE:=/dev/mpp_service}"
+: "${YONDER_GST_LIBDIR:=/usr/lib/aarch64-linux-gnu}"
+: "${YONDER_GST_PLUGIN_DIR:=/usr/lib/aarch64-linux-gnu/gstreamer-1.0}"
+: "${YONDER_GST_REGISTRY_DIRS:=/root/.cache/gstreamer-1.0 /var/cache/gstreamer-1.0 /home/yonder/.cache/gstreamer-1.0}"
+
 # The one path the systemd unit's ExecStart names, and a symlink this
 # installer points at whichever node the install actually resolved.
 #

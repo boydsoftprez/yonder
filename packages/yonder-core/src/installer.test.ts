@@ -70,7 +70,7 @@ function assertAccounts(unitPath: string, opts: { known?: [string[], string[]]; 
   );
 }
 
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, readdirSync, statSync, symlinkSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, readdirSync, statSync, symlinkSync, existsSync, lstatSync } from "node:fs";
 
 import { ROUTER_CONF_PATH, ROUTER_UNIT } from "./mav/renderer.js";
 
@@ -244,11 +244,11 @@ describe("installer/roles/50-mediamtx.sh", () => {
     // and a pipeline naming an element GStreamer cannot resolve fails to
     // parse rather than failing to connect — so a missing package here is
     // every camera on the device, not one output.
-    expect(role).toMatch(/^ensure_pkgs gstreamer1\.0-rtsp$/m);
+    expect(role).toMatch(/^ensure_pkgs gstreamer1\.0-tools gstreamer1\.0-plugins-base gstreamer1\.0-plugins-good \\$/m);
   });
 
   it("asks GStreamer to resolve the element, not dpkg whether a package is there", () => {
-    expect(role).toContain("gst-inspect-1.0 rtspclientsink");
+    expect(role).toContain("rtspclientsink v4l2src");
     expect(role.indexOf("die")).toBeGreaterThan(0);
   });
 
@@ -1592,5 +1592,175 @@ describe("installer/make-payload.sh stages gst-rockchip", () => {
   it("never reads a variable in the summary that only one component sets (K-64)", () => {
     const summary = script.slice(script.indexOf('step "done"'));
     expect(summary).not.toContain("$ZT_DEB");
+  });
+});
+
+describe("installer/roles/52-gst-rockchip.sh", () => {
+  const GR_ROLE = join(ROOT, "installer", "roles", "52-gst-rockchip.sh");
+
+  /** An ELF header for `machine`, as a staged shared object would begin. */
+  function elfObject(machine: number): Buffer {
+    const h = Buffer.alloc(64);
+    h.write("\x7fELF", 0, "binary");
+    h[4] = 2;
+    h[5] = 1;
+    h[6] = 1;
+    h.writeUInt16LE(3, 16);
+    h.writeUInt16LE(machine, 18);
+    return h;
+  }
+  /** dpkg says every package is present, apt has no network, ldconfig and gst-inspect record what they were asked. */
+  function stubs(opts: { unresolved?: string[] } = {}): { path: string; log: string } {
+    const bin = join(dir, "grbin");
+    const log = join(dir, "gr.log");
+    mkdirSync(bin, { recursive: true });
+    const record = (name: string, body: string) => writeFileSync(join(bin, name), [
+      "#!/bin/sh",
+      `printf '%s %s\\n' "$(basename "$0")" "$*" >> '${log}'`,
+      body,
+      "",
+    ].join("\n"), { mode: 0o755 });
+    record("dpkg-query", 'printf "install ok installed\\n"; exit 0');
+    record("apt-get", 'printf "the network is not here\\n" >&2; exit 100');
+    record("ldconfig", "exit 0");
+    const cases = (opts.unresolved ?? []).map((e) => `*"${e}"*) exit 1 ;;`).join(" ");
+    record("gst-inspect-1.0", `case "$*" in ${cases} *) exit 0 ;; esac`);
+    writeFileSync(log, "");
+    return { path: `${bin}:${process.env.PATH ?? ""}`, log };
+  }
+  function payload(opts: { plugin?: Buffer } = {}): string {
+    const src = join(dir, "src");
+    const lib = join(src, "vendor", "gst-rockchip", "lib");
+    const plug = join(src, "vendor", "gst-rockchip", "gstreamer-1.0");
+    mkdirSync(lib, { recursive: true });
+    mkdirSync(plug, { recursive: true });
+    writeFileSync(join(lib, "librockchip_mpp.so.0"), elfObject(183));
+    symlinkSync("librockchip_mpp.so.0", join(lib, "librockchip_mpp.so.1"));
+    symlinkSync("librockchip_mpp.so.1", join(lib, "librockchip_mpp.so"));
+    writeFileSync(join(lib, "librga.so.2"), elfObject(183));
+    symlinkSync("librga.so.2", join(lib, "librga.so"));
+    writeFileSync(join(plug, "libgstrockchipmpp.so"), opts.plugin ?? elfObject(183));
+    return src;
+  }
+  function board() {
+    const libdir = join(dir, "usr-lib");
+    const registry = join(dir, "gst-cache");
+    mkdirSync(registry, { recursive: true });
+    writeFileSync(join(registry, "registry.aarch64.bin"), "stale");
+    const reference = join(dir, "reference-elf");
+    writeFileSync(reference, elfObject(183));
+    return { libdir, plugindir: join(libdir, "gstreamer-1.0"), registry, reference };
+  }
+  function runRole(opts: { src: string; path: string; device: string; board: ReturnType<typeof board>; dryRun?: boolean }) {
+    return sh(
+      `set -eu; . '${COMMON}'; . '${GR_ROLE}'`,
+      {
+        DRY_RUN: opts.dryRun === true ? "1" : "0",
+        YONDER_SRC: opts.src,
+        YONDER_MPP_DEVICE: opts.device,
+        YONDER_GST_LIBDIR: opts.board.libdir,
+        YONDER_GST_PLUGIN_DIR: opts.board.plugindir,
+        YONDER_GST_REGISTRY_DIRS: opts.board.registry,
+        YONDER_ELF_REFERENCE: opts.board.reference,
+      },
+      opts.path,
+    );
+  }
+  // /dev/null is a character device on every Unix; a Rockchip board is told
+  // apart by the character device MPP opens, so it stands in for one here.
+  const ROCKCHIP = "/dev/null";
+
+  it("skips, and says how to build one, when the payload carries no plugin", () => {
+    const src = join(dir, "bare-src");
+    mkdirSync(src, { recursive: true });
+    const r = runRole({ src, path: stubs().path, device: ROCKCHIP, board: board() });
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("no gst-rockchip in the payload; skipping");
+    expect(r.out).toContain("--only gst-rockchip");
+  });
+
+  it("leaves a board with no MPP device alone, and says why (R-HW-04)", () => {
+    const b = board();
+    const { path, log } = stubs();
+    const r = runRole({ src: payload(), path, device: join(dir, "no-such-node"), board: b });
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("not a Rockchip board");
+    expect(existsSync(join(b.plugindir, "libgstrockchipmpp.so"))).toBe(false);
+    expect(readFileSync(log, "utf8")).not.toContain("ldconfig");
+  });
+
+  it("installs the libraries and the plugin where GStreamer looks, refreshes the loader and drops the registry cache", () => {
+    const b = board();
+    const { path, log } = stubs();
+    const r = runRole({ src: payload(), path, device: ROCKCHIP, board: b });
+    expect(r.code).toBe(0);
+    expect(existsSync(join(b.plugindir, "libgstrockchipmpp.so"))).toBe(true);
+    expect(existsSync(join(b.libdir, "librockchip_mpp.so.0"))).toBe(true);
+    expect(lstatSync(join(b.libdir, "librockchip_mpp.so.1")).isSymbolicLink()).toBe(true);
+    expect(existsSync(join(b.libdir, "librga.so.2"))).toBe(true);
+    expect(existsSync(join(b.registry, "registry.aarch64.bin"))).toBe(false);
+    const asked = readFileSync(log, "utf8");
+    expect(asked).toContain("ldconfig");
+    for (const element of ["mpph264enc", "mpph265enc", "mppjpegdec"]) {
+      expect(asked).toContain(`gst-inspect-1.0 --exists ${element}`);
+    }
+    expect(r.out).toContain("probeEncoder will find them");
+  });
+
+  it("dies naming the element the registry does not resolve, and names the permission trap", () => {
+    const r = runRole({ src: payload(), path: stubs({ unresolved: ["mpph265enc"] }).path, device: ROCKCHIP, board: board() });
+    expect(r.code).not.toBe(0);
+    expect(r.out).toContain("does not resolve mpph265enc");
+    expect(r.out).toContain("decoders and no encoders");
+  });
+
+  it("refuses a plugin built for another architecture, naming both", () => {
+    const r = runRole({ src: payload({ plugin: elfObject(62) }), path: stubs().path, device: ROCKCHIP, board: board() });
+    expect(r.code).not.toBe(0);
+    expect(r.out).toContain("ELF machine 62");
+    expect(r.out).toContain("183");
+  });
+
+  it("says what it would do on a dry run, and touches nothing", () => {
+    const b = board();
+    const r = runRole({ src: payload(), path: stubs().path, device: ROCKCHIP, board: b, dryRun: true });
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("would check that GStreamer resolves");
+    expect(existsSync(join(b.plugindir, "libgstrockchipmpp.so"))).toBe(false);
+    expect(existsSync(join(b.registry, "registry.aarch64.bin"))).toBe(true);
+  });
+
+  it("installs libdrm2 and the tools package from Debian, not the payload", () => {
+    expect(readFileSync(GR_ROLE, "utf8")).toMatch(/^ensure_pkgs libdrm2 gstreamer1\.0-tools$/m);
+  });
+});
+
+describe("installer/roles/50-mediamtx.sh installs what every pipeline is made of (spec §10)", () => {
+  const role = readFileSync(join(ROOT, "installer", "roles", "50-mediamtx.sh"), "utf8");
+  const ensure = role.slice(role.indexOf("ensure_pkgs gstreamer1.0-tools"), role.indexOf("gstreamer1.0-rtsp") + "gstreamer1.0-rtsp".length);
+
+  it("names every GStreamer package the composer relies on, on every board", () => {
+    for (const pkg of ["gstreamer1.0-tools", "gstreamer1.0-plugins-base", "gstreamer1.0-plugins-good",
+      "gstreamer1.0-plugins-bad", "gstreamer1.0-plugins-ugly", "gstreamer1.0-rtsp"]) {
+      expect(ensure).toContain(pkg);
+    }
+  });
+
+  it("resolves every board-independent element compose() can name, and dies on the first it cannot", () => {
+    // The list in video/pipeline.ts, minus the elements a board's own plugin
+    // provides (v4l2convert and v4l2h264enc on a Pi; the MPP elements on
+    // Rockchip, which 52-gst-rockchip.sh checks).
+    for (const element of ["rtspclientsink", "v4l2src", "jpegdec", "videoflip", "tee", "queue", "capsfilter",
+      "videorate", "videoconvert", "videoscale", "h264parse", "h265parse", "rtph264pay", "rtph265pay",
+      "udpsink", "x264enc", "jpegenc", "matroskamux", "filesink"]) {
+      expect(role).toContain(element);
+    }
+    expect(role).toContain('gst-inspect-1.0 --exists "$mtx_element"');
+    expect(role).toContain("|| die");
+  });
+
+  it("no longer takes the weaker branch when gst-inspect-1.0 is absent — it dies", () => {
+    expect(role).not.toContain("no gst-inspect-1.0 here to resolve");
+    expect(role).toContain("still no gst-inspect-1.0");
   });
 });

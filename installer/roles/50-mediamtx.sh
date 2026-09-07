@@ -2,37 +2,43 @@
 # Install the media server from the offline payload, and leave it off.
 # shellcheck shell=sh
 
-# The one GStreamer package every RTSP branch of every pipeline depends on.
+# Every GStreamer package the composer relies on, on every board, and the
+# tools package the probe asks the registry with. What is where: plugins-base
+# carries capsfilter, videoconvert, videoscale, videorate, tee and queue;
+# plugins-good v4l2src, jpegdec, videoflip, rtph264pay, rtph265pay, udpsink,
+# jpegenc and matroskamux; plugins-bad h264parse and h265parse; plugins-ugly
+# x264enc, the software fallback probeEncoder names — which no role installed
+# until now, so a board without a hardware encoder had no encoder at all;
+# rtsp carries rtspclientsink, the element every branch of every pipeline
+# ends in. A board's own elements — v4l2convert and v4l2h264enc on a Pi, the
+# MPP elements on Rockchip — come from the board's own plugin and are checked
+# by the role that provides it (52-gst-rockchip.sh).
 #
-# `rtspclientsink` lives in gstreamer1.0-rtsp, and a development board did not
-# have it. What that costs is not one branch: a pipeline description carrying
-# an element GStreamer cannot resolve does not *parse*, so the launch fails
-# before anything is negotiated - and both the full-rate consumers and the
-# cheap preview the interface watches go through this element. A missing
-# package here is every camera on the device, not one output.
-#
-# From apt rather than the payload: it is in Debian base, so an offline board
-# imaged from a debootstrapped chroot has it available the same way
-# network-manager and avahi-daemon are.
-ensure_pkgs gstreamer1.0-rtsp
+# From apt rather than the payload: all six are in Debian main, so an offline
+# board imaged from a debootstrapped chroot has them the same way it has
+# network-manager. make-payload.sh is for what Debian does not carry.
+ensure_pkgs gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
+    gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-rtsp
 
 # And checked, because "the package installed" and "GStreamer resolves the
-# element" are different questions and only the second one matters. Asked of
-# the registry when there is a gst-inspect-1.0 to ask it with; a board without
-# the tools package can still say whether the package is there, which is
-# weaker but is not nothing.
+# element" are different questions and only the second matters: a pipeline
+# description naming an element GStreamer cannot resolve does not parse, so
+# one missing element is every camera on the device, not one output. The
+# weaker branch this check used to take when gst-inspect-1.0 was absent is
+# gone — the tools package is installed above, so its absence now is a fault.
 if [ "$DRY_RUN" = "1" ]; then
-    log "would check that GStreamer resolves rtspclientsink"
-elif command -v gst-inspect-1.0 >/dev/null 2>&1; then
-    gst-inspect-1.0 rtspclientsink >/dev/null 2>&1 \
-        || die "GStreamer cannot resolve rtspclientsink even though gstreamer1.0-rtsp is installed;
-every pipeline on this device carries that element - the full-rate outputs and the preview alike -
-and a pipeline naming an element GStreamer does not have fails to parse rather than failing to connect"
-    log "GStreamer resolves rtspclientsink"
-elif have_pkg gstreamer1.0-rtsp; then
-    log "gstreamer1.0-rtsp is installed; no gst-inspect-1.0 here to resolve rtspclientsink with"
+    log "would check that GStreamer resolves every board-independent element the composer names"
 else
-    die "gstreamer1.0-rtsp is not installed; every video pipeline on this device would fail to parse"
+    command -v gst-inspect-1.0 >/dev/null 2>&1 \
+        || die "gstreamer1.0-tools is installed and there is still no gst-inspect-1.0; nothing here can ask the registry anything"
+    for mtx_element in rtspclientsink v4l2src jpegdec videoflip tee queue capsfilter videorate videoconvert videoscale \
+            h264parse h265parse rtph264pay rtph265pay udpsink x264enc jpegenc matroskamux filesink; do
+        gst-inspect-1.0 --exists "$mtx_element" \
+            || die "GStreamer cannot resolve $mtx_element even though its package is installed;
+a pipeline naming an element GStreamer does not have fails to parse rather than failing to connect,
+and every camera on this device composes it"
+    done
+    log "GStreamer resolves every board-independent element the composer names"
 fi
 
 mtx_src="$YONDER_SRC/vendor/mediamtx"
