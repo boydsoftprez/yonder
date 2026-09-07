@@ -199,7 +199,8 @@ class Pad(object):
         # A blocking probe on a pad nothing is pushing through fires at once,
         # which is what makes it a *block* rather than a wait.
         if mask in (PadProbeType.BLOCK_DOWNSTREAM, PadProbeType.IDLE):
-            callback(self, ProbeInfo(None))
+            if callback(self, ProbeInfo(None)) is PadProbeReturn.REMOVE:
+                self.probes.pop(handle, None)
         return handle
 
     def remove_probe(self, handle):
@@ -214,6 +215,15 @@ class Pad(object):
         self.peer = peer
         peer.peer = self
         _trace("link", src=self.path(), sink=peer.path())
+        # **Caps travel to a pad the moment it is linked, not only when the
+        # pipeline is started.** In GStreamer they are sticky events, held on
+        # the source pad and delivered to whatever links to it afterwards. A
+        # branch built and joined while everything else is already playing —
+        # which is how a still and a recording work — has no other moment to
+        # learn its shape, and without this it reports none and the host
+        # answers a capture with no size on it.
+        if self.caps is not None:
+            _deliver_caps(peer, self.caps)
         return PadLinkReturn.OK
 
     def unlink(self, peer):
@@ -645,6 +655,26 @@ class StateChangeReturn(object):
     NO_PREROLL = _Enum(3)
 
 
+
+def _deliver_caps(pad, caps, seen=None):
+    """The caps a newly linked pad inherits, and everything downstream of it.
+
+    `Pipeline.negotiate` does this for a graph that is joined up before it
+    plays; this is the same walk for a branch joined after."""
+    seen = set() if seen is None else seen
+    element = pad.element
+    if element is None or element.name in seen:
+        return
+    seen = seen | {element.name}
+    pad.caps = caps
+    for name, downstream in list(element.pads.items()):
+        if name == "sink":
+            continue
+        downstream.caps = caps
+        if downstream.peer is not None:
+            _deliver_caps(downstream.peer, caps, seen)
+
+
 class PadProbeType(object):
     BUFFER = _Enum(1)
     BLOCK_DOWNSTREAM = _Enum(2)
@@ -655,6 +685,10 @@ class PadProbeType(object):
 class PadProbeReturn(object):
     OK = _Enum(0)
     DROP = _Enum(1)
+    # A probe that has done its one job and wants to be gone. `Branch.start`
+    # joins the tee from inside an IDLE probe and returns this, so the link is
+    # made once and the probe does not sit on a pad that is about to stream.
+    REMOVE = _Enum(2)
 
 
 class PadLinkReturn(object):

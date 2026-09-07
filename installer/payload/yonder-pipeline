@@ -586,6 +586,25 @@ class Host(object):
             ])
         except BranchError as exc:
             return {"refused": str(exc)}
+
+        # **Count what actually reaches the branch.** A recording that received
+        # no frame still leaves a container header on the card — 336 bytes of
+        # it — and without this the console lists that as a capture and an
+        # operator finds a file that will not open. The still path already
+        # refuses on the same evidence; this is the recording's half of it.
+        # Counted rather than inferred from the file's size, because only the
+        # branch knows the difference between a header and a short recording.
+        frames = [0]
+
+        def count(pad, info):
+            frames[0] += 1
+            return Gst.PadProbeReturn.OK
+
+        head = branch.head()
+        if head is not None:
+            head.add_probe(Gst.PadProbeType.BUFFER, count)
+        branch.frames = frames
+
         branch.start()
         self.recording = branch
         self.recording_path = path
@@ -638,7 +657,16 @@ class Host(object):
         if probe and last is not None:
             last.remove_probe(probe)
         branch.dispose()
-        return {"path": path, "bytes": size_of(path), "recording": False}
+
+        # Nothing arrived, so there is nothing to keep: what is on the card is
+        # a container header and no video. Removed and refused, rather than
+        # offered to the console as a capture.
+        if getattr(branch, "frames", [1])[0] == 0:
+            remove_quietly(path)
+            return {"refused": "no frame reached the recording, so nothing was "
+                               "written", "recording": False}
+        return {"path": path, "bytes": size_of(path), "recording": False,
+                "frames": getattr(branch, "frames", [None])[0]}
 
     def apply(self, sets):
         """Set each property on the element that carries it, exactly as the
