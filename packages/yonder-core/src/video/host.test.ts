@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -351,6 +351,217 @@ describe("the pipeline host moves the preview and nothing else", () => {
     expect(host.traced().filter((e) => e.event === "sync_state")).toEqual([]);
     expect(host.stderr()).toContain("not on a branch of their own");
   }, 30_000);
+});
+
+/**
+ * The two ops that build a branch while the pipeline is playing.
+ *
+ * These are the host's first ops that **add and remove elements** rather than
+ * set properties on ones already there, and every recipe below is the one
+ * measured on a Pi 4 and written down in
+ * `docs/hardware/stills-and-recording-on-a-live-pipeline.md`. Two of the
+ * assertions here exist because the mistake they name each destroyed a spike:
+ * an end-of-stream sent to take a still branch down, and a branch's pad
+ * offset to zero.
+ */
+describe("the pipeline host takes a still off the raw tee", () => {
+  /** Every trace line written since `from`. */
+  const after = (host: ReturnType<typeof startHost>, from: number): Record<string, unknown>[] =>
+    host.traced().slice(from);
+
+  it("writes a frame, and answers with the file and the shape it actually is", async () => {
+    const host = startHost(argvFor().slice(1));
+    await host.flowing();
+    const path = join(dir, "still-1.jpg");
+    const reply = await host.ask({ id: 30, camera: "cam0", op: "still", path });
+    expect(reply).toMatchObject({
+      id: 30, continuous: true,
+      // The shape is read off the branch's own pad, never taken from the
+      // request: what the frame *is* is the only honest answer.
+      observed: { path, width: 1280, height: 720 },
+    });
+    expect((reply.observed as { bytes: number }).bytes).toBeGreaterThan(0);
+    expect(statSync(path).isFile()).toBe(true);
+  }, 20_000);
+
+  it("hangs it off `raw`, where the decoded frames are, and not off `main`", async () => {
+    // A still off `main` would be H.264, not a photograph; a recording off
+    // `raw` would cost a second encode on a board whose whole cost is the
+    // decode. The pair is the point, so it is asserted rather than assumed.
+    const host = startHost(argvFor().slice(1));
+    await host.flowing();
+    const from = host.traced().length;
+    await host.ask({ id: 31, camera: "cam0", op: "still", path: join(dir, "still-2.jpg") });
+    const requested = after(host, from).filter((e) => e.event === "request_pad");
+    expect(requested.map((e) => e.element)).toEqual(["raw"]);
+  }, 20_000);
+
+  it("takes three in a row, which is the whole reason it does not send an end-of-stream", async () => {
+    // The first attempt at this sent EOS to take the branch down. The first
+    // still was written correctly and *every later one got zero buffers*,
+    // silently, because EOS is sticky and a tee pad that has carried one is
+    // finished for good. A build that only ever took one still would have
+    // shipped it — so three are taken, and the trace is asserted to carry no
+    // event at all.
+    const host = startHost(argvFor().slice(1));
+    await host.flowing();
+    const from = host.traced().length;
+    for (const n of [1, 2, 3]) {
+      const path = join(dir, `burst-${n}.jpg`);
+      const reply = await host.ask({ id: 40 + n, camera: "cam0", op: "still", path });
+      expect(reply.observed, `still ${n}`).toMatchObject({ path, width: 1280 });
+      expect(statSync(path).size).toBeGreaterThan(0);
+    }
+    expect(after(host, from).filter((e) => e.event === "send_event")).toEqual([]);
+  }, 30_000);
+
+  it("never offsets the branch's pad, which is what made a container ffprobe rejects", async () => {
+    // The other mistake that cost a spike: a branch joining a pipeline that
+    // has been up for a while carries the running time on its first buffer,
+    // and `pad.set_offset(-running)` looks like the fix. Negative timestamps
+    // make matroskamux write a container ffprobe refuses outright.
+    const host = startHost(argvFor().slice(1));
+    await host.flowing();
+    await host.ask({ id: 44, camera: "cam0", op: "still", path: join(dir, "still-3.jpg") });
+    expect(host.traced().filter((e) => e.event === "set_offset")).toEqual([]);
+  }, 20_000);
+
+  it("refuses when no fresh frame comes, and leaves no empty file behind", async () => {
+    // Never an old frame reported as a new one, and never an empty file
+    // dressed as a capture: a photograph an operator opens and finds nothing
+    // in is worse than being told the pipeline had nothing to give.
+    const host = startHost(argvFor().slice(1), { YONDER_FAKE_GST_ONE_FRAME: "1" });
+    await host.flowing();
+    const path = join(dir, "nothing.jpg");
+    const reply = await host.ask({ id: 45, camera: "cam0", op: "still", path });
+    expect(reply.observed).toMatchObject({ refused: expect.stringContaining("no fresh frame") as string });
+    expect(existsSync(path)).toBe(false);
+  }, 30_000);
+
+  it("says nothing at all to a still with no path to write to", async () => {
+    const host = startHost(argvFor().slice(1));
+    await host.flowing();
+    host.tell({ id: 46, camera: "cam0", op: "still" });
+    await until("the refusal", () => host.stderr().includes("no path to write to"));
+    expect(host.replies()).toEqual([]);
+  }, 20_000);
+});
+
+describe("the pipeline host records off the encoded tee", () => {
+  const after = (host: ReturnType<typeof startHost>, from: number): Record<string, unknown>[] =>
+    host.traced().slice(from);
+
+  it("starts a recording that grows and stops one that is finalised", async () => {
+    const host = startHost(argvFor().slice(1));
+    await host.flowing();
+    const path = join(dir, "flight.mkv");
+    expect(await host.ask({ id: 50, camera: "cam0", op: "record", path }))
+      .toMatchObject({ continuous: true, observed: { path, recording: true } });
+    const early = statSync(path).size;
+    await until("the file to grow", () => statSync(path).size > early);
+
+    const stopped = await host.ask({ id: 51, camera: "cam0", op: "record-stop" });
+    expect(stopped).toMatchObject({ continuous: true, observed: { path, recording: false } });
+    // Finalised: the muxer writes its index when it sees end-of-stream, and a
+    // teardown that raced the event would leave a file that does not play.
+    expect(readFileSync(path, "utf8").endsWith("index")).toBe(true);
+    // And it stopped growing, which is what "stopped" has to mean.
+    const settled = statSync(path).size;
+    await sleep(60);
+    expect(statSync(path).size).toBe(settled);
+  }, 30_000);
+
+  it("releases the fork pad before the end-of-stream, so the tee never carries one", async () => {
+    // The order is the whole of the stop. Block, unlink and release first, so
+    // no buffer is handed to elements on their way down; *then* the event,
+    // into the branch's own head, where it travels forward only and the tee's
+    // other pads never see it.
+    const host = startHost(argvFor().slice(1));
+    await host.flowing();
+    await host.ask({ id: 52, camera: "cam0", op: "record", path: join(dir, "order.mkv") });
+    const from = host.traced().length;
+    await host.ask({ id: 53, camera: "cam0", op: "record-stop" });
+
+    const events = after(host, from).map((e) => String(e.event));
+    const unlinked = events.indexOf("unlink");
+    const released = events.indexOf("release_pad");
+    const eos = events.indexOf("send_event");
+    const nulled = events.findIndex((e, i) => e === "set_state"
+      && Number(after(host, from)[i]?.state) === 1);
+    expect(unlinked).toBeGreaterThanOrEqual(0);
+    expect(released).toBeGreaterThan(unlinked);
+    expect(eos).toBeGreaterThan(released);
+    // And the branch is not taken down until the event has arrived.
+    expect(nulled).toBeGreaterThan(eos);
+  }, 30_000);
+
+  it("hangs off `main`, so it writes H.264 the encoder already made", async () => {
+    const host = startHost(argvFor().slice(1));
+    await host.flowing();
+    const from = host.traced().length;
+    await host.ask({ id: 54, camera: "cam0", op: "record", path: join(dir, "where.mkv") });
+    const requested = after(host, from).filter((e) => e.event === "request_pad");
+    expect(requested.map((e) => e.element)).toEqual(["main"]);
+    // Nothing that encodes was built: the branch parses and muxes, and that
+    // is the whole of the argument for taking it off the tee after the
+    // encoder rather than the one before it.
+    const built = after(host, from).filter((e) => e.event === "add_element").map((e) => e.kind);
+    expect(built).toEqual(["queue", "h264parse", "matroskamux", "filesink"]);
+  }, 20_000);
+
+  it("refuses a second recording rather than starting one over the top", async () => {
+    const host = startHost(argvFor().slice(1));
+    await host.flowing();
+    const path = join(dir, "first.mkv");
+    await host.ask({ id: 55, camera: "cam0", op: "record", path });
+    const second = await host.ask({
+      id: 56, camera: "cam0", op: "record", path: join(dir, "second.mkv"),
+    });
+    expect(second.observed).toMatchObject({
+      refused: expect.stringContaining("already recording") as string,
+    });
+    expect(existsSync(join(dir, "second.mkv"))).toBe(false);
+  }, 30_000);
+
+  it("refuses a stop when nothing is recording", async () => {
+    const host = startHost(argvFor().slice(1));
+    await host.flowing();
+    expect((await host.ask({ id: 57, camera: "cam0", op: "record-stop" })).observed)
+      .toMatchObject({ refused: expect.stringContaining("not recording") as string });
+  }, 20_000);
+
+  it("keeps a recording running and continuous through a still", async () => {
+    // The spiked property, and the one this whole task turns on: a frame off
+    // `raw` while a recording is running off `main` disturbs neither the
+    // source nor the recording.
+    const host = startHost(argvFor().slice(1));
+    await host.flowing();
+    const recording = join(dir, "during.mkv");
+    await host.ask({ id: 58, camera: "cam0", op: "record", path: recording });
+    const before = statSync(recording).size;
+
+    const still = await host.ask({
+      id: 59, camera: "cam0", op: "still", path: join(dir, "during.jpg"),
+    });
+    expect(still).toMatchObject({ continuous: true, observed: { width: 1280 } });
+    // The recording went on being written while the still was taken.
+    expect(statSync(recording).size).toBeGreaterThan(before);
+
+    // And it is still the recording that was running: it stops, and its file
+    // is finalised, exactly as though nothing had happened in between.
+    expect((await host.ask({ id: 60, camera: "cam0", op: "record-stop" })).observed)
+      .toMatchObject({ path: recording, recording: false });
+    expect(readFileSync(recording, "utf8").endsWith("index")).toBe(true);
+  }, 30_000);
+
+  it("reports a break when the main branch stops delivering as the branch goes on", async () => {
+    // The witness is measured, not asserted: with the pipeline made to stall
+    // as the graph changes, the same op answers `continuous: false`.
+    const host = startHost(argvFor().slice(1), { YONDER_FAKE_GST_STALL_AFTER_SET: "1" });
+    await host.flowing();
+    expect(await host.ask({ id: 61, camera: "cam0", op: "record", path: join(dir, "broken.mkv") }))
+      .toMatchObject({ continuous: false });
+  }, 20_000);
 });
 
 /**

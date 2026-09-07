@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { readFileSync } from "node:fs";
+import { statfs } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
 import { boardFacts, type BoardFacts, type FactSources } from "./facts.js";
 
 /**
@@ -75,4 +77,38 @@ export function readFactSources(opts: ReadFactsOptions = {}): FactSources {
 /** What this board says about itself. Every field may be null. */
 export function readBoardFacts(opts: ReadFactsOptions = {}): BoardFacts {
   return boardFacts(readFactSources(opts));
+}
+
+/**
+ * Free space on the medium holding `path`, in bytes (R-STO-06).
+ *
+ * `bavail` and not `bfree`: the kernel keeps a percentage of every filesystem
+ * back for root, and a recording running as the daemon's own user cannot
+ * spend it. Counting it would mean promising an operator time the card will
+ * not actually give — and this whole reader exists so that the remaining time
+ * on the console is the time they really have.
+ *
+ * **It walks up to the nearest directory that exists.** A captures directory
+ * nothing has written to yet is not a full card; it is the same medium as its
+ * parent, and answering with a failure there would refuse the first recording
+ * on every freshly flashed board.
+ *
+ * Injected wherever it is used, never called from inside a decision — see
+ * `video/recorder.ts`, which takes it as an option so that no test measures
+ * the machine it happens to be running on.
+ */
+export async function freeSpaceOn(path: string): Promise<number> {
+  let at = resolve(path);
+  for (;;) {
+    try {
+      const medium = await statfs(at);
+      return Number(medium.bavail) * Number(medium.bsize);
+    } catch (e) {
+      const up = dirname(at);
+      if (up === at) {
+        throw new Error(`cannot measure the medium holding ${path}: ${(e as Error).message}`);
+      }
+      at = up;
+    }
+  }
 }

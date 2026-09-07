@@ -39,6 +39,8 @@ import { applyControls } from "../video/controls.js";
 import { EncoderChannel } from "../video/encoder.js";
 import { Viewers } from "../video/viewers.js";
 import { Adaptation } from "../video/adaptation.js";
+import { CAPTURES_ROOT, Recorder } from "../video/recorder.js";
+import { freeSpaceOn } from "../system/read.js";
 import { readSupply } from "../system/supply.js";
 import { ZeroTierCli } from "../remote/zerotier/cli.js";
 import { readTraffic } from "../remote/traffic.js";
@@ -850,9 +852,14 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   const encoders = built === undefined
     ? undefined
     : new EncoderChannel({ supervisor: built.supervisor, clock });
+  // The same object the channel above was built on, named here because the
+  // recorder needs it too. The two are absent together — there is one
+  // condition, `buildRenderers` having thrown — and the pair below says so.
+  const supervisor = built?.supervisor;
   let viewers: Viewers | undefined;
   let adaptation: Adaptation | undefined;
-  if (encoders !== undefined) {
+  let recorder: Recorder | undefined;
+  if (encoders !== undefined && supervisor !== undefined) {
     const channel = encoders;
     const watching = new Viewers({
       cameras: () => reachConfig().cameras,
@@ -877,6 +884,35 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
       onDecisions: (decisions) => { watching.decided(decisions); },
     });
     adaptation.start();
+
+    /**
+     * Recording to the board and taking a still (R-CAM-17, R-CAM-18,
+     * R-STO-06).
+     *
+     * Beside the three above, on the same supervisor and the same clock, and
+     * for the identical reason: a redeploy destroys every Node-RED node, and a
+     * recorder in one would forget which cameras were recording the moment
+     * somebody edited a flow — leaving a branch on a tee that nothing could
+     * stop.
+     *
+     * **The reserve is read fresh on every look**, so an apply that changes it
+     * is in force at the next tick of the watch rather than at the next
+     * reboot. And `inForce` is the same channel `Viewers` reads, so the
+     * remaining time is worked out from the rate the encoder is actually
+     * holding rather than from the document (K-48).
+     */
+    recorder = new Recorder({
+      channel: supervisor,
+      cameras: () => reachConfig().cameras,
+      reserveMb: () => reachConfig().storage.reserve_mb,
+      // The one reader in this daemon that measures the card. Injected here
+      // rather than defaulted inside the recorder, so no test that merely
+      // reached that file would be measuring the machine it ran on.
+      freeBytes: freeSpaceOn,
+      root: CAPTURES_ROOT,
+      clock,
+      inForce: (id) => channel.inForce(id),
+    });
   }
   // The telemetry equivalent, and on its own clock for the same reason
   // (R-NET-10's argument, applied to the router's own counters): the sparkline
@@ -1264,6 +1300,10 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
     // cannot narrow, and the condition is the same one: no supervisor, no
     // register of who is watching.
     ...(viewers === undefined ? {} : { viewers }),
+    // The other half of the same block above: no supervisor, no recorder to
+    // command a pipeline through, and every capture route says so rather than
+    // answering with an empty list that would read as *nothing was recorded*.
+    ...(recorder === undefined ? {} : { recorder }),
     // Not behind `built`: the reach monitor is assembled from the runner and
     // the nmcli client, neither of which depends on the secret store, so a
     // board whose secrets.yaml is unreadable can still say which way out is
@@ -1293,6 +1333,20 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
         }
       }
       void route(req.method ?? "GET", req.url ?? "/", body).then((r) => {
+        // **One route answers with bytes**: a capture an operator downloads
+        // (R-CAM-18). It says so by carrying a content type, and its body is
+        // written as it stands. Everything else is a document a page reads,
+        // and is serialised exactly as it always was — the flag is what keeps
+        // the one exception from turning every other answer into something a
+        // caller has to inspect first.
+        if (r.contentType !== undefined && Buffer.isBuffer(r.body)) {
+          res.writeHead(r.status, {
+            "content-type": r.contentType,
+            "content-length": r.body.length,
+          });
+          res.end(r.body);
+          return;
+        }
         res.writeHead(r.status, { "content-type": "application/json" });
         res.end(JSON.stringify(r.body));
       });

@@ -51,6 +51,8 @@ apply:
 system:
   hostname: yonder
   timezone: UTC
+storage:
+  reserve_mb: 1024
 remote:
   zerotier:
     enabled: false

@@ -23,7 +23,29 @@ stderr, which the daemon inherits and systemd hands to the journal.
 here, no envelope is applied, nothing reacts to a link or a battery. A
 `retune` sets the properties it is given on the elements it names; a
 `reconfigure-preview` does the same and, only where the running elements will
-not take them, restarts the preview branch alone.
+not take them, restarts the preview branch alone. A `still` writes one frame
+to the path it is given; a `record` writes to the path it is given until a
+`record-stop` arrives. Not one of them decides *when* — that is an operator
+pressing a key, relayed through `video/recorder.ts`.
+
+**`still`, `record` and `record-stop` are this program's first ops that add
+and remove elements** (R-CAM-17, R-CAM-18). `retune` and
+`reconfigure-preview` both manipulate elements the launch line already put in
+the graph; these three build a branch at run time, hang it off a tee that is
+already playing, and take it down again — which is new ground here rather
+than a variation on what was there, and is why they follow a recipe measured
+on hardware rather than one derived at a desk
+(`docs/hardware/stills-and-recording-on-a-live-pipeline.md`).
+
+Two things that recipe forbids, each of which destroyed a spike, and both of
+which are stated again at the code that would be the place to reintroduce
+them:
+
+  * **a still branch is never taken down with EOS** — the first still is
+    written correctly and every later one silently gets zero buffers, because
+    a tee pad that has carried a sticky EOS is finished for good;
+  * **a branch's pad is never offset to zero** — negative timestamps make
+    `matroskamux` write a container `ffprobe` rejects outright.
 
 **Continuity is measured, not inferred.** A buffer probe sits on the *sink*
 pad of the `main` tee -- the fork every ground-station output and every board
@@ -92,6 +114,16 @@ for _needed in ("parse_launchv", "util_set_object_arg"):
 # where continuity is witnessed.
 MAIN_TEE = "main"
 
+# The tee `compose()` forks the decoded frames off, before either encode.
+#
+# **A still hangs off `raw` and a recording off `main`**, and the pair is not
+# arbitrary: `raw` is where the decoded frames are, so a still is one convert
+# and one JPEG encode away from them; `main` is after the H.264 encoder, so a
+# recording writes the bytes the ground station is already being sent and
+# encodes nothing at all. A recording taken off `raw` would run a second
+# encode on a board whose entire cost is the JPEG decode.
+RAW_TEE = "raw"
+
 # How long the main branch is watched after an instruction, before the reply
 # goes out. `continuous` is a claim about what happened *after* the request,
 # so a reply sent the instant the property was written would be claiming it
@@ -107,6 +139,33 @@ RETUNE_WATCH_S = 0.3
 RECONFIGURE_WATCH_S = 0.4
 RECONFIGURE_SETTLE_S = 1.2
 POLL_S = 0.02
+# The same watch, for the three ops that build a branch. The spike measured no
+# gap over 100 ms on the branch that kept running through a still and none over
+# 200 ms through a recording start or stop, so a window of 0.3 s is long enough
+# for either to show and short enough to sit inside the budgets
+# `video/recorder.ts` gives these ops.
+STILL_WATCH_S = 0.3
+RECORD_WATCH_S = 0.3
+
+# How long a still waits for the frame it is going to keep.
+#
+# It waits for the gate probe's **second** firing, which is what proves the
+# first buffer is clear of the encoder — waiting on the file, or on a timer, is
+# guessing. Two seconds is sixty frame periods at 30 fps and ten at 5, so a
+# pipeline delivering anything at all answers well inside it; a pipeline
+# delivering nothing is refused rather than answered with whatever happened to
+# be on disk.
+STILL_FRAME_WAIT_S = 2.0
+
+# How long a stopping recording is given for its EOS to reach the filesink.
+#
+# **Not a sleep.** The muxer writes its index when it sees end-of-stream, and a
+# teardown that races it leaves a file that will not play, so the branch is not
+# set to NULL until the event has actually arrived. The wait is bounded because
+# an event that never arrives must not hold the control channel open for ever;
+# a recording finalised past this bound is a short file rather than a stuck
+# process.
+EOS_WAIT_S = 3.0
 # How long a fork pad is given to come to rest before its branch is taken
 # down. Best effort: a probe that has not fired is a branch with nothing
 # flowing through it, which is the easy case, not a reason to give up.
@@ -195,6 +254,124 @@ class MainBranch(object):
         return gaps > mark[1] or (mark[0] > 0 and count == opened[0])
 
 
+class BranchError(Exception):
+    """A branch that could not be built or hung on. Carries the sentence the
+    operator is shown, because there is nobody else to compose one: this
+    program is the only thing that knows which element would not make."""
+
+
+class Branch(object):
+    """
+    A chain of elements built at run time and hung off a tee that is already
+    playing (R-CAM-17, R-CAM-18).
+
+    **The first thing in this program to change the graph rather than a
+    property on it.** Everything about the order below is the recipe measured
+    on a Pi 4 and recorded in
+    `docs/hardware/stills-and-recording-on-a-live-pipeline.md`; it is followed
+    rather than re-derived, and where it forbids something the comment says so
+    at the line that would reintroduce it.
+
+    Building and hanging on are one step. **Coming down is not**, and that is
+    deliberate: a still and a recording share `unhook` and differ entirely
+    afterwards — a still is disposed of straight away, and a recording must be
+    sent an end-of-stream and given time to write its index first.
+    """
+
+    def __init__(self, pipeline, tee, spec):
+        self.pipeline = pipeline
+        self.tee = tee
+        self.elements = []
+        for kind, props in spec:
+            element = Gst.ElementFactory.make(kind, None)
+            if element is None:
+                raise BranchError("this GStreamer has no %s, so that cannot be "
+                                  "written here" % kind)
+            for name, value in props.items():
+                element.set_property(name, value)
+            self.elements.append(element)
+        for element in self.elements:
+            pipeline.add(element)
+        for upstream, downstream in zip(self.elements, self.elements[1:]):
+            if not upstream.link(downstream):
+                self.dispose()
+                raise BranchError("%s will not link to %s"
+                                  % (upstream.get_name(), downstream.get_name()))
+        # The fork itself, last, so nothing is pushed at a chain that is not
+        # joined up yet.
+        self.pad = tee.get_request_pad("src_%u")
+        if self.pad is None:
+            self.dispose()
+            raise BranchError("%s would not give out a pad to fork from"
+                              % name_of(tee))
+        if self.pad.link(self.head()) != Gst.PadLinkReturn.OK:
+            tee.release_request_pad(self.pad)
+            self.pad = None
+            self.dispose()
+            raise BranchError("that branch will not join %s" % name_of(tee))
+        # **The pad's offset is left exactly as it is.** A branch joining a
+        # pipeline that has been up for a while carries the running time on its
+        # first buffer, and `pad.set_offset(-running)` looks like the fix. It is
+        # not: negative timestamps make `matroskamux` write a container ffprobe
+        # rejects outright, and both spike recordings were destroyed by it.
+
+    def head(self):
+        """The branch's own input pad — what the tee is linked to, and where an
+        end-of-stream is pushed in so that it travels forward only."""
+        return self.elements[0].get_static_pad("sink")
+
+    def last_sink(self):
+        """The sink pad of the element at the end of the chain — where an
+        end-of-stream has to be seen to have arrived before anything is taken
+        down."""
+        return self.elements[-1].get_static_pad("sink")
+
+    def start(self):
+        """Bring the branch up to the state the pipeline is already in.
+
+        Called after any probe the caller needs, so a still's gate is watching
+        before there is anything to watch, and **downstream first**, so the
+        sink is ready to take a buffer before the head is in a state to hand
+        it one."""
+        for element in reversed(self.elements):
+            element.sync_state_with_parent()
+
+    def unhook(self):
+        """
+        Take the branch off the tee, and nothing more.
+
+        Blocked first, so no buffer is handed to elements on their way down;
+        unlinked; then the pad is given back. Best effort on the block, exactly
+        as `restart_branch` is: a fork pad that has not come to rest within the
+        wait is a branch with nothing flowing down it, which is the easy case
+        rather than a reason to give up.
+        """
+        if self.pad is None:
+            return
+        blocked = threading.Event()
+
+        def hold(pad, info):
+            blocked.set()
+            return Gst.PadProbeReturn.OK
+
+        probe = self.pad.add_probe(Gst.PadProbeType.IDLE, hold)
+        blocked.wait(BLOCK_WAIT_S)
+        self.pad.unlink(self.head())
+        if probe:
+            self.pad.remove_probe(probe)
+        self.tee.release_request_pad(self.pad)
+        self.pad = None
+
+    def dispose(self):
+        """NULL, then out of the pipeline. Downstream first, so nothing is
+        left pushing at an element that has already gone."""
+        for element in reversed(self.elements):
+            element.set_state(Gst.State.NULL)
+        for element in self.elements:
+            self.pipeline.remove(element)
+        self.elements = []
+
+
 def parse_options(args):
     """
     The pipeline description, with `gst-launch-1.0`'s own leading options
@@ -220,6 +397,12 @@ class Host(object):
     def __init__(self, pipeline):
         self.pipeline = pipeline
         self.main = MainBranch(pipeline)
+        # One pipeline is one camera, so one recording at a time is all there
+        # is to hold. `video/recorder.ts` refuses a second start before it
+        # reaches here; this is what makes that refusal true rather than
+        # merely polite.
+        self.recording = None
+        self.recording_path = None
 
     # -- instructions -----------------------------------------------------
 
@@ -230,19 +413,36 @@ class Host(object):
         reports an unanswered request as a request that did not land, which
         is exactly what it was."""
         op = command.get("op")
-        sets = command.get("sets")
-        if not isinstance(sets, list):
-            note("a command with no sets in it: %r" % (command,))
-            return None
 
-        mark = self.main.mark()
-        if op == "retune":
-            self.apply(sets)
-            broke = self.main.broke_over(mark, RETUNE_WATCH_S)
-            observed = self.rate_of(sets)
-        elif op == "reconfigure-preview":
-            observed = self.reconfigure(sets)
-            broke = self.main.broke_over(mark, RECONFIGURE_WATCH_S)
+        # The two ops that set properties. `sets` is checked for them and not
+        # for the three below, which carry a path instead — a command shaped
+        # for one op is not evidence about another.
+        if op in ("retune", "reconfigure-preview"):
+            sets = command.get("sets")
+            if not isinstance(sets, list):
+                note("a command with no sets in it: %r" % (command,))
+                return None
+            mark = self.main.mark()
+            if op == "retune":
+                self.apply(sets)
+                broke = self.main.broke_over(mark, RETUNE_WATCH_S)
+                observed = self.rate_of(sets)
+            else:
+                observed = self.reconfigure(sets)
+                broke = self.main.broke_over(mark, RECONFIGURE_WATCH_S)
+        elif op in ("still", "record"):
+            path = command.get("path")
+            if not isinstance(path, str) or not path:
+                note("a %s with no path to write to: %r" % (op, command))
+                return None
+            mark = self.main.mark()
+            observed = self.still(path) if op == "still" else self.record(path)
+            broke = self.main.broke_over(
+                mark, STILL_WATCH_S if op == "still" else RECORD_WATCH_S)
+        elif op == "record-stop":
+            mark = self.main.mark()
+            observed = self.record_stop()
+            broke = self.main.broke_over(mark, RECORD_WATCH_S)
         else:
             note("no such op: %r" % (op,))
             return None
@@ -253,6 +453,163 @@ class Host(object):
             "continuous": not broke,
             "observed": observed,
         }
+
+    # -- a still, off the raw tee (R-CAM-18) -------------------------------
+
+    def still(self, path):
+        """
+        One frame off `raw`, written to `path`, with everything else left
+        running.
+
+        Measured on a Pi 4: three stills in a row, each a real 1280x720 JPEG,
+        with no gap over 100 ms on the branch that kept going. The order below
+        is that measurement and not a design.
+
+        **The wait is for the gate probe's second firing.** The first buffer is
+        the still; the second proves the first is clear of the encoder. Waiting
+        on the file's size, or on a timer, is guessing — and guessing here is
+        how a half-written JPEG gets reported as a photograph.
+
+        A second buffer that does not come inside the bound is a refusal, and
+        the file the branch may have opened is removed with it. **An old frame
+        is never reported as a new one**, and neither is an empty file: a
+        capture an operator can open and find nothing in is worse than being
+        told the pipeline had nothing to give.
+        """
+        tee = self.pipeline.get_by_name(RAW_TEE)
+        if tee is None:
+            return {"refused": "this pipeline has no `%s` tee to take a frame "
+                               "off" % RAW_TEE}
+        try:
+            branch = Branch(self.pipeline, tee, [
+                ("queue", {}),
+                ("videoconvert", {}),
+                ("jpegenc", {}),
+                ("filesink", {"location": path}),
+            ])
+        except BranchError as exc:
+            return {"refused": str(exc)}
+
+        fired = threading.Event()
+        seen = [0]
+
+        def gate(pad, info):
+            """The first buffer through, every later one dropped, and the
+            second firing is the signal."""
+            seen[0] += 1
+            if seen[0] == 1:
+                return Gst.PadProbeReturn.OK
+            fired.set()
+            return Gst.PadProbeReturn.DROP
+
+        watch = branch.elements[0].get_static_pad("src")
+        probe = None if watch is None else watch.add_probe(Gst.PadProbeType.BUFFER, gate)
+        shape = None
+        branch.start()
+        got = fired.wait(STILL_FRAME_WAIT_S)
+        if watch is not None:
+            shape = shape_of(watch)
+
+        branch.unhook()
+        if probe and watch is not None:
+            watch.remove_probe(probe)
+        # **No end-of-stream, ever.** That was the first attempt at this and it
+        # fails in a way worth recording: the first still is written correctly
+        # and every later one gets zero buffers, silently, because EOS is
+        # sticky and a tee pad that has carried one is finished for good. A
+        # build that only ever took one still would have shipped it.
+        branch.dispose()
+
+        if not got:
+            remove_quietly(path)
+            return {"refused": "the pipeline delivered no fresh frame within "
+                               "%.1f s, so nothing was written" % STILL_FRAME_WAIT_S}
+        answer = {"path": path, "bytes": size_of(path)}
+        if shape is not None:
+            answer.update(shape)
+        return answer
+
+    # -- a recording, off the encoded tee (R-CAM-17) -----------------------
+
+    def record(self, path):
+        """
+        A branch on to `main`, writing the H.264 the encoder has already made.
+
+        It encodes nothing: `main` is the tee *after* the encoder, so a
+        recording costs no second encode on a board whose whole cost is the
+        JPEG decode. Measured on a Pi 4: two recordings in a row, each
+        finalised cleanly, with no gap over 200 ms on the branch that kept
+        streaming.
+        """
+        if self.recording is not None:
+            return {"refused": "this camera is already recording to %s"
+                               % self.recording_path}
+        tee = self.pipeline.get_by_name(MAIN_TEE)
+        if tee is None:
+            return {"refused": "this pipeline has no `%s` tee to record off"
+                               % MAIN_TEE}
+        try:
+            branch = Branch(self.pipeline, tee, [
+                ("queue", {}),
+                ("h264parse", {}),
+                ("matroskamux", {}),
+                ("filesink", {"location": path}),
+            ])
+        except BranchError as exc:
+            return {"refused": str(exc)}
+        branch.start()
+        self.recording = branch
+        self.recording_path = path
+        return {"path": path, "recording": True}
+
+    def record_stop(self):
+        """
+        The half that needs care, because a container has to be finalised or
+        the file will not play.
+
+        Three steps, in this order and no other:
+
+          1. the fork pad is blocked, unlinked and released, so no buffer is
+             handed to elements on their way down;
+          2. **then** an end-of-stream is pushed into the branch's own head. It
+             travels forward only: the tee's other pads and everything upstream
+             never see it, which is what makes a recording stoppable without
+             the ground station's stream noticing;
+          3. and that event is waited for at the last element's sink pad before
+             anything is set to NULL. Not a sleep — the muxer writes its index
+             on end-of-stream and a teardown that races it leaves an unplayable
+             file.
+        """
+        branch = self.recording
+        path = self.recording_path
+        if branch is None:
+            return {"refused": "this camera is not recording"}
+        self.recording = None
+        self.recording_path = None
+
+        branch.unhook()
+
+        arrived = threading.Event()
+
+        def finished(pad, info):
+            event = info.get_event()
+            if event is not None and event.type == Gst.EventType.EOS:
+                arrived.set()
+            return Gst.PadProbeReturn.OK
+
+        last = branch.last_sink()
+        probe = None if last is None else last.add_probe(
+            Gst.PadProbeType.EVENT_DOWNSTREAM, finished)
+        head = branch.head()
+        if head is not None:
+            head.send_event(Gst.Event.new_eos())
+        if not arrived.wait(EOS_WAIT_S):
+            note("the recording's end-of-stream did not reach %s within %.1f s; "
+                 "%s may be short" % (name_of(branch.elements[-1]), EOS_WAIT_S, path))
+        if probe and last is not None:
+            last.remove_probe(probe)
+        branch.dispose()
+        return {"path": path, "bytes": size_of(path), "recording": False}
 
     def apply(self, sets):
         """Set each property on the element that carries it, exactly as the
@@ -453,6 +810,43 @@ def is_request_pad(pad):
     return template is not None and template.presence == Gst.PadPresence.REQUEST
 
 
+def shape_of(pad):
+    """`{width, height}` from the caps a pad has negotiated, or None.
+
+    Read off the still branch's own pad rather than taken from the request:
+    what the frame *is* is the only honest answer, and `video/recorder.ts`
+    checks it against the size the pipeline was composed for."""
+    caps = pad.get_current_caps()
+    if caps is None or caps.get_size() < 1:
+        return None
+    structure = caps.get_structure(0)
+    ok_w, width = structure.get_int("width")
+    ok_h, height = structure.get_int("height")
+    if not ok_w or not ok_h:
+        return None
+    return {"width": width, "height": height}
+
+
+def size_of(path):
+    """The bytes on disk, or None where the file is not there to be read. The
+    daemon stats it again itself; this is what makes the reply complete
+    enough to act on without a second look."""
+    try:
+        return os.stat(path).st_size
+    except OSError:
+        return None
+
+
+def remove_quietly(path):
+    """A file this program opened and could not fill. A capture an operator can
+    open and find nothing in is worse than being told the pipeline had nothing
+    to give, so the empty one does not survive the refusal."""
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
 def order_downstream(branch):
     """The branch, from its upstream end to its sink. An element whose sink
     peer is outside the set is the head; each next one is its src peer."""
@@ -605,6 +999,14 @@ def main(args):
             sys.stdout.write(json.dumps(reply) + "\n")
             sys.stdout.flush()
 
+    # The daemon has gone. **A recording still open is finalised before the
+    # pipeline is taken down**, because a matroska file whose index was never
+    # written does not play, and the operator would be left with a recording
+    # that ran for the whole flight and opens in nothing. There is nobody left
+    # to answer, so the reply is dropped; the file is the point.
+    if host.recording is not None:
+        note("finalising the recording before shutting down")
+        host.record_stop()
     pipeline.set_state(Gst.State.NULL)
     return 0
 

@@ -228,6 +228,33 @@ const System = z.object({
 }).strict();
 
 /**
+ * What recording may never take from the card (R-STO-06).
+ *
+ * **Device-wide, and deliberately not per camera, because the medium is not
+ * per camera.** Two cameras recording at once share one floor: each one's
+ * remaining time is measured against the same free space, and whichever
+ * reaches the reserve first ends. A reserve written on a camera would read as
+ * a promise this device cannot keep — a second camera would consume the first
+ * one's headroom while its own number went on counting down.
+ *
+ * A gigabyte by default. It is not a guess at what the rest of the system
+ * needs: R-STO-02 already bounds what logging may take and R-STO-01 keeps
+ * volatile state off the card, so this reserve is headroom for the writes a
+ * running board makes that nothing bounds — the journal's own rotation
+ * boundary, a support bundle written in the field, and the apply journal that
+ * has to be writable for a rollback to happen at all. A card with no space
+ * left is a device that cannot roll back, which is rule 6 arriving through
+ * the storage layer.
+ *
+ * Zero is allowed and means *no reserve*: an operator who has told this board
+ * to fill the card is entitled to. It is not the default, and the console
+ * shows the remaining time against whatever is set.
+ */
+const Storage = z.object({
+  reserve_mb: z.number().int().min(0).max(1024 * 1024).default(1024),
+}).strict();
+
+/**
  * Sixteen lowercase hex characters. Uppercase is rejected rather than folded:
  * `zerotier-cli` takes the id verbatim, and a configuration that stores one
  * form while the client reports another is two spellings of the same network.
@@ -704,6 +731,7 @@ export const ConfigSchema = z.object({
   ui: Ui,
   apply: Apply.default({}),
   system: System.default({}),
+  storage: Storage.default({}),
   remote: Remote.default({}),
   cameras: z.array(Camera).max(8).default([]),
   mavlink: Mavlink.default({}),

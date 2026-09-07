@@ -41,6 +41,10 @@ import { setCameraSettings, type CameraSettings } from "../video/settings.js";
 import { renderReceive, type Rendering } from "../video/receive.js";
 import type { CameraRun, Supervisor } from "../video/supervisor.js";
 import type { ViewerStats, Viewers, Want } from "../video/viewers.js";
+import {
+  SAFE_CAPTURE_NAME, isRefusal,
+  type Recorder, type RecordingState, type Refusal,
+} from "../video/recorder.js";
 import type { Detection, DetectResult, Rejection } from "../video/probe/camera.js";
 import type { Encoder } from "../video/probe/encoder.js";
 import type { SupplyFlags, SupplyState } from "../system/supply.js";
@@ -176,6 +180,21 @@ export interface RouterDeps {
    */
   viewers?: Viewers;
   /**
+   * Recording to the board and taking a still (R-CAM-17, R-CAM-18,
+   * R-STO-06).
+   *
+   * It lives for the daemon's lifetime beside the supervisor and `viewers`,
+   * and for the same reason: a redeploy destroys every Node-RED node, and a
+   * recorder in one would forget which cameras were recording the moment
+   * somebody edited a flow — leaving a branch on a tee that nothing could
+   * stop and a card filling with a file the console had stopped counting.
+   *
+   * Injected like every other camera-layer part. Absent means this daemon has
+   * no video layer, which the routes say rather than answering with an empty
+   * capture list that would read as *nothing has been recorded*.
+   */
+  recorder?: Recorder;
+  /**
    * The RTSP credential, resolved from `secrets.yaml`.
    *
    * A function returning one value rather than the whole store, because the
@@ -294,6 +313,20 @@ export interface CameraView {
    */
   deck: CameraDeck;
   aim: AimPanel;
+  /**
+   * What this camera's recorder is doing, and how long the medium has left
+   * (R-CAM-17, R-STO-06).
+   *
+   * Carried on the camera's own page rather than fetched separately, so the
+   * REC pill and the remaining time are drawn from the same read as
+   * everything else and cannot disagree with it about one camera.
+   *
+   * `null` on a daemon assembled with no video layer — the same *cannot tell*
+   * every other field here uses, and deliberately not a state saying
+   * `recording: false`, which would read as *this camera is not recording*
+   * when the truth is that nothing here can say.
+   */
+  recorder: RecordingState | null;
 }
 
 /**
@@ -438,6 +471,20 @@ export interface WayBackIn {
 export interface RouteResult {
   status: number;
   body: unknown;
+  /**
+   * The content type of `body`, where it is **not** JSON.
+   *
+   * Absent on every route but one, and that is the point: everything this
+   * daemon serves is a document a page reads, except a capture, which is a
+   * photograph or a recording an operator downloads (R-CAM-18). Set it, and
+   * `body` is a `Buffer` written to the socket as it stands; leave it, and
+   * `body` is serialised as JSON exactly as it always was.
+   *
+   * A flag rather than a second router: one route answering with bytes must
+   * not turn every other route's answer into something a caller has to
+   * inspect before reading.
+   */
+  contentType?: string;
 }
 
 export type Router = (method: string, path: string, body: unknown) => Promise<RouteResult>;
@@ -587,9 +634,36 @@ const VIEWER_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
  * matching at all. The difference is not cosmetic: a guard nothing can reach
  * is a guard no test can prove.
  */
-const CAMERA_ROUTE = /^\/cameras\/(.+?)(?:\/(run|probe|stream-address|controls|settings|apply|outputs\/(?:rtp|rtsp|srt)|viewers\/[^/]+))?$/;
+const CAMERA_ROUTE = /^\/cameras\/(.+?)(?:\/(run|probe|stream-address|controls|settings|apply|record|photo|captures(?:\/[^/]+)?|outputs\/(?:rtp|rtsp|srt)|viewers\/[^/]+))?$/;
 
 const WANTS: readonly Want[] = ["video", "stills", "off"];
+
+/**
+ * What each kind of capture refusal is answered with (R-CAM-17, R-CAM-18).
+ *
+ * A table rather than a chain of comparisons, so a refusal added to
+ * `video/recorder.ts` cannot reach a route without somebody deciding what it
+ * means over HTTP: the type is exhaustive, and an unmapped kind will not
+ * compile.
+ *
+ * **409 and not 400 or 500 for all but one of them.** Every one of these is
+ * *not now*: the camera is not running, something else is in flight on it, or
+ * the card is at its reserve. None of them is a malformed request and none is
+ * this daemon failing — an operator who presses REC on a stopped camera has
+ * asked a reasonable question and is owed the reason.
+ *
+ * `on-camera` is overridden to 404 on the two routes that address one capture,
+ * because there the fact is not *not now* but *this device does not have that
+ * file* — see `captureRoute`.
+ */
+const REFUSAL_STATUS: Record<Refusal["because"], number> = {
+  busy: 409,
+  "no-space": 409,
+  "not-running": 409,
+  "on-camera": 409,
+  "not-found": 404,
+  unanswered: 409,
+};
 
 /**
  * A browser's statistic, off the wire, or null where it is not one.
@@ -828,6 +902,103 @@ export function createRouter(deps: RouterDeps): Router {
   };
 
   /**
+   * Recording, stills, and the captures this device is holding (R-CAM-17,
+   * R-CAM-18, R-STO-06).
+   *
+   * **One operation at a time, per camera, and a second press is refused**
+   * rather than queued — `Recorder` holds that guard and answers `busy`, and
+   * this is where that becomes a 409. An operator who presses REC twice must
+   * not get two branches on one tee, and the honest answer to the second
+   * press is *not now*, not a silent success.
+   *
+   * **A capture the camera holds is a 404 with the reason.** Yonder never saw
+   * the file: it is on the camera's own medium, and offering it here and
+   * failing to produce it would be the console claiming something it does not
+   * have (R-CAM-18).
+   *
+   * The name off the URL is matched against `SAFE_CAPTURE_NAME` **after it is
+   * decoded and before it is used for anything**, exactly as `CAMERA_ID`
+   * guards the id above and for the same reason: this is the second place in
+   * this router where something from a URL becomes part of a file path.
+   */
+  const captureRoute = async (
+    method: string,
+    id: string,
+    verb: string,
+    body: unknown,
+    say: (line: string) => void,
+  ): Promise<RouteResult> => {
+    const recorder = deps.recorder;
+    if (recorder === undefined) {
+      return noCameraLayer(`${method} /cameras/${id}/${verb}`, say);
+    }
+    /** A refusal, with the status this route answers that kind with. */
+    const refuseWith = (
+      refusal: Refusal, overrides: Partial<Record<Refusal["because"], number>> = {},
+    ): RouteResult => {
+      say(`${method} /cameras/${id}/${verb}: ${refusal.refused}`);
+      return {
+        status: overrides[refusal.because] ?? REFUSAL_STATUS[refusal.because],
+        body: { error: refusal.refused },
+      };
+    };
+
+    if (method === "POST" && verb === "record") {
+      const action = (body as { action?: unknown } | undefined)?.action;
+      if (action !== "start" && action !== "stop") {
+        return { status: 400, body: { error: 'action must be "start" or "stop"' } };
+      }
+      const answer = await recorder.record(id, action);
+      return isRefusal(answer) ? refuseWith(answer) : { status: 200, body: answer.ok };
+    }
+
+    if (method === "POST" && verb === "photo") {
+      // Answered only once the file is written, never on dispatch: a capture
+      // reported before it exists is a thumbnail that 404s.
+      const answer = await recorder.photo(id);
+      return isRefusal(answer) ? refuseWith(answer) : { status: 200, body: answer.ok };
+    }
+
+    if (method === "GET" && verb === "captures") {
+      const answer = await recorder.captures(id);
+      return isRefusal(answer)
+        ? refuseWith(answer)
+        : { status: 200, body: { captures: answer.ok } };
+    }
+
+    if (verb.startsWith("captures/") && (method === "GET" || method === "DELETE")) {
+      let name = verb.slice("captures/".length);
+      try {
+        name = decodeURIComponent(name);
+      } catch {
+        // A malformed escape is not a name; it is refused as one rather than
+        // throwing out of this router.
+        return { status: 404, body: { error: "that is not a capture on this device" } };
+      }
+      if (!SAFE_CAPTURE_NAME.test(name)) {
+        return { status: 404, body: { error: "that is not a capture on this device" } };
+      }
+      if (method === "DELETE") {
+        const answer = await recorder.remove(id, name);
+        // 404 for a camera-held one, with the body saying the camera holds
+        // it — the same answer the fetch gives, because it is the same fact.
+        return isRefusal(answer)
+          ? refuseWith(answer, { "on-camera": 404 })
+          : { status: 200, body: answer.ok };
+      }
+      const answer = await recorder.fetch(id, name);
+      if (isRefusal(answer)) return refuseWith(answer, { "on-camera": 404 });
+      return {
+        status: 200,
+        body: answer.ok.bytes,
+        contentType: answer.ok.contentType,
+      };
+    }
+
+    return { status: 404, body: { error: `no route for ${method} /cameras/${id}/${verb}` } };
+  };
+
+  /**
    * Everything under `/cameras/<id>`.
    *
    * The id has already been matched against `CAMERA_ID` by the caller, before
@@ -847,6 +1018,22 @@ export function createRouter(deps: RouterDeps): Router {
     // viewer — would be this route spending the device on bookkeeping.
     if (verb.startsWith("viewers/")) {
       return viewerRoute(method, id, verb.slice("viewers/".length), body, say);
+    }
+
+    // Before the probes as well, and for the same reason: pressing REC, taking
+    // a still or listing what has been captured needs no `v4l2-ctl` run on the
+    // operator's behalf. A recording is taken off the pipeline that is already
+    // running, and whether it is running is the supervisor's answer rather
+    // than a fresh sweep of the board.
+    if (verb === "record" || verb === "photo" || verb === "captures"
+      || verb.startsWith("captures/")) {
+      // The configuration is still what says a camera exists — every other
+      // answer here would be `Recorder`'s, and it reads the same list.
+      const known = loadConfig(deps.configPath).cameras.some((c) => c.id === id);
+      if (!known) {
+        return { status: 404, body: { error: `no camera is configured with the id "${id}"` } };
+      }
+      return captureRoute(method, id, verb, body, say);
     }
 
     const probes = deps.cameras;
@@ -910,6 +1097,11 @@ export function createRouter(deps: RouterDeps): Router {
         // can never disagree about the same camera.
         deck: cameraDeck({ camera, capabilities, encoder, paths: await reachPaths() }),
         aim: aimPanel(capabilities),
+        // From the recorder that holds the recording, never from a count of
+        // files on the disk: a file is there whether or not anything is still
+        // writing to it, and a page drawing a REC pill off the second would
+        // go on drawing it for ever.
+        recorder: deps.recorder === undefined ? null : await deps.recorder.state(id),
         // Answered on the page rather than only on the start, so an operator
         // reads which of their settings this camera does not offer before
         // they press anything (R-CAM-10). `knownDevices` comes from the sweep

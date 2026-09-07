@@ -137,6 +137,9 @@ system:
   hostname: yonder                             # also published as <hostname>.local
   timezone: UTC
 
+storage:
+  reserve_mb: 1024              # recording stops before it takes the card below this; 0 means none
+
 mavlink:
   serial:
     device: auto                # auto | /dev/ttyAMA0 | /dev/ttyACM0
@@ -535,6 +538,15 @@ sign you out of the console you would have confirmed from.
 **`apply.timeout` and `apply.radioTimeout`** are the two confirmation windows above, in
 seconds, each between 30 and 600. Below 30 s nobody can confirm anything; above 600 s an
 unconfirmed change that broke the device sits there for ten minutes.
+
+**`storage.reserve_mb`** is the space on the card that recording may not consume (R-STO-06).
+A recording ends by itself when the free space reaches it, and the console shows remaining
+time measured against it rather than against an empty card. **One number for the device, not
+one per camera**, because the medium is not per camera: two cameras recording at once share
+the same floor, and whichever reaches it first ends. It defaults to 1024 MB — headroom for
+the writes a running board makes that nothing else bounds, the apply journal among them,
+since a card with no space left is a device that cannot roll back. `0` means no reserve, for
+an operator who means to fill the card.
 
 **`system.hostname`** is the device's name, and since M1b-2 it is applied rather than merely
 recorded: the daemon sets the system hostname from it, and `avahi-daemon` publishes it over

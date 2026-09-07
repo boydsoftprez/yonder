@@ -382,6 +382,18 @@ function noChannel(camera: string): { notControllable: string } {
   };
 }
 
+/**
+ * One line back, or null where it is not one this channel issued.
+ *
+ * **The `id` must be a number, and that guard is load-bearing beyond this
+ * file.** `video/recorder.ts` speaks to the same processes over the same
+ * supervisor and keeps its own table of outstanding requests; if both handed
+ * out `1`, a reply to a still could settle a retune on the same camera the
+ * first time an operator pressed the shutter while the rate controller was
+ * working. Its ids are strings — `rec-1` — so this refusal is what keeps the
+ * two tables from claiming each other's replies, and the same statement is
+ * written where those ids are minted.
+ */
 function parseReply(line: string): Reply | null {
   let raw: unknown;
   try {

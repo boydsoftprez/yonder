@@ -142,6 +142,53 @@ describe("apply", () => {
   });
 });
 
+/**
+ * The reserve recording may not consume (R-STO-06). A new section, so
+ * nothing retires — the same reasoning `apply` above is introduced with.
+ */
+describe("storage", () => {
+  it("keeps a gigabyte back by default", () => {
+    expect(DEFAULT_CONFIG.storage).toEqual({ reserve_mb: 1024 });
+  });
+
+  it("is optional, so a configuration written before it existed still loads", () => {
+    const without = structuredClone(DEFAULT_CONFIG) as Record<string, unknown>;
+    delete without.storage;
+    expect(ConfigSchema.parse(without).storage).toEqual({ reserve_mb: 1024 });
+  });
+
+  /**
+   * **Device-wide, not per camera.** Asserted here because it is the decision
+   * the shape encodes: the medium is one card, so the floor is one number,
+   * and two cameras recording at once share it. A reserve that lived on a
+   * camera would let the second one eat the first one's headroom while the
+   * first went on counting down.
+   */
+  it("is one number for the device, and no camera carries one of its own", () => {
+    const one = { id: "cam0", name: "Nose", source: "usb", device: "usb-0000:01:00.0-1.2" };
+    expect(Object.keys(Camera.parse(one))).not.toContain("reserve_mb");
+    const perCamera = { ...DEFAULT_CONFIG, cameras: [{ ...one, reserve_mb: 512 }] };
+    expect(ConfigSchema.safeParse(perCamera).success).toBe(false);
+  });
+
+  it("allows no reserve at all, for an operator who means to fill the card", () => {
+    expect(ConfigSchema.parse({ ...DEFAULT_CONFIG, storage: { reserve_mb: 0 } }).storage)
+      .toEqual({ reserve_mb: 0 });
+  });
+
+  it("refuses a reserve that is not a whole number of megabytes, or is negative", () => {
+    for (const reserve_mb of [-1, 1.5]) {
+      expect(ConfigSchema.safeParse({ ...DEFAULT_CONFIG, storage: { reserve_mb } }).success,
+        String(reserve_mb)).toBe(false);
+    }
+  });
+
+  it("is strict, so a misspelled reserve is a refusal and not a silent default", () => {
+    expect(ConfigSchema.safeParse({ ...DEFAULT_CONFIG, storage: { reserve: 1024 } }).success)
+      .toBe(false);
+  });
+});
+
 describe("network.modem", () => {
   it("is absent from a device that has not configured one", () => {
     // R-CFG-08: a freshly flashed board is usable with no operator input, and

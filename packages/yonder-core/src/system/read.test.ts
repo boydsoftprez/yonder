@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   DEFAULT_FACT_PATHS,
+  freeSpaceOn,
   readBoardFacts,
   readFactSources,
   systemReader,
@@ -92,6 +93,47 @@ describe("systemReader", () => {
       expect(systemReader(join(dir, "absent"))).toBeNull();
       // EISDIR is the other way this call fails, and it must be as quiet.
       expect(systemReader(dir)).toBeNull();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+/**
+ * The medium a recording is written to (R-STO-06).
+ *
+ * The one reader here that answers a number rather than a text, and the one
+ * whose failure would be silent: a captures directory that does not exist yet
+ * must read as the medium it would be created on, not as a full card.
+ */
+describe("freeSpaceOn", () => {
+  it("answers with what is actually available on the medium", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "yonder-space-"));
+    try {
+      const free = await freeSpaceOn(dir);
+      expect(free).toBeGreaterThan(0);
+      expect(Number.isFinite(free)).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("answers for a directory that has not been created yet", async () => {
+    // A freshly flashed board has no captures directory until the first
+    // capture is taken, and refusing that first recording would be the whole
+    // feature failing on the one board that has never used it.
+    const dir = mkdtempSync(join(tmpdir(), "yonder-space-"));
+    try {
+      const deep = join(dir, "captures", "cam0");
+      const missing = await freeSpaceOn(deep);
+      // The same medium, so the same figure — within whatever the machine
+      // running this wrote to its own disk between the two calls. Compared
+      // loosely on purpose: an exact equality here fails on a laptop that is
+      // doing anything at all, and the property under test is that a path
+      // that is not there answers for its medium rather than throwing.
+      const parent = await freeSpaceOn(dir);
+      expect(missing).toBeGreaterThan(0);
+      expect(Math.abs(missing - parent) / parent).toBeLessThan(0.01);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

@@ -15,6 +15,7 @@ import { DEFAULT_AP_PASSPHRASE } from "../net/profiles.js";
 import { MODEM_PASSWORD_SECRET } from "../net/modem/configure.js";
 import { ConfigSchema, DEFAULT_CONFIG, type Camera, type Config } from "../schema/config.js";
 import { Supervisor } from "../video/supervisor.js";
+import { Recorder, type CameraMedium, type Capture } from "../video/recorder.js";
 import { noCapabilities, present, type CameraCapabilities, type VideoFormat } from "../video/capability.js";
 import type { ApplyControlsOptions, ApplyControlsResult } from "../video/controls.js";
 import type { DetectResult, Detection, Rejection } from "../video/probe/camera.js";
@@ -251,6 +252,10 @@ interface RouterOptions {
   controlsResult?: ApplyControlsResult;
   /** The telemetry link. Undefined, as in production today, unless a test says otherwise. */
   mavlink?: MavlinkControl;
+  /** Recording and stills (R-CAM-17, R-CAM-18). Absent means this daemon has
+   *  no recorder, which every capture route says rather than answering with
+   *  an empty list. */
+  recorder?: Recorder;
 }
 
 function router(opts: RouterOptions = {}): Router {
@@ -314,6 +319,7 @@ function router(opts: RouterOptions = {}): Router {
       },
     }),
     ...(opts.mavlink === undefined ? {} : { mavlink: opts.mavlink }),
+    ...(opts.recorder === undefined ? {} : { recorder: opts.recorder }),
   });
 }
 
@@ -2289,6 +2295,247 @@ describe("the camera routes", () => {
    * Through the engine like every other change to what leaves the aircraft,
    * and emphatically not a runtime toggle.
    */
+  /**
+   * Recording, stills, and the captures this device is holding (R-CAM-17,
+   * R-CAM-18, R-STO-06).
+   *
+   * `video/recorder.test.ts` is where the mechanism is proved — the reserve,
+   * the pending guard, the naming. What is proved here is the seam: which
+   * status each refusal becomes, that a capture leaves as bytes with a
+   * content type rather than as JSON, and that a name off a URL cannot become
+   * a path this device did not write.
+   */
+  describe("the capture routes", () => {
+    /** A recorder with a stand-in for the pipeline host under it. */
+    function recorderOn(opts: {
+      free?: number;
+      running?: boolean;
+      onCamera?: CameraMedium;
+      deaf?: boolean;
+    } = {}) {
+      // Under this test's own directory, which afterEach removes.
+      const root = mkdtempSync(join(dir, "captures-"));
+      const sent: Record<string, unknown>[] = [];
+      const listeners: ((camera: string, line: string) => void)[] = [];
+      const held = new Map<string, string>();
+      const recorder = new Recorder({
+        channel: {
+          send: (camera, message) => {
+            const m = message as Record<string, unknown>;
+            sent.push(m);
+            if (opts.deaf === true) return false;
+            queueMicrotask(() => {
+              const path = String(m.path ?? held.get(camera) ?? "");
+              let observed: unknown;
+              if (m.op === "still") {
+                writeFileSync(path, "a jpeg");
+                observed = { path, bytes: 6, width: 1280, height: 720 };
+              } else if (m.op === "record") {
+                writeFileSync(path, "mkv");
+                held.set(camera, path);
+                observed = { path, recording: true };
+              } else {
+                held.delete(camera);
+                observed = { path, bytes: 3, recording: false };
+              }
+              const line = JSON.stringify({ id: m.id, pid: 1, continuous: true, observed });
+              for (const fn of listeners) fn(camera, line);
+            });
+            return true;
+          },
+          onMessage: (fn) => { listeners.push(fn); },
+          state: (camera) => ({
+            id: camera,
+            state: opts.running === false ? "stopped" : "running",
+            since: 0,
+            restarts: 0,
+          }),
+        },
+        cameras: () => loadConfig(configPath).cameras,
+        reserveMb: () => loadConfig(configPath).storage.reserve_mb,
+        freeBytes: () => Promise.resolve(opts.free ?? 8 * 1024 * 1024 * 1024),
+        root,
+        clock: frozenClock,
+        ...(opts.onCamera === undefined ? {} : { onCamera: opts.onCamera }),
+      });
+      return { recorder, sent, root };
+    }
+
+    /** The camera's own medium, modelled: one file Yonder never saw. */
+    const ON_CAMERA: Capture = {
+      name: "DJI_0001.MP4", at: 1_699_000_000_000, bytes: 91_000_000,
+      width: 1920, height: 1080, held: "camera",
+    };
+    const CARD: CameraMedium = {
+      holds: () => true,
+      captures: () => Promise.resolve([ON_CAMERA]),
+    };
+
+    it("is 403 while unprovisioned, like every other configuration route", async () => {
+      const { recorder } = recorderOn();
+      const r = router({ cameras: fixtureDetection(), recorder });
+      expect((await r("POST", "/cameras/cam0/record", { action: "start" })).status).toBe(403);
+      expect((await r("POST", "/cameras/cam0/photo", undefined)).status).toBe(403);
+      expect((await r("GET", "/cameras/cam0/captures", undefined)).status).toBe(403);
+    });
+
+    it("starts a recording and answers with what is being written", async () => {
+      const { recorder, sent } = recorderOn();
+      const r = provisioned({ cameras: fixtureDetection(), recorder });
+      const res = await r("POST", "/cameras/cam0/record", { action: "start" });
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ recording: true, destination: "board" });
+      expect(sent.map((m) => m.op)).toEqual(["record"]);
+    });
+
+    it("refuses a second press while one is in flight, rather than queueing it", async () => {
+      // One at a time, per camera. Two branches on one tee is what the guard
+      // exists to prevent, and 409 is the honest answer to the second press.
+      const { recorder, sent } = recorderOn();
+      const r = provisioned({ cameras: fixtureDetection(), recorder });
+      const first = r("POST", "/cameras/cam0/record", { action: "start" });
+      const second = await r("POST", "/cameras/cam0/photo", undefined);
+      expect(second.status).toBe(409);
+      expect((second.body as { error: string }).error).toContain("one at a time");
+      expect((await first).status).toBe(200);
+      expect(sent.map((m) => m.op)).toEqual(["record"]);
+    });
+
+    it("refuses a start at the reserve, with the reason in words an operator reads", async () => {
+      const { recorder, sent } = recorderOn({ free: 1024 * 1024 * 1024 });
+      const r = provisioned({ cameras: fixtureDetection(), recorder });
+      const res = await r("POST", "/cameras/cam0/record", { action: "start" });
+      expect(res.status).toBe(409);
+      expect((res.body as { error: string }).error)
+        .toContain("1024 MB is reserved on this device");
+      // Nothing was written, and nothing was asked of the pipeline.
+      expect(sent).toEqual([]);
+    });
+
+    it("refuses a recording on a camera that is not running", async () => {
+      const { recorder } = recorderOn({ running: false });
+      const r = provisioned({ cameras: fixtureDetection(), recorder });
+      const res = await r("POST", "/cameras/cam0/record", { action: "start" });
+      expect(res.status).toBe(409);
+      expect((res.body as { error: string }).error).toContain("no pipeline to record");
+    });
+
+    it("refuses an action that is neither start nor stop", async () => {
+      const { recorder } = recorderOn();
+      const r = provisioned({ cameras: fixtureDetection(), recorder });
+      expect((await r("POST", "/cameras/cam0/record", { action: "pause" })).status).toBe(400);
+    });
+
+    it("is 404 for a camera this device does not have", async () => {
+      const { recorder } = recorderOn();
+      const r = provisioned({ cameras: fixtureDetection(), recorder });
+      expect((await r("POST", "/cameras/cam9/record", { action: "start" })).status).toBe(404);
+      expect((await r("GET", "/cameras/cam9/captures", undefined)).status).toBe(404);
+    });
+
+    it("answers a still with the capture, once the file is written", async () => {
+      const { recorder } = recorderOn();
+      const r = provisioned({ cameras: fixtureDetection(), recorder });
+      const res = await r("POST", "/cameras/cam0/photo", undefined);
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ width: 1280, height: 720, held: "board", bytes: 6 });
+    });
+
+    it("lists the captures, newest first", async () => {
+      const { recorder } = recorderOn();
+      const r = provisioned({ cameras: fixtureDetection(), recorder });
+      await r("POST", "/cameras/cam0/photo", undefined);
+      const res = await r("GET", "/cameras/cam0/captures", undefined);
+      expect(res.status).toBe(200);
+      const { captures } = res.body as { captures: { name: string; held: string }[] };
+      expect(captures).toHaveLength(1);
+      expect(captures[0].held).toBe("board");
+    });
+
+    it("hands one over as bytes with a content type, not as JSON", async () => {
+      const { recorder } = recorderOn();
+      const r = provisioned({ cameras: fixtureDetection(), recorder });
+      const taken = (await r("POST", "/cameras/cam0/photo", undefined)).body as { name: string };
+      const res = await r("GET", `/cameras/cam0/captures/${taken.name}`, undefined);
+      expect(res.status).toBe(200);
+      expect(res.contentType).toBe("image/jpeg");
+      expect(Buffer.isBuffer(res.body)).toBe(true);
+      expect((res.body as Buffer).toString("utf8")).toBe("a jpeg");
+    });
+
+    it("deletes one, and it is gone from the listing", async () => {
+      const { recorder } = recorderOn();
+      const r = provisioned({ cameras: fixtureDetection(), recorder });
+      const taken = (await r("POST", "/cameras/cam0/photo", undefined)).body as { name: string };
+      expect((await r("DELETE", `/cameras/cam0/captures/${taken.name}`, undefined)).status).toBe(200);
+      const after = await r("GET", "/cameras/cam0/captures", undefined);
+      expect((after.body as { captures: unknown[] }).captures).toEqual([]);
+    });
+
+    it("is 404 for a capture the camera holds, and says the camera holds it", async () => {
+      // Yonder never saw the file. A 404 with the reason is the honest answer;
+      // offering it and failing later would be the console claiming something
+      // it does not have.
+      const { recorder } = recorderOn({ onCamera: CARD });
+      const r = provisioned({ cameras: fixtureDetection(), recorder });
+      const listed = await r("GET", "/cameras/cam0/captures", undefined);
+      expect((listed.body as { captures: { held: string }[] }).captures[0].held).toBe("camera");
+
+      for (const method of ["GET", "DELETE"]) {
+        const res = await r(method, `/cameras/cam0/captures/${ON_CAMERA.name}`, undefined);
+        expect(res.status, method).toBe(404);
+        expect((res.body as { error: string }).error, method).toContain("never saw the file");
+      }
+    });
+
+    it("will not record or photograph on a camera that holds its own", async () => {
+      const { recorder, sent } = recorderOn({ onCamera: CARD });
+      const r = provisioned({ cameras: fixtureDetection(), recorder });
+      expect((await r("POST", "/cameras/cam0/record", { action: "start" })).status).toBe(409);
+      expect((await r("POST", "/cameras/cam0/photo", undefined)).status).toBe(409);
+      expect(sent).toEqual([]);
+    });
+
+    /**
+     * The second place in this router where something off a URL becomes part
+     * of a file path — the first is the camera id. A pattern, not a filter for
+     * `..`: a filter is a list of the tricks somebody thought of.
+     */
+    it("refuses a capture name that is not one, however it is spelled", async () => {
+      const { recorder } = recorderOn();
+      const r = provisioned({ cameras: fixtureDetection(), recorder });
+      for (const name of [
+        "..%2F..%2Fetc%2Fyonder%2Fsecrets.yaml",
+        "..",
+        "%2e%2e%2f%2e%2e%2fetc%2fpasswd",
+        "%zz",
+      ]) {
+        const res = await r("GET", `/cameras/cam0/captures/${name}`, undefined);
+        expect(res.status, name).toBe(404);
+        expect(res.contentType, name).toBeUndefined();
+      }
+    });
+
+    it("carries the recorder's state on the camera's own page", async () => {
+      const { recorder } = recorderOn();
+      const r = provisioned({ cameras: fixtureDetection(), recorder });
+      await r("POST", "/cameras/cam0/record", { action: "start" });
+      const page = await r("GET", "/cameras/cam0", undefined);
+      expect((page.body as { recorder: unknown }).recorder)
+        .toMatchObject({ recording: true, destination: "board" });
+    });
+
+    it("says so rather than answering when this daemon has no recorder", async () => {
+      // Never an empty capture list, which would read as *nothing has been
+      // recorded* on a device that cannot tell.
+      const r = provisioned({ cameras: fixtureDetection() });
+      const res = await r("GET", "/cameras/cam0/captures", undefined);
+      expect(res.status).toBe(503);
+      expect((await r("GET", "/cameras/cam0", undefined)).body)
+        .toMatchObject({ recorder: null });
+    });
+  });
+
   describe("POST /cameras/:id/outputs/:kind", () => {
     it("stops one output without losing its port, its path or its secret", async () => {
       const r = provisioned({ cameras: fixtureDetection() });
