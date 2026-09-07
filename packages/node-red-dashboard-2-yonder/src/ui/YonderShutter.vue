@@ -9,10 +9,8 @@
             :aria-pressed="isRecording ? 'true' : 'false'"
             @click="press"
         >
-            <span class="y-shutter__ring" aria-hidden="true" />
             <span class="y-shutter__label">{{ label }}</span>
         </button>
-        <span v-if="isRecording" class="y-shutter__elapsed">{{ elapsed }}</span>
         <span v-if="inhibited" class="y-shutter__why">{{ inhibited }}</span>
         <span v-if="destination" class="y-shutter__dest">{{ destination }}</span>
     </div>
@@ -109,8 +107,20 @@ export default {
     emits: ['record', 'photo'],
     data: () => ({ now: Date.now(), tick: null }),
     computed: {
+        /**
+         * **The whole state of the key, in the key** (blueprint L-44):
+         * `○ RECORD`, `PHOTO`, `● RECORDING 00:13:47`.
+         *
+         * The ring is a glyph in this string and not a shape drawn around the
+         * control. It was a 64px circle until the operator said it looked
+         * large, and the blueprint has no circle on this page at all — the
+         * shutter is the width and height of the `Video │ Photo` pair directly
+         * above it, and the hollow and filled rings are the two characters
+         * that say which way it is.
+         */
         label () {
-            return this.mode === 'photo' ? 'PHOTO' : 'RECORD'
+            if (this.isRecording) return `\u25cf RECORDING ${this.elapsed}`
+            return this.mode === 'photo' ? 'PHOTO' : '\u25cb RECORD'
         },
         isRecording () {
             return this.mode === 'video' && Boolean(this.recording) && Number.isFinite(this.recording.since)
@@ -158,29 +168,18 @@ export default {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 64px;
-    height: 64px;
-    padding: 0;
-    border-radius: 50%;
-    border: 3px solid var(--yonder-divider, #2b333c);
+    width: 100%;
+    min-height: 40px;
+    padding: 0 12px;
+    border-radius: 3px;
+    border: 1px solid var(--yonder-divider, #2b333c);
     background: var(--yonder-track, #161b21);
     cursor: pointer;
 }
 .y-shutter__btn:disabled { cursor: not-allowed; }
-.y-shutter__ring {
-    position: absolute;
-    inset: -3px;
-    border-radius: 50%;
-    border: 3px solid transparent;
-    pointer-events: none;
-}
 /* Lit while recording: the red ring is what carries at a glance, the same
    "lit, not merely coloured" rule YonderAnnunciator's own lamp states. */
 .y-shutter__btn.lit { border-color: var(--yonder-bad, #ff4034); }
-.y-shutter__btn.lit .y-shutter__ring {
-    border-color: var(--yonder-bad, #ff4034);
-    box-shadow: 0 0 10px var(--yonder-bad, #ff4034);
-}
 .y-shutter__label {
     font-size: 10.5px;
     font-weight: 700;
@@ -188,13 +187,6 @@ export default {
     color: var(--yonder-value, #ffffff);
 }
 .y-shutter__btn.lit .y-shutter__label { color: var(--yonder-bad, #ff4034); }
-.y-shutter__elapsed {
-    font-family: var(--yonder-font-mono, ui-monospace, monospace);
-    font-size: 13px;
-    font-weight: 600;
-    font-variant-numeric: tabular-nums;
-    color: var(--yonder-bad, #ff4034);
-}
 .y-shutter__dest {
     font-size: 10.5px;
     color: var(--yonder-label, #7f8a95);
