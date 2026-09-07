@@ -365,6 +365,7 @@
               <button :disabled="dataBusy" @click="$refs.terrainPackFiles.click()">Import terrain folder</button>
               <button :disabled="dataBusy" @click="$refs.offlineMapFiles.click()">Import offline map folder</button>
               <button :disabled="dataBusy" @click="$refs.geoidFile.click()">Import EGM96 geoid</button>
+              <p v-if="groundRelayUrl&&sourceMode==='ground'">Detailed terrain streams from the selected ground relay as needed. Look-ahead loads follow measured motion up to 30 seconds ahead. Preload the whole pack only for offline use.</p>
               <button :disabled="dataBusy||!groundRelayUrl||sourceMode!=='ground'" @click="preloadGroundTerrain">Preload terrain from ground relay</button>
             </div>
             <p v-if="groundStatus.offlineTerrain">Saved terrain: {{groundStatus.offlineTerrain.title||groundStatus.offlineTerrain.id}} · {{groundStatus.offlineTerrain.tiles}} tiles.</p>
@@ -899,6 +900,8 @@ export default {
       if (saved) this.preferences = validatePfdPreferences(saved)
       const trail=JSON.parse(localStorage.getItem('yonder-own-trail-v1')||'null');
       if(trail){this.ownTrailOptions=trailPreferences(trail.options);this.ownTrailCleared=trail.cleared}
+      const relay=localStorage.getItem('yonder-ground-relay-v1');
+      if(relay){this.groundRelayInput=relay;this.applyGroundRelay()}
     } catch {}
     this.source?.setTrailOptions?.(this.ownTrailOptions);
     this.timer = setInterval(() => {
@@ -1326,7 +1329,7 @@ export default {
     },
     applyGroundRelay() {
       const previous=this.groundRelayUrl;
-      try{this.groundRelayUrl=this.groundRelayInput.trim();this.configureGroundData();this.dataMessage=this.groundRelayUrl?'Ground relay selected':'Direct browser providers selected'}
+      try{this.groundRelayUrl=this.groundRelayInput.trim();this.configureGroundData();try{localStorage.setItem('yonder-ground-relay-v1',this.groundRelayUrl)}catch{};this.dataMessage=this.groundRelayUrl?'Ground relay selected':'Direct browser providers selected'}
       catch(e){this.groundRelayUrl=previous;this.dataMessage=e.message}
     },
     async importGroundFiles(kind,event) {

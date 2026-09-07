@@ -284,12 +284,30 @@ data. Missing samples remain holes. Mapped surface may include buildings and
 unclassified returns; it is not a current inventory of vegetation or obstacles.
 Nearby imagery is an optional visual layer and does not change elevation geometry.
 
+With a **ground relay origin** selected, detailed terrain streams on demand; the
+whole pack need not be preloaded. Visible terrain loads first. The display then
+warms up to 16 native tiles along measured ground track, up to 30 seconds or
+1.5 km ahead, with bounded memory. This cannot supply coverage absent from the
+selected survey. **Preload terrain from ground relay** remains the explicit way
+to save the complete pack for offline use. The selected relay is remembered in
+this browser.
+
+Drawing targets 60 frames per second independently of **Display telemetry updates**.
+The default 4 updates per second limits flight-link traffic. Received attitude,
+position and director cues are interpolated with about one observed update interval
+plus a small jitter margin (bounded at 1.2 seconds); no future pose is invented.
+Lost/invalid data still removes the affected indication. Cached meshes and satellite
+textures survive region changes. Yellow shading eases in when new surfaces arrive;
+red warning shading and numeric advisories do not wait for that visual fade.
+
 The aircraft height datum defaults to **Unknown** because MAVLink AMSL does not
 identify its geoid model. Declare EGM96, NAVD88 or WGS84 ellipsoid only from a
 verified receiver configuration. Native height comparisons require compatible
 references. The named Terrarium fallback can provide approximate terrain when the
 pack cannot be used; it does not supply numeric AGL without a verified common
-reference. Estimated ground AGL is separate from clearance over mapped objects.
+reference. Estimated ground AGL is separate from clearance over mapped objects. **EST AGL**
+appears directly beneath the MSL tape. **AGL —** means fresh compatible terrain is
+unavailable, including when the aircraft leaves a prepared pack's footprint.
 
 The **Current-motion forecast** samples reported track, ground speed and vertical
 speed through the selected time/distance horizon. It checks a ±20 m corridor,

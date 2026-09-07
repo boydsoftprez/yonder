@@ -6,6 +6,7 @@ import {
   latLonToUtm,
   sampleTerrain,
 } from "yonder-core/terrain";
+import { terrainLookaheadTiles } from "./terrain-lookahead.mjs";
 import { tileCoordinate, tilePosition } from "./terrain-state.mjs";
 import { rendererMesh, terrainImageCoordinate } from "./terrain-adapter.mjs";
 const providerStates = new WeakMap();
@@ -21,17 +22,19 @@ async function readTile(descriptor, signal, provider, state) {
     state.tiles.delete(state.tiles.keys().next().value);
   return tile;
 }
-export async function loadTerrainPack(pose, datum, signal, provider) {
+export async function loadTerrainPack(pose, datum, signal, provider, motion = {}) {
   if (!provider) return null;
   let state = providerStates.get(provider);
   if (!state || state.revision !== provider.revision) {
-    state = { revision: provider.revision, tiles: new Map(), manifest: null };
+    state = { revision: provider.revision, tiles: new Map(), nativeMeshes: new Map(), manifest: null };
     providerStates.set(provider, state);
   }
-  if (!state.manifest)
-    state.manifest = await provider.terrainManifest({ signal });
+  if (!state.manifest) {
+    const candidate = await provider.terrainManifest({ signal });
+    if (candidate) state.manifest = validateTerrainManifest(candidate);
+  }
   if (!state.manifest) return null;
-  const manifest = validateTerrainManifest(state.manifest);
+  const manifest = state.manifest;
   if (datum !== manifest.verticalDatum || !manifest.verticalTransform.verified)
     return null;
   let point;
@@ -48,8 +51,8 @@ export async function loadTerrainPack(pose, datum, signal, provider) {
     },
     point.eastingM,
     point.northingM,
-    200,
-    9,
+    300,
+    24,
   );
   if (
     !near.length ||
@@ -63,8 +66,27 @@ export async function loadTerrainPack(pose, datum, signal, provider) {
     7000,
     16,
   ).filter((t) => !near.some((n) => n.id === t.id));
+  const warmAhead = () => {
+    const queue = terrainLookaheadTiles(manifest, pose, motion, t => state.tiles.has(t.id + "/" + t.sha256));
+    let next = 0;
+    // Visible tiles finish first. Two workers share the provider's bounded
+    // request queue; aborted/reconfigured pages never continue downloading.
+    void Promise.all(Array.from({length: 2}, async () => {
+      while (next < queue.length && !signal?.aborted) {
+        try { await readTile(queue[next++], signal, provider, state); } catch { return; }
+      }
+    }));
+  };
+  const selectionKey = JSON.stringify([
+    near.map(t => t.id).sort(), far.map(t => t.id).sort(),
+  ]);
+  // The source revision scopes this one-region cache; moving the camera does
+  // not require a new origin, normals, UVs, triangle masks, or GPU uploads.
+  if (state.region?.key === selectionKey) { warmAhead(); return state.region.value; }
   const origin = {
-      ...point,
+      eastingM: manifest.tiles[0].originEastingM,
+      northingM: manifest.tiles[0].originNorthingM,
+      hemisphere: manifest.horizontalCrs.hemisphere,
       heightM: 0,
       zone: manifest.horizontalCrs.zone,
       utm: true,
@@ -86,8 +108,16 @@ export async function loadTerrainPack(pose, datum, signal, provider) {
   );
   const meshes = [];
   for (const tile of loaded) {
-    const native = near.some((n) => n.id === tile.descriptor.id),
-      mesh = rendererMesh(tile, origin, "ground");
+    const native = near.some((n) => n.id === tile.descriptor.id);
+    const cached = native && state.nativeMeshes.get(tile.descriptor.id);
+    if (cached) {
+      state.nativeMeshes.delete(tile.descriptor.id);
+      state.nativeMeshes.set(tile.descriptor.id, cached);
+      meshes.push(...cached);
+      continue;
+    }
+    const tileMeshes = [];
+    const mesh = rendererMesh(tile, origin, "ground");
     if (!native) {
       const inside = (i) => {
         const east = mesh.positions[i * 3] + origin.eastingM,
@@ -135,7 +165,7 @@ export async function loadTerrainPack(pose, datum, signal, provider) {
           (corners[2].y * (1 - u) + corners[3].y * u) * v;
       }
     mesh.packImagery = true;
-    meshes.push(mesh);
+    tileMeshes.push(mesh);
     if (native) {
       const surface = rendererMesh(tile, origin, "surface");
       const raised = [];
@@ -156,10 +186,15 @@ export async function loadTerrainPack(pose, datum, signal, provider) {
       surface.uv = mesh.uv;
       surface.packImagery = true;
       surface.surface = true;
-      if (raised.length) meshes.push(surface);
+      if (raised.length) tileMeshes.push(surface);
+      state.nativeMeshes.set(tile.descriptor.id, tileMeshes);
+      while (state.nativeMeshes.size > 32) state.nativeMeshes.delete(state.nativeMeshes.keys().next().value);
     }
+    meshes.push(...tileMeshes);
     await new Promise((r) => setTimeout(r, 0));
   }
+  const groundTiles = [...loaded].sort((a, b) => a.descriptor.spacingM - b.descriptor.spacingM);
+  const nativeTiles = groundTiles.filter(t => t.descriptor.level === 0);
   const groundSampler = (x, y, u, v) => {
     const coordinate = tileCoordinate(x + u, y + v);
     const p = latLonToUtm(
@@ -167,9 +202,7 @@ export async function loadTerrainPack(pose, datum, signal, provider) {
       coordinate.lon,
       manifest.horizontalCrs.zone,
     );
-    for (const tile of loaded.sort(
-      (a, b) => a.descriptor.spacingM - b.descriptor.spacingM,
-    )) {
+    for (const tile of groundTiles) {
       const result = sampleTerrain(tile, p.eastingM, p.northingM);
       if (result.groundM !== null) return result.groundM;
     }
@@ -177,9 +210,7 @@ export async function loadTerrainPack(pose, datum, signal, provider) {
   };
   const sampleBoth = (lat, lon) => {
     const p = latLonToUtm(lat, lon, manifest.horizontalCrs.zone);
-    for (const tile of loaded
-      .filter((t) => t.descriptor.level === 0)
-      .sort((a, b) => a.descriptor.spacingM - b.descriptor.spacingM)) {
+    for (const tile of nativeTiles) {
       const sample = sampleTerrain(tile, p.eastingM, p.northingM);
       if (sample.groundM !== null)
         return {
@@ -195,7 +226,7 @@ export async function loadTerrainPack(pose, datum, signal, provider) {
       covered: false,
     };
   };
-  return {
+  const value = {
     meshes,
     origin,
     groundSampler,
@@ -204,4 +235,8 @@ export async function loadTerrainPack(pose, datum, signal, provider) {
     spacingM: Math.min(...near.map((t) => t.spacingM)),
     farSpacingM: Math.max(...far.map((t) => t.spacingM), 1),
   };
+  if (signal?.aborted) throw new DOMException("Terrain load aborted", "AbortError");
+  state.region = { key: selectionKey, value };
+  warmAhead();
+  return value;
 }

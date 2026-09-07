@@ -20,7 +20,7 @@ HTTP/TLS overhead, compressed wire size, video and public geographic downloads.
 
 | Mode | Elevation and imagery | Prepared terrain | Traffic |
 | --- | --- | --- | --- |
-| Ground (default) | Browser uses its internet connection; optionally an explicitly configured ground relay | Imported browser package only | Browser queries ADSB.lol; trails stay local |
+| Ground (default) | Browser uses its internet connection; optionally an explicitly configured ground relay | Requested tiles from an explicitly configured ground relay, reusing matching imported tiles; imported browser package when no relay is configured | Browser queries ADSB.lol; trails stay local |
 | Offline | Explicitly imported map files; a missing tile stays missing | Imported browser package only | Unavailable; no requests |
 | Aircraft | Explicit same-origin aircraft proxy requests | Explicit aircraft package requests | Current points from `/cockpit/api/traffic`; trails reconstructed locally |
 
@@ -35,9 +35,22 @@ relay, **Preload terrain from ground relay** explicitly downloads and verifies i
 prepared terrain pack. The button never reads the aircraft terrain endpoint in
 Ground mode.
 
+With terrain enabled in Ground mode, applying a ground relay origin makes its
+`/terrain/manifest` the prepared-terrain source. The browser fetches only the
+manifest-listed files requested for the current view or bounded lookahead; it
+does not wait for the entire pack to download. Matching tiles from an existing
+complete import are verified and reused before any tile download. Streamed tiles
+receive the same SHA-256, compressed-length and bounded-inflate validation as
+imports. Compressed and decoded session caches each hold at most 16 MiB and 128
+entries. Concurrent consumers share a transfer, and source changes or the last
+consumer's cancellation abort it. Streamed tiles stay in memory and are reported
+separately from a complete offline import. Use the explicit import or preload
+action to prepare a complete package before disconnecting. Offline mode never
+requests relay files, and a relay failure never selects the aircraft proxy.
+
 Import the directory `packages/yonder-core/src/terrain/assets/cove` using the terrain-directory picker, including `manifest.json` and all 227 `.bin.gz` files. The package contains 20,973,049 compressed tile bytes. Browser validation checks the manifest, each file hash, decoded lengths, coordinate references and missing-cell behavior before atomically replacing the previous package in IndexedDB. A failed import leaves the previous package intact. HTTPS or localhost is required for browser cryptographic validation. Browser storage can be evicted; check its available-package status before disconnecting.
 
-The package survives a page reload. Ground and offline modes use that local copy; they do not fetch the package from the aircraft. The pack's own README and preparation report document its 2016 survey, EGM96 conversion and 28 suspect surface cells retained as unknown. One metre sampling does not establish one metre absolute accuracy or a complete current obstacle inventory.
+The imported package survives a page reload. Offline mode and Ground mode without a relay use that local copy; a configured ground relay can reuse its matching tiles. The pack's own README and preparation report document its 2016 survey, EGM96 conversion and 28 suspect surface cells retained as unknown. One metre sampling does not establish one metre absolute accuracy or a complete current obstacle inventory.
 
 For a licensed offline map, import `map-manifest.json` and its named PNG/JPEG tile files. This is an explicit import of operator-provided data, not a provider tile scraper. A manifest has this shape:
 
@@ -59,21 +72,21 @@ node scripts/cockpit/ground-data-server.mjs --allow-origin http://127.0.0.1:4196
 
 The service binds loopback. Set the allowed origin to the exact cockpit page origin. Set the cockpit's ground relay origin to `http://127.0.0.1:4197` only when that relay is intentionally in use. Remote tablets require an operator-managed HTTPS ground service; a laptop's loopback address does not identify the laptop from a tablet. Browser private-network/mixed-content permissions still apply and failures remain visible. Do not deploy this helper on the aircraft and label it ground internet.
 
-The relay accepts GET for fixed geographic/traffic paths and explicitly listed package files. It rejects other origins, command methods, arbitrary target URLs, oversized responses and excessive concurrency. It does not bypass provider authentication, quotas or refusal: a provider's HTTP 403 remains unavailable. The optional `--terrain-dir` makes a ground package available for the explicit `preloadTerrainPack(origin)` action; that action downloads the package to IndexedDB and verifies it just like a local file import. Starting the relay does not preload anything.
+The relay accepts GET for fixed geographic/traffic paths and explicitly listed package files. It rejects other origins, command methods, arbitrary target URLs, oversized responses and excessive concurrency. It does not bypass provider authentication, quotas or refusal: a provider's HTTP 403 remains unavailable. The optional `--terrain-dir` makes a ground package available for on-demand viewing after its origin is selected in the browser. The separate explicit `preloadTerrainPack(origin)` action downloads the complete package to IndexedDB and verifies it just like a local file import. Starting the relay does not preload anything.
 
 ## Provider contract for the native host
 
 Import `createGroundDataProvider` from `src/ui/cockpit/ground-data.mjs`. Construct one provider for the cockpit and pass it as `dataProvider` to `YonderCockpitMap`, `TerrainVision` and `CameraTerrainOverlay`. Close it when the cockpit unmounts.
 
 - `configure({mode, terrain, imagery, traffic, trafficRadiusNm, groundRelayUrl})`: validated source settings. Radius is an integer from 1 through 100 NM. Defaults are ground mode, 25 NM and all sources off.
-- `options`, `revision`, `subscribe(callback)`, `status()`: inspect settings/status and invalidate renderers on changes; subscribe returns an unsubscribe function.
+- `options`, `revision`, `subscribe(callback)`, `status()`: inspect settings/status and invalidate renderers on changes; subscribe returns an unsubscribe function. `terrainStream` identifies the selected relay manifest, while `offlineTerrain` identifies an explicitly imported complete package. `terrainPackedCacheBytes` reports compressed session terrain bytes.
 - `tile(layer,z,x,y,{signal})`: selected-source image Blob, with bounded fetch/cache and no fallback.
 - `terrainManifest({signal})` and `terrainTile(descriptor,{signal})`: selected-source manifest and raw decoded DTM/DSM bytes.
 - `pollTraffic({lat,lon})`: requests only the selected traffic source, at most once per two seconds, with backoff. There is no timer in the provider constructor. Call it only while the cockpit is visible and has a fresh position.
 - `trafficSnapshot({lat,lon})`: observed targets and browser-maintained trails. Current aircraft points are obtained only in explicit aircraft mode via `/cockpit/api/traffic`; the recurring flight endpoint is never polled by this provider.
 - `refreshOffline()`: load retained-package summaries after construction. `importTerrainPack(File[])`, `importOfflineMap(File[])`, `preloadTerrainPack(groundOrigin,{signal})` and `clearOffline()` manage explicit imports. `importGeoid(File)` provisions optional local traffic height conversion.
 
-Live image memory is bounded to 32 MiB and 128 entries, decoded terrain memory to 16 MiB, and terrain renderer sample caches to 64 tiles. Requests are bounded to six active and 64 waiting, with 12-second timeouts, 512 KiB image responses and 4 MiB public traffic responses. Images receive short session reuse; they are not bulk-downloaded for offline export. Terrain imports are bounded to 64 MiB and decoded tile lengths are checked before use.
+Live image memory is bounded to 32 MiB and 128 entries, decoded terrain memory to 16 MiB, compressed terrain memory to 16 MiB, and terrain renderer sample caches to 64 tiles. Each terrain byte cache is also limited to 128 entries. Requests are bounded to six active and 64 waiting, with 12-second timeouts, 512 KiB image responses and 4 MiB public traffic responses. Streamed terrain has at most 70 distinct pending jobs, one validated manifest response of at most 4 MiB, and file/decode limits from that manifest. Images receive short session reuse; they are not bulk-downloaded for offline export. Terrain imports are bounded to 64 MiB and decoded tile lengths are checked before use.
 
 Traffic preserves the core normalization: provider observation time and `seen_pos`, 15-second stale status, 60-second target expiry, at most 128 targets, five minutes of history and 150 points per target, with breaks for invalid positions, long gaps and implausible jumps. A source refresh cannot make an old observation fresh.
 

@@ -32,6 +32,23 @@ Actual source inspection found isolated class-1 returns near 975–1027 m NAVD88
 
 The default footprint is 1537 × 1793 one metre cells with north-west corner UTM (286080, 3982960). It includes the full cove route and a bounded margin, not every possible loiter or diversion. Detail levels use 1/2/4/8/16 metre spacing. Coarse levels use the maximum only where every contributing cell is observed. They are visual summaries; native clearance sampling always uses level 0. Adjacent tiles share their border samples. Each independently compressed tile contains at most 129 × 129 samples.
 
+## A wider local demonstration footprint
+
+The east-side loiter example can leave the bundled route margin. To prepare a
+separate local pack from the same cached surveys, keeping unknown cells unknown:
+
+```sh
+vendor/terrain-cache/venv/bin/python scripts/terrain/prepare.py --cache vendor/terrain-cache/sources --grids vendor/terrain-cache/grids --output vendor/terrain-cache/prepared-cove-east --columns 2305 --id cove-usgs-2016-east
+node scripts/cockpit/ground-data-server.mjs --allow-origin http://127.0.0.1:4198 --terrain-dir vendor/terrain-cache/prepared-cove-east --port 4205
+```
+
+Select that ground relay in Display & data. The browser streams only requested
+tiles; complete preload is optional. This preparation produced 298 tiles and
+26,849,006 compressed bytes, with 84.41% observed ground and 82.03% observed
+surface across the larger rectangle. The original source surveys do not cover
+every part of that rectangle. It does not extend the underlying survey coverage
+or the bundled pack. The generated manifest/report remain in the ignored cache.
+
 ## Wire and runtime contract
 
 `TerrainPackService.open(directory)` validates `manifest.json`. The service refuses unlisted paths, symlinks, corrupt files, decompression beyond the descriptor length, excessive queues and cache growth. `getTile(id)` returns decoded bytes; `sampleAt(eastingM, northingM)` returns native ground/surface samples with the explicit datum and transform state. `latLonToUtm` provides the matching frontend-safe coordinate conversion.

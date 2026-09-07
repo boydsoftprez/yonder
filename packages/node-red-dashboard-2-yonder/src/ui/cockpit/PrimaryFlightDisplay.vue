@@ -76,7 +76,7 @@
         <path d="M616 194 H583 V204 H523 L505 225 L523 246 H583 V256 H616 Z" class="pfd-readout-box"/>
         <text x="565" y="235" text-anchor="middle" class="pfd-altitude-value">{{fixed(flight.altitude)}}</text>
         <path v-if="refOffset('altitude',.35)!==null" class="pfd-reference-bug" :transform="'translate(0 '+(225+refOffset('altitude',.35))+')'" d="M508 0 L495 -7 V7 Z"/>
-        <text x="558" y="382" text-anchor="middle" class="pfd-unit pfd-agl-value">{{estimatedAgl!==null?'EST AGL '+fixed(estimatedAgl)+' FT':'MSL · TELEMETRY'}}</text>
+        <text x="558" y="382" text-anchor="middle" class="pfd-unit pfd-agl-value" :aria-label="estimatedAgl===null?'AGL unavailable: fresh compatible terrain required':'Estimated height above terrain '+fixed(estimatedAgl)+' feet'">{{estimatedAgl!==null?'EST AGL '+fixed(estimatedAgl)+' FT':'AGL —'}}</text>
         </g>
       </g>
       <!-- Scale and pointer adapted from Peter Heinrich's SDU460 PFD/VSI.svg,
@@ -151,6 +151,7 @@
   </section>
 </template>
 <script>
+import { frameCadence } from "./frame-cadence.mjs";
 // SVG primary flight display, authored for the Yonder community navigation host.
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -214,7 +215,7 @@ export default {
         message: 'Terrain unavailable'
       });
     const displayPose = shallowRef(null),
-      presentation = new PosePresentation();
+      presentation = new PosePresentation(null);
     let animation = 0;
     const updatePresentation = () => {
       const next = presentation.at(performance.now()),
@@ -222,20 +223,22 @@ export default {
       if (next === null || previous === null || Object.keys(next).some(key => next[key] !== previous[key]))
         displayPose.value = next;
     };
+    watch([() => props.snapshot?.identity?.generation, () => props.telemetry.altitudeDatum], () => presentation.reset());
     watch([() => props.telemetry, () => props.flight.live, () => props.flight.attitudeValid], () => {
       const pose = terrainPose(props.flight, props.telemetry);
       presentation.push(pose ? {
         ...pose,
         navPitch: props.flight.navPitch,
         navRoll: props.flight.navRoll
-      } : null, performance.now());
+      } : null, performance.now(), props.snapshot?.at);
       updatePresentation();
     }, {
       immediate: true
     });
     onMounted(() => {
-      const animate = () => {
-        updatePresentation();
+      const due = frameCadence();
+      const animate = time => {
+        if (due(time)) updatePresentation();
         animation = requestAnimationFrame(animate);
       };
       animation = requestAnimationFrame(animate);

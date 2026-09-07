@@ -55,6 +55,8 @@ export function createGroundDataProvider({
   now = Date.now,
   storage = createOfflineStore(),
   maxCacheBytes = 32 * 1024 * 1024,
+  maxTerrainCacheBytes = 16 * 1024 * 1024,
+  maxTerrainPackedBytes = 16 * 1024 * 1024,
 } = {}) {
   let settings = { ...GROUND_DATA_DEFAULTS },
     controller = new AbortController(),
@@ -63,17 +65,136 @@ export function createGroundDataProvider({
     active = 0,
     error = null,
     terrainInfo = null,
+    streamManifest = null,
     mapInfo = null,
     geoid = null,
     feed;
   const cache = new ByteCache(maxCacheBytes),
-    decoded = new ByteCache(16 * 1024 * 1024, 128),
+    decoded = new ByteCache(maxTerrainCacheBytes, 128),
+    terrainPacked = new ByteCache(maxTerrainPackedBytes, 128),
+    terrainPending = new Map(),
     listeners = new Set(),
     waiters = [];
   const notify = () => {
     revision++;
+    streamManifest = null;
+    for (const entry of terrainPending.values()) entry.linked.abort();
+    terrainPending.clear();
     for (const fn of listeners) fn(revision);
   };
+  const aborted = () => new DOMException("Aborted", "AbortError");
+  function currentTerrain(generation, signal) {
+    if (closed || generation !== revision || signal?.aborted) throw aborted();
+  }
+  // A renderer and a lookahead load can share one transfer. Each caller can
+  // cancel its own wait; the transfer stops when its last consumer leaves.
+  function shareTerrain(key, signal, run) {
+    const generation = revision;
+    currentTerrain(generation, signal);
+    key = generation + "/" + key;
+    let entry = terrainPending.get(key);
+    if (!entry) {
+      if (terrainPending.size >= 70)
+        throw new Error("Ground terrain request queue full");
+      entry = { linked: signals(controller.signal), users: 0, done: false };
+      terrainPending.set(key, entry);
+      entry.promise = Promise.resolve()
+        .then(() => {
+          currentTerrain(generation, entry.linked.signal);
+          return run(entry.linked.signal, generation);
+        })
+        .finally(() => {
+          entry.done = true;
+          entry.linked.dispose();
+          if (terrainPending.get(key) === entry) terrainPending.delete(key);
+        });
+    }
+    return new Promise((resolve, reject) => {
+      const linked = signals(entry.linked.signal, signal);
+      let settled = false;
+      entry.users++;
+      const finish = (fn, value) => {
+        if (settled) return;
+        settled = true;
+        linked.signal.removeEventListener("abort", abort);
+        linked.dispose();
+        entry.users--;
+        if (!entry.users && !entry.done) {
+          entry.linked.abort();
+          if (terrainPending.get(key) === entry) terrainPending.delete(key);
+        }
+        fn(value);
+      };
+      const abort = () => finish(reject, aborted());
+      linked.signal.addEventListener("abort", abort, { once: true });
+      entry.promise.then(
+        (value) => finish(resolve, value),
+        (reason) => finish(reject, reason),
+      );
+      if (linked.signal.aborted) abort();
+    });
+  }
+  function groundTerrainManifest(signal) {
+    currentTerrain(revision, signal);
+    if (streamManifest) return Promise.resolve(streamManifest);
+    const origin = settings.groundRelayUrl;
+    return shareTerrain("manifest", signal, async (requestSignal, generation) => {
+      const result = await request(
+        origin + "/terrain/manifest", 4 * 1024 * 1024, requestSignal,
+      );
+      const manifest = validateTerrainManifest(JSON.parse(new TextDecoder().decode(result.bytes)));
+      currentTerrain(generation, requestSignal);
+      // Descriptors also supply fetch/inflate limits: callers cannot mutate
+      // the validated cached list into an arbitrary file request.
+      for (const tile of manifest.tiles) Object.freeze(tile);
+      Object.freeze(manifest.tiles);
+      streamManifest = Object.freeze(manifest);
+      return streamManifest;
+    });
+  }
+  async function groundTerrainTile(descriptor, signal) {
+    const generation = revision,
+      origin = settings.groundRelayUrl,
+      manifest = await groundTerrainManifest(signal);
+    currentTerrain(generation, signal);
+    const tile = manifest.tiles.find((candidate) => candidate.id === descriptor?.id);
+    if (!tile || Object.keys(tile).some((field) => tile[field] !== descriptor[field]))
+      throw new Error("Terrain descriptor does not match the selected manifest");
+    const key = origin + "/" + tile.id + "/" + tile.sha256,
+      cached = decoded.get(key);
+    if (cached) return cached.slice();
+    const raw = await shareTerrain(key, signal, async (requestSignal, requestGeneration) => {
+      let packed = terrainPacked.get(key), value;
+      if (!packed) {
+        // One keyed read, without scanning or copying the complete import.
+        // A previous pack can share tiles even when the relay pack expanded.
+        const imported = await storage.get("terrain/tile/" + tile.id).catch(() => null);
+        currentTerrain(requestGeneration, requestSignal);
+        if (imported) {
+          try {
+            value = await inflateTerrain(imported, tile);
+            packed = imported;
+          } catch {
+            // A stale/corrupt imported file is not the selected relay tile.
+          }
+          currentTerrain(requestGeneration, requestSignal);
+        }
+      }
+      if (!packed) {
+        packed = (await request(
+          origin + "/terrain/files/" + encodeURIComponent(tile.file),
+          tile.bytes, requestSignal,
+        )).bytes;
+      }
+      value ??= await inflateTerrain(packed, tile);
+      currentTerrain(requestGeneration, requestSignal);
+      terrainPacked.put(key, packed, packed.length);
+      decoded.put(key, value, value.length);
+      return value;
+    });
+    currentTerrain(generation, signal);
+    return raw.slice();
+  }
   function acquire(signal) {
     if (signal.aborted)
       return Promise.reject(new DOMException("Aborted", "AbortError"));
@@ -257,6 +378,7 @@ export function createGroundDataProvider({
         controller = new AbortController();
         cache.clear();
         decoded.clear();
+        terrainPacked.clear();
         error = null;
         notify();
       }
@@ -303,6 +425,8 @@ export function createGroundDataProvider({
     },
     async terrainManifest({ signal } = {}) {
       if (closed || !settings.terrain) return null;
+      if (settings.mode === "ground" && settings.groundRelayUrl)
+        return groundTerrainManifest(signal);
       if (settings.mode !== "aircraft") {
         const m = await storage.get("terrain/manifest").catch(() => null);
         if (m) {
@@ -333,6 +457,8 @@ export function createGroundDataProvider({
     async terrainTile(descriptor, { signal } = {}) {
       if (closed || !settings.terrain)
         throw new Error("Terrain source disabled");
+      if (settings.mode === "ground" && settings.groundRelayUrl)
+        return groundTerrainTile(descriptor, signal);
       const generation = revision,
         key = settings.mode + "/" + descriptor.id + "/" + descriptor.sha256,
         cached = decoded.get(key);
@@ -446,6 +572,7 @@ export function createGroundDataProvider({
     async importTerrainPack(files) {
       terrainInfo = await importTerrain(files, storage);
       decoded.clear();
+      terrainPacked.clear();
       notify();
       return terrainInfo;
     },
@@ -467,6 +594,7 @@ export function createGroundDataProvider({
       terrainInfo = mapInfo = null;
       cache.clear();
       decoded.clear();
+      terrainPacked.clear();
       notify();
     },
     status() {
@@ -475,6 +603,14 @@ export function createGroundDataProvider({
         revision,
         cacheBytes: cache.bytes,
         terrainCacheBytes: decoded.bytes,
+        terrainPackedCacheBytes: terrainPacked.bytes,
+        terrainStream: streamManifest ? {
+          id: streamManifest.id,
+          title: streamManifest.title,
+          tiles: streamManifest.tiles.length,
+          datum: streamManifest.verticalDatum,
+          source: "ground-relay",
+        } : null,
         pendingRequests: active + waiters.length,
         offlineTerrain: terrainInfo,
         offlineMap: mapInfo,
@@ -492,6 +628,10 @@ export function createGroundDataProvider({
       feed.close();
       cache.clear();
       decoded.clear();
+      terrainPacked.clear();
+      streamManifest = null;
+      for (const entry of terrainPending.values()) entry.linked.abort();
+      terrainPending.clear();
       listeners.clear();
     },
   };

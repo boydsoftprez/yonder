@@ -72,3 +72,21 @@ The separate protocol smoke command is
 `node packages/yonder-core/scripts/vehicle-sitl-smoke.mjs --firmware-dir vendor/cockpit-sitl --output vendor/cockpit-sitl-smoke.json`.
 That bounded smoke explicitly commands its own simulator, uses port 5764, records
 ACK/observation evidence, and removes its container when finished.
+
+## Passive synthetic-vision profiling
+
+With an already-running preview, run:
+
+```sh
+COCKPIT_URL='http://127.0.0.1:4198/?live=1' COCKPIT_TERRAIN_RELAY=http://127.0.0.1:4205 node packages/node-red-dashboard-2-yonder/cockpit/profile.mjs
+```
+
+This opens a fresh browser context, streams terrain without full preload, waits
+for warm-up and measures 15 seconds of frame cadence, actual terrain draws,
+attitude changes, flight responses, geometry uploads and long tasks. Every
+non-GET aircraft API request is blocked and reported. It never starts, moves or
+resets an aircraft. Omit the relay variable to measure the configured fallback.
+Results go to ignored `.cockpit-artifacts/synthetic-profile.json`; set
+`COCKPIT_PROFILE_OUTPUT` to choose another output. On macOS the probe explicitly
+uses Metal so it does not accidentally benchmark software rasterization. Avoid
+running builds/tests during a timing comparison and report the GPU and viewport.

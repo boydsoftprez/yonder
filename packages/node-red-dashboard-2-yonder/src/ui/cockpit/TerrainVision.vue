@@ -39,6 +39,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { latLonToUtm, evaluateTerrainPath } from "yonder-core/terrain";
 import { loadTerrainPack } from "./terrain-pack-client.mjs";
+import { frameCadence } from "./frame-cadence.mjs";
 import { viewportProjection } from "./terrain-viewport.mjs";
 import { ref, onMounted, onBeforeUnmount, watch } from "vue";
 import {
@@ -250,7 +251,7 @@ function createRenderer(canvas) {
  `,
     `
   precision highp float;varying vec3 vNormal;varying vec2 vUv;varying float vElevation;varying float vDistance;
-  uniform bool mappedSurface;uniform float aircraftHeight;uniform sampler2D imagery;uniform bool textured;uniform sampler2D detailImagery;uniform bool detailed;uniform vec4 detailTransform;
+  uniform bool mappedSurface;uniform float surfaceArrival;uniform float aircraftHeight;uniform sampler2D imagery;uniform bool textured;uniform sampler2D detailImagery;uniform bool detailed;uniform vec4 detailTransform;
   void main(){
    vec3 low=vec3(.31,.36,.20),high=vec3(.49,.39,.25);
    vec3 color=mix(low,high,smoothstep(250.0,1500.0,vElevation));
@@ -262,7 +263,13 @@ function createRenderer(canvas) {
    }
    float light=.62+.38*max(0.0,dot(normalize(vNormal),normalize(vec3(-.55,.85,-.35))));
    color*=light;
-   if(mappedSurface){float clearance=aircraftHeight-vElevation;if(clearance<30.0)color=mix(color,vec3(1.0,.23,.19),.65);else if(clearance<90.0)color=mix(color,vec3(1.0,.75,.23),.55);}
+   if(mappedSurface){
+    float clearance=aircraftHeight-vElevation;
+    // Five-metre visual ramp starts BEFORE each advisory threshold. The
+    // separate measured-clearance warning calculation is never delayed.
+    float caution=1.0-smoothstep(90.0,95.0,clearance),warning=1.0-smoothstep(30.0,35.0,clearance);
+    color=mix(color,mix(vec3(1.0,.75,.23),vec3(1.0,.23,.19),warning),caution*mix(.55,.65,warning)*max(warning,surfaceArrival));
+   }
    float fog=smoothstep(4500.0,10500.0,vDistance);color=mix(color,vec3(.62,.68,.69),fog);
    gl_FragColor=vec4(color,1.0);
   }
@@ -308,6 +315,7 @@ function createRenderer(canvas) {
   const location = (p, name) => gl.getUniformLocation(p, name),
     terrain = {
       mappedSurface: location(terrainProgram, "mappedSurface"),
+      surfaceArrival: location(terrainProgram, "surfaceArrival"),
       aircraftHeight: location(terrainProgram, "aircraftHeight"),
       position: gl.getAttribLocation(terrainProgram, "position"),
       normal: gl.getAttribLocation(terrainProgram, "normal"),
@@ -365,14 +373,11 @@ function createRenderer(canvas) {
       );
     return texture;
   };
-  const disposeMeshes = () => {
-    for (const mesh of meshes) {
-      for (const buffer of [mesh.position, mesh.normal, mesh.uv, mesh.indices])
-        gl.deleteBuffer(buffer);
-      if (mesh.texture) gl.deleteTexture(mesh.texture);
-    }
-    meshes = [];
+  const disposeMesh = mesh => {
+    for (const buffer of [mesh.position, mesh.normal, mesh.uv, mesh.indices]) gl.deleteBuffer(buffer);
+    if (mesh.texture) gl.deleteTexture(mesh.texture);
   };
+  const disposeMeshes = () => { meshes.forEach(disposeMesh); meshes = []; };
   const buffer = (target, data) => {
     const b = gl.createBuffer();
     gl.bindBuffer(target, b);
@@ -383,11 +388,16 @@ function createRenderer(canvas) {
     isContextLost: () => gl.isContextLost(),
     replace(data) {
       requireContext();
-      disposeMeshes();
-      clearDetail();
+      const retained = new Map(meshes.map(mesh => [mesh.source, mesh]));
+      // The atlas is georeferenced and remains valid across mesh/LOD changes.
       if (data.some((m) => m.indices instanceof Uint32Array) && !index32)
         throw new Error("32-bit terrain indices unavailable");
-      meshes = data.map((mesh) => ({
+      meshes = data.map((mesh) => {
+        const existing = retained.get(mesh);
+        if (existing) { retained.delete(mesh); return existing; }
+        return {
+        source: mesh,
+        installedAt: performance.now(),
         packImagery: mesh.packImagery === true,
         surface: mesh.surface === true,
         indexType:
@@ -404,7 +414,15 @@ function createRenderer(canvas) {
         count: mesh.indices.length,
         chunks: mesh.chunks,
         texture: null,
-      }));
+      }; });
+      retained.forEach(disposeMesh);
+    },
+    clearImagery() {
+      clearDetail();
+      for (const mesh of meshes) {
+        if (mesh.texture) gl.deleteTexture(mesh.texture);
+        mesh.texture = null;
+      }
     },
     texture({ x, y, surface }) {
       requireContext();
@@ -488,7 +506,11 @@ function createRenderer(canvas) {
       gl.uniform1i(terrain.detailed, detailTexture ? 1 : 0);
       gl.activeTexture(gl.TEXTURE0);
       gl.uniform1f(terrain.aircraftHeight, pose.altitude);
+      const drawnAt = performance.now();
       for (const mesh of meshes) {
+        // Ease in newly arrived caution shading; red warning shading and
+        // the independent advisory report do not wait for this visual fade.
+        gl.uniform1f(terrain.surfaceArrival, Math.min(1, Math.max(0, (drawnAt - mesh.installedAt) / 200)));
         gl.uniform1i(terrain.mappedSurface, mesh.surface ? 1 : 0);
         gl.uniform4fv(
           terrain.detailTransform,
@@ -570,7 +592,7 @@ export default {
       clearance = ref(null);
     let lastForecast = -Infinity,
       forecast = null,
-      lastDraw = -Infinity,
+      fallbackRegion = "",
       pack = null,
       renderer = null,
       frame = 0,
@@ -578,6 +600,8 @@ export default {
       loadingKey = "",
       origin = null,
       controller = null,
+      imageryController = null,
+      meshGeneration = 0,
       generation = 0,
       failedUntil = 0,
       disposed = false,
@@ -657,7 +681,9 @@ export default {
         if (token === detailGeneration) detailLoadingKey = "";
       }
     };
-    const loadImagery = async (tiles, token, currentController) => {
+    const loadImagery = async (tiles, token) => {
+      imageryController?.abort();
+      const currentController = imageryController = new AbortController();
       imageryState.value = "loading";
       imageryCount.value = 0;
       const timeout = setTimeout(() => currentController.abort(), 25000);
@@ -679,18 +705,18 @@ export default {
                     currentController.signal,
                     props.dataProvider,
                   );
-                  if (disposed || token !== generation) return;
+                  if (disposed || token !== meshGeneration) return;
                   renderer.texture(image);
                   imageryCount.value++;
                 } catch {
-                  if (disposed || token !== generation) return;
+                  if (disposed || token !== meshGeneration) return;
                   failed++;
                 }
               }
             },
           ),
         );
-        if (disposed || token !== generation) return;
+        if (disposed || token !== meshGeneration) return;
         imageryState.value = failed
           ? imageryCount.value
             ? "partial"
@@ -719,24 +745,42 @@ export default {
             props.telemetry?.altitudeDatum || "UNKNOWN",
             currentController.signal,
             props.dataProvider,
+            {trackDeg: props.telemetry?.trackDeg, groundspeedMps: props.flight.groundspeed * 1852 / 3600},
           );
         } catch {
           /* Named Terrarium fallback remains available. */
         }
         if (disposed || token !== generation) return;
         if (candidate) {
+          // A coverage probe is not a geometry change. Preserve GPU buffers/imagery.
+          if (candidate === pack && origin) {
+            regionKey = key;
+            loadingKey = "";
+            failedUntil = 0;
+            return;
+          }
           pack = candidate;
+          fallbackRegion = "";
+          meshGeneration++;
+          imageryController?.abort();
           renderer.replace(candidate.meshes);
           origin = candidate.origin;
           groundSampler = candidate.groundSampler;
           regionKey = key;
           loadingKey = "";
           failedUntil = 0;
-          detailState.value = "native";
+          detailState.value = detailLoadingKey ? "loading" : detailKey ? "ready" : "native";
           detailMetresPerPixel.value = candidate.spacingM;
           imageryState.value = "disabled";
           imageryCount.value = 0;
-          if (props.imageryEnabled) void loadDetail(pose);
+          if (props.imageryEnabled && detailKey !== terrainImageryPatch(pose).key && !detailLoadingKey) void loadDetail(pose);
+          return;
+        }
+        const fallbackKey = `${center.x}/${center.y}`;
+        if (!pack && origin && fallbackRegion === fallbackKey) {
+          regionKey = key;
+          loadingKey = "";
+          failedUntil = 0;
           return;
         }
         pack = null;
@@ -799,9 +843,12 @@ export default {
         detailFailedUntil = 0;
         detailState.value = "disabled";
         detailMetresPerPixel.value = null;
+        meshGeneration++;
+        imageryController?.abort();
         renderer.replace(mesh);
         groundSampler = sampleHeight;
         origin = newOrigin;
+        fallbackRegion = fallbackKey;
         regionKey = key;
         loadingKey = "";
         failedUntil = 0;
@@ -813,7 +860,7 @@ export default {
         );
         if (props.imageryEnabled) {
           void loadDetail(pose);
-          void loadImagery(tiles, token, currentController);
+          void loadImagery(tiles, meshGeneration);
         }
       } catch (error) {
         if (disposed || token !== generation) return;
@@ -833,12 +880,15 @@ export default {
         clearTimeout(timeout);
       }
     };
+    const drawDue = frameCadence();
     const animate = (time) => {
       if (disposed) return;
       frame = requestAnimationFrame(animate);
       if (!props.enabled) {
         if (wasEnabled) {
           generation++;
+          meshGeneration++;
+          imageryController?.abort();
           controller?.abort();
           loadingKey = "";
           detailGeneration++;
@@ -947,10 +997,7 @@ export default {
           time >= detailFailedUntil
         )
           void loadDetail(pose);
-        if (time - lastDraw >= 50) {
-          renderer.draw(props.displayPose || pose, origin, props.viewport);
-          lastDraw = time;
-        }
+        if (drawDue(time)) renderer.draw(props.displayPose || pose, origin, props.viewport);
         status(
           "ready",
           pack
@@ -971,7 +1018,10 @@ export default {
       }
     };
     const invalidateRegion = () => {
+      renderer?.clearImagery();
       generation++;
+      meshGeneration++;
+      imageryController?.abort();
       controller?.abort();
       detailGeneration++;
       detailController?.abort();
@@ -985,6 +1035,7 @@ export default {
       loadingKey = "";
       regionKey = "";
       origin = null;
+      fallbackRegion = "";
       failedUntil = 0;
       imageryState.value = "disabled";
       imageryCount.value = 0;
@@ -1025,6 +1076,8 @@ export default {
       disposed = true;
       unsubscribeProvider?.();
       generation++;
+      meshGeneration++;
+      imageryController?.abort();
       controller?.abort();
       detailGeneration++;
       detailController?.abort();
