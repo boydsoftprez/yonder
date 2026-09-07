@@ -1124,6 +1124,19 @@ describe("NetworkRenderer and a modem whose settings changed", () => {
     expect(verbs(calls)).toEqual(["modify"]);
   });
 
+  it("does not cancel boot dialling because nmcli masks the password (R-CEL-06)", async () => {
+    const { renderer, calls } = harness({
+      devices: MODEM_DEVICES.replace("gsm:connected:", "gsm:connecting (prepare):"),
+      connections: [AP_CONNECTION, ETHERNET_CONNECTION, MODEM_CONNECTION],
+      dialled: { "gsm.apn": "ereseller", "gsm.password": "<hidden>" },
+    });
+    await renderer.render(onApn("ereseller"));
+    expect(verbs(calls)).toEqual(["modify"]);
+    const modify = argvOf(calls, "modify", MODEM_CONNECTION)!;
+    expect(modify[modify.indexOf("connection.autoconnect-retries") + 1]).toBe("0");
+    expect(calls.some((c) => c.includes("--show-secrets"))).toBe(false);
+  });
+
   it("does not cycle the link when only the route metric moved", async () => {
     // `network.priority` edited, or a path stood down: the metric changes on
     // every render that follows, and a bearer picks a metric up in place.

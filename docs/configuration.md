@@ -496,6 +496,11 @@ replace the `hilink`/`stick` sketch that appeared in this reference before M3a: 
 was never implemented and never shipped, so no device in the field can be carrying either
 value.
 
+Enabled modem profiles reconnect automatically with unlimited NetworkManager
+activation retries (R-CEL-06). A slow modem can finish registering after boot without
+requiring a console reconnect. A password reported as `<hidden>` is unreadable, so
+it does not trigger a redial. A password-only change takes effect on the next dial.
+
 **An enabled appliance must name its adapter.** `interface` is the whole of how this device
 locates one, so `enabled: true` with `mode: appliance` and no `interface` is refused —
 loading such a file fails and applying such a change is rejected before anything is written.

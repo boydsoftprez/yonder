@@ -31,6 +31,11 @@ describe("modemProfile", () => {
     expect(settings(p!)["connection.autoconnect"]).toBe("yes");
   });
 
+  it.each(["auto", "appliance"])("keeps retrying a slow modem in %s mode (R-CEL-06)", (mode) => {
+    const p = modemProfile(withModem({ enabled: true, mode }), null, "usb0");
+    expect(settings(p!)["connection.autoconnect-retries"]).toBe("0");
+  });
+
   it("sets a route metric from the operator's order", () => {
     // R-NET-06's mechanism: ethernet 100, modem 700 were the measured
     // defaults, and the metric is what decides which default route wins.
@@ -131,6 +136,17 @@ describe("redialSettings", () => {
 });
 
 describe("bearerChanges", () => {
+  it.each(["", "configured-secret"])("does not redial for a masked password when wanted is %j", (password) => {
+    expect(bearerChanges(
+      [["gsm.apn", "ereseller"], ["gsm.password", password]],
+      "gsm.apn:ereseller\ngsm.password:<hidden>\n",
+    )).toEqual([]);
+    expect(bearerChanges(
+      [["gsm.apn", "new-apn"], ["gsm.password", password]],
+      "gsm.apn:ereseller\ngsm.password:<hidden>\n",
+    )).toEqual(["gsm.apn"]);
+  });
+
   it("names the setting a live bearer would not pick up", () => {
     // The measured defect: dialled on `ereseller`, `config.yaml` now says
     // `nxtgenphone`, and NetworkManager will not re-dial for a profile write.
