@@ -56,6 +56,36 @@ or the file will not play:
    to `NULL`. Not a sleep — the muxer writes its index on EOS and a teardown
    that races it leaves an unplayable file.
 
+## Bring the branch up *before* joining it to the tee
+
+This is the one the spike got wrong and only hardware found, because it needs a
+live sink downstream to show at all.
+
+Both spikes requested the tee pad, linked it, and *then* called
+`sync_state_with_parent()` — and both passed, because a `fakesink` will absorb
+anything. On the board the same order broke the ground station's stream every
+time a recording started. The host said so itself:
+
+```
+cam0: the main stream broke while starting a recording; the capture was
+still written
+```
+
+**A tee linked to a chain that is still in NULL stalls, and a stalled tee stalls
+every branch on it.** The recording that came out was a container header with no
+frames in it — 336 bytes — and after the first couple every later recording was
+the same. The daemon reported each of them as written.
+
+So: build the branch, request the fork pad, `sync_state_with_parent()` downstream
+first, and **link the fork pad last, from inside an `IDLE` probe on it** so the
+link never lands mid-push. Measured after the correction: five recordings in a
+row of 10, 20, 10, 5 and 10 seconds came out at 10.83, 20.39, 10.43, 5.39 and
+10.61 seconds, and the main stream broke **zero** times.
+
+That measurement also closes the question the section below leaves open: the
+board records real time faithfully, and the spike's shortfall really was its
+software encoder.
+
 ## Two things that are not true, and cost a spike each
 
 **Do not offset the branch's pad to zero.** A branch joining a pipeline that has
@@ -72,10 +102,9 @@ The container was faithful throughout. What was short was the software
 
 That last point does not carry over to the board, because the recording branch
 takes H.264 that the hardware encoder has already produced and encodes nothing.
-**It is still unverified there**, and it is the first thing Task 33 should
-measure on hardware: record a known number of seconds off the real pipeline and
-check the frame count against the camera's own frame rate before anything is
-built on top of it.
+**Verified on the board on 2026-09-07**, once the ordering above was corrected:
+five recordings, each within a second of the time asked for, at 24–29 frames a
+second against a nominal 30.
 
 ## What this asks of `yonder-pipeline`
 

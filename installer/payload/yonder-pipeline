@@ -272,10 +272,16 @@ class Branch(object):
     rather than re-derived, and where it forbids something the comment says so
     at the line that would reintroduce it.
 
-    Building and hanging on are one step. **Coming down is not**, and that is
-    deliberate: a still and a recording share `unhook` and differ entirely
-    afterwards — a still is disposed of straight away, and a recording must be
-    sent an end-of-stream and given time to write its index first.
+    **Building, starting and hanging on are three steps, in that order.** The
+    branch is constructed and its fork pad requested; `start()` brings it up to
+    the pipeline's own state and only then joins it to the tee. Joining a tee to
+    a chain still in NULL stalls the tee, and a stalled tee stalls every branch
+    on it — see `start()`.
+
+    **Coming down is separate too**: a still and a recording share `unhook` and
+    differ entirely afterwards — a still is disposed of straight away, and a
+    recording must be sent an end-of-stream and given time to write its index
+    first.
     """
 
     def __init__(self, pipeline, tee, spec):
@@ -297,18 +303,17 @@ class Branch(object):
                 self.dispose()
                 raise BranchError("%s will not link to %s"
                                   % (upstream.get_name(), downstream.get_name()))
-        # The fork itself, last, so nothing is pushed at a chain that is not
-        # joined up yet.
+        # The fork pad is requested here and **linked in `hook()`, not here**.
+        # Measured on the board: a tee linked to a chain that is still in NULL
+        # stalls, and a stalled tee stalls every other branch on it — the
+        # ground station's stream included. The host said so itself, *the main
+        # stream broke while starting a recording*, and the capture that came
+        # out was a container header with no frames in it.
         self.pad = tee.get_request_pad("src_%u")
         if self.pad is None:
             self.dispose()
             raise BranchError("%s would not give out a pad to fork from"
                               % name_of(tee))
-        if self.pad.link(self.head()) != Gst.PadLinkReturn.OK:
-            tee.release_request_pad(self.pad)
-            self.pad = None
-            self.dispose()
-            raise BranchError("that branch will not join %s" % name_of(tee))
         # **The pad's offset is left exactly as it is.** A branch joining a
         # pipeline that has been up for a while carries the running time on its
         # first buffer, and `pad.set_offset(-running)` looks like the fix. It is
@@ -327,14 +332,38 @@ class Branch(object):
         return self.elements[-1].get_static_pad("sink")
 
     def start(self):
-        """Bring the branch up to the state the pipeline is already in.
+        """Bring the branch up, then join it to the tee — in that order.
 
         Called after any probe the caller needs, so a still's gate is watching
         before there is anything to watch, and **downstream first**, so the
         sink is ready to take a buffer before the head is in a state to hand
-        it one."""
+        it one.
+
+        **The join is last, and it happens inside an `IDLE` probe on the fork
+        pad.** Both halves of that matter and both were learnt on hardware. A
+        tee linked to a chain still in NULL stalls, and a stalled tee stalls
+        every branch on it — the first symptom was the ground station's stream
+        breaking whenever a recording started. Doing the link from an idle
+        probe is what keeps it off a pad that is mid-push; linking from the
+        calling thread and hoping is the same race with no name.
+        """
         for element in reversed(self.elements):
             element.sync_state_with_parent()
+
+        joined = threading.Event()
+        outcome = [None]
+
+        def join(pad, info):
+            outcome[0] = pad.link(self.head())
+            joined.set()
+            return Gst.PadProbeReturn.REMOVE
+
+        self.pad.add_probe(Gst.PadProbeType.IDLE, join)
+        if not joined.wait(BLOCK_WAIT_S):
+            raise BranchError("%s never came to rest, so that branch could not "
+                              "join it" % name_of(self.tee))
+        if outcome[0] != Gst.PadLinkReturn.OK:
+            raise BranchError("that branch will not join %s" % name_of(self.tee))
 
     def unhook(self):
         """
