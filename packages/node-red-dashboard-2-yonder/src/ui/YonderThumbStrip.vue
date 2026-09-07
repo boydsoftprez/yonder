@@ -33,7 +33,8 @@
  * `Live`". Every camera keeps a fixed position in the strip whichever one
  * is currently on the main picture, so an operator counting cameras never
  * has to notice one is briefly missing because it happens to be the one
- * already in view.
+ * already in view. The active one reads `Live` only while it runs; stopped,
+ * it reads `Stopped` like any other, and keeps its mark.
  *
  * **Draws what it is given and decides nothing.** `ageSeconds` is R-VID-
  * 14's own frame age, computed wherever the stills mechanism already
@@ -79,8 +80,13 @@ export default {
     methods: {
         /** The word under a thumbnail — see this component's doc comment. */
         captionOf (cam) {
-            if (cam.active) return 'Live'
+            // Stopped is stopped whichever camera is on the main picture: that
+            // picture says THIS CAMERA IS NOT RUNNING, and a thumbnail under it
+            // reading `Live` would contradict it. `Live` is the active camera's
+            // word only while it runs; the mark (`on`) stays, because the
+            // position is still the one in view.
             if (cam.stopped) return 'Stopped'
+            if (cam.active) return 'Live'
             if (cam.ageSeconds === null || cam.ageSeconds === undefined) return 'Still · waiting'
             return 'Still · ' + cam.ageSeconds + ' s'
         }

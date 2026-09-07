@@ -21,7 +21,7 @@ import YonderThumbStrip from "./YonderThumbStrip.vue";
  * props, nothing else.
  */
 function strip(props: {
-  cameras?: Array<{ id: string; name?: string; active?: boolean; ageSeconds?: number }>;
+  cameras?: Array<{ id: string; name?: string; active?: boolean; stopped?: boolean; ageSeconds?: number | null }>;
   downlink?: string;
 } = {}) {
   return mount(YonderThumbStrip, { props });
@@ -100,4 +100,25 @@ it("Downlink now is the measured path total, not the sum of two targets", () => 
 it("draws no downlink line at all when nothing has been measured yet", () => {
   const w = strip({ cameras: [{ id: "cam-nose", name: "Nose", active: true }] });
   expect(w.find(".y-strip__dl").exists()).toBe(false);
+});
+
+/**
+ * The active camera's word is `Live` only while it runs. On the board the
+ * main picture said THIS CAMERA IS NOT RUNNING over a strip whose active
+ * thumbnail read `Live` — two instruments contradicting each other about
+ * one fact. Stopped is stopped whichever camera it is; the mark stays,
+ * because the position is still the one on the main picture.
+ */
+it("an active camera that is stopped reads Stopped, and keeps its mark", () => {
+  const w = strip({
+    cameras: [
+      { id: "cam-nose", name: "Nose", active: true, stopped: true, ageSeconds: null },
+      { id: "cam-tail", name: "Tail", active: false, ageSeconds: 3 },
+    ],
+  });
+  const thumbs = w.findAll(".y-strip__thumb");
+  expect(thumbs[0].classes()).toContain("on");
+  expect(thumbs[0].find(".y-strip__cap").text()).toBe("Stopped");
+  expect(thumbs[0].text()).not.toContain("Live");
+  expect(thumbs[1].find(".y-strip__cap").text()).toBe("Still · 3 s");
 });
