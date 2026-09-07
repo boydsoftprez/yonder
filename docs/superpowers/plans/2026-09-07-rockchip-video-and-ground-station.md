@@ -34,10 +34,10 @@ those two notes and from the board on 2026-09-07, not from documentation.
 
 - **Logic lives in node packages, never in Node-RED function nodes.** `flows/` is wiring only.
 - **Every change traces to a requirement ID.** New this plan: `R-HW-07`, `R-VID-20`;
-  known issues `K-61` (renumbered from the bench branch's `K-54`), `K-62`, `K-63`, `K-64`.
+  known issues `K-62` (renumbered from the bench branch's `K-54`), `K-63`, `K-64`, `K-65`.
   IDs are stable; never reuse or renumber an existing one.
 - **The Pi path does not change.** A Pi composes today's launch line token for token after
-  every task here; `pipeline.test.ts`'s existing assertions stay green untouched. K-61's
+  every task here; `pipeline.test.ts`'s existing assertions stay green untouched. K-62's
   Pi change ships separately with its own Pi proof.
 - **The preview branch is always H.264** (`R-VID-20`): the browser reaches it over WebRTC.
   `camera.codec` governs the main stream only.
@@ -83,7 +83,7 @@ those two notes and from the board on 2026-09-07, not from documentation.
 | `installer/roles/40-uart.sh` | Frees the header UART on Armbian (UART2 overlay, no serial console, no `ttyFIQ0` getty). |
 | `packages/yonder-core/src/mav/renderer.ts` | `device: auto` sweeps `/dev/ttyS2`. |
 | `.github/workflows/ci.yml` | Builds the `gst-rockchip` payload for arm64 when the recipe changes. |
-| `docs/…` | Spec §2 reversed on evidence; `R-HW-07`, `R-VID-20`; K-61…K-64; architecture and roadmap corrected; a hardware note for what shipped. |
+| `docs/…` | Spec §2 reversed on evidence; `R-HW-07`, `R-VID-20`; K-62…K-65; architecture and roadmap corrected; a hardware note for what shipped. |
 
 ---
 
@@ -95,7 +95,13 @@ evidence this plan cites and the spec addendum that reverses §2. They share a b
 (`506bbe5`) and conflict in exactly one file, `docs/known-issues.md`, because both appended
 entries: the bench branch numbered its new entry **K-54**, and the video branch already
 spent K-54 on *"A detected camera cannot be configured from the console"*. IDs are never
-reused, so the bench entry becomes **K-61**.
+reused, so the bench entry becomes **K-62**.
+
+> **Note, after execution (2026-09-07):** by the time Task 0 ran,
+> `claude/exciting-merkle-e4cd39` had advanced to `8d200b7` and spent K-61
+> itself, so the branch merged that tip too and the bench entry is **K-62**;
+> the plan's later entries are K-63, K-64 and K-65. Requirement IDs were
+> unaffected.
 
 **Files:**
 - Modify: `docs/known-issues.md` (merge resolution)
@@ -136,17 +142,17 @@ Then, in an editor, using `git show claude/happy-tereshkova-f8087d:docs/known-is
 the source of the text:
 
 1. **K-48.** Copy the paragraph beginning `**Update — the reasoning that made respawn the sanctioned path no longer holds, and a second defect is now visible.**` (through `…which OpenHD does and this daemon does not.`) and insert it at the end of K-48's body — immediately before the `---` that precedes `### K-49 · ~~Adaptive is offered — for the rate and for the size — and nothing implements either~~ — BUILT, not yet proven on a board`.
-2. **K-53.** Copy the paragraph beginning `**Update — the remedy above is the right one, and the argument for deferring it was wrong.**` (through `…report what the encoder says rather than what it was asked for — see K-48.`) and insert it at the end of K-53's body — immediately before the `---` that precedes `### K-54 · A detected camera cannot be configured from the console`. In the copied text change `(see K-54)` to `(see K-61)`.
-3. **K-61.** Copy the whole entry `### K-54 · The Pi's ISP scaler is over budget in the preview branch, and drops frames to say so` (through its final `Evidence:` line) and append it at the very end of the file, after a `---` separator, with the heading changed to `### K-61 · The Pi's ISP scaler is over budget in the preview branch, and drops frames to say so`.
+2. **K-53.** Copy the paragraph beginning `**Update — the remedy above is the right one, and the argument for deferring it was wrong.**` (through `…report what the encoder says rather than what it was asked for — see K-48.`) and insert it at the end of K-53's body — immediately before the `---` that precedes `### K-54 · A detected camera cannot be configured from the console`. In the copied text change `(see K-54)` to `(see K-62)`.
+3. **K-62.** Copy the whole entry `### K-54 · The Pi's ISP scaler is over budget in the preview branch, and drops frames to say so` (through its final `Evidence:` line) and append it at the very end of the file, after a `---` separator, with the heading changed to `### K-62 · The Pi's ISP scaler is over budget in the preview branch, and drops frames to say so`.
 
 - [ ] **Step 4: Fix the one reference in the spec, and check the numbering**
 
 ```bash
-sed -i '' 's/See also K-54\./See also K-61./' docs/superpowers/specs/2026-09-05-rockchip-hardware-encode-design.md
-grep -c '^### K-61 · The Pi' docs/known-issues.md
+sed -i '' 's/See also K-54\./See also K-62./' docs/superpowers/specs/2026-09-05-rockchip-hardware-encode-design.md
+grep -c '^### K-62 · The Pi' docs/known-issues.md
 grep -c '^### K-54 · A detected camera' docs/known-issues.md
 grep -n 'K-54' docs/superpowers/specs/2026-09-05-rockchip-hardware-encode-design.md docs/hardware/ffmpeg-as-the-pipeline-composer.md | grep -v 'K-54 · A detected' || echo "no stale K-54 references"
-grep -c 'see K-61' docs/known-issues.md
+grep -c 'see K-62' docs/known-issues.md
 ls scripts/spikes/retune-bitrate-mpp.py scripts/spikes/rockchip-camera-path.py
 ```
 
@@ -156,11 +162,11 @@ Expected: `1`, `1`, `no stale K-54 references`, `1`, both files listed.
 
 ```bash
 git add docs/known-issues.md docs/superpowers/specs/2026-09-05-rockchip-hardware-encode-design.md docs/superpowers/plans/2026-09-07-rockchip-video-and-ground-station.md
-git commit -s -m "docs: merge the bench record — ffmpeg cannot retune, GStreamer reaches MPP; the bench's K-54 becomes K-61; and the plan that acts on it
+git commit -s -m "docs: merge the bench record — ffmpeg cannot retune, GStreamer reaches MPP; the bench's K-54 becomes K-62; and the plan that acts on it
 
 The spec's own 2026-09-06 addendum, the composer note and the spike scripts
 arrive here. K-54 was already spent on this branch, so the ISP-scaler entry is
-K-61; IDs are never reused."
+K-62; IDs are never reused."
 git log --oneline -3
 ```
 
@@ -562,7 +568,7 @@ not, and the camera page refuses Start with the encoder named rather than lettin
 pipeline die (R-CAM-08, R-CAM-10). It changes only what leaves for the ground station: the
 copy the console watches is always H.264, because a browser reaches it over WebRTC
 (R-VID-20). Changing it restarts the camera's pipeline and does not arm the confirmation
-window. There is no control for it on the camera page yet (K-64); it is set here.
+window. There is no control for it on the camera page yet (K-65); it is set here.
 ```
 
 - [ ] **Step 10: Commit**
@@ -1249,7 +1255,7 @@ does not: the plugin configures against GStreamer 1.26.2 unpatched, and the benc
 three pieces on the board. Delivery is the one column the GStreamer route loses, and this
 task pays it the way `mavlink-router` already does — a container build for `linux/arm64`
 from pinned commits, staged into `vendor/`, fingerprinted by the commit. Along the way the
-`--only <component>` summary stops dying on `ZT_DEB` (K-63).
+`--only <component>` summary stops dying on `ZT_DEB` (K-64).
 
 **Files:**
 - Modify: `installer/make-payload.sh` — pins after line 108, `COMPONENTS` (111), usage (112-140), a new block before `if wanted console`, the summary (589-592)
@@ -1286,7 +1292,7 @@ describe("installer/make-payload.sh stages gst-rockchip", () => {
     expect(script).toContain("grep -q mppjpegdec");
   });
 
-  it("never reads a variable in the summary that only one component sets (K-63)", () => {
+  it("never reads a variable in the summary that only one component sets (K-64)", () => {
     const summary = script.slice(script.indexOf('step "done"'));
     expect(summary).not.toContain("$ZT_DEB");
   });
@@ -1449,7 +1455,7 @@ register the emulation handlers (Linux: qemu-user-static and binfmt-support) and
 fi
 ```
 
-- [ ] **Step 5: Fix the summary (K-63)**
+- [ ] **Step 5: Fix the summary (K-64)**
 
 Replace line 591, `log "zerotier: $OUT/zerotier/$ZT_DEB"`, with:
 
@@ -1538,7 +1544,7 @@ In `.github/workflows/ci.yml`, after the `payload-mavlink-router` job, add:
 
 ```bash
 git add installer/make-payload.sh .github/workflows/ci.yml packages/yonder-core/src/installer.test.ts
-git commit -s -m "feat(installer): the payload carries MPP, librga and gstreamer-rockchip, built from pinned commits — R-HW-03, R-CFG-07; and --only no longer dies on ZT_DEB (K-63)"
+git commit -s -m "feat(installer): the payload carries MPP, librga and gstreamer-rockchip, built from pinned commits — R-HW-03, R-CFG-07; and --only no longer dies on ZT_DEB (K-64)"
 ```
 
 `vendor/` is git-ignored; nothing built is committed.
@@ -1949,15 +1955,15 @@ in its own voice rather than be contradicted by code. Three known issues are fil
 them closed by this branch — and R-VID-20 records the one rule this plan adds.
 
 **Files:**
-- Modify: `docs/superpowers/specs/2026-09-05-rockchip-hardware-encode-design.md` (after the addendum that ends `See also K-61.`; and §11)
+- Modify: `docs/superpowers/specs/2026-09-05-rockchip-hardware-encode-design.md` (after the addendum that ends `See also K-62.`; and §11)
 - Modify: `docs/requirements.md:130` (after R-VID-19), `docs/requirements.md:263` (after R-HW-06)
-- Modify: `docs/known-issues.md` (append K-62, K-63, K-64 after K-61)
+- Modify: `docs/known-issues.md` (append K-63, K-64, K-65 after K-62)
 - Modify: `docs/architecture.md:162,168,390-391`
 - Modify: `docs/roadmap.md:346-347,443`
 
 - [ ] **Step 1: The spec reverses its own §2, on its own evidence**
 
-After the paragraph ending `See also K-61.` in §2's addendum, add:
+After the paragraph ending `See also K-62.` in §2's addendum, add:
 
 ```markdown
 ### Decision, revised 2026-09-07
@@ -1984,7 +1990,7 @@ What this settles for the sections below:
   (`gst-inspect-1.0 --exists`). The converter probe collapses to one fact: on MPP the
   preview is scaled *inside* the encoder through RGA (`width`/`height`) — about twice a
   software scaler's throughput, the whole preview branch at one point of four cores — and
-  on every other board the line is unchanged. K-61's Pi change is separate work.
+  on every other board the line is unchanged. K-62's Pi change is separate work.
 - **§5 holds and is measured:** `mppjpegdec` costs +3 against software's +8.
 - **§6 holds**, with one rule added: the interface's copy is always H.264 (R-VID-20).
 - **§7 is untouched and still open.**
@@ -2013,10 +2019,10 @@ After the R-HW-06 row (line 263) add:
 
 - [ ] **Step 3: Three known issues**
 
-Append to `docs/known-issues.md`, after K-61, each preceded by a `---` line:
+Append to `docs/known-issues.md`, after K-62, each preceded by a `---` line:
 
 ```markdown
-### K-62 · ~~On a Rockchip board no camera starts, and the console says the board has no hardware encoder~~ — CLOSED
+### K-63 · ~~On a Rockchip board no camera starts, and the console says the board has no hardware encoder~~ — CLOSED
 
 **Status:** Closed · **Requirements:** R-HW-03, R-CAM-07, R-CAM-08, R-CAM-10, R-CAM-13
 
@@ -2038,7 +2044,7 @@ by `52-gst-rockchip.sh`. Proven on the board — see
 
 ---
 
-### K-63 · ~~`make-payload.sh --only <one component>` ends with `ZT_DEB: unbound variable`~~ — CLOSED
+### K-64 · ~~`make-payload.sh --only <one component>` ends with `ZT_DEB: unbound variable`~~ — CLOSED
 
 **Status:** Closed · **Requirements:** R-CFG-07
 
@@ -2050,7 +2056,7 @@ variable. It now is.
 
 ---
 
-### K-64 · The camera page has no codec control
+### K-65 · The camera page has no codec control
 
 **Status:** Open · **Requirements:** R-CAM-08, R-UI-17
 
@@ -2101,7 +2107,7 @@ Expected: `1`; two rows; three headings; `claim gone`; the only `image-only` hit
 
 ```bash
 git add docs
-git commit -s -m "docs: reverse the composer decision on its own evidence, file K-62..K-64, add R-HW-07 and R-VID-20, and correct architecture and roadmap — R-HW-03, R-CAM-13"
+git commit -s -m "docs: reverse the composer decision on its own evidence, file K-63..K-65, add R-HW-07 and R-VID-20, and correct architecture and roadmap — R-HW-03, R-CAM-13"
 ```
 
 ---
@@ -2449,12 +2455,12 @@ git commit -s -m "feat(installer): free the header UART on Armbian — UART2 ove
 ### Task 11: Prove it on the board, to a ground station, over cellular — and write it down
 
 Everything above is unit-tested against stand-ins. This task is the board, the ground
-station and the note, in that order, and it is what closes K-62. Nothing here is a claim
+station and the note, in that order, and it is what closes K-63. Nothing here is a claim
 until the command beside it has printed the number.
 
 **Files:**
 - Create: `docs/hardware/rockchip-video-shipped.md`
-- Modify: `docs/known-issues.md` (K-62's *Proven* line gets the date and the figures)
+- Modify: `docs/known-issues.md` (K-63's *Proven* line gets the date and the figures)
 - Board: `/opt/yonder-src` (staged tree), `/etc/yonder/config.yaml` (through `POST /apply` only)
 
 - [ ] **Step 1: Stage and install**
@@ -2564,11 +2570,11 @@ ssh root@<radxa> '/usr/sbin/zerotier-cli listpeers | grep LEAF; curl -s --unix-s
 
 Expected: the Mac's peer line no longer shows a `192.168.68.x` path; `modem True`; `answering: True` still; `relayed False` (or `True`, recorded either way) with the latency and the uplink rate the mesh reports while Mission Planner and `ffplay` are both consuming. That is the whole chain — camera to MPP to mediamtx to the mesh to cellular to the ground, and MAVLink both ways beside it.
 
-- [ ] **Step 8: Write the note, close K-62, commit**
+- [ ] **Step 8: Write the note, close K-63, commit**
 
 Create `docs/hardware/rockchip-video-shipped.md` in the form of `hardware-encode-on-a-radxa-zero-3w.md`: a *What was in front of us* table (board, kernel, Armbian version, the three commits from `vendor/gst-rockchip/MANIFEST` and the plugin's sha256, camera, modem, date); then one section per step above with the command run and what it printed — the probe's answer, the launch line, the two frames, the busy figure against the bench's +4, the retune before/after with the unchanged `since`, the H.265 `ffprobe` lines and the preview still H.264, the ground station's `answering`, the cellular peer path and rates; a *What the UART needed* section recording what the hand-applied state was and that `40-uart.sh` found it already in place (and whether the camera's by-path name held across this session's reboots — R-CAM-05's second clean reboot); and *Not settled* for what it did not measure (latency on Rockchip, picture quality across sources and sizes, sustained load, Mission Planner's own decoder on macOS).
 
-In `docs/known-issues.md`, K-62's *Proven on the board* line gains the date and the two numbers that matter: the busy figure and the retune's before/after.
+In `docs/known-issues.md`, K-63's *Proven on the board* line gains the date and the two numbers that matter: the busy figure and the retune's before/after.
 
 ```bash
 git add docs/hardware/rockchip-video-shipped.md docs/known-issues.md
@@ -2603,7 +2609,7 @@ not new code in the router path.
 
 **Placeholder scan:** run `grep -nE "TBD|TODO|later|fill in|Similar to|edge cases|appropriate" docs/superpowers/plans/2026-09-07-rockchip-video-and-ground-station.md` — every hit is prose about the domain (a "later" milestone, an "appropriate" quoted from an existing comment), not an instruction to an implementer. Every code step carries its code.
 
-**Type consistency:** `Encoder` (Task 1) is `{ element, h265, decoder, device, hardware, detail }` everywhere — the fixtures in Tasks 3, 4 and 5 all spell `MPP` the same way; `EncodeKind`, `encoderFor`, `scalesInEncoder`, `encodeControl`, `encodesIn`, `refuse` (Task 3) are the names Tasks 4 and 5 import; the payload layout Task 6 produces (`lib/`, `gstreamer-1.0/`, `MANIFEST`, `inspect.txt`) is what Task 7's role and tests read; the `YONDER_*` defaults Tasks 7 and 10 add to `common.sh` are the names their tests set; `docs/hardware/rockchip-video-shipped.md` is cited by Task 8's K-62 and created by Task 11.
+**Type consistency:** `Encoder` (Task 1) is `{ element, h265, decoder, device, hardware, detail }` everywhere — the fixtures in Tasks 3, 4 and 5 all spell `MPP` the same way; `EncodeKind`, `encoderFor`, `scalesInEncoder`, `encodeControl`, `encodesIn`, `refuse` (Task 3) are the names Tasks 4 and 5 import; the payload layout Task 6 produces (`lib/`, `gstreamer-1.0/`, `MANIFEST`, `inspect.txt`) is what Task 7's role and tests read; the `YONDER_*` defaults Tasks 7 and 10 add to `common.sh` are the names their tests set; `docs/hardware/rockchip-video-shipped.md` is cited by Task 8's K-63 and created by Task 11.
 
 ## Execution notes
 

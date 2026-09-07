@@ -59,21 +59,21 @@ artefact) shows.
 
 ## What is here
 
-| | |
-|---|---|
-| `gallery/DraftPicker.vue` | One value from what the device answered. Present, advertised, gated. A real `<select>` underneath |
-| `gallery/DraftSegmented.vue` | Two or three exclusive choices. A maximum width; it never stretches |
-| `gallery/DraftSetBar.vue` | A bounded continuous value. One track, up to three marks — where the device is, what was commanded, and — hollow, the third — what a Live edit has drafted but not applied. Snaps to the device's own step |
-| `gallery/DraftReadout.vue` | Label, value, unit, stacked |
-| `gallery/DraftColumn.vue` | A titled group with a right-hand qualifier |
-| `gallery/DraftAimDial.vue` | Pan and tilt. White where it is, cyan where you push. Drag sets a rate; release stops. An axis that will not answer stays on the dial, struck |
-| `gallery/DraftPicture.vue` | The picture with its overlays and the drag-to-slew layer. Orb only, measured from where the finger landed. A photo's white flash and `SAVED · to <destination>` are a timestamp prop, not a route the deck has to know about |
-| `gallery/DraftTextField.vue` | The camera's name. Defaults `Cam 1`, `Cam 2` |
-| `gallery/DraftShell.vue` | The console's shell, wearing Dashboard's class names so the real `theme.css` rules draw it |
-| `gallery/DraftIndex.vue` | The Cameras page: camera rows and rejection rows |
-| `gallery/DraftCaptures.vue` | The captures panel (§8.3, R-CAM-18): board-saved stills only, view · download · delete. A popover beside the shutter key — the deck's 252px columns have no room for a thumbnail, two dates and three keys side by side |
-| `gallery/cameras.js` | The two capability reports, with `proven` recording what the bench has actually driven; `openValues` on every gate states which of its own values leave the controls it holds live; `orientationNote` states which one is turning the picture |
-| `gallery/deck.js` | The deck. Composes columns from the report; Live and Setup are one component in two modes; owns the shared draft and the board captures list, each a module-level store keyed by camera so a Live↔Setup or camera switch — which remounts this component — does not lose them; assigns every group to a fixed slot (`SLOTS`) rather than letting the browser balance column heights |
+| | | What it became |
+|---|---|---|
+| `gallery/DraftPicker.vue` | One value from what the device answered. Present, advertised, gated. A real `<select>` underneath | `YonderPicker.vue` (Task 16) |
+| `gallery/DraftSegmented.vue` | Two or three exclusive choices. A maximum width; it never stretches | `YonderSegmented.vue` (Task 17) |
+| `gallery/DraftSetBar.vue` | A bounded continuous value. One track, up to three marks — where the device is, what was commanded, and — hollow, the third — what a Live edit has drafted but not applied. Snaps to the device's own step | `YonderSetBar.vue` (Task 18); the mark follows the pointer since `22a3129` |
+| `gallery/DraftReadout.vue` | Label, value, unit, stacked | `YonderReadout.vue` (Task 15) |
+| `gallery/DraftColumn.vue` | A titled group with a right-hand qualifier | `YonderColumn.vue` (Task 19) |
+| `gallery/DraftAimDial.vue` | Pan and tilt. White where it is, cyan where you push. Drag sets a rate; release stops. An axis that will not answer stays on the dial, struck | `YonderAimPad.vue` (Task 20), inside `YonderAim.vue` (Task 23) |
+| `gallery/DraftPicture.vue` | The picture with its overlays and the drag-to-slew layer. Orb only, measured from where the finger landed. A photo's white flash and `SAVED · to <destination>` are a timestamp prop, not a route the deck has to know about | `YonderPicture.vue` (Task 25); its SAVED banner and Start key came with Tasks 33b and the operator's call of 2026-09-07 |
+| `gallery/DraftTextField.vue` | The camera's name. Defaults `Cam 1`, `Cam 2` | `YonderTextField.vue` (Task 15) and the camera's name (Task 29) |
+| `gallery/DraftShell.vue` | The console's shell, wearing Dashboard's class names so the real `theme.css` rules draw it | `console/theme.ts` — the shell's rules, generated into the served document's head (Task 26) |
+| `gallery/DraftIndex.vue` | The Cameras page: camera rows and rejection rows | `YonderIndex.vue` (Task 24); ADD and FORGET came with `61bf4cc` and Task 46 |
+| `gallery/DraftCaptures.vue` | The captures panel (§8.3, R-CAM-18): board-saved stills only, view · download · delete. A popover beside the shutter key — the deck's 252px columns have no room for a thumbnail, two dates and three keys side by side | `YonderCaptures.vue` (Task 33b) — drawn as a panel under the deck, not the popover; see the manifest's L-48 |
+| `gallery/cameras.js` | The two capability reports, with `proven` recording what the bench has actually driven; `openValues` on every gate states which of its own values leave the controls it holds live; `orientationNote` states which one is turning the picture | `scripts/fixtures/camera-globalshutter.json` and the capability model in `video/capability.ts` (Tasks 4–7) |
+| `gallery/deck.js` | The deck. Composes columns from the report; Live and Setup are one component in two modes; owns the shared draft and the board captures list, each a module-level store keyed by camera so a Live↔Setup or camera switch — which remounts this component — does not lose them; assigns every group to a fixed slot (`SLOTS`) rather than letting the browser balance column heights | `YonderDeck.vue` (Task 22) |
 | `live.pocket2.night.png`, `live.pocket2.poor.png`, `live.pocket2.day.png`, `live.elp.night.png` | Live, both cameras, both palettes, the link degraded. The Aim panel is simply live — round 2 removed the range finder and the envelope it recorded |
 | `setup.elp.night.png` | Setup, the ELP: the four bench-only fields, no Aim group — this camera has no motor |
 | `setup.pocket2.night.png` | Setup, the Pocket 2: two pending changes listed with their interruptions, `DISCARD`/`APPLY` on the rail. No Aim group here either (round 2) — Setup carries only the bench-only fields, as it always did |

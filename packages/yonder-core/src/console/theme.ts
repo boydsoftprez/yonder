@@ -983,7 +983,21 @@ ${panelCss(theme)}
 .yonder-tone-good    { color: var(--yonder-good); font-weight: 600; }
 .yonder-tone-bad     { color: var(--yonder-bad); font-weight: 600; }
 
-/* The soft-key rail's group: part of the bezel, not another instrument. */
+/* The soft-key rail's group: part of the bezel, not another instrument.
+
+   And it stays put (spec §5, blueprint L-97). The deck under a picture can run
+   to twice the height of a notebook window, and a rail that scrolls away with
+   it is a page whose actions are somewhere below — which is how the operator
+   came to say that starting a camera was "all the way at the bottom and not
+   obvious". Sticky to the foot of the viewport, the rail is reachable at every
+   scroll position, and the gate now asserts that at the *top* of the page,
+   where a rail that merely sits at the end would be off-screen. */
+.nrdb-ui-group.yonder-rail,
+.yonder-rail {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+}
 .nrdb-ui-group.yonder-rail > .v-card,
 .yonder-rail > .v-card {
   background: color-mix(in srgb, var(--yonder-pane) 82%, transparent) !important;

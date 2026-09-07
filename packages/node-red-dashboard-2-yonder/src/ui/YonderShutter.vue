@@ -168,9 +168,16 @@ export default {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 100%;
+    /* The width of a key, not of its column. Blueprint L-44 draws the shutter
+       the size of one `Video | Photo` button, and the gate refuses an action
+       that spans its whole surface — `100%` did, on every camera page. Sized
+       to its label like `YonderSegmented` is, with a floor so `PHOTO` and
+       `○ RECORD` come out the same width and the key does not jump when the
+       mode changes. */
+    width: max-content;
+    min-width: 128px;
     min-height: 40px;
-    padding: 0 12px;
+    padding: 0 18px;
     border-radius: 3px;
     border: 1px solid var(--yonder-divider, #2b333c);
     background: var(--yonder-track, #161b21);

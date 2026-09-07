@@ -142,7 +142,7 @@ Pi and are properties of that board: the direct translation of `compose()` into 
 not run at all (`h264_v4l2m2m` refuses the `yuvj420p` its MJPEG decoder emits); under ffmpeg
 the Pi has no hardware scaler, because `v4l2convert` is a GStreamer element with no ffmpeg
 equivalent; and §4's converter probe therefore owes an answer for what it selects on a Pi
-under ffmpeg. See also K-61.
+under ffmpeg. See also K-62.
 
 ## 3. Delivery: one pinned package, nothing compiled
 

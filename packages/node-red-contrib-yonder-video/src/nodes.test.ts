@@ -88,6 +88,52 @@ describe("yonder-cameras", () => {
     // for a journal, and it never reaches a page.
     expect(JSON.stringify(msg)).not.toContain("no reply scripted");
   });
+
+  /** The ADD key's own request — the socket, never `/dev/videoN` (R-CAM-05). */
+  it("adopts the socket an ADD press names", async () => {
+    replies.push(ok({ camera: "cam1", id: "a-1", expiresAt: null }));
+    await send(camerasNode, "yonder-cameras", { payload: { adopt: "platform-usb-0:1.1:1.0-video-index0" } });
+    expect(asked).toEqual([
+      { method: "POST", path: "/cameras", body: { device: "platform-usb-0:1.1:1.0-video-index0" } },
+    ]);
+  });
+
+  /**
+   * **The removal key's own request** (R-CAM-21).
+   *
+   * The **id**, where the adoption above names the socket, and the asymmetry
+   * is the point: an adoption has no entry to name yet, and a removal is very
+   * often of a camera whose socket has nothing on it at all — a thing that is
+   * not there cannot be addressed by where it is not.
+   */
+  it("removes the camera a removal press names, by id, on the address it already has", async () => {
+    replies.push(ok({ camera: "cam1", id: "a-2", expiresAt: 1_000 }));
+    const msg = await send(camerasNode, "yonder-cameras", { payload: { forget: "cam1" } });
+    expect(asked).toEqual([{ method: "DELETE", path: "/cameras/cam1" }]);
+    // Which camera the answer is about, on a message the node emitted fresh.
+    expect(msg.camera).toBeUndefined();
+    expect((msg.payload as { camera: string }).camera).toBe("cam1");
+  });
+
+  /**
+   * A refusal is a refusal, and the node says so rather than reporting a
+   * change that did not happen. The reason the operator actually reads is the
+   * one on the key itself — this page reads the list again after every press,
+   * so a refusal on the message is overwritten before anything draws it.
+   */
+  it("reports a refused removal as rejected, never as a change that took", async () => {
+    replies.push(refused(409, { error: "this camera is streaming; stop it before taking it out of the configuration" }));
+    const msg = await send(camerasNode, "yonder-cameras", { payload: { forget: "cam1" } });
+    expect(msg.yonder?.state).toBe("rejected");
+    expect(msg.payload).toBeNull();
+  });
+
+  /** A message with neither key is still a sweep, which is what a poll sends. */
+  it("sweeps the board when a message names no press at all", async () => {
+    replies.push(ok({ found: [], rejected: [] }));
+    await send(camerasNode, "yonder-cameras", { payload: { forget: "" } });
+    expect(asked).toEqual([{ method: "GET", path: "/cameras" }]);
+  });
 });
 
 describe("yonder-camera", () => {

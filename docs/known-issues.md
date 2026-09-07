@@ -1256,9 +1256,23 @@ measured afterwards, and no drop has happened since it was installed.
 
 ---
 
-### K-47 · The capture gate rewrites every committed day-palette image from a run that checks no credential
+### K-47 · The capture gate's `--press NIGHT` run checks no credential, and discards its own verdict
 
-**Status:** Open · **Requirements:** R-SEC-10, R-UI-12
+**Status:** Open — narrowed on 2026-09-07 · **Requirements:** R-SEC-10, R-UI-12
+
+**The half about committed images is closed, by policy rather than by a fix.**
+On 2026-09-06 the operator adopted the telemetry branch's rule that captured
+images are not committed: `docs/console/capture/` is gitignored, the gate writes
+to `vendor/capture/`, and what is committed and compared is the geometry in
+`docs/console/shape/`. So this run can no longer rewrite a committed picture,
+because there is none. The text below is kept as written, because the other two
+halves still stand: the run performs no credential check at all on a page that
+carries a resolved RTSP password, and its images are what CI uploads as an
+artifact a reviewer downloads — an unchecked path into a published artefact is
+still R-SEC-10's concern — and `>/dev/null 2>&1 || true` still throws away
+whatever it would have said.
+
+---
 
 `scripts/verify-pages.sh:826` presses the `NIGHT` key through a real browser,
 which is the gate's one end-to-end proof that a soft key on this console does
@@ -1500,9 +1514,17 @@ the original size with no gap and no complaint. That is this entry's own fault
 with the layers swapped, and it is caught only by reading the value back after
 writing it, which OpenHD does and this daemon does not.
 
-### K-49 · ~~Adaptive is offered — for the rate and for the size — and nothing implements either~~ — BUILT, not yet proven on a board
+### K-49 · ~~Adaptive is offered — for the rate and for the size — and nothing implements either~~ — CLOSED
 
-**Status:** Open · **Requirements:** R-UI-20, R-VID-07
+**Status:** Closed on 2026-09-07 — proven on the board · **Requirements:** R-UI-20, R-VID-07
+
+**Proven on hardware, 2026-09-06/07.** With a real browser as the only viewer,
+its own `getStats()` drove the preview to 1389 kb/s; with a synthetic link
+swept 2600 → 1600 kb/s the preview went 1591 → 633 kb/s, each measured on the
+wire with `ffmpeg` and the pipeline pid unchanged throughout; freeing the link
+by cutting the main stream took it 0.51 → 0.83 → 1.37 → 2.07 Mb/s, stopping at
+the applied ceiling. The size ladder steps down at the floor (`53a8342`). What
+it will not do — hold the ceiling on a link too thin for the floor — is K-59.
 
 The stream and preview both offer **Fixed / Adaptive**. Selecting Adaptive
 makes the bitrate bar read-only — correctly, since in Adaptive the rate is not
@@ -1564,7 +1586,32 @@ the decisions to the picture. Until Task 32 lands this entry stays open and
 both faults above stand: a controller that is never told anything holds, which
 is the right behaviour and the same thing an operator sees.
 
-### K-50 · An apply can be left pending for ever, and two routes disagree about it
+### K-50 · ~~An apply can be left pending for ever, and two routes disagree about it~~ — CLOSED, and half of it was misread
+
+**Status:** Closed on 2026-09-07 · **Requirements:** R-CAM-12, R-UI-05, R-VID-07
+
+**What was actually happening.** The engine holds the apply's `id` from the
+moment it starts until it returns to idle — through `pending` *and* through
+`reverting`. The sighting below (`/apply` refusing, `/status` with no id three
+seconds later) was the tail of a revert: `/apply` hit the engine while it was
+still `reverting`, and by the time `/status` was asked the revert had finished
+and there was nothing to report. Not two routes disagreeing; one route asked
+three seconds after the other about a state that had ended in between.
+
+**The console's CONFIRM key was never the problem either.** `poll-pending`
+re-reads `/status` on the press and hands the id on; `yonder-confirm` posts it.
+The `id is required` refusal in the text below answered a hand-written `curl`
+that sent `{}`, not anything the console does.
+
+**What was wrong, and is fixed:** the refusal said *an apply is already
+pending; confirm or wait for it to revert* for all three busy states, and only
+one of them can be confirmed. An operator who read it during a revert went
+looking for a change to confirm that no longer existed. It now names the state
+— pending (with the id), still applying, or putting the previous configuration
+back — and says what can be done in each.
+
+*The original entry, kept as written:*
+
 
 **Seen on hardware, 2026-09-06**, while proving adaptive. `POST /cameras/cam0/apply`
 refused with
@@ -1628,9 +1675,9 @@ operator had to reload the browser page to see the picture again. `YonderPicture
 draws `RECONNECTING · ATTEMPT n`, so it knows the stream went away, but the
 WebRTC session did not recover on its own once the publisher returned.
 
-### K-52 · The ground station's stream has no resolution or frame-rate control
+### K-52 · ~~The ground station's stream has no resolution or frame-rate control~~ — CLOSED
 
-**Status:** Closed · **Requirements:** R-CAM-14, R-VID-07, R-UI-20
+**Status:** Closed on 2026-09-07 — closed by the resolution and frame-rate pickers on the ground station's stream (bb19ce7), proven on the board: the capture caps moved 1280×720@30 → 640×480@15 and the pipeline respawned to them · **Requirements:** R-CAM-14, R-VID-07, R-UI-20
 
 Found by the operator on the board: the preview has **Size** and **Rate**
 pickers; the stream to the ground station has neither. Its resolution and frame
@@ -1712,9 +1759,9 @@ refuses is the same defect one layer down:
   was written, the window armed and the picture stayed down until the rollback
   took it back.
 
-### K-53 · The video pipeline is run by a program that cannot be spoken to
+### K-53 · ~~The video pipeline is run by a program that cannot be spoken to~~ — CLOSED
 
-**Status:** Open · **Requirements:** R-VID-07, R-VID-09
+**Status:** Closed on 2026-09-07 — closed by `installer/payload/yonder-pipeline` (Task 30a, 14d7cf2): the pipeline is a program that answers — `retune`, `reconfigure-preview`, `still`, `record`, `record-stop` over NDJSON, each reporting whether the main stream stayed continuous. Every runtime retune, still and recording this branch proved on hardware went through it · **Requirements:** R-VID-07, R-VID-09
 
 `video/pipeline.ts` composes a GStreamer launch line and `systemSpawner` hands
 it to **`gst-launch-1.0`**. That tool plays a pipeline and then answers nothing:
@@ -1846,7 +1893,7 @@ Two things support the shape it already describes:
   RubyFPV reaches the same split from an entirely different architecture.
 - **Resolution should not be in scope for live reconfigure.** Measured on both
   boards, no hardware path changes resolution on a running pipeline: the Pi's
-  `v4l2convert` fails `S_FMT` and takes the pipeline down (see K-61), and the
+  `v4l2convert` fails `S_FMT` and takes the pipeline down (see K-62), and the
   MPP encoders accept `width`/`height` mid-stream and ignore them. Only a
   software scaler can, and both peer projects respawn instead. The preview-branch
   reconfigure this entry lists should be read as *bitrate live, size by respawn*.
@@ -1854,9 +1901,9 @@ Two things support the shape it already describes:
 The host should also **read every control back after setting it** and report
 what the encoder says rather than what it was asked for — see K-48.
 
-### K-54 · A detected camera cannot be configured from the console
+### K-54 · ~~A detected camera cannot be configured from the console~~ — CLOSED
 
-**Status:** Open · **Requirements:** R-UI-03, R-CAM-12
+**Status:** Closed on 2026-09-07 — closed by the `ADD` key (61bf4cc) and `FORGET` (Task 46); pressed on the board on 2026-09-07 to adopt the ELP after a port move · **Requirements:** R-UI-03, R-CAM-12
 
 Found by the operator: he attached a second camera, the Cameras page showed it,
 and there was no way to do anything with it.
@@ -2213,7 +2260,55 @@ line alone doing the work.
 
 ---
 
-### K-61 · The Pi's ISP scaler is over budget in the preview branch, and drops frames to say so
+### K-61 · A configured camera matches on its socket alone, so a different camera in the same socket inherits its identity
+
+**Status:** Open — the choice is the operator's · **Requirements:** R-CAM-05, R-CAM-12, R-UI-20
+
+Found on the board on 2026-09-07. `cam1` was configured for the ELP Global
+Shutter Camera on USB port 1.1. The operator plugged a different device into
+that port — a `Webcam gadget: UVC HD Camera`, Linux Foundation `1d6b:0102` — and
+the Cameras page read:
+
+```
+cam1   Global Shutter Camera: Global S   Idle
+```
+
+The gadget had silently become `cam1`: the ELP's name, its 1280×720p30, its
+H.264, its 2000 kb/s, its controls. Every reading on the Camera page was about
+a device that was no longer there. The probe reports the card name — the page
+itself lists `Webcam gadget: UVC HD Camera` under *found* — and nothing compares
+it with the name the configuration was made against.
+
+**Why it is this way.** A camera's identity is its USB path, and that is the
+right answer to the question R-CAM-05 asks — *is this the same camera after a
+reboot* — because the by-path name is what survives one. It is the wrong answer
+to *is this the same camera I configured*, which is a different question with a
+different witness: the card name, and the serial where the device offers one.
+
+**Why it matters on an aircraft.** Swap a camera between flights and the console
+presents it under the previous camera's name and settings without a word. The
+exposure and colour controls are written to a sensor they were never tuned for;
+the stream address names a camera that is not the one streaming.
+
+Two ways to close it, and neither is this file's to choose:
+
+1. **Match on socket, and say loudly when the card has changed.** The row keeps
+   its id and settings, and gains a caution — *configured as a Global Shutter
+   Camera; a UVC HD Camera is in that socket now* — with the recorded card name
+   stored beside the device path so there is something to compare. Least
+   disruptive; a replaced camera still works immediately, under the old name.
+2. **Match on both, and treat a mismatch as absent.** The old entry reads *Not
+   attached* and the new device appears as *not configured*, with `ADD` beside
+   it. Nothing is ever presented as a camera it is not; the cost is that a
+   deliberately replaced camera has to be adopted again, and the old entry
+   forgotten.
+
+The second is the honest one and the first is the convenient one. Recorded
+rather than decided.
+
+---
+
+### K-62 · The Pi's ISP scaler is over budget in the preview branch, and drops frames to say so
 
 **Status:** Open · **Requirements:** R-CAM-10, R-HW-05, R-VID-13
 
@@ -2264,4 +2359,3 @@ about twice the throughput of software, and the whole preview branch costs one
 point of a four-core board.
 
 Evidence: [`ffmpeg-as-the-pipeline-composer.md`](hardware/ffmpeg-as-the-pipeline-composer.md).
-

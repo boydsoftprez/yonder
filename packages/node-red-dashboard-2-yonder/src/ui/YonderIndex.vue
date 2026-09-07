@@ -25,20 +25,30 @@
                             </span>
                             <YonderReadout :rows="[{ label: '', value: rateValue(cam), unit: 'Mb/s' }]" />
                         </span>
-                        <button
-                            v-if="cam.id"
-                            type="button"
-                            class="y-idx__open"
-                            :title="'Open ' + cam.name"
-                            @click="open(cam.id)"
-                        >OPEN<i aria-hidden="true">&rsaquo;</i></button>
-                        <button
-                            v-else
-                            type="button"
-                            class="y-idx__open y-idx__adopt"
-                            :title="'Configure ' + cam.name + ', so it has a page'"
-                            @click="adopt(cam)"
-                        >ADD<i aria-hidden="true">&plus;</i></button>
+                        <span class="y-idx__keys">
+                            <button
+                                v-if="cam.id"
+                                type="button"
+                                class="y-idx__k y-idx__forget"
+                                :disabled="!!cam.removal"
+                                :title="cam.removal || ('Take ' + cam.name + ' out of the configuration on this device')"
+                                @click="forget(cam)"
+                            >FORGET<i aria-hidden="true">&minus;</i></button>
+                            <button
+                                v-if="cam.id"
+                                type="button"
+                                class="y-idx__k y-idx__open"
+                                :title="'Open ' + cam.name"
+                                @click="open(cam.id)"
+                            >OPEN<i aria-hidden="true">&rsaquo;</i></button>
+                            <button
+                                v-else
+                                type="button"
+                                class="y-idx__k y-idx__adopt"
+                                :title="'Configure ' + cam.name + ', so it has a page'"
+                                @click="adopt(cam)"
+                            >ADD<i aria-hidden="true">&plus;</i></button>
+                        </span>
                     </div>
                 </template>
                 <p v-else class="y-idx__none">No camera.</p>
@@ -77,10 +87,21 @@ import { summarise } from 'yonder-core/presentation'
  * wiring task, the same way `camera.ts` builds `ui-yonder-deck`'s payload):
  *
  * ```
- * { cameras: { id, name, bus, spec, state, tone, rate,
- *              capabilities: CameraCapabilities }[],
+ * { cameras: { id, name, bus, spec, identity, state, tone, rate, device,
+ *              capabilities: CameraCapabilities | null,
+ *              removal: string | null }[],
  *   rejected: { device, reason }[] }
  * ```
+ *
+ * **A row is drawn for every camera the board found and for every camera the
+ * configuration names** — the union, composed by `cameraIndex()`. A
+ * configured camera whose socket answered nothing arrives with
+ * `state: 'Not attached'`, `capabilities: null` (nothing answered, so nothing
+ * was asked, and a row of `aim: none · zoom: none` would be a claim about a
+ * camera this board cannot see) and a `removal` of `null`, which is what
+ * makes the key that clears it live. `removal` is the reason that key is
+ * *not* live when it is not: a camera that is streaming is not removed, it is
+ * stopped.
  *
  * `tone` is one of `'good' | 'waiting' | 'bad' | 'neutral'` — the same
  * closed register `CommandPresentation` uses everywhere else in this
@@ -250,6 +271,32 @@ export default {
             if (!cam || cam.id || !cam.device) return
             this.post({ adopt: cam.device })
         },
+        /**
+         * **Take this camera out of the configuration.**
+         *
+         * The other half of the state the operator found a board in: two
+         * configured cameras on ports with nothing in them, the camera in his
+         * hand matching neither, and no way to clear either entry short of
+         * editing `/etc/yonder/config.yaml` over SSH.
+         *
+         * Posts the **id**, where `adopt` posts the socket, and the asymmetry
+         * is the point: an adoption has no entry to name yet, and a removal
+         * is very often of a camera whose socket has nothing on it at all —
+         * a thing that is not there cannot be addressed by where it is not.
+         *
+         * Guarded on `cam.removal` as well as `:disabled`, for the reason
+         * `YonderShutter` gives for guarding twice: a dispatched click
+         * reaches a disabled button's listener in a real browser. The refusal
+         * is composed by `cameraIndex()` and drawn on the key's own title, so
+         * an operator reads *why* before they press rather than after —
+         * this page reads the camera list again after every press, so a
+         * refusal travelling back on the message would be overwritten by the
+         * next sweep before anything could show it.
+         */
+        forget (cam) {
+            if (!cam || !cam.id || cam.removal) return
+            this.post({ forget: cam.id })
+        },
         toneClass (tone) {
             return TONE_CLASS[tone] || ''
         },
@@ -310,13 +357,19 @@ export default {
  * has actually shrunk that far, rather than a page that is unreadable
  * vertically for everyone.
  */
+/* The last track is `auto` rather than a fixed 76 px because it now holds one
+   key or two: a configured camera carries both the key that opens it and the
+   key that removes it, and a detected one nothing is configured for carries
+   only the key that adopts it. A fixed width would be sized for whichever of
+   the two somebody had in mind. `min-width` rises with it — the row's own
+   floor, below which `.y-idx__display`'s `overflow-x: auto` takes over. */
 .y-idx__cam {
     display: grid;
-    grid-template-columns: 150px minmax(140px, 1fr) 168px 76px;
+    grid-template-columns: 150px minmax(140px, 1fr) 168px auto;
     gap: 16px;
     align-items: center;
     width: 100%;
-    min-width: 480px;
+    min-width: 580px;
     padding: 11px 0;
     background: transparent;
     border: 0;
@@ -339,7 +392,7 @@ export default {
    configured for has no page to open (R-UI-03), and a key that is missing
    for that reason is indistinguishable from a page that failed to draw it.
    44 px tall, which is a finger on a tablet (spec §5). */
-.y-idx__open {
+.y-idx__k {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -356,12 +409,30 @@ export default {
     color: var(--yonder-label, #7f8a95);
     cursor: pointer;
 }
-.y-idx__open:hover:not(:disabled) {
+.y-idx__k:hover:not(:disabled) {
     color: var(--yonder-value, #ffffff);
     border-color: var(--yonder-select, #2ad4f0);
 }
-.y-idx__open:disabled { cursor: not-allowed; opacity: 0.45; }
-.y-idx__open i { font-size: 15px; font-style: normal; }
+.y-idx__k:disabled { cursor: not-allowed; opacity: 0.45; }
+.y-idx__k i { font-size: 15px; font-style: normal; }
+
+/* **The removal key sits to the left of OPEN, and never at the row's end.**
+   OPEN is the key an operator presses without looking — it is where the
+   blueprint's chevron pointed and it is the whole reason a row is a row. A
+   key that takes a camera out of the configuration must not be the one that
+   catches a finger aimed at the familiar spot, so it goes on the inside. */
+.y-idx__keys {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+}
+/* Not drawn in a warning colour. It is not destructive of anything that
+   cannot be put back — the change goes through the apply engine like every
+   other, and the camera's captures are untouched — and a red key on every
+   configured row would read as an alarm on a page where two of them may be
+   perfectly healthy. It is a key, sized to what it says (R-UI-10). */
+.y-idx__forget i { font-size: 15px; }
 
 .y-idx__nm { display: flex; flex-direction: column; gap: 3px; }
 .y-idx__nm b { font-size: 13.5px; font-weight: 600; }

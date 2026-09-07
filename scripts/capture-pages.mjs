@@ -65,7 +65,7 @@ import { join, dirname, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 // The rules that run inside the page. Their own module so they can be
 // tested against a synthetic DOM without a console — see measure-page.mjs.
-import { measure, railAtBottom } from "./measure-page.mjs";
+import { measure, railAtBottom, railAtTop } from "./measure-page.mjs";
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -664,6 +664,7 @@ for (const page of pages) {
   // full-page picture above proves every control is *reachable*; neither of
   // these two is evidence for the other, and the requirement asks for both.
   let rail = null;
+  let railTop = null;
   if (fold) {
     await tab.screenshot({
       path: join(refs, "capture", `${stem}.fold.png`),
@@ -677,6 +678,10 @@ for (const page of pages) {
     // measurement taken in the same tick is of where it used to be.
     await tab.waitForTimeout(300);
     rail = await tab.evaluate(railAtBottom, [RAIL]);
+    // And once the page is back at the top: on a page taller than the window
+    // this is the only measurement that tells a sticky rail from one that
+    // sits at the end of the page (spec §5, blueprint L-97).
+    railTop = await tab.evaluate(railAtTop, [RAIL]);
     await tab.evaluate(() => { window.scrollTo(0, 0); });
   }
 
@@ -810,6 +815,15 @@ for (const page of pages) {
       failures += 1;
     } else {
       note(`  ok    ${page.title} (${palette}) keeps the rail in the viewport at the bottom of the page`);
+    }
+    if (railTop !== null && railTop.present && railTop.tall && !railTop.inside) {
+      report(
+        { rule: "rail", page: page.name, palette, key: "top" },
+        `${page.title} (${palette}) loses the rail when the page is scrolled to the top`,
+        `${railTop.box.w}x${railTop.box.h} at ${railTop.box.x},${railTop.box.y} in ${railTop.viewport.w}x${railTop.viewport.h} — the rail is not sticky (spec §5, L-97)`,
+      );
+    } else if (railTop !== null && railTop.present && railTop.tall) {
+      note(`  ok    ${page.title} (${palette}) keeps the rail in the viewport at the top of a page that scrolls`);
     }
     const held = shape.fold.parts.filter((x) => x.present && x.inside);
     if (held.length === shape.fold.parts.length && foldContract) {

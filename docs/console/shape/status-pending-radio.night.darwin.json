@@ -243,7 +243,7 @@
       "key": "nrdb-ui-group.yonder-rail",
       "box": {
         "x": 268,
-        "y": 1988,
+        "y": 818,
         "w": 1000,
         "h": 82
       }
@@ -252,7 +252,7 @@
       "key": "nrdb-ui-widget.nrdb-ui-yonder-softkeys",
       "box": {
         "x": 285,
-        "y": 2005,
+        "y": 835,
         "w": 966,
         "h": 48
       }

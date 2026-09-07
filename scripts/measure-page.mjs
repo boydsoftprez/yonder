@@ -504,6 +504,32 @@ export function measure([liveSelectors, fixedSelector, specimenValues, maskedKey
  * scrolls" (spec §5) is not a claim any measurement of an unscrolled page can
  * make, and a rail at the foot of a short page satisfies it by accident.
  */
+/**
+ * Where the rail is once the page is back at the *top* of its scroll.
+ *
+ * `railAtBottom` alone is satisfied by a rail that merely sits at the end of
+ * the page — scrolled to the bottom, anything at the bottom is in view. What
+ * spec §5 and blueprint L-97 ask for is a rail that is reachable *while the
+ * deck scrolls*, which on a page taller than the window means sticky to the
+ * viewport's foot. Measured at the top, a rail that only sits at the end is
+ * off-screen; a sticky one is not. That is the whole difference, and it is
+ * the one the operator noticed: Start "all the way at the bottom".
+ */
+export function railAtTop([railSelector]) {
+  window.scrollTo(0, 0);
+  const el = document.querySelector(railSelector);
+  if (el === null) return { present: false };
+  const r = el.getBoundingClientRect();
+  const round = (n) => Math.round(n);
+  return {
+    present: true,
+    inside: r.top >= -1 && r.bottom <= window.innerHeight + 1,
+    tall: document.documentElement.scrollHeight > window.innerHeight + 1,
+    box: { x: round(r.x), y: round(r.y), w: round(r.width), h: round(r.height) },
+    viewport: { w: window.innerWidth, h: window.innerHeight },
+  };
+}
+
 export function railAtBottom([railSelector]) {
   const el = document.querySelector(railSelector);
   if (el === null) return { present: false };

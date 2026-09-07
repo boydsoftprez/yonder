@@ -350,6 +350,9 @@ until M8.
 - **Detect cameras on demand, and say what was rejected and why** — R-CAM-12
 - **Capabilities built from what the device answers, never from a stored list** — R-CAM-14
 - Stable camera identity, so the detected camera is the configured one — R-CAM-05
+- **Every configured camera on the list, present or not**, and a way to take one off it —
+  R-CAM-20, R-CAM-21. Both are the same fact seen twice: identity is the socket, so moving a
+  camera between ports leaves an entry behind that nothing removed and nothing drew
 - **Encoder chosen by probing the board** — R-CAM-13, R-CAM-07
 - The Raspberry Pi family: hardware H.264, and software where the board has none — R-HW-01, R-HW-02
 - RTP/UDP H.264 to a ground station, and the document that configures one — R-VID-01, R-VID-10
@@ -414,7 +417,7 @@ code and unit tests and an explicit note that it has never run on hardware.
 - **Telemetry overlay on the video** — R-TEL-12
 - Moving map, fullscreen, and inset swap — R-TEL-11, R-TEL-13, R-TEL-14
 - MAVLink path verification — R-DIA-04
-- **A camera that is itself a USB host — the DJI Pocket 2** — R-CAM-15. Here rather than
+- **A camera that is itself a USB host — the DJI Pocket 2** — R-CAM-15. **Deferred on 2026-09-05, the operator's decision, until the Pocket 2 is back in hand:** every task that drives it (the plan's Task 2 and Phase 5, Tasks 35–40) is held rather than dropped, and the branch that built the rest of M4 says so in its plan. Here rather than
   in M9 because the bench settled it in an evening: with the board playing the phone, the
   camera streams 720p H.264 unprompted and its gimbal is commands on the same link, which
   is a real gimbal for the Cockpit this milestone builds. See

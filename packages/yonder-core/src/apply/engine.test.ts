@@ -215,7 +215,7 @@ describe("ApplyEngine", () => {
     const { clock } = fakeClock();
     const e = new ApplyEngine({ configPath, journalPath, renderers: [renderer()], clock });
     await e.apply(changed());
-    await expect(e.apply(changed())).rejects.toThrow(/already pending/);
+    await expect(e.apply(changed())).rejects.toThrow(/is pending; confirm it/);
   });
 
   it("reverts when a renderer throws, and reports the failure", async () => {
@@ -312,7 +312,7 @@ describe("ApplyEngine", () => {
 
     const other = structuredClone(DEFAULT_CONFIG);
     other.system.hostname = "second";
-    await expect(e.apply(other)).rejects.toThrow(/already pending/);
+    await expect(e.apply(other)).rejects.toThrow(/still being carried out/);
 
     release();
     await first;
