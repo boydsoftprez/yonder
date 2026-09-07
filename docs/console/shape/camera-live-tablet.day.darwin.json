@@ -126,7 +126,7 @@
       "key": "nrdb-ui-group.yonder-deck-live.yonder-rail",
       "box": {
         "x": 268,
-        "y": 2448,
+        "y": 557,
         "w": 744,
         "h": 211
       }
@@ -135,7 +135,7 @@
       "key": "nrdb-ui-widget.nrdb-ui-yonder-databar",
       "box": {
         "x": 285,
-        "y": 2465,
+        "y": 574,
         "w": 710,
         "h": 57
       }
@@ -144,7 +144,7 @@
       "key": "nrdb-ui-widget.nrdb-ui-yonder-softkeys",
       "box": {
         "x": 285,
-        "y": 2533,
+        "y": 643,
         "w": 469,
         "h": 108
       }
@@ -153,7 +153,7 @@
       "key": "nrdb-ui-widget.nrdb-ui-yonder-holdkey",
       "box": {
         "x": 766,
-        "y": 2533,
+        "y": 643,
         "w": 229,
         "h": 108
       }

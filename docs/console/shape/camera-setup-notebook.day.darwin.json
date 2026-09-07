@@ -180,7 +180,7 @@
       "key": "nrdb-ui-group.yonder-deck-setup.yonder-rail",
       "box": {
         "x": 268,
-        "y": 2503,
+        "y": 818,
         "w": 1160,
         "h": 82
       }
@@ -189,7 +189,7 @@
       "key": "nrdb-ui-widget.nrdb-ui-yonder-softkeys",
       "box": {
         "x": 285,
-        "y": 2520,
+        "y": 835,
         "w": 1126,
         "h": 48
       }
