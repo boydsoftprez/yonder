@@ -1735,7 +1735,7 @@ refuses is the same defect one layer down:
 
 ### K-53 · ~~The video pipeline is run by a program that cannot be spoken to~~ — CLOSED
 
-**Status:** Closed on 2026-09-07 — closed by `installer/payload/yonder-pipeline` (Task 30a, 55e27be): the pipeline is a program that answers — `retune`, `reconfigure-preview`, `still`, `record`, `record-stop` over NDJSON, each reporting whether the main stream stayed continuous. Every runtime retune, still and recording this branch proved on hardware went through it · **Requirements:** R-VID-07, R-VID-09
+**Status:** Closed on 2026-09-07 — closed by `installer/payload/yonder-pipeline` (Task 30a, 14d7cf2): the pipeline is a program that answers — `retune`, `reconfigure-preview`, `still`, `record`, `record-stop` over NDJSON, each reporting whether the main stream stayed continuous. Every runtime retune, still and recording this branch proved on hardware went through it · **Requirements:** R-VID-07, R-VID-09
 
 `video/pipeline.ts` composes a GStreamer launch line and `systemSpawner` hands
 it to **`gst-launch-1.0`**. That tool plays a pipeline and then answers nothing:
