@@ -129,7 +129,7 @@ Reopen only with new evidence, and say what changed.
 
 | | |
 |---|---|
-| `docs/requirements.md` | 220 numbered requirements. The definition of done |
+| `docs/requirements.md` | 223 numbered requirements. The definition of done |
 | `docs/architecture.md` | What runs and why; config model; rollback; security commitments |
 | `docs/roadmap.md` | M0–M9, each with its requirement IDs and an exit criterion |
 | `docs/configuration.md` | `config.yaml` reference |
