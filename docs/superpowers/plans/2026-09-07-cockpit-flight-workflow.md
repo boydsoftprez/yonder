@@ -80,8 +80,14 @@ dashboard `cockpit-state.mjs`, `YonderCockpit.vue`, fixture and docs.
 
 ## 5. Integration and handoff
 
-- [ ] Run the complete workspace tests, build and lint; review the combined diff.
-- [ ] Verify real browser controls, mission conversion, payload routing and responsive
+- [x] Run the complete workspace tests, build and lint; review the combined diff.
+- [x] Verify real browser controls, mission conversion, payload routing and responsive
   scene in both palettes; use fixtures and isolated SITL without altering active flight.
-- [ ] Update walkthrough, requirement/blueprint mappings and evidence with practical limits.
-- [ ] Commit signed changes and leave a working preview for the operator.
+- [x] Update walkthrough, requirement/blueprint mappings and evidence with practical limits.
+- [x] Commit signed changes and leave a working preview for the operator.
+
+The workspace tests/build/lint and cockpit-specific browser checks pass. The
+broader installed-page visual gate flags camera-page geometry and action-width
+changes from the merged base; those captures have not been accepted as part of
+this cockpit change. See the recorded integration result in
+`docs/console/evidence/2026-09-07-cockpit-flight-workflow.md`.

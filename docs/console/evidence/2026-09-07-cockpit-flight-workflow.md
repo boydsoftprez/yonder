@@ -80,3 +80,34 @@ ownership and offline preparation are documented in the
 Physical camera calibration/capture timing, actual aircraft control performance,
 sunlight readability and provider service availability remain outside this
 software and isolated-simulator verification.
+
+## Integrated branch verification
+
+The signed cockpit implementation commit `9db18f5` was merged with the requested
+base through `bfe2898` in signed merge `d5a4e8a`. The wiring conflict retained
+both the cockpit page and the base's camera Start action. The resulting flow
+contains 375 unique node IDs; the existing camera page implementations and their
+shape baselines were not changed by this cockpit integration.
+
+- `npm test`: **3,780 tests passed across 189 test files**, including 644 dashboard
+  and 2,793 core tests. The tests use explicit failure fixtures for link loss,
+  invalid inputs and unavailable system services; those fixture messages are not
+  test failures.
+- `npm run build` and `npm run lint`: passed.
+- The merge-focused flow, authentication and route checks: **395 tests passed**.
+- `npm run cockpit:verify -w node-red-dashboard-2-yonder`: passed the responsive
+  fixture checks without issuing vehicle requests.
+- Installed Node-RED cockpit captures passed in day and night at 1280×900 and
+  in night at 1024×768. The captured PFD, insets and persistent controls were
+  visually inspected. Missing flight measurements remain explicitly unavailable.
+- The complete installed-page visual gate finished with **189 passed and 12
+  failed checks**. It is **not green**: the camera index,
+  live and setup captures differ from their stored geometry, and the Record
+  action spans its surface at the tested widths. These findings concern camera
+  pages retained from the merged base. Their shape baselines were not accepted
+  in this cockpit work.
+
+The operator preview remains on page port 4196 against the isolated native
+ArduPlane simulator, separate from the earlier previews. The walkthrough includes
+the HTTPS/localhost requirement for cryptographically verified offline imports
+and distinguishes a tablet's loopback address from a laptop ground service.

@@ -236,6 +236,13 @@ hybrid imagery and internet traffic independently in Display & data. Executable
 assets are served by the device. The grid map, mission geometry and instruments
 remain useful with sources disabled or unavailable.
 
+Offline terrain/map imports and geoid validation require **HTTPS**, or a page
+served from **localhost**. For an iPad connecting to another computer, use an
+HTTPS ground service; `127.0.0.1` on the iPad points to the iPad itself. A missing
+secure browser context is reported as an import error and does not bypass file
+integrity checks. Saved terrain/map packages stay in that browser's IndexedDB;
+the geoid file must be loaded again in a new session.
+
 The bundled cove pack contains surveyed bare-earth and **mapped surface** data.
 Near the aircraft, the renderer retains the native one-metre grid within a bounded
 nearby tile set; farther away it uses a labeled lower detail level. Survey dates,
