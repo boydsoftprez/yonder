@@ -696,7 +696,9 @@ step 3 says the gate asserts "the rail's box inside the viewport at scroll
 bottom (the sticky rail)". A rail that is simply the last thing on the page
 satisfies that sentence exactly as well as a sticky one does. The gate passes
 at 160/0, the assertion is written down, and the rail is not sticky (L-97). An
-assertion that cannot fail reads, in every review, like one that can.
+assertion that cannot fail reads, in every review, like one that can. *(Since
+closed: the rail is sticky and the gate measures it at the top of every page
+that scrolls — L-97 is present.)*
 
 **5 · The mask hides the thing most worth checking.** The rollback
 confirmation annunciator is masked in every committed capture, correctly, and
@@ -763,7 +765,6 @@ has a named owner or is built, no camera surface is finished.
 | L-02, L-03 | `CAMERAS` and `SYSTEM` section headings in the sidebar |
 | L-04, L-05 | One sidebar entry per camera, and its selected state (R-UI-03) |
 | L-93 | The `SRT` output row |
-| L-97 | The sticky rail |
 | S-04, S-05 | The `RECORD FORMAT` and `SENSOR SIZE` bench-only fields |
 | C-04 | A thumbnail on each Cameras row |
 | C-15, C-16 | **The `ENCODING USED` meter and `room for one more 1080p30 stream`** |
