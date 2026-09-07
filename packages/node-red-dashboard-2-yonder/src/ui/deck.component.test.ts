@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { mount, type VueWrapper } from "@vue/test-utils";
 import { describe, expect, it, vi } from "vitest";
-import { reactive } from "vue";
+import { nextTick, reactive } from "vue";
 import YonderDeck, { CAPABILITY_LAYOUT, appliedForDraft } from "./YonderDeck.vue";
 import { CAPABILITY_KEYS } from "yonder-core/presentation";
 
@@ -700,6 +700,170 @@ it("groups flow into columns and no group is stranded on a row of its own", () =
  * a fact; `advertised` and `gated` keep the key, inoperative, carrying the
  * reason (R-UI-21, R-UI-26: under the picture it records, never on a rail).
  */
+/**
+ * **One key that follows the mode, and the line under it** (blueprint L-43 to
+ * L-47; R-CAM-17, R-CAM-18, R-STO-06).
+ *
+ * The deck drew two shutter keys, always both — a Record circle and a Photo
+ * circle stacked — because it called `drawShutter()` once per capability.
+ * The camera cannot do both at once, so two keys were a lie about that, and
+ * `YonderShutter` had taken a `mode` prop since the day it was built.
+ *
+ * Everything below is about what an operator reads without opening anything:
+ * which key is there, what it says about where a capture lands and how much
+ * room is left, and — the one an operator was not present for — why a
+ * recording ended when nobody stopped it.
+ */
+describe("the capture column: one key, following the mode", () => {
+  const recorder = (over: Record<string, unknown> = {}) => ({
+    recording: false, since: null, destination: "board",
+    remainingSeconds: 7_080, remainingPhotos: 3_900, bytes: null, ended: null, ...over,
+  });
+  const both = {
+    ...noCapabilities(),
+    recording: present({ medium: "board" }),
+    stills: present({ source: "pipeline" }),
+  };
+  const mode = (w: VueWrapper<any>) => segByLabel(w, "Mode");
+
+  it("draws one key, not two, and it reads RECORD in Video", () => {
+    const { wrapper } = deck(makeStore(makeReport({ capabilities: both, recorder: recorder() })), "live");
+    expect(wrapper.findAll(".y-shutter"), "one camera, one shutter").toHaveLength(1);
+    expect(wrapper.find(".y-shutter__label").text()).toBe("RECORD");
+  });
+
+  it("reads PHOTO once the MODE control is put in Photo, and still draws one key", async () => {
+    const { wrapper } = deck(makeStore(makeReport({ capabilities: both, recorder: recorder() })), "live");
+    await mode(wrapper).findAll("button")[1]!.trigger("click");
+    expect(wrapper.findAll(".y-shutter")).toHaveLength(1);
+    expect(wrapper.find(".y-shutter__label").text()).toBe("PHOTO");
+  });
+
+  /**
+   * The operator settled this: Video-or-Photo is a state of the browser, like
+   * which deck is showing. It is not configuration, so it must not reach the
+   * socket at all — the same structural guarantee every staged edit on this
+   * deck has, asserted the same way.
+   */
+  it("changes the mode without posting anything, because the mode is the browser's", async () => {
+    const { wrapper, emit } = deck(makeStore(makeReport({ capabilities: both, recorder: recorder() })), "live");
+    await mode(wrapper).findAll("button")[1]!.trigger("click");
+    expect(emit).not.toHaveBeenCalled();
+  });
+
+  it("offers no mode to a camera with only one of the two, and draws that one's key", () => {
+    const onlyStills = { ...noCapabilities(), stills: present({ source: "pipeline" }) };
+    const { wrapper } = deck(makeStore(makeReport({ capabilities: onlyStills, recorder: recorder() })), "live");
+    // A control whose options are one is a control that cannot be used.
+    expect(wrapper.findAll(".y-seg").some((s) => s.find(".y-seg__label").text() === "Mode")).toBe(false);
+    expect(wrapper.find(".y-shutter__label").text()).toBe("PHOTO");
+  });
+
+  it("says where a capture lands and how much is left, in the unit the mode works in", async () => {
+    const { wrapper } = deck(makeStore(makeReport({ capabilities: both, recorder: recorder() })), "live");
+    expect(wrapper.find(".y-shutter__dest").text()).toBe("to this board · 118 min free");
+    await mode(wrapper).findAll("button")[1]!.trigger("click");
+    expect(wrapper.find(".y-shutter__dest").text()).toBe("to this board · 3900 photos free");
+  });
+
+  it("says the camera's own card is a medium it cannot measure, never that it is full", () => {
+    const { wrapper } = deck(makeStore(makeReport({
+      capabilities: both,
+      recorder: recorder({ destination: "camera", remainingSeconds: null, remainingPhotos: null }),
+    })), "live");
+    expect(wrapper.find(".y-shutter__dest").text())
+      .toBe("to the camera's card · this device cannot see what is left on it");
+  });
+
+  it("counts the elapsed time from the recorder's own `since`, never from the press", async () => {
+    const since = Date.now() - 64_000;
+    const { wrapper } = deck(makeStore(makeReport({
+      capabilities: both, recorder: recorder({ recording: true, since }),
+    })), "live");
+    // A page opened after the recording began shows it running, at the
+    // board's own elapsed time. An optimistic local timestamp — which is what
+    // this deck used to keep — reads 00:00:00 here.
+    expect(wrapper.find(".y-shutter__elapsed").text()).toBe("00:01:04");
+    expect(wrapper.find(".y-shutter__btn").classes()).toContain("lit");
+  });
+
+  /**
+   * R-STO-06 is only honest if the interface can say *that is what happened*.
+   * An operator whose recording ended without them has to be told why, and a
+   * sentence after every stop would train them to stop reading it.
+   */
+  it("says why a recording ended by itself, and says nothing after a stop somebody pressed", () => {
+    const byItself = deck(makeStore(makeReport({
+      capabilities: both,
+      recorder: recorder({ ended: { at: 5, reason: "the card reached the 1024 MB reserve" } }),
+    })), "live").wrapper;
+    expect(byItself.find(".y-deck__ended").text())
+      .toContain("the card reached the 1024 MB reserve");
+
+    const pressed = deck(makeStore(makeReport({ capabilities: both, recorder: recorder() })), "live").wrapper;
+    expect(pressed.find(".y-deck__ended").exists()).toBe(false);
+  });
+
+  it("posts record, then stop, from the one key — reading the device, not itself", async () => {
+    // Reactive, because this is the one test here that watches the deck
+    // answer a *second* report — the device saying the recording started.
+    const store = reactive(makeStore(makeReport({ capabilities: both, recorder: recorder() })));
+    const { wrapper, emit } = deck(store, "live");
+    await wrapper.find(".y-shutter__btn").trigger("click");
+    expect(emit.mock.calls[0]![2]).toEqual({ payload: { shutter: "record" } });
+
+    // The device answers, and only then is the key a stop. A deck that kept
+    // its own guess would send `stop` here whether or not anything started.
+    store.state.data.messages.d1 = {
+      payload: makeReport({
+        capabilities: both, recorder: recorder({ recording: true, since: Date.now() }),
+      }),
+    };
+    await nextTick();
+    await wrapper.find(".y-shutter__btn").trigger("click");
+    expect(emit.mock.calls[1]![2]).toEqual({ payload: { shutter: "stop" } });
+  });
+
+  it("takes a photograph in Photo mode", async () => {
+    const { wrapper, emit } = deck(makeStore(makeReport({ capabilities: both, recorder: recorder() })), "live");
+    await mode(wrapper).findAll("button")[1]!.trigger("click");
+    await wrapper.find(".y-shutter__btn").trigger("click");
+    expect(emit.mock.calls[0]![2]).toEqual({ payload: { shutter: "photo" } });
+  });
+
+  /**
+   * §8.3: repeated presses must not launch competing captures. The device
+   * refuses the second with `busy`, and a refusal the operator should never
+   * have had to see is a refusal this page should not have caused.
+   */
+  it("sends nothing on a second press while the first is still in flight", async () => {
+    const { wrapper, emit } = deck(makeStore(makeReport({ capabilities: both, recorder: recorder() })), "live");
+    await wrapper.find(".y-shutter__btn").trigger("click");
+    await wrapper.find(".y-shutter__btn").trigger("click");
+    expect(emit).toHaveBeenCalledTimes(1);
+  });
+
+  it("draws the captures link with the count, and asks for the listing when it is pressed", async () => {
+    const { wrapper, emit } = deck(makeStore(makeReport({
+      capabilities: both, recorder: recorder(), captures: { count: 3 },
+    })), "live");
+    const link = wrapper.find(".y-deck__captures");
+    expect(link.text()).toBe("Captures (3) \u203a");
+    await link.trigger("click");
+    expect(emit.mock.calls[0]![2]).toEqual({ payload: { captures: "read" } });
+  });
+
+  /**
+   * A camera page has to say where a capture would go before any daemon with
+   * a recorder has answered — otherwise the line under the key is blank on
+   * every device that has not been upgraded, which reads as *nowhere*.
+   */
+  it("falls back to the capability's own medium where there is no recorder to ask", () => {
+    const { wrapper } = deck(makeStore(makeReport({ capabilities: both })), "live");
+    expect(wrapper.find(".y-shutter__dest").text()).toBe("to this board");
+  });
+});
+
 describe("the shutter key, in all four capability states", () => {
   const REASON = "board recording is not built";
 

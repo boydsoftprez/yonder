@@ -10,7 +10,7 @@ import YonderTextField from './YonderTextField.vue'
 import YonderShutter from './YonderShutter.vue'
 import YonderAimPad from './YonderAimPad.vue'
 import { createDraftStore } from './draft.ts'
-import { LABELS, captureRefusal, captureSizes, deckDraft, draftPathFor, interruption } from 'yonder-core/presentation'
+import { LABELS, captureDestination, captureRefusal, captureSizes, deckDraft, draftPathFor, endedWords, interruption } from 'yonder-core/presentation'
 
 /**
  * `ui-yonder-deck` — a camera's whole control surface, composed from what it
@@ -83,6 +83,8 @@ import { LABELS, captureRefusal, captureSizes, deckDraft, draftPathFor, interrup
  *              preview: <same shape as policy.preview> },
  *   outputs: { kind, label, enabled, costKbps, reach: OutputReach }[],
  *   captures: { count },
+ *   recorder: { recording, since, destination, remainingSeconds,
+ *               remainingPhotos, bytes, ended } | null,
  *   orientation: { says, turns: { key, by: "sensor"|"board",
  *                                 says: string|null, value }[] },
  *   problems: { path, message }[],    // only after a refused apply
@@ -121,10 +123,10 @@ import { LABELS, captureRefusal, captureSizes, deckDraft, draftPathFor, interrup
  * `kind`: `bar` (a bounded value, `YonderSetBar`), `pick` (the device's own
  * menu, `YonderPicker`), `seg` (a plain on/off, `YonderSegmented`), or one of
  * the ones that are not an image control at all and draw through a branch of
- * their own: `shutter-video` and `shutter-photo` in `drawCapability()`,
- * `turn` in `buildOrientation()`, and `capture` — the format list, drawn as
- * the Stream column's Resolution and Frame rate pickers by
- * `buildCaptureShape()`.
+ * their own: `shutter` — both of `recording` and `stills`, drawn as **one**
+ * key by `buildCapture()` — `turn` in `buildOrientation()`, and `capture`,
+ * the format list, drawn as the Stream column's Resolution and Frame rate
+ * pickers by `buildCaptureShape()`.
  *
  * `setupOnly` marks the four housekeeping controls this deck draws only on
  * Setup — mains frequency, backlight compensation, gain and sharpness: real
@@ -153,8 +155,16 @@ export const CAPABILITY_LAYOUT = {
   contrast: { group: 'colour', kind: 'bar' },
   rotation: { group: 'orientation', kind: 'turn' },
   aim: { group: 'aim', kind: 'aim' },
-  recording: { group: 'capture', kind: 'shutter-video' },
-  stills: { group: 'capture', kind: 'shutter-photo' },
+  /* **One key, not two** (blueprint L-43/L-44). Both capabilities land on the
+   * same `shutter` kind and `buildCapture()` draws *one* control from
+   * whichever of them the MODE control has selected — the camera cannot
+   * record and photograph at once, so two keys drawn side by side is a lie
+   * about that, and it is the lie this deck shipped. `drawCapability()` is
+   * never called for either: the capture group owns the pair, the way
+   * `buildOrientation()` owns its three and `buildCaptureShape()` owns
+   * `formats`, because what is drawn depends on a fact outside any one key. */
+  recording: { group: 'capture', kind: 'shutter' },
+  stills: { group: 'capture', kind: 'shutter' },
   saturation: { group: 'colour', kind: 'bar' },
   hue: { group: 'colour', kind: 'bar' },
   autoWhiteBalance: { group: 'exposure', kind: 'seg' },
@@ -369,12 +379,36 @@ export default {
        * dependency that tells Vue the plain `Map`s inside `draftStore` (never
        * reactive on their own) have changed. See `stage()`. */
       draftVersion: 0,
-      /** This deck's own optimistic guess at "is the shutter lit", toggled
-       * by each press (§8.3's own model — the blueprint's `this.recording`
-       * is exactly this, a local ref no report field drives). Reset by a
-       * remount, which is what a camera switch or a Live<->Setup flip
-       * already does to this whole component. */
-      recordingSince: null,
+      /**
+       * **Video or Photo — the browser's, not the device's** (blueprint
+       * L-43).
+       *
+       * Which of the two the one shutter key is currently for. It is a state
+       * of this page, exactly like which deck is showing: it changes nothing
+       * on the aircraft, it is not configuration, it must not go through an
+       * apply, and it does not survive a reload. A remount — a camera switch,
+       * a Live/Setup flip — puts it back to Video, which is the mode an
+       * operator watching a picture is in.
+       *
+       * The operator settled this. It is written here because the obvious
+       * alternative — staging it on the draft beside the stream policy —
+       * would have put a browser preference behind a confirmation window.
+       */
+      workMode: 'video',
+      /**
+       * A shutter press is in flight, awaiting the device's own answer
+       * (`YonderShutter`'s own `pending`, §8.3).
+       *
+       * **This deck no longer guesses whether it is recording.** It held an
+       * optimistic `recordingSince` — a local timestamp set by the press —
+       * which lit the key whether or not anything started, and counted from
+       * when the browser pressed rather than from when the board began.
+       * R-UI-05 is that a control shows when it has *taken effect*: the key
+       * now lights from `report.recorder.since`, the recorder's own answer,
+       * and this flag covers only the round trip in between so a second press
+       * cannot start a competing capture.
+       */
+      shutterPending: false,
     }
   },
   created () {
@@ -415,6 +449,34 @@ export default {
     camera () {
       return (this.report && this.report.camera && this.report.camera.id) || ''
     },
+    /**
+     * What the recorder answered, or null (R-CAM-17, R-STO-06).
+     *
+     * `null` is a daemon with no video layer and is drawn as *nothing here
+     * knows* rather than as *not recording*: the two are different facts and
+     * an operator acts differently on each.
+     */
+    recorder () {
+      const r = this.report && this.report.recorder
+      return r && typeof r === 'object' ? r : null
+    },
+    /**
+     * Which of the two the shutter is for, once the camera has been consulted
+     * (blueprint L-43/L-44).
+     *
+     * `workMode` is what the operator chose; this is what the camera can
+     * actually do about it. A camera that offers stills and no recorder is in
+     * Photo whatever the control says — drawing a Record key over a
+     * capability the report calls `not-offered` is the class of lie R-UI-20
+     * exists to stop.
+     */
+    shutterMode () {
+      const caps = this.report ? (this.report.capabilities || {}) : {}
+      const has = (key) => Boolean(caps[key]) && caps[key].state !== 'not-offered'
+      if (!has('recording')) return has('stills') ? 'photo' : null
+      if (!has('stills')) return 'video'
+      return this.workMode === 'photo' ? 'photo' : 'video'
+    },
     /** The raw draft, unfiltered — `void this.draftVersion` is the line that
      * makes this recompute after `stage()`/`apply()`/`discard()`, since
      * `draftStore` itself holds plain `Map`s Vue cannot see into. */
@@ -430,6 +492,19 @@ export default {
     pendingEdits () {
       void this.draftVersion
       return this.report ? this.draftStore.pending(this.camera, this.appliedFlat) : []
+    },
+  },
+  watch: {
+    /**
+     * A fresh report is the device's own answer, whatever it says.
+     *
+     * `shutterPending` is "a press is in flight" and nothing else, so the
+     * next read of this camera ends it — a refused press and a successful one
+     * both arrive as a report, and a flag cleared only on success would leave
+     * the key dead for ever after a refusal.
+     */
+    report () {
+      this.shutterPending = false
     },
   },
   methods: {
@@ -552,18 +627,41 @@ export default {
     toggleOutput (kind, enabled) {
       this.post({ output: kind, enabled })
     },
-    pressShutter (kind) {
-      if (kind === 'photo') {
-        this.post({ shutter: 'photo' })
-        return
-      }
-      if (this.recordingSince === null) {
-        this.recordingSince = Date.now()
-        this.post({ shutter: 'record' })
-      } else {
-        this.recordingSince = null
-        this.post({ shutter: 'stop' })
-      }
+    /**
+     * **The one key, pressed** (blueprint L-44).
+     *
+     * Three messages from one control, and which one it is comes from the
+     * mode and from what the recorder says it is doing — never from a guess
+     * this component is keeping. A press while recording is a stop; a press
+     * in Photo is a still; anything else starts one.
+     *
+     * `shutterPending` is set here and cleared by the next report, so a
+     * second press during the round trip sends nothing: §8.3 is explicit
+     * that repeated presses must not launch competing captures, and the
+     * device's own one-at-a-time guard answering `busy` is a refusal the
+     * operator should never have had to see.
+     */
+    pressShutter () {
+      if (this.shutterPending) return
+      const mode = this.shutterMode
+      if (mode === null) return
+      this.shutterPending = true
+      if (mode === 'photo') { this.post({ shutter: 'photo' }); return }
+      this.post({ shutter: this.isRecording() ? 'stop' : 'record' })
+    },
+    /** What the *device* says, never what this page did last (R-UI-05). */
+    isRecording () {
+      return Boolean(this.recorder && this.recorder.recording
+        && Number.isFinite(this.recorder.since))
+    },
+    /** The captures link beside the key (blueprint L-47) — a request for the
+     * listing, which is what the panel draws. It reads nothing and changes
+     * nothing on the aircraft; it asks the daemon what it is holding. */
+    openCaptures () {
+      this.post({ captures: 'read' })
+    },
+    setWorkMode (v) {
+      this.workMode = v === 'Photo' ? 'photo' : 'video'
     },
     /** `advertised`/`gated`, in the one sentence every disabled control on
      * this page carries — `gated`'s own wording matches `capability.ts`'s
@@ -612,25 +710,10 @@ export default {
       const label = this.label(key)
       if (!cap || cap.state === 'not-offered') return this.fact(key, label, 'this camera has none')
 
-      /**
-       * **The key stays, whatever state the capability is in** — spec §4,
-       * which every other kind on this deck already follows and this branch
-       * did not: it fell back to a fact for anything but `present`, so a
-       * camera that lists a recorder and cannot use one drew no Record key
-       * at all. Only `not-offered` draws a fact (handled above, with every
-       * other kind); `advertised` and `gated` draw the key inoperative,
-       * carrying the reason. R-UI-26: the key is here, under the picture it
-       * records, and not on a rail.
-       */
-      if (layout.kind === 'shutter-video' || layout.kind === 'shutter-photo') {
-        const { state, reason } = this.stateAndReason(cap)
-        return this.drawShutter(
-          layout.kind === 'shutter-photo' ? 'photo' : 'video',
-          cap,
-          state === 'present' ? null : reason,
-        )
-      }
-
+      // `shutter` never reaches here: `buildCapture()` draws one key from
+      // whichever of `recording`/`stills` the mode selects, because what is
+      // drawn depends on a fact outside either key. The same reason `turn`
+      // and `capture` have branches of their own.
       const { state, reason } = this.stateAndReason(cap)
       const descriptor = r.descriptors ? r.descriptors[key] : undefined
       const values = r.values || {}
@@ -690,24 +773,54 @@ export default {
       }
       return null
     },
-    /** `inhibited` is the reason the key will not act, or null. See
-     * `drawCapability`'s own shutter branch, and `YonderShutter`'s own
-     * `inhibited` prop for why the key is drawn either way. */
-    drawShutter (kind, cap, inhibited = null) {
-      const destination = kind === 'video'
-        ? ((cap.value && cap.value.medium === 'board') ? 'this board' : "the camera's card")
-        : ((cap.value && cap.value.source === 'pipeline') ? 'this board' : "the camera's card")
-      const recording = (kind === 'video' && this.recordingSince !== null)
-        ? { since: this.recordingSince }
-        : null
+    /**
+     * **One shutter key, following the mode** (blueprint L-44, R-CAM-17,
+     * R-CAM-18).
+     *
+     * It was two, always both drawn — a Record circle and a Photo circle
+     * stacked — because `drawCapability()` was called once per capability and
+     * each drew its own. The camera cannot do both at once, so two keys were
+     * a lie about that; `YonderShutter` has taken a `mode` prop since it was
+     * built and this is the caller finally composing it against the
+     * blueprint rather than against the capability list.
+     *
+     * **The line under it is `yonder-core`'s sentence, not one composed
+     * here** (L-45, L-46). `captureDestination()` states where a capture
+     * lands and what the medium has left, in minutes in Video and in
+     * photographs in Photo — the two differ in a unit and in nothing else,
+     * which is exactly why they are one function. It falls back to the
+     * capability's own medium where there is no recorder to ask, so a camera
+     * page still says where a capture would go before a daemon with a video
+     * layer has ever answered.
+     *
+     * `inhibited` is the reason the key will not act, or null — the key is
+     * drawn either way (spec §4, R-UI-21): a camera that lists a recorder and
+     * cannot use one keeps its key, marked, carrying the reason, because an
+     * operator who cannot find Record at all has to work out whether the page
+     * is broken or the camera cannot do it.
+     */
+    drawShutter (mode, cap) {
+      const { state, reason } = this.stateAndReason(cap)
+      const fallback = mode === 'video'
+        ? ((cap.value && cap.value.medium === 'board') ? 'to this board' : "to the camera's card")
+        : ((cap.value && cap.value.source === 'pipeline') ? 'to this board' : "to the camera's card")
+      const destination = this.recorder === null
+        ? fallback
+        : captureDestination(this.recorder, mode)
       return h(YonderShutter, {
-        key: 'shutter-' + kind,
-        mode: kind === 'photo' ? 'photo' : 'video',
-        recording,
+        key: 'shutter',
+        mode,
+        // From the recorder's own answer, so the elapsed time counts from
+        // when the board began rather than from when this browser pressed —
+        // and so a page opened after the recording started shows it running.
+        recording: (mode === 'video' && this.isRecording())
+          ? { since: this.recorder.since }
+          : null,
         destination,
-        inhibited,
-        onRecord: () => this.pressShutter('video'),
-        onPhoto: () => this.pressShutter('photo'),
+        pending: this.shutterPending,
+        inhibited: state === 'present' ? null : reason,
+        onRecord: () => this.pressShutter(),
+        onPhoto: () => this.pressShutter(),
       })
     },
     /** Whether every key `CAPABILITY_LAYOUT` assigns to `groupId` reads
@@ -806,14 +919,61 @@ export default {
       const r = this.report
       const recording = r.capabilities && r.capabilities.recording
       const stills = r.capabilities && r.capabilities.stills
-      const anyPresent = [recording, stills].some((c) => c && c.state !== 'not-offered')
-      if (!anyPresent) return null
+      const has = (c) => Boolean(c) && c.state !== 'not-offered'
+      if (!has(recording) && !has(stills)) return null
+      const mode = this.shutterMode
       const children = []
-      if (recording) children.push(this.drawCapability('recording'))
-      if (stills) children.push(this.drawCapability('stills'))
-      if (r.captures && typeof r.captures.count === 'number') {
-        children.push(h('div', { class: 'y-deck__captures', key: 'captures' }, `Captures · ${r.captures.count}`))
+
+      /**
+       * **MODE, at the head of the column** (blueprint L-43).
+       *
+       * `YonderSegmented`, which is already this deck's control for a
+       * two-way choice — not a second segmented control written for this one
+       * page. Drawn only where there is a choice to make: a camera that
+       * offers one of the two has no mode to be in, and a control whose
+       * options are one is a control that cannot be used (R-UI-20).
+       */
+      if (has(recording) && has(stills)) {
+        children.push(h(YonderSegmented, {
+          key: 'workMode',
+          label: 'Mode',
+          options: ['Video', 'Photo'],
+          value: mode === 'photo' ? 'Photo' : 'Video',
+          onChange: (v) => this.setWorkMode(v),
+        }))
       }
+
+      children.push(this.drawShutter(mode, mode === 'photo' ? stills : recording))
+
+      /**
+       * **Why a recording ended, when it ended by itself** (R-STO-06).
+       *
+       * Under the key rather than in a notification, because it is a fact
+       * about this camera's medium and the operator's next press is right
+       * here. Empty after a stop somebody pressed — see `endedWords()`.
+       */
+      const ended = endedWords(this.recorder)
+      if (ended !== '') {
+        children.push(h('div', { class: 'y-deck__ended', key: 'ended' }, ended))
+      }
+
+      /**
+       * **`Captures (3) ›` — a link beside the key** (blueprint L-47).
+       *
+       * It was a `Captures · 0` readout lower in the column, which stated a
+       * number and offered nothing to do about it. The count is the deck
+       * payload's, composed by the daemon from the one listing the panel
+       * itself draws, so the number beside the link and the number in the
+       * panel cannot disagree.
+       */
+      const count = (r.captures && typeof r.captures.count === 'number') ? r.captures.count : 0
+      children.push(h('button', {
+        type: 'button',
+        class: 'y-deck__captures',
+        key: 'captures',
+        onClick: () => this.openCaptures(),
+      }, `Captures (${count}) \u203a`))
+
       return h(YonderColumn, { legend: GROUP_LEGEND.capture, key: 'capture' }, () => children)
     },
     /**
@@ -1304,10 +1464,35 @@ export default {
     color: var(--yonder-label, #7f8a95);
     margin-top: 2px;
 }
+/* A link, not a readout (blueprint L-47). The blueprint draws it beside the
+   shutter key in the deck's own type, and it opens the panel that lists what
+   the count is about. */
 .y-deck__captures {
+    /* Centred under the key it belongs to, which is itself centred. `margin:
+       auto` rather than `align-self`, because the column this lands in is not
+       a flex container and `align-self` there does nothing at all — which is
+       what it did. */
+    display: block;
+    margin: 4px auto 0;
+    padding: 6px 9px;
+    border: 0;
+    background: transparent;
+    font: inherit;
     font-size: 11px;
-    color: var(--yonder-label, #7f8a95);
+    letter-spacing: 0.06em;
+    color: var(--yonder-select, #2ad4f0);
+    cursor: pointer;
+}
+.y-deck__captures:hover { text-decoration: underline; }
+/* R-STO-06: a recording that ended by itself, said where the next press is.
+   The caution tone, because it is a thing that happened to the operator
+   rather than a thing they did. */
+.y-deck__ended {
+    font-size: 11px;
+    line-height: 1.4;
+    color: var(--yonder-waiting, #ffcf28);
     padding: 4px 0;
+    text-align: center;
 }
 /* Fixed slots (SLOTS above), never a CSS-flow column: each holds whatever
    groups it was assigned, in a fixed vertical order, and nothing moves

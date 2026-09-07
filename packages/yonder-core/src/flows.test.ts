@@ -1987,6 +1987,13 @@ describe("flows/flows.json camera pages", () => {
     expect(ordered.map((g) => g.id)).toEqual([
       "group-cam-picture", "group-cam-aim", "group-cam-readout",
       "group-cam-live", "group-cam-setup",
+      // The captures panel sits directly under the deck whose shutter key
+      // fills it, and above the prose. The blueprint hangs it off that key as
+      // a popover; a Dashboard widget cannot render inside another widget's
+      // column, so it is the nearest thing that can be drawn — recorded here
+      // and in the manifest, because a divergence nobody wrote down is how
+      // this console drifted from the blueprint before.
+      "group-cam-captures",
       "group-cam-facts", "group-cam-receive",
       "group-cam-rail-live", "group-cam-rail-setup",
     ]);
@@ -2719,29 +2726,51 @@ describe("flows/flows.json camera pages", () => {
   /**
    * **Every press the deck makes has somewhere to go.**
    *
-   * `YonderDeck` posts six different shapes — an image control, an apply, a
-   * discard, an output switch, the shutter and a deck flip — and Dashboard
-   * delivers all six down one wire. A route that recognised five of them
-   * would leave the sixth silently doing nothing, which is exactly the
-   * failure `emitsActions` produces one layer up and is just as invisible.
+   * `YonderDeck` posts seven different shapes — an image control, an apply, a
+   * discard, an output switch, the shutter, the captures link and a deck flip
+   * — and Dashboard delivers all of them down one wire. A route that
+   * recognised six would leave the seventh silently doing nothing, which is
+   * exactly the failure `emitsActions` produces one layer up and is just as
+   * invisible.
+   *
+   * **It did.** The deck has posted `{ shutter: … }` since it was built and
+   * this switch had rules for four other keys, so pressing RECORD or PHOTO on
+   * the camera page did nothing at all, in silence, for as long as the key has
+   * been drawn. That is the defect Task 33b was named for, and it is the
+   * second time in this file: `7103700` is the identical shape one page along,
+   * where OPEN reached nothing because a switch had more outputs than rules.
    *
    * `discard` is deliberately not routed: it is the browser dropping its own
    * draft and reaches the daemon by design (`YonderDeck.discard()` clears the
-   * store before it posts). `shutter` and the aim events are Task 33's and
-   * Task 38's; they are named here as unrouted so that adding a route is a
-   * change to this list rather than a discovery.
+   * store before it posts). The aim events are Task 38's; they are named here
+   * as unrouted so that adding a route is a change to this list rather than a
+   * discovery.
    */
   it("routes every press the deck makes, and names the ones it does not", () => {
     const route = flows.find((n) => n.id === "cam-deck-route");
     expect(route?.type).toBe("switch");
     expect(route?.property).toBe("payload");
     const rules = route?.rules as { t: string; v: string }[];
-    expect(rules.map((r) => r.v)).toEqual(["control", "apply", "output", "mode"]);
+    expect(rules.map((r) => r.v))
+      .toEqual(["control", "apply", "output", "mode", "shutter", "captures"]);
     for (const rule of rules) expect(rule.t, "each is a has-key test").toBe("hask");
 
     const wires = route?.wires as string[][];
     expect(wires.map((w) => w[0]))
-      .toEqual(["cam-control-msg", "cam-apply-msg", "cam-output-msg", "cam-deck-mode"]);
+      .toEqual([
+        "cam-control-msg", "cam-apply-msg", "cam-output-msg", "cam-deck-mode",
+        "cam-at-captures-act", "cam-at-read",
+      ]);
+    // **A rule per output, checked rather than assumed.** A switch with more
+    // outputs than rules has an output nothing can reach, and a test that
+    // reads only wires cannot see it — which is exactly how `7103700`
+    // shipped. Asserted here as a property, not as a count that happens to
+    // match today.
+    expect(rules.length, "one rule per output, or an output is unreachable")
+      .toBe(wires.length);
+    for (const [i, w] of wires.entries()) {
+      expect(w, `${String(rules[i]?.v)} is routed nowhere`).not.toEqual([]);
+    }
     // Both decks reach it, or the Setup deck's own Apply goes nowhere.
     for (const id of ["deck-cam-live", "deck-cam-setup"]) {
       expect((flows.find((n) => n.id === id)?.wires as string[][])[0]).toEqual(["cam-deck-route"]);
@@ -2759,6 +2788,114 @@ describe("flows/flows.json camera pages", () => {
     const apply = flows.find((n) => n.id === "cam-apply-msg");
     expect(JSON.stringify(apply?.rules)).toContain('"to":"apply"');
     expect((apply?.wires as string[][])[0]).toEqual(["cam-at-settings"]);
+  });
+
+  /**
+   * **A shutter press reaches the node that works the shutter** (R-CAM-17,
+   * R-CAM-18).
+   *
+   * The route above proves the message leaves the switch; this proves where
+   * it lands, and the two together are the whole of the defect. A press that
+   * reached a `change` node and stopped there would satisfy the first and do
+   * nothing, which is what it did.
+   *
+   * **The mapping is the node's, not a rule's** (CLAUDE.md rule 2). What
+   * `shutter: "record"` means as an HTTP route is decided in
+   * `node-red-contrib-yonder-video/src/captures.ts`, where it has source and
+   * tests; a `change` node composing `{"action":"start"}` in JSONata beside a
+   * wire coordinate would be that decision serialised into an artefact nobody
+   * can review a diff of. So this asserts the press reaches the node
+   * *carrying its own payload* — nothing between the deck and the daemon
+   * rewrites it.
+   */
+  it("carries a shutter press to the captures node, unrewritten", () => {
+    const at = flows.find((n) => n.id === "cam-at-captures-act");
+    expect(at?.type).toBe("change");
+    // Addressing only: which camera this is about. Nothing composes a body.
+    expect(at?.rules).toEqual([{ t: "set", p: "camera", pt: "msg", to: "camera", tot: "flow" }]);
+    const target = (at?.wires as string[][])[0]?.[0];
+    const node = flows.find((n) => n.id === target);
+    expect(node?.type, "a shutter press reaches the capture node").toBe("yonder-captures");
+
+    // And its answer goes three places: the annunciator, the still's own
+    // confirmation over the picture, and a fresh read of the camera — which
+    // is what redraws the key, the count beside it and the panel below.
+    expect((node?.wires as string[][])[0])
+      .toEqual(["ann-camera", "cam-saved-gate", "cam-at-read"]);
+  });
+
+  /**
+   * **The captures panel is fed by the same read as everything else.**
+   *
+   * A panel fetched on its own could show a listing composed a poll apart
+   * from the `Captures (n)` link beside the shutter key — two answers to one
+   * question, on one screen. `yonder-core` composes both from one directory
+   * read; the flow only selects.
+   */
+  it("draws the captures panel from the camera read, and routes its one press", () => {
+    expect((flows.find((n) => n.id === "camera-read")?.wires as string[][])[0])
+      .toContain("pick-cam-captures");
+    const pick = flows.find((n) => n.id === "pick-cam-captures");
+    // Selection, not composition: the shape is the daemon's own.
+    expect(pick?.rules).toEqual([
+      { t: "set", p: "payload", pt: "msg", to: "payload.captures", tot: "msg" },
+    ]);
+    expect((pick?.wires as string[][])[0]).toEqual(["caps-camera"]);
+    const panel = flows.find((n) => n.id === "caps-camera");
+    expect(panel?.type).toBe("ui-yonder-captures");
+
+    // A delete is the one thing the panel sends, and it is routed rather than
+    // wired straight through — with an `else` that says so, because a press
+    // matching no rule is a press that does nothing in silence.
+    const route = flows.find((n) => n.id === "cam-caps-route");
+    expect((panel?.wires as string[][])[0]).toEqual(["cam-caps-route"]);
+    const rules = route?.rules as { t: string; v?: string }[];
+    expect(rules.map((r) => r.v)).toEqual(["remove", undefined]);
+    expect(rules.at(-1)?.t, "the fall-through is a real rule").toBe("else");
+    expect(rules.length, "one rule per output, or an output is unreachable")
+      .toBe((route?.wires as string[][]).length);
+    expect((route?.wires as string[][])[0]).toEqual(["cam-at-captures-act"]);
+  });
+
+  /**
+   * **Only a still that landed flashes the picture** (blueprint L-18).
+   *
+   * The one node behind the shutter answers three different things — a
+   * recorder state, a capture, and a bare name from a delete — and a banner
+   * reading *Saved · to this board* over a delete would be a lie about both.
+   * `held` is the field only a capture carries, and the gate is a switch
+   * rather than a sentence read back out of a payload.
+   */
+  it("confirms a still over the picture, and nothing else", () => {
+    const gate = flows.find((n) => n.id === "cam-saved-gate");
+    expect(gate?.type).toBe("switch");
+    expect(gate?.property).toBe("payload");
+    expect(gate?.rules).toEqual([{ t: "hask", v: "held", vt: "str" }]);
+    expect((gate?.rules as unknown[]).length).toBe((gate?.wires as string[][]).length);
+
+    const saved = flows.find((n) => n.id === (gate?.wires as string[][])[0]?.[0]);
+    // Copies, and no expression: the words for where it went are
+    // `heldWords()`'s, in the component that draws them.
+    expect(JSON.stringify(saved?.rules)).not.toContain("jsonata");
+    expect((saved?.wires as string[][])[0]).toEqual(["pic-camera"]);
+  });
+
+  /**
+   * **The REC pill has a source** (blueprint L-16).
+   *
+   * It has been drawn since Task 19 and fed by nothing. The elapsed time is
+   * counted in the component from the recorder's own `since`, so what travels
+   * here is the recorder's state and not a formatted string — a five-second
+   * poll formatting a stopwatch would produce a clock that ticks in fives.
+   */
+  it("gives the picture the recorder's own state to count from", () => {
+    const pick = flows.find((n) => n.id === "pick-cam-picture");
+    const rules = pick?.rules as { p: string; to: string; tot: string }[];
+    expect(rules[0]).toEqual({ t: "set", p: "rec", pt: "msg", to: "payload.recorder", tot: "msg" });
+    expect(rules.some((r) => r.p === "payload.recording" && r.to === "rec" && r.tot === "msg"))
+      .toBe(true);
+    // And the scratch key does not travel on to the widget.
+    expect(rules.at(-1)).toMatchObject({ t: "delete", p: "rec" });
   });
 });
 

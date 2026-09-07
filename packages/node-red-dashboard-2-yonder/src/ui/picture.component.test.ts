@@ -1935,3 +1935,84 @@ describe("stands alone, with no deck at all (R-UI-28)", () => {
     expect(wrapper.find(".y-pic__orb").exists()).toBe(true);
   });
 });
+
+/**
+ * **The REC pill's data source, and the still's confirmation** (blueprint
+ * L-16 and L-18, R-CAM-17, R-CAM-18, R-UI-05).
+ *
+ * L-16's pill has been built since Task 19 and nothing has ever fed it. Both
+ * of these are about *what arrives*, so both are driven the way a real page
+ * drives this component — a message into the store, never a prop.
+ */
+describe("the recording pill and the still's confirmation", () => {
+  it("counts the elapsed time from the board's own `since`, not from this browser", async () => {
+    const { wrapper, press } = mountWithRail();
+    // The recording began a minute before this page opened. A component that
+    // counted from its own mount would read 00:00:00 here, which is the
+    // whole reason the pill takes an epoch rather than a duration.
+    await press({ recording: { recording: true, since: Date.now() - 64_000, destination: "board" } });
+
+    expect(wrapper.find(".y-pic__rec").text()).toContain("00:01:04");
+
+    // And it counts on its own, because the page reads every five seconds
+    // and a stopwatch that stepped in fives would read as a broken clock.
+    await advance(3_000);
+    expect(wrapper.find(".y-pic__rec").text()).toContain("00:01:07");
+  });
+
+  it("draws no pill for a recorder that is not recording", async () => {
+    const { wrapper, press } = mountWithRail();
+    await press({ recording: { recording: false, since: null, destination: "board" } });
+    expect(wrapper.find(".y-pic__rec").exists()).toBe(false);
+  });
+
+  it("flashes the picture and names where the still went, then clears", async () => {
+    const { wrapper, press } = mountWithRail();
+    await press({ saved: { at: Date.now(), to: "this board" } });
+
+    expect(wrapper.find(".y-pic__flash").exists(), "the flash is the confirmation").toBe(true);
+    expect(wrapper.find(".y-pic__saved").text()).toContain("Saved · to this board");
+
+    // It goes again on its own. A confirmation left on the picture is an
+    // overlay between the operator and the thing they are watching.
+    await advance(1_300);
+    expect(wrapper.find(".y-pic__flash").exists()).toBe(false);
+    expect(wrapper.find(".y-pic__saved").exists()).toBe(false);
+  });
+
+  it("names the medium the still actually landed on", async () => {
+    // The listing's own `held`, through the same words the shutter key's line
+    // uses. A still that landed on the camera's card announced as this
+    // board's would send an operator to the wrong place to find it.
+    const { wrapper, press } = mountWithRail();
+    await press({ saved: { at: Date.now(), held: "camera" } });
+    expect(wrapper.find(".y-pic__saved").text()).toContain("Saved · to the camera's card");
+  });
+
+  it("does not flash again for the same still arriving on the next poll", async () => {
+    const { wrapper, press } = mountWithRail();
+    const at = Date.now();
+    await press({ saved: { at, to: "this board" } });
+    await advance(1_300);
+    expect(wrapper.find(".y-pic__flash").exists()).toBe(false);
+
+    // The payload is cached across messages, so the same capture arrives with
+    // every read. Watching the object rather than its `at` would flash the
+    // picture once every five seconds for ever.
+    await press({ path: "cam0-preview" });
+    expect(wrapper.find(".y-pic__flash").exists()).toBe(false);
+  });
+
+  it("restarts the confirmation for a second still taken during the first", async () => {
+    const { wrapper, press } = mountWithRail();
+    await press({ saved: { at: 1_000, to: "this board" } });
+    await advance(900);
+    await press({ saved: { at: 2_000, to: "this board" } });
+    // Still up 900 ms into the first one's own window: a second photograph is
+    // a second confirmation, not one swallowed by the first.
+    await advance(600);
+    expect(wrapper.find(".y-pic__flash").exists()).toBe(true);
+    await advance(700);
+    expect(wrapper.find(".y-pic__flash").exists()).toBe(false);
+  });
+});

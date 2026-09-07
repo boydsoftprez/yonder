@@ -38,6 +38,7 @@ const camerasNode = (await import("./cameras.js")).default ?? await import("./ca
 const cameraNode = (await import("./camera.js")).default ?? await import("./camera.js");
 const streamNode = (await import("./stream.js")).default ?? await import("./stream.js");
 const addressNode = (await import("./stream-address.js")).default ?? await import("./stream-address.js");
+const capturesNode = (await import("./captures.js")).default ?? await import("./captures.js");
 
 const ok = (body: unknown): DaemonReply => ({ ok: true, status: 200, body });
 /** The daemon answering, and refusing. `ok` here is the *transport*: the
@@ -431,5 +432,102 @@ describe("yonder-stream-address", () => {
         .replace(/^\s*\/\/.*$/gm, "");
       expect(code, entry).not.toMatch(/node:fs|["']fs["']|readFileSync|secrets\.yaml/);
     }
+  });
+});
+
+/**
+ * The shutter, and the files it makes (R-CAM-17, R-CAM-18, R-STO-06).
+ *
+ * **The reason this node exists is a press that reached nothing.** The deck
+ * has emitted `{ shutter: … }` since it was built and the route behind it
+ * switched on four other keys, so RECORD and PHOTO did nothing at all, in
+ * silence. So the first thing tested here is the mapping itself: which route
+ * a press becomes. `flows.test.ts` holds the other half — that a press
+ * reaches this node at all — because a test of one without the other is
+ * exactly how that defect stayed invisible.
+ */
+describe("yonder-captures", () => {
+  it("starts a recording, with the action in the body rather than in the route", async () => {
+    replies.push(ok({ recording: true, since: 1, destination: "board", remainingSeconds: 7080, bytes: 0, ended: null }));
+    const started = await send(capturesNode, "yonder-captures", { camera: "cam0", payload: { shutter: "record" } });
+    expect(asked).toEqual([{ method: "POST", path: "/cameras/cam0/record", body: { action: "start" } }]);
+    expect(started.yonder?.message).toBe("recording");
+  });
+
+  it("stops one on the same route, because a stop is not a second thing", async () => {
+    replies.push(ok({ recording: false, since: null, destination: "board", remainingSeconds: 7000, bytes: null, ended: null }));
+    const stopped = await send(capturesNode, "yonder-captures", { camera: "cam0", payload: { shutter: "stop" } });
+    expect(asked).toEqual([{ method: "POST", path: "/cameras/cam0/record", body: { action: "stop" } }]);
+    expect(stopped.yonder?.message).toBe("recording stopped");
+  });
+
+  /**
+   * R-STO-06 is only honest if the interface can say *that is what happened*.
+   * A recording the reserve ended and one the operator ended are the same
+   * silence otherwise, and the operator is the one who was not there for it.
+   */
+  it("says why a recording ended when it ended by itself", async () => {
+    replies.push(ok({
+      recording: false, since: null, destination: "board", remainingSeconds: 0, bytes: null,
+      ended: { at: 2, reason: "the card reached the 1024 MB reserve" },
+    }));
+    const msg = await send(capturesNode, "yonder-captures", { camera: "cam0", payload: { shutter: "stop" } });
+    expect(msg.yonder?.message).toBe("recording ended · the card reached the 1024 MB reserve");
+  });
+
+  it("takes a still, and reports the capture it made", async () => {
+    replies.push(ok({ name: "2026-09-07T14-22-05-123Z-1280x720.jpg", at: 1, bytes: 6, width: 1280, height: 720, held: "board" }));
+    const msg = await send(capturesNode, "yonder-captures", { camera: "cam0", payload: { shutter: "photo" } });
+    expect(asked).toEqual([{ method: "POST", path: "/cameras/cam0/photo" }]);
+    expect(msg.yonder?.message).toBe("2026-09-07T14-22-05-123Z-1280x720.jpg");
+  });
+
+  it("reads the listing for a message that asks for nothing else", async () => {
+    replies.push(ok({ camera: "cam0", captures: [{ name: "a.jpg" }, { name: "b.jpg" }] }));
+    const msg = await send(capturesNode, "yonder-captures", { camera: "cam0", payload: {} });
+    expect(asked).toEqual([{ method: "GET", path: "/cameras/cam0/captures" }]);
+    expect(msg.yonder?.message).toBe("2 captures");
+  });
+
+  it("deletes the capture it was named, and never a path", async () => {
+    const name = "2026-09-07T14-22-05-123Z-1280x720.jpg";
+    replies.push(ok({ name }));
+    await send(capturesNode, "yonder-captures", { camera: "cam0", payload: { remove: name } });
+    expect(asked).toEqual([{ method: "DELETE", path: `/cameras/cam0/captures/${name}` }]);
+  });
+
+  it.each([["../../etc/shadow"], ["a/b.jpg"], [""], [7]])(
+    "calls the daemon nothing at all for %p, which could not be a capture name",
+    async (remove) => {
+      const msg = await send(capturesNode, "yonder-captures", { camera: "cam0", payload: { remove } });
+      expect(msg.yonder?.state).toBe("rejected");
+      // The guard is that nothing was asked, not that the daemon said no: a
+      // string with a slash in it would address a different route entirely.
+      expect(asked, "a refusal spends no round trip").toEqual([]);
+    },
+  );
+
+  /**
+   * A word this node does not know is a drift between the deck and the route,
+   * and the honest answer is to say so — never to fall through to the listing,
+   * which would answer a question nobody asked and look like it worked.
+   */
+  it("refuses a shutter word it does not know rather than reading the listing", async () => {
+    const msg = await send(capturesNode, "yonder-captures", { camera: "cam0", payload: { shutter: "pause" } });
+    expect(msg.yonder?.state).toBe("rejected");
+    expect(asked).toEqual([]);
+  });
+
+  it("calls the daemon nothing when no camera is named", async () => {
+    const msg = await send(capturesNode, "yonder-captures", { payload: { shutter: "photo" } });
+    expect(msg.yonder?.state).toBe("rejected");
+    expect(asked).toEqual([]);
+  });
+
+  it("says which camera a refusal is about", async () => {
+    replies.push(refused(409, { error: "cam0 is already recording" }));
+    const msg = await send(capturesNode, "yonder-captures", { camera: "cam0", payload: { shutter: "record" } });
+    expect(msg.yonder?.state).toBe("rejected");
+    expect(msg.camera).toBe("cam0");
   });
 });

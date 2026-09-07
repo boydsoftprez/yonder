@@ -4254,7 +4254,7 @@
         "page": "page-camera",
         "width": 12,
         "height": 1,
-        "order": 7,
+        "order": 8,
         "showTitle": false,
         "className": "yonder-deck-setup",
         "visible": false,
@@ -4329,7 +4329,8 @@
                 "pick-cam-deck",
                 "pick-cam-aim",
                 "pick-cam-picture",
-                "pick-cam-hold"
+                "pick-cam-hold",
+                "pick-cam-captures"
             ]
         ]
     },
@@ -4501,10 +4502,29 @@
         "rules": [
             {
                 "t": "set",
+                "p": "rec",
+                "pt": "msg",
+                "to": "payload.recorder",
+                "tot": "msg"
+            },
+            {
+                "t": "set",
                 "p": "payload",
                 "pt": "msg",
                 "to": "{\"path\": payload.camera.id, \"cost\": payload.display.pictureCost}",
                 "tot": "jsonata"
+            },
+            {
+                "t": "set",
+                "p": "payload.recording",
+                "pt": "msg",
+                "to": "rec",
+                "tot": "msg"
+            },
+            {
+                "t": "delete",
+                "p": "rec",
+                "pt": "msg"
             }
         ],
         "action": "",
@@ -5550,6 +5570,33 @@
         ]
     },
     {
+        "id": "pick-cam-captures",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "the captures, as yonder-core composed them",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "payload.captures",
+                "tot": "msg"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 800,
+        "y": 2530,
+        "wires": [
+            [
+                "caps-camera"
+            ]
+        ]
+    },
+    {
         "id": "pick-cam-aim",
         "type": "change",
         "z": "yonder-console",
@@ -5657,11 +5704,21 @@
                 "t": "hask",
                 "v": "mode",
                 "vt": "str"
+            },
+            {
+                "t": "hask",
+                "v": "shutter",
+                "vt": "str"
+            },
+            {
+                "t": "hask",
+                "v": "captures",
+                "vt": "str"
             }
         ],
         "checkall": "false",
         "repair": false,
-        "outputs": 4,
+        "outputs": 6,
         "x": 700,
         "y": 2280,
         "wires": [
@@ -5676,6 +5733,12 @@
             ],
             [
                 "cam-deck-mode"
+            ],
+            [
+                "cam-at-captures-act"
+            ],
+            [
+                "cam-at-read"
             ]
         ]
     },
@@ -5835,6 +5898,168 @@
         ]
     },
     {
+        "id": "cam-at-captures-act",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "point this at the camera",
+        "rules": [
+            {
+                "t": "set",
+                "p": "camera",
+                "pt": "msg",
+                "to": "camera",
+                "tot": "flow"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 1000,
+        "y": 2430,
+        "wires": [
+            [
+                "captures-act"
+            ]
+        ]
+    },
+    {
+        "id": "captures-act",
+        "type": "yonder-captures",
+        "z": "yonder-console",
+        "name": "the shutter, and one delete",
+        "camera": "",
+        "x": 1300,
+        "y": 2430,
+        "wires": [
+            [
+                "ann-camera",
+                "cam-saved-gate",
+                "cam-at-read"
+            ]
+        ]
+    },
+    {
+        "id": "cam-saved-gate",
+        "type": "switch",
+        "z": "yonder-console",
+        "name": "was that a still that landed?",
+        "property": "payload",
+        "propertyType": "msg",
+        "rules": [
+            {
+                "t": "hask",
+                "v": "held",
+                "vt": "str"
+            }
+        ],
+        "checkall": "false",
+        "repair": false,
+        "outputs": 1,
+        "x": 1600,
+        "y": 2380,
+        "wires": [
+            [
+                "cam-caps-saved"
+            ]
+        ]
+    },
+    {
+        "id": "cam-caps-saved",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "the still the picture is confirming",
+        "rules": [
+            {
+                "t": "set",
+                "p": "saved",
+                "pt": "msg",
+                "to": "payload",
+                "tot": "msg"
+            },
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "{}",
+                "tot": "json"
+            },
+            {
+                "t": "set",
+                "p": "payload.saved",
+                "pt": "msg",
+                "to": "saved",
+                "tot": "msg"
+            },
+            {
+                "t": "delete",
+                "p": "saved",
+                "pt": "msg"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 1900,
+        "y": 2380,
+        "wires": [
+            [
+                "pic-camera"
+            ]
+        ]
+    },
+    {
+        "id": "caps-camera",
+        "type": "ui-yonder-captures",
+        "z": "yonder-console",
+        "group": "group-cam-captures",
+        "name": "what this board is holding",
+        "order": 1,
+        "width": 12,
+        "height": 0,
+        "x": 1600,
+        "y": 2530,
+        "wires": [
+            [
+                "cam-caps-route"
+            ]
+        ]
+    },
+    {
+        "id": "cam-caps-route",
+        "type": "switch",
+        "z": "yonder-console",
+        "name": "which press was that",
+        "property": "payload",
+        "propertyType": "msg",
+        "rules": [
+            {
+                "t": "hask",
+                "v": "remove",
+                "vt": "str"
+            },
+            {
+                "t": "else"
+            }
+        ],
+        "checkall": "false",
+        "repair": false,
+        "outputs": 2,
+        "x": 1900,
+        "y": 2530,
+        "wires": [
+            [
+                "cam-at-captures-act"
+            ],
+            [
+                "cam-key-unrouted"
+            ]
+        ]
+    },
+    {
         "id": "cam-open",
         "type": "change",
         "z": "yonder-console",
@@ -5946,13 +6171,27 @@
         "wires": []
     },
     {
+        "id": "group-cam-captures",
+        "type": "ui-group",
+        "name": "Captures",
+        "page": "page-camera",
+        "width": 12,
+        "height": 1,
+        "order": 6,
+        "showTitle": false,
+        "className": "yonder-captures",
+        "visible": true,
+        "disabled": false,
+        "groupType": "default"
+    },
+    {
         "id": "group-cam-facts",
         "type": "ui-group",
         "name": "What this camera is",
         "page": "page-camera",
         "width": 12,
         "height": 1,
-        "order": 6,
+        "order": 7,
         "showTitle": false,
         "className": "",
         "visible": true,

@@ -15,7 +15,9 @@ import {
   type ConsoleMiddlewareDeps,
   type Middleware,
 } from "./middleware.js";
+import { Readable } from "node:stream";
 import { DaemonClient, type DaemonRequest, type Transport } from "./client.js";
+import type { CaptureAnswer } from "./capture.js";
 import { SessionStore } from "./session.js";
 import type { Clock } from "../apply/types.js";
 
@@ -108,6 +110,33 @@ function call(
     });
     req.on("error", reject);
     if (payload !== undefined) req.write(payload);
+    req.end();
+  });
+}
+
+/**
+ * As `call`, but the body kept as bytes.
+ *
+ * `call` above decodes to UTF-8, which is right for every other route here
+ * and destroys the one this exists for: a JPEG's first two bytes are 0xff
+ * 0xd8, and a test that compared strings would pass on a proxy that had
+ * replaced every one of them.
+ */
+function callBytes(
+  method: string, path: string, cookie?: string,
+): Promise<{ status: number; headers: Record<string, string | string[] | undefined>; body: Buffer }> {
+  return new Promise((resolve, reject) => {
+    const req = request(
+      { host: "127.0.0.1", port, method, path, headers: cookie === undefined ? {} : { cookie } },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (c: Buffer) => chunks.push(c));
+        res.on("end", () => {
+          resolve({ status: res.statusCode ?? 0, headers: res.headers, body: Buffer.concat(chunks) });
+        });
+      },
+    );
+    req.on("error", reject);
     req.end();
   });
 }
@@ -707,6 +736,147 @@ describe("consoleMiddleware — a viewer's own report", () => {
 });
 
 // ---------------------------------------------------------------------------
+
+/**
+ * **A capture's bytes, behind the same credential as the picture**
+ * (R-CAM-18, R-SEC-13).
+ *
+ * The captures panel draws a thumbnail, a View and a Download, and all three
+ * are this route. It sits inside the `/video` branch beside the handshake, so
+ * these tests are as much about *where* the session is checked as about what
+ * comes back: a route authenticated by falling through to the check at the
+ * bottom of the function stops being authenticated the day the function is
+ * reordered, which is the property the first test here holds.
+ */
+describe("consoleMiddleware — a capture's bytes", () => {
+  function sessionCookie(sessions: SessionStore): string {
+    return `${SESSION_COOKIE}=${encodeURIComponent(sessions.mint())}`;
+  }
+  const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
+  const NAME = "2026-09-07T14-22-05-123Z-1280x720.jpg";
+
+  /** A stand-in for the proxy, recording what reached it. */
+  function recordingCapture(answer?: Partial<CaptureAnswer>): {
+    handler: NonNullable<ConsoleMiddlewareDeps["capture"]>;
+    seen: { camera: string; name: string }[];
+  } {
+    const seen: { camera: string; name: string }[] = [];
+    return {
+      seen,
+      handler: (req) => {
+        seen.push({ camera: req.camera, name: req.name });
+        return Promise.resolve({
+          status: 200,
+          contentType: "image/jpeg",
+          body: Readable.from([JPEG]),
+          ...answer,
+        });
+      },
+    };
+  }
+
+  it("refuses without a session, and never asks for the file", async () => {
+    const capture = recordingCapture();
+    const sessions = new SessionStore({ clock: fakeClock() });
+    await serve(consoleMiddleware({
+      client: new DaemonClient({ transport: answering(200, "{}") }),
+      sessions,
+      capture: capture.handler,
+    }));
+
+    const res = await call("GET", `/video/cam0/captures/${NAME}`);
+
+    expect(res.status).toBe(401);
+    expect(capture.seen, "an unauthenticated request must not reach the file").toEqual([]);
+    // And it did not fall through to whatever is behind the gate either.
+    expect(passedThrough).toEqual([]);
+  });
+
+  it("serves the bytes to a session, unchanged, with the daemon's own type", async () => {
+    const capture = recordingCapture();
+    const sessions = new SessionStore({ clock: fakeClock() });
+    await serve(consoleMiddleware({
+      client: new DaemonClient({ transport: answering(200, "{}") }),
+      sessions,
+      capture: capture.handler,
+    }));
+
+    const res = await callBytes("GET", `/video/cam0/captures/${NAME}`, sessionCookie(sessions));
+
+    expect(res.status).toBe(200);
+    expect(res.headers["content-type"]).toBe("image/jpeg");
+    // Byte for byte: the first two are 0xff 0xd8, which no text encoding
+    // survives, and a broken image is the only thing a browser would report.
+    expect(res.body).toEqual(JPEG);
+    expect(capture.seen).toEqual([{ camera: "cam0", name: NAME }]);
+  });
+
+  it("never lets a capture be cached, because a capture can be deleted", async () => {
+    const sessions = new SessionStore({ clock: fakeClock() });
+    await serve(consoleMiddleware({
+      client: new DaemonClient({ transport: answering(200, "{}") }),
+      sessions,
+      capture: recordingCapture().handler,
+    }));
+
+    const res = await callBytes("GET", `/video/cam0/captures/${NAME}`, sessionCookie(sessions));
+
+    expect(res.headers["cache-control"]).toBe("no-store");
+    expect(res.headers["x-content-type-options"]).toBe("nosniff");
+  });
+
+  it("takes GET and nothing else — a capture is deleted from the flow, not by a URL", async () => {
+    const capture = recordingCapture();
+    const sessions = new SessionStore({ clock: fakeClock() });
+    await serve(consoleMiddleware({
+      client: new DaemonClient({ transport: answering(200, "{}") }),
+      sessions,
+      capture: capture.handler,
+    }));
+
+    const res = await call("DELETE", `/video/cam0/captures/${NAME}`, {
+      cookie: sessionCookie(sessions),
+    });
+
+    expect(res.status).toBe(405);
+    expect(capture.seen).toEqual([]);
+  });
+
+  it("answers 404, not a stack trace, on a console assembled with no capture proxy", async () => {
+    const sessions = new SessionStore({ clock: fakeClock() });
+    await serve(consoleMiddleware({
+      client: new DaemonClient({ transport: answering(200, "{}") }),
+      sessions,
+    }));
+
+    const res = await call("GET", `/video/cam0/captures/${NAME}`, {
+      cookie: sessionCookie(sessions),
+    });
+
+    expect(res.status).toBe(404);
+  });
+
+  it("leaves the handshake and the report where they were", async () => {
+    // The capture match sits in the same branch as those two, so the guard
+    // that it did not swallow either of them belongs here rather than in a
+    // reviewer's head.
+    const whep = recordingWhep();
+    const capture = recordingCapture();
+    const sessions = new SessionStore({ clock: fakeClock() });
+    await serve(consoleMiddleware({
+      client: new DaemonClient({ transport: answering(200, "{}") }),
+      sessions,
+      whep: whep.handler,
+      capture: capture.handler,
+    }));
+    const cookie = sessionCookie(sessions);
+
+    await call("POST", "/video/cam0/whep", { raw: OFFER, type: "application/sdp", cookie });
+
+    expect(whep.seen).toHaveLength(1);
+    expect(capture.seen).toEqual([]);
+  });
+});
 
 describe("viewerFor", () => {
   /**

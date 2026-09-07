@@ -22,7 +22,14 @@ import type { NodeMessage, RED, RedNode } from "./red.js";
 /** One request, or the reason there is nothing to ask for. */
 export type Ask =
   | {
-    method: "GET" | "POST";
+    /**
+     * `DELETE` joined the two the day a capture could be removed from the
+     * page (R-CAM-18). It is a verb rather than a route because the daemon
+     * makes it one: `DELETE /cameras/:id/captures/:name` is the same address
+     * a `GET` fetches, and a `POST /…/delete` beside it would be a second
+     * spelling of one fact for the router to keep in step.
+     */
+    method: "GET" | "POST" | "DELETE";
     path: string;
     body?: unknown;
     /**

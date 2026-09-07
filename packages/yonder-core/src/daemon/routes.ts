@@ -43,7 +43,7 @@ import type { CameraRun, Supervisor } from "../video/supervisor.js";
 import type { ViewerStats, Viewers, Want } from "../video/viewers.js";
 import {
   SAFE_CAPTURE_NAME, isRefusal,
-  type Recorder, type RecordingState, type Refusal,
+  type Capture, type Recorder, type RecordingState, type Refusal,
 } from "../video/recorder.js";
 import type { Detection, DetectResult, Rejection } from "../video/probe/camera.js";
 import type { Encoder } from "../video/probe/encoder.js";
@@ -327,6 +327,18 @@ export interface CameraView {
    * when the truth is that nothing here can say.
    */
   recorder: RecordingState | null;
+  /**
+   * What this camera is holding, in the shape the captures panel draws
+   * (R-CAM-18).
+   *
+   * The same listing `deck.captures.count` is composed from, on the same
+   * read — a panel and the link that counts it disagreeing would be two
+   * answers to one question on one screen. Empty on a daemon with no video
+   * layer, which is what a device that has never held a capture also reads
+   * as; the difference between the two is a question about the *device*, and
+   * `recorder: null` above is where it is answered.
+   */
+  captures: { camera: string; captures: readonly Capture[] };
 }
 
 /**
@@ -961,9 +973,16 @@ export function createRouter(deps: RouterDeps): Router {
 
     if (method === "GET" && verb === "captures") {
       const answer = await recorder.captures(id);
+      // **The answer names the camera it is about.** The captures panel
+      // builds every thumbnail, View and Download URL from an id, and the
+      // node that fetched this list emits a fresh message — `msg.camera` does
+      // not survive the round trip, the same fact `adapter.ts` records for a
+      // refusal. A listing that did not say whose it was could be drawn
+      // against a different camera's page after a switch, offering files that
+      // are not there.
       return isRefusal(answer)
         ? refuseWith(answer)
-        : { status: 200, body: { captures: answer.ok } };
+        : { status: 200, body: { camera: id, captures: answer.ok } };
     }
 
     if (verb.startsWith("captures/") && (method === "GET" || method === "DELETE")) {
@@ -1068,6 +1087,31 @@ export function createRouter(deps: RouterDeps): Router {
       const device = answer?.device ?? null;
       const byPathStable = found?.byPathStable ?? false;
       const capabilities = found?.capabilities ?? null;
+      // From the recorder that holds the recording, never from a count of
+      // files on the disk: a file is there whether or not anything is still
+      // writing to it, and a page drawing a REC pill off the second would go
+      // on drawing it for ever.
+      const recorderState = deps.recorder === undefined
+        ? null
+        : await deps.recorder.state(id);
+      /**
+       * How many captures this camera has, for the link that opens the panel
+       * listing them (R-CAM-18).
+       *
+       * A directory read per camera-page poll, which is worth naming: it is
+       * the same order of cost as the `statfs` the recorder's own state does,
+       * and it is the only way the count on the page can be true without the
+       * panel having been opened first. A count the operator has to open a
+       * panel to learn is a count that tells them nothing about whether to.
+       *
+       * A refusal counts as none rather than propagating: this is a number
+       * beside a link, and a camera whose listing cannot be read is a camera
+       * whose panel will say so when it is opened.
+       */
+      const listed = deps.recorder === undefined
+        ? undefined
+        : await deps.recorder.captures(id);
+      const heldCaptures = listed === undefined || isRefusal(listed) ? [] : listed.ok;
       return {
         camera,
         run,
@@ -1095,13 +1139,38 @@ export function createRouter(deps: RouterDeps): Router {
         // The two instrument payloads, from the same read as everything
         // above — never a second sweep, so the deck and the readout strip
         // can never disagree about the same camera.
-        deck: cameraDeck({ camera, capabilities, encoder, paths: await reachPaths() }),
+        deck: cameraDeck({
+          camera, capabilities, encoder, paths: await reachPaths(),
+          // The same two facts the `recorder` field below carries, on the
+          // deck's own payload: the capture column draws the shutter key's
+          // destination line and its elapsed time from the first, and the
+          // `Captures (n)` link from the second. Read once here and handed to
+          // both, so the pill on the picture and the key under it can never
+          // be reading two different answers from one read.
+          recorder: recorderState,
+          captures: heldCaptures.length,
+        }),
         aim: aimPanel(capabilities),
         // From the recorder that holds the recording, never from a count of
         // files on the disk: a file is there whether or not anything is still
         // writing to it, and a page drawing a REC pill off the second would
         // go on drawing it for ever.
-        recorder: deps.recorder === undefined ? null : await deps.recorder.state(id),
+        recorder: recorderState,
+        /**
+         * What this camera is holding, in the shape the captures panel draws
+         * (R-CAM-18).
+         *
+         * **The same listing the deck's count is composed from**, on the same
+         * read, for the reason the two instrument payloads beside it are:
+         * a panel and a link that disagreed about how many captures there are
+         * would be two answers to one question on one screen. It costs
+         * nothing extra — the count above already had to read the directory.
+         *
+         * `camera` travels with it because the panel builds every thumbnail,
+         * View and Download URL from an id, and the node that carries this to
+         * the page emits a fresh message that has no `msg.camera` of its own.
+         */
+        captures: { camera: id, captures: heldCaptures },
         // Answered on the page rather than only on the start, so an operator
         // reads which of their settings this camera does not offer before
         // they press anything (R-CAM-10). `knownDevices` comes from the sweep

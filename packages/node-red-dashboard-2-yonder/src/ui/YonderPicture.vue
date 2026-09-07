@@ -39,6 +39,14 @@
 
             <div v-if="recording" class="y-pic__rec"><i class="y-pic__rec-dot"></i>REC {{ recording.elapsed }}</div>
 
+            <!-- L-18: a still landed. The flash is the confirmation that
+                 something happened at the moment the key was pressed
+                 (R-UI-05); the banner says where it went. -->
+            <div v-if="flashing" class="y-pic__flash" aria-hidden="true"></div>
+            <div v-if="flashing" class="y-pic__saved">
+                <i class="y-pic__saved-dot" aria-hidden="true"></i>Saved · to {{ savedTo }}
+            </div>
+
             <div v-if="footItems.length" class="y-pic__foot">
                 <span v-for="item in footItems" :key="item.key" class="y-pic__foot-item">
                     <span class="y-pic__foot-k">{{ item.label }}</span>{{ item.text }}
@@ -72,7 +80,7 @@
 <script>
 import YonderStateOverlay from './YonderStateOverlay.vue'
 import YonderThumbStrip from './YonderThumbStrip.vue'
-import { atIp, cameraFor, DESCRIPTORS } from 'yonder-core/presentation'
+import { atIp, cameraFor, DESCRIPTORS, heldWords } from 'yonder-core/presentation'
 
 /**
  * The live picture, and the three things that happen to it (R-VID-03).
@@ -349,7 +357,7 @@ const BACKOFF_MS = [1000, 2000, 4000, 8000, 15000]
 /** The picture's own richer facts (R-VID-18), cached the same way `cost`
  * and the camera's own name already are — see `fromPayload`'s own doc
  * comment above for why one loop replaces eight hand-written pairs. */
-const PAYLOAD_KEYS = ['state', 'recording', 'cameras', 'downlink', 'aim', 'zoom', 'exposure', 'stats']
+const PAYLOAD_KEYS = ['state', 'recording', 'cameras', 'downlink', 'aim', 'zoom', 'exposure', 'stats', 'saved']
 
 /** `+12.4` / `−12.4` — a proper minus sign, matching every other signed
  * reading this console already draws (`YonderAim.vue`'s own gauges, the
@@ -357,6 +365,19 @@ const PAYLOAD_KEYS = ['state', 'recording', 'cameras', 'downlink', 'aim', 'zoom'
 function signed (n, digits = 1) {
     return (n >= 0 ? '+' : '−') + Math.abs(n).toFixed(digits)
 }
+
+/** How long a recording has been running, `00:13:47`. The same reading
+ *  `YonderShutter` draws beside its own key, so the pill over the picture and
+ *  the key under it cannot disagree about the same recording. */
+export function elapsedWords (ms) {
+    const s = Math.max(0, Math.floor(ms / 1000))
+    const pad = (n) => String(n).padStart(2, '0')
+    return `${pad(Math.floor(s / 3600))}:${pad(Math.floor((s % 3600) / 60))}:${pad(s % 60)}`
+}
+
+/** How long the white flash and the banner stay up (the blueprint's own
+ *  figure): long enough to be seen without being in the way of the picture. */
+export const FLASH_MS = 1200
 
 /**
  * The drag-to-slew layer's own geometry, in raw CSS pixels — see this
@@ -553,6 +574,21 @@ export default {
             /** The last message's own richer facts (R-VID-18) — see
              * `fromPayload`'s own doc comment above. */
             sentExtra: {},
+            /**
+             * The still this picture is currently confirming (L-18).
+             *
+             * `flashAt` is the `at` of the capture being shown, so a *second*
+             * still while the first is still flashing restarts the
+             * confirmation rather than being swallowed by it; `flashing`
+             * is what the two overlays are drawn from, and `flashTimer` ends
+             * it. A timer rather than the once-a-second `now` clock this
+             * component already keeps: a 1.2 s confirmation driven off a 1 s
+             * tick lasts between 1.2 and 2.2 seconds, which is visible.
+             */
+            flashAt: null,
+            flashing: false,
+            flashTimer: null,
+            savedTo: '',
             /** The drag-to-slew layer's own gesture state — see this file's
              * own doc comment on why this mirrors `YonderAimPad` method-for-
              * method rather than sharing its implementation. */
@@ -704,9 +740,38 @@ export default {
             const v = this.fromPayload('state')
             return v && typeof v === 'object' ? v : null
         },
+        /**
+         * The REC pill (L-16), and where its elapsed time comes from.
+         *
+         * Two shapes, one meaning. A caller may hand a pre-formatted
+         * `{ elapsed }` — which is what this component has always taken — or
+         * the recorder's own `RecordingState`, in which case the time is
+         * counted here from `since`, the board's own answer to *when*.
+         *
+         * **`since` is the one that ships**, and the reason is the poll: the
+         * camera page reads every five seconds, so a pre-formatted string
+         * would make a stopwatch that jumps in five-second steps. Counting
+         * from `since` against this component's own once-a-second clock is a
+         * pill that reads like a clock, and it is right for a page opened
+         * *after* the recording started — the elapsed time is the device's,
+         * not this browser's guess at how long it has been watching.
+         *
+         * `{ elapsed }` is kept because it costs one branch and it is the
+         * honest shape for a source that formats its own — a camera pushing
+         * its own recorder state (§8.5) has a duration and no epoch.
+         */
         recording () {
             const v = this.fromPayload('recording')
-            return v && typeof v === 'object' && typeof v.elapsed === 'string' ? v : null
+            if (!v || typeof v !== 'object') return null
+            if (typeof v.elapsed === 'string') return v
+            if (v.recording !== true || !Number.isFinite(v.since)) return null
+            return { elapsed: elapsedWords(this.now - v.since) }
+        },
+        /** L-18's own fact: which still is being confirmed, and where it
+         * went. Read here so the watcher below has one thing to watch. */
+        saved () {
+            const v = this.fromPayload('saved')
+            return v && typeof v === 'object' && Number.isFinite(v.at) ? v : null
         },
         cameras () {
             const v = this.fromPayload('cameras')
@@ -826,6 +891,37 @@ export default {
          * this file's own top-of-file doc comment). */
         aimable (now) {
             if (!now) this.endDragGesture()
+        },
+        /**
+         * **A still landed** (L-18, R-UI-05).
+         *
+         * A white flash over the whole picture and a centred banner saying
+         * where it went — a deliberate confirmation that something happened
+         * at the moment the key was pressed, on a control whose only other
+         * evidence is a file appearing in a panel the operator may not have
+         * open.
+         *
+         * Watched on the capture's own `at`, not on the object: the payload
+         * is cached across messages (`sentExtra`), so the same still arrives
+         * again with every poll and an identity watch would flash on each
+         * one. A *new* `at` is a new photograph and nothing else is.
+         */
+        saved: {
+            immediate: false,
+            handler (v) {
+                if (!v || v.at === this.flashAt) return
+                this.flashAt = v.at
+                // The capture's own `held`, through the words the shutter
+                // key's line already uses — a still that landed on the
+                // camera's card must not be announced as this board's. `to`
+                // is honoured where a caller has already composed the words.
+                this.savedTo = typeof v.to === 'string' && v.to !== ''
+                    ? v.to
+                    : heldWords(v.held === 'camera' ? 'camera' : 'board')
+                this.flashing = true
+                clearTimeout(this.flashTimer)
+                this.flashTimer = setTimeout(() => { this.flashing = false }, FLASH_MS)
+            }
         }
     },
     created () {
@@ -850,6 +946,7 @@ export default {
         this.requestLive()
     },
     beforeUnmount () {
+        clearTimeout(this.flashTimer)
         clearInterval(this.tick)
         clearTimeout(this.retryTimer)
         clearTimeout(this.stillsTimer)
@@ -1455,6 +1552,46 @@ export default {
     pointer-events: none;
 }
 .y-pic__rec-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--yonder-bad, #ff4034); display: inline-block; }
+/* L-18, the blueprint's own figures (`gallery/DraftPicture.vue`): a white
+   wash over the whole picture and a centred banner. `pointer-events: none`
+   on both, because the drag-to-slew layer is underneath and a confirmation
+   that swallowed a slew for a second would be a control that stopped working
+   every time a photograph was taken. */
+.y-pic__flash {
+    position: absolute;
+    inset: 0;
+    z-index: 7;
+    background: #ffffff;
+    opacity: 0.55;
+    pointer-events: none;
+}
+.y-pic__saved {
+    position: absolute;
+    z-index: 8;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 7px 13px;
+    border-radius: 2px;
+    background: rgba(4, 6, 10, 0.82);
+    border: 1px solid var(--yonder-select, #2ad4f0);
+    color: var(--yonder-select, #2ad4f0);
+    pointer-events: none;
+    white-space: nowrap;
+}
+.y-pic__saved-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--yonder-select, #2ad4f0);
+    display: inline-block;
+}
 /* `left`/`right` both set, rather than a shrink-to-fit box growing from
    `left` alone — a narrow picture (defect 1 means there is no fixed width
    to assume any more) left four readings on one unbroken line wide enough

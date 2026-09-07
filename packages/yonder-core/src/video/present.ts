@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import type { Camera } from "../schema/config.js";
 import {
-  CAPABILITY_KEYS, noCapabilities,
+  CAPABILITY_KEYS, noCapabilities, present,
   type CameraCapabilities, type Capability, type ControlRange,
+  type RecordingCapability, type StillsCapability,
 } from "./capability.js";
 import { describe, type DescriptorView } from "./descriptors.js";
 import { FLIP_KEYS, TURNED_BY_SAYS, turnedBy, turningSays, type FlipKey } from "./orientation.js";
 import { outputReach, type OutputKind, type OutputReach, type ReachPaths } from "./outputs.js";
+import type { RecordingState } from "./recorder.js";
 import type { RunState } from "./supervisor.js";
 
 /**
@@ -713,7 +715,138 @@ export interface CameraDeck {
   };
   readonly outputs: readonly DeckOutput[];
   readonly captures: { readonly count: number };
+  /**
+   * What this camera's recorder is doing, and what the medium has left
+   * (R-CAM-17, R-STO-06).
+   *
+   * **On the deck's own payload, not only on the camera view beside it.**
+   * The capture column draws the shutter key, the line under it saying where
+   * a capture lands and how much of the medium is left, and the elapsed time
+   * while one is running — all three from this one field. Carried here rather
+   * than left for the flow to graft on, because a `change` node copying a
+   * sibling field across is wiring that has to be right, and this deck and
+   * the REC pill on the picture would then be reading two different answers
+   * from the same read.
+   *
+   * `null` where the daemon has no video layer at all — deliberately not a
+   * state saying `recording: false`, which would be this payload claiming to
+   * know something it has no source for.
+   */
+  readonly recorder: RecordingState | null;
   readonly orientation: DeckOrientation;
+}
+
+/**
+ * Which medium holds a capture, in the words an operator reads (R-CAM-17,
+ * R-CAM-18).
+ *
+ * Three surfaces say this same thing about the same fact — the line under the
+ * shutter key (*to this board*), the banner over the picture when a still
+ * lands (*saved · to this board*), and a row in the captures panel that Yonder
+ * cannot fetch (*the camera's card*). Written once, because three copies of a
+ * two-branch ternary is three chances for one of them to say "the board" while
+ * the other two say "this board", on the same screen.
+ */
+export function heldWords(held: "board" | "camera"): string {
+  return held === "board" ? "this board" : "the camera's card";
+}
+
+/**
+ * The headroom under the shutter key, in the unit the mode is working in
+ * (R-CAM-17, R-STO-06; blueprint L-45 and L-46).
+ *
+ * `to this board · 118 min free` in Video, `to this board · 3900 photos free`
+ * in Photo, and `to the camera's card · no card in the camera` where the
+ * medium is one this device does not measure. **One function, because the two
+ * modes differ in a unit and in nothing else**, and a deck that composed each
+ * separately is a deck where one of them keeps the destination and the other
+ * loses it.
+ *
+ * **Minutes, not seconds.** `remainingSeconds` is what the reserve is measured
+ * in and `01:58:20` is not a figure anybody plans a flight with; the
+ * blueprint's own line reads minutes and so does this. Rounded down for the
+ * reason the still estimate is: a number that turns out pessimistic costs
+ * nothing, and an optimistic one costs the operator the recording they thought
+ * they had room for.
+ *
+ * A `null` count is a medium nothing here can measure — the camera's own card
+ * today — so the sentence says that rather than an amount. It never says
+ * *0 min free* for *unknown*: those are opposite facts and the operator acts
+ * differently on each.
+ */
+export function captureDestination(
+  state: RecordingState | null,
+  mode: "video" | "photo",
+): string {
+  if (state === null) return "";
+  const where = `to ${heldWords(state.destination)}`;
+  const left = mode === "photo" ? state.remainingPhotos : state.remainingSeconds;
+  if (left === null) {
+    return state.destination === "camera"
+      ? `${where} · this device cannot see what is left on it`
+      : `${where} · nothing here knows what is left`;
+  }
+  return mode === "photo"
+    ? `${where} · ${String(left)} photos free`
+    : `${where} · ${String(Math.floor(left / 60))} min free`;
+}
+
+/**
+ * Why the last recording ended, when it ended by itself (R-STO-06).
+ *
+ * Empty while one is running and after an operator's own stop — a stop
+ * somebody pressed needs no explanation, and a sentence under the key after
+ * every stop would train them to stop reading it. `ended.reason` is the
+ * recorder's own words, never a paraphrase: it names the reserve and the
+ * figure, which is the thing the operator has to change.
+ */
+export function endedWords(state: RecordingState | null): string {
+  if (state === null || state.recording || state.ended === null) return "";
+  return `the recording ended by itself · ${state.ended.reason}`;
+}
+
+/**
+ * Who records this camera, and who photographs it (R-CAM-17, R-CAM-18).
+ *
+ * **This is the second place a `not-offered` capability does not become a
+ * fact on the page, and it is deliberate for the same reason the first one
+ * is** (`deckOrientation()`, R-CTL-15). `probe/camera.ts` is right that a USB
+ * camera offers neither `recording` nor `stills`: it has no card and no
+ * shutter, that is what the device answered, and `capabilityFacts()` and the
+ * Cameras index both depend on it. It is not what *Yonder* can do.
+ * `video/recorder.ts` records that camera off its own running pipeline and
+ * takes a still off the raw tee — both proven on the board — so the picture
+ * an operator is watching can be recorded and photographed either way.
+ *
+ * Read through the device's own answer, the capture column would be omitted
+ * entirely on every camera this project has: no shutter key at all, on a
+ * console that can record all of them. That is the page this function exists
+ * to stop, and it is the same shape of mistake the Orientation group was
+ * rewritten to remove.
+ *
+ * So the question asked here is not *does the device have a recorder* but
+ * *who would carry a capture*: the camera's own medium where it has one — no
+ * camera in this build does, and `CameraMedium` is the seam that answers
+ * differently when one arrives — and this board otherwise. A daemon with no
+ * video layer has neither, and there the device's own `not-offered` stands.
+ */
+export function deckCapture(
+  caps: CameraCapabilities,
+  recorder: RecordingState | null,
+): Pick<CameraCapabilities, "recording" | "stills"> {
+  if (recorder === null) return { recording: caps.recording, stills: caps.stills };
+  const onCamera = recorder.destination === "camera";
+  return {
+    // A camera that answered for itself is left alone: the device saying
+    // *this is mine* outranks anything composed here, which is what makes
+    // this an addition rather than an override.
+    recording: caps.recording.state === "not-offered"
+      ? present<RecordingCapability>({ medium: onCamera ? "camera" : "board" })
+      : caps.recording,
+    stills: caps.stills.state === "not-offered"
+      ? present<StillsCapability>({ source: onCamera ? "camera" : "pipeline" })
+      : caps.stills,
+  };
 }
 
 /** The words for an output kind, once, so two pages cannot disagree. */
@@ -744,8 +877,13 @@ const OUTPUT_LABEL: Record<OutputKind, string> = {
  * comparison at `policy` would be right by coincidence and wrong the day a
  * runtime tracker exists.
  *
- * **`captures.count` is 0 by construction**: board recording (§8.3) is
- * unbuilt, so there is nothing to count.
+ * **`captures.count` and `recorder` are the caller's**, read from the one
+ * `Recorder` that holds both and handed in. They were `0` and absent here
+ * while board recording was unbuilt; it is built now (R-CAM-17, R-CAM-18,
+ * R-STO-06), and the capture column draws the count as a link to the panel
+ * that lists them and the recorder state as the sentence under the shutter
+ * key. A caller with no video layer passes neither, and a deck that says the
+ * count is zero and the recorder is unknown is the honest reading of that.
  *
  * **There is no `interruption` here, and there was never a value this
  * function could put in it.** What a draft would interrupt is a fact about a
@@ -761,6 +899,19 @@ export function cameraDeck(view: {
   readonly capabilities: CameraCapabilities | null;
   readonly encoder: { readonly element: string; readonly hardware: boolean };
   readonly paths: ReachPaths;
+  /**
+   * What the recorder answered for this camera, and how many captures it is
+   * holding — both read by the caller, from the one recorder that owns them,
+   * and handed in rather than reached for here.
+   *
+   * Injected for the same reason `capabilities` is: this function composes,
+   * it does not go and find things out. Omitted on a caller with no video
+   * layer, which is what `recorder: null` and a count of zero then say — and
+   * the two are separate omissions because a device that is not recording
+   * still holds every capture it made before it stopped.
+   */
+  readonly recorder?: RecordingState | null;
+  readonly captures?: number;
 }): CameraDeck {
   const { camera } = view;
   const caps = view.capabilities ?? noCapabilities();
@@ -799,7 +950,9 @@ export function cameraDeck(view: {
       spec: `${camera.source.toUpperCase()} · ${camera.codec.toUpperCase()} · `
         + `${camera.width}×${camera.height}p${camera.framerate} · ${view.encoder.element}`,
     },
-    capabilities: caps,
+    // The two the board carries for a camera that has neither of its own.
+    // See `deckCapture()` for why this is composed rather than read.
+    capabilities: { ...caps, ...deckCapture(caps, view.recorder ?? null) },
     descriptors,
     values,
     commanded,
@@ -812,7 +965,8 @@ export function cameraDeck(view: {
       costKbps: atIp(camera.bitrate_kbps),
       reach: outputReach(output.kind, view.paths),
     })),
-    captures: { count: 0 },
+    captures: { count: view.captures ?? 0 },
+    recorder: view.recorder ?? null,
     orientation: deckOrientation(caps, camera, values),
   };
 }

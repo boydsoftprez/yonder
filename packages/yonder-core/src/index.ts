@@ -181,6 +181,14 @@ export {
   type SetupMiddlewareDeps,
   type ConsoleMiddlewareDeps,
 } from "./console/middleware.js";
+export {
+  captureHandler,
+  captureRequestFor,
+  CAPTURE_TIMEOUT_MS,
+  type CaptureAnswer,
+  type CaptureHandler,
+  type CaptureRequest,
+} from "./console/capture.js";
 export { renderPage, pageSource, escapeHtml, type PageName } from "./console/assets.js";
 export {
   renderSettings,

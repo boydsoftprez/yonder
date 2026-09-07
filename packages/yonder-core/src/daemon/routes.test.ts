@@ -2447,9 +2447,29 @@ describe("the camera routes", () => {
       await r("POST", "/cameras/cam0/photo", undefined);
       const res = await r("GET", "/cameras/cam0/captures", undefined);
       expect(res.status).toBe(200);
-      const { captures } = res.body as { captures: { name: string; held: string }[] };
+      const { camera, captures } = res.body as {
+        camera: string; captures: { name: string; held: string }[];
+      };
       expect(captures).toHaveLength(1);
       expect(captures[0].held).toBe("board");
+      // **The listing says whose it is.** The panel builds every thumbnail,
+      // View and Download URL from this id, and the node that fetched the
+      // list emits a fresh message that carries no `msg.camera` of its own.
+      expect(camera).toBe("cam0");
+    });
+
+    it("puts the recorder and the count on the deck payload, from the same read", async () => {
+      const { recorder } = recorderOn();
+      const r = provisioned({ cameras: fixtureDetection(), recorder });
+      await r("POST", "/cameras/cam0/photo", undefined);
+      const view = (await r("GET", "/cameras/cam0", undefined)).body as {
+        deck: { captures: { count: number }; recorder: unknown };
+        recorder: unknown;
+      };
+      expect(view.deck.captures).toEqual({ count: 1 });
+      // One read, one answer: the REC pill on the picture and the shutter key
+      // under it must not be able to disagree.
+      expect(view.deck.recorder).toEqual(view.recorder);
     });
 
     it("hands one over as bytes with a content type, not as JSON", async () => {

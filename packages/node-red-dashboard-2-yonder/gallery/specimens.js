@@ -3,6 +3,7 @@ import YonderAim from "../src/ui/YonderAim.vue";
 import YonderAimPad from "../src/ui/YonderAimPad.vue";
 import YonderAnnunciator from "../src/ui/YonderAnnunciator.vue";
 import YonderBudget from "../src/ui/YonderBudget.vue";
+import YonderCaptures from "../src/ui/YonderCaptures.vue";
 import YonderColumn from "../src/ui/YonderColumn.vue";
 import YonderDataBar from "../src/ui/YonderDataBar.vue";
 import YonderDeck from "../src/ui/YonderDeck.vue";
@@ -104,8 +105,11 @@ const ELP_REPORT = {
     contrast: present(range({ min: 0, max: 95, step: 1, current: 0, default: 0 })),
     rotation: notOffered(),
     aim: advertised(undefined, "this camera advertises pan and tilt but there is no motor behind either — it accepts the command and nothing moves"),
-    recording: notOffered(),
-    stills: notOffered(),
+    // The ELP has no card and no shutter, and the board records it off its
+    // own pipeline — `cameraDeck()` composes these two for exactly that
+    // reason, so this fixture carries what a real report now carries.
+    recording: present({ medium: "board" }),
+    stills: present({ source: "pipeline" }),
     saturation: present(range({ min: 0, max: 255, step: 1, current: 56, default: 56 })),
     hue: present(range({ min: -2000, max: 2000, step: 1, current: 0, default: 0 })),
     gamma: present(range({ min: 64, max: 300, step: 1, current: 110, default: 110 })),
@@ -164,6 +168,14 @@ const ELP_REPORT = {
       reach: { direction: "listener", reachable: false, note: "nothing can dial in to this RTSP listener over cellular; it is reachable on the mesh or a LAN" } },
   ],
   captures: { count: 3 },
+  // What the recorder answered: nothing running, an hour and fifty-eight
+  // minutes of headroom against the 1024 MB reserve, and the same headroom in
+  // photographs. This is what draws the line under the shutter key
+  // (blueprint L-45 and L-46) — the two readings differ only in a unit.
+  recorder: {
+    recording: false, since: null, destination: "board",
+    remainingSeconds: 7080, remainingPhotos: 3900, bytes: null, ended: null,
+  },
   interruption: [],
 };
 
@@ -234,6 +246,12 @@ const POCKET2_REPORT = {
       reach: { direction: "outbound", reachable: true, note: "an outbound push to the configured ground station; it leaves over whichever path is active, cellular included" } },
   ],
   captures: { count: 0 },
+  // The Pocket 2 holds its own captures, so the board's headroom is a number
+  // about the wrong medium and the honest answer is that nothing here knows.
+  recorder: {
+    recording: false, since: null, destination: "camera",
+    remainingSeconds: null, remainingPhotos: null, bytes: null, ended: null,
+  },
   interruption: ["current respawn path only"],
 };
 
@@ -943,6 +961,42 @@ export const SPECIMENS = [
       to: { label: "2 ground stations", detail: "no TCP clients" },
       legs: [{ absent: true }, { absent: true }],
     },
+    part: false,
+  },
+  {
+    title: "Captures — three on this board and one the camera holds",
+    note: "R-CAM-18, blueprint L-48. Four rows of the four things that differ between them: a still with a thumbnail, a recording with none (there is no frame to show without decoding the file, so the row carries its kind instead), a still old enough to have stopped reading 'just now', and one the camera holds — which is listed, because a photograph that exists and is not here is a fact the operator needs, and carries none of the three keys, because Yonder never saw the file. Newest first is the daemon's own order, kept.",
+    component: YonderCaptures,
+    props: {},
+    payload: {
+      camera: "cam0",
+      captures: [
+        {
+          name: "2026-09-07T14-22-05-123Z-1280x720.jpg",
+          at: Date.now() - 4_000, bytes: 1_140_000, width: 1280, height: 720, held: "board",
+        },
+        {
+          name: "2026-09-07T13-58-11-004Z-1280x720.mkv",
+          at: Date.now() - 26 * 60_000, bytes: 214_800_000, width: 1280, height: 720, held: "board",
+        },
+        {
+          name: "2026-09-07T13-41-02-870Z-1280x720.jpg",
+          at: Date.now() - 41 * 60_000, bytes: 1_020_000, width: 1280, height: 720, held: "board",
+        },
+        {
+          name: "DJI_0007.JPG",
+          at: Date.now() - 3 * 60 * 60_000, bytes: 8_400_000, width: 4000, height: 3000, held: "camera",
+        },
+      ],
+    },
+    part: false,
+  },
+  {
+    title: "Captures — nothing saved yet",
+    note: "The empty listing drawn as a sentence rather than as a blank pane, the same guarantee the Cameras index makes: an operator must be able to tell 'nothing has been captured' from 'this panel failed to load'. The two are different states here — a report that genuinely lists none, against no report at all.",
+    component: YonderCaptures,
+    props: {},
+    payload: { camera: "cam0", captures: [] },
     part: false,
   },
 ];

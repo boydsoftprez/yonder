@@ -6,6 +6,7 @@ import { CONSOLE_HOME } from "./settings.js";
 import type { DaemonClient } from "./client.js";
 import type { SessionStore } from "./session.js";
 import { whepHandler, WHEP_PREFIX, type WhepRequest, type WhepResponse } from "./whep.js";
+import { captureRequestFor, type CaptureAnswer, type CaptureHandler } from "./capture.js";
 import { cameraFor } from "../video/media-path.js";
 
 /**
@@ -290,6 +291,34 @@ export function viewerFor(token: string): string {
 }
 
 /** An answer relayed from the media server, or this console's refusal of one. */
+/**
+ * A capture, relayed byte for byte.
+ *
+ * `no-store`, like everything else this console serves: a capture can be
+ * deleted, and a browser holding a cached copy of a file the operator has
+ * removed would be the console showing something the device no longer has.
+ * `nosniff` because the content type is the daemon's own answer about a file
+ * an operator's camera wrote, and a browser guessing differently about it is
+ * a guess nobody asked for.
+ */
+function sendCapture(res: ServerResponse, answer: CaptureAnswer): void {
+  res.writeHead(answer.status, {
+    "content-type": answer.contentType,
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+  });
+  if (typeof answer.body === "string") {
+    res.end(answer.body);
+    return;
+  }
+  // Piped rather than collected: see `capture.ts` on why a recording must not
+  // become a second whole copy in this process. A stream that fails mid-body
+  // ends the response — there is no status left to change by then, and a
+  // half-written file is what the browser will make of it either way.
+  answer.body.on("error", () => { res.end(); });
+  answer.body.pipe(res);
+}
+
 function sendProxied(res: ServerResponse, answer: WhepResponse): void {
   res.writeHead(answer.status, {
     "content-type": "text/plain; charset=utf-8",
@@ -371,6 +400,14 @@ export interface ConsoleMiddlewareDeps {
    * route without a media server and without opening a socket.
    */
   whep?: (req: WhepRequest) => Promise<WhepResponse>;
+  /**
+   * A capture's bytes (capture.ts), for the same reason and in the same
+   * shape. Absent on a console assembled without one — which is every test
+   * that is not about this route, and a device with no video layer — and the
+   * route then answers 404 rather than throwing, exactly as a daemon with no
+   * recorder answers the routes behind it.
+   */
+  capture?: CaptureHandler;
 }
 
 /**
@@ -432,6 +469,44 @@ export function consoleMiddleware(deps: ConsoleMiddlewareDeps): Middleware {
       // than after it: `/report` is not a WHEP verb, and falling through to
       // `whep()` would only have it refused there as "no such camera
       // stream" — a 404 this route can both avoid and answer more usefully.
+      /**
+       * **A capture's bytes, behind this console's own credential**
+       * (R-CAM-18, R-SEC-13).
+       *
+       * Matched here, beside the viewer report and before the handshake, for
+       * the same two reasons that one is: `captures` is not a WHEP verb, so
+       * falling through would answer "no such camera stream" — a 404 that
+       * says nothing — and a route authenticated by where it sits in a
+       * function is a route that stops being authenticated the day the
+       * function is reordered. The session is therefore checked here, in this
+       * branch, rather than relied on from below.
+       *
+       * `GET` only. A capture is deleted through the daemon's own route, from
+       * the flow, where a delete is a press an operator made on a panel that
+       * asked them first — never by a URL a browser can be pointed at.
+       */
+      const wanted = captureRequestFor(path);
+      if (wanted !== null) {
+        if (req.method !== "GET") {
+          sendProxied(res, { status: 405, body: "only GET reads a capture" });
+          return;
+        }
+        if (sessionOf(req, deps.sessions) === undefined) {
+          sendProxied(res, { status: 401, body: "log in to read this camera's captures" });
+          return;
+        }
+        const serve = deps.capture;
+        if (serve === undefined) {
+          sendProxied(res, { status: 404, body: "this device serves no captures" });
+          return;
+        }
+        void (async () => {
+          const answer = await serve(wanted);
+          sendCapture(res, answer);
+        })();
+        return;
+      }
+
       const report = /^\/video\/([^/]+)\/report$/.exec(path);
       if (report !== null) {
         const streamPath = report[1];

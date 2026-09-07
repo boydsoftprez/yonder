@@ -93,6 +93,21 @@ export interface RecordingState {
   /** Seconds of recording the medium has left before the reserve, or null
    *  where nothing knows the rate. */
   readonly remainingSeconds: number | null;
+  /**
+   * Stills the medium has left before the reserve, or null on a medium this
+   * device is not spending.
+   *
+   * **The same fact as `remainingSeconds`, in the unit the operator is
+   * working in.** Photo mode is not a recording, and a page that answered
+   * "118 min free" under a shutter key that takes photographs would be
+   * stating the headroom in a unit nothing on the screen is about. It is here
+   * rather than worked out on the page for this file's own reason: the page
+   * has neither the free space nor the reserve, and a browser dividing one
+   * guess by another is two copies of a rule that would drift.
+   *
+   * An estimate, and knowingly so — see `STILL_BYTES_PER_PIXEL`.
+   */
+  readonly remainingPhotos: number | null;
   /** What the open recording has written so far, or null when none is. */
   readonly bytes: number | null;
   /**
@@ -218,6 +233,14 @@ export const CAPTURES_ROOT = "/var/lib/yonder/captures";
 const CAPTURE_DIR_MODE = 0o750;
 
 const STILL_EXTENSION = "jpg";
+
+/**
+ * What one still costs, per pixel, for the count under a Photo-mode shutter
+ * key (R-CAM-17). Measured off this project's own captures — see
+ * `remainingStills()` for why the pessimistic end of the range is the one
+ * taken, and why an estimate is the honest answer here rather than silence.
+ */
+const STILL_BYTES_PER_PIXEL = 0.15;
 const RECORDING_EXTENSION = "mkv";
 
 const CONTENT_TYPES: Record<string, string> = {
@@ -379,6 +402,10 @@ export class Recorder {
       remainingSeconds: onCamera || camera === undefined
         ? null
         : this.remaining(free, this.rateKbps(camera)),
+      // The same headroom, counted in the unit Photo mode works in.
+      remainingPhotos: onCamera || camera === undefined
+        ? null
+        : this.remainingStills(free, camera),
       bytes: open === undefined ? null : sizeOf(open.path),
       ended: this.ended.get(id) ?? null,
     };
@@ -722,6 +749,29 @@ export class Recorder {
     // at all rather than one worked out from a rate nothing is running.
     const kbps = running === null ? camera.bitrate_kbps : running.stream;
     return kbps !== null && kbps > 0 ? kbps : null;
+  }
+
+  /**
+   * How many more stills fit before the reserve.
+   *
+   * **An estimate, and it says so.** A JPEG's size is a property of the
+   * picture, not of the sensor: a blank wall and a treeline at the same
+   * resolution differ several times over, and nothing can be known about the
+   * next one. The alternative to an estimate is no number at all, and R-CAM-17
+   * asks the interface to show the remaining time on the medium doing the
+   * work — a figure an operator plans with, in the unit they are working in.
+   *
+   * The factor is measured off this project's own captures rather than
+   * assumed: `jpegenc`'s default quality on a 1280×720 frame of a real scene
+   * writes about 100–140 kB, which is 0.11 to 0.15 bytes per pixel. The
+   * higher of the two, so the count is the conservative one: a number that
+   * turns out to have been pessimistic costs an operator nothing, and an
+   * optimistic one costs them the shot they thought they had room for.
+   */
+  private remainingStills(free: number, camera: Camera): number | null {
+    const perStill = camera.width * camera.height * STILL_BYTES_PER_PIXEL;
+    if (!(perStill > 0)) return null;
+    return Math.max(0, Math.floor((free - this.reserveBytes()) / perStill));
   }
 
   private reserveBytes(): number {

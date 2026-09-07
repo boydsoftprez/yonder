@@ -2,7 +2,7 @@
   "name": "node-red-dashboard-2-yonder",
   "version": "0.1.0",
   "license": "GPL-3.0-or-later",
-  "description": "Yonder's instrument objects for Dashboard 2.x — engine bars, tapes, annunciators, data bars, identities, soft keys, hold keys and sparklines. The console's visual language, built once (ADR-0009).",
+  "description": "Yonder's instrument objects for Dashboard 2.x \u2014 engine bars, tapes, annunciators, data bars, identities, soft keys, hold keys and sparklines. The console's visual language, built once (ADR-0009).",
   "keywords": [
     "node-red",
     "node-red-dashboard-2",
@@ -25,7 +25,8 @@
       "ui-yonder-deck": "dist/deck.js",
       "ui-yonder-aim": "dist/aim.js",
       "ui-yonder-index": "dist/index-widget.js",
-      "ui-yonder-flow": "dist/flow.js"
+      "ui-yonder-flow": "dist/flow.js",
+      "ui-yonder-captures": "dist/captures.js"
     }
   },
   "node-red-dashboard-2": {
@@ -90,6 +91,10 @@
       "ui-yonder-flow": {
         "output": "ui-yonder-flow.umd.js",
         "component": "YonderFlow"
+      },
+      "ui-yonder-captures": {
+        "output": "ui-yonder-captures.umd.js",
+        "component": "YonderCaptures"
       }
     }
   },

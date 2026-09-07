@@ -9,6 +9,10 @@ import {
   cameraIndex,
   cameraStrip,
   capabilityFacts,
+  captureDestination,
+  deckCapture,
+  endedWords,
+  heldWords,
   identityWords,
   LABELS,
   uplinkBudget,
@@ -16,6 +20,7 @@ import {
 import { advertised, gated, noCapabilities, notOffered, present } from "./capability.js";
 import type { CameraCapabilities } from "./capability.js";
 import type { Camera } from "../schema/config.js";
+import type { RecordingState } from "./recorder.js";
 
 const BY_PATH = "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0";
 
@@ -803,6 +808,160 @@ describe("cameraDeck", () => {
     const deck = cameraDeck({ camera: camera(), capabilities: null, encoder, paths });
     expect(deck.captures).toEqual({ count: 0 });
     expect(Object.prototype.hasOwnProperty.call(deck, "interruption")).toBe(false);
+  });
+
+  /**
+   * The count and the recorder are the *caller's* facts, carried rather than
+   * found (R-CAM-17, R-CAM-18, R-STO-06). A caller with no video layer at all
+   * passes neither, and the two absences are separate: a device that is not
+   * recording still holds every capture it made before it stopped.
+   */
+  it("carries the recorder and the count it was given, and says null where it was given nothing", () => {
+    const recorder = {
+      recording: true, since: 1_700_000_000_000, destination: "board" as const,
+      remainingSeconds: 7080, remainingPhotos: 3900, bytes: 4_100_000, ended: null,
+    };
+    const told = cameraDeck({
+      camera: camera(), capabilities: null, encoder, paths, recorder, captures: 3,
+    });
+    expect(told.recorder).toEqual(recorder);
+    expect(told.captures).toEqual({ count: 3 });
+
+    const untold = cameraDeck({ camera: camera(), capabilities: null, encoder, paths });
+    // Not `{ recording: false }`: that would be this payload claiming to know
+    // something it has no source for.
+    expect(untold.recorder).toBeNull();
+  });
+});
+
+/**
+ * The sentences the capture column, the picture's banner and the captures
+ * panel share about one recorder (R-CAM-17, R-STO-06; blueprint L-45, L-46).
+ *
+ * Three surfaces say the same thing about the same fact, so it is said once.
+ * The tests that matter here are the two the blueprint's own two rows are
+ * about — a unit that follows the mode — and the one an operator acts on
+ * differently from every other: *nothing knows* is not *none left*.
+ */
+/**
+ * The board records a camera that cannot record itself (R-CAM-17, R-CAM-18).
+ *
+ * Read through the device's own answer, every camera this project has would
+ * draw no shutter key at all: a USB camera has no card and no shutter, and
+ * `probe/camera.ts` says so honestly. The board records it off its own
+ * pipeline, so the question the deck asks is *who would carry a capture*.
+ * Exactly the reasoning `deckOrientation()` already carries, one group along.
+ */
+describe("deckCapture", () => {
+  const board: RecordingState = {
+    recording: false, since: null, destination: "board",
+    remainingSeconds: 7_080, remainingPhotos: 3_900, bytes: null, ended: null,
+  };
+
+  it("gives the board's own recorder to a camera that offers neither", () => {
+    const caps = noCapabilities();
+    expect(deckCapture(caps, board)).toEqual({
+      recording: { state: "present", value: { medium: "board" } },
+      stills: { state: "present", value: { source: "pipeline" } },
+    });
+  });
+
+  it("leaves a camera that answered for itself alone", () => {
+    // The device saying *this is mine* outranks anything composed here, which
+    // is what makes this an addition rather than an override.
+    const own = {
+      ...noCapabilities(),
+      recording: present({ medium: "camera" as const }),
+      stills: present({ source: "camera" as const }),
+    };
+    expect(deckCapture(own, board)).toEqual({
+      recording: own.recording, stills: own.stills,
+    });
+  });
+
+  it("says nothing on a daemon with no recorder at all", () => {
+    // `not-offered` stands where nothing here can record: an operator must be
+    // able to tell *this device cannot* from *this page failed*.
+    const caps = noCapabilities();
+    expect(deckCapture(caps, null)).toEqual({
+      recording: caps.recording, stills: caps.stills,
+    });
+  });
+
+  it("reaches the deck, so the capture column is drawn at all", () => {
+    const deck = cameraDeck({
+      camera: camera(),
+      capabilities: null,
+      encoder: { element: "v4l2h264enc", hardware: true },
+      paths: { lan: true, mesh: false, cellular: false },
+      recorder: board,
+    });
+    expect(deck.capabilities.recording).toEqual({ state: "present", value: { medium: "board" } });
+    expect(deck.capabilities.stills).toEqual({ state: "present", value: { source: "pipeline" } });
+  });
+});
+
+describe("captureDestination", () => {
+  const state = (over: Partial<RecordingState> = {}): RecordingState => ({
+    recording: false, since: null, destination: "board",
+    remainingSeconds: 7_080, remainingPhotos: 3_900, bytes: null, ended: null,
+    ...over,
+  });
+
+  it("counts minutes in Video and photographs in Photo, off the same reading", () => {
+    expect(captureDestination(state(), "video")).toBe("to this board · 118 min free");
+    expect(captureDestination(state(), "photo")).toBe("to this board · 3900 photos free");
+  });
+
+  it("rounds a part-minute down, because an optimistic figure costs the recording", () => {
+    expect(captureDestination(state({ remainingSeconds: 119 }), "video"))
+      .toBe("to this board · 1 min free");
+  });
+
+  it("says the medium it cannot measure is unmeasured, never that it is full", () => {
+    // Opposite facts, and an operator acts differently on each: *0 min free*
+    // is a card to clear, *nothing knows* is a card this device does not hold.
+    const camera = state({ destination: "camera", remainingSeconds: null, remainingPhotos: null });
+    expect(captureDestination(camera, "video"))
+      .toBe("to the camera's card · this device cannot see what is left on it");
+    expect(captureDestination(state({ remainingSeconds: 0 }), "video"))
+      .toBe("to this board · 0 min free");
+  });
+
+  it("says nothing at all where there is no recorder to say it about", () => {
+    expect(captureDestination(null, "video")).toBe("");
+  });
+});
+
+describe("endedWords", () => {
+  const stopped = (ended: { at: number; reason: string } | null): RecordingState => ({
+    recording: false, since: null, destination: "board",
+    remainingSeconds: 0, remainingPhotos: 0, bytes: null, ended,
+  });
+
+  it("names the reserve, in the recorder's own words, when it ended by itself", () => {
+    expect(endedWords(stopped({ at: 5, reason: "the card reached the 1024 MB reserve" })))
+      .toBe("the recording ended by itself · the card reached the 1024 MB reserve");
+  });
+
+  it("says nothing after a stop somebody pressed", () => {
+    // A sentence under the key after every stop would train an operator to
+    // stop reading it, and this is the one line they must read.
+    expect(endedWords(stopped(null))).toBe("");
+  });
+
+  it("says nothing while one is running", () => {
+    expect(endedWords({
+      recording: true, since: 1, destination: "board", remainingSeconds: 10,
+      remainingPhotos: 10, bytes: 5, ended: { at: 1, reason: "an older one" },
+    })).toBe("");
+  });
+});
+
+describe("heldWords", () => {
+  it("gives the two media the words three surfaces all say", () => {
+    expect(heldWords("board")).toBe("this board");
+    expect(heldWords("camera")).toBe("the camera's card");
   });
 });
 

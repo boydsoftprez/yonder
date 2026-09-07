@@ -323,6 +323,39 @@ describe("the reserve (R-STO-06)", () => {
     expect((await b.recorder.state("cam0")).remainingSeconds).toBe(0);
   });
 
+  /**
+   * L-46: the same headroom, in the unit Photo mode works in. A page that
+   * answered "118 min free" under a key that takes photographs would be
+   * stating the free space in a unit nothing on the screen is about.
+   */
+  it("counts the stills that fit, against the reserve and at the camera's own shape", async () => {
+    const b = on({ free: RESERVE_MB * MB + 500 * MB });
+    const state = await b.recorder.state("cam0");
+    // 1280×720 at the measured 0.15 bytes a pixel, out of 500 MB of headroom
+    // — the reserve is not the operator's to spend here either.
+    const perStill = 1280 * 720 * 0.15;
+    expect(state.remainingPhotos).toBe(Math.floor((500 * MB) / perStill));
+
+    b.setFree(RESERVE_MB * MB);
+    expect((await b.recorder.state("cam0")).remainingPhotos).toBe(0);
+  });
+
+  /**
+   * A count is not a rate: a camera whose encoder has been retuned, or that
+   * has none at all, still writes stills of a size its own shape predicts. So
+   * the two headroom figures are independently null — the recording's is
+   * unknown, the photograph's is not.
+   */
+  it("still counts stills on a feed whose recording rate nothing knows", async () => {
+    const b = on({
+      free: RESERVE_MB * MB + 500 * MB,
+      inForce: () => ({ stream: null, preview: 400, shape: null }),
+    });
+    const state = await b.recorder.state("cam0");
+    expect(state.remainingSeconds).toBeNull();
+    expect(state.remainingPhotos).toBeGreaterThan(0);
+  });
+
   it("says nothing at all where the rate is unknown", async () => {
     // A pipeline that is running and carries the source's own encoding: there
     // is no encoder on the feed, so nothing knows what a second of recording

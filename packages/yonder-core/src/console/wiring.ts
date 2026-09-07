@@ -3,6 +3,7 @@ import type { ServerResponse } from "node:http";
 import { DaemonClient } from "./client.js";
 import { SessionStore } from "./session.js";
 import { setupMiddleware, consoleMiddleware, type Middleware } from "./middleware.js";
+import { captureHandler } from "./capture.js";
 
 /**
  * The things a generated `settings.js` calls into.
@@ -69,7 +70,15 @@ export function consoleGate(opts: GateOptions): Middleware {
   if (!opts.provisioned) {
     return setupMiddleware({ client, log });
   }
-  return consoleMiddleware({ client, sessions: new SessionStore(), log });
+  // The captures route is handed a proxy built from the same socket path
+  // (capture.ts), not the JSON client above: a JPEG is not JSON, and the
+  // reason each of the two exists is written where it is.
+  return consoleMiddleware({
+    client,
+    sessions: new SessionStore(),
+    capture: captureHandler(opts.socketPath),
+    log,
+  });
 }
 
 /** What Node-RED's `adminAuth` wants back from a successful login. */

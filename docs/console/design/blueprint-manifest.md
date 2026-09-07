@@ -135,9 +135,9 @@ Capture: `camera-live.night.png` / `.day.png`, `camera-live-notebook.day.fold.pn
 | L-13 | **A step line, top-right of the picture**, on a ladder change only: `dropped to 640×360 — the link could not carry 720p` | Absent | owned — **Task 31** (the ladder) and **Task 32** (reporting it) | |
 | L-14 | A foot strip, bottom-left of the picture, of the live control readings — `ZOOM 0  GAIN 0` on the ELP, `PAN +0.0°  TILT +0.0°  ZOOM 1.0×  EV +0.0` on the Pocket 2 | Built (`.y-pic__foot`); not visible in the capture because the media server is not answering | present | Unverifiable from this capture; verified in source |
 | L-15 | `LINK 3.10 Mb/s / DROP 0.0 %` in the bottom-right corner of the picture | Built (`.y-pic__foot` link/drop block); not visible in this capture | present | Same caveat as L-14 |
-| L-16 | A `REC` pill with elapsed time while recording | Built (`.y-pic__rec`) | present | Its data source is Task 33 |
+| L-16 | A `REC` pill with elapsed time while recording | Built (`.y-pic__rec`), and fed: `pick-cam-picture` carries `recorder` to it and `YonderPicture` counts from the board's own `since` | present | Task 33b wired it. The elapsed time is counted in the component, not formatted by the daemon — the page reads every five seconds and a pre-formatted string makes a stopwatch that steps in fives |
 | L-17 | **A hint centred on the picture, `DRAG TO SLEW · RELEASE TO STOP`, whenever the camera can be aimed** | **Absent.** `gallery/DraftPicture.vue:45` draws it; `YonderPicture.vue` has no equivalent | **unbuilt** | No task names it. Task 25's step list covers the drag layer's *behaviour* and never its affordance |
-| L-18 | **A white flash over the whole picture and a centred `● SAVED · TO THIS BOARD` banner** when a still lands | **Absent.** `gallery/DraftPicture.vue:11` draws it | unbuilt / partly owned — **Task 33** owns the still; nothing owns the banner | Task 33's steps name the recorder, the routes, the captures panel and the REC pill — not the picture's confirmation |
+| L-18 | **A white flash over the whole picture and a centred `● SAVED · TO THIS BOARD` banner** when a still lands | Built (`.y-pic__flash`, `.y-pic__saved`), 1200 ms, restarted by a second still and gated on `held` so a delete never flashes | present | Task 33b. The words for the medium are `heldWords()`'s, shared with the shutter key's own line |
 | L-19 | The drag-to-slew orb measured from where the pointer went down | Built and tested (`picture.component.test.ts`) | present | |
 
 ### 1.3 The thumbnail strip
@@ -190,12 +190,12 @@ the capture and was checked against `YonderAim.vue` instead.**
 
 | # | The blueprint shows | Today | Class | Note |
 |---|---|---|---|---|
-| L-43 | **A `MODE` segmented control, `Video │ Photo`, at the head of the column** | **Absent** | **unbuilt** | Nothing owns it. The README lists it among the blueprint's settled decisions: "One shutter key that follows Video/Photo mode" |
-| L-44 | **One shutter key that follows the mode** — `○ RECORD` in Video, `PHOTO` in Photo, `● RECORDING 00:13:47` while running | **Two keys, always both drawn** — a `RECORD` circle and a `PHOTO` circle stacked. `YonderShutter.vue` takes a `mode` prop and supports it; `YonderDeck.drawShutter()` is called once per capability key instead | drifted | Task 19's own test says "reads RECORD in video mode and PHOTO in photo mode" — the part was built to the blueprint and the deck composes it against it |
-| L-45 | Beneath the key, where a capture lands (R-CAM-17): `to this board · 118 min free`, or `to the camera's card · no card in the camera` | A caution sentence instead: `Yonder can command a recording and has nowhere to put the file: board recording is not built`, then `the camera's card` | owned — **Task 33** | Correct for today's state; the free-space reading arrives with the recorder |
-| L-46 | In Photo mode the free-space line counts photos: `to this board · 3900 photos free` | Absent | owned — **Task 33** | |
-| L-47 | **A `CAPTURES (3) ›` link beside the shutter key** | **Absent.** A plain readout `Captures · 0` appears lower in the column | owned — **Task 33** (`ui/YonderCaptures.vue`) | `YonderCaptures.vue` does not exist in `packages/`; `gallery/DraftCaptures.vue` does |
-| L-48 | **The captures popover**: `CAPTURES · THIS BOARD` / `4 SAVED`, one row per still with a thumbnail, `just now`, `1280×720 · 1.1 MB`, and `VIEW · DOWNLOAD · DELETE` | Absent | owned — **Task 33** | |
+| L-43 | **A `MODE` segmented control, `Video │ Photo`, at the head of the column** | Built — `YonderSegmented`, drawn only where the camera offers both | present | Task 33b. The mode is the browser's: not configuration, never an apply, and it does not survive a reload (the operator's own decision) |
+| L-44 | **One shutter key that follows the mode** — `○ RECORD` in Video, `PHOTO` in Photo, `● RECORDING 00:13:47` while running | Built — one key, drawn from whichever capability the mode selects | present | Task 33b. It lights and counts from `recorder.since`, the board's own answer, not from a local guess: a page opened after a recording started shows it running |
+| L-45 | Beneath the key, where a capture lands (R-CAM-17): `to this board · 118 min free`, or `to the camera's card · no card in the camera` | Built — `captureDestination()` in `yonder-core`, from `recorder.remainingSeconds` against the storage reserve | present | Task 33b. A medium this device cannot measure says so — *this device cannot see what is left on it* — rather than *0 min free*, which is the opposite fact |
+| L-46 | In Photo mode the free-space line counts photos: `to this board · 3900 photos free` | Built — the same sentence, from `recorder.remainingPhotos` | present | Task 33b. The count is an estimate at a measured 0.15 bytes per pixel, taken at the pessimistic end; `recorder.ts` says why an estimate beats silence here |
+| L-47 | **A `CAPTURES (3) ›` link beside the shutter key** | Built — a link under the key, counting the same listing the panel draws, and pressing it re-reads now rather than at the next poll | present | Task 33b |
+| L-48 | **The captures popover**: `CAPTURES · THIS BOARD` / `4 SAVED`, one row per still with a thumbnail, `just now`, `1280×720 · 1.1 MB`, and `VIEW · DOWNLOAD · DELETE` | Built (`ui-yonder-captures`) — **as a panel below the deck, not a popover hanging off the link** | drifted, deliberately — **owner: the operator, to accept or reverse** | A Dashboard 2.x widget cannot render inside another widget's column, and the deck's own columns are 220 px — the constraint the blueprint's popover exists to escape. Everything else is the render: the heading and count, the rows, the relative time, `1280×720 · 1.1 MB`, and the three keys. A recording carries its kind instead of a thumbnail (there is no frame without decoding the file); a camera-held capture is listed and carries none of the three keys (R-CAM-18 — Yonder never saw it); Delete asks on the row before it acts |
 | L-49 | A `DEVICE` readout: `usb-1.2 · ELP-USBFHD01M` | Absent from the column; a by-path string appears in a separate `IDENTITY` panel below the deck | drifted | |
 | L-50 | An `ENCODER` readout: `v4l2h264enc · hardware` | Absent from the column; folded into the placard (L-08), without the `hardware`/`re-encoded` qualifier | drifted | |
 | L-51 | *(Not in the blueprint)* `CAPTURE FORMATS 10` | **Gone.** The formats are offered, in the Stream column's two pickers (L-56) | present | Was K-52's own smaller case: "a count offers nothing". R-CAM-14 asks for the formats offered, not counted, and the row that counted them is removed rather than reworded — the Stream column now offers those same formats, and a count beside it would state the fact twice |
@@ -652,7 +652,7 @@ Five mechanisms, each visible more than once above.
 
 **1 · A deferred concern with no owner.** K-52's resolution picker was named by
 Task 28's own implementer, recorded in the plan's ledger, and picked up by
-nobody. L-17, L-23, L-43, L-92, L-93, S-04, S-05, S-11, C-04, C-15, C-16, C-20,
+nobody. L-17, L-23, L-92, L-93, S-04, S-05, S-11, C-04, C-15, C-16, C-20,
 C-22 and C-24 are all in the same state now: real gaps, no owner, invisible to
 every diff.
 
@@ -720,11 +720,15 @@ check against.
 |---|---|
 | 31 — the rate controller and the size ladder | L-13 (the step line's cause) |
 | 32 — viewers and the preview-state message | L-10, L-11, L-12, L-13, L-24, L-26, L-27, L-63 |
-| 33 — board recording, stills and the captures panel | L-45, L-46, L-47, L-48, and the still behind L-18 |
+| 33 — board recording, stills and the captures panel | **Done.** L-16, L-18, L-43, L-44, L-45, L-46, L-47 built; L-48 built as a panel rather than a popover, for the operator to accept or reverse |
 | 34 — the stills strip, per viewer | L-20, L-21, L-22 |
 | Phase 5 (deferred, Pocket 2) | L-52, L-79, L-83 |
 
-**Unbuilt, with no owner — twenty-one rows**
+**Unbuilt, with no owner — nineteen rows**
+
+*(L-18 and L-43 left this list in Task 33b, built rather than deferred: under
+rule 7 an element the blueprint draws needing another feature built is a
+reason to build that feature, and the shutter's own route was that feature.)*
 
 Under CLAUDE.md rule 7 these are not deferred. They are missing, and until each
 has a named owner or is built, no camera surface is finished.
@@ -734,9 +738,7 @@ has a named owner or is built, no camera surface is finished.
 | L-02, L-03 | `CAMERAS` and `SYSTEM` section headings in the sidebar |
 | L-04, L-05 | One sidebar entry per camera, and its selected state (R-UI-03) |
 | L-17 | `DRAG TO SLEW · RELEASE TO STOP` on an aimable picture |
-| L-18 | The photo flash and the `● SAVED · TO THIS BOARD` banner |
 | L-23 | The `● CONFIRMED` pill on the camera page's strip |
-| L-43 | The `MODE` segmented control, `Video │ Photo` |
 | L-92 | `stop or start them on Setup ›` on Live |
 | L-93 | The `SRT` output row |
 | L-97 | The sticky rail |

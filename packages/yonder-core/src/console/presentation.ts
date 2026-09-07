@@ -77,7 +77,14 @@ export { atIp } from "../video/present.js";
  * second copy of the eight characters to slice is exactly what this file
  * exists to rule out.
  */
-export { cameraFor } from "../video/media-path.js";
+/**
+ * **`captureUrl` travels beside it, for the identical reason.**
+ * `YonderCaptures.vue` builds the address a capture's thumbnail, View and
+ * Download all point at, and `console/middleware.ts` matches that same
+ * address on the way in — two ends of one string, which is precisely what
+ * this entry point exists to keep from being written twice.
+ */
+export { cameraFor, captureUrl } from "../video/media-path.js";
 
 /**
  * The operator-facing word for each capability key — `whiteBalance` is not a
@@ -93,6 +100,29 @@ export { cameraFor } from "../video/media-path.js";
  * file exists to stop.
  */
 export { LABELS } from "../video/present.js";
+
+/**
+ * The three sentences the capture column and the picture share about one
+ * recorder (R-CAM-17, R-CAM-18, R-STO-06; blueprint L-18, L-45, L-46, L-48).
+ *
+ * Values, and safe here for the reason `LABELS` above already establishes:
+ * `video/present.ts`'s imports of `Camera` and `RecordingState` are both
+ * `import type` and are erased entirely at build time, so nothing pulls the
+ * schema — and therefore zod — in behind them.
+ *
+ * They belong here by this file's own rule. `heldWords` is said on the deck,
+ * on the picture's banner and in the captures panel; `captureDestination` is
+ * the one line whose only difference between Video and Photo is a unit; and
+ * `endedWords` is the difference between a recording the operator stopped and
+ * one the storage reserve stopped, which is a distinction R-STO-06 only makes
+ * good on if the page can draw it. Composed in a component, each would be a
+ * second copy of a rule to drift from.
+ */
+export {
+  captureDestination,
+  endedWords,
+  heldWords,
+} from "../video/present.js";
 
 /**
  * The adapter boundary: labels, display units and gating for one V4L2

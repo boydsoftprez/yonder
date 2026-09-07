@@ -1,0 +1,57 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!--
+  The editor half of the shutter. Node-RED finds this by basename beside the
+  node's .js; without it the node registers and shows as "unknown node". A
+  form and a registration, nothing else (CLAUDE.md rule 2).
+-->
+<script type="text/html" data-template-name="yonder-captures">
+  <div class="form-row"><label for="node-input-camera"><i class="fa fa-video-camera"></i> Camera</label>
+    <input type="text" id="node-input-camera" placeholder="cam0 — or name one on msg.camera" /></div>
+  <div class="form-row"><label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name" /></div>
+  <div class="form-tips">
+    <b>The shutter, and the files it makes (R-CAM-17, R-CAM-18).</b> Send
+    <code>{ shutter: "record" | "stop" | "photo" }</code> to work the shutter,
+    <code>{ remove: "&lt;name&gt;" }</code> to delete one capture, and anything
+    else to read the listing.
+  </div>
+</script>
+<script type="text/html" data-help-name="yonder-captures">
+<p>Records, photographs, lists and deletes this camera's captures. Every
+decision — the storage reserve, one operation at a time, whether the camera
+holds the file — is the daemon's; this node calls a route and reports what
+came back.</p>
+<p><b>Which camera</b> comes from <code>msg.camera</code> first, then the
+node's own field, exactly as <code>yonder-camera</code> resolves it.</p>
+<h3>Inputs</h3>
+<dl class="message-properties">
+  <dt>payload.shutter <span class="property-type">string</span></dt>
+  <dd><code>record</code> starts one, <code>stop</code> ends it,
+      <code>photo</code> takes a still. A still answers only once the file is
+      written.</dd>
+  <dt>payload.remove <span class="property-type">string</span></dt>
+  <dd>One capture's name, deleted. A capture the camera holds is refused with
+      the reason: Yonder never saw the file.</dd>
+</dl>
+<p>A message carrying neither reads the listing —
+<code>{ camera, captures: [{ name, at, bytes, width, height, held }] }</code>,
+newest first. That is what the <code>CAPTURES</code> link sends, and what the
+flow re-reads with after every one of the actions above.</p>
+<p><b>A recording that ended by itself says so.</b> The answer carries
+<code>ended.reason</code> when the storage reserve stopped it (R-STO-06); an
+operator whose recording ended without them has to be told why.</p>
+<p><b>This node originates nothing</b> (R-CMD-04). It relays a press.</p>
+</script>
+<script type="text/javascript">
+  RED.nodes.registerType("yonder-captures", {
+    category: "yonder", color: "#c7d4e0",
+    defaults: {
+      name: { value: "" },
+      camera: { value: "" }
+    },
+    inputs: 1, outputs: 1,
+    icon: "font-awesome/fa-camera",
+    paletteLabel: "yonder captures",
+    label: function () { return this.name || "yonder captures"; }
+  });
+</script>

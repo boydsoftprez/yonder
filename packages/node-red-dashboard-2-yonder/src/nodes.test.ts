@@ -22,6 +22,7 @@ const budgetNode = (await import("./budget.js")).default ?? await import("./budg
 const deckNode = (await import("./deck.js")).default ?? await import("./deck.js");
 const aimNode = (await import("./aim.js")).default ?? await import("./aim.js");
 const indexNode = (await import("./index-widget.js")).default ?? await import("./index-widget.js");
+const capturesNode = (await import("./captures.js")).default ?? await import("./captures.js");
 
 /**
  * What is tested here, and what honestly cannot be.
@@ -601,6 +602,26 @@ describe("the cameras index", () => {
     // intermediate state in the editor, not a fault — Node-RED must load
     // the rest of the flow either way.
     const { node } = build(indexNode as (RED: RED) => void, {}, null);
+    expect(node.error).toHaveBeenCalledWith(expect.stringContaining("no dashboard group"));
+  });
+});
+
+describe("ui-yonder-captures", () => {
+  /**
+   * The same test, for the same reason, one widget along: a delete leaves
+   * through this node's output, and Dashboard drops a `widget-action` from a
+   * widget that never registered `onAction` — silently, with no error
+   * anywhere. `captures.component.test.ts` mounts the Vue half against a
+   * mocked `$socket` and cannot see this file at all.
+   */
+  it("registers as a widget that sends", () => {
+    const { type, events } = build(capturesNode as (RED: RED) => void, {});
+    expect(type).toBe("ui-yonder-captures");
+    expect(events).toMatchObject({ onAction: true });
+  });
+
+  it("does not draw itself when it has no dashboard group", () => {
+    const { node } = build(capturesNode as (RED: RED) => void, {}, null);
     expect(node.error).toHaveBeenCalledWith(expect.stringContaining("no dashboard group"));
   });
 });
