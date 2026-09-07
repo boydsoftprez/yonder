@@ -233,6 +233,7 @@ export class VehicleService {
         ...[[30, 10], [33, 10], [74, 10], [62, 10], [24, 2], [1, 2], [42, 2], [87, 2]].map(([id, hz]) => ({ name: `Request message ${id} at ${hz} Hz`, command: 511, params: [id, Math.round(1e6 / hz), 0, 0, 0, 0, 0] })),
         ...[148, 242].map(id => ({ name: `Request message ${id}`, command: 512, params: [id, 0, 0, 0, 0, 0, 0] })),
         { name: "Request wind estimate at 1 Hz", command: 511, params: [168, 1000000, 0, 0, 0, 0, 0] },
+        { name: "Request calibrated primary acceleration at 5 Hz", command: 511, params: [27, 200000, 0, 0, 0, 0, 0] },
       ];
       default: return [];
     }

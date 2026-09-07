@@ -142,6 +142,7 @@
       <button class="pfd-hotspot pfd-touch-navigation" :style="hit([446,418,188,170])" aria-label="PFD mission navigation" @click="open('nav')"><span>NAVIGATION</span></button>
       <button class="pfd-hotspot pfd-touch-bank" :style="hit([6,514,185,77])" aria-label="Pitch and bank display settings" @click="open('attitude')"><span>ATTITUDE</span></button>
     </div>
+    <PfdSkidBall v-if="options.skidBall!==false" :telemetry="telemetry" :style="hit([240,83,160,30])" @open="open('slip')"/>
     <PfdWindDisplay v-if="options.windDisplay!=='off'" :telemetry="telemetry" :mode="options.windDisplay||'components'" :style="hit([130-viewport.edgeShift,302,128,86])" @open="open('wind')"/>
     <div v-if="!flight.live" class="pfd-loss" role="status">Flight instruments unavailable</div>
     </div>
@@ -176,6 +177,7 @@ import PfdControlPanel from './PfdControlPanel.vue';
 import TelemetryStrip from './TelemetryStrip.vue';
 import FlightModeAnnunciator from './FlightModeAnnunciator.vue';
 import PfdWindDisplay from './PfdWindDisplay.vue';
+import PfdSkidBall from './PfdSkidBall.vue';
 import {pfdViewport,pfdHitRegion} from './flight-workflow.mjs';
 
 import {
@@ -192,7 +194,8 @@ export default {
     PfdControlPanel,
     TelemetryStrip,
     FlightModeAnnunciator,
-    PfdWindDisplay
+    PfdWindDisplay,
+    PfdSkidBall
   },
   props: ['flight', 'guidance', 'telemetry', 'cdiScale', 'references', 'options', 'mission', 'trafficTracks',
     'trafficOptions', 'trafficSelected', 'trafficNow', 'backgroundReady', 'backgroundLabel', 'terrainReport', 'snapshot'

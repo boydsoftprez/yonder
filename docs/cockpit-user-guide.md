@@ -59,6 +59,23 @@ fresh target coordinates restores geographic guidance; actual AUTO restores
 mission navigation. Missing request history and external heading overrides are
 explicit limitations of GUIDED ownership, not evidence of an active waypoint.
 
+## Slip / skid ball
+
+The white ball beneath the bank pointer shows the sideways force felt in the
+aircraft. In coordinated flight it stays between the two center marks, even
+while banked. Wind and a difference between heading and ground track do not by
+themselves move it. Tap the ball, or use **PFD Menu → Slip / skid**, to inspect
+its source measurements or hide it. **Display → Slip / skid ball settings**
+restores it when hidden.
+
+The ball uses calibrated primary ArduPlane accelerometer readings and their
+reported health. It disappears with **SLIP / SKID —** when flight data, sensor
+health or fresh acceleration is unavailable. Data expires after two seconds;
+low or negative normal load also makes this conventional indication unavailable.
+**Aircraft → Request flight telemetry** includes these readings at 5 Hz.
+Movement is smoothed over 180 ms; travel is bounded at an apparent-force angle
+of ±10°. That is the display's scale, not an aerodynamic sideslip angle.
+
 ## Wind on the PFD
 
 The wind box sits beside the lower part of the airspeed tape, above the mission

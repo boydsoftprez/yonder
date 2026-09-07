@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { ardupilotmega, common, minimal } from "node-mavlink";
 import type { DecodedFrame } from "./protocol.js";
-import type { FieldValidity, FlightTelemetry, NavController, PositionTarget, VehicleIdentity } from "./types.js";
+import type { FieldValidity, FlightTelemetry, NavController, PositionTarget, SlipSkidSample, VehicleIdentity } from "./types.js";
 export const PLANE_MODES: Record<number, string> = { 0: "MANUAL", 1: "CIRCLE", 2: "STABILIZE", 3: "TRAINING", 4: "ACRO", 5: "FBWA", 6: "FBWB", 7: "CRUISE", 8: "AUTOTUNE", 10: "AUTO", 11: "RTL", 12: "LOITER", 13: "TAKEOFF", 14: "AVOID_ADSB", 15: "GUIDED", 17: "QSTABILIZE", 18: "QHOVER", 19: "QLOITER", 20: "QLAND", 21: "QRTL", 22: "QAUTOTUNE", 23: "QACRO", 24: "THERMAL", 25: "LOITER_ALT_QLAND", 26: "AUTOLAND" };
 export const isPlane = (id: VehicleIdentity | null): boolean => id?.autopilot === 3 && id.vehicleType === 1;
 const clean = (n: number): number | null => Number.isFinite(n) ? n : null;
@@ -16,6 +16,8 @@ export class VehicleTelemetry {
   private target: { value: Omit<PositionTarget, "ageMs">; at: number } | null = null;
   private home: { value: { lat: number; lon: number; alt: number }; at: number } | null = null;
   private wind: { directionFromDeg: number; speedKt: number; at: number } | null = null;
+  private acceleration: (Omit<SlipSkidSample, "ageMs"> & { at: number }) | null = null;
+  private accelHealth: { healthy: boolean; at: number } | null = null;
   private put(values: Partial<Record<Scalar, Sample["value"]>>, source: string, now: number, ttl = 2000) {
     for (const [key, value] of Object.entries(values)) this.values.set(key as Scalar, { value: value ?? null, source, at: now, ttl });
   }
@@ -35,12 +37,19 @@ export class VehicleTelemetry {
       // ArduPlane reports a signed true-north FROM bearing (atan2(-east,-north)).
       this.wind = range(m.direction, -360, 360) !== null && range(m.speed, 0, 1000) !== null
         ? { directionFromDeg: (m.direction + 360) % 360, speedKt: m.speed * 1.9438444924406, at: now } : null;
+    } else if (isPlane(identity) && (m instanceof common.ScaledImu || (m instanceof common.RawImu && m.id === 0))) {
+      // ArduPilot GCS_Common emits calibrated body-frame milli-g for both IMU-0
+      // messages. RAW_IMU units are not assumed for other autopilot families.
+      this.acceleration = Number.isFinite(m.yacc) && Number.isFinite(m.zacc)
+        && Math.abs(m.yacc) < 16000 && m.zacc < -200 && m.zacc > -16000
+        ? { lateralG: m.yacc / 1000, normalG: -m.zacc / 1000, at: now, source: m instanceof common.ScaledImu ? "SCALED_IMU" : "RAW_IMU" } : null;
     } else if (m instanceof common.GlobalPositionInt) {
       this.put({ latitude: range(m.lat / 1e7, -90, 90), longitude: range(m.lon / 1e7, -180, 180), globalAltitudeM: m.alt / 1000, relativeAltitudeM: m.relativeAlt / 1000,
         trackDeg: Math.hypot(m.vx, m.vy) >= 50 ? (Math.atan2(m.vy, m.vx) * 180 / Math.PI + 360) % 360 : null }, "GLOBAL_POSITION_INT (fused position)", now);
     } else if (m instanceof common.GpsRawInt) {
       this.put({ fixType: m.fixType, satellites: m.satellitesVisible === 255 ? null : m.satellitesVisible, gpsAltitudeM: m.fixType >= 3 ? m.alt / 1000 : null }, "GPS_RAW_INT (MSL altitude)", now, 5000);
     } else if (m instanceof common.SysStatus) {
+      this.accelHealth = { at: now, healthy: (m.onboardControlSensorsPresent & m.onboardControlSensorsEnabled & m.onboardControlSensorsHealth & 2) !== 0 };
       this.put({ batteryV: m.voltageBattery === 65535 ? null : m.voltageBattery / 1000, currentA: m.currentBattery === -1 ? null : m.currentBattery / 100, batteryPercent: m.batteryRemaining === -1 ? null : range(m.batteryRemaining, 0, 100) }, "SYS_STATUS", now, 5000);
     } else if (m instanceof common.HomePosition) {
       if (positionValid(m.latitude / 1e7, m.longitude / 1e7)) this.home = { value: { lat: m.latitude / 1e7, lon: m.longitude / 1e7, alt: m.altitude / 1000 }, at: now };
@@ -74,8 +83,11 @@ export class VehicleTelemetry {
     const at = Math.max(...[...this.values.values()].map(s => s.at));
     const wind = connected && this.wind && now >= this.wind.at && now - this.wind.at < 5000
       ? { directionFromDeg: this.wind.directionFromDeg, speedKt: this.wind.speedKt, ageMs: now - this.wind.at, source: "WIND" as const } : null;
+    const a = this.acceleration, health = this.accelHealth;
+    const slipSkid = connected && a && health?.healthy && now >= health.at && now - health.at < 5000 && now >= a.at && now - a.at < 2000
+      ? { lateralG: a.lateralG, normalG: a.normalG, source: a.source, ageMs: now - a.at } : null;
     return { ...values, source: "MAVLink", ready, ageMs: Number.isFinite(at) ? now - at : null, fdReady,
       navRollDeg: fdReady ? values.navRollDeg : null, navPitchDeg: fdReady ? values.navPitchDeg : null,
-      navController: nav, positionTarget: target, homePosition: connected && this.home ? { ...this.home.value } : null, wind, fields } as FlightTelemetry;
+      navController: nav, positionTarget: target, homePosition: connected && this.home ? { ...this.home.value } : null, wind, slipSkid, fields } as FlightTelemetry;
   }
 }

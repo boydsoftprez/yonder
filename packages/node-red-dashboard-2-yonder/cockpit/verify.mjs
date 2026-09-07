@@ -12,6 +12,11 @@ for(const [name,width,height] of [['laptop',1440,900],['tablet',1024,768],['port
  assert.equal(await page.getByRole('main').getAttribute('data-layout'),'full');
  const pfd=page.locator('[aria-label="Primary flight display"]');assert.equal(await pfd.count(),1);
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+ const skid=page.getByRole('button',{name:'Slip and skid indicator settings',exact:true});
+ await skid.waitFor({state:'visible'});
+ assert.equal(await skid.locator('.skid-ball').count(),1);
+ await skid.click();await page.getByRole('dialog',{name:'Slip / skid',exact:true}).waitFor();
+ await page.getByRole('button',{name:'Close PFD controls'}).click();
  const wind=page.getByRole('button',{name:'Wind display settings',exact:true});
  await wind.waitFor({state:'visible'});
  assert.equal(await wind.locator('[data-direction="down"]').count(),1);

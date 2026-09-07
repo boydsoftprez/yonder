@@ -29,3 +29,15 @@ and native Vue composition. The original previews and source worktree remain sep
 Verification and limits are recorded in [the integration evidence](cockpit-integration-verification.md),
 [control audit](cockpit-control-integration-audit.md), [terrain audit](cockpit-terrain-integration-audit.md)
 and [walkthrough](cockpit-user-guide.md).
+
+## Follow-through after integration
+
+- [x] Ground traffic provider access, cooldowns and traffic-range map framing.
+- [x] Terrain render cadence, prepared tile streaming/look-ahead and restored AGL.
+- [x] Aircraft breadcrumbs with distance, time and since-power-on views.
+- [x] Wind components/vector/direction display from the MAVLink estimate.
+- [x] Slip/skid ball from calibrated primary acceleration and sensor health.
+
+The [latest follow-through evidence](console/evidence/2026-09-07-cockpit-followthrough.md)
+records current firmware/browser checks and the remaining capture-annunciation,
+direct terrain-target, camera-alignment and point-cloud limits.

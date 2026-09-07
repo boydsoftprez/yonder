@@ -58,6 +58,14 @@ describe('compact aircraft flight wire',()=>{
     expect(unpackFlight({...wire,c:false},full).telemetry.wind).toBeNull();
     expect(JSON.stringify(wire).length-JSON.stringify(older).length).toBeLessThan(70);
   });
+  it('round-trips acceleration freshness without changing existing columns or reusing old details',()=>{
+    const full=snapshot();full.connected=true;full.telemetry.slipSkid={lateralG:-.1,normalG:1.2,ageMs:120,source:'RAW_IMU'};
+    const wire=packFlight(full,'a');expect(wire.i).toEqual([-.1,1.2,120,27]);
+    expect(unpackFlight(wire,full).telemetry.slipSkid).toEqual(full.telemetry.slipSkid);
+    const {i,...older}=wire;expect(unpackFlight(older,full).telemetry.slipSkid).toBeNull();
+    for(const i of [[0,1,2000,27],[0,1,-1,27],[NaN,1,0,27],[0,0,0,27],[0,-1,0,27],[0,1,0,999]])expect(unpackFlight({...wire,i} as never,full).telemetry.slipSkid).toBeNull();
+    expect(unpackFlight({...wire,c:false},full).telemetry.slipSkid).toBeNull();
+  });
   it('rejects a mismatched protocol version instead of drawing misindexed values',()=>{
     const wire=packFlight(snapshot(),'a');
     expect(()=>unpackFlight({...wire,v:99} as never,{})).toThrow(/version/i);

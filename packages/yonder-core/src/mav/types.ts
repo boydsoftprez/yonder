@@ -7,6 +7,8 @@ export interface VehicleIdentity { system: number; component: number; autopilot:
 export interface FieldValidity { source: string; receivedAt: number | null; ageMs: number | null; valid: boolean; reason?: string }
 /** ArduPlane's reported horizontal estimate. WIND carries no estimator confidence flag. */
 export interface WindEstimate { directionFromDeg: number; speedKt: number; ageMs: number; source: "WIND" }
+/** Calibrated body specific force: right-positive lateral and upward-positive normal load, in g. */
+export interface SlipSkidSample { lateralG: number; normalG: number; ageMs: number; source: "RAW_IMU" | "SCALED_IMU" }
 /** Canonical decoded values: geographic x/y in degrees, local x/y in metres, other commands raw. */
 export interface MissionItem { seq: number; command: number; frame: number; params: [number | null, number | null, number | null, number | null]; x: number | null; y: number | null; z: number | null; current: boolean; autocontinue: boolean }
 export interface MissionSnapshot {
@@ -41,6 +43,7 @@ export interface FlightTelemetry {
   positionTarget: PositionTarget | null; navController: NavController | null;
   homePosition: { lat: number; lon: number; alt: number } | null;
   wind?: WindEstimate | null;
+  slipSkid?: SlipSkidSample | null;
   fields: Record<string, FieldValidity>;
 }
 export type VehicleAction =

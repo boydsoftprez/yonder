@@ -17,6 +17,7 @@
       <div v-else-if="kind==='menu'" class="pfd-menu-grid">
         <button v-for="(f,key) in referenceFields" :key="key" @click="$emit('panel',key)">{{f.title}}<small>{{references[key]===null?'No local reference':fmt(references[key])+' '+f.unit}}</small></button>
         <button @click="$emit('panel','attitude')">Attitude & display<small>Transparency · terrain · declutter</small></button><button @click="$emit('panel','director')">Flight director<small>Cue style & visibility</small></button>
+        <button @click="$emit('panel','slip')">Slip / skid<small>Ball · sensor status</small></button>
         <button @click="$emit('panel','wind')">Wind<small>Components · arrow · direction</small></button>
         <button @click="$emit('panel','nav')">Mission navigation<small>Flight plan · direct-to</small></button><button @click="$emit('panel','status')">Aircraft data<small>GPS · battery · source</small></button>
       </div>
@@ -30,11 +31,20 @@
         <button class="pfd-wide-button" @click="navigate('display')">Background, insets &amp; data sources →</button>
         <button class="pfd-wide-button" @click="$emit('panel','director')">Flight director settings →</button>
         <button class="pfd-wide-button" @click="$emit('panel','wind')">Wind display settings →</button>
+        <button class="pfd-wide-button" @click="$emit('panel','slip')">Slip / skid ball settings →</button>
         <p class="pfd-control-note">Display settings save immediately. Terrain is shown only when elevation data and aircraft pose are available.</p>
         <p class="pfd-control-note" v-if="Number.isFinite(terrainStatus?.estimatedAglM)">Estimated height above terrain: {{fmt(terrainStatus.estimatedAglM/.3048)}} ft · terrain elevation {{fmt(terrainStatus.groundElevationM)}} m MSL. This is the elevation-map estimate, separate from height above home.</p>
         <p class="pfd-control-note" v-if="terrainStatus?.detailState">Nearby imagery: {{terrainStatus.detailState}}{{Number.isFinite(terrainStatus.detailMetresPerPixel)?' · '+fmt(terrainStatus.detailMetresPerPixel,1)+' m/pixel':''}}</p>
         <p class="pfd-control-note" v-if="terrainStatus?.imageryAttributionUrl">Surface imagery: {{terrainStatus.imageryState}} · <a :href="terrainStatus.imageryAttributionUrl" target="_blank" rel="noopener">{{terrainStatus.imageryAttribution}}</a></p>
         <p class="pfd-control-note" v-if="terrainStatus?.attributionUrl"><a :href="terrainStatus.attributionUrl" target="_blank" rel="noopener">{{terrainStatus.attribution}}</a></p>
+      </div>
+      <div v-else-if="kind==='slip'" class="pfd-options">
+        <label class="pfd-option"><span>Show skid ball</span><input type="checkbox" aria-label="Show skid ball" :checked="options.skidBall!==false" @change="$emit('option','skidBall',$event.target.checked)"></label>
+        <p class="pfd-control-note">The ball follows the sideways force felt in the aircraft. Between the two marks means coordinated flight, including during a banked turn. Wind or a difference between heading and ground track does not by itself move the ball.</p>
+        <dl class="pfd-data-list" v-if="slip.available"><div><dt>Lateral acceleration</dt><dd>{{fmt(slip.lateralG,2)}} g</dd></div><div><dt>Normal load</dt><dd>{{fmt(slip.normalG,2)}} g</dd></div></dl>
+        <p v-else class="pfd-control-note" role="status">SLIP / SKID UNAVAILABLE · {{slip.reason}}</p>
+        <p class="pfd-control-note">The display needs fresh, healthy primary accelerometer data. Low or negative normal load also makes this indication unavailable. Full travel corresponds to 10° of apparent-force deflection; this is not an aerodynamic sideslip-angle measurement.</p>
+        <p class="pfd-control-note">Aircraft → Request flight telemetry includes the ball's sensor data at 5 Hz. Visibility saves on this display.</p>
       </div>
       <div v-else-if="kind==='wind'" class="pfd-options">
         <label class="pfd-option"><span>Wind display</span><select aria-label="Wind display mode" :value="options.windDisplay||'components'" @change="$emit('option','windDisplay',$event.target.value)"><option value="components">Head / crosswind components</option><option value="vector">Wind arrow &amp; speed</option><option value="direction">Direction, arrow &amp; speed</option><option value="off">Off</option></select></label>
@@ -75,6 +85,7 @@ import {
   nextTick
 } from 'vue';
 import {windState} from './wind-state.mjs';
+import {slipSkidState} from './slip-skid.mjs';
 import {
   referenceFields,
   parseReference,
@@ -99,7 +110,8 @@ export default {
       nav: 'Mission navigation',
       status: 'Aircraft data',
       director: 'Flight director',
-      wind: 'Wind display'
+      wind: 'Wind display',
+      slip: 'Slip / skid'
     };
     const title = computed(() => field.value?.title || titles[props.kind]);
     const liveValue = computed(() => props.flight[props.kind] ?? null);
@@ -176,6 +188,7 @@ export default {
     return {
       root,
       wind: computed(()=>windState(props.telemetry)),
+      slip: computed(()=>slipSkidState(props.telemetry)),
       input,
       error,
       field,

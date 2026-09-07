@@ -87,7 +87,25 @@ describe("vehicle telemetry", () => {
     r.request({kind:'stream-setup'},{confirmed:false}); await flush();
     for(let i=0;i<10;i++) { r.ack(i<8?511:512); await flush(); }
     expect(r.sent.some(frame=>frame.data.command===511 && frame.data._param1===168 && frame.data._param2===1000000)).toBe(true);
+    r.ack(511);await flush();
+    expect(r.sent.at(-1)?.data).toMatchObject({command:511,_param1:27,_param2:200000});
     r.service.close();
+  });
+  it("reads calibrated primary ArduPlane acceleration and rejects unhealthy, stale or other IMU data",()=>{
+    const r=rig();r.heartbeat();
+    const health=(healthy=true)=>r.feed(Object.assign(new common.SysStatus(),{onboardControlSensorsPresent:2,onboardControlSensorsEnabled:2,onboardControlSensorsHealth:healthy?2:0}));
+    const raw=(yacc=100,zacc=-1000,id=0)=>r.feed(Object.assign(new common.RawImu(),{yacc,zacc,id}));
+    raw();expect(r.service.snapshot().telemetry.slipSkid).toBeNull();
+    health();raw();expect(r.service.snapshot().telemetry.slipSkid).toMatchObject({lateralG:.1,normalG:1,source:'RAW_IMU',ageMs:0});
+    raw(900,-1000,1);expect(r.service.snapshot().telemetry.slipSkid?.lateralG).toBe(.1);
+    r.feed(Object.assign(new common.ScaledImu(),{yacc:-200,zacc:-1200}));
+    expect(r.service.snapshot().telemetry.slipSkid).toMatchObject({lateralG:-.2,normalG:1.2,source:'SCALED_IMU'});
+    r.clock.advance(2000);r.heartbeat();health();expect(r.service.snapshot().telemetry.slipSkid).toBeNull();
+    raw();health(false);expect(r.service.snapshot().telemetry.slipSkid).toBeNull();
+    health();raw(0,0);expect(r.service.snapshot().telemetry.slipSkid).toBeNull();
+    raw(0,1000);expect(r.service.snapshot().telemetry.slipSkid).toBeNull();
+    raw();r.clock.advance(3100);expect(r.service.snapshot().telemetry.slipSkid).toBeNull();
+    r.heartbeat(0,false,12,1);health();raw();expect(r.service.snapshot().telemetry.slipSkid).toBeNull();r.service.close();
   });
   it("invalidates controller targets on a mode/current/target context change", () => {
     const r = rig(); r.heartbeat(10);
