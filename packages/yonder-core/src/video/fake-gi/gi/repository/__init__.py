@@ -451,6 +451,11 @@ class Element(object):
         """
         if self._location() is None or self.state != State.PLAYING:
             return False
+        return self._fed()
+
+    def _fed(self):
+        """Whether this element's chain reaches a source — the only
+        condition under which anything is handed to it."""
         element = self
         seen = set()
         while element is not None and element.name not in seen:
@@ -602,6 +607,16 @@ class Pipeline(object):
                 # a file that does not.
                 if element._writing():
                     element._write(b".")
+                # **A pad whose chain does not reach a source gets no
+                # buffers**, which is plainly true in GStreamer and was not
+                # true here. A branch is built, its probes are added, and
+                # only then is it joined to the tee — so without this a
+                # still's own gate could count two buffers before the branch
+                # was linked at all, the host would answer, and the file it
+                # named was empty. It failed only under load, because it is a
+                # race between the join and this loop.
+                if not element._fed():
+                    continue
                 for pad in list(element.pads.values()):
                     for mask, callback in list(pad.probes.values()):
                         if mask != PadProbeType.BUFFER:
