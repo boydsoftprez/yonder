@@ -1649,9 +1649,9 @@ operator had to reload the browser page to see the picture again. `YonderPicture
 draws `RECONNECTING · ATTEMPT n`, so it knows the stream went away, but the
 WebRTC session did not recover on its own once the publisher returned.
 
-### K-52 · The ground station's stream has no resolution or frame-rate control
+### K-52 · ~~The ground station's stream has no resolution or frame-rate control~~ — CLOSED
 
-**Status:** Closed · **Requirements:** R-CAM-14, R-VID-07, R-UI-20
+**Status:** Closed on 2026-09-07 — closed by the resolution and frame-rate pickers on the ground station's stream (2e4787c), proven on the board: the capture caps moved 1280×720@30 → 640×480@15 and the pipeline respawned to them · **Requirements:** R-CAM-14, R-VID-07, R-UI-20
 
 Found by the operator on the board: the preview has **Size** and **Rate**
 pickers; the stream to the ground station has neither. Its resolution and frame
@@ -1733,9 +1733,9 @@ refuses is the same defect one layer down:
   was written, the window armed and the picture stayed down until the rollback
   took it back.
 
-### K-53 · The video pipeline is run by a program that cannot be spoken to
+### K-53 · ~~The video pipeline is run by a program that cannot be spoken to~~ — CLOSED
 
-**Status:** Open · **Requirements:** R-VID-07, R-VID-09
+**Status:** Closed on 2026-09-07 — closed by `installer/payload/yonder-pipeline` (Task 30a, 55e27be): the pipeline is a program that answers — `retune`, `reconfigure-preview`, `still`, `record`, `record-stop` over NDJSON, each reporting whether the main stream stayed continuous. Every runtime retune, still and recording this branch proved on hardware went through it · **Requirements:** R-VID-07, R-VID-09
 
 `video/pipeline.ts` composes a GStreamer launch line and `systemSpawner` hands
 it to **`gst-launch-1.0`**. That tool plays a pipeline and then answers nothing:
@@ -1849,9 +1849,9 @@ back, and proves nothing about `v4l2h264enc`. What closes this entry is a Pi
 running the daemon's own pipeline under this host, an operator moving a
 bitrate from the console, and the picture not breaking.
 
-### K-54 · A detected camera cannot be configured from the console
+### K-54 · ~~A detected camera cannot be configured from the console~~ — CLOSED
 
-**Status:** Open · **Requirements:** R-UI-03, R-CAM-12
+**Status:** Closed on 2026-09-07 — closed by the `ADD` key (61bf4cc) and `FORGET` (Task 46); pressed on the board on 2026-09-07 to adopt the ELP after a port move · **Requirements:** R-UI-03, R-CAM-12
 
 Found by the operator: he attached a second camera, the Cameras page showed it,
 and there was no way to do anything with it.
