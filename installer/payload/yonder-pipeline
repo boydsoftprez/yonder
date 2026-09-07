@@ -560,9 +560,27 @@ class Host(object):
 
     # -- a recording, off the encoded tee (R-CAM-17) -----------------------
 
+    def parser_kind(self):
+        """
+        The parser the main chain already carries — `h264parse` or
+        `h265parse`, whichever `compose()` put in front of the `main` tee.
+        A recording writes what the encoder made (R-CAM-17), so it takes the
+        same parser rather than assuming H.264; the element feeding the tee
+        is looked up and its factory named. Anything that cannot be read
+        answers `h264parse`, which is every pipeline before H.265 existed.
+        """
+        tee = self.pipeline.get_by_name(MAIN_TEE)
+        sink = None if tee is None else tee.get_static_pad("sink")
+        peer = None if sink is None else sink.get_peer()
+        feed = None if peer is None else peer.get_parent_element()
+        factory = None if feed is None else feed.get_factory()
+        kind = "" if factory is None else factory.get_name()
+        return "h265parse" if kind == "h265parse" else "h264parse"
+
     def record(self, path):
         """
-        A branch on to `main`, writing the H.264 the encoder has already made.
+        A branch on to `main`, writing what the encoder has already made,
+        H.264 or H.265.
 
         It encodes nothing: `main` is the tee *after* the encoder, so a
         recording costs no second encode on a board whose whole cost is the
@@ -580,7 +598,7 @@ class Host(object):
         try:
             branch = Branch(self.pipeline, tee, [
                 ("queue", {}),
-                ("h264parse", {}),
+                (self.parser_kind(), {}),
                 ("matroskamux", {}),
                 ("filesink", {"location": path}),
             ])
@@ -712,7 +730,11 @@ class Host(object):
             if isinstance(value, bool):
                 continue
             if isinstance(value, int):
-                return value
+                # Two encoders count in kb/s in a plain property (`x264enc`'s
+                # `bitrate`); Rockchip's MPP counts in bits per second
+                # (`bps`). The property's name says which, and it is the same
+                # name `pipeline.ts`'s `bitrateOf()` wrote.
+                return int(round(value / 1000.0)) if one.get("property") == "bps" else value
             bits = structure_field(value, "video_bitrate")
             if bits is not None:
                 return int(round(bits / 1000.0))

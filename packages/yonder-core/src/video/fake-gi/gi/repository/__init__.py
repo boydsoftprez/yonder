@@ -325,6 +325,16 @@ def _always_pads(kind):
     return ("sink", "src")
 
 
+class _Factory(object):
+    """`Gst.ElementFactory`, as far as `get_name()` — the kind an element was
+    made as, which is the one thing the host reads off it."""
+    def __init__(self, kind):
+        self.kind = kind
+
+    def get_name(self):
+        return self.kind
+
+
 class Element(object):
     def __init__(self, pipeline, kind, name):
         self.pipeline = pipeline
@@ -369,6 +379,9 @@ class Element(object):
 
     def get_static_pad(self, name):
         return self.pads.get(name)
+
+    def get_factory(self):
+        return _Factory(self.kind)
 
     def downstream(self):
         """The element this one's output reaches, or None. Src pads only, so a

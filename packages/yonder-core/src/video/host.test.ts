@@ -59,6 +59,12 @@ const SOFT = {
   element: "x264enc" as const, h265: null, decoder: null, device: null, hardware: false,
   detail: "software",
 };
+const MPP = {
+  element: "mpph264enc" as const, h265: "mpph265enc" as const, decoder: "mppjpegdec" as const,
+  device: "/dev/mpp_service", hardware: true,
+  detail: "hardware H.264 and H.265 through Rockchip MPP (mpph264enc, mpph265enc)",
+};
+const RETUNE_MPP = [{ element: "enc-stream", property: "bps", value: "3000000" }];
 
 const argvFor = (camera: Camera = CAMERA, encoder = HW): string[] => compose({
   camera, capabilities: CAPS, encoder, rtspBase: "rtsp://127.0.0.1:8554",
@@ -279,6 +285,15 @@ describe("the pipeline host answers for what the encoder is running", () => {
     await host.flowing();
     expect(await host.ask({ id: 8, camera: "cam0", op: "retune", sets: RETUNE_HW }))
       .toMatchObject({ continuous: false });
+  }, 20_000);
+
+  it("reports an MPP encoder's bits per second as the kb/s the channel reads", async () => {
+    const host = startHost(argvFor(CAMERA, MPP).slice(1));
+    await host.flowing();
+    expect(await host.ask({ id: 8, camera: "cam0", op: "retune", sets: RETUNE_MPP }))
+      .toMatchObject({ id: 8, continuous: true, observed: 3000 });
+    const set = host.traced().find((e) => e.event === "set_arg" && e.property === "bps");
+    expect(set).toMatchObject({ element: "enc-stream", value: "3000000" });
   }, 20_000);
 });
 
@@ -562,6 +577,17 @@ describe("the pipeline host records off the encoded tee", () => {
     expect(await host.ask({ id: 61, camera: "cam0", op: "record", path: join(dir, "broken.mkv") }))
       .toMatchObject({ continuous: false });
   }, 20_000);
+
+  it("carries the main chain's own parser, so an H.265 stream records as H.265 (R-CAM-17, R-CAM-08)", async () => {
+    const host = startHost(argvFor({ ...CAMERA, codec: "h265" }, MPP).slice(1));
+    await host.flowing();
+    const path = join(dir, "flight.mkv");
+    expect(await host.ask({ id: 30, camera: "cam0", op: "record", path })).toMatchObject({ id: 30 });
+    const added = host.traced().filter((e) => e.event === "add_element").map((e) => e.kind);
+    expect(added).toContain("h265parse");
+    expect(added).not.toContain("h264parse");
+    await host.ask({ id: 31, camera: "cam0", op: "record-stop" });
+  }, 20_000);
 });
 
 /**
@@ -662,6 +688,15 @@ describe("EncoderChannel over the real host", () => {
       notControllable: expect.stringContaining("cam9 is not running") as string,
     });
     expect(supervisor.state(CAMERA.id).state).not.toBe("failed");
+    stop();
+  }, 20_000);
+
+  it("speaks MPP's bits per second all the way to the element and back", async () => {
+    const { channel, ready, stop } = board(MPP);
+    await ready();
+    expect(await channel.retune(CAMERA, "stream", 3000)).toMatchObject({
+      requested: 3000, observed: 3000, continuous: true,
+    });
     stop();
   }, 20_000);
 });
