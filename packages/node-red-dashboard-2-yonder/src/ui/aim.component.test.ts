@@ -471,9 +471,25 @@ describe("the dead state, with its reason", () => {
         expect(recentreBtn(wrapper).attributes("disabled")).toBeDefined();
     });
 
-    it("the pad itself shows the reason and accepts no press", () => {
+    /**
+     * **The pad refuses, and says so shortly; the panel says why in full.**
+     *
+     * The pad used to repeat the panel's whole sentence, and so did both
+     * position gauges and the mode control — four copies of one fact, more
+     * prose than the panel was tall, drawn over the dial it was explaining.
+     * The operator reported it as an overlap in the pan and tilt area.
+     *
+     * A camera that is not answering at all is not a fact about the dial, or
+     * about either axis: it is a fact about the panel, and its head carries
+     * it once. What the pad owes is that it will not respond.
+     */
+    it("the pad refuses a press and says so, while the panel carries the reason in full", () => {
         const { wrapper, emit } = mountAim(makeReport({ state: "advertised", reason: REASON }));
-        expect(wrapper.find(".y-aim__reason").text()).toBe(REASON);
+        expect(wrapper.find(".y-aim__reason").text()).toBe("not answering");
+        expect(wrapper.find(".y-aimpanel__reason").text()).toBe(REASON);
+        // Said once between them, never four times.
+        expect(wrapper.findAll("*").filter((e) => e.element.children.length === 0
+            && e.text().includes(REASON))).toHaveLength(1);
         press(dial(wrapper), 20, 0);
         expect(emit).not.toHaveBeenCalled();
     });
