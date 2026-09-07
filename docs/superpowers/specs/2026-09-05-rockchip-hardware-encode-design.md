@@ -144,6 +144,40 @@ the Pi has no hardware scaler, because `v4l2convert` is a GStreamer element with
 equivalent; and §4's converter probe therefore owes an answer for what it selects on a Pi
 under ffmpeg. See also K-62.
 
+### Decision, revised 2026-09-07
+
+**§2's decision is reversed. Yonder composes its pipelines with GStreamer on every board;
+the GStreamer composer gains a Rockchip MPP arm, and no ffmpeg composer is built.**
+
+What changed is the addendum above. The premise this section rested on — that GStreamer
+cannot reach Rockchip hardware without carried patches — was tested and is false, and the
+comparison the gates produced runs the other way on every axis that has a requirement
+behind it. R-VID-07 needs a bitrate that moves on a running pipeline: GStreamer's
+`mpph264enc` and `mpph265enc` take one with no gap on this SoC with the real camera in front
+of them, and ffmpeg takes one nowhere. K-53's pipeline host — built, and installed by
+`55-pipeline-host.sh` — is the channel that reaches it.
+
+What this settles for the sections below:
+
+- **§3 is superseded.** Delivery was the one column ffmpeg won, and its cost is paid: MPP,
+  librga and `gstreamer-rockchip` are built from pinned commits in a `debian:trixie`
+  container by `installer/make-payload.sh --only gst-rockchip` and installed by
+  `installer/roles/52-gst-rockchip.sh` where `/dev/mpp_service` exists. One payload for
+  every board; a Pi's role skips it by the device node, never by a name (R-HW-04).
+- **§4 holds, narrowed.** The probe widens to the GStreamer registry
+  (`gst-inspect-1.0 --exists`). The converter probe collapses to one fact: on MPP the
+  preview is scaled *inside* the encoder through RGA (`width`/`height`) — about twice a
+  software scaler's throughput, the whole preview branch at one point of four cores — and
+  on every other board the line is unchanged. K-62's Pi change is separate work.
+- **§5 holds and is measured:** `mppjpegdec` costs +3 against software's +8.
+- **§6 holds**, with one rule added: the interface's copy is always H.264 (R-VID-20).
+- **§7 is untouched and still open.**
+- **§8 and §9 are done** by the change that carries this revision.
+
+Not settled, and stated so: the plugin's H.264 picture beyond one synthetic source and one
+camera at 720p (Radxa's own guidance prefers `mpph265enc` on the 6.1 kernel); latency on
+Rockchip; sustained load. The hardware note the change ships with records what was seen.
+
 ## 3. Delivery: one pinned package, nothing compiled
 
 ### Evidence
@@ -347,4 +381,4 @@ single-ffmpeg-composer decision has to be reopened rather than patched around.
   already runs unprivileged; the encoder does not. That is a security question worth asking
   and is not this change.
 - **Whether GStreamer leaves the image entirely.** This design stops composing with it. What
-  else in the console or the installer still wants it is a separate audit.
+  else in the console or the installer still wants it is a separate audit. — **It does not** (revision above): the composer stays GStreamer, and the audit is moot.

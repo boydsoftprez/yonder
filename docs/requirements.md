@@ -130,6 +130,7 @@ Parameter writes are vehicle commands. R-CMD applies to every requirement here.
 | R-VID-14 | **Where live video cannot be established, serve periodic stills instead**, at a stated cost and with the age of the current frame shown. The fall-back happens without being asked for and reports why it happened, and stills are also offered as a deliberate choice on a link that cannot carry video | 2 |
 | R-VID-15 | **Show the exact receive-side command in the interface**, generated from what the camera is doing at that moment and carrying the address the operator is actually reaching the device on. R-VID-10 makes a ground station configurable from the documentation; this removes the need to read it | 2 |
 | R-VID-19 | **Take in a browser's own measurement of the path its picture is arriving on** — round-trip time, loss and throughput it observed itself, reported continuously while its session is live — as evidence for R-VID-07's adaptation, on top of what the device can measure of its own output. A report always speaks for the session that sent it, and never another's | 2 |
+| R-VID-20 | **The interface's copy is always H.264, whatever the main stream carries.** A browser reaches the preview over WebRTC, and H.265 there is not something every browser does; the main stream's codec (R-CAM-08) is the ground station's business, and choosing it never takes the operator's own picture away. Changing `codec` changes what leaves for the ground station and nothing about what the console shows | 2 |
 
 ## R-CTL — Live camera control
 
@@ -263,6 +264,7 @@ Parameter writes are vehicle commands. R-CMD applies to every requirement here.
 | R-HW-04 | One image per board family, selecting board-specific behaviour at boot rather than at flash time | 1 |
 | R-HW-05 | Document per-board limits — camera count, resolution and encoder — and enforce them in configuration validation | 2 |
 | R-HW-06 | Never overclock or over-volt a board by default | 1 |
+| R-HW-07 | **Use a hardware offload wherever the board has one for a workflow, and keep the CPU for everything else.** Encoding (R-CAM-07 is this rule's first instance), decoding a camera's compressed source, and scaling the cheaper copy are each taken by the block that does them where the board has one — selected by probing what is in front of the daemon (R-CAM-13), never by a table of board names — so that a board's cost for video is what its silicon charges and the CPU stays free for the control plane, the console and the link. Measured on an RK3566: hardware decode and encode with the preview scaled in the encoder cost +4 points of four cores for two streams; the software route costs +41 for one | 1 |
 
 ## R-STO — Storage and resilience
 

@@ -343,8 +343,9 @@ number below came from.
 So **the Raspberry Pi encoder work moves into M4** and multi-camera stays in M6. The
 encoder is a property of the board, not of how many cameras are attached; deferring it
 means shipping a video milestone that works on one board and revisiting every pipeline site
-later. Radxa stays out — it is P2 and needs the vendor BSP kernel, which makes it image-only
-until M8.
+later. Radxa arrived after all: Armbian ships the vendor kernel and the MPP path is carried
+in the payload, so M6's Rockchip line was pulled into M4 (see the Rockchip design and its
+2026-09-07 revision).
 
 - USB UVC capture, including cameras that emit compressed video — R-CAM-02
 - **Detect cameras on demand, and say what was rejected and why** — R-CAM-12
@@ -443,7 +444,7 @@ capture stack, and the boards M4 could not be shown on.*
 - Independent pipeline per camera — R-CAM-09
 - Per-board limits enforced in validation — R-CAM-10, R-HW-05
 - HDMI input with EDID push — R-CAM-03
-- Rockchip boards: hardware H.264 and H.265 — R-HW-03, R-CAM-08, R-VID-02
+- ~~Rockchip boards: hardware H.264 and H.265~~ — R-HW-03, R-CAM-08, R-VID-02 — **done, pulled into M4**
 - The rest of R-HW-01 and R-HW-02 on real hardware — every Pi M4 could only unit-test
 - Second Ethernet and USB gadget — R-NET-04, R-NET-05
 - One image per board family, no overclocking by default — R-HW-04, R-HW-06

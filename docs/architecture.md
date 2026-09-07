@@ -159,13 +159,15 @@ over cellular costs its own bitrate, which is why the browser is served a separa
 copy by default (R-VID-13) and why every output is reported against the uplink's capacity
 (R-VID-11).
 
-Encoder selection is per board, resolved at install time and recorded in config:
+Encoder selection is per board, probed when the daemon looks (R-CAM-13) and reported on the
+camera page; nothing about it is written to configuration — R-CAM-06 was withdrawn for
+exactly that:
 
 | Board | H.264 | H.265 |
 |---|---|---|
 | Pi Zero 2 W, Pi 3, Pi 4, CM3, CM4 | V4L2 M2M hardware | — |
 | Pi 5, CM5 | **software** (`x264enc`) | — |
-| Radxa (rk35xx) | rkmpp hardware | rkmpp hardware |
+| Radxa (rk35xx) | MPP hardware (`mpph264enc`) | MPP hardware (`mpph265enc`) |
 
 The Pi 5 dropped the hardware H.264 encoder its predecessors had. It works, in software,
 and it runs hotter and slower than a Pi 4 doing the same job.
@@ -387,8 +389,11 @@ installer/install.sh
          └── over Armbian (rk35xx)      → yonder-radxa-<ver>.img.xz
 ```
 
-Radxa hardware encoding needs the board vendor's BSP kernel and the Rockchip MPP
-libraries, which is why Radxa is image-only in practice. The Pi supports both paths.
+Radxa hardware encoding needs the Rockchip MPP library and the GStreamer Rockchip plugin,
+which no repository packages; both are built from pinned commits into the offline payload by
+`installer/make-payload.sh` and installed by a role where `/dev/mpp_service` exists. Armbian
+ships the vendor kernel, so Radxa is installable rather than image-only. The Pi supports
+both paths.
 
 Every release publishes both artifacts and the installer that produced them, so anyone can
 reproduce the image from the same commit.

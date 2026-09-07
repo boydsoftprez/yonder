@@ -2306,8 +2306,6 @@ Two ways to close it, and neither is this file's to choose:
 The second is the honest one and the first is the convenient one. Recorded
 rather than decided.
 
----
-
 ### K-62 · The Pi's ISP scaler is over budget in the preview branch, and drops frames to say so
 
 **Status:** Open · **Requirements:** R-CAM-10, R-HW-05, R-VID-13
@@ -2359,3 +2357,46 @@ about twice the throughput of software, and the whole preview branch costs one
 point of a four-core board.
 
 Evidence: [`ffmpeg-as-the-pipeline-composer.md`](hardware/ffmpeg-as-the-pipeline-composer.md).
+
+### K-63 · ~~On a Rockchip board no camera starts, and the console says the board has no hardware encoder~~ — CLOSED
+
+**Status:** Closed · **Requirements:** R-HW-03, R-CAM-07, R-CAM-08, R-CAM-10, R-CAM-13
+
+Three problems with one cause, named in the Rockchip design's §1 and measured in
+[`hardware-encode-on-a-radxa-zero-3w.md`](hardware/hardware-encode-on-a-radxa-zero-3w.md):
+`compose()` hard-coded `v4l2convert`, an element a Rockchip board does not have, so every
+pipeline description failed to *parse* — `no element "v4l2convert"` — and the supervisor
+restart-looped; `probeEncoder` swept `/dev/video10`–`17` for a V4L2 memory-to-memory node
+the SoC does not expose, so it returned its software fallback; and that fallback's detail
+string told the operator *"this board offers no hardware encoder"* on a board with two.
+R-CAM-10 did not fire — `refusal` was `null` right before the pipeline died.
+
+**Closed by** the probe's MPP arm (the registry, asked with `gst-inspect-1.0 --exists`);
+`compose()`'s Rockchip branches — `mppjpegdec`, `mpph264enc`/`mpph265enc` carrying `bps`,
+the preview scaled inside its encoder through RGA, no scaler element at all; a detail
+string that says what the probe knows; and the plugin carried in the payload and installed
+by `52-gst-rockchip.sh`. Proven on the board — see
+[`rockchip-video-shipped.md`](hardware/rockchip-video-shipped.md).
+
+### K-64 · ~~`make-payload.sh --only <one component>` ends with `ZT_DEB: unbound variable`~~ — CLOSED
+
+**Status:** Closed · **Requirements:** R-CFG-07
+
+The summary at the end of `installer/make-payload.sh` read `$ZT_DEB`, a variable only the
+ZeroTier block sets; under `set -u` a run that staged its component correctly then exited 1.
+A build step whose exit status says it failed after it succeeded is one CI cannot use, and
+the comment beside the summary already said the report had to be a lookup rather than a
+variable. It now is.
+
+### K-65 · The camera page has no codec control
+
+**Status:** Open · **Requirements:** R-CAM-08, R-UI-17
+
+`codec` is a draft field the deck already carries — `DRAFT_PATHS` maps it and
+`YonderDeck.vue` flattens `capture.codec` into the form — and no control stages it, so H.265
+is chosen by editing `config.yaml`. That is a supported path (the `mavlink.endpoints[].name`
+note in `configuration.md` takes the same position) and not the intended one.
+
+**What closes it:** a choice on the camera page offered only where `view.encoder.h265` is
+not null, refused with the encoder named where it is (the same sentence `refuse()` already
+produces), and the capture gate re-run for the page that changed.
