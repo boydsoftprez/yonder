@@ -4,6 +4,14 @@ import {packFlight} from 'yonder-core/cockpit-wire';
 import {fixture} from '../../../cockpit/fixture.mjs';
 import {createCockpitApi} from './cockpit-state.mjs';
 const settle=()=>new Promise(resolve=>setTimeout(resolve,0));
+it('reports a stopped flight service instead of exposing an empty JSON parse error',async()=>{
+ const api=createCockpitApi(async()=>new Response('',{status:502}));
+ await expect(api.state()).rejects.toThrow(/flight service.*unavailable.*502/i);api.close();
+});
+it('keeps a non-JSON admission refusal distinct from an unavailable service',async()=>{
+ const api=createCockpitApi(async()=>new Response('Forbidden',{status:403}));
+ await expect(api.command({})).rejects.toMatchObject({admissionRejected:true,message:expect.stringContaining('403')});api.close();
+});
 it('keeps flight updates independent of slow mission transfer and caches unchanged details',async()=>{
  const state=fixture(), calls:string[]=[];
  let finishMission:(value:unknown)=>void;

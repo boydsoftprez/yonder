@@ -42,6 +42,7 @@ function validCenter(c) {
     throw new Error("Invalid traffic region");
 }
 export class TrafficFeed {
+  pollInterval = 5000;
   now;
   fetcher;
   geoid;
@@ -209,6 +210,12 @@ export class TrafficFeed {
           : now - this.received >= STALE || now - this.source >= STALE
             ? "stale"
             : "live";
+    const tracks = center
+      ? [...this.tracks.values()]
+          .filter((t) => distance(center, t) <= center.radiusNm * 1852)
+          .sort((a, b) => distance(center, a) - distance(center, b))
+          .map((t) => ({ ...t, history: t.history.map((p) => ({ ...p })) }))
+      : [];
     return {
       provider: "ADSB.lol",
       sourceUrl: "https://www.adsb.lol/docs/open-data/api/",
@@ -218,7 +225,7 @@ export class TrafficFeed {
       message:
         this.error ??
         (status === "live"
-          ? "Observed internet traffic · coverage and latency vary"
+          ? `ADSB.lol · ${tracks.length ? `${tracks.length} target${tracks.length === 1 ? '' : 's'} observed` : 'No targets reported'} within ${center?.radiusNm ?? '—'} NM`
           : status === "stale"
             ? "Traffic feed is stale"
             : "Waiting for public traffic"),
@@ -227,19 +234,14 @@ export class TrafficFeed {
       retryAtMs: this.retry,
       center,
       altitudeModel: this.geoid ? "EGM96-5" : null,
-      tracks: center
-        ? [...this.tracks.values()]
-            .filter((t) => distance(center, t) <= center.radiusNm * 1852)
-            .sort((a, b) => distance(center, a) - distance(center, b))
-            .map((t) => ({ ...t, history: t.history.map((p) => ({ ...p })) }))
-        : [],
+      tracks,
     };
   }
   async poll(center) {
     validCenter(center);
     if (this.closed || this.now() < this.next) return;
     if (this.active) return this.active;
-    this.next = this.now() + 2000;
+    this.next = this.now() + this.pollInterval;
     this.active = (async () => {
       try {
         const value = await this.fetcher(center, this.controller.signal);
@@ -250,7 +252,7 @@ export class TrafficFeed {
         this.retry =
           this.now() +
           Math.max(
-            2000,
+            this.pollInterval,
             Math.min(120000, 2 ** this.failures * 1000),
             error instanceof DataFetchError ? error.retryMs : 0,
           );

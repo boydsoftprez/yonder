@@ -13,6 +13,16 @@ const epoch = 1788790000000,
     alt_baro: 1500,
     ...extra,
   });
+it('distinguishes an empty nearby search from loading and counts only observations in range',()=>{
+ const f=new TrafficFeed({now:()=>epoch});
+ expect(f.snapshot(center).status).toBe('loading');
+ f.ingest({now:epoch,ac:[raw(),raw({hex:'abc124',lat:36.96})]},center);
+ expect(f.snapshot(center).message).toMatch(/1 target.*1 NM/);
+ const elsewhere={lat:36.96,lon:-83.36,radiusNm:5};
+ f.ingest({now:epoch,ac:[]},elsewhere);
+ expect(f.snapshot(elsewhere)).toMatchObject({status:'live',tracks:[],message:expect.stringMatching(/no targets.*5 NM/i)});
+ f.close();
+});
 it("preserves core observation age/trail gaps and accepts actual one-NM radius", () => {
   let now = epoch;
   const f = new TrafficFeed({ now: () => now });

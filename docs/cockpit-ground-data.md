@@ -74,6 +74,14 @@ The service binds loopback. Set the allowed origin to the exact cockpit page ori
 
 The relay accepts GET for fixed geographic/traffic paths and explicitly listed package files. It rejects other origins, command methods, arbitrary target URLs, oversized responses and excessive concurrency. It does not bypass provider authentication, quotas or refusal: a provider's HTTP 403 remains unavailable. The optional `--terrain-dir` makes a ground package available for on-demand viewing after its origin is selected in the browser. The separate explicit `preloadTerrainPack(origin)` action downloads the complete package to IndexedDB and verifies it just like a local file import. Starting the relay does not preload anything.
 
+Ground traffic polls at most every five seconds, with five-second relay cache
+reuse for identical searches. The relay identifies itself as Yonder with the project's contact URL; ADSB.lol
+rejects the generic Node fetch identity. It shares a traffic cooldown across all
+positions, ranges and tabs using that relay after a provider HTTP 429. It honors
+`Retry-After` and waits at least 60 seconds when that header is absent. The browser
+reports rate limiting and retries automatically; changing the display range does
+not bypass the relay cooldown. Existing observations still expire normally.
+
 ## Provider contract for the native host
 
 Import `createGroundDataProvider` from `src/ui/cockpit/ground-data.mjs`. Construct one provider for the cockpit and pass it as `dataProvider` to `YonderCockpitMap`, `TerrainVision` and `CameraTerrainOverlay`. Close it when the cockpit unmounts.
@@ -82,7 +90,7 @@ Import `createGroundDataProvider` from `src/ui/cockpit/ground-data.mjs`. Constru
 - `options`, `revision`, `subscribe(callback)`, `status()`: inspect settings/status and invalidate renderers on changes; subscribe returns an unsubscribe function. `terrainStream` identifies the selected relay manifest, while `offlineTerrain` identifies an explicitly imported complete package. `terrainPackedCacheBytes` reports compressed session terrain bytes.
 - `tile(layer,z,x,y,{signal})`: selected-source image Blob, with bounded fetch/cache and no fallback.
 - `terrainManifest({signal})` and `terrainTile(descriptor,{signal})`: selected-source manifest and raw decoded DTM/DSM bytes.
-- `pollTraffic({lat,lon})`: requests only the selected traffic source, at most once per two seconds, with backoff. There is no timer in the provider constructor. Call it only while the cockpit is visible and has a fresh position.
+- `pollTraffic({lat,lon})`: requests only the selected traffic source, at most once per five seconds for public ground traffic (two seconds for explicit aircraft-proxy reads), with backoff. There is no timer in the provider constructor. Call it only while the cockpit is visible and has a fresh position.
 - `trafficSnapshot({lat,lon})`: observed targets and browser-maintained trails. Current aircraft points are obtained only in explicit aircraft mode via `/cockpit/api/traffic`; the recurring flight endpoint is never polled by this provider.
 - `refreshOffline()`: load retained-package summaries after construction. `importTerrainPack(File[])`, `importOfflineMap(File[])`, `preloadTerrainPack(groundOrigin,{signal})` and `clearOffline()` manage explicit imports. `importGeoid(File)` provisions optional local traffic height conversion.
 
@@ -92,7 +100,7 @@ Traffic preserves the core normalization: provider observation time and `seen_po
 
 ## Verified provider behavior and limits
 
-On 2026-09-07 an isolated Chromium page at localhost successfully fetched and decoded a Terrarium PNG and Esri World Imagery JPEG directly. Both returned HTTP 200 and `Access-Control-Allow-Origin: *`. ADSB.lol failed direct browser access from this network, and the corresponding Node request returned HTTP 403 without a CORS header. No live traffic-success claim is made for that network; tests cover honest error/backoff and no aircraft fallback.
+On 2026-09-07 an isolated Chromium page at localhost successfully fetched and decoded a Terrarium PNG and Esri World Imagery JPEG directly. Both returned HTTP 200 and `Access-Control-Allow-Origin: *`. ADSB.lol failed direct browser access from this network. The Node HTTP 403 body identified the missing project contact in its request identity. Adding Yonder's identity returned HTTP 200 with actual targets. Direct browser responses still lacked CORS permission, so this preview uses the explicit laptop ground relay. The provider also returned HTTP 429 during verification; availability and rate limits remain external dependencies, with visible errors/backoff and no aircraft fallback.
 
 The actual 227-file USGS pack was imported into Chromium IndexedDB, the page reloaded, and the native adapter loaded one metre nearby and four metre distant meshes. Home sampling returned DTM 316.383 m and mapped surface 319.187 m EGM96. The verification observed **zero `/cockpit/api/` requests**.
 

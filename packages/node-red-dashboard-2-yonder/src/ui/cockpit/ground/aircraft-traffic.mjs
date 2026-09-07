@@ -10,6 +10,7 @@ const text = (v) =>
     ? v.replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 64)
     : null;
 export class AircraftTrafficFeed extends TrafficFeed {
+  pollInterval = 2000;
   normalize(raw) {
     if (
       !raw ||

@@ -11,7 +11,7 @@ const services={imagery:'World_Imagery',places:'Reference/World_Boundaries_and_P
 async function fileBytes(path,limit){const file=await open(path,constants.O_RDONLY|constants.O_NOFOLLOW);try{const stat=await file.stat();if(!stat.isFile()||stat.size>limit)throw new Error('Ground file exceeds limit');const bytes=await file.readFile();if(bytes.length!==stat.size)throw new Error('Ground file changed');return bytes;}finally{await file.close();}}
 export async function createGroundServer({allowOrigin,terrainDirectory=null,fetchImpl=fetch,now=Date.now}={}){
  const origin=new URL(allowOrigin);if(!['http:','https:'].includes(origin.protocol)||origin.origin!==allowOrigin)throw new Error('An exact console origin is required');
- let manifest=null,directory=null,active=0,closed=false;const cache=new ByteCache(32*1024*1024,128),controllers=new Set();
+ let manifest=null,directory=null,active=0,closed=false,trafficRetryAt=0;const cache=new ByteCache(32*1024*1024,128),controllers=new Set();
  if(terrainDirectory){directory=await realpath(terrainDirectory);manifest=validateTerrainManifest(JSON.parse((await fileBytes(join(directory,'manifest.json'),4*1024*1024)).toString('utf8')));}
  const server=createServer(async(req,res)=>{
   if(!/^(127\.0\.0\.1|localhost):\d+$/.test(req.headers.host||'')){res.writeHead(403);res.end();return;}
@@ -25,12 +25,21 @@ export async function createGroundServer({allowOrigin,terrainDirectory=null,fetc
    if(path==='/terrain/manifest'&&manifest){res.setHeader('Content-Type','application/json');res.end(JSON.stringify(manifest));return;}
    if(pack&&manifest){const descriptor=manifest.tiles.find(t=>t.file===pack[1]);if(!descriptor){res.writeHead(404);res.end();return;}res.setHeader('Content-Type','application/octet-stream');res.end(await fileBytes(join(directory,descriptor.file),descriptor.bytes));return;}
    if(tile){const [_,layer,zs,xs,ys]=tile,z=Number(zs),x=Number(xs),y=Number(ys);validTile(layer,z,x,y);url=layer==='elevation'?`https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${z}/${x}/${y}.png`:`https://server.arcgisonline.com/ArcGIS/rest/services/${services[layer]}/MapServer/tile/${z}/${y}/${x}`;}
-   else if(traffic){const lat=Number(traffic[1]),lon=Number(traffic[2]),radius=Number(traffic[3]);if(Math.abs(lat)>90||Math.abs(lon)>180||radius<1||radius>100)throw new Error('Invalid region');url=`https://api.adsb.lol/v2/point/${lat.toFixed(5)}/${lon.toFixed(5)}/${radius}`;limit=4*1024*1024;ttl=2000;}
+   else if(traffic){const lat=Number(traffic[1]),lon=Number(traffic[2]),radius=Number(traffic[3]);if(Math.abs(lat)>90||Math.abs(lon)>180||radius<1||radius>100)throw new Error('Invalid region');url=`https://api.adsb.lol/v2/point/${lat.toFixed(5)}/${lon.toFixed(5)}/${radius}`;limit=4*1024*1024;ttl=5000;}
    else{res.writeHead(404);res.end();return;}
    const cached=cache.get(url,now());if(cached){res.setHeader('Content-Type',cached.type);res.end(cached.bytes);return;}
+   if(traffic&&now()<trafficRetryAt){res.setHeader('Retry-After',String(Math.ceil((trafficRetryAt-now())/1000)));res.writeHead(429);res.end();return;}
    if(closed||active>=6){res.setHeader('Retry-After','2');res.writeHead(429);res.end();return;}
    active++;const controller=new AbortController();controllers.add(controller);const timer=setTimeout(()=>controller.abort(),12000),cancel=()=>controller.abort();res.once('close',cancel);
-   try{const response=await fetchImpl(url,{signal:controller.signal,redirect:'error',credentials:'omit'});if(!response.ok){await response.body?.cancel();const retry=response.headers.get('retry-after');if(retry&&/^\d{1,5}$/.test(retry))res.setHeader('Retry-After',retry);res.writeHead(response.status);res.end();return;}
+   try{const response=await fetchImpl(url,{signal:controller.signal,redirect:'error',credentials:'omit',headers:{'User-Agent':'Yonder-Ground/0.1 (+https://github.com/boydsoftprez/yonder)'}});if(!response.ok){
+    await response.body?.cancel();const retry=response.headers.get('retry-after');
+    if(traffic&&response.status===429){
+     const seconds=retry?(/^\d+$/.test(retry)?Number(retry):(Date.parse(retry)-now())/1000):NaN;
+     const delay=Number.isFinite(seconds)&&seconds>0?Math.ceil(seconds):60;
+     trafficRetryAt=Math.max(trafficRetryAt,now()+delay*1000);res.setHeader('Retry-After',String(Math.ceil((trafficRetryAt-now())/1000)));
+    }else if(retry&&/^\d{1,5}$/.test(retry))res.setHeader('Retry-After',retry);
+    res.writeHead(response.status);res.end();return;
+   }
     const bytes=await readBytes(response,limit),type=tile?imageType(bytes,response.headers.get('content-type')?.split(';')[0]):'application/json';if(traffic)JSON.parse(new TextDecoder().decode(bytes));if(!closed)cache.put(url,{bytes,type},bytes.length,now()+ttl);res.setHeader('Content-Type',type);res.end(bytes);
    }finally{clearTimeout(timer);res.removeListener('close',cancel);controllers.delete(controller);active--;}
   }catch{if(!res.headersSent)res.writeHead(502);res.end('Ground source unavailable');}

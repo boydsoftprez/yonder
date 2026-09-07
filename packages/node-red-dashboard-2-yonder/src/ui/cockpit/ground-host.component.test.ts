@@ -35,3 +35,13 @@ it('applies a small traffic radius and an explicit aircraft source choice withou
   w.vm.sourceMode='offline';await w.vm.$nextTick();
   expect(provider.configure).toHaveBeenLastCalledWith(expect.objectContaining({mode:'offline'}));
 });
+it('explains map-only traffic and links directly to ground-data setup without a flight command',async()=>{
+ const {w,api}=host();await flushPromises();
+ await w.setProps({report:{...w.props('report'),traffic:{status:'live',altitudeModel:null,message:'ADSB.lol · 1 target observed within 10 NM',tracks:[{id:'abc123',altitudeMslM:null}]}}});
+ w.vm.panel='traffic';await w.vm.$nextTick();
+ expect(w.text()).toMatch(/1 target.*map only/i);
+ const setup=w.findAll('button').find(b=>b.text()==='Traffic data setup');
+ expect(setup).toBeDefined();await setup!.trigger('click');
+ expect(w.find('input[aria-label="Ground relay origin"]').exists()).toBe(true);
+ expect(api.command).not.toHaveBeenCalled();
+});

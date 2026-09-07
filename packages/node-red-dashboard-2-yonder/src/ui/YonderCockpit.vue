@@ -472,7 +472,9 @@
           >Keep this draft for the current aircraft and review upload</button>
         </template><template v-else-if="panel==='trail'">
           <OwnTrailSettings :options="ownTrailOptions" :status="ownTrailDisplay" @change="setOwnTrailOptions" @clear="clearOwnTrail" @restore="restoreOwnTrail" />
-        </template><template v-else-if="panel==='traffic'"><label>Display range<select v-model.number="trafficRange">
+        </template><template v-else-if="panel==='traffic'">
+          <label><input v-model="onlineTraffic" type="checkbox" />Enable internet ADS-B traffic</label>
+          <label>Display range<select v-model.number="trafficRange">
               <option
                 v-for="range in [1,2,5,10,25,50,100]"
                 :key="range"
@@ -484,6 +486,10 @@
               <option :value="300">300 seconds</option>
             </select></label>
           <p>{{trafficReport.message||'Traffic feed off'}}</p>
+          <p v-if="onlineTraffic&&trafficMapOnlyCount">{{trafficMapOnlyCount}} target{{trafficMapOnlyCount===1?'':'s'}} on map only: geometric altitude or height conversion is unavailable.</p>
+          <p v-if="onlineTraffic&&!trafficReport.altitudeModel&&sourceMode==='ground'">Import the EGM96 geoid in data setup to enable synthetic-vision placement for targets reporting geometric altitude. Targets must also be in the forward view.</p>
+          <p>Use Fit {{trafficRange}} NM on the map to show the selected traffic range. Follow keeps your chosen zoom.</p>
+          <button @click="panel='display'">Traffic data setup</button>
           <p v-if="selectedTraffic"><b>{{selectedTraffic.callSign||selectedTraffic.id}}</b> ·
             {{selectedTraffic.altitudeMslM==null?'Altitude datum unknown: map only':fmt(selectedTraffic.altitudeMslM/.3048)+' ft MSL'}}
           </p>
@@ -723,6 +729,7 @@ export default {
     }
   },
   computed: {
+    trafficMapOnlyCount(){return (this.trafficReport.tracks||[]).filter(track=>!Number.isFinite(track.altitudeMslM)).length},
     ownTrailDisplay(){return selectOwnTrail(this.snapshot.ownTrail,this.ownTrailOptions,this.ownTrailCleared,this.snapshot.at+Math.floor(Math.max(0,this.elapsed)/1000)*1000)},
     draftContextChanged(){return !!this.draft&&(!this.draftContext||this.draftContext.generation!==(this.snapshot.identity?.generation||null)||this.draftContext.revision!==(this.snapshot.mission?.revision||null))},
     telemetry() {

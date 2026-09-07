@@ -247,12 +247,12 @@ export function createGroundDataProvider({
       if (!response.ok) {
         await response.body?.cancel();
         const retry = response.headers.get("retry-after"),
-          seconds = Number(retry);
+          seconds = retry ? (/^\d+$/.test(retry) ? Number(retry) : (Date.parse(retry)-now())/1000) : NaN;
         throw new DataFetchError(
-          `${settings.mode} data HTTP ${response.status}`,
+          response.status === 429 ? `${settings.mode} data rate limited · retrying automatically (HTTP 429)` : `${settings.mode} data HTTP ${response.status}`,
           Number.isFinite(seconds)
-            ? Math.min(120000, Math.max(0, seconds * 1000))
-            : 0,
+            ? Math.max(0, seconds * 1000)
+            : response.status === 429 ? 60000 : 0,
         );
       }
       const bytes = await readBytes(response, limit);
@@ -290,7 +290,8 @@ export function createGroundDataProvider({
       geoid,
       fetcher: async (c, signal) => {
         const path = `/traffic/${c.lat.toFixed(5)}/${c.lon.toFixed(5)}/${c.radiusNm}`;
-        const result = await request(
+        let result;
+        try { result = await request(
           groundUrl(
             path,
             `https://api.adsb.lol/v2/point/${c.lat.toFixed(5)}/${c.lon.toFixed(5)}/${c.radiusNm}`,
@@ -298,7 +299,13 @@ export function createGroundDataProvider({
           4 * 1024 * 1024,
           signal,
           false,
-        );
+        ); } catch (error) {
+          if (error instanceof TypeError)
+            throw new DataFetchError(settings.groundRelayUrl
+              ? 'Ground traffic relay connection failed · check the relay address and allowed browser origin'
+              : 'ADSB.lol browser connection failed · check ground internet or select a ground relay for browser access');
+          throw error;
+        }
         return JSON.parse(new TextDecoder().decode(result.bytes));
       },
     });

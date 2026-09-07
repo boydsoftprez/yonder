@@ -5,6 +5,7 @@
     <div class="cockpit-map-tools">
       <button @click="zoom(1)" aria-label="Zoom map in">+</button
       ><button @click="zoom(-1)" aria-label="Zoom map out">−</button
+      ><button @click="fitTrafficRange" :disabled="!snapshot?.telemetry?.ready" aria-label="Fit traffic range">Fit {{range}} NM</button
       ><button
         @click="
           follow = !follow;
@@ -68,6 +69,7 @@ export default {
     base: null,
     basemap: "grid",
     follow: true,
+    centered: false,
     status: "Local grid · data sources off",
     observer: null,
     hold: null,
@@ -206,6 +208,12 @@ export default {
     },
   },
   methods: {
+    fitTrafficRange(){
+      const t=this.snapshot?.telemetry,here={lat:t?.latitude,lon:t?.longitude};
+      if(!this.map||!t?.ready||!validPosition(here))return;
+      this.follow=true;this.centered=true;
+      this.map.fitBounds(L.latLng(here.lat,here.lon).toBounds(this.range*1852*2),{animate:false,padding:[20,20]});
+    },
     renderOwnTrail(){const segments=this.ownTrail?.segments||[];this.ownTrailHalo?.setLatLngs(segments);this.ownTrailLine?.setLatLngs(segments);},
     zoom(d) {
       this.map?.setZoom(this.map.getZoom() + d);
@@ -300,14 +308,16 @@ export default {
             iconSize: [32, 36],
           }),
         }).addTo(this.route);
-        if (this.follow)
+        if (this.follow) {
           this.map.setView(
             [here.lat, here.lon],
-            this.map.getZoom() < 10 ? 14 : this.map.getZoom(),
+            this.centered ? this.map.getZoom() : 14,
             {
               animate: false,
             },
           );
+          this.centered=true;
+        }
       }
       if (this.prediction?.points.length)
         L.polyline(

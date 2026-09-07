@@ -14,11 +14,16 @@ export function createCockpitApi(fetchFn=(...args)=>fetch(...args)){
     const timer=setTimeout(()=>controller.abort(),5000);
     try{
       const response=await fetchFn(url,{...init,credentials:'same-origin',cache:'no-store',signal:controller.signal});
-      const body=await response.json();
+      let body;
+      try{body=await response.json();}catch(error){
+        if(error.name==='AbortError')throw error;
+        if(response.ok)throw new Error('Flight service returned an invalid response');
+        body={};
+      }
       const bytes=new TextEncoder().encode(JSON.stringify(body)).length,now=Date.now();
       receivedBytes+=bytes;samples.push({at:now,bytes});while(samples.length>256||samples[0]?.at<now-10000)samples.shift();
       if(url.endsWith('/flight'))flightBytes=bytes;
-      if(!response.ok){const error=new Error(body.error||body.message||`Console request failed (${response.status})`);error.admissionRejected=response.status>=400&&response.status<500;throw error;}
+      if(!response.ok){const error=new Error(body?.error||body?.message||(response.status>=500?`Flight service unavailable (HTTP ${response.status}) · check the local simulator or aircraft connection`:`Console request failed (${response.status})`));error.admissionRejected=response.status>=400&&response.status<500;throw error;}
       return body;
     }finally{clearTimeout(timer);controllers.delete(controller);}
   }

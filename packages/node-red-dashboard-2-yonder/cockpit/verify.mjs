@@ -25,6 +25,15 @@ await page.waitForTimeout(1000);const markerCount=await page.locator('.leaflet-t
 await page.getByRole('button',{name:'Expand map',exact:true}).click();
 const ownTrail=page.locator('path.cockpit-own-trail');await ownTrail.waitFor({state:'attached'});
 assert.match(await ownTrail.getAttribute('d'),/L/,'ownship breadcrumb geometry must render');
+const trailWidthBefore=await ownTrail.evaluate(node=>node.getBBox().width);
+assert.equal(await page.getByRole('button',{name:'Fit traffic range',exact:true}).count(),1,'traffic range needs a map framing control');
+await page.getByRole('button',{name:'Fit traffic range',exact:true}).click();
+await page.waitForTimeout(1200);
+assert.ok(await ownTrail.evaluate(node=>node.getBBox().width)<trailWidthBefore/4,'Follow must preserve the wider traffic view across telemetry updates');
+const fittedWidth=await ownTrail.evaluate(node=>node.getBBox().width);
+await page.getByRole('button',{name:'Zoom map out',exact:true}).click();
+await page.waitForTimeout(1200);
+assert.ok(await ownTrail.evaluate(node=>node.getBBox().width)<=fittedWidth,'Follow must not reset manually selected zoom');
 await page.getByRole('button',{name:'Aircraft breadcrumb settings',exact:true}).click();
 await page.getByLabel('Aircraft trail window',{exact:true}).selectOption('distance');
 await page.getByLabel('Aircraft trail distance units',{exact:true}).selectOption('mi');

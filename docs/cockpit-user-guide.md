@@ -321,10 +321,25 @@ Traffic controls select 1–100 NM depiction range and 60, 120 or 300 second obs
 breadcrumbs. Fetch coverage follows the selected 1–100 NM depiction range; a
 5 NM display requests a 5 NM feed. Changing this range preserves cached map and
 terrain data.
+Tap the traffic status under the map to enable the feed, adjust its range and
+open **Traffic data setup**. A successful search shows its observed target count
+or explicitly reports no targets within the selected range. Press **Fit 10 NM**
+(or the selected range) on the map to frame that area. Follow centers the aircraft
+without resetting your zoom. Ground traffic refreshes every five seconds when
+the provider permits, independently of the flight telemetry/display rate.
+A browser-connection error can require the optional ground
+relay described in [Ground data](cockpit-ground-data.md); the relay address is
+remembered in this browser. HTTP 429 means the provider is rate limiting, and the
+display retries after its cooldown. It never switches to the aircraft connection.
 Gaps break the trail; old targets expire. Unknown target altitude or incompatible
 ownship altitude keeps targets on the map. Perspective traffic requires compatible
 EGM96 heights and fresh ownship pose. Provider errors, delay and attribution remain
 visible. An empty display is not evidence that airspace is clear.
+The traffic panel reports targets that are map-only. **Traffic data setup →
+Import EGM96 geoid** loads the local altitude-conversion grid for the current page
+session. Only targets with geometric altitude and inside the forward field of
+view can then appear in synthetic vision; a target behind the aircraft remains
+on the moving map.
 
 ## Select a camera and review calibration
 

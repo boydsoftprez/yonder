@@ -5,6 +5,44 @@ import { createGroundDataProvider } from "./ground-data.mjs";
 const png = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
 const image = () =>
   new Response(png, { headers: { "content-type": "image/png" } });
+it('explains failed direct browser traffic and allows an explicitly selected ground relay',async()=>{
+ const now=1788790000000,urls=[];
+ const p=createGroundDataProvider({now:()=>now,fetchImpl:async url=>{
+  urls.push(url);
+  if(url.startsWith('https://api.adsb.lol/'))throw new TypeError('Failed to fetch');
+  return new Response(JSON.stringify({now,ac:[{hex:'abc123',lat:35.96,lon:-83.36,seen_pos:0}]}));
+ }});
+ const center={lat:35.96,lon:-83.36};p.configure({traffic:true,trafficRadiusNm:10});
+ await p.pollTraffic(center);
+ expect(p.trafficSnapshot(center)).toMatchObject({status:'error',message:expect.stringMatching(/browser.*ground relay/i)});
+ expect(urls).toHaveLength(1);
+ p.configure({groundRelayUrl:'http://127.0.0.1:4197'});await p.pollTraffic(center);
+ expect(p.trafficSnapshot(center).tracks).toHaveLength(1);
+ expect(urls).toEqual(['https://api.adsb.lol/v2/point/35.96000/-83.36000/10','http://127.0.0.1:4197/traffic/35.96000/-83.36000/10']);
+ p.close();
+});
+it('shows traffic rate limiting and waits a minute when the provider omits Retry-After',async()=>{
+ let now=1788790000000,calls=0;
+ const p=createGroundDataProvider({now:()=>now,fetchImpl:async()=>{calls++;return new Response('',{status:429})}});
+ p.configure({traffic:true});const center={lat:35.96,lon:-83.36};await p.pollTraffic(center);
+ expect(p.trafficSnapshot(center)).toMatchObject({status:'error',message:expect.stringMatching(/rate.limit.*retry/i),retryAtMs:now+60000});
+ now+=59000;await p.pollTraffic(center);expect(calls).toBe(1);
+ now+=1000;await p.pollTraffic(center);expect(calls).toBe(2);p.close();
+});
+it('bounds normal ground traffic to six requests per thirty seconds of display updates',async()=>{
+ let now=1788790000000,calls=0;
+ const p=createGroundDataProvider({now:()=>now,fetchImpl:async()=>{calls++;return new Response(JSON.stringify({now,ac:[]}))}});
+ p.configure({traffic:true});
+ for(let i=0;i<150;i++){await p.pollTraffic({lat:35.96,lon:-83.36});now+=200;}
+ expect(calls).toBe(6);expect(p.trafficSnapshot({lat:35.96,lon:-83.36}).status).toBe('live');p.close();
+});
+it.each(['600',new Date(1788790600000).toUTCString()])('honors a provider cooldown longer than local backoff (%s)',async retry=>{
+ let now=1788790000000,calls=0;
+ const p=createGroundDataProvider({now:()=>now,fetchImpl:async()=>{calls++;return new Response('',{status:429,headers:{'Retry-After':retry}})}});
+ p.configure({traffic:true});const center={lat:35.96,lon:-83.36};await p.pollTraffic(center);
+ expect(p.trafficSnapshot(center).retryAtMs).toBe(1788790600000);
+ now+=599000;await p.pollTraffic(center);expect(calls).toBe(1);p.close();
+});
 it("defaults to ground and opt-out performs no requests; failure never falls back to aircraft", async () => {
   const fetchImpl = vi.fn(async () => {
     throw new Error("ground offline");
