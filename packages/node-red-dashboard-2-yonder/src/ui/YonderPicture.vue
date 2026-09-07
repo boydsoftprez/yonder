@@ -64,6 +64,22 @@
             <div v-if="mode === 'off'" class="y-pic__off">
                 not requested · this changes nothing the aircraft sends anyone else
             </div>
+            <!--
+              **The one action this page draws off the rail, and it is the
+              operator's decision that it is here** (R-UI-10 puts every action
+              on the rail, and only there).
+
+              Starting a camera meant scrolling past the whole deck to the foot
+              of the page, with nothing above saying that was where to go. The
+              empty picture is what an operator is already looking at when a
+              camera is stopped, so it is what says so and offers the one thing
+              worth doing about it. The rail keeps START too: this adds a way
+              in, it does not move the control.
+            -->
+            <div v-if="cameraRunning === false" class="y-pic__stopped">
+                <span class="y-pic__stopped-l">This camera is not running</span>
+                <button type="button" class="y-pic__start" @click="pressStart">Start it</button>
+            </div>
         </div>
       </div>
 
@@ -681,6 +697,18 @@ export default {
             return this.sentCost || this.props.cost
         },
         /** The camera named by the last message that named one. */
+        /**
+         * **Whether the camera this picture is about is running at all.**
+         *
+         * `null` where the message has not said — an older console, or a
+         * picture not yet told a camera — and the picture then draws nothing
+         * about it rather than guessing that a camera is stopped.
+         */
+        cameraRunning () {
+            const payload = this.command
+            if (!payload || typeof payload !== 'object') return null
+            return typeof payload.running === 'boolean' ? payload.running : null
+        },
         told () {
             const payload = this.command
             return payload && typeof payload === 'object' && typeof payload.path === 'string'
@@ -1352,6 +1380,11 @@ export default {
          * flow knows what the operator asked for" reasoning `setMode`
          * already gives for its own press.
          */
+        /** The same word the rail's START sends, down the same switch, so
+         *  there is one way a camera is started and not two. */
+        pressStart () {
+            this.post('start')
+        },
         onThumbGo (id) {
             this.sentPath = id
             this.post({ path: id })
@@ -1646,6 +1679,36 @@ export default {
     background: color-mix(in srgb, var(--yonder-select, #2ad4f0) 18%, transparent);
     pointer-events: none;
 }
+.y-pic__stopped {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+}
+.y-pic__stopped-l {
+    font-family: var(--yonder-font-mono);
+    font-size: 0.6875rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--yonder-dim, #7b8794);
+}
+.y-pic__start {
+    font-family: var(--yonder-font-mono);
+    font-size: 0.6875rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--yonder-act, #38bdf8);
+    background: transparent;
+    border: 1px solid currentColor;
+    border-radius: 3px;
+    padding: 8px 18px;
+    cursor: pointer;
+}
+.y-pic__start:hover { background: rgba(56, 189, 248, 0.08); }
+
 .y-pic__reason, .y-pic__off {
     position: absolute; left: 8px; right: 8px; bottom: 8px; z-index: 5;
     font-family: var(--yonder-font, system-ui, sans-serif); font-size: 12px;

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtempSync, rmSync, readFileSync, existsSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, readFileSync, existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BOOLEAN_CONTROLS, createRouter, requestedControls, type DiagProbes, type Router, type SystemReport } from "./routes.js";
@@ -1765,6 +1765,175 @@ describe("the camera routes", () => {
     const res = await provisioned({ cameras: fixtureDetection() })("POST", "/cameras", {});
     expect(res.status).toBe(400);
     expect(String((res.body as { error: string }).error)).toContain("device");
+  });
+
+  /**
+   * **Every configured camera reaches the page, present or not** (R-CAM-20).
+   *
+   * Asserted here as well as in `present.test.ts` for the reason the rate
+   * assertion above gives: that file proves what `cameraIndex()` composes and
+   * cannot prove that the daemon hands it the configuration to compose it
+   * from. This route is the only place the seam is ever used, and the defect
+   * the operator found was a page that drew nothing for two configured
+   * cameras while the navigation — built from the same file — carried both.
+   */
+  it("puts every configured camera on the index, including one the sweep found nothing for", async () => {
+    // The board's own state: nothing on the bus, one camera configured.
+    const r = provisioned({ cameras: { found: [], rejected: [] } });
+    const body = (await r("GET", "/cameras", undefined)).body as {
+      found: unknown[];
+      index: { cameras: { id: string | null; state: string; device: string }[] };
+    };
+    expect(body.found, "the probe genuinely saw nothing").toHaveLength(0);
+    expect(body.index.cameras, "and the configured camera is still on the page").toHaveLength(1);
+    expect(body.index.cameras[0]).toMatchObject({ id: "cam0", state: "Not attached" });
+    // Carrying the socket it expects — the one string an operator can act on.
+    expect(body.index.cameras[0]?.device).toBe(CAMERA_BY_PATH);
+  });
+
+  /** And a camera that *is* there is drawn once, never also as absent. */
+  it("draws a configured camera that is attached exactly once", async () => {
+    const r = provisioned({ cameras: fixtureDetection() });
+    const body = (await r("GET", "/cameras", undefined)).body as {
+      index: { cameras: { id: string | null; state: string }[] };
+    };
+    expect(body.index.cameras).toHaveLength(1);
+    expect(body.index.cameras[0]).toMatchObject({ id: "cam0", state: "Idle" });
+  });
+
+  /**
+   * **`DELETE /cameras/:id` — the mirror of the adoption above** (R-CAM-21,
+   * R-CAM-05, R-CFG-01, R-CFG-03).
+   *
+   * Found on a board, minutes after the adoption shipped. A camera had been
+   * moved between USB ports; identity is the socket, so each move made it a
+   * *different* camera as far as the configuration was concerned and nothing
+   * ever removed the old one. The board carried two configured cameras
+   * against ports with nothing in them and the camera in the operator's hand
+   * matching neither. `POST /cameras` could adopt; nothing could undo it, and
+   * the only repair left was editing `/etc/yonder/config.yaml` by hand on the
+   * device — the exact thing R-CFG-01's single writer exists to prevent.
+   */
+  describe("DELETE /cameras/:id", () => {
+    /** The ordinary case, and the one the operator was actually in. */
+    it("removes a camera whose socket has nothing on it", async () => {
+      // `cameras` is the *other* camera's detection, so the configured
+      // `cam0` — on CAMERA_BY_PATH — is matched by nothing on the bus.
+      const r = provisioned({
+        cameras: { found: [], rejected: fixtureDetection().rejected },
+      });
+      expect(loadConfig(configPath).cameras.map((c) => c.id)).toEqual(["cam0"]);
+      const res = await r("DELETE", "/cameras/cam0", undefined);
+      expect(res.status).toBe(200);
+      expect(loadConfig(configPath).cameras, "the entry left the configuration").toEqual([]);
+      expect((res.body as { camera: string }).camera).toBe("cam0");
+    });
+
+    /**
+     * **Through the apply engine, never a direct write** (R-CFG-03). The
+     * answer carries the apply's own id, which is the confirmation handle —
+     * a route that wrote `config.yaml` itself would have nothing to put here
+     * and nothing to revert.
+     */
+    it("goes through the apply engine, so the change is journalled and revertible", async () => {
+      const r = provisioned({ cameras: fixtureDetection() });
+      const res = await r("DELETE", "/cameras/cam0", undefined);
+      expect(res.status).toBe(200);
+      const body = res.body as { camera: string; id: string; expiresAt: number | null };
+      expect(body.id, "an apply id, which is what a confirm or a revert names").toBeTruthy();
+      expect(body.id).not.toBe(body.camera);
+      // And it really did revert: the engine's rollback target is the
+      // configuration this route was handed, camera and all.
+      await r("POST", "/revert", { id: body.id });
+      expect(loadConfig(configPath).cameras.map((c) => c.id)).toEqual(["cam0"]);
+    });
+
+    /**
+     * **Removing a camera is not a way to stop it** (R-CAM-21). An operator
+     * stopping a feed should do it deliberately, on the key that says so.
+     */
+    it("refuses to remove a camera that is running, and says why", async () => {
+      const r = provisioned({ cameras: fixtureDetection() });
+      await r("POST", "/cameras/cam0/run", { action: "start" });
+      const res = await r("DELETE", "/cameras/cam0", undefined);
+      expect(res.status).toBe(409);
+      const error = String((res.body as { error: string }).error);
+      expect(error, "the reason, in words").toContain("stop it");
+      expect(loadConfig(configPath).cameras.map((c) => c.id), "and nothing was written")
+        .toEqual(["cam0"]);
+    });
+
+    /**
+     * The refusal is the *row's* refusal — one sentence, composed in
+     * `video/present.ts` and read by both. Two wordings for one rule is how a
+     * page and a daemon come to disagree about why something did not happen.
+     */
+    it("refuses in the same words the row draws the key inoperative with", async () => {
+      const r = provisioned({ cameras: fixtureDetection() });
+      await r("POST", "/cameras/cam0/run", { action: "start" });
+      const listed = (await r("GET", "/cameras", undefined)).body as {
+        index: { cameras: { id: string | null; removal: string | null }[] };
+      };
+      const row = listed.index.cameras.find((c) => c.id === "cam0");
+      const refused = await r("DELETE", "/cameras/cam0", undefined);
+      expect(row?.removal).toBe((refused.body as { error: string }).error);
+    });
+
+    it("answers 404 for an id nothing is configured under, and writes nothing", async () => {
+      const r = provisioned({ cameras: fixtureDetection() });
+      const res = await r("DELETE", "/cameras/cam9", undefined);
+      expect(res.status).toBe(404);
+      expect(loadConfig(configPath).cameras.map((c) => c.id)).toEqual(["cam0"]);
+    });
+
+    /**
+     * The id off a URL is matched against `CAMERA_ID` before it is used for
+     * anything at all — before the configuration is even read. The same guard
+     * every other camera route is behind, reached through this verb too.
+     */
+    it("refuses an id that is not one, rather than joining it to anything", async () => {
+      const r = provisioned({ cameras: fixtureDetection() });
+      expect((await r("DELETE", "/cameras/..%2F..%2Fetc", undefined)).status).toBe(404);
+      expect((await r("DELETE", "/cameras/../../etc", undefined)).status).toBe(404);
+    });
+
+    /**
+     * **The camera goes; its captures stay.** The removal is revertible
+     * (R-CFG-03) and deleting the recordings would make half of it
+     * irreversible while the console told the operator the whole thing could
+     * be undone. R-CAM-18 gives deleting a capture its own control, on the
+     * camera's own page, where an operator does it deliberately.
+     */
+    it("leaves the captures the camera already made on the board", async () => {
+      const captures = join(dir, "captures", "cam0");
+      mkdirSync(captures, { recursive: true });
+      writeFileSync(join(captures, "a-recording.mp4"), "not really an mp4");
+      const r = provisioned({ cameras: fixtureDetection() });
+      expect((await r("DELETE", "/cameras/cam0", undefined)).status).toBe(200);
+      expect(existsSync(join(captures, "a-recording.mp4"))).toBe(true);
+    });
+
+    /**
+     * The other half of what the page then shows: the row does not vanish
+     * where the camera is still on the bus — it comes back as a detection
+     * nothing is configured for, with the key that adopts it (R-UI-03).
+     */
+    it("leaves a camera that is still attached listed, with no id", async () => {
+      const r = provisioned({ cameras: fixtureDetection() });
+      await r("DELETE", "/cameras/cam0", undefined);
+      const body = (await r("GET", "/cameras", undefined)).body as {
+        index: { cameras: { id: string | null; state: string }[] };
+      };
+      expect(body.index.cameras).toHaveLength(1);
+      expect(body.index.cameras[0]).toMatchObject({ id: null, state: "Not configured" });
+    });
+
+    /** R-SEC-09: it is behind the administrator gate like every other write. */
+    it("is refused outright while no administrator password is set", async () => {
+      const res = await router({ cameras: fixtureDetection() })("DELETE", "/cameras/cam0", undefined);
+      expect(res.status).toBe(403);
+      expect(loadConfig(configPath).cameras.map((c) => c.id)).toEqual(["cam0"]);
+    });
   });
 
   it("puts no rate on an index row, because nothing on this device measures one", async () => {

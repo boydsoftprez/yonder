@@ -7,6 +7,21 @@
             <span class="y-aimpanel__fact-v">{{ reason || 'this camera has none' }}</span>
         </div>
         <YonderColumn v-else legend="Aim" :qualifier="badgeText" :tone="badgeTone">
+            <!--
+              **Said once, at the top, for the whole panel.**
+
+              `effectiveReason` is one fact about this camera — *it advertises
+              pan and tilt but there is no motor behind either* — and it used to
+              be handed to the pad and to both position gauges as well, each of
+              which drew it in full. Four copies of one sentence, 155 px of
+              prose in a 228 px panel, overlapping the dial and the gauges it
+              was explaining. The operator saw it as an overlap before anyone
+              saw it as a repetition.
+
+              The children still take `dead`/`state`, so they are drawn as
+              controls that cannot be worked; what they no longer do is each
+              restate why.
+            -->
             <div v-if="effectiveReason" class="y-aimpanel__reason">{{ effectiveReason }}</div>
 
             <YonderAimPad
@@ -22,8 +37,8 @@
                 <span class="y-aimpanel__rate-v">{{ rateShown }}<i>°/s</i></span>
             </div>
 
-            <YonderPositionGauge label="Pan" unit="°" :value="pan" :min="panBounds.lo" :max="panBounds.hi" :dead="!hasBounds" :reason="effectiveReason" />
-            <YonderPositionGauge label="Tilt" unit="°" :value="tilt" :min="tiltBounds.lo" :max="tiltBounds.hi" :dead="!hasBounds" :reason="effectiveReason" />
+            <YonderPositionGauge label="Pan" unit="°" :value="pan" :min="panBounds.lo" :max="panBounds.hi" :dead="!hasBounds" :reason="gaugeReason" />
+            <YonderPositionGauge label="Tilt" unit="°" :value="tilt" :min="tiltBounds.lo" :max="tiltBounds.hi" :dead="!hasBounds" :reason="gaugeReason" />
 
             <div v-if="mode" class="y-aimpanel__modeline">{{ modeSentence }}</div>
             <YonderSegmented
@@ -31,7 +46,7 @@
                 :value="mode"
                 :options="modes"
                 :state="modeControlState"
-                :reason="effectiveReason"
+                :reason="gaugeReason"
                 @change="onModeChange"
             />
 
@@ -288,8 +303,26 @@ export default {
          * `data()` — so the pad's own `watch: { inhibited }` keeps reacting
          * exactly as Task 20 built it (coordinator resolution 6). */
         padInhibited () {
-            if (this.aimState !== 'present') return this.reason || 'not answering'
+            // Truthy so the pad refuses a press, but **short**: a camera that
+            // is not answering at all is the panel's fact and its head says it
+            // in full. The pad used to repeat that whole sentence, and so did
+            // both gauges and the mode control — four copies of it, more prose
+            // than the panel was tall, drawn over the dial it explained.
+            if (this.aimState !== 'present') return 'not answering'
             return this.inhibited || null
+        },
+
+        /**
+         * The reason a *position* cannot be shown, which is the only kind
+         * these gauges and the mode control should carry.
+         *
+         * An inhibition is about the reading — *position has not been
+         * established yet* — so it belongs on the thing that would have shown
+         * it. A camera that is not answering at all is not about any one
+         * reading; that is said once, at the head of the panel.
+         */
+        gaugeReason () {
+            return this.aimState === 'present' ? (this.inhibited || '') : ''
         },
         badgeText () {
             return this.aimState === 'present' ? 'RATE CONTROL' : 'NOT ANSWERING'

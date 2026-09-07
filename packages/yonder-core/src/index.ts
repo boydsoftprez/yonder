@@ -328,9 +328,11 @@ export {
   type BoardDisplay,
 } from "./system/format.js";
 export {
+  absentIdentityWords,
   cameraStrip,
   capabilityFacts,
   identityWords,
+  removalRefusal,
   uplinkBudget,
   atIp,
   IP_OVERHEAD,

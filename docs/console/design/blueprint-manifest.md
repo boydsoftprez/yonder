@@ -374,6 +374,8 @@ Capture: `cameras.night.png`, `cameras.day.png`.
 | C-24 | A rail key `APPLY`, in the select tone | **Absent** | unbuilt | Nothing on this page stages anything today, so there is nothing to apply — but the blueprint draws a page that does |
 | C-25 | Rows open their camera (spec §5) | Present — `OPEN ›` | present | |
 | C-26 | A day palette of this page | The console has one; **the blueprint does not** | — | Blueprint gap, not a console gap |
+| C-27 | **A row for a camera the configuration names and the board did not find** | Present — `NOT ATTACHED` in the bad tone, stating the socket it expects | present | **The blueprint is silent here too, and its silence is what shipped.** The page drew a row per *detection*, so two configured cameras on empty ports had no row at all while the navigation, built from the same configuration, carried both. Found on a board (R-CAM-20) |
+| C-28 | **An action that takes a camera out of the configuration** | Present — a key on each configured row, drawn inoperative with its reason while that camera is streaming | present | Not drawn in the blueprint either, and the mirror of C-23: identity is the socket (R-CAM-05), so moving a camera between ports leaves an entry nothing removed. Its word is the operator's to settle — see the task-46 report (R-CAM-21) |
 
 ---
 

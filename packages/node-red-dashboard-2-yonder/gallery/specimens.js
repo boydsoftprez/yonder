@@ -935,6 +935,47 @@ export const SPECIMENS = [
     part: false,
   },
   {
+    title: "Cameras index — the board he found",
+    note: "R-CAM-20, R-CAM-21, and the exact state a real board was in. A camera's identity is the socket it is on (R-CAM-05), so moving one between USB ports makes it a different camera as far as the configuration is concerned and nothing ever removed the old entry — the same physical camera had been configured three times. The page drew none of it: it mapped detections only, so the two configured cameras on empty ports had no row at all, while the navigation, built from the same configuration, carried both. Here all three are drawn — the ELP that is present and configured nowhere, offering ADD, and the two that are configured and not on the bus, each stating the socket it expects and offering the key that clears it.",
+    component: YonderIndex,
+    props: {
+      report: {
+        cameras: [
+          {
+            id: null, name: "GENERAL — UVC Camera", bus: "usb · /dev/video0",
+            spec: "not configured",
+            identity: "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.2:1.0-video-index0 — survives a reboot",
+            state: "Not configured", tone: "neutral", rate: null,
+            device: "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.2:1.0-video-index0",
+            capabilities: ELP_REPORT.capabilities,
+            removal: "nothing is configured on this socket, so there is nothing to remove",
+          },
+          {
+            id: "cam0", name: "Cam1", bus: "usb · no device",
+            spec: "H264 · 1280×720p30",
+            identity: "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0 — configured on this socket; nothing there answered",
+            state: "Not attached", tone: "bad", rate: null,
+            device: "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0",
+            capabilities: null,
+            removal: null,
+          },
+          {
+            id: "cam1", name: "Global Shutter Camera", bus: "usb · no device",
+            spec: "H264 · 1280×720p30",
+            identity: "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.1:1.0-video-index0 — configured on this socket; nothing there answered",
+            state: "Not attached", tone: "bad", rate: null,
+            device: "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.1:1.0-video-index0",
+            capabilities: null,
+            removal: null,
+          },
+        ],
+        rejected: [],
+      },
+    },
+    payload: undefined,
+    part: false,
+  },
+  {
     title: "Cameras index — empty",
     note: "Coordinator resolution 4: an operator whose camera has fallen off the bus must be able to tell an empty list from a page that failed. Drawn as 'No camera.' rather than a blank pane — the same instrument, given a report that genuinely found nothing, not a broken one given no report at all.",
     component: YonderIndex,

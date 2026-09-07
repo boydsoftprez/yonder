@@ -75,7 +75,12 @@ interface CameraRow {
     state: string;
     tone: string;
     rate: number | null;
-    capabilities: ReturnType<typeof makeCapabilities>;
+    /** The socket, which is what an adoption names (R-CAM-05). */
+    device?: string;
+    /** Null on a camera that answered nothing — see the absent-camera rows. */
+    capabilities: ReturnType<typeof makeCapabilities> | null;
+    /** Why this camera may not be taken out of the configuration, or null. */
+    removal: string | null;
 }
 interface RejectedRow {
     device: string;
@@ -103,6 +108,7 @@ function makeReport(overrides: Partial<IndexReport> = {}): IndexReport {
                 tone: "good",
                 rate: 1.9,
                 capabilities: makeCapabilities(),
+                removal: null,
             },
             {
                 id: "gimbal",
@@ -121,6 +127,7 @@ function makeReport(overrides: Partial<IndexReport> = {}): IndexReport {
                         reason: "this camera advertises pan and tilt but there is no motor behind either",
                     },
                 }),
+                removal: null,
             },
         ],
         rejected: [
@@ -441,4 +448,130 @@ describe("a camera the board found and nothing is configured for", () => {
     expect(row.find(".y-idx__adopt").exists()).toBe(false);
     expect(row.find(".y-idx__open").exists()).toBe(true);
   });
+});
+
+/**
+ * **A camera the configuration names and the board cannot find** (R-CAM-20,
+ * R-CAM-21).
+ *
+ * The other half of the state the operator found a board in, minutes after
+ * the adoption above shipped. A camera had been moved between USB ports;
+ * identity is the socket (R-CAM-05), so each move made it a *different*
+ * camera as far as the configuration was concerned and nothing ever removed
+ * the old one. The board carried two configured cameras against ports with
+ * nothing in them, the camera in his hand matched neither, and the page drew
+ * no row at all for either — while the navigation, built from the same
+ * configuration, carried both.
+ */
+describe("a camera the configuration names and the board did not find", () => {
+    const EXPECTED = "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.1:1.0-video-index0";
+
+    /** One absent row, as `cameraIndex()` composes it. */
+    function absentReport() {
+        return makeReport({
+            cameras: [{
+                id: "cam1",
+                name: "Global Shutter Camera",
+                bus: "usb · no device",
+                spec: "H264 · 1280×720p30",
+                identity: `${EXPECTED} — configured on this socket; nothing there answered`,
+                state: "Not attached",
+                tone: "bad",
+                rate: null,
+                device: EXPECTED,
+                capabilities: null,
+                removal: null,
+            }],
+        });
+    }
+
+    /**
+     * **The socket it expects, drawn.** It is the one string an operator can
+     * act on: move a plug back to it, or remove the entry that names it.
+     */
+    it("states which camera it is and which socket it wanted", () => {
+        const { wrapper } = mountIndex(absentReport());
+        const row = camRows(wrapper)[0]!;
+        expect(row.find(".y-idx__nm b").text()).toBe("Global Shutter Camera");
+        expect(row.find(".y-idx__id").text()).toContain(EXPECTED);
+        expect(row.find(".y-idx__ann").text()).toBe("Not attached");
+        expect(row.find(".y-idx__ann").classes()).toContain("tone-bad");
+    });
+
+    /**
+     * **Nothing answered, so nothing was asked** (R-CAM-14, R-UI-20). A line
+     * of `aim: none · zoom: none` would be twenty-one claims about a camera
+     * this board cannot see, in the place an operator reads to find out what
+     * a camera can do.
+     */
+    it("draws no probe summary for a camera that answered nothing", () => {
+        const { wrapper } = mountIndex(absentReport());
+        expect(camRows(wrapper)[0]!.find(".y-idx__b").text()).toBe("");
+        // And a camera that *did* answer still gets its line, so this is not
+        // the summary silently disappearing everywhere.
+        const { wrapper: found } = mountIndex(makeReport());
+        expect(camRows(found)[0]!.find(".y-idx__b").text()).toContain("aim:");
+    });
+
+    it("offers the key that takes it out of the configuration, and posts the id", async () => {
+        const { wrapper, emit } = mountIndex(absentReport());
+        const key = camRows(wrapper)[0]!.find(".y-idx__forget");
+        expect(key.exists(), "there is something to press").toBe(true);
+        expect(key.attributes("disabled"), "and it is live").toBeUndefined();
+        await key.trigger("click");
+        expect(emit).toHaveBeenCalledTimes(1);
+        const [event, id, msg] = emit.mock.calls[0]!;
+        expect(event).toBe("widget-action");
+        expect(id).toBe("i1");
+        // **The id, not the socket** — the opposite of an adoption, and for
+        // the reason each is what it is: a camera that is not there cannot be
+        // addressed by where it is not.
+        expect(msg).toEqual({ payload: { forget: "cam1" } });
+    });
+
+    /**
+     * **Removing a camera is not a way to stop it** (R-CAM-21). The reason is
+     * on the key itself, because this page reads the camera list again after
+     * every press: a refusal travelling back on the message is overwritten by
+     * the next sweep before anything could draw it.
+     */
+    it("draws the key inoperative, carrying the reason, while the camera is streaming", async () => {
+        const report = makeReport();
+        report.cameras[0]!.removal = "this camera is streaming; stop it before taking it out of the configuration";
+        const { wrapper, emit } = mountIndex(report);
+        const key = camRows(wrapper)[0]!.find(".y-idx__forget");
+        expect(key.attributes("disabled")).toBeDefined();
+        expect(key.attributes("title")).toBe(report.cameras[0]!.removal);
+        // Guarded twice, for the reason `YonderShutter` gives: a dispatched
+        // click reaches a disabled button's listener in a real browser even
+        // though `.click()` does not.
+        await key.trigger("click");
+        expect(emit).not.toHaveBeenCalled();
+    });
+
+    /** A socket nothing is configured for has no entry to remove. */
+    it("offers no such key on a camera nothing is configured for", () => {
+        const report = makeReport();
+        report.cameras[0]!.id = null;
+        report.cameras[0]!.device = EXPECTED;
+        report.cameras[0]!.removal = "nothing is configured on this socket, so there is nothing to remove";
+        const row = camRows(mountIndex(report).wrapper)[0]!;
+        expect(row.find(".y-idx__forget").exists()).toBe(false);
+        expect(row.find(".y-idx__adopt").exists()).toBe(true);
+    });
+
+    /**
+     * **OPEN stays at the row's end, and the removal key never takes that
+     * place.** OPEN is the key an operator presses without looking — it is
+     * where the blueprint's chevron pointed. A key that takes a camera out of
+     * the configuration must not be the one that catches a finger aimed at
+     * the familiar spot.
+     */
+    it("puts the removal key inside OPEN, never at the end of the row", () => {
+        const { wrapper } = mountIndex(makeReport());
+        const keys = camRows(wrapper)[0]!.findAll(".y-idx__k");
+        expect(keys).toHaveLength(2);
+        expect(keys[0]!.classes()).toContain("y-idx__forget");
+        expect(keys.at(-1)!.classes()).toContain("y-idx__open");
+    });
 });

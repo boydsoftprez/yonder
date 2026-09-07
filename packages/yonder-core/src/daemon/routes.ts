@@ -31,7 +31,8 @@ import type { RemoteState } from "../remote/state.js";
 import { compose, refuse } from "../video/pipeline.js";
 import { noCapabilities, summarise, type CameraCapabilities } from "../video/capability.js";
 import {
-  aimPanel, cameraDeck, cameraIndex, cameraStrip, capabilityFacts, identityWords, uplinkBudget,
+  aimPanel, cameraDeck, cameraIndex, cameraStrip, capabilityFacts, identityWords, removalRefusal,
+  uplinkBudget,
   type AimPanel, type CameraDeck, type CameraStrip, type CapabilityFact,
 } from "../video/present.js";
 import { applyCameraDraft, deckDraft, interruption, validateDraft } from "../apply/draft.js";
@@ -1069,6 +1070,73 @@ export function createRouter(deps: RouterDeps): Router {
         return { status: 404, body: { error: `no camera is configured with the id "${id}"` } };
       }
       return captureRoute(method, id, verb, body, say);
+    }
+
+    /**
+     * **Take a camera out of the configuration** (R-CAM-21, R-CAM-05,
+     * R-CFG-01, R-CFG-03).
+     *
+     * The mirror of `POST /cameras`, and the other half of the state the
+     * operator found a board in. A camera's identity is the socket it is
+     * attached to (R-CAM-05), so moving it between USB ports makes it a
+     * *different* camera as far as the configuration is concerned. Nothing
+     * ever removed the old entry, so one physical camera ended up configured
+     * three times, twice against empty ports. `POST /cameras` could adopt;
+     * nothing could undo it, and the only repair left was editing
+     * `/etc/yonder/config.yaml` by hand on the device — which is the exact
+     * thing R-CFG-01's single writer exists so that nobody has to do.
+     *
+     * **Before the probe guard below, deliberately**, and for the same reason
+     * the capture routes are: this needs no `v4l2-ctl` run on the operator's
+     * behalf. It is a configuration edit, and the commonest case for it is a
+     * socket with nothing on it — a sweep would tell it nothing it does not
+     * already know, and a daemon with no camera layer at all should still be
+     * able to shed an entry it can never answer for.
+     *
+     * **Through `engine.apply`, never a direct write** (R-CFG-03). It is
+     * journalled, confirmable and revertible on the same terms as every other
+     * change to the single declarative file; whether it earns a confirmation
+     * window is the engine's decision, not this route's.
+     *
+     * **What happens to the captures this camera made: they stay.**
+     * `/var/lib/yonder/captures/<id>/` is untouched here. Removing an entry
+     * is a configuration change and the apply engine can revert it — deleting
+     * the recordings would make half of it irreversible while the console
+     * told the operator the whole thing could be undone, and flight footage
+     * is not a thing to destroy as a side effect of tidying a list. R-CAM-18
+     * gives deleting a capture its own control, on the camera's own page,
+     * where an operator does it deliberately.
+     *
+     * The consequence, stated rather than discovered: ids are handed out
+     * lowest-free, so re-adopting a camera after removing `cam2` gives it
+     * `cam2` again — and that camera's page will list the removed camera's
+     * captures, because they are filed under the id. On a board where the
+     * same camera has moved sockets that is very often the right answer, and
+     * where it is not, the captures panel is where they can be removed.
+     */
+    if (method === "DELETE" && verb === "") {
+      const held = loadConfig(deps.configPath);
+      const going = held.cameras.find((c) => c.id === id);
+      if (going === undefined) {
+        return { status: 404, body: { error: `no camera is configured with the id "${id}"` } };
+      }
+      // The supervisor's own observation, never the configuration's
+      // `enabled`: what must not be pulled out from under a pipeline is a
+      // pipeline that is actually up. Absent supervisor means this daemon
+      // started nothing, so nothing is running.
+      const refusal = removalRefusal(deps.supervisor?.state(id).state ?? "stopped");
+      if (refusal !== null) {
+        say(`DELETE /cameras/${id}: ${refusal}`);
+        return { status: 409, body: { error: refusal } };
+      }
+      const next = structuredClone(held);
+      next.cameras = next.cameras.filter((c) => c.id !== id);
+      say(`cameras: removed ${id}, which was configured on ${going.device}`);
+      // `camera`, not `id`, for the reason `POST /cameras` gives: the apply's
+      // own answer carries an `id` — the confirmation handle — and two
+      // different ids under one name in one body is how a caller confirms the
+      // wrong thing.
+      return { status: 200, body: { camera: id, ...(await deps.engine.apply(next)) } };
     }
 
     const probes = deps.cameras;

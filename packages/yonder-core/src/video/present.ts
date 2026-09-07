@@ -370,6 +370,28 @@ export function identityWords(byPath: string | null, stable: boolean): string {
     : `${byPath} — an enumeration number; it may mean a different camera after a reboot`;
 }
 
+/**
+ * The socket a configured camera expects, where the sweep matched it to
+ * nothing (R-CAM-05, R-UI-20).
+ *
+ * `identityWords()` has two branches and neither is this one. Both of its
+ * answers are about a camera that *answered*: it either has a by-path name
+ * that survives a reboot or an enumeration number that does not. Its `null`
+ * branch — "not resolved — this camera did not answer" — is the camera's own
+ * page, where the socket is already stated beside it; on an index row it
+ * would drop the one fact this row exists to carry, which is **which socket
+ * this camera is configured on**. That string is what the operator moves a
+ * plug to, or removes the entry for.
+ *
+ * "Nothing there answered" rather than "nothing is attached", because the
+ * board cannot tell the two apart and the second claims more than it saw: a
+ * camera can be plugged in and refuse to enumerate, and it would appear here
+ * exactly as an empty socket does.
+ */
+export function absentIdentityWords(device: string): string {
+  return `${device} — configured on this socket; nothing there answered`;
+}
+
 export function cameraStrip(view: {
   camera: Camera;
   run: { state: string; reason?: string };
@@ -487,7 +509,37 @@ export interface CameraRow {
    * that is what still means this camera after a replug.
    */
   readonly device: string;
-  readonly capabilities: CameraCapabilities;
+  /**
+   * What the device answered when the probe asked it, or **`null` where
+   * nothing was asked because nothing answered** (R-CAM-14, R-UI-20).
+   *
+   * `null` on exactly one kind of row: a configured camera the sweep matched
+   * to no detection. `noCapabilities()` would be the easy value to put here
+   * and it would be a lie — it reads out as `aim: none · zoom: none · …`,
+   * twenty-one statements about a camera this board cannot see, in the line
+   * an operator reads to find out what a camera can do. An operator must be
+   * able to tell *this camera cannot* from *this camera was not there to
+   * ask*, which is R-UI-20's own sentence. `YonderIndex` draws no probe
+   * summary at all for null.
+   */
+  readonly capabilities: CameraCapabilities | null;
+  /**
+   * Why this camera cannot be taken out of the configuration right now, or
+   * `null` when nothing is stopping it (R-CAM-21).
+   *
+   * The same shape and the same reason as `CameraStrip.startCheck`: the row
+   * carries the refusal so the key that would be refused is drawn inoperative
+   * *with the reason on it*, rather than live and answered with a 409 the
+   * page has nowhere to put. The Cameras page's own wiring reads the list
+   * again after a press, so a refusal travelling back on `msg.yonder` is
+   * overwritten by the next sweep before anything could draw it — which is
+   * how a refusal "in words" becomes no words at all.
+   *
+   * Non-null on a row with no `id` too: there is no configured camera on that
+   * socket, so there is nothing to remove. That row draws the key that
+   * *adopts* it instead.
+   */
+  readonly removal: string | null;
 }
 
 /** One device the probe refused, and why (R-CAM-12). */
@@ -530,16 +582,82 @@ function runState(state: RunState): { state: string; tone: RunTone } {
 }
 
 /**
- * What the Cameras page draws (R-CAM-12, R-UI-03, R-CAM-05).
+ * Why a camera may not be taken out of the configuration, or `null`
+ * (R-CAM-21).
  *
- * A row per *detection*, not per configured camera: the page's subject is
- * what is attached to this board right now, and a configured camera that is
- * not plugged in has no row here — its absence is the fact, and the
- * rejection list beside it is where a device that is present and unusable
- * appears. A detection on a socket nothing is configured for is still a row,
- * with `id: null`, because "there is a camera here and Yonder is not set up
- * for it" is exactly the thing an operator has to be told; `YonderIndex`
- * draws such a row inert, because there is no page to open for it (R-UI-03).
+ * **Removing a camera is not a way to stop it.** A pipeline that is up is a
+ * picture somebody is watching and an uplink somebody is paying for, and an
+ * operator who wants it to stop has a Stop key that says so. Taking the
+ * camera's entry out from under a running pipeline is the same press wearing
+ * a disguise, and it is irreversible in the direction that matters: the
+ * configuration is what the pipeline was composed from.
+ *
+ * `failed` and `stopped` both allow it, and the distinction is deliberate —
+ * a camera that failed is a camera whose pipeline exited, which is very often
+ * *because* the device is not there. Refusing to remove exactly the entries
+ * an operator most needs to remove would be this guard defeating its own
+ * purpose.
+ *
+ * Exhaustive by construction — every case returns, no `default:`, the return
+ * type written out — for the reason `runState()` above gives.
+ *
+ * Exported so `daemon/routes.ts` refuses in the same words the row is drawn
+ * with. Two sentences for one rule is how a page and a daemon come to
+ * disagree about why something did not happen.
+ */
+export function removalRefusal(run: RunState): string | null {
+  switch (run) {
+    case "running":
+      return "this camera is streaming; stop it before taking it out of the configuration";
+    case "starting":
+      return "this camera is starting; stop it before taking it out of the configuration";
+    case "failed":
+    case "stopped":
+      return null;
+  }
+}
+
+/** What a row with no configured camera behind it says about being removed. */
+const NOTHING_TO_REMOVE = "nothing is configured on this socket, so there is nothing to remove";
+
+/**
+ * What the Cameras page draws (R-CAM-12, R-CAM-20, R-UI-03, R-CAM-05).
+ *
+ * **A row per detection *and* a row per configured camera** — the union, and
+ * never one of the two alone.
+ *
+ * This used to map `input.found` only, and the sentence justifying it was
+ * that a configured camera which is not plugged in "has no row here — its
+ * absence is the fact". The operator found what that sentence costs. A camera
+ * had been moved between USB ports; a camera's identity is its socket
+ * (R-CAM-05), so each move made it a *different* camera as far as the
+ * configuration was concerned, and the board ended up with two entries
+ * pointing at empty ports and the camera actually in his hand matching
+ * neither. The page said **"not configured"** about the only camera present
+ * and drew nothing at all about the two it was configured for — while the
+ * navigation, built from the configuration, carried both. The honest reading
+ * of a page like that is that the console is broken.
+ *
+ * An absence is a fact only where something states it. This is R-UI-20's own
+ * argument, one level up from the capability rows it was written about: an
+ * absent reading and a reading of nothing are different facts, and drawing
+ * neither is worse than drawing either.
+ *
+ * So there are three kinds of row, and every one of them is drawn:
+ *
+ * - **configured, and found** — the ordinary camera, with its supervisor's
+ *   observed run state;
+ * - **found, and configured nowhere** — `id: null`, `state: "Not
+ *   configured"`. There is a camera here and Yonder is not set up for it,
+ *   which is exactly the thing an operator has to be told; `YonderIndex`
+ *   draws no OPEN key for it, because there is no page to open (R-UI-03),
+ *   and offers the key that adopts it instead;
+ * - **configured, and found nowhere** — `state: "Not attached"`, carrying
+ *   the socket it expects and no capabilities, because nothing answered to
+ *   be asked. `YonderIndex` offers the key that removes it (R-CAM-21).
+ *
+ * The rejection list beside all three is still where a device that is present
+ * and unusable appears (R-CAM-12).
  */
 export function cameraIndex(input: {
   readonly found: readonly {
@@ -564,6 +682,19 @@ export function cameraIndex(input: {
    */
   readonly egressKbps?: (id: string) => number | null;
 }): CameraIndex {
+  /**
+   * Which configured cameras a detection accounted for — **by id, not by
+   * socket.**
+   *
+   * By id because that is what makes "every configured camera is drawn
+   * somewhere" true by construction rather than by luck. A configuration can
+   * name two cameras on one socket — `POST /cameras` refuses to write the
+   * second, but a hand-written `config.yaml` is not obliged to ask it — and a
+   * set of matched sockets would mark that socket accounted for, leave the
+   * second entry matched by nothing, and drop it from the page. Which is the
+   * defect this function is being changed to fix, in miniature.
+   */
+  const matched = new Set<string>();
   const cameras = input.found.map((detected): CameraRow => {
     const configured = input.cameras.find((c) => c.device === detected.byPath);
     const identity = identityWords(detected.byPath, detected.byPathStable);
@@ -580,9 +711,12 @@ export function cameraIndex(input: {
         rate: null,
         device: detected.byPath,
         capabilities: detected.capabilities,
+        removal: NOTHING_TO_REMOVE,
       };
     }
+    matched.add(configured.id);
     const measured = input.egressKbps?.(configured.id) ?? null;
+    const run = input.run(configured.id);
     return {
       id: configured.id,
       // The socket the camera was found on, which is the socket the
@@ -593,14 +727,64 @@ export function cameraIndex(input: {
       bus,
       spec: `${configured.codec.toUpperCase()} · ${configured.width}×${configured.height}p${configured.framerate}`,
       identity,
-      ...runState(input.run(configured.id)),
+      ...runState(run),
       // Mb/s at IP, the layer an uplink actually carries — the same layer
       // every other rate on this console is stated at (`IP_OVERHEAD` above).
       rate: measured === null ? null : Number((atIp(measured) / 1000).toFixed(2)),
       capabilities: detected.capabilities,
+      removal: removalRefusal(run),
     };
   });
-  return { cameras, rejected: input.rejected };
+
+  /**
+   * Every configured camera the sweep matched to nothing (R-CAM-20).
+   *
+   * **After the found rows, never interleaved with them.** What is attached
+   * to this board is still the page's first subject, and an operator scanning
+   * for the camera in their hand should not have to read past two entries for
+   * cameras that are not there to find it. The order is also the one the
+   * operator meets these in: a row appears down here on the day something is
+   * unplugged, or on the day it is moved to another port and appears twice —
+   * once up there with no id, once down here with no device.
+   *
+   * `state` is **not** `runState(input.run(id))`. The supervisor answers
+   * `stopped` for a camera that is idle and for a camera that is not on the
+   * bus at all, and drawing both as `Idle` is precisely the confusion that
+   * left two dead entries on a board unnoticed. `run` is still asked, and it
+   * still decides `removal`: a pipeline can outlive the device it was reading
+   * from (a camera can fall off the bus mid-flight), and removing a camera is
+   * not the way to stop one.
+   */
+  const absent = input.cameras
+    .filter((camera) => !matched.has(camera.id))
+    .map((camera): CameraRow => ({
+      id: camera.id,
+      name: camera.name,
+      // Where the `/dev` node would be, there is none — said, rather than
+      // left as an empty half of the line.
+      bus: `${camera.source} · no device`,
+      // What it is configured to send, exactly as a found camera's row states
+      // it. The configuration has not stopped saying it; the camera has
+      // stopped being there to say it to.
+      spec: `${camera.codec.toUpperCase()} · ${camera.width}×${camera.height}p${camera.framerate}`,
+      identity: absentIdentityWords(camera.device),
+      state: "Not attached",
+      // The strongest of the four, and deliberately: this is an aircraft
+      // configured for a camera it does not have. It is either a camera that
+      // fell off the bus — the failure K-46 is about, which an operator has
+      // to know about while they can still act on it — or an entry left
+      // behind by a replug, which is wrong and now has a key to clear it.
+      // Drawn neutral, it is what nobody noticed for three configurations.
+      tone: "bad",
+      rate: null,
+      // The socket it expects. The one string an operator can act on: move a
+      // plug back to it, or remove the entry that names it.
+      device: camera.device,
+      capabilities: null,
+      removal: removalRefusal(input.run(camera.id)),
+    }));
+
+  return { cameras: [...cameras, ...absent], rejected: input.rejected };
 }
 
 /** One output as the deck draws it. */
