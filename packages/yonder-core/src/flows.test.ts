@@ -400,8 +400,12 @@ describe("flows/flows.json", () => {
     // when it is not working. The list is exhaustive rather than a minimum on
     // purpose: a page added without a line here is a page nobody decided to
     // ship, and the capture gate would photograph it anyway.
+    //
+    // Cockpit is R-UI-28's own surface: the picture and the aim panel with
+    // nothing the camera page draws around them. It sits directly after
+    // Camera because it is the same payload seen a second way.
     expect(pages.map((p) => p.name).sort())
-      .toEqual(["Camera", "Cameras", "Diagnostics", "Log", "Network", "Status", "Telemetry"]);
+      .toEqual(["Camera", "Cameras", "Cockpit", "Diagnostics", "Log", "Network", "Status", "Telemetry"]);
 
     const groups = flows.filter((n) => n.type === "ui-group");
     for (const page of pages) {
@@ -1747,6 +1751,12 @@ describe("flows/flows.json camera pages", () => {
     // on the rail, because R-UI-10 puts every action there and only there.
     { group: "group-cameras-pending", suffix: "-cameras", hidden: "group" },
     { group: "group-cam-pending", suffix: "-cam", hidden: "group" },
+    // The Cockpit has no rail to hang CONFIRM and REVERT NOW off, so the
+    // banner carries its own keys — the Status/Log/Diagnostics/Telemetry
+    // idiom, where the whole banner is one hidden group. Without the `ui-text`
+    // pair, because ADR-0009 keeps stock controls off the surfaces that draw
+    // camera instruments and the lamp says the same words those lines would.
+    { group: "group-cockpit-pending", suffix: "-cockpit", hidden: "group" },
     { group: "group-net-now", suffix: "-interfaces", hidden: "widgets" },
     { group: "group-net-join", suffix: "-wifi", hidden: "widgets" },
     { group: "group-net-zerotier", suffix: "-zerotier", hidden: "widgets" },
@@ -2129,8 +2139,12 @@ describe("flows/flows.json camera pages", () => {
     expect(down).toEqual(["cam-rate-full"]);
     expect(up).toEqual(["cam-rate-preview"]);
     // And both reach the picture, or the key is a control that does nothing.
+    // Both pictures: one read feeds the Camera page's and the Cockpit's
+    // (R-UI-28), so a message that stopped at one of them would be a rate
+    // change the other page never heard about.
     for (const id of ["cam-rate-full", "cam-rate-preview"]) {
-      expect((flows.find((n) => n.id === id)?.wires as string[][])[0]).toEqual(["pic-camera"]);
+      expect((flows.find((n) => n.id === id)?.wires as string[][])[0])
+        .toEqual(["pic-camera", "pic-cockpit"]);
     }
   });
 
@@ -2840,11 +2854,14 @@ describe("flows/flows.json camera pages", () => {
    * gets a 404 and reports it as a camera that is not streaming.
    */
   it("tells the picture which camera it is of, and what watching it costs", () => {
-    const picture = flows.find((n) => n.type === "ui-yonder-picture");
-    expect(picture?.cost).toBe("");
-    expect(picture?.path).toBe("");
+    const pictures = flows.filter((n) => n.type === "ui-yonder-picture");
+    expect(pictures.length, "there is no picture").toBeGreaterThan(0);
+    for (const picture of pictures) {
+      expect(picture.cost, `${String(picture.id)} types its own cost`).toBe("");
+      expect(picture.path, `${String(picture.id)} types its own path`).toBe("");
+    }
     const from = flows.find((n) => n.id === "pick-cam-picture");
-    expect((from?.wires as string[][])[0]).toEqual(["pic-camera"]);
+    expect((from?.wires as string[][])[0]).toEqual(["pic-camera", "pic-cockpit"]);
     expect(JSON.stringify(from?.rules)).toContain("payload.camera.id");
     expect(JSON.stringify(from?.rules)).toContain("payload.display.pictureCost");
     expect((flows.find((n) => n.id === "camera-read")?.wires as string[][])[0])
@@ -3073,7 +3090,7 @@ describe("flows/flows.json camera pages", () => {
     // Copies, and no expression: the words for where it went are
     // `heldWords()`'s, in the component that draws them.
     expect(JSON.stringify(saved?.rules)).not.toContain("jsonata");
-    expect((saved?.wires as string[][])[0]).toEqual(["pic-camera"]);
+    expect((saved?.wires as string[][])[0]).toEqual(["pic-camera", "pic-cockpit"]);
   });
 
   /**
@@ -3096,6 +3113,243 @@ describe("flows/flows.json camera pages", () => {
     const deletes = rules.map((r, i) => ({ ...r, i })).filter((r) => r.t === "delete");
     expect(deletes.map((r) => r.p)).toContain("rec");
     for (const d of deletes) expect(d.i, `${d.p} is deleted before the last set`).toBeGreaterThan(lastSet);
+  });
+});
+
+/**
+ * **The Cockpit: the picture and the aim panel, with no deck around them**
+ * (R-UI-28).
+ *
+ * This page is not the mission-control surface — that is M5. It is the
+ * *proof* that the two instruments M5 will embed stand on their own: a page
+ * carrying exactly `ui-yonder-picture` and `ui-yonder-aim`, fed the same
+ * messages the Camera page feeds them, with no deck, no rail and no readout
+ * strip. If either instrument reaches for something the deck draws around it,
+ * this is the page where that shows — on a board, in the capture gate, and
+ * here.
+ *
+ * **One read, two pages.** Every feed is a second wire off the *same* change
+ * node rather than a second copy of it, so `camera-poll`'s five-second read
+ * still asks the daemon once. A duplicated pick node would have doubled the
+ * poll the moment somebody opened the Cockpit, and nothing on either page
+ * would have looked wrong.
+ *
+ * **What is deliberately here and is not an instrument**: the CHANGE PENDING
+ * banner, hidden until there is something to confirm. R-UI-15 is priority 1
+ * and says *every* surface, and the operator watching the picture is exactly
+ * the operator about to lose a working configuration to a timer they cannot
+ * see. It is one hidden group carrying its own lamp and its own two keys —
+ * the Status/Log/Diagnostics/Telemetry idiom — because there is no rail here
+ * to hang them off. It draws nothing in any normal state and feeds neither
+ * instrument, so the proof above is untouched by it.
+ */
+describe("flows/flows.json Cockpit page", () => {
+  const byId = (id: string) => flows.find((n) => n.id === id);
+  const cockpit = flows.find((n) => n.type === "ui-page" && n.name === "Cockpit");
+  const groupsOn = (page: FlowNode | undefined): FlowNode[] =>
+    flows.filter((n) => n.type === "ui-group" && n.page === page?.id);
+  const on = (page: FlowNode | undefined): FlowNode[] => {
+    const ids = new Set(groupsOn(page).map((g) => g.id));
+    return flows.filter((n) => ids.has(String(n.group)));
+  };
+
+  it("is a grid page of its own, at /cockpit", () => {
+    expect(cockpit, "there is no Cockpit page").toBeDefined();
+    expect(cockpit?.layout).toBe("grid");
+    expect(cockpit?.path).toBe("/cockpit");
+  });
+
+  /**
+   * **Directly after Camera, and the pages below it move down.**
+   *
+   * The order numbers are the navigation pane, so this is the sidebar an
+   * operator actually sees: the payload first, then the things they reach for
+   * when the payload is not working.
+   */
+  it("sits after Camera in the navigation, with the rest renumbered", () => {
+    const nav = flows.filter((n) => n.type === "ui-page")
+      .sort((a, b) => Number(a.order) - Number(b.order))
+      .map((p) => p.name);
+    expect(nav).toEqual([
+      "Status", "Network", "Cameras", "Camera", "Cockpit", "Telemetry", "Log", "Diagnostics",
+    ]);
+    // Distinct, or two pages share a slot and Dashboard picks one by
+    // accident — the renumber above is exactly where that could happen.
+    const orders = flows.filter((n) => n.type === "ui-page").map((p) => Number(p.order));
+    expect(new Set(orders).size, "two pages claim the same place in the nav").toBe(orders.length);
+  });
+
+  /**
+   * **The picture and the aim panel, and nothing that draws around them.**
+   *
+   * Named as an exhaustive list rather than as a set of absences: a widget
+   * added here without a line in this test is a widget nobody decided the
+   * proof could survive.
+   */
+  it("carries one picture, one aim panel, and no deck, rail or readout", () => {
+    const instruments = on(cockpit).filter((n) => !String(n.className ?? "").includes("yonder-pending"));
+    expect(instruments.map((n) => n.id).sort()).toEqual(["aim-cockpit", "pic-cockpit"]);
+    expect(instruments.map((n) => n.type).sort()).toEqual(["ui-yonder-aim", "ui-yonder-picture"]);
+    // The deck by name, because that is the thing R-UI-28 is about.
+    expect(on(cockpit).map((n) => n.type), "the Cockpit draws a deck")
+      .not.toContain("ui-yonder-deck");
+    for (const group of groupsOn(cockpit)) {
+      expect(String(group.className ?? ""), `${String(group.id)} is a rail`)
+        .not.toContain("yonder-rail");
+    }
+    // No readout strip: the data bar is what draws one, and the facts under
+    // the deck are the other half of it.
+    for (const kind of ["ui-yonder-databar", "ui-yonder-facts", "ui-yonder-captures"]) {
+      expect(on(cockpit).map((n) => n.type), `the Cockpit draws a ${kind}`).not.toContain(kind);
+    }
+  });
+
+  /**
+   * **Beside, not below** — the Camera page's own widths, so the arrangement
+   * spec §5 measured on that page is the arrangement measured here.
+   */
+  it("puts the aim panel beside the picture, in the Camera page's widths", () => {
+    const ordered = groupsOn(cockpit)
+      .filter((g) => g.id !== "group-cockpit-pending")
+      .sort((a, b) => Number(a.order) - Number(b.order));
+    expect(ordered.map((g) => g.id)).toEqual(["group-cockpit-picture", "group-cockpit-aim"]);
+    expect(Number(ordered[0]?.width)).toBe(Number(byId("group-cam-picture")?.width));
+    expect(Number(ordered[1]?.width)).toBe(Number(byId("group-cam-aim")?.width));
+    expect(Number(ordered[0]?.width) + Number(ordered[1]?.width)).toBe(12);
+    // The banner is above both, or a change pending would push the picture
+    // down the page from underneath it.
+    expect(Number(byId("group-cockpit-pending")?.order))
+      .toBeLessThan(Number(ordered[0]?.order));
+  });
+
+  /**
+   * **The same change nodes, not a second copy of them** (R-UI-28).
+   *
+   * Every one of the picture's four feeds and the aim panel's one is a second
+   * wire off the node the Camera page's widget already hangs from. Asserted
+   * as "both ids on the one node's output" rather than "the Cockpit widget is
+   * fed by something", because a duplicated pick node would satisfy the
+   * weaker claim and would poll the daemon twice.
+   */
+  it("feeds both pages from one read", () => {
+    const pairs: [string, string, string][] = [
+      ["pick-cam-picture", "pic-camera", "pic-cockpit"],
+      ["cam-rate-full", "pic-camera", "pic-cockpit"],
+      ["cam-rate-preview", "pic-camera", "pic-cockpit"],
+      ["cam-caps-saved", "pic-camera", "pic-cockpit"],
+      ["pick-cam-aim", "aim-camera", "aim-cockpit"],
+    ];
+    for (const [from, camera, cockpitWidget] of pairs) {
+      expect((byId(from)?.wires as string[][])[0], `${from} does not feed both pages`)
+        .toEqual([camera, cockpitWidget]);
+    }
+    // And nothing else composes for them: one pick node per fact, still.
+    for (const kind of ["pick-cam-picture", "pick-cam-aim"]) {
+      expect(flows.filter((n) => n.type === "change" && n.id === kind).length).toBe(1);
+    }
+  });
+
+  /**
+   * **The Cockpit picture's node says no more than the Camera page's.**
+   *
+   * Every value it draws arrives on a message; a field typed in here would be
+   * a number frozen at deploy time, which is the defect R-VID-11 exists for
+   * and which this file has already caught twice on `pic-camera`.
+   */
+  it("gives the Cockpit picture the same fields as the Camera page's, and no more", () => {
+    const camera = byId("pic-camera") as FlowNode;
+    const cockpitPicture = byId("pic-cockpit") as FlowNode;
+    const shape = (n: FlowNode) => Object.keys(n)
+      .filter((k) => !["id", "name", "group", "x", "y", "wires"].includes(k)).sort();
+    expect(shape(cockpitPicture)).toEqual(shape(camera));
+    for (const field of ["path", "label", "cost"]) {
+      expect(cockpitPicture[field], `${field} is typed into the Cockpit picture`).toBe("");
+    }
+    expect(cockpitPicture.stillsAfterMs).toBe(camera.stillsAfterMs);
+  });
+
+  /**
+   * **The Cockpit's actions reach what the Camera page's reach.**
+   *
+   * One switch for both pictures, not a second one: `cam-pic-act` already
+   * knows a Start from a thumb press, and a copy of it would be a second
+   * place for the two to drift apart. The rule-per-output check is the one
+   * that `7103700` shipped without — a switch with more outputs than rules
+   * has an output nothing can reach, and no test that reads only wires can
+   * see it.
+   */
+  it("sends the Cockpit picture's presses to the same switch, which still answers all three", () => {
+    expect((byId("pic-cockpit")?.wires as string[][])[0]).toEqual(["cam-pic-act"]);
+    expect(flows.filter((n) => n.id === "cam-pic-act").length).toBe(1);
+    const act = byId("cam-pic-act");
+    const rules = act?.rules as { t: string; v?: string }[];
+    const wires = act?.wires as string[][];
+    expect(rules.length, "one rule per output, or an output is unreachable").toBe(wires.length);
+    expect(rules.map((r) => `${r.t}:${String(r.v)}`))
+      .toEqual(["eq:start", "hask:path", "else:undefined"]);
+    expect(wires[0]).toEqual(["cam-at-stream"]);
+    expect(wires[1]).toEqual(["cam-pic-go"]);
+    // The fall-through goes nowhere on purpose: everything else the picture
+    // posts is its own business (`mode:`, `rate:`) and must not come back.
+    expect(wires[2]).toEqual([]);
+  });
+
+  /**
+   * The aim panel's output goes where the Camera page's goes, which today is
+   * nowhere — the gimbal route is named as unrouted in "routes every press
+   * the deck makes" above, so adding one is a change to a list rather than a
+   * discovery. Asserted as *the same* rather than as *empty*, so the day that
+   * route arrives this page gets it in the same change.
+   */
+  it("gives the Cockpit aim panel the Camera page's own destination", () => {
+    expect((byId("aim-cockpit")?.wires as string[][])[0])
+      .toEqual((byId("aim-camera")?.wires as string[][])[0]);
+  });
+
+  /**
+   * R-UI-15 on a page with no rail: one hidden group carrying the lamp and
+   * the two keys, raised and dropped by the same `ui-control` message every
+   * other surface's banner is.
+   */
+  it("shows a change pending, and offers the two keys, from inside the banner", () => {
+    const group = byId("group-cockpit-pending");
+    expect(group?.page).toBe("page-cockpit");
+    expect(group?.visible, "the banner is drawn before there is anything to say").toBe(false);
+    const lamp = byId("ann-pending-cockpit");
+    const keys = byId("keys-pending-cockpit");
+    expect(lamp?.group).toBe("group-cockpit-pending");
+    expect(keys?.group).toBe("group-cockpit-pending");
+    expect((JSON.parse(String(keys?.keys)) as { action: string }[]).map((k) => k.action))
+      .toEqual(["confirm", "revert"]);
+    expect((keys?.wires as string[][])[0]).toEqual(["tag-pending-key"]);
+    // Fed by the one poll that feeds every other banner on the console.
+    const poll = (byId("poll-pending")?.wires as string[][])[0];
+    for (const id of ["ann-pending-cockpit", "keys-pending-cockpit"]) {
+      expect(poll, `${id} is a banner nothing fills`).toContain(id);
+    }
+    // And raised and dropped with the rest.
+    for (const id of ["show-pending-banner", "hide-pending-banner"]) {
+      expect(String((byId(id)?.rules as { to: string }[])[0]?.to),
+        `${id} leaves the Cockpit's banner where it was`).toContain("group-cockpit-pending");
+    }
+  });
+
+  /**
+   * **Not a camera page**, so the sweep that shows and hides one leaves it
+   * alone. `page-cockpit`'s groups are `group-cockpit-*` for exactly this
+   * reason: "shows and opens the same camera page" above finds camera pages
+   * by a `group-cam-` prefix, and a Cockpit caught by that filter would fail
+   * as a camera page nothing shows.
+   */
+  it("is not swept with the camera pages", () => {
+    for (const group of groupsOn(cockpit)) {
+      expect(String(group.id).startsWith("group-cam-"),
+        `${String(group.id)} would read as a camera group`).toBe(false);
+    }
+    for (const id of ["cameras-show-page", "cameras-hide-page"]) {
+      expect(String((flows.find((n) => n.id === id)?.rules as { to: string }[])[0].to))
+        .not.toContain("page-cockpit");
+    }
   });
 });
 

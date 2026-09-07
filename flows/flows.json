@@ -149,7 +149,7 @@
                 "cols": "12"
             }
         ],
-        "order": 6,
+        "order": 7,
         "className": "",
         "visible": true,
         "disabled": false
@@ -185,7 +185,7 @@
                 "cols": "12"
             }
         ],
-        "order": 7,
+        "order": 8,
         "className": "",
         "visible": true,
         "disabled": false
@@ -3053,7 +3053,9 @@
                 "ann-camera",
                 "ann-pending-cameras",
                 "keys-pending-cameras",
-                "keys-pending-cam"
+                "keys-pending-cam",
+                "ann-pending-cockpit",
+                "keys-pending-cockpit"
             ]
         ]
     },
@@ -3160,7 +3162,7 @@
                 "t": "set",
                 "p": "payload",
                 "pt": "msg",
-                "to": "{\"groups\": {\"show\": [\"group-status-pending\", \"group-log-pending\", \"group-diag-pending\", \"group-tel-pending\", \"group-cameras-pending\"]}, \"widgets\": {\"show\": [\"ann-pending-interfaces\", \"text-pending-what-interfaces\", \"text-pending-why-interfaces\", \"keys-pending-interfaces\", \"ann-pending-wifi\", \"text-pending-what-wifi\", \"text-pending-why-wifi\", \"keys-pending-wifi\", \"ann-pending-zerotier\", \"text-pending-what-zerotier\", \"text-pending-why-zerotier\", \"keys-pending-zerotier\", \"ann-pending-cellular\", \"text-pending-what-cellular\", \"text-pending-why-cellular\", \"keys-pending-cellular\", \"ann-pending-activity\", \"text-pending-what-activity\", \"text-pending-why-activity\", \"keys-pending-activity\", \"keys-pending-cameras\", \"keys-pending-cam\"]}}",
+                "to": "{\"groups\": {\"show\": [\"group-status-pending\", \"group-log-pending\", \"group-diag-pending\", \"group-tel-pending\", \"group-cameras-pending\", \"group-cockpit-pending\"]}, \"widgets\": {\"show\": [\"ann-pending-interfaces\", \"text-pending-what-interfaces\", \"text-pending-why-interfaces\", \"keys-pending-interfaces\", \"ann-pending-wifi\", \"text-pending-what-wifi\", \"text-pending-why-wifi\", \"keys-pending-wifi\", \"ann-pending-zerotier\", \"text-pending-what-zerotier\", \"text-pending-why-zerotier\", \"keys-pending-zerotier\", \"ann-pending-cellular\", \"text-pending-what-cellular\", \"text-pending-why-cellular\", \"keys-pending-cellular\", \"ann-pending-activity\", \"text-pending-what-activity\", \"text-pending-why-activity\", \"keys-pending-activity\", \"keys-pending-cameras\", \"keys-pending-cam\"]}}",
                 "tot": "json"
             }
         ],
@@ -3187,7 +3189,7 @@
                 "t": "set",
                 "p": "payload",
                 "pt": "msg",
-                "to": "{\"groups\": {\"hide\": [\"group-status-pending\", \"group-log-pending\", \"group-diag-pending\", \"group-tel-pending\", \"group-cameras-pending\"]}, \"widgets\": {\"hide\": [\"ann-pending-interfaces\", \"text-pending-what-interfaces\", \"text-pending-why-interfaces\", \"keys-pending-interfaces\", \"ann-pending-wifi\", \"text-pending-what-wifi\", \"text-pending-why-wifi\", \"keys-pending-wifi\", \"ann-pending-zerotier\", \"text-pending-what-zerotier\", \"text-pending-why-zerotier\", \"keys-pending-zerotier\", \"ann-pending-cellular\", \"text-pending-what-cellular\", \"text-pending-why-cellular\", \"keys-pending-cellular\", \"ann-pending-activity\", \"text-pending-what-activity\", \"text-pending-why-activity\", \"keys-pending-activity\", \"keys-pending-cameras\", \"keys-pending-cam\"]}}",
+                "to": "{\"groups\": {\"hide\": [\"group-status-pending\", \"group-log-pending\", \"group-diag-pending\", \"group-tel-pending\", \"group-cameras-pending\", \"group-cockpit-pending\"]}, \"widgets\": {\"hide\": [\"ann-pending-interfaces\", \"text-pending-what-interfaces\", \"text-pending-why-interfaces\", \"keys-pending-interfaces\", \"ann-pending-wifi\", \"text-pending-what-wifi\", \"text-pending-why-wifi\", \"keys-pending-wifi\", \"ann-pending-zerotier\", \"text-pending-what-zerotier\", \"text-pending-why-zerotier\", \"keys-pending-zerotier\", \"ann-pending-cellular\", \"text-pending-what-cellular\", \"text-pending-why-cellular\", \"keys-pending-cellular\", \"ann-pending-activity\", \"text-pending-what-activity\", \"text-pending-why-activity\", \"keys-pending-activity\", \"keys-pending-cameras\", \"keys-pending-cam\"]}}",
                 "tot": "json"
             }
         ],
@@ -3935,6 +3937,41 @@
         ]
     },
     {
+        "id": "ann-pending-cockpit",
+        "type": "ui-yonder-annunciator",
+        "z": "yonder-console",
+        "group": "group-cockpit-pending",
+        "name": "how long is left",
+        "order": 1,
+        "width": 12,
+        "height": 1,
+        "label": "",
+        "source": "yonder",
+        "x": 1020,
+        "y": 5440,
+        "wires": [],
+        "className": "yonder-live yonder-pending"
+    },
+    {
+        "id": "keys-pending-cockpit",
+        "type": "ui-yonder-softkeys",
+        "z": "yonder-console",
+        "group": "group-cockpit-pending",
+        "name": "confirm or revert",
+        "order": 2,
+        "width": 12,
+        "height": 1,
+        "keys": "[{\"label\": \"CONFIRM\", \"action\": \"confirm\", \"tone\": \"warn\"}, {\"label\": \"REVERT NOW\", \"action\": \"revert\", \"tone\": \"act\"}]",
+        "className": "yonder-pending",
+        "x": 260,
+        "y": 5440,
+        "wires": [
+            [
+                "tag-pending-key"
+            ]
+        ]
+    },
+    {
         "id": "page-cameras",
         "type": "ui-page",
         "name": "Cameras",
@@ -4201,6 +4238,42 @@
             }
         ],
         "order": 4,
+        "className": "",
+        "visible": true,
+        "disabled": false
+    },
+    {
+        "id": "page-cockpit",
+        "type": "ui-page",
+        "name": "Cockpit",
+        "ui": "dashboard",
+        "path": "/cockpit",
+        "icon": "crosshairs-gps",
+        "layout": "grid",
+        "theme": "palette",
+        "breakpoints": [
+            {
+                "name": "Default",
+                "px": "0",
+                "cols": "3"
+            },
+            {
+                "name": "Tablet",
+                "px": "576",
+                "cols": "6"
+            },
+            {
+                "name": "Small Desktop",
+                "px": "768",
+                "cols": "9"
+            },
+            {
+                "name": "Desktop",
+                "px": "1024",
+                "cols": "12"
+            }
+        ],
+        "order": 5,
         "className": "",
         "visible": true,
         "disabled": false
@@ -4562,7 +4635,8 @@
         "y": 1980,
         "wires": [
             [
-                "pic-camera"
+                "pic-camera",
+                "pic-cockpit"
             ]
         ]
     },
@@ -5225,7 +5299,8 @@
         "y": 2750,
         "wires": [
             [
-                "pic-camera"
+                "pic-camera",
+                "pic-cockpit"
             ]
         ]
     },
@@ -5252,7 +5327,8 @@
         "y": 2790,
         "wires": [
             [
-                "pic-camera"
+                "pic-camera",
+                "pic-cockpit"
             ]
         ]
     },
@@ -5444,6 +5520,48 @@
         "groupType": "default"
     },
     {
+        "id": "group-cockpit-picture",
+        "type": "ui-group",
+        "name": "Picture",
+        "page": "page-cockpit",
+        "width": 8,
+        "height": 1,
+        "order": 1,
+        "showTitle": false,
+        "className": "",
+        "visible": true,
+        "disabled": false,
+        "groupType": "default"
+    },
+    {
+        "id": "group-cockpit-aim",
+        "type": "ui-group",
+        "name": "Aim",
+        "page": "page-cockpit",
+        "width": 4,
+        "height": 1,
+        "order": 2,
+        "showTitle": false,
+        "className": "",
+        "visible": true,
+        "disabled": false,
+        "groupType": "default"
+    },
+    {
+        "id": "group-cockpit-pending",
+        "type": "ui-group",
+        "name": "Change pending",
+        "page": "page-cockpit",
+        "width": 12,
+        "height": 1,
+        "order": 0,
+        "showTitle": true,
+        "className": "",
+        "visible": false,
+        "disabled": false,
+        "groupType": "default"
+    },
+    {
         "id": "group-cam-setup",
         "type": "ui-group",
         "name": "Setup",
@@ -5482,6 +5600,42 @@
         "height": 4,
         "x": 460,
         "y": 2030,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "pic-cockpit",
+        "type": "ui-yonder-picture",
+        "z": "yonder-console",
+        "group": "group-cockpit-picture",
+        "name": "the picture, with no deck around it",
+        "order": 1,
+        "width": 12,
+        "height": 7,
+        "path": "",
+        "label": "",
+        "stillsAfterMs": 12000,
+        "cost": "",
+        "x": 180,
+        "y": 1880,
+        "wires": [
+            [
+                "cam-pic-act"
+            ]
+        ]
+    },
+    {
+        "id": "aim-cockpit",
+        "type": "ui-yonder-aim",
+        "z": "yonder-console",
+        "group": "group-cockpit-aim",
+        "name": "the gimbal, with no deck around it",
+        "order": 1,
+        "width": 12,
+        "height": 4,
+        "x": 180,
+        "y": 1930,
         "wires": [
             []
         ]
@@ -5646,7 +5800,8 @@
         "y": 2030,
         "wires": [
             [
-                "aim-camera"
+                "aim-camera",
+                "aim-cockpit"
             ]
         ]
     },
@@ -6034,7 +6189,8 @@
         "y": 2380,
         "wires": [
             [
-                "pic-camera"
+                "pic-camera",
+                "pic-cockpit"
             ]
         ]
     },
@@ -6395,7 +6551,7 @@
                 "cols": "12"
             }
         ],
-        "order": 5,
+        "order": 6,
         "className": "",
         "visible": true,
         "disabled": false

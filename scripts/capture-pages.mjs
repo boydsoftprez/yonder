@@ -77,15 +77,44 @@ function pagesFromFlows() {
   for (const p of flows.filter((n) => n.type === "ui-page")) {
     const slug = String(p.name).toLowerCase().replace(/[^a-z0-9]+/g, "-");
     const url = (base?.path ?? "/dashboard") + p.path;
+    const groups = flows.filter((n) => n.type === "ui-group" && n.page === p.id);
+    const ids = new Set(groups.map((g) => g.id));
+    const widgets = flows.filter((n) => ids.has(String(n.group)));
+    /**
+     * **What this page promises, read off the page rather than off a list.**
+     *
+     * The three viewport rules below are not one rule: the parts above the
+     * fold, one page scroll with no scroller inside the deck, and a rail that
+     * stays reachable. Spec §5 writes all three for the camera pages, which
+     * carry all three things. The Cockpit (R-UI-28) carries the picture and
+     * the Aim panel and deliberately nothing else — no deck, so no shutter key
+     * and no inner scroller to look for, and no rail to keep in the viewport.
+     *
+     * Holding it to rules about parts it does not have would be the mistake
+     * this file already records one paragraph down: a gate rule stricter than
+     * the specification silently becoming the specification, and moving the
+     * console away from the blueprint. Holding it to *none* of them would be
+     * worse — so what it is held to is what it declares. A rail deleted by
+     * accident is `flows.test.ts`'s to catch, and it does.
+     */
+    const surface = {
+      rail: groups.some((g) => /yonder-rail/.test(String(g.className ?? ""))),
+      deck: groups.some((g) => /yonder-deck/.test(String(g.className ?? "")))
+        || widgets.some((n) => n.type === "ui-yonder-deck"),
+      // A page that draws a camera at all. `--synthetic-cameras` asserts one
+      // was photographed, and the Cockpit is one without being called
+      // "camera…" — the check used to read the name and would have said the
+      // fixture reached no page.
+      camera: widgets.some((n) => /^ui-yonder-(picture|deck|index|budget)$/.test(String(n.type))),
+    };
     // A tabbed page shows one group at a time, so "every page" would quietly
     // mean "the first tab" unless each tab is captured in its own right
     // (R-UI-12). The tab's label is its group's name.
     if (p.layout === "tabs") {
-      const tabs = flows
-        .filter((n) => n.type === "ui-group" && n.page === p.id)
-        .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+      const tabs = groups.slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
       for (const [i, g] of tabs.entries()) {
         out.push({
+          ...surface,
           name: `${slug}-${String(g.name).toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
           title: `${p.name} · ${g.name}`,
           url,
@@ -99,13 +128,12 @@ function pagesFromFlows() {
       // way. A deck is a `yonder-deck-<name>` in a group's className, and the
       // key that reveals it is the soft key whose action is that name.
       const decks = [];
-      for (const g of flows.filter((n) => n.type === "ui-group" && n.page === p.id)
-        .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))) {
+      for (const g of groups.slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0))) {
         const named = /yonder-deck-([a-z0-9-]+)/.exec(String(g.className ?? ""));
         if (named && !decks.includes(named[1])) decks.push(named[1]);
       }
       if (decks.length < 2) {
-        out.push({ name: slug, title: p.name, url });
+        out.push({ ...surface, name: slug, title: p.name, url });
         continue;
       }
       const label = (action) => {
@@ -118,6 +146,7 @@ function pagesFromFlows() {
       };
       for (const [i, deck] of decks.entries()) {
         out.push({
+          ...surface,
           name: `${slug}-${deck}`,
           title: `${p.name} · ${deck}`,
           url,
@@ -262,6 +291,16 @@ const ABOVE_THE_FOLD = [
   ["the Aim panel", ".y-aimpanel"],
   ["the shutter key", ".y-shutter"],
 ];
+
+/**
+ * The shutter key is drawn inside the deck's Capture column, so it is a part
+ * of the deck's own promise and not of the picture's. A surface with no deck
+ * — the Cockpit (R-UI-28) — has no shutter key to find, and reporting one
+ * missing there would be reporting the page for being what it is meant to be.
+ * The picture and the Aim panel are asked of every surface that runs `--fold`.
+ */
+const foldPartsFor = (page) =>
+  ABOVE_THE_FOLD.filter(([name]) => page.deck || name !== "the shutter key");
 
 /** A deck, however it is drawn: groups wearing the class today, one node later. */
 const DECK = '[class*="yonder-deck"], .nrdb-ui-yonder-deck';
@@ -643,7 +682,7 @@ for (const page of pages) {
   // actually doing.
   await tab.screenshot({ path: join(artifacts, `${stem}.png`), fullPage: true });
 
-  const shape = await tab.evaluate(measure, [LIVE, FIXED, specimens.fields, specimens.masked, ABOVE_THE_FOLD, DECK]);
+  const shape = await tab.evaluate(measure, [LIVE, FIXED, specimens.fields, specimens.masked, foldPartsFor(page), DECK]);
   for (const reading of shape.readings) fieldsSeen.add(reading.key);
 
   // The committed picture: every reading at its widest honest specimen, and a
@@ -800,7 +839,11 @@ for (const page of pages) {
     // already argues that for the parts above. `nested` was empty on every
     // run because `querySelectorAll` matched nothing, and an empty list reads
     // exactly like a page with no scroller in it.
-    if (shape.fold.decks === 0) {
+    //
+    // `page.deck` is what makes that a finding rather than a fact: a surface
+    // the flows say draws a deck and does not is broken, and one the flows say
+    // draws none — the Cockpit — is not.
+    if (page.deck && shape.fold.decks === 0) {
       report(
         { rule: "nested", page: page.name, palette, key: "the deck" },
         `${page.title} (${palette}) has no deck on it, so nothing was checked for a scroller of its own`,
@@ -814,7 +857,15 @@ for (const page of pages) {
         "one vertical page scroll, and no scroller of its own inside it (spec §5)",
       );
     }
-    if (rail === null || !rail.present) {
+    // The rail rule belongs to the surfaces that have a rail. R-UI-10 puts a
+    // page's own actions on one; R-UI-28's Cockpit has no page-level action at
+    // all — every action on it is on the picture or in the Aim panel — so
+    // there is nothing for a rail to carry and nothing to keep in the
+    // viewport. Which surfaces those are is read off the flows, not decided
+    // here: a page whose rail group went missing still fails below.
+    if (!page.rail) {
+      note(`  ok    ${page.title} (${palette}) has no rail, and the flows say it has none`);
+    } else if (rail === null || !rail.present) {
       note(`  FAIL  ${page.title} (${palette}) has no rail to keep reachable`);
       failures += 1;
     } else if (!rail.inside) {
@@ -1019,7 +1070,11 @@ if (only === undefined) {
 if (syntheticCameras !== undefined) {
   const fixture = JSON.parse(readFileSync(syntheticCameras, "utf8"));
   const wanted = String(fixture.camera?.name ?? "");
-  const captured = pages.filter((p) => p.name.startsWith("camera"));
+  // Read off the flows, not off the page's name: the Cockpit draws the
+  // picture and the Aim panel (R-UI-28) and is not called "camera…", so a
+  // name check would have said the fixture reached no page on the one run
+  // that captures it.
+  const captured = pages.filter((p) => p.camera);
   if (captured.length === 0) {
     note("  FAIL  --synthetic-cameras was given and no camera page was captured");
     failures += 1;

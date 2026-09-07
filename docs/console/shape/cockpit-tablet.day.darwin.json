@@ -1,0 +1,45 @@
+{
+  "platform": "darwin",
+  "viewport": {
+    "w": 1024,
+    "h": 768
+  },
+  "widgets": [
+    {
+      "key": "nrdb-ui-group#0",
+      "box": {
+        "x": 268,
+        "y": 76,
+        "w": 492,
+        "h": 442
+      }
+    },
+    {
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-picture",
+      "box": {
+        "x": 285,
+        "y": 93,
+        "w": 458,
+        "h": 408
+      }
+    },
+    {
+      "key": "nrdb-ui-group#1",
+      "box": {
+        "x": 772,
+        "y": 76,
+        "w": 240,
+        "h": 442
+      }
+    },
+    {
+      "key": "nrdb-ui-widget.nrdb-ui-yonder-aim",
+      "box": {
+        "x": 789,
+        "y": 93,
+        "w": 206,
+        "h": 228
+      }
+    }
+  ]
+}

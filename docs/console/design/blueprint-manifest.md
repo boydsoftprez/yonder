@@ -88,10 +88,12 @@ requirements and the capture gate alone.
 ### What the capture gate does and does not catch
 
 `scripts/verify-pages.sh` photographs every page in both palettes at 1280×900,
-plus notebook (1440×900) and tablet (1024) viewports for the camera pages, and
-measures overflow, clipping, the fold and the shape reference. It passes at
-160/0 today. **It has no concept of fidelity** — it cannot ask whether what is
-on the page is what the blueprint drew, and every gap below survived it.
+plus notebook (1440×900) and tablet (1024) viewports for the two camera
+surfaces and the Cockpit, and measures overflow, clipping, the fold and the
+shape reference. It passes at 205/0 today (2026-09-07, `PORT=18884
+./scripts/verify-pages.sh` on darwin). **It has no concept of fidelity** — it
+cannot ask whether what is on the page is what the blueprint drew, and every
+gap below survived it.
 
 It has a second blind spot this audit exposed: the camera pages are
 photographed against one fixture (`scripts/fixtures/camera-globalshutter.json`,
@@ -111,6 +113,20 @@ the degraded link), `photo-and-captures.elp.png`, `aim.elp.png`,
 `aim.pocket2.png`, `fold.1440.png`.
 Capture: `camera-live.night.png` / `.day.png`, `camera-live-notebook.day.fold.png`.
 
+**R-UI-28 — the picture and the Aim panel without the deck — is proven off
+this surface, not on it.** The blueprint draws no Cockpit, so there is no row
+below for it and none is missing: the requirement is that the two instruments
+this surface carries *do not depend on the rest of it*. The proof is a page of
+its own, `Cockpit` in `flows/flows.json` (`page-cockpit`), carrying
+`pic-cockpit` and `aim-cockpit` and nothing else, fed from the same change
+nodes this page's are — one read, two pages. It is asserted in
+`packages/yonder-core/src/flows.test.ts` ("flows/flows.json Cockpit page"),
+proven in the DOM in
+`packages/node-red-dashboard-2-yonder/src/ui/cockpit.component.test.ts`, and
+photographed by the capture gate at 1440×900 and 1024×768 like the two camera
+surfaces. The Cockpit page itself — mission control — is M5; this is only the
+proof that the two instruments will stand there.
+
 ### 1.1 Shell and navigation
 
 | # | The blueprint shows | Today | Class | Note |
@@ -120,7 +136,7 @@ Capture: `camera-live.night.png` / `.day.png`, `camera-live-notebook.day.fold.pn
 | L-03 | A sidebar with a `SYSTEM` section heading above `LOG` and `DIAGNOSTICS` | Absent — a substrate limit, now verified (this row was *unverified, see C-3*) | substrate | Checked on the board, 2026-09-07, against Dashboard 2 v1.31.0: the sidebar renders `ui-page` and `ui-link` config nodes flat, in `order`, and nothing else — there is no section heading, and both are static flow nodes, so an entry per *adopted* camera would mean writing flow nodes per configuration (rule 2). The one `pageGroups` in the bundle is drag-to-reorder of groups *within* a page. **Operator's call** (rule 8): (a) accept the flat sidebar and let the Camera page's thumb strip be the per-camera navigation — record as *substrate*; (b) have the console renderer emit one `ui-link` per configured camera at deploy time, which is generated wiring and a change to what rule 2 means; (c) a Dashboard feature request, and wait |
 | L-04 | **One sidebar entry per camera** under `CAMERAS` — `CAM 1`, `CAM 2` (R-UI-03) | Absent — a substrate limit; a `ui-link` per camera is possible only as generated flow nodes | substrate | Checked on the board, 2026-09-07, against Dashboard 2 v1.31.0: the sidebar renders `ui-page` and `ui-link` config nodes flat, in `order`, and nothing else — there is no section heading, and both are static flow nodes, so an entry per *adopted* camera would mean writing flow nodes per configuration (rule 2). The one `pageGroups` in the bundle is drag-to-reorder of groups *within* a page. **Operator's call** (rule 8): (a) accept the flat sidebar and let the Camera page's thumb strip be the per-camera navigation — record as *substrate*; (b) have the console renderer emit one `ui-link` per configured camera at deploy time, which is generated wiring and a change to what rule 2 means; (c) a Dashboard feature request, and wait |
 | L-05 | The pressed camera's entry highlighted, the others not | Follows L-04 | substrate | As L-04 |
-| L-06 | Sidebar order `STATUS · NETWORK · CAMERAS · CAM 1 · CAM 2 · LOG · DIAGNOSTICS` | `STATUS · NETWORK · CAMERAS · CAMERA · LOG · DIAGNOSTICS` | drifted | Follows from L-04 |
+| L-06 | Sidebar order `STATUS · NETWORK · CAMERAS · CAM 1 · CAM 2 · LOG · DIAGNOSTICS` | `STATUS · NETWORK · CAMERAS · CAMERA · COCKPIT · TELEMETRY · LOG · DIAGNOSTICS` | drifted | Follows from L-04. Telemetry came with M5a and Cockpit with R-UI-28; both sit above `LOG`, because the payload is what an operator came for and the log is what they reach for when it is not working |
 
 ### 1.2 The placard and the picture
 

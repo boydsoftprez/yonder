@@ -1597,10 +1597,18 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
     # `--fold` photographs the viewport on its own beside the full page and
     # asserts what is inside it.
     #
-    # Only the camera pages, because that is what the contract is written
-    # about — the picture, the Aim panel, the shutter key, one deck and one
-    # rail. Every other page is checked for sideways scroll and clipped text
-    # at 1280 like everything else.
+    # Only the pages that draw the picture, because that is what the contract
+    # is written about — the picture, the Aim panel, the shutter key, one deck
+    # and one rail. Every other page is checked for sideways scroll and
+    # clipped text at 1280 like everything else.
+    #
+    # **The Cockpit is one of them, and it is held to less** (R-UI-28). It
+    # carries the picture and the Aim panel and deliberately nothing else, so
+    # the fold rule applies to those two and the shutter-key, deck-scroller
+    # and rail rules do not — there is no deck and no rail on it to check.
+    # Which of the three each surface answers for is read off `flows.json` in
+    # `capture-pages.mjs` rather than decided here, so a page that loses its
+    # rail by accident still fails.
     #
     # Each width records a shape reference of its own, under its own `--as`
     # name, so a 1440 rendering is never compared against a 1024 one.
@@ -1615,7 +1623,7 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
     # rather than pass quietly, and the pair is what the base capture uses.
     capture_fold() {
         # $1 palette, $2 surface name, $3 viewport
-        for camera_page in camera-live camera-setup; do
+        for camera_page in camera-live camera-setup cockpit; do
             if node "$REPO/scripts/capture-pages.mjs" \
                     --base-url "http://127.0.0.1:$PORT" \
                     --password "$PASSWORD" \
