@@ -31,6 +31,11 @@ const SOFT = {
   element: "x264enc" as const, h265: null, decoder: null, device: null, hardware: false,
   detail: "software",
 };
+const MPP = {
+  element: "mpph264enc" as const, h265: "mpph265enc" as const, decoder: "mppjpegdec" as const,
+  device: "/dev/mpp_service", hardware: true,
+  detail: "hardware H.264 and H.265 through Rockchip MPP (mpph264enc, mpph265enc)",
+};
 
 const argvFor = (camera: Camera = CAMERA, encoder = HW): string[] => compose({
   camera, capabilities: CAPS, encoder, rtspBase: "rtsp://127.0.0.1:8554",
@@ -261,6 +266,23 @@ describe("EncoderChannel.reconfigurePreview", () => {
       continuous: false,
       at: expect.any(Number) as number,
     });
+  });
+
+  it("takes no live size where the preview is scaled inside its encoder (K-48, spec §4)", async () => {
+    const { channel, spawned, camera } = running({ encoder: MPP });
+    const ack = await channel.reconfigurePreview(camera, { size: "854x480", fps: 15 });
+    expect(ack).toEqual({
+      notControllable: expect.stringContaining("scaled inside its encoder") as string,
+    });
+    // Nothing was sent: a request the element would silently ignore is not made.
+    expect(spawned[0].sent).toHaveLength(0);
+    // The rate still moves — bps is a property, and MPP takes it live.
+    const pending = channel.retune(camera, "preview", 700);
+    expect(spawned[0].sent[0].sets[0]).toEqual({
+      element: "enc-preview", property: "bps", value: "700000",
+    });
+    spawned[0].answer();
+    expect(await pending).toMatchObject({ requested: 700 });
   });
 });
 

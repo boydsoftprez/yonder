@@ -2,7 +2,7 @@
 import { systemClock, type Clock } from "../apply/types.js";
 import { PREVIEW_RUNGS, type Camera, type PreviewRung } from "../schema/config.js";
 import {
-  encodeControl, encodesIn, previewCaps,
+  encodeControl, encodesIn, previewCaps, scalesInEncoder,
   type ElementProperty, type EncodeName, type PreviewShape, type RunningEncodes,
 } from "./pipeline.js";
 import type { CameraRun, Supervisor } from "./supervisor.js";
@@ -231,6 +231,17 @@ export class EncoderChannel {
   async reconfigurePreview(camera: Camera, shape: PreviewShape): Promise<Ack<PreviewShape>> {
     const argv = this.supervisor.argv(camera.id);
     if (argv === null) return notRunning(camera.id);
+
+    // On MPP the preview's size is RGA's, set on the encoder at start only;
+    // set while playing it is accepted and ignored (measured). Refusing it
+    // here is what stops an Ack reporting a shape the picture never took.
+    // The rate controller holds the rung on this refusal (rate.ts) and the
+    // renderer applies a new size by restarting the camera.
+    if (scalesInEncoder(argv)) {
+      return {
+        notControllable: `${camera.id}'s preview is scaled inside its encoder, which takes a size only when the pipeline starts; a new size is applied by restarting the camera`,
+      };
+    }
 
     const held = this.hold(camera.id, argv);
     const last = held.shape;
