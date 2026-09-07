@@ -2139,9 +2139,29 @@ describe("flows/flows.json camera pages", () => {
    * `mode:<mode>` when the operator changes it, so a flow that looped that
    * back would be a picture commanding itself.
    */
-  it("never wires the picture's output into the picture", () => {
+  it("never lets the picture's own output come back to it as a command", () => {
     const picture = flows.find((n) => n.type === "ui-yonder-picture");
-    expect((picture?.wires as string[][]).flat()).toEqual([]);
+    const out = (picture?.wires as string[][]).flat();
+
+    // It has an output now — the operator asked for a Start on the picture —
+    // so "wired to nothing" is no longer the way to say this. What has to
+    // stay true is the thing that rule was protecting: `setMode` emits
+    // `mode:<mode>`, and a path that carried that back would be a picture
+    // commanding itself. Everything but `start` is dropped, by a switch whose
+    // `else` output goes nowhere at all.
+    for (const id of out) {
+      const router = flows.find((n) => n.id === id);
+      expect(router?.type, `${id} takes the picture's output and is not a switch`).toBe("switch");
+      const rules = (router?.rules as { t?: string; v?: string }[]) ?? [];
+      const wires = (router?.wires as string[][]) ?? [];
+      expect(rules).toHaveLength(wires.length);
+      const otherwise = rules.findIndex((r) => r.t === "else");
+      expect(otherwise, `${id} passes anything it does not recognise`).toBeGreaterThanOrEqual(0);
+      expect(wires[otherwise], `${id}'s else output leads somewhere`).toEqual([]);
+      for (const r of rules) {
+        if (r.t !== "else") expect(r.v).toBe("start");
+      }
+    }
   });
 
   /**
@@ -2395,6 +2415,51 @@ describe("flows/flows.json camera pages", () => {
       .toContain("pick-cam-start");
   });
 
+  /**
+   * **The picture's own Start, and why R-UI-10 still holds around it.**
+   *
+   * Starting a camera meant scrolling past the whole deck to the rail at the
+   * foot of the page, with nothing above saying that was where to go. The
+   * operator asked for it where they are already looking, and decided that
+   * the empty picture is the place — so `ui-yonder-picture` now draws one
+   * key, and it is the only action on this page that is not on the rail.
+   *
+   * It is not a second way of starting a camera: it sends the same `start`
+   * the rail's own key sends, through a switch that reaches the same
+   * `cam-at-stream`. The rule below still counts Dashboard widgets, and a key
+   * drawn inside the picture is not one — so this test is what says the
+   * exception exists deliberately, rather than leaving it to look like a gap.
+   */
+  it("lets the picture start a camera, down the same path the rail's key takes", () => {
+    const pic = flows.find((n) => n.type === "ui-yonder-picture");
+    expect(pic, "there is no picture on the camera page").toBeDefined();
+    const to = ((pic?.wires as string[][]) ?? [])[0] ?? [];
+    expect(to, "the picture's key reaches nothing").toHaveLength(1);
+
+    const router = flows.find((n) => n.id === to[0]);
+    expect(router?.type).toBe("switch");
+    // One rule per output. A switch with an output no rule can reach has
+    // shipped here once already (7103700), and every test then read wires.
+    const rules = (router?.rules as unknown[]) ?? [];
+    expect(rules).toHaveLength(((router?.wires as string[][]) ?? []).length);
+    expect((rules[0] as { v?: string }).v).toBe("start");
+
+    // The same node the rail's START ends at, not a second start path.
+    const railBound = (flows.find((n) => n.id === "cam-live-keys")?.wires as string[][])[0];
+    expect(((router?.wires as string[][]) ?? [])[0]).toEqual(railBound);
+  });
+
+  /**
+   * The picture cannot offer to start a camera it has not been told is
+   * stopped, so the message that names the camera carries that too.
+   */
+  it("tells the picture whether its camera is running", () => {
+    const pick = flows.find((n) => n.id === "pick-cam-picture");
+    const jsonata = ((pick?.rules as { to?: string; tot?: string }[]) ?? [])
+      .find((r) => r.tot === "jsonata");
+    expect(jsonata?.to, "the picture is never told the run state").toContain("running");
+  });
+
   /** R-UI-10: every action on this page is on the rail, and only there. */
   it("puts no action anywhere but the rail", () => {
     const rails = new Set(
@@ -2574,6 +2639,43 @@ describe("flows/flows.json camera pages", () => {
     expect((after?.wires as string[][])[0]).toEqual(["cameras-read"]);
   });
 
+  /**
+   * **The other half of the state the operator found a board in** (R-CAM-21).
+   *
+   * A camera had been moved between USB ports. Identity is the socket
+   * (R-CAM-05), so each move made it a different camera and left the previous
+   * entry behind — two configured cameras against ports with nothing in them,
+   * and no way to clear either short of editing `config.yaml` over SSH.
+   *
+   * **`cam-index-route` cannot carry this on its own.** A `switch` tests one
+   * property, and its property is `payload.adopt`, which is empty for an OPEN
+   * press and empty for a removal alike — so its `else` output is where both
+   * of them arrive and there is nothing left there to tell them apart. Hence
+   * a second switch rather than a third rule, and the rule/output check below
+   * is the one this repository has already shipped a defect against (7103700:
+   * a switch with two outputs and one rule, so OPEN reached nothing).
+   */
+  it("routes a removal press to the one request that takes a camera out of the configuration", () => {
+    const route = flows.find((n) => n.id === "cam-forget-route");
+    expect(route?.type).toBe("switch");
+    expect(route?.property, "routed on the press, not on a page name").toBe("payload.forget");
+    const rules = route?.rules as { t: string }[];
+    const wires = route?.wires as string[][];
+    expect(rules.length, "one rule per output, or an output is unreachable").toBe(wires.length);
+    expect(rules.at(-1)?.t, "the fall-through is a real rule").toBe("else");
+    // It is reached from the index's own switch, not wired to the widget in
+    // parallel — a widget has one output and both presses leave through it.
+    expect((flows.find((n) => n.id === "cam-index-route")?.wires as string[][])[1])
+      .toEqual(["cam-forget-route"]);
+    const forget = flows.find((n) => n.id === wires[0]?.[0]);
+    expect(forget?.type, "a removal reaches the camera adapter").toBe("yonder-cameras");
+    // And afterwards the list is read again, or the row the operator just
+    // removed stays on the page until the next poll.
+    const after = flows.find((n) => n.id === (forget?.wires as string[][])[0]?.[0]);
+    expect(String(after?.name)).toContain("sweep again");
+    expect((after?.wires as string[][])[0]).toEqual(["cameras-read"]);
+  });
+
   it("opens the camera whose row was pressed, and keeps it open", () => {
     const open = flows.find((n) => n.id === "cam-open");
     const rules = open?.rules as { p: string; pt: string; to: string; tot: string }[];
@@ -2602,7 +2704,22 @@ describe("flows/flows.json camera pages", () => {
     expect(routeRules.length, "one rule per output, or an output is unreachable")
       .toBe((route?.wires as string[][]).length);
     expect(routeRules.at(-1)?.t, "the fall-through is a real rule").toBe("else");
-    expect((route?.wires as string[][])[1]).toEqual(["cam-open"]);
+    // **A press now falls through two switches, not one**, because a row
+    // sends three different things and a `switch` tests one property. What
+    // matters is that the last fall-through still lands on `cam-open`: an
+    // OPEN press must reach the node that records the choice however many
+    // hops are added in front of it. Walked rather than named, so a fourth
+    // press inserted later cannot quietly leave OPEN going nowhere.
+    let hop = flows.find((n) => n.id === (route?.wires as string[][])[1]?.[0]);
+    while (hop?.type === "switch") {
+      const rules = hop.rules as { t: string }[];
+      const wires = hop.wires as string[][];
+      expect(rules.length, `one rule per output on ${String(hop.id)}, or an output is unreachable`)
+        .toBe(wires.length);
+      expect(rules.at(-1)?.t, `${String(hop.id)}'s fall-through is a real rule`).toBe("else");
+      hop = flows.find((n) => n.id === wires.at(-1)?.[0]);
+    }
+    expect(hop?.id, "OPEN still reaches the node that records the choice").toBe("cam-open");
 
     // And the sweep seeds the id only when there is nothing chosen, or when
     // what was chosen is no longer attached. Without this, the next poll puts
