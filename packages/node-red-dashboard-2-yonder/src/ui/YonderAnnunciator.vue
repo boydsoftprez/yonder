@@ -95,7 +95,22 @@ export default {
     font-weight: 800;
     letter-spacing: 0.15em;
     text-transform: uppercase;
-    white-space: nowrap;
+    /**
+     * **Wraps, and stays inside its own group.**
+     *
+     * `nowrap` suits what this lamp usually says — `RATE CONTROL`,
+     * `CHANGE PENDING`, a phase word. It does not suit what it says when a
+     * read fails: *the device's configuration service is not answering; try
+     * again in a moment* ran straight out of its group, over the panel beside
+     * it, and was clipped mid-word at the edge of the page. The operator saw
+     * it as an overlap.
+     *
+     * A lamp that cannot show its whole message is worse than a lamp two lines
+     * tall, and the message it cannot show is the one that matters most.
+     */
+    white-space: normal;
+    overflow-wrap: anywhere;
+    max-width: 100%;
 }
 
 /* Lit, not merely coloured: the glow is what carries at a glance. */
