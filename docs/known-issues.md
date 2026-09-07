@@ -1540,25 +1540,25 @@ is the right behaviour and the same thing an operator sees.
 
 ### K-50 · An apply can be left pending for ever, and two routes disagree about it
 
-**Status:** Open · **Requirements:** R-CFG-03, R-UI-05
-
-`POST /cameras/cam0/outputs/rtsp {"enabled": false}` answered
+**Seen on hardware, 2026-09-06**, while proving adaptive. `POST /cameras/cam0/apply`
+refused with
 
 ```
-{"id": "b23b9f8b-059b-445c-be92-92deb1409f27", "expiresAt": null}
+{"error": "an apply is already pending; confirm or wait for it to revert"}
 ```
 
-`expiresAt: null` — no confirmation window, so nothing reverts it. Every later
-apply was then refused with `an apply is already pending; confirm or wait for it
-to revert`, while `POST /confirm` with that id answered `nothing is pending
-confirmation`. The board could not be configured at all until the state cleared
-on its own.
+and `GET /status`, three seconds later, reported **no pending id at all** — so
+there was nothing for a console to confirm and nothing for this operator to
+act on. The next apply then succeeded. Whatever was pending was invisible to
+the one route a page would ask, which is the half of this entry that matters
+to somebody holding the aircraft: the apply that blocks the next one cannot be
+found, so the only remedy is to wait for a timer nothing displays.
 
-The two answers cannot both be right, and the operator sees the first: a
-console that says a change is waiting, with no way to confirm it and nothing
-that will time it out. R-CFG-03's whole point is that a change either confirms
-or reverts; a third state where it does neither is the one an operator cannot
-get out of.
+Found because `POST /confirm` requires an `id` and answers
+`{"error":"id is required"}` to a body without one. That is a fair contract,
+but it means a caller that does not read the reply leaves the apply pending and
+believes it confirmed — which is exactly what happened here, repeatedly, before
+anyone noticed.
 
 ### K-51 · A camera reads *running* while its pipeline is emitting nothing
 
@@ -2124,4 +2124,38 @@ Two ways to close it, and the choice is the operator's (CLAUDE.md rule 8):
 
 Not decided here. The first is the smaller change and keeps the applied
 envelope meaningful; the second is the one that keeps a picture on a bad day.
+
+---
+
+### K-60 · The preview's reading blanks out the moment reports go stale
+
+**Status:** Open · **Requirements:** R-VID-07, R-UI-05, R-UI-20
+
+The line under the picture is the only place an operator can see what the
+adaptive preview is doing: `0.83 of 0.31–2.07` — what it is running at, inside
+the envelope they applied. It is composed in `YonderStateOverlay`'s payload as
+`detail`.
+
+When no viewer has reported for six seconds the rate controller stops deciding,
+correctly — *what the link can carry is unknown, so nothing moves* — but the
+overlay's `detail` and `bitrate` go **empty**, and the page draws a blank where
+the number was. Seen repeatedly on the board on 2026-09-06: a browser that
+tabs out, a page mid-reload, or a console that has just restarted all produce
+it.
+
+Blank is the wrong thing to draw, and for the reason R-UI-20 already gives
+about capability states: an absent reading and a reading of nothing are
+different facts, and only one of them is true here. The encode has not stopped.
+It is still running at whatever it was last told, and that number is known —
+it is on the same object, in `shared.kbps`. What is unknown is only whether it
+still *suits* the link.
+
+The other instruments in this set already have the idiom for exactly this: a
+value held with a qualifier saying it is not fresh, rather than a value
+withdrawn. `YonderPicture`'s own mode badge distinguishes *no contact* from
+*off* for the same reason.
+
+Not fixed here because the wording is the operator's call: whether a stale
+reading is shown greyed, shown with the age beside it, or shown with the step
+line alone doing the work.
 
