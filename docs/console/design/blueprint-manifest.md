@@ -152,7 +152,7 @@ proof that the two instruments will stand there.
 | L-14 | A foot strip, bottom-left of the picture, of the live control readings — `ZOOM 0  GAIN 0` on the ELP, `PAN +0.0°  TILT +0.0°  ZOOM 1.0×  EV +0.0` on the Pocket 2 | Built (`.y-pic__foot`); not visible in the capture because the media server is not answering | present | Unverifiable from this capture; verified in source |
 | L-15 | `LINK 3.10 Mb/s / DROP 0.0 %` in the bottom-right corner of the picture | Built (`.y-pic__foot` link/drop block); not visible in this capture | present | Same caveat as L-14 |
 | L-16 | A `REC` pill with elapsed time while recording | Built (`.y-pic__rec`), and fed: `pick-cam-picture` carries `recorder` to it and `YonderPicture` counts from the board's own `since` | present | Task 33b wired it. The elapsed time is counted in the component, not formatted by the daemon — the page reads every five seconds and a pre-formatted string makes a stopwatch that steps in fives |
-| L-17 | **A hint centred on the picture, `DRAG TO SLEW · RELEASE TO STOP`, whenever the camera can be aimed** | **Absent.** `gallery/DraftPicture.vue:45` draws it; `YonderPicture.vue` has no equivalent | **unbuilt** | No task names it. Task 25's step list covers the drag layer's *behaviour* and never its affordance |
+| L-17 | **A hint centred on the picture, `DRAG TO SLEW · RELEASE TO STOP`, whenever the camera can be aimed** | Present (`.y-pic__hint`), from the same `aimable` that arms the drag layer, and taken away while a drag is in flight | present | Task 47. **And the layer itself was dark until now:** `payload.aim` reached only `pick-cam-aim`, so nothing armed either. `pick-cam-picture` now moves it on to *both* pictures — the Camera page's and the Cockpit's — on the same scratch move `strip` uses. Uncaptured, correctly: the gate's fixture answers `aim: none`, so there is nothing to aim and nothing to hint at |
 | L-18 | **A white flash over the whole picture and a centred `● SAVED · TO THIS BOARD` banner** when a still lands | Built (`.y-pic__flash`, `.y-pic__saved`), 1200 ms, restarted by a second still and gated on `held` so a delete never flashes | present | Task 33b. The words for the medium are `heldWords()`'s, shared with the shutter key's own line |
 | L-19 | The drag-to-slew orb measured from where the pointer went down | Built and tested (`picture.component.test.ts`) | present | |
 
@@ -171,7 +171,7 @@ strip of camera facts in the same place.
 
 | # | The blueprint shows | Today | Class | Note |
 |---|---|---|---|---|
-| L-23 | A `● CONFIRMED` pill at the left of the strip | Absent | unbuilt | Nothing owns the camera page's apply-confirmation pill |
+| L-23 | A `● CONFIRMED` pill at the left of the strip | Present, and captured — `cameraStrip()` composes it from the apply engine's own status, handed in by the camera route; `YonderDataBar`'s `kind: 'pill'` draws it | present | Task 47. It shows while the last apply ended **confirmed** and the engine is at rest, and goes from the moment the next apply begins. A board that came up from its file and applied nothing shows none — the honest state. Drawn in the **good** tone, which is the render's (`#35d06a`), not the select cyan |
 | L-24 | `BROWSER 1 viewer` | Absent | owned — **Task 32** (viewers) | |
 | L-25 | `GROUND STATION 10.50.x.x:5600` | Absent from the strip; the address appears in the Stream address panel lower down | drifted | |
 | L-26 | **Three cost figures, never one sum**: `THIS VIEWER 1.8 Mb/s`, `SHARED ENCODE 1.8 Mb/s`, `PATH TOTAL 4.8 of 5.0 Mb/s` | Absent | owned — **Task 32** (`cost: { mine, shared, path }`) | Spec §15 names the single simulated sum as the thing to replace; the console has neither form |
@@ -303,8 +303,8 @@ who decided.
 
 | # | The blueprint shows | Today | Class | Note |
 |---|---|---|---|---|
-| L-91 | **On Live**, outputs as one line of facts: `OUTPUTS  Ground station 3.0 Mb/s   RTSP idle · nothing can reach it over cellular   SRT off` | A full On/Off table on Live, identical to Setup's | drifted | The blueprint deliberately keeps Live read-only here |
-| L-92 | **On Live**, a right-aligned link `stop or start them on Setup ›` | **Absent** | unbuilt | Follows from L-91 |
+| L-91 | **On Live**, outputs as one line of facts: `OUTPUTS  Ground station 3.0 Mb/s   RTSP idle · nothing can reach it over cellular   SRT off` | Present — one read-only line of facts per output, no control on it; the On/Off table stays on Setup | present | Task 47. Each output's own words are the daemon's, joined and never recomposed: the label, then the cost when it is reaching, `idle · <reach note>` when it is on and cannot be reached, or `off`. **The line is longer than the render's**, because `outputReach()`'s sentences are longer than the render's abbreviations of them, so at 1280 px it wraps to two lines — the words are L-94's and S-15's, not this row's |
+| L-92 | **On Live**, a right-aligned link `stop or start them on Setup ›` | Present, in the outputs legend on Live and never on Setup, through `YonderColumn`'s new `head-right` slot | present | Task 47. It takes the same `setMode('setup')` the footer's SETUP key takes, so there is one path to Setup and not two. **A link, not a soft key** — R-UI-10 is about the rail carrying the page's *actions*, and moving between two views of one page is not one |
 | L-93 | An `SRT` output row | **Absent** — only `RTP · to the ground station` and `RTSP · a player connects` | unbuilt | Nothing owns an SRT output |
 | L-94 | Output labels `GROUND STATION`, `RTSP`, `SRT` | `RTP · to the ground station`, `RTSP · a player connects` | drifted | |
 | L-95 | **One rail**, `LIVE · SETUP · STREAM ADDRESS`, with `FULL RATE` right-aligned and reading `3.1 Mb/s while held` (R-VID-13) | **Three separate boxes**: the deck's own `LIVE │ SETUP` rail, then a facts panel, then a second rail `START │ STOP │ SETUP` with `FULL RATE` in a box beside it | drifted | The `FULL RATE` hold key exists and reads `2.07 Mb/s while held` |
@@ -347,7 +347,7 @@ is listed.
 | S-08 | Each row carries its interruption, right-aligned — `no interruption known`, `may restart the preview branch` — **including the blank case, stated** | Interruptions are drawn as separate lines beneath the list, and a row with no known interruption says nothing | drifted | The blueprint states the blank case on purpose |
 | S-09 | The `SETUP` key on Live carries the pending count when read from Live | Present (`Setup · N`) | present | |
 | S-10 | The outputs table on Setup with `On │ Off` per row | Present for two of three rows (L-93: no SRT) | drifted | |
-| S-11 | The outputs legend carries a right-aligned annunciator `1 UNREACHABLE` | **Absent** | unbuilt | The per-row reachability sentences are present; the count is not |
+| S-11 | The outputs legend carries a right-aligned annunciator `1 UNREACHABLE` | Present and captured — `2 UNREACHABLE` on the bench fixture, whose two outputs are both on and neither reachable | present | Task 47. The count is `DeckOutputs.unreachable`, composed in `present.ts` and drawn by the page — never counted in the component. **An output that is off is not unreachable; it is off**, so `enabled` gates it; zero draws nothing at all. On Setup only, which is where both renders put it: the Live legend carries L-92's link instead |
 | S-12 | The rail reads `LIVE · SETUP · STREAM ADDRESS · DISCARD · APPLY`, with `APPLY` in the select tone | The deck rail reads `LIVE │ SETUP │ DISCARD │ APPLY` (Apply in the select tone); `STREAM ADDRESS` is on a second rail with `LIVE │ RE-PROBE` | drifted | As L-95/L-96 |
 | S-13 | No `FULL RATE` key on Setup | Correct — it is on Live only | present | |
 | S-14 | No Aim group on Setup | Correct | present | |
@@ -670,9 +670,13 @@ Five mechanisms, each visible more than once above.
 
 **1 · A deferred concern with no owner.** K-52's resolution picker was named by
 Task 28's own implementer, recorded in the plan's ledger, and picked up by
-nobody. L-17, L-23, L-92, L-93, S-04, S-05, S-11, C-04, C-15, C-16, C-20,
-C-22 and C-24 are all in the same state now: real gaps, no owner, invisible to
-every diff.
+nobody. L-93, S-04, S-05, C-04, C-15, C-16, C-20, C-22 and C-24 are all in
+the same state now: real gaps, no owner, invisible to every diff.
+
+*(L-17, L-23, L-91, L-92 and S-11 were on that list and are built — Task 47
+was written for exactly the reason this section gives, that a row with no
+owner is indistinguishable from a closed one. Nothing found them but the
+manifest.)*
 
 **2 · The gate photographs one capability state.** The camera pages are
 captured against a single fixture whose camera answers `aim: none` and gates
@@ -742,11 +746,14 @@ check against.
 | 34 — the stills strip, per viewer | **Built, uncaptured.** L-20, L-21, L-22, and the `STILLS` half of L-11; the strip's active thumbnail image and the still's size are the operator's calls (see the rows) |
 | Phase 5 (deferred, Pocket 2) | L-52, L-79, L-83 |
 
-**Unbuilt, with no owner — nineteen rows**
+**Unbuilt, with no owner — fifteen rows**
 
 *(L-18 and L-43 left this list in Task 33b, built rather than deferred: under
 rule 7 an element the blueprint draws needing another feature built is a
-reason to build that feature, and the shutter's own route was that feature.)*
+reason to build that feature, and the shutter's own route was that feature.
+L-17, L-23, L-92 and S-11 left it the same way in Task 47, which was written
+against this list — and with them the drifted L-91 the link could not exist
+without.)*
 
 Under CLAUDE.md rule 7 these are not deferred. They are missing, and until each
 has a named owner or is built, no camera surface is finished.
@@ -755,13 +762,9 @@ has a named owner or is built, no camera surface is finished.
 |---|---|
 | L-02, L-03 | `CAMERAS` and `SYSTEM` section headings in the sidebar |
 | L-04, L-05 | One sidebar entry per camera, and its selected state (R-UI-03) |
-| L-17 | `DRAG TO SLEW · RELEASE TO STOP` on an aimable picture |
-| L-23 | The `● CONFIRMED` pill on the camera page's strip |
-| L-92 | `stop or start them on Setup ›` on Live |
 | L-93 | The `SRT` output row |
 | L-97 | The sticky rail |
 | S-04, S-05 | The `RECORD FORMAT` and `SENSOR SIZE` bench-only fields |
-| S-11 | The outputs legend's `1 UNREACHABLE` count |
 | C-04 | A thumbnail on each Cameras row |
 | C-15, C-16 | **The `ENCODING USED` meter and `room for one more 1080p30 stream`** |
 | C-20 | `starting the gimbal would need 2.1 more` |
@@ -772,4 +775,4 @@ has a named owner or is built, no camera surface is finished.
 Three of those — L-56, C-15/C-16 and C-22/C-23 — are the three CLAUDE.md rule 7
 names as the reason this file exists. **L-56 is now built** (as two pickers, the
 operator's decision — see §1.7); the other two are still open. The remaining
-seventeen rows are the same shape and had not been found before this audit.
+rows are the same shape and had not been found before this audit.

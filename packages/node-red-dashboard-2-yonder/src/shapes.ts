@@ -16,8 +16,8 @@
 export interface DataCell {
   /** Property to read from `msg.payload`. */
   key: string;
-  /** What the operator sees above it. */
-  label: string;
+  /** What the operator sees above it. A `pill` has none — see `kind`. */
+  label?: string;
   /**
    * `plain` for a quantity, `id` for something compared character by
    * character — an SSID, an address, a version — which is set in the mono
@@ -31,8 +31,14 @@ export interface DataCell {
    * of readings legible and are exactly what a sentence cannot live under:
    * one 104-character reason took the camera strip 798 px wide inside a
    * 710 px page. `YonderDataBar.vue`'s own doc comment carries the rest.
+   *
+   * `pill` is the fourth, and it is not a reading at all: one state word in
+   * a bordered box with a dot, carrying no caption and drawing **nothing**
+   * when its value is absent rather than the em dash every other kind draws
+   * (L-23, R-CFG-03). The camera strip's is `● CONFIRMED`. Again,
+   * `YonderDataBar.vue`'s own doc comment carries the reasoning.
    */
-  kind?: "plain" | "id" | "note";
+  kind?: "plain" | "id" | "note" | "pill";
 }
 
 /** One key of the soft-key rail. */

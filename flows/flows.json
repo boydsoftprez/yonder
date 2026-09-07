@@ -4589,6 +4589,13 @@
             },
             {
                 "t": "set",
+                "p": "aimv",
+                "pt": "msg",
+                "to": "payload.aim",
+                "tot": "msg"
+            },
+            {
+                "t": "set",
                 "p": "payload",
                 "pt": "msg",
                 "to": "{\"path\": payload.camera.id, \"cost\": payload.display.pictureCost, \"running\": payload.run.state = \"running\"}",
@@ -4616,6 +4623,13 @@
                 "tot": "msg"
             },
             {
+                "t": "set",
+                "p": "payload.aim",
+                "pt": "msg",
+                "to": "aimv",
+                "tot": "msg"
+            },
+            {
                 "t": "delete",
                 "p": "rec",
                 "pt": "msg"
@@ -4623,6 +4637,11 @@
             {
                 "t": "delete",
                 "p": "strip",
+                "pt": "msg"
+            },
+            {
+                "t": "delete",
+                "p": "aimv",
                 "pt": "msg"
             }
         ],
@@ -4726,7 +4745,7 @@
         "width": 12,
         "height": 0,
         "label": "",
-        "cells": "[{\"key\":\"name\",\"label\":\"CAMERA\"},{\"key\":\"picture\",\"label\":\"PICTURE\"},{\"key\":\"rate\",\"label\":\"RATE\"},{\"key\":\"bitrate\",\"label\":\"BITRATE\"},{\"key\":\"uplink\",\"label\":\"UPLINK\"}]",
+        "cells": "[{\"key\":\"confirmed\",\"kind\":\"pill\"},{\"key\":\"name\",\"label\":\"CAMERA\"},{\"key\":\"picture\",\"label\":\"PICTURE\"},{\"key\":\"rate\",\"label\":\"RATE\"},{\"key\":\"bitrate\",\"label\":\"BITRATE\"},{\"key\":\"uplink\",\"label\":\"UPLINK\"}]",
         "x": 1030,
         "y": 2080,
         "wires": []

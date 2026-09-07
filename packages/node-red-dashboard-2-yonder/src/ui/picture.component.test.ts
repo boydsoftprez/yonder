@@ -2022,6 +2022,83 @@ describe("the drag-to-slew layer — orb only (spec §6)", () => {
     expect(stops[0]![2]).toEqual({ payload: { stop: { gesture: last.payload.slew.gesture } } });
   });
 
+  /* ---------------------------------------------------------------------- *
+   * L-17 — the hint that says the layer is there (R-VID-18).
+   *
+   * The blueprint draws the layer's affordance as well as its behaviour, and
+   * a gesture nothing on the picture advertises is a gesture an operator has
+   * to be told about out of band. Every assertion below is keyed on the
+   * *same* `aimable` the layer itself is, which is the point: a hint offering
+   * a gesture the picture would refuse is worse than no hint at all.
+   * ---------------------------------------------------------------------- */
+
+  const hint = (w: VueWrapper) => w.find(".y-pic__hint");
+
+  it("draws the hint on the picture whenever the camera can be aimed", async () => {
+    const { wrapper, press } = mountWithRail();
+    await settle();
+    await press({ aim: { state: "present", pan: 0, tilt: 0 } });
+    // The blueprint's words, and the draft's (`gallery/DraftPicture.vue:45`).
+    // Upper-cased by the style, not by the string, so the words a screen
+    // reader gets are the words a person says.
+    expect(hint(wrapper).text()).toBe("Drag to slew · release to stop");
+  });
+
+  it("draws no hint for any state that is not `present`", async () => {
+    const { wrapper, press } = mountWithRail();
+    await settle();
+    for (const aim of [
+      { state: "not-offered" },
+      { state: "advertised", reason: "the gimbal is not answering" },
+      { state: "gated", reason: "recording has it" },
+    ]) {
+      await press({ aim });
+      expect(hint(wrapper).exists(), `${aim.state} must draw no hint`).toBe(false);
+      // The layer and the hint are one decision, asserted together so they
+      // cannot come apart.
+      expect(wrapper.find(".y-pic__frame").classes()).not.toContain("is-aiming");
+    }
+  });
+
+  it("takes the hint away while a drag is in flight, and puts it back after", async () => {
+    // The hint says what to do; during the gesture it would cover the thing
+    // being done — and it sits where the foot strip's readings are being
+    // watched.
+    const { wrapper, press } = mountWithRail();
+    await settle();
+    await press({ aim: { state: "present", pan: 0, tilt: 0 } });
+    expect(hint(wrapper).exists()).toBe(true);
+
+    const el = frameEl(wrapper);
+    el.dispatchEvent(dragPoint("pointerdown", 200, 150));
+    el.dispatchEvent(dragPoint("pointermove", 240, 150));
+    await settle();
+    expect(wrapper.find(".y-pic__orb").exists(), "the drag must be in flight for this to mean anything").toBe(true);
+    expect(hint(wrapper).exists(), "the hint covers the gesture it describes").toBe(false);
+
+    el.dispatchEvent(dragPoint("pointerup", 240, 150));
+    await settle();
+    expect(hint(wrapper).exists()).toBe(true);
+  });
+
+  /**
+   * The hint is inside `.y-pic__frame`, which is the element that captures
+   * the drag. A box there that took the pointer would be a hint you cannot
+   * press through to do the thing it tells you to do — so a press that lands
+   * on the hint's own coordinates still starts a gesture.
+   */
+  it("does not swallow the press it is telling the operator to make", async () => {
+    const { wrapper, emit, press } = mountWithRail();
+    await settle();
+    await press({ aim: { state: "present", pan: 0, tilt: 0 } });
+    expect(getComputedStyle(hint(wrapper).element).pointerEvents).toBe("none");
+
+    const el = frameEl(wrapper);
+    el.dispatchEvent(dragPoint("pointerdown", 200, 150));
+    el.dispatchEvent(dragPoint("pointermove", 260, 150));
+    expect(slewCalls(emit).length).toBeGreaterThan(0);
+  });
+
   it("draws the orb in front of the video too — it only exists mid-gesture", async () => {
     // **The one overlay the list above cannot reach**, and review caught its
     // absence: setting the orb's z-index to 0 left all sixty-seven tests

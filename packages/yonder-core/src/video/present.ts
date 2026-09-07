@@ -347,6 +347,79 @@ export interface CameraStrip {
   /** Whether that identity survives a reboot (R-CAM-05), in words. */
   readonly identity: string;
   readonly encoder: string;
+  /**
+   * The word for the pill at the head of the strip, or `null` for no pill
+   * (R-CFG-03, R-UI-15).
+   *
+   * It says one thing: **the configuration this camera is running under was
+   * confirmed, and is not going to revert underneath the operator.** That is
+   * the fact R-CFG-03's timer makes worth stating on a page an operator
+   * spends time on — every other surface carries the *pending* half
+   * (R-UI-15's banner), and nothing carried the settled half.
+   *
+   * `null` is a real answer and the common one: a board that came up from
+   * its file and has applied nothing this boot has no confirmation to
+   * report, and a pill claiming one would be inventing an operator. See
+   * `confirmedPill()` for when it is composed.
+   */
+  readonly confirmed: string | null;
+}
+
+/**
+ * The engine's own answer, as much of it as the strip needs.
+ *
+ * Structural, and deliberately not `ApplyStatus` imported from
+ * `apply/types.js`: this file composes what a page reads and must not
+ * acquire an opinion about the apply engine's vocabulary. The route hands
+ * the status in (`daemon/routes.ts`), the same way it hands in the reach
+ * paths and the recorder state — `present.ts` never reaches for either.
+ */
+export interface StripApplyStatus {
+  readonly state: string;
+  readonly lastResult?: { readonly outcome: string };
+}
+
+/**
+ * **When the `● CONFIRMED` pill shows**, and the reason, written here
+ * because the reason is the whole of the decision.
+ *
+ * Two conditions, and both are needed:
+ *
+ *   - the last apply ended **confirmed**. Not `reverted` and not `failed`:
+ *     an operator whose change was rolled back is looking at a
+ *     configuration nobody confirmed, and that is exactly the case a pill
+ *     saying otherwise would lie about.
+ *   - the engine is **at rest**. From the moment a new apply begins the pill
+ *     goes, and it does not come back until that one is confirmed in turn.
+ *     During `pending` the page already carries R-UI-15's banner with the
+ *     countdown on it; a `CONFIRMED` pill beside a countdown saying the
+ *     change will revert is two answers to one question.
+ *
+ * **`confirmed` is a resting state, and `idle` is the other one.**
+ * `ApplyEngine.confirm()` leaves `state` at `"confirmed"`; only `finish()` —
+ * a revert or a failure — returns it to `"idle"`. A reading of *idle and
+ * last confirmed* is therefore one that can never be true after a confirm,
+ * and would draw this pill never.
+ *
+ * **The two are named, rather than the three busy ones.** A state this
+ * function has not met is not treated as rest: the pill asserts something
+ * about the configuration in force, and a state added to the engine later
+ * would otherwise draw that assertion through a window nobody had thought
+ * about. Silence is the safe direction for a claim; it is not for a warning,
+ * which is why `movesRadio`'s absence goes the other way.
+ *
+ * **No timer.** The pill is not a notification that fades: it states what is
+ * true about the configuration in force, and that stays true until the next
+ * apply. A device that booted from its file and has applied nothing this
+ * boot shows no pill — the honest state, not a defect.
+ */
+const APPLY_AT_REST = ["idle", "confirmed"];
+
+export function confirmedPill(status: StripApplyStatus | undefined): string | null {
+  if (status === undefined) return null;
+  if (status.lastResult?.outcome !== "confirmed") return null;
+  if (!APPLY_AT_REST.includes(status.state)) return null;
+  return "Confirmed";
 }
 
 /** What `state()` reports, and the reason where the supervisor has one. */
@@ -400,6 +473,12 @@ export function cameraStrip(view: {
   byPathStable: boolean;
   encoder: { element: string; hardware: boolean };
   refusal?: string | null;
+  /**
+   * The apply engine's own answer, handed in by the route (R-CFG-03).
+   * Optional: a caller with no engine behind it composes a strip with no
+   * pill, which is the same *nothing to report* a fresh boot gives.
+   */
+  apply?: StripApplyStatus;
 }): CameraStrip {
   const { camera } = view;
   const outputs = camera.outputs.length;
@@ -428,6 +507,7 @@ export function cameraStrip(view: {
     device: view.device ?? "not resolved",
     identity: identityWords(view.device === null ? null : camera.device, view.byPathStable),
     encoder: `${view.encoder.element} · ${view.encoder.hardware ? "hardware" : "software"}`,
+    confirmed: confirmedPill(view.apply),
   };
 }
 
@@ -807,6 +887,35 @@ export interface DeckOutput {
 }
 
 /**
+ * The outputs group as the deck draws it: the rows, and the one number the
+ * legend annunciates (R-UI-24).
+ *
+ * A block rather than a bare array because the count is a fact **about the
+ * group**, not about any row in it, and the page must not derive it: a
+ * component counting the rows itself is a second opinion on R-UI-24 living
+ * next to the first, and the day the definition changes only one of them
+ * changes with it. The daemon composes, the page draws.
+ */
+export interface DeckOutputs {
+  readonly rows: readonly DeckOutput[];
+  /**
+   * How many outputs are **on and cannot be reached** (R-UI-24).
+   *
+   * **An output that is off is not unreachable; it is off.** A count of
+   * every unreachable row would annunciate a warning about a listener the
+   * operator deliberately turned off, on a device where nothing is wrong —
+   * and an annunciator that lights when nothing is wrong is one an operator
+   * stops reading. So `enabled` gates it, and the number is the number of
+   * things that are running and going nowhere.
+   *
+   * Zero draws nothing at all. It is not `0 UNREACHABLE`: a legend saying
+   * zero of something is a legend asking to be read, and there is nothing
+   * there to read.
+   */
+  readonly unreachable: number;
+}
+
+/**
  * One of the three controls that turn the picture, as the deck draws it
  * (R-CTL-05, R-CTL-15).
  *
@@ -906,7 +1015,7 @@ export interface CameraDeck {
     readonly stream: Camera["stream"] & { bitrate_kbps: number };
     readonly preview: Camera["preview"];
   };
-  readonly outputs: readonly DeckOutput[];
+  readonly outputs: DeckOutputs;
   readonly captures: { readonly count: number };
   /**
    * What this camera's recorder is doing, and what the medium has left
@@ -1042,6 +1151,25 @@ export function deckCapture(
   };
 }
 
+/**
+ * Every output this camera has, and how many of them are running and
+ * unreachable (R-UI-24).
+ *
+ * The rows and the count are composed together, from one pass, so the
+ * annunciator in the legend and the sentences under it can never be counting
+ * different things.
+ */
+function deckOutputs(camera: Camera, paths: ReachPaths): DeckOutputs {
+  const rows = camera.outputs.map((output) => ({
+    kind: output.kind,
+    label: OUTPUT_LABEL[output.kind],
+    enabled: output.enabled,
+    costKbps: atIp(camera.bitrate_kbps),
+    reach: outputReach(output.kind, paths),
+  }));
+  return { rows, unreachable: rows.filter((r) => r.enabled && !r.reach.reachable).length };
+}
+
 /** The words for an output kind, once, so two pages cannot disagree. */
 const OUTPUT_LABEL: Record<OutputKind, string> = {
   rtp: "RTP · to the ground station",
@@ -1151,13 +1279,7 @@ export function cameraDeck(view: {
     commanded,
     policy,
     applied: policy,
-    outputs: camera.outputs.map((output) => ({
-      kind: output.kind,
-      label: OUTPUT_LABEL[output.kind],
-      enabled: output.enabled,
-      costKbps: atIp(camera.bitrate_kbps),
-      reach: outputReach(output.kind, view.paths),
-    })),
+    outputs: deckOutputs(camera, view.paths),
     captures: { count: view.captures ?? 0 },
     recorder: view.recorder ?? null,
     orientation: deckOrientation(caps, camera, values),

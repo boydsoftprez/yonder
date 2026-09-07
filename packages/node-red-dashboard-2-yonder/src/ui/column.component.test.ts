@@ -20,8 +20,18 @@ import YonderColumn from "./YonderColumn.vue";
  * it the way `col()` below does: plain props and a default slot, nothing
  * else.
  */
-function col(props: { legend?: string; qualifier?: string; tone?: string } = {}, slotContent = "") {
-  return mount(YonderColumn, { props, slots: slotContent ? { default: slotContent } : {} });
+function col(
+  props: { legend?: string; qualifier?: string; tone?: string } = {},
+  slotContent = "",
+  headRight = "",
+) {
+  return mount(YonderColumn, {
+    props,
+    slots: {
+      ...(slotContent ? { default: slotContent } : {}),
+      ...(headRight ? { "head-right": headRight } : {}),
+    },
+  });
 }
 
 /**
@@ -70,4 +80,35 @@ it("draws its legend and a right-hand qualifier in the given tone; none when emp
   const empty = col({ legend: "", qualifier: "should not appear" }, "should not render either");
   expect(empty.find(".y-col").exists()).toBe(false);
   expect(empty.html().replace(/<!--.*?-->/g, "").trim()).toBe("");
+});
+
+/**
+ * **`head-right` — the same place, for something that is not a string**
+ * (L-92).
+ *
+ * The blueprint puts a link in the outputs legend on Live, and a
+ * `qualifier` cannot be one: it is a `<span>`, and the whole point of that
+ * element is that it states a fact and cannot be pressed. The slot hands
+ * the right-hand end of the head row over while this column keeps owning
+ * where it sits — the alternative being a page drawing its own head row
+ * and starting a second copy of this layout.
+ */
+it("lets a page put its own element at the right of the head row", async () => {
+  const w = col({ legend: "Outputs" }, "<div>rows</div>", "<button class=\"link\">go ›</button>");
+  const link = w.find("button.link");
+  expect(link.exists()).toBe(true);
+  expect(link.text()).toBe("go ›");
+  // Inside the head row, beside the legend — not floated into the body.
+  expect(link.element.closest(".y-col__head")).not.toBeNull();
+  // One or the other, never both: the slot replaces the qualifier rather
+  // than being drawn after it.
+  expect(w.find(".y-col__q").exists()).toBe(false);
+});
+
+it("still draws the qualifier where no page supplied a slot", () => {
+  // The default content, so every existing caller is untouched by the slot
+  // existing at all.
+  const w = col({ legend: "Outputs", qualifier: "2 UNREACHABLE", tone: "waiting" });
+  expect(w.find(".y-col__q").text()).toBe("2 UNREACHABLE");
+  expect(w.find(".y-col__q").classes()).toContain("tone-waiting");
 });

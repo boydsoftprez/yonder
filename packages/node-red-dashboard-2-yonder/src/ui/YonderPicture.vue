@@ -64,6 +64,15 @@
 
             <div v-if="dragGesture" class="y-pic__orb" :style="{ left: orbX + 'px', top: orbY + 'px' }"></div>
 
+            <!-- L-17, R-VID-18: the drag layer's own affordance. Drawn from
+                 the same `aimable` that arms the layer, so the words and the
+                 thing they describe cannot disagree — a hint offering a
+                 gesture the picture would refuse is worse than no hint.
+
+                 It goes while a drag is in flight: the hint says what to do,
+                 and during the gesture it would cover the thing being done. -->
+            <div v-if="aimable && !dragGesture" class="y-pic__hint">Drag to slew &middot; release to stop</div>
+
             <!-- The daemon's own words when it has no still to give: a
                  camera that is not running, or a first frame not yet taken.
                  Above the fall-back's reason, which stays — it is why this
@@ -2016,6 +2025,35 @@ export default {
 /* The daemon's words about a still it has no frame for, above the reason
    line rather than on top of it — both can be true at once. */
 .y-pic__note { bottom: 32px; }
+
+/* L-17. The blueprint's own placement: horizontally centred, sitting above
+   the foot strip rather than in the middle of the frame, so it annotates the
+   picture without landing on whatever the operator is looking at. Small caps
+   in the picture's own hud style — the same letter-spaced uppercase
+   `.y-pic__saved` uses — because it is an instruction and not a reading.
+
+   `pointer-events: none` is load-bearing and not cosmetic: this box sits
+   inside `.y-pic__frame`, which is the element that captures the drag, and a
+   hint that swallowed the pointer would be a hint you cannot press through
+   to do the thing it tells you to do. */
+.y-pic__hint {
+    position: absolute;
+    z-index: 5;
+    left: 50%;
+    bottom: 52px;
+    transform: translateX(-50%);
+    padding: 5px 11px;
+    border-radius: 2px;
+    font-family: var(--yonder-font, system-ui, sans-serif);
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    color: var(--yonder-value, #ffffff);
+    background: color-mix(in srgb, var(--yonder-display, #04060a) 72%, transparent);
+    border: 1px solid color-mix(in srgb, var(--yonder-value, #ffffff) 12%, transparent);
+    pointer-events: none;
+}
 .tone-neutral { color: var(--yonder-neutral, #7d7869); }
 .tone-waiting { color: var(--yonder-waiting, #ffcf28); }
 .tone-good    { color: var(--yonder-good, #35d06a); }

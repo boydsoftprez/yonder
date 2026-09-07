@@ -10,6 +10,7 @@ import {
   cameraIndex,
   cameraStrip,
   capabilityFacts,
+  confirmedPill,
   captureDestination,
   deckCapture,
   endedWords,
@@ -449,6 +450,65 @@ describe("cameraStrip", () => {
     expect(strip.state).toBe("failed — the pipeline exited with code 1");
     expect(strip.device).toBe("not resolved");
     expect(strip.identity).toBe("not resolved — this camera did not answer");
+  });
+
+  /* ---------------------------------------------------------------------- *
+   * L-23 — the `● CONFIRMED` pill at the head of the strip (R-CFG-03,
+   * R-UI-15).
+   * ---------------------------------------------------------------------- */
+
+  const stripWith = (apply?: { state: string; lastResult?: { outcome: string } }) =>
+    cameraStrip({
+      camera: camera(),
+      run: { state: "running" },
+      device: "/dev/video0",
+      byPathStable: true,
+      encoder,
+      apply,
+    });
+
+  it("carries the pill when the last apply was confirmed and nothing is in flight", () => {
+    // `confirm()` leaves the engine at `confirmed`, not `idle` — see
+    // `confirmedPill()`'s own note on why a reading of *idle* would draw
+    // this pill never.
+    expect(stripWith({ state: "confirmed", lastResult: { outcome: "confirmed" } }).confirmed)
+      .toBe("Confirmed");
+    // And after a later revert has taken the engine back to rest, an apply
+    // confirmed before it is still the last word on the configuration in
+    // force only if the *last* result says so — which this one does not.
+    expect(stripWith({ state: "idle", lastResult: { outcome: "confirmed" } }).confirmed)
+      .toBe("Confirmed");
+  });
+
+  it("takes the pill away from the moment a new apply begins", () => {
+    for (const state of ["applying", "pending", "reverting"]) {
+      expect(stripWith({ state, lastResult: { outcome: "confirmed" } }).confirmed).toBeNull();
+    }
+  });
+
+  /**
+   * A board that came up from its file and has applied nothing this boot has
+   * no confirmation to report, and neither has one whose change was rolled
+   * back. Both are the honest `null`, not a defect.
+   */
+  it("draws no pill where nothing was confirmed", () => {
+    expect(stripWith().confirmed).toBeNull();
+    expect(stripWith({ state: "idle" }).confirmed).toBeNull();
+    expect(stripWith({ state: "idle", lastResult: { outcome: "reverted" } }).confirmed).toBeNull();
+    expect(stripWith({ state: "idle", lastResult: { outcome: "failed" } }).confirmed).toBeNull();
+  });
+});
+
+describe("confirmedPill", () => {
+  /**
+   * The two resting states are named rather than the three busy ones, so a
+   * state added to the engine later draws no claim until somebody decides it
+   * should. This is the test that fails if that is inverted.
+   */
+  it("draws nothing through a state it has not met", () => {
+    expect(confirmedPill({ state: "settling", lastResult: { outcome: "confirmed" } })).toBeNull();
+    expect(confirmedPill({ state: "confirmed", lastResult: { outcome: "confirmed" } }))
+      .toBe("Confirmed");
   });
 });
 
@@ -983,12 +1043,81 @@ describe("cameraDeck", () => {
       encoder,
       paths: { lan: false, mesh: false, cellular: true },
     });
-    expect(behindNat.outputs[0]).toMatchObject({ kind: "rtp", enabled: true });
-    expect(behindNat.outputs[0]?.reach.reachable).toBe(true);
+    expect(behindNat.outputs.rows[0]).toMatchObject({ kind: "rtp", enabled: true });
+    expect(behindNat.outputs.rows[0]?.reach.reachable).toBe(true);
     // A listener cannot be dialled from behind a carrier's NAT, and a stopped
     // output keeps everything but its `enabled`.
-    expect(behindNat.outputs[1]).toMatchObject({ kind: "rtsp", enabled: false });
-    expect(behindNat.outputs[1]?.reach.reachable).toBe(false);
+    expect(behindNat.outputs.rows[1]).toMatchObject({ kind: "rtsp", enabled: false });
+    expect(behindNat.outputs.rows[1]?.reach.reachable).toBe(false);
+    // S-11: the RTSP listener is unreachable here and it is also **off**, so
+    // nothing is running that cannot be reached.
+    expect(behindNat.outputs.unreachable).toBe(0);
+  });
+
+  /* ---------------------------------------------------------------------- *
+   * S-11 — the outputs legend's `N UNREACHABLE` annunciator (R-UI-24).
+   * ---------------------------------------------------------------------- */
+
+  const outputsOn = [
+    { kind: "rtp", host: "192.168.77.20", port: 5600, enabled: true },
+    { kind: "rtsp", password: { secret: "rtsp_password" }, enabled: true },
+  ];
+
+  it("counts the outputs that are on and cannot be reached", () => {
+    // Cellular only: the outbound push leaves over it, the listener cannot be
+    // dialled through the carrier's NAT. Two on, one of them going nowhere.
+    const deck = cameraDeck({
+      camera: camera({ outputs: outputsOn } as Partial<Camera>),
+      capabilities: null,
+      encoder,
+      paths: { lan: false, mesh: false, cellular: true },
+    });
+    expect(deck.outputs.rows).toHaveLength(2);
+    expect(deck.outputs.unreachable).toBe(1);
+  });
+
+  /**
+   * **An output that is off is not unreachable; it is off.** The mutation
+   * this catches is a count over every row rather than over the enabled
+   * ones — which would annunciate a warning about a listener the operator
+   * deliberately turned off, on a board where nothing is wrong.
+   */
+  it("does not count an output that is off, however unreachable it would be", () => {
+    const deck = cameraDeck({
+      camera: camera({
+        outputs: [
+          { kind: "rtp", host: "192.168.77.20", port: 5600, enabled: true },
+          { kind: "rtsp", password: { secret: "rtsp_password" }, enabled: false },
+          { kind: "srt", port: 8890, enabled: false },
+        ],
+      } as Partial<Camera>),
+      capabilities: null,
+      encoder,
+      paths: { lan: false, mesh: false, cellular: true },
+    });
+    expect(deck.outputs.rows).toHaveLength(3);
+    expect(deck.outputs.rows.filter((r) => !r.reach.reachable)).toHaveLength(2);
+    expect(deck.outputs.unreachable).toBe(0);
+  });
+
+  it("counts every one of them when no path is up at all", () => {
+    const deck = cameraDeck({
+      camera: camera({ outputs: outputsOn } as Partial<Camera>),
+      capabilities: null,
+      encoder,
+      paths: { lan: false, mesh: false, cellular: false },
+    });
+    expect(deck.outputs.unreachable).toBe(2);
+  });
+
+  it("counts none where every output on can be reached", () => {
+    const deck = cameraDeck({
+      camera: camera({ outputs: outputsOn } as Partial<Camera>),
+      capabilities: null,
+      encoder,
+      paths: { lan: true, mesh: false, cellular: false },
+    });
+    expect(deck.outputs.unreachable).toBe(0);
   });
 
   /**

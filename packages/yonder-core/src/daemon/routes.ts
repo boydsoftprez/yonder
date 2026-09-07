@@ -1284,6 +1284,19 @@ export function createRouter(deps: RouterDeps): Router {
         encoder,
         display: cameraStrip({
           camera, run, device, byPathStable, encoder,
+          /**
+           * The apply engine's own answer, for the `● CONFIRMED` pill at the
+           * head of the strip (R-CFG-03, R-UI-15).
+           *
+           * Handed in, exactly as `paths` and `recorder` are handed to
+           * `cameraDeck()` below — `present.ts` composes what a page reads
+           * and never reaches for a daemon collaborator itself. It rides
+           * this read rather than a poll of its own: the camera page already
+           * asks for this every few seconds, and a second timer for one word
+           * would be a second answer that could disagree with the strip
+           * beside it.
+           */
+          apply: deps.engine.status(),
           refusal: refuse({
             camera,
             capabilities: capabilities ?? noCapabilities(),

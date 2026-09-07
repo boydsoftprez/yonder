@@ -99,7 +99,9 @@ function makeReport(overrides: Record<string, unknown> = {}) {
       stream: { ...BASE_STREAM_POLICY, ...((applied && applied.stream) || {}) },
       preview: { ...BASE_PREVIEW_POLICY, ...((applied && applied.preview) || {}) },
     },
-    outputs: outputs || [],
+    // L-91/S-11: the outputs block the daemon composes (`DeckOutputs`) —
+    // the rows and, beside them, the one number the legend annunciates.
+    outputs: outputs || { rows: [], unreachable: 0 },
     captures: captures || { count: 0 },
     interruption: interruption || [],
     ...rest,
@@ -1316,5 +1318,172 @@ describe("the size and rate the camera captures", () => {
     })), "setup");
     expect(wrapper.text()).not.toContain("Capture formats");
     expect(factLabels(wrapper)).not.toContain("Capture formats");
+  });
+});
+
+/* -------------------------------------------------------------------------- *
+ * L-91, L-92, S-10, S-11 — the outputs group is two surfaces.
+ * -------------------------------------------------------------------------- */
+
+describe("the outputs group", () => {
+  const reach = (reachable: boolean, note: string, direction = "outbound") => ({ direction, reachable, note });
+  const OUTPUTS = {
+    rows: [
+      {
+        kind: "rtp",
+        label: "RTP · to the ground station",
+        enabled: true,
+        costKbps: 2067,
+        reach: reach(true, "an outbound push to the configured ground station; it leaves over whichever path is active, cellular included"),
+      },
+      {
+        kind: "rtsp",
+        label: "RTSP · a player connects",
+        enabled: true,
+        costKbps: 2067,
+        reach: reach(false, "nothing can dial in to this RTSP listener over cellular; it is reachable on the mesh or a LAN", "listener"),
+      },
+    ],
+    unreachable: 1,
+  };
+  const outputsColumn = (wrapper: VueWrapper<any>) =>
+    wrapper.findAll(".y-col").find((c) => c.find(".y-col__legend").text() === "Outputs");
+
+  /* ---- L-91: Live is read-only ------------------------------------------ */
+
+  it("draws no control at all on Live", () => {
+    const { wrapper } = deck(makeStore(makeReport({ outputs: OUTPUTS })), "live");
+    const column = outputsColumn(wrapper)!;
+    expect(column.exists(), "the outputs group is not on Live at all").toBe(true);
+    // The whole of the drift this row records: an On/Off pair under the
+    // picture, on the surface an operator watches while an aircraft flies.
+    expect(column.findAll(".y-seg")).toHaveLength(0);
+    expect(column.findAll(".y-deck__out"), "Setup's table is on Live").toHaveLength(0);
+  });
+
+  it("draws each output's name and what it is doing, on one line", () => {
+    const { wrapper } = deck(makeStore(makeReport({ outputs: OUTPUTS })), "live");
+    const items = outputsColumn(wrapper)!.findAll(".y-deck__outline-item");
+    expect(items).toHaveLength(2);
+    expect(items[0]!.find(".y-deck__outline-l").text()).toBe("RTP · to the ground station");
+    expect(items[0]!.find(".y-deck__outline-v").text()).toBe("2067 kb/s");
+    expect(items[1]!.find(".y-deck__outline-l").text()).toBe("RTSP · a player connects");
+    // `idle` is entailed by *enabled and unreachable* — nothing can dial in,
+    // so nothing is flowing — and the reason is the daemon's own sentence,
+    // never a shorter one composed here.
+    expect(items[1]!.find(".y-deck__outline-v").text())
+      .toBe("idle · nothing can dial in to this RTSP listener over cellular; it is reachable on the mesh or a LAN");
+  });
+
+  it("says `off` for an output that is off, and nothing about reaching it", () => {
+    const off = { rows: [{ ...OUTPUTS.rows[0], enabled: false }], unreachable: 0 };
+    const { wrapper } = deck(makeStore(makeReport({ outputs: off })), "live");
+    expect(outputsColumn(wrapper)!.find(".y-deck__outline-v").text()).toBe("off");
+  });
+
+  it("draws the three states in three tones", () => {
+    const rows = [
+      { ...OUTPUTS.rows[0] },
+      { ...OUTPUTS.rows[1] },
+      { ...OUTPUTS.rows[0], kind: "srt", enabled: false },
+    ];
+    const { wrapper } = deck(makeStore(makeReport({ outputs: { rows, unreachable: 1 } })), "live");
+    const tones = outputsColumn(wrapper)!.findAll(".y-deck__outline-v")
+      .map((v) => v.classes().find((c) => c.startsWith("y-deck__outline-v--")));
+    expect(tones).toEqual([
+      "y-deck__outline-v--good",
+      "y-deck__outline-v--warn",
+      "y-deck__outline-v--off",
+    ]);
+  });
+
+  /* ---- L-92: the link to where the controls are ------------------------- */
+
+  it("offers a link to Setup on Live, and none on Setup", () => {
+    const { wrapper } = deck(makeStore(makeReport({ outputs: OUTPUTS })), "live");
+    const link = outputsColumn(wrapper)!.find(".y-deck__outline-link");
+    expect(link.exists()).toBe(true);
+    expect(link.text()).toBe("stop or start them on Setup ›");
+
+    const setup = deck(makeStore(makeReport({ outputs: OUTPUTS })), "setup");
+    expect(outputsColumn(setup.wrapper)!.find(".y-deck__outline-link").exists(),
+      "the link must never appear on the page it points at").toBe(false);
+  });
+
+  /**
+   * **The same path the footer's SETUP key takes.** Two ways to Setup that
+   * did different things is exactly the failure `7103700` shipped, one layer
+   * down; this asserts the message on the wire, not the method name.
+   */
+  it("sends the same message the footer's SETUP key sends", async () => {
+    const store = makeStore(makeReport({ outputs: OUTPUTS }));
+    const { wrapper, emit } = deck(store, "live");
+    await outputsColumn(wrapper)!.get(".y-deck__outline-link").trigger("click");
+    const sent = emit.mock.calls.filter(([, , msg]) => msg?.payload?.mode !== undefined);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]![2]).toEqual({ payload: { mode: "setup" } });
+  });
+
+  /**
+   * A link in a legend is not a soft key. The capture gate presses keys
+   * through `.y-keys__key`, and R-UI-10 is about the rail carrying the
+   * page's *actions* — going to another view of the same page is not one.
+   */
+  it("is not a soft key", () => {
+    const { wrapper } = deck(makeStore(makeReport({ outputs: OUTPUTS })), "live");
+    const link = outputsColumn(wrapper)!.get(".y-deck__outline-link");
+    expect(link.classes()).not.toContain("y-keys__key");
+    expect(link.element.closest(".y-keys")).toBeNull();
+  });
+
+  /* ---- S-10/S-11: Setup keeps its table, and gains the count ----------- */
+
+  it("keeps the On/Off table on Setup, unchanged", async () => {
+    const { wrapper, emit } = deck(makeStore(makeReport({ outputs: OUTPUTS })), "setup");
+    const column = outputsColumn(wrapper)!;
+    const rows = column.findAll(".y-deck__out");
+    expect(rows).toHaveLength(2);
+    expect(rows[0]!.find(".y-deck__out-l").text()).toBe("RTP · to the ground station");
+    expect(rows[0]!.find(".y-deck__out-cost").text()).toBe("2067 kb/s");
+    expect(rows[1]!.find(".y-deck__out-reach").classes()).toContain("y-deck__out-reach--warn");
+    expect(column.findAll(".y-seg")).toHaveLength(2);
+    // And the control still does what it did.
+    await rows[0]!.findAll(".y-seg__opt")[0]!.trigger("click");
+    const sent = emit.mock.calls.filter(([, , msg]) => msg?.payload?.output !== undefined);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]![2]).toEqual({ payload: { output: "rtp", enabled: false } });
+  });
+
+  it("annunciates the daemon's count in the legend, right-aligned and in the warn tone", () => {
+    const { wrapper } = deck(makeStore(makeReport({ outputs: OUTPUTS })), "setup");
+    const q = outputsColumn(wrapper)!.get(".y-col__q");
+    expect(q.text()).toBe("1 UNREACHABLE");
+    expect(q.classes()).toContain("tone-waiting");
+  });
+
+  it("draws nothing at zero", () => {
+    const none = { rows: OUTPUTS.rows, unreachable: 0 };
+    const { wrapper } = deck(makeStore(makeReport({ outputs: none })), "setup");
+    expect(outputsColumn(wrapper)!.find(".y-col__q").exists()).toBe(false);
+  });
+
+  /**
+   * **The count is the daemon's, and the page must not derive one.** The
+   * mutation this catches is a component counting `rows.filter(r => !r.reach
+   * .reachable)` for itself — which agrees with the daemon on this report and
+   * disagrees the moment an output is off, because *off is not unreachable*.
+   */
+  it("draws the number it was handed, not one it counted", () => {
+    const { wrapper } = deck(makeStore(makeReport({
+      outputs: { rows: [{ ...OUTPUTS.rows[1] }, { ...OUTPUTS.rows[1], kind: "srt" }], unreachable: 2 },
+    })), "setup");
+    expect(outputsColumn(wrapper)!.get(".y-col__q").text()).toBe("2 UNREACHABLE");
+  });
+
+  it("draws no outputs group at all where a camera has none", () => {
+    for (const mode of ["live", "setup"] as const) {
+      const { wrapper } = deck(makeStore(makeReport({ outputs: { rows: [], unreachable: 0 } })), mode);
+      expect(outputsColumn(wrapper)).toBeUndefined();
+    }
   });
 });

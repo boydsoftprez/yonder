@@ -1,20 +1,25 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <template>
     <div class="y-bar">
-        <div
-            v-for="cell in props.cells"
-            :key="cell.key"
-            class="y-bar__cell"
-            :class="{ note: cell.kind === 'note' }"
-        >
-            <span class="y-bar__k">{{ cell.label }}</span>
-            <span
-                class="y-bar__v"
-                :class="{ id: cell.kind === 'id', note: cell.kind === 'note', absent: !has(cell.key) }"
-            >
-                {{ shown(cell.key) }}
-            </span>
-        </div>
+        <template v-for="cell in props.cells" :key="cell.key">
+            <!-- A pill draws only when it has something to say, and nothing
+                 at all otherwise — no cell, no rule, no gap. See this file's
+                 own note on `kind: 'pill'`. -->
+            <template v-if="cell.kind === 'pill'">
+                <div v-if="has(cell.key)" class="y-bar__pill-cell">
+                    <span class="y-bar__pill"><i class="y-bar__pill-dot" aria-hidden="true"></i>{{ shown(cell.key) }}</span>
+                </div>
+            </template>
+            <div v-else class="y-bar__cell" :class="{ note: cell.kind === 'note' }">
+                <span class="y-bar__k">{{ cell.label }}</span>
+                <span
+                    class="y-bar__v"
+                    :class="{ id: cell.kind === 'id', note: cell.kind === 'note', absent: !has(cell.key) }"
+                >
+                    {{ shown(cell.key) }}
+                </span>
+            </div>
+        </template>
     </div>
 </template>
 
@@ -57,6 +62,24 @@
  * Wrapping on "this string looks long" would wrap a reading the day a camera
  * reports a wider one, and `white-space: nowrap` on a reading is what stops
  * `1280 × 720` breaking after the `×`.
+ *
+ * **`kind: 'pill'` is a state, not a reading** (L-23). It carries no caption,
+ * because a caption is the question a reading answers and this cell answers
+ * no question — it is one word that is either true of the device or is not
+ * there. The camera strip's is `● CONFIRMED`: the configuration in force was
+ * confirmed and is not going to revert (R-CFG-03, R-UI-15).
+ *
+ * **An absent pill draws nothing at all — no cell, no dividing rule, no
+ * gap.** This is the one kind here for which absence is silence rather than
+ * an em dash. The dash exists because *not known* and *nothing* are
+ * different answers to a question that was asked; a pill is not asked, it is
+ * asserted, and `— ` in a box where a state word would go reads as a state
+ * the device is in. `null` from the daemon is *there is no confirmation to
+ * report*, which is a fact about the world with no shape on the page.
+ *
+ * Where the pill sits is the page's, not this component's: it is an entry in
+ * `cells` like any other and draws in the order the page declared. The camera
+ * strip declares it first, which is where the blueprint draws it.
  */
 /**
  * The store is reached through `$store`, not through vuex's `mapState`.
@@ -133,6 +156,44 @@ export default {
     flex: 1 1 100%;
     min-width: 0;
     border-right: 0;
+}
+
+/* The pill's cell takes only the width of the pill — it is not one of the
+   `flex: 1` readings sharing the line, because a state word given an equal
+   share of a row of readings would push every reading beside it narrower to
+   hold a box that is always the same size. No right-hand rule either: the
+   rules divide readings from one another, and this is not one of them. */
+.y-bar__pill-cell {
+    display: flex;
+    align-items: center;
+    flex: 0 0 auto;
+    padding: 5px 10px;
+}
+/* The blueprint's own tone (`live.elp.night.png`): the **good** green, not
+   the select cyan. Select is *this is the one chosen* — a tab, an identifier
+   to copy, the segment in force. This says *the thing that was done, held*,
+   which is what `--yonder-good` means everywhere else on the console. */
+.y-bar__pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 8px;
+    border: 1px solid var(--yonder-good, #35d06a);
+    border-radius: 2px;
+    color: var(--yonder-good, #35d06a);
+    font-family: var(--yonder-font-mono);
+    font-size: 0.5rem;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+.y-bar__pill-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--yonder-good, #35d06a);
+    flex: 0 0 auto;
 }
 
 .y-bar__k {

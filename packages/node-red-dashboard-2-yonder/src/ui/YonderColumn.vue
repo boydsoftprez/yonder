@@ -3,7 +3,11 @@
     <div v-if="legend" class="y-col">
         <div class="y-col__head">
             <span class="y-col__legend">{{ legend }}</span>
-            <span v-if="qualifier" class="y-col__q" :class="toneClass">{{ qualifier }}</span>
+            <!-- The right-hand end of the head row: the qualifier prop, or
+                 whatever the page puts there instead. See `head-right`. -->
+            <slot name="head-right">
+                <span v-if="qualifier" class="y-col__q" :class="toneClass">{{ qualifier }}</span>
+            </slot>
         </div>
         <slot />
     </div>
@@ -41,6 +45,17 @@
  * have none, and that is the ordinary case rather than one needing this
  * same silent treatment — it simply draws nothing in the space it would
  * have taken.
+ *
+ * **`head-right` is the same place, for something that is not a string.**
+ * The blueprint puts a link in the outputs legend on Live — `stop or start
+ * them on Setup ›` (L-92) — and a `qualifier` cannot be one: it is a
+ * `<span>`, and the whole point of that element is that it states a fact
+ * and cannot be pressed. Rather than teach this column what a link is, or
+ * let one page draw its own head row and start a second copy of this
+ * layout, the slot hands the right-hand end over and the column keeps
+ * owning where it sits and how it aligns. `qualifier` remains the default
+ * content, so every existing caller is untouched and a page supplies one or
+ * the other, never both.
  *
  * **The tone is a lookup, not a ternary** — the same reasoning
  * `YonderFacts`, `YonderPicker`, `YonderSegmented` and `YonderSetBar` all

@@ -1257,10 +1257,82 @@ export default {
       }))
       return h(YonderColumn, { legend: GROUP_LEGEND.preview, qualifier: 'to this browser', key: 'preview' }, () => children)
     },
+    /**
+     * The outputs group, and it is **two different surfaces** (L-91, L-92,
+     * S-11).
+     *
+     * On **Setup** it is the table it has always been: one row per output
+     * with `Off │ On`, its cost and its reachability sentence — the surface
+     * where an output is turned on and off, and the only one.
+     *
+     * On **Live** it is one line of facts under the same legend, with no
+     * control on it, and a link at the right-hand end of the legend to the
+     * page where the controls are. That split is the blueprint's, and the
+     * reason it gives is the one this console keeps re-learning: Live is
+     * what an operator watches while an aircraft is flying, and an On/Off
+     * pair sitting under the picture is a thing that can be pressed by
+     * accident on the surface where pressing it costs the most.
+     */
     buildOutputs () {
       const outputs = this.report.outputs
-      if (!Array.isArray(outputs) || outputs.length === 0) return null
-      const rows = outputs.map((o) => h('div', { class: 'y-deck__out', key: o.kind }, [
+      const rows = (outputs && outputs.rows) || []
+      if (!Array.isArray(rows) || rows.length === 0) return null
+      return this.mode === 'live'
+        ? this.buildOutputsLive(rows)
+        : this.buildOutputsSetup(rows, outputs.unreachable)
+    },
+    /**
+     * L-91/L-92 — Live: facts, and the way to the controls.
+     *
+     * **Every word here is the daemon's**, joined and nothing more: the
+     * label it composed, its cost or the state entailed by its reach, and
+     * its own reachability sentence. Composing a shorter sentence in the
+     * component would put a second vocabulary for the same fact on the same
+     * console as `outputReach()`'s, and the two would drift.
+     *
+     * `idle` is not invented either — it is what *enabled and unreachable*
+     * already means. Nothing can dial in to a listener over cellular and
+     * nothing leaves over a path that is not up, so an output in that state
+     * is carrying nothing, and saying so beside the reason is the whole of
+     * what the blueprint's line says.
+     */
+    buildOutputsLive (rows) {
+      const facts = rows.map((o) => {
+        const reachable = !o.reach || o.reach.reachable
+        const cost = typeof o.costKbps === 'number' ? `${o.costKbps} kb/s` : ''
+        const note = (o.reach && o.reach.note) || ''
+        const doing = !o.enabled ? 'off' : (reachable ? cost : ['idle', note].filter(Boolean).join(' · '))
+        return h('span', { class: 'y-deck__outline-item', key: o.kind }, [
+          h('span', { class: 'y-deck__outline-l' }, o.label || o.kind),
+          h('span', {
+            class: [
+              'y-deck__outline-v',
+              !o.enabled ? 'y-deck__outline-v--off' : (reachable ? 'y-deck__outline-v--good' : 'y-deck__outline-v--warn'),
+            ],
+          }, doing),
+        ])
+      })
+      return h(YonderColumn, { legend: GROUP_LEGEND.outputs, key: 'outputs' }, {
+        /**
+         * L-92. **A link, not a soft key.** The rail's keys are this page's
+         * actions (R-UI-10) and they are pressed through `.y-keys__key`;
+         * this is a way to a different surface of the same page, drawn where
+         * the blueprint draws it — at the right-hand end of the legend it
+         * belongs to, beside the facts it is about. It takes the same
+         * `setMode('setup')` the footer's SETUP key takes, so there is one
+         * path to Setup and not two that could come to disagree (R-UI-26).
+         */
+        'head-right': () => h('button', {
+          type: 'button',
+          class: 'y-deck__outline-link',
+          onClick: () => this.setMode('setup'),
+        }, 'stop or start them on Setup ›'),
+        default: () => [h('div', { class: 'y-deck__outline' }, facts)],
+      })
+    },
+    /** S-10 — Setup: the table, unchanged, plus S-11's count in the legend. */
+    buildOutputsSetup (rows, unreachable) {
+      const drawn = rows.map((o) => h('div', { class: 'y-deck__out', key: o.kind }, [
         h('span', { class: 'y-deck__out-l' }, o.label || o.kind),
         h(YonderSegmented, {
           options: ['Off', 'On'],
@@ -1272,7 +1344,18 @@ export default {
           class: ['y-deck__out-reach', { 'y-deck__out-reach--warn': o.reach && !o.reach.reachable }],
         }, (o.reach && o.reach.note) || ''),
       ]))
-      return h(YonderColumn, { legend: GROUP_LEGEND.outputs, key: 'outputs' }, () => rows)
+      /**
+       * S-11, R-UI-24. The count is the daemon's (`DeckOutputs.unreachable`)
+       * and is not derived here: a page counting the rows itself would be a
+       * second opinion on what *unreachable* means, sitting beside the
+       * first. Zero draws nothing — `0 UNREACHABLE` is a legend asking to be
+       * read with nothing in it to read.
+       */
+      return h(YonderColumn, {
+        legend: GROUP_LEGEND.outputs,
+        key: 'outputs',
+        ...(unreachable > 0 ? { qualifier: `${unreachable} UNREACHABLE`, tone: 'waiting' } : {}),
+      }, () => drawn)
     },
     /**
      * The gimbal pad — Live only, beside the picture, never one of `SLOTS`
@@ -1573,6 +1656,48 @@ export default {
 }
 .y-deck__out-reach { color: var(--yonder-label, #7f8a95); font-size: 11px; }
 .y-deck__out-reach--warn { color: var(--yonder-waiting, #ffcf28); }
+
+/* L-91 — Live's read-only line. One row of facts that wraps rather than
+   truncating: the daemon's reachability sentences are whole sentences
+   (R-UI-25 forbids shortening them), so at a narrow page this becomes two or
+   three lines of facts instead of one. Wrapping is what a line of facts does
+   when the page is narrower than the facts; cutting one in half is not. */
+.y-deck__outline {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    column-gap: 22px;
+    row-gap: 4px;
+    padding: 2px 0 6px;
+    font-size: 12px;
+}
+.y-deck__outline-item { display: inline-flex; align-items: baseline; gap: 7px; min-width: 0; }
+.y-deck__outline-l { color: var(--yonder-label, #7f8a95); }
+/* Three states, three tones, the blueprint's own: what it is sending, in the
+   good tone; what is running and going nowhere, in the caution tone; and off,
+   which is neither and is drawn as the plain fact it is. */
+.y-deck__outline-v { font-variant-numeric: tabular-nums; color: var(--yonder-value, #ffffff); }
+.y-deck__outline-v--good { color: var(--yonder-good, #35d06a); }
+.y-deck__outline-v--warn { color: var(--yonder-waiting, #ffcf28); }
+.y-deck__outline-v--off { color: var(--yonder-value, #ffffff); }
+/* L-92. A link in a legend: no border, no box, nothing that reads as a key.
+   The rail's keys are square and bordered because a key is pressed to do
+   something to the aircraft; this goes to another view of the same page. */
+.y-deck__outline-link {
+    appearance: none;
+    background: none;
+    border: 0;
+    padding: 0;
+    margin: 0;
+    cursor: pointer;
+    font: inherit;
+    font-style: normal;
+    letter-spacing: 0.1em;
+    text-transform: none;
+    color: var(--yonder-select, #2ad4f0);
+}
+.y-deck__outline-link:hover { text-decoration: underline; }
+.y-deck__outline-link:focus-visible { outline: 1px solid var(--yonder-select, #2ad4f0); outline-offset: 2px; }
 .y-deck__pending {
     margin: 0 16px;
     padding: 8px 10px;

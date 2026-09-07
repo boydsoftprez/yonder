@@ -29,8 +29,10 @@ import YonderThumbStrip from "./YonderThumbStrip.vue";
  * file exists to produce.
  *
  * **The payloads are the flow's own.** `pick-cam-picture` composes
- * `{ path, cost, running, recording, cameras, downlink }` and `pick-cam-aim`
- * passes the daemon's `aim` object through unchanged; `cam-caps-saved` is a
+ * `{ path, cost, running }` and moves `recording`, `cameras`, `downlink` and
+ * `aim` on to it; `pick-cam-aim` passes the daemon's `aim` object through
+ * unchanged to the panel — the *same object*, so the picture's drag layer
+ * and the panel beside it can never disagree about one gimbal; `cam-caps-saved` is a
  * second message on the picture's id carrying `{ saved }`. Those, and the
  * daemon's own answer to the picture's viewer report, are every channel this
  * page has. A field invented here that no node sends would prove nothing
@@ -161,6 +163,10 @@ function pictureMessage(overrides: Record<string, unknown> = {}): Record<string,
       { id: "cam1", name: "Tail", active: false, ageSeconds: 4, thumbSrc: "/video/cam1/still?at=1", stopped: false },
     ],
     downlink: "12 kb/s of stills · counted in Path total",
+    // L-17: `pick-cam-picture` moves the daemon's `aim` on to the picture
+    // unchanged, so the drag layer and its hint arm from this page's own
+    // message. `flows.test.ts` holds the move; this is what it carries.
+    aim: { state: "present", pan: 12.4, tilt: -6 },
     ...overrides,
   };
 }
@@ -392,25 +398,26 @@ describe("the picture draws every part of itself from its own message", () => {
   });
 
   /**
-   * **The drag layer, and the one thing on this page that no node fills.**
+   * **The drag layer, and the wiring that arms it** (L-17, R-UI-28).
    *
    * `aimable` is `payload.aim.state === 'present'` on the picture's *own*
    * message — the picture reads nothing of the deck's for it, which is what
-   * R-UI-28 asks. What no node sends is the field: `pick-cam-picture`
-   * composes `{ path, cost, running }` and moves `recording`, `cameras` and
-   * `downlink`, and `payload.aim` is on the camera read but is moved only to
-   * `pick-cam-aim`. So the drag layer is dark on the Camera page and on this
-   * one alike, and the fixture the gate runs against answers `aim: none`
-   * anyway.
+   * R-UI-28 asks.
    *
-   * That is a finding about the wiring, not about either instrument, and it
-   * is stated here rather than hidden: the `aim` below is supplied by this
-   * test and by nothing in `flows/flows.json`. Feeding it is one scratch move
-   * on `pick-cam-picture` — the same shape `strip` already uses — and it
-   * belongs with the gimbal work the Pocket 2 deferral holds.
+   * It used to read nothing at all: `pick-cam-picture` composed
+   * `{ path, cost, running }` and moved `recording`, `cameras` and
+   * `downlink`, and `payload.aim` went only to `pick-cam-aim`. So the layer
+   * was dark on the Camera page and on this one alike — a gesture built,
+   * tested, and reachable from nowhere. The test that recorded that is this
+   * one, inverted: the flow now carries `aim` on the same scratch move
+   * `strip` uses, so the message this page actually receives arms the layer.
+   *
+   * `pictureMessage()` is that message, field for field, and it carries
+   * `aim` because `flows/flows.json` does — `flows.test.ts` is what holds
+   * the two together.
    */
-  it("draws the orb on a drag once something gives it an aim state", async () => {
-    const { pic } = mountCockpit(pictureMessage({ aim: { state: "present", pan: 12, tilt: -4 } }));
+  it("draws the orb on a drag, on the message the flow actually sends", async () => {
+    const { pic } = mountCockpit();
     await settle();
 
     const frame = pic.find(".y-pic__frame").element;
@@ -421,13 +428,26 @@ describe("the picture draws every part of itself from its own message", () => {
     expect(pic.find(".y-pic__orb").exists()).toBe(true);
   });
 
-  it("draws no drag layer on the message the flow actually sends", async () => {
-    // The honest state of this page today, asserted so that the day
-    // `pick-cam-picture` carries `aim` this test is the one that has to
-    // change.
+  /**
+   * L-17 — and the hint the layer's affordance is, on this page too. The
+   * Cockpit's picture is fed by the same `pick-cam-picture` the Camera
+   * page's is, which is the whole reason the move was made there and not on
+   * either page's own node.
+   */
+  it("draws the slew hint here, from the same message", async () => {
     const { pic } = mountCockpit();
     await settle();
+    expect(pic.find(".y-pic__hint").text()).toBe("Drag to slew · release to stop");
+  });
+
+  it("draws no drag layer where the camera has no gimbal", async () => {
+    // The bench fixture's own answer, and the board's: no aim, no layer, no
+    // hint. Correct, and not the same thing as a message that never carried
+    // the field.
+    const { pic } = mountCockpit(pictureMessage({ aim: { state: "not-offered" } }));
+    await settle();
     expect(pic.find(".y-pic__frame").classes()).not.toContain("is-aiming");
+    expect(pic.find(".y-pic__hint").exists()).toBe(false);
   });
 });
 

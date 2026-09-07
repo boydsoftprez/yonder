@@ -2007,6 +2007,48 @@ describe("the camera routes", () => {
     expect(body.refusal).toBeNull();
   });
 
+  /**
+   * L-23 — the `● CONFIRMED` pill rides the camera read (R-CFG-03, R-UI-15).
+   *
+   * The point of the test is the **hand-in**: `cameraStrip()` cannot see the
+   * apply engine and must not learn how to, so this is the assertion that
+   * the route is the thing giving it the status. The condition itself is
+   * `confirmedPill()`'s and is tested in `present.test.ts`.
+   *
+   * It also proves the pill needs no poll of its own: it arrives on the read
+   * the camera page already makes.
+   */
+  it("carries no confirmation pill on a board that has applied nothing", async () => {
+    const r = await provisioned({ cameras: fixtureDetection() })("GET", "/cameras/cam0", undefined);
+    expect((r.body as { display: { confirmed: string | null } }).display.confirmed).toBeNull();
+  });
+
+  /** This board's own configuration with one field moved — so `cam0` is
+   *  still in it and the camera read still has a camera to answer with. */
+  const withHostname = async (route: Router, hostname: string): Promise<Config> => {
+    const config = structuredClone((await route("GET", "/config", undefined)).body as Config);
+    config.system.hostname = hostname;
+    return config;
+  };
+  const pillOf = (body: unknown) => (body as { display: { confirmed: string | null } }).display.confirmed;
+
+  it("carries the confirmation pill once an apply has been confirmed", async () => {
+    const route = provisioned({ cameras: fixtureDetection() });
+    const applied = await route("POST", "/apply", await withHostname(route, "changed"));
+    const { id } = applied.body as { id: string };
+    await route("POST", "/confirm", { id });
+    expect(pillOf((await route("GET", "/cameras/cam0", undefined)).body)).toBe("Confirmed");
+  });
+
+  it("takes the pill away again while the next apply is pending", async () => {
+    const route = provisioned({ cameras: fixtureDetection() });
+    const first = await route("POST", "/apply", await withHostname(route, "changed"));
+    await route("POST", "/confirm", { id: (first.body as { id: string }).id });
+    const armed = await route("POST", "/apply", await withHostname(route, "changed-again"));
+    expect((armed.body as { expiresAt: number | null }).expiresAt).not.toBeNull();
+    expect(pillOf((await route("GET", "/cameras/cam0", undefined)).body)).toBeNull();
+  });
+
   /** The Setup deck's *Re-probe* key: this one device, read again. */
   it("re-probes one camera and answers with what it said this time", async () => {
     const detection = fixtureDetection();

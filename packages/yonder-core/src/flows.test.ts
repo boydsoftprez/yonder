@@ -2906,6 +2906,99 @@ describe("flows/flows.json camera pages", () => {
   });
 
   /**
+   * **L-17: the picture's drag layer, fed** (R-VID-18, R-UI-28).
+   *
+   * `YonderPicture` has had the drag-to-slew layer and the hint above it
+   * since Task 25, both armed from `payload.aim.state === 'present'` on the
+   * picture's **own** message — the picture reads nothing of the deck's, and
+   * must not. But `payload.aim` went only to `pick-cam-aim`, so the layer was
+   * dark on the Camera page and on the Cockpit alike: a gesture built,
+   * tested, and reachable from nowhere.
+   *
+   * One scratch move fixes it, the same shape `strip` uses — kept before the
+   * composition that replaces `payload`, moved back after it, deleted at the
+   * end — and it feeds **both** pictures at once, because `pick-cam-picture`
+   * is wired to `pic-camera` and `pic-cockpit` together. The same object the
+   * aim panel gets, moved and never recomposed: two payloads composing the
+   * same gimbal's state from the same read is two answers waiting to differ.
+   */
+  it("carries the aim state to the picture, so the drag layer can arm", () => {
+    const from = flows.find((n) => n.id === "pick-cam-picture");
+    const rules = (from?.rules as { t: string; p: string; pt: string; to?: string; tot?: string }[]) ?? [];
+    expect(rules.find((r) => r.t === "set" && r.p === "aimv" && r.pt === "msg"),
+      "the daemon's aim is never kept across the payload's own composition")
+      .toMatchObject({ to: "payload.aim", tot: "msg" });
+    expect(rules.find((r) => r.t === "set" && r.p === "payload.aim"),
+      "the aim state never reaches the picture")
+      .toMatchObject({ to: "aimv", tot: "msg" });
+    const at = (p: string): number => rules.findIndex((r) => r.p === p);
+    expect(at("aimv")).toBeLessThan(at("payload"));
+    expect(at("payload")).toBeLessThan(at("payload.aim"));
+    expect(rules.some((r) => r.t === "delete" && r.p === "aimv")).toBe(true);
+    // Both pictures, from the one move. This is the point of doing it here
+    // rather than on either page's own node.
+    expect((from?.wires as string[][])[0]).toEqual(["pic-camera", "pic-cockpit"]);
+    // And the aim panel still gets its own, unchanged: the move copies, it
+    // does not divert.
+    expect((flows.find((n) => n.id === "pick-cam-aim")?.rules as { to?: string }[])[0]?.to)
+      .toBe("payload.aim");
+  });
+
+  /**
+   * **L-23: the `● CONFIRMED` pill at the head of the readout strip**
+   * (R-CFG-03, R-UI-15).
+   *
+   * **No new wire, and that is the finding.** The pill's condition is the
+   * apply engine's, and the engine is already read on the camera read: the
+   * route hands `engine.status()` to `cameraStrip()`, so the word arrives on
+   * `payload.display` with every other reading in the strip and
+   * `pick-cam-strip` moves it on unchanged. A second poll for one word would
+   * be a second answer that could disagree with the strip beside it.
+   *
+   * So all `flows.json` carries is the cell — declared first, which is where
+   * the blueprint draws it.
+   */
+  /**
+   * **Every switch in the shipped flow, not only the ones a test named.**
+   *
+   * `7103700` shipped a switch with more outputs than rules: an output
+   * nothing could ever reach, and OPEN pressed on the Cameras page did
+   * nothing at all. Three separate tests since have asserted the invariant
+   * for the switch they happened to be about, which leaves it holding for
+   * three switches and for none of the rest.
+   *
+   * A `switch` with `checkall: "false"` and no `else` also drops a message
+   * in silence, but that is a different defect with a different fix and this
+   * check is deliberately only the arithmetic one: **an output with no rule
+   * behind it is a wire that can never carry anything**, and it is visible
+   * from the document alone.
+   */
+  it("gives every switch in the flow one rule per output", () => {
+    const switches = flows.filter((n) => n.type === "switch");
+    expect(switches.length, "there are no switches to check").toBeGreaterThan(0);
+    for (const node of switches) {
+      const rules = (node.rules as unknown[]) ?? [];
+      const wires = (node.wires as unknown[][]) ?? [];
+      expect(wires.length, `${String(node.id)} has an output no rule can reach`)
+        .toBe(rules.length);
+    }
+  });
+
+  it("declares the confirmation pill first among the strip's cells", () => {
+    const bar = flows.find((n) => n.id === "bar-camera");
+    const cells = JSON.parse(String(bar?.cells)) as { key: string; kind?: string; label?: string }[];
+    expect(cells[0]).toEqual({ key: "confirmed", kind: "pill" });
+    // The readings that were there are all still there, in order.
+    expect(cells.slice(1).map((c) => c.label))
+      .toEqual(["CAMERA", "PICTURE", "RATE", "BITRATE", "UPLINK"]);
+    // And it rides the strip the daemon already composes — nothing new is
+    // wired to `pick-cam-strip` to carry it.
+    const strip = flows.find((n) => n.id === "pick-cam-strip");
+    expect((strip?.rules as unknown[]).length, "the strip node grew a rule for the pill").toBe(1);
+    expect((strip?.rules as { to?: string }[])[0]?.to).toBe("payload.display");
+  });
+
+  /**
    * **R-UI-26: an action lives beside the thing it acts on.**
    *
    * The rail carries the page's own actions — start, stop, the deck flip,

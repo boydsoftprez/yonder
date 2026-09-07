@@ -134,3 +134,64 @@ describe("a cell holding a sentence rather than a reading", () => {
     expect(getComputedStyle(w.findAll(".y-bar__v")[1]!.element).whiteSpace).toBe("nowrap");
   });
 });
+
+/* -------------------------------------------------------------------------- *
+ * L-23 — the `● CONFIRMED` pill (R-CFG-03, R-UI-15).
+ * -------------------------------------------------------------------------- */
+
+describe("a pill cell", () => {
+  const CELLS: DataCell[] = [
+    { key: "confirmed", kind: "pill" },
+    { key: "name", label: "CAMERA" },
+    { key: "picture", label: "PICTURE" },
+  ];
+
+  it("draws the word the daemon composed, with its dot, before the first cell", () => {
+    const w = bar(CELLS, { confirmed: "Confirmed", name: "Cam 1", picture: "1280 × 720" });
+    expect(w.get(".y-bar__pill").text()).toBe("Confirmed");
+    expect(w.find(".y-bar__pill-dot").exists()).toBe(true);
+    // Before the first reading, which is where the blueprint draws it. The
+    // order is the page's — `cells` declares it first — and this is the
+    // assertion that the component honours the order rather than appending
+    // its own kinds after the rest.
+    const order = [...w.element.querySelectorAll(".y-bar__pill, .y-bar__k")]
+      .map((el) => el.className);
+    expect(order[0]).toContain("y-bar__pill");
+    expect(w.findAll(".y-bar__k").map((k) => k.text())).toEqual(["CAMERA", "PICTURE"]);
+  });
+
+  /**
+   * **Absent is silence, not an em dash.** Every other kind answers a
+   * question, and a question asked with no answer is `—`; a pill is asserted
+   * rather than asked, and `—` in a box where a state word goes reads as a
+   * state the device is in.
+   */
+  it("draws nothing at all when the value is absent", () => {
+    for (const payload of [{ name: "Cam 1" }, { confirmed: null, name: "Cam 1" }, { confirmed: "", name: "Cam 1" }]) {
+      const w = bar(CELLS, payload);
+      expect(w.find(".y-bar__pill").exists()).toBe(false);
+      expect(w.find(".y-bar__pill-cell").exists(), "no empty box either").toBe(false);
+      // And it is not silently redrawn as an ordinary cell with a dash in it.
+      expect(w.findAll(".y-bar__cell")).toHaveLength(2);
+      expect(w.findAll(".y-bar__v").map((v) => v.text())).toEqual(["Cam 1", "—"]);
+    }
+  });
+
+  it("carries no caption, and takes no share of the row's width", () => {
+    const w = bar(CELLS, { confirmed: "Confirmed", name: "Cam 1", picture: "1280 × 720" });
+    const cell = w.get(".y-bar__pill-cell");
+    expect(cell.find(".y-bar__k").exists()).toBe(false);
+    // `flex: 1` on this box would push every reading beside it narrower to
+    // hold a box that is always the same size — R-UI-25's own failure, from
+    // the other direction.
+    expect(getComputedStyle(cell.element).flex).toBe("0 0 auto");
+  });
+
+  /** The blueprint's tone: the good green, not the select cyan. */
+  it("is drawn in the good tone", () => {
+    const w = bar(CELLS, { confirmed: "Confirmed", name: "Cam 1" });
+    const style = getComputedStyle(w.get(".y-bar__pill").element);
+    expect(style.color).toContain("--yonder-good");
+    expect(style.color).not.toContain("--yonder-select");
+  });
+});
