@@ -2084,3 +2084,44 @@ test would have to read Node-RED's own registry, and the honest version of that 
 is the one this gate already wants — `GET /nodes` after start-up, compared against the
 manifests `flows.test.ts` already reads for `R-UI-19`. Worth doing when something else
 brings a reader of that endpoint.
+
+---
+
+### K-59 · A link too thin for the floor leaves the preview at the ceiling
+
+**Status:** Open · **Requirements:** R-VID-07, R-VID-11
+
+Found while proving adaptive on the board, 2026-09-06. The rate controller
+adapts correctly across the ordinary range — a 2600 kb/s link took the preview
+to 1591 kb/s and a 1600 kb/s link to 633 kb/s, both measured on the wire — but
+a link too thin to carry even the floor makes it stop rather than fall.
+
+Reported capacity 400 kb/s, with a 900 kb/s main stream configured beside it:
+
+```
+Cam1's preview floor of 300 kb/s costs 310 kb/s on the link and only
+0 kb/s is available; nothing was changed
+```
+
+The preview stayed at **2000 kb/s**, its ceiling, on a link measured at 400.
+
+The reasoning is defensible read one way: the operator's applied envelope cannot
+be honoured at all, so the controller declines to invent a rate outside it and
+says so out loud. But the outcome is the worst available one. A link that cannot
+carry the floor certainly cannot carry the ceiling, and holding the ceiling
+there is what turns a degraded picture into no picture at all — on the one
+link where an operator most needs the frames to keep coming.
+
+Two ways to close it, and the choice is the operator's (CLAUDE.md rule 8):
+
+1. **Fall to the floor and stay there**, with the reason saying the floor does
+   not fit either. The picture is then as small as the operator allowed and the
+   link is oversubscribed by the least amount available.
+2. **Fall below the floor**, on the grounds that a floor is a quality
+   preference and a link that cannot carry it has overruled it. Gets frames
+   through where nothing else would, and means the console can be showing a
+   picture the operator's own settings say is too poor to show.
+
+Not decided here. The first is the smaller change and keeps the applied
+envelope meaningful; the second is the one that keeps a picture on a bad day.
+
