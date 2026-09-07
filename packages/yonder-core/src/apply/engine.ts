@@ -220,7 +220,17 @@ export class ApplyEngine {
       throw new ConfigError(`cannot apply while degraded: ${this.degraded}`);
     }
     if (BUSY.includes(this.state)) {
-      throw new ConfigError("an apply is already pending; confirm or wait for it to revert");
+      // Named by state, because only one of the three can be confirmed. This
+      // used to say *pending; confirm or wait for it to revert* for all three,
+      // and an operator who read that during the tail of a revert went to
+      // confirm a change that no longer existed — K-50, seen on the board.
+      throw new ConfigError(
+        this.state === "pending"
+          ? `an apply (${String(this.id)}) is pending; confirm it, revert it, or wait for it to revert`
+          : this.state === "applying"
+            ? "an apply is still being carried out; wait for it to finish"
+            : "the previous configuration is being put back; wait for it to finish",
+      );
     }
 
     // Given the same tolerance the loader gives a file on disk (R-CFG-09),

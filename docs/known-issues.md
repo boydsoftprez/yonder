@@ -1552,7 +1552,32 @@ the decisions to the picture. Until Task 32 lands this entry stays open and
 both faults above stand: a controller that is never told anything holds, which
 is the right behaviour and the same thing an operator sees.
 
-### K-50 · An apply can be left pending for ever, and two routes disagree about it
+### K-50 · ~~An apply can be left pending for ever, and two routes disagree about it~~ — CLOSED, and half of it was misread
+
+**Status:** Closed on 2026-09-07 · **Requirements:** R-CAM-12, R-UI-05, R-VID-07
+
+**What was actually happening.** The engine holds the apply's `id` from the
+moment it starts until it returns to idle — through `pending` *and* through
+`reverting`. The sighting below (`/apply` refusing, `/status` with no id three
+seconds later) was the tail of a revert: `/apply` hit the engine while it was
+still `reverting`, and by the time `/status` was asked the revert had finished
+and there was nothing to report. Not two routes disagreeing; one route asked
+three seconds after the other about a state that had ended in between.
+
+**The console's CONFIRM key was never the problem either.** `poll-pending`
+re-reads `/status` on the press and hands the id on; `yonder-confirm` posts it.
+The `id is required` refusal in the text below answered a hand-written `curl`
+that sent `{}`, not anything the console does.
+
+**What was wrong, and is fixed:** the refusal said *an apply is already
+pending; confirm or wait for it to revert* for all three busy states, and only
+one of them can be confirmed. An operator who read it during a revert went
+looking for a change to confirm that no longer existed. It now names the state
+— pending (with the id), still applying, or putting the previous configuration
+back — and says what can be done in each.
+
+*The original entry, kept as written:*
+
 
 **Seen on hardware, 2026-09-06**, while proving adaptive. `POST /cameras/cam0/apply`
 refused with
