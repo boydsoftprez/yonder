@@ -84,7 +84,15 @@ export { atIp } from "../video/present.js";
  * address on the way in — two ends of one string, which is precisely what
  * this entry point exists to keep from being written twice.
  */
-export { cameraFor, captureUrl } from "../video/media-path.js";
+/**
+ * **And `stillUrl`, for the same reason a third time** (R-VID-14).
+ * `YonderPicture.vue` fetches its own still on the interval it was told and
+ * builds the strip's thumbnails from what `video/present.ts` composed, and
+ * `console/middleware.ts` matches the same address on the way in.
+ */
+export {
+  cameraFor, captureUrl, stillUrl, STILL_AGE_HEADER, STILL_AT_HEADER,
+} from "../video/media-path.js";
 
 /**
  * The operator-facing word for each capability key — `whiteBalance` is not a

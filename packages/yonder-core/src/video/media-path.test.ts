@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
-import { cameraFor } from "./media-path.js";
+import { cameraFor, stillUrl } from "./media-path.js";
 
 describe("cameraFor", () => {
   it("strips a trailing -preview", () => {
@@ -29,5 +29,18 @@ describe("cameraFor", () => {
 
   it("returns an empty string unchanged", () => {
     expect(cameraFor("")).toBe("");
+  });
+});
+
+describe("stillUrl", () => {
+  it("is the console's own still route for the camera, never a media path", () => {
+    expect(stillUrl("cam0")).toBe("/video/cam0/still");
+    // A caller holding a stream path gets the same address: a still is
+    // neither the preview nor the full-rate copy, so there is no suffix.
+    expect(stillUrl("cam0-preview")).toBe("/video/cam0/still");
+  });
+
+  it("encodes the id, so it cannot be a path of its own", () => {
+    expect(stillUrl("a/b")).toBe("/video/a%2Fb/still");
   });
 });

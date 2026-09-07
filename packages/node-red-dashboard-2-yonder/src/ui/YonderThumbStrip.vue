@@ -9,11 +9,16 @@
             :class="{ on: cam.active }"
             @click="$emit('go', cam.id)"
         >
-            <span v-if="cam.thumbSrc" class="y-strip__img" :style="{ backgroundImage: 'url(' + cam.thumbSrc + ')' }" />
-            <span class="y-strip__cap">{{ cam.active ? 'Live' : ('Still · ' + (cam.ageSeconds ?? 0) + ' s') }}</span>
+            <span class="y-strip__img" :class="{ 'is-empty': !cam.thumbSrc }" :style="cam.thumbSrc ? { backgroundImage: 'url(' + cam.thumbSrc + ')' } : {}" />
+            <span class="y-strip__cap" :class="{ 'is-stopped': cam.stopped }">{{ captionOf(cam) }}</span>
             <span v-if="cam.name" class="y-strip__name">{{ cam.name }}</span>
         </button>
-        <div v-if="downlink" class="y-strip__dl">Downlink now <b class="y-strip__dl-v">{{ downlink }}</b></div>
+        <!-- L-22: `OTHER CAMERAS` over what every still copy is costing, in the
+             daemon's own words, to the right of the thumbnails. -->
+        <div v-if="downlink" class="y-strip__dl">
+            <em class="y-strip__dl-h">OTHER CAMERAS</em>
+            <b class="y-strip__dl-v">{{ downlink }}</b>
+        </div>
     </div>
 </template>
 
@@ -33,7 +38,12 @@
  * **Draws what it is given and decides nothing.** `ageSeconds` is R-VID-
  * 14's own frame age, computed wherever the stills mechanism already
  * computes it (§8.6) — this component only chooses the words around it
- * (`Still · 4 s`), never the number itself.
+ * (`Still · 4 s`), never the number itself. Two more words, both about a
+ * camera that has no frame to show: `Stopped` for one with no pipeline
+ * (`stopped`), drawn as stopped and never as a stale frame, and `Still ·
+ * waiting` for one that is running and whose first still has not been
+ * taken yet (`ageSeconds` null) — a wait of at most one interval, which is
+ * a different fact from a camera to start.
  *
  * **A press emits the camera's own id, never its position in the array.**
  * `cameras` is drawn in whatever order its caller hands it, and a caller
@@ -43,24 +53,38 @@
  * camera object precisely so nothing here ever has to reach for `index`
  * at all.
  *
- * **`Downlink now` is the measured path total, never a sum this component
- * reconstructs.** §8.2: "actual traffic per output/subscriber on each
- * path … including other viewers and thumbnail stills, not the sum of two
- * encoder targets." Every still this strip shows for every non-active
- * camera is itself part of that total (§8.6, "count every transmitted
- * copy in path spend"), and this component has no visibility into the
- * other subscribers or viewers that also share it — so `downlink` arrives
- * pre-measured, exactly the way `YonderStateOverlay`'s own `cost.path`
- * does, and nothing here adds anything to produce it.
+ * **`OTHER CAMERAS` over `downlink`** (blueprint L-22), and `downlink` is a
+ * sentence the daemon composed — `12 kb/s of stills · counted in Path
+ * total` — never a sum this component reconstructs. §8.2: "actual traffic
+ * per output/subscriber on each path … including other viewers and
+ * thumbnail stills, not the sum of two encoder targets." Every still this
+ * strip shows for every non-active camera is itself part of the path total
+ * (§8.6, "count every transmitted copy in path spend"), and this component
+ * has no visibility into the other subscribers or viewers that also share
+ * it — so `downlink` arrives pre-composed, exactly the way
+ * `YonderStateOverlay`'s own `cost.path` does, and nothing here adds
+ * anything to produce it. The heading is written in capitals in the
+ * template rather than uppercased by a stylesheet, so what a test reads
+ * through `.text()` is what is on screen.
  */
 export default {
     name: 'YonderThumbStrip',
     props: {
-        /** `{ id, name, active, ageSeconds, thumbSrc }` per camera. */
+        /** `{ id, name, active, ageSeconds, thumbSrc, stopped }` per camera —
+         * `video/present.ts`'s own `ThumbRow`. */
         cameras: { type: Array, default: () => [] },
         downlink: { type: String, default: '' }
     },
-    emits: ['go']
+    emits: ['go'],
+    methods: {
+        /** The word under a thumbnail — see this component's doc comment. */
+        captionOf (cam) {
+            if (cam.active) return 'Live'
+            if (cam.stopped) return 'Stopped'
+            if (cam.ageSeconds === null || cam.ageSeconds === undefined) return 'Still · waiting'
+            return 'Still · ' + cam.ageSeconds + ' s'
+        }
+    }
 }
 </script>
 
@@ -103,6 +127,10 @@ export default {
     color: var(--yonder-label, #7f8a95);
 }
 .y-strip__thumb.on .y-strip__cap { color: var(--yonder-select, #2ad4f0); font-weight: 700; }
+.y-strip__cap.is-stopped { color: var(--yonder-neutral, #7d7869); }
+/* A thumbnail with nothing to show keeps its box, so the strip does not
+   reflow when a frame arrives or a camera stops. */
+.y-strip__img.is-empty { opacity: 0.6; }
 .y-strip__name {
     font-size: 10px;
     font-weight: 600;
@@ -111,7 +139,16 @@ export default {
 .y-strip__dl {
     margin-left: auto;
     align-self: center;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
     font-size: 10.5px;
+    color: var(--yonder-label, #7f8a95);
+}
+.y-strip__dl-h {
+    font-style: normal;
+    font-size: 9.5px;
+    letter-spacing: 0.1em;
     color: var(--yonder-label, #7f8a95);
 }
 /* Never uppercased: a bare `Mb/s` in `downlink` would read `MB/S`

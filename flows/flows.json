@@ -4498,13 +4498,20 @@
         "id": "pick-cam-picture",
         "type": "change",
         "z": "yonder-console",
-        "name": "the picture: which camera, and what it costs",
+        "name": "the picture: which camera, what it costs, and the strip",
         "rules": [
             {
                 "t": "set",
                 "p": "rec",
                 "pt": "msg",
                 "to": "payload.recorder",
+                "tot": "msg"
+            },
+            {
+                "t": "set",
+                "p": "strip",
+                "pt": "msg",
+                "to": "payload.strip",
                 "tot": "msg"
             },
             {
@@ -4522,8 +4529,27 @@
                 "tot": "msg"
             },
             {
+                "t": "set",
+                "p": "payload.cameras",
+                "pt": "msg",
+                "to": "strip.cameras",
+                "tot": "msg"
+            },
+            {
+                "t": "set",
+                "p": "payload.downlink",
+                "pt": "msg",
+                "to": "strip.downlink",
+                "tot": "msg"
+            },
+            {
                 "t": "delete",
                 "p": "rec",
+                "pt": "msg"
+            },
+            {
+                "t": "delete",
+                "p": "strip",
                 "pt": "msg"
             }
         ],
@@ -4579,7 +4605,6 @@
         "path": "",
         "label": "",
         "stillsAfterMs": 12000,
-        "stillsUrl": "",
         "cost": "",
         "x": 460,
         "y": 1980,
@@ -8604,7 +8629,7 @@
         "id": "cam-pic-act",
         "type": "switch",
         "z": "yonder-console",
-        "name": "the picture's own key",
+        "name": "the picture's own key, and a press on the strip",
         "property": "payload",
         "propertyType": "msg",
         "rules": [
@@ -8614,19 +8639,66 @@
                 "vt": "str"
             },
             {
+                "t": "hask",
+                "v": "path",
+                "vt": "str"
+            },
+            {
                 "t": "else"
             }
         ],
         "checkall": "false",
         "repair": false,
-        "outputs": 2,
+        "outputs": 3,
         "x": 700,
         "y": 3600,
         "wires": [
             [
                 "cam-at-stream"
             ],
+            [
+                "cam-pic-go"
+            ],
             []
+        ]
+    },
+    {
+        "id": "cam-pic-go",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "show the camera pressed on the strip",
+        "rules": [
+            {
+                "t": "set",
+                "p": "camera",
+                "pt": "flow",
+                "to": "payload.path",
+                "tot": "msg"
+            },
+            {
+                "t": "delete",
+                "p": "topic",
+                "pt": "msg"
+            },
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 960,
+        "y": 3640,
+        "wires": [
+            [
+                "cam-at-read"
+            ]
         ]
     }
 ]

@@ -40,6 +40,7 @@ import { EncoderChannel } from "../video/encoder.js";
 import { Viewers } from "../video/viewers.js";
 import { Adaptation } from "../video/adaptation.js";
 import { CAPTURES_ROOT, Recorder } from "../video/recorder.js";
+import { Stills, STILLS_ROOT } from "../video/stills.js";
 import { freeSpaceOn } from "../system/read.js";
 import { readSupply } from "../system/supply.js";
 import { ZeroTierCli } from "../remote/zerotier/cli.js";
@@ -123,6 +124,13 @@ export interface ServerOptions {
    * production value.
    */
   mediaConfigPath?: string;
+  /**
+   * Where the periodic stills live (R-STO-01). `STILLS_ROOT` — the tmpfs the
+   * unit's `RuntimeDirectory` provides — unless a test says otherwise, and a
+   * test must: the generator clears that directory when it starts, and a
+   * test that reached `/run/yonder` would be clearing a board's.
+   */
+  stillsRoot?: string;
   /**
    * The camera layer, given whole instead of probed for.
    *
@@ -859,6 +867,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   let viewers: Viewers | undefined;
   let adaptation: Adaptation | undefined;
   let recorder: Recorder | undefined;
+  let stills: Stills | undefined;
   if (encoders !== undefined && supervisor !== undefined) {
     const channel = encoders;
     const watching = new Viewers({
@@ -872,6 +881,12 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
       // has already decided whether this browser is an active video
       // subscriber of that camera, which is the filter §8.2 asks for.
       onReport: (report) => { adaptation?.observe(report); },
+      // The still this device holds for a camera, for the age and the shape
+      // a stills viewer's own state reports (R-VID-14). Through the closure
+      // because the generator below is built from this register — it asks
+      // it which cameras to take a frame for — and the two meet in the
+      // middle.
+      stillFor: (id) => stills?.latest(id) ?? null,
     });
     viewers = watching;
     adaptation = new Adaptation({
@@ -913,6 +928,35 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
       clock,
       inForce: (id) => channel.inForce(id),
     });
+
+    /**
+     * Periodic stills, for whoever is on them (R-VID-14, R-VID-11, R-STO-01;
+     * spec §8.6).
+     *
+     * The chain that was missing: `Viewers` accounted for a stills
+     * subscriber completely and `YonderPicture` fell back to stills after
+     * twelve seconds, and nothing between them produced a frame. This is
+     * the host's own `still` op — the one `Recorder.photo()` drives — on a
+     * timer, once per camera that has a stills subscriber, however many.
+     * It asks the register above which cameras those are, on every tick,
+     * so a browser that has gone stops costing the pipeline a frame the
+     * moment the register lets go of it.
+     *
+     * Beside the three timers above, on the same supervisor and the same
+     * clock, for the same reason: a redeploy destroys every Node-RED node,
+     * and a generator in one would stop the moment somebody edited a flow.
+     * The stills themselves live on the daemon's `RuntimeDirectory` — RAM,
+     * never the card (R-STO-01) — and are cleared when this process starts,
+     * because nothing remembers when an earlier one took them.
+     */
+    stills = new Stills({
+      channel: supervisor,
+      cameras: () => reachConfig().cameras,
+      wanted: () => watching.wantingStills(),
+      root: opts.stillsRoot ?? STILLS_ROOT,
+      clock,
+    });
+    stills.start();
   }
   // The telemetry equivalent, and on its own clock for the same reason
   // (R-NET-10's argument, applied to the router's own counters): the sparkline
@@ -1304,6 +1348,12 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
     // command a pipeline through, and every capture route says so rather than
     // answering with an empty list that would read as *nothing was recorded*.
     ...(recorder === undefined ? {} : { recorder }),
+    // And the third of that block: no supervisor, no pipeline to take a
+    // still off, and the still route says so.
+    ...(stills === undefined ? {} : { stills }),
+    // The daemon's own clock, for the ages the camera page states — so a
+    // test composes a page at a moment it chose.
+    clock,
     // Not behind `built`: the reach monitor is assembled from the runner and
     // the nmcli client, neither of which depends on the secret store, so a
     // board whose secrets.yaml is unreadable can still say which way out is
@@ -1341,6 +1391,9 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
         // caller has to inspect first.
         if (r.contentType !== undefined && Buffer.isBuffer(r.body)) {
           res.writeHead(r.status, {
+            // A still's age travels beside its bytes (R-VID-14); nothing
+            // else sets these, and a JSON answer never carries them.
+            ...r.headers,
             "content-type": r.contentType,
             "content-length": r.body.length,
           });
@@ -1435,6 +1488,10 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
         // that has already let go of its socket — and, unlike the others,
         // it would be commanding hardware while it did it.
         adaptation?.stop();
+        // The sixth. A stills generator still ticking after close() would
+        // go on hanging branches off a running pipeline's tee for a process
+        // that has already let go of its socket.
+        stills?.stop();
         // The fifth: the telemetry sampler, and with it any sweep this
         // renderer had scheduled for thirty seconds' time.
         built?.mavlinkRenderer?.close();

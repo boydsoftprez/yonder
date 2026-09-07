@@ -21,17 +21,16 @@ export = function register(RED: RED): void {
         /** Always the preview path. The full rate is a held key, not a default. */
         path: path.endsWith("-preview") ? path : `${path}-preview`,
         label: str(config.label),
-        /** How long to wait for live video before serving stills (R-VID-14). */
-        stillsAfterMs: num(config.stillsAfterMs, 12_000),
         /**
-         * Where the stills come from, when the fall-back happens.
+         * How long to wait for live video before serving stills (R-VID-14).
          *
-         * Configuration rather than something discovered, because nothing in
-         * this repository serves stills yet. Left unset, the fall-back still
-         * happens and still reports why — which is the half of R-VID-14 that
-         * sends an operator to the right place — and draws no picture.
+         * The stills themselves are not configured anywhere: the picture
+         * derives their address from the camera it is showing, and the
+         * daemon takes them on the interval it states. An editor field
+         * that named a source used to sit here and nothing could ever fill
+         * it — a field that was never fillable is not a feature.
          */
-        stillsUrl: str(config.stillsUrl),
+        stillsAfterMs: num(config.stillsAfterMs, 12_000),
         cost: str(config.cost),
       };
     },

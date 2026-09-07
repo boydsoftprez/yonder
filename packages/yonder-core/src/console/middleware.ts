@@ -6,7 +6,10 @@ import { CONSOLE_HOME } from "./settings.js";
 import type { DaemonClient } from "./client.js";
 import type { SessionStore } from "./session.js";
 import { whepHandler, WHEP_PREFIX, type WhepRequest, type WhepResponse } from "./whep.js";
-import { captureRequestFor, type CaptureAnswer, type CaptureHandler } from "./capture.js";
+import {
+  captureRequestFor, stillRequestFor,
+  type CaptureAnswer, type CaptureHandler, type StillHandler,
+} from "./capture.js";
 import { cameraFor } from "../video/media-path.js";
 
 /**
@@ -303,6 +306,9 @@ export function viewerFor(token: string): string {
  */
 function sendCapture(res: ServerResponse, answer: CaptureAnswer): void {
   res.writeHead(answer.status, {
+    // A still's own facts first (R-VID-14), then this console's rules,
+    // which nothing relayed may override.
+    ...answer.headers,
     "content-type": answer.contentType,
     "cache-control": "no-store",
     "x-content-type-options": "nosniff",
@@ -408,6 +414,12 @@ export interface ConsoleMiddlewareDeps {
    * recorder answers the routes behind it.
    */
   capture?: CaptureHandler;
+  /**
+   * A camera's latest still (capture.ts, `stillHandler`), for the same
+   * reason and in the same shape — and absent on the same consoles, with
+   * the route answering 404 in words rather than throwing.
+   */
+  still?: StillHandler;
 }
 
 /**
@@ -502,6 +514,43 @@ export function consoleMiddleware(deps: ConsoleMiddlewareDeps): Middleware {
         }
         void (async () => {
           const answer = await serve(wanted);
+          sendCapture(res, answer);
+        })();
+        return;
+      }
+
+      /**
+       * **A camera's latest still, behind the same credential** (R-VID-14,
+       * R-VID-11, R-SEC-13) — exactly as the capture above, and for the same
+       * two reasons it sits here: `still` is not a WHEP verb, and a route
+       * authenticated by where it sits in a function stops being
+       * authenticated the day the function is reordered.
+       *
+       * `GET` only: a still is taken by the device on its own timer, for
+       * whoever is on stills, and nothing a browser can send here asks for
+       * one to be taken. The viewer the copy is for is derived from the
+       * session — never from the request, for the reason the report route
+       * below gives — so the daemon counts it against the browser that
+       * fetched it and no script on a page can be charged to another.
+       */
+      const stillWanted = stillRequestFor(path);
+      if (stillWanted !== null) {
+        if (req.method !== "GET") {
+          sendProxied(res, { status: 405, body: "only GET reads a camera's still" });
+          return;
+        }
+        const token = sessionOf(req, deps.sessions);
+        if (token === undefined) {
+          sendProxied(res, { status: 401, body: "log in to read this camera's stills" });
+          return;
+        }
+        const serve = deps.still;
+        if (serve === undefined) {
+          sendProxied(res, { status: 404, body: "this device serves no stills" });
+          return;
+        }
+        void (async () => {
+          const answer = await serve({ camera: stillWanted.camera, viewer: viewerFor(token) });
           sendCapture(res, answer);
         })();
         return;

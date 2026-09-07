@@ -38,7 +38,9 @@
 //   YONDER_PAGES_ROUTER_STATE file the systemctl stand-in writes: `active`/`inactive`
 //   YONDER_PAGES_ROUTER_STATS file the journalctl stand-in prints
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createSocket } from "node:dgram";
 import { startServer, consolePathsFromEnv } from "../packages/yonder-core/dist/daemon/server.js";
 import { heartbeatV2 } from "../packages/yonder-core/dist/mav/testing.js";
@@ -272,6 +274,12 @@ await startServer({
   ...(process.env.YONDER_MEDIA_CONFIG === undefined
     ? {}
     : { mediaConfigPath: process.env.YONDER_MEDIA_CONFIG }),
+  // Never /run/yonder/stills, for the reason above one line up: the stills
+  // generator clears its directory before the first still it takes, and a
+  // harness that reached a board's tmpfs would be clearing a board's. No
+  // camera runs under this harness, so nothing is ever written here — the
+  // path exists so that stays true by construction rather than by luck.
+  stillsRoot: process.env.YONDER_STILLS ?? mkdtempSync(join(tmpdir(), "yonder-pages-stills-")),
   cameraLayer: {
     cameras: { detect, probe },
     encoder: async () => structuredClone(current().encoder),

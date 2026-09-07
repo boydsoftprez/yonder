@@ -2147,8 +2147,10 @@ describe("flows/flows.json camera pages", () => {
     // so "wired to nothing" is no longer the way to say this. What has to
     // stay true is the thing that rule was protecting: `setMode` emits
     // `mode:<mode>`, and a path that carried that back would be a picture
-    // commanding itself. Everything but `start` is dropped, by a switch whose
-    // `else` output goes nowhere at all.
+    // commanding itself. Two things pass, and neither is a mode string: the
+    // word `start`, and an object naming a camera (`hask path` — a thumb
+    // press, which no string can satisfy). Everything else is dropped, by a
+    // switch whose `else` output goes nowhere at all.
     for (const id of out) {
       const router = flows.find((n) => n.id === id);
       expect(router?.type, `${id} takes the picture's output and is not a switch`).toBe("switch");
@@ -2159,7 +2161,9 @@ describe("flows/flows.json camera pages", () => {
       expect(otherwise, `${id} passes anything it does not recognise`).toBeGreaterThanOrEqual(0);
       expect(wires[otherwise], `${id}'s else output leads somewhere`).toEqual([]);
       for (const r of rules) {
-        if (r.t !== "else") expect(r.v).toBe("start");
+        if (r.t === "else") continue;
+        if (r.t === "eq") expect(r.v).toBe("start");
+        else expect(r.t, `${id} passes a payload by a rule a mode string could match`).toBe("hask");
       }
     }
   });
@@ -2447,6 +2451,44 @@ describe("flows/flows.json camera pages", () => {
     // The same node the rail's START ends at, not a second start path.
     const railBound = (flows.find((n) => n.id === "cam-live-keys")?.wires as string[][])[0];
     expect(((router?.wires as string[][]) ?? [])[0]).toEqual(railBound);
+  });
+
+  /**
+   * **A press on the strip switches the page to that camera** (blueprint
+   * L-21, R-UI-03, R-VID-14).
+   *
+   * The picture already renegotiated on a thumb press and told the flow
+   * `{ path }` — and the flow dropped it: the switch above had one rule,
+   * `start`, and an else output wired to nothing. So the picture moved to
+   * the pressed camera and the page's next read, five seconds later, named
+   * the camera the page was still on and moved it back. A control that
+   * worked for five seconds.
+   *
+   * The press now sets the page's own camera — the same `flow.camera` the
+   * Cameras page's OPEN sets — and reads it back at once through the same
+   * node every read takes, so every instrument on the page follows and the
+   * next poll agrees. Moves only: the pressed id, one property to another.
+   */
+  it("shows the camera pressed on the strip, by the same read every page takes", () => {
+    const router = flows.find((n) => n.id === "cam-pic-act");
+    const rules = (router?.rules as { t: string; v?: string }[]) ?? [];
+    const wires = (router?.wires as string[][]) ?? [];
+    const pressed = rules.findIndex((r) => r.t === "hask" && r.v === "path");
+    expect(pressed, "a thumb press names a camera on payload.path, and no rule reads it").toBeGreaterThan(0);
+    expect(wires[pressed], "the press reaches nothing").toHaveLength(1);
+
+    const go = flows.find((n) => n.id === wires[pressed]?.[0]);
+    expect(go?.type).toBe("change");
+    const set = (go?.rules as { t: string; p: string; pt: string; to: string; tot: string }[])
+      .find((r) => r.t === "set" && r.pt === "flow" && r.p === "camera");
+    // The pressed camera's own id, moved and never composed.
+    expect(set).toMatchObject({ to: "payload.path", tot: "msg" });
+    // Then a plain read of it — no topic, no payload — down the same node
+    // that points every read at `flow.camera`.
+    expect((go?.wires as string[][])[0]).toEqual(["cam-at-read"]);
+    expect((flows.find((n) => n.id === "cam-at-read")?.wires as string[][])[0]).toEqual(["camera-read"]);
+    const cleared = (go?.rules as { t: string; p: string }[]).map((r) => `${r.t} ${r.p}`);
+    expect(cleared).toContain("delete topic");
   });
 
   /**
@@ -2810,6 +2852,43 @@ describe("flows/flows.json camera pages", () => {
   });
 
   /**
+   * **The strip under the picture, as the daemon composed it** (R-VID-14,
+   * R-VID-11; blueprint L-20, L-22).
+   *
+   * `YonderThumbStrip` was built, mounted, and fed by nothing: no message
+   * ever carried `cameras` or `downlink` to the picture, so the strip was
+   * absent from every page. `video/present.ts` composes both now, on the
+   * same read as everything else on the page, and this node moves them —
+   * one property to another, never a JSONata composition — on to the
+   * picture's own payload beside the camera and the cost.
+   *
+   * **And the picture has no stills source to configure.** The editor field
+   * that named one could never be filled; the picture derives the address
+   * from the camera it is showing.
+   */
+  it("carries the strip to the picture, moved and never composed", () => {
+    const from = flows.find((n) => n.id === "pick-cam-picture");
+    const rules = (from?.rules as { t: string; p: string; pt: string; to?: string; tot?: string }[]) ?? [];
+    const kept = rules.find((r) => r.t === "set" && r.p === "strip" && r.pt === "msg");
+    expect(kept, "the daemon's strip is never kept across the payload's own composition")
+      .toMatchObject({ to: "payload.strip", tot: "msg" });
+    for (const [key, source] of [["payload.cameras", "strip.cameras"], ["payload.downlink", "strip.downlink"]]) {
+      const rule = rules.find((r) => r.t === "set" && r.p === key);
+      expect(rule, `${key} never reaches the picture`).toMatchObject({ to: source, tot: "msg" });
+    }
+    // The keep is before the composition that replaces `payload`, and the
+    // moves are after it — order is what makes a move of `payload.strip`
+    // find anything.
+    const at = (p: string): number => rules.findIndex((r) => r.p === p);
+    expect(at("strip")).toBeLessThan(at("payload"));
+    expect(at("payload")).toBeLessThan(at("payload.cameras"));
+    expect(rules.some((r) => r.t === "delete" && r.p === "strip")).toBe(true);
+
+    const picture = flows.find((n) => n.type === "ui-yonder-picture");
+    expect(picture).not.toHaveProperty("stillsUrl");
+  });
+
+  /**
    * **R-UI-26: an action lives beside the thing it acts on.**
    *
    * The rail carries the page's own actions — start, stop, the deck flip,
@@ -3011,8 +3090,12 @@ describe("flows/flows.json camera pages", () => {
     expect(rules[0]).toEqual({ t: "set", p: "rec", pt: "msg", to: "payload.recorder", tot: "msg" });
     expect(rules.some((r) => r.p === "payload.recording" && r.to === "rec" && r.tot === "msg"))
       .toBe(true);
-    // And the scratch key does not travel on to the widget.
-    expect(rules.at(-1)).toMatchObject({ t: "delete", p: "rec" });
+    // And neither scratch key travels on to the widget: every delete is
+    // after the last set, and `rec` is among them.
+    const lastSet = rules.map((r) => r.t).lastIndexOf("set");
+    const deletes = rules.map((r, i) => ({ ...r, i })).filter((r) => r.t === "delete");
+    expect(deletes.map((r) => r.p)).toContain("rec");
+    for (const d of deletes) expect(d.i, `${d.p} is deleted before the last set`).toBeGreaterThan(lastSet);
   });
 });
 

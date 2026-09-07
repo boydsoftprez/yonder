@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
-import { Viewers, type CameraReport, type PreviewState, type ViewerStats } from "./viewers.js";
+import {
+  STILLS_INTERVAL_MS, stillCostKbps, Viewers,
+  type CameraReport, type PreviewState, type ViewerStats,
+} from "./viewers.js";
 import type { Decision } from "./rate.js";
 import type { RunningEncodes } from "./pipeline.js";
 import { atIp } from "./present.js";
@@ -191,17 +194,18 @@ describe("Viewers and what a picture costs", () => {
     viewers.subscribe("v1", "cam0", "video");
     viewers.subscribe("v2", "cam0", "video");
     viewers.subscribe("v3", "cam0", "stills");
-    viewers.report("v3", stats({ egress: 120 }));
+    viewers.transmitted("v3", "cam0", 100_000);
     viewers.fullRate("v2", "cam0", true);
 
     const mine = viewers.state("cam0", "v1");
     // One configured RTP output at the stream's running rate, one full-rate
     // viewer at the same rate, one preview viewer, and one stills viewer at
-    // what it measured arriving.
-    expect(mine.cost.path).toBe(atIp(2000) + atIp(2000) + atIp(900) + 120);
+    // the copy it was sent over the interval it is sent at.
+    const still = stillCostKbps(100_000, STILLS_INTERVAL_MS);
+    expect(mine.cost.path).toBe(atIp(2000) + atIp(2000) + atIp(900) + still);
     expect(mine.cost.mine).toBe(atIp(900));
     expect(viewers.state("cam0", "v2").cost.mine).toBe(atIp(2000));
-    expect(viewers.state("cam0", "v3").cost.mine).toBe(120);
+    expect(viewers.state("cam0", "v3").cost.mine).toBe(still);
     // The encode itself, once, whoever is watching it.
     expect(mine.cost.shared).toBe(atIp(900));
   });
@@ -210,14 +214,16 @@ describe("Viewers and what a picture costs", () => {
     const { viewers } = viewersOn({ cameras: [CAMERA, SECOND] });
     viewers.subscribe("v1", "cam0", "video");
     viewers.subscribe("v1", "cam1", "stills");
-    viewers.report("v1", stats({ camera: "cam1", egress: 150 }));
-    expect(viewers.state("cam0", "v1").cost.mine).toBe(atIp(900) + 150);
+    viewers.transmitted("v1", "cam1", 60_000);
+    expect(viewers.state("cam0", "v1").cost.mine)
+      .toBe(atIp(900) + stillCostKbps(60_000, STILLS_INTERVAL_MS));
   });
 
-  it("charges nothing for a still nothing has measured", () => {
+  it("charges nothing for a still nothing has been sent", () => {
     const { viewers } = viewersOn();
     viewers.subscribe("v1", "cam0", "stills");
     expect(viewers.state("cam0", "v1").cost.mine).toBe(0);
+    expect(viewers.state("cam0", "v1").mine.kbps).toBeNull();
     expect(viewers.state("cam0", "v1").cost.path).toBe(atIp(2000));
   });
 
@@ -226,6 +232,145 @@ describe("Viewers and what a picture costs", () => {
     const { viewers } = viewersOn({ cameras: [off], running: () => null });
     viewers.subscribe("v1", "cam0", "video");
     expect(viewers.state("cam0", "v1").cost.path).toBe(0);
+  });
+});
+
+/**
+ * The stills the strip is made of (R-VID-14, R-VID-11; spec §8.6).
+ *
+ * Two rules, each with a test that a plausible wrong implementation fails:
+ * **one still per camera however many browsers want it** is `wantingStills`
+ * naming a camera once; **every transmitted copy counted** is three browsers
+ * on one camera costing the path three copies of one image.
+ */
+describe("Viewers and the stills it accounts for", () => {
+  const still = (bytes: number): number => stillCostKbps(bytes, STILLS_INTERVAL_MS);
+
+  it("names each camera with a stills subscriber once, however many there are", () => {
+    const { viewers } = viewersOn({ cameras: [CAMERA, SECOND] });
+    viewers.subscribe("v1", "cam0", "stills");
+    viewers.subscribe("v2", "cam0", "stills");
+    viewers.subscribe("v3", "cam0", "video");
+    viewers.subscribe("v3", "cam1", "video");
+    // cam0 once — not twice for its two stills viewers — and cam1 not at all:
+    // a video viewer is not a reason to take a still.
+    expect(viewers.wantingStills()).toEqual(["cam0"]);
+
+    viewers.subscribe("v3", "cam1", "stills");
+    expect(viewers.wantingStills()).toEqual(["cam0", "cam1"]);
+    viewers.unsubscribe("v1");
+    viewers.unsubscribe("v2");
+    expect(viewers.wantingStills()).toEqual(["cam1"]);
+  });
+
+  it("names no camera that is not enabled, and none nobody wants", () => {
+    const off = { ...SECOND, enabled: false } as unknown as Camera;
+    const { viewers } = viewersOn({ cameras: [CAMERA, off] });
+    viewers.subscribe("v1", "cam1", "stills");
+    expect(viewers.wantingStills()).toEqual([]);
+    viewers.subscribe("v1", "cam0", "off");
+    expect(viewers.wantingStills()).toEqual([]);
+  });
+
+  it("charges every transmitted copy: three browsers on one image is three copies", () => {
+    const { viewers } = viewersOn();
+    for (const v of ["v1", "v2", "v3"]) viewers.subscribe(v, "cam0", "stills");
+    for (const v of ["v1", "v2", "v3"]) viewers.transmitted(v, "cam0", 100_000);
+
+    // **The mutation this catches:** counting the still once per camera
+    // rather than once per transmission would put one copy on the path here
+    // and leave two browsers' worth of uplink unstated.
+    expect(viewers.state("cam0", "v1").cost.path).toBe(atIp(2000) + 3 * still(100_000));
+    for (const v of ["v1", "v2", "v3"]) {
+      expect(viewers.state("cam0", v).cost.mine).toBe(still(100_000));
+      expect(viewers.state("cam0", v).mine.kbps).toBe(still(100_000));
+    }
+    expect(viewers.stillsKbps()).toBe(3 * still(100_000));
+  });
+
+  it("costs a copy as its size over the interval, at IP", () => {
+    // 100 kB every 5 s is 160 kb/s on the wire, and a little more at IP.
+    expect(still(100_000)).toBe(atIp(160));
+    expect(stillCostKbps(0, STILLS_INTERVAL_MS)).toBe(0);
+    expect(stillCostKbps(100_000, 0)).toBe(0);
+  });
+
+  it("charges the last copy sent, not every copy ever sent", () => {
+    const { viewers } = viewersOn();
+    viewers.subscribe("v1", "cam0", "stills");
+    viewers.transmitted("v1", "cam0", 100_000);
+    viewers.transmitted("v1", "cam0", 80_000);
+    expect(viewers.state("cam0", "v1").cost.mine).toBe(still(80_000));
+  });
+
+  it("takes a fetch by a browser that said nothing as asking for stills", () => {
+    const { viewers } = viewersOn();
+    viewers.transmitted("v1", "cam0", 100_000);
+    expect(viewers.state("cam0", "v1").mine.delivery).toBe("stills");
+    expect(viewers.wantingStills()).toEqual(["cam0"]);
+    expect(viewers.state("cam0", "v1").cost.mine).toBe(still(100_000));
+  });
+
+  it("leaves a video viewer on video, and does not charge its fetch as a still", () => {
+    const { viewers } = viewersOn();
+    viewers.subscribe("v1", "cam0", "video");
+    viewers.transmitted("v1", "cam0", 100_000);
+    expect(viewers.state("cam0", "v1").mine.delivery).toBe("video");
+    expect(viewers.state("cam0", "v1").cost.mine).toBe(atIp(900));
+    expect(viewers.stillsKbps()).toBe(0);
+  });
+
+  it("refuses to count a copy for a camera this device does not have", () => {
+    const { viewers } = viewersOn();
+    viewers.transmitted("v1", "nope", 100_000);
+    expect(viewers.watching("nope")).toEqual([]);
+    expect(viewers.stillsKbps()).toBe(0);
+  });
+
+  it("reports the still's own age, shape and the interval on a stills viewer's mine", () => {
+    const clock = fakeClock();
+    const taken = { at: clock.at(), bytes: 100_000, width: 1280, height: 720 };
+    const viewers = new Viewers({
+      cameras: () => [CAMERA],
+      inForce: () => RUNNING,
+      clock: clock.clock,
+      stillFor: (camera) => (camera === "cam0" ? taken : null),
+    });
+    viewers.subscribe("v1", "cam0", "stills");
+    clock.advance(3_200);
+
+    const mine = viewers.state("cam0", "v1").mine;
+    // The daemon's own measurement of the frame it is holding, in whole
+    // seconds — not a browser's report, which an `<img>` has no media clock
+    // to make.
+    expect(mine.frameAge).toBe(3_000);
+    expect(mine.interval).toBe(STILLS_INTERVAL_MS);
+    expect(mine.size).toBe("1280x720");
+    expect(mine.delivery).toBe("stills");
+    // And the overlay's head reads `STILLS · every 5 s` (spec §8.2).
+    const overlay = viewers.state("cam0", "v1").overlay;
+    expect(overlay.head).toBe("stills");
+    expect(overlay.rate).toBe("every 5 s");
+    expect(overlay.size).toBe("1280×720");
+  });
+
+  it("reports no age and no size for a camera with no still to have one", () => {
+    const { viewers } = viewersOn();
+    viewers.subscribe("v1", "cam0", "stills");
+    const mine = viewers.state("cam0", "v1").mine;
+    expect(mine.frameAge).toBeNull();
+    expect(mine.size).toBeNull();
+    expect(mine.interval).toBe(STILLS_INTERVAL_MS);
+    expect(viewers.state("cam0", "v1").overlay.rate).toBe("every 5 s");
+  });
+
+  it("publishes to the browser whose copy was counted, because its cost moved", () => {
+    const { viewers, published } = viewersOn();
+    viewers.subscribe("v1", "cam0", "stills");
+    const before = published.length;
+    viewers.transmitted("v1", "cam0", 100_000);
+    expect(published.length).toBe(before + 1);
+    expect(published.at(-1)?.cost.mine).toBe(still(100_000));
   });
 });
 

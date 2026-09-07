@@ -5,6 +5,7 @@ import { nextTick, reactive } from "vue";
 import YonderPicture from "./YonderPicture.vue";
 import YonderStateOverlay from "./YonderStateOverlay.vue";
 import YonderThumbStrip from "./YonderThumbStrip.vue";
+import { STILL_AGE_HEADER } from "yonder-core/presentation";
 
 /**
  * `YonderPicture` is the most behavioural thing on the console, and none of
@@ -63,6 +64,32 @@ const reportCalls: { path: string; body: unknown }[] = [];
  * point of view, and never as a `reason` on screen. */
 let reportOutcome: "ok" | "fails" = "ok";
 
+/** What the daemon answers a report with — its per-viewer preview state
+ * (§8.2), or the `{}` an older daemon's route answered, which the picture
+ * must leave alone. */
+let reportAnswer = "{}";
+
+/** A JPEG's first bytes, so a still is bytes and not a string. */
+const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46]);
+
+/** What `GET /video/<camera>/still` answers: the daemon's latest still with
+ * its age, or its refusal in words. No still yet, unless a test says so. */
+let stillReply: { status: number; age?: string; text?: string } = {
+  status: 404,
+  text: '{"error":"no still of cam0 yet; the first is taken within 5 s of a viewer asking for stills"}',
+};
+
+/** Every still this suite's fake `fetch` was asked for — the camera, and
+ * the cache-busting query it carried. */
+const stillCalls: { camera: string; query: string }[] = [];
+
+/** Negotiations only — `POST …/whep` — for the tests that hold that no
+ * *reconnect* happened. A picture on stills goes on fetching stills and
+ * saying so, and those are not negotiations. */
+function whepCalls(): number {
+  return fetchMock.mock.calls.filter(([url]) => /\/whep$/.test(String(url))).length;
+}
+
 const fetchMock = vi.fn(async (url: string, init: unknown) => {
   // A viewer's own report, and the handshake, are two different exchanges
   // over the identical global `fetch` this suite stubs once — branched on
@@ -73,7 +100,19 @@ const fetchMock = vi.fn(async (url: string, init: unknown) => {
     const body: unknown = JSON.parse(String((init as { body?: string } | undefined)?.body ?? "{}"));
     reportCalls.push({ path: report[1]!, body });
     if (reportOutcome === "fails") throw new TypeError("Failed to fetch");
-    return { ok: true, status: 200, text: async () => "{}", headers: { get: () => null } };
+    return { ok: true, status: 200, text: async () => reportAnswer, headers: { get: () => null } };
+  }
+  const still = /^\/video\/([^/]+)\/still\?(.*)$/.exec(url);
+  if (still) {
+    stillCalls.push({ camera: still[1]!, query: still[2]! });
+    const r = stillReply;
+    return {
+      ok: r.status === 200,
+      status: r.status,
+      blob: async () => new Blob([JPEG], { type: "image/jpeg" }),
+      text: async () => r.text ?? "",
+      headers: { get: (name: string) => (name.toLowerCase() === STILL_AGE_HEADER ? r.age ?? null : null) },
+    };
   }
   if (reply === "throws") throw new TypeError("Failed to fetch");
   // A gated request answers when a test says so — or rejects with
@@ -308,6 +347,10 @@ function reasonText(wrapper: VueWrapper): string {
   return el.exists() ? el.text() : "";
 }
 
+/** Object URLs, which jsdom does not make: one per still, numbered, so a
+ * test can tell a fresh frame from the last one. */
+let objectUrls = 0;
+
 beforeEach(() => {
   vi.useFakeTimers();
   FakePeerConnection.made.length = 0;
@@ -316,6 +359,15 @@ beforeEach(() => {
   reply = { status: 201, sdp: ANSWER, viewerHeader: "viewer-1" };
   reportCalls.length = 0;
   reportOutcome = "ok";
+  reportAnswer = "{}";
+  stillReply = {
+    status: 404,
+    text: '{"error":"no still of cam0 yet; the first is taken within 5 s of a viewer asking for stills"}',
+  };
+  stillCalls.length = 0;
+  objectUrls = 0;
+  (URL as unknown as { createObjectURL: unknown }).createObjectURL = () => `blob:still-${++objectUrls}`;
+  (URL as unknown as { revokeObjectURL: unknown }).revokeObjectURL = () => {};
   vi.stubGlobal("RTCPeerConnection", FakePeerConnection);
   vi.stubGlobal("fetch", fetchMock);
 });
@@ -323,6 +375,8 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  delete (URL as unknown as { createObjectURL?: unknown }).createObjectURL;
+  delete (URL as unknown as { revokeObjectURL?: unknown }).revokeObjectURL;
 });
 
 describe("asking for the picture", () => {
@@ -444,9 +498,9 @@ describe("the twelve-second fall-back to stills", () => {
     // And the attempt that was already scheduled when the deadline expired
     // does not fire: a session negotiated behind a badge reading 'stills'
     // would put live video under a caption saying it is not live.
-    const attempts = fetchMock.mock.calls.length;
+    const attempts = whepCalls();
     await advance(60_000);
-    expect(fetchMock).toHaveBeenCalledTimes(attempts);
+    expect(whepCalls()).toBe(attempts);
   });
 
   it("does not fall back when a frame has arrived", async () => {
@@ -462,18 +516,157 @@ describe("the twelve-second fall-back to stills", () => {
     expect(badge(wrapper)).not.toBe("stills");
   });
 
-  it("points the stills at the configured source, and draws none when there is none", async () => {
+  /**
+   * **The stills are real** (R-VID-14, R-VID-11). The fall-back used to set
+   * an `<img src>` to an editor field nobody could fill, once, and never
+   * refresh it. Now it reaches the daemon's own still through the console's
+   * route, on the interval the daemon states, and draws the frame's age.
+   */
+  it("reaches the daemon's still, not an empty src, and says it is on stills", async () => {
     reply = { status: 404 };
-    const withSource = mountPicture({ stillsUrl: "/stills/cam0.jpg" });
+    stillReply = { status: 200, age: "2500" };
+    const { wrapper } = mountPicture();
     await settle();
     await advance(12_000);
-    expect(withSource.wrapper.find("img").attributes("src")).toBe("/stills/cam0.jpg");
+    expect(badge(wrapper)).toBe("stills");
 
-    const without = mountPicture();
+    // First, the daemon is told — `want: stills`, on the same route the live
+    // session reports on — and then the still is fetched, with a
+    // cache-busting query so no browser cache hands back the last frame.
+    expect(reportCalls.at(-1)).toEqual({ path: "cam0-preview", body: { want: "stills" } });
+    expect(stillCalls).toHaveLength(1);
+    expect(stillCalls[0]).toMatchObject({ camera: "cam0" });
+    expect(stillCalls[0]!.query).toMatch(/^t=\d+$/);
+    // Drawn from the bytes the daemon sent, not a URL an editor typed.
+    expect(wrapper.find("img").attributes("src")).toBe("blob:still-1");
+  });
+
+  it("draws the frame's age from the daemon's own header, and keeps counting", async () => {
+    reply = { status: 404 };
+    stillReply = { status: 200, age: "2500" };
+    const { wrapper } = mountPicture();
     await settle();
     await advance(12_000);
-    expect(without.wrapper.find("img").exists()).toBe(false);
-    expect(badge(without.wrapper)).toBe("stills");
+
+    // 2.5 s old when it arrived …
+    expect(wrapper.find(".y-pic__age--still").text()).toBe("2 s old");
+    // … and older every second after, until the next frame replaces it.
+    await advance(1_000);
+    expect(wrapper.find(".y-pic__age--still").text()).toBe("3 s old");
+    await advance(1_000);
+    expect(wrapper.find(".y-pic__age--still").text()).toBe("4 s old");
+  });
+
+  it("refreshes on the interval the daemon states, not one of its own", async () => {
+    reply = { status: 404 };
+    stillReply = { status: 200, age: "0" };
+    // The daemon's answer to the report: this viewer's own state, with the
+    // interval it promises (§8.2).
+    reportAnswer = JSON.stringify({
+      mine: { delivery: "stills", interval: 2_000, frameAge: 0 },
+      overlay: { head: "stills", size: "1280×720", rate: "every 2 s", bitrate: "", detail: "", step: "", cost: {} },
+    });
+    const { wrapper } = mountPicture();
+    await settle();
+    await advance(12_000);
+    expect(stillCalls).toHaveLength(1);
+    expect(wrapper.find("img").attributes("src")).toBe("blob:still-1");
+
+    // **The mutation this catches:** a picture refreshing on its own 5 s
+    // default would not have fetched again at 2 s.
+    await advance(2_000);
+    expect(stillCalls).toHaveLength(2);
+    expect(wrapper.find("img").attributes("src")).toBe("blob:still-2");
+    await advance(2_000);
+    expect(stillCalls).toHaveLength(3);
+    // Every turn says `stills` again, which is what keeps the subscription
+    // alive inside the daemon's idle sweep.
+    expect(reportCalls.filter((c) => c.path === "cam0-preview").map((c) => c.body))
+      .toEqual([{ want: "stills" }, { want: "stills" }, { want: "stills" }]);
+  });
+
+  it("wears the daemon's own state: STILLS · every 2 s (spec §8.2, L-11)", async () => {
+    reply = { status: 404 };
+    stillReply = { status: 200, age: "0" };
+    reportAnswer = JSON.stringify({
+      mine: { delivery: "stills", interval: 2_000, frameAge: 0 },
+      overlay: { head: "stills", size: "1280×720", rate: "every 2 s", bitrate: "0.17 Mb/s", detail: "", step: "", cost: { view: "0.17 Mb/s", path: "2.24 Mb/s" } },
+    });
+    const { wrapper } = mountPicture();
+    await settle();
+    expect(wrapper.findComponent(YonderStateOverlay).exists()).toBe(false);
+    await advance(12_000);
+
+    const overlay = wrapper.findComponent(YonderStateOverlay);
+    expect(overlay.exists()).toBe(true);
+    expect(overlay.props("head")).toBe("stills");
+    expect(overlay.props("rate")).toBe("every 2 s");
+    expect(overlay.text()).toContain("STILLS");
+    expect(overlay.text()).toContain("every 2 s");
+  });
+
+  it("says the daemon's own words when there is no still to draw, and keeps asking", async () => {
+    reply = { status: 404 };
+    stillReply = {
+      status: 404,
+      text: '{"error":"cam0 is not running: there is no pipeline to take a frame from"}',
+    };
+    const { wrapper } = mountPicture();
+    await settle();
+    await advance(12_000);
+
+    expect(wrapper.find("img").exists()).toBe(false);
+    expect(wrapper.find(".y-pic__note").text()).toBe("cam0 is not running: there is no pipeline to take a frame from");
+    // The fall-back's own reason stays: it is why this picture is on stills.
+    expect(reasonText(wrapper)).toMatch(/not streaming/i);
+
+    // The camera is started: the next turn gets a frame, and the words go.
+    stillReply = { status: 200, age: "300" };
+    await advance(5_000);
+    expect(wrapper.find("img").attributes("src")).toBe("blob:still-1");
+    expect(wrapper.find(".y-pic__note").exists()).toBe(false);
+  });
+
+  it("lets go of the still, and stops asking, when live is asked for again", async () => {
+    reply = { status: 404 };
+    stillReply = { status: 200, age: "0" };
+    const { wrapper } = mountPicture();
+    await settle();
+    await advance(12_000);
+    expect(wrapper.find("img").exists()).toBe(true);
+    const asked = stillCalls.length;
+
+    reply = { status: 201, sdp: ANSWER, viewerHeader: "viewer-1" };
+    setMode(wrapper, "live");
+    await settle();
+    expect(wrapper.find("img").exists()).toBe(false);
+    expect(wrapper.find(".y-pic__age--still").exists()).toBe(false);
+    // A picture that paints, so the twelve-second fall-back has no reason
+    // to fire again.
+    pc(1).deliverTrack();
+    for (let i = 0; i < 30; i += 1) { await advance(1_000); frames(wrapper); }
+    // Nothing fetched a still after the operator asked for live.
+    expect(stillCalls).toHaveLength(asked);
+    expect(badge(wrapper)).toBe("live · preview");
+  });
+
+  it("draws nothing from a still that answers after the operator asked for live", async () => {
+    // The stills loop's own session check: a frame in flight when live is
+    // asked for belongs to nobody.
+    reply = { status: 404 };
+    stillReply = { status: 200, age: "0" };
+    const { wrapper } = mountPicture();
+    await settle();
+    await advance(12_000);
+    expect(stillCalls).toHaveLength(1);
+
+    // The next turn is due; the operator asks for live in the same instant
+    // the fetch is made, before it can answer.
+    reply = { status: 201, sdp: ANSWER, viewerHeader: "viewer-1" };
+    setMode(wrapper, "live");
+    await advance(5_000);
+    expect(wrapper.find("img").exists()).toBe(false);
+    expect(badge(wrapper)).toBe("live · preview");
   });
 });
 
@@ -564,7 +757,7 @@ describe("reconnecting", () => {
     connection.goes("failed");
     await advance(60_000);
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(whepCalls()).toBe(1);
   });
 
   it("does not reconnect once it has fallen back to stills", async () => {
@@ -572,11 +765,11 @@ describe("reconnecting", () => {
     await settle();
     await advance(12_000);
     expect(badge(wrapper)).toBe("stills");
-    const attempts = fetchMock.mock.calls.length;
+    const attempts = whepCalls();
 
     pc(0).goes("failed");
     await advance(60_000);
-    expect(fetchMock).toHaveBeenCalledTimes(attempts);
+    expect(whepCalls()).toBe(attempts);
   });
 
   /**
@@ -768,9 +961,9 @@ describe("off is not the link being down", () => {
   });
 
   it("lets go of it for stills too, which is where there is nothing to draw", async () => {
-    // `picture.ts` records that nothing in this repository serves stills yet,
-    // so the `<img>` is `v-if`'d away and the stale live frame showed through
-    // it — badged "stills", in the *waiting* tone.
+    // Before a still has arrived — the daemon answers "no still yet" until
+    // its first tick — the `<img>` is `v-if`'d away, and the stale live
+    // frame used to show through it, badged "stills", in the *waiting* tone.
     const { wrapper } = mountPicture();
     await settle();
     pc().deliverTrack();
@@ -794,7 +987,7 @@ describe("off is not the link being down", () => {
 
     setMode(wrapper, "live");
     await settle();
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(whepCalls()).toBe(2);
     expect(badge(wrapper)).toBe("live · preview");
   });
 });
@@ -871,7 +1064,7 @@ describe("a handshake that was abandoned while it was in flight", () => {
 
     expect(badge(wrapper)).toBe("off");
     expect(reasonText(wrapper)).toBe("");
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(whepCalls()).toBe(1);
   });
 
   it("aborts the request rather than leaving it in flight", async () => {
@@ -905,7 +1098,7 @@ describe("teardown", () => {
     await settle();
     wrapper.unmount();
     await advance(60_000);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(whepCalls()).toBe(1);
   });
 });
 
@@ -1096,7 +1289,11 @@ describe("reporting what this browser is measuring", () => {
 
     pc().statsReport = fakeStats({ inbound: { bytesReceived: 999_999 } });
     await advance(10_000);
-    expect(reportCalls).toHaveLength(0);
+    // No measurement after it is gone — and the one thing that did leave is
+    // this browser saying it wants nothing of this camera any more, so the
+    // daemon stops charging the view now rather than at its idle sweep.
+    expect(reportCalls.filter((c) => "stats" in (c.body as object))).toHaveLength(0);
+    expect(reportCalls.map((c) => c.body)).toEqual([{ want: "off" }]);
   });
 
   it("stops the timer, and stops producing reports, once mode leaves 'live'", async () => {
@@ -1111,7 +1308,10 @@ describe("reporting what this browser is measuring", () => {
 
     pc().statsReport = fakeStats({ inbound: { bytesReceived: 999_999 } });
     await advance(10_000);
-    expect(reportCalls).toHaveLength(0);
+    // No measurement once the operator asked for nothing — only the word
+    // that says so, once.
+    expect(reportCalls.filter((c) => "stats" in (c.body as object))).toHaveLength(0);
+    expect(reportCalls.map((c) => c.body)).toEqual([{ want: "off" }]);
   });
 
   /**
@@ -1665,6 +1865,109 @@ describe("the picture wears its own state (defect 3)", () => {
     const pathCalls = emit.mock.calls.filter(([, , msg]) => msg?.payload?.path);
     expect(pathCalls).toHaveLength(1);
     expect(pathCalls[0]![2].payload.path).toBe("cam1");
+  });
+});
+
+/**
+ * **The strip's other cameras are this browser's own stills subscriptions**
+ * (R-VID-14, R-VID-11; spec §8.6: "at a stated interval for each viewer").
+ *
+ * A still nobody has asked for is never taken, so the strip's thumbnails
+ * exist only because each browser tells the daemon it wants stills of each
+ * other camera — and stops saying so when it goes.
+ */
+describe("the strip's other cameras, subscribed as this browser's own stills", () => {
+  const strip = {
+    cameras: [
+      { id: "cam0", name: "Nose", active: true, ageSeconds: 0, thumbSrc: null, stopped: false },
+      { id: "cam1", name: "Tail", active: false, ageSeconds: 4, thumbSrc: "/video/cam1/still?at=1", stopped: false },
+      { id: "cam2", name: "Belly", active: false, ageSeconds: null, thumbSrc: null, stopped: true },
+    ],
+    downlink: "12 kb/s of stills · counted in Path total",
+  };
+  const wantsOf = (camera: string): unknown[] =>
+    reportCalls.filter((c) => c.path === camera).map((c) => (c.body as { want?: unknown }).want);
+
+  it("tells the daemon it wants stills of every other running camera, and renews on every arrival", async () => {
+    const { press } = mountWithRail();
+    await settle();
+    await press(strip);
+
+    // The other running camera: stills. Not the one on the picture, which
+    // the live session is saying `video` of; not the stopped one, which no
+    // frame can be taken from.
+    expect(wantsOf("cam1")).toEqual(["stills"]);
+    expect(wantsOf("cam2")).toEqual([]);
+    expect(wantsOf("cam0")).toEqual([]);
+
+    // The next poll's strip renews it — well inside the daemon's idle sweep.
+    await press({ ...strip, cameras: strip.cameras.map((c) => ({ ...c })) });
+    expect(wantsOf("cam1")).toEqual(["stills", "stills"]);
+  });
+
+  it("tells the daemon `off` for each when the component goes, and for one that stops", async () => {
+    const { wrapper, press } = mountWithRail();
+    await settle();
+    await press(strip);
+    expect(wantsOf("cam1")).toEqual(["stills"]);
+
+    // cam1 stops: no frame can be taken from it, so this browser lets go.
+    await press({
+      ...strip,
+      cameras: strip.cameras.map((c) => (c.id === "cam1" ? { ...c, stopped: true, thumbSrc: null, ageSeconds: null } : c)),
+    });
+    expect(wantsOf("cam1")).toEqual(["stills", "off"]);
+
+    // And a page navigated away from stops costing the uplink now.
+    await press(strip);
+    expect(wantsOf("cam1")).toEqual(["stills", "off", "stills"]);
+    wrapper.unmount();
+    expect(wantsOf("cam1")).toEqual(["stills", "off", "stills", "off"]);
+    // The picture's own camera too — its live session is gone with it.
+    expect(wantsOf("cam0")).toEqual(["off"]);
+  });
+
+  it("re-subscribes on a switch from the strip, and disables nothing", async () => {
+    const { wrapper, press } = mountWithRail();
+    await settle();
+    await press(strip);
+    pc(0).deliverTrack();
+    frames(wrapper);
+    await settle();
+
+    // A press on the Tail thumbnail: the picture renegotiates on to cam1 …
+    await wrapper.findComponent(YonderThumbStrip).vm.$emit("go", "cam1");
+    await settle();
+    expect(fetchMock.mock.calls.filter(([url]) => /\/whep$/.test(String(url))).map(([url]) => url))
+      .toEqual(["/video/cam0-preview/whep", "/video/cam1-preview/whep"]);
+    expect(badge(wrapper)).toBe("live · preview");
+
+    // … the camera it left becomes one of the strip's stills, this browser's
+    // own subscription, and the one it moved to is no longer told `stills`.
+    expect(wantsOf("cam0")).toEqual(["stills"]);
+    expect(wantsOf("cam1")).toEqual(["stills"]);
+    pc(1).deliverTrack();
+    pc(1).statsReport = fakeStats();
+    await advance(1_000);
+    await advance(1_000);
+    expect(wantsOf("cam1-preview").at(-1)).toBe("video");
+
+    // And nothing else left this browser: every exchange was a negotiation
+    // or a report. No output was switched, no configuration touched — a
+    // viewer's delivery is the only thing a switch changes (§8.6).
+    for (const [url] of fetchMock.mock.calls) {
+      expect(String(url)).toMatch(/\/(whep|report)$|\/still\?/);
+    }
+  });
+
+  it("draws a stopped camera as stopped, from the row the daemon composed", async () => {
+    const { wrapper, press } = mountWithRail();
+    await settle();
+    await press(strip);
+    const thumbs = wrapper.findComponent(YonderThumbStrip).findAll(".y-strip__thumb");
+    expect(thumbs.map((t) => t.find(".y-strip__cap").text())).toEqual(["Live", "Still · 4 s", "Stopped"]);
+    expect(wrapper.findComponent(YonderThumbStrip).text()).toContain("OTHER CAMERAS");
+    expect(wrapper.findComponent(YonderThumbStrip).text()).toContain("12 kb/s of stills · counted in Path total");
   });
 });
 

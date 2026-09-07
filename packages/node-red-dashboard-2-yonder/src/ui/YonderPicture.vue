@@ -28,6 +28,10 @@
             <div class="y-pic__hud">
                 <span class="y-pic__badge" :class="'tone-' + tone">{{ caption }}</span>
                 <span v-if="staleFor > 0" class="y-pic__age">{{ ageText }}</span>
+                <!-- R-VID-14: the age of the still on screen, from the
+                     daemon's own stamp on it, counted on from the moment it
+                     arrived. -->
+                <span v-if="mode === 'stills' && stillAgeSeconds !== null" class="y-pic__age y-pic__age--still">{{ stillAgeText }}</span>
                 <span v-if="cost" class="y-pic__cost">{{ cost }}</span>
             </div>
 
@@ -60,6 +64,11 @@
 
             <div v-if="dragGesture" class="y-pic__orb" :style="{ left: orbX + 'px', top: orbY + 'px' }"></div>
 
+            <!-- The daemon's own words when it has no still to give: a
+                 camera that is not running, or a first frame not yet taken.
+                 Above the fall-back's reason, which stays — it is why this
+                 picture is on stills at all. -->
+            <div v-if="mode === 'stills' && stillNote" class="y-pic__note">{{ stillNote }}</div>
             <div v-if="reason" class="y-pic__reason">{{ reason }}</div>
             <div v-if="mode === 'off'" class="y-pic__off">
                 not requested · this changes nothing the aircraft sends anyone else
@@ -96,7 +105,7 @@
 <script>
 import YonderStateOverlay from './YonderStateOverlay.vue'
 import YonderThumbStrip from './YonderThumbStrip.vue'
-import { atIp, cameraFor, DESCRIPTORS, heldWords } from 'yonder-core/presentation'
+import { atIp, cameraFor, DESCRIPTORS, heldWords, STILL_AGE_HEADER, stillUrl } from 'yonder-core/presentation'
 
 /**
  * The live picture, and the three things that happen to it (R-VID-03).
@@ -135,6 +144,37 @@ import { atIp, cameraFor, DESCRIPTORS, heldWords } from 'yonder-core/presentatio
  * reports *why*, because a browser blocked by a network, a carrier discarding
  * UDP and a camera that has stopped producing frames all present as no
  * picture, and only one of them is worth walking outside for.
+ *
+ * **And the stills are real** (R-VID-14, R-VID-11; spec §8.6). On stills this
+ * picture tells the daemon so — `want: stills`, on the same report route the
+ * live session uses — takes the interval it is told back out of the answer
+ * (`mine.interval`), and fetches the camera's latest still from the console's
+ * own still route on that interval, with a cache-busting query so no browser
+ * cache can hand back the last frame under a fresh age. The frame's age comes
+ * off the answer's own header, stamped by the daemon — the one thing that
+ * knows when the frame was taken — and is counted on from the moment it
+ * arrived. Every fetch is one copy leaving the aircraft, and the daemon counts
+ * it against this session. A daemon with no still to give says so in words,
+ * and those words are drawn: a stopped camera and a first frame not yet taken
+ * are different sentences, and an operator does something different about
+ * each.
+ *
+ * **The strip's other cameras are this browser's own stills subscriptions.**
+ * `payload.cameras` names every camera, composed by the daemon with each
+ * one's latest still and its age; this picture tells the daemon it wants
+ * stills of every one that is not the camera it is showing and not stopped,
+ * again whenever the strip arrives — which renews the subscription well inside
+ * the daemon's idle sweep — and tells it `off` for each when the component
+ * goes. That is what makes a still be taken at all: a still nobody has asked
+ * for is never taken (§8.6), and the thumbnails' own addresses carry the
+ * frame's stamp, so a browser re-fetches exactly when there is a new frame.
+ *
+ * **The daemon's answer to every report is this picture's own state.** The
+ * preview-state message (§8.2) is per viewer, and a message through the flow
+ * is broadcast to every browser — so the only channel that can carry *this*
+ * browser's state is the answer to its own post, which the daemon already
+ * returns and this component used to discard. `previewState` reads it first,
+ * and falls back to `payload.state` for a caller that composes one.
  *
  * **Off is not the link being down**, and must not look like it: the neutral
  * tone rather than the fault tone, 'not requested' rather than 'no contact'.
@@ -375,6 +415,31 @@ const BACKOFF_MS = [1000, 2000, 4000, 8000, 15000]
  * comment above for why one loop replaces eight hand-written pairs. */
 const PAYLOAD_KEYS = ['state', 'recording', 'cameras', 'downlink', 'aim', 'zoom', 'exposure', 'stats', 'saved']
 
+/**
+ * The daemon's own sentence out of an answer that carried none of its bytes:
+ * `{"error":"…"}` from the daemon, relayed as it stands by the console, or a
+ * plain line the console composed itself.
+ */
+function wordsOf (text) {
+    try {
+        const parsed = JSON.parse(text)
+        if (parsed && typeof parsed === 'object' && typeof parsed.error === 'string') return parsed.error
+    } catch {
+        // Not JSON: the console's own words, as they are.
+    }
+    return String(text || '')
+}
+
+/** Let go of an object URL a still was drawn from. Quietly: a browser that
+ * has already forgotten it throws, and there is nothing to do about that. */
+function revokeQuietly (url) {
+    try {
+        if (typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') URL.revokeObjectURL(url)
+    } catch {
+        // Already gone.
+    }
+}
+
 /** `+12.4` / `−12.4` — a proper minus sign, matching every other signed
  * reading this console already draws (`YonderAim.vue`'s own gauges, the
  * blueprint's own `fmt()`), never a hyphen. */
@@ -564,6 +629,29 @@ export default {
             reason: '',
             stillSrc: '',
             stillsTimer: null,
+            /**
+             * The stills loop's own bookkeeping (R-VID-14). `stillsSession`
+             * is to the loop what `session` is to a handshake: a counter a
+             * fetch in flight compares against, so an answer arriving after
+             * the operator asked for live again belongs to nobody.
+             * `stillInterval` is what the daemon last said (`mine.interval`);
+             * `stillAgeMs` and `stillFetchedAt` are the frame's own age off
+             * the answer's header and when it arrived, so the age drawn is
+             * `header age + time since`. `stillNote` is the daemon's own
+             * words when it had nothing to give.
+             */
+            stillsSession: 0,
+            stillTimer: null,
+            stillInterval: 5000,
+            stillAgeMs: null,
+            stillFetchedAt: null,
+            stillNote: '',
+            /** The daemon's answer to this browser's own last report — its
+             * per-viewer preview state (§8.2). See the doc comment above. */
+            ownState: null,
+            /** The strip cameras this browser has told the daemon it wants
+             * stills of, so each can be told `off` when it no longer does. */
+            stripWanted: [],
             retryTimer: null,
             /** The last cost the flow sent, held across later commands. */
             sentCost: '',
@@ -765,8 +853,24 @@ export default {
          * simply running the *existing* suite first and reading the warning.
          */
         previewState () {
+            // This browser's own state, from the daemon's answer to its own
+            // last report, before anything composed for everyone.
+            if (this.ownState && this.ownState.overlay && typeof this.ownState.overlay === 'object') {
+                return this.ownState.overlay
+            }
             const v = this.fromPayload('state')
             return v && typeof v === 'object' ? v : null
+        },
+        /** Whole seconds old the still on screen is: the daemon's own age for
+         * it, counted on from when it arrived here (R-VID-14). */
+        stillAgeSeconds () {
+            if (this.stillAgeMs === null || this.stillFetchedAt === null) return null
+            return Math.max(0, Math.floor((this.stillAgeMs + (this.now - this.stillFetchedAt)) / 1000))
+        },
+        stillAgeText () {
+            const s = this.stillAgeSeconds
+            if (s === null) return ''
+            return s < 60 ? `${s} s old` : `${Math.floor(s / 60)} min ${s % 60} s old`
         },
         /**
          * The REC pill (L-16), and where its elapsed time comes from.
@@ -886,8 +990,23 @@ export default {
          * which every read does, five seconds apart — costs nothing.
          */
         streamPath (next) {
+            // The camera this picture is of has moved, so which cameras are
+            // *other* has too: the one it left joins the strip's stills, and
+            // the one it is showing leaves them.
+            this.tellStrip()
             if (this.mode !== 'live' || next === this.negotiated) return
             this.requestLive()
+        },
+        /**
+         * The strip arrived, or changed: tell the daemon this browser wants
+         * stills of every camera in it that is not the one on the picture —
+         * which is what makes a still be taken at all, and renews the
+         * subscription on every arrival. Immediate, so a page composed with
+         * `props.report` and no store at all (R-UI-28) subscribes too.
+         */
+        cameras: {
+            immediate: true,
+            handler () { this.tellStrip() }
         },
         command (value) {
             if (value && typeof value === 'object') {
@@ -989,6 +1108,14 @@ export default {
         // navigating away from the page is not a reason to keep slewing.
         this.onDragEnd()
         this.teardown()
+        // And a page navigated away from stops costing the uplink now, not
+        // when the daemon's idle sweep notices: every subscription this
+        // browser made — the strip's stills and its own picture — is told
+        // `off`. The daemon touches no configured output for any of it.
+        this.stopStills()
+        for (const id of this.stripWanted) void this.tell(id, 'off')
+        this.stripWanted = []
+        if (this.mode !== 'off') void this.tell(cameraFor(this.streamPath), 'off')
     },
     methods: {
         /**
@@ -1139,15 +1266,166 @@ export default {
             // a live picture reporting into nothing until the page is reloaded.
             body.want = this.mode === 'live' ? 'video' : this.mode === 'stills' ? 'stills' : 'off'
             try {
-                await fetch(`/video/${this.negotiated}/report`, {
+                const res = await fetch(`/video/${this.negotiated}/report`, {
                     method: 'POST',
                     headers: { 'content-type': 'application/json' },
                     body: JSON.stringify(body)
                 })
+                if (session !== this.session) return
+                // The daemon answers every report with this browser's own
+                // preview state (§8.2) — the one channel that can carry a
+                // per-viewer fact to a per-viewer picture.
+                this.takeState(await res.text())
             } catch {
                 // Silent, and no retry-storm: the next tick is one second
                 // away regardless of whether this one reached the network.
             }
+        },
+        /**
+         * The daemon's answer to a report, if it is a preview state: this
+         * browser's own overlay, and the stills interval it was promised.
+         * Anything else — an error body, an older daemon's empty answer — is
+         * left alone rather than drawn.
+         */
+        takeState (text) {
+            let state
+            try {
+                state = JSON.parse(text)
+            } catch {
+                return
+            }
+            if (!state || typeof state !== 'object') return
+            if (!state.overlay || typeof state.overlay !== 'object') return
+            if (!state.mine || typeof state.mine !== 'object') return
+            this.ownState = state
+            const interval = state.mine.interval
+            if (Number.isFinite(interval) && interval > 0) this.stillInterval = interval
+        },
+        /**
+         * One camera, one word: what this browser wants of it (spec §8.2),
+         * on the same route the live session's own report takes. Fire and
+         * forget, for the reason `sendReport` is silent about a failure: the
+         * next arrival of the strip, or the next tick of the stills loop, is
+         * the retry. `keepalive` so an `off` sent from `beforeUnmount` still
+         * leaves as the page goes.
+         */
+        async tell (camera, want) {
+            if (!camera) return
+            try {
+                await fetch(`/video/${camera}/report`, {
+                    method: 'POST',
+                    headers: { 'content-type': 'application/json' },
+                    body: JSON.stringify({ want }),
+                    keepalive: want === 'off'
+                })
+            } catch {
+                // See above.
+            }
+        },
+        /**
+         * The strip's other cameras, subscribed as this browser's own stills
+         * (§8.6: "at a stated interval for each viewer"). The camera on the
+         * picture is *this component's* notion of active, never the payload's
+         * flag: a thumb press moves the picture before the page's next read
+         * moves the flag, and in between the live session is saying `video`
+         * of that camera every second.
+         *
+         * A stopped camera is not subscribed to — no frame can be taken from
+         * it and the strip draws it as stopped — and a camera that has left
+         * the strip, or stopped, is told `off`.
+         */
+        tellStrip () {
+            const active = cameraFor(this.streamPath)
+            const wanted = this.cameras
+                .filter((c) => c && typeof c.id === 'string' && c.id !== '' && c.id !== active && !c.stopped)
+                .map((c) => c.id)
+            for (const id of wanted) void this.tell(id, 'stills')
+            for (const id of this.stripWanted) {
+                if (!wanted.includes(id) && id !== active) void this.tell(id, 'off')
+            }
+            this.stripWanted = wanted
+        },
+        // -- the stills loop (R-VID-14) --------------------------------------
+        /** Begin fetching this camera's still on the interval the daemon
+         *  states. A new session number so any fetch still in flight from a
+         *  loop that was stopped belongs to nobody. */
+        startStills () {
+            this.stillsSession += 1
+            this.stillNote = ''
+            clearTimeout(this.stillTimer)
+            void this.refreshStill(this.stillsSession)
+        },
+        /** End the loop and let go of the frame — the operator has asked for
+         *  live or for nothing, and a still arriving after that would be a
+         *  picture under a badge that says otherwise. */
+        stopStills () {
+            this.stillsSession += 1
+            clearTimeout(this.stillTimer)
+            this.stillTimer = null
+            this.releaseStill()
+            this.stillNote = ''
+        },
+        /**
+         * One turn of the loop: say `stills` and learn the interval, fetch the
+         * frame with its age, draw whichever the daemon gave — the frame or
+         * its words — and come back after the interval.
+         *
+         * A session check after every await, for the reason `connect()` gives
+         * for its own: an answer that arrives after the operator asked for
+         * live again must draw nothing.
+         */
+        async refreshStill (session) {
+            const path = this.streamPath
+            const camera = cameraFor(path)
+            if (!camera) return
+            try {
+                const res = await fetch(`/video/${path}/report`, {
+                    method: 'POST',
+                    headers: { 'content-type': 'application/json' },
+                    body: JSON.stringify({ want: 'stills' })
+                })
+                if (session !== this.stillsSession) return
+                this.takeState(await res.text())
+            } catch {
+                // The interval last stated stands; the next turn asks again.
+            }
+            if (session !== this.stillsSession) return
+            try {
+                // A cache-busting query, so no browser cache can hand back
+                // the last frame under a fresh age.
+                const res = await fetch(`${stillUrl(camera)}?t=${Date.now()}`)
+                if (session !== this.stillsSession) return
+                if (res.ok) {
+                    const blob = await res.blob()
+                    if (session !== this.stillsSession) return
+                    this.showStill(blob, Number(res.headers.get(STILL_AGE_HEADER)))
+                } else {
+                    this.stillNote = wordsOf(await res.text())
+                }
+            } catch {
+                // The last frame stays up, with its age still counting.
+            }
+            if (session !== this.stillsSession) return
+            this.stillTimer = setTimeout(() => { void this.refreshStill(session) }, this.stillInterval)
+        },
+        /** The frame, on to the `<img>`, and its age off the daemon's header. */
+        showStill (blob, ageMs) {
+            const url = typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function'
+                ? URL.createObjectURL(blob)
+                : ''
+            const old = this.stillSrc
+            this.stillSrc = url
+            if (old) revokeQuietly(old)
+            this.stillAgeMs = Number.isFinite(ageMs) ? Math.max(0, ageMs) : null
+            this.stillFetchedAt = Date.now()
+            this.stillNote = ''
+        },
+        releaseStill () {
+            const old = this.stillSrc
+            this.stillSrc = ''
+            if (old) revokeQuietly(old)
+            this.stillAgeMs = null
+            this.stillFetchedAt = null
         },
         /**
          * Let go of the last live frame.
@@ -1191,7 +1469,7 @@ export default {
             this.attempt = 0
             this.lastFrameAt = null
             this.reason = ''
-            this.stillSrc = ''
+            this.stopStills()
             clearTimeout(this.retryTimer)
             clearTimeout(this.stillsTimer)
             this.stillsTimer = setTimeout(() => {
@@ -1209,12 +1487,14 @@ export default {
          */
         toStills () {
             this.mode = 'stills'
-            this.stillSrc = this.props.stillsUrl || ''
             clearTimeout(this.retryTimer)
             // Nothing is watching the session now, and a track arriving after
             // this would be live video under a badge reading 'stills'.
             this.teardown()
             this.blank()
+            // And the stills are real: the daemon's, on the interval it
+            // states, with the frame's age (R-VID-14).
+            this.startStills()
         },
         /**
          * One handshake, and the rule that it may only ever speak for itself.
@@ -1243,6 +1523,9 @@ export default {
          */
         async connect () {
             this.teardown()
+            // A state the daemon answered about another camera is not this
+            // picture's; it is dropped rather than drawn under a new one.
+            if (cameraFor(this.negotiated) !== cameraFor(this.streamPath)) this.ownState = null
             this.negotiated = this.streamPath
             // Nothing has said which camera this is yet. Not a fault and not a
             // reconnect: the message that names it is what starts this, through
@@ -1361,7 +1644,16 @@ export default {
                 // A mode the operator chose is not a failure, and carries no
                 // reason: 'off' is 'not requested', never 'no contact'.
                 this.reason = ''
-                this.stillSrc = mode === 'stills' ? (this.props.stillsUrl || '') : ''
+                if (mode === 'stills') {
+                    this.startStills()
+                } else {
+                    this.stopStills()
+                    // Told now rather than left to the daemon's idle sweep:
+                    // the cost of this view falls the moment it stops, and a
+                    // state about a delivery that has ended is not drawn.
+                    this.ownState = null
+                    void this.tell(cameraFor(this.streamPath), 'off')
+                }
             }
             this.$socket.emit('widget-action', this.id, { payload: `mode:${mode}`, topic: this.props.label })
         },
@@ -1561,6 +1853,10 @@ export default {
     font-size: 15px; font-weight: 600; text-transform: none;
     color: var(--yonder-bad, #ff4034);
 }
+/* The still's age is a fact about a picture that is doing what was asked,
+   in the waiting tone the stills badge beside it already wears — not the
+   fault tone a live picture that has stopped painting takes. */
+.y-pic__age--still { color: var(--yonder-waiting, #ffcf28); font-size: 12px; }
 .y-pic__cost {
     /* What watching this costs, stated rather than discovered (R-VID-14).
        Never uppercased: kb/s rendered as KB/S says kilobytes. */
@@ -1709,7 +2005,7 @@ export default {
 }
 .y-pic__start:hover { background: rgba(56, 189, 248, 0.08); }
 
-.y-pic__reason, .y-pic__off {
+.y-pic__reason, .y-pic__off, .y-pic__note {
     position: absolute; left: 8px; right: 8px; bottom: 8px; z-index: 5;
     font-family: var(--yonder-font, system-ui, sans-serif); font-size: 12px;
     color: var(--yonder-label, #7f8a95);
@@ -1717,6 +2013,9 @@ export default {
     padding: 4px 6px; border-radius: 2px;
     pointer-events: none;
 }
+/* The daemon's words about a still it has no frame for, above the reason
+   line rather than on top of it — both can be true at once. */
+.y-pic__note { bottom: 32px; }
 .tone-neutral { color: var(--yonder-neutral, #7d7869); }
 .tone-waiting { color: var(--yonder-waiting, #ffcf28); }
 .tone-good    { color: var(--yonder-good, #35d06a); }

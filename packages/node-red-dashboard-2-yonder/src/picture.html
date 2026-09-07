@@ -15,8 +15,6 @@
     <input type="text" id="node-input-label" placeholder="Nose" /></div>
   <div class="form-row"><label for="node-input-stillsAfterMs"><i class="fa fa-clock-o"></i> Stills after</label>
     <input type="text" id="node-input-stillsAfterMs" placeholder="12000" /> ms</div>
-  <div class="form-row"><label for="node-input-stillsUrl"><i class="fa fa-picture-o"></i> Stills from</label>
-    <input type="text" id="node-input-stillsUrl" placeholder="(none)" /></div>
   <div class="form-row"><label for="node-input-cost"><i class="fa fa-tachometer"></i> Cost</label>
     <input type="text" id="node-input-cost" placeholder="374 kb/s" /></div>
   <div class="form-tips">
@@ -27,7 +25,9 @@
     <br /><b>Stills after</b> is how long to wait for live video before falling
     back to stills without being asked (R-VID-14). Twelve seconds is long
     enough for a slow negotiation to finish and short enough that nobody is
-    left staring at nothing.
+    left staring at nothing. The stills come from the device itself, on the
+    interval it states, for the camera the picture is showing; there is
+    nothing to point at.
   </div>
 </script>
 <script type="text/html" data-help-name="ui-yonder-picture">
@@ -46,7 +46,13 @@ withdrew the request.</p>
 <p><b>It falls back to stills without being asked</b> when live video cannot be
 established, and reports <i>why</i> &mdash; a browser blocked by a network, a
 carrier discarding UDP and a camera that has stopped producing frames all
-present as no picture, and only one of them is worth walking outside for.</p>
+present as no picture, and only one of them is worth walking outside for. The
+stills are the device's own, taken on the interval it states, shown with the
+age of the frame on screen and counted against this browser on the uplink
+(R-VID-14, R-VID-11).</p>
+<p><b>The strip under the picture</b> shows every camera, the others as periodic
+stills with their age, and what all of those stills are costing. A press on a
+thumbnail switches the page to that camera.</p>
 <p>Sends <code>mode:live</code>, <code>mode:stills</code> or
 <code>mode:off</code> on <code>msg.payload</code> when the mode changes.
 Nothing here claims to know anything about the aircraft's other outputs: a
@@ -61,7 +67,7 @@ feed.</p>
       group: { type: "ui-group", required: true },
       order: { value: 0 }, width: { value: 0 }, height: { value: 0 },
       path: { value: "" }, label: { value: "" },
-      stillsAfterMs: { value: 12000 }, stillsUrl: { value: "" },
+      stillsAfterMs: { value: 12000 },
       cost: { value: "" }
     },
     inputs: 1, outputs: 1,

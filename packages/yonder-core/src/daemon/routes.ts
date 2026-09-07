@@ -30,9 +30,12 @@ import { compose, refuse } from "../video/pipeline.js";
 import { noCapabilities, summarise, type CameraCapabilities } from "../video/capability.js";
 import {
   aimPanel, cameraDeck, cameraIndex, cameraStrip, capabilityFacts, identityWords, removalRefusal,
-  uplinkBudget,
-  type AimPanel, type CameraDeck, type CameraStrip, type CapabilityFact,
+  thumbStrip, uplinkBudget,
+  type AimPanel, type CameraDeck, type CameraStrip, type CapabilityFact, type ThumbStrip,
 } from "../video/present.js";
+import type { Stills } from "../video/stills.js";
+import { STILL_AGE_HEADER, STILL_AT_HEADER } from "../video/media-path.js";
+import { systemClock, type Clock } from "../apply/types.js";
 import { applyCameraDraft, deckDraft, interruption, validateDraft } from "../apply/draft.js";
 import { captureRefusal, captureSizes } from "../video/capability.js";
 import type { ReachPaths } from "../video/outputs.js";
@@ -196,6 +199,23 @@ export interface RouterDeps {
    */
   recorder?: Recorder;
   /**
+   * The periodic stills this device holds, one per watched camera
+   * (R-VID-14, R-STO-01; spec §8.6).
+   *
+   * Beside `viewers` and `recorder` for the daemon's lifetime, and for the
+   * same reason. `GET /cameras/:id/still` serves the latest one with its age,
+   * and the camera's own page carries the strip composed from all of them.
+   * Absent means this daemon has no video layer, which the still route says
+   * rather than answering with an image it does not have.
+   */
+  stills?: Stills;
+  /**
+   * When *now* is, for the ages this router states — the strip's `Still ·
+   * 4 s`. Injected so a test composes a page at a known moment; the system
+   * clock otherwise.
+   */
+  clock?: Clock;
+  /**
    * The RTSP credential, resolved from `secrets.yaml`.
    *
    * A function returning one value rather than the whole store, because the
@@ -340,6 +360,18 @@ export interface CameraView {
    * `recorder: null` above is where it is answered.
    */
   captures: { camera: string; captures: readonly Capture[] };
+  /**
+   * The strip under the picture: every camera as a thumbnail, the others as
+   * periodic stills, and what all of those stills cost (R-VID-14, R-VID-11;
+   * blueprint L-20, L-22).
+   *
+   * Composed in `video/present.ts` from the camera index, each camera's
+   * latest still and the sum of every transmitted copy, on the same read as
+   * everything else here — so the strip and the picture above it are about
+   * the same moment. A daemon with no video layer composes it with no
+   * stills and nothing leaving: every row stopped, `0 kb/s of stills`.
+   */
+  strip: ThumbStrip;
 }
 
 /**
@@ -498,6 +530,15 @@ export interface RouteResult {
    * inspect before reading.
    */
   contentType?: string;
+  /**
+   * Headers to send with a bytes answer, and only with one.
+   *
+   * A still carries its age (R-VID-14) beside its bytes, and a JPEG has no
+   * field to carry a number in — so the one route that serves a picture with
+   * a fact about it puts the fact here. Ignored on a JSON answer, which
+   * carries its facts in the document.
+   */
+  headers?: Record<string, string>;
 }
 
 export type Router = (method: string, path: string, body: unknown) => Promise<RouteResult>;
@@ -647,7 +688,8 @@ const VIEWER_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
  * matching at all. The difference is not cosmetic: a guard nothing can reach
  * is a guard no test can prove.
  */
-const CAMERA_ROUTE = /^\/cameras\/(.+?)(?:\/(run|probe|stream-address|controls|settings|apply|record|photo|captures(?:\/[^/]+)?|outputs\/(?:rtp|rtsp|srt)|viewers\/[^/]+))?$/;
+const CAMERA_ROUTE = /^\/cameras\/(.+?)(?:\/(run|probe|stream-address|controls|settings|apply|record|photo|still|captures(?:\/[^/]+)?|outputs\/(?:rtp|rtsp|srt)|viewers\/[^/]+))?$/;
+
 
 const WANTS: readonly Want[] = ["video", "stills", "off"];
 
@@ -1019,6 +1061,52 @@ export function createRouter(deps: RouterDeps): Router {
   };
 
   /**
+   * The latest still of one camera, with its age, or the refusal in words
+   * (R-VID-14, R-VID-11, R-STO-01).
+   *
+   * **Each answer is one transmission**, and `Viewers` is told so: two
+   * browsers on one camera's stills are two copies of one image leaving the
+   * aircraft, and the path total has to say so. The console names the viewer
+   * on the query, from the session it checked; a caller naming none — a
+   * shell on the socket — is served and counted against nobody, because
+   * nothing left the aircraft.
+   *
+   * **404, in words, for both of the ways there can be no still**: the
+   * camera is not running, or nobody has been on its stills long enough for
+   * the first frame to have been taken. Different sentences, because an
+   * operator does something different about each.
+   */
+  const stillRoute = (
+    method: string, id: string, query: string, say: (line: string) => void,
+  ): RouteResult => {
+    const stills = deps.stills;
+    if (stills === undefined) {
+      return noCameraLayer(`${method} /cameras/${id}/still`, say);
+    }
+    if (method !== "GET") {
+      return { status: 404, body: { error: `no route for ${method} /cameras/${id}/still` } };
+    }
+    const viewer = new URLSearchParams(query).get("viewer");
+    if (viewer !== null && !VIEWER_ID.test(viewer)) {
+      return { status: 404, body: { error: "that is not a viewer this device would have issued" } };
+    }
+    const answer = stills.read(id);
+    if (isRefusal(answer)) {
+      return { status: 404, body: { error: answer.refused } };
+    }
+    if (viewer !== null) deps.viewers?.transmitted(viewer, id, answer.ok.bytes);
+    return {
+      status: 200,
+      body: answer.ok.body,
+      contentType: answer.ok.contentType,
+      headers: {
+        [STILL_AT_HEADER]: String(answer.ok.at),
+        [STILL_AGE_HEADER]: String(answer.ok.age),
+      },
+    };
+  };
+
+  /**
    * Everything under `/cameras/<id>`.
    *
    * The id has already been matched against `CAMERA_ID` by the caller, before
@@ -1046,13 +1134,18 @@ export function createRouter(deps: RouterDeps): Router {
     // running, and whether it is running is the supervisor's answer rather
     // than a fresh sweep of the board.
     if (verb === "record" || verb === "photo" || verb === "captures"
-      || verb.startsWith("captures/")) {
+      || verb.startsWith("captures/") || verb === "still") {
       // The configuration is still what says a camera exists — every other
-      // answer here would be `Recorder`'s, and it reads the same list.
+      // answer here would be `Recorder`'s or `Stills`', and both read the
+      // same list.
       const known = loadConfig(deps.configPath).cameras.some((c) => c.id === id);
       if (!known) {
         return { status: 404, body: { error: `no camera is configured with the id "${id}"` } };
       }
+      // A still is fetched on the interval by every browser on stills, and
+      // once per other camera by every strip: the one route here that is hit
+      // several times a second on a busy console, and it reads one file.
+      if (verb === "still") return stillRoute(method, id, query, say);
       return captureRoute(method, id, verb, body, say);
     }
 
@@ -1239,6 +1332,21 @@ export function createRouter(deps: RouterDeps): Router {
          * the page emits a fresh message that has no `msg.camera` of its own.
          */
         captures: { camera: id, captures: heldCaptures },
+        /**
+         * The strip under the picture (R-VID-14, R-VID-11; blueprint L-20,
+         * L-22): every configured camera, this one active, the others with
+         * their latest still and its age, and what every still copy leaving
+         * this device costs. From the same read as the picture above it, so
+         * the two cannot be about different moments.
+         */
+        strip: thumbStrip({
+          cameras: config.cameras,
+          active: id,
+          run: (other) => supervisor.state(other).state,
+          still: (other) => deps.stills?.latest(other) ?? null,
+          now: (deps.clock ?? systemClock).now(),
+          stillsKbps: deps.viewers?.stillsKbps() ?? 0,
+        }),
         // Answered on the page rather than only on the start, so an operator
         // reads which of their settings this camera does not offer before
         // they press anything (R-CAM-10). `knownDevices` comes from the sweep

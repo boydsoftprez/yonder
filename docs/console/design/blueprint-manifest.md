@@ -130,7 +130,7 @@ Capture: `camera-live.night.png` / `.day.png`, `camera-live-notebook.day.fold.pn
 | L-08 | The placard's right side reading the transport, codec and mode: `USB · H.264 · 1280×720P30` | Present, but the encoder is appended too: `USB · H264 · 1280×720p30 · v4l2h264enc` | drifted | The blueprint gives the encoder its own readout in the Capture column (L-27) |
 | L-09 | The picture drawn at the video's own aspect ratio, no fixed height | Present (`YonderPicture.vue` binds aspect from `loadedmetadata`) | present | |
 | L-10 | **A state overlay on the picture**, top-left, four lines: head word, `1280×720 · 15 fps · 1.8 Mb/s`, `1.8 of 0.3–2.0 Mb/s` | **Absent from the page.** `YonderStateOverlay.vue` is built and `YonderPicture.vue` mounts it `v-if="previewState"`; nothing supplies `previewState` | owned — **Task 32** (the preview-state message, R-VID-18) | The component exists; the message does not |
-| L-11 | The overlay's head word takes the state: `ADAPTIVE`, `AT THE FLOOR` (caution), `HELD`, `FULL RATE` (select), `STILLS` (fault) | Absent | owned — **Task 32** | |
+| L-11 | The overlay's head word takes the state: `ADAPTIVE`, `AT THE FLOOR` (caution), `HELD`, `FULL RATE` (select), `STILLS` (fault) | **Built, uncaptured.** The daemon's answer to every viewer report is that browser's own preview state, and `YonderPicture.vue` now reads it (Task 34); on stills the head reads `STILLS · every 5 s` | owned — **Task 32** built the message; Task 34 put it on the page; **the capture is the operator's gate** | The per-viewer state can only reach a per-viewer picture through its own report's answer — a flow message is broadcast to every browser. The four other head words reach the page by the same route and are not yet captured either |
 | L-12 | The overlay carries the round-trip on a poor link: `0.3 of 0.3–2.0 Mb/s · 1.2 s round trip` | Absent | owned — **Task 32** | |
 | L-13 | **A step line, top-right of the picture**, on a ladder change only: `dropped to 640×360 — the link could not carry 720p` | Absent | owned — **Task 31** (the ladder) and **Task 32** (reporting it) | |
 | L-14 | A foot strip, bottom-left of the picture, of the live control readings — `ZOOM 0  GAIN 0` on the ELP, `PAN +0.0°  TILT +0.0°  ZOOM 1.0×  EV +0.0` on the Pocket 2 | Built (`.y-pic__foot`); not visible in the capture because the media server is not answering | present | Unverifiable from this capture; verified in source |
@@ -144,9 +144,9 @@ Capture: `camera-live.night.png` / `.day.png`, `camera-live-notebook.day.fold.pn
 
 | # | The blueprint shows | Today | Class | Note |
 |---|---|---|---|---|
-| L-20 | **A strip under the picture, one thumbnail per camera**, the active one bordered and labelled `Live`, the others labelled `Still · 4 s` | **Absent from the page.** `YonderThumbStrip.vue` is built and mounted by `YonderPicture.vue`; no `cameras` payload reaches it | owned — **Task 34** (the stills strip, R-VID-14) | |
-| L-21 | A press on a thumbnail switches camera, and the sidebar follows | Absent | owned — **Task 34**; the sidebar half needs L-04 | |
-| L-22 | To the right of the strip, `OTHER CAMERAS` over `12 kb/s of stills · counted in Path total` | Absent | owned — **Task 34** | |
+| L-20 | **A strip under the picture, one thumbnail per camera**, the active one bordered and labelled `Live`, the others labelled `Still · 4 s` | **Built, uncaptured** (Task 34). `video/present.ts`'s `thumbStrip()` composes one row per configured camera on the camera read; `pick-cam-picture` moves it on to the picture; the daemon takes one still per watched camera on a 5 s timer (`video/stills.ts`) and each browser subscribes to the others' stills itself. A stopped camera reads `Stopped`; a running one with no frame yet reads `Still · waiting` | built — **the capture is the operator's gate** | **The active thumbnail carries no image**: its picture is the live one above, and fetching its still too would be an uncounted copy for a video viewer. The blueprint draws a picture in it. Painting the live `<video>` into a small canvas would close it at no uplink cost — **owner: none; the operator to decide** |
+| L-21 | A press on a thumbnail switches camera, and the sidebar follows | **Built, uncaptured** (Task 34) — the press sets the page's own camera and re-reads it, so every instrument follows and the next poll agrees. Before this the picture switched and the next poll switched it back | built — **the capture is the operator's gate**; the sidebar half still needs L-04 | |
+| L-22 | To the right of the strip, `OTHER CAMERAS` over `12 kb/s of stills · counted in Path total` | **Built, uncaptured** (Task 34). The figure is `Viewers.stillsKbps()` — every transmitted copy, every viewer, every camera — in the daemon's own words | built — **the capture is the operator's gate** | The figure is honest and larger than the render's: a still is the host's `still` op off the `raw` tee at capture size, ~100 kB at 720p, so one copy every 5 s is ~170 kb/s. The render's `12 kb/s` implies a thumbnail-sized still, which would need the host op to scale — **owner: none; the operator to decide** |
 
 ### 1.4 The strip beneath (delivery)
 
@@ -723,7 +723,7 @@ check against.
 | 31 — the rate controller and the size ladder | L-13 (the step line's cause) |
 | 32 — viewers and the preview-state message | L-10, L-11, L-12, L-13, L-24, L-26, L-27, L-63 |
 | 33 — board recording, stills and the captures panel | **Done.** L-16, L-18, L-43, L-44, L-45, L-46, L-47 built; L-48 built as a panel rather than a popover, for the operator to accept or reverse |
-| 34 — the stills strip, per viewer | L-20, L-21, L-22 |
+| 34 — the stills strip, per viewer | **Built, uncaptured.** L-20, L-21, L-22, and the `STILLS` half of L-11; the strip's active thumbnail image and the still's size are the operator's calls (see the rows) |
 | Phase 5 (deferred, Pocket 2) | L-52, L-79, L-83 |
 
 **Unbuilt, with no owner — nineteen rows**

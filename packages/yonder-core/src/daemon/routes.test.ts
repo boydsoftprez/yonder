@@ -16,6 +16,8 @@ import { MODEM_PASSWORD_SECRET } from "../net/modem/configure.js";
 import { ConfigSchema, DEFAULT_CONFIG, type Camera, type Config } from "../schema/config.js";
 import { Supervisor } from "../video/supervisor.js";
 import { Recorder, type CameraMedium, type Capture } from "../video/recorder.js";
+import { Stills } from "../video/stills.js";
+import { STILLS_INTERVAL_MS, stillCostKbps, Viewers } from "../video/viewers.js";
 import { noCapabilities, present, type CameraCapabilities, type VideoFormat } from "../video/capability.js";
 import type { ApplyControlsOptions, ApplyControlsResult } from "../video/controls.js";
 import type { DetectResult, Detection, Rejection } from "../video/probe/camera.js";
@@ -256,6 +258,13 @@ interface RouterOptions {
    *  no recorder, which every capture route says rather than answering with
    *  an empty list. */
   recorder?: Recorder;
+  /** Periodic stills (R-VID-14). Absent means no video layer, which the
+   *  still route says rather than answering with an image it does not have. */
+  stills?: Stills;
+  /** Who is watching (spec §8.2), so a served still can be counted. */
+  viewers?: Viewers;
+  /** When *now* is, for the ages the camera page states. */
+  clock?: Clock;
 }
 
 function router(opts: RouterOptions = {}): Router {
@@ -320,6 +329,9 @@ function router(opts: RouterOptions = {}): Router {
     }),
     ...(opts.mavlink === undefined ? {} : { mavlink: opts.mavlink }),
     ...(opts.recorder === undefined ? {} : { recorder: opts.recorder }),
+    ...(opts.stills === undefined ? {} : { stills: opts.stills }),
+    ...(opts.viewers === undefined ? {} : { viewers: opts.viewers }),
+    ...(opts.clock === undefined ? {} : { clock: opts.clock }),
   });
 }
 
@@ -2722,6 +2734,219 @@ describe("the camera routes", () => {
       expect(res.status).toBe(503);
       expect((await r("GET", "/cameras/cam0", undefined)).body)
         .toMatchObject({ recorder: null });
+    });
+  });
+
+  /**
+   * The latest still, with its age, and the strip it is drawn in (R-VID-14,
+   * R-VID-11, R-STO-01; blueprint L-20, L-22).
+   *
+   * The stand-in for the pipeline host writes a real JPEG where it is told
+   * to, so the bytes the route hands over are bytes read off a real
+   * directory; the clock is the test's, so the age is a number the test
+   * chose rather than one it measured.
+   */
+  describe("GET /cameras/:id/still", () => {
+    // A JPEG's magic number and enough behind it to cost something at the
+    // interval: ten bytes every five seconds rounds to 0 kb/s, and a copy
+    // that costs nothing cannot prove it was counted.
+    const JPEG = Buffer.concat([
+      Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46]),
+      Buffer.alloc(20_000, 0x2e),
+    ]);
+    let nowMs = 1_700_000_000_000;
+    const ticking: Clock = { now: () => nowMs, setTimer: () => 1, clearTimer: () => {} };
+
+    /** A generator with a stand-in for the pipeline host under it. */
+    function stillsOn(opts: { running?: boolean } = {}) {
+      const root = mkdtempSync(join(dir, "stills-"));
+      const listeners: ((camera: string, line: string) => void)[] = [];
+      const stills = new Stills({
+        channel: {
+          send: (camera, message) => {
+            const m = message as { id: string; path: string };
+            writeFileSync(m.path, JPEG);
+            queueMicrotask(() => {
+              const observed = { path: m.path, bytes: JPEG.length, width: 1280, height: 720 };
+              for (const fn of listeners) {
+                fn(camera, JSON.stringify({ id: m.id, pid: 1, continuous: true, observed }));
+              }
+            });
+            return true;
+          },
+          onMessage: (fn) => { listeners.push(fn); },
+          state: (camera) => ({
+            id: camera, state: opts.running === false ? "stopped" : "running", since: 0, restarts: 0,
+          }),
+        },
+        cameras: () => loadConfig(configPath).cameras,
+        wanted: () => loadConfig(configPath).cameras.map((c) => c.id),
+        root,
+        clock: ticking,
+      });
+      const viewers = new Viewers({
+        cameras: () => loadConfig(configPath).cameras,
+        inForce: () => null,
+        clock: ticking,
+        stillFor: (id) => stills.latest(id),
+      });
+      return { stills, viewers, root };
+    }
+
+    /** A second configured camera beside the fixture's, so the strip has an
+     *  *other* camera to draw as a still. */
+    function withTail(): void {
+      const config = loadConfig(configPath);
+      const nose = config.cameras[0]!;
+      saveConfig(configPath, {
+        ...config,
+        cameras: [nose, { ...nose, id: "tail", name: "Tail", device: `${nose.device}-tail` }],
+      });
+    }
+
+    beforeEach(() => { nowMs = 1_700_000_000_000; });
+
+    it("is 403 while unprovisioned, like every other configuration route", async () => {
+      const { stills } = stillsOn();
+      const r = router({ cameras: fixtureDetection(), stills });
+      expect((await r("GET", "/cameras/cam0/still", undefined)).status).toBe(403);
+    });
+
+    it("hands over the latest still as bytes, with when it was taken and how old it is", async () => {
+      const { stills } = stillsOn();
+      const r = provisioned({ cameras: fixtureDetection(), stills, clock: ticking });
+      await stills.tick();
+      nowMs += 1_500;
+      const res = await r("GET", "/cameras/cam0/still", undefined);
+      expect(res.status).toBe(200);
+      expect(res.contentType).toBe("image/jpeg");
+      expect(res.body).toEqual(JPEG);
+      // The frame's own stamp, and its age by the clock that stamped it: a
+      // browser cannot compare this device's clock with its own, so it is
+      // told the age rather than left to work one out (R-VID-14).
+      expect(res.headers).toEqual({
+        "x-yonder-still-at": String(nowMs - 1_500),
+        "x-yonder-still-age": "1500",
+      });
+    });
+
+    it("counts each answer as one transmission to the viewer that asked (R-VID-11)", async () => {
+      const { stills, viewers } = stillsOn();
+      const r = provisioned({ cameras: fixtureDetection(), stills, viewers, clock: ticking });
+      await stills.tick();
+      const copy = stillCostKbps(JPEG.length, STILLS_INTERVAL_MS);
+
+      expect((await r("GET", "/cameras/cam0/still?viewer=aaaa", undefined)).status).toBe(200);
+      const oneCopy = viewers.state("cam0", "aaaa").cost.path;
+      expect((await r("GET", "/cameras/cam0/still?viewer=bbbb", undefined)).status).toBe(200);
+      // Two browsers, two copies of one image: each is charged its own, and
+      // **the path carries both** — a daemon counting the still once per
+      // camera would leave the second browser's copy off the path total,
+      // which is the mutation this last line exists to catch.
+      expect(copy).toBeGreaterThan(0);
+      expect(viewers.state("cam0", "aaaa").cost.mine).toBe(copy);
+      expect(viewers.state("cam0", "bbbb").cost.mine).toBe(copy);
+      expect(viewers.stillsKbps()).toBe(2 * copy);
+      expect(viewers.state("cam0", "aaaa").cost.path).toBe(oneCopy + copy);
+      expect(viewers.state("cam0", "aaaa").mine).toMatchObject({ delivery: "stills", frameAge: 0 });
+
+      // A caller naming no viewer — a shell on the socket — is served and
+      // counted against nobody: nothing left the aircraft.
+      expect((await r("GET", "/cameras/cam0/still", undefined)).status).toBe(200);
+      expect(viewers.stillsKbps()).toBe(2 * copy);
+    });
+
+    it("says in words that there is no still yet", async () => {
+      const { stills } = stillsOn();
+      const r = provisioned({ cameras: fixtureDetection(), stills });
+      const res = await r("GET", "/cameras/cam0/still", undefined);
+      expect(res.status).toBe(404);
+      expect(res.contentType).toBeUndefined();
+      expect((res.body as { error: string }).error).toMatch(/no still of cam0 yet/);
+    });
+
+    it("says in words that the camera is not running", async () => {
+      const { stills } = stillsOn({ running: false });
+      const r = provisioned({ cameras: fixtureDetection(), stills });
+      const res = await r("GET", "/cameras/cam0/still", undefined);
+      expect(res.status).toBe(404);
+      expect((res.body as { error: string }).error).toContain("cam0 is not running");
+    });
+
+    it("refuses a viewer id that could address another route, and counts nothing", async () => {
+      const { stills, viewers } = stillsOn();
+      const r = provisioned({ cameras: fixtureDetection(), stills, viewers });
+      await stills.tick();
+      const res = await r("GET", "/cameras/cam0/still?viewer=..%2Fadmin", undefined);
+      expect(res.status).toBe(404);
+      expect(viewers.stillsKbps()).toBe(0);
+    });
+
+    it("takes GET and nothing else", async () => {
+      const { stills } = stillsOn();
+      const r = provisioned({ cameras: fixtureDetection(), stills });
+      await stills.tick();
+      for (const method of ["POST", "DELETE", "PUT"]) {
+        expect((await r(method, "/cameras/cam0/still", undefined)).status, method).toBe(404);
+      }
+    });
+
+    it("is 404 for a camera this device does not have", async () => {
+      const { stills } = stillsOn();
+      const r = provisioned({ cameras: fixtureDetection(), stills });
+      const res = await r("GET", "/cameras/nope/still", undefined);
+      expect(res.status).toBe(404);
+      expect((res.body as { error: string }).error).toContain("no camera is configured");
+    });
+
+    it("says so rather than answering when this daemon has no stills", async () => {
+      const r = provisioned({ cameras: fixtureDetection() });
+      expect((await r("GET", "/cameras/cam0/still", undefined)).status).toBe(503);
+    });
+
+    it("carries the strip on the camera's own page, from the same read (L-20, L-22)", async () => {
+      const { stills, viewers } = stillsOn();
+      const r = provisioned({ cameras: fixtureDetection(), stills, viewers, clock: ticking });
+      withTail();
+      // Only the fixture's own camera can be started here; `tail` names a
+      // socket the sweep did not find, so the supervisor holds it stopped.
+      expect((await r("POST", "/cameras/cam0/run", { action: "start" })).status).toBe(200);
+      await stills.tick();
+      const taken = nowMs;
+      nowMs += 4_200;
+      await r("GET", "/cameras/cam0/still?viewer=aaaa", undefined);
+
+      const page = (await r("GET", "/cameras/cam0", undefined)).body as {
+        strip: { cameras: Record<string, unknown>[]; downlink: string };
+      };
+      // One row per configured camera. This one is active, with its still's
+      // age and nothing to fetch — its picture is the live one above. The
+      // other is **stopped on the page even though the generator's stand-in
+      // holds a frame for it**: the run state is the supervisor's, and a
+      // camera the supervisor is not running has no still to show, whatever
+      // is on the tmpfs (`server.wiring.test.ts` draws the running case, with
+      // the one supervisor both read).
+      expect(stills.latest("tail")?.at).toBe(taken);
+      expect(page.strip.cameras).toEqual([
+        { id: "cam0", name: expect.any(String), active: true, ageSeconds: 4, thumbSrc: null, stopped: false },
+        { id: "tail", name: "Tail", active: false, ageSeconds: null, thumbSrc: null, stopped: true },
+      ]);
+      // And what every still copy is costing, in the blueprint's words —
+      // the one copy served above, for the page's own camera.
+      const copy = stillCostKbps(JPEG.length, STILLS_INTERVAL_MS);
+      expect(copy).toBeGreaterThan(0);
+      expect(page.strip.downlink).toBe(`${String(Math.round(copy))} kb/s of stills · counted in Path total`);
+    });
+
+    it("draws the strip with nothing in it on a daemon with no video layer", async () => {
+      const r = provisioned({ cameras: fixtureDetection() });
+      withTail();
+      const page = (await r("GET", "/cameras/cam0", undefined)).body as {
+        strip: { cameras: Record<string, unknown>[]; downlink: string };
+      };
+      expect(page.strip.cameras).toHaveLength(2);
+      expect(page.strip.cameras.every((c) => c.thumbSrc === null)).toBe(true);
+      expect(page.strip.downlink).toBe("0 kb/s of stills · counted in Path total");
     });
   });
 

@@ -457,15 +457,14 @@ describe("the picture", () => {
       .toMatchObject({ stillsAfterMs: 12_000 });
   });
 
-  it("carries the stills source, so the fall-back has somewhere to point", () => {
-    // R-VID-14's fall-back is only useful if it can draw something. Nothing
-    // in this repository serves stills yet, so this is configuration rather
-    // than a discovered URL, and an unset one leaves the fall-back drawing
-    // its reason and no picture.
-    expect(build(pictureNode as (RED: RED) => void, { path: "cam0", stillsUrl: "/stills/cam0.jpg" }).props)
-      .toMatchObject({ stillsUrl: "/stills/cam0.jpg" });
+  it("carries no stills source: the picture derives it from the camera it shows", () => {
+    // R-VID-14's stills come from the device, on the interval it states, at
+    // an address the picture builds from the camera it is showing. An editor
+    // field that named a source sat here for two milestones and nothing
+    // could ever fill it — a field that was never fillable is not a feature,
+    // and one left behind would read as a knob that does something.
     expect(build(pictureNode as (RED: RED) => void, { path: "cam0" }).props)
-      .toMatchObject({ stillsUrl: "" });
+      .not.toHaveProperty("stillsUrl");
   });
 });
 
