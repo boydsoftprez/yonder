@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
 import {
-  compose, encodeControl, encodesIn, previewCaps, refuse,
+  compose, encodeControl, encodesIn, encoderFor, previewCaps, refuse, scalesInEncoder,
   ENCODE_ELEMENT, PREVIEW_CAPS_ELEMENT, QUEUE,
 } from "./pipeline.js";
 import { present, noCapabilities, captureSizes } from "./capability.js";
@@ -36,6 +36,15 @@ const HW = {
 const opts = { camera: CAMERA, capabilities: CAPS, encoder: HW, rtspBase: "rtsp://127.0.0.1:8554" };
 const argv = () => compose(opts);
 const text = () => argv().join(" ");
+
+const MPP = {
+  element: "mpph264enc" as const, h265: "mpph265enc" as const, decoder: "mppjpegdec" as const,
+  device: "/dev/mpp_service", hardware: true,
+  detail: "hardware H.264 and H.265 through Rockchip MPP (mpph264enc, mpph265enc)",
+};
+const mppOpts = { ...opts, encoder: MPP };
+const mpp = () => compose(mppOpts);
+const mppText = () => mpp().join(" ");
 
 describe("compose", () => {
   it("captures the format the camera actually offered", () => {
@@ -170,6 +179,106 @@ describe("compose", () => {
   it("never shells out — the composition is a value", () => {
     expect(Array.isArray(argv())).toBe(true);
     expect(argv()[0]).toBe("gst-launch-1.0");
+  });
+});
+
+describe("compose, on a Rockchip board (R-HW-03, R-CAM-07, spec §4 §5)", () => {
+  it("decodes with the board's own JPEG decoder, and names no software decoder", () => {
+    expect(mpp()).toContain("mppjpegdec");
+    expect(mpp()).not.toContain("jpegdec");
+  });
+
+  it("scales the preview inside its encoder through RGA, with no scaler element at all", () => {
+    const at = mpp().indexOf("name=enc-preview");
+    expect(mpp()[at - 1]).toBe("mpph264enc");
+    expect(mpp().slice(at, at + 6)).toEqual(expect.arrayContaining(["width=640", "height=360"]));
+    expect(mppText()).not.toContain("v4l2convert");
+    expect(mppText()).not.toContain("videoscale");
+    expect(mppText()).not.toContain("videoconvert");
+    expect(mppText()).not.toContain("name=preview-scale");
+  });
+
+  it("carries the bitrate in bits per second, in the encoder's own property, on both encodes", () => {
+    expect(mpp()).toContain("bps=2000000");
+    expect(mpp()).toContain("bps=400000");
+    expect(mppText()).not.toContain("extra-controls");
+    expect(mppText()).not.toContain("bitrate=");
+  });
+
+  it("runs a short GOP on the preview branch only", () => {
+    expect(mpp().filter((t) => t === "gop=15")).toHaveLength(1);
+    const preview = mppText().slice(mppText().indexOf("name=enc-preview"));
+    expect(preview).toContain("gop=15");
+  });
+
+  it("keeps the preview's rate filter without pinning the memory the frames sit in", () => {
+    // mppjpegdec hands out DMA buffers. A plain video/x-raw filter would
+    // negotiate every branch off the tee back into system memory — the
+    // +25-point arm the bench measured. (ANY) matches any caps feature.
+    expect(mpp()).toContain("videorate");
+    expect(mpp()).toContain("caps=video/x-raw(ANY),framerate=15/1");
+  });
+
+  it("welds the V4L2 level capsfilter to nothing on this board", () => {
+    expect(mppText()).not.toContain("video/x-h264,level=(string)4");
+  });
+
+  it("encodes H.265 for the ground station and H.264 for the browser (R-CAM-08, R-VID-20)", () => {
+    const line = compose({ ...mppOpts, camera: { ...CAMERA, codec: "h265" } });
+    const text = line.join(" ");
+    const stream = line.indexOf("name=enc-stream");
+    const preview = line.indexOf("name=enc-preview");
+    expect(line[stream - 1]).toBe("mpph265enc");
+    expect(line[preview - 1]).toBe("mpph264enc");
+    expect(text.slice(0, text.indexOf("tee name=main"))).toContain("h265parse");
+    expect(text).toContain("rtph265pay");
+    expect(text).not.toContain("rtph264pay");
+    expect(text.slice(text.indexOf("name=enc-preview"))).toContain("h264parse");
+  });
+
+  it("composes the same line for a Pi as it did before this board existed", () => {
+    expect(text()).toContain("jpegdec");
+    expect(text()).toContain("v4l2convert");
+    expect(text()).not.toContain("mpp");
+    expect(text()).not.toContain("bps=");
+  });
+});
+
+describe("the runtime channel's half of the launch line, on a Rockchip board", () => {
+  it("builds a retune in MPP's own units", () => {
+    expect(encodeControl(mpp(), "stream", 3000)).toEqual({
+      element: "enc-stream", property: "bps", value: "3000000",
+    });
+    expect(encodeControl(mpp(), "preview", 700)).toEqual({
+      element: "enc-preview", property: "bps", value: "700000",
+    });
+  });
+
+  it("reads MPP's bits back as kb/s, and the preview's size off its encoder", () => {
+    expect(encodesIn(mpp())).toEqual({ stream: 2000, preview: 400, shape: { size: "640x360", fps: 15 } });
+  });
+
+  it("knows when the preview is scaled inside its encoder", () => {
+    expect(scalesInEncoder(mpp())).toBe(true);
+    expect(scalesInEncoder(argv())).toBe(false);
+  });
+});
+
+describe("refuse, for a codec the board cannot encode (R-CAM-08, R-CAM-10)", () => {
+  it("refuses H.265 on a board whose encoder has none, before Start, naming the encoder", () => {
+    const refusal = refuse({ ...opts, camera: { ...CAMERA, codec: "h265" } });
+    expect(refusal).toContain("no H.265 encoder");
+    expect(refusal).toContain("hardware H.264 on /dev/video11");
+  });
+
+  it("accepts it where the encoder offers it", () => {
+    expect(refuse({ ...mppOpts, camera: { ...CAMERA, codec: "h265" } })).toBeNull();
+  });
+
+  it("answers the question compose() will ask", () => {
+    expect(encoderFor(MPP, "h265")).toBe("mpph265enc");
+    expect(encoderFor(MPP, "h264")).toBe("mpph264enc");
+    expect(encoderFor(HW, "h265")).toBeNull();
   });
 });
 

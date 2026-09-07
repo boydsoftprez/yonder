@@ -153,6 +153,58 @@ export const RTP_PAYLOAD_TYPE = 96;
  */
 const H264_LEVEL = "video/x-h264,level=(string)4";
 
+type Codec = Camera["codec"];
+export type EncodeKind = Encoder["element"] | "mpph265enc";
+
+/** The parser that follows an encode. */
+function parser(codec: Codec): string {
+  return codec === "h265" ? "h265parse" : "h264parse";
+}
+
+/** The payloader an RTP output needs. */
+function payloader(codec: Codec): string {
+  return codec === "h265" ? "rtph265pay" : "rtph264pay";
+}
+
+/**
+ * Which element encodes `codec` on this board, or null where it has none.
+ * H.265 is a Rockchip capability (R-CAM-08): the Pi's V4L2 encoder and
+ * `x264enc` are H.264 only. `refuse()` turns the null into a sentence before
+ * Start; `compose()` treats reaching it as a programming error.
+ */
+export function encoderFor(encoder: Encoder, codec: Codec): EncodeKind | null {
+  return codec === "h265" ? encoder.h265 : encoder.element;
+}
+
+/**
+ * Whether this board's preview is scaled inside its encoder. On MPP the
+ * encoder carries `width`/`height` and hands the resize to RGA — measured at
+ * about twice a software scaler's throughput, and the whole preview branch at
+ * one point of four cores. There is then no scaler element to reconfigure
+ * live, which is what `encoder.ts` asks this for.
+ */
+function encoderScales(encoder: Encoder): boolean {
+  return encoder.element === "mpph264enc";
+}
+
+/** The same question, of a launch line that is running. */
+export function scalesInEncoder(argv: readonly string[]): boolean {
+  const preview = elementIn(argv, ENCODE_ELEMENT.preview);
+  return preview !== null && preview.kind.startsWith("mpp")
+    && elementIn(argv, PREVIEW_CAPS_ELEMENT.scale) === null;
+}
+
+/**
+ * The preview's rate filter, written so it does not pin the memory the
+ * frames sit in. `mppjpegdec` hands out DMA buffers; a plain `video/x-raw`
+ * filter on one branch negotiates every branch off the tee back into system
+ * memory, which is the +25-point arm the bench measured against +4. `(ANY)`
+ * matches any caps feature.
+ */
+function anyMemory(set: ElementProperty): ElementProperty {
+  return { ...set, value: set.value.replace(/^video\/x-raw,/, "video/x-raw(ANY),") };
+}
+
 /**
  * The concrete pixel size to bake into today's respawn-only pipeline.
  *
@@ -248,7 +300,7 @@ function extraControls(kbps: number, shortGop: boolean): string {
  * made to answer for it.
  */
 function bitrateOf(
-  kind: Encoder["element"], element: string, kbps: number, shortGop: boolean,
+  kind: EncodeKind, element: string, kbps: number, shortGop: boolean,
 ): ElementProperty {
   switch (kind) {
     case "x264enc":
@@ -257,6 +309,7 @@ function bitrateOf(
     case "v4l2h264enc":
       return { element, property: "extra-controls", value: extraControls(kbps, shortGop) };
     case "mpph264enc":
+    case "mpph265enc":
       // MPP counts in bits per second, in a plain property. Measured live on
       // an RK3566 with the real camera in front of it: 0.96 → 3.93 Mb/s on
       // both encoders, no gap after the change (retune-bitrate-mpp.py).
@@ -264,22 +317,37 @@ function bitrateOf(
   }
 }
 
-function encode(encoder: Encoder, name: EncodeName, kbps: number): string[] {
+function encode(
+  kind: EncodeKind, name: EncodeName, kbps: number,
+  scale: { width: number; height: number } | null,
+): string[] {
   const element = ENCODE_ELEMENT[name];
-  const bitrate = token(bitrateOf(encoder.element, element, kbps, SHORT_GOP[name]));
-  if (encoder.element === "x264enc") {
-    // key-int-max is in frames. `tune=zerolatency` because a B-frame reorder
-    // buffer is latency on a link that already has 300 ms of it (R-UI-06).
-    return [
-      "x264enc", `name=${element}`, bitrate, "speed-preset=veryfast", "tune=zerolatency",
-      ...(SHORT_GOP[name] ? ["key-int-max=15"] : []),
-    ];
+  const bitrate = token(bitrateOf(kind, element, kbps, SHORT_GOP[name]));
+  switch (kind) {
+    case "x264enc":
+      // key-int-max is in frames. `tune=zerolatency` because a B-frame reorder
+      // buffer is latency on a link that already has 300 ms of it (R-UI-06).
+      return [
+        "x264enc", `name=${element}`, bitrate, "speed-preset=veryfast", "tune=zerolatency",
+        ...(SHORT_GOP[name] ? ["key-int-max=15"] : []),
+      ];
+    case "v4l2h264enc":
+      // No `device=`: the property is read-only and `encoder.device` cannot
+      // be applied — see the module comment. The capsfilter is welded on here
+      // rather than at the call sites, because an encoder that reaches it
+      // without one does not survive its first frame.
+      return ["v4l2h264enc", `name=${element}`, bitrate, LINK, H264_LEVEL];
+    case "mpph264enc":
+    case "mpph265enc":
+      // `gop` is the keyframe interval in frames (-1 means one per second).
+      // `width`/`height` are RGA's resize inside the encoder, taken at start
+      // only — set while playing they are accepted and ignored (measured).
+      return [
+        kind, `name=${element}`, bitrate,
+        ...(SHORT_GOP[name] ? ["gop=15"] : []),
+        ...(scale === null ? [] : [`width=${scale.width}`, `height=${scale.height}`]),
+      ];
   }
-  // No `device=`: the property is read-only and `encoder.device` cannot be
-  // applied — see the module comment. The capsfilter is welded on here rather
-  // than added at the two call sites, because an encoder that reaches one of
-  // them without it does not survive its first frame.
-  return ["v4l2h264enc", `name=${element}`, bitrate, LINK, H264_LEVEL];
 }
 
 /**
@@ -316,13 +384,13 @@ export function previewCaps(shape: PreviewShape): readonly [ElementProperty, Ele
  * every location this function composes against the paths that file declares,
  * so the two cannot drift apart again without a test going red.
  */
-function sink(output: CameraOutput, rtspBase: string, cameraId: string): string[] {
+function sink(output: CameraOutput, rtspBase: string, cameraId: string, codec: Codec): string[] {
   switch (output.kind) {
     case "rtp":
       // config-interval=-1 sends SPS/PPS with every keyframe. Without it a
       // ground station started after the stream never gets the parameter sets
       // and shows nothing, with no error, for ever.
-      return ["rtph264pay", "config-interval=-1", `pt=${RTP_PAYLOAD_TYPE}`, LINK,
+      return [payloader(codec), "config-interval=-1", `pt=${RTP_PAYLOAD_TYPE}`, LINK,
         "udpsink", `host=${output.host}`, `port=${output.port}`, "sync=false"];
     case "rtsp":
       return ["rtspclientsink", `location=${rtspBase}/${cameraId}`, "latency=0"];
@@ -369,25 +437,34 @@ function turn(opts: ComposeOptions): string[] {
 
 export function compose(opts: ComposeOptions): string[] {
   const { camera, encoder, rtspBase } = opts;
+  const main = encoderFor(encoder, camera.codec);
+  if (main === null) {
+    throw new Error(
+      `${camera.id} asks for ${camera.codec} and this board's encoder offers none; refuse() answers this before compose() is reached`,
+    );
+  }
   const argv: string[] = ["gst-launch-1.0", "-q"];
   const push = (...tokens: string[]): void => { argv.push(...tokens); };
 
   push(
     "v4l2src", `device=/dev/v4l/by-path/${camera.device}`, "io-mode=4", LINK,
     `image/jpeg,width=${camera.width},height=${camera.height},framerate=${camera.framerate}/1`, LINK,
-    "jpegdec", LINK,
+    // Spec §5: decode in hardware where the board has it, so the frames
+    // never leave the SoC between capture and encode. Measured at +3 points
+    // against software's +8 for one branch, +4 against +14 for two.
+    encoder.decoder ?? "jpegdec", LINK,
     ...turn(opts),
     "tee", "name=raw",
   );
 
   // The full-rate encode, then the fork to its consumers.
-  push("raw.", LINK, ...QUEUE, LINK, ...encode(encoder, "stream", camera.bitrate_kbps), LINK,
-    "h264parse", LINK, "tee", "name=main");
+  push("raw.", LINK, ...QUEUE, LINK, ...encode(main, "stream", camera.bitrate_kbps, null), LINK,
+    parser(camera.codec), LINK, "tee", "name=main");
   // A disabled output contributes no branch at all (R-VID-16) — not a branch
   // that opens a socket and sits muted, which is a different claim to an
   // operator than "stopped". See the note on `CameraOutput.enabled`.
   for (const output of camera.outputs.filter((o) => o.enabled)) {
-    push("main.", LINK, ...QUEUE, LINK, ...sink(output, rtspBase, camera.id));
+    push("main.", LINK, ...QUEUE, LINK, ...sink(output, rtspBase, camera.id, camera.codec));
   }
 
   // The cheap copy the interface watches (R-VID-13), always published, always
@@ -395,16 +472,29 @@ export function compose(opts: ComposeOptions): string[] {
   const [scale, rate] = previewCaps({
     size: heldRung(camera.preview), fps: camera.preview.framerate,
   });
-  push(
-    "raw.", LINK, ...QUEUE, LINK,
-    "v4l2convert", LINK,
-    "capsfilter", `name=${scale.element}`, token(scale), LINK,
-    "videorate", LINK,
-    "capsfilter", `name=${rate.element}`, token(rate), LINK,
-    ...encode(encoder, "preview", camera.preview.bitrate_kbps), LINK,
-    "h264parse", LINK,
-    "rtspclientsink", `location=${rtspBase}/${camera.id}-preview`, "latency=0",
-  );
+  // The interface's copy is always H.264, whatever the main stream carries:
+  // a browser reaches it over WebRTC (R-VID-20).
+  if (encoderScales(encoder)) {
+    push(
+      "raw.", LINK, ...QUEUE, LINK,
+      "videorate", LINK,
+      "capsfilter", `name=${rate.element}`, token(anyMemory(rate)), LINK,
+      ...encode(encoder.element, "preview", camera.preview.bitrate_kbps, previewSize(camera.preview)), LINK,
+      "h264parse", LINK,
+      "rtspclientsink", `location=${rtspBase}/${camera.id}-preview`, "latency=0",
+    );
+  } else {
+    push(
+      "raw.", LINK, ...QUEUE, LINK,
+      "v4l2convert", LINK,
+      "capsfilter", `name=${scale.element}`, token(scale), LINK,
+      "videorate", LINK,
+      "capsfilter", `name=${rate.element}`, token(rate), LINK,
+      ...encode(encoder.element, "preview", camera.preview.bitrate_kbps, null), LINK,
+      "h264parse", LINK,
+      "rtspclientsink", `location=${rtspBase}/${camera.id}-preview`, "latency=0",
+    );
+  }
 
   return argv;
 }
@@ -444,14 +534,16 @@ function elementIn(
  * `notControllable` an operator is shown, rather than a control that appears
  * to work.
  */
+const ENCODE_KINDS: readonly string[] = ["v4l2h264enc", "x264enc", "mpph264enc", "mpph265enc"];
+
 export function encodeControl(
   argv: readonly string[], name: EncodeName, kbps: number,
 ): ElementProperty | null {
   const element = ENCODE_ELEMENT[name];
   const found = elementIn(argv, element);
   if (found === null) return null;
-  if (found.kind !== "v4l2h264enc" && found.kind !== "x264enc") return null;
-  return bitrateOf(found.kind, element, kbps, SHORT_GOP[name]);
+  if (!ENCODE_KINDS.includes(found.kind)) return null;
+  return bitrateOf(found.kind as EncodeKind, element, kbps, SHORT_GOP[name]);
 }
 
 /**
@@ -479,16 +571,23 @@ function bitrateIn(argv: readonly string[], name: EncodeName): number | null {
     // x264enc, already in kb/s.
     const plain = /^bitrate=(\d+)$/.exec(prop);
     if (plain) return Number(plain[1]);
+    const bps = /^bps=(\d+)$/.exec(prop);
+    if (bps) return Math.round(Number(bps[1]) / 1000);
   }
   return null;
 }
 
 function shapeIn(argv: readonly string[]): PreviewShape | null {
-  const scale = elementIn(argv, PREVIEW_CAPS_ELEMENT.scale);
   const rate = elementIn(argv, PREVIEW_CAPS_ELEMENT.rate);
-  if (scale === null || rate === null) return null;
-  const size = /\bwidth=(\d+),height=(\d+)/.exec(scale.props.join(" "));
+  if (rate === null) return null;
   const fps = /\bframerate=(\d+)\/1/.exec(rate.props.join(" "));
+  // The size lives on the capsfilter where a scaler element does the
+  // resize, and on the preview encoder itself where RGA does it inside.
+  const scale = elementIn(argv, PREVIEW_CAPS_ELEMENT.scale);
+  const preview = elementIn(argv, ENCODE_ELEMENT.preview);
+  const size = scale !== null
+    ? /\bwidth=(\d+),height=(\d+)/.exec(scale.props.join(" "))
+    : preview === null ? null : /\bwidth=(\d+) height=(\d+)/.exec(preview.props.join(" "));
   if (size === null || fps === null) return null;
   const rung = `${size[1]}x${size[2]}`;
   // A size this schema does not offer is not reported as one it does. The
@@ -521,7 +620,7 @@ export function encodesIn(argv: readonly string[]): RunningEncodes {
  * before the two that depend on what the camera said about its sizes.
  */
 export function refuse(opts: ComposeOptions): string | null {
-  const { camera, capabilities, knownDevices } = opts;
+  const { camera, capabilities, encoder, knownDevices } = opts;
 
   // **First, because it is the one that cannot be fixed by looking at the
   // camera.** `srtsink` binds `0.0.0.0:<port>` and leaves `passphrase` at its
@@ -564,6 +663,10 @@ export function refuse(opts: ComposeOptions): string | null {
   const preview = previewSize(camera.preview);
   if (preview.width > camera.width || preview.height > camera.height) {
     return `the preview is ${preview.width}x${preview.height}, larger than the ${camera.width}x${camera.height} it is scaled from`;
+  }
+
+  if (encoderFor(encoder, camera.codec) === null) {
+    return `this board has no H.265 encoder — its encoder is ${encoder.detail}; set codec to h264, or run this camera on a board that encodes H.265 (R-CAM-08)`;
   }
 
   if (capabilities.formats.state !== "present") {
