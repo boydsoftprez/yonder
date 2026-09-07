@@ -266,6 +266,14 @@ const ABOVE_THE_FOLD = [
 /** A deck, however it is drawn: groups wearing the class today, one node later. */
 const DECK = '[class*="yonder-deck"], .nrdb-ui-yonder-deck';
 
+/** A soft key on a rail, and nothing else that is a button. A key is pressed
+ *  by its label, and a label is not unique among buttons: the thumb strip's
+ *  active thumbnail is a button that reads `Live`, and it sits above the rail
+ *  in the page — so `button` with `hasText: "LIVE"` pressed the thumbnail,
+ *  the console was never put back on Live, and the next palette photographed
+ *  the Live deck as Setup. Every key press below goes through this. */
+const SOFTKEY = ".y-keys__key";
+
 /** The soft-key rail, which must be reachable at the bottom of the page. */
 const RAIL = ".yonder-rail";
 
@@ -596,7 +604,7 @@ for (const page of pages) {
   // goes to Node-RED, the flow answers with a ui-control message, and the
   // groups appear. So this is also the only proof that path works at all.
   if (page.press) {
-    const key = tab.locator("button", { hasText: page.press }).first();
+    const key = tab.locator(SOFTKEY, { hasText: page.press }).first();
     if (await key.count()) {
       await key.click();
       await tab.waitForTimeout(900);
@@ -906,7 +914,7 @@ for (const page of pages) {
   // that walked off leaving the console on Setup would photograph the next
   // run's Live deck as Setup, and the shape reference would drift with it.
   if (page.restore) {
-    const key = tab.locator("button", { hasText: page.restore }).first();
+    const key = tab.locator(SOFTKEY, { hasText: page.restore }).first();
     if (await key.count()) {
       await key.click();
       await tab.waitForTimeout(700);
@@ -926,7 +934,7 @@ if (press) {
     const tab = await context.newPage();
     await tab.goto(baseUrl + page.url, { waitUntil: "load" });
     await tab.waitForTimeout(500);
-    const key = tab.locator("button", { hasText: press }).first();
+    const key = tab.locator(SOFTKEY, { hasText: press }).first();
     if (await key.count()) {
       await key.click();
       note(`  ok    pressed "${press}" on ${page.title}`);
