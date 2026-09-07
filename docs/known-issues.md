@@ -1256,9 +1256,23 @@ measured afterwards, and no drop has happened since it was installed.
 
 ---
 
-### K-47 · The capture gate rewrites every committed day-palette image from a run that checks no credential
+### K-47 · The capture gate's `--press NIGHT` run checks no credential, and discards its own verdict
 
-**Status:** Open · **Requirements:** R-SEC-10, R-UI-12
+**Status:** Open — narrowed on 2026-09-07 · **Requirements:** R-SEC-10, R-UI-12
+
+**The half about committed images is closed, by policy rather than by a fix.**
+On 2026-09-06 the operator adopted the telemetry branch's rule that captured
+images are not committed: `docs/console/capture/` is gitignored, the gate writes
+to `vendor/capture/`, and what is committed and compared is the geometry in
+`docs/console/shape/`. So this run can no longer rewrite a committed picture,
+because there is none. The text below is kept as written, because the other two
+halves still stand: the run performs no credential check at all on a page that
+carries a resolved RTSP password, and its images are what CI uploads as an
+artifact a reviewer downloads — an unchecked path into a published artefact is
+still R-SEC-10's concern — and `>/dev/null 2>&1 || true` still throws away
+whatever it would have said.
+
+---
 
 `scripts/verify-pages.sh:826` presses the `NIGHT` key through a real browser,
 which is the gate's one end-to-end proof that a soft key on this console does
