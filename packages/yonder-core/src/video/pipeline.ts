@@ -256,6 +256,11 @@ function bitrateOf(
       return { element, property: "bitrate", value: String(kbps) };
     case "v4l2h264enc":
       return { element, property: "extra-controls", value: extraControls(kbps, shortGop) };
+    case "mpph264enc":
+      // MPP counts in bits per second, in a plain property. Measured live on
+      // an RK3566 with the real camera in front of it: 0.96 → 3.93 Mb/s on
+      // both encoders, no gap after the change (retune-bitrate-mpp.py).
+      return { element, property: "bps", value: String(kbps * 1000) };
   }
 }
 

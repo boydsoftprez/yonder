@@ -51,7 +51,7 @@ import type { Encoder } from "../video/probe/encoder.js";
  * renderer will compose for an unchanged configuration.
  */
 const WIRED_ENCODER: Encoder = {
-  element: "x264enc", device: null, hardware: false, codec: "h264",
+  element: "x264enc", h265: null, decoder: null, device: null, hardware: false,
   detail: "software H.264 (x264enc) — this board offers no hardware encoder",
 };
 
@@ -282,7 +282,12 @@ describe("buildRenderers", () => {
    * suite may start a real `gst-launch-1.0`.
    */
   it("wires the pipeline renderer to the supervisor the camera routes are given", async () => {
-    const run: CommandRunner = async () => ({ code: 0, stdout: "", stderr: "" });
+    // Answering gst-inspect-1.0's --exists the same blanket way as v4l2-ctl
+    // (code 0) would tell probeEncoder this board has registered
+    // mpph264enc — the opposite of "no v4l2-ctl to answer" above. Refused
+    // here so the fall-through to software this test relies on still holds.
+    const run: CommandRunner = async (argv) =>
+      argv[0] === "gst-inspect-1.0" ? { code: 1, stdout: "", stderr: "" } : { code: 0, stdout: "", stderr: "" };
     const spawned: string[][] = [];
     const killed: number[] = [];
     let pid = 0;
@@ -1258,8 +1263,8 @@ describe("the stream address is built from an address a peer can dial", () => {
           probe: async (node: string, card: string) => ({ device: node, card, reason: "not in this fixture" }),
         },
         encoder: async () => ({
-          element: "v4l2h264enc", device: "/dev/video11", hardware: true,
-          codec: "h264" as const, detail: "hardware H.264",
+          element: "v4l2h264enc", h265: null, decoder: null, device: "/dev/video11", hardware: true,
+          detail: "hardware H.264",
         }),
         rtspPassword: () => "FIXTURE-NOT-A-REAL-PASSWORD",
       },
@@ -1440,8 +1445,8 @@ describe("the daemon runs the rate controller", () => {
           probe: async (node: string, card: string) => ({ device: node, card, reason: "not re-probed here" }),
         },
         encoder: async () => ({
-          element: "v4l2h264enc", device: "/dev/video11", hardware: true,
-          codec: "h264" as const, detail: "hardware H.264 on /dev/video11",
+          element: "v4l2h264enc", h265: null, decoder: null, device: "/dev/video11", hardware: true,
+          detail: "hardware H.264 on /dev/video11",
         }),
         rtspPassword: () => null,
       },

@@ -22,8 +22,8 @@ import type { Clock } from "../apply/types.js";
  * `config.yaml` said 2000.
  */
 const HW: Encoder = {
-  element: "v4l2h264enc", device: "/dev/video11", hardware: true,
-  codec: "h264", detail: "hardware H.264 on /dev/video11",
+  element: "v4l2h264enc", h265: null, decoder: null, device: "/dev/video11", hardware: true,
+  detail: "hardware H.264 on /dev/video11",
 };
 
 function camera(id: string, over: Partial<Camera> = {}): Camera {

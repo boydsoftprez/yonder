@@ -168,8 +168,8 @@ describe("mediamtxConfig", () => {
       camera: cfg.cameras[0],
       capabilities: noCapabilities(),
       encoder: {
-        element: "v4l2h264enc", device: "/dev/video11", hardware: true,
-        codec: "h264", detail: "hardware H.264 on /dev/video11",
+        element: "v4l2h264enc", h265: null, decoder: null, device: "/dev/video11", hardware: true,
+        detail: "hardware H.264 on /dev/video11",
       },
       rtspBase,
     });

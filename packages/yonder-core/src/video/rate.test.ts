@@ -767,8 +767,8 @@ describe("RateController over the real encoder channel", () => {
     formats: present([{ fourcc: "MJPG", width: 1280, height: 720, rates: [30, 24, 15] }]),
   };
   const HW = {
-    element: "v4l2h264enc" as const, device: "/dev/video11", hardware: true,
-    codec: "h264" as const, detail: "hardware H.264 on /dev/video11",
+    element: "v4l2h264enc" as const, h265: null, decoder: null, device: "/dev/video11", hardware: true,
+    detail: "hardware H.264 on /dev/video11",
   };
   interface Sent {
     id: number; op: string;

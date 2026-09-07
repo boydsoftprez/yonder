@@ -170,7 +170,7 @@ function fixtureDetection(): DetectResult {
 }
 
 const ENCODER: Encoder = {
-  element: "v4l2h264enc", device: "/dev/video11", hardware: true, codec: "h264",
+  element: "v4l2h264enc", h265: null, decoder: null, device: "/dev/video11", hardware: true,
   detail: "hardware H.264 on /dev/video11 — raw in, H.264 out",
 };
 

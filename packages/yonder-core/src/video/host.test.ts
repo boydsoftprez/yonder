@@ -52,12 +52,12 @@ const CAPS = {
   formats: present([{ fourcc: "MJPG", width: 1280, height: 720, rates: [30, 24, 15] }]),
 };
 const HW = {
-  element: "v4l2h264enc" as const, device: "/dev/video11", hardware: true,
-  codec: "h264" as const, detail: "hardware H.264 on /dev/video11",
+  element: "v4l2h264enc" as const, h265: null, decoder: null, device: "/dev/video11", hardware: true,
+  detail: "hardware H.264 on /dev/video11",
 };
 const SOFT = {
-  element: "x264enc" as const, device: null, hardware: false,
-  codec: "h264" as const, detail: "software",
+  element: "x264enc" as const, h265: null, decoder: null, device: null, hardware: false,
+  detail: "software",
 };
 
 const argvFor = (camera: Camera = CAMERA, encoder = HW): string[] => compose({

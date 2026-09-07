@@ -30,8 +30,8 @@ const CAPS = {
   formats: present([{ fourcc: "MJPG", width: 1280, height: 720, rates: [30, 24, 15] }]),
 };
 const HW = {
-  element: "v4l2h264enc" as const, device: "/dev/video11", hardware: true,
-  codec: "h264" as const, detail: "hardware H.264 on /dev/video11",
+  element: "v4l2h264enc" as const, h265: null, decoder: null, device: "/dev/video11", hardware: true,
+  detail: "hardware H.264 on /dev/video11",
 };
 const opts = { camera: CAMERA, capabilities: CAPS, encoder: HW, rtspBase: "rtsp://127.0.0.1:8554" };
 const argv = () => compose(opts);
@@ -126,7 +126,7 @@ describe("compose", () => {
 
   it("uses x264enc where the board has no hardware encoder", () => {
     const soft = compose({ ...opts, encoder: {
-      element: "x264enc", device: null, hardware: false, codec: "h264",
+      element: "x264enc", h265: null, decoder: null, device: null, hardware: false,
       detail: "software",
     } });
     expect(soft.join(" ")).toContain("x264enc");
@@ -151,7 +151,7 @@ describe("compose", () => {
     // x264enc needs nothing of the kind. Copying it across would be the
     // ritual the comment on H264_LEVEL exists to prevent.
     const soft = compose({ ...opts, encoder: {
-      element: "x264enc", device: null, hardware: false, codec: "h264",
+      element: "x264enc", h265: null, decoder: null, device: null, hardware: false,
       detail: "software",
     } });
     expect(soft.join(" ")).not.toContain("level=(string)4");
@@ -418,7 +418,7 @@ describe("the runtime channel's half of the launch line", () => {
       value: "controls,video_bitrate=3000000",
     });
     const soft = compose({ ...opts, encoder: {
-      element: "x264enc", device: null, hardware: false, codec: "h264", detail: "software",
+      element: "x264enc", h265: null, decoder: null, device: null, hardware: false, detail: "software",
     } });
     expect(encodeControl(soft, "stream", 3000)).toEqual({
       element: "enc-stream", property: "bitrate", value: "3000",
@@ -454,7 +454,7 @@ describe("the runtime channel's half of the launch line", () => {
       stream: 2000, preview: 400, shape: { size: "640x360", fps: 15 },
     });
     const soft = compose({ ...opts, encoder: {
-      element: "x264enc", device: null, hardware: false, codec: "h264", detail: "software",
+      element: "x264enc", h265: null, decoder: null, device: null, hardware: false, detail: "software",
     } });
     expect(encodesIn(soft)).toMatchObject({ stream: 2000, preview: 400 });
   });

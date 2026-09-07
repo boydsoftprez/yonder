@@ -14,9 +14,16 @@ const HARDWARE_CAP = [
   "\t[0]: 'H264' (H.264, compressed)",
 ].join("\n");
 
-function runner(nodes: Record<string, { out: string; cap: string }>): CommandRunner {
+function runner(
+  nodes: Record<string, { out: string; cap: string }>,
+  registered: readonly string[] = [],
+): CommandRunner {
   return async (argv) => {
     const key = argv.join(" ");
+    if (argv[0] === "gst-inspect-1.0" && argv[1] === "--exists") {
+      const ok = registered.includes(argv[2]);
+      return { code: ok ? 0 : 1, stdout: "", stderr: "" };
+    }
     for (const [node, answer] of Object.entries(nodes)) {
       if (!key.includes(node)) continue;
       if (key.includes("--list-formats-out")) return { code: 0, stdout: answer.out, stderr: "" };
@@ -25,6 +32,44 @@ function runner(nodes: Record<string, { out: string; cap: string }>): CommandRun
     return { code: 1, stdout: "", stderr: "No such file or directory" };
   };
 }
+
+it("finds Rockchip's MPP encoders through the GStreamer registry, both codecs and the decoder (R-HW-03)", async () => {
+  const e = await probeEncoder({ runner: runner({}, ["mpph264enc", "mpph265enc", "mppjpegdec"]) });
+  expect(e).toEqual({
+    element: "mpph264enc", h265: "mpph265enc", decoder: "mppjpegdec",
+    device: "/dev/mpp_service", hardware: true,
+    detail: "hardware H.264 and H.265 through Rockchip MPP (mpph264enc, mpph265enc)",
+  });
+});
+
+it("reports H.264 alone when the H.265 element is not registered", async () => {
+  const e = await probeEncoder({ runner: runner({}, ["mpph264enc", "mppjpegdec"]) });
+  expect(e).toMatchObject({ element: "mpph264enc", h265: null, decoder: "mppjpegdec" });
+  expect(e.detail).toBe("hardware H.264 through Rockchip MPP (mpph264enc)");
+});
+
+it("asks the registry before sweeping V4L2 nodes, so a Rockchip board never falls through to software", async () => {
+  const asked: string[] = [];
+  const inner = runner({}, ["mpph264enc"]);
+  const e = await probeEncoder({ runner: async (argv) => { asked.push(argv[0]); return inner(argv); } });
+  expect(e.element).toBe("mpph264enc");
+  expect(asked).not.toContain("v4l2-ctl");
+});
+
+it("says it found no hardware encoder, never that the board has none (spec §8)", async () => {
+  const e = await probeEncoder({ runner: runner({}) });
+  expect(e).toMatchObject({ element: "x264enc", h265: null, decoder: null, hardware: false });
+  expect(e.detail).toContain("no hardware encoder found");
+  expect(e.detail).not.toContain("offers no");
+});
+
+it("lets an operator name the MPP encoder explicitly, bypassing the probe (R-CAM-13)", async () => {
+  const e = await probeEncoder({ runner: runner({}), override: "mpph264enc" });
+  expect(e).toMatchObject({
+    element: "mpph264enc", h265: "mpph265enc", decoder: "mppjpegdec", device: "/dev/mpp_service", hardware: true,
+  });
+  expect(e.detail).toContain("named by the operator");
+});
 
 it("finds the board's hardware H.264 encoder and names the node", async () => {
   const e = await probeEncoder({
@@ -35,7 +80,7 @@ it("finds the board's hardware H.264 encoder and names the node", async () => {
 
 it("falls back to software where the board has no encoder (R-HW-02)", async () => {
   const e = await probeEncoder({ runner: runner({}) });
-  expect(e).toMatchObject({ element: "x264enc", device: null, hardware: false });
+  expect(e).toMatchObject({ element: "x264enc", device: null, hardware: false, h265: null, decoder: null });
   expect(e.detail).toContain("software");
 });
 
