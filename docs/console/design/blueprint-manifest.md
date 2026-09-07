@@ -324,8 +324,8 @@ is listed.
 | S-01 | A `NAME` text field in the Stream group, defaulting `Cam 1` / `Cam 2`, with the note `shown on this page, in the camera list and on the stream address` | Present, defaulting to the card name (`Front camera`), with the same note | present | The `Cam N` default is R-UI-27's; the console uses the card name instead |
 | S-02 | A `HOUSEKEEPING` legend carrying `MAINS FREQUENCY` as a picker (`50 Hz`) | Present | present | |
 | S-03 | Setup adds **only** name, mains frequency, record format and sensor size — everything else the camera has is on Live too | Setup also adds `GAIN`, `BACKLIGHT COMPENSATION` and `SHARPNESS`, which the blueprint draws on Live | drifted | **See C-2** — this is L-72/L-73/L-85 restated from Setup's side |
-| S-04 | A `RECORD FORMAT` bench-only field | **Absent** | unbuilt | The blueprint's README names it as one of the four; no render shows it on the ELP, and Phase 5 holds the Pocket 2 |
-| S-05 | A `SENSOR SIZE` bench-only field | **Absent** | unbuilt | As S-04. An untracked capture `camera-live-sensor-turns.night.png` suggests the other session is working near this |
+| S-04 | A `RECORD FORMAT` bench-only field | Absent — a Pocket 2 bench field | deferred | Phase 5 is deferred until the Pocket 2 is in hand — the operator's decision of 2026-09-05. Held, not dropped |
+| S-05 | A `SENSOR SIZE` bench-only field | Absent — a Pocket 2 bench field | deferred | As S-04 |
 | S-06 | **A `PENDING CHANGES` panel at the top of the page**, above the picture, with a right-hand qualifier `2 · APPLY OR DISCARD ON THE RAIL` | Present as `Pending changes · 2`, with no qualifier | drifted | |
 | S-07 | One row per staged change: **the control's label** (`BITRATE`, `SIZE`), then the requested value | One row per staged change: **the raw draft path** (`previewSize`), then the requested value | drifted | An operator reads labels, not the model's key names |
 | S-08 | Each row carries its interruption, right-aligned — `no interruption known`, `may restart the preview branch` — **including the blank case, stated** | Interruptions are drawn as separate lines beneath the list, and a row with no known interruption says nothing | drifted | The blueprint states the blank case on purpose |
@@ -370,7 +370,7 @@ Capture: `cameras.night.png`, `cameras.day.png`.
 | C-20 | **A line saying what starting another camera would cost**: `starting the gimbal would need 2.1 more` | **Absent** | unbuilt | The headroom question again, from the uplink side |
 | C-21 | A rail key `DETECT AGAIN` | Present, named `SWEEP AGAIN` | drifted | |
 | C-22 | **A rail key `ADD BY ADDRESS`** (spec §5) | **Absent** | **unbuilt** — this is **K-54**'s first half | K-54: "no task in the implementation plan owns it" |
-| C-23 | **Any action that configures a detected camera** | **Absent** — the page has one soft key | **unbuilt** — this is **K-54**'s second half | Not drawn in the blueprint either, and it is the commoner case: the board already has the socket, the card name and the format list. **The blueprint is silent here too — see C-4** |
+| C-23 | **Any action that configures a detected camera** | The `ADD` key on a found-but-unconfigured camera (`61bf4cc`), and `FORGET` on a configured one whose device is gone (Task 46). Pressed on the board on 2026-09-07 to adopt the ELP after a port move | present | K-54 closed. The manifest still read *unbuilt* after the key shipped; corrected 2026-09-07 |
 | C-24 | A rail key `APPLY`, in the select tone | **Absent** | unbuilt | Nothing on this page stages anything today, so there is nothing to apply — but the blueprint draws a page that does |
 | C-25 | Rows open their camera (spec §5) | Present — `OPEN ›` | present | |
 | C-26 | A day palette of this page | The console has one; **the blueprint does not** | — | Blueprint gap, not a console gap |
