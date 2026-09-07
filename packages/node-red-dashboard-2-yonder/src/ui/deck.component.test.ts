@@ -729,7 +729,11 @@ describe("the capture column: one key, following the mode", () => {
   it("draws one key, not two, and it reads RECORD in Video", () => {
     const { wrapper } = deck(makeStore(makeReport({ capabilities: both, recorder: recorder() })), "live");
     expect(wrapper.findAll(".y-shutter"), "one camera, one shutter").toHaveLength(1);
-    expect(wrapper.find(".y-shutter__label").text()).toBe("RECORD");
+    // Blueprint L-44 draws the state in the key's own label — `\u25cb RECORD`,
+    // `PHOTO`, `\u25cf RECORDING 00:13:47`. The ring is a glyph in that string,
+    // not a circle drawn around the control: the shutter is the width and
+    // height of the `Video | Photo` pair above it, like every other key here.
+    expect(wrapper.find(".y-shutter__label").text()).toBe("\u25cb RECORD");
   });
 
   it("reads PHOTO once the MODE control is put in Photo, and still draws one key", async () => {
@@ -783,7 +787,8 @@ describe("the capture column: one key, following the mode", () => {
     // A page opened after the recording began shows it running, at the
     // board's own elapsed time. An optimistic local timestamp — which is what
     // this deck used to keep — reads 00:00:00 here.
-    expect(wrapper.find(".y-shutter__elapsed").text()).toBe("00:01:04");
+    // In the key, not beside it: one control saying one thing.
+    expect(wrapper.find(".y-shutter__label").text()).toBe("\u25cf RECORDING 00:01:04");
     expect(wrapper.find(".y-shutter__btn").classes()).toContain("lit");
   });
 

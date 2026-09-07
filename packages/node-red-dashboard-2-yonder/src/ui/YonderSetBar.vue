@@ -192,7 +192,13 @@ export default {
         readonly: { type: Boolean, default: false }
     },
     emits: ['set'],
-    data: () => ({ dragging: false, captureFailed: false, TRACK_WIDTH }),
+    data: () => ({ dragging: false, captureFailed: false, dragAt: null, TRACK_WIDTH }),
+    watch: {
+        // Let go of the drag's own position the moment the device answers:
+        // holding it after that would draw a value nothing on the board has.
+        actual () { this.dragAt = null },
+        requested () { this.dragAt = null },
+    },
     computed: {
         hasRequested () {
             return this.requested !== null && this.requested !== undefined
@@ -221,8 +227,23 @@ export default {
          * value otherwise, so this is never absent and never doubled while
          * the bar is interactive.
          */
+        /**
+         * **Where the mark is drawn, and why the drag's own position wins.**
+         *
+         * `actual` and `requested` both come from outside: a press is sent to
+         * the device, the device answers, and the answer comes back as a prop.
+         * Drawn from those alone the mark cannot move until that round trip
+         * completes — over a mesh link that is a visible lag on every pixel of
+         * a drag, and what it reads as is a control that ignores you. The
+         * operator's words for it were *I can't move it at all*.
+         *
+         * So while a drag is in flight the mark is drawn where the pointer is,
+         * and `dragAt` is let go the moment a fresh value arrives from the
+         * device — which is the only thing that should be trusted once it has.
+         */
         grabAt () {
             if (this.state !== 'present' || this.readonly) return null
+            if (this.dragAt !== null) return this.dragAt
             return this.hasRequested ? this.requested : this.actual
         },
         grabAriaLabel () {
@@ -256,6 +277,7 @@ export default {
         down (e) {
             if (this.state !== 'present' || this.readonly) return
             this.dragging = true
+            this.dragAt = this.from(e)
             /**
              * **The press is emitted whatever pointer capture does.**
              *
@@ -279,7 +301,9 @@ export default {
             this.$emit('set', this.from(e))
         },
         move (e) {
-            if (this.dragging) this.$emit('set', this.from(e))
+            if (!this.dragging) return
+            this.dragAt = this.from(e)
+            this.$emit('set', this.dragAt)
         },
         up () {
             this.dragging = false

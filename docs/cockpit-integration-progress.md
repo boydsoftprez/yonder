@@ -1,8 +1,9 @@
 # Cockpit integration progress
 
-Base: `0f1e9b92485a7f4e23c7d75a6e2fde195124a2ca` on
+Initial base: `0f1e9b92485a7f4e23c7d75a6e2fde195124a2ca` on
 `claude/exciting-merkle-e4cd39`. Integration branch: `codex/single-glass-cockpit`.
-The source worktree's uncommitted camera edits are preserved outside this branch.
+The integration also includes that branch's subsequent camera UI fixes through
+`22a3129b0c2e81c3881ef044c4ccb8cba8f80b94`. The source worktree is preserved.
 
 - [x] Inspect source branch and create isolated integration worktree.
 - [x] Repair base lockfile: MAVLink workspace was absent from package-lock.json.

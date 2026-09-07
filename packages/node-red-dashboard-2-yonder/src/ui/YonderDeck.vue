@@ -936,6 +936,14 @@ export default {
       if (has(recording) && has(stills)) {
         children.push(h(YonderSegmented, {
           key: 'workMode',
+          // Tighter than the same control is elsewhere, and only here. Spec §5
+          // puts the shutter key above the fold at 1440x900, and adding Mode at
+          // the head of this column (L-43) put it seven pixels below one. The
+          // room is taken from this control rather than from the key, which is
+          // the thing that has to be reachable, and by a class rather than by
+          // changing `YonderSegmented` — the image controls on the Setup deck
+          // use the same component and are not short of room.
+          class: 'y-deck__mode',
           label: 'Mode',
           options: ['Video', 'Photo'],
           value: mode === 'photo' ? 'Photo' : 'Video',
@@ -1484,6 +1492,15 @@ export default {
     cursor: pointer;
 }
 .y-deck__captures:hover { text-decoration: underline; }
+
+/* See the note beside `y-deck__mode` above: the shutter key has to clear the
+   fold at 1440x900, and this is where the room comes from. */
+/* The room the shutter needs to clear the fold comes from this control's own
+   height — never from the gap beneath it. A negative margin here took the eight
+   pixels back by pulling the key up over the `Video | Photo` buttons, which is
+   not saving space, it is hiding a control behind another one. */
+.y-deck__mode :deep(.y-seg__btn) { min-height: 26px; }
+.y-deck__mode :deep(.y-seg__label) { margin-bottom: 3px; }
 /* R-STO-06: a recording that ended by itself, said where the next press is.
    The caution tone, because it is a thing that happened to the operator
    rather than a thing they did. */

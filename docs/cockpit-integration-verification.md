@@ -1,17 +1,19 @@
 # Cockpit integration verification
 
-Base `0f1e9b92485a7f4e23c7d75a6e2fde195124a2ca` on
+Initial base `0f1e9b92485a7f4e23c7d75a6e2fde195124a2ca` on
 `claude/exciting-merkle-e4cd39`; integration branch `codex/single-glass-cockpit`.
+The integration includes subsequent camera UI fixes from the requested branch
+through `22a3129b0c2e81c3881ef044c4ccb8cba8f80b94`.
 All work is in the isolated integration checkout. The source checkout's existing
 camera edits and original research previews are preserved.
 
 ## Evidence
 
-- The full workspace run passed **3,652 tests**: core 2,740; dashboard 573;
+- The full workspace run passed **3,653 tests**: core 2,740; dashboard 574;
   MAVLink nodes 95; modem 90; network 38; remote 56; system 16; video 44.
-- `npm run build` and `npm run lint` passed after the protocol, data, terrain and
-  native-widget integration. Subsequent presentation changes are rechecked in
-  the dashboard suite and production bundle build.
+- `npm test`, `npm run build`, `npm run lint` and the cockpit browser fixture
+  checks passed again with the requested branch's camera UI fixes through
+  `22a3129` included. The production cockpit bundle is 516.80 kB (141.86 kB gzip).
 - Terrain preparation passed **10 tests**, using the actual checked vertical
   grids. Runtime terrain includes 19 tests within the core total.
 - The capture gate's own mutation checks pass: real text overflow is still
@@ -45,8 +47,9 @@ native containment and SVG measurements) were corrected and checked separately
 against the final shipped flow on a second actual Dashboard instance.
 
 The remaining historical shape differences are Camera Live/Setup at desktop,
-notebook and tablet sizes in both palettes. Those surfaces' component sources are
-unchanged from the requested base. Their references predate the base's camera
+notebook and tablet sizes in both palettes. This cockpit integration adds no
+changes to those surfaces' components beyond the requested branch's camera fixes.
+Their references predate the base's camera
 changes; the blueprint already records that capture debt. No old camera shape was
 silently accepted or overwritten to make this cockpit's gate pass.
 

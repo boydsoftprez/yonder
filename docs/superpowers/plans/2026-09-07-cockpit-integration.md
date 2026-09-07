@@ -13,7 +13,9 @@ WebGL, existing mediamtx/WebRTC, Vitest and Playwright.
 
 ## Global constraints
 
-- Base `0f1e9b92485a7f4e23c7d75a6e2fde195124a2ca`; do not alter the source worktree.
+- Initial base `0f1e9b92485a7f4e23c7d75a6e2fde195124a2ca`; do not alter the source worktree.
+  The final integration includes that branch's subsequent camera fixes through
+  `22a3129b0c2e81c3881ef044c4ccb8cba8f80b94`.
 - Logic and presentation live in packages; flows contain wiring only.
 - No aircraft-changing action without authenticated operator review/confirmation.
 - Autopilot validation and execution remain authoritative; timeout means unknown.
