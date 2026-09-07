@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { clientFor, fetched, readFailure } from "yonder-core";
+import { clientFor, fetched, readFailure, HEARTBEAT_STALE_MS } from "yonder-core";
 import type { CommandState, DaemonClient, LinkState, MavlinkStateBody } from "yonder-core";
 import type { RED, RedNode } from "./red.js";
 import { formatBaud, formatKbRate, formatSeconds, formatSpan } from "./format.js";
@@ -71,6 +71,11 @@ const GROUND_STATION_ROWS = 3;
  */
 function count(n: number, singular: string, plural: string): string {
   return n === 1 ? `1 ${singular}` : `${String(n)} ${plural}`;
+}
+
+/** Presence is a recent arrival, independent of discovery and routing state. */
+function hasHeartbeat(state: LinkState): boolean {
+  return state.lastHeardMs !== null && state.lastHeardMs < HEARTBEAT_STALE_MS;
 }
 
 /**
@@ -173,7 +178,7 @@ export function messageFor(state: LinkState, _now: number = Date.now()): {
   const vehicleShort = state.vehicle === null || state.system === null
     ? null
     : `${state.vehicle} · sys ${String(state.system)}`;
-  const heartbeat = typeof state.heartbeatHz === "number" && Number.isFinite(state.heartbeatHz)
+  const heartbeat = hasHeartbeat(state) && typeof state.heartbeatHz === "number" && Number.isFinite(state.heartbeatHz)
     ? `${state.heartbeatHz.toFixed(1)} Hz`
     : null;
   const heardSeconds = formatSeconds(state.lastHeardMs);
@@ -239,11 +244,10 @@ export function messageFor(state: LinkState, _now: number = Date.now()): {
  * the loopback copy the router carries whether or not the ground stations
  * are being sent to (`mav/check.ts`'s `autopilotLink` makes the identical
  * choice, for the identical reason). `linked` and `stopped` read the same —
- * *Connected* — because from the autopilot's own perspective a stop changes
- * nothing (R-MAV-09: "the interface goes on reporting heartbeat, port, speed
- * and vehicle throughout"). What it does not paper over is a link the tracker
- * still remembers while the router that would carry it is not running: that
- * is `mav/check.ts`'s own trap, named again here for the same reason.
+ * *Connected* while heartbeats are fresh, because stopping the broadcast
+ * does not stop listening (R-MAV-09). A discovered port and a running router
+ * alone cannot confirm that a GPIO lead is still attached. A remembered
+ * link also cannot confirm presence while its router is not running.
  *
  * **`silent` shares `searching`'s waiting tone — it is not its own failure
  * state.** The captured mockup for this exact phase
@@ -269,6 +273,8 @@ export function linkFor(state: LinkState, routerRunning: boolean): Annunciator {
   if (state.phase === "noise") return { state: "rejected", message: "Not MAVLink" };
   // linked or stopped.
   if (!routerRunning) return { state: "idle", message: "Not checked" };
+  if (state.lastHeardMs === null) return { state: "pending", message: "Waiting" };
+  if (!hasHeartbeat(state)) return { state: "pending", message: "No heartbeat" };
   return { state: "confirmed", message: "Connected" };
 }
 
@@ -361,9 +367,12 @@ export function flowFor(
     ? { label: "No ground stations", detail: "None configured", absent: true }
     : { label: count(stationCount, "ground station", "ground stations"), detail: tcpDetail, absent: false };
 
-  const heartbeatOk = routerRunning && typeof state.heartbeatHz === "number" && Number.isFinite(state.heartbeatHz);
+  const heartbeatOk = routerRunning && hasHeartbeat(state);
+  const heartbeatRate = typeof state.heartbeatHz === "number" && Number.isFinite(state.heartbeatHz)
+    ? `${state.heartbeatHz.toFixed(1)} Hz`
+    : null;
   const heartbeatLeg: FlowLeg = heartbeatOk
-    ? { rate: `${(state.heartbeatHz as number).toFixed(1)} Hz`, caption: "heartbeat", absent: false }
+    ? { rate: heartbeatRate, caption: "heartbeat", absent: false }
     : { rate: null, caption: "no heartbeat", absent: true };
 
   // The peak across the window, deliberately — the same read

@@ -79,6 +79,32 @@ describe("LinkTracker", () => {
     expect(t.state().heartbeatHz).toBeCloseTo(1, 1);
   });
 
+  it("expires the heartbeat rate when the GPIO link goes silent, retaining its last-heard age", () => {
+    const clock = fakeClock();
+    const t = new LinkTracker({ clock });
+    t.heard(vehicle);
+    clock.advance(1_000);
+    t.heard(vehicle);
+    clock.advance(2_999);
+    expect(t.state().heartbeatHz).toBe(1);
+    clock.advance(1);
+    expect(t.state()).toMatchObject({ heartbeatHz: null, lastHeardMs: 3_000 });
+  });
+
+  it("measures the resumed stream without averaging across an outage, even if nobody polled", () => {
+    const clock = fakeClock();
+    const t = new LinkTracker({ clock });
+    t.heard(vehicle);
+    clock.advance(1_000);
+    t.heard(vehicle);
+    clock.advance(30_000);
+    t.heard(vehicle);
+    expect(t.state()).toMatchObject({ heartbeatHz: null, lastHeardMs: 0 });
+    clock.advance(1_000);
+    t.heard(vehicle);
+    expect(t.state().heartbeatHz).toBe(1);
+  });
+
   // heartbeatHz demands two arrivals before it will claim a rate at all — a
   // single beat fixes no interval, so no measurement backs a number yet.
   it("reports no heartbeat rate from a single arrival", () => {

@@ -92,6 +92,9 @@ export interface LinkState {
 
 const DEFAULT_WINDOW_MS = 5_000;
 
+/** Three missed nominal 1 Hz heartbeats; shared with the path check and console. */
+export const HEARTBEAT_STALE_MS = 3_000;
+
 /**
  * Heartbeats kept for the rate calculation. HEARTBEAT is nominally 1 Hz, so
  * ten of them span roughly the last ten seconds — enough to smooth over one
@@ -179,6 +182,11 @@ export class LinkTracker {
   heard(heartbeat: Heartbeat): void {
     if (!heartbeat.fromVehicle) return;
     const now = this.clock.now();
+    // A restored wire starts a new stream. Do not average the outage into
+    // its rate, including when nobody asked for state during the outage.
+    if (this.lastHeartbeatAtMs !== null && now - this.lastHeartbeatAtMs >= HEARTBEAT_STALE_MS) {
+      this.heartbeatRing = [];
+    }
     this.lastHeartbeatAtMs = now;
     this.heartbeatRing.push(now);
     if (this.heartbeatRing.length > HEARTBEAT_RING_SIZE) this.heartbeatRing.shift();
@@ -287,7 +295,8 @@ export class LinkTracker {
 
     // Below two arrivals there is no interval to measure yet — a rate from
     // one heartbeat is a claim no measurement supports.
-    const heartbeatHz = this.heartbeatRing.length >= 2
+    const lastHeardMs = this.lastHeartbeatAtMs === null ? null : now - this.lastHeartbeatAtMs;
+    const heartbeatHz = lastHeardMs !== null && lastHeardMs < HEARTBEAT_STALE_MS && this.heartbeatRing.length >= 2
       ? (this.heartbeatRing.length - 1)
         / ((this.heartbeatRing[this.heartbeatRing.length - 1] - this.heartbeatRing[0]) / 1000)
       : null;
@@ -321,7 +330,7 @@ export class LinkTracker {
       vehicle: outcome?.kind === "found" ? outcome.vehicle : null,
       system: outcome?.kind === "found" ? outcome.system : null,
       heartbeatHz,
-      lastHeardMs: this.lastHeartbeatAtMs === null ? null : now - this.lastHeartbeatAtMs,
+      lastHeardMs,
       groundStations,
       triedBauds: outcome !== null && outcome.kind !== "found" ? outcome.triedBauds : [],
       traffic,

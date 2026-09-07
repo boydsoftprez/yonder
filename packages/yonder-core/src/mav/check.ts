@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import type { LinkState } from "./link.js";
+import { HEARTBEAT_STALE_MS } from "./link.js";
 import { groupThousands } from "../console/digits.js";
 
 /**
@@ -91,7 +92,7 @@ export interface PathCheckInput {
  * that a cable that came out is reported while they are still holding it.
  * Exported so a reader can find the number rather than infer it.
  */
-export const HEARTBEAT_STALE_MS = 3_000;
+export { HEARTBEAT_STALE_MS } from "./link.js";
 
 /** Milliseconds as an operator reads them: "0.3 s", "12.0 s". */
 function seconds(ms: number): string {

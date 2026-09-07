@@ -219,6 +219,15 @@ describe("messageFor — the throughput sparkline", () => {
 });
 
 describe("linkFor — the Autopilot panel's headline annunciator", () => {
+  it("waits for a heartbeat before confirming an adopted router's link", () => {
+    expect(linkFor(linked({ lastHeardMs: null, heartbeatHz: null }), true).state).toBe("pending");
+  });
+
+  it.each(["linked", "stopped"] as const)("reports a silent %s link and recovers on the first returning heartbeat", (phase) => {
+    expect(linkFor(linked({ phase, lastHeardMs: 2_999 }), true).state).toBe("confirmed");
+    expect(linkFor(linked({ phase, lastHeardMs: 3_000 }), true)).toEqual({ state: "pending", message: "No heartbeat" });
+    expect(linkFor(linked({ phase, lastHeardMs: 0, heartbeatHz: null }), true).state).toBe("confirmed");
+  });
   it("is confirmed 'Connected' once linked", () => {
     expect(linkFor(linked(), true)).toEqual({ state: "confirmed", message: "Connected" });
   });
@@ -370,6 +379,22 @@ describe("flowFor — the Status page's three-cell flow strip", () => {
 });
 
 describe("stateMessage — what the node actually sends, one MavlinkStateBody in", () => {
+  it("shows the returning heartbeat as present before a second arrival establishes its rate", () => {
+    const msg = stateMessage({ link: linked({ lastHeardMs: 0, heartbeatHz: null }), telemetryRunning: true, routerRunning: true }, NOW);
+    expect(msg.payload.link.state).toBe("confirmed");
+    expect(msg.payload.heartbeat).toBeNull();
+    expect(msg.payload.flow.legs[0]).toEqual({ rate: null, caption: "heartbeat", absent: false });
+  });
+
+  it("removes the stale heartbeat reading and arrow while keeping routing state separate", () => {
+    const msg = stateMessage({ link: linked({ lastHeardMs: 30_000 }), telemetryRunning: true, routerRunning: true }, NOW);
+    expect(msg.payload.link.state).toBe("pending");
+    expect(msg.payload.heartbeat).toBeNull();
+    expect(msg.payload.heard).toBe("30.0 s ago");
+    expect(msg.payload.flow.legs[0]).toEqual({ rate: null, caption: "no heartbeat", absent: true });
+    expect(msg.payload.running.message).toBe("Running");
+    expect(msg.payload.port).toBe("/dev/ttyAMA0");
+  });
   it("combines the state-only fields with the two booleans into one payload", () => {
     const msg = stateMessage({ link: linked(), telemetryRunning: true, routerRunning: true }, NOW);
     expect(msg.payload.link).toEqual({ state: "confirmed", message: "Connected" });
