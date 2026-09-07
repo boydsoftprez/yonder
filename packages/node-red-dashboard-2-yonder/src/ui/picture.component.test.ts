@@ -953,6 +953,40 @@ describe("reporting what this browser is measuring", () => {
     expect(reportCalls).toHaveLength(0);
   });
 
+  /**
+   * **The report says what this browser is watching, or the controller never
+   * sees it.** `Viewers.report()` hands a measurement on to the rate
+   * controller only while that viewer's `want` is `video`, and a subscription
+   * the device opens on a report's behalf starts at `off`. So a report
+   * carrying only a statistic is recorded against the viewer and goes no
+   * further — the page's own state updates, which is what makes it look like
+   * it arrived, while the controller goes on saying it has had no fresh
+   * report.
+   *
+   * That is not hypothetical: adaptive was inert on a real board for exactly
+   * this reason, with the route, the controller and this component each
+   * working and each tested on its own. The chain is what was untested.
+   */
+  it("says what it is watching on every report, not once at connect", async () => {
+    mountPicture();
+    await settle();
+
+    pc().statsReport = fakeStats();
+    await advance(1000); // baseline: every rate here is a delta
+    pc().statsReport = fakeStats({ inbound: { bytesReceived: 200_000 } });
+    await advance(1000);
+
+    expect(reportCalls).toHaveLength(1);
+    expect((reportCalls[0]!.body as { want?: unknown }).want).toBe("video");
+    // Every tick, not just the first: a daemon that restarted, or a
+    // subscription swept for idleness, must not leave a live picture
+    // reporting into nothing until somebody reloads the page.
+    pc().statsReport = fakeStats({ inbound: { bytesReceived: 400_000 } });
+    await advance(1000);
+    expect(reportCalls).toHaveLength(2);
+    expect((reportCalls[1]!.body as { want?: unknown }).want).toBe("video");
+  });
+
   it("reports nothing on the first tick, then the interval rate — not the session average — on the second", async () => {
     mountPicture();
     await settle();
@@ -1020,7 +1054,13 @@ describe("reporting what this browser is measuring", () => {
     await advance(1000);
 
     expect(reportCalls).toHaveLength(1);
-    expect(reportCalls[0]!.body).toEqual({});
+    // `want` and nothing else. The statistic is omitted whole rather than
+    // sent half-filled, which is this test's point — but the report still has
+    // to say what this browser is watching, or the subscription it is keeping
+    // alive is swept for idleness and the controller loses the viewer
+    // altogether. A browser with no bandwidth estimate is still a browser
+    // watching the picture.
+    expect(reportCalls[0]!.body).toEqual({ want: "video" });
   });
 
   it("includes frameAge once a frame has painted, and carries none before one ever has", async () => {

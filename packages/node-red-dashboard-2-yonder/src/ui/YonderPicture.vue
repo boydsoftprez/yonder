@@ -996,6 +996,23 @@ export default {
             if (!prev || !sample) return
             const body = reportBody(cameraFor(this.negotiated), prev, sample, this.lastFrameAt)
             if (!body) return
+            // **What this browser is asking for, stated on every report.**
+            //
+            // Not decoration and not a duplicate of the statistic beside it:
+            // `Viewers.report()` hands a measurement to the rate controller
+            // only while that viewer's `want` is `video`, and a subscription
+            // this device made on its own starts at `off`. A report that never
+            // says what it is watching is therefore recorded against the
+            // viewer — the page's own `mine` block updates, so it looks like it
+            // arrived — and never reaches the controller, which goes on saying
+            // it has had no fresh report. Adaptive was inert on a real board
+            // for exactly that reason, with every part of it working.
+            //
+            // Restated every second rather than once at connect, because it is
+            // the browser's standing answer and not an event: a daemon that
+            // restarts, or a subscription swept after `IDLE_MS`, must not leave
+            // a live picture reporting into nothing until the page is reloaded.
+            body.want = this.mode === 'live' ? 'video' : this.mode === 'stills' ? 'stills' : 'off'
             try {
                 await fetch(`/video/${this.negotiated}/report`, {
                     method: 'POST',
