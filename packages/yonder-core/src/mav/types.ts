@@ -45,6 +45,10 @@ export type VehicleAction =
   | { kind: "mode"; customMode: number }
   | { kind: "arm"; armed: boolean }
   | { kind: "goto"; target: GeoTarget }
+  | { kind: "heading"; headingDeg: number; reference: "true"; turnAccelerationMps2: number }
+  | { kind: "altitude"; altitudeM: number; datum: "msl" | "home"; verticalRateMps: number }
+  | { kind: "speed"; airspeedMps: number; accelerationMps2: number }
+  | { kind: "loiter"; target: GeoTarget; radiusM: number; direction: "cw" | "ccw" }
   | { kind: "set-current"; seq: number }
   | { kind: "continue-auto"; seq: number; autoMode: number }
   | { kind: "mission-start" }
@@ -65,8 +69,11 @@ export interface VehicleOperation {
 }
 export interface VehicleSnapshot {
   at: number; sequence: number; identity: VehicleIdentity | null; connected: boolean; ready: boolean;
+  /** Stable across flight samples; identifies the separately transferable details. */
+  detailKey?: string;
   telemetry: FlightTelemetry; mission: MissionSnapshot; operations: VehicleOperation[]; busy: boolean;
-  capabilities: { modes: { name: string; customMode: number; source: "advertised" | "firmware-known" }[]; commands: { command: number; source: "advertised" | "firmware-known" }[]; terrainTargets: boolean; signing: "unsigned-only" };
+  capabilities: { modes: { name: string; customMode: number; source: "advertised" | "firmware-known" }[]; commands: { command: number; source: "advertised" | "firmware-known" }[]; terrainTargets: boolean; signing: "unsigned-only";
+    flightControl: { kind: "heading" | "altitude" | "speed" | "loiter"; command: number; source: "firmware-known"; available: boolean; reason: string | null; requiredMode: 15; entersGuided: true; confirmation: "acknowledgement" }[] };
   statustext: { at: number; severity: number; text: string }[];
 }
 export type OperationAdmission = { accepted: true; operationId: string } | { accepted: false; status: 400 | 409 | 503; message: string };

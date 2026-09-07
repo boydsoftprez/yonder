@@ -2,7 +2,7 @@
 import { common, minimal } from "node-mavlink";
 import type { DecodedFrame } from "./protocol.js";
 import type { FieldValidity, FlightTelemetry, NavController, PositionTarget, VehicleIdentity } from "./types.js";
-export const PLANE_MODES: Record<number, string> = { 0: "MANUAL", 1: "CIRCLE", 2: "STABILIZE", 3: "TRAINING", 4: "ACRO", 5: "FBWA", 6: "FBWB", 7: "CRUISE", 8: "AUTOTUNE", 10: "AUTO", 11: "RTL", 12: "LOITER", 13: "TAKEOFF", 14: "AVOID_ADSB", 15: "GUIDED", 17: "QSTABILIZE", 18: "QHOVER", 19: "QLOITER", 20: "QLAND", 21: "QRTL", 22: "QAUTOTUNE", 23: "QACRO", 24: "THERMAL", 25: "LOITER_ALT_QLAND" };
+export const PLANE_MODES: Record<number, string> = { 0: "MANUAL", 1: "CIRCLE", 2: "STABILIZE", 3: "TRAINING", 4: "ACRO", 5: "FBWA", 6: "FBWB", 7: "CRUISE", 8: "AUTOTUNE", 10: "AUTO", 11: "RTL", 12: "LOITER", 13: "TAKEOFF", 14: "AVOID_ADSB", 15: "GUIDED", 17: "QSTABILIZE", 18: "QHOVER", 19: "QLOITER", 20: "QLAND", 21: "QRTL", 22: "QAUTOTUNE", 23: "QACRO", 24: "THERMAL", 25: "LOITER_ALT_QLAND", 26: "AUTOLAND" };
 export const isPlane = (id: VehicleIdentity | null): boolean => id?.autopilot === 3 && id.vehicleType === 1;
 const clean = (n: number): number | null => Number.isFinite(n) ? n : null;
 const range = (n: number, lo: number, hi: number): number | null => Number.isFinite(n) && n >= lo && n <= hi ? n : null;

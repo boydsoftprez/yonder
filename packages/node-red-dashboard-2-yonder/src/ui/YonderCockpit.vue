@@ -16,13 +16,21 @@
       class="cockpit-source"
       :class="{unavailable:!flight.live}"
     >{{ flight.live ? (telemetry.source || 'MAVLink') : 'FLIGHT DATA UNAVAILABLE' }}</span><button
-      @click="openMission(null)"
+      @click="openFlightControls('modes')"
     >{{ telemetry.mode || 'NO MODE' }} ·
       {{telemetry.armed===true?'ARMED':telemetry.armed===false?'DISARMED':'—'}}</button><button
       @click="panel='display'">Display & data</button><button
       @click="panel='status'"
       aria-label="Aircraft and command status"
     >{{snapshot.operations?.at(-1)?.state || 'Aircraft'}}</button></header>
+  <FlightControlPanel
+    ref="flightControls"
+    :snapshot="agedSnapshot"
+    :available="canCommand"
+    :selected-target="selectedFlightTarget"
+    @request="({action,label})=>review(action,label)"
+    @pick-target="pickFlightTarget"
+  />
   <div v-if="preferences.display.stripPlacement==='mfd'" class="cockpit-navigation-data" aria-label="Mission and navigation instrument data">
     <TelemetryStrip :telemetry="displayTelemetry" :live="flight.live" @open="panel='status'" />
   </div>
@@ -31,6 +39,7 @@
       ref="pfd"
       class="cockpit-primary"
       :flight="flight"
+      :snapshot="agedSnapshot"
       :guidance="guidance"
       :telemetry="displayTelemetry"
       :mission="actualMission"
@@ -40,17 +49,19 @@
       :background-ready="backgroundReady"
       :background-label="backgroundLabel"
       :terrain-report="terrainReport"
+      @flight-controls="openFlightControls"
       @reference="setReference"
       @option="setOption"
       @navigate="navigate"
     >
-      <template #background="{pose}">
+      <template #background="{pose,viewport}">
         <div class="cockpit-background">
           <template v-if="background==='terrain'">
             <slot
               name="terrain"
               :snapshot="snapshot"
               :pose="pose"
+              :viewport="viewport"
             >
               <component
                 v-if="terrainComponent"
@@ -59,6 +70,8 @@
                 :flight="flight"
                 :telemetry="displayTelemetry"
                 :display-pose="pose"
+                :viewport="viewport"
+                :data-provider="groundData"
                 :enabled="onlineTerrain"
                 :imagery-enabled="onlineMap"
                 :lookahead-seconds="predicted.seconds||predictionSeconds"
@@ -77,6 +90,7 @@
               :camera="{...snapshot.camera,calibration:calibrationCandidate||snapshot.camera?.calibration}"
               :telemetry="displayTelemetry"
               :now="now"
+              :data-provider="groundData"
               :enabled="onlineTerrain"
               @status="cameraRegistration=$event"
             />
@@ -87,11 +101,12 @@
           >Selected camera unavailable</div>
         </div>
       </template>
-      <template #traffic="{pose}">
+      <template #traffic="{pose,viewport}">
         <slot
           name="traffic-vision"
           :snapshot="snapshot"
           :pose="pose"
+          :viewport="viewport"
           :tracks="trafficTracks"
           :range="trafficRange"
           :enabled="background==='terrain'"
@@ -104,6 +119,7 @@
             :options="{enabled:onlineTraffic,pfd:true,map:true,labels:true,trails:true,showGround:false,radiusNm:trafficRange,trailSeconds}"
             :selected-id="selectedTraffic?.id"
             :display-pose="pose"
+            :viewport="viewport"
             :now="now"
             @select="selectedTraffic=trafficTracks.find(t=>t.id===$event);panel='traffic'"
           />
@@ -164,10 +180,11 @@
           @click="layout='map'"
         >↗</button></header>
       <YonderCockpitMap
+        :data-provider="groundData"
         :snapshot="agedSnapshot"
         :mission="shownMission"
         :prediction="predicted"
-        :picking="!!picking"
+        :picking="!!picking||!!flightPicking"
         :online="onlineMap"
         :traffic="trafficReport"
         :range="trafficRange"
@@ -177,11 +194,13 @@
         @location="mapLocation"
         @traffic-select="selectedTraffic=$event;panel='traffic'"
       />
+      <div v-if="flightPicking" class="cockpit-target-prompt" role="status">Select {{flightPicking.kind==='loiter'?'loiter center':'Direct-To target'}} on the map<button @click="flightPicking=null">Cancel target selection</button></div>
       <footer><button @click="panel='traffic'">{{trafficReport.message||'Traffic feed off'}}</button><button
           v-if="layout==='map'"
           @click="openMission(null)"
         >Mission actions</button></footer>
     </section>
+    <div v-if="background!=='terrain'&&!cameraPath" class="cockpit-camera-fallback" role="status"><span>Selected camera unavailable</span><button aria-label="Use synthetic terrain" @click="background='terrain';onlineTerrain=true">Use synthetic terrain</button></div>
     <div
       v-if="background==='camera-overlay'&&!registration.ready"
       class="cockpit-registration"
@@ -223,6 +242,7 @@
     @close="missionOpen=false"
     @edit="edit"
     @command="missionAction"
+    @flight-controls="missionFlightControls"
     @upload="reviewUpload"
     @undo="undo"
     @export="exportMission"
@@ -324,7 +344,35 @@
         >×</button>
       </header>
       <div class="cockpit-dialog-body">
-        <template v-if="panel==='display'"><label>Palette<select
+        <template v-if="panel==='display'">
+          <fieldset class="cockpit-data-settings"><legend>Connection & offline data</legend>
+            <label>Public data connection<select v-model="sourceMode" aria-label="Public data connection">
+              <option value="ground">Ground browser internet</option>
+              <option value="offline">Offline browser packs</option>
+              <option value="aircraft">Aircraft proxy · uses aircraft bandwidth</option>
+            </select></label>
+            <p>{{sourceMode==='aircraft'?'Public data is explicitly routed through the aircraft server.':sourceMode==='offline'?'Map and terrain use imported browser packs. Live internet traffic is off.':'Imagery, terrain and ADS-B use this browser’s internet connection or your ground relay. There is no automatic aircraft proxy fallback.'}}</p>
+            <p v-if="sourceMode==='ground'">The device’s network route still matters: connect the iPad or laptop to ground internet if its default connection would otherwise use the aircraft modem.</p>
+            <label v-if="sourceMode==='ground'">Optional ground relay origin<input v-model="groundRelayInput" type="url" placeholder="https://ground.example" aria-label="Ground relay origin" /></label>
+            <button v-if="sourceMode==='ground'" @click="applyGroundRelay">Apply ground relay</button>
+            <label>Display telemetry updates<select v-model.number="telemetryRate" aria-label="Display telemetry updates">
+              <option v-for="rate in [1,2,4,8]" :key="rate" :value="rate">{{rate}} / second</option>
+            </select></label>
+            <p v-if="connectionStats">Flight payload {{fmt(connectionStats.flightBytes)}} bytes · received JSON {{fmt(connectionStats.bytesPerSecond/1024,1)}} KiB/s. Mission transfers {{connectionStats.missionTransfers}}; detail transfers {{connectionStats.detailsTransfers}}. Excludes HTTP overhead, video and public data.</p>
+            <div class="cockpit-actions">
+              <button :disabled="dataBusy" @click="$refs.terrainPackFiles.click()">Import terrain folder</button>
+              <button :disabled="dataBusy" @click="$refs.offlineMapFiles.click()">Import offline map folder</button>
+              <button :disabled="dataBusy" @click="$refs.geoidFile.click()">Import EGM96 geoid</button>
+              <button :disabled="dataBusy||!groundRelayUrl||sourceMode!=='ground'" @click="preloadGroundTerrain">Preload terrain from ground relay</button>
+            </div>
+            <p v-if="groundStatus.offlineTerrain">Saved terrain: {{groundStatus.offlineTerrain.title||groundStatus.offlineTerrain.id}} · {{groundStatus.offlineTerrain.tiles}} tiles.</p>
+            <p v-if="groundStatus.offlineMap">Saved map: {{groundStatus.offlineMap.title||groundStatus.offlineMap.id}} · {{groundStatus.offlineMap.tiles}} tiles.</p>
+            <p v-if="groundStatus.geoid">Traffic height conversion: {{groundStatus.geoid}}.</p>
+            <p v-if="dataMessage" role="status">{{dataMessage}}</p>
+            <p v-if="groundStatus.error" role="status">{{groundStatus.error}}</p>
+            <p v-if="snapshot.detailError" role="status">Aircraft details: {{snapshot.detailError}}</p>
+          </fieldset>
+          <label>Palette<select
               aria-label="Palette"
               v-model="palette"
             >
@@ -377,7 +425,7 @@
             /> Enable hybrid imagery data</label><label><input
               type="checkbox"
               v-model="onlineTraffic"
-            /> Enable airborne traffic data</label>
+            /> Enable internet ADS-B traffic</label>
           <p>Data sources are optional. Executable display assets are served by this device.</p><label>Motion
             estimate<select v-model="predictionMode">
               <option value="time">Time vector</option>
@@ -467,7 +515,7 @@
             >Request flight telemetry</button><button
               :disabled="!canCommand"
               @click="sendReadAction('mission-download')"
-            >Read aircraft mission</button><button @click="panel=null;openMission(null)">Autopilot controls</button>
+            >Read aircraft mission</button><button @click="openFlightControls('modes')">Autopilot controls</button>
           </div>
           <article
             v-for="op in snapshot.operations||[]"
@@ -479,6 +527,9 @@
       </div>
     </section>
   </div>
+  <input ref="terrainPackFiles" type="file" multiple webkitdirectory hidden @change="importGroundFiles('terrain',$event)" />
+  <input ref="offlineMapFiles" type="file" multiple webkitdirectory hidden @change="importGroundFiles('map',$event)" />
+  <input ref="geoidFile" type="file" accept=".pgm" hidden @change="importGroundFiles('geoid',$event)" />
   <input
     ref="calibrationFile"
     type="file"
@@ -495,6 +546,8 @@
 </main>
 </template>
 <script>
+import { markRaw } from 'vue'
+import { createGroundDataProvider } from './cockpit/ground-data.mjs'
 import {
   validateCameraCalibration
 } from 'yonder-core/terrain'
@@ -505,6 +558,7 @@ import TerrainVision from './cockpit/TerrainVision.vue'
 import TelemetryStrip from './cockpit/TelemetryStrip.vue'
 import NavigationDeviation from './cockpit/NavigationDeviation.vue'
 import PrimaryFlightDisplay from './cockpit/PrimaryFlightDisplay.vue'
+import FlightControlPanel from './cockpit/FlightControlPanel.vue'
 import MissionTouch from './cockpit/MissionTouch.vue'
 import YonderCockpitMap from './cockpit/YonderCockpitMap.vue'
 import YonderPicture from './YonderPicture.vue'
@@ -558,6 +612,7 @@ export default {
     CameraTerrainOverlay,
     TrafficVision,
     PrimaryFlightDisplay,
+    FlightControlPanel,
     MissionTouch,
     YonderCockpitMap,
     YonderPicture
@@ -588,6 +643,7 @@ export default {
       type: Object,
       default: null
     },
+    dataProvider: { type: Object, default: null },
     terrainComponent: {
       default: () => TerrainVision
     }
@@ -603,6 +659,20 @@ export default {
       onlineTerrain: false,
       onlineMap: false,
       onlineTraffic: false,
+      groundData: markRaw(this.dataProvider || createGroundDataProvider()),
+      sourceMode: 'ground',
+      groundRelayUrl: '',
+      groundRelayInput: '',
+      groundStatus: {},
+      dataMessage: '',
+      dataBusy: false,
+      hydratingOptions: false,
+      editedOptions: {},
+      dataOptionTimer: null,
+      dataSyncing: false,
+      dataSyncPending: false,
+      telemetryRate: 4,
+      connectionStats: null,
       trafficReport: {
         tracks: [],
         message: 'Traffic feed off'
@@ -630,7 +700,9 @@ export default {
       draftContext: null,
       history: [],
       picking: null,
+      flightPicking: null,
       reviewing: null,
+      pendingOperationId: null,
       sending: false,
       error: '',
       predictionMode: 'time',
@@ -723,8 +795,14 @@ export default {
     trafficTracks() {
       return this.trafficReport.tracks || []
     },
+    selectedFlightTarget() {
+      const item=this.shownMission.items.find(item=>item.seq===this.selection?.seq);
+      const command=getCommand(item?.command);
+      if(!item||!command?.location||!command?.altitude||![0,3,5,6].includes(item.frame)||![item.lat,item.lon,item.alt].every(Number.isFinite))return null;
+      return {lat:item.lat,lon:item.lon,altitudeM:item.alt,datum:[0,5].includes(item.frame)?'msl':'home'}
+    },
     canCommand() {
-      return !!this.source?.command && !!this.snapshot.identity?.generation && this.snapshot.connected === true
+      return !!this.source?.command && !!this.snapshot.identity?.generation && this.snapshot.connected === true && this.snapshot._detailsReady !== false
     },
     contextChanged() {
       return !!this.reviewing && (this.reviewing.generation !== this.snapshot.identity?.generation || this.reviewing
@@ -748,6 +826,7 @@ export default {
     }
   },
   watch: {
+    sourceMode() { this.dataOptions('sourceMode') },
     report: {
       handler(v) {
         if (v) this.ingest(v)
@@ -772,22 +851,22 @@ export default {
       this.$el?.setAttribute('data-mobile-inset', value)
     },
     onlineTerrain() {
-      this.dataOptions()
+      this.dataOptions('terrain')
     },
     onlineMap() {
-      this.dataOptions()
+      this.dataOptions('imagery')
     },
     onlineTraffic() {
-      this.dataOptions()
+      this.dataOptions('traffic')
     },
     trafficRange() {
-      this.dataOptions()
+      this.dataOptions('trafficRadiusNm')
     },
     cameraId() {
-      this.dataOptions()
+      this.dataOptions('cameraId')
     },
     aircraftDatum() {
-      this.dataOptions()
+      this.dataOptions('aircraftDatum')
     }
   },
   mounted() {
@@ -804,12 +883,16 @@ export default {
     if (this.report || this.props.report) this.ingest(this.report || this.props.report);
     this.source = this.api || (!this.report && !this.props.report ? createCockpitApi() : null);
     this.$el.setAttribute('data-mobile-inset', this.mobileInset);
+    this.groundData.refreshOffline().then(()=>{ if(!this.disposed)this.groundStatus=this.groundData.status() }).catch(e=>{this.dataMessage='Browser storage unavailable: '+e.message});
     try {
       const saved = JSON.parse(localStorage.getItem('yonder-cockpit-v1') || 'null');
       if (saved) this.preferences = validatePfdPreferences(saved)
     } catch {}
     this.timer = setInterval(() => {
-      this.now = Date.now()
+      this.now = Date.now();
+      this.connectionStats=this.source?.stats?.()||null;
+      this.refreshGroundTraffic();
+      this.groundStatus=this.groundData.status()
     }, 200);
     if (this.source?.state && !this.report && !this.props.report) this.poll()
   },
@@ -818,7 +901,10 @@ export default {
     window.removeEventListener('resize', this.fitViewport);
     this.disposed = true;
     clearInterval(this.timer);
-    clearTimeout(this.pollTimer)
+    clearTimeout(this.pollTimer);
+    clearTimeout(this.dataOptionTimer);
+    this.source?.close?.();
+    this.groundData.close()
   },
   methods: {
     fitViewport() {
@@ -848,14 +934,21 @@ export default {
     ingest(value) {
       this.snapshot = value;
       this.receivedAt = Date.now();
+      if(this.pendingOperationId){
+        const operation=value.operations?.find(op=>op.id===this.pendingOperationId);
+        if(operation){this.error=operation.state+' · '+operation.message;if(['observed','accepted','rejected','failed','unknown'].includes(operation.state))this.pendingOperationId=null}
+      }
       if (value.traffic) this.trafficReport = value.traffic;
       if (!this.optionsLoaded && value.dataOptions) {
+        this.hydratingOptions = true;
         this.optionsLoaded = true;
-        this.onlineTerrain = value.dataOptions.terrain === true;
-        this.onlineMap = value.dataOptions.imagery === true;
-        this.onlineTraffic = value.dataOptions.traffic === true;
-        this.cameraId = value.dataOptions.cameraId ?? null;
-        this.aircraftDatum = value.dataOptions.aircraftDatum || 'UNKNOWN'
+        if(!this.editedOptions.terrain)this.onlineTerrain = value.dataOptions.terrain === true;
+        if(!this.editedOptions.imagery)this.onlineMap = value.dataOptions.imagery === true;
+        if(!this.editedOptions.traffic)this.onlineTraffic = value.dataOptions.traffic === true;
+        if(!this.editedOptions.cameraId)this.cameraId = value.dataOptions.cameraId ?? null;
+        if(!this.editedOptions.aircraftDatum)this.aircraftDatum = value.dataOptions.aircraftDatum || 'UNKNOWN';
+        this.configureGroundData();
+        this.$nextTick(()=>{this.hydratingOptions=false;if(Object.keys(this.editedOptions).length)this.dataOptions()})
       }
     },
     async poll() {
@@ -865,7 +958,7 @@ export default {
       } catch (e) {
         this.error = e.name === 'AbortError' ? 'Telemetry request timed out' : e.message
       } finally {
-        if (!this.disposed) this.pollTimer = setTimeout(() => this.poll(), 250)
+        if (!this.disposed) this.pollTimer = setTimeout(() => this.poll(), 1000/this.telemetryRate)
       }
     },
     persist() {
@@ -981,12 +1074,36 @@ export default {
         this.error = e.message
       }
     },
+    openFlightControls(kind,target) {
+      this.panel=null;
+      this.missionOpen=false;
+      this.$refs.flightControls?.open(kind,target)
+    },
+    missionFlightControls(payload) {
+      const target={lat:payload.lat,lon:payload.lon};
+      if(Number.isFinite(payload.alt)&&[0,3,5,6].includes(payload.frame))Object.assign(target,{altitudeM:payload.alt,datum:[0,5].includes(payload.frame)?'msl':'home'});
+      this.openFlightControls(payload.kind,target)
+    },
+    pickFlightTarget(intent) {
+      this.flightPicking={...intent,generation:this.snapshot.identity?.generation};
+      this.picking=null;
+      this.missionOpen=false;
+      this.layout='map'
+    },
     pickLocation(intent) {
+      this.flightPicking=null;
       this.picking = intent;
       this.missionOpen = false;
       this.layout = 'map'
     },
     mapLocation(point) {
+      if(this.flightPicking){
+        const intent=this.flightPicking;
+        this.flightPicking=null;
+        if(intent.generation!==this.snapshot.identity?.generation){this.error='The aircraft changed while selecting a target. Choose a new flight target.';return;}
+        this.openFlightControls(intent.kind,{...intent.target,...point});
+        return;
+      }
       if (this.picking) {
         const intent = this.picking;
         this.picking = null;
@@ -1087,6 +1204,7 @@ export default {
         revision: this.snapshot.mission?.revision || null
       };
       this.missionOpen = false;
+      this.$refs.flightControls?.close();
       this.panel = null
     },
     async confirmCommand() {
@@ -1108,6 +1226,7 @@ export default {
           this.reviewing = null;
           return
         }
+        this.pendingOperationId=response.operationId;
         this.error = `Request queued · ${response.operationId}. Awaiting aircraft result.`;
         this.reviewing = null
       } catch (e) {
@@ -1131,6 +1250,7 @@ export default {
           }
         });
         if (response.accepted !== true) throw new Error(response.message || 'Request unavailable');
+        this.pendingOperationId=response.operationId;
         this.error = 'Request queued; awaiting aircraft response'
       } catch (e) {
         this.error = e.message
@@ -1157,23 +1277,55 @@ export default {
       }
       event.target.value = ''
     },
-    async dataOptions() {
-      const options = {
-        cameraId: this.cameraId,
-        aircraftDatum: this.aircraftDatum,
-        terrain: this.onlineTerrain,
-        imagery: this.onlineMap,
-        traffic: this.onlineTraffic,
-        trafficRadiusNm: this.trafficRange <= 25 ? 25 : this.trafficRange <= 50 ? 50 : 100
-      };
-      this.$emit('data-options', options);
-      if (this.source?.dataOptions) {
-        try {
-          await this.source.dataOptions(options)
-        } catch (e) {
-          this.error = 'Data source change failed: ' + e.message
-        }
-      }
+    configureGroundData() {
+      this.groundData.configure({mode:this.sourceMode,terrain:this.onlineTerrain,imagery:this.onlineMap,traffic:this.onlineTraffic,trafficRadiusNm:this.trafficRange,groundRelayUrl:this.groundRelayUrl});
+      this.groundStatus=this.groundData.status()
+    },
+    dataOptions(key) {
+      if(this.hydratingOptions||this.disposed)return;
+      if(key)this.editedOptions[key]=true;
+      try{this.configureGroundData()}catch(e){this.dataMessage=e.message;return}
+      if(!this.optionsLoaded)return;
+      clearTimeout(this.dataOptionTimer);
+      this.dataOptionTimer=setTimeout(()=>this.syncDataOptions(),0)
+    },
+    async syncDataOptions() {
+      if(this.dataSyncing){this.dataSyncPending=true;return}
+      this.dataSyncing=true;
+      do{
+        this.dataSyncPending=false;
+        const options={sourceMode:this.sourceMode,cameraId:this.cameraId,aircraftDatum:this.aircraftDatum,terrain:this.onlineTerrain,imagery:this.onlineMap,traffic:this.onlineTraffic,trafficRadiusNm:this.trafficRange};
+        this.$emit('data-options',options);
+        try{if(this.source?.dataOptions)await this.source.dataOptions(options)}
+        catch(e){if(!this.disposed)this.dataMessage='Aircraft data configuration failed: '+e.message}
+      }while(this.dataSyncPending&&!this.disposed);
+      this.dataSyncing=false
+    },
+    refreshGroundTraffic() {
+      if(this.report||this.props.report)return;
+      const center=this.flight.live&&Number.isFinite(this.telemetry.latitude)&&Number.isFinite(this.telemetry.longitude)?{lat:this.telemetry.latitude,lon:this.telemetry.longitude}:null;
+      this.groundData.pollTraffic(center).catch(e=>{if(!this.disposed)this.dataMessage=e.message});
+      this.trafficReport=this.groundData.trafficSnapshot(center)
+    },
+    applyGroundRelay() {
+      const previous=this.groundRelayUrl;
+      try{this.groundRelayUrl=this.groundRelayInput.trim();this.configureGroundData();this.dataMessage=this.groundRelayUrl?'Ground relay selected':'Direct browser providers selected'}
+      catch(e){this.groundRelayUrl=previous;this.dataMessage=e.message}
+    },
+    async importGroundFiles(kind,event) {
+      const files=Array.from(event.target.files||[]);if(!files.length)return;
+      this.dataBusy=true;this.dataMessage='Verifying and saving browser data…';
+      try{
+        const result=kind==='terrain'?await this.groundData.importTerrainPack(files):kind==='map'?await this.groundData.importOfflineMap(files):await this.groundData.importGeoid(files[0]);
+        this.groundStatus=this.groundData.status();this.dataMessage=(result.title||result.id||result.model||'Data')+(kind==='geoid'?' loaded for this session':' saved in this browser');
+      }catch(e){this.dataMessage='Import failed: '+e.message}
+      finally{this.dataBusy=false;event.target.value=''}
+    },
+    async preloadGroundTerrain() {
+      this.dataBusy=true;this.dataMessage='Downloading terrain from the selected ground relay into browser storage…';
+      try{const result=await this.groundData.preloadTerrainPack(this.groundRelayUrl);this.groundStatus=this.groundData.status();this.dataMessage=(result.title||result.id)+' saved in this browser'}
+      catch(e){this.dataMessage='Ground preload failed: '+e.message}
+      finally{this.dataBusy=false}
     },
     cancelPanel() {
       this.panel = null;
@@ -1203,3 +1355,8 @@ export default {
 </script>
 <style src="./cockpit/prototype.css"></style>
 <style src="./cockpit/cockpit.css"></style>
+<style scoped>
+.cockpit-data-settings { border: 1px solid var(--cockpit-border, #52616e); padding: 12px; margin-bottom: 16px; min-width: 0; }
+.cockpit-data-settings legend { font-weight: 700; padding: 0 6px; }
+.cockpit-data-settings p { overflow-wrap: anywhere; }
+</style>

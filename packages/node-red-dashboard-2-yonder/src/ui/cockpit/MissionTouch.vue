@@ -12,20 +12,20 @@
       <template v-if="selected">
         <div class="mission-selected-summary"><span>{{selectedMeta?.category||'Imported command'}} · MAV_CMD {{selected.command}}</span><b v-if="selectedMeta?.altitude">{{fmt(selected.alt,2)}} m <small>{{datumLabel(selected.frame)}}</small></b><p>{{selectedMeta?.description||'This imported command is preserved. Its parameters can be inspected below.'}}</p></div>
         <div class="mission-touch-section-label">AIRCRAFT ACTIONS</div>
-        <div class="mission-action-grid"><button class="mission-execute" :disabled="commandDisabled||!flyTarget" @click="flySelected">Review fly-to<small>GUIDED · use this position and altitude</small></button><button class="mission-execute" :disabled="commandDisabled||draft" @click="send({action:'set-current',seq:selected.seq})">Set current item<small>Keep the current flight mode</small></button><button class="mission-execute" :disabled="commandDisabled||draft" @click="send({action:'continue-auto',seq:selected.seq})">Continue AUTO from this item<small>Set current item, then select AUTO</small></button></div>
+        <div class="mission-action-grid"><button class="mission-execute" :disabled="commandDisabled||!flyTarget" @click="flySelected">Review fly-to<small>GUIDED · use this position and altitude</small></button><button class="mission-execute" :disabled="commandDisabled||!flyTarget" @click="$emit('flight-controls',{kind:'loiter',...flyTarget})">Loiter at this item…<small>Choose radius and direction, then review</small></button><button class="mission-execute" :disabled="commandDisabled||draft" @click="send({action:'set-current',seq:selected.seq})">Set current item<small>Keep the current flight mode</small></button><button class="mission-execute" :disabled="commandDisabled||draft" @click="send({action:'continue-auto',seq:selected.seq})">Continue AUTO from this item<small>Set current item, then select AUTO</small></button></div>
         <p class="mission-touch-note" v-if="!flyTarget">Fly-to requires a fixed geographic position and an MSL or home-relative altitude.</p><p class="mission-touch-note" v-if="draft">Upload and verify the draft before selecting one of its items as the aircraft's current mission item.</p>
         <button v-if="immediateAllowed" class="mission-touch-wide mission-execute" :disabled="commandDisabled" @click="runImmediate">Send {{selectedMeta?.label||'command '+selected.command}} now<small>Immediate aircraft command · uses these parameters</small></button>
         <p class="mission-touch-note" v-if="!immediateAllowed&&selectedMeta?.category!=='Navigation'">This item runs through mission execution. It has no immediate command action enabled here.</p>
         <div class="mission-touch-section-label">EDIT LOCAL DRAFT</div>
-        <div class="mission-action-grid"><button :disabled="pending||!selectedMeta" @click="editSelected">Edit parameters<small>Command, coordinates and altitude datum</small></button><button :disabled="pending" @click="openCatalog">Insert after this item<small>Choose from {{MISSION_COMMANDS.length}} mission commands</small></button><button :disabled="pending||selectedIndex<=0" @click="modify('move',-1)">Move earlier</button><button :disabled="pending||selectedIndex>=items.length-1" @click="modify('move',1)">Move later</button><button :disabled="pending" @click="modify('delete')">Remove item</button><button @click="view='details'">Inspect all parameters</button></div>
+        <div class="mission-action-grid"><button :disabled="pending||!selectedMeta" @click="editSelected">Edit parameters<small>Coordinates, altitude datum and parameters</small></button><button aria-label="Change mission action" :disabled="pending" @click="openCatalog(true)">Change action<small>Keep item identity; use new command defaults</small></button><button :disabled="pending" @click="openCatalog()">Insert after this item<small>Choose from {{MISSION_COMMANDS.length}} mission commands</small></button><button :disabled="pending||selectedIndex<=0" @click="modify('move',-1)">Move earlier</button><button :disabled="pending||selectedIndex>=items.length-1" @click="modify('move',1)">Move later</button><button :disabled="pending" @click="modify('delete')">Remove item</button><button @click="view='details'">Inspect all parameters</button></div>
       </template>
       <template v-else-if="selection?.lat!==undefined">
         <div class="mission-selected-summary"><span>MAP POSITION</span><b>{{fmt(selection.lat,7)}}°, {{fmt(selection.lon,7)}}°</b></div>
-        <div class="mission-action-grid"><button :disabled="pending" @click="startForm(16,{point:selection,after:items.at(-1)?.seq??null})">Add waypoint here<small>Edit altitude and mission order</small></button><button :disabled="pending" @click="openCatalog">Add another mission command<small>Navigation, condition or action</small></button><button class="mission-execute" :disabled="commandDisabled" @click="flyPosition">Fly to / loiter here…<small>Choose altitude, then send GUIDED target</small></button></div>
+        <div class="mission-action-grid"><button :disabled="pending" @click="startForm(16,{point:selection,after:items.at(-1)?.seq??null})">Add waypoint here<small>Edit altitude and mission order</small></button><button :disabled="pending" @click="openCatalog()">Add another mission command<small>Navigation, condition or action</small></button><button class="mission-execute" :disabled="commandDisabled" @click="flyPosition">Direct-To here…<small>Choose altitude, then review GUIDED target</small></button><button class="mission-execute" :disabled="commandDisabled" @click="$emit('flight-controls',{kind:'loiter',lat:selection.lat,lon:selection.lon})">Loiter here…<small>Choose altitude, radius and direction</small></button></div>
       </template>
       <template v-else>
         <div class="mission-selected-summary"><span>{{draft?'LOCAL DRAFT':'DISPLAYED MISSION'}} · {{items.length}} ITEMS</span><b>{{mission?.name||'No mission loaded'}}</b></div>
-        <div class="mission-action-grid"><button :disabled="pending" @click="openCatalog">Add mission item<small>{{MISSION_COMMANDS.length}} Mission Planner ArduPlane commands</small></button><button :disabled="pending" @click="$emit('pick-location',{command:16,afterSeq:items.at(-1)?.seq??null})">Add waypoint on map<small>Choose its location by touch</small></button></div>
+        <div class="mission-action-grid"><button :disabled="pending" @click="openCatalog()">Add mission item<small>{{MISSION_COMMANDS.length}} Mission Planner ArduPlane commands</small></button><button :disabled="pending" @click="$emit('pick-location',{command:16,afterSeq:items.at(-1)?.seq??null})">Add waypoint on map<small>Choose its location by touch</small></button></div>
       </template>
 
       <div class="mission-touch-section-label">DRAFT & MISSION</div>
@@ -42,13 +42,18 @@
     <div v-else-if="view==='catalog'" class="mission-touch-body mission-catalog-body">
       <input class="mission-command-search" v-model="query" type="search" aria-label="Search mission commands" placeholder="Search command, parameter or MAV_CMD ID">
       <div class="mission-categories" role="group" aria-label="Mission command category"><button v-for="c in categories" :key="c" :aria-pressed="category===c" @click="category=c">{{c}}</button></div>
-      <p class="mission-touch-note">{{commands.length}} of {{MISSION_COMMANDS.length}} ArduPlane mission commands · inserts a local draft item</p>
-      <div class="mission-command-list"><button v-for="command in commands" :key="command.id" :aria-label="'Add '+command.label" @click="startForm(command.id,{point:selection?.lat!==undefined?selection:null,after:afterSeq})"><span><b>{{command.label}}</b><small>{{command.category}} · {{command.name}}</small></span><em>{{command.id}}</em><p>{{command.description}}</p></button><p v-if="!commands.length" class="mission-touch-note">No commands match this search.</p></div>
+      <p class="mission-touch-note">{{commands.length}} of {{MISSION_COMMANDS.length}} ArduPlane mission commands · {{catalogReplace?'changes the selected local draft item':'inserts a local draft item'}}</p>
+      <div class="mission-command-list"><button v-for="command in commands" :key="command.id" :aria-label="(catalogReplace?'Change to ':'Add ')+command.label" @click="chooseCommand(command.id)"><span><b>{{command.label}}</b><small>{{command.category}} · {{command.name}}</small></span><em>{{command.id}}</em><p>{{command.description}}</p></button><p v-if="!commands.length" class="mission-touch-note">No commands match this search.</p></div>
     </div>
 
     <form v-else-if="view==='form'||view==='fly'" class="mission-touch-body mission-parameter-form" @submit.prevent="view==='fly'?submitFly():submitEdit()">
       <div class="mission-command-heading"><small>{{view==='fly'?'GUIDED TARGET':meta?.category+' · MAV_CMD '+formCommand}}</small><h3>{{view==='fly'?'Choose position and altitude':meta?.label}}</h3><p>{{view==='fly'?'Sends an immediate target to the local aircraft. It does not add a mission item.':meta?.description}}</p></div>
+      <p v-if="view==='form'&&homeDatumConversion" class="mission-touch-note" role="status">Enter a new MSL altitude for Set Home. The previous {{selected.alt}} m {{datumLabel(selected.frame)}} value was cleared; it has not been converted to MSL.</p>
       <label class="mission-form-row" v-if="view==='form'&&operation==='insert'"><span>Insert after</span><select aria-label="Insert after mission item" v-model="afterSeq"><option :value="null">Beginning of mission</option><option v-for="item in items" :key="item.seq" :value="item.seq">{{itemLabel(item)}} · {{getCommand?.(item.command)?.label||'Command '+item.command}}</option></select></label>
+      <div v-if="loiter" class="mission-loiter-editor">
+        <div class="mission-field-grid"><label class="mission-parameter-field"><span>Radius <small>metres</small></span><input v-if="loiter.radiusIndex" aria-label="Loiter radius metres" type="number" min="0" step="any" :value="loiter.radiusM??0" @input="setLoiterRadius($event.target.value)"><input v-else aria-label="Loiter radius source" value="Aircraft WP_LOITER_RAD" readonly><small>{{loiter.radiusIndex?'0 uses the aircraft configured radius.':'Timed loiter uses the aircraft configured radius; only direction is stored here.'}}</small></label><label class="mission-parameter-field"><span>Direction</span><select aria-label="Loiter direction" :value="loiter.direction" @change="setLoiterDirection($event.target.value)"><option v-if="loiter.radiusIndex" value="default">Aircraft default (radius 0)</option><option value="cw">Clockwise</option><option value="ccw">Counterclockwise</option></select></label><label v-if="[17,31].includes(formCommand)" class="mission-parameter-field"><span>Duration</span><input aria-label="Loiter duration" :value="loiter.duration" readonly></label></div>
+        <div class="loiter-local-preview" aria-label="Local mission loiter circle preview"><svg viewBox="0 0 150 120" aria-hidden="true"><circle cx="75" cy="60" r="43" :stroke-dasharray="loiter.radiusM?'none':'6 5'"/><path d="M75 60 H118"/><path v-if="loiter.direction!=='default'" :d="loiter.direction==='cw'?'M116 44 L118 59 L130 50':'M107 62 L118 47 L129 61'" class="loiter-preview-arrow"/><circle cx="75" cy="60" r="3"/></svg><span><b>{{loiter.radiusM?loiter.radiusM+' m':'Aircraft configured radius'}} · {{loiter.duration}}</b><small>Local draft preview · {{loiter.direction==='cw'?'Clockwise':loiter.direction==='ccw'?'Counterclockwise':'Aircraft direction'}}</small></span></div>
+      </div>
       <div class="mission-field-grid">
         <label v-for="param in formFields" :key="param.index" class="mission-parameter-field" :class="{'coordinate-field':meta?.location&&[5,6].includes(param.index)}"><span>{{param.label}} <small>P{{param.index}}{{param.unit?' · '+param.unit:''}}</small></span>
           <select v-if="fieldType(param)==='enum'" :aria-label="param.label+' parameter '+param.index" v-model="fieldValues[param.index]"><option v-if="!param.required" value="">Default</option><option v-for="option in param.options" :key="option.value" :value="String(option.value)">{{option.label}} ({{option.value}})</option></select>
@@ -62,7 +67,7 @@
       <label class="mission-autocontinue" v-if="view==='form'"><span>Continue automatically</span><input type="checkbox" v-model="autocontinue" aria-label="Continue automatically"></label>
       <p class="mission-command-notes" v-if="view==='form'&&meta?.notes">{{meta.notes}}</p><p class="mission-touch-note" v-if="view==='form'&&meta?.capability&&meta.capability!=='Plane mission command; actual firmware acceptance and execution reported separately'">{{meta.capability}}</p>
       <p v-for="warning in validation.warnings||[]" :key="warning" class="mission-touch-note">{{warning}}</p>
-      <p class="mission-touch-note" v-if="view==='form'">Active Mission Planner parameters are shown. Unused imported parameter values are retained. Conditions and DO items follow ArduPlane mission sequencing.</p>
+      <p class="mission-touch-note" v-if="view==='form'">{{catalogReplace&&operation==='replace'?'Changing action resets command parameters to the new command defaults. Coordinates and altitude datum remain where the new action uses them.':'Active command parameters are shown. Unused imported parameter values are retained.'}} Conditions and DO items follow ArduPlane mission sequencing.</p>
       <div class="mission-form-actions"><button type="button" @click="view='context'">Cancel</button><button class="mission-primary" type="submit" :disabled="view==='fly'?commandDisabled:pending">{{view==='fly'?'Review fly-to request':operation==='replace'?'Save draft item':'Add to draft'}}</button></div>
     </form>
 
@@ -91,6 +96,7 @@ import {
   createMissionItem,
   validateMissionItem
 } from './mission-commands.mjs';
+import {changeMissionAction,loiterPresentation} from './mission-action-edit.mjs';
 
 const clone = value => JSON.parse(JSON.stringify(value));
 const itemLabel = item => 'WP' + String(item.seq).padStart(3, '0');
@@ -115,7 +121,7 @@ export default {
     draft: Boolean,
     canUndo: Boolean
   },
-  emits: ['close', 'edit', 'command', 'upload', 'undo', 'export', 'use-live', 'pick-location', 'start'],
+  emits: ['close', 'edit', 'command', 'upload', 'undo', 'export', 'use-live', 'pick-location', 'start', 'flight-controls'],
   setup(props, {
     emit
   }) {
@@ -123,6 +129,7 @@ export default {
       view = ref('context'),
       query = ref(''),
       category = ref('All'),
+      catalogReplace = ref(false),
       localError = ref(''),
       formCommand = ref(16),
       operation = ref('insert'),
@@ -294,12 +301,31 @@ export default {
       }
     }
 
-    function openCatalog() {
+    function openCatalog(replace = false) {
+      catalogReplace.value = replace;
       afterSeq.value = selected.value?.seq ?? items.value.at(-1)?.seq ?? null;
       query.value = '';
       category.value = 'All';
       view.value = 'catalog';
       localError.value = '';
+    }
+
+    function chooseCommand(command) {
+      if(catalogReplace.value && selected.value) startForm(command,{replace:true,item:changeMissionAction(selected.value,command)});
+      else startForm(command,{point:props.selection?.lat!==undefined?props.selection:null,after:afterSeq.value});
+    }
+    const homeDatumConversion = computed(()=>catalogReplace.value && formCommand.value===179 && selected.value && ![0,5].includes(selected.value.frame));
+    const loiter = computed(()=>view.value==='form'?loiterPresentation(currentItem()):null);
+    function setLoiterRadius(value) {
+      const index=loiter.value?.radiusIndex;if(!index)return;
+      fieldValues[index]=String(Math.abs(Number(value))*(loiter.value.direction==='ccw'?-1:1));
+    }
+    function setLoiterDirection(value) {
+      const l=loiter.value;if(!l)return;
+      const index=l.radiusIndex||3;
+      if(l.radiusIndex && !l.radiusM && value!=='default'){localError.value='Enter a radius greater than zero before choosing direction. Radius zero uses the aircraft default.';return;}
+      localError.value='';
+      fieldValues[index]=String(value==='default'?0:(value==='ccw'?-1:1)*(l.radiusIndex?l.radiusM:1));
     }
 
     function pickLocation() {
@@ -425,7 +451,7 @@ export default {
       label: 'Altitude',
       unit: 'm',
       required: true
-    }] : meta.value?.params || []);
+    }] : (meta.value?.params || []).filter(p=>!loiter.value || p.index!==(loiter.value.radiusIndex||3)).map(p=>loiter.value&&p.index===1?{...p,label:formCommand.value===19?'Duration':'Duration in turns'}:p));
     return {
       root,
       view,
@@ -458,6 +484,12 @@ export default {
       keyboard,
       startForm,
       openCatalog,
+      catalogReplace,
+      chooseCommand,
+      loiter,
+      homeDatumConversion,
+      setLoiterRadius,
+      setLoiterDirection,
       pickLocation,
       submitEdit,
       editSelected,

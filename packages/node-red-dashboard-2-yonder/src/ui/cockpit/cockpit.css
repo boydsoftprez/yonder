@@ -959,3 +959,82 @@
 .y-cockpit .pfd-telemetry-strip>button:last-child { border-right:0 }
 .y-cockpit .pfd-telemetry-strip>button:hover { background:#627e8b33 }
 .y-cockpit[data-palette="day"] .pfd-telemetry-strip { background:#e3edf1; color:#102d3c }
+
+/* One uniform instrument scale over the full responsive scene. */
+.y-cockpit .pfd-instrument-canvas>.pfd-svg { width:100%; height:100%; max-width:none; position:absolute; inset:0 }
+.y-cockpit .pfd-touch-surfaces { width:100%; height:100%; max-width:none; aspect-ratio:auto; left:0; right:0; transform:none }
+.y-cockpit .pfd-touch-vsi-scale { right:auto }
+.y-cockpit .flight-mode-annunciator { position:absolute; z-index:5; left:50%; top:5px; transform:translateX(-50%); display:grid; grid-template-columns:minmax(110px,1fr) auto; max-width:calc(100% - 190px); min-width:230px; color:#e0f9eb; background:#06140fe8; border:1px solid #799b8e99; border-radius:4px; pointer-events:auto; overflow:hidden }
+.y-cockpit .flight-mode-annunciator button { border:0; border-radius:0; background:transparent; min-height:30px; padding:3px 10px; line-height:1.15; text-align:center; color:inherit }
+.y-cockpit .flight-mode-actual { grid-row:span 2; border-right:1px solid #799b8e66!important }
+.y-cockpit .flight-mode-actual small { display:block; font-size:8px; letter-spacing:1px; color:#a8c6b9 }
+.y-cockpit .flight-mode-actual strong { display:block; color:#7df1a7; font-size:20px; letter-spacing:1.5px; padding-top:2px }
+.y-cockpit .flight-mode-annunciator .flight-mode-arm { font-size:10px; min-height:23px }
+.y-cockpit .flight-mode-annunciator .flight-mode-fd { color:#ff9eec; font-size:10px; min-height:22px; border-top:1px solid #799b8e66 }
+.y-cockpit .flight-mode-request { grid-column:1/-1; display:flex; justify-content:center; gap:8px; padding:4px 7px; font-size:10px; background:#0a1b27f2; color:#dbe9f0; border-top:1px solid #799b8e66; white-space:normal }
+.y-cockpit .flight-mode-request small { color:#f4d098; font-size:inherit }
+.y-cockpit .flight-mode-annunciator.unavailable .flight-mode-actual strong,.y-cockpit .flight-mode-annunciator.caution .flight-mode-request { color:#ffcf89 }
+.y-cockpit .flight-control-host { flex:none; position:relative; z-index:30 }
+.y-cockpit .flight-control-strip { display:grid; grid-template-columns:repeat(8,minmax(0,1fr)); background:#06121c; border-bottom:1px solid var(--cockpit-line); gap:1px }
+.y-cockpit .flight-control-strip button { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; min-width:0; min-height:51px; border:0; border-right:1px solid #617b8855; border-radius:0; padding:6px 3px; background:#132b38; color:#ecf7fa; font-size:12px }
+.y-cockpit .flight-control-strip button small { font-size:9px; color:#a9c3cc; white-space:nowrap }
+.y-cockpit .flight-control-strip button[aria-expanded="true"] { background:#234856; box-shadow:inset 0 -3px #77dcee }
+.y-cockpit .flight-control-scrim { z-index:90 }
+.y-cockpit .flight-control-dialog { width:min(630px,calc(100vw - 24px)); max-height:calc(100dvh - 24px) }
+.y-cockpit .flight-control-actual { display:flex; align-items:center; gap:13px; padding:12px 18px; border-bottom:1px solid var(--cockpit-line); color:#c7dadd; background:#0c202b; font-size:12px }
+.y-cockpit .flight-control-actual small { font-size:9px; letter-spacing:.8px }
+.y-cockpit .flight-control-actual strong { color:#8de9b8 }
+.y-cockpit .flight-control-dialog .mission-mode-grid button { min-height:47px }
+.y-cockpit .flight-control-dialog .mission-mode-grid small { display:block; font-size:9px; color:var(--cockpit-muted); margin-top:4px }
+.y-cockpit .flight-request-form { display:grid; gap:15px }
+.y-cockpit .flight-request-form .mission-field-grid { margin:0 }
+.y-cockpit .loiter-local-preview { display:flex; align-items:center; gap:14px; margin:12px 0; padding:8px 12px; border:1px solid var(--cockpit-line); border-radius:5px; background:#12303a55 }
+.y-cockpit .loiter-local-preview svg { width:120px; height:96px; flex:none; fill:none; stroke:#66dbe4; stroke-width:2 }
+.y-cockpit .loiter-preview-arrow { stroke-width:4; stroke-linejoin:round }
+.y-cockpit .loiter-local-preview b { display:block; font-size:13px }
+.y-cockpit .loiter-local-preview small { display:block; font-size:11px; color:var(--cockpit-muted); margin-top:7px }
+.y-cockpit[data-palette="day"] .flight-control-strip { background:#90a8b2 }
+.y-cockpit[data-palette="day"] .flight-control-strip button { background:#dce8ed; color:#152c38 }
+.y-cockpit[data-palette="day"] .flight-control-strip button small { color:#395763 }
+.y-cockpit[data-palette="day"] .flight-control-strip button[aria-expanded="true"] { background:#bedee4; box-shadow:inset 0 -3px #137386 }
+.y-cockpit[data-palette="day"] .flight-control-actual { background:#cbdde4; color:#183c4e }
+.y-cockpit[data-palette="day"] .flight-control-actual strong { color:#176c3c }
+.y-cockpit[data-palette="day"] .loiter-local-preview svg { stroke:#117383 }
+@container yonder-cockpit (max-width:800px) {
+ .y-cockpit .flight-control-strip { grid-template-columns:repeat(4,minmax(0,1fr)) }
+ .y-cockpit .flight-control-strip button { min-height:44px; font-size:11px }
+ .y-cockpit .flight-control-strip button small { font-size:8px }
+}
+@container yonder-cockpit (max-width:480px) {
+ .y-cockpit .flight-mode-annunciator { min-width:190px; max-width:calc(100% - 90px); top:4px }
+ .y-cockpit .flight-mode-actual strong { font-size:15px }
+ .y-cockpit .flight-mode-request { flex-direction:column; align-items:center; gap:2px; font-size:8px; padding:3px }
+ .y-cockpit .flight-mode-annunciator button { padding:3px 6px }
+ .y-cockpit .loiter-local-preview svg { width:85px; height:72px }
+}
+.y-cockpit .cockpit-target-prompt { position:absolute; z-index:1200; left:12px; right:12px; bottom:55px; display:flex; justify-content:space-between; align-items:center; gap:10px; padding:7px 10px; background:var(--cockpit-pane); border:1px solid var(--cockpit-line); font-size:12px }
+.y-cockpit .cockpit-camera-fallback { position:absolute; z-index:12; top:100px; left:50%; transform:translateX(-50%); display:flex; align-items:center; gap:12px; padding:7px 12px; border:1px solid #a5b9bd; border-radius:5px; background:var(--cockpit-pane); font-size:12px }
+.y-cockpit[data-palette="day"] .flight-mode-annunciator { background:#e5f0e8ed; color:#254e3b }
+.y-cockpit[data-palette="day"] .flight-mode-actual strong { color:#186039 }
+.y-cockpit[data-palette="day"] .flight-mode-actual small { color:#426852 }
+.y-cockpit[data-palette="day"] .flight-mode-request { background:#deebed; color:#183c4e }
+.y-cockpit[data-palette="day"] .flight-mode-request small { color:#784200 }
+
+/* Keep inset tops below the tapes when persistent controls consume vertical space. */
+.y-cockpit[data-layout="full"] :is(.cockpit-mission,.cockpit-map-pane) { max-height:calc((var(--cockpit-height,100dvh) - 235px)*.36) }
+/* Keep the actual-mode strip above the authored bank ticks at laptop scale. */
+.y-cockpit .flight-mode-annunciator { top:0; grid-template-columns:auto auto auto; min-width:280px; overflow:visible }
+.y-cockpit .flight-mode-actual { grid-row:auto; white-space:nowrap }
+.y-cockpit .flight-mode-actual small { display:inline; font-size:8px; letter-spacing:.2px; margin-right:7px }
+.y-cockpit .flight-mode-actual strong { display:inline; padding:0; font-size:17px }
+.y-cockpit .flight-mode-annunciator button { min-height:27px; padding:2px 7px }
+.y-cockpit .flight-mode-annunciator .flight-mode-arm,.y-cockpit .flight-mode-annunciator .flight-mode-fd { min-height:27px; font-size:9px; border-top:0 }
+.y-cockpit .flight-mode-annunciator .flight-mode-fd { border-left:1px solid #799b8e66 }
+@container yonder-cockpit (min-width:1000px) {
+ .y-cockpit .flight-mode-request { position:absolute; left:calc(100% + 10px); top:0; width:230px; max-width:calc((100cqw - 640px)/2); min-height:27px; border:1px solid #799b8e66; border-radius:3px; flex-direction:column; gap:3px }
+}
+@container yonder-cockpit (max-width:480px) {
+ .y-cockpit .flight-mode-annunciator { min-width:260px }
+ .y-cockpit .flight-mode-actual small { font-size:7px; margin-right:4px }
+ .y-cockpit .flight-mode-actual strong { font-size:15px }
+}

@@ -3,6 +3,8 @@ import type { TerrainPackService } from "../terrain/service.js";
 import type { VehicleService } from "../mav/vehicle.js";
 import type { OperatorRequest } from "../mav/types.js";
 import type { CockpitData } from "./data.js";
+import { createHash } from 'node:crypto';
+import { packFlight } from './flight-wire.js';
 export interface CockpitServices {
   vehicle?: VehicleService;
   data?: CockpitData;
@@ -17,6 +19,31 @@ export async function cockpitRoute(
   body: unknown,
 ): Promise<{ status: number; body: unknown } | null> {
   if (!path.startsWith("/cockpit/")) return null;
+  if(['/cockpit/flight','/cockpit/details','/cockpit/mission','/cockpit/traffic'].includes(path)&&method==='GET'){
+    if(!services.vehicle)return {status:503,body:{error:'Vehicle telemetry service is unavailable'}};
+    if(path==='/cockpit/mission'){
+      const snapshot=services.vehicle.snapshot();
+      return {status:200,body:{generation:snapshot.identity?.generation??null,mission:snapshot.mission}};
+    }
+    if(path==='/cockpit/traffic'){
+      const t=services.vehicle.snapshot({details:false}).telemetry;
+      const state=services.data?.snapshot({lat:t.latitude,lon:t.longitude,valid:t.ready&&t.fixType!==null&&t.fixType>=3});
+      const traffic=state?.traffic;
+      // One current observation per target. Trails are assembled on the ground.
+      return {status:200,body:traffic?{...traffic,tracks:traffic.tracks.map(({history:_,...track})=>track)}:{status:'disabled',tracks:[],message:'Traffic provider unavailable'}};
+    }
+    const camera=await services.cameraState?.();
+    const snapshot=services.vehicle.snapshot({details:path==='/cockpit/details'});
+    const dataOptions=services.data?.options;
+    const detailKey=createHash('sha256').update(JSON.stringify([snapshot.detailKey,camera,dataOptions])).digest('hex').slice(0,24);
+    if(path==='/cockpit/flight'){
+      snapshot.telemetry.altitudeDatum=dataOptions?.aircraftDatum??'UNKNOWN';
+      return {status:200,body:packFlight(snapshot,detailKey)};
+    }
+    return {status:200,body:{detailKey,identity:snapshot.identity,capabilities:snapshot.capabilities,
+      operations:snapshot.operations,statustext:snapshot.statustext,...camera,dataOptions,
+      terrainPack:services.terrain?{id:services.terrain.manifest.id,available:true}:null}};
+  }
   if (path === "/cockpit/state" && method === "GET") {
     if (!services.vehicle)
       return {

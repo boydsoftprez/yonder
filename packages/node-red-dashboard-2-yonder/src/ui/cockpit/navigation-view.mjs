@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import {isPositionItem} from './mission-import.mjs';
+import {guidedNavigationUnavailable, guidedSource} from './guided-navigation.mjs';
 import {
   aircraftMission,
   bearing,
@@ -32,6 +33,8 @@ export function navigationView(snapshot, elapsed = 0) {
     ...base,
     reason: 'Flight telemetry unavailable'
   };
+  const unavailable = guidedNavigationUnavailable(snapshot);
+  if (unavailable) return {...base, targetName:'GUIDED', guidanceSource:guidedSource, reason:unavailable};
   const fresh = n && n.ageMs + elapsed < 2000 && n.autopilotId === 3;
   if (t.mode === 'GUIDED' && t.positionTarget && t.positionTarget.ageMs + elapsed < 2000) {
     const target = t.positionTarget,
@@ -46,6 +49,7 @@ export function navigationView(snapshot, elapsed = 0) {
       valid: dist !== null,
       target,
       targetName: 'GUIDED',
+      guidanceSource: guidedSource,
       guided: true,
       distanceM: dist,
       bearingDeg: bearing(p, target),

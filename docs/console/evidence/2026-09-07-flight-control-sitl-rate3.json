@@ -1,0 +1,3720 @@
+{
+  "schema": 1,
+  "sourceCommit": "dbe792162d06cab66c3475fd5556bf7a120f119e",
+  "firmware": "Official ArduPlane 4.7.1",
+  "evidence": "Independent disposable SITL; no physical aircraft",
+  "startedAt": "2026-09-07T17:26:04.738Z",
+  "stages": [
+    {
+      "action": "stream-setup",
+      "operation": {
+        "id": "e64420aa-8409-434f-ac2d-922e2d2e0b75",
+        "sessionId": "local-sitl-smoke",
+        "vehicleGeneration": "fb1a79bd-fb23-4bc4-b0a9-5d117cc6ab7f",
+        "action": {
+          "kind": "stream-setup"
+        },
+        "createdAt": 1788801966449,
+        "sentAt": 1788801966450,
+        "updatedAt": 1788801966654,
+        "state": "accepted",
+        "ack": {
+          "command": 512,
+          "result": 0,
+          "progress": 0,
+          "at": 1788801966654
+        },
+        "effect": {
+          "state": "unavailable",
+          "at": 1788801966654,
+          "message": "Autopilot accepted; physical effect is not measured by this command"
+        },
+        "message": "Autopilot accepted; physical effect is not measured by this command",
+        "steps": [
+          {
+            "action": "Request message 30 at 10 Hz",
+            "state": "accepted",
+            "message": "Autopilot accepted; physical effect is not measured by this command"
+          },
+          {
+            "action": "Request message 33 at 10 Hz",
+            "state": "accepted",
+            "message": "Autopilot accepted; physical effect is not measured by this command"
+          },
+          {
+            "action": "Request message 74 at 10 Hz",
+            "state": "accepted",
+            "message": "Autopilot accepted; physical effect is not measured by this command"
+          },
+          {
+            "action": "Request message 62 at 10 Hz",
+            "state": "accepted",
+            "message": "Autopilot accepted; physical effect is not measured by this command"
+          },
+          {
+            "action": "Request message 24 at 2 Hz",
+            "state": "accepted",
+            "message": "Autopilot accepted; physical effect is not measured by this command"
+          },
+          {
+            "action": "Request message 1 at 2 Hz",
+            "state": "accepted",
+            "message": "Autopilot accepted; physical effect is not measured by this command"
+          },
+          {
+            "action": "Request message 42 at 2 Hz",
+            "state": "accepted",
+            "message": "Autopilot accepted; physical effect is not measured by this command"
+          },
+          {
+            "action": "Request message 87 at 2 Hz",
+            "state": "accepted",
+            "message": "Autopilot accepted; physical effect is not measured by this command"
+          },
+          {
+            "action": "Request message 148",
+            "state": "accepted",
+            "message": "Autopilot accepted; physical effect is not measured by this command"
+          },
+          {
+            "action": "Request message 242",
+            "state": "accepted",
+            "message": "Autopilot accepted; physical effect is not measured by this command"
+          }
+        ]
+      },
+      "telemetry": {
+        "rollDeg": null,
+        "pitchDeg": null,
+        "yawRateDegS": null,
+        "airspeedKt": null,
+        "groundspeedKt": null,
+        "headingDeg": null,
+        "trackDeg": null,
+        "altitudeFt": null,
+        "verticalSpeedFpm": null,
+        "latitude": null,
+        "longitude": null,
+        "globalAltitudeM": null,
+        "gpsAltitudeM": null,
+        "relativeAltitudeM": null,
+        "fixType": null,
+        "satellites": null,
+        "batteryV": null,
+        "currentA": null,
+        "batteryPercent": null,
+        "throttlePercent": null,
+        "mode": "Mode 16",
+        "customMode": 16,
+        "armed": false,
+        "navRollDeg": null,
+        "navPitchDeg": null,
+        "source": "MAVLink",
+        "ready": false,
+        "ageMs": 362,
+        "fdReady": false,
+        "navController": null,
+        "positionTarget": null,
+        "homePosition": null,
+        "fields": {
+          "rollDeg": {
+            "source": "Not received",
+            "receivedAt": null,
+            "ageMs": null,
+            "valid": false,
+            "reason": "Not received"
+          },
+          "pitchDeg": {
+            "source": "Not received",
+            "receivedAt": null,
+            "ageMs": null,
+            "valid": false,
+            "reason": "Not received"
+          },
+          "yawRateDegS": {
+            "source": "Not received",
+            "receivedAt": null,
+            "ageMs": null,
+            "valid": false,
+            "reason": "Not received"
+          },
+          "airspeedKt": {
+            "source": "Not received",
+            "receivedAt": null,
+            "ageMs": null,
+            "valid": false,
+            "reason": "Not received"
+          },
+          "groundspeedKt": {
+            "source": "Not received",
+            "receivedAt": null,
+            "ageMs": null,
+            "valid": false,
+            "reason": "Not received"
+          },
+          "headingDeg": {
+            "source": "Not received",
+            "receivedAt": null,
+            "ageMs": null,
+            "valid": false,
+            "reason": "Not received"
+          },
+          "trackDeg": {
+            "source": "Not received",
+            "receivedAt": null,
+            "ageMs": null,
+            "valid": false,
+            "reason": "Not received"
+          },
+          "altitudeFt": {
+            "source": "Not received",
+            "receivedAt": null,
+            "ageMs": null,
+            "valid": false,
+            "reason": "Not received"
+          },
+          "verticalSpeedFpm": {
+            "source": "Not received",
+            "receivedAt": null,
+            "ageMs": null,
+            "valid": false,
+            "reason": "Not received"
+          },
+          "latitude": {
+            "source": "Not received",
+            "receivedAt": null,
+            "ageMs": null,
+            "valid": false,
+            "reason": "Not received"
+          },
+          "longitude": {
+            "source": "Not received",
+            "receivedAt": null,
+            "ageMs": null,
+            "valid": false,
+            "reason": "Not received"
+          },
+          "globalAltitudeM": {
+            "source": "Not received",
+            "receivedAt": null,
+            "ageMs": null,
+            "valid": false,
+            "reason": "Not received"
+          },
+          "gpsAltitudeM": {
+            "source": "Not received",
+            "receivedAt": null,
+            "ageMs": null,
+            "valid": false,
+            "reason": "Not received"
+          },
+          "relativeAltitudeM": {
+            "source": "Not received",
+            "receivedAt": null,
+            "ageMs": null,
+            "valid": false,
+            "reason": "Not received"
+          },
+          "fixType": {
+            "source": "Not received",
+            "receivedAt": null,
+            "ageMs": null,
+            "valid": false,
+            "reason": "Not received"
+          },
+          "satellites": {
+            "source": "Not received",
+            "receivedAt": null,
+            "ageMs": null,
+            "valid": false,
+            "reason": "Not received"
+          },
+          "batteryV": {
+            "source": "Not received",
+            "receivedAt": null,
+            "ageMs": null,
+            "valid": false,
+            "reason": "Not received"
+          },
+          "currentA": {
+            "source": "Not received",
+            "receivedAt": null,
+            "ageMs": null,
+            "valid": false,
+            "reason": "Not received"
+          },
+          "batteryPercent": {
+            "source": "Not received",
+            "receivedAt": null,
+            "ageMs": null,
+            "valid": false,
+            "reason": "Not received"
+          },
+          "throttlePercent": {
+            "source": "Not received",
+            "receivedAt": null,
+            "ageMs": null,
+            "valid": false,
+            "reason": "Not received"
+          },
+          "mode": {
+            "source": "HEARTBEAT",
+            "receivedAt": 1788801966392,
+            "ageMs": 362,
+            "valid": true
+          },
+          "customMode": {
+            "source": "HEARTBEAT",
+            "receivedAt": 1788801966392,
+            "ageMs": 362,
+            "valid": true
+          },
+          "armed": {
+            "source": "HEARTBEAT",
+            "receivedAt": 1788801966392,
+            "ageMs": 362,
+            "valid": true
+          },
+          "navRollDeg": {
+            "source": "Not received",
+            "receivedAt": null,
+            "ageMs": null,
+            "valid": false,
+            "reason": "Not received"
+          },
+          "navPitchDeg": {
+            "source": "Not received",
+            "receivedAt": null,
+            "ageMs": null,
+            "valid": false,
+            "reason": "Not received"
+          }
+        }
+      },
+      "mission": {
+        "revision": null,
+        "items": [],
+        "synchronization": "unknown",
+        "currentSeq": null,
+        "currentFresh": false,
+        "reachedSeq": null,
+        "transfer": null,
+        "message": "No mission downloaded"
+      }
+    },
+    {
+      "action": "mission-download",
+      "operation": {
+        "id": "380a1b84-850d-491e-af01-6818372efa88",
+        "sessionId": "local-sitl-smoke",
+        "vehicleGeneration": "fb1a79bd-fb23-4bc4-b0a9-5d117cc6ab7f",
+        "action": {
+          "kind": "mission-download"
+        },
+        "createdAt": 1788801975161,
+        "sentAt": 1788801975161,
+        "updatedAt": 1788801975165,
+        "state": "observed",
+        "ack": null,
+        "effect": {
+          "state": "observed",
+          "at": 1788801975165,
+          "message": "Complete vehicle mission downloaded"
+        },
+        "message": "Complete vehicle mission downloaded",
+        "steps": []
+      },
+      "telemetry": {
+        "rollDeg": 0.03682551185886588,
+        "pitchDeg": 1.1454290203917794,
+        "yawRateDegS": -0.03714908540068862,
+        "airspeedKt": 1.451873367342523,
+        "groundspeedKt": 0.8295661172393053,
+        "headingDeg": 91,
+        "trackDeg": null,
+        "altitudeFt": 0.03280839821680614,
+        "verticalSpeedFpm": 0,
+        "latitude": 35.9607874,
+        "longitude": -83.3668697,
+        "globalAltitudeM": 0.01,
+        "gpsAltitudeM": 315.74,
+        "relativeAltitudeM": 0.014,
+        "fixType": 6,
+        "satellites": 10,
+        "batteryV": 12.6,
+        "currentA": 0,
+        "batteryPercent": 99,
+        "throttlePercent": 0,
+        "mode": "MANUAL",
+        "customMode": 0,
+        "armed": false,
+        "navRollDeg": null,
+        "navPitchDeg": null,
+        "source": "MAVLink",
+        "ready": true,
+        "ageMs": 55,
+        "fdReady": false,
+        "navController": null,
+        "positionTarget": null,
+        "homePosition": null,
+        "fields": {
+          "rollDeg": {
+            "source": "ATTITUDE",
+            "receivedAt": 1788801975207,
+            "ageMs": 55,
+            "valid": true
+          },
+          "pitchDeg": {
+            "source": "ATTITUDE",
+            "receivedAt": 1788801975207,
+            "ageMs": 55,
+            "valid": true
+          },
+          "yawRateDegS": {
+            "source": "ATTITUDE",
+            "receivedAt": 1788801975207,
+            "ageMs": 55,
+            "valid": true
+          },
+          "airspeedKt": {
+            "source": "VFR_HUD (estimated MSL altitude)",
+            "receivedAt": 1788801975207,
+            "ageMs": 55,
+            "valid": true
+          },
+          "groundspeedKt": {
+            "source": "VFR_HUD (estimated MSL altitude)",
+            "receivedAt": 1788801975207,
+            "ageMs": 55,
+            "valid": true
+          },
+          "headingDeg": {
+            "source": "VFR_HUD (estimated MSL altitude)",
+            "receivedAt": 1788801975207,
+            "ageMs": 55,
+            "valid": true
+          },
+          "trackDeg": {
+            "source": "GLOBAL_POSITION_INT (fused position)",
+            "receivedAt": 1788801975207,
+            "ageMs": 55,
+            "valid": false,
+            "reason": "Invalid or stale sample"
+          },
+          "altitudeFt": {
+            "source": "VFR_HUD (estimated MSL altitude)",
+            "receivedAt": 1788801975207,
+            "ageMs": 55,
+            "valid": true
+          },
+          "verticalSpeedFpm": {
+            "source": "VFR_HUD (estimated MSL altitude)",
+            "receivedAt": 1788801975207,
+            "ageMs": 55,
+            "valid": true
+          },
+          "latitude": {
+            "source": "GLOBAL_POSITION_INT (fused position)",
+            "receivedAt": 1788801975207,
+            "ageMs": 55,
+            "valid": true
+          },
+          "longitude": {
+            "source": "GLOBAL_POSITION_INT (fused position)",
+            "receivedAt": 1788801975207,
+            "ageMs": 55,
+            "valid": true
+          },
+          "globalAltitudeM": {
+            "source": "GLOBAL_POSITION_INT (fused position)",
+            "receivedAt": 1788801975207,
+            "ageMs": 55,
+            "valid": true
+          },
+          "gpsAltitudeM": {
+            "source": "GPS_RAW_INT (MSL altitude)",
+            "receivedAt": 1788801975067,
+            "ageMs": 195,
+            "valid": true
+          },
+          "relativeAltitudeM": {
+            "source": "GLOBAL_POSITION_INT (fused position)",
+            "receivedAt": 1788801975207,
+            "ageMs": 55,
+            "valid": true
+          },
+          "fixType": {
+            "source": "GPS_RAW_INT (MSL altitude)",
+            "receivedAt": 1788801975067,
+            "ageMs": 195,
+            "valid": true
+          },
+          "satellites": {
+            "source": "GPS_RAW_INT (MSL altitude)",
+            "receivedAt": 1788801975067,
+            "ageMs": 195,
+            "valid": true
+          },
+          "batteryV": {
+            "source": "SYS_STATUS",
+            "receivedAt": 1788801975067,
+            "ageMs": 195,
+            "valid": true
+          },
+          "currentA": {
+            "source": "SYS_STATUS",
+            "receivedAt": 1788801975067,
+            "ageMs": 195,
+            "valid": true
+          },
+          "batteryPercent": {
+            "source": "SYS_STATUS",
+            "receivedAt": 1788801975067,
+            "ageMs": 195,
+            "valid": true
+          },
+          "throttlePercent": {
+            "source": "VFR_HUD (estimated MSL altitude)",
+            "receivedAt": 1788801975207,
+            "ageMs": 55,
+            "valid": true
+          },
+          "mode": {
+            "source": "HEARTBEAT",
+            "receivedAt": 1788801974407,
+            "ageMs": 855,
+            "valid": true
+          },
+          "customMode": {
+            "source": "HEARTBEAT",
+            "receivedAt": 1788801974407,
+            "ageMs": 855,
+            "valid": true
+          },
+          "armed": {
+            "source": "HEARTBEAT",
+            "receivedAt": 1788801974407,
+            "ageMs": 855,
+            "valid": true
+          },
+          "navRollDeg": {
+            "source": "Not received",
+            "receivedAt": null,
+            "ageMs": null,
+            "valid": false,
+            "reason": "Not received"
+          },
+          "navPitchDeg": {
+            "source": "Not received",
+            "receivedAt": null,
+            "ageMs": null,
+            "valid": false,
+            "reason": "Not received"
+          }
+        }
+      },
+      "mission": {
+        "revision": "4f53cda18c2baa0c0354bb5f",
+        "items": [],
+        "synchronization": "verified",
+        "currentSeq": 0,
+        "currentFresh": true,
+        "reachedSeq": null,
+        "transfer": null,
+        "message": "Vehicle mission downloaded and verified"
+      }
+    },
+    {
+      "action": "mission-upload",
+      "operation": {
+        "id": "74e3ca6d-399f-4ce3-8b48-8617d79cd2b7",
+        "sessionId": "local-sitl-smoke",
+        "vehicleGeneration": "fb1a79bd-fb23-4bc4-b0a9-5d117cc6ab7f",
+        "action": {
+          "kind": "mission-upload",
+          "itemCount": 3,
+          "revision": "9123621c1d4086bc4b4a04c3"
+        },
+        "createdAt": 1788801975263,
+        "sentAt": 1788801975264,
+        "updatedAt": 1788801975405,
+        "state": "observed",
+        "ack": {
+          "command": 44,
+          "result": 0,
+          "progress": null,
+          "at": 1788801975324
+        },
+        "effect": {
+          "state": "observed",
+          "at": 1788801975405,
+          "message": "Mission accepted and downloaded copy verified; home is the actual vehicle home"
+        },
+        "message": "Mission accepted and downloaded copy verified; home is the actual vehicle home",
+        "steps": []
+      },
+      "telemetry": {
+        "rollDeg": -0.007207724708084565,
+        "pitchDeg": 0.4736843978326682,
+        "yawRateDegS": -0.030148354944837114,
+        "airspeedKt": 0.7782013511554707,
+        "groundspeedKt": 0.18132144251343454,
+        "headingDeg": 90,
+        "trackDeg": null,
+        "altitudeFt": 0.6889763564418884,
+        "verticalSpeedFpm": 0,
+        "latitude": 35.9607874,
+        "longitude": -83.3668697,
+        "globalAltitudeM": 0.21,
+        "gpsAltitudeM": 315.74,
+        "relativeAltitudeM": 0.211,
+        "fixType": 6,
+        "satellites": 10,
+        "batteryV": 12.6,
+        "currentA": 0,
+        "batteryPercent": 99,
+        "throttlePercent": 0,
+        "mode": "MANUAL",
+        "customMode": 0,
+        "armed": false,
+        "navRollDeg": null,
+        "navPitchDeg": null,
+        "source": "MAVLink",
+        "ready": true,
+        "ageMs": 61,
+        "fdReady": false,
+        "navController": null,
+        "positionTarget": null,
+        "homePosition": {
+          "lat": 35.9607874,
+          "lon": -83.3668697,
+          "alt": 315.74
+        },
+        "fields": {
+          "rollDeg": {
+            "source": "ATTITUDE",
+            "receivedAt": 1788801975404,
+            "ageMs": 61,
+            "valid": true
+          },
+          "pitchDeg": {
+            "source": "ATTITUDE",
+            "receivedAt": 1788801975404,
+            "ageMs": 61,
+            "valid": true
+          },
+          "yawRateDegS": {
+            "source": "ATTITUDE",
+            "receivedAt": 1788801975404,
+            "ageMs": 61,
+            "valid": true
+          },
+          "airspeedKt": {
+            "source": "VFR_HUD (estimated MSL altitude)",
+            "receivedAt": 1788801975404,
+            "ageMs": 61,
+            "valid": true
+          },
+          "groundspeedKt": {
+            "source": "VFR_HUD (estimated MSL altitude)",
+            "receivedAt": 1788801975404,
+            "ageMs": 61,
+            "valid": true
+          },
+          "headingDeg": {
+            "source": "VFR_HUD (estimated MSL altitude)",
+            "receivedAt": 1788801975404,
+            "ageMs": 61,
+            "valid": true
+          },
+          "trackDeg": {
+            "source": "GLOBAL_POSITION_INT (fused position)",
+            "receivedAt": 1788801975404,
+            "ageMs": 61,
+            "valid": false,
+            "reason": "Invalid or stale sample"
+          },
+          "altitudeFt": {
+            "source": "VFR_HUD (estimated MSL altitude)",
+            "receivedAt": 1788801975404,
+            "ageMs": 61,
+            "valid": true
+          },
+          "verticalSpeedFpm": {
+            "source": "VFR_HUD (estimated MSL altitude)",
+            "receivedAt": 1788801975404,
+            "ageMs": 61,
+            "valid": true
+          },
+          "latitude": {
+            "source": "GLOBAL_POSITION_INT (fused position)",
+            "receivedAt": 1788801975404,
+            "ageMs": 61,
+            "valid": true
+          },
+          "longitude": {
+            "source": "GLOBAL_POSITION_INT (fused position)",
+            "receivedAt": 1788801975404,
+            "ageMs": 61,
+            "valid": true
+          },
+          "globalAltitudeM": {
+            "source": "GLOBAL_POSITION_INT (fused position)",
+            "receivedAt": 1788801975404,
+            "ageMs": 61,
+            "valid": true
+          },
+          "gpsAltitudeM": {
+            "source": "GPS_RAW_INT (MSL altitude)",
+            "receivedAt": 1788801975067,
+            "ageMs": 398,
+            "valid": true
+          },
+          "relativeAltitudeM": {
+            "source": "GLOBAL_POSITION_INT (fused position)",
+            "receivedAt": 1788801975404,
+            "ageMs": 61,
+            "valid": true
+          },
+          "fixType": {
+            "source": "GPS_RAW_INT (MSL altitude)",
+            "receivedAt": 1788801975067,
+            "ageMs": 398,
+            "valid": true
+          },
+          "satellites": {
+            "source": "GPS_RAW_INT (MSL altitude)",
+            "receivedAt": 1788801975067,
+            "ageMs": 398,
+            "valid": true
+          },
+          "batteryV": {
+            "source": "SYS_STATUS",
+            "receivedAt": 1788801975067,
+            "ageMs": 398,
+            "valid": true
+          },
+          "currentA": {
+            "source": "SYS_STATUS",
+            "receivedAt": 1788801975067,
+            "ageMs": 398,
+            "valid": true
+          },
+          "batteryPercent": {
+            "source": "SYS_STATUS",
+            "receivedAt": 1788801975067,
+            "ageMs": 398,
+            "valid": true
+          },
+          "throttlePercent": {
+            "source": "VFR_HUD (estimated MSL altitude)",
+            "receivedAt": 1788801975404,
+            "ageMs": 61,
+            "valid": true
+          },
+          "mode": {
+            "source": "HEARTBEAT",
+            "receivedAt": 1788801975404,
+            "ageMs": 61,
+            "valid": true
+          },
+          "customMode": {
+            "source": "HEARTBEAT",
+            "receivedAt": 1788801975404,
+            "ageMs": 61,
+            "valid": true
+          },
+          "armed": {
+            "source": "HEARTBEAT",
+            "receivedAt": 1788801975404,
+            "ageMs": 61,
+            "valid": true
+          },
+          "navRollDeg": {
+            "source": "Not received",
+            "receivedAt": null,
+            "ageMs": null,
+            "valid": false,
+            "reason": "Not received"
+          },
+          "navPitchDeg": {
+            "source": "Not received",
+            "receivedAt": null,
+            "ageMs": null,
+            "valid": false,
+            "reason": "Not received"
+          }
+        }
+      },
+      "mission": {
+        "revision": "ee05b31d91ef5a0f603c1e18",
+        "items": [
+          {
+            "seq": 0,
+            "command": 16,
+            "frame": 0,
+            "current": false,
+            "autocontinue": true,
+            "params": [
+              0,
+              0,
+              0,
+              0
+            ],
+            "x": 35.9607874,
+            "y": -83.3668697,
+            "z": 315.74
+          },
+          {
+            "seq": 1,
+            "command": 22,
+            "frame": 3,
+            "current": false,
+            "autocontinue": true,
+            "params": [
+              0,
+              0,
+              0,
+              0
+            ],
+            "x": 0,
+            "y": 0,
+            "z": 100
+          },
+          {
+            "seq": 2,
+            "command": 16,
+            "frame": 3,
+            "current": false,
+            "autocontinue": true,
+            "params": [
+              0,
+              0,
+              0,
+              0
+            ],
+            "x": 35.9637874,
+            "y": -83.3628696,
+            "z": 100
+          }
+        ],
+        "synchronization": "verified",
+        "currentSeq": 0,
+        "currentFresh": true,
+        "reachedSeq": null,
+        "transfer": null,
+        "message": "Vehicle mission downloaded and verified"
+      }
+    },
+    {
+      "action": "arm",
+      "operation": {
+        "id": "1da3d5f9-7bca-4dc1-a648-a4dc4c5da50f",
+        "sessionId": "local-sitl-smoke",
+        "vehicleGeneration": "fb1a79bd-fb23-4bc4-b0a9-5d117cc6ab7f",
+        "action": {
+          "kind": "arm",
+          "armed": true
+        },
+        "createdAt": 1788802010468,
+        "sentAt": 1788802010468,
+        "updatedAt": 1788802011422,
+        "state": "observed",
+        "ack": {
+          "command": 400,
+          "result": 0,
+          "progress": 0,
+          "at": 1788802010503
+        },
+        "effect": {
+          "state": "observed",
+          "at": 1788802011422,
+          "message": "Requested aircraft state observed"
+        },
+        "message": "Requested aircraft state observed",
+        "steps": [
+          {
+            "action": "Arm",
+            "state": "observed",
+            "message": "Requested aircraft state observed"
+          }
+        ]
+      },
+      "telemetry": {
+        "rollDeg": 0.05644639751838449,
+        "pitchDeg": 0.04164974984185059,
+        "yawRateDegS": 0.011812141823822613,
+        "airspeedKt": 1.0976927069299396,
+        "groundspeedKt": 0.030743709280604086,
+        "headingDeg": 89,
+        "trackDeg": null,
+        "altitudeFt": 1035.9251968503863,
+        "verticalSpeedFpm": 3.367661329822322,
+        "latitude": 35.9607874,
+        "longitude": -83.3668698,
+        "globalAltitudeM": 315.75,
+        "gpsAltitudeM": 315.74,
+        "relativeAltitudeM": -0.167,
+        "fixType": 6,
+        "satellites": 10,
+        "batteryV": 12.6,
+        "currentA": 0,
+        "batteryPercent": 99,
+        "throttlePercent": 0,
+        "mode": "MANUAL",
+        "customMode": 0,
+        "armed": true,
+        "navRollDeg": null,
+        "navPitchDeg": null,
+        "source": "MAVLink",
+        "ready": true,
+        "ageMs": 55,
+        "fdReady": false,
+        "navController": null,
+        "positionTarget": null,
+        "homePosition": {
+          "lat": 35.9607874,
+          "lon": -83.3668698,
+          "alt": 315.92
+        },
+        "fields": {
+          "rollDeg": {
+            "source": "ATTITUDE",
+            "receivedAt": 1788802011422,
+            "ageMs": 55,
+            "valid": true
+          },
+          "pitchDeg": {
+            "source": "ATTITUDE",
+            "receivedAt": 1788802011422,
+            "ageMs": 55,
+            "valid": true
+          },
+          "yawRateDegS": {
+            "source": "ATTITUDE",
+            "receivedAt": 1788802011422,
+            "ageMs": 55,
+            "valid": true
+          },
+          "airspeedKt": {
+            "source": "VFR_HUD (estimated MSL altitude)",
+            "receivedAt": 1788802011422,
+            "ageMs": 55,
+            "valid": true
+          },
+          "groundspeedKt": {
+            "source": "VFR_HUD (estimated MSL altitude)",
+            "receivedAt": 1788802011422,
+            "ageMs": 55,
+            "valid": true
+          },
+          "headingDeg": {
+            "source": "VFR_HUD (estimated MSL altitude)",
+            "receivedAt": 1788802011422,
+            "ageMs": 55,
+            "valid": true
+          },
+          "trackDeg": {
+            "source": "GLOBAL_POSITION_INT (fused position)",
+            "receivedAt": 1788802011422,
+            "ageMs": 55,
+            "valid": false,
+            "reason": "Invalid or stale sample"
+          },
+          "altitudeFt": {
+            "source": "VFR_HUD (estimated MSL altitude)",
+            "receivedAt": 1788802011422,
+            "ageMs": 55,
+            "valid": true
+          },
+          "verticalSpeedFpm": {
+            "source": "VFR_HUD (estimated MSL altitude)",
+            "receivedAt": 1788802011422,
+            "ageMs": 55,
+            "valid": true
+          },
+          "latitude": {
+            "source": "GLOBAL_POSITION_INT (fused position)",
+            "receivedAt": 1788802011422,
+            "ageMs": 55,
+            "valid": true
+          },
+          "longitude": {
+            "source": "GLOBAL_POSITION_INT (fused position)",
+            "receivedAt": 1788802011422,
+            "ageMs": 55,
+            "valid": true
+          },
+          "globalAltitudeM": {
+            "source": "GLOBAL_POSITION_INT (fused position)",
+            "receivedAt": 1788802011422,
+            "ageMs": 55,
+            "valid": true
+          },
+          "gpsAltitudeM": {
+            "source": "GPS_RAW_INT (MSL altitude)",
+            "receivedAt": 1788802011082,
+            "ageMs": 395,
+            "valid": true
+          },
+          "relativeAltitudeM": {
+            "source": "GLOBAL_POSITION_INT (fused position)",
+            "receivedAt": 1788802011422,
+            "ageMs": 55,
+            "valid": true
+          },
+          "fixType": {
+            "source": "GPS_RAW_INT (MSL altitude)",
+            "receivedAt": 1788802011082,
+            "ageMs": 395,
+            "valid": true
+          },
+          "satellites": {
+            "source": "GPS_RAW_INT (MSL altitude)",
+            "receivedAt": 1788802011082,
+            "ageMs": 395,
+            "valid": true
+          },
+          "batteryV": {
+            "source": "SYS_STATUS",
+            "receivedAt": 1788802011082,
+            "ageMs": 395,
+            "valid": true
+          },
+          "currentA": {
+            "source": "SYS_STATUS",
+            "receivedAt": 1788802011082,
+            "ageMs": 395,
+            "valid": true
+          },
+          "batteryPercent": {
+            "source": "SYS_STATUS",
+            "receivedAt": 1788802011082,
+            "ageMs": 395,
+            "valid": true
+          },
+          "throttlePercent": {
+            "source": "VFR_HUD (estimated MSL altitude)",
+            "receivedAt": 1788802011422,
+            "ageMs": 55,
+            "valid": true
+          },
+          "mode": {
+            "source": "HEARTBEAT",
+            "receivedAt": 1788802011422,
+            "ageMs": 55,
+            "valid": true
+          },
+          "customMode": {
+            "source": "HEARTBEAT",
+            "receivedAt": 1788802011422,
+            "ageMs": 55,
+            "valid": true
+          },
+          "armed": {
+            "source": "HEARTBEAT",
+            "receivedAt": 1788802011422,
+            "ageMs": 55,
+            "valid": true
+          },
+          "navRollDeg": {
+            "source": "Not received",
+            "receivedAt": null,
+            "ageMs": null,
+            "valid": false,
+            "reason": "Not received"
+          },
+          "navPitchDeg": {
+            "source": "Not received",
+            "receivedAt": null,
+            "ageMs": null,
+            "valid": false,
+            "reason": "Not received"
+          }
+        }
+      },
+      "mission": {
+        "revision": "9bff7a908e7006587f58bc79",
+        "items": [
+          {
+            "seq": 0,
+            "command": 16,
+            "frame": 0,
+            "current": false,
+            "autocontinue": true,
+            "params": [
+              0,
+              0,
+              0,
+              0
+            ],
+            "x": 35.9607874,
+            "y": -83.3668698,
+            "z": 315.92
+          },
+          {
+            "seq": 1,
+            "command": 22,
+            "frame": 3,
+            "current": false,
+            "autocontinue": true,
+            "params": [
+              0,
+              0,
+              0,
+              0
+            ],
+            "x": 0,
+            "y": 0,
+            "z": 100
+          },
+          {
+            "seq": 2,
+            "command": 16,
+            "frame": 3,
+            "current": false,
+            "autocontinue": true,
+            "params": [
+              0,
+              0,
+              0,
+              0
+            ],
+            "x": 35.9637874,
+            "y": -83.3628696,
+            "z": 100
+          }
+        ],
+        "synchronization": "verified",
+        "currentSeq": 0,
+        "currentFresh": true,
+        "reachedSeq": null,
+        "transfer": null,
+        "message": "Vehicle mission downloaded and verified"
+      }
+    },
+    {
+      "action": "continue-auto",
+      "operation": {
+        "id": "309ccda3-3a91-4ce5-8a6a-6de0f3bb939d",
+        "sessionId": "local-sitl-smoke",
+        "vehicleGeneration": "fb1a79bd-fb23-4bc4-b0a9-5d117cc6ab7f",
+        "action": {
+          "kind": "continue-auto",
+          "seq": 1,
+          "autoMode": 10
+        },
+        "createdAt": 1788802011478,
+        "sentAt": 1788802011479,
+        "updatedAt": 1788802011503,
+        "state": "observed",
+        "ack": {
+          "command": 176,
+          "result": 0,
+          "progress": 0,
+          "at": 1788802011502
+        },
+        "effect": {
+          "state": "observed",
+          "at": 1788802011503,
+          "message": "Requested aircraft state observed"
+        },
+        "message": "Requested aircraft state observed",
+        "steps": [
+          {
+            "action": "Current mission item 1",
+            "state": "observed",
+            "message": "Requested aircraft state observed"
+          },
+          {
+            "action": "Mode AUTO",
+            "state": "observed",
+            "message": "Requested aircraft state observed"
+          }
+        ]
+      },
+      "telemetry": {
+        "rollDeg": 0.05657126191414878,
+        "pitchDeg": 0.0420784642741879,
+        "yawRateDegS": 0.006738762018691106,
+        "airspeedKt": 1.613128584352988,
+        "groundspeedKt": 0.028549433840724284,
+        "headingDeg": 89,
+        "trackDeg": null,
+        "altitudeFt": 1035.9251968503863,
+        "verticalSpeedFpm": 3.315203669151027,
+        "latitude": 35.9607874,
+        "longitude": -83.3668698,
+        "globalAltitudeM": 315.75,
+        "gpsAltitudeM": 315.74,
+        "relativeAltitudeM": -0.167,
+        "fixType": 6,
+        "satellites": 10,
+        "batteryV": 12.6,
+        "currentA": 0,
+        "batteryPercent": 99,
+        "throttlePercent": 0,
+        "mode": "AUTO",
+        "customMode": 10,
+        "armed": true,
+        "navRollDeg": 0,
+        "navPitchDeg": 3.990000009536743,
+        "source": "MAVLink",
+        "ready": true,
+        "ageMs": 55,
+        "fdReady": true,
+        "navController": {
+          "crossTrackM": 0,
+          "navBearingDeg": 0,
+          "targetBearingDeg": 0,
+          "waypointDistanceM": 0,
+          "missionSeq": 1,
+          "mode": "AUTO",
+          "autopilotId": 3,
+          "vehicleType": 1,
+          "position": {
+            "latitude": 35.9607874,
+            "longitude": -83.3668698
+          },
+          "positionTarget": null,
+          "ageMs": 55
+        },
+        "positionTarget": null,
+        "homePosition": {
+          "lat": 35.9607874,
+          "lon": -83.3668698,
+          "alt": 315.92
+        },
+        "fields": {
+          "rollDeg": {
+            "source": "ATTITUDE",
+            "receivedAt": 1788802011525,
+            "ageMs": 55,
+            "valid": true
+          },
+          "pitchDeg": {
+            "source": "ATTITUDE",
+            "receivedAt": 1788802011525,
+            "ageMs": 55,
+            "valid": true
+          },
+          "yawRateDegS": {
+            "source": "ATTITUDE",
+            "receivedAt": 1788802011525,
+            "ageMs": 55,
+            "valid": true
+          },
+          "airspeedKt": {
+            "source": "VFR_HUD (estimated MSL altitude)",
+            "receivedAt": 1788802011525,
+            "ageMs": 55,
+            "valid": true
+          },
+          "groundspeedKt": {
+            "source": "VFR_HUD (estimated MSL altitude)",
+            "receivedAt": 1788802011525,
+            "ageMs": 55,
+            "valid": true
+          },
+          "headingDeg": {
+            "source": "VFR_HUD (estimated MSL altitude)",
+            "receivedAt": 1788802011525,
+            "ageMs": 55,
+            "valid": true
+          },
+          "trackDeg": {
+            "source": "GLOBAL_POSITION_INT (fused position)",
+            "receivedAt": 1788802011525,
+            "ageMs": 55,
+            "valid": false,
+            "reason": "Invalid or stale sample"
+          },
+          "altitudeFt": {
+            "source": "VFR_HUD (estimated MSL altitude)",
+            "receivedAt": 1788802011525,
+            "ageMs": 55,
+            "valid": true
+          },
+          "verticalSpeedFpm": {
+            "source": "VFR_HUD (estimated MSL altitude)",
+            "receivedAt": 1788802011525,
+            "ageMs": 55,
+            "valid": true
+          },
+          "latitude": {
+            "source": "GLOBAL_POSITION_INT (fused position)",
+            "receivedAt": 1788802011525,
+            "ageMs": 55,
+            "valid": true
+          },
+          "longitude": {
+            "source": "GLOBAL_POSITION_INT (fused position)",
+            "receivedAt": 1788802011525,
+            "ageMs": 55,
+            "valid": true
+          },
+          "globalAltitudeM": {
+            "source": "GLOBAL_POSITION_INT (fused position)",
+            "receivedAt": 1788802011525,
+            "ageMs": 55,
+            "valid": true
+          },
+          "gpsAltitudeM": {
+            "source": "GPS_RAW_INT (MSL altitude)",
+            "receivedAt": 1788802011082,
+            "ageMs": 498,
+            "valid": true
+          },
+          "relativeAltitudeM": {
+            "source": "GLOBAL_POSITION_INT (fused position)",
+            "receivedAt": 1788802011525,
+            "ageMs": 55,
+            "valid": true
+          },
+          "fixType": {
+            "source": "GPS_RAW_INT (MSL altitude)",
+            "receivedAt": 1788802011082,
+            "ageMs": 498,
+            "valid": true
+          },
+          "satellites": {
+            "source": "GPS_RAW_INT (MSL altitude)",
+            "receivedAt": 1788802011082,
+            "ageMs": 498,
+            "valid": true
+          },
+          "batteryV": {
+            "source": "SYS_STATUS",
+            "receivedAt": 1788802011082,
+            "ageMs": 498,
+            "valid": true
+          },
+          "currentA": {
+            "source": "SYS_STATUS",
+            "receivedAt": 1788802011082,
+            "ageMs": 498,
+            "valid": true
+          },
+          "batteryPercent": {
+            "source": "SYS_STATUS",
+            "receivedAt": 1788802011082,
+            "ageMs": 498,
+            "valid": true
+          },
+          "throttlePercent": {
+            "source": "VFR_HUD (estimated MSL altitude)",
+            "receivedAt": 1788802011525,
+            "ageMs": 55,
+            "valid": true
+          },
+          "mode": {
+            "source": "HEARTBEAT",
+            "receivedAt": 1788802011503,
+            "ageMs": 77,
+            "valid": true
+          },
+          "customMode": {
+            "source": "HEARTBEAT",
+            "receivedAt": 1788802011503,
+            "ageMs": 77,
+            "valid": true
+          },
+          "armed": {
+            "source": "HEARTBEAT",
+            "receivedAt": 1788802011503,
+            "ageMs": 77,
+            "valid": true
+          },
+          "navRollDeg": {
+            "source": "NAV_CONTROLLER_OUTPUT",
+            "receivedAt": 1788802011525,
+            "ageMs": 55,
+            "valid": true
+          },
+          "navPitchDeg": {
+            "source": "NAV_CONTROLLER_OUTPUT",
+            "receivedAt": 1788802011525,
+            "ageMs": 55,
+            "valid": true
+          }
+        }
+      },
+      "mission": {
+        "revision": "9bff7a908e7006587f58bc79",
+        "items": [
+          {
+            "seq": 0,
+            "command": 16,
+            "frame": 0,
+            "current": false,
+            "autocontinue": true,
+            "params": [
+              0,
+              0,
+              0,
+              0
+            ],
+            "x": 35.9607874,
+            "y": -83.3668698,
+            "z": 315.92
+          },
+          {
+            "seq": 1,
+            "command": 22,
+            "frame": 3,
+            "current": false,
+            "autocontinue": true,
+            "params": [
+              0,
+              0,
+              0,
+              0
+            ],
+            "x": 0,
+            "y": 0,
+            "z": 100
+          },
+          {
+            "seq": 2,
+            "command": 16,
+            "frame": 3,
+            "current": false,
+            "autocontinue": true,
+            "params": [
+              0,
+              0,
+              0,
+              0
+            ],
+            "x": 35.9637874,
+            "y": -83.3628696,
+            "z": 100
+          }
+        ],
+        "synchronization": "verified",
+        "currentSeq": 1,
+        "currentFresh": true,
+        "reachedSeq": null,
+        "transfer": null,
+        "message": "Vehicle mission downloaded and verified"
+      }
+    },
+    {
+      "action": "AUTO flight observed",
+      "telemetry": {
+        "rollDeg": -0.07902258730386993,
+        "pitchDeg": 18.357221102034593,
+        "yawRateDegS": -0.15308305551593884,
+        "airspeedKt": 50.452694985572904,
+        "groundspeedKt": 48.951214075603325,
+        "headingDeg": 89,
+        "trackDeg": 89.97724552164385,
+        "altitudeFt": 1104.330728686067,
+        "verticalSpeedFpm": 2012.4365964274034,
+        "latitude": 35.9607882,
+        "longitude": -83.3658675,
+        "globalAltitudeM": 336.6,
+        "gpsAltitudeM": 330.42,
+        "relativeAltitudeM": 20.688,
+        "fixType": 6,
+        "satellites": 10,
+        "batteryV": 11.9,
+        "currentA": 47.22,
+        "batteryPercent": 98,
+        "throttlePercent": 100,
+        "mode": "AUTO",
+        "customMode": 10,
+        "armed": true,
+        "navRollDeg": 0,
+        "navPitchDeg": 14.989999771118164,
+        "source": "MAVLink",
+        "ready": true,
+        "ageMs": 28,
+        "fdReady": true,
+        "navController": {
+          "crossTrackM": 0,
+          "navBearingDeg": 89,
+          "targetBearingDeg": 89,
+          "waypointDistanceM": 89,
+          "missionSeq": 1,
+          "mode": "AUTO",
+          "autopilotId": 3,
+          "vehicleType": 1,
+          "position": {
+            "latitude": 35.9607882,
+            "longitude": -83.3658675
+          },
+          "positionTarget": {
+            "lat": 35.9607884,
+            "lon": -83.3668688,
+            "alt": 415.91998291015625,
+            "frame": 0
+          },
+          "ageMs": 28
+        },
+        "positionTarget": {
+          "lat": 35.9607884,
+          "lon": -83.3668688,
+          "alt": 415.91998291015625,
+          "frame": 0,
+          "ageMs": 468
+        },
+        "homePosition": {
+          "lat": 35.9607874,
+          "lon": -83.3668698,
+          "alt": 315.92
+        },
+        "fields": {
+          "rollDeg": {
+            "source": "ATTITUDE",
+            "receivedAt": 1788802017523,
+            "ageMs": 28,
+            "valid": true
+          },
+          "pitchDeg": {
+            "source": "ATTITUDE",
+            "receivedAt": 1788802017523,
+            "ageMs": 28,
+            "valid": true
+          },
+          "yawRateDegS": {
+            "source": "ATTITUDE",
+            "receivedAt": 1788802017523,
+            "ageMs": 28,
+            "valid": true
+          },
+          "airspeedKt": {
+            "source": "VFR_HUD (estimated MSL altitude)",
+            "receivedAt": 1788802017523,
+            "ageMs": 28,
+            "valid": true
+          },
+          "groundspeedKt": {
+            "source": "VFR_HUD (estimated MSL altitude)",
+            "receivedAt": 1788802017523,
+            "ageMs": 28,
+            "valid": true
+          },
+          "headingDeg": {
+            "source": "VFR_HUD (estimated MSL altitude)",
+            "receivedAt": 1788802017523,
+            "ageMs": 28,
+            "valid": true
+          },
+          "trackDeg": {
+            "source": "GLOBAL_POSITION_INT (fused position)",
+            "receivedAt": 1788802017523,
+            "ageMs": 28,
+            "valid": true
+          },
+          "altitudeFt": {
+            "source": "VFR_HUD (estimated MSL altitude)",
+            "receivedAt": 1788802017523,
+            "ageMs": 28,
+            "valid": true
+          },
+          "verticalSpeedFpm": {
+            "source": "VFR_HUD (estimated MSL altitude)",
+            "receivedAt": 1788802017523,
+            "ageMs": 28,
+            "valid": true
+          },
+          "latitude": {
+            "source": "GLOBAL_POSITION_INT (fused position)",
+            "receivedAt": 1788802017523,
+            "ageMs": 28,
+            "valid": true
+          },
+          "longitude": {
+            "source": "GLOBAL_POSITION_INT (fused position)",
+            "receivedAt": 1788802017523,
+            "ageMs": 28,
+            "valid": true
+          },
+          "globalAltitudeM": {
+            "source": "GLOBAL_POSITION_INT (fused position)",
+            "receivedAt": 1788802017523,
+            "ageMs": 28,
+            "valid": true
+          },
+          "gpsAltitudeM": {
+            "source": "GPS_RAW_INT (MSL altitude)",
+            "receivedAt": 1788802017083,
+            "ageMs": 468,
+            "valid": true
+          },
+          "relativeAltitudeM": {
+            "source": "GLOBAL_POSITION_INT (fused position)",
+            "receivedAt": 1788802017523,
+            "ageMs": 28,
+            "valid": true
+          },
+          "fixType": {
+            "source": "GPS_RAW_INT (MSL altitude)",
+            "receivedAt": 1788802017083,
+            "ageMs": 468,
+            "valid": true
+          },
+          "satellites": {
+            "source": "GPS_RAW_INT (MSL altitude)",
+            "receivedAt": 1788802017083,
+            "ageMs": 468,
+            "valid": true
+          },
+          "batteryV": {
+            "source": "SYS_STATUS",
+            "receivedAt": 1788802017083,
+            "ageMs": 468,
+            "valid": true
+          },
+          "currentA": {
+            "source": "SYS_STATUS",
+            "receivedAt": 1788802017083,
+            "ageMs": 468,
+            "valid": true
+          },
+          "batteryPercent": {
+            "source": "SYS_STATUS",
+            "receivedAt": 1788802017083,
+            "ageMs": 468,
+            "valid": true
+          },
+          "throttlePercent": {
+            "source": "VFR_HUD (estimated MSL altitude)",
+            "receivedAt": 1788802017523,
+            "ageMs": 28,
+            "valid": true
+          },
+          "mode": {
+            "source": "HEARTBEAT",
+            "receivedAt": 1788802017404,
+            "ageMs": 147,
+            "valid": true
+          },
+          "customMode": {
+            "source": "HEARTBEAT",
+            "receivedAt": 1788802017404,
+            "ageMs": 147,
+            "valid": true
+          },
+          "armed": {
+            "source": "HEARTBEAT",
+            "receivedAt": 1788802017404,
+            "ageMs": 147,
+            "valid": true
+          },
+          "navRollDeg": {
+            "source": "NAV_CONTROLLER_OUTPUT",
+            "receivedAt": 1788802017523,
+            "ageMs": 28,
+            "valid": true
+          },
+          "navPitchDeg": {
+            "source": "NAV_CONTROLLER_OUTPUT",
+            "receivedAt": 1788802017523,
+            "ageMs": 28,
+            "valid": true
+          }
+        }
+      }
+    },
+    {
+      "action": "goto",
+      "operation": {
+        "id": "3cf7bcb5-0f94-46d3-9b61-d88bbe1b9ea9",
+        "sessionId": "local-sitl-smoke",
+        "vehicleGeneration": "fb1a79bd-fb23-4bc4-b0a9-5d117cc6ab7f",
+        "action": {
+          "kind": "goto",
+          "target": {
+            "lat": 35.9647874,
+            "lon": -83.3638696,
+            "altitudeM": 435.641734,
+            "datum": "msl"
+          }
+        },
+        "createdAt": 1788802017552,
+        "sentAt": 1788802017552,
+        "updatedAt": 1788802017583,
+        "state": "observed",
+        "ack": {
+          "command": 192,
+          "result": 0,
+          "progress": 0,
+          "at": 1788802017559
+        },
+        "effect": {
+          "state": "observed",
+          "at": 1788802017583,
+          "message": "Requested aircraft state observed"
+        },
+        "message": "Requested aircraft state observed",
+        "steps": [
+          {
+            "action": "GUIDED target",
+            "state": "observed",
+            "message": "Requested aircraft state observed"
+          }
+        ]
+      },
+      "telemetry": {
+        "rollDeg": -0.15556799039378055,
+        "pitchDeg": 18.173367777503483,
+        "yawRateDegS": 0.17281739301880975,
+        "airspeedKt": 50.697614616245616,
+        "groundspeedKt": 49.11670973182485,
+        "headingDeg": 89,
+        "trackDeg": 89.97731758649252,
+        "altitudeFt": 1107.6771493345968,
+        "verticalSpeedFpm": 2013.1473466167565,
+        "latitude": 35.9607883,
+        "longitude": -83.3658396,
+        "globalAltitudeM": 337.62,
+        "gpsAltitudeM": 333.94,
+        "relativeAltitudeM": 21.703,
+        "fixType": 6,
+        "satellites": 10,
+        "batteryV": 11.9,
+        "currentA": 47.22,
+        "batteryPercent": 98,
+        "throttlePercent": 99,
+        "mode": "GUIDED",
+        "customMode": 15,
+        "armed": true,
+        "navRollDeg": -57.66999816894531,
+        "navPitchDeg": 13.479999542236328,
+        "source": "MAVLink",
+        "ready": true,
+        "ageMs": 34,
+        "fdReady": true,
+        "navController": {
+          "crossTrackM": 396.813720703125,
+          "navBearingDeg": 21,
+          "targetBearingDeg": 21,
+          "waypointDistanceM": 479,
+          "missionSeq": 1,
+          "mode": "GUIDED",
+          "autopilotId": 3,
+          "vehicleType": 1,
+          "position": {
+            "latitude": 35.9607883,
+            "longitude": -83.3658396
+          },
+          "positionTarget": {
+            "lat": 35.9647874,
+            "lon": -83.3638696,
+            "alt": 435.6399841308594,
+            "frame": 0
+          },
+          "ageMs": 34
+        },
+        "positionTarget": {
+          "lat": 35.9647874,
+          "lon": -83.3638696,
+          "alt": 435.6399841308594,
+          "frame": 0,
+          "ageMs": 70
+        },
+        "homePosition": {
+          "lat": 35.9607874,
+          "lon": -83.3668698,
+          "alt": 315.92
+        },
+        "fields": {
+          "rollDeg": {
+            "source": "ATTITUDE",
+            "receivedAt": 1788802017619,
+            "ageMs": 34,
+            "valid": true
+          },
+          "pitchDeg": {
+            "source": "ATTITUDE",
+            "receivedAt": 1788802017619,
+            "ageMs": 34,
+            "valid": true
+          },
+          "yawRateDegS": {
+            "source": "ATTITUDE",
+            "receivedAt": 1788802017619,
+            "ageMs": 34,
+            "valid": true
+          },
+          "airspeedKt": {
+            "source": "VFR_HUD (estimated MSL altitude)",
+            "receivedAt": 1788802017619,
+            "ageMs": 34,
+            "valid": true
+          },
+          "groundspeedKt": {
+            "source": "VFR_HUD (estimated MSL altitude)",
+            "receivedAt": 1788802017619,
+            "ageMs": 34,
+            "valid": true
+          },
+          "headingDeg": {
+            "source": "VFR_HUD (estimated MSL altitude)",
+            "receivedAt": 1788802017619,
+            "ageMs": 34,
+            "valid": true
+          },
+          "trackDeg": {
+            "source": "GLOBAL_POSITION_INT (fused position)",
+            "receivedAt": 1788802017619,
+            "ageMs": 34,
+            "valid": true
+          },
+          "altitudeFt": {
+            "source": "VFR_HUD (estimated MSL altitude)",
+            "receivedAt": 1788802017619,
+            "ageMs": 34,
+            "valid": true
+          },
+          "verticalSpeedFpm": {
+            "source": "VFR_HUD (estimated MSL altitude)",
+            "receivedAt": 1788802017619,
+            "ageMs": 34,
+            "valid": true
+          },
+          "latitude": {
+            "source": "GLOBAL_POSITION_INT (fused position)",
+            "receivedAt": 1788802017619,
+            "ageMs": 34,
+            "valid": true
+          },
+          "longitude": {
+            "source": "GLOBAL_POSITION_INT (fused position)",
+            "receivedAt": 1788802017619,
+            "ageMs": 34,
+            "valid": true
+          },
+          "globalAltitudeM": {
+            "source": "GLOBAL_POSITION_INT (fused position)",
+            "receivedAt": 1788802017619,
+            "ageMs": 34,
+            "valid": true
+          },
+          "gpsAltitudeM": {
+            "source": "GPS_RAW_INT (MSL altitude)",
+            "receivedAt": 1788802017583,
+            "ageMs": 70,
+            "valid": true
+          },
+          "relativeAltitudeM": {
+            "source": "GLOBAL_POSITION_INT (fused position)",
+            "receivedAt": 1788802017619,
+            "ageMs": 34,
+            "valid": true
+          },
+          "fixType": {
+            "source": "GPS_RAW_INT (MSL altitude)",
+            "receivedAt": 1788802017583,
+            "ageMs": 70,
+            "valid": true
+          },
+          "satellites": {
+            "source": "GPS_RAW_INT (MSL altitude)",
+            "receivedAt": 1788802017583,
+            "ageMs": 70,
+            "valid": true
+          },
+          "batteryV": {
+            "source": "SYS_STATUS",
+            "receivedAt": 1788802017583,
+            "ageMs": 70,
+            "valid": true
+          },
+          "currentA": {
+            "source": "SYS_STATUS",
+            "receivedAt": 1788802017583,
+            "ageMs": 70,
+            "valid": true
+          },
+          "batteryPercent": {
+            "source": "SYS_STATUS",
+            "receivedAt": 1788802017583,
+            "ageMs": 70,
+            "valid": true
+          },
+          "throttlePercent": {
+            "source": "VFR_HUD (estimated MSL altitude)",
+            "receivedAt": 1788802017619,
+            "ageMs": 34,
+            "valid": true
+          },
+          "mode": {
+            "source": "HEARTBEAT",
+            "receivedAt": 1788802017559,
+            "ageMs": 94,
+            "valid": true
+          },
+          "customMode": {
+            "source": "HEARTBEAT",
+            "receivedAt": 1788802017559,
+            "ageMs": 94,
+            "valid": true
+          },
+          "armed": {
+            "source": "HEARTBEAT",
+            "receivedAt": 1788802017559,
+            "ageMs": 94,
+            "valid": true
+          },
+          "navRollDeg": {
+            "source": "NAV_CONTROLLER_OUTPUT",
+            "receivedAt": 1788802017619,
+            "ageMs": 34,
+            "valid": true
+          },
+          "navPitchDeg": {
+            "source": "NAV_CONTROLLER_OUTPUT",
+            "receivedAt": 1788802017619,
+            "ageMs": 34,
+            "valid": true
+          }
+        }
+      },
+      "mission": {
+        "revision": "9bff7a908e7006587f58bc79",
+        "items": [
+          {
+            "seq": 0,
+            "command": 16,
+            "frame": 0,
+            "current": false,
+            "autocontinue": true,
+            "params": [
+              0,
+              0,
+              0,
+              0
+            ],
+            "x": 35.9607874,
+            "y": -83.3668698,
+            "z": 315.92
+          },
+          {
+            "seq": 1,
+            "command": 22,
+            "frame": 3,
+            "current": false,
+            "autocontinue": true,
+            "params": [
+              0,
+              0,
+              0,
+              0
+            ],
+            "x": 0,
+            "y": 0,
+            "z": 100
+          },
+          {
+            "seq": 2,
+            "command": 16,
+            "frame": 3,
+            "current": false,
+            "autocontinue": true,
+            "params": [
+              0,
+              0,
+              0,
+              0
+            ],
+            "x": 35.9637874,
+            "y": -83.3628696,
+            "z": 100
+          }
+        ],
+        "synchronization": "verified",
+        "currentSeq": 1,
+        "currentFresh": true,
+        "reachedSeq": null,
+        "transfer": null,
+        "message": "Vehicle mission downloaded and verified"
+      }
+    },
+    {
+      "action": "heading",
+      "operation": {
+        "id": "07c47da2-1423-4273-aaf2-81ad903db752",
+        "sessionId": "local-sitl-smoke",
+        "vehicleGeneration": "fb1a79bd-fb23-4bc4-b0a9-5d117cc6ab7f",
+        "action": {
+          "kind": "heading",
+          "headingDeg": 0,
+          "reference": "true",
+          "turnAccelerationMps2": 2
+        },
+        "createdAt": 1788802017654,
+        "sentAt": 1788802017654,
+        "updatedAt": 1788802017665,
+        "state": "accepted",
+        "ack": {
+          "command": 43002,
+          "result": 0,
+          "progress": 0,
+          "at": 1788802017665
+        },
+        "effect": {
+          "state": "unavailable",
+          "at": 1788802017665,
+          "message": "Autopilot accepted true-heading request; heading capture is not reported by this protocol"
+        },
+        "message": "Autopilot accepted true-heading request; heading capture is not reported by this protocol",
+        "steps": [
+          {
+            "action": "GUIDED heading",
+            "state": "accepted",
+            "message": "Autopilot accepted true-heading request; heading capture is not reported by this protocol"
+          }
+        ]
+      },
+      "telemetry": {
+        "rollDeg": -1.0616560031696325,
+        "pitchDeg": 17.896560701010376,
+        "yawRateDegS": -4.101257950346795,
+        "airspeedKt": 50.882452764984734,
+        "groundspeedKt": 49.329084145070034,
+        "headingDeg": 89,
+        "trackDeg": 90.04516812585251,
+        "altitudeFt": 1110.990829668012,
+        "verticalSpeedFpm": 1999.3609330785819,
+        "latitude": 35.9607883,
+        "longitude": -83.3658112,
+        "globalAltitudeM": 338.63,
+        "gpsAltitudeM": 333.94,
+        "relativeAltitudeM": 22.718,
+        "fixType": 6,
+        "satellites": 10,
+        "batteryV": 11.9,
+        "currentA": 47.22,
+        "batteryPercent": 98,
+        "throttlePercent": 98,
+        "mode": "GUIDED",
+        "customMode": 15,
+        "armed": true,
+        "navRollDeg": -11.519999504089355,
+        "navPitchDeg": 11.960000038146973,
+        "source": "MAVLink",
+        "ready": true,
+        "ageMs": 29,
+        "fdReady": true,
+        "navController": {
+          "crossTrackM": 395.86212158203125,
+          "navBearingDeg": 21,
+          "targetBearingDeg": 21,
+          "waypointDistanceM": 478,
+          "missionSeq": 1,
+          "mode": "GUIDED",
+          "autopilotId": 3,
+          "vehicleType": 1,
+          "position": {
+            "latitude": 35.9607883,
+            "longitude": -83.3658112
+          },
+          "positionTarget": {
+            "lat": 35.9647874,
+            "lon": -83.3638696,
+            "alt": 435.6399841308594,
+            "frame": 0
+          },
+          "ageMs": 29
+        },
+        "positionTarget": {
+          "lat": 35.9647874,
+          "lon": -83.3638696,
+          "alt": 435.6399841308594,
+          "frame": 0,
+          "ageMs": 171
+        },
+        "homePosition": {
+          "lat": 35.9607874,
+          "lon": -83.3668698,
+          "alt": 315.92
+        },
+        "fields": {
+          "rollDeg": {
+            "source": "ATTITUDE",
+            "receivedAt": 1788802017725,
+            "ageMs": 29,
+            "valid": true
+          },
+          "pitchDeg": {
+            "source": "ATTITUDE",
+            "receivedAt": 1788802017725,
+            "ageMs": 29,
+            "valid": true
+          },
+          "yawRateDegS": {
+            "source": "ATTITUDE",
+            "receivedAt": 1788802017725,
+            "ageMs": 29,
+            "valid": true
+          },
+          "airspeedKt": {
+            "source": "VFR_HUD (estimated MSL altitude)",
+            "receivedAt": 1788802017725,
+            "ageMs": 29,
+            "valid": true
+          },
+          "groundspeedKt": {
+            "source": "VFR_HUD (estimated MSL altitude)",
+            "receivedAt": 1788802017725,
+            "ageMs": 29,
+            "valid": true
+          },
+          "headingDeg": {
+            "source": "VFR_HUD (estimated MSL altitude)",
+            "receivedAt": 1788802017725,
+            "ageMs": 29,
+            "valid": true
+          },
+          "trackDeg": {
+            "source": "GLOBAL_POSITION_INT (fused position)",
+            "receivedAt": 1788802017725,
+            "ageMs": 29,
+            "valid": true
+          },
+          "altitudeFt": {
+            "source": "VFR_HUD (estimated MSL altitude)",
+            "receivedAt": 1788802017725,
+            "ageMs": 29,
+            "valid": true
+          },
+          "verticalSpeedFpm": {
+            "source": "VFR_HUD (estimated MSL altitude)",
+            "receivedAt": 1788802017725,
+            "ageMs": 29,
+            "valid": true
+          },
+          "latitude": {
+            "source": "GLOBAL_POSITION_INT (fused position)",
+            "receivedAt": 1788802017725,
+            "ageMs": 29,
+            "valid": true
+          },
+          "longitude": {
+            "source": "GLOBAL_POSITION_INT (fused position)",
+            "receivedAt": 1788802017725,
+            "ageMs": 29,
+            "valid": true
+          },
+          "globalAltitudeM": {
+            "source": "GLOBAL_POSITION_INT (fused position)",
+            "receivedAt": 1788802017725,
+            "ageMs": 29,
+            "valid": true
+          },
+          "gpsAltitudeM": {
+            "source": "GPS_RAW_INT (MSL altitude)",
+            "receivedAt": 1788802017583,
+            "ageMs": 171,
+            "valid": true
+          },
+          "relativeAltitudeM": {
+            "source": "GLOBAL_POSITION_INT (fused position)",
+            "receivedAt": 1788802017725,
+            "ageMs": 29,
+            "valid": true
+          },
+          "fixType": {
+            "source": "GPS_RAW_INT (MSL altitude)",
+            "receivedAt": 1788802017583,
+            "ageMs": 171,
+            "valid": true
+          },
+          "satellites": {
+            "source": "GPS_RAW_INT (MSL altitude)",
+            "receivedAt": 1788802017583,
+            "ageMs": 171,
+            "valid": true
+          },
+          "batteryV": {
+            "source": "SYS_STATUS",
+            "receivedAt": 1788802017583,
+            "ageMs": 171,
+            "valid": true
+          },
+          "currentA": {
+            "source": "SYS_STATUS",
+            "receivedAt": 1788802017583,
+            "ageMs": 171,
+            "valid": true
+          },
+          "batteryPercent": {
+            "source": "SYS_STATUS",
+            "receivedAt": 1788802017583,
+            "ageMs": 171,
+            "valid": true
+          },
+          "throttlePercent": {
+            "source": "VFR_HUD (estimated MSL altitude)",
+            "receivedAt": 1788802017725,
+            "ageMs": 29,
+            "valid": true
+          },
+          "mode": {
+            "source": "HEARTBEAT",
+            "receivedAt": 1788802017559,
+            "ageMs": 195,
+            "valid": true
+          },
+          "customMode": {
+            "source": "HEARTBEAT",
+            "receivedAt": 1788802017559,
+            "ageMs": 195,
+            "valid": true
+          },
+          "armed": {
+            "source": "HEARTBEAT",
+            "receivedAt": 1788802017559,
+            "ageMs": 195,
+            "valid": true
+          },
+          "navRollDeg": {
+            "source": "NAV_CONTROLLER_OUTPUT",
+            "receivedAt": 1788802017725,
+            "ageMs": 29,
+            "valid": true
+          },
+          "navPitchDeg": {
+            "source": "NAV_CONTROLLER_OUTPUT",
+            "receivedAt": 1788802017725,
+            "ageMs": 29,
+            "valid": true
+          }
+        }
+      },
+      "mission": {
+        "revision": "9bff7a908e7006587f58bc79",
+        "items": [
+          {
+            "seq": 0,
+            "command": 16,
+            "frame": 0,
+            "current": false,
+            "autocontinue": true,
+            "params": [
+              0,
+              0,
+              0,
+              0
+            ],
+            "x": 35.9607874,
+            "y": -83.3668698,
+            "z": 315.92
+          },
+          {
+            "seq": 1,
+            "command": 22,
+            "frame": 3,
+            "current": false,
+            "autocontinue": true,
+            "params": [
+              0,
+              0,
+              0,
+              0
+            ],
+            "x": 0,
+            "y": 0,
+            "z": 100
+          },
+          {
+            "seq": 2,
+            "command": 16,
+            "frame": 3,
+            "current": false,
+            "autocontinue": true,
+            "params": [
+              0,
+              0,
+              0,
+              0
+            ],
+            "x": 35.9637874,
+            "y": -83.3628696,
+            "z": 100
+          }
+        ],
+        "synchronization": "verified",
+        "currentSeq": 1,
+        "currentFresh": true,
+        "reachedSeq": null,
+        "transfer": null,
+        "message": "Vehicle mission downloaded and verified"
+      }
+    },
+    {
+      "action": "one-shot heading measured after 8 seconds",
+      "telemetry": {
+        "rollDeg": -0.4009306902171469,
+        "pitchDeg": -2.7429817725623185,
+        "yawRateDegS": -0.2888523285378358,
+        "airspeedKt": 43.352305863382384,
+        "groundspeedKt": 45.0991846830231,
+        "headingDeg": 0,
+        "trackDeg": 0.12348209225172013,
+        "altitudeFt": 1429.5603033751538,
+        "verticalSpeedFpm": 48.790725432043644,
+        "latitude": 35.9653338,
+        "longitude": -83.3615342,
+        "globalAltitudeM": 435.73,
+        "gpsAltitudeM": 435.63,
+        "relativeAltitudeM": 119.818,
+        "fixType": 6,
+        "satellites": 10,
+        "batteryV": 12.254,
+        "currentA": 11.87,
+        "batteryPercent": 93,
+        "throttlePercent": 49,
+        "mode": "GUIDED",
+        "customMode": 15,
+        "armed": true,
+        "navRollDeg": -0.3100000023841858,
+        "navPitchDeg": -3.43999981880188,
+        "source": "MAVLink",
+        "ready": true,
+        "ageMs": 42,
+        "fdReady": true,
+        "navController": {
+          "crossTrackM": 135.45870971679688,
+          "navBearingDeg": 254,
+          "targetBearingDeg": 254,
+          "waypointDistanceM": 218,
+          "missionSeq": 1,
+          "mode": "GUIDED",
+          "autopilotId": 3,
+          "vehicleType": 1,
+          "position": {
+            "latitude": 35.9653338,
+            "longitude": -83.3615342
+          },
+          "positionTarget": {
+            "lat": 35.9647874,
+            "lon": -83.3638696,
+            "alt": 435.6399841308594,
+            "frame": 0
+          },
+          "ageMs": 103
+        },
+        "positionTarget": {
+          "lat": 35.9647874,
+          "lon": -83.3638696,
+          "alt": 435.6399841308594,
+          "frame": 0,
+          "ageMs": 42
+        },
+        "homePosition": {
+          "lat": 35.9607874,
+          "lon": -83.3668698,
+          "alt": 315.92
+        },
+        "fields": {
+          "rollDeg": {
+            "source": "ATTITUDE",
+            "receivedAt": 1788802049532,
+            "ageMs": 103,
+            "valid": true
+          },
+          "pitchDeg": {
+            "source": "ATTITUDE",
+            "receivedAt": 1788802049532,
+            "ageMs": 103,
+            "valid": true
+          },
+          "yawRateDegS": {
+            "source": "ATTITUDE",
+            "receivedAt": 1788802049532,
+            "ageMs": 103,
+            "valid": true
+          },
+          "airspeedKt": {
+            "source": "VFR_HUD (estimated MSL altitude)",
+            "receivedAt": 1788802049532,
+            "ageMs": 103,
+            "valid": true
+          },
+          "groundspeedKt": {
+            "source": "VFR_HUD (estimated MSL altitude)",
+            "receivedAt": 1788802049532,
+            "ageMs": 103,
+            "valid": true
+          },
+          "headingDeg": {
+            "source": "VFR_HUD (estimated MSL altitude)",
+            "receivedAt": 1788802049532,
+            "ageMs": 103,
+            "valid": true
+          },
+          "trackDeg": {
+            "source": "GLOBAL_POSITION_INT (fused position)",
+            "receivedAt": 1788802049532,
+            "ageMs": 103,
+            "valid": true
+          },
+          "altitudeFt": {
+            "source": "VFR_HUD (estimated MSL altitude)",
+            "receivedAt": 1788802049532,
+            "ageMs": 103,
+            "valid": true
+          },
+          "verticalSpeedFpm": {
+            "source": "VFR_HUD (estimated MSL altitude)",
+            "receivedAt": 1788802049532,
+            "ageMs": 103,
+            "valid": true
+          },
+          "latitude": {
+            "source": "GLOBAL_POSITION_INT (fused position)",
+            "receivedAt": 1788802049532,
+            "ageMs": 103,
+            "valid": true
+          },
+          "longitude": {
+            "source": "GLOBAL_POSITION_INT (fused position)",
+            "receivedAt": 1788802049532,
+            "ageMs": 103,
+            "valid": true
+          },
+          "globalAltitudeM": {
+            "source": "GLOBAL_POSITION_INT (fused position)",
+            "receivedAt": 1788802049532,
+            "ageMs": 103,
+            "valid": true
+          },
+          "gpsAltitudeM": {
+            "source": "GPS_RAW_INT (MSL altitude)",
+            "receivedAt": 1788802049593,
+            "ageMs": 42,
+            "valid": true
+          },
+          "relativeAltitudeM": {
+            "source": "GLOBAL_POSITION_INT (fused position)",
+            "receivedAt": 1788802049532,
+            "ageMs": 103,
+            "valid": true
+          },
+          "fixType": {
+            "source": "GPS_RAW_INT (MSL altitude)",
+            "receivedAt": 1788802049593,
+            "ageMs": 42,
+            "valid": true
+          },
+          "satellites": {
+            "source": "GPS_RAW_INT (MSL altitude)",
+            "receivedAt": 1788802049593,
+            "ageMs": 42,
+            "valid": true
+          },
+          "batteryV": {
+            "source": "SYS_STATUS",
+            "receivedAt": 1788802049593,
+            "ageMs": 42,
+            "valid": true
+          },
+          "currentA": {
+            "source": "SYS_STATUS",
+            "receivedAt": 1788802049593,
+            "ageMs": 42,
+            "valid": true
+          },
+          "batteryPercent": {
+            "source": "SYS_STATUS",
+            "receivedAt": 1788802049593,
+            "ageMs": 42,
+            "valid": true
+          },
+          "throttlePercent": {
+            "source": "VFR_HUD (estimated MSL altitude)",
+            "receivedAt": 1788802049532,
+            "ageMs": 103,
+            "valid": true
+          },
+          "mode": {
+            "source": "HEARTBEAT",
+            "receivedAt": 1788802049438,
+            "ageMs": 197,
+            "valid": true
+          },
+          "customMode": {
+            "source": "HEARTBEAT",
+            "receivedAt": 1788802049438,
+            "ageMs": 197,
+            "valid": true
+          },
+          "armed": {
+            "source": "HEARTBEAT",
+            "receivedAt": 1788802049438,
+            "ageMs": 197,
+            "valid": true
+          },
+          "navRollDeg": {
+            "source": "NAV_CONTROLLER_OUTPUT",
+            "receivedAt": 1788802049532,
+            "ageMs": 103,
+            "valid": true
+          },
+          "navPitchDeg": {
+            "source": "NAV_CONTROLLER_OUTPUT",
+            "receivedAt": 1788802049532,
+            "ageMs": 103,
+            "valid": true
+          }
+        }
+      }
+    },
+    {
+      "action": "altitude",
+      "operation": {
+        "id": "00bbc257-56bb-4d36-95a5-92408e1fcbd0",
+        "sessionId": "local-sitl-smoke",
+        "vehicleGeneration": "fb1a79bd-fb23-4bc4-b0a9-5d117cc6ab7f",
+        "action": {
+          "kind": "altitude",
+          "altitudeM": 150,
+          "datum": "home",
+          "verticalRateMps": 3
+        },
+        "createdAt": 1788802049636,
+        "sentAt": 1788802049636,
+        "updatedAt": 1788802049656,
+        "state": "accepted",
+        "ack": {
+          "command": 43001,
+          "result": 0,
+          "progress": 0,
+          "at": 1788802049656
+        },
+        "effect": {
+          "state": "unavailable",
+          "at": 1788802049656,
+          "message": "Autopilot accepted altitude request; monitor reported altitude and vertical speed, capture is not reported"
+        },
+        "message": "Autopilot accepted altitude request; monitor reported altitude and vertical speed, capture is not reported",
+        "steps": [
+          {
+            "action": "GUIDED altitude",
+            "state": "accepted",
+            "message": "Autopilot accepted altitude request; monitor reported altitude and vertical speed, capture is not reported"
+          }
+        ]
+      },
+      "telemetry": {
+        "rollDeg": -0.35691761821624585,
+        "pitchDeg": -3.1613291516783066,
+        "yawRateDegS": 0.27467200204724307,
+        "airspeedKt": 43.38635265440961,
+        "groundspeedKt": 45.053325513011586,
+        "headingDeg": 0,
+        "trackDeg": 0.09891363416937793,
+        "altitudeFt": 1429.691565005475,
+        "verticalSpeedFpm": 21.848631069416424,
+        "latitude": 35.9653752,
+        "longitude": -83.3615342,
+        "globalAltitudeM": 435.77,
+        "gpsAltitudeM": 435.63,
+        "relativeAltitudeM": 119.856,
+        "fixType": 6,
+        "satellites": 10,
+        "batteryV": 12.254,
+        "currentA": 11.87,
+        "batteryPercent": 93,
+        "throttlePercent": 49,
+        "mode": "GUIDED",
+        "customMode": 15,
+        "armed": true,
+        "navRollDeg": -0.3100000023841858,
+        "navPitchDeg": -3.1999998092651367,
+        "source": "MAVLink",
+        "ready": true,
+        "ageMs": 4,
+        "fdReady": true,
+        "navController": {
+          "crossTrackM": 136.7871551513672,
+          "navBearingDeg": 253,
+          "targetBearingDeg": 253,
+          "waypointDistanceM": 220,
+          "missionSeq": 1,
+          "mode": "GUIDED",
+          "autopilotId": 3,
+          "vehicleType": 1,
+          "position": {
+            "latitude": 35.9653752,
+            "longitude": -83.3615342
+          },
+          "positionTarget": {
+            "lat": 35.9647874,
+            "lon": -83.3638696,
+            "alt": 435.6399841308594,
+            "frame": 0
+          },
+          "ageMs": 4
+        },
+        "positionTarget": {
+          "lat": 35.9647874,
+          "lon": -83.3638696,
+          "alt": 435.6399841308594,
+          "frame": 0,
+          "ageMs": 144
+        },
+        "homePosition": {
+          "lat": 35.9607874,
+          "lon": -83.3668698,
+          "alt": 315.92
+        },
+        "fields": {
+          "rollDeg": {
+            "source": "ATTITUDE",
+            "receivedAt": 1788802049733,
+            "ageMs": 4,
+            "valid": true
+          },
+          "pitchDeg": {
+            "source": "ATTITUDE",
+            "receivedAt": 1788802049733,
+            "ageMs": 4,
+            "valid": true
+          },
+          "yawRateDegS": {
+            "source": "ATTITUDE",
+            "receivedAt": 1788802049733,
+            "ageMs": 4,
+            "valid": true
+          },
+          "airspeedKt": {
+            "source": "VFR_HUD (estimated MSL altitude)",
+            "receivedAt": 1788802049733,
+            "ageMs": 4,
+            "valid": true
+          },
+          "groundspeedKt": {
+            "source": "VFR_HUD (estimated MSL altitude)",
+            "receivedAt": 1788802049733,
+            "ageMs": 4,
+            "valid": true
+          },
+          "headingDeg": {
+            "source": "VFR_HUD (estimated MSL altitude)",
+            "receivedAt": 1788802049733,
+            "ageMs": 4,
+            "valid": true
+          },
+          "trackDeg": {
+            "source": "GLOBAL_POSITION_INT (fused position)",
+            "receivedAt": 1788802049733,
+            "ageMs": 4,
+            "valid": true
+          },
+          "altitudeFt": {
+            "source": "VFR_HUD (estimated MSL altitude)",
+            "receivedAt": 1788802049733,
+            "ageMs": 4,
+            "valid": true
+          },
+          "verticalSpeedFpm": {
+            "source": "VFR_HUD (estimated MSL altitude)",
+            "receivedAt": 1788802049733,
+            "ageMs": 4,
+            "valid": true
+          },
+          "latitude": {
+            "source": "GLOBAL_POSITION_INT (fused position)",
+            "receivedAt": 1788802049733,
+            "ageMs": 4,
+            "valid": true
+          },
+          "longitude": {
+            "source": "GLOBAL_POSITION_INT (fused position)",
+            "receivedAt": 1788802049733,
+            "ageMs": 4,
+            "valid": true
+          },
+          "globalAltitudeM": {
+            "source": "GLOBAL_POSITION_INT (fused position)",
+            "receivedAt": 1788802049733,
+            "ageMs": 4,
+            "valid": true
+          },
+          "gpsAltitudeM": {
+            "source": "GPS_RAW_INT (MSL altitude)",
+            "receivedAt": 1788802049593,
+            "ageMs": 144,
+            "valid": true
+          },
+          "relativeAltitudeM": {
+            "source": "GLOBAL_POSITION_INT (fused position)",
+            "receivedAt": 1788802049733,
+            "ageMs": 4,
+            "valid": true
+          },
+          "fixType": {
+            "source": "GPS_RAW_INT (MSL altitude)",
+            "receivedAt": 1788802049593,
+            "ageMs": 144,
+            "valid": true
+          },
+          "satellites": {
+            "source": "GPS_RAW_INT (MSL altitude)",
+            "receivedAt": 1788802049593,
+            "ageMs": 144,
+            "valid": true
+          },
+          "batteryV": {
+            "source": "SYS_STATUS",
+            "receivedAt": 1788802049593,
+            "ageMs": 144,
+            "valid": true
+          },
+          "currentA": {
+            "source": "SYS_STATUS",
+            "receivedAt": 1788802049593,
+            "ageMs": 144,
+            "valid": true
+          },
+          "batteryPercent": {
+            "source": "SYS_STATUS",
+            "receivedAt": 1788802049593,
+            "ageMs": 144,
+            "valid": true
+          },
+          "throttlePercent": {
+            "source": "VFR_HUD (estimated MSL altitude)",
+            "receivedAt": 1788802049733,
+            "ageMs": 4,
+            "valid": true
+          },
+          "mode": {
+            "source": "HEARTBEAT",
+            "receivedAt": 1788802049438,
+            "ageMs": 299,
+            "valid": true
+          },
+          "customMode": {
+            "source": "HEARTBEAT",
+            "receivedAt": 1788802049438,
+            "ageMs": 299,
+            "valid": true
+          },
+          "armed": {
+            "source": "HEARTBEAT",
+            "receivedAt": 1788802049438,
+            "ageMs": 299,
+            "valid": true
+          },
+          "navRollDeg": {
+            "source": "NAV_CONTROLLER_OUTPUT",
+            "receivedAt": 1788802049733,
+            "ageMs": 4,
+            "valid": true
+          },
+          "navPitchDeg": {
+            "source": "NAV_CONTROLLER_OUTPUT",
+            "receivedAt": 1788802049733,
+            "ageMs": 4,
+            "valid": true
+          }
+        }
+      },
+      "mission": {
+        "revision": "9bff7a908e7006587f58bc79",
+        "items": [
+          {
+            "seq": 0,
+            "command": 16,
+            "frame": 0,
+            "current": false,
+            "autocontinue": true,
+            "params": [
+              0,
+              0,
+              0,
+              0
+            ],
+            "x": 35.9607874,
+            "y": -83.3668698,
+            "z": 315.92
+          },
+          {
+            "seq": 1,
+            "command": 22,
+            "frame": 3,
+            "current": false,
+            "autocontinue": true,
+            "params": [
+              0,
+              0,
+              0,
+              0
+            ],
+            "x": 0,
+            "y": 0,
+            "z": 100
+          },
+          {
+            "seq": 2,
+            "command": 16,
+            "frame": 3,
+            "current": false,
+            "autocontinue": true,
+            "params": [
+              0,
+              0,
+              0,
+              0
+            ],
+            "x": 35.9637874,
+            "y": -83.3628696,
+            "z": 100
+          }
+        ],
+        "synchronization": "verified",
+        "currentSeq": 1,
+        "currentFresh": true,
+        "reachedSeq": 0,
+        "transfer": null,
+        "message": "Vehicle mission downloaded and verified"
+      }
+    }
+  ],
+  "outcome": "failed",
+  "error": "Timed out: measured home-relative altitude",
+  "simulatorLog": "Setting SIM_SPEEDUP=1.000000\nSetting MAV_SYSID=1\nHome: 35.960787 -83.366870 alt=315.640000m hdg=90.000000\nStarting sketch 'ArduPlane'\nStarting SITL input\nUsing Irlock at port : 9005\nWaiting for connection ....\nConnection on serial port 5760\nLoaded defaults from /opt/sitl/plane.parm\nSmoothing reset at 0.001\nLoaded defaults from /opt/sitl/plane.parm",
+  "lastSnapshot": {
+    "at": 1788802139762,
+    "sequence": 11834,
+    "detailKey": "42ddc05f0593c81b9d752472",
+    "identity": {
+      "system": 1,
+      "component": 1,
+      "autopilot": 3,
+      "vehicleType": 1,
+      "generation": "fb1a79bd-fb23-4bc4-b0a9-5d117cc6ab7f"
+    },
+    "connected": true,
+    "ready": true,
+    "telemetry": {
+      "rollDeg": 0.007380584689734088,
+      "pitchDeg": -3.2073153212561216,
+      "yawRateDegS": 0.1251422457252976,
+      "airspeedKt": 42.75216953285816,
+      "groundspeedKt": 44.55541853770828,
+      "headingDeg": 0,
+      "trackDeg": 359.80001554332114,
+      "altitudeFt": 1459.908072404025,
+      "verticalSpeedFpm": 16.42955247107475,
+      "latitude": 35.9839008,
+      "longitude": -83.3617121,
+      "globalAltitudeM": 444.98,
+      "gpsAltitudeM": 444.91,
+      "relativeAltitudeM": 129.067,
+      "fixType": 6,
+      "satellites": 10,
+      "batteryV": 12.261,
+      "currentA": 11.4,
+      "batteryPercent": 84,
+      "throttlePercent": 48,
+      "mode": "GUIDED",
+      "customMode": 15,
+      "armed": true,
+      "navRollDeg": -0.009999999776482582,
+      "navPitchDeg": -3.1399998664855957,
+      "source": "MAVLink",
+      "ready": true,
+      "ageMs": 87,
+      "fdReady": true,
+      "navController": {
+        "crossTrackM": 2052.57763671875,
+        "navBearingDeg": 186,
+        "targetBearingDeg": 186,
+        "waypointDistanceM": 2136,
+        "missionSeq": 1,
+        "mode": "GUIDED",
+        "autopilotId": 3,
+        "vehicleType": 1,
+        "position": {
+          "latitude": 35.9839008,
+          "longitude": -83.3617121
+        },
+        "positionTarget": {
+          "lat": 35.9647874,
+          "lon": -83.3638696,
+          "alt": 435.6399841308594,
+          "frame": 0
+        },
+        "ageMs": 87
+      },
+      "positionTarget": {
+        "lat": 35.9647874,
+        "lon": -83.3638696,
+        "alt": 435.6399841308594,
+        "frame": 0,
+        "ageMs": 125
+      },
+      "homePosition": {
+        "lat": 35.9607874,
+        "lon": -83.3668698,
+        "alt": 315.92
+      },
+      "fields": {
+        "rollDeg": {
+          "source": "ATTITUDE",
+          "receivedAt": 1788802139675,
+          "ageMs": 87,
+          "valid": true
+        },
+        "pitchDeg": {
+          "source": "ATTITUDE",
+          "receivedAt": 1788802139675,
+          "ageMs": 87,
+          "valid": true
+        },
+        "yawRateDegS": {
+          "source": "ATTITUDE",
+          "receivedAt": 1788802139675,
+          "ageMs": 87,
+          "valid": true
+        },
+        "airspeedKt": {
+          "source": "VFR_HUD (estimated MSL altitude)",
+          "receivedAt": 1788802139675,
+          "ageMs": 87,
+          "valid": true
+        },
+        "groundspeedKt": {
+          "source": "VFR_HUD (estimated MSL altitude)",
+          "receivedAt": 1788802139675,
+          "ageMs": 87,
+          "valid": true
+        },
+        "headingDeg": {
+          "source": "VFR_HUD (estimated MSL altitude)",
+          "receivedAt": 1788802139675,
+          "ageMs": 87,
+          "valid": true
+        },
+        "trackDeg": {
+          "source": "GLOBAL_POSITION_INT (fused position)",
+          "receivedAt": 1788802139675,
+          "ageMs": 87,
+          "valid": true
+        },
+        "altitudeFt": {
+          "source": "VFR_HUD (estimated MSL altitude)",
+          "receivedAt": 1788802139675,
+          "ageMs": 87,
+          "valid": true
+        },
+        "verticalSpeedFpm": {
+          "source": "VFR_HUD (estimated MSL altitude)",
+          "receivedAt": 1788802139675,
+          "ageMs": 87,
+          "valid": true
+        },
+        "latitude": {
+          "source": "GLOBAL_POSITION_INT (fused position)",
+          "receivedAt": 1788802139675,
+          "ageMs": 87,
+          "valid": true
+        },
+        "longitude": {
+          "source": "GLOBAL_POSITION_INT (fused position)",
+          "receivedAt": 1788802139675,
+          "ageMs": 87,
+          "valid": true
+        },
+        "globalAltitudeM": {
+          "source": "GLOBAL_POSITION_INT (fused position)",
+          "receivedAt": 1788802139675,
+          "ageMs": 87,
+          "valid": true
+        },
+        "gpsAltitudeM": {
+          "source": "GPS_RAW_INT (MSL altitude)",
+          "receivedAt": 1788802139637,
+          "ageMs": 125,
+          "valid": true
+        },
+        "relativeAltitudeM": {
+          "source": "GLOBAL_POSITION_INT (fused position)",
+          "receivedAt": 1788802139675,
+          "ageMs": 87,
+          "valid": true
+        },
+        "fixType": {
+          "source": "GPS_RAW_INT (MSL altitude)",
+          "receivedAt": 1788802139637,
+          "ageMs": 125,
+          "valid": true
+        },
+        "satellites": {
+          "source": "GPS_RAW_INT (MSL altitude)",
+          "receivedAt": 1788802139637,
+          "ageMs": 125,
+          "valid": true
+        },
+        "batteryV": {
+          "source": "SYS_STATUS",
+          "receivedAt": 1788802139637,
+          "ageMs": 125,
+          "valid": true
+        },
+        "currentA": {
+          "source": "SYS_STATUS",
+          "receivedAt": 1788802139637,
+          "ageMs": 125,
+          "valid": true
+        },
+        "batteryPercent": {
+          "source": "SYS_STATUS",
+          "receivedAt": 1788802139637,
+          "ageMs": 125,
+          "valid": true
+        },
+        "throttlePercent": {
+          "source": "VFR_HUD (estimated MSL altitude)",
+          "receivedAt": 1788802139675,
+          "ageMs": 87,
+          "valid": true
+        },
+        "mode": {
+          "source": "HEARTBEAT",
+          "receivedAt": 1788802139476,
+          "ageMs": 286,
+          "valid": true
+        },
+        "customMode": {
+          "source": "HEARTBEAT",
+          "receivedAt": 1788802139476,
+          "ageMs": 286,
+          "valid": true
+        },
+        "armed": {
+          "source": "HEARTBEAT",
+          "receivedAt": 1788802139476,
+          "ageMs": 286,
+          "valid": true
+        },
+        "navRollDeg": {
+          "source": "NAV_CONTROLLER_OUTPUT",
+          "receivedAt": 1788802139675,
+          "ageMs": 87,
+          "valid": true
+        },
+        "navPitchDeg": {
+          "source": "NAV_CONTROLLER_OUTPUT",
+          "receivedAt": 1788802139675,
+          "ageMs": 87,
+          "valid": true
+        }
+      }
+    },
+    "mission": {
+      "revision": "9bff7a908e7006587f58bc79",
+      "items": [
+        {
+          "seq": 0,
+          "command": 16,
+          "frame": 0,
+          "current": false,
+          "autocontinue": true,
+          "params": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "x": 35.9607874,
+          "y": -83.3668698,
+          "z": 315.92
+        },
+        {
+          "seq": 1,
+          "command": 22,
+          "frame": 3,
+          "current": false,
+          "autocontinue": true,
+          "params": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "x": 0,
+          "y": 0,
+          "z": 100
+        },
+        {
+          "seq": 2,
+          "command": 16,
+          "frame": 3,
+          "current": false,
+          "autocontinue": true,
+          "params": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "x": 35.9637874,
+          "y": -83.3628696,
+          "z": 100
+        }
+      ],
+      "synchronization": "verified",
+      "currentSeq": 1,
+      "currentFresh": true,
+      "reachedSeq": 0,
+      "transfer": null,
+      "message": "Vehicle mission downloaded and verified"
+    },
+    "operations": [
+      {
+        "id": "e64420aa-8409-434f-ac2d-922e2d2e0b75",
+        "sessionId": "local-sitl-smoke",
+        "vehicleGeneration": "fb1a79bd-fb23-4bc4-b0a9-5d117cc6ab7f",
+        "action": {
+          "kind": "stream-setup"
+        },
+        "createdAt": 1788801966449,
+        "sentAt": 1788801966450,
+        "updatedAt": 1788801966654,
+        "state": "accepted",
+        "ack": {
+          "command": 512,
+          "result": 0,
+          "progress": 0,
+          "at": 1788801966654
+        },
+        "effect": {
+          "state": "unavailable",
+          "at": 1788801966654,
+          "message": "Autopilot accepted; physical effect is not measured by this command"
+        },
+        "message": "Autopilot accepted; physical effect is not measured by this command",
+        "steps": [
+          {
+            "action": "Request message 30 at 10 Hz",
+            "state": "accepted",
+            "message": "Autopilot accepted; physical effect is not measured by this command"
+          },
+          {
+            "action": "Request message 33 at 10 Hz",
+            "state": "accepted",
+            "message": "Autopilot accepted; physical effect is not measured by this command"
+          },
+          {
+            "action": "Request message 74 at 10 Hz",
+            "state": "accepted",
+            "message": "Autopilot accepted; physical effect is not measured by this command"
+          },
+          {
+            "action": "Request message 62 at 10 Hz",
+            "state": "accepted",
+            "message": "Autopilot accepted; physical effect is not measured by this command"
+          },
+          {
+            "action": "Request message 24 at 2 Hz",
+            "state": "accepted",
+            "message": "Autopilot accepted; physical effect is not measured by this command"
+          },
+          {
+            "action": "Request message 1 at 2 Hz",
+            "state": "accepted",
+            "message": "Autopilot accepted; physical effect is not measured by this command"
+          },
+          {
+            "action": "Request message 42 at 2 Hz",
+            "state": "accepted",
+            "message": "Autopilot accepted; physical effect is not measured by this command"
+          },
+          {
+            "action": "Request message 87 at 2 Hz",
+            "state": "accepted",
+            "message": "Autopilot accepted; physical effect is not measured by this command"
+          },
+          {
+            "action": "Request message 148",
+            "state": "accepted",
+            "message": "Autopilot accepted; physical effect is not measured by this command"
+          },
+          {
+            "action": "Request message 242",
+            "state": "accepted",
+            "message": "Autopilot accepted; physical effect is not measured by this command"
+          }
+        ]
+      },
+      {
+        "id": "380a1b84-850d-491e-af01-6818372efa88",
+        "sessionId": "local-sitl-smoke",
+        "vehicleGeneration": "fb1a79bd-fb23-4bc4-b0a9-5d117cc6ab7f",
+        "action": {
+          "kind": "mission-download"
+        },
+        "createdAt": 1788801975161,
+        "sentAt": 1788801975161,
+        "updatedAt": 1788801975165,
+        "state": "observed",
+        "ack": null,
+        "effect": {
+          "state": "observed",
+          "at": 1788801975165,
+          "message": "Complete vehicle mission downloaded"
+        },
+        "message": "Complete vehicle mission downloaded",
+        "steps": []
+      },
+      {
+        "id": "74e3ca6d-399f-4ce3-8b48-8617d79cd2b7",
+        "sessionId": "local-sitl-smoke",
+        "vehicleGeneration": "fb1a79bd-fb23-4bc4-b0a9-5d117cc6ab7f",
+        "action": {
+          "kind": "mission-upload",
+          "itemCount": 3,
+          "revision": "9123621c1d4086bc4b4a04c3"
+        },
+        "createdAt": 1788801975263,
+        "sentAt": 1788801975264,
+        "updatedAt": 1788801975405,
+        "state": "observed",
+        "ack": {
+          "command": 44,
+          "result": 0,
+          "progress": null,
+          "at": 1788801975324
+        },
+        "effect": {
+          "state": "observed",
+          "at": 1788801975405,
+          "message": "Mission accepted and downloaded copy verified; home is the actual vehicle home"
+        },
+        "message": "Mission accepted and downloaded copy verified; home is the actual vehicle home",
+        "steps": []
+      },
+      {
+        "id": "1da3d5f9-7bca-4dc1-a648-a4dc4c5da50f",
+        "sessionId": "local-sitl-smoke",
+        "vehicleGeneration": "fb1a79bd-fb23-4bc4-b0a9-5d117cc6ab7f",
+        "action": {
+          "kind": "arm",
+          "armed": true
+        },
+        "createdAt": 1788802010468,
+        "sentAt": 1788802010468,
+        "updatedAt": 1788802011422,
+        "state": "observed",
+        "ack": {
+          "command": 400,
+          "result": 0,
+          "progress": 0,
+          "at": 1788802010503
+        },
+        "effect": {
+          "state": "observed",
+          "at": 1788802011422,
+          "message": "Requested aircraft state observed"
+        },
+        "message": "Requested aircraft state observed",
+        "steps": [
+          {
+            "action": "Arm",
+            "state": "observed",
+            "message": "Requested aircraft state observed"
+          }
+        ]
+      },
+      {
+        "id": "309ccda3-3a91-4ce5-8a6a-6de0f3bb939d",
+        "sessionId": "local-sitl-smoke",
+        "vehicleGeneration": "fb1a79bd-fb23-4bc4-b0a9-5d117cc6ab7f",
+        "action": {
+          "kind": "continue-auto",
+          "seq": 1,
+          "autoMode": 10
+        },
+        "createdAt": 1788802011478,
+        "sentAt": 1788802011479,
+        "updatedAt": 1788802011503,
+        "state": "observed",
+        "ack": {
+          "command": 176,
+          "result": 0,
+          "progress": 0,
+          "at": 1788802011502
+        },
+        "effect": {
+          "state": "observed",
+          "at": 1788802011503,
+          "message": "Requested aircraft state observed"
+        },
+        "message": "Requested aircraft state observed",
+        "steps": [
+          {
+            "action": "Current mission item 1",
+            "state": "observed",
+            "message": "Requested aircraft state observed"
+          },
+          {
+            "action": "Mode AUTO",
+            "state": "observed",
+            "message": "Requested aircraft state observed"
+          }
+        ]
+      },
+      {
+        "id": "3cf7bcb5-0f94-46d3-9b61-d88bbe1b9ea9",
+        "sessionId": "local-sitl-smoke",
+        "vehicleGeneration": "fb1a79bd-fb23-4bc4-b0a9-5d117cc6ab7f",
+        "action": {
+          "kind": "goto",
+          "target": {
+            "lat": 35.9647874,
+            "lon": -83.3638696,
+            "altitudeM": 435.641734,
+            "datum": "msl"
+          }
+        },
+        "createdAt": 1788802017552,
+        "sentAt": 1788802017552,
+        "updatedAt": 1788802017583,
+        "state": "observed",
+        "ack": {
+          "command": 192,
+          "result": 0,
+          "progress": 0,
+          "at": 1788802017559
+        },
+        "effect": {
+          "state": "observed",
+          "at": 1788802017583,
+          "message": "Requested aircraft state observed"
+        },
+        "message": "Requested aircraft state observed",
+        "steps": [
+          {
+            "action": "GUIDED target",
+            "state": "observed",
+            "message": "Requested aircraft state observed"
+          }
+        ]
+      },
+      {
+        "id": "07c47da2-1423-4273-aaf2-81ad903db752",
+        "sessionId": "local-sitl-smoke",
+        "vehicleGeneration": "fb1a79bd-fb23-4bc4-b0a9-5d117cc6ab7f",
+        "action": {
+          "kind": "heading",
+          "headingDeg": 0,
+          "reference": "true",
+          "turnAccelerationMps2": 2
+        },
+        "createdAt": 1788802017654,
+        "sentAt": 1788802017654,
+        "updatedAt": 1788802017665,
+        "state": "accepted",
+        "ack": {
+          "command": 43002,
+          "result": 0,
+          "progress": 0,
+          "at": 1788802017665
+        },
+        "effect": {
+          "state": "unavailable",
+          "at": 1788802017665,
+          "message": "Autopilot accepted true-heading request; heading capture is not reported by this protocol"
+        },
+        "message": "Autopilot accepted true-heading request; heading capture is not reported by this protocol",
+        "steps": [
+          {
+            "action": "GUIDED heading",
+            "state": "accepted",
+            "message": "Autopilot accepted true-heading request; heading capture is not reported by this protocol"
+          }
+        ]
+      },
+      {
+        "id": "00bbc257-56bb-4d36-95a5-92408e1fcbd0",
+        "sessionId": "local-sitl-smoke",
+        "vehicleGeneration": "fb1a79bd-fb23-4bc4-b0a9-5d117cc6ab7f",
+        "action": {
+          "kind": "altitude",
+          "altitudeM": 150,
+          "datum": "home",
+          "verticalRateMps": 3
+        },
+        "createdAt": 1788802049636,
+        "sentAt": 1788802049636,
+        "updatedAt": 1788802049656,
+        "state": "accepted",
+        "ack": {
+          "command": 43001,
+          "result": 0,
+          "progress": 0,
+          "at": 1788802049656
+        },
+        "effect": {
+          "state": "unavailable",
+          "at": 1788802049656,
+          "message": "Autopilot accepted altitude request; monitor reported altitude and vertical speed, capture is not reported"
+        },
+        "message": "Autopilot accepted altitude request; monitor reported altitude and vertical speed, capture is not reported",
+        "steps": [
+          {
+            "action": "GUIDED altitude",
+            "state": "accepted",
+            "message": "Autopilot accepted altitude request; monitor reported altitude and vertical speed, capture is not reported"
+          }
+        ]
+      }
+    ],
+    "busy": false,
+    "capabilities": {
+      "modes": [
+        {
+          "name": "MANUAL",
+          "customMode": 0,
+          "source": "firmware-known"
+        },
+        {
+          "name": "CIRCLE",
+          "customMode": 1,
+          "source": "firmware-known"
+        },
+        {
+          "name": "STABILIZE",
+          "customMode": 2,
+          "source": "firmware-known"
+        },
+        {
+          "name": "TRAINING",
+          "customMode": 3,
+          "source": "firmware-known"
+        },
+        {
+          "name": "ACRO",
+          "customMode": 4,
+          "source": "firmware-known"
+        },
+        {
+          "name": "FBWA",
+          "customMode": 5,
+          "source": "firmware-known"
+        },
+        {
+          "name": "FBWB",
+          "customMode": 6,
+          "source": "firmware-known"
+        },
+        {
+          "name": "CRUISE",
+          "customMode": 7,
+          "source": "firmware-known"
+        },
+        {
+          "name": "AUTOTUNE",
+          "customMode": 8,
+          "source": "firmware-known"
+        },
+        {
+          "name": "AUTO",
+          "customMode": 10,
+          "source": "firmware-known"
+        },
+        {
+          "name": "RTL",
+          "customMode": 11,
+          "source": "firmware-known"
+        },
+        {
+          "name": "LOITER",
+          "customMode": 12,
+          "source": "firmware-known"
+        },
+        {
+          "name": "TAKEOFF",
+          "customMode": 13,
+          "source": "firmware-known"
+        },
+        {
+          "name": "AVOID_ADSB",
+          "customMode": 14,
+          "source": "firmware-known"
+        },
+        {
+          "name": "GUIDED",
+          "customMode": 15,
+          "source": "firmware-known"
+        },
+        {
+          "name": "QSTABILIZE",
+          "customMode": 17,
+          "source": "firmware-known"
+        },
+        {
+          "name": "QHOVER",
+          "customMode": 18,
+          "source": "firmware-known"
+        },
+        {
+          "name": "QLOITER",
+          "customMode": 19,
+          "source": "firmware-known"
+        },
+        {
+          "name": "QLAND",
+          "customMode": 20,
+          "source": "firmware-known"
+        },
+        {
+          "name": "QRTL",
+          "customMode": 21,
+          "source": "firmware-known"
+        },
+        {
+          "name": "QAUTOTUNE",
+          "customMode": 22,
+          "source": "firmware-known"
+        },
+        {
+          "name": "QACRO",
+          "customMode": 23,
+          "source": "firmware-known"
+        },
+        {
+          "name": "THERMAL",
+          "customMode": 24,
+          "source": "firmware-known"
+        },
+        {
+          "name": "LOITER_ALT_QLAND",
+          "customMode": 25,
+          "source": "firmware-known"
+        }
+      ],
+      "commands": [
+        {
+          "command": 178,
+          "source": "firmware-known"
+        },
+        {
+          "command": 181,
+          "source": "firmware-known"
+        },
+        {
+          "command": 182,
+          "source": "firmware-known"
+        },
+        {
+          "command": 183,
+          "source": "firmware-known"
+        },
+        {
+          "command": 184,
+          "source": "firmware-known"
+        },
+        {
+          "command": 206,
+          "source": "firmware-known"
+        }
+      ],
+      "terrainTargets": false,
+      "signing": "unsigned-only",
+      "flightControl": [
+        {
+          "kind": "heading",
+          "command": 43002,
+          "source": "firmware-known",
+          "available": true,
+          "reason": null,
+          "requiredMode": 15,
+          "entersGuided": true,
+          "confirmation": "acknowledgement"
+        },
+        {
+          "kind": "altitude",
+          "command": 43001,
+          "source": "firmware-known",
+          "available": true,
+          "reason": null,
+          "requiredMode": 15,
+          "entersGuided": true,
+          "confirmation": "acknowledgement"
+        },
+        {
+          "kind": "speed",
+          "command": 43000,
+          "source": "firmware-known",
+          "available": true,
+          "reason": null,
+          "requiredMode": 15,
+          "entersGuided": true,
+          "confirmation": "acknowledgement"
+        },
+        {
+          "kind": "loiter",
+          "command": 192,
+          "source": "firmware-known",
+          "available": true,
+          "reason": null,
+          "requiredMode": 15,
+          "entersGuided": true,
+          "confirmation": "acknowledgement"
+        }
+      ]
+    },
+    "statustext": [
+      {
+        "at": 1788801968764,
+        "severity": 6,
+        "text": "Airspeed 1 calibrated"
+      },
+      {
+        "at": 1788801974407,
+        "severity": 6,
+        "text": "GPS 1: probing for u-blox at 230400 baud"
+      },
+      {
+        "at": 1788801974423,
+        "severity": 6,
+        "text": "GPS 1: detected u-blox"
+      },
+      {
+        "at": 1788801974870,
+        "severity": 6,
+        "text": "EKF2 IMU0 MAG0 initial yaw alignment complete"
+      },
+      {
+        "at": 1788801974870,
+        "severity": 6,
+        "text": "EKF2 IMU1 MAG0 initial yaw alignment complete"
+      },
+      {
+        "at": 1788801975324,
+        "severity": 6,
+        "text": "Flight plan received"
+      },
+      {
+        "at": 1788801975626,
+        "severity": 6,
+        "text": "EKF3 IMU0 initialised"
+      },
+      {
+        "at": 1788801975626,
+        "severity": 6,
+        "text": "EKF3 IMU1 initialised"
+      },
+      {
+        "at": 1788801977507,
+        "severity": 6,
+        "text": "EKF3 IMU0 tilt alignment complete"
+      },
+      {
+        "at": 1788801977507,
+        "severity": 6,
+        "text": "EKF3 IMU1 tilt alignment complete"
+      },
+      {
+        "at": 1788801977587,
+        "severity": 6,
+        "text": "EKF3 IMU0 MAG0 initial yaw alignment complete"
+      },
+      {
+        "at": 1788801977587,
+        "severity": 6,
+        "text": "EKF3 IMU1 MAG0 initial yaw alignment complete"
+      },
+      {
+        "at": 1788801980109,
+        "severity": 6,
+        "text": "EKF2 IMU0 tilt alignment complete"
+      },
+      {
+        "at": 1788801980109,
+        "severity": 6,
+        "text": "EKF2 IMU1 tilt alignment complete"
+      },
+      {
+        "at": 1788801984830,
+        "severity": 6,
+        "text": "EKF2 IMU0 origin set"
+      },
+      {
+        "at": 1788801984830,
+        "severity": 6,
+        "text": "EKF2 IMU1 origin set"
+      },
+      {
+        "at": 1788801984830,
+        "severity": 6,
+        "text": "EKF3 IMU0 origin set"
+      },
+      {
+        "at": 1788801984830,
+        "severity": 6,
+        "text": "EKF3 IMU1 origin set"
+      },
+      {
+        "at": 1788801984868,
+        "severity": 6,
+        "text": "Field Elevation Set: 316m"
+      },
+      {
+        "at": 1788801985853,
+        "severity": 6,
+        "text": "EKF3 IMU0 is using GPS"
+      },
+      {
+        "at": 1788801985853,
+        "severity": 6,
+        "text": "EKF3 IMU1 is using GPS"
+      },
+      {
+        "at": 1788801985853,
+        "severity": 6,
+        "text": "AHRS: EKF3 active"
+      },
+      {
+        "at": 1788802010528,
+        "severity": 6,
+        "text": "Throttle armed"
+      },
+      {
+        "at": 1788802011503,
+        "severity": 6,
+        "text": "Mission: 1 Takeoff"
+      },
+      {
+        "at": 1788802011525,
+        "severity": 6,
+        "text": "Armed AUTO, xaccel = 0.0 m/s/s, waiting 0.2 sec"
+      },
+      {
+        "at": 1788802011722,
+        "severity": 6,
+        "text": "Triggered AUTO. GPS speed = 0.0"
+      },
+      {
+        "at": 1788802013004,
+        "severity": 6,
+        "text": "Holding course 8998 at 5.8m/s (0.0)"
+      },
+      {
+        "at": 1788802013024,
+        "severity": 6,
+        "text": "Autoland direction= 89"
+      },
+      {
+        "at": 1788802038130,
+        "severity": 6,
+        "text": "EKF2 IMU0 is using GPS"
+      },
+      {
+        "at": 1788802038529,
+        "severity": 6,
+        "text": "EKF2 IMU1 is using GPS"
+      }
+    ]
+  },
+  "finishedAt": "2026-09-07T17:29:00.012Z"
+}

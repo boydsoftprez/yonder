@@ -42,6 +42,17 @@ Start the browser in another terminal:
 COCKPIT_API=http://127.0.0.1:4195 npm run cockpit:dev -w node-red-dashboard-2-yonder -- --port 4193
 ```
 
+For another isolated instance, use `--http-port 4201 --vehicle-port 5770` on
+the SITL preview and point a separate Vite preview at that API, for example
+`COCKPIT_API=http://127.0.0.1:4201 npm run cockpit:dev -w node-red-dashboard-2-yonder -- --port 4196`.
+Ports must be free; the helper never reuses another simulator's state.
+
+`--public-data` enables display source flags but leaves their route at **Ground**.
+The aircraft server performs no automatic internet traffic or tile fetches in
+that mode. Use the browser's **Display & data** controls to select sources,
+preload detailed terrain into browser storage and adjust telemetry rate. See
+[Ground geographic data](../../docs/cockpit-ground-data.md).
+
 Open `http://127.0.0.1:4193/?live=1`. The header identifies **ArduPlane SITL**.
 Use Aircraft to request flight telemetry and read the aircraft mission. Load the
 Cove example into the local draft, review and confirm its upload, then explicitly

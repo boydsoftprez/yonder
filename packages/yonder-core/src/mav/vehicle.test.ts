@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
-import { common, minimal, MavLinkProtocolV2, type MavLinkData } from "node-mavlink";
+import { common, minimal, standard, MavLinkProtocolV2, type MavLinkData } from "node-mavlink";
 import { VehicleService } from "./vehicle.js";
 import { decodeDatagram } from "./protocol.js";
 import type { Clock } from "../apply/types.js";
@@ -238,4 +238,125 @@ describe("mission transactions", () => {
     expect(r.service.snapshot().mission.items[0]).toMatchObject({x:35.01,y:-83.01,z:315.74});
     expect(r.service.snapshot().mission.revision).not.toBe(before);r.service.close();
   });
+});
+
+
+describe("reviewed flight controls (R-FLT-12/13)", () => {
+  const firmware = (r: ReturnType<typeof rig>, version = 0x040701ff) => r.feed(Object.assign(new standard.AutopilotVersion(), { flightSwVersion: version, capabilities: 0n, uid: 0n }));
+  const heading: VehicleAction = { kind: "heading", headingDeg: 275, reference: "true", turnAccelerationMps2: 2 };
+  it("gates flight actions on the selected, reported firmware and resets that evidence on reconnect", async () => {
+    const r = rig(); r.heartbeat(15);
+    expect(r.service.snapshot().capabilities.flightControl?.find(c => c.kind === "heading")).toMatchObject({ available: false });
+    expect(r.request(heading).accepted).toBe(false);
+    firmware(r, 0x040600ff); expect(r.request(heading).accepted).toBe(false);
+    firmware(r); expect(r.service.snapshot().capabilities.flightControl.find(c => c.kind === "heading")).toMatchObject({ available: true, command: 43002, confirmation: "acknowledgement" });
+    r.clock.advance(3100); r.heartbeat(15); expect(r.request(heading).accepted).toBe(false);
+    await flush(); expect(r.sent).toHaveLength(0); r.service.close();
+  });
+  it("waits for a post-dispatch GUIDED heartbeat before sending heading and retains ACK versus measured state", async () => {
+    const r = rig(); r.heartbeat(10); firmware(r);
+    expect(r.request(heading, { id: "heading" }).accepted).toBe(true);
+    r.heartbeat(15); await flush();
+    expect(r.sent).toHaveLength(1); expect(r.sent[0].data).toMatchObject({ command: 176, _param2: 15 });
+    r.ack(176); await flush(); expect(r.sent).toHaveLength(1);
+    r.heartbeat(15); await flush();
+    expect(r.sent[1].id).toBe(75);
+    expect(r.sent[1].data).toMatchObject({ command: 43002, frame: 0, _param1: 1, _param2: 275, _param3: 2 });
+    r.feed(Object.assign(new common.VfrHud(), { heading: 275 }));
+    expect(r.service.snapshot().operations[0].state).toBe("sent");
+    r.ack(43002);
+    expect(r.service.snapshot().operations[0]).toMatchObject({ action: heading, state: "accepted", ack: { command: 43002, result: 0 }, effect: { state: "unavailable" } });
+    expect(r.service.snapshot().telemetry.mode).toBe("GUIDED");
+    expect(r.request(heading, { id: "heading" }).accepted).toBe(true); await flush(); expect(r.sent).toHaveLength(2); r.service.close();
+  });
+  it.each([
+    [{ kind: "altitude", altitudeM: 123.5, datum: "home", verticalRateMps: 3 }, { command: 43001, frame: 3, _param3: 3, _param7: 123.5 }],
+    [{ kind: "altitude", altitudeM: 500, datum: "msl", verticalRateMps: 0 }, { command: 43001, frame: 0, _param3: 0, _param7: 500 }],
+    [{ kind: "speed", airspeedMps: 24, accelerationMps2: 1.5 }, { command: 43000, frame: 0, _param1: 0, _param2: 24, _param3: 1.5 }],
+    [{ kind: "loiter", target: { lat: 35.1234567, lon: -83.1234567, altitudeM: 120, datum: "home" }, radiusM: 180, direction: "ccw" }, { command: 192, frame: 3, _param1: -1, _param2: 1, _param3: 180, _param4: 1, _param5: 351234567, _param6: -831234567, _param7: 120 }],
+    [{ kind: "loiter", target: { lat: 35, lon: -83, altitudeM: 450, datum: "msl" }, radiusM: 200, direction: "cw" }, { command: 192, frame: 0, _param3: 200, _param4: 0 }],
+  ])("encodes each explicit-unit flight action in COMMAND_INT: %j", async (action, expected) => {
+    const r = rig(); r.heartbeat(15); firmware(r);
+    expect(r.request(action as VehicleAction).accepted).toBe(true); await flush();
+    expect(r.sent).toHaveLength(1); expect(r.sent[0].id).toBe(75); expect(r.sent[0].data).toMatchObject(expected);
+    r.ack(expected.command); expect(r.service.snapshot().operations[0]).toMatchObject({ state: "accepted", effect: { state: "unavailable" } });
+    r.service.close();
+  });
+  it("refuses invalid units, unsupported datums and bounded control values without dispatching", async () => {
+    const r = rig(); r.heartbeat(15); firmware(r);
+    for (const action of [
+      { ...heading, headingDeg: 360 }, { ...heading, reference: "magnetic" }, { ...heading, turnAccelerationMps2: 0 },
+      { kind: "altitude", altitudeM: 0, datum: "home", verticalRateMps: 1 }, { kind: "altitude", altitudeM: -1, datum: "msl", verticalRateMps: 1 },
+      { kind: "altitude", altitudeM: 100, datum: "terrain", verticalRateMps: 1 }, { kind: "altitude", altitudeM: 100, datum: "home", verticalRateMps: -1 },
+      { kind: "speed", airspeedMps: 0, accelerationMps2: 1 }, { kind: "speed", airspeedMps: 20, accelerationMps2: NaN },
+      { kind: "loiter", target: { lat: 35, lon: -83, altitudeM: 100, datum: "home" }, radiusM: 0, direction: "cw" },
+      { kind: "loiter", target: { lat: 35, lon: -83, altitudeM: 100, datum: "home" }, radiusM: 150, direction: "left" },
+    ]) expect(r.request(action as VehicleAction).accepted).toBe(false);
+    await flush(); expect(r.sent).toHaveLength(0); r.service.close();
+  });
+  it("does not dispatch a guided control after an external mode change during its prerequisite", async () => {
+    const r = rig(); r.heartbeat(10); firmware(r); r.request(heading); await flush();
+    r.heartbeat(15); r.heartbeat(11); await flush();
+    expect(r.sent).toHaveLength(1); expect(r.service.snapshot().operations[0].state).toBe("failed"); r.service.close();
+  });
+  it("does not send flight controls when GUIDED is refused or the request context is stale", async () => {
+    const r = rig(); r.heartbeat(10); firmware(r);
+    expect(r.request(heading, { vehicleGeneration: "old" }).accepted).toBe(false);
+    expect(r.request(heading, { confirmed: false }).accepted).toBe(false);
+    r.request(heading); await flush(); r.ack(176, 2); await flush();
+    expect(r.sent).toHaveLength(1); expect(r.service.snapshot().operations[0].state).toBe("rejected"); r.service.close();
+  });
+  it("keeps a refused flight command and a lost ACK distinct and never retries on timers", async () => {
+    const r = rig(); r.heartbeat(15); firmware(r); r.request(heading); await flush(); r.ack(43002, 3);
+    expect(r.service.snapshot().operations[0].state).toBe("rejected");
+    r.request(heading, { id: "lost" }); await flush();
+    for (let i = 0; i < 6; i++) { r.clock.advance(1000); r.heartbeat(15); }
+    expect(r.service.snapshot().operations[1].state).toBe("unknown"); expect(r.sent).toHaveLength(2);
+    r.ack(43002); expect(r.request(heading, { id: "repeat" }).accepted).toBe(false); r.service.close();
+  });
+});
+
+
+describe("compact vehicle snapshots", () => {
+  it("omits full details without changing the default complete snapshot", async () => {
+    const r = rig(); r.heartbeat(); r.request({ kind: "mission-download" }); await flush();
+    r.feed(Object.assign(new common.MissionCount(), { count: 2 })); await flush();
+    for (const item of sample()) { r.feed(missionWire(item)); await flush(); }
+    r.feed(Object.assign(new common.StatusText(), { text: "Ready", severity: 6 }));
+    const compact = r.service.snapshot({ details: false }), full = r.service.snapshot();
+    expect(compact.mission.items).toEqual([]); expect(compact.operations).toEqual([]); expect(compact.statustext).toEqual([]);
+    expect(full.mission.items).toHaveLength(2); expect(full.operations).toHaveLength(1); expect(full.statustext).toHaveLength(1);
+    expect(compact.mission.revision).toBe(full.mission.revision); expect(compact.detailKey).toBe(full.detailKey); r.service.close();
+  });
+  it("keeps detail identity stable through flight samples and changes it for operator and capability events", async () => {
+    const r = rig(); r.heartbeat(); const initial = r.service.snapshot().detailKey;
+    expect(initial).toEqual(expect.any(String));
+    r.clock.advance(100); r.heartbeat(); r.feed(Object.assign(new common.Attitude(), { roll: 0.1 }));
+    expect(r.service.snapshot().detailKey).toBe(initial);
+    r.feed(Object.assign(new standard.AutopilotVersion(), { flightSwVersion: 0x040701ff, capabilities: 0n, uid: 0n }));
+    const firmwareKey = r.service.snapshot().detailKey; expect(firmwareKey).not.toBe(initial);
+    r.request({ kind: "mode", customMode: 15 }); await flush(); const sentKey = r.service.snapshot().detailKey;
+    expect(sentKey).not.toBe(firmwareKey); r.ack(176); expect(r.service.snapshot().detailKey).not.toBe(sentKey);
+    r.heartbeat(15); const observedKey = r.service.snapshot().detailKey;
+    r.feed(Object.assign(new common.StatusText(), { text: "Mode switched", severity: 6 }));
+    expect(r.service.snapshot().detailKey).not.toBe(observedKey); r.service.close();
+  });
+});
+
+
+it("offers the firmware-known AUTOLAND mode and reports the autopilot result", async () => {
+  const r = rig(); r.heartbeat();
+  expect(r.service.snapshot().capabilities.modes.find(m => m.customMode === 26)).toMatchObject({ name: "AUTOLAND", source: "firmware-known" });
+  expect(r.request({ kind: "mode", customMode: 26 }).accepted).toBe(true); await flush();
+  expect(r.sent[0].data).toMatchObject({ command: 176, _param2: 26 }); r.ack(176, 3);
+  expect(r.service.snapshot().operations[0].state).toBe("rejected"); r.service.close();
+});
+
+
+it("rechecks firmware evidence before a queued flight-control transaction can write", async () => {
+  const r = rig(); r.heartbeat(10);
+  r.feed(Object.assign(new standard.AutopilotVersion(), { flightSwVersion: 0x040701ff, capabilities: 0n, uid: 0n }));
+  expect(r.request({ kind: "speed", airspeedMps: 25, accelerationMps2: 0 }).accepted).toBe(true);
+  r.feed(Object.assign(new standard.AutopilotVersion(), { flightSwVersion: 0x040600ff, capabilities: 0n, uid: 0n }));
+  await flush(); expect(r.sent).toHaveLength(0); expect(r.service.snapshot().operations[0].state).toBe("failed"); r.service.close();
 });

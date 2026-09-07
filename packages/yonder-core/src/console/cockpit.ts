@@ -8,6 +8,10 @@ export interface CockpitProxyOptions {
 }
 const MAX_BODY = 512 * 1024;
 const routes: Record<string, { method: string; path: string }> = {
+  "/cockpit/api/flight": { method: "GET", path: "/cockpit/flight" },
+  "/cockpit/api/details": { method: "GET", path: "/cockpit/details" },
+  "/cockpit/api/mission": { method: "GET", path: "/cockpit/mission" },
+  "/cockpit/api/traffic": { method: "GET", path: "/cockpit/traffic" },
   "/cockpit/api/state": { method: "GET", path: "/cockpit/state" },
   "/cockpit/api/terrain/manifest": {
     method: "GET",

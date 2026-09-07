@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { createHash, randomUUID } from "node:crypto";
-import { common, minimal, MavLinkProtocolV2, type MavLinkData } from "node-mavlink";
+import { common, minimal, standard, MavLinkProtocolV2, type MavLinkData } from "node-mavlink";
 import { decodeDatagram, type DecodedFrame } from "./protocol.js";
 import { decodeMissionItem, encodeMissionItem, MAX_MISSION_ITEMS, missionFrame, missionRevision, validateCommandParameters, validateMission, verifyMission } from "./mission.js";
 import { isPlane, PLANE_MODES, VehicleTelemetry } from "./vehicle-telemetry.js";
@@ -10,7 +10,8 @@ export const VEHICLE_SOURCE_SYSTEM = 254;
 export const VEHICLE_SOURCE_COMPONENT = 191;
 const HEARTBEAT_MS = 3000, COMMAND_MS = 5000, MAX_OPERATIONS = 256;
 const IMMEDIATE = new Set([178, 181, 182, 183, 184, 206]);
-type Step = { name: string; command: number; params: number[]; int?: { frame: number; x: number; y: number; z: number }; observes?: (frame: DecodedFrame) => boolean };
+const FLIGHT_COMMANDS = { heading: 43002, altitude: 43001, speed: 43000, loiter: 192 } as const;
+type Step = { name: string; command: number; params: number[]; int?: { frame: number; x: number; y: number; z: number }; observes?: (frame: DecodedFrame) => boolean; requiredMode?: number; acceptedMessage?: string };
 interface Work {
   op: VehicleOperation; stage: "command" | "upload" | "count" | "items";
   steps: Step[]; step: number; stepSent: boolean; sentSequence: number; deadline: number; absoluteDeadline: number;
@@ -26,6 +27,7 @@ const readonlyAction = (a: VehicleAction) => a.kind === "stream-setup" || a.kind
 export class VehicleService {
   private identity: VehicleIdentity | null = null;
   private lastHeartbeat: number | null = null;
+  private flightSwVersion: number | null = null;
   private telemetry = new VehicleTelemetry();
   private mission = emptyMission();
   private missionAt: number | null = null;
@@ -63,12 +65,13 @@ export class VehicleService {
         this.abort("Selected autopilot changed or reconnected; previous outcome is unknown");
         this.identity = { system: frame.system, component: frame.component, autopilot: m.autopilot, vehicleType: m.type, generation: randomUUID() };
         this.telemetry = new VehicleTelemetry(); this.mission = emptyMission(); this.missionAt = null; this.missionOpaqueId = 0;
-        this.uncertain.clear(); this.missionUncertain = false;
+        this.uncertain.clear(); this.missionUncertain = false; this.flightSwVersion = null;
       }
       this.lastHeartbeat = now;
     }
     if (!this.identity || frame.system !== this.identity.system || frame.component !== this.identity.component || !this.connected()) return;
     this.receiveSequence++; this.sequence++;
+    if (m instanceof standard.AutopilotVersion) this.flightSwVersion = m.flightSwVersion;
     if (m instanceof common.MissionCurrent) {
       if (this.mission.currentSeq !== m.seq) this.telemetry.clearGuidance();
       if (m.missionId && this.missionOpaqueId && m.missionId !== this.missionOpaqueId) this.changedMission("Autopilot reports a different mission revision");
@@ -98,7 +101,7 @@ export class VehicleService {
         if (m.result === 5) { work.deadline = this.now() + COMMAND_MS; this.status(work, "in-progress", "Autopilot reports command in progress"); return; }
         if (m.result !== 0) { this.finish(work, "rejected", `Autopilot refused command (${m.result})`, "unavailable"); return; }
         this.status(work, "accepted", "Autopilot accepted; awaiting observed effect");
-        if (!step.observes) this.nextStep(work, "accepted", "Autopilot accepted; physical effect is not measured by this command");
+        if (!step.observes) this.nextStep(work, "accepted", step.acceptedMessage ?? "Autopilot accepted; physical effect is not measured by this command");
       }
       if (this.active === work && step?.observes && work.stepSent && this.receiveSequence > work.sentSequence && step.observes(frame)) this.nextStep(work, "observed", "Requested aircraft state observed");
     } else this.receiveMission(frame, work);
@@ -106,15 +109,28 @@ export class VehicleService {
   private recipient(m: { targetSystem: number; targetComponent: number; missionType?: number }): boolean {
     return [0, VEHICLE_SOURCE_SYSTEM].includes(m.targetSystem) && [0, VEHICLE_SOURCE_COMPONENT].includes(m.targetComponent) && (m.missionType === undefined || m.missionType === 0);
   }
-  snapshot(): VehicleSnapshot {
+  private flightControlReason(): string | null {
+    if (!this.connected()) return "A fresh autopilot heartbeat is required";
+    if (!isPlane(this.identity)) return "Flight controls are verified for ArduPlane only";
+    if (this.flightSwVersion === null) return "Request aircraft streams to obtain AUTOPILOT_VERSION before using flight controls";
+    // The firmware version proves the adapter family, not optional build features. ACK is authoritative.
+    if (this.flightSwVersion !== 0x040701ff) return "Flight controls are currently verified for ArduPlane 4.7.1 stable only";
+    return null;
+  }
+  snapshot(options: { details?: boolean } = {}): VehicleSnapshot {
     this.tick();
     const now = this.now(), connected = this.connected(), telemetry = this.telemetry.snapshot(now, connected, this.identity);
-    return structuredClone({ at: now, sequence: this.sequence, identity: this.identity, connected, ready: connected,
-      telemetry, mission: { ...this.mission, currentFresh: connected && this.missionAt !== null && now - this.missionAt < 2000 && this.mission.synchronization === "verified" },
-      operations: this.operations, busy: this.active !== null,
+    const reason = this.flightControlReason(), lastOperation = this.operations.at(-1), lastText = this.texts.at(-1);
+    const detailKey = createHash("sha256").update(JSON.stringify([this.identity, connected, this.flightSwVersion,
+      this.mission.revision, this.mission.synchronization, this.mission.message, this.mission.transfer,
+      this.operations.length, lastOperation, this.texts.length, lastText])).digest("hex").slice(0, 24);
+    return structuredClone({ at: now, sequence: this.sequence, detailKey, identity: this.identity, connected, ready: connected,
+      telemetry, mission: { ...this.mission, items: options.details === false ? [] : this.mission.items, currentFresh: connected && this.missionAt !== null && now - this.missionAt < 2000 && this.mission.synchronization === "verified" },
+      operations: options.details === false ? [] : this.operations, busy: this.active !== null,
       capabilities: { modes: isPlane(this.identity) ? Object.entries(PLANE_MODES).map(([id, name]) => ({ name, customMode: Number(id), source: "firmware-known" as const })) : [],
-        commands: isPlane(this.identity) ? [...IMMEDIATE].map(command => ({ command, source: "firmware-known" as const })) : [], terrainTargets: false, signing: "unsigned-only" as const },
-      statustext: this.texts });
+        commands: isPlane(this.identity) ? [...IMMEDIATE].map(command => ({ command, source: "firmware-known" as const })) : [], terrainTargets: false, signing: "unsigned-only" as const,
+        flightControl: Object.entries(FLIGHT_COMMANDS).map(([kind, command]) => ({ kind: kind as keyof typeof FLIGHT_COMMANDS, command, source: "firmware-known" as const, available: reason === null, reason, requiredMode: 15 as const, entersGuided: true as const, confirmation: "acknowledgement" as const })) },
+      statustext: options.details === false ? [] : this.texts });
   }
   submit(request: OperatorRequest): OperationAdmission {
     this.tick();
@@ -133,6 +149,7 @@ export class VehicleService {
     if (this.active) return reject(409, "Another vehicle operation is in progress");
     if (this.operations.length >= MAX_OPERATIONS) return reject(409, "This service has reached its bounded operation-history limit; completed IDs cannot be reused");
     const kind = request.action.kind;
+    if (kind in FLIGHT_COMMANDS) { const reason = this.flightControlReason(); if (reason) return reject(400, reason); }
     const missionChange = ["mission-upload", "mission-clear", "set-current", "continue-auto", "mission-start"].includes(kind);
     if (missionChange && ["changed", "failed"].includes(this.mission.synchronization)) return reject(409, "Vehicle mission synchronization was lost; download and review it before changing it");
     if (missionChange && this.mission.revision !== null && request.expectedMissionRevision !== this.mission.revision) return reject(409, "Vehicle mission changed; review the current revision");
@@ -161,6 +178,10 @@ export class VehicleService {
       case "set-current": return integer(action.seq, 1, MAX_MISSION_ITEMS - 1) ? null : "Invalid mission sequence";
       case "continue-auto": return integer(action.seq, 1, MAX_MISSION_ITEMS - 1) && action.autoMode === 10 ? null : "Continue AUTO requires a valid ArduPlane mission sequence and AUTO mode";
       case "goto": return action.target && number(action.target.lat, -90, 90) && number(action.target.lon, -180, 180) && number(action.target.altitudeM, -1000, 30000) && ["msl", "home"].includes(action.target.datum) ? null : "GUIDED requires valid coordinates and MSL or home-relative altitude; terrain datum is not supported by this adapter";
+      case "heading": return number(action.headingDeg, 0, 360) && action.headingDeg < 360 && action.reference === "true" && number(action.turnAccelerationMps2, 0.05, 20) ? null : "Heading requires 0–359.99 degrees true and 0.05–20 m/s² turn acceleration";
+      case "altitude": return number(action.altitudeM, -1000, 30000) && ![-1, 0].includes(action.altitudeM) && ["msl", "home"].includes(action.datum) && number(action.verticalRateMps, 0, 100) ? null : "Altitude requires MSL or home-relative metres (except -1 and 0) and a 0–100 m/s vertical rate; zero rate selects the aircraft maximum";
+      case "speed": return number(action.airspeedMps, 0.01, 300) && number(action.accelerationMps2, 0, 20) ? null : "Speed requires positive airspeed up to 300 m/s and 0–20 m/s² acceleration; aircraft tuning limits also apply";
+      case "loiter": return this.validateAction({ kind: "goto", target: action.target }) ?? (integer(action.radiusM, 1, 65535) && ["cw", "ccw"].includes(action.direction) ? null : "Loiter requires a whole-metre radius from 1–65535 and cw or ccw direction");
       case "mission-upload": return !Array.isArray(action.items) || !action.items.length ? "Use the explicit clear-mission action for an empty mission" : validateMission(action.items);
       case "immediate": return IMMEDIATE.has(action.command) && Array.isArray(action.params) && action.params.length === 7 && action.params.every(p => p === null || number(p)) && (action.frame === undefined || action.frame === 2) ? validateCommandParameters(action.command, action.params) : "Immediate command or parameters are unsupported";
       default: return "Unsupported operator action";
@@ -169,11 +190,22 @@ export class VehicleService {
   private steps(action: VehicleAction): Step[] {
     const mode = (id: number): Step => ({ name: `Mode ${PLANE_MODES[id] ?? id}`, command: 176, params: [1, id, 0, 0, 0, 0, 0], observes: f => f.data instanceof minimal.Heartbeat && f.data.customMode === id });
     const current = (seq: number): Step => ({ name: `Current mission item ${seq}`, command: 224, params: [seq, 0, 0, 0, 0, 0, 0], observes: f => f.data instanceof common.MissionCurrent && f.data.seq === seq });
+    const guided = (step: Step): Step[] => this.telemetry.snapshot(this.now(), this.connected(), this.identity).customMode === 15 ? [step] : [mode(15), step];
     switch (action.kind) {
       case "mode": return [mode(action.customMode)];
       case "arm": return [{ name: action.armed ? "Arm" : "Disarm", command: 400, params: [action.armed ? 1 : 0, 0, 0, 0, 0, 0, 0], observes: f => f.data instanceof minimal.Heartbeat && !!(f.data.baseMode & 128) === action.armed }];
       case "set-current": return [current(action.seq)];
       case "continue-auto": return [current(action.seq), mode(action.autoMode)];
+      // ArduPlane 4.7.1 guided slew commands persist in the autopilot; never repeat from a timer.
+      case "heading": return guided({ name: "GUIDED heading", command: 43002, params: [1, action.headingDeg, action.turnAccelerationMps2, 0], int: { frame: 0, x: 0, y: 0, z: 0 }, requiredMode: 15,
+        acceptedMessage: "Autopilot accepted true-heading request; heading capture is not reported by this protocol" });
+      case "altitude": return guided({ name: "GUIDED altitude", command: 43001, params: [0, 0, action.verticalRateMps, 0], int: { frame: action.datum === "msl" ? 0 : 3, x: 0, y: 0, z: action.altitudeM }, requiredMode: 15,
+        acceptedMessage: "Autopilot accepted altitude request; monitor reported altitude and vertical speed, capture is not reported" });
+      case "speed": return guided({ name: "GUIDED airspeed", command: 43000, params: [0, action.airspeedMps, action.accelerationMps2, 0], int: { frame: 0, x: 0, y: 0, z: 0 }, requiredMode: 15,
+        acceptedMessage: "Autopilot accepted airspeed request; speed capture is not reported by this protocol" });
+      case "loiter": return guided({ name: "GUIDED loiter", command: 192, params: [-1, 1, action.radiusM, action.direction === "ccw" ? 1 : 0],
+        int: { frame: action.target.datum === "msl" ? 0 : 3, x: Math.round(action.target.lat * 1e7), y: Math.round(action.target.lon * 1e7), z: action.target.altitudeM }, requiredMode: 15,
+        acceptedMessage: "Autopilot accepted loiter request; monitor GUIDED target and aircraft track, radius and direction are not reported" });
       case "goto": {
         const t = action.target, frame = t.datum === "msl" ? 0 : 3;
         return [{ name: "GUIDED target", command: 192, params: [-1, 1, 0, 0], int: { frame, x: Math.round(t.lat * 1e7), y: Math.round(t.lon * 1e7), z: t.altitudeM }, observes: f => {
@@ -216,6 +248,12 @@ export class VehicleService {
     const bytes = this.protocol.serialize(message, this.wireSequence++ % 256);
     this.writeChain = this.writeChain.then(async () => {
       if (this.active !== work || !this.connected() || this.identity?.generation !== work.op.vehicleGeneration) return;
+      if (work.op.action.kind in FLIGHT_COMMANDS && this.flightControlReason()) {
+        this.finish(work, "failed", "Aircraft firmware evidence changed before the flight control was sent; review again", "unavailable"); return;
+      }
+      if (work.stage === "command" && work.steps[work.step]?.requiredMode !== undefined && this.telemetry.snapshot(this.now(), true, this.identity).customMode !== work.steps[work.step].requiredMode) {
+        this.finish(work, "failed", "Aircraft mode changed before the GUIDED control was sent; review again", "unavailable"); return;
+      }
       work.op.sentAt ??= this.now();
       if (work.stage === "command") { work.stepSent = true; work.sentSequence = this.receiveSequence; this.status(work, "sent", "Sent; awaiting autopilot response"); }
       else if (work.op.state === "queued") this.status(work, "sent", "Sent; awaiting autopilot response");

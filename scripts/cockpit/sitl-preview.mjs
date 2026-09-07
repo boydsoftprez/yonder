@@ -23,10 +23,10 @@ const args = process.argv.slice(2),
   index = args.indexOf("--firmware-dir");
 assert(
   index >= 0 && args[index + 1],
-  "Usage: node scripts/cockpit/sitl-preview.mjs --firmware-dir DIR [--public-data]",
+  "Usage: node scripts/cockpit/sitl-preview.mjs --firmware-dir DIR [--public-data] [--http-port PORT] [--vehicle-port PORT]",
 );
 assert(
-  args.every((a, i) => i === index || i === index + 1 || a === "--public-data"),
+  args.every((a, i) => i === index || i === index + 1 || a === "--public-data" || ['--http-port','--vehicle-port'].includes(a) || ['--http-port','--vehicle-port'].includes(args[i-1])),
   "Unknown option",
 );
 const firmware = resolve(args[index + 1]);
@@ -47,8 +47,9 @@ for (const [file, hash] of [
     hash,
     `Unverified simulator input ${file}`,
   );
-const httpPort = 4195,
-  vehiclePort = 5766,
+const portOption=(flag,fallback)=>{const i=args.indexOf(flag);if(i<0)return fallback;const value=Number(args[i+1]);assert(Number.isInteger(value)&&value>=1024&&value<=65535,`Invalid ${flag}`);return value;};
+const httpPort = portOption('--http-port',4195),
+  vehiclePort = portOption('--vehicle-port',5766),
   name = `yonder-native-cockpit-${randomUUID().slice(0, 8)}`;
 const runtime = mkdtempSync(join(tmpdir(), "yonder-native-cockpit-"));
 const docker = (...a) =>
@@ -198,8 +199,8 @@ try {
   );
   const vehicle = {
     submit: (request) => service.submit(request),
-    snapshot: () => {
-      const state = service.snapshot();
+    snapshot: (options) => {
+      const state = service.snapshot(options);
       state.telemetry.source = "ArduPlane SITL";
       return state;
     },
@@ -243,7 +244,7 @@ try {
     `Native ArduPlane SITL API http://127.0.0.1:${httpPort} · container ${name}`,
   );
   console.log(
-    "Start the Vue harness with COCKPIT_API=http://127.0.0.1:4195 and open /?live=1.",
+    `Start the Vue harness with COCKPIT_API=http://127.0.0.1:${httpPort} and open /?live=1.`,
   );
   console.log(
     "Aircraft → Request flight telemetry → Read aircraft mission. Import/load your local mission, review, then explicitly upload/arm/start. Ctrl-C removes only this simulator.",

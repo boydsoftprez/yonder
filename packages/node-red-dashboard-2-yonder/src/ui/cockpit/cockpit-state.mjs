@@ -3,6 +3,7 @@
 import {
   pfdState
 } from './pfd-state.mjs';
+import {guidedNavigationUnavailable, guidedSource} from './guided-navigation.mjs';
 const RAD = Math.PI / 180,
   EARTH = 6371000;
 export const finite = Number.isFinite;
@@ -189,6 +190,8 @@ export function guidanceView(snapshot, elapsed = 0) {
     valid: false,
     reason: 'Flight telemetry unavailable'
   };
+  const unavailable = guidedNavigationUnavailable(snapshot);
+  if (unavailable) return {valid:false, reason:unavailable, desiredBank:t.navRollDeg};
   if (!n || n.ageMs + elapsed >= 2000) return {
     valid: false,
     reason: 'Navigation controller unavailable'
@@ -210,6 +213,7 @@ export function guidanceView(snapshot, elapsed = 0) {
       distanceM: distance(here, center),
       crossTrackM: n.crossTrackM,
       label: 'GUIDED radial',
+      guidanceSource: guidedSource,
       target,
       ete: null,
       desiredBank: t.navRollDeg
@@ -230,45 +234,4 @@ export function guidanceView(snapshot, elapsed = 0) {
     desiredBank: t.navRollDeg
   };
 }
-export function createCockpitApi(fetchFn = (...args) => fetch(...args)) {
-  async function request(url, init = {}) {
-    const controller = new AbortController(),
-      timer = setTimeout(() => controller.abort(), 5000);
-    try {
-      const response = await fetchFn(url, {
-        ...init,
-        credentials: 'same-origin',
-        cache: 'no-store',
-        signal: controller.signal
-      });
-      const body = await response.json();
-      if (!response.ok) {
-        const error = new Error(body.message || `Console request failed (${response.status})`);
-        error.admissionRejected = response.status >= 400 && response.status < 500;
-        throw error;
-      }
-      return body;
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-  return {
-    state: () => request('/cockpit/api/state'),
-    dataOptions: options => request('/cockpit/api/data-options', {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-yonder-cockpit': '1'
-      },
-      body: JSON.stringify(options)
-    }),
-    command: body => request('/cockpit/api/command', {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-yonder-cockpit': '1'
-      },
-      body: JSON.stringify(body)
-    })
-  };
-}
+export { createCockpitApi } from './cockpit-api.mjs';

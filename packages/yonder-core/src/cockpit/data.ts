@@ -3,10 +3,11 @@ import { boundedFetch } from "./fetch.js";
 import { GeoidGrid } from "./geoid.js";
 import { TrafficFeed, type TrafficCenter } from "./traffic.js";
 export interface DataOptions {
+  sourceMode: 'ground' | 'offline' | 'aircraft';
   traffic: boolean;
   terrain: boolean;
   imagery: boolean;
-  trafficRadiusNm: 25 | 50 | 100;
+  trafficRadiusNm: number;
   cameraId: string | null;
   aircraftDatum: "UNKNOWN" | "EGM96" | "NAVD88" | "WGS84_ELLIPSOID";
 }
@@ -27,6 +28,7 @@ const layers = {
 /** Opt-in, process-local provider data. No background fetches when no cockpit is polling. */
 export class CockpitData {
   private settings: DataOptions = {
+    sourceMode: 'ground',
     traffic: false,
     terrain: false,
     imagery: false,
@@ -45,7 +47,7 @@ export class CockpitData {
   private readonly pending = new Map<string, Promise<TileReply>>();
   private activeFetches = 0;
   private readonly waiting: ((acquired: boolean) => void)[] = [];
-  private readonly abort = new AbortController();
+  private abort = new AbortController();
   private closed = false;
   constructor(options: Options = {}) {
     this.fetcher = options.fetcher ?? boundedFetch;
@@ -66,14 +68,18 @@ export class CockpitData {
       return false;
     const raw = value as Record<string, unknown>,
       next = { ...this.settings };
+    if(raw.sourceMode!==undefined){
+      if(!['ground','offline','aircraft'].includes(String(raw.sourceMode)))return false;
+      next.sourceMode=raw.sourceMode as DataOptions['sourceMode'];
+    }
     for (const key of ["traffic", "terrain", "imagery"] as const)
       if (raw[key] !== undefined) {
         if (typeof raw[key] !== "boolean") return false;
         next[key] = raw[key];
       }
     if (raw.trafficRadiusNm !== undefined) {
-      if (![25, 50, 100].includes(raw.trafficRadiusNm as number)) return false;
-      next.trafficRadiusNm = raw.trafficRadiusNm as 25 | 50 | 100;
+      if (!Number.isInteger(raw.trafficRadiusNm)||Number(raw.trafficRadiusNm)<1||Number(raw.trafficRadiusNm)>100) return false;
+      next.trafficRadiusNm = raw.trafficRadiusNm as number;
     }
     if (raw.cameraId !== undefined) {
       if (
@@ -93,6 +99,14 @@ export class CockpitData {
         return false;
       next.aircraftDatum = raw.aircraftDatum as DataOptions["aircraftDatum"];
     }
+    const leavingAircraft = this.settings.sourceMode === 'aircraft' && next.sourceMode !== 'aircraft';
+    if (leavingAircraft || (this.settings.terrain && !next.terrain) || (this.settings.imagery && !next.imagery)) {
+      // Retire the whole tile batch. A later enablement must not revive its queued requests.
+      this.abort.abort();
+      this.abort = new AbortController();
+      this.waiting.splice(0).forEach(resolve => resolve(false));
+    }
+    if (leavingAircraft || (this.settings.traffic && !next.traffic)) this.feed.pause();
     this.settings = next;
     return true;
   }
@@ -115,12 +129,12 @@ export class CockpitData {
             radiusNm: this.settings.trafficRadiusNm,
           }
         : null;
-    if (this.settings.traffic && center && !this.closed)
+    if (this.settings.sourceMode==='aircraft' && this.settings.traffic && center && !this.closed)
       void this.feed.poll(center);
     const traffic = this.feed.snapshot(center);
-    if (!this.settings.traffic) {
+    if (this.settings.sourceMode!=='aircraft'||!this.settings.traffic) {
       traffic.status = "disabled";
-      traffic.message = "Public traffic is off";
+      traffic.message = this.settings.sourceMode==='aircraft'?'Public traffic is off':'Public traffic is owned by the ground client';
       traffic.tracks = [];
     } else if (!center) {
       traffic.status = "unavailable";
@@ -149,6 +163,7 @@ export class CockpitData {
       return { status: 400, body: { error: "Invalid geographic tile" } };
     if (
       this.closed ||
+      this.settings.sourceMode!=='aircraft' ||
       !(layer === "elevation" ? this.settings.terrain : this.settings.imagery)
     )
       return {
@@ -173,12 +188,16 @@ export class CockpitData {
         status: 429,
         body: { error: "Geographic tiles are busy; retry shortly" },
       };
+    // Capture ownership before waiting for a fetch slot, not when the network request starts.
+    const controller = this.abort;
     const work = (async (): Promise<TileReply> => {
       const acquired = await this.acquireFetch();
       try {
         if (
           !acquired ||
           this.closed ||
+          controller.signal.aborted ||
+          this.settings.sourceMode!=='aircraft' ||
           !(layer === "elevation"
             ? this.settings.terrain
             : this.settings.imagery)
@@ -194,8 +213,11 @@ export class CockpitData {
         const { bytes, type } = await this.fetcher(
           url,
           512 * 1024,
-          this.abort.signal,
+          controller.signal,
         );
+        // A provider completion may race abort; obsolete responses cannot be served or cached.
+        if (this.closed || controller.signal.aborted)
+          return { status: 403, body: { error: "Geographic source was disabled or changed" } };
         const png = bytes
             .subarray(0, 8)
             .equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])),
@@ -228,8 +250,8 @@ export class CockpitData {
         return { status: 200, body };
       } catch {
         return {
-          status: 502,
-          body: { error: "Geographic source unavailable" },
+          status: this.closed || controller.signal.aborted ? 403 : 502,
+          body: { error: this.closed || controller.signal.aborted ? "Geographic source was disabled or changed" : "Geographic source unavailable" },
         };
       } finally {
         this.pending.delete(key);

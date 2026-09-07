@@ -4,26 +4,27 @@
     <header class="screen-title"><strong>PFD</strong><span>Primary flight display</span><button class="pfd-mode-button" @click="open('status')" aria-label="PFD mode and data status" :class="{unavailable:!flight.live}">{{flight.live?telemetry.mode:'NO DATA'}}</button></header>
     <TelemetryStrip v-if="options.stripPlacement==='pfd'" :telemetry="telemetry" :live="flight.live" @open="open('status')"/>
     <div class="pfd-screen" :class="{stale:!flight.live}">
-    <div class="pfd-instrument-canvas">
-    <slot name="traffic" :pose="displayPose"/>
-    <slot name="background" :pose="displayPose"/>
-    <svg viewBox="0 0 640 650" class="pfd-svg" role="img" aria-label="Artificial horizon, airspeed and altitude tapes, vertical speed and heading">
+    <div ref="canvas" class="pfd-instrument-canvas">
+    <slot name="traffic" :pose="displayPose" :viewport="viewport"/>
+    <slot name="background" :pose="displayPose" :viewport="viewport"/>
+    <FlightModeAnnunciator :snapshot="modeSnapshot" :director-label="options.fdVisible?(director?'FD CUES':'FD NO DATA'):'FD OFF'" @open="$emit('flight-controls',$event)" @director="open('director')"/>
+    <svg :viewBox="viewport.viewBox" class="pfd-svg" role="img" aria-label="Artificial horizon, airspeed and altitude tapes, vertical speed and heading">
       <defs>
         <linearGradient id="pfd-sky" x2="0" y2="1"><stop stop-color="#075096"/><stop offset="1" stop-color="#388eda"/></linearGradient>
         <linearGradient id="pfd-earth" x2="0" y2="1"><stop stop-color="#a97839"/><stop offset="1" stop-color="#51351c"/></linearGradient>
-        <clipPath id="pfd-attitude-clip"><rect width="640" height="386"/></clipPath>
+        <clipPath id="pfd-attitude-clip"><rect :x="viewport.x" :y="viewport.y" :width="viewport.width" :height="viewport.height"/></clipPath>
         <clipPath id="pfd-pitch-clip"><rect x="205" y="108" width="230" height="230"/></clipPath>
         <linearGradient id="pfd-pitch-fade" x1="0" y1="108" x2="0" y2="338" gradientUnits="userSpaceOnUse"><stop stop-color="white" stop-opacity="0"/><stop offset=".15" stop-color="white"/><stop offset=".85" stop-color="white"/><stop offset="1" stop-color="white" stop-opacity="0"/></linearGradient>
         <mask id="pfd-pitch-mask"><rect x="205" y="108" width="230" height="230" fill="url(#pfd-pitch-fade)"/></mask>
         <clipPath id="pfd-speed-clip"><rect x="24" y="91" width="88" height="268"/></clipPath>
         <clipPath id="pfd-altitude-clip"><rect x="508" y="91" width="104" height="268"/></clipPath>
       </defs>
-      <rect width="640" height="650" fill="#04090f" :fill-opacity="terrainReady?0:1"/>
+      <rect :x="viewport.x" :y="viewport.y" :width="viewport.width" :height="viewport.height" fill="#04090f" :fill-opacity="terrainReady?0:1"/>
       <g clip-path="url(#pfd-attitude-clip)" :opacity="flight.attitudeValid?1:.18">
         <g class="pfd-horizon" :transform="horizon" :opacity="terrainReady?0:1">
-          <rect x="-900" y="-1600" width="2440" height="1825" fill="url(#pfd-sky)"/>
-          <rect x="-900" y="225" width="2440" height="1600" fill="url(#pfd-earth)"/>
-          <line x1="-900" y1="225" x2="1540" y2="225" stroke="white" stroke-width="3"/>
+          <rect :x="320-sceneExtent" :y="225-sceneExtent" :width="sceneExtent*2" :height="sceneExtent" fill="url(#pfd-sky)"/>
+          <rect :x="320-sceneExtent" y="225" :width="sceneExtent*2" :height="sceneExtent" fill="url(#pfd-earth)"/>
+          <line :x1="320-sceneExtent" y1="225" :x2="320+sceneExtent" y2="225" stroke="white" stroke-width="3"/>
         </g>
         <g v-if="options.pitchLadder" clip-path="url(#pfd-pitch-clip)" mask="url(#pfd-pitch-mask)"><g :transform="horizon">
           <g v-for="mark in pitchMarks" :key="mark" :transform="'translate(320 '+(225-mark*5)+')'" class="pitch-mark">
@@ -52,7 +53,7 @@
         </g>
         <g v-else><path d="M203 220 H276 V231 H268 V228 H203 Z M437 220 H364 V231 H372 V228 H437 Z"/><path d="M305 226 L320 218 L335 226 L320 223 Z"/></g>
       </g>
-      <g class="pfd-tapes">
+      <g class="pfd-tapes"><g :transform="'translate('+(-viewport.edgeShift)+' 0)'">
         <rect x="24" y="63" width="88" height="296" rx="5" class="pfd-tape-background" :fill-opacity="options.tapeOpacity"/>
         <path d="M29 63 H107 Q112 63 112 68 V91 H24 V68 Q24 63 29 63 Z" class="pfd-tape-cap"/>
         <text x="30" y="82" class="pfd-small">IAS</text><text x="105" y="82" text-anchor="end" class="pfd-unit">KT</text>
@@ -64,7 +65,7 @@
         <text x="69" y="238" text-anchor="middle" class="pfd-speed-value">{{fixed(flight.airspeed)}}</text>
         <path v-if="refOffset('airspeed',3)!==null" class="pfd-reference-bug" :transform="'translate(0 '+(225+refOffset('airspeed',3))+')'" d="M112 0 L125 -7 V7 Z"/>
         <text x="26" y="382" class="pfd-unit">GS <tspan fill="white">{{fixed(flight.groundspeed)}} KT</tspan></text>
-        <g class="pfd-altimeter" transform="translate(-26 0)">
+        </g><g class="pfd-altimeter" :transform="'translate('+(viewport.edgeShift-26)+' 0)'">
         <rect x="508" y="63" width="104" height="296" rx="5" class="pfd-tape-background" :fill-opacity="options.tapeOpacity"/>
         <path d="M513 63 H607 Q612 63 612 68 V91 H508 V68 Q508 63 513 63 Z" class="pfd-tape-cap"/>
         <text x="514" y="82" class="pfd-small">MSL</text><text x="606" y="82" text-anchor="end" class="pfd-unit">FT</text>
@@ -80,7 +81,7 @@
       </g>
       <!-- Scale and pointer adapted from Peter Heinrich's SDU460 PFD/VSI.svg,
            copyright 2024, GPL-3.0-or-later. See PROVENANCE.md. -->
-      <g class="pfd-vsi" transform="translate(590 225)" :aria-label="flight.vsi===null?'Vertical speed unavailable':'Vertical speed '+fixed(flight.vsi)+' feet per minute'">
+      <g class="pfd-vsi" :transform="'translate('+(590+viewport.edgeShift)+' 225)'" :aria-label="flight.vsi===null?'Vertical speed unavailable':'Vertical speed '+fixed(flight.vsi)+' feet per minute'">
         <path d="M0 -128 H38 Q44 -128 44 -122 V-23 Q44 -13 24 -7 L12 0 L24 7 Q44 13 44 23 V122 Q44 128 38 128 H0 Z" class="pfd-tape-background" :fill-opacity="options.tapeOpacity"/>
         <path d="M0 -121 V121 M0 0 L14 -7 M0 0 L14 7" class="pfd-vsi-scale-line"/>
         <g v-for="tick in vsiTicks" :key="tick.value" :transform="'translate(0 '+(-tick.offset)+')'">
@@ -97,7 +98,7 @@
         <text x="21" y="145" text-anchor="middle" class="pfd-unit">×1000</text><text x="21" y="158" text-anchor="middle" class="pfd-unit">FPM</text>
       </g>
       <g v-if="!flight.attitudeValid" class="pfd-attitude-fail"><path d="M170 120 L470 320 M470 120 L170 320" stroke="#ff5353" stroke-width="5"/><rect x="219" y="270" width="202" height="33" fill="#210c0c"/><text x="320" y="293" text-anchor="middle" fill="#ffd28e">ATTITUDE UNAVAILABLE</text></g>
-      <line x1="0" y1="396" x2="640" y2="396" stroke="#394b5d"/>
+      <line :x1="viewport.x" y1="396" :x2="viewport.x+viewport.width" y2="396" stroke="#394b5d" stroke-opacity=".25"/>
       <g transform="translate(320 518)">
         <circle r="108" fill="#08131f" :fill-opacity="options.hsiOpacity" stroke="#d4dee4" stroke-width="3"/>
         <circle r="59" fill="none" stroke="#d4dee4" stroke-opacity=".7" stroke-width="1.5"/>
@@ -129,19 +130,17 @@
         <g v-if="options.secondary"><text x="616" y="530" text-anchor="end">{{bearingValid?'BEARING':guidance.trackTitle||'DESIRED TRACK'}}</text><text x="616" y="556" text-anchor="end" class="pfd-secondary-value">{{navValid?angle(guidance.desiredTrackDeg):radialValid?angle(guidance.pathBearingDeg):bearingValid?angle(guidance.bearingDeg):'—'}}</text></g>
         <text x="320" y="638" text-anchor="middle">HEADING · TRUE NORTH</text>
       </g>
-      <g class="pfd-reference-labels"><text v-if="references.airspeed!==null" x="25" y="22">REF {{fixed(references.airspeed)}} KT</text><text v-if="references.altitude!==null" x="587" y="22" text-anchor="end">REF {{fixed(references.altitude)}} FT</text><text v-if="references.heading!==null" x="320" y="382" text-anchor="middle">HDG REF {{angle(references.heading)}}</text><text v-if="references.vsi!==null" x="25" y="495">REF {{fixed(references.vsi)}} FPM</text></g>
-      <text x="320" y="28" text-anchor="middle" class="pfd-fd-label">{{options.fdVisible?(director?'FD CUES':'FD NO DATA'):'FD OFF'}}</text>
+      <g class="pfd-reference-labels"><text v-if="references.airspeed!==null" :x="25-viewport.edgeShift" y="22">REF {{fixed(references.airspeed)}} KT</text><text v-if="references.altitude!==null" :x="587+viewport.edgeShift" y="22" text-anchor="end">REF {{fixed(references.altitude)}} FT</text><text v-if="references.heading!==null" x="320" y="382" text-anchor="middle">HDG REF {{angle(references.heading)}}</text><text v-if="references.vsi!==null" x="25" y="495">REF {{fixed(references.vsi)}} FPM</text></g>
     </svg>
     <div class="pfd-touch-surfaces" role="group" aria-label="Touch flight instruments">
-      <button class="pfd-hotspot pfd-touch-speed" aria-label="Airspeed controls" @click="open('airspeed')"><span>IAS</span></button>
-      <button class="pfd-hotspot pfd-touch-altitude" aria-label="Set altitude reference" @click="open('altitude')"><span>ALT</span></button>
-      <button class="pfd-hotspot pfd-touch-attitude" aria-label="Attitude and display settings" @click="open('attitude')"><span>DISPLAY</span></button>
-      <button class="pfd-hotspot pfd-touch-director" aria-label="Flight director settings" @click="open('director')"><span>FLIGHT DIRECTOR</span></button>
-      <button class="pfd-hotspot pfd-touch-vsi" aria-label="Set vertical speed reference" @click="open('vsi')"><span>VS</span></button>
-      <button class="pfd-hotspot pfd-touch-vsi-scale" aria-label="Vertical speed scale reference" @click="open('vsi')"><span>VS</span></button>
-      <button class="pfd-hotspot pfd-touch-heading" aria-label="Set heading reference" @click="open('heading')"><span>HEADING</span></button>
-      <button class="pfd-hotspot pfd-touch-navigation" aria-label="PFD mission navigation" @click="open('nav')"><span>NAVIGATION</span></button>
-      <button class="pfd-hotspot pfd-touch-bank" aria-label="Pitch and bank display settings" @click="open('attitude')"><span>ATTITUDE</span></button>
+      <button class="pfd-hotspot pfd-touch-speed" :style="hit([6-viewport.edgeShift,35,124,355])" aria-label="Airspeed controls" @click="open('airspeed')"><span>IAS</span></button>
+      <button class="pfd-hotspot pfd-touch-altitude" :style="hit([477+viewport.edgeShift,35,110,355])" aria-label="Set altitude reference" @click="open('altitude')"><span>ALT</span></button>
+      <button class="pfd-hotspot pfd-touch-attitude" :style="hit([135,98,342,275])" aria-label="Attitude and display settings" @click="open('attitude')"><span>DISPLAY</span></button>
+      <button class="pfd-hotspot pfd-touch-vsi" :style="hit([6,416,184,92])" aria-label="Set vertical speed reference" @click="open('vsi')"><span>VS</span></button>
+      <button class="pfd-hotspot pfd-touch-vsi-scale" :style="hit([588+viewport.edgeShift,96,52,270])" aria-label="Vertical speed scale reference" @click="open('vsi')"><span>VS</span></button>
+      <button class="pfd-hotspot pfd-touch-heading" :style="hit([204,398,232,240])" aria-label="Set heading reference" @click="open('heading')"><span>HEADING</span></button>
+      <button class="pfd-hotspot pfd-touch-navigation" :style="hit([446,418,188,170])" aria-label="PFD mission navigation" @click="open('nav')"><span>NAVIGATION</span></button>
+      <button class="pfd-hotspot pfd-touch-bank" :style="hit([6,514,185,77])" aria-label="Pitch and bank display settings" @click="open('attitude')"><span>ATTITUDE</span></button>
     </div>
     <div v-if="!flight.live" class="pfd-loss" role="status">Flight instruments unavailable</div>
     </div>
@@ -173,6 +172,8 @@ import {
 } from './pfd-controls.mjs';
 import PfdControlPanel from './PfdControlPanel.vue';
 import TelemetryStrip from './TelemetryStrip.vue';
+import FlightModeAnnunciator from './FlightModeAnnunciator.vue';
+import {pfdViewport,pfdHitRegion} from './flight-workflow.mjs';
 
 import {
   cdiDeflection
@@ -186,15 +187,27 @@ import {
 export default {
   components: {
     PfdControlPanel,
-    TelemetryStrip
+    TelemetryStrip,
+    FlightModeAnnunciator
   },
   props: ['flight', 'guidance', 'telemetry', 'cdiScale', 'references', 'options', 'mission', 'trafficTracks',
-    'trafficOptions', 'trafficSelected', 'trafficNow', 'backgroundReady', 'backgroundLabel', 'terrainReport'
+    'trafficOptions', 'trafficSelected', 'trafficNow', 'backgroundReady', 'backgroundLabel', 'terrainReport', 'snapshot'
   ],
-  emits: ['reference', 'option', 'navigate', 'traffic-select'],
+  emits: ['reference', 'option', 'navigate', 'traffic-select', 'flight-controls'],
   setup(props, {
     expose
   }) {
+    const canvas = ref(null), viewport = ref(pfdViewport(640,650));
+    let resizeObserver;
+    const sceneExtent = computed(()=>Math.hypot(viewport.value.width,viewport.value.height)+1000);
+    const hit = box => pfdHitRegion(viewport.value,box);
+    const modeSnapshot = computed(()=>props.snapshot||{connected:props.flight.live,telemetry:props.telemetry});
+    onMounted(()=>{
+      const measure=()=>{const bounds=canvas.value?.getBoundingClientRect();if(bounds?.width&&bounds?.height)viewport.value=pfdViewport(bounds.width,bounds.height)};
+      measure();
+      if(typeof ResizeObserver!=='undefined'){resizeObserver=new ResizeObserver(measure);resizeObserver.observe(canvas.value)}
+    });
+    onBeforeUnmount(()=>resizeObserver?.disconnect());
     const panel = ref(null),
       terrainStatus = computed(() => props.terrainReport || {
         state: 'unavailable',
@@ -294,6 +307,11 @@ export default {
     const estimatedAgl = computed(() => terrainReady.value && props.flight.live && Number.isFinite(terrainStatus.value
       .estimatedAglM) ? terrainStatus.value.estimatedAglM / .3048 : null);
     return {
+      canvas,
+      viewport,
+      sceneExtent,
+      hit,
+      modeSnapshot,
       displayPose,
       displayFlight,
       displayTelemetry,

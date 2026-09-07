@@ -765,16 +765,31 @@ camera-page findings above.
 
 | ID | Approved behavior | Implementation / evidence |
 |---|---|---|
-| F-01 | One PFD with translucent instruments, measured VSI, HSI/CDI and reported flight-director cues | `PrimaryFlightDisplay.vue`; telemetry/context tests and cockpit browser matrix |
+| F-01 | One full-width PFD scene with translucent instruments, measured VSI, HSI/CDI and reported director cues; preserve instrument proportions and move touch regions with the tapes | `PrimaryFlightDisplay.vue`, `flight-workflow.mjs`; R-FLT-01/03, viewport/hit-region tests and laptop/tablet/narrow fixture checks |
 | F-02 | Left mission inset and right satellite/hybrid moving map; expand with the same PFD still present | `YonderCockpit.vue`, `YonderCockpitMap.vue`; landscape/portrait browser checks |
 | F-03 | Tap instruments for references/settings, distinguish local bugs from actual autopilot targets | Preserved PFD control forms and `cockpit-state.mjs` adapter |
-| F-04 | Import/edit/export Mission Planner missions, contextual waypoint/map actions, explicit review before transmission | Preserved mission catalog/forms; authenticated operation service and byte-level tests |
+| F-04 | Import/edit/export Mission Planner missions, contextual waypoint/map actions, explicit review before transmission | Preserved mission catalog/forms; authenticated operation service and byte-level tests; R-FLT-02/04/05 |
 | F-05 | Real ADS-B map/vision targets with selected range, stale state and observed trails | `TrafficFeed`, map/vision components; geometric datum and timestamp regressions |
 | F-06 | Detailed terrain with source/age/coverage, smooth independent pose updates | Prepared USGS ground/surface pack, retained Terrarium renderer and bounded tile service |
 | F-07 | Fixed ELP camera selection and registered terrain overlays | Existing Yonder camera stream plus calibrated projection component. Physical lens/mount and frame-time verification remains required; unavailable registration is stated |
 | F-08 | Time/distance projected path and waypoint ETE | Original prediction adapter. No invented autopilot turn countdown; source-missing intent is unavailable |
 | F-09 | Authenticated production page and ongoing config-revert indication | Shipped `page-cockpit`, `group-cockpit-pending`; routing and flow contract tests |
 | F-10 | Source fidelity without importing restricted simulator assets | Attribution file beside cockpit components; retained permissive/GPL assets and original behavior adapters |
+| F-11 | Persistent Direct-To, Heading, Altitude / Speed, Loiter, Resume Mission, RTL, complete supplied mode list and separate arm/disarm access. Verified fresh Home (0) offers a distinct reviewed mission start; resume requires a verified current authored item 1–1999. Neither action arms. | `FlightControlPanel.vue`, `flight-workflow.mjs`, `YonderCockpit.vue`; R-FLT-13, review/confirmation, start/resume boundary and map-target component tests |
+| F-12 | Top-center actual mode/armed annunciation; requested action, ACK and observed state stay distinct from FD cue availability | `FlightModeAnnunciator.vue`, `flightAnnunciation`; R-FLT-03/13, actual/request transition and stale-generation tests. No heading/altitude capture mode is invented |
+| F-13 | One-shot supported GUIDED heading, altitude, speed and geographic loiter requests with explicit units, datum, rate and radius/direction | `VehicleService`, `flightRequest`; R-FLT-02/05/13, [ArduPlane 4.7.1 byte/ACK and isolated SITL evidence](../evidence/2026-09-07-flight-control-protocol.md). ACK-only controls do not claim observed capture |
+| F-14 | Change an existing mission action, preserving item identity/jump references and compatible geographic fields while resetting incompatible parameters | `MissionTouch.vue`, `mission-action-edit.mjs`, `editMission`; R-FLT-04/14, waypoint-to-loiter and jump-preservation tests |
+| F-15 | Separate loiter radius, direction and duration controls with a local circle preview before upload; timed loiter states its aircraft-configured radius | Pinned Plane command catalog, `loiterPresentation`, local preview; R-FLT-05/14, parameter-index/direction tests and interactive mission form checks |
+| F-16 | An unavailable selected camera offers an explicit synthetic-terrain switch | `YonderCockpit.vue`; R-FLT-09, camera-fallback component test. Terrain coverage/datum and registration limits remain visible |
+| F-17 | Ground internet by default, explicit aircraft proxy, browser offline packs and bounded local traffic trails | `ground-data.mjs`, offline store, ground relay and renderer provider contract; R-FLT-11, [source and offline guide](../../cockpit-ground-data.md), browser import and cancellation evidence |
+| F-18 | Compact recurring flight updates with separately versioned mission and command details, adjustable read rate and visible JSON bandwidth | `flight-wire.ts`, cockpit routes and `cockpit-api.mjs`; R-FLT-12, compact/reconnect/background-transfer and delayed-options tests |
+
+The [cockpit walkthrough](../../cockpit-user-guide.md) covers each shortcut,
+confirmation, mission action conversion and loiter upload. The
+[protocol evidence](../evidence/2026-09-07-flight-control-protocol.md) records
+one-shot persistence and measured simulator behavior, including the slow
+nonzero-rate altitude result. Unsupported firmware and unobserved command effects
+remain explicit limits, not deferred capture indicators.
 
 The component fixture explicitly identifies synthetic telemetry and has no vehicle
 transport. Browser imagery is an artifact, not a committed pixel reference. The

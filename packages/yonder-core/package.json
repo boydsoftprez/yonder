@@ -34,6 +34,10 @@
       "default": "./dist/console/presentation.js"
     },
     "./package.json": "./package.json",
+    "./cockpit-wire": {
+      "types": "./dist/cockpit/flight-wire.d.ts",
+      "default": "./dist/cockpit/flight-wire.js"
+    },
     "./terrain": {
       "types": "./dist/terrain/index.d.ts",
       "default": "./dist/terrain/index.js"

@@ -72,7 +72,7 @@ function validCenter(c: TrafficCenter) {
   if (
     n(c.lat, -90, 90) === null ||
     n(c.lon, -180, 180) === null ||
-    ![25, 50, 100].includes(c.radiusNm)
+    !Number.isInteger(c.radiusNm)||c.radiusNm<1||c.radiusNm>100
   )
     throw new Error("Invalid traffic region");
 }
@@ -281,12 +281,13 @@ export class TrafficFeed {
     if (this.closed || this.now() < this.next) return;
     if (this.active) return this.active;
     this.next = this.now() + 2000;
+    const controller=this.controller;
     this.active = (async () => {
       try {
-        const value = await this.fetcher(center, this.controller.signal);
-        if (!this.closed) this.ingest(value, center);
+        const value = await this.fetcher(center, controller.signal);
+        if (!this.closed&&!controller.signal.aborted) this.ingest(value, center);
       } catch (error) {
-        if (this.closed) return;
+        if (this.closed||controller.signal.aborted) return;
         this.failures = Math.min(10, this.failures + 1);
         this.retry =
           this.now() +
@@ -301,10 +302,15 @@ export class TrafficFeed {
             ? error.message
             : "ADSB.lol connection or response error";
       } finally {
-        this.active = null;
+        if(controller===this.controller)this.active = null;
       }
     })();
     return this.active;
+  }
+  /** Stop an optional source immediately without losing service ownership. */
+  pause() {
+    this.controller.abort();this.controller=new AbortController();this.active=null;this.next=0;
+    this.tracks.clear();this.breaks.clear();this.received=null;this.source=null;
   }
   close() {
     this.closed = true;
