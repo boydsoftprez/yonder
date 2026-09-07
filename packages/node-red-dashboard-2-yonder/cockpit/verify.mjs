@@ -12,12 +12,32 @@ for(const [name,width,height] of [['laptop',1440,900],['tablet',1024,768],['port
  assert.equal(await page.getByRole('main').getAttribute('data-layout'),'full');
  const pfd=page.locator('[aria-label="Primary flight display"]');assert.equal(await pfd.count(),1);
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+ const wind=page.getByRole('button',{name:'Wind display settings',exact:true});
+ await wind.waitFor({state:'visible'});
+ assert.equal(await wind.locator('[data-direction="down"]').count(),1);
+ assert.equal(await wind.locator('[data-direction="left"]').count(),1);
+ // Verify the actual hit target at each responsive size, not merely SVG presence.
+ await wind.click();await page.getByRole('dialog',{name:'Wind display',exact:true}).waitFor();
+ await page.getByLabel('Wind display mode',{exact:true}).selectOption('direction');
+ await page.getByRole('button',{name:'Close PFD controls'}).click();
+ assert.match(await wind.innerText(),/225° T/);
+ await wind.click();await page.getByLabel('Wind display mode',{exact:true}).selectOption('components');
+ await page.getByRole('button',{name:'Close PFD controls'}).click();
  await page.screenshot({path:`${artifacts}/${name}-full.png`});
  if(width>=768){await page.getByRole('button',{name:'Expand mission',exact:true}).click();assert.equal(await page.getByRole('main').getAttribute('data-layout'),'mission');await page.screenshot({path:`${artifacts}/${name}-mission.png`});await page.getByRole('button',{name:'Return to full PFD',exact:true}).click();}
  await page.getByRole('button',{name:'Airspeed controls',exact:true}).click();await page.getByRole('dialog',{name:'Airspeed reference',exact:true}).waitFor();await page.screenshot({path:`${artifacts}/${name}-airspeed.png`});await page.getByRole('button',{name:'Close PFD controls'}).click();
  assert.equal(await page.evaluate(()=>window.cockpitFixture.calls.length),0);
 }
 await page.setViewportSize({width:1440,height:900});await page.goto(base);
+await page.getByRole('button',{name:'Wind display settings',exact:true}).click();
+await page.getByLabel('Wind display mode',{exact:true}).selectOption('off');
+await page.getByRole('button',{name:'Close PFD controls'}).click();
+assert.equal(await page.locator('.pfd-wind-display').count(),0);
+await page.reload();assert.equal(await page.locator('.pfd-wind-display').count(),0);
+await page.getByRole('button',{name:'PFD Menu',exact:true}).click();
+await page.getByRole('button',{name:'Wind Components · arrow · direction',exact:true}).click();
+await page.getByLabel('Wind display mode',{exact:true}).selectOption('components');
+await page.getByRole('button',{name:'Close PFD controls'}).click();
 await page.getByRole('button',{name:'Mission controls',exact:true}).click();await page.getByRole('button',{name:'Add mission item',exact:false}).click();assert.match(await page.locator('.mission-touch').innerText(),/55/);await page.getByRole('searchbox',{name:'Search mission commands'}).fill('Loiter');await page.screenshot({path:`${artifacts}/catalog.png`});await page.getByRole('button',{name:'Close mission controls'}).click();
 await page.getByRole('button',{name:'Display & data',exact:true}).click();await page.getByLabel('Palette',{exact:true}).selectOption('day');await page.screenshot({path:`${artifacts}/day-settings.png`});await page.getByRole('button',{name:'Close cockpit panel'}).click();await page.screenshot({path:`${artifacts}/day-full.png`});
 assert.equal(await page.locator('.pfd-hotspot').evaluateAll(nodes=>nodes.every(node=>getComputedStyle(node).backgroundColor==='rgba(0, 0, 0, 0)')),true,'day palette must preserve transparent instrument hit regions');

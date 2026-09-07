@@ -17,6 +17,7 @@
       <div v-else-if="kind==='menu'" class="pfd-menu-grid">
         <button v-for="(f,key) in referenceFields" :key="key" @click="$emit('panel',key)">{{f.title}}<small>{{references[key]===null?'No local reference':fmt(references[key])+' '+f.unit}}</small></button>
         <button @click="$emit('panel','attitude')">Attitude & display<small>Transparency · terrain · declutter</small></button><button @click="$emit('panel','director')">Flight director<small>Cue style & visibility</small></button>
+        <button @click="$emit('panel','wind')">Wind<small>Components · arrow · direction</small></button>
         <button @click="$emit('panel','nav')">Mission navigation<small>Flight plan · direct-to</small></button><button @click="$emit('panel','status')">Aircraft data<small>GPS · battery · source</small></button>
       </div>
       <div v-else-if="kind==='attitude'" class="pfd-options">
@@ -28,11 +29,20 @@
         <label class="pfd-option"><span>Instrument strip</span><select aria-label="Instrument strip placement" :value="options.stripPlacement" @change="$emit('option','stripPlacement',$event.target.value)"><option value="mfd">Mission / navigation</option><option value="pfd">PFD</option><option value="hidden">Hidden</option></select></label>
         <button class="pfd-wide-button" @click="navigate('display')">Background, insets &amp; data sources →</button>
         <button class="pfd-wide-button" @click="$emit('panel','director')">Flight director settings →</button>
+        <button class="pfd-wide-button" @click="$emit('panel','wind')">Wind display settings →</button>
         <p class="pfd-control-note">Display settings save immediately. Terrain is shown only when elevation data and aircraft pose are available.</p>
         <p class="pfd-control-note" v-if="Number.isFinite(terrainStatus?.estimatedAglM)">Estimated height above terrain: {{fmt(terrainStatus.estimatedAglM/.3048)}} ft · terrain elevation {{fmt(terrainStatus.groundElevationM)}} m MSL. This is the elevation-map estimate, separate from height above home.</p>
         <p class="pfd-control-note" v-if="terrainStatus?.detailState">Nearby imagery: {{terrainStatus.detailState}}{{Number.isFinite(terrainStatus.detailMetresPerPixel)?' · '+fmt(terrainStatus.detailMetresPerPixel,1)+' m/pixel':''}}</p>
         <p class="pfd-control-note" v-if="terrainStatus?.imageryAttributionUrl">Surface imagery: {{terrainStatus.imageryState}} · <a :href="terrainStatus.imageryAttributionUrl" target="_blank" rel="noopener">{{terrainStatus.imageryAttribution}}</a></p>
         <p class="pfd-control-note" v-if="terrainStatus?.attributionUrl"><a :href="terrainStatus.attributionUrl" target="_blank" rel="noopener">{{terrainStatus.attribution}}</a></p>
+      </div>
+      <div v-else-if="kind==='wind'" class="pfd-options">
+        <label class="pfd-option"><span>Wind display</span><select aria-label="Wind display mode" :value="options.windDisplay||'components'" @change="$emit('option','windDisplay',$event.target.value)"><option value="components">Head / crosswind components</option><option value="vector">Wind arrow &amp; speed</option><option value="direction">Direction, arrow &amp; speed</option><option value="off">Off</option></select></label>
+        <p class="pfd-control-note">Arrows point where the wind is blowing. ↓ headwind · ↑ tailwind · ← from the right · → from the left. Components are relative to aircraft heading, in knots.</p>
+        <dl class="pfd-data-list" v-if="wind.available"><div><dt>Wind from · true north</dt><dd>{{fmt(wind.directionFromDeg)}}° T</dd></div><div><dt>Wind speed</dt><dd>{{fmt(wind.speedKt,1)}} KT</dd></div><div><dt>{{wind.headwindKt>=0?'Headwind':'Tailwind'}}</dt><dd>{{fmt(Math.abs(wind.headwindKt),1)}} KT</dd></div><div><dt>Crosswind · {{wind.crosswindKt>=0?'from right':'from left'}}</dt><dd>{{fmt(Math.abs(wind.crosswindKt),1)}} KT</dd></div></dl>
+        <p v-else class="pfd-control-note" role="status">NO WIND DATA · {{wind.reason}}</p>
+        <p class="pfd-control-note">EST is the autopilot's reported wind estimate. MAVLink WIND does not report confidence; it may be unconverged on the ground or without sufficient air data. A reported zero is not verified calm.</p>
+        <p class="pfd-control-note">Wind expires after five seconds without a new sample. Aircraft → Request flight telemetry includes wind at 1 Hz. These display choices save locally and do not send aircraft commands or fetch weather data.</p>
       </div>
       <div v-else-if="kind==='director'" class="pfd-options">
         <label class="pfd-option"><span>Show flight director</span><input type="checkbox" :checked="options.fdVisible" @change="$emit('option','fdVisible',$event.target.checked)"></label>
@@ -64,6 +74,7 @@ import {
   onBeforeUnmount,
   nextTick
 } from 'vue';
+import {windState} from './wind-state.mjs';
 import {
   referenceFields,
   parseReference,
@@ -87,7 +98,8 @@ export default {
       attitude: 'Attitude & display',
       nav: 'Mission navigation',
       status: 'Aircraft data',
-      director: 'Flight director'
+      director: 'Flight director',
+      wind: 'Wind display'
     };
     const title = computed(() => field.value?.title || titles[props.kind]);
     const liveValue = computed(() => props.flight[props.kind] ?? null);
@@ -163,6 +175,7 @@ export default {
     };
     return {
       root,
+      wind: computed(()=>windState(props.telemetry)),
       input,
       error,
       field,

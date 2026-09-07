@@ -44,6 +44,20 @@ describe('compact aircraft flight wire',()=>{
     expect(restored.telemetry.navController).toEqual(full.telemetry.navController);
     expect(restored.telemetry.positionTarget).toEqual(full.telemetry.positionTarget);
   });
+  it('carries wind as an optional compact extension and never borrows old detail wind',()=>{
+    const full=snapshot();full.connected=true;
+    full.telemetry.wind={directionFromDeg:270,speedKt:19.4,ageMs:1200,source:'WIND'};
+    const wire=packFlight(full,'a');
+    expect(wire.w).toEqual([270,19.4,1200]);
+    expect(unpackFlight(wire,full).telemetry.wind).toEqual(full.telemetry.wind);
+    const {w,...older}=wire;
+    expect(unpackFlight(older,full).telemetry.wind).toBeNull();
+    for(const invalid of [[0,-1,0],[NaN,5,0],[360,5,0],[0,5,-1],[0,5,5000],[]]) {
+      expect(unpackFlight({...wire,w:invalid} as never,full).telemetry.wind).toBeNull();
+    }
+    expect(unpackFlight({...wire,c:false},full).telemetry.wind).toBeNull();
+    expect(JSON.stringify(wire).length-JSON.stringify(older).length).toBeLessThan(70);
+  });
   it('rejects a mismatched protocol version instead of drawing misindexed values',()=>{
     const wire=packFlight(snapshot(),'a');
     expect(()=>unpackFlight({...wire,v:99} as never,{})).toThrow(/version/i);

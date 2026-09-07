@@ -12,6 +12,8 @@ export interface FlightWire {
   n: FlightTelemetry['navController']; p: FlightTelemetry['positionTarget']; h: FlightTelemetry['homePosition'];
   m: Omit<VehicleSnapshot['mission'],'items'>;
   r?: VehicleSnapshot['trail'];
+  /** Optional v1 extension: true FROM bearing, knots, sample age ms. Older clients ignore it. */
+  w?: [number,number,number] | null;
 }
 export function packFlight(snapshot:VehicleSnapshot,detailKey:string):FlightWire {
   const t=snapshot.telemetry, src:string[]=[];
@@ -23,7 +25,8 @@ export function packFlight(snapshot:VehicleSnapshot,detailKey:string):FlightWire
   const {items:_,...mission}=snapshot.mission;
   return {v:1,at:snapshot.at,s:snapshot.sequence,g:snapshot.identity?.generation??null,c:snapshot.connected,b:snapshot.busy,d:detailKey,
     source:t.source,ready:t.ready,fd:t.fdReady,age:t.ageMs,datum:t.altitudeDatum??'UNKNOWN',
-    t:FLIGHT_COLUMNS.map(key=>t[key]??null),a,src,n:t.navController,p:t.positionTarget,h:t.homePosition,m:mission,...(snapshot.trail?{r:snapshot.trail}:{})};
+    t:FLIGHT_COLUMNS.map(key=>t[key]??null),a,src,n:t.navController,p:t.positionTarget,h:t.homePosition,m:mission,...(snapshot.trail?{r:snapshot.trail}:{}),
+    w:t.wind?[t.wind.directionFromDeg,t.wind.speedKt,t.wind.ageMs]:null};
 }
 /** Reconstruct the existing PFD view while refusing another generation's details. */
 export function unpackFlight(wire:FlightWire,details:Partial<VehicleSnapshot>={}):VehicleSnapshot {
@@ -31,6 +34,10 @@ export function unpackFlight(wire:FlightWire,details:Partial<VehicleSnapshot>={}
   if(!Array.isArray(wire.t)||wire.t.length!==FLIGHT_COLUMNS.length||!Array.isArray(wire.a)||wire.a.length!==FLIGHT_COLUMNS.length||!Array.isArray(wire.src)||!wire.m)throw new Error('Incomplete flight telemetry frame');
   const sameVehicle=(details.identity?.generation??null)===wire.g;
   const sameMission=sameVehicle&&details.mission?.revision===wire.m.revision;
+  const w=wire.w;
+  const wind:FlightTelemetry['wind']=wire.c && Array.isArray(w) && w.length===3 && w.every(Number.isFinite)
+    && w[0]>=0 && w[0]<360 && w[1]>=0 && w[1]<=1943.8444924406 && w[2]>=0 && w[2]<5000
+    ? {directionFromDeg:w[0],speedKt:w[1],ageMs:w[2],source:'WIND'} : null;
   const fields:FlightTelemetry['fields']={};
   const values:Record<string,unknown>={};
   FLIGHT_COLUMNS.forEach((key,index)=>{
@@ -42,7 +49,7 @@ export function unpackFlight(wire:FlightWire,details:Partial<VehicleSnapshot>={}
   });
   return {at:wire.at,sequence:wire.s,detailKey:wire.d,trail:wire.r,identity:sameVehicle?details.identity??null:null,connected:wire.c,ready:wire.c,busy:wire.b,
     telemetry:{...values,source:wire.source,ready:wire.ready,fdReady:wire.fd,ageMs:wire.age,altitudeDatum:wire.datum,
-      fields,navController:wire.n,positionTarget:wire.p,homePosition:wire.h} as FlightTelemetry,
+      fields,navController:wire.n,positionTarget:wire.p,homePosition:wire.h,wind} as FlightTelemetry,
     mission:{...wire.m,currentFresh:wire.m.currentFresh&&sameMission,items:sameMission?details.mission!.items:[]},
     operations:sameVehicle?details.operations??[]:[],statustext:sameVehicle?details.statustext??[]:[],
     capabilities:sameVehicle&&details.capabilities?details.capabilities:{modes:[],commands:[],flightControl:[],terrainTargets:false,signing:'unsigned-only'}};

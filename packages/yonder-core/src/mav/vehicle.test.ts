@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
-import { common, minimal, standard, MavLinkProtocolV2, type MavLinkData } from "node-mavlink";
+import { ardupilotmega, common, minimal, standard, MavLinkProtocolV2, type MavLinkData } from "node-mavlink";
 import { VehicleService } from "./vehicle.js";
 import { decodeDatagram } from "./protocol.js";
 import type { Clock } from "../apply/types.js";
@@ -52,6 +52,41 @@ describe("vehicle telemetry", () => {
     expect([t.globalAltitudeM, t.gpsAltitudeM, t.relativeAltitudeM]).toEqual([410, 415, 110]);
     r.clock.advance(2100); r.heartbeat();
     expect(r.service.snapshot().telemetry).toMatchObject({ ready: false, rollDeg: null, mode: "MANUAL" });
+    r.service.close();
+  });
+  it("receives only the selected ArduPlane wind estimate, normalizes signed bearings and expires it", () => {
+    const r = rig(); r.heartbeat();
+    const wind = () => Object.assign(new ardupilotmega.Wind(), { direction: -90, speed: 10, speedZ: 0 });
+    r.feed(wind(), 2); r.feed(wind(), 1, 2);
+    expect(r.service.snapshot().telemetry.wind).toBeNull();
+    r.feed(wind());
+    expect(r.service.snapshot().telemetry.wind).toMatchObject({ directionFromDeg: 270, source: 'WIND', ageMs: 0 });
+    expect(r.service.snapshot().telemetry.wind?.speedKt).toBeCloseTo(19.4384449);
+    r.clock.advance(2500); r.heartbeat();
+    expect(r.service.snapshot().telemetry.wind?.ageMs).toBe(2500);
+    r.clock.advance(2500); r.heartbeat();
+    expect(r.service.snapshot().telemetry.wind).toBeNull();
+    r.feed(wind()); r.clock.advance(3100);
+    expect(r.service.snapshot().telemetry.wind).toBeNull();
+    r.heartbeat(); expect(r.service.snapshot().telemetry.wind).toBeNull();
+    r.service.close();
+  });
+  it("does not retain an earlier wind after invalid data or vehicle replacement", () => {
+    const r=rig(); r.heartbeat();
+    const feed=(direction:number,speed:number)=>r.feed(Object.assign(new ardupilotmega.Wind(),{direction,speed}));
+    for (const [direction,speed] of [[NaN,5],[Infinity,5],[0,-1],[0,NaN],[361,5]]) {
+      feed(0,5); feed(direction,speed); expect(r.service.snapshot().telemetry.wind).toBeNull();
+    }
+    feed(360,0); expect(r.service.snapshot().telemetry.wind).toMatchObject({directionFromDeg:0,speedKt:0});
+    r.heartbeat(0,false,12,1); expect(r.service.snapshot().telemetry.wind).toBeNull();
+    feed(90,5); expect(r.service.snapshot().telemetry.wind).toBeNull();
+    r.service.close();
+  });
+  it("requests low-rate wind only as part of an explicit stream setup", async () => {
+    const r=rig(); r.heartbeat(); expect(r.sent).toHaveLength(0);
+    r.request({kind:'stream-setup'},{confirmed:false}); await flush();
+    for(let i=0;i<10;i++) { r.ack(i<8?511:512); await flush(); }
+    expect(r.sent.some(frame=>frame.data.command===511 && frame.data._param1===168 && frame.data._param2===1000000)).toBe(true);
     r.service.close();
   });
   it("invalidates controller targets on a mode/current/target context change", () => {

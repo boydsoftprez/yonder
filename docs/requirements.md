@@ -340,6 +340,7 @@ Parameter writes are vehicle commands. R-CMD applies to every requirement here.
 | R-FLT-13 | Keep common flight controls available beside the PFD: direct-to, supported heading/altitude/speed requests, loiter, resume mission, return and mode selection. Show requested, accepted and reported states separately; unsupported modes or targets remain explicit | 1 |
 | R-FLT-14 | Let a waypoint's action change while preserving its location and mission references. Present loiter radius, direction and duration separately and preview the geometry before an explicit mission upload | 1 |
 | R-FLT-15 | Depict the aircraft's observed breadcrumb trail with distance, time and since-power-on windows, separate from traffic and future motion. Retain bounded history in the vehicle service for browser recovery; transfer new points compactly. Break telemetry gaps, start new history on detected autopilot reboot or aircraft replacement, and disclose late recording, simplification and unavailable history. Trail display controls never command the aircraft | 1 |
+| R-FLT-16 | Show the autopilot's fresh wind estimate on the PFD with heading-relative headwind/tailwind and left/right crosswind arrows in knots. Offer touch selection of component, vector, direction/speed and off views. Label estimates and true-north bearings explicitly; missing, invalid or stale wind/heading is unavailable, never assumed calm. Carry wind compactly without external weather downloads; stream setup remains an explicit operator action | 2 |
 
 ---
 

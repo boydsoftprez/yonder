@@ -59,6 +59,31 @@ fresh target coordinates restores geographic guidance; actual AUTO restores
 mission navigation. Missing request history and external heading overrides are
 explicit limitations of GUIDED ownership, not evidence of an active waypoint.
 
+## Wind on the PFD
+
+The wind box sits beside the lower part of the airspeed tape, above the mission
+inset. Its default view shows headwind/tailwind and crosswind components in knots,
+relative to the aircraft's true heading. Arrows point where the wind is blowing:
+**↓ headwind**, **↑ tailwind**, **← from the right**, **→ from the left**. Values
+round to whole knots; an arrowhead disappears when its component rounds to zero.
+
+Tap the box, or use **PFD Menu → Wind** or **Display → Wind display settings**.
+Choose components, wind arrow and speed, direction/arrow/speed, or off. The direction
+view reports the bearing the wind comes **from**, labeled **° T** for true north.
+Settings save on this browser and never issue a flight command.
+
+**EST** identifies ArduPlane's MAVLink `WIND` estimate. This message contains no
+confidence flag; a fresh report can still be unconverged on the ground or without
+sufficient air data. A reported zero is not verified calm. Missing/invalid data,
+a sample at least five seconds old, or unavailable heading/flight telemetry shows
+**NO WIND DATA** and removes the arrows. Wind from another vehicle is never used.
+
+**Aircraft → Request flight telemetry** now requests `WIND` at **1 Hz** after the
+existing flight stream requests. No stream changes occur on page load or reconnect.
+Wind travels in the compact flight response as three numbers (bearing, speed and
+sample age). It uses no weather API or public-data proxy. Older services that do
+not publish this field show **NO WIND DATA** until their core is updated.
+
 ## Read and author a mission
 
 1. Open Aircraft status and press **Read aircraft mission**. A verified transfer

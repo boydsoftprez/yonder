@@ -46,6 +46,7 @@ export const displayDefaults = Object.freeze({
   syntheticVision: true,
   fdVisible: true,
   fdStyle: 'vbar',
+  windDisplay: 'components',
   stripPlacement: 'mfd',
   layout: 'split'
 });
@@ -85,6 +86,7 @@ export function validatePfdPreferences(input = {}) {
     if (typeof input?.display?.[key] === 'boolean') display[key] = input.display[key];
   for (const key of ['tapeOpacity', 'hsiOpacity'])
     if (Number.isFinite(input?.display?.[key])) display[key] = Math.max(.1, Math.min(1, input.display[key]));
+  if (['components', 'vector', 'direction', 'off'].includes(input?.display?.windDisplay)) display.windDisplay = input.display.windDisplay;
   if (['vbar', 'crossbar'].includes(input?.display?.fdStyle)) display.fdStyle = input.display.fdStyle;
   if (['pfd', 'mfd', 'hidden'].includes(input?.display?.stripPlacement)) display.stripPlacement = input.display
     .stripPlacement;

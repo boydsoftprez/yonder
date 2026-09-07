@@ -5,6 +5,8 @@ export type AltitudeDatum = "msl" | "home" | "terrain";
 export interface GeoTarget { lat: number; lon: number; altitudeM: number; datum: AltitudeDatum }
 export interface VehicleIdentity { system: number; component: number; autopilot: number; vehicleType: number; generation: string }
 export interface FieldValidity { source: string; receivedAt: number | null; ageMs: number | null; valid: boolean; reason?: string }
+/** ArduPlane's reported horizontal estimate. WIND carries no estimator confidence flag. */
+export interface WindEstimate { directionFromDeg: number; speedKt: number; ageMs: number; source: "WIND" }
 /** Canonical decoded values: geographic x/y in degrees, local x/y in metres, other commands raw. */
 export interface MissionItem { seq: number; command: number; frame: number; params: [number | null, number | null, number | null, number | null]; x: number | null; y: number | null; z: number | null; current: boolean; autocontinue: boolean }
 export interface MissionSnapshot {
@@ -38,6 +40,7 @@ export interface FlightTelemetry {
   fdReady: boolean; navRollDeg: number | null; navPitchDeg: number | null;
   positionTarget: PositionTarget | null; navController: NavController | null;
   homePosition: { lat: number; lon: number; alt: number } | null;
+  wind?: WindEstimate | null;
   fields: Record<string, FieldValidity>;
 }
 export type VehicleAction =
