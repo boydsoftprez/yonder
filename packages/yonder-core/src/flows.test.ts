@@ -106,6 +106,50 @@ describe("flows/flows.json", () => {
    * test: it is to move whatever was written into a package under
    * `packages/`, where it has a source file and tests of its own.
    */
+  /**
+   * **A control that leads nowhere.**
+   *
+   * Three controls shipped on the Telemetry page fully built — implemented in
+   * a node, routed in the daemon, given their own error type and their own
+   * status code, tested at both ends — and joined to nothing. Pressing them
+   * did exactly as much as pressing the desk. Two were found by a person
+   * pressing them; the third by a reviewer reading the wiring.
+   *
+   * Nothing here could have caught them. The suite proves that logic is not
+   * smuggled into this file, that every page carries its pending banner, that
+   * payload shapes match what the page was drawn against — all of which were
+   * true of a button wired to nothing. The checks were good at proving things
+   * *work* and had no way to notice one was never *joined up*.
+   *
+   * So: a widget an operator can act on must lead somewhere. This says
+   * nothing about where, or whether the far end is right — only that a press
+   * reaches something. That is the cheap half of the question, and it is the
+   * half that was missing.
+   */
+  it("has no control an operator can press that reaches nothing", () => {
+    const CONTROLS = [
+      "ui-button",
+      "ui-text-input",
+      "ui-dropdown",
+      "ui-switch",
+      "ui-slider",
+      "ui-radio-group",
+      "ui-form",
+      "ui-file-input",
+      "ui-yonder-softkeys",
+    ];
+    const deadEnds = flows
+      .filter((n) => CONTROLS.includes(n.type))
+      .filter((n) => (n.wires ?? []).every((group) => group.length === 0))
+      .map((n) => `${n.type} ${n.id}`);
+    expect(
+      deadEnds,
+      "a control on the console goes nowhere: an operator can press it and nothing "
+      + "happens, with no error and no sign anything is wrong. Wire it to the node "
+      + "that acts on it, or delete it.",
+    ).toEqual([]);
+  });
+
   it("contains no function node", () => {
     const offenders = flows.filter((n) => n.type === "function").map((n) => n.id);
     expect(
