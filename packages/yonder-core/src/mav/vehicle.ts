@@ -134,6 +134,7 @@ export class VehicleService {
     if (this.operations.length >= MAX_OPERATIONS) return reject(409, "This service has reached its bounded operation-history limit; completed IDs cannot be reused");
     const kind = request.action.kind;
     const missionChange = ["mission-upload", "mission-clear", "set-current", "continue-auto", "mission-start"].includes(kind);
+    if (missionChange && ["changed", "failed"].includes(this.mission.synchronization)) return reject(409, "Vehicle mission synchronization was lost; download and review it before changing it");
     if (missionChange && this.mission.revision !== null && request.expectedMissionRevision !== this.mission.revision) return reject(409, "Vehicle mission changed; review the current revision");
     if (["set-current", "continue-auto", "mission-start"].includes(kind) && this.mission.synchronization !== "verified") return reject(409, "Download and verify the current vehicle mission first");
     const action = request.action;

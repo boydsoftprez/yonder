@@ -201,6 +201,30 @@ describe("mission transactions", () => {
     r.feed(Object.assign(new common.MissionAck(),{type:0,targetSystem:255,targetComponent:190}));
     expect(r.service.snapshot().mission.synchronization).toBe("changed");r.service.close();
   });
+  it.each(["external-ack", "opaque-change", "failed-read"])("refuses mission writes after %s until a complete read restores synchronization", async cause => {
+    const r=rig();r.heartbeat();r.request({kind:"mission-download"});await flush();r.feed(Object.assign(new common.MissionCount(),{count:2}));await flush();
+    for(const item of sample()){r.feed(missionWire(item));await flush();}
+    const staleRevision=r.service.snapshot().mission.revision!;
+    if(cause==="external-ack")r.feed(Object.assign(new common.MissionAck(),{type:0,targetSystem:255,targetComponent:190}));
+    else if(cause==="opaque-change"){
+      r.feed(Object.assign(new common.MissionCurrent(),{seq:1,missionId:11}));
+      r.feed(Object.assign(new common.MissionCurrent(),{seq:1,missionId:12}));
+    }else{
+      r.request({kind:"mission-download"},{id:"failed-refresh"});await flush();
+      r.feed(Object.assign(new common.MissionCount(),{count:65535}));
+    }
+    expect(r.service.snapshot().mission.synchronization).not.toBe("verified");
+    const sentBefore=r.sent.length;
+    for(const action of [{kind:"mission-upload",items:sample()},{kind:"mission-clear"}] as VehicleAction[])
+      expect(r.request(action,{id:`stale-${action.kind}`,expectedMissionRevision:staleRevision})).toMatchObject({accepted:false,status:409});
+    await flush();expect(r.sent).toHaveLength(sentBefore);
+    expect(r.request({kind:"mission-download"},{id:"resynchronize"}).accepted).toBe(true);await flush();
+    r.feed(Object.assign(new common.MissionCount(),{count:2}));await flush();const actual=sample();actual[1].z=150;
+    for(const item of actual){r.feed(missionWire(item));await flush();}
+    const revision=r.service.snapshot().mission.revision!;expect(revision).not.toBe(staleRevision);
+    expect(r.request({kind:"mission-upload",items:actual},{id:"reviewed-new-mission",expectedMissionRevision:revision}).accepted).toBe(true);
+    r.service.close();
+  });
   it("summarizes uploaded plans in history rather than duplicating them in every snapshot", async () => {
     const r=rig();r.heartbeat();r.request({kind:"mission-upload",items:sample()});await flush();
     expect(r.service.snapshot().operations[0].action).toMatchObject({kind:"mission-upload",itemCount:2});
