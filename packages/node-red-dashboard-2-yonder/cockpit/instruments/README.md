@@ -68,3 +68,9 @@ and both placements. The same PFD element stayed mounted. Captures and viewport
 bounds were inspected at 1440×900, 1024×768 and 768×1024. There were no browser
 exceptions or aircraft HTTP requests. These are browser viewport checks, not
 physical iPad performance evidence.
+
+The side column now follows the face width implied by the available row height,
+instead of reserving a fixed-width gutter. Browser measurements at 1440×900
+reduced the column from 220 to about 183 px; at 1024×768, from 190 to about
+152 px. The rendered gauge sizes stayed unchanged. Tall-window and portrait
+layouts, clipping, editing and switching back to the top strip were also checked.
