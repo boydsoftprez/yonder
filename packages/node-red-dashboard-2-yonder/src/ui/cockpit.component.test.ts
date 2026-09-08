@@ -64,3 +64,14 @@ it('Escape dismisses an open host dialog after a busy control loses focus to the
  expect((wrapper.props('api') as any).command).not.toHaveBeenCalled();
  wrapper.unmount();
 });
+
+it('supports a scoped instrument preview without replacing the actual PFD or its default strip',async()=>{
+ const wrapper=mount(component!.default,{props:{id:'instrument-preview',report,api:{}},slots:{'instrument-strip':'<template #default="data"><output class="custom-instrument">{{data.telemetry.currentA}}</output></template>'},global:{stubs:{YonderCockpitMap:true,YonderPicture:true},provide:{$socket:{emit:vi.fn()},$dataTracker:{}}}});
+ (wrapper.vm as any).setOption('stripPlacement','mfd');await wrapper.vm.$nextTick();
+ await wrapper.setProps({report:{...report,telemetry:{...report.telemetry,currentA:8.4}}});
+ expect(wrapper.get('.custom-instrument').text()).toBe('8.4');
+ expect(wrapper.find('[aria-label="Primary flight display"]').exists()).toBe(true);
+ expect(wrapper.find('.cockpit-navigation-data .pfd-telemetry-strip').exists()).toBe(false);
+ wrapper.unmount();
+ const normal=cockpit();(normal.vm as any).setOption('stripPlacement','mfd');await normal.vm.$nextTick();expect(normal.find('.cockpit-navigation-data .pfd-telemetry-strip').exists()).toBe(true);normal.unmount();
+});

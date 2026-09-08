@@ -34,7 +34,9 @@
     @pick-target="pickFlightTarget"
   />
   <div v-if="preferences.display.stripPlacement==='mfd'" class="cockpit-navigation-data" aria-label="Mission and navigation instrument data">
-    <TelemetryStrip :telemetry="displayTelemetry" :live="flight.live" @open="panel='status'" />
+    <slot name="instrument-strip" :telemetry="displayTelemetry" :live="flight.live">
+      <TelemetryStrip :telemetry="displayTelemetry" :live="flight.live" @open="panel='status'" />
+    </slot>
   </div>
   <div class="cockpit-body">
     <PrimaryFlightDisplay

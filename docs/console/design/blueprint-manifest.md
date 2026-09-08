@@ -802,3 +802,9 @@ transport. Automated gate imagery remains an artifact, not a committed pixel ref
 The guide separately includes selected, captioned [instructional screenshots](../../images/cockpit/README.md)
 and a [surface walkthrough record](../evidence/2026-09-08-cockpit-guide.md). The
 normal page uses the daemon's actual telemetry and authenticated operations.
+
+The [graphical instrument study](../../../packages/node-red-dashboard-2-yonder/cockpit/instruments/README.md)
+is a separate, unapproved design preview using the native PFD and a scoped
+instrument-strip slot (R-UI-09). It demonstrates selectable arc and linear
+instruments with fixture readings/limits; it does not replace the current
+production strip or establish live integration for its proposed readings.
