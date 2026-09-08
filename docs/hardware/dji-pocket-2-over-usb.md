@@ -1,5 +1,10 @@
 # A DJI Pocket 2 on the USB port
 
+**2026-09-08 resume:** the camera is back on the dev Pi. See the
+[resumed bench evidence](pocket2-resume-2026-09-08.md) for measured stop timing,
+mode trajectories, shutter/focus readbacks, and the unresolved card detection.
+The dated evidence there supersedes older untried rows below where stated.
+
 The Pocket 2 is on the compatibility list and it is not a UVC camera. This note records
 what the device told us, what the manufacturer's own software told us about how to talk to
 it, and what happened when Yonder's board did. **The last section is a decoded frame.**

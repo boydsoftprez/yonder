@@ -236,14 +236,16 @@ git commit -s -m "docs(hardware): whether v4l2h264enc retunes at runtime — mea
 ### Task 2: The gimbal's stop bound after the last frame
 
 **Files:**
-- Create: `scripts/spikes/gimbal-stop-bound.sh`
+- Create: `scripts/spikes/gimbal-stop-bound.sh` and `gimbal-stop-bound.py`
 - Modify: `docs/hardware/dji-pocket-2-over-usb.md` (section *The stop bound, measured*)
+
+**Resumed 2026-09-08:** [five measured runs and their uncertainty](../../hardware/pocket2-resume-2026-09-08.md#device-stopping-term). Device allowance 800 ms; complete browser-loss proof remains Task 39.
 
 **Why:** Spec §8.7: the device's ~0.5 s timeout is only the last link. Task 36
 sizes its lease from this number and Task 39 measures the complete
 browser-to-rest bound on top of it.
 
-- [ ] **Step 1: Write the spike**
+- [x] **Step 1: Write the spike**
 
 Using `scripts/pocket2/aoa_session.py`'s inject file, the way
 `gimbal-rate-confirm.sh` does: inject yaw +10°/s frames at 10 Hz for 2 s; stop
@@ -251,11 +253,11 @@ injecting; sample the attitude push at 20 Hz until yaw is unchanged for
 500 ms; print the time from the last injected frame to the last changing
 sample. Five runs.
 
-- [ ] **Step 2: Run with the Pocket 2 mounted and the handle held; recentre between runs**
+- [x] **Step 2: Run with the Pocket 2 mounted and the handle held; recentre between runs**
 
-- [ ] **Step 3: Record the five readings and the maximum in the hardware note**
+- [x] **Step 3: Record the five readings and the maximum in the hardware note**
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add scripts/spikes/gimbal-stop-bound.sh docs/hardware/dji-pocket-2-over-usb.md
@@ -1500,12 +1502,13 @@ it("ignores a draft and reads only the applied policy", ...);
 
 # Phase 5 — the accessory camera
 
-**Phase 5 is deferred until the Pocket 2 is back in hand** — the operator's
-decision, taken on 2026-09-05. Every task in it drives a real gimbal or a real
-camera over a real USB link, and none can be finished, or honestly reviewed,
-without the device mounted. Nothing here is blocked on understanding.
-
-Task 2 is deferred with them, for the same reason.
+**Phase 5 resumed on 2026-09-08 at the operator's request**, with the Pocket 2
+connected to the dev Pi 4. The original deferral was taken on 2026-09-05.
+The [resumed bench evidence](../../hardware/pocket2-resume-2026-09-08.md) records
+the real USB link, gimbal tests and camera-control effects. Card-dependent
+recording/photo proof still needs a card that the camera recognizes.
+Task 2 has its five readings; production integration and complete browser-loss
+measurement remain open until their acceptance checks below pass.
 
 **When the camera returns, start from the bench queue** in
 [`hardware/dji-pocket-2-over-usb.md`](../../hardware/dji-pocket-2-over-usb.md),
@@ -1556,7 +1559,7 @@ it("latency beyond the budget inhibits new motion rather than admitting stale co
 
 **Files:** `video/accessory/gimbal.ts` + `gimbal.test.ts`
 
-- [ ] **Step 1: Write the failing tests** — a rate frame is `0x0C` with flags `0x80`, three int16 tenths in the order pitch, roll, yaw, pitch sign inverted per the bench; frames repeat at 10 Hz **only while `Intent.live()` returns a rate**; attitude decodes tenths; **pitch limit = bit 0, yaw limit = bit 1**; recentre is `0x4C 02 01`; a mode command is `0x44` (asserted at the wire only until Task 39 drives it).
+- [ ] **Step 1: Write the failing tests** — a rate frame is `0x0C` with flags `0x80`, three int16 tenths in the order yaw, roll, pitch, pitch sign inverted per the bench; frames repeat at 10 Hz **only while `Intent.live()` returns a rate**; attitude decodes tenths; **pitch limit = bit 0, yaw limit = bit 1**; recentre is `0x4C 02 01`; a mode command is `0x44` (asserted at the wire only until Task 39 drives it).
 - [ ] **Step 2–4: Fail; implement; pass; mutation-check** the 10 Hz gate on `live()`.
 - [ ] **Step 5: Commit** — `git commit -s -m "feat(video): gimbal rate, attitude, limits and recentre, measured — R-CAM-11, R-TEL-15"`
 
