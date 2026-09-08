@@ -205,6 +205,23 @@ describe("compose, on a Rockchip board (R-HW-03, R-CAM-07, spec §4 §5)", () =>
     expect(mppText()).not.toContain("bitrate=");
   });
 
+  it.each(["h264", "h265"] as const)(
+    "bounds both %s pipeline encoders so synchronous MPP can drain output before another input",
+    (codec) => {
+      // RK3566's MPP changes NON_BLOCK input to BLOCK during initialization.
+      // The plugin batches pending inputs before polling output; its default
+      // sixteen can fill MPP's eight output slots and deadlock that task.
+      // This is the composer-to-plugin contract; the RTSP restart bench proves
+      // frame delivery with the real hardware and the actual emitted argv.
+      const line = compose({ ...mppOpts, camera: { ...CAMERA, codec } });
+      for (const name of ["enc-stream", "enc-preview"]) {
+        const at = line.indexOf(`name=${name}`);
+        const end = line.indexOf("!", at);
+        expect(line.slice(at + 1, end)).toContain("max-pending=1");
+      }
+    },
+  );
+
   it("runs a short GOP on the preview branch only", () => {
     expect(mpp().filter((t) => t === "gop=15")).toHaveLength(1);
     const preview = mppText().slice(mppText().indexOf("name=enc-preview"));
@@ -241,6 +258,7 @@ describe("compose, on a Rockchip board (R-HW-03, R-CAM-07, spec §4 §5)", () =>
     expect(text()).toContain("v4l2convert");
     expect(text()).not.toContain("mpp");
     expect(text()).not.toContain("bps=");
+    expect(text()).not.toContain("max-pending=");
   });
 });
 

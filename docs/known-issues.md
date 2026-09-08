@@ -2452,3 +2452,31 @@ permanent answer.
 
 **K-55 remains open.** This removed the most expensive caller on one board; the polling
 rate and the shelling out are still what that entry describes.
+
+---
+
+### K-67 · ~~Rockchip H.264 preview can stop delivering after Start while the pipeline remains running~~ — CLOSED
+
+**Status:** Closed · **Requirements:** R-VID-13, R-VID-20, R-CTL-01
+
+On RK3566, a camera could publish its main RTSP stream while its H.264 preview stopped
+after a few packets. The process stayed alive, so the supervisor reported no restart.
+The camera and encoder benches passed because their file-output runs did not consistently
+produce the startup backlog that exposed the problem. A bitrate retune did not recover
+the stalled preview, and even setting the pipeline to NULL could hang.
+
+The pinned MPP library changes the plugin's requested nonblocking input mode to blocking
+on RK3566. The plugin sends its entire pending input batch before draining encoded
+packets. Its default sixteen pending frames can fill MPP's eight output slots, leaving
+the same task blocked submitting input when it needs to consume output. Native thread
+stacks found the preview encoder in that input wait, with the other callers waiting for
+its stream lock.
+
+**Closed by** composing both MPP encoders with `max-pending=1`, so submission and output
+draining stay paired. The same bound applies to the H.264 preview when the main stream
+uses H.265. Three consecutive H.264 start/read/stop cycles with the changed argv delivered
+both streams; the composer regression covers both codecs and preserves the Pi pipeline.
+The reusable [`rockchip-rtsp-restarts.py`](../scripts/spikes/rockchip-rtsp-restarts.py) bench
+runs the actual pipeline argv, checks concurrent RTSP delivery and can enforce measured
+frame rates. Hardware evidence and remaining acceptance work are recorded in
+[`rockchip-video-shipped.md`](hardware/rockchip-video-shipped.md).

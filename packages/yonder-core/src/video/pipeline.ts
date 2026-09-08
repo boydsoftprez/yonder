@@ -342,8 +342,14 @@ function encode(
       // `gop` is the keyframe interval in frames (-1 means one per second).
       // `width`/`height` are RGA's resize inside the encoder, taken at start
       // only — set while playing they are accepted and ignored (measured).
+      // RK3566's MPP changes nonblocking input to blocking at initialization.
+      // The plugin sends its whole pending batch before draining output; its
+      // default sixteen frames can fill MPP's eight output slots and deadlock
+      // that same task. One pending frame keeps submission and draining paired
+      // on both encodes (R-VID-13, R-VID-20). Reproduced with RTSP, then verified
+      // across repeated starts by scripts/spikes/rockchip-rtsp-restarts.py.
       return [
-        kind, `name=${element}`, bitrate,
+        kind, `name=${element}`, bitrate, "max-pending=1",
         ...(SHORT_GOP[name] ? ["gop=15"] : []),
         ...(scale === null ? [] : [`width=${scale.width}`, `height=${scale.height}`]),
       ];
