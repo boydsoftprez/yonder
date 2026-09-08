@@ -1,0 +1,90 @@
+{
+  "why": [
+    "A second camera and a gimbal, so the picture and the strip can be photographed with",
+    "something on them (R-VID-14, R-VID-18, R-UI-12, R-UI-23).",
+    "",
+    "**What it is for.** The gate's daemon is built from one camera answering no gimbal, and no",
+    "viewer ever reports to it, so eight rows of the blueprint manifest were built and",
+    "uncaptured: the state overlay on the picture (L-10 to L-13), which reaches a page only as",
+    "the daemon's answer to *that browser's own* viewer report; the drag hint (L-17), drawn only",
+    "where `aim` answers `present`; and the strip's `Still · N s` row, its thumbnail and its",
+    "`OTHER CAMERAS` figure (L-20 to L-22), which need a second camera that is running and has a",
+    "still to show. One camera and no gimbal can picture none of them.",
+    "",
+    "**An overlay, not a second recording** — the shape `camera-sensor-turns.json` already has,",
+    "and for the same reason. `second` is copied from the recorded fixture's own `found[0]` on",
+    "the way past, changing only what a different socket changes: the `/dev` node, the by-path",
+    "name and the card. Keeping a whole second copy of eighteen recorded controls here would",
+    "drift from the board's the first time either was regenerated, silently.",
+    "`verify-pages.sh` is what merges the two.",
+    "",
+    "**Nothing on the bench answers `aim`.** No gimbal has been attached to any board this",
+    "repository has run on, so `probeCamera` has never returned anything but `not-offered` for",
+    "it and there is no measurement to record. `aim` below is a shape a camera can have, not a",
+    "reading: the envelope is the one `present.test.ts` reasons about — both ends of both axes,",
+    "which is the only case `aimPanel` draws a gauge for — and the mode is the work mode such an",
+    "envelope would have been learned in. No page drawn from it may be reported as hardware",
+    "evidence.",
+    "",
+    "**And the hint it puts on the picture has nowhere to send a gesture: K-62.** The drag layer",
+    "emits a slew per pointer move and `cam-pic-act`'s third output is wired to nothing, because",
+    "the daemon has no aim command route until the gimbal phase. Photographing L-17 here is a",
+    "picture of the affordance, and it is deliberately a picture of the open defect too — which",
+    "is better than the affordance being invisible to the gate while the defect stays open.",
+    "",
+    "**Only the first camera carries the gimbal.** The second is the recorded camera exactly as",
+    "the board answered it, so the strip's two rows differ in what they are as well as in where",
+    "they are — and `capabilityFacts` still has a camera with `aim: none` to say so about.",
+    "",
+    "**`second.camera` is the configuration entry, not a probe answer.** `verify-pages.sh` adds",
+    "it to the applied document through `POST /apply` like any other change and takes it out",
+    "again afterwards, so every other picture in the run is still of a one-camera board. Its",
+    "capture size and rate are the recorded camera's own, because they have to be a pair that",
+    "camera's `formats` offers — `refuse()` checks, and a start it refuses is a strip with",
+    "nothing running in it."
+  ],
+  "aim": {
+    "state": "present",
+    "value": {
+      "yaw": { "min": -180, "max": 180 },
+      "pitch": { "min": -90, "max": 30 },
+      "mode": "follow"
+    }
+  },
+  "second": {
+    "device": "/dev/video2",
+    "card": "Global Shutter Camera: Global S",
+    "byPath": "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.4:1.0-video-index0",
+    "camera": {
+      "id": "tail",
+      "name": "Tail camera",
+      "source": "usb",
+      "device": "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.4:1.0-video-index0",
+      "enabled": true,
+      "autostart": false,
+      "width": 1280,
+      "height": 720,
+      "framerate": 30,
+      "codec": "h264",
+      "bitrate_kbps": 2000,
+      "preview": {
+        "size": "640x360",
+        "framerate": 15,
+        "bitrate_kbps": 400
+      },
+      "controls": {
+        "brightness": null,
+        "contrast": null,
+        "rotation": 0,
+        "horizontalFlip": false
+      },
+      "outputs": [
+        {
+          "kind": "rtp",
+          "host": "192.168.77.20",
+          "port": 5602
+        }
+      ]
+    }
+  }
+}

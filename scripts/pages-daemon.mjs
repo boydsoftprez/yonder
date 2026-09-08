@@ -26,9 +26,10 @@
 //      `main()` builds from the same environment variables, plus the serial
 //      opener it cannot build.
 //   2. **The stand-ins** — a serial port whose behaviour is read from a file
-//      on every open, and a `mavlink-router` that follows the same file the
-//      gate's `systemctl` stand-in writes. Neither decides anything; each
-//      replays what a board was measured doing.
+//      on every open, a `mavlink-router` that follows the same file the
+//      gate's `systemctl` stand-in writes, and a pipeline host with no
+//      GStreamer under it. None of them decides anything; each replays what a
+//      board was measured doing.
 //
 // Environment, beyond the ones `main()` already reads:
 //
@@ -40,11 +41,15 @@
 
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createSocket } from "node:dgram";
 import { startServer, consolePathsFromEnv } from "../packages/yonder-core/dist/daemon/server.js";
+import { controlledSpawner } from "../packages/yonder-core/dist/video/supervisor.js";
 import { heartbeatV2 } from "../packages/yonder-core/dist/mav/testing.js";
 import { LOOPBACK_PORT } from "../packages/yonder-core/dist/mav/router/config.js";
+
+const REPO = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 const env = (name) => {
   const value = process.env[name];
@@ -256,6 +261,36 @@ const probe = async (node, card) => {
   return structuredClone(rejected ?? { device: node, card, reason: "this device is not in the fixture" });
 };
 
+/**
+ * A pipeline host with no GStreamer under it — the third stand-in.
+ *
+ * **The real program, not a description of it.** `installer/payload/
+ * yonder-pipeline` is what a board runs; `src/video/fake-gi` is a GStreamer
+ * that models the graph and nothing else, and `host.test.ts` already spawns
+ * exactly this pair. So a camera "running" under this harness is a real
+ * process, parsing the real argv `compose()` emits, answering the real NDJSON
+ * protocol over its real stdout — and a still is a frame the real `still` op
+ * wrote to a real file.
+ *
+ * **Why the gate needs one.** `Viewers` composes a picture's overlay from
+ * what the encoder is in force at, `Stills` takes a frame only off a running
+ * pipeline, and the strip reads both. With no spawner a camera can never be
+ * started here, so the state overlay, the strip's `Still · N s` row and its
+ * `OTHER CAMERAS` figure had no state to be photographed in — eight blueprint
+ * rows built and uncaptured (L-10 to L-13, L-17, L-20 to L-22).
+ *
+ * **Nothing starts on its own.** The fixtures set `autostart: false`, so this
+ * is a spawner that is never called until `verify-pages.sh` asks for a start;
+ * every capture taken before it does is of the same stopped board as before.
+ *
+ * `spawner` is a test-only option `main()` never supplies (ServerOptions),
+ * for the same reason `cameraLayer` beside it is one: a device that ran its
+ * pipelines under something other than the program it installed would be
+ * lying about what it is doing.
+ */
+const HOST = join(REPO, "installer", "payload", "yonder-pipeline");
+const FAKE_GI = join(REPO, "packages", "yonder-core", "src", "video", "fake-gi");
+
 await startServer({
   socketPath: env("YONDER_SOCKET"),
   configPath: env("YONDER_CONFIG"),
@@ -276,10 +311,13 @@ await startServer({
     : { mediaConfigPath: process.env.YONDER_MEDIA_CONFIG }),
   // Never /run/yonder/stills, for the reason above one line up: the stills
   // generator clears its directory before the first still it takes, and a
-  // harness that reached a board's tmpfs would be clearing a board's. No
-  // camera runs under this harness, so nothing is ever written here — the
-  // path exists so that stays true by construction rather than by luck.
+  // harness that reached a board's tmpfs would be clearing a board's. Frames
+  // *are* written here now — the fake host takes them off a running pipeline
+  // for the strip to draw (R-VID-14) — so this path being a temporary
+  // directory is what keeps a run on a developer's machine off a board's
+  // tmpfs, rather than nothing ever reaching it.
   stillsRoot: process.env.YONDER_STILLS ?? mkdtempSync(join(tmpdir(), "yonder-pages-stills-")),
+  spawner: controlledSpawner(HOST, { PYTHONPATH: FAKE_GI }),
   cameraLayer: {
     cameras: { detect, probe },
     encoder: async () => structuredClone(current().encoder),
@@ -292,5 +330,6 @@ await startServer({
   },
 });
 process.stdout.write(
-  `yonder-core listening (pages harness: a serial stand-in, cameras from ${fixturePath})\n`,
+  "yonder-core listening (pages harness: a serial stand-in, a pipeline host with no "
+  + `GStreamer under it, cameras from ${fixturePath})\n`,
 );

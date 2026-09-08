@@ -2298,3 +2298,73 @@ Two ways to close it, and neither is this file's to choose:
    element the operator cannot see until then.
 
 Option 1 is the coordinator's reading; the manifest row L-17 records the owner.
+
+
+### K-63 · The Aim panel is four rows tall and needs nine when a gimbal answers
+
+**Status:** Open — the choice is the operator's · **Requirements:** R-CAM-11, R-UI-28, R-UI-12, R-UI-16
+
+Found by the capture gate on 2026-09-07, the first time anything photographed
+the panel with a gimbal on the other end of it. `scripts/fixtures/camera-pair
+.json` makes one camera answer `aim: present`, and the gate then reported:
+
+```
+camera-live-pair (day) spills over what follows it: 480px of content in 228px (53%)
+        nrdb-ui-widget.nrdb-ui-yonder-aim
+```
+
+`ui-yonder-aim` is `height: 4` in `flows/flows.json`, which Dashboard draws as
+228 px. With `aim.state` at `not-offered` — every camera on every board this
+repository has run on — the panel is one line, `Aim · this camera has none`,
+and 228 px is mostly empty. With a gimbal answering it draws the reason, the
+slew pad, the commanded-rate row, a Pan gauge, a Tilt gauge, the mode line, the
+mode control and the Recentre key: 480 px, which escapes the card and is
+painted over the readout strip beneath it.
+
+**Why it was never seen.** Nothing had ever answered `present`. No gimbal is on
+the bench, the recorded fixture answers `not-offered`, and `YonderAim`'s own
+component tests measure no geometry — so the height was chosen against the only
+state anything could produce. It is the same shape as the defect that gate
+exists for: every unit test passes and the page is wrong.
+
+Two ways to close it, and neither is this file's to choose:
+
+1. **`height: 0` on both `ui-yonder-aim` nodes**, which is Dashboard's own
+   *grow to content* and the idiom `flows.json` already uses for
+   `ui-yonder-deck` and `bar-cell-facts`. One property per node, no component
+   change; the panel is short with no gimbal and tall with one. The cost is
+   that every camera surface's committed shape moves — the empty panel shrinks
+   from 228 px to its one line — so it is a change to what four approved
+   captures look like, which is why it is not made here.
+2. **Make the panel fit 228 px**, by folding the two position gauges and the
+   mode control into the space the pad already has. Keeps every existing
+   capture; costs a redesign of a surface the blueprint draws, and the
+   blueprint draws all eight of those parts.
+
+**Three more things the same photograph shows**, recorded here rather than as
+issues of their own because they have one cause — this panel had never been
+drawn in its `present` state — and one photograph closes all four:
+
+- **The reason is drawn twice.** `YonderAim.vue` says of `effectiveReason`
+  that it is "said once, at the top, for the whole panel", and it is; but
+  `YonderAimPad` draws its own `inhibited` underneath the dial, and today
+  both resolve to the same sentence — *the motion guard is not built yet, so
+  nothing is sent*. An operator reads it above the dial and again below it.
+- **`● READY` is painted over `COMMANDED RATE`.** The annunciator and the
+  rate row occupy the same line, and the badge sits on top of the words.
+- **The `Gimbal mode` control draws nothing.** `aimPanel` answers `modes: []`
+  — spec §8.7's `0x44` is unbuilt, so there is no list to choose from — and
+  `YonderSegmented` with no options renders an empty control. Blueprint L-37
+  is recorded *present* on the strength of the source; the first photograph of
+  the panel shows only the sentence above it, `Gimbal mode: follow.`
+- **`Recentre gimbal` is drawn, and on the Camera page it is covered.**
+  `cockpit-pair.*.png` shows the key at the foot of the panel;
+  `camera-live-pair.*.png` does not, because that is where the overflow above
+  runs into the readout strip drawn beneath the Aim group. Two surfaces, one
+  cause.
+
+Until this is closed, `docs/console/accepted-violations.json` carries the
+overflow for `camera-live-pair` and `cockpit-pair` — the only two captures
+that can reach the state — so the gate reports it on every run rather than
+failing on it. Nothing else in the run is affected: with no gimbal the panel
+does not overflow.

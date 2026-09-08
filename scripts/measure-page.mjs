@@ -88,6 +88,13 @@ export function measure([liveSelectors, fixedSelector, specimenValues, maskedKey
     }
     if (el.classList.contains("y-spark__ceiling")) return "ceiling";
     if (el.classList.contains("y-spark__span")) return "span";
+    // The thumbnail strip's own figure has a caption beside it — `OTHER
+    // CAMERAS` — in an element of its own rather than in any of the shapes
+    // above. Named for it, because the fallback would be the *widget's*
+    // classes: the picture draws a dozen things and one key covering all of
+    // them is one specimen written over every one of them.
+    const strip = el.closest(".y-strip__dl");
+    if (strip !== null) return words(strip.querySelector(".y-strip__dl-h"));
     // A table cell's field is its column, not the cell: every row of one
     // column holds the same kind of value, so one specimen is what a column
     // is owed and the widest of them is what the column has to fit.

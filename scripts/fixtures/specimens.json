@@ -50,6 +50,20 @@
     "to add. An entry on either list that matches no reading on any page also fails \u2014",
     "the same rule `accepted-violations.json` is held to, for the same reason.",
     "",
+    "**The state overlay's own lines are in neither list, and this is why.** The",
+    "picture draws `STILLS \u00b7 1280\u00d7720 \u00b7 every 5 s`, a range line and a step line",
+    "(R-VID-18; blueprint L-10 to L-13) \u2014 all readings, and all of them absent from",
+    "every page a full pass captures, because the overlay reaches a browser only as the",
+    "daemon's answer to that browser's *own* viewer report and a page photographed",
+    "seconds after it loads has not made one. `camera-live-pair` is the only capture",
+    "that has them, and it is a `--only` run. An entry here for a reading no full-pass",
+    "page draws fails the build by the rule three paragraphs up \u2014 rightly, since that",
+    "rule is what stops this file describing a console that no longer exists. So they",
+    "are unlisted rather than listed, they are photographed at whatever the harness",
+    "produced, and this paragraph is the record that the omission was reasoned about.",
+    "The way out is a full pass that reaches the state, which is the same fixture work",
+    "the pair captures already are.",
+    "",
     "**No credential belongs in here (R-SEC-10).** These values are rendered into",
     "pages that are screenshotted and committed. The stream address resolves a real",
     "RTSP password on a real device, so the fixture carries a visibly fake one and",
@@ -279,6 +293,10 @@
     "nrdb-ui-yonder-sparkline \u00b7 span": {
       "value": "last 5 s",
       "why": "state.ts:214: `span: formatSpan(state.traffic.windowMs)`. windowMs is LinkTracker's own retention window (link.ts:93: DEFAULT_WINDOW_MS = 5_000, taken at link.ts:141 when no override is given), and renderer.ts:245 constructs the one LinkTracker this daemon runs with no windowMs override \u2014 so this is not the widest of several branches, it is the only value this build can ever produce. formatSpan's own seconds branch (format.ts:95-102) renders it 'last 5 s'. Derived by calling formatSpan(5000)."
+    },
+    "nrdb-ui-yonder-picture · OTHER CAMERAS": {
+      "value": "1690 kb/s of stills · counted in Path total",
+      "why": "thumbStrip's `downlink` (video/present.ts), whose figure is `Viewers.stillsKbps()` rounded — every still copy leaving this device, every viewer and every camera (R-VID-11; blueprint L-22). One copy of a 720p JPEG is about 100 kB, which is what the host's own still op writes off the raw tee on a board, and one such copy every 5 s is stillCostKbps(102400, 5000) = 169 kb/s at IP, derived by calling the built function. Ten copies is 1690: two cameras with five browsers each on the other's stills. **Nothing bounds it** — not the number of browsers, not the frame size — so this is the widest anybody has written down, a floor and not a ceiling. The harness's own figure is far smaller (about 6 kb/s), because the fake host's frame is a flat grey field that compresses to 3.7 kB; that is a fact about the fake, not about a board."
     }
   },
   "masked": {

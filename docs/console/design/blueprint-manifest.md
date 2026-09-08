@@ -90,18 +90,31 @@ requirements and the capture gate alone.
 `scripts/verify-pages.sh` photographs every page in both palettes at 1280×900,
 plus notebook (1440×900) and tablet (1024) viewports for the two camera
 surfaces and the Cockpit, and measures overflow, clipping, the fold and the
-shape reference. It passes at 205/0 today (2026-09-07, `PORT=18884
+shape reference. It passes at 227/0 today (2026-09-07, `PORT=18884
 ./scripts/verify-pages.sh` on darwin). **It has no concept of fidelity** — it
 cannot ask whether what is on the page is what the blueprint drew, and every
 gap below survived it.
 
-It has a second blind spot this audit exposed: the camera pages are
+It had a second blind spot this audit exposed: the camera pages were
 photographed against one fixture (`scripts/fixtures/camera-globalshutter.json`,
-plus `camera-sensor-turns.json`). That camera answers `aim: none` and gates
-shutter, focus and temperature. The blueprint draws four capability states
-across two cameras. **Most of the states the blueprint draws are unreachable by
-the gate**, so a control drawn only in `advertised` or `gated` form cannot be
-compared to anything.
+plus `camera-sensor-turns.json`), whose camera answers `aim: none`, gates
+shutter, focus and temperature, and never has anything running on it. The
+blueprint draws four capability states across two cameras.
+
+`camera-pair.json` closes part of it (Task 48). Two cameras, both running under
+`installer/payload/yonder-pipeline` with `video/fake-gi` beneath it, a gimbal
+answering `present` on the first, and a browser held on the page long enough to
+fall back to stills and be answered — which is the only route a per-viewer
+overlay has to a per-viewer picture. `camera-live-pair` and `cockpit-pair` are
+those two surfaces in that state.
+
+**What is still unreachable**: every state that needs a viewer *on video*.
+Nothing here answers WHEP, so every picture in the gate falls back to stills
+after twelve seconds — which fixes the overlay's head word at `STILLS`, leaves
+the rate controller with no measurement to act on, and puts four of L-11's five
+head words, L-12's round trip and L-13's ladder change out of reach. A media
+server in the harness is what would close it, and it is a larger fixture than a
+second camera.
 
 ---
 
@@ -145,14 +158,14 @@ proof that the two instruments will stand there.
 | L-07 | A placard reading `CAMERA · <name>` at the left | Present — `CAMERA · FRONT CAMERA` | present | |
 | L-08 | The placard's right side reading the transport, codec and mode: `USB · H.264 · 1280×720P30` | Present, but the encoder is appended too: `USB · H264 · 1280×720p30 · v4l2h264enc` | drifted | The blueprint gives the encoder its own readout in the Capture column (L-27) |
 | L-09 | The picture drawn at the video's own aspect ratio, no fixed height | Present (`YonderPicture.vue` binds aspect from `loadedmetadata`) | present | |
-| L-10 | **A state overlay on the picture**, top-left, four lines: head word, `1280×720 · 15 fps · 1.8 Mb/s`, `1.8 of 0.3–2.0 Mb/s` | **Built, uncaptured** (Task 34). `YonderPicture.vue` reads the daemon's answer to this browser's own report (`ownState.overlay`) before `payload.state`, and that answer carries head, size, rate, bitrate, detail and step — every line of the overlay reaches the page by that route | built — **the capture is the operator's gate**; the gate's one-camera fixture answers no preview state, so it is uncaptured until the fixture does (owner: the fixture task, see the notes) | The component exists; the message does not |
-| L-11 | The overlay's head word takes the state: `ADAPTIVE`, `AT THE FLOOR` (caution), `HELD`, `FULL RATE` (select), `STILLS` (fault) | **Built, uncaptured.** The daemon's answer to every viewer report is that browser's own preview state, and `YonderPicture.vue` now reads it (Task 34); on stills the head reads `STILLS · every 5 s` | owned — **Task 32** built the message; Task 34 put it on the page; **the capture is the operator's gate** | The per-viewer state can only reach a per-viewer picture through its own report's answer — a flow message is broadcast to every browser. The four other head words reach the page by the same route and are not yet captured either |
-| L-12 | The overlay carries the round-trip on a poor link: `0.3 of 0.3–2.0 Mb/s · 1.2 s round trip` | **Built, uncaptured** (Task 34). `YonderPicture.vue` reads the daemon's answer to this browser's own report (`ownState.overlay`) before `payload.state`, and that answer carries head, size, rate, bitrate, detail and step — every line of the overlay reaches the page by that route — the round-trip is `detail` | built — **the capture is the operator's gate**; the gate's one-camera fixture answers no preview state, so it is uncaptured until the fixture does (owner: the fixture task, see the notes) | |
-| L-13 | **A step line, top-right of the picture**, on a ladder change only: `dropped to 640×360 — the link could not carry 720p` | **Built, uncaptured** (Task 34). `YonderPicture.vue` reads the daemon's answer to this browser's own report (`ownState.overlay`) before `payload.state`, and that answer carries head, size, rate, bitrate, detail and step — every line of the overlay reaches the page by that route — the step line is `step` | built — **the capture is the operator's gate**; the gate's one-camera fixture answers no preview state, so it is uncaptured until the fixture does (owner: the fixture task, see the notes) | |
+| L-10 | **A state overlay on the picture**, top-left, four lines: head word, `1280×720 · 15 fps · 1.8 Mb/s`, `1.8 of 0.3–2.0 Mb/s` | **Present, and captured** — `camera-live-pair.*.png` and `cockpit-pair.*.png` draw `STILLS  1280×720  every 5 s  0.01 Mb/s`, the range line under it, the step line under that and the three cost figures under those. `YonderPicture.vue` reads the daemon's answer to this browser's own report (`ownState.overlay`) before `payload.state`, and the report the harness produces is the one the picture posts when it falls back to stills | present | Task 34 built it; **Task 48** photographed it, against `scripts/fixtures/camera-pair.json` — a second running camera and a viewer report is what it cost. Two things the photograph shows that the source did not. The head word **shares the first line** with the size, rate and bitrate rather than sitting on one of its own; and the `15 fps` slot reads `every 5 s`, which is the daemon's own substitution for a stills viewer — an interval, not a frame rate (§8.2). **And the overlay has no scrim**: `.y-ov` sets a colour and no background, so it is legible exactly as far as the picture behind it allows. Against the harness's flat mid-grey frame the range, step and cost lines read faintly. The gate's legibility rule measures *control* text, so nothing checks this one — **the operator's**, put to them 2026-09-07 |
+| L-11 | The overlay's head word takes the state: `ADAPTIVE`, `AT THE FLOOR` (caution), `HELD`, `FULL RATE` (select), `STILLS` (fault) | **Present, and captured for one of the five** — `STILLS`, in the fault tone, in `camera-live-pair.*.png`. The daemon's answer to every viewer report is that browser's own preview state, and `YonderPicture.vue` reads it (Task 34) | present | Task 32 built the message, Task 34 put it on the page, **Task 48** photographed it. The per-viewer state can only reach a per-viewer picture through its own report's answer — a flow message is broadcast to every browser. **The four other head words are still unphotographed, and one fixture is not enough for them:** each needs a viewer **on video**, and no media server answers under the harness, so every picture in it falls back to stills within twelve seconds. Reaching them means a media server in the gate — a larger fixture than a second camera. **Owner: Task 48**, put to the operator 2026-09-07 |
+| L-12 | The overlay carries the round-trip on a poor link: `0.3 of 0.3–2.0 Mb/s · 1.2 s round trip` | **The range line is present and captured; the round trip is not built.** `camera-live-pair.*.png` draws `0.41 of 0.31–2.07`. `overlayFor` (`video/viewers.ts`) composes `detail` as `<rate> of <floor>–<ceiling>` and appends no round trip, on a poor link or on any other — the row was recorded as built on the strength of *the line* existing | **drifted** | Photographing it is what separated the two halves. **The round trip is absent**, and it would need a viewer report with an `rtt` in it, which only a viewer on video produces — the same fixture L-11's other four head words wait for. **Owner: Task 48**, put to the operator 2026-09-07. **And the line carries no unit**: the render reads `1.8 of 0.3–2.0 Mb/s`, the console reads `0.41 of 0.31–2.07`. Same family as L-55 |
+| L-13 | **A step line, top-right of the picture**, on a ladder change only: `dropped to 640×360 — the link could not carry 720p` | **Present, and captured** — the overlay's third line in `camera-live-pair.*.png`, reading `no fresh report from any viewer in the last 6 s: what the link can carry is unknown, so nothing moves`. It is `overlay.step`, which is `Viewers.decided()`'s record of the last decision for that camera | present | Two differences the photograph shows. It is **top-left under the range line, not top-right** — the whole overlay is one block at the top left. And it is **not only a ladder change**: `decided()` keeps the last *decision*, which may be a shortfall, a size, a rate or a **hold**, so the line says why the picture is where it is rather than only that it moved. Reaching an actual ladder change needs a viewer report with a measurement in it — a viewer on video, as L-11 and L-12. Whether a hold belongs on this line is **the operator's**, put to them 2026-09-07 |
 | L-14 | A foot strip, bottom-left of the picture, of the live control readings — `ZOOM 0  GAIN 0` on the ELP, `PAN +0.0°  TILT +0.0°  ZOOM 1.0×  EV +0.0` on the Pocket 2 | Built (`.y-pic__foot`); not visible in the capture because the media server is not answering | present | Unverifiable from this capture; verified in source |
 | L-15 | `LINK 3.10 Mb/s / DROP 0.0 %` in the bottom-right corner of the picture | Built (`.y-pic__foot` link/drop block); not visible in this capture | present | Same caveat as L-14 |
 | L-16 | A `REC` pill with elapsed time while recording | Built (`.y-pic__rec`), and fed: `pick-cam-picture` carries `recorder` to it and `YonderPicture` counts from the board's own `since` | present | Task 33b wired it. The elapsed time is counted in the component, not formatted by the daemon — the page reads every five seconds and a pre-formatted string makes a stopwatch that steps in fives |
-| L-17 | **A hint centred on the picture, `DRAG TO SLEW · RELEASE TO STOP`, whenever the camera can be aimed** | Present (`.y-pic__hint`), from the same `aimable` that arms the drag layer, and taken away while a drag is in flight | present | Task 47. **And the layer itself was dark until now:** `payload.aim` reached only `pick-cam-aim`, so nothing armed either. `pick-cam-picture` now moves it on to *both* pictures — the Camera page's and the Cockpit's — on the same scratch move `strip` uses. Uncaptured, correctly: the gate's fixture answers `aim: none`, so there is nothing to aim and nothing to hint at |
+| L-17 | **A hint centred on the picture, `DRAG TO SLEW · RELEASE TO STOP`, whenever the camera can be aimed** | Present (`.y-pic__hint`), from the same `aimable` that arms the drag layer, and taken away while a drag is in flight. **Captured** — centred on the picture in both `camera-live-pair.*.png` and `cockpit-pair.*.png` | present | Task 47. **And the layer itself was dark until then:** `payload.aim` reached only `pick-cam-aim`, so nothing armed either. `pick-cam-picture` now moves it on to *both* pictures — the Camera page's and the Cockpit's — on the same scratch move `strip` uses, and the pair capture is what proves it reaches both. Photographed by **Task 48**, whose fixture answers `aim: present` on the first camera. **It is a picture of an open defect too:** K-62 — the gesture the hint invites falls to `cam-pic-act`'s third output, which is wired to nothing |
 | L-18 | **A white flash over the whole picture and a centred `● SAVED · TO THIS BOARD` banner** when a still lands | Built (`.y-pic__flash`, `.y-pic__saved`), 1200 ms, restarted by a second still and gated on `held` so a delete never flashes | present | Task 33b. The words for the medium are `heldWords()`'s, shared with the shutter key's own line |
 | L-19 | The drag-to-slew orb measured from where the pointer went down | Built and tested (`picture.component.test.ts`) | present | |
 
@@ -160,9 +173,9 @@ proof that the two instruments will stand there.
 
 | # | The blueprint shows | Today | Class | Note |
 |---|---|---|---|---|
-| L-20 | **A strip under the picture, one thumbnail per camera**, the active one bordered and labelled `Live`, the others labelled `Still · 4 s` | **Built, uncaptured** (Task 34). `video/present.ts`'s `thumbStrip()` composes one row per configured camera on the camera read; `pick-cam-picture` moves it on to the picture; the daemon takes one still per watched camera on a 5 s timer (`video/stills.ts`) and each browser subscribes to the others' stills itself. A stopped camera reads `Stopped`; a running one with no frame yet reads `Still · waiting` | built — **the capture is the operator's gate** | **The active thumbnail carries no image**: its picture is the live one above, and fetching its still too would be an uncounted copy for a video viewer. The blueprint draws a picture in it. Painting the live `<video>` into a small canvas would close it at no uplink cost — **owner: the operator** — put to them 2026-09-07 with a recommendation (paint the live video into the thumbnail in the browser, at no cost on the link) |
-| L-21 | A press on a thumbnail switches camera, and the sidebar follows | **Built, uncaptured** (Task 34) — the press sets the page's own camera and re-reads it, so every instrument follows and the next poll agrees. Before this the picture switched and the next poll switched it back | built — **the capture is the operator's gate**; the sidebar half still needs L-04 | |
-| L-22 | To the right of the strip, `OTHER CAMERAS` over `12 kb/s of stills · counted in Path total` | **Built, uncaptured** (Task 34). The figure is `Viewers.stillsKbps()` — every transmitted copy, every viewer, every camera — in the daemon's own words | built — **the capture is the operator's gate** | The figure is honest and larger than the render's: a still is the host's `still` op off the `raw` tee at capture size, ~100 kB at 720p, so one copy every 5 s is ~170 kb/s. The render's `12 kb/s` implies a thumbnail-sized still, which would need the host op to scale — **owner: the operator** — put to them 2026-09-07 with a recommendation (a `size` on the host's existing still op, after a board measurement of a 320×180 JPEG) |
+| L-20 | **A strip under the picture, one thumbnail per camera**, the active one bordered and labelled `Live`, the others labelled `Still · 4 s` | **Present, and captured** — `camera-live-pair.*.png` draws two: the active one bordered and labelled `Live`, and `Still · 3 s` beside it carrying the second camera's own frame. `video/present.ts`'s `thumbStrip()` composes one row per configured camera on the camera read; `pick-cam-picture` moves it on to the picture; the daemon takes one still per watched camera on a 5 s timer (`video/stills.ts`) and each browser subscribes to the others' stills itself. A stopped camera reads `Stopped`; a running one with no frame yet reads `Still · waiting` | present | Photographed by **Task 48**. **The active thumbnail carries no image**: its picture is the live one above, and fetching its still too would be an uncounted copy for a video viewer. The blueprint draws a picture in it. Painting the live `<video>` into a small canvas would close it at no uplink cost — **owner: the operator** — put to them 2026-09-07 with a recommendation (paint the live video into the thumbnail in the browser, at no cost on the link). **The frame in the capture is the fake host's**, not a photograph: `video/fake-gi` writes a flat mid-grey 1280×720 JPEG where a board's pipeline would write a frame, so the thumbnail is a grey field. What it proves is the chain — a still taken, served, fetched and drawn — not what a camera sees |
+| L-21 | A press on a thumbnail switches camera, and the sidebar follows | **Built, uncaptured** (Task 34) — the press sets the page's own camera and re-reads it, so every instrument follows and the next poll agrees. Before this the picture switched and the next poll switched it back. Proven in `picture.component.test.ts`; **not photographed**, and Task 48's pair fixture does not change that | built — **owner: Task 48**; the sidebar half still needs L-04 | **The gate presses soft keys and nothing else.** Every press it makes goes through `.y-keys__key` — the operator's own rule after a thumbnail that reads `Live` was pressed instead of the LIVE soft key and left the console on the wrong deck (`ae8cb0a`) — and a thumbnail is a button, not a key. Photographing the switch means giving the gate a second, separately named press for the strip; whether it should have one is **the operator's**, put to them 2026-09-07. It is the one row of the eight the pair fixture does not close |
+| L-22 | To the right of the strip, `OTHER CAMERAS` over `12 kb/s of stills · counted in Path total` | **Present, and captured** — `OTHER CAMERAS` over `12 kb/s of stills · counted in Path total` in `camera-live-pair.*.png`, and `24 kb/s` on the Cockpit's own copy, where two pictures are fetching. The figure is `Viewers.stillsKbps()` — every transmitted copy, every viewer, every camera — in the daemon's own words | present | Photographed by **Task 48**. The figure is honest and larger than the render's: a still is the host's `still` op off the `raw` tee at capture size, ~100 kB at 720p, so one copy every 5 s is ~170 kb/s. The render's `12 kb/s` implies a thumbnail-sized still, which would need the host op to scale — **owner: the operator** — put to them 2026-09-07 with a recommendation (a `size` on the host's existing still op, after a board measurement of a 320×180 JPEG). **The harness's own figure is small for a reason that is not the board's**: the fake host's frame is a flat grey field that compresses to 3.7 kB, so a copy costs 6 kb/s there. `scripts/fixtures/specimens.json` carries `1690 kb/s of stills · counted in Path total` as the widest anybody has written down, and that is what the committed picture is laid out under |
 
 ### 1.4 The strip beneath (delivery)
 
@@ -181,9 +194,26 @@ strip of camera facts in the same place.
 ### 1.5 The Aim panel
 
 Blueprint: `aim.elp.png` (advertised, not answering) and `aim.pocket2.png`
-(present). The bench fixture answers `aim: none`, so the console draws one line
-of text and none of the panel. **Every row here is therefore unverifiable from
-the capture and was checked against `YonderAim.vue` instead.**
+(present). The bench fixture answers `aim: none`, so the base captures draw one
+line of text and none of the panel, and **every row below was checked against
+`YonderAim.vue` rather than against a picture.**
+
+**Since Task 48 there is a picture.** `camera-live-pair.*.png` and
+`cockpit-pair.*.png` are taken against a fixture whose first camera answers
+`aim: present` with both ends of both axes, so this panel is photographed in
+the state the blueprint draws it in. The first photograph found four things at
+once, all recorded as **K-63**: the panel needs 480 px in a 228 px widget and
+its lower half is painted over what follows it; the reason sentence is drawn
+twice, once under the legend and once under the dial; `● READY` is painted over
+`COMMANDED RATE`; and the `Gimbal mode` control renders nothing, because
+`aimPanel` answers `modes: []`. `Recentre gimbal` is drawn on the Cockpit and
+covered on the Camera page, by the same overflow.
+
+**The rows below have not been re-read against that picture**, and saying so is
+the point: they were signed off against the source, four defects were in the
+first photograph of them, and the two facts do not sit together. **Owner: Task
+48** — a row-by-row re-read of L-29 … L-42 against `camera-live-pair.*.png` is
+work this task did not do.
 
 | # | The blueprint shows | Today | Class | Note |
 |---|---|---|---|---|
@@ -229,13 +259,22 @@ the capture and was checked against `YonderAim.vue` instead.**
 | L-58 | In Adaptive: `FLOOR` and `CEILING` **pickers** appear (`1.0 Mb/s`, …) | Present, but drawn as **set bars**, not pickers | drifted | `columns.adaptive.png` is the reference |
 | L-59 | A staged edit shows `Pending · apply on Setup` beneath the control it was made on | Present (`YonderSetBar.vue:17`, `YonderDeck.vue:440`) | present | |
 
-**The gate's fixture answers one camera and no gimbal, so eight built rows are
-uncaptured** — L-10, L-11, L-12, L-13 (the overlay, drawn from the daemon's answer to
-a viewer report the fixture never gets), L-17 (the drag hint, drawn only when a gimbal
-answers `present`), and L-20, L-21, L-22 (the strip's `Still · N s` row and its figure,
-which need a second running camera). A fixture with two cameras and a gimbal answering
-`present` pictures all eight. **Owner: Task 48** (briefed 2026-09-07, after the final
-review named this blind spot).
+**Seven of those eight rows are now photographed, and the eighth is not.**
+`scripts/fixtures/camera-pair.json` gives the gate two cameras — both running
+under a pipeline host with no GStreamer under it — and a gimbal answering
+`aim: present` on the first, and `camera-live-pair.*.png` / `cockpit-pair.*.png`
+are what it takes with them: the state overlay and all four of its lines (L-10,
+L-11, L-12, L-13), the drag hint (L-17), the strip with a second thumbnail
+carrying a frame (L-20) and a non-zero `OTHER CAMERAS` figure (L-22). **L-21 is
+the one left**: photographing a thumbnail press means the gate pressing
+something that is not a soft key, which is the operator's to decide — the row
+says why.
+
+Three things that state showed which nothing else could: L-12's round trip is
+not composed at all, L-13's step line carries a *hold* and not only a ladder
+change, and the Aim panel needs 480 px in a 228 px widget (**K-63**, accepted in
+`docs/console/accepted-violations.json` until the operator chooses between its
+two fixes).
 
 **L-56 diverges from the approved render, deliberately. The operator decided
 it, under CLAUDE.md rule 8, and this row is the record of it.**
@@ -686,12 +725,17 @@ was written for exactly the reason this section gives, that a row with no
 owner is indistinguishable from a closed one. Nothing found them but the
 manifest.)*
 
-**2 · The gate photographs one capability state.** The camera pages are
+**2 · The gate photographs one capability state.** The camera pages were
 captured against a single fixture whose camera answers `aim: none` and gates
 shutter, focus and temperature. The blueprint draws four states across two
 cameras. Most of the Aim panel, every `advertised` reading, and the whole Photo
-path are outside anything the gate has ever rendered — so a regression in them
-would not change a single committed pixel.
+path were outside anything the gate had ever rendered — so a regression in them
+would not have changed a single committed pixel.
+
+*(Partly closed by Task 48. `camera-pair.json` reaches the gimbal state, and the
+first photograph of the Aim panel in it found four defects at once — K-63 — in a
+panel every row of §1.5 had been signed off against the source. Every state that
+needs a viewer on video is still outside it.)*
 
 **3 · A capture that is stale against its own code.** The committed
 `camera-live.*.png` predate the Orientation commits. An auditor reading
@@ -718,16 +762,16 @@ so has never been seen in a picture anybody reviews (B-02).
 
 | Surface | Elements | Present | Absent (unbuilt) | Absent (owned) | Drifted | Deferred | Not checkable |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| Camera · Live | 105 | 41 | 11 | 15 | 34 | 3 | 1 |
+| Camera · Live | 105 | 46 | 11 | 9 | 35 | 3 | 1 |
 | Camera · Setup | 17 | 5 | 3 | 0 | 8 | 0 | 1 |
 | Cameras | 26 | 8 | 7 | 0 | 10 | 0 | 1 |
-| **Compared against a blueprint** | **148** | **54** | **21** | **15** | **52** | **3** | **3** |
+| **Compared against a blueprint** | **148** | **59** | **21** | **9** | **53** | **3** | **3** |
 | Status | 20 | — | — | — | — | — | 20 |
 | Network | 24 | — | — | — | — | — | 24 |
 | Log | 8 | — | — | — | — | — | 8 |
 | Diagnostics | 11 | — | — | — | — | — | 11 |
 | **Inventoried, no blueprint** | **63** | — | — | — | — | — | **63** |
-| **Total** | **211** | **54** | **21** | **15** | **52** | **3** | **66** |
+| **Total** | **211** | **59** | **21** | **9** | **53** | **3** | **66** |
 
 **Conflicts: 5** (C-1 … C-5), listed above. They are counted in their
 surface's other columns as well, where they describe a concrete difference.
@@ -751,9 +795,10 @@ check against.
 | Task | What it owes this manifest |
 |---|---|
 | 31 — the rate controller and the size ladder | L-13 (the step line's cause) |
-| 32 — viewers and the preview-state message | L-10, L-11, L-12, L-13, L-24, L-26, L-27, L-63 |
+| 32 — viewers and the preview-state message | L-24, L-26, L-27, L-63. *(L-10, L-11 and L-13 left this list when Task 48 photographed them; L-12's round trip is still Task 32's `detail` to compose)* |
 | 33 — board recording, stills and the captures panel | **Done.** L-16, L-18, L-43, L-44, L-45, L-46, L-47 built; L-48 built as a panel rather than a popover, for the operator to accept or reverse |
-| 34 — the stills strip, per viewer | **Built, uncaptured.** L-20, L-21, L-22, and the `STILLS` half of L-11; the strip's active thumbnail image and the still's size are the operator's calls (see the rows) |
+| 34 — the stills strip, per viewer | **Built; captured by Task 48.** L-20, L-22 and the `STILLS` half of L-11 are photographed in `camera-live-pair.*.png`; the strip's active thumbnail image and the still's size are still the operator's calls (see the rows) |
+| 48 — a fixture the gate can photograph the whole camera page with | **Done, less one row.** L-10, L-11, L-12, L-13, L-17, L-20 and L-22 photographed. **L-21 is owed**: a thumbnail press is not a soft-key press and the gate makes only the second. Also owed, and put to the operator: L-11's four other head words, L-12's round trip and L-13's ladder change, all of which need a viewer on video |
 | Phase 5 (deferred, Pocket 2) | L-52, L-79, L-83 |
 
 **Unbuilt, with no owner — fourteen rows**

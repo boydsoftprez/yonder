@@ -60,6 +60,7 @@
 //   node scripts/capture-pages.mjs ... --synthetic-cameras scripts/fixtures/camera-globalshutter.json
 //   node scripts/capture-pages.mjs ... --secrets /etc/yonder/secrets.yaml
 //   node scripts/capture-pages.mjs ... --viewport 1440x900 --fold
+//   node scripts/capture-pages.mjs ... --wait-for .y-pic__state   # repeatable
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join, dirname, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -218,6 +219,19 @@ const LIVE = [
   // under it wear `yonder-fixed`, so what the banner is about is still
   // readable in the picture.
   ".yonder-live .y-ann__text",
+  // **The strip's figure, and only the figure.** Every still copy leaving this
+  // device, in kb/s (R-VID-11; blueprint L-22) — a reading, unbounded, and
+  // the widest one it can carry is what the strip has to hold.
+  //
+  // `.y-strip__cap` beside it is deliberately not here, and it is the
+  // annunciator's argument one row down applied again: three of its four
+  // words are *state* — `Live`, `Stopped`, `Still · waiting` — and those are
+  // what somebody looking at these pictures needs to read. The fourth,
+  // `Still · 4 s`, carries a frame age, and there is no way to specimen that
+  // one alone: every caption in the strip is drawn by one component with one
+  // caption beside it, so they share a key, and a specimen written for the
+  // age would be written over the state words too.
+  ".y-strip__dl-v",
   // The telemetry instruments' own readings. A leg's rate and a sparkline's
   // series are measurements that differ between two runs of this gate by
   // construction — a heartbeat interval and a router's kB counter — so
@@ -403,6 +417,49 @@ const press = arg("press");
  */
 const only = arg("only");
 const as = arg("as");
+/**
+ * A selector every captured page must be showing before it is photographed.
+ * Repeatable; each one is waited for in turn.
+ *
+ * **A condition, never a sleep.** Some of what this console draws arrives on
+ * the page's own clock rather than on its first render, and the picture is
+ * the extreme case: with no media server answering, `YonderPicture` gives a
+ * negotiation twelve seconds and only then falls back to stills — and it is
+ * the *report* it posts on falling back that the daemon answers with this
+ * browser's own preview state, which is the one channel the state overlay
+ * (R-VID-18; blueprint L-10 to L-13) can reach a page by. A capture taken
+ * before that is a picture of a page that is still waiting, and a fixed sleep
+ * long enough to cover it is a number that is either too short on a loaded
+ * machine or wasted on every run.
+ *
+ * So the caller says what the page has to be showing and this waits for it,
+ * the way the shell around it waits on `GET /status` rather than sleeping
+ * past an apply. A selector that never matches fails the capture by name,
+ * which is the right failure: it means the state this picture was taken for
+ * never arrived, and a photograph of the page without it would be filed under
+ * that state's name regardless.
+ */
+const waitFor = (() => {
+  const found = [];
+  for (let i = 0; i < process.argv.length; i += 1) {
+    if (process.argv[i] === "--wait-for" && process.argv[i + 1] !== undefined) {
+      found.push(process.argv[i + 1]);
+    }
+  }
+  return found;
+})();
+/**
+ * How long each `--wait-for` selector has.
+ *
+ * The slowest thing on this console that a capture waits for is the picture's
+ * own state overlay once it has fallen back to stills, and it is a chain of
+ * three waits rather than one: twelve seconds before the fall-back, up to one
+ * five-second interval before this device has taken a frame to answer with,
+ * and up to one more before the report that carries what that copy cost. That
+ * is about twenty-five seconds when everything is prompt, and this is that
+ * with room for a loaded machine underneath it.
+ */
+const WAIT_FOR_MS = 45_000;
 /**
  * The fixture the harness seeded the daemon's camera layer from.
  *
@@ -590,10 +647,38 @@ for (const page of pages) {
   // browser's and not ours. A 404 on a widget bundle still fails, which is
   // what this check was written for.
   const aboutTheStream = (url) => /\/whep(\?|$)/.test(String(url ?? ""));
+  /**
+   * A camera's still, which a page asks for before this device has taken one.
+   *
+   * The stills loop posts its subscription and fetches the frame in the same
+   * turn, and the daemon takes the first frame on its own next tick — so the
+   * first fetch after a fall-back is answered *no still of this camera yet;
+   * the first is taken within 5 s*, in words the picture then draws
+   * (`.y-pic__note`). That is R-VID-14 working, not a page failing, and it is
+   * the same case the WHEP exemption above is: a route answering honestly
+   * about a state the component is built to show.
+   *
+   * **Only that answer, and only on that route.** A 404 here is *not yet*; a
+   * 409 is a camera that is not running, a 401 is a session that was not
+   * carried, and a 500 is a defect — every one of those still fails, which is
+   * what keeps this from being a blanket for the route.
+   */
+  const noStillYet = (url, status) =>
+    status === 404 && /\/still(\?|$)/.test(String(url ?? ""));
   tab.on("console", (m) => {
     if (m.type() !== "error") return;
-    if (aboutTheStream(m.location()?.url)) return;
-    noise.push(`console: ${m.text().slice(0, 200)}`);
+    const where = m.location()?.url;
+    if (aboutTheStream(where)) return;
+    // The browser reports a failed fetch twice — once as a response and once
+    // as a console error — so the still exemption has to be made in both
+    // places. Here the status is only in the words, because a console message
+    // carries none of its own.
+    if (/\b404\b/.test(m.text()) && noStillYet(where, 404)) return;
+    // **With the resource that produced it.** "Failed to load resource: 404"
+    // on its own names nothing, and a finding nobody can act on is a finding
+    // somebody accepts.
+    noise.push(`console: ${m.text().slice(0, 200)}`
+      + (where ? `  (${String(where).slice(-70)})` : ""));
   });
   tab.on("pageerror", (e) => noise.push(`uncaught: ${String(e.message).slice(0, 200)}`));
   tab.on("requestfailed", (r) => {
@@ -607,6 +692,7 @@ for (const page of pages) {
     // on the rail"). A 404 on a widget bundle still fails, which is what this
     // check was written for.
     if (aboutTheStream(r.url())) return;
+    if (noStillYet(r.url(), r.status())) return;
     if (r.status() >= 400) noise.push(`HTTP ${r.status()}: ${r.url().slice(-90)}`);
   });
 
@@ -649,6 +735,19 @@ for (const page of pages) {
       await tab.waitForTimeout(900);
     } else {
       note(`  FAIL  ${page.title} (${palette}) has no key labelled "${page.press}" to reach it`);
+      failures += 1;
+    }
+  }
+
+  // The states this run was taken for, waited for rather than slept past. See
+  // `waitFor` above: a picture's fall-back to stills, and the still that
+  // reaches the strip, both arrive seconds after the page is drawn.
+  for (const selector of waitFor) {
+    try {
+      await tab.waitForSelector(selector, { timeout: WAIT_FOR_MS, state: "attached" });
+    } catch {
+      note(`  FAIL  ${page.title} (${palette}) never showed "${selector}"`);
+      note(`          the state this capture is filed under did not arrive within ${String(WAIT_FOR_MS / 1000)} s`);
       failures += 1;
     }
   }
@@ -1006,11 +1105,23 @@ await browser.close();
 
 // An accepted violation that no longer happens is a line to delete. Left in,
 // it would quietly re-accept the same defect if it ever came back.
-// Only on a full pass. A run of one page has not been anywhere near the
-// entries about the others, and reporting them as fixed would be a lie that
-// deletes a real debt.
-const stale = only !== undefined ? [] : debt.entries.filter(
-  (e) => !seen.has(e) && (e.palette === "*" || e.palette === palette),
+//
+// **Only for the pages this run actually captured.** A run that has not been
+// near a page cannot say its debt is fixed, and there are two ways to not be
+// near one: a `--only` run has been near exactly one page, and a *full* pass
+// has been near none of the state captures — `camera-live-pair`,
+// `status-pending`, `network-interfaces-down` — because each of those is
+// itself an `--only` run under a name of its own.
+//
+// This used to be written as "skip the whole check on a `--only` run", which
+// covered the first case and made the second one worse: the full pass then
+// reported every debt on every state capture as fixed, on a run that had not
+// photographed one of them. Asking which pages were captured answers both.
+const capturedPages = new Set(pages.map((p) => p.name));
+const stale = debt.entries.filter(
+  (e) => !seen.has(e)
+    && capturedPages.has(e.page)
+    && (e.palette === "*" || e.palette === palette),
 );
 for (const e of stale) {
   note(`  FAIL  ${e.page} (${e.palette}) no longer has the accepted "${e.rule}" on "${e.key}"`);

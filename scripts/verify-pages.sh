@@ -430,6 +430,55 @@ for (const [key, value] of Object.entries(overlay.capabilities)) {
 writeFileSync(process.env.OUT, JSON.stringify(base, null, 2) + "\n");
 ' || die "could not build the sensor-turns fixture at $CAMERAS_SENSOR"
 
+# A third copy: two cameras, and a gimbal on the first.
+#
+# The gate's daemon answered one camera and no gimbal, and no browser had ever
+# reported to it — so the state overlay on the picture, the drag hint, and the
+# strip's `Still · N s` row with its `OTHER CAMERAS` figure were built and
+# uncaptured (blueprint L-10 to L-13, L-17, L-20 to L-22). None of them can be
+# photographed against one stopped camera: the overlay is the daemon's answer
+# to *this browser's* own viewer report, the hint is drawn only where `aim`
+# answers `present`, and a still can only be taken off a pipeline that is
+# running.
+#
+# An overlay again, merged the same way and for the same reason: the recorded
+# answers stay in one file. The second camera is `found[0]` on another socket
+# — cloned *before* the gimbal goes on the first, so it answers `aim:
+# not-offered` exactly as the board did, and the pair differ in what they are
+# as well as in where they are. See scripts/fixtures/camera-pair.json.
+CAMERAS_PAIR="$ROOT/cameras-pair.json"
+PAIR_OVERLAY="$REPO/scripts/fixtures/camera-pair.json"
+[ -f "$PAIR_OVERLAY" ] || die "no camera-pair overlay at $PAIR_OVERLAY"
+BASE="$CAMERAS" OVERLAY="$PAIR_OVERLAY" OUT="$CAMERAS_PAIR" node -e '
+const { readFileSync, writeFileSync } = require("node:fs");
+const base = JSON.parse(readFileSync(process.env.BASE, "utf8"));
+const overlay = JSON.parse(readFileSync(process.env.OVERLAY, "utf8"));
+const second = overlay.second;
+// The configured camera has to be one the sweep reports, or `refuse()` stops
+// the start with "this board has no /dev/v4l/by-path/..." and the strip has
+// nothing running in it — a fixture that disagreed with itself would fail as
+// a page with no picture rather than as the typo it is.
+if (second.camera.device !== second.byPath) {
+  throw new Error("the second camera is configured on a by-path name the sweep does not report");
+}
+base.found.push({
+  ...structuredClone(base.found[0]),
+  device: second.device,
+  card: second.card,
+  byPath: second.byPath,
+});
+// A capability the overlay names and the recorded fixture has no key for is a
+// renamed key, not a camera that lacks it — the same guard the sensor-turns
+// merge above makes, and for the same reason: written silently it would leave
+// the pair capture drawing no aim panel and passing.
+if (!("aim" in base.found[0].capabilities)) {
+  throw new Error("the recorded fixture has no `aim` key for the overlay to answer");
+}
+base.found[0].capabilities.aim = overlay.aim;
+base.cameras = [base.camera, second.camera];
+writeFileSync(process.env.OUT, JSON.stringify(base, null, 2) + "\n");
+' || die "could not build the pair fixture at $CAMERAS_PAIR"
+
 DAEMON_PID=""
 CONSOLE_PID=""
 cleanup() {
@@ -616,6 +665,29 @@ confirm_apply() {
     id=$(printf '%s' "$1" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
     [ -n "$id" ] && sock_post /confirm "{\"id\":\"$id\"}" >/dev/null
 }
+
+# The same confirmation, **waited out**, and by a parsed id.
+#
+# `confirm_apply` above sends the confirmation and returns, which is enough
+# where the next thing to happen is another route. It is not enough before a
+# *capture*: the engine is still settling for a moment afterwards, an apply
+# that has not settled blocks every apply behind it — the theme change
+# included — and a page photographed inside the window carries a countdown
+# banner it was not taken for.
+#
+# `json_field`, not the pattern above, for the reason that function's own
+# comment gives: a greedy match reads whichever id came last in the reply.
+settle_apply() {
+    settle_id=$(printf '%s' "$1" | json_field id)
+    [ -n "$settle_id" ] && sock_post /confirm "{\"id\":\"$settle_id\"}" >/dev/null
+    i=0
+    while [ "$i" -lt "$TRIES" ]; do
+        case "$(sock /status)" in *'"state":"pending"'*) ;; *) return 0 ;; esac
+        sleep "$POLL"; i=$((i + 1))
+    done
+    bad "an apply was still pending after it was confirmed: $(sock /status)"
+    return 1
+}
 confirm_apply "$armed"
 confirm_apply "$(sock_post /cameras/front/settings '{"bitrate_kbps":2000,"framerate":30}')"
 expect_contains "and the document really changed, not only the answer" \
@@ -635,6 +707,24 @@ wait_for_phase() {
     i=0
     while [ "$i" -lt "$TRIES" ]; do
         case "$(sock /mav/state)" in *"\"phase\":\"$1\""*) return 0 ;; esac
+        sleep "$POLL"; i=$((i + 1))
+    done
+    return 1
+}
+
+# A camera's pipeline, in the state the **supervisor observed** it in — never
+# the configuration's own `enabled` (R-CTL-10).
+#
+# Matched on the run block's two fields together rather than on
+# `"state":"running"` alone: this reply carries a dozen other objects with a
+# `state` in them, and one of those answering for the pipeline would be a wait
+# that returns before anything has started.
+wait_for_run() {
+    i=0
+    while [ "$i" -lt "$TRIES" ]; do
+        case "$(sock "/cameras/$1")" in
+            *"\"run\":{\"id\":\"$1\",\"state\":\"$2\""*) return 0 ;;
+        esac
         sleep "$POLL"; i=$((i + 1))
     done
     return 1
@@ -1194,6 +1284,127 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
             '"horizontalFlip":{"state":"not-offered"}' "$(sock /cameras/front)"
     }
 
+    # The picture and the strip with something on them (R-VID-14, R-VID-18;
+    # blueprint L-10 to L-13, L-17, L-20 to L-22).
+    #
+    # Every other camera capture in this run is of a one-camera board with
+    # nothing running on it, which is the state an operator meets first and is
+    # worth photographing — and it is also a picture with no overlay, a strip
+    # with one stopped thumbnail and a figure reading zero. Eight rows of the
+    # blueprint are drawn only in the other state, so this is that state: two
+    # cameras, both pipelines up under the fake host, a gimbal answering on the
+    # first, and a browser left on the page long enough to fall back to stills
+    # and be answered.
+    #
+    # **The waits are conditions, not sleeps**, and each names the row it is
+    # for: the overlay and its bitrate line (L-10 to L-13), the frame on the
+    # picture, the drag hint (L-17), the second camera's thumbnail and its
+    # caption (L-20), and a non-zero figure beside `OTHER CAMERAS` (L-22).
+    #
+    # The state overlay reaches a page only as the daemon's answer to *that
+    # browser's own* viewer report, and the report the harness produces is the
+    # one the picture posts when it gives up on video after twelve seconds —
+    # then this device has to take a frame, serve it, and answer the report
+    # after that with what the copy cost. A fixed sleep covering all of that
+    # would be a number too short on a loaded machine and wasted on every
+    # other run, and one too short is a picture filed under a state it is not
+    # in. `--wait-for` is what the capture waits on instead.
+    #
+    # **`camera-live` and the Cockpit, and deliberately not `camera-setup`.**
+    # The picture and the strip are the same group on Setup, drawn by the same
+    # method from the same payload, so a third picture of them would cost a
+    # capture to prove nothing the first does. The Cockpit is not that: it is a
+    # second `ui-yonder-picture`, fed by a second change node (R-UI-28), and
+    # `payload.aim` reaching it is exactly what Task 47 had to add.
+    capture_pair() {
+        cp "$CAMERAS_PAIR" "$CAMERAS_LIVE"
+        # The second camera into the applied document, through the engine like
+        # any other change (R-CFG-01, R-CFG-03) — never a write behind its
+        # back — and taken out again at the end of this function.
+        sock /config > "$ROOT/config.json"
+        SECOND="$PAIR_OVERLAY" node -e '
+            const { readFileSync } = require("node:fs");
+            const config = require(process.argv[1]);
+            const overlay = JSON.parse(readFileSync(process.env.SECOND, "utf8"));
+            config.cameras = [...config.cameras, overlay.second.camera];
+            process.stdout.write(JSON.stringify(config));
+        ' "$ROOT/config.json" > "$ROOT/pair.json"
+        added=$(curl -s -H 'content-type: application/json' --data @"$ROOT/pair.json" \
+            --unix-socket "$SOCKET" http://localhost/apply)
+        settle_apply "$added"
+        expect_contains "the board has a second camera configured" \
+            '"id":"tail"' "$(sock /config)"
+        # Both pipelines up. Start is a runtime action and survives no apply
+        # (R-CTL-01), so it comes after the change above rather than before it.
+        sock_post /cameras/front/run '{"action":"start"}' >/dev/null
+        sock_post /cameras/tail/run '{"action":"start"}' >/dev/null
+        for pair_cam in front tail; do
+            if wait_for_run "$pair_cam" running; then
+                ok "the $pair_cam camera is running, under a pipeline host with no GStreamer in it"
+            else
+                bad "the $pair_cam camera never reached running: $(sock "/cameras/$pair_cam")"
+            fi
+        done
+        # What the pages are about to draw, asserted through the daemon first,
+        # so a capture that comes out wrong is read as a page defect and not as
+        # a fixture that never arrived.
+        pair=$(sock /cameras/front)
+        expect_contains "the deck's aim panel says this camera can be aimed" \
+            '"aim":{"state":"present"' "$pair"
+        expect_contains "with the envelope the fixture answered, both ends of both axes" \
+            '"bounds":{"pan":[-180,180],"tilt":[-90,30]}' "$pair"
+        expect_contains "and the strip carries the second camera beside it" \
+            '"name":"Tail camera"' "$pair"
+        expect_contains "which is running, so it is not drawn as stopped" \
+            '"stopped":false' "$pair"
+        for pair_page in camera-live cockpit; do
+            if node "$REPO/scripts/capture-pages.mjs" \
+                    --base-url "http://127.0.0.1:$PORT" \
+                    --password "$PASSWORD" \
+                    --palette "$1" \
+                    --only "$pair_page" \
+                    --as "$pair_page-pair" \
+                    --artifacts "$REPO/vendor/capture" \
+                    --synthetic-cameras "$CAMERAS_PAIR" \
+                    --secrets "$ETC/secrets.yaml" \
+                    --wait-for ".y-pic__state" \
+                    --wait-for ".y-ov__bitrate" \
+                    --wait-for "img.y-pic__video" \
+                    --wait-for ".y-pic__hint" \
+                    --wait-for ".y-strip__img:not(.is-empty)" \
+                    --wait-for '.y-strip__cap:text-matches("^Still . [0-9]")' \
+                    --wait-for '.y-strip__dl-v:text-matches("^[1-9]")' \
+                    ${ACCEPT_SHAPE:+--accept}; then
+                ok "the $1 palette: $pair_page with two cameras, a gimbal and a picture on stills"
+            else
+                bad "the $1 palette: $pair_page with two cameras, see above"
+            fi
+        done
+        # Back to the one-camera board before anything else is captured. Both
+        # pipelines down first: a camera cannot be taken out from under a
+        # running one, which is `removalRefusal`'s whole job.
+        sock_post /cameras/tail/run '{"action":"stop"}' >/dev/null
+        sock_post /cameras/front/run '{"action":"stop"}' >/dev/null
+        for pair_cam in front tail; do
+            wait_for_run "$pair_cam" stopped \
+                || bad "the $pair_cam camera never stopped: $(sock "/cameras/$pair_cam")"
+        done
+        sock /config > "$ROOT/config.json"
+        node -e '
+            const config = require(process.argv[1]);
+            config.cameras = config.cameras.filter((c) => c.id !== "tail");
+            process.stdout.write(JSON.stringify(config));
+        ' "$ROOT/config.json" > "$ROOT/one-camera.json"
+        settle_apply "$(curl -s -H 'content-type: application/json' --data @"$ROOT/one-camera.json" \
+            --unix-socket "$SOCKET" http://localhost/apply)"
+        cp "$CAMERAS" "$CAMERAS_LIVE"
+        sleep 7
+        expect_missing "the board is back to one camera for the rest of the run" \
+            '"id":"tail"' "$(sock /config)"
+        expect_contains "and it answers no gimbal again" \
+            '"aim":{"state":"not-offered"}' "$(sock /cameras/front)"
+    }
+
     # Status's third shape, and the one the confirmation timer exists for
     # (R-UI-15, R-CFG-03). A change is applied and deliberately *not*
     # confirmed, so the banner is up with a real countdown on it — then the
@@ -1656,6 +1867,7 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
         capture_status_pending night
         capture_pending_radio night
         capture_sensor_turns night
+        capture_pair night
         capture_fold night notebook 1440x900
         capture_fold night tablet 1024x768
         capture_telemetry_states night
@@ -1675,6 +1887,7 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
         capture_status_pending day
         capture_pending_radio day
         capture_sensor_turns day
+        capture_pair day
         capture_fold day notebook 1440x900
         capture_fold day tablet 1024x768
         capture_telemetry_states day
