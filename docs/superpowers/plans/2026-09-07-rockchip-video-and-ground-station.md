@@ -2460,6 +2460,11 @@ Everything above is unit-tested against stand-ins. This task is the board, the g
 station and the note, in that order, and it is what closes K-63. Nothing here is a claim
 until the command beside it has printed the number.
 
+**Handoff note:** The K-62 through K-66 entries in `docs/known-issues.md` should each
+have a `---` separator; the owner of that file will make that correction. A black gadget
+camera is not meaningful picture or bitrate proof; the controller will document the
+actual measurements in the hardware note.
+
 **Files:**
 - Create: `docs/hardware/rockchip-video-shipped.md`
 - Modify: `docs/known-issues.md` (K-63's *Proven* line gets the date and the figures)
@@ -2470,8 +2475,9 @@ until the command beside it has printed the number.
 ```bash
 npm run build
 rsync -az --delete --exclude .git --exclude node_modules --exclude 'docs/console/design' \
-  ./packages ./config ./flows ./systemd ./installer ./scripts ./vendor ./package.json ./package-lock.json \
+  ./packages ./config ./flows ./systemd ./installer ./scripts ./package.json ./package-lock.json \
   root@<radxa>:/opt/yonder-src/
+rsync -az --exclude .git --exclude node_modules ./vendor/ root@<radxa>:/opt/yonder-src/vendor/
 ssh root@<radxa> 'cd /opt/yonder-src && rm -rf packages/yonder-core/dist && for r in 50-mediamtx 52-gst-rockchip 55-pipeline-host 20-yonder-core 30-console 40-uart; do ./installer/install.sh --only $r 2>&1 | tail -4; done'
 ```
 
@@ -2494,20 +2500,20 @@ Expected: `element: mpph264enc`, `h265: mpph265enc`, `decoder: mppjpegdec`, `dev
 - [ ] **Step 3: H.264 — start, look, cost**
 
 ```bash
-ssh root@<radxa> 'curl -s -X POST --unix-socket /run/yonder/core.sock -H "Content-Type: application/json" -d "{\"action\":\"start\"}" http://localhost/cameras/cam0/run; sleep 12; curl -s --unix-socket /run/yonder/core.sock http://localhost/cameras/cam0/run; echo; pid=$(pgrep -f "yonder-pipeline" | head -1); tr "\0" " " < /proc/$pid/cmdline; echo'
+ssh root@<radxa> 'curl -s -X POST --unix-socket /run/yonder/core.sock -H "Content-Type: application/json" -d "{\"action\":\"start\"}" http://localhost/cameras/cam0/run; sleep 12; curl -s --unix-socket /run/yonder/core.sock http://localhost/cameras/cam0 | python3 -c "import json,sys; print(json.load(sys.stdin)[\"run\"])"; echo; pid=$(pgrep -f "[y]onder-pipeline" | head -1); tr "\0" " " < /proc/$pid/cmdline; echo'
 ```
 
 Expected: `state: running`, `restarts: 0`; the command line carries `mppjpegdec`, `mpph264enc name=enc-stream bps=2000000`, `mpph264enc name=enc-preview bps=400000 gop=15 width=640 height=360`, `caps=video/x-raw(ANY),framerate=15/1`, and no `v4l2convert`. If `restarts` is not 0, `journalctl -u yonder-core -n 40` names the element that did not parse; that is the finding to record before anything else.
 
 ```bash
-ssh root@<radxa> 'gst-launch-1.0 -q rtspsrc location=rtsp://127.0.0.1:8554/cam0 latency=200 ! rtph264depay ! h264parse ! mppvideodec ! videoconvert ! jpegenc snapshot=true ! filesink location=/tmp/full.jpg 2>/dev/null; gst-launch-1.0 -q rtspsrc location=rtsp://127.0.0.1:8554/cam0-preview latency=200 ! rtph264depay ! h264parse ! mppvideodec ! videoconvert ! jpegenc snapshot=true ! filesink location=/tmp/preview.jpg 2>/dev/null; /usr/lib/jellyfin-ffmpeg/ffprobe -v error -show_entries stream=codec_name,width,height -of csv=p=0 /tmp/full.jpg /tmp/preview.jpg'
+ssh root@<radxa> 'gst-launch-1.0 -q rtspsrc location=rtsp://127.0.0.1:8554/cam0 latency=200 ! rtph264depay ! h264parse ! mppvideodec ! videoconvert ! jpegenc snapshot=true ! filesink location=/tmp/full.jpg 2>/dev/null; gst-launch-1.0 -q rtspsrc location=rtsp://127.0.0.1:8554/cam0-preview latency=200 ! rtph264depay ! h264parse ! mppvideodec ! videoconvert ! jpegenc snapshot=true ! filesink location=/tmp/preview.jpg 2>/dev/null; printf "full: "; /usr/lib/jellyfin-ffmpeg/ffprobe -v error -show_entries stream=codec_name,width,height -of csv=p=0 /tmp/full.jpg; printf "preview: "; /usr/lib/jellyfin-ffmpeg/ffprobe -v error -show_entries stream=codec_name,width,height -of csv=p=0 /tmp/preview.jpg'
 scp root@<radxa>:/tmp/full.jpg root@<radxa>:/tmp/preview.jpg /tmp/
 ```
 
 Expected: `mjpeg,1280,720` and `mjpeg,640,360`; look at both files — a picture of the room, not a grey frame.
 
 ```bash
-ssh root@<radxa> 'b() { f=$(head -1 /proc/stat); set -- $f; echo $(( $2+$3+$4+$6+$7+$8 )) $(( $2+$3+$4+$5+$6+$7+$8 )); }; s=$(b); sleep 10; e=$(b); set -- $s $e; echo "busy $(( ($3-$1)*100/($4-$2) ))% over 10 s with the pipeline running"'
+ssh root@<radxa> 'b() { f=$(head -1 /proc/stat); set -- $f; echo $(( $2+$3+$4+$7+$8 )) $(( $2+$3+$4+$5+$6+$7+$8 )); }; s=$(b); sleep 10; e=$(b); set -- $s $e; echo "busy $(( ($3-$1)*100/($4-$2) ))% over 10 s with the pipeline running"'
 ```
 
 Expected: about **26%** with `yonder-core`, Node-RED and mediamtx idle at ~21–23% — the bench's +4. If it reads +20 or more, the preview branch fell to system memory: record it, then re-measure with the rate filter removed from the launch line by hand (`gst-launch-1.0` the same tokens minus `videorate ! capsfilter …`) to say which it was, and file it against Task 3 rather than shipping around it.
@@ -2515,15 +2521,15 @@ Expected: about **26%** with `yonder-core`, Node-RED and mediamtx idle at ~21–
 - [ ] **Step 4: The live retune, through the daemon**
 
 ```bash
-ssh root@<radxa> 'rate() { /usr/lib/jellyfin-ffmpeg/ffmpeg -v error -rtsp_transport tcp -i rtsp://127.0.0.1:8554/cam0 -t 10 -c copy -f null - 2>&1 | grep -oE "video:[0-9]+kB" ; }; echo "before: $(rate)"; curl -s --unix-socket /run/yonder/core.sock http://localhost/cameras/cam0/run; echo; curl -s -X POST --unix-socket /run/yonder/core.sock -H "Content-Type: application/json" -d "{\"streamBitrate\":3500}" http://localhost/cameras/cam0/apply | head -c 600; echo; sleep 3; echo "after: $(rate)"; curl -s --unix-socket /run/yonder/core.sock http://localhost/cameras/cam0/run; echo'
+ssh root@<radxa> 'rate() { /usr/lib/jellyfin-ffmpeg/ffprobe -v error -rtsp_transport tcp -read_intervals "%+10" -select_streams v:0 -show_entries packet=size -of csv=p=0 rtsp://127.0.0.1:8554/cam0 | awk "{sum += \$1} END {printf \"%.0f kB (%.0f kb/s)\\n\", sum/1024, sum*8/10/1000}"; }; echo "before: $(rate)"; curl -s --unix-socket /run/yonder/core.sock http://localhost/cameras/cam0 | python3 -c "import json,sys; print(json.load(sys.stdin)[\"run\"])"; echo; curl -s -X POST --unix-socket /run/yonder/core.sock -H "Content-Type: application/json" -d "{\"streamBitrate\":3500}" http://localhost/cameras/cam0/apply | head -c 600; echo; sleep 3; echo "after: $(rate)"; curl -s --unix-socket /run/yonder/core.sock http://localhost/cameras/cam0 | python3 -c "import json,sys; print(json.load(sys.stdin)[\"run\"])"; echo'
 ```
 
-Expected: `before` about `video:2500kB` (2000 kb/s × 10 s ÷ 8); the apply answer's `interruption` says the picture is **not** restarted; `after` about `video:4375kB`; the two `run` readings show the **same `since`** — the pipeline that was running is the pipeline still running, and its rate moved. Confirm the apply with `POST /confirm` carrying the id the answer returned (or watch it be kept without a window — `codec`, `bitrate_kbps` under `stream` are what `interruption()` and `CAMERA_EXEMPT_LEAVES` decide; record which happened).
+Expected: `before` about `2500 kB (2000 kb/s)` (2000 kb/s × 10 s ÷ 8); the apply answer's `interruption` says the picture is **not** restarted; `after` about `4375 kB (3500 kb/s)`; the two `run` readings show the **same `since`** — the pipeline that was running is the pipeline still running, and its rate moved. Confirm the apply with `POST /confirm` carrying the id the answer returned (or watch it be kept without a window — `codec`, `bitrate_kbps` under `stream` are what `interruption()` and `CAMERA_EXEMPT_LEAVES` decide; record which happened).
 
 - [ ] **Step 5: H.265**
 
 ```bash
-ssh root@<radxa> 'curl -s -X POST --unix-socket /run/yonder/core.sock -H "Content-Type: application/json" -d "{\"codec\":\"h265\"}" http://localhost/cameras/cam0/apply | head -c 400; echo; sleep 15; curl -s --unix-socket /run/yonder/core.sock http://localhost/cameras/cam0/run; echo; pid=$(pgrep -f yonder-pipeline | head -1); tr "\0" " " < /proc/$pid/cmdline | grep -oE "mpph26[45]enc name=enc-[a-z]+|h26[45]parse" | tr "\n" " "; echo; /usr/lib/jellyfin-ffmpeg/ffprobe -v error -rtsp_transport tcp -show_entries stream=codec_name,width,height -of csv=p=0 rtsp://127.0.0.1:8554/cam0; /usr/lib/jellyfin-ffmpeg/ffprobe -v error -rtsp_transport tcp -show_entries stream=codec_name -of csv=p=0 rtsp://127.0.0.1:8554/cam0-preview'
+ssh root@<radxa> 'curl -s -X POST --unix-socket /run/yonder/core.sock -H "Content-Type: application/json" -d "{\"codec\":\"h265\"}" http://localhost/cameras/cam0/apply | head -c 400; echo; sleep 15; curl -s --unix-socket /run/yonder/core.sock http://localhost/cameras/cam0 | python3 -c "import json,sys; print(json.load(sys.stdin)[\"run\"])"; echo; pid=$(pgrep -f "[y]onder-pipeline" | head -1); tr "\0" " " < /proc/$pid/cmdline | grep -oE "mpph26[45]enc name=enc-[a-z]+|h26[45]parse" | tr "\n" " "; echo; /usr/lib/jellyfin-ffmpeg/ffprobe -v error -rtsp_transport tcp -show_entries stream=codec_name,width,height -of csv=p=0 rtsp://127.0.0.1:8554/cam0; /usr/lib/jellyfin-ffmpeg/ffprobe -v error -rtsp_transport tcp -show_entries stream=codec_name -of csv=p=0 rtsp://127.0.0.1:8554/cam0-preview'
 ```
 
 Expected: the apply says the picture restarts; a new `since`; `mpph265enc name=enc-stream h265parse mpph264enc name=enc-preview h264parse`; `hevc,1280,720` on `cam0` and `h264` on `cam0-preview`. Repeat Step 4's rate measurement once here — H.265 retunes live too (the bench: 0.97 → 3.91). Then open the console in Chrome, sign in, and confirm the camera page's preview still plays (R-VID-20) and its encoder line reads `mpph264enc · hardware`. Put `codec` back to `h264` or leave it — say which in the note.
