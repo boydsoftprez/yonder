@@ -101,7 +101,7 @@ describe('observed camera operations', () => {
         await flush();
         expect(complete).toBe(false);
         h.push('photo-idle-before');
-        await expect(op).resolves.toMatchObject({ completed: true, state: { status: { recordState: 0 } } });
+        await expect(op).resolves.toMatchObject({ completed: true, state: { status: { recordState: 0 } }, capture: { destination: 'camera', kind: 'video' } });
     });
     it('changes to observed photo mode, then requires photo phase and idle plus storage effect', async () => {
         const h = harness();
@@ -261,6 +261,60 @@ describe('observed camera operations', () => {
         h.push('photo_mode');
         vi.advanceTimersByTime(2000);
         await rejected;
+    });
+    it.each([
+        ['removal and same-capacity reinsertion', (p: Buffer) => p.writeUInt32LE(0x800400, 0)],
+        ['card error then recovery', (p: Buffer) => p.writeUInt32LE(0x800a00, 0)],
+        ['different capacity then original capacity', (p: Buffer) => p.writeUInt32LE(59614, 5)],
+    ] as const)('does not revive photo evidence after %s', async (_name, interruptCard) => {
+        const h = harness();
+        h.push('photo-ready');
+        const op = h.camera.execute({ kind: 'photo' });
+        const rejected = expect(op).rejects.toThrow('timeout');
+        await flush();
+        h.push('photo-shot-confirm');
+        h.push('photo-ready', 0x80, interruptCard);
+        // Even another storing phase on a normal card cannot revive this operation.
+        h.push('photo-shot-confirm');
+        h.push('photo-completed');
+        vi.advanceTimersByTime(2000);
+        await rejected;
+    });
+    it.each([
+        ['removal and same-capacity reinsertion', (p: Buffer) => p.writeUInt32LE(0x8004c0, 0)],
+        ['card error then recovery', (p: Buffer) => p.writeUInt32LE(0x800ac0, 0)],
+        ['different capacity then original capacity', (p: Buffer) => p.writeUInt32LE(59614, 5)],
+    ] as const)('completes video stop without a capture claim after %s', async (_name, interruptCard) => {
+        const h = harness();
+        h.push('card-record-running2');
+        const op = h.camera.execute({ kind: 'record-stop' });
+        await flush();
+        h.push('card-record-stop2', 0x80, interruptCard);
+        h.push('photo-idle-before');
+        const result = await op;
+        expect(result).toMatchObject({ completed: true, state: { status: { recordState: 0 } } });
+        expect(result).not.toHaveProperty('capture');
+    });
+    it('completes video stop without a capture claim when the idle card has changed capacity', async () => {
+        const h = harness();
+        h.push('card-record-running2');
+        const op = h.camera.execute({ kind: 'record-stop' });
+        await flush();
+        h.push('card-record-stop2');
+        h.push('photo-idle-before', 0x80, p => p.writeUInt32LE(59614, 5));
+        const result = await op;
+        expect(result.completed).toBe(true);
+        expect(result).not.toHaveProperty('capture');
+    });
+    it('does not claim a video capture from an unrecognized baseline card', async () => {
+        const h = harness();
+        h.push('card-record-running2', 0x80, p => p.writeUInt32LE(0x800a80, 0));
+        const op = h.camera.execute({ kind: 'record-stop' });
+        await flush();
+        h.push('photo-idle-before');
+        const result = await op;
+        expect(result.completed).toBe(true);
+        expect(result).not.toHaveProperty('capture');
     });
     it('does not accept an unknown photo phase as the measured shot transition', async () => {
         const h = harness();

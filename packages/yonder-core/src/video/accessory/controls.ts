@@ -195,6 +195,7 @@ interface Stage {
     after?: number;
     written: boolean;
     photoSeen: boolean;
+    captureMediumContinuous: boolean;
     baseline: CameraStatus | null;
 }
 interface Operation {
@@ -318,7 +319,7 @@ export class CameraController {
             this.fail(op, (error as Error).message);
             return;
         }
-        const stage: Stage = { command, written: false, photoSeen: false, baseline: null };
+        const stage: Stage = { command, written: false, photoSeen: false, captureMediumContinuous: true, baseline: null };
         op.stage = stage;
         const admission = () => {
             if (!this.valid(op) || op.stage !== stage)
@@ -332,6 +333,7 @@ export class CameraController {
             }
             stage.after = this.options.clock.now();
             stage.baseline = this.readState().status;
+            stage.captureMediumContinuous &&= !!stage.baseline?.cardInserted && stage.baseline.cardState === 'normal';
             stage.photoSeen = false;
             return true;
         };
@@ -362,7 +364,14 @@ export class CameraController {
         if (!s)
             return;
         const statusFresh = !!s && s.at > stage.after, exposureFresh = !!e && e.at > stage.after, focusFresh = !!f && f.at > stage.after;
-        if (c.kind === 'photo' && statusFresh && s.photoState === 1 && s.storing && s.mode === 'photo' && s.cardInserted && s.cardState === 'normal')
+        // Capacity is not a card identity. Once any observed push contradicts
+        // medium continuity, same-capacity reinsertion cannot revive a claim.
+        if (statusFresh && (c.kind === 'photo' || c.kind === 'record-stop')
+            && (!s.cardInserted || s.cardState !== 'normal' || s.totalSpaceRaw !== stage.baseline?.totalSpaceRaw)) {
+            stage.captureMediumContinuous = false;
+            stage.photoSeen = false;
+        }
+        if (c.kind === 'photo' && stage.captureMediumContinuous && statusFresh && s.photoState === 1 && s.storing && s.mode === 'photo' && s.cardInserted && s.cardState === 'normal')
             stage.photoSeen = true;
         if (!stage.written)
             return;
@@ -378,7 +387,7 @@ export class CameraController {
                 matches = statusFresh && s.modeCode === c.value && s.recordState === 0 && s.photoState === 0 && !s.storing;
                 break;
             case 'photo':
-                matches = statusFresh && s.cardInserted && s.cardState === 'normal' && s.totalSpaceRaw === stage.baseline?.totalSpaceRaw && s.mode === 'photo' && s.recordState === 0 && s.photoState === 0 && !s.storing && stage.photoSeen && !!stage.baseline
+                matches = stage.captureMediumContinuous && statusFresh && s.cardInserted && s.cardState === 'normal' && s.totalSpaceRaw === stage.baseline?.totalSpaceRaw && s.mode === 'photo' && s.recordState === 0 && s.photoState === 0 && !s.storing && stage.photoSeen && !!stage.baseline
                     && (s.remainingPhotos < stage.baseline.remainingPhotos || s.freeSpaceRaw < stage.baseline.freeSpaceRaw);
                 break;
             case 'exposure-mode':
@@ -413,7 +422,7 @@ export class CameraController {
             return;
         }
         const capture = op.command.kind === 'photo' ? { destination: 'camera' as const, kind: 'photo' as const } :
-            op.command.kind === 'record-stop' && [2, 3].includes(stage.baseline?.recordState ?? -1) && s.cardInserted && s.cardState === 'normal' ? { destination: 'camera' as const, kind: 'video' as const } : undefined;
+            op.command.kind === 'record-stop' && stage.captureMediumContinuous && [2, 3].includes(stage.baseline?.recordState ?? -1) && s.cardInserted && s.cardState === 'normal' ? { destination: 'camera' as const, kind: 'video' as const } : undefined;
         this.finish(op);
         op.resolve(Object.freeze({ completed: true, state, ...(capture ? { capture: Object.freeze(capture) } : {}) }));
     }
