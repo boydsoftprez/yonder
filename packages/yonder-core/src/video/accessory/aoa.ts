@@ -329,7 +329,7 @@ class Pocket2VideoSplitter {
 
 export interface AoaBulkTransport {
   /** Resolve only once the entire envelope has been written. Honor abort. */
-  write(data: Uint8Array, signal: AbortSignal): Promise<void>;
+  write(data: Uint8Array, signal: AbortSignal, deadline?: number): Promise<void>;
 }
 
 export interface AccessorySessionOptions {
@@ -346,6 +346,10 @@ export interface AccessoryCommandOptions {
    * cannot move after waiting behind backpressure.
    */
   readonly signal?: AbortSignal;
+  /** Absolute CLOCK_MONOTONIC milliseconds, preserved through the command queue. */
+  readonly deadline?: number;
+  /** Rechecked at serialized dispatch (for revocable motion admission). */
+  readonly admission?: () => boolean;
 }
 
 function asError(reason: unknown): Error {
@@ -454,7 +458,7 @@ export class AccessorySession {
     }
     const frame = encodeDuml({ ...command, sequence: this.sequence });
     this.sequence = (this.sequence + 1) & 0xffff;
-    return this.writeFrame(frame, options.signal);
+    return this.writeFrame(frame, options.signal, options.deadline, options.admission);
   }
 
   /** Feed bytes read from the enabled FunctionFS bulk OUT endpoint. */
@@ -512,18 +516,23 @@ export class AccessorySession {
     this.stop("accessory session closed");
   }
 
-  private writeFrame(frame: Uint8Array, commandSignal?: AbortSignal): Promise<void> {
+  private writeFrame(frame: Uint8Array, commandSignal?: AbortSignal, deadline?: number, admission?: () => boolean): Promise<void> {
     if (!this.linkEnabled) return Promise.reject(new Error("accessory link is not enabled"));
     const generation = this.generation;
     const sessionSignal = this.abort.signal;
     const combined = combineAbortSignals(sessionSignal, commandSignal);
     const envelope = encodeAoaEnvelope(AOA_COMMAND_ROUTE, frame);
+    let admitted = true;
     const pending = this.writeTail.then(async () => {
       try {
         if (!this.linkEnabled || generation !== this.generation || combined.signal.aborted) {
           throw asError(combined.signal.reason ?? "accessory session disconnected");
         }
-        await this.transport.write(envelope, combined.signal);
+        if (admission !== undefined && !admission()) {
+          admitted = false;
+          throw new Error("accessory command admission expired");
+        }
+        await this.transport.write(envelope, combined.signal, deadline);
       } finally {
         combined.dispose();
       }
@@ -531,7 +540,7 @@ export class AccessorySession {
     this.writeTail = pending.catch(() => undefined);
     return pending.catch((reason: unknown) => {
       const error = asError(reason);
-      if (this.linkEnabled && generation === this.generation
+      if (admitted && this.linkEnabled && generation === this.generation
         && !sessionSignal.aborted && commandSignal?.aborted !== true) {
         this.report(error);
         this.stop("accessory session disconnected after transport error");

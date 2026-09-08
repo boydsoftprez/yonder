@@ -408,3 +408,25 @@ describe("AccessorySession", () => {
     expect(() => session.enable()).toThrow(/closed/);
   });
 });
+
+describe("dispatch admission and original deadline", () => {
+  it("preserves the caller deadline through serialization and rechecks revoked admission", async () => {
+    let release!: () => void;
+    const deadlines: (number | undefined)[] = [];
+    const session = new AccessorySession({ transport: { write: async (_data, _signal, deadline) => {
+      deadlines.push(deadline);
+      if (deadlines.length === 1) await new Promise<void>(resolve => { release = resolve; });
+    } } });
+    session.enable();
+    const first = session.sendCommand({ commandSet: 0, commandId: 1 }, { deadline: 1234 });
+    await flush();
+    let valid = true;
+    const revoked = session.sendCommand({ commandSet: 4, commandId: 12 }, { deadline: 1350, admission: () => valid });
+    valid = false;
+    release(); await first;
+    await expect(revoked).rejects.toThrow(/admission/);
+    expect(deadlines).toEqual([1234]);
+    expect(session.enabled).toBe(true);
+    session.close();
+  });
+});
