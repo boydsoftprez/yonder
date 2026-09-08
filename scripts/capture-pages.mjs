@@ -327,6 +327,26 @@ const DECK = '[class*="yonder-deck"], .nrdb-ui-yonder-deck';
  *  the Live deck as Setup. Every key press below goes through this. */
 const SOFTKEY = ".y-keys__key";
 
+/**
+ * A thumbnail on the picture's own camera strip, and nothing else that is a
+ * button — the strip's half of the same rule `SOFTKEY` states above.
+ *
+ * **This is deliberately a second, separately named press and not a widening
+ * of `SOFTKEY`.** `SOFTKEY` exists because `button` with `hasText: "LIVE"`
+ * found the strip's active thumbnail instead of the rail's LIVE key
+ * (`ae8cb0a`), and the console spent the rest of that run on the wrong deck.
+ * Loosening it to reach a thumbnail would put that defect straight back. So
+ * a run says which of the two it means, by its own flag, and neither selector
+ * can ever match the other's control: `.y-keys__key` is on the rail,
+ * `.y-strip__thumb` is on the strip, and a page that had one where the other
+ * belongs would be a different defect entirely.
+ *
+ * Blueprint L-21 — a press on a thumbnail switches camera and the page
+ * follows — was *built and uncaptured* for exactly this reason: the gate had
+ * no press that could reach it.
+ */
+const STRIP_THUMB = ".y-strip__thumb";
+
 /** The soft-key rail, which must be reachable at the bottom of the page. */
 const RAIL = ".yonder-rail";
 
@@ -417,6 +437,24 @@ const press = arg("press");
  */
 const only = arg("only");
 const as = arg("as");
+/**
+ * A camera to switch to on the strip before this page is photographed, and
+ * the one to switch back to afterwards, both named by the words on the
+ * thumbnail (blueprint L-21, R-UI-03).
+ *
+ * **The restore is not optional and is not a courtesy.** Which camera a page
+ * is on is `flow.camera` in the daemon — server-side, shared by every browser
+ * and persistent — so a run that switched and walked away would photograph
+ * every page after this one as the *other* camera, which is precisely the
+ * failure `restore` already exists for on a deck. A `--press-thumb` with no
+ * `--restore-thumb` is refused below rather than trusted.
+ *
+ * Given as two flags rather than inferred, because the gate cannot know which
+ * camera a board comes up on and guessing it is how a restore silently stops
+ * restoring.
+ */
+const pressThumb = arg("press-thumb");
+const restoreThumb = arg("restore-thumb");
 /**
  * A selector every captured page must be showing before it is photographed.
  * Repeatable; each one is waited for in turn.
@@ -590,6 +628,14 @@ try {
 
 // ---------------------------------------------------------------------------
 
+if (pressThumb !== undefined && restoreThumb === undefined) {
+  process.stderr.write(
+    "capture-pages: --press-thumb needs --restore-thumb — which camera a page is on is the\n" +
+    "daemon's own state, so a run that switches and does not switch back photographs every\n" +
+    "page after this one as the wrong camera\n");
+  process.exit(2);
+}
+
 let pages = pagesFromFlows();
 if (only !== undefined) {
   pages = pages.filter((p) => p.name === only);
@@ -735,6 +781,25 @@ for (const page of pages) {
       await tab.waitForTimeout(900);
     } else {
       note(`  FAIL  ${page.title} (${palette}) has no key labelled "${page.press}" to reach it`);
+      failures += 1;
+    }
+  }
+
+  // The camera this run is for, reached by pressing its thumbnail on the
+  // strip — the one press on this console that is neither a tab nor a soft
+  // key (L-21). Like a deck, the switch is the *device's*: the press posts
+  // `{ path }`, the flow sets `flow.camera`, and the whole page is re-read
+  // from the camera that answers. So this is also the only proof that path
+  // works. It goes before the waits below because everything they wait for —
+  // the picture, the overlay, the strip's own figures — belongs to whichever
+  // camera the page ends up on.
+  if (pressThumb !== undefined) {
+    const thumb = tab.locator(STRIP_THUMB, { hasText: pressThumb }).first();
+    if (await thumb.count()) {
+      await thumb.click();
+      await tab.waitForTimeout(1200);
+    } else {
+      note(`  FAIL  ${page.title} (${palette}) has no thumbnail reading "${pressThumb}" to press`);
       failures += 1;
     }
   }
@@ -1070,6 +1135,34 @@ for (const page of pages) {
       await tab.waitForTimeout(700);
     } else {
       note(`  FAIL  ${page.title} (${palette}) has no "${page.restore}" key to put the deck back`);
+      failures += 1;
+    }
+  }
+
+  // And the camera back, for the same reason and out of the same store: a run
+  // that left the console on the second camera would photograph every page
+  // after it as that camera, with the shape reference drifting behind it.
+  if (restoreThumb !== undefined) {
+    const thumb = tab.locator(STRIP_THUMB, { hasText: restoreThumb }).first();
+    if (await thumb.count()) {
+      await thumb.click();
+      // **Checked, not merely clicked.** `flow.camera` is the daemon's, so a
+      // restore that stopped working would be invisible here and would show
+      // up as every later page in the run being photographed as the wrong
+      // camera — which is a failure nothing on those pages would explain.
+      // The mark on the strip is the page's own answer that the switch landed.
+      try {
+        await tab.waitForSelector(
+          `${STRIP_THUMB}.on:has-text(${JSON.stringify(restoreThumb)})`,
+          { timeout: 15000 },
+        );
+      } catch {
+        note(`  FAIL  ${page.title} (${palette}) did not go back to "${restoreThumb}"`);
+        note("          every page captured after this one is of the wrong camera");
+        failures += 1;
+      }
+    } else {
+      note(`  FAIL  ${page.title} (${palette}) has no thumbnail reading "${restoreThumb}" to put the camera back`);
       failures += 1;
     }
   }

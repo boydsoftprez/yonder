@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <template>
-    <div v-if="state !== 'not-offered'" class="y-seg" :class="'is-' + state">
+    <div v-if="offering" class="y-seg" :class="'is-' + state">
         <span v-if="label" class="y-seg__label">{{ label }}</span>
         <div class="y-seg__group" role="group" :aria-label="label">
             <button
@@ -47,6 +47,17 @@
  * value, and an index would make each of them re-derive the same mapping
  * `YonderPicker`'s own `value`/`label` pairs do not need, because this
  * control's options are already the device's own values.
+ *
+ * **An empty `options` draws nothing at all, in every state.** A group with
+ * no buttons in it is a labelled box offering nothing — R-UI-20's own
+ * argument, since an operator cannot tell a control with no choices from a
+ * control whose choices failed to load, and a caller that has no options has
+ * a *fact* to state where this control would have been, not an empty frame to
+ * leave behind. This is the component's own guarantee and not a restatement
+ * of any caller's: `YonderAim` decides separately whether to draw this
+ * control or the sentence that replaces it (K-63's fourth part), and this
+ * check is what makes sure no *other* caller can produce the empty box by
+ * forgetting to.
  *
  * **The four states behave exactly as `YonderPicker`'s do**, read there
  * before changing anything here: `present` works, offering exactly the
@@ -103,6 +114,12 @@ export default {
     },
     emits: ['change'],
     computed: {
+        /** Drawn only where there is genuinely a choice to offer — see this
+         * component's own doc comment on why an empty `options` draws
+         * nothing rather than an empty group. */
+        offering () {
+            return this.state !== 'not-offered' && this.options.length > 0
+        },
         toneClass () {
             return TONE_CLASS[this.state] || ''
         }

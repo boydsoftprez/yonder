@@ -795,7 +795,7 @@ export const SPECIMENS = [
   },
   {
     title: "Aim panel — live, on its own",
-    note: "Task 23: ui-yonder-aim, mounted with no deck and no camera page around it (R-UI-28) — everything here comes from this one payload. The badge reads RATE CONTROL in the select tone; Commanded rate is real only while dragging the pad below it. Roll stays struck through even here — no camera this project supports has a roll motor, so YonderAim.vue hardcodes it exactly as YonderDeck.buildAim() does, not derived from this payload.",
+    note: "Task 23: ui-yonder-aim, mounted with no deck and no camera page around it (R-UI-28) — everything here comes from this one payload. The badge reads RATE CONTROL in the select tone; Commanded rate sits below the two gauges as a bounded value, real only while dragging the pad above it, and its ceiling is YonderAimPad's own MAX_RATE rather than a number written down twice. Roll stays struck through even here — no camera this project supports has a roll motor, so YonderAim.vue hardcodes it exactly as YonderDeck.buildAim() does, not derived from this payload. This is the render aim.pocket2.png draws, part for part.",
     component: YonderAim,
     props: {
       report: {
@@ -815,7 +815,7 @@ export const SPECIMENS = [
   },
   {
     title: "Aim panel — inhibited",
-    note: "The device answers aim normally (state: present) but a live guard is temporarily refusing motion (§8.7: unknown bounds, unknown mode or stale attitude inhibit non-zero motion until the missing precondition clears) — the badge still reads RATE CONTROL, since the capability itself is not the thing that is unavailable, but the pad, the gimbal-mode control and Recentre are all disabled and carry this same reason, which YonderAimPad's own inhibited prop states directly on the pad itself.",
+    note: "The device answers aim normally (state: present) but a live guard is temporarily refusing motion (§8.7: unknown bounds, unknown mode or stale attitude inhibit non-zero motion until the missing precondition clears) — the badge still reads RATE CONTROL, since the capability itself is not the thing that is unavailable, but the pad, the gimbal-mode control and Recentre are all disabled. The reason is drawn once, at the head of the panel, and the pad below it says nothing: it used to repeat this same sentence 40 px lower, which is the half of K-63 the first photograph of a gimbal answering showed. The pad is still refused — YonderAimPad takes `note` (what it says) separately from `inhibited` (what stops the press), and this panel passes it an empty one.",
     component: YonderAim,
     props: {
       report: {
@@ -828,6 +828,26 @@ export const SPECIMENS = [
         mode: "Follow",
         modes: ["Follow", "Tilt lock", "FPV"],
         inhibited: "attitude is stale; movement is held until it refreshes",
+      },
+    },
+    payload: undefined,
+    part: false,
+  },
+  {
+    title: "Aim panel — a gimbal that lists no modes",
+    note: "The state the bench fixture and every DJI probe answer today, and the one the gate photographs: aim present, both ends of both axes known, and `modes: []`, because spec §8.7's mode enumeration (0x44) is unbuilt so nothing has ever asked. The blueprint draws three modes here. Drawing them anyway would be this console inventing a device's capability, and drawing an empty group would be a control offering nothing — so the panel states the fact where the control would have been (R-UI-20), and the sentence beneath still says what the mode it is in does. Blueprint L-37, deferred to the gimbal phase.",
+    component: YonderAim,
+    props: {
+      report: {
+        state: "present",
+        reason: "",
+        pan: 0,
+        tilt: 0,
+        bounds: { pan: [-180, 180], tilt: [-90, 30] },
+        atLimit: { pitch: false, yaw: false },
+        mode: "follow",
+        modes: [],
+        inhibited: "the motion guard is not built yet, so nothing is sent",
       },
     },
     payload: undefined,

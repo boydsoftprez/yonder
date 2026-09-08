@@ -20,7 +20,20 @@
 
               The children still take `dead`/`state`, so they are drawn as
               controls that cannot be worked; what they no longer do is each
-              restate why.
+              restate why. **The pad stopped in Task 49** — the first
+              photograph of this panel with a gimbal answering showed it saying
+              the head's own sentence again, 40 px below it (K-63) — and
+              `padNote` is where that is decided.
+
+              **`gaugeReason` is the part of this that is still true and
+              should not be**, and it is recorded rather than quietly fixed:
+              it is non-empty in exactly the states where this head is already
+              drawing the same sentence, so it is a third and fourth copy,
+              latent because nothing on the bench draws a dead gauge or a mode
+              control at the same time as an inhibition. Removing it overturns
+              a documented decision and runs into R-UI-21's own requirement
+              that a gated control name what has charge of it, so it is the
+              operator's — K-63's own "what is not closed" says so in full.
             -->
             <div v-if="effectiveReason" class="y-aimpanel__reason">{{ effectiveReason }}</div>
 
@@ -28,20 +41,33 @@
                 :axes="PAD_AXES"
                 :at-limit="atLimit"
                 :inhibited="padInhibited"
+                :note="padNote"
                 @slew="onSlew"
                 @stop="onStop"
             />
 
-            <div v-if="aimState === 'present'" class="y-aimpanel__rate">
-                <span class="y-aimpanel__rate-l">Commanded rate</span>
-                <span class="y-aimpanel__rate-v">{{ rateShown }}<i>°/s</i></span>
-            </div>
-
+            <!-- L-33: the gauges are a *reading*, and the blueprint says so
+                 above them. Without it the two rows read as controls sitting
+                 loose under the dial. -->
+            <div class="y-aimpanel__sub">Reported position</div>
             <YonderPositionGauge label="Pan" unit="°" :value="pan" :min="panBounds.lo" :max="panBounds.hi" :dead="!hasBounds" :reason="gaugeReason" />
             <YonderPositionGauge label="Tilt" unit="°" :value="tilt" :min="tiltBounds.lo" :max="tiltBounds.hi" :dead="!hasBounds" :reason="gaugeReason" />
 
-            <div v-if="mode" class="y-aimpanel__modeline">{{ modeSentence }}</div>
+            <!-- L-36: below the gauges, and against its bounds. Above them it
+                 shared a line with the annunciator drawn beneath this panel
+                 and the badge was painted over the words (K-63). -->
+            <div v-if="aimState === 'present'" class="y-aimpanel__rate">
+                <div class="y-aimpanel__sub">Commanded rate</div>
+                <div class="y-aimpanel__rate-v">{{ rateShown }}<i>°/s</i></div>
+                <div class="y-aimpanel__rate-b"><span>0</span><i /><span>{{ MAX_RATE }} °/s</span></div>
+            </div>
+
+            <!-- L-37 and R-UI-20: the modes the device states, and where it
+                 states none, the fact where the control would have been —
+                 never a labelled box with nothing in it, and never three
+                 modes this gimbal never claimed. -->
             <YonderSegmented
+                v-if="modes.length"
                 label="Gimbal mode"
                 :value="mode"
                 :options="modes"
@@ -49,6 +75,13 @@
                 :reason="gaugeReason"
                 @change="onModeChange"
             />
+            <div v-else class="y-aimpanel__nomode">
+                <span class="y-aimpanel__nomode-l">Gimbal mode</span>
+                <span class="y-aimpanel__nomode-v">{{ modeAbsence }}</span>
+            </div>
+
+            <!-- L-38, L-39: what the mode *does*, under the control. -->
+            <div v-if="modeSentence" class="y-aimpanel__modeline">{{ modeSentence }}</div>
 
             <button type="button" class="y-aimpanel__recentre" :disabled="recentreDisabled" @click="pressRecentre">Recentre gimbal</button>
         </YonderColumn>
@@ -56,7 +89,7 @@
 </template>
 
 <script>
-import YonderAimPad from './YonderAimPad.vue'
+import YonderAimPad, { MAX_RATE } from './YonderAimPad.vue'
 import YonderPositionGauge from './YonderPositionGauge.vue'
 import YonderSegmented from './YonderSegmented.vue'
 import YonderColumn from './YonderColumn.vue'
@@ -161,15 +194,25 @@ import YonderColumn from './YonderColumn.vue'
  * at all — the pad and the position gauges stay drawn dead instead, per
  * R-UI-20, rather than this block pretending to a number.
  *
- * **The mode sentence states the current mode in a full sentence** rather
- * than a bare label, so it reads differently from the segmented control's
- * own button caption beneath it — deliberately inventing no per-mode
- * description (`Follow`, `Tilt lock`, `FPV` are the device's own words,
- * `modes` verbatim off the payload, never expanded the way this library
- * never expands a menu id's own meaning elsewhere either). Drawn only when
- * `mode` is set, independent of `aimState`, since it is a reading rather
- * than a control — the same reasoning that keeps the pad's puck position
- * showing regardless of state.
+ * **The block is drawn below the gauges and against its bounds** (L-36), and
+ * the ceiling is `YonderAimPad`'s own exported `MAX_RATE`, imported rather
+ * than written down again. **That is the rate this pad commands at the rim,
+ * and it is deliberately not a claim about the gimbal**: this node's payload
+ * carries no maximum rate at all — `aimPanel()` in `yonder-core` answers
+ * `state`, `reason`, the two readings, the envelope, `atLimit`, `mode`,
+ * `modes` and `inhibited`, and nothing about how fast the device can slew —
+ * so the only honest ceiling this panel has is the one it can ask for. The
+ * blueprint's own draft holds the same number for the same reason, in the
+ * same one place. If a gimbal ever states its own maximum, that is a field
+ * on the payload and this is where it lands.
+ *
+ * **The mode sentence says what the mode does** (L-38), under the control
+ * (L-39) — see `MODE_SENTENCES` above, which also records why this file
+ * previously refused to write one and what changed.
+ *
+ * **Where the device states no modes, the fact goes where the control
+ * would have been** (`modeAbsence`, R-UI-20). Not an empty group, and not
+ * the blueprint's three modes drawn on a gimbal that never claimed them.
  *
  * **`Recentre` obeys the shutter's own rule** (coordinator resolution 5): it
  * emits once per press, and a second press while one is pending emits
@@ -195,6 +238,31 @@ import YonderColumn from './YonderColumn.vue'
  */
 const PAD_AXES = { pan: 'present', tilt: 'present', roll: 'advertised' }
 
+/**
+ * What each mode *does*, in the operator's words — L-38, keyed on the
+ * device's own word for it, lowercased so `follow` and `Follow` are one mode.
+ *
+ * **This file used to refuse to write these**, and said so at length: the
+ * modes are the device's words, and expanding one into a description is
+ * inventing a meaning the device never sent. The blueprint overrules that,
+ * and rule 7 is why — `aim.pocket2.png` draws `Pan and tilt follow the
+ * handle.` under the control, in those words, and the sentence that shipped
+ * instead (`Gimbal mode: follow.`) restates the label above it and tells an
+ * operator nothing they could not already read.
+ *
+ * The refusal survives where it was actually right: **a mode with no sentence
+ * here gets none**, rather than a generated one. These three are the
+ * blueprint's own, written down once; a gimbal that answers a fourth word has
+ * that word drawn as its mode and no claim made about what it does, because
+ * nobody has looked at that gimbal yet. R-UI-20 is satisfied either way — the
+ * mode itself is never missing, only the gloss.
+ */
+const MODE_SENTENCES = {
+    follow: 'Pan and tilt follow the handle.',
+    'tilt lock': 'Tilt holds where it is. Pan follows the handle.',
+    fpv: 'Pan, tilt and roll follow the aircraft.'
+}
+
 /** A payload `bounds` axis (`[lo, hi]` or missing) to the pair
  * `YonderPositionGauge` needs, falling back to the blueprint's own default
  * range for that axis (§7's Aim table: pan ±180°, tilt ±90°) rather than an
@@ -219,6 +287,9 @@ export default {
     },
     data: () => ({
         PAD_AXES,
+        /** The pad's own rim rate, so the bounds row under the commanded
+         * rate reads the same number the pad commands. See `rateShown`. */
+        MAX_RATE,
         /** A display cache of the pad's own last relayed rate — fed by
          * `onSlew`/`onStop`, never re-derived from `inhibited` or `aimState`.
          * See this component's own doc comment on "the rate block". */
@@ -311,6 +382,30 @@ export default {
             if (this.aimState !== 'present') return 'not answering'
             return this.inhibited || null
         },
+        /**
+         * **The sentence the pad says — and never the one this panel's head
+         * already says.** K-63's second part: with a gimbal answering
+         * `present` under a guard, `effectiveReason` *is* `inhibited`, and the
+         * pad drew that same sentence again under the dial. One fact, twice,
+         * 40 px apart.
+         *
+         * Which one goes is settled by ownership rather than by comparison
+         * (the brief's own instruction, and the right rule anyway): this file
+         * already states, above, that the reason is "said once, at the top,
+         * for the whole panel", so the top keeps it and the pad's copy goes.
+         * `padInhibited` is untouched — the guard still refuses the press, it
+         * simply no longer repeats why.
+         *
+         * While the state is anything other than `present` the two are
+         * different sentences by construction, not by luck: the head carries
+         * the device's own full reason and the pad says the short `not
+         * answering`, which is the arrangement Task 23 already chose and
+         * `aim.component.test.ts` already asserts. So the pad is silenced in
+         * exactly one state, and it is the one where the two would collide.
+         */
+        padNote () {
+            return this.aimState === 'present' ? '' : 'not answering'
+        },
 
         /**
          * The reason a *position* cannot be shown, which is the only kind
@@ -320,6 +415,22 @@ export default {
          * established yet* — so it belongs on the thing that would have shown
          * it. A camera that is not answering at all is not about any one
          * reading; that is said once, at the head of the panel.
+         *
+         * **Read that against `effectiveReason` before touching either.**
+         * This is non-empty exactly when `aimState === 'present'` and
+         * `inhibited` is set — which is exactly when `effectiveReason`
+         * resolves to that same string — so whenever a child actually draws
+         * this, the head above it has already said it. That is the same
+         * defect `padNote` closes for the pad (K-63), one component further
+         * along, and it is left standing deliberately: closing it means
+         * overturning the decision this comment states, and deleting it
+         * outright would leave a dead gauge saying nothing about why it is
+         * dead, which is R-UI-20's own concern. Nothing photographs it today
+         * — the gate's fixture answers a known envelope, so neither gauge is
+         * dead, and `modes: []`, so there is no control to carry a reason —
+         * but this package's own gallery does, in `Aim panel — inhibited`.
+         * **Owner: the operator**, put to them 2026-09-08; K-63's own "what
+         * is not closed" carries both sides.
          */
         gaugeReason () {
             return this.aimState === 'present' ? (this.inhibited || '') : ''
@@ -336,10 +447,23 @@ export default {
             if (this.aimState === 'advertised') return 'waiting'
             return ''
         },
-        /** `not-offered` when the device offers no choice at all — the same
-         * silence `YonderSegmented` already draws for that state, so an
-         * empty `modes` list never renders a labelled control with nothing
-         * inside its own group. Otherwise mirrors `aimState`.
+        /** Mirrors `aimState`, except that a live capability under a
+         * temporary guard reads `gated`.
+         *
+         * **It no longer answers `not-offered` for an empty `modes`.** That
+         * branch existed to keep `YonderSegmented` from drawing a labelled
+         * box with nothing in it, and it worked — but it worked by making the
+         * control *silently vanish*, which is the other half of R-UI-20 and
+         * is what the first photograph of this panel with a gimbal on it
+         * actually showed: no control, no fact, nothing where the blueprint
+         * draws three modes. The template decides that now, in the open —
+         * `v-if="modes.length"` draws the control, `v-else` draws the fact
+         * where it would have been — and `YonderSegmented` keeps its own,
+         * separate guarantee that an empty `options` draws nothing, so no
+         * other caller can make the empty box either. Two guards, each
+         * covering ground the other does not: removing the template's
+         * `v-if` loses the sentence, removing the component's loses the
+         * promise it makes to every other caller.
          *
          * **A live capability under a temporary guard reads `gated`, not
          * `advertised`.** This said `advertised` and review caught it: in
@@ -357,15 +481,38 @@ export default {
          * rate, mode and Recentre together; that is about *what* is
          * inhibited, not about how severe it looks. */
         modeControlState () {
-            if (!this.modes.length) return 'not-offered'
             if (this.aimState !== 'present') return this.aimState
             if (this.inhibited) return 'gated'
             return 'present'
         },
-        /** A full sentence, not a bare label — see this component's own
-         * doc comment on why. */
+        /** The device's own word for the mode, normalised for the lookup
+         * below: `Tilt lock`, `tilt lock` and `TILT LOCK` are one mode. */
+        modeKey () {
+            return String(this.mode || '').trim().toLowerCase()
+        },
+        /** What this mode does, in the operator's words, under the control
+         * (L-38, L-39) — `MODE_SENTENCES` above says why this file writes
+         * one, and why a mode it has no sentence for gets none rather than
+         * a generated one. */
         modeSentence () {
-            return this.mode ? `Gimbal mode: ${this.mode}.` : ''
+            return MODE_SENTENCES[this.modeKey] || ''
+        },
+        /**
+         * The fact drawn where the mode control would have been, when the
+         * device states no modes to choose from (R-UI-20; K-63's fourth
+         * part).
+         *
+         * It says what was *reported*, never what exists: `modes: []` is a
+         * gimbal that has not listed its modes, not a gimbal that has one.
+         * Today it is `aimPanel`'s own honest answer — §8.7's mode
+         * enumeration (`0x44`) is unbuilt, so nothing has ever asked — and
+         * drawing the blueprint's `Follow │ Tilt lock │ FPV` here anyway
+         * would be this console inventing a device's capabilities, which is
+         * the one thing R-UI-20 exists to stop.
+         */
+        modeAbsence () {
+            const said = 'this gimbal has not said what it can be set to'
+            return this.mode ? `${this.mode} — and ${said}` : said
         },
         rateShown () {
             return Math.hypot(this.commandedPan, this.commandedTilt).toFixed(0)
@@ -471,22 +618,36 @@ export default {
     color: var(--yonder-neutral, #7d7869);
 }
 
+/* The sub-heading over a block of readings — `Reported position`,
+   `Commanded rate`. Not invented here: these are the blueprint's own
+   `.d-blk__h` values (`gallery/DraftAimDial.vue`, read not modified), which
+   is where both headings are drawn in `aim.pocket2.png`. Deliberately not
+   `YonderColumn`'s own head or the deck's `.y-deck__aim-h` — those are the
+   uppercase, letter-spaced legend of a whole group, and this is a label
+   *inside* one, drawn in the render at the same weight and case as the mode
+   sentence below it. */
+.y-aimpanel__sub {
+    display: block;
+    font-size: 12px;
+    color: var(--yonder-label, #7f8a95);
+    margin: 12px 0 8px;
+}
+/* The first one heads the gauges directly under the dial, which brings its
+   own 8px gap — the render puts one space there, not two. */
+.y-aimpanel__sub:first-of-type { margin-top: 4px; }
+
+/* Below the gauges, and drawn against its bounds (L-36). It used to be a
+   one-line label-and-value above them, which put it on the same line as the
+   annunciator this panel sits above and had the badge painted over the
+   words. */
 .y-aimpanel__rate {
-    display: flex;
-    align-items: baseline;
-    gap: 8px;
     margin-bottom: 10px;
 }
-.y-aimpanel__rate-l {
-    font-size: 10.5px;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: var(--yonder-label, #7f8a95);
-}
 .y-aimpanel__rate-v {
-    font-size: 20px;
+    font-size: 22px;
     font-weight: 600;
     font-variant-numeric: tabular-nums;
+    line-height: 1.1;
     color: var(--yonder-value, #ffffff);
 }
 .y-aimpanel__rate-v i {
@@ -497,7 +658,63 @@ export default {
     margin-left: 4px;
     color: var(--yonder-label, #7f8a95);
 }
+/* `0 — 30 °/s`: the floor, a divider tick, and the ceiling. The same
+   `space-between` across the panel's own width that `YonderPositionGauge`'s
+   `.y-pg__bounds` uses two rows above it, and no `max-width`, so the three
+   bounds rows share one right edge exactly as they do in the render. */
+.y-aimpanel__rate-b {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 2px;
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+    color: var(--yonder-label, #7f8a95);
+}
+.y-aimpanel__rate-b i {
+    width: 18px;
+    height: 1px;
+    background: var(--yonder-divider, #2b333c);
+}
 
+/* The fact drawn where the mode control would have been.
+
+   **Deliberately not `.y-aimpanel__fact`**, which is the whole panel's own
+   one-line collapse (`Aim · this camera has none`) and carries the panel's
+   own 16px side padding — inside `YonderColumn` that indents twice, and its
+   90px label column squeezed this sentence into four narrow lines.
+
+   The label is `YonderSegmented`'s own `.y-seg__label`, value for value,
+   copied rather than shared because a scoped style cannot be. Copied
+   *deliberately*: this block stands in for that control, in the same row of
+   the same panel, and an operator who sees `GIMBAL MODE` on one camera and
+   `Gimbal mode` on the next reads two different things. The blueprint draws
+   this heading in the panel's own sentence-case block style
+   (`.y-aimpanel__sub`) and every other segmented control in this console —
+   MODE, BITRATE, RESOLUTION — is uppercase in its own approved render; the
+   two renders disagree about one shared component, and that is the
+   operator's to settle, not this file's. Until they do, the two states of
+   this row match each other.
+
+   The sentence takes `.y-seg__why`'s own gated tone and width: neutral,
+   because nothing here is broken. */
+.y-aimpanel__nomode { margin-bottom: 13px; max-width: 230px; }
+.y-aimpanel__nomode-l {
+    display: block;
+    font-size: 10.5px;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    color: var(--yonder-label, #7f8a95);
+    margin-bottom: 5px;
+}
+.y-aimpanel__nomode-v {
+    display: block;
+    font-size: 11px;
+    line-height: 1.4;
+    color: var(--yonder-neutral, #7d7869);
+}
+
+/* Under the control, not over it (L-39) — it explains the thing above it. */
 .y-aimpanel__modeline {
     font-size: 12px;
     color: var(--yonder-value, #ffffff);

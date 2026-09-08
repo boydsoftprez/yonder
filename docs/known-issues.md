@@ -2300,9 +2300,9 @@ Two ways to close it, and neither is this file's to choose:
 Option 1 is the coordinator's reading; the manifest row L-17 records the owner.
 
 
-### K-63 · The Aim panel is four rows tall and needs nine when a gimbal answers
+### K-63 · ~~The Aim panel is four rows tall and needs nine when a gimbal answers~~ — CLOSED
 
-**Status:** Open — the choice is the operator's · **Requirements:** R-CAM-11, R-UI-28, R-UI-12, R-UI-16
+**Requirements:** R-CAM-11, R-UI-28, R-UI-12, R-UI-16, R-UI-20
 
 Found by the capture gate on 2026-09-07, the first time anything photographed
 the panel with a gimbal on the other end of it. `scripts/fixtures/camera-pair
@@ -2313,12 +2313,12 @@ camera-live-pair (day) spills over what follows it: 480px of content in 228px (5
         nrdb-ui-widget.nrdb-ui-yonder-aim
 ```
 
-`ui-yonder-aim` is `height: 4` in `flows/flows.json`, which Dashboard draws as
+`ui-yonder-aim` was `height: 4` in `flows/flows.json`, which Dashboard draws as
 228 px. With `aim.state` at `not-offered` — every camera on every board this
 repository has run on — the panel is one line, `Aim · this camera has none`,
 and 228 px is mostly empty. With a gimbal answering it draws the reason, the
 slew pad, the commanded-rate row, a Pan gauge, a Tilt gauge, the mode line, the
-mode control and the Recentre key: 480 px, which escapes the card and is
+mode control and the Recentre key: 480 px, which escaped the card and was
 painted over the readout strip beneath it.
 
 **Why it was never seen.** Nothing had ever answered `present`. No gimbal is on
@@ -2327,44 +2327,166 @@ component tests measure no geometry — so the height was chosen against the onl
 state anything could produce. It is the same shape as the defect that gate
 exists for: every unit test passes and the page is wrong.
 
-Two ways to close it, and neither is this file's to choose:
+**Closed on 2026-09-08, all four parts, against the blueprint render.** The
+render is `docs/console/design/instrument-library/aim.pocket2.png` and the
+photograph is `vendor/capture/camera-live-pair.night.png`; reading the two
+together is what this closure is, and every fix below is what that comparison
+asked for rather than what the source suggested.
 
-1. **`height: 0` on both `ui-yonder-aim` nodes**, which is Dashboard's own
-   *grow to content* and the idiom `flows.json` already uses for
-   `ui-yonder-deck` and `bar-cell-facts`. One property per node, no component
-   change; the panel is short with no gimbal and tall with one. The cost is
-   that every camera surface's committed shape moves — the empty panel shrinks
-   from 228 px to its one line — so it is a change to what four approved
-   captures look like, which is why it is not made here.
-2. **Make the panel fit 228 px**, by folding the two position gauges and the
-   mode control into the space the pad already has. Keeps every existing
-   capture; costs a redesign of a surface the blueprint draws, and the
-   blueprint draws all eight of those parts.
+- **The height.** `height: 0` on both `ui-yonder-aim` nodes — `aim-camera` and
+  `aim-cockpit` — which is Dashboard's own grow-to-content and the idiom
+  `deck-cam-live`, `deck-cam-setup` and `bar-cell-facts` already use here. One
+  property per node, no component change; the panel is short with no gimbal and
+  tall with one. The cost, taken deliberately: the committed shape of every
+  camera surface moved, because the empty panel shrank from 228 px to its one
+  line. The alternative — folding the eight parts the blueprint stacks into
+  228 px — was rejected as the narrower reading of a surface the blueprint
+  draws in full (CLAUDE.md rule 7). `flows.test.ts` asserts both nodes, by
+  name, so a fix to one surface can never leave the other carrying it.
+- **The reason drawn twice.** `YonderAimPad` now takes `note` — what it *says*
+  — separately from `inhibited`, which is what refuses the press. `YonderAim`
+  passes `note: ''` while `present`, because in that state its own head is
+  already drawing the identical sentence; while the state is anything else the
+  two are different sentences by construction (the head carries the device's
+  full reason, the pad says `not answering`) and both stay. Decided by which
+  panel owns the sentence, never by comparing the two strings at runtime: two
+  sentences that match today are not one fact, and one that stopped matching
+  would silently start drawing twice again.
+- **`● READY` painted over `COMMANDED RATE`.** The rate block moved below the
+  two position gauges, where the blueprint draws it, and became a bounded value
+  — `0 °/s` with `0 … 30 °/s` beneath (L-36). `ann-camera` is a separate widget
+  in the same group and now sits below a panel that fits, so the badge has its
+  own line. Both halves were needed: the order is the blueprint's, and the
+  height is what stopped the panel reaching the annunciator at all.
+- **The mode control drawing nothing.** `aimPanel` answers `modes: []` —
+  §8.7's `0x44` enumeration is unbuilt — and the panel drew *no control and no
+  fact*, which R-UI-20 is exactly the argument against: an operator cannot tell
+  *this gimbal has no modes* from *this page failed*. The panel now states the
+  fact where the control would have been (`follow — and this gimbal has not
+  said what it can be set to`), and `YonderSegmented` gained its own guarantee
+  that an empty `options` draws nothing at all, so no other caller can produce
+  the empty box either. **The blueprint's three modes are deliberately not
+  drawn**: `Follow │ Tilt lock │ FPV` on a gimbal that never claimed them would
+  be this console inventing a device's capabilities. L-37 carries that as
+  *needs the gimbal phase*.
+- **`Recentre gimbal` covered on the Camera page.** Closed by the height: the
+  key is at the foot of a panel that now fits, and is in both captures.
 
-**Three more things the same photograph shows**, recorded here rather than as
-issues of their own because they have one cause — this panel had never been
-drawn in its `present` state — and one photograph closes all four:
+`docs/console/accepted-violations.json` is empty as a result — its last two
+entries were this defect on `camera-live-pair` and `cockpit-pair`.
 
-- **The reason is drawn twice.** `YonderAim.vue` says of `effectiveReason`
-  that it is "said once, at the top, for the whole panel", and it is; but
-  `YonderAimPad` draws its own `inhibited` underneath the dial, and today
-  both resolve to the same sentence — *the motion guard is not built yet, so
-  nothing is sent*. An operator reads it above the dial and again below it.
-- **`● READY` is painted over `COMMANDED RATE`.** The annunciator and the
-  rate row occupy the same line, and the badge sits on top of the words.
-- **The `Gimbal mode` control draws nothing.** `aimPanel` answers `modes: []`
-  — spec §8.7's `0x44` is unbuilt, so there is no list to choose from — and
-  `YonderSegmented` with no options renders an empty control. Blueprint L-37
-  is recorded *present* on the strength of the source; the first photograph of
-  the panel shows only the sentence above it, `Gimbal mode: follow.`
-- **`Recentre gimbal` is drawn, and on the Camera page it is covered.**
-  `cockpit-pair.*.png` shows the key at the foot of the panel;
-  `camera-live-pair.*.png` does not, because that is where the overflow above
-  runs into the readout strip drawn beneath the Aim group. Two surfaces, one
-  cause.
+**What is not closed, and is the operator's.** `YonderAim`'s `gaugeReason`
+hands the same inhibition sentence to both position gauges and to the mode
+control, and it is non-empty in *exactly* the states where the panel's own head
+is already drawing it — not sometimes, always, by construction. So the sentence
+this entry reduced from two to one is still drawn twice wherever a gimbal
+answers `present` under a guard **and** has modes to offer, or answers one with
+no envelope. No capture reaches either: the gate's fixture answers a known
+envelope, so neither gauge is dead, and `modes: []`, so there is no control.
+The package's own gallery does — `Aim panel — inhibited` shows *attitude is
+stale; movement is held until it refreshes* under the legend and again under
+the mode control.
 
-Until this is closed, `docs/console/accepted-violations.json` carries the
-overflow for `camera-live-pair` and `cockpit-pair` — the only two captures
-that can reach the state — so the gate reports it on every run rather than
-failing on it. Nothing else in the run is affected: with no gimbal the panel
-does not overflow.
+It is brought here rather than fixed because the two sides are a real
+collision and the choice is a wording decision on a surface:
+
+- *Say it once* — the panel's own stated rule, and the whole of this entry's
+  second part. `gaugeReason` is a guaranteed duplicate of the head.
+- *A control that cannot be used carries the reason* — R-UI-20 and R-CAM-14,
+  and the argument the `gaugeReason` comment itself makes: an inhibition is
+  about the reading, so it belongs on the thing that would have shown it.
+  Delete it and a dead gauge says nothing at all about why it is dead.
+
+The resolution this panel already has for the identical problem one component
+along is a **short, different** sentence rather than none — the pad says `not
+answering` while the head carries the device's full reason — and the same
+shape would work here. What the short sentence should say is the operator's.
+Put to them 2026-09-08.
+
+---
+
+### K-64 · The Camera page draws two aim pads, and neither knows about the other
+
+**Status:** Open · **Requirements:** R-CAM-11, R-UI-28, R-UI-20
+
+Found in the same photograph as K-63. `camera-live-pair.*.png` carries an `AIM`
+legend and a slew dial in the group at the top right — `ui-yonder-aim` — and a
+*second* `AIM` heading with a *second* slew dial lower down, inside the deck.
+
+`YonderDeck.buildAim()` draws one whenever the camera's `capabilities.aim` is
+anything but `not-offered`; `ui-yonder-aim` (`aim-camera`, Task 23) draws the
+whole panel. The deck's block predates the panel — the panel was extracted so
+the Cockpit could carry it with no deck around it (R-UI-28) — and nothing
+removed the original when it was.
+
+Two dials on one page, and they do not even post the same message: the deck's
+emits `{ aim: { pan, tilt, seq, gesture } }` and the panel's emits
+`{ slew: { … } }`. An operator has no way to tell which is which, and neither
+carries the panel's own readings — the deck's block is a heading and a dial,
+nothing else. R-UI-20's whole argument is that a page must not be ambiguous
+about what a control is.
+
+**Nothing on the bench can reach it**, which is why it stood from Task 23 to
+here unseen: every board this repository has run on answers `aim: not-offered`,
+and `buildAim()` returns `null` for that. Only Task 48's pair fixture draws it.
+
+The likely fix is deleting `buildAim()` and its two style rules — the panel is
+the surface the blueprint draws, the deck's block is not in the blueprint at
+all, and `YonderAimPad` keeps both of its call sites' tests either way — but
+that is a decision about a surface, so it is the operator's.
+
+**What this entry does *not* say, having nearly said it.** The first reading of
+that photograph was that the deck's dial *overflows*, painted across the staged
+line and down into the soft-key rail. It does not. The rail group is
+`position: sticky` (L-97), and Chromium composites a stuck element at its
+viewport position into a full-page screenshot — so the rail is painted over
+whatever the page has at 689–900 px, which is where the deck's own placard and
+aim block happen to sit. `docs/console/shape/camera-live-pair.night.darwin.json`
+says so plainly: the rail group is at `y: 689, h: 211` before and after K-63's
+fix, while every other widget below the Aim panel moved down by 236 px.
+`docs/console/design/instrument-library/README.md` already warns about exactly
+this artefact, and the gate's clip rule was right to report nothing.
+
+---
+
+### K-65 · The gimbal has not said where it is pointing, and both gauges read 0.0°
+
+**Status:** Open · **Requirements:** R-CAM-11, R-UI-20, R-VID-18
+
+`aimPanel()` in `packages/yonder-core/src/video/present.ts` answers `pan: null`
+and `tilt: null` for a gimbal that is `present`, and says why in its own words:
+
+```ts
+// §8.7's 20 Hz attitude push is unbuilt, so nothing has reported where
+// this gimbal is pointing. `null` is that fact; a zero would be a claim.
+pan: null,
+tilt: null,
+```
+
+`YonderAim.vue` then does exactly what that comment forbids:
+
+```js
+pan () {
+    return this.report && typeof this.report.pan === 'number' ? this.report.pan : 0
+}
+```
+
+So `camera-live-pair.night.png` and `cockpit-pair.night.png` both show
+`PAN 0.0 °` and `TILT 0.0 °`, with a pointer on the track, under a heading that
+reads `Reported position`. Nothing reported it. The daemon took care to say so
+and the page turned it back into a number.
+
+`YonderPositionGauge` already has the honest treatment — `dead` draws a single
+em dash and no pointer — and the panel already passes it, but keyed on
+`bounds === null` rather than on whether there is a reading. The two are
+different facts: this gimbal answered both ends of both axes and has never said
+where it is.
+
+**Not fixed here, because the fix collides with K-63's own second part.**
+`dead` also turns on `YonderPositionGauge`'s `reason`, and the panel hands it
+`gaugeReason` — so making the gauges honest today would draw the inhibition
+sentence twice more, under each gauge, which is the defect K-63 has just
+closed. The two have to move together, and how they move is the operator's
+(see K-63's own "what is not closed").
+
+---

@@ -14,24 +14,13 @@
     "defect with a reason and a way out, never a decision.",
     "",
     "The staleness half asks which pages a run actually captured, so an entry on a",
-    "state capture — `camera-live-pair` below — is held to it by the run that takes",
-    "that capture and ignored by every other. Each entry names the known issue that",
-    "closing it belongs to."
+    "state capture is held to it by the run that takes that capture and ignored by",
+    "every other. Each entry names the known issue that closing it belongs to.",
+    "",
+    "**It is empty, and that is the point of it.** The last two entries were K-63's,",
+    "on `camera-live-pair` and `cockpit-pair`: one Aim panel, two surfaces, 480 px of",
+    "content in a 228 px widget. Both went when the two `ui-yonder-aim` nodes were",
+    "given `height: 0` and the panel was rebuilt against the render that defines it."
   ],
-  "accepted": [
-    {
-      "rule": "clipped",
-      "page": "camera-live-pair",
-      "palette": "*",
-      "key": "nrdb-ui-widget.nrdb-ui-yonder-aim",
-      "note": "K-63. `ui-yonder-aim` is four Dashboard rows — 228 px — and the panel needs 480 px once a gimbal answers `present`: the reason, the slew pad, the commanded rate, two position gauges, the mode line, the mode control and Recentre. The height was chosen against the only state anything could produce, because nothing on any board this repository has run on has ever answered a gimbal. The way out is one of the two K-63 sets out — `height: 0`, which is Dashboard's grow-to-content and the idiom `ui-yonder-deck` already uses, or a panel that fits four rows — and it is the operator's, because the first moves what four already-approved captures look like. Delete this entry when it is taken."
-    },
-    {
-      "rule": "clipped",
-      "page": "cockpit-pair",
-      "palette": "*",
-      "key": "nrdb-ui-widget.nrdb-ui-yonder-aim",
-      "note": "K-63, on the Cockpit's own copy of the same panel (`aim-cockpit`, R-UI-28). One defect, two surfaces, because the two are two call sites of one component and both nodes carry the same height. Whichever way K-63 is closed closes both; delete both entries together."
-    }
-  ]
+  "accepted": []
 }

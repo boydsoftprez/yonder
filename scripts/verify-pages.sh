@@ -1380,6 +1380,45 @@ if node -e 'import("playwright")' >/dev/null 2>&1; then
                 bad "the $1 palette: $pair_page with two cameras, see above"
             fi
         done
+        # **L-21, which no press the gate had could reach.** A thumbnail is a
+        # button on the strip and not a soft key, and every press this gate
+        # makes goes through `.y-keys__key` — the rule added after a thumbnail
+        # reading `Live` was pressed instead of the LIVE key and left the
+        # console on the wrong deck. So the strip has its own press, under its
+        # own flag and its own selector, and this is the capture it exists for:
+        # the page on the *second* camera, reached by pressing its thumbnail.
+        #
+        # It proves more than the strip's own mark moving. The switch is the
+        # daemon's — the press posts `{ path }`, `cam-pic-go` sets
+        # `flow.camera`, the page is re-read — so the placard reading `TAIL
+        # CAMERA` is the whole round trip, and the Aim panel collapsing to its
+        # one line beside it is the other half of `height: 0` (K-63): the same
+        # widget, tall with a gimbal and short without one, on one page.
+        #
+        # `.y-pic__hint` is deliberately not waited for here. Only the front
+        # camera answers `aim`, so the drag hint is *correctly* absent on this
+        # one, and waiting for it would fail the capture for the page being
+        # right.
+        if node "$REPO/scripts/capture-pages.mjs" \
+                --base-url "http://127.0.0.1:$PORT" \
+                --password "$PASSWORD" \
+                --palette "$1" \
+                --only camera-live \
+                --as camera-live-switched \
+                --press-thumb "Tail camera" \
+                --restore-thumb "Front camera" \
+                --artifacts "$REPO/vendor/capture" \
+                --synthetic-cameras "$CAMERAS_PAIR" \
+                --secrets "$ETC/secrets.yaml" \
+                --wait-for '.y-strip__thumb.on:has-text("Tail camera")' \
+                --wait-for '.y-plc__name:text-matches("Tail camera", "i")' \
+                --wait-for ".y-pic__state" \
+                --wait-for "img.y-pic__video" \
+                ${ACCEPT_SHAPE:+--accept}; then
+            ok "the $1 palette: a press on the strip switches camera, and the page follows"
+        else
+            bad "the $1 palette: the strip press, see above"
+        fi
         # Back to the one-camera board before anything else is captured. Both
         # pipelines down first: a camera cannot be taken out from under a
         # running one, which is `removalRefusal`'s whole job.

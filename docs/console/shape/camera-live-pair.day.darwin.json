@@ -11,7 +11,7 @@
         "x": 268,
         "y": 76,
         "w": 663,
-        "h": 442
+        "h": 678
       }
     },
     {
@@ -29,7 +29,7 @@
         "x": 943,
         "y": 76,
         "w": 325,
-        "h": 442
+        "h": 678
       }
     },
     {
@@ -38,14 +38,14 @@
         "x": 960,
         "y": 93,
         "w": 291,
-        "h": 228
+        "h": 584
       }
     },
     {
       "key": "nrdb-ui-widget.nrdb-ui-yonder-annunciator",
       "box": {
         "x": 960,
-        "y": 333,
+        "y": 689,
         "w": 291,
         "h": 48
       }
@@ -54,7 +54,7 @@
       "key": "nrdb-ui-group#2",
       "box": {
         "x": 268,
-        "y": 530,
+        "y": 766,
         "w": 1000,
         "h": 82
       }
@@ -63,7 +63,7 @@
       "key": "nrdb-ui-widget.nrdb-ui-yonder-databar",
       "box": {
         "x": 285,
-        "y": 547,
+        "y": 783,
         "w": 966,
         "h": 48
       }
@@ -72,7 +72,7 @@
       "key": "nrdb-ui-group.yonder-deck-live",
       "box": {
         "x": 268,
-        "y": 624,
+        "y": 860,
         "w": 1000,
         "h": 1619
       }
@@ -81,7 +81,7 @@
       "key": "nrdb-ui-widget.nrdb-ui-yonder-deck",
       "box": {
         "x": 285,
-        "y": 641,
+        "y": 877,
         "w": 966,
         "h": 1585
       }
@@ -90,7 +90,7 @@
       "key": "nrdb-ui-group.yonder-captures",
       "box": {
         "x": 268,
-        "y": 2255,
+        "y": 2491,
         "w": 1000,
         "h": 145
       }
@@ -99,7 +99,7 @@
       "key": "nrdb-ui-widget.nrdb-ui-yonder-captures",
       "box": {
         "x": 285,
-        "y": 2272,
+        "y": 2508,
         "w": 966,
         "h": 111
       }
@@ -108,7 +108,7 @@
       "key": "nrdb-ui-group#3",
       "box": {
         "x": 268,
-        "y": 2412,
+        "y": 2648,
         "w": 1000,
         "h": 112
       }
@@ -117,7 +117,7 @@
       "key": "nrdb-ui-widget.nrdb-ui-yonder-databar",
       "box": {
         "x": 285,
-        "y": 2429,
+        "y": 2665,
         "w": 966,
         "h": 78
       }

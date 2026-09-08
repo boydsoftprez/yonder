@@ -174,7 +174,7 @@ proof that the two instruments will stand there.
 | # | The blueprint shows | Today | Class | Note |
 |---|---|---|---|---|
 | L-20 | **A strip under the picture, one thumbnail per camera**, the active one bordered and labelled `Live`, the others labelled `Still · 4 s` | **Present, and captured** — `camera-live-pair.*.png` draws two: the active one bordered and labelled `Live`, and `Still · 3 s` beside it carrying the second camera's own frame. `video/present.ts`'s `thumbStrip()` composes one row per configured camera on the camera read; `pick-cam-picture` moves it on to the picture; the daemon takes one still per watched camera on a 5 s timer (`video/stills.ts`) and each browser subscribes to the others' stills itself. A stopped camera reads `Stopped`; a running one with no frame yet reads `Still · waiting` | present | Photographed by **Task 48**. **The active thumbnail carries no image**: its picture is the live one above, and fetching its still too would be an uncounted copy for a video viewer. The blueprint draws a picture in it. Painting the live `<video>` into a small canvas would close it at no uplink cost — **owner: the operator** — put to them 2026-09-07 with a recommendation (paint the live video into the thumbnail in the browser, at no cost on the link). **The frame in the capture is the fake host's**, not a photograph: `video/fake-gi` writes a flat mid-grey 1280×720 JPEG where a board's pipeline would write a frame, so the thumbnail is a grey field. What it proves is the chain — a still taken, served, fetched and drawn — not what a camera sees |
-| L-21 | A press on a thumbnail switches camera, and the sidebar follows | **Built, uncaptured** (Task 34) — the press sets the page's own camera and re-reads it, so every instrument follows and the next poll agrees. Before this the picture switched and the next poll switched it back. Proven in `picture.component.test.ts`; **not photographed**, and Task 48's pair fixture does not change that | built — **owner: Task 48**; the sidebar half still needs L-04 | **The gate presses soft keys and nothing else.** Every press it makes goes through `.y-keys__key` — the operator's own rule after a thumbnail that reads `Live` was pressed instead of the LIVE soft key and left the console on the wrong deck (`ae8cb0a`) — and a thumbnail is a button, not a key. Photographing the switch means giving the gate a second, separately named press for the strip; whether it should have one is **the operator's**, put to them 2026-09-07. It is the one row of the eight the pair fixture does not close |
+| L-21 | A press on a thumbnail switches camera, and the sidebar follows | **Built, and captured** — `camera-live-switched.*.png` is the page on the second camera, reached by pressing its thumbnail: the strip's mark moves, the placard reads `TAIL CAMERA`, the deck is re-read from it, and the Aim panel collapses to its one line beside them because only the front camera answers a gimbal | present; the sidebar half still needs L-04 | Task 49. **The gate presses soft keys and nothing else**, and still does: every key press goes through `.y-keys__key`, the operator's own rule after a thumbnail that reads `Live` was pressed instead of the LIVE soft key and left the console on the wrong deck (`ae8cb0a`). The strip got a **second, separately named** press of its own — `--press-thumb`, matching `.y-strip__thumb` and nothing else — rather than a widened `SOFTKEY`, so neither selector can ever reach the other's control. It comes with `--restore-thumb`, which the script *requires*: which camera a page is on is `flow.camera` in the daemon, shared and persistent, so a run that switched and walked away would photograph every later page as the wrong camera. The restore is checked, not merely clicked |
 | L-22 | To the right of the strip, `OTHER CAMERAS` over `12 kb/s of stills · counted in Path total` | **Present, and captured** — `OTHER CAMERAS` over `12 kb/s of stills · counted in Path total` in `camera-live-pair.*.png`, and `24 kb/s` on the Cockpit's own copy, where two pictures are fetching. The figure is `Viewers.stillsKbps()` — every transmitted copy, every viewer, every camera — in the daemon's own words | present | Photographed by **Task 48**. The figure is honest and larger than the render's: a still is the host's `still` op off the `raw` tee at capture size, ~100 kB at 720p, so one copy every 5 s is ~170 kb/s. The render's `12 kb/s` implies a thumbnail-sized still, which would need the host op to scale — **owner: the operator** — put to them 2026-09-07 with a recommendation (a `size` on the host's existing still op, after a board measurement of a 320×180 JPEG). **The harness's own figure is small for a reason that is not the board's**: the fake host's frame is a flat grey field that compresses to 3.7 kB, so a copy costs 6 kb/s there. `scripts/fixtures/specimens.json` carries `1690 kb/s of stills · counted in Path total` as the widest anybody has written down, and that is what the committed picture is laid out under |
 
 ### 1.4 The strip beneath (delivery)
@@ -195,42 +195,55 @@ strip of camera facts in the same place.
 
 Blueprint: `aim.elp.png` (advertised, not answering) and `aim.pocket2.png`
 (present). The bench fixture answers `aim: none`, so the base captures draw one
-line of text and none of the panel, and **every row below was checked against
-`YonderAim.vue` rather than against a picture.**
+line of text and none of the panel, and until Task 48 **every row below had
+been checked against `YonderAim.vue` rather than against a picture** — which is
+how four defects and six drifts came to be signed off as built.
 
 **Since Task 48 there is a picture.** `camera-live-pair.*.png` and
 `cockpit-pair.*.png` are taken against a fixture whose first camera answers
 `aim: present` with both ends of both axes, so this panel is photographed in
 the state the blueprint draws it in. The first photograph found four things at
-once, all recorded as **K-63**: the panel needs 480 px in a 228 px widget and
-its lower half is painted over what follows it; the reason sentence is drawn
-twice, once under the legend and once under the dial; `● READY` is painted over
-`COMMANDED RATE`; and the `Gimbal mode` control renders nothing, because
-`aimPanel` answers `modes: []`. `Recentre gimbal` is drawn on the Cockpit and
+once, all recorded as **K-63**: the panel needed 480 px in a 228 px widget and
+its lower half was painted over what followed it; the reason sentence was drawn
+twice, once under the legend and once under the dial; `● READY` was painted
+over `COMMANDED RATE`; and the `Gimbal mode` control rendered nothing, because
+`aimPanel` answers `modes: []`. `Recentre gimbal` was drawn on the Cockpit and
 covered on the Camera page, by the same overflow.
 
-**The rows below have not been re-read against that picture**, and saying so is
-the point: they were signed off against the source, four defects were in the
-first photograph of them, and the two facts do not sit together. **Owner: Task
-48** — a row-by-row re-read of L-29 … L-42 against `camera-live-pair.*.png` is
-work this task did not do.
+**Task 49 closed K-63 and re-read every row below against the picture.** The
+panel was rebuilt against `aim.pocket2.png` rather than against its own source:
+`height: 0` on both `ui-yonder-aim` nodes, the rate block moved below the
+gauges and drawn against its bounds, a `Reported position` heading over them,
+the mode sentence moved under the control and made to say what the mode *does*,
+and a stated fact where the mode control cannot be drawn. The re-read found
+six more things the source had signed off — L-29's badge is not outlined, L-31's
+puck stays live cyan on a pad that refuses every press, L-34 and L-35 are
+missing the render's own middle tick and its signed value, L-37's label is drawn
+in a case the aim render disagrees with, and L-41's caution slot is at the head
+in the neutral tone where the render puts it under the gauges in caution — and
+two defects that are not manifest rows at all: **K-64** (the deck draws a
+*second* aim pad on the same page, posting a different message from the panel's)
+and **K-65** (the gauges read `0.0°` for a gimbal that has never reported where
+it is pointing). Each is recorded on its row, and every one of them is a gap
+between the render and the picture that reading the source could not have
+found.
 
 | # | The blueprint shows | Today | Class | Note |
 |---|---|---|---|---|
-| L-29 | An `AIM` legend with an **outlined badge** at the right: `□ RATE CONTROL` when present, `□ NOT ANSWERING` when advertised | Built (`YonderAim.vue:295`) | present | Not reachable by the gate's fixture |
+| L-29 | An `AIM` legend with an **outlined badge** at the right: `□ RATE CONTROL` when present, `□ NOT ANSWERING` when advertised | The legend and the words are there and photographed — `RATE CONTROL`, in the select tone, at the right of the `AIM` legend. **The outline is not**: `YonderColumn`'s own `.y-col__q` is a bare `<span>`, and the render draws a bordered box with a check glyph in it | drifted | Task 49 re-read. Photographed for the first time in `camera-live-pair.*.png`, which is what showed this: it was recorded *present* on the source, where the words matched and nobody was looking at the box. The qualifier is `YonderColumn`'s, shared with every other group head on the console (`TO THE GROUND STATION`, none of which the blueprint outlines), so an outline here is either a variant of that part or a badge of the panel's own — **owner: the operator**, put to them 2026-09-08 |
 | L-30 | On a camera with no aim at all, the panel collapses to one fact line | Present — `Aim  this camera has none` | present | |
-| L-31 | The dial: one thin ring, a crosshair, a haloed puck, axis labels `TILT +`, `PAN`, `ROLL —` | Built (`YonderAimPad.vue`) | present | |
+| L-31 | The dial: one thin ring, a crosshair, a haloed puck, axis labels `TILT +`, `PAN`, `ROLL —` | Built, and every part is there. **The puck does not go dead**: `aim.elp.png` draws it and its halo grey on a camera that will not answer, and `YonderAimPad` draws them in the select cyan in every state | drifted | Task 49 re-read, against `aim.elp.png` and the `Aim panel — not answering (ELP)` specimen in this package's own gallery (there is no capture of that state — no fixture reaches it). Cyan is this console's mark for *live and selected*, and a pad that refuses every press wearing it is the same defect `.is-gated` was fixed for on `YonderSegmented` and `YonderPicker`. **Owner: the operator** — one rule on `.y-aim__dial.is-inhibited`, but the pad has two call sites and the change is a state treatment, not a part |
 | L-32 | **An axis that will not answer stays on the dial, struck** — the ELP's `ROLL` arc is drawn broken | Built (`aimpad.component.test.ts` asserts the struck axis) | present | |
-| L-33 | A **`Reported position` sub-heading** above the two gauges | **Absent** — `YonderAim.vue` renders the gauges with no heading | drifted | |
-| L-34 | A `PAN` gauge with `−180° / 0° / +180°` beneath, dashed and em-dashed when dead | Built (`YonderPositionGauge.vue`, `:dead="!hasBounds"`) | present | |
-| L-35 | A `TILT` gauge with `−90° / 0° / +90°` | Built | present | |
-| L-36 | A **`Commanded rate` block below the gauges**, drawn as a bounded value: `0 °/s` with `0 … 30 °/s` beneath | Present as a bare value **above** the gauges, with no bounds | drifted | Order reversed, and the bounded track the blueprint draws is absent |
-| L-37 | A `Gimbal mode` segmented control of three: `Follow │ Tilt lock │ FPV` | Built | present | |
-| L-38 | **A sentence under the mode saying what the mode does** — `Pan and tilt follow the handle.` | Present in position but not in substance: `modeSentence` returns `Gimbal mode: ${mode}.`, a restatement of the label | drifted | The blueprint's own note calls for "a sentence under the gimbal mode saying what the mode does" |
-| L-39 | The sentence sits **below** the segmented control | It is rendered **above** it | drifted | |
-| L-40 | A `Recentre gimbal` key at the foot of the panel | Built | present | |
-| L-41 | A caution line for an advertised-but-dead axis: `Listed ±180° in 1° steps. Fifteen values sent, every one acknowledged, the frame never moved.` | A `reason` slot exists (`effectiveReason`); this sentence is a property of the report, not the component | present (mechanism) | Unverifiable — no fixture produces it |
-| L-42 | *(Not in the blueprint)* A `● READY` annunciator inside the Aim panel | Present in the capture | drifted | Nothing in the blueprint draws it |
+| L-33 | A **`Reported position` sub-heading** above the two gauges | **Present, and captured** — `.y-aimpanel__sub`, above both gauges and under the dial | present | Task 49. The style is the blueprint's own `.d-blk__h` (`gallery/DraftAimDial.vue`), not `YonderColumn`'s legend or the deck's `.y-deck__aim-h`: those are the uppercase, letter-spaced head of a whole group, and this is a heading *inside* one. `aim.component.test.ts` asserts document order, not presence — the three drifts on this panel were all parts that existed in the wrong place |
+| L-34 | A `PAN` gauge with `−180° / 0° / +180°` beneath, dashed and em-dashed when dead | Built, and now photographed — **with two bounds and not three**: `-180°` and `180°`, no middle `0°` label, and the value reads `0.0 °` where the render signs it `+0.0°`. The zero *tick* is on the track (`.y-pg__zero`); what is missing is its label and the sign | drifted | Task 49 re-read; recorded *present* on the source before anything drew it. **Owner: the operator** — `YonderPositionGauge` is the aim panel's alone, so a third bound and a signed value are contained, but they were outside this task's build list and are put to them 2026-09-08. See also **K-65**: the reading itself is `null` and drawn as a number |
+| L-35 | A `TILT` gauge with `−90° / 0° / +90°` | Built, and now photographed — the same two-bound row as L-34, reading the fixture's own asymmetric envelope (`-90°`, `30°`) rather than the render's symmetric one, which is correct | drifted | Task 49 re-read. Same owner and same fix as L-34 |
+| L-36 | A **`Commanded rate` block below the gauges**, drawn as a bounded value: `0 °/s` with `0 … 30 °/s` beneath | **Present, and captured** — the heading, the value, and `0 — 30 °/s` beneath it, below both gauges | present | Task 49. Moving it is also what un-collided `● READY` (K-63): above the gauges it shared a line with the annunciator drawn beneath the panel. **The `30` is `YonderAimPad`'s own exported `MAX_RATE`**, imported rather than written down twice — the rate this pad asks for at the rim. It is deliberately not a claim about the gimbal: `aimPanel()` answers no maximum rate of the device's own, which is a finding of this task, and if one ever arrives it is a payload field and this is where it lands |
+| L-37 | A `Gimbal mode` segmented control of three: `Follow │ Tilt lock │ FPV` | **The control is built and the device states no modes to put in it.** `aimPanel` answers `modes: []` — §8.7's `0x44` enumeration is unbuilt — so the panel states the fact where the control would have been: `follow — and this gimbal has not said what it can be set to`. Photographed in that state | **needs the gimbal phase** — owner: **Phase 5** | Task 49. Drawing the render's three modes on a gimbal that never claimed them would be this console inventing a device's capabilities (R-UI-20), and drawing an empty group is a control offering nothing; `YonderSegmented` now refuses the second outright, in every state. **A second, smaller drift on the same row**: the render draws this label in the panel's own sentence-case block style, and `YonderSegmented`'s label — shared with `MODE`, `BITRATE`, `RESOLUTION`, all uppercase in *their* own approved renders — is uppercase. Two approved renders disagree about one shared component; **owner: the operator**, put to them 2026-09-08. The panel's absent-state label matches the control's, so the two states of one row read alike |
+| L-38 | **A sentence under the mode saying what the mode does** — `Pan and tilt follow the handle.` | **Present, and captured** — `Pan and tilt follow the handle.` in the blueprint's own words, from a table of one sentence per mode in `YonderAim.vue` (rule 2) | present | Task 49. This file previously refused to write these, on the argument that expanding a device's own word invents a meaning — the blueprint overrules that and rule 7 is why. The refusal survives where it was right: **a mode nobody has written a sentence for gets none**, rather than a generated one, so a gimbal answering a fourth word has that word drawn and no claim made about what it does |
+| L-39 | The sentence sits **below** the segmented control | **Present, and captured** — below the control, and below the fact that stands in for it | present | Task 49, asserted as document order rather than presence |
+| L-40 | A `Recentre gimbal` key at the foot of the panel | **Present, and captured on both surfaces** | present | Task 49. It was drawn on the Cockpit and covered on the Camera page, by K-63's overflow; `height: 0` put it in both pictures |
+| L-41 | A caution line for an advertised-but-dead axis: `Listed ±180° in 1° steps. Fifteen values sent, every one acknowledged, the frame never moved.` | The `reason` slot exists (`effectiveReason`) and the sentence is a property of the report, not the component — but **the slot is in a different place and a different colour**: the render puts it under the two gauges, in the caution tone; the panel draws it at the head, in the neutral one | drifted | Task 49 re-read. The sentence itself is still unverifiable — no fixture produces it — but where its slot sits and what colour it takes are the component's own and are visible in the gallery's ELP specimen. The head is also where K-63's "said once" fix put it deliberately, so moving it is not free: **owner: the operator** |
+| L-42 | *(Not in the blueprint)* A `● READY` annunciator inside the Aim group | Present in the capture, and now on its own line beneath the panel rather than painted over the commanded rate | drifted | Nothing in the blueprint draws it. `ann-camera` is a separate widget in `group-cam-aim`, order 2 — it was never inside the panel; the panel was overflowing onto it (K-63). Whether the Aim group should carry the page's own "what this page last did" lamp at all is **the operator's**, unchanged by Task 49 |
 
 ### 1.6 The Capture column
 
@@ -259,22 +272,23 @@ work this task did not do.
 | L-58 | In Adaptive: `FLOOR` and `CEILING` **pickers** appear (`1.0 Mb/s`, …) | Present, but drawn as **set bars**, not pickers | drifted | `columns.adaptive.png` is the reference |
 | L-59 | A staged edit shows `Pending · apply on Setup` beneath the control it was made on | Present (`YonderSetBar.vue:17`, `YonderDeck.vue:440`) | present | |
 
-**Seven of those eight rows are now photographed, and the eighth is not.**
+**All eight of those rows are now photographed.**
 `scripts/fixtures/camera-pair.json` gives the gate two cameras — both running
 under a pipeline host with no GStreamer under it — and a gimbal answering
 `aim: present` on the first, and `camera-live-pair.*.png` / `cockpit-pair.*.png`
 are what it takes with them: the state overlay and all four of its lines (L-10,
 L-11, L-12, L-13), the drag hint (L-17), the strip with a second thumbnail
-carrying a frame (L-20) and a non-zero `OTHER CAMERAS` figure (L-22). **L-21 is
-the one left**: photographing a thumbnail press means the gate pressing
-something that is not a soft key, which is the operator's to decide — the row
-says why.
+carrying a frame (L-20) and a non-zero `OTHER CAMERAS` figure (L-22). **L-21
+was the one left**, because photographing a thumbnail press means the gate
+pressing something that is not a soft key; Task 49 gave the strip its own,
+separately named press and `camera-live-switched.*.png` is what it takes — the
+row says how, and why that is not a loosening of the soft-key rule.
 
 Three things that state showed which nothing else could: L-12's round trip is
 not composed at all, L-13's step line carries a *hold* and not only a ladder
-change, and the Aim panel needs 480 px in a 228 px widget (**K-63**, accepted in
-`docs/console/accepted-violations.json` until the operator chooses between its
-two fixes).
+change, and the Aim panel needed 480 px in a 228 px widget (**K-63**, closed by
+Task 49 with `height: 0` on both `ui-yonder-aim` nodes;
+`docs/console/accepted-violations.json` is empty as a result).
 
 **L-56 diverges from the approved render, deliberately. The operator decided
 it, under CLAUDE.md rule 8, and this row is the record of it.**
@@ -734,7 +748,10 @@ would not have changed a single committed pixel.
 
 *(Partly closed by Task 48. `camera-pair.json` reaches the gimbal state, and the
 first photograph of the Aim panel in it found four defects at once — K-63 — in a
-panel every row of §1.5 had been signed off against the source. Every state that
+panel every row of §1.5 had been signed off against the source. Task 49 closed
+those four, and re-reading the same photograph against the render found four
+more drifts and two defects nothing had a row for at all (K-64, K-65) — which is
+the argument for this whole entry, made twice on one panel. Every state that
 needs a viewer on video is still outside it.)*
 
 **3 · A capture that is stale against its own code.** The committed
@@ -762,16 +779,26 @@ so has never been seen in a picture anybody reviews (B-02).
 
 | Surface | Elements | Present | Absent (unbuilt) | Absent (owned) | Drifted | Deferred | Not checkable |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| Camera · Live | 105 | 46 | 11 | 9 | 35 | 3 | 1 |
+| Camera · Live | 105 | 45 | 11 | 8 | 36 | 4 | 1 |
 | Camera · Setup | 17 | 5 | 3 | 0 | 8 | 0 | 1 |
 | Cameras | 26 | 8 | 7 | 0 | 10 | 0 | 1 |
-| **Compared against a blueprint** | **148** | **59** | **21** | **9** | **53** | **3** | **3** |
+| **Compared against a blueprint** | **148** | **58** | **21** | **8** | **54** | **4** | **3** |
 | Status | 20 | — | — | — | — | — | 20 |
 | Network | 24 | — | — | — | — | — | 24 |
 | Log | 8 | — | — | — | — | — | 8 |
 | Diagnostics | 11 | — | — | — | — | — | 11 |
 | **Inventoried, no blueprint** | **63** | — | — | — | — | — | **63** |
-| **Total** | **211** | **59** | **21** | **9** | **53** | **3** | **66** |
+| **Total** | **211** | **58** | **21** | **8** | **54** | **4** | **66** |
+
+**Task 49 moved eleven rows, and they net to −1 present.** L-33, L-36, L-38 and
+L-39 were built (drifted → present); L-29, L-31, L-34, L-35 and L-41 were
+signed off against the source and the render disagrees (present → drifted);
+L-37 is the control the device states nothing to put in (present → deferred,
+Phase 5); and L-21 is photographed at last (Task 48's owned gap → present).
+Camera · Live is −2 present, −1 owned, +2 drifted, +1 deferred; nothing else
+moved. **Seven of the eleven were found by looking at the picture beside the
+render**, and none of them by reading the diff — which is what CLAUDE.md rule 7
+says a console review has to do, written out as a tally.
 
 **Conflicts: 5** (C-1 … C-5), listed above. They are counted in their
 surface's other columns as well, where they describe a concrete difference.
@@ -798,8 +825,8 @@ check against.
 | 32 — viewers and the preview-state message | L-24, L-26, L-27, L-63. *(L-10, L-11 and L-13 left this list when Task 48 photographed them; L-12's round trip is still Task 32's `detail` to compose)* |
 | 33 — board recording, stills and the captures panel | **Done.** L-16, L-18, L-43, L-44, L-45, L-46, L-47 built; L-48 built as a panel rather than a popover, for the operator to accept or reverse |
 | 34 — the stills strip, per viewer | **Built; captured by Task 48.** L-20, L-22 and the `STILLS` half of L-11 are photographed in `camera-live-pair.*.png`; the strip's active thumbnail image and the still's size are still the operator's calls (see the rows) |
-| 48 — a fixture the gate can photograph the whole camera page with | **Done, less one row.** L-10, L-11, L-12, L-13, L-17, L-20 and L-22 photographed. **L-21 is owed**: a thumbnail press is not a soft-key press and the gate makes only the second. Also owed, and put to the operator: L-11's four other head words, L-12's round trip and L-13's ladder change, all of which need a viewer on video |
-| Phase 5 (deferred, Pocket 2) | L-52, L-79, L-83 |
+| 48 — a fixture the gate can photograph the whole camera page with | **Done.** L-10, L-11, L-12, L-13, L-17, L-20 and L-22 photographed; **L-21 closed by Task 49**, which gave the strip its own named press. Still owed, and put to the operator: L-11's four other head words, L-12's round trip and L-13's ladder change, all of which need a viewer on video |
+| Phase 5 (deferred, Pocket 2) | L-52, L-79, L-83, **L-37** — the gimbal's mode list needs §8.7's `0x44` enumeration; until then the panel states the fact where the control would be, and never the render's three modes |
 
 **Unbuilt, with no owner — fourteen rows**
 

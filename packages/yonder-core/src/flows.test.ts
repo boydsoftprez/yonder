@@ -3400,6 +3400,32 @@ describe("flows/flows.json Cockpit page", () => {
   });
 
   /**
+   * **Both aim panels grow to their content, on every surface that draws
+   * one** — K-63, and the only part of it that lives in `flows.json`.
+   *
+   * `height: 4` is 228 px, and it was chosen against the only state any
+   * board this repository has run on can produce: `aim.state: "not-offered"`,
+   * where the panel is a single line and 228 px is mostly empty. With a
+   * gimbal answering `present` the panel draws the reason, the pad, the two
+   * position gauges, the commanded rate, the mode and Recentre — 480 px —
+   * and the half of that which did not fit was painted over the readout
+   * strip drawn beneath it. `height: 0` is Dashboard's own grow-to-content,
+   * the idiom `deck-cam-live`, `deck-cam-setup` and `bar-cell-facts` already
+   * use here, and the property is wiring rather than behaviour (rule 2).
+   *
+   * Asserted on both nodes by name: they are two call sites of one component
+   * (R-UI-28) and a fix applied to one of them leaves the other surface
+   * carrying the defect alone, which is how `cockpit-pair` and
+   * `camera-live-pair` both came to be in `accepted-violations.json`.
+   */
+  it("lets both aim panels grow to their content, rather than fixing them at four rows", () => {
+    for (const id of ["aim-camera", "aim-cockpit"]) {
+      expect(byId(id)?.height, `${id} is a fixed height and the panel is taller in every state but one`)
+        .toBe(0);
+    }
+  });
+
+  /**
    * R-UI-15 on a page with no rail: one hidden group carrying the lamp and
    * the two keys, raised and dropped by the same `ui-control` message every
    * other surface's banner is.

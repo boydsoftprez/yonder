@@ -26,7 +26,7 @@
         </svg>
 
         <div v-if="limited" class="y-aim__limit"><i class="y-aim__limit-dot" />At the limit</div>
-        <div v-if="inhibited" class="y-aim__reason">{{ inhibited }}</div>
+        <div v-if="saying" class="y-aim__reason">{{ saying }}</div>
     </div>
 </template>
 
@@ -117,6 +117,14 @@
  * becoming inhibited" exercises the second) — they are not a duplicate
  * pair, because each covers ground the other does not reach.
  *
+ * **Saying why is a separate prop from refusing** (`note`, added closing
+ * K-63). The guard is `inhibited` and never moves; what is drawn under the
+ * dial is `note`, which defaults to the inhibition's own words and which a
+ * caller that already says that sentence at the head of its own panel sets
+ * to `''`. `YonderAim` does exactly that, because the two together drew one
+ * sentence twice in the first photograph anything ever took of this pad with
+ * a gimbal on the other end of it.
+ *
  * **A struck axis is one the device advertises and will not answer**
  * (coordinator resolution 7) — drawn struck through on the pad itself,
  * never hidden, the same reasoning `YonderPositionGauge`'s own dead-axis
@@ -169,8 +177,15 @@ const DIAL_SIZE = 132
 const DEAD = 15
 /** The rim: full rate at the edge of the inner ring. */
 const RIM = 44
-/** Degrees per second at the rim. */
-const MAX_RATE = 30
+/**
+ * Degrees per second at the rim — **exported**, because it is the upper bound
+ * of the only rate this pad can command and a panel that draws that rate
+ * against its bounds (`YonderAim`'s own commanded-rate block, the blueprint's
+ * `0 … 30 °/s`) must read it from here rather than write `30` down a second
+ * time. The blueprint's own draft holds it the same way — one `MAX_RATE`,
+ * rendered into the bounds row it also drives.
+ */
+export const MAX_RATE = 30
 
 /**
  * A fresh id for a new gesture — module-scoped so two mounted pads (and,
@@ -196,8 +211,30 @@ export default {
          * recorded envelope (the range finder this plan removed). */
         atLimit: { type: Object, default: () => ({}) },
         /** A general inhibition reason, or `null`. The deck supplies
-         * whatever is true; this component states no opinion on why. */
-        inhibited: { type: String, default: null }
+         * whatever is true; this component states no opinion on why.
+         *
+         * **This is the guard, not the sentence.** It refuses the press; what
+         * is *drawn* beneath the dial is `note` below, which defaults to this
+         * string and can be silenced without loosening the guard. */
+        inhibited: { type: String, default: null },
+        /**
+         * What this pad says for itself, beneath the dial — `null` (the
+         * default) means "whatever `inhibited` says", which is right for a
+         * caller with nowhere else to put it (`YonderDeck`'s own aim block
+         * draws a heading and this pad and nothing else).
+         *
+         * A caller whose own head already states that same fact passes `''`
+         * instead, and the pad stays refused and says nothing:
+         * `YonderAim.vue` does, because it drew the identical sentence twice —
+         * once under its legend and once under this dial — which is the half
+         * of K-63 an operator reads as being told one thing twice.
+         * The suppression is structural, decided by *which* panel owns the
+         * sentence, and deliberately never a runtime comparison of the two
+         * strings: two sentences that happen to match today are not the same
+         * fact, and one that stopped matching would silently start drawing
+         * twice again.
+         */
+        note: { type: String, default: null }
     },
     emits: ['slew', 'stop'],
     data: () => ({
@@ -222,6 +259,12 @@ export default {
         },
         limited () {
             return Boolean(this.atLimit?.pitch || this.atLimit?.yaw)
+        },
+        /** The sentence drawn beneath the dial. See `note`'s own comment: an
+         * unset `note` falls back to the inhibition's own words, `''` draws
+         * nothing at all, and neither changes what the guard does. */
+        saying () {
+            return this.note === null ? (this.inhibited || '') : this.note
         }
     },
     watch: {

@@ -5616,7 +5616,7 @@
         "name": "the gimbal",
         "order": 1,
         "width": 12,
-        "height": 4,
+        "height": 0,
         "x": 460,
         "y": 2030,
         "wires": [
@@ -5652,7 +5652,7 @@
         "name": "the gimbal, with no deck around it",
         "order": 1,
         "width": 12,
-        "height": 4,
+        "height": 0,
         "x": 180,
         "y": 1930,
         "wires": [

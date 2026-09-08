@@ -115,6 +115,46 @@ function rateValue(w: VueWrapper<any>) {
     return w.find(".y-aimpanel__rate-v");
 }
 
+/**
+ * The sentences this panel draws for the three modes the blueprint draws
+ * (`MODE_SENTENCES` in `YonderAim.vue`), mirrored here by hand rather than
+ * imported — the same reasoning `TRACK_WIDTH` below is mirrored for: a test
+ * that imported the table would assert the component agrees with itself,
+ * and what L-38 is actually about is the words on the page.
+ */
+const SAYS = {
+    follow: "Pan and tilt follow the handle.",
+    tiltLock: "Tilt holds where it is. Pan follows the handle.",
+    fpv: "Pan, tilt and roll follow the aircraft.",
+};
+
+/**
+ * Where a part sits relative to another, which is what L-33, L-36 and L-39
+ * are each about. Every one of those three shipped *built* and drifted, and
+ * a test asking only whether both parts exist would have stayed green on
+ * the panel the first photograph disagrees with — so these read document
+ * order, not presence.
+ */
+function drawnBefore(a: Element, b: Element) {
+    return Boolean(a.compareDocumentPosition(b) & 4 /* DOCUMENT_POSITION_FOLLOWING */);
+}
+
+/** A `.y-aimpanel__sub` block heading by its own words. */
+function subHeading(w: VueWrapper<any>, text: string): Element {
+    const found = w.findAll(".y-aimpanel__sub").find((h) => h.text() === text);
+    if (!found) {
+        throw new Error(`no sub-heading reading "${text}" among ` +
+            w.findAll(".y-aimpanel__sub").map((h) => `"${h.text()}"`).join(", "));
+    }
+    return found.element;
+}
+
+/** How many times a sentence appears in what the panel draws. One is the
+ * whole point of the "said once" tests: two is K-63's second part. */
+function times(haystack: string, needle: string) {
+    return haystack.split(needle).length - 1;
+}
+
 /** Finds a mounted `YonderPositionGauge` by its own label — the same
  * "find by the label element's own text" idiom
  * `deck.component.test.ts`'s own `controlByLabel()` uses for every ported
@@ -199,14 +239,14 @@ describe("the live report wins over the configured fallback", () => {
         // Both fixtures share the identical `modes` list, so "Tilt lock"
         // legitimately appears in the mounted tree either way, as one of
         // the segmented control's own button labels — asserting its plain
-        // absence would prove nothing about precedence. The *sentence*,
-        // naming which mode is actually active, is what discriminates.
+        // absence would prove nothing about precedence. The *sentence*
+        // saying what the active mode does is what discriminates.
         const { wrapper } = mountAimWithStore(
             makeReport({ mode: "FPV" }),
             makeReport({ mode: "Tilt lock" }),
         );
-        expect(wrapper.text()).toContain("Gimbal mode: FPV.");
-        expect(wrapper.text()).not.toContain("Gimbal mode: Tilt lock.");
+        expect(wrapper.text()).toContain(SAYS.fpv);
+        expect(wrapper.text()).not.toContain(SAYS.tiltLock);
     });
 
     it("falls back to the configured report when the store has no message yet", () => {
@@ -218,7 +258,7 @@ describe("the live report wins over the configured fallback", () => {
                 mixins: [{ computed: { $store: () => store } }],
             },
         });
-        expect(wrapper.text()).toContain("Gimbal mode: Tilt lock.");
+        expect(wrapper.text()).toContain(SAYS.tiltLock);
     });
 });
 
@@ -259,6 +299,104 @@ describe("position against bounds", () => {
         const { wrapper } = mountAim(makeReport({ bounds: null, inhibited: null }));
         expect(recentreBtn(wrapper).attributes("disabled")).toBeUndefined();
         expect(gaugeByLabel(wrapper, "Pan").classes()).toContain("is-dead");
+    });
+});
+
+describe("the blueprint's own order: the reading, then the rate, then the mode", () => {
+    /**
+     * Every one of these three was recorded *built* against the source and
+     * every one of them is wrong in the first photograph anything took of
+     * this panel with a gimbal answering (`camera-live-pair.*.png`, Task
+     * 48). They are order-and-presence assertions for that reason: the
+     * parts were all there, in the wrong places, with one of them missing
+     * outright.
+     */
+    it("draws a Reported position heading above the two gauges (L-33)", () => {
+        const { wrapper } = mountAim(makeReport());
+        const heading = subHeading(wrapper, "Reported position");
+        expect(drawnBefore(heading, gaugeByLabel(wrapper, "Pan").element)).toBe(true);
+        expect(drawnBefore(heading, gaugeByLabel(wrapper, "Tilt").element)).toBe(true);
+        // And under the dial, not over it — it heads the gauges, not the pad.
+        expect(drawnBefore(wrapper.find(".y-aim__dial").element, heading)).toBe(true);
+    });
+
+    it("draws the commanded rate below both gauges, not above them (L-36)", () => {
+        const { wrapper } = mountAim(makeReport());
+        const rate = wrapper.find(".y-aimpanel__rate").element;
+        expect(drawnBefore(gaugeByLabel(wrapper, "Pan").element, rate)).toBe(true);
+        expect(drawnBefore(gaugeByLabel(wrapper, "Tilt").element, rate)).toBe(true);
+        expect(subHeading(wrapper, "Commanded rate")).toBeTruthy();
+    });
+
+    it("draws the rate against its bounds, from the pad's own rim rate (L-36)", () => {
+        // 30 is `YonderAimPad`'s own exported MAX_RATE — the fastest this pad
+        // can ask for — and it is imported rather than written down twice.
+        // The payload states no maximum of the gimbal's own; see
+        // `YonderAim.vue`'s doc comment on the rate block.
+        const { wrapper } = mountAim(makeReport());
+        const bounds = wrapper.find(".y-aimpanel__rate-b");
+        expect(bounds.exists()).toBe(true);
+        const ends = bounds.findAll("span").map((e) => e.text());
+        expect(ends).toEqual(["0", "30 °/s"]);
+    });
+
+    it("keeps the rate's ceiling and the rate the pad emits the same number", async () => {
+        // Proves the bound is the pad's own, not a `30` typed beside it: push
+        // to the rim and the reading has to reach exactly the stated ceiling.
+        const { wrapper } = mountAim(makeReport());
+        const ceiling = wrapper.find(".y-aimpanel__rate-b").findAll("span")[1]!.text();
+        press(dial(wrapper), 44, 0);
+        await wrapper.vm.$nextTick();
+        expect(`${rateValue(wrapper).text().replace("°/s", "")} °/s`).toBe(ceiling);
+    });
+});
+
+describe("the mode control, and the fact where it cannot be drawn", () => {
+    it("offers exactly the modes the device states", () => {
+        const { wrapper } = mountAim(makeReport({ modes: ["Follow", "Tilt lock", "FPV"] }));
+        expect(wrapper.findAll(".y-seg__opt").map((b) => b.text()))
+            .toEqual(["Follow", "Tilt lock", "FPV"]);
+        expect(wrapper.text()).not.toContain("has not said what it can be set to");
+    });
+
+    it("draws no control at all when the device states no modes (R-UI-20)", () => {
+        // K-63's fourth part. `aimPanel` answers `modes: []` because §8.7's
+        // `0x44` enumeration is unbuilt, and an empty labelled group is a
+        // control offering nothing.
+        const { wrapper } = mountAim(makeReport({ modes: [] }));
+        expect(wrapper.find(".y-seg").exists()).toBe(false);
+        expect(wrapper.find(".y-seg__group").exists()).toBe(false);
+    });
+
+    it("states the fact where the control would have been, naming the mode it is in", () => {
+        // The other half of R-UI-20: never simply absent. Before this the
+        // control vanished silently and the panel said nothing at all where
+        // the blueprint draws three modes.
+        const { wrapper } = mountAim(makeReport({ mode: "Follow", modes: [] }));
+        const fact = wrapper.find(".y-aimpanel__nomode");
+        expect(fact.exists(), "no fact drawn where the mode control would have been").toBe(true);
+        expect(fact.find(".y-aimpanel__nomode-l").text()).toBe("Gimbal mode");
+        expect(fact.find(".y-aimpanel__nomode-v").text())
+            .toBe("Follow — and this gimbal has not said what it can be set to");
+    });
+
+    it("puts the fact exactly where the control would have been", () => {
+        // Under the commanded rate and over the mode sentence, in the row the
+        // control holds when there is one — not appended somewhere else.
+        const { wrapper } = mountAim(makeReport({ mode: "Follow", modes: [] }));
+        const fact = wrapper.find(".y-aimpanel__nomode").element;
+        expect(drawnBefore(wrapper.find(".y-aimpanel__rate").element, fact)).toBe(true);
+        expect(drawnBefore(fact, wrapper.find(".y-aimpanel__modeline").element)).toBe(true);
+    });
+
+    it("states what was reported, and never that the gimbal has no other mode", () => {
+        // `modes: []` is a gimbal that has not listed its modes. Saying it
+        // has none would be this console answering a question nothing asked.
+        const { wrapper } = mountAim(makeReport({ mode: "", modes: [] }));
+        expect(wrapper.find(".y-aimpanel__nomode-v").text())
+            .toBe("this gimbal has not said what it can be set to");
+        expect(wrapper.text()).not.toContain("Tilt lock");
+        expect(wrapper.text()).not.toContain("FPV");
     });
 });
 
@@ -306,10 +444,30 @@ describe("the RATE CONTROL / NOT ANSWERING badge", () => {
     });
 });
 
-describe("the mode sentence", () => {
-    it("states the current mode as a full sentence", () => {
+describe("the mode sentence says what the mode does, under the control", () => {
+    it("says what the mode does, not what it is called", () => {
         const { wrapper } = mountAim(makeReport({ mode: "Tilt lock" }));
-        expect(wrapper.text()).toContain("Gimbal mode: Tilt lock.");
+        expect(wrapper.find(".y-aimpanel__modeline").text()).toBe(SAYS.tiltLock);
+        // The name is already on the button above it. Restating it there was
+        // L-38's drift: `Gimbal mode: Tilt lock.` told an operator nothing
+        // the control did not already say.
+        expect(wrapper.find(".y-aimpanel__modeline").text()).not.toContain("Gimbal mode:");
+    });
+
+    it("reads the device's own word for the mode whatever case it sends it in", () => {
+        // `aimPanel` answers the DJI probe's own lower-case `follow`; this
+        // file's fixtures say `Follow`. One mode, one sentence.
+        expect(mountAim(makeReport({ mode: "follow" })).wrapper.text()).toContain(SAYS.follow);
+        expect(mountAim(makeReport({ mode: "Follow" })).wrapper.text()).toContain(SAYS.follow);
+    });
+
+    it("sits below the segmented control, not above it", () => {
+        // L-39. Above it, the sentence explained a control the operator had
+        // not reached yet.
+        const { wrapper } = mountAim(makeReport({ mode: "Follow" }));
+        const control = wrapper.find(".y-seg").element;
+        const sentence = wrapper.find(".y-aimpanel__modeline").element;
+        expect(drawnBefore(control, sentence)).toBe(true);
     });
 
     it("draws nothing where the sentence would be when no mode is reported", () => {
@@ -317,13 +475,22 @@ describe("the mode sentence", () => {
         expect(wrapper.find(".y-aimpanel__modeline").exists()).toBe(false);
     });
 
+    it("says nothing about a mode nobody has written a sentence for, rather than inventing one", () => {
+        // The mode itself is not lost — the control marks it — but what it
+        // *does* is a fact about a gimbal this project has not seen.
+        const { wrapper } = mountAim(makeReport({ mode: "Sport", modes: ["Follow", "Sport"] }));
+        expect(wrapper.find(".y-aimpanel__modeline").exists()).toBe(false);
+        const on = wrapper.findAll(".y-seg__opt").find((b) => b.classes().includes("on"));
+        expect(on?.text()).toBe("Sport");
+    });
+
     it("the sentence stays even when there is no selectable control beneath it", () => {
-        // modes: [] hides YonderSegmented's own control entirely (its own
-        // "not-offered draws nothing" rule) but the current mode is still a
-        // reading, not a control, and states it regardless.
+        // modes: [] replaces the control with a stated fact (below), but the
+        // current mode is still a reading rather than a control and what it
+        // does is still worth saying.
         const { wrapper } = mountAim(makeReport({ mode: "Follow", modes: [] }));
         expect(wrapper.find(".y-seg").exists()).toBe(false);
-        expect(wrapper.text()).toContain("Gimbal mode: Follow.");
+        expect(wrapper.text()).toContain(SAYS.follow);
     });
 
     it("changing the mode control posts { mode } through the socket", async () => {
@@ -421,6 +588,46 @@ describe("inhibited shows the reason, and the pad emits nothing", () => {
     it("shows the reason while present but inhibited", () => {
         const { wrapper } = mountAim(makeReport({ inhibited: REASON }));
         expect(wrapper.text()).toContain(REASON);
+    });
+
+    /**
+     * K-63's second part. `effectiveReason` and the pad's own `inhibited`
+     * are both true here and both resolved to this same sentence, so an
+     * operator read it above the dial and again below it. It is said once,
+     * at the head, and the second assertion is the one that matters: a fix
+     * that silenced the *head* instead would leave the count at one and
+     * move the panel's own fact under the dial, where it heads nothing.
+     */
+    it("says the reason exactly once, at the head, and not again under the dial", () => {
+        // The state the gate photographs (`scripts/fixtures/camera-pair.json`
+        // through `aimPanel()`): a gimbal answering `present` under §8.7's
+        // unbuilt-guard inhibition, with a known envelope and `modes: []`.
+        // The head and the pad both resolved to this sentence and both drew
+        // it, 40 px apart.
+        const { wrapper } = mountAim(makeReport({ inhibited: REASON, modes: [] }));
+        expect(times(wrapper.text(), REASON)).toBe(1);
+        expect(reasonLine(wrapper).text()).toBe(REASON);
+        expect(wrapper.find(".y-aim__reason").exists()).toBe(false);
+    });
+
+    it("silences the pad's sentence without loosening the pad's guard", () => {
+        // The suppression is the drawn note, never the guard: the press must
+        // still be refused with nothing written under the dial.
+        const { wrapper, emit } = mountAim(makeReport({ inhibited: REASON }));
+        expect(wrapper.find(".y-aim__reason").exists()).toBe(false);
+        press(dial(wrapper), 40, 0);
+        drag(dial(wrapper), 44, 0);
+        expect(emit).not.toHaveBeenCalled();
+    });
+
+    it("keeps the pad's own short sentence where the head is saying a different one", () => {
+        // Not present: the head carries the device's own full reason and the
+        // pad says `not answering`. Two different sentences, one each — the
+        // arrangement Task 23 chose, and the reason the fix above is keyed on
+        // which state the panel is in rather than on comparing two strings.
+        const { wrapper } = mountAim(makeReport({ state: "advertised", reason: "no motor behind either" }));
+        expect(reasonLine(wrapper).text()).toBe("no motor behind either");
+        expect(wrapper.find(".y-aim__reason").text()).toBe("not answering");
     });
 
     it("a press on the pad emits no slew and no stop through this panel's own socket", () => {
