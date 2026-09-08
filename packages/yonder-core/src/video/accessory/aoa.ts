@@ -320,8 +320,42 @@ export interface AccessorySessionOptions {
   readonly onError?: (error: Error) => void;
 }
 
+export interface AccessoryCommandOptions {
+  /**
+   * Cancels this command independently of the link. It is checked when the
+   * serialized writer actually reaches the command, so an expired gesture
+   * cannot move after waiting behind backpressure.
+   */
+  readonly signal?: AbortSignal;
+}
+
 function asError(reason: unknown): Error {
   return reason instanceof Error ? reason : new Error(String(reason));
+}
+
+function combineAbortSignals(
+  session: AbortSignal,
+  command: AbortSignal | undefined,
+): { readonly signal: AbortSignal; dispose(): void } {
+  if (command === undefined) return { signal: session, dispose: () => undefined };
+  const controller = new AbortController();
+  const dispose = (): void => {
+    session.removeEventListener("abort", sessionAborted);
+    command.removeEventListener("abort", commandAborted);
+  };
+  const abortFrom = (signal: AbortSignal): void => {
+    if (!controller.signal.aborted) controller.abort(signal.reason);
+    dispose();
+  };
+  const sessionAborted = (): void => { abortFrom(session); };
+  const commandAborted = (): void => { abortFrom(command); };
+  if (session.aborted) abortFrom(session);
+  else if (command.aborted) abortFrom(command);
+  else {
+    session.addEventListener("abort", sessionAborted, { once: true });
+    command.addEventListener("abort", commandAborted, { once: true });
+  }
+  return { signal: controller.signal, dispose };
 }
 
 export class AccessorySession {
@@ -391,11 +425,17 @@ export class AccessorySession {
     }
   }
 
-  sendCommand(command: Omit<DumlCommand, "sequence">): Promise<void> {
+  sendCommand(
+    command: Omit<DumlCommand, "sequence">,
+    options: AccessoryCommandOptions = {},
+  ): Promise<void> {
     if (!this.linkEnabled) return Promise.reject(new Error("accessory link is not enabled"));
+    if (options.signal?.aborted === true) {
+      return Promise.reject(asError(options.signal.reason ?? "accessory command aborted"));
+    }
     const frame = encodeDuml({ ...command, sequence: this.sequence });
     this.sequence = (this.sequence + 1) & 0xffff;
-    return this.writeFrame(frame);
+    return this.writeFrame(frame, options.signal);
   }
 
   /** Feed bytes read from the enabled FunctionFS bulk OUT endpoint. */
@@ -453,21 +493,27 @@ export class AccessorySession {
     this.stop("accessory session closed");
   }
 
-  private writeFrame(frame: Uint8Array): Promise<void> {
+  private writeFrame(frame: Uint8Array, commandSignal?: AbortSignal): Promise<void> {
     if (!this.linkEnabled) return Promise.reject(new Error("accessory link is not enabled"));
     const generation = this.generation;
-    const signal = this.abort.signal;
+    const sessionSignal = this.abort.signal;
+    const combined = combineAbortSignals(sessionSignal, commandSignal);
     const envelope = encodeAoaEnvelope(AOA_COMMAND_ROUTE, frame);
     const pending = this.writeTail.then(async () => {
-      if (!this.linkEnabled || generation !== this.generation || signal.aborted) {
-        throw asError(signal.reason ?? "accessory session disconnected");
+      try {
+        if (!this.linkEnabled || generation !== this.generation || combined.signal.aborted) {
+          throw asError(combined.signal.reason ?? "accessory session disconnected");
+        }
+        await this.transport.write(envelope, combined.signal);
+      } finally {
+        combined.dispose();
       }
-      await this.transport.write(envelope, signal);
     });
     this.writeTail = pending.catch(() => undefined);
     return pending.catch((reason: unknown) => {
       const error = asError(reason);
-      if (this.linkEnabled && generation === this.generation && !signal.aborted) {
+      if (this.linkEnabled && generation === this.generation
+        && !sessionSignal.aborted && commandSignal?.aborted !== true) {
         this.report(error);
         this.stop("accessory session disconnected after transport error");
       }

@@ -259,6 +259,58 @@ describe("AccessorySession", () => {
     await vi.advanceTimersByTimeAsync(10_000);
   });
 
+  it("rechecks a command's abort signal when a blocked queue reaches it", async () => {
+    const writes: Uint8Array[] = [];
+    let release: (() => void) | undefined;
+    const transport: AoaBulkTransport = {
+      write: async (data) => {
+        writes.push(data.slice());
+        if (writes.length === 1) await new Promise<void>((resolve) => { release = resolve; });
+      },
+    };
+    const session = new AccessorySession({ transport });
+    session.enable();
+    const blocker = session.sendCommand({ commandSet: 2, commandId: 1 });
+    await flush();
+    const gesture = new AbortController();
+    const stale = session.sendCommand(
+      { commandSet: 4, commandId: 0x0c, payload: bytes("64 00 00 00 00 00 80") },
+      { signal: gesture.signal },
+    );
+    gesture.abort(new Error("gesture ended"));
+    release?.();
+
+    await blocker;
+    await expect(stale).rejects.toThrow("gesture ended");
+    expect(writtenCommands(writes).map((frame) => frame?.commandId)).toEqual([1]);
+    expect(session.enabled).toBe(true);
+    session.close();
+  });
+
+  it("combines a command abort with the session signal for an active write", async () => {
+    let active: AbortSignal | undefined;
+    const transport: AoaBulkTransport = {
+      write: (_data, signal) => new Promise<void>((_resolve, reject) => {
+        active = signal;
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      }),
+    };
+    const session = new AccessorySession({ transport });
+    session.enable();
+    const gesture = new AbortController();
+    const pending = session.sendCommand(
+      { commandSet: 4, commandId: 0x0c, payload: bytes("64 00 00 00 00 00 80") },
+      { signal: gesture.signal },
+    );
+    await flush();
+    expect(active?.aborted).toBe(false);
+    gesture.abort(new Error("lease expired"));
+    await expect(pending).rejects.toThrow("lease expired");
+    expect(active?.aborted).toBe(true);
+    expect(session.enabled).toBe(true);
+    session.close();
+  });
+
   it("surfaces transport and malformed-input errors and stops the link", async () => {
     const errors: Error[] = [];
     const session = new AccessorySession({

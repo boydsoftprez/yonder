@@ -31,6 +31,9 @@ Status: DONE
   - Writes are serialized. `disconnect()` and `close()` clear liveness timers,
     abort the active write, invalidate queued writes and discard partial input.
     Transport and parser errors reach `onError`; close is permanent.
+  - `sendCommand` accepts a per-command `AbortSignal`. It is combined with the
+    session signal for an active write and checked again at actual serialized
+    dispatch, so expired motion queued behind backpressure cannot be sent.
 
 No gimbal motion command or camera-control policy is present. No daemon,
 FunctionFS file-descriptor adapter, flow or hardware integration was added.
@@ -69,7 +72,7 @@ This demonstrates why both the fixed references and round trips are present.
 
 ```text
 npx vitest run src/video/accessory/duml.test.ts src/video/accessory/aoa.test.ts --root packages/yonder-core
-2 files passed; 24 tests passed
+2 files passed; 26 tests passed
 
 npm run build -w yonder-core
 exit 0; TypeScript and asset copy passed
@@ -86,5 +89,5 @@ not in that path. `flows.test.ts` passed on this rebased base.
 
 Self-review checked the brief line by line, malformed-length recovery, split
 magic, exact Python descriptor bytes, input bounds, callback separation,
-timer lifecycle, abort propagation, address reversal and the absence of any
-motion-producing path.
+timer lifecycle, session and per-command abort propagation, dispatch-time
+admission, address reversal and the absence of any motion-producing path.
