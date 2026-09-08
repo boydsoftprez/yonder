@@ -13,6 +13,9 @@ export const fmt = (value, digits = 0) => finite(value) ? value.toLocaleString('
 }) : '—';
 export const validPosition = p => finite(p?.lat) && finite(p?.lon) && Math.abs(p.lat) <= 90 && Math.abs(p.lon) <= 180;
 export function agedTelemetry(source = {}, elapsed = 0) {
+  // A packet can arrive between UI clock ticks. Negative elapsed time must not
+  // turn a fresh zero-age sample into invalid negative-age data for one frame.
+  elapsed=Number.isFinite(elapsed)?Math.max(0,elapsed):Infinity;
   const telemetry = {
     ...source,
     ready: source.ready === true && elapsed < 2000
@@ -22,11 +25,14 @@ export function agedTelemetry(source = {}, elapsed = 0) {
     const ttl = slow.has(key) ? 5000 : ['mode', 'customMode', 'armed'].includes(key) ? 3000 : 2000;
     if (metadata.valid === false || (finite(metadata.ageMs) && metadata.ageMs + elapsed >= ttl)) telemetry[key] = null;
   }
-  for (const key of ['navController', 'positionTarget'])
+  for (const key of ['navController', 'positionTarget', 'turnRate', 'slipSkid'])
     if (source[key]) telemetry[key] = source[key].ageMs + elapsed < 2000 ? {
       ...source[key],
       ageMs: source[key].ageMs + elapsed
     } : null;
+  if(source.wind) telemetry.wind={...source.wind,ageMs:source.wind.ageMs+elapsed};
+  if(source.estimatedTrueAirspeed) telemetry.estimatedTrueAirspeed={...source.estimatedTrueAirspeed,
+    velocityAgeMs:source.estimatedTrueAirspeed.velocityAgeMs+elapsed,windAgeMs:source.estimatedTrueAirspeed.windAgeMs+elapsed};
   telemetry.fdReady=source.fdReady===true&&typeof telemetry.mode==='string'&&finite(telemetry.customMode)&&finite(telemetry.navRollDeg)&&finite(telemetry.navPitchDeg);
   return telemetry;
 }

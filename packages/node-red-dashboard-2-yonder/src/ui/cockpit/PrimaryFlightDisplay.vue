@@ -43,6 +43,10 @@
         <path d="M181.436 145 A160 160 0 0 1 458.564 145" fill="none"/>
         <line v-for="mark in bankMarks" :key="mark" x1="320" y1="65" x2="320" :y2="mark%30===0?44:53" :transform="'rotate('+mark+' 320 225)'"/>
         <path d="M312 36 L328 36 L320 48 Z" fill="white" stroke="none"/>
+        <g v-if="options.standardRatePointers!==false&&turnCues.bankDeg!==null" class="pfd-standard-rate-bank" :aria-label="`Standard-rate bank ${turnCues.bankDeg.toFixed(1)} degrees, based on estimated true airspeed`">
+          <path v-for="side in [-1,1]" :key="side" d="M320 64 L313 52 H327 Z" :transform="`rotate(${side*turnCues.bankDeg} 320 225)`" fill="#51ff68" stroke="#09280f" stroke-width="1.5"/>
+          <text x="320" y="96" text-anchor="middle" fill="#51ff68" stroke="#09280f" stroke-width="2" paint-order="stroke" font-size="10">STD · EST TAS</text>
+        </g>
         <path v-if="flight.attitudeValid" d="M320 65 L311 80 L329 80 Z" fill="white" stroke="#263744" :transform="'rotate('+(-displayFlight.roll)+' 320 225)'"/>
       </g>
       <g class="pfd-aircraft-reference" fill="#fff348" stroke="#26210a" stroke-width="2.5">
@@ -99,7 +103,7 @@
       </g>
       <g v-if="!flight.attitudeValid" class="pfd-attitude-fail"><path d="M170 120 L470 320 M470 120 L170 320" stroke="#ff5353" stroke-width="5"/><rect x="219" y="270" width="202" height="33" fill="#210c0c"/><text x="320" y="293" text-anchor="middle" fill="#ffd28e">ATTITUDE UNAVAILABLE</text></g>
       <line :x1="viewport.x" y1="396" :x2="viewport.x+viewport.width" y2="396" stroke="#394b5d" stroke-opacity=".25"/>
-      <g transform="translate(320 518)">
+      <g class="pfd-hsi" transform="translate(320 518)">
         <circle r="108" fill="#08131f" :fill-opacity="options.hsiOpacity" stroke="#d4dee4" stroke-width="3"/>
         <circle r="59" fill="none" stroke="#d4dee4" stroke-opacity=".7" stroke-width="1.5"/>
         <g class="pfd-compass-card" :transform="'rotate('+(-(displayFlight.heading??0))+')'" :opacity="flight.heading===null?.2:1">
@@ -120,6 +124,7 @@
         <path d="M0 -15 L4 -3 L19 6 V9 L3 4 L3 18 L8 22 V24 L0 21 L-8 24 V22 L-3 18 L-3 4 L-19 9 V6 L-4 -3 Z" fill="white" stroke="#08111c"/>
         <path d="M0 -109 L-7 -120 H7 Z" fill="white"/>
         <text v-if="radialValid" x="0" y="42" text-anchor="middle" class="pfd-radial-label">LOITER</text>
+        <PfdTurnRate v-if="options.turnRate!==false" :state="turnCues"/>
       </g>
       <rect x="272" y="402" width="96" height="31" class="pfd-readout-box"/><text x="320" y="425" text-anchor="middle" class="pfd-heading-value">{{angle(flight.heading)}}</text>
       <g class="pfd-secondary">
@@ -130,7 +135,7 @@
         <g v-if="options.secondary"><text x="616" y="530" text-anchor="end">{{bearingValid?'BEARING':guidance.trackTitle||'DESIRED TRACK'}}</text><text x="616" y="556" text-anchor="end" class="pfd-secondary-value">{{navValid?angle(guidance.desiredTrackDeg):radialValid?angle(guidance.pathBearingDeg):bearingValid?angle(guidance.bearingDeg):'—'}}</text></g>
         <text x="320" y="638" text-anchor="middle">HEADING · TRUE NORTH</text>
       </g>
-      <g class="pfd-reference-labels"><text v-if="references.airspeed!==null" :x="25-viewport.edgeShift" y="22">REF {{fixed(references.airspeed)}} KT</text><text v-if="references.altitude!==null" :x="587+viewport.edgeShift" y="22" text-anchor="end">REF {{fixed(references.altitude)}} FT</text><text v-if="references.heading!==null" x="320" y="382" text-anchor="middle">HDG REF {{angle(references.heading)}}</text><text v-if="references.vsi!==null" x="25" y="495">REF {{fixed(references.vsi)}} FPM</text></g>
+      <g class="pfd-reference-labels"><text v-if="references.airspeed!==null" :x="25-viewport.edgeShift" y="22">REF {{fixed(references.airspeed)}} KT</text><text v-if="references.altitude!==null" :x="587+viewport.edgeShift" y="22" text-anchor="end">REF {{fixed(references.altitude)}} FT</text><text v-if="references.heading!==null" x="424" y="382" text-anchor="middle">HDG REF {{angle(references.heading)}}</text><text v-if="references.vsi!==null" x="25" y="495">REF {{fixed(references.vsi)}} FPM</text></g>
     </svg>
     <div class="pfd-touch-surfaces" role="group" aria-label="Touch flight instruments">
       <button class="pfd-hotspot pfd-touch-speed" :style="hit([6-viewport.edgeShift,35,124,355])" aria-label="Airspeed controls" @click="open('airspeed')"><span>IAS</span></button>
@@ -142,7 +147,7 @@
       <button class="pfd-hotspot pfd-touch-navigation" :style="hit([446,418,188,170])" aria-label="PFD mission navigation" @click="open('nav')"><span>NAVIGATION</span></button>
       <button class="pfd-hotspot pfd-touch-bank" :style="hit([6,514,185,77])" aria-label="Pitch and bank display settings" @click="open('attitude')"><span>ATTITUDE</span></button>
     </div>
-    <PfdSkidBall v-if="options.skidBall!==false" :telemetry="telemetry" :style="hit([240,83,160,30])" @open="open('slip')"/>
+    <PfdSkidBall v-if="options.skidBall!==false" :telemetry="telemetry" :style="{...hit([264,365,112,44]),transform:'translateY(-50%)'}" @open="open('slip')"/>
     <PfdWindDisplay v-if="options.windDisplay!=='off'" :telemetry="telemetry" :mode="options.windDisplay||'components'" :style="hit([130-viewport.edgeShift,302,128,86])" @open="open('wind')"/>
     <div v-if="!flight.live" class="pfd-loss" role="status">Flight instruments unavailable</div>
     </div>
@@ -178,6 +183,8 @@ import TelemetryStrip from './TelemetryStrip.vue';
 import FlightModeAnnunciator from './FlightModeAnnunciator.vue';
 import PfdWindDisplay from './PfdWindDisplay.vue';
 import PfdSkidBall from './PfdSkidBall.vue';
+import PfdTurnRate from './PfdTurnRate.vue';
+import {turnCueState} from './turn-cues.mjs';
 import {pfdViewport,pfdHitRegion} from './flight-workflow.mjs';
 
 import {
@@ -195,7 +202,8 @@ export default {
     TelemetryStrip,
     FlightModeAnnunciator,
     PfdWindDisplay,
-    PfdSkidBall
+    PfdSkidBall,
+    PfdTurnRate
   },
   props: ['flight', 'guidance', 'telemetry', 'cdiScale', 'references', 'options', 'mission', 'trafficTracks',
     'trafficOptions', 'trafficSelected', 'trafficNow', 'backgroundReady', 'backgroundLabel', 'terrainReport', 'snapshot'
@@ -347,6 +355,7 @@ export default {
       terrainStatus,
       terrainReady,
       director,
+      turnCues: computed(()=>turnCueState(props.telemetry)),
       refOffset
     };
   }

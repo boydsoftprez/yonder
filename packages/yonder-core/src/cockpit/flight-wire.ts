@@ -16,6 +16,10 @@ export interface FlightWire {
   w?: [number,number,number] | null;
   /** Optional acceleration: lateral g, normal g, sample age, source message ID. */
   i?: [number,number,number,26|27] | null;
+  /** Heading deg/sec and age; optional, preserving the v1 scalar column order. */
+  tr?: [number,number] | null;
+  /** Estimated TAS knots, ground-velocity age, wind age. */
+  tas?: [number,number,number] | null;
 }
 export function packFlight(snapshot:VehicleSnapshot,detailKey:string):FlightWire {
   const t=snapshot.telemetry, src:string[]=[];
@@ -29,7 +33,9 @@ export function packFlight(snapshot:VehicleSnapshot,detailKey:string):FlightWire
     source:t.source,ready:t.ready,fd:t.fdReady,age:t.ageMs,datum:t.altitudeDatum??'UNKNOWN',
     t:FLIGHT_COLUMNS.map(key=>t[key]??null),a,src,n:t.navController,p:t.positionTarget,h:t.homePosition,m:mission,...(snapshot.trail?{r:snapshot.trail}:{}),
     w:t.wind?[t.wind.directionFromDeg,t.wind.speedKt,t.wind.ageMs]:null,
-    i:t.slipSkid?[t.slipSkid.lateralG,t.slipSkid.normalG,t.slipSkid.ageMs,t.slipSkid.source==='SCALED_IMU'?26:27]:null};
+    i:t.slipSkid?[t.slipSkid.lateralG,t.slipSkid.normalG,t.slipSkid.ageMs,t.slipSkid.source==='SCALED_IMU'?26:27]:null,
+    tr:t.turnRate?[t.turnRate.degS,t.turnRate.ageMs]:null,
+    tas:t.estimatedTrueAirspeed?[t.estimatedTrueAirspeed.knots,t.estimatedTrueAirspeed.velocityAgeMs,t.estimatedTrueAirspeed.windAgeMs]:null};
 }
 /** Reconstruct the existing PFD view while refusing another generation's details. */
 export function unpackFlight(wire:FlightWire,details:Partial<VehicleSnapshot>={}):VehicleSnapshot {
@@ -39,6 +45,12 @@ export function unpackFlight(wire:FlightWire,details:Partial<VehicleSnapshot>={}
   const sameMission=sameVehicle&&details.mission?.revision===wire.m.revision;
   const w=wire.w;
   const i=wire.i;
+  const tr=wire.tr, tas=wire.tas;
+  const turnRate:FlightTelemetry['turnRate']=wire.c && Array.isArray(tr) && tr.length===2 && tr.every(Number.isFinite)
+    && Math.abs(tr[0])<=360 && tr[1]>=0 && tr[1]<2000 ? {degS:tr[0],ageMs:tr[1],source:'ATTITUDE'} : null;
+  const estimatedTrueAirspeed:FlightTelemetry['estimatedTrueAirspeed']=wire.c && Array.isArray(tas) && tas.length===3 && tas.every(Number.isFinite)
+    && tas[0]>=0 && tas[0]<=1943.8444924406 && tas[1]>=0 && tas[1]<2000 && tas[2]>=0 && tas[2]<5000
+    ? {knots:tas[0],velocityAgeMs:tas[1],windAgeMs:tas[2],source:'GLOBAL_POSITION_INT/WIND'} : null;
   const slipSkid:FlightTelemetry['slipSkid']=wire.c && Array.isArray(i) && i.length===4 && i.every(Number.isFinite)
     && Math.abs(i[0])<16 && i[1]>.2 && i[1]<16 && i[2]>=0 && i[2]<2000 && [26,27].includes(i[3])
     ? {lateralG:i[0],normalG:i[1],ageMs:i[2],source:i[3]===26?'SCALED_IMU':'RAW_IMU'} : null;
@@ -56,7 +68,7 @@ export function unpackFlight(wire:FlightWire,details:Partial<VehicleSnapshot>={}
   });
   return {at:wire.at,sequence:wire.s,detailKey:wire.d,trail:wire.r,identity:sameVehicle?details.identity??null:null,connected:wire.c,ready:wire.c,busy:wire.b,
     telemetry:{...values,source:wire.source,ready:wire.ready,fdReady:wire.fd,ageMs:wire.age,altitudeDatum:wire.datum,
-      fields,navController:wire.n,positionTarget:wire.p,homePosition:wire.h,wind,slipSkid} as FlightTelemetry,
+      fields,navController:wire.n,positionTarget:wire.p,homePosition:wire.h,wind,slipSkid,turnRate,estimatedTrueAirspeed} as FlightTelemetry,
     mission:{...wire.m,currentFresh:wire.m.currentFresh&&sameMission,items:sameMission?details.mission!.items:[]},
     operations:sameVehicle?details.operations??[]:[],statustext:sameVehicle?details.statustext??[]:[],
     capabilities:sameVehicle&&details.capabilities?details.capabilities:{modes:[],commands:[],flightControl:[],terrainTargets:false,signing:'unsigned-only'}};

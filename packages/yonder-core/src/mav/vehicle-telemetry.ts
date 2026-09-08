@@ -15,7 +15,9 @@ export class VehicleTelemetry {
   private nav: { value: Omit<NavController, "ageMs">; at: number } | null = null;
   private target: { value: Omit<PositionTarget, "ageMs">; at: number } | null = null;
   private home: { value: { lat: number; lon: number; alt: number }; at: number } | null = null;
-  private wind: { directionFromDeg: number; speedKt: number; at: number } | null = null;
+  private wind: { directionFromDeg: number; speedKt: number; downMps: number | null; at: number } | null = null;
+  private velocity: { north: number; east: number; down: number; at: number } | null = null;
+  private turn: { degS: number; at: number } | null = null;
   private acceleration: (Omit<SlipSkidSample, "ageMs"> & { at: number }) | null = null;
   private accelHealth: { healthy: boolean; at: number } | null = null;
   private put(values: Partial<Record<Scalar, Sample["value"]>>, source: string, now: number, ttl = 2000) {
@@ -30,13 +32,18 @@ export class VehicleTelemetry {
       this.put({ customMode: m.customMode, mode: isPlane(identity) ? PLANE_MODES[m.customMode] ?? `Mode ${m.customMode}` : `Mode ${m.customMode}`, armed: !!(m.baseMode & 128) }, "HEARTBEAT", now, 3000);
     } else if (m instanceof common.Attitude) {
       this.put({ rollDeg: range(m.roll * 180 / Math.PI, -180, 180), pitchDeg: range(m.pitch * 180 / Math.PI, -90, 90), yawRateDegS: clean(m.yawspeed * 180 / Math.PI) }, "ATTITUDE", now);
+      // Euler heading derivative from body q/r. Near vertical pitch it is singular.
+      const valid = [m.roll, m.pitch, m.pitchspeed, m.yawspeed].every(Number.isFinite)
+        && Math.abs(m.roll) <= Math.PI && Math.abs(m.pitch) < 85 * Math.PI / 180;
+      const degS = valid ? (m.pitchspeed * Math.sin(m.roll) + m.yawspeed * Math.cos(m.roll)) / Math.cos(m.pitch) * 180 / Math.PI : NaN;
+      this.turn = range(degS, -360, 360) !== null ? { degS, at: now } : null;
     } else if (m instanceof common.VfrHud) {
       this.put({ airspeedKt: range(m.airspeed, 0, 1000) === null ? null : m.airspeed * 1.9438444924406, groundspeedKt: range(m.groundspeed, 0, 1000) === null ? null : m.groundspeed * 1.9438444924406,
         altitudeFt: clean(m.alt * 3.2808398950131), verticalSpeedFpm: clean(m.climb * 196.85039370079), headingDeg: range(m.heading, 0, 360), throttlePercent: range(m.throttle, 0, 100) }, "VFR_HUD (estimated MSL altitude)", now);
     } else if (m instanceof ardupilotmega.Wind && isPlane(identity)) {
       // ArduPlane reports a signed true-north FROM bearing (atan2(-east,-north)).
       this.wind = range(m.direction, -360, 360) !== null && range(m.speed, 0, 1000) !== null
-        ? { directionFromDeg: (m.direction + 360) % 360, speedKt: m.speed * 1.9438444924406, at: now } : null;
+        ? { directionFromDeg: (m.direction + 360) % 360, speedKt: m.speed * 1.9438444924406, downMps: range(m.speedZ, -1000, 1000), at: now } : null;
     } else if (isPlane(identity) && (m instanceof common.ScaledImu || (m instanceof common.RawImu && m.id === 0))) {
       // ArduPilot GCS_Common emits calibrated body-frame milli-g for both IMU-0
       // messages. RAW_IMU units are not assumed for other autopilot families.
@@ -44,6 +51,8 @@ export class VehicleTelemetry {
         && Math.abs(m.yacc) < 16000 && m.zacc < -200 && m.zacc > -16000
         ? { lateralG: m.yacc / 1000, normalG: -m.zacc / 1000, at: now, source: m instanceof common.ScaledImu ? "SCALED_IMU" : "RAW_IMU" } : null;
     } else if (m instanceof common.GlobalPositionInt) {
+      this.velocity = positionValid(m.lat / 1e7, m.lon / 1e7) && [m.vx, m.vy, m.vz].every(Number.isFinite)
+        ? { north: m.vx / 100, east: m.vy / 100, down: m.vz / 100, at: now } : null;
       this.put({ latitude: range(m.lat / 1e7, -90, 90), longitude: range(m.lon / 1e7, -180, 180), globalAltitudeM: m.alt / 1000, relativeAltitudeM: m.relativeAlt / 1000,
         trackDeg: Math.hypot(m.vx, m.vy) >= 50 ? (Math.atan2(m.vy, m.vx) * 180 / Math.PI + 360) % 360 : null }, "GLOBAL_POSITION_INT (fused position)", now);
     } else if (m instanceof common.GpsRawInt) {
@@ -86,8 +95,17 @@ export class VehicleTelemetry {
     const a = this.acceleration, health = this.accelHealth;
     const slipSkid = connected && a && health?.healthy && now >= health.at && now - health.at < 5000 && now >= a.at && now - a.at < 2000
       ? { lateralG: a.lateralG, normalG: a.normalG, source: a.source, ageMs: now - a.at } : null;
+    const turnRate = connected && this.turn && now >= this.turn.at && now - this.turn.at < 2000
+      ? { degS: this.turn.degS, ageMs: now - this.turn.at, source: "ATTITUDE" as const } : null;
+    const v = this.velocity, w = this.wind;
+    let estimatedTrueAirspeed: FlightTelemetry['estimatedTrueAirspeed'] = null;
+    if (connected && isPlane(identity) && wind && w?.downMps !== null && w && v && now >= v.at && now - v.at < 2000) {
+      const bearing = w.directionFromDeg * Math.PI / 180, speed = w.speedKt / 1.9438444924406;
+      const knots = Math.hypot(v.north + speed * Math.cos(bearing), v.east + speed * Math.sin(bearing), v.down - w.downMps) * 1.9438444924406;
+      if (range(knots, 0, 1943.8444924406) !== null) estimatedTrueAirspeed = { knots, velocityAgeMs: now - v.at, windAgeMs: now - w.at, source: "GLOBAL_POSITION_INT/WIND" };
+    }
     return { ...values, source: "MAVLink", ready, ageMs: Number.isFinite(at) ? now - at : null, fdReady,
       navRollDeg: fdReady ? values.navRollDeg : null, navPitchDeg: fdReady ? values.navPitchDeg : null,
-      navController: nav, positionTarget: target, homePosition: connected && this.home ? { ...this.home.value } : null, wind, slipSkid, fields } as FlightTelemetry;
+      navController: nav, positionTarget: target, homePosition: connected && this.home ? { ...this.home.value } : null, wind, slipSkid, turnRate, estimatedTrueAirspeed, fields } as FlightTelemetry;
   }
 }

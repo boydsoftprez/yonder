@@ -40,6 +40,13 @@
       </div>
       <div v-else-if="kind==='slip'" class="pfd-options">
         <label class="pfd-option"><span>Show skid ball</span><input type="checkbox" aria-label="Show skid ball" :checked="options.skidBall!==false" @change="$emit('option','skidBall',$event.target.checked)"></label>
+        <label class="pfd-option"><span>Standard-rate bank pointers<small>Green pointers on the upper roll scale</small></span><input type="checkbox" aria-label="Standard-rate bank pointers" :checked="options.standardRatePointers!==false" @change="$emit('option','standardRatePointers',$event.target.checked)"></label>
+        <label class="pfd-option"><span>HSI turn-rate arc<small>Magenta six-second heading trend</small></span><input type="checkbox" aria-label="HSI turn-rate arc" :checked="options.turnRate!==false" @change="$emit('option','turnRate',$event.target.checked)"></label>
+        <dl class="pfd-data-list"><div><dt>Measured turn</dt><dd>{{turn.degS===null?'—':fmt(Math.abs(turn.degS),1)+'°/s '+(turn.degS===0?'':turn.degS<0?'LEFT':'RIGHT')}}</dd></div><div><dt>Estimated true airspeed</dt><dd>{{fmt(turn.tas,1)}} KT</dd></div><div><dt>Standard-rate bank</dt><dd>{{turn.bankDeg===null?'—':'±'+fmt(turn.bankDeg,1)+'°'}}</dd></div></dl>
+        <p v-if="turn.bankReason" class="pfd-control-note" role="status">BANK POINTERS · {{turn.bankReason}}</p>
+        <p v-if="turn.degS===null" class="pfd-control-note" role="status">TURN RATE · {{turn.rateReason}}</p>
+        <p class="pfd-control-note">The inner compass marks are half-standard rate (1.5°/s); the outer marks are standard rate (3°/s, a two-minute circle). The magenta arc shows six seconds of measured heading change. An arrow at the end means more than 4°/s.</p>
+        <p class="pfd-control-note">Green pointers show the bank for a coordinated, level standard-rate turn. They use estimated true airspeed from ground velocity minus the autopilot's wind estimate, whose confidence is unknown. Following the G3X behavior, they hide below 50 KT or without fresh data. They are a reference, not a flight-director command.</p>
         <p class="pfd-control-note">The ball follows the sideways force felt in the aircraft. Between the two marks means coordinated flight, including during a banked turn. Wind or a difference between heading and ground track does not by itself move the ball.</p>
         <dl class="pfd-data-list" v-if="slip.available"><div><dt>Lateral acceleration</dt><dd>{{fmt(slip.lateralG,2)}} g</dd></div><div><dt>Normal load</dt><dd>{{fmt(slip.normalG,2)}} g</dd></div></dl>
         <p v-else class="pfd-control-note" role="status">SLIP / SKID UNAVAILABLE · {{slip.reason}}</p>
@@ -86,6 +93,7 @@ import {
 } from 'vue';
 import {windState} from './wind-state.mjs';
 import {slipSkidState} from './slip-skid.mjs';
+import {turnCueState} from './turn-cues.mjs';
 import {
   referenceFields,
   parseReference,
@@ -189,6 +197,7 @@ export default {
       root,
       wind: computed(()=>windState(props.telemetry)),
       slip: computed(()=>slipSkidState(props.telemetry)),
+      turn: computed(()=>turnCueState(props.telemetry)),
       input,
       error,
       field,

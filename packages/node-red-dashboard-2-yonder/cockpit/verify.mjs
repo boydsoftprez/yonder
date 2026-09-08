@@ -15,6 +15,16 @@ for(const [name,width,height] of [['laptop',1440,900],['tablet',1024,768],['port
  const skid=page.getByRole('button',{name:'Slip and skid indicator settings',exact:true});
  await skid.waitFor({state:'visible'});
  assert.equal(await skid.locator('.skid-ball').count(),1);
+ assert.equal(await page.locator('.pfd-standard-rate-bank path').count(),2);
+ assert.equal(await page.locator('.turn-tick').count(),4);
+ const ballBounds=await skid.locator('.skid-ball').boundingBox(), headingBounds=await page.locator('.pfd-heading-value').boundingBox();
+ assert.ok(ballBounds.y+ballBounds.height<headingBounds.y,'ball sits above the HSI heading readout');
+ const samples=await page.evaluate(async()=>{
+   const result=[];
+   for(let i=0;i<15;i++){result.push({ball:!!document.querySelector('.skid-ball'),turnMissing:!!document.querySelector('.turn-unavailable')});await new Promise(r=>setTimeout(r,50));}
+   return result;
+ });
+ assert.ok(samples.every(s=>s.ball&&!s.turnMissing),'new zero-age packets must not flash unavailable between UI clock ticks');
  await skid.click();await page.getByRole('dialog',{name:'Slip / skid',exact:true}).waitFor();
  await page.getByRole('button',{name:'Close PFD controls'}).click();
  const wind=page.getByRole('button',{name:'Wind display settings',exact:true});

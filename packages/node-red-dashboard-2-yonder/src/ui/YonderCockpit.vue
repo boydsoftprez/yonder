@@ -724,6 +724,7 @@ export default {
       pendingOperationId: null,
       sending: false,
       error: '',
+      pollError: null,
       predictionMode: 'time',
       predictionSeconds: 30,
       predictionDistance: 1000,
@@ -739,7 +740,7 @@ export default {
       return agedTelemetry(this.snapshot.telemetry || {}, this.elapsed)
     },
     elapsed() {
-      return this.now - this.receivedAt
+      return Math.max(0, this.now - this.receivedAt)
     },
     flight() {
       return flightView({
@@ -984,9 +985,13 @@ export default {
     async poll() {
       if (this.disposed) return;
       try {
-        this.ingest(await this.source.state())
+        const state = await this.source.state();
+        if (this.error === this.pollError) this.error = '';
+        this.pollError = null;
+        this.ingest(state)
       } catch (e) {
-        this.error = e.name === 'AbortError' ? 'Telemetry request timed out' : e.message
+        this.pollError = e.name === 'AbortError' ? 'Telemetry request timed out' : e.message;
+        this.error = this.pollError
       } finally {
         if (!this.disposed) this.pollTimer = setTimeout(() => this.poll(), 1000/this.telemetryRate)
       }

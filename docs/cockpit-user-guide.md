@@ -61,7 +61,7 @@ explicit limitations of GUIDED ownership, not evidence of an active waypoint.
 
 ## Slip / skid ball
 
-The white ball beneath the bank pointer shows the sideways force felt in the
+The white ball immediately above the HSI heading readout shows the sideways force felt in the
 aircraft. In coordinated flight it stays between the two center marks, even
 while banked. Wind and a difference between heading and ground track do not by
 themselves move it. Tap the ball, or use **PFD Menu → Slip / skid**, to inspect
@@ -75,6 +75,25 @@ low or negative normal load also makes this conventional indication unavailable.
 **Aircraft → Request flight telemetry** includes these readings at 5 Hz.
 Movement is smoothed over 180 ms; travel is bounded at an apparent-force angle
 of ±10°. That is the display's scale, not an aerodynamic sideslip angle.
+
+The same touch panel controls **Standard-rate bank pointers** and the **HSI
+turn-rate arc**. Green triangles on the upper roll scale show the bank required
+for a coordinated, level 3°/second turn. They are labeled **STD · EST TAS** because
+true airspeed is estimated from ground velocity minus the autopilot's wind vector.
+They hide below 50 KT estimated TAS, as in the G3X, or when either input expires.
+The panel gives the current estimate and the reason when unavailable. WIND does
+not carry estimator confidence; this is not a directly measured TAS indication.
+
+Above the compass, the inner white marks indicate 1.5°/second and the outer marks
+3°/second (a two-minute circle). The magenta arc depicts six seconds of measured
+heading change; its end arrow indicates more than 4°/second. It uses attitude and
+body rates converted into heading rate, rather than body yaw rate alone. Missing
+data shows a steady **TURN —**. These references are separate from the magenta
+flight director's commanded attitude. Their visibility settings save locally.
+
+Both cues use already received MAVLink messages; no additional aircraft streams
+or public data downloads are needed. Older telemetry servers require an update
+to supply these optional compact fields.
 
 ## Wind on the PFD
 

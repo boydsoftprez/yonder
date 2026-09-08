@@ -70,4 +70,18 @@ describe('compact aircraft flight wire',()=>{
     const wire=packFlight(snapshot(),'a');
     expect(()=>unpackFlight({...wire,v:99} as never,{})).toThrow(/version/i);
   });
+  it('round-trips turn and estimated TAS with independent ages; absent or invalid extensions stay unavailable',()=>{
+    const full=snapshot();full.connected=true;
+    full.telemetry.turnRate={degS:-3,ageMs:150,source:'ATTITUDE'};
+    full.telemetry.estimatedTrueAirspeed={knots:100,velocityAgeMs:100,windAgeMs:900,source:'GLOBAL_POSITION_INT/WIND'};
+    const wire=packFlight(full,'turn');
+    expect(unpackFlight(wire,full).telemetry.turnRate).toEqual(full.telemetry.turnRate);
+    expect(unpackFlight(wire,full).telemetry.estimatedTrueAirspeed).toEqual(full.telemetry.estimatedTrueAirspeed);
+    const {tr,tas,...older}=wire;
+    expect(unpackFlight(older,full).telemetry).toMatchObject({turnRate:null,estimatedTrueAirspeed:null});
+    expect(unpackFlight({...wire,c:false},full).telemetry).toMatchObject({turnRate:null,estimatedTrueAirspeed:null});
+    for(const tr of [[3,2000],[3,-1],[NaN,0],[361,0],[]])expect(unpackFlight({...wire,tr} as never,full).telemetry.turnRate).toBeNull();
+    for(const tas of [[100,2000,0],[100,0,5000],[100,-1,0],[-1,0,0],[NaN,0,0],[]])expect(unpackFlight({...wire,tas} as never,full).telemetry.estimatedTrueAirspeed).toBeNull();
+    expect(JSON.stringify(wire).length-JSON.stringify(older).length).toBeLessThan(100);
+  });
 });

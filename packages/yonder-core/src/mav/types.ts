@@ -9,6 +9,10 @@ export interface FieldValidity { source: string; receivedAt: number | null; ageM
 export interface WindEstimate { directionFromDeg: number; speedKt: number; ageMs: number; source: "WIND" }
 /** Calibrated body specific force: right-positive lateral and upward-positive normal load, in g. */
 export interface SlipSkidSample { lateralG: number; normalG: number; ageMs: number; source: "RAW_IMU" | "SCALED_IMU" }
+/** Earth-frame heading rate, positive right. Not body-axis yaw rate. */
+export interface TurnRateSample { degS: number; ageMs: number; source: "ATTITUDE" }
+/** Air-relative velocity magnitude; WIND has no estimator confidence flag. */
+export interface EstimatedTrueAirspeed { knots: number; velocityAgeMs: number; windAgeMs: number; source: "GLOBAL_POSITION_INT/WIND" }
 /** Canonical decoded values: geographic x/y in degrees, local x/y in metres, other commands raw. */
 export interface MissionItem { seq: number; command: number; frame: number; params: [number | null, number | null, number | null, number | null]; x: number | null; y: number | null; z: number | null; current: boolean; autocontinue: boolean }
 export interface MissionSnapshot {
@@ -44,6 +48,8 @@ export interface FlightTelemetry {
   homePosition: { lat: number; lon: number; alt: number } | null;
   wind?: WindEstimate | null;
   slipSkid?: SlipSkidSample | null;
+  turnRate?: TurnRateSample | null;
+  estimatedTrueAirspeed?: EstimatedTrueAirspeed | null;
   fields: Record<string, FieldValidity>;
 }
 export type VehicleAction =
