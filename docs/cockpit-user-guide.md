@@ -103,6 +103,21 @@ Press **Fields** beside the top readings, or **Instruments** on the bank:
 Each selection supports up to 16 distinct readings and up to eight nonoverlapping
 bands per reading. Invalid scales or bands must be corrected before applying.
 
+The starter bank uses the approved design's bright green/yellow/red scales:
+current and CPU arcs, a vertical battery gauge, and horizontal charge, cellular
+signal and flight-telemetry-age bars. These are editable presentation presets,
+not limits read from your aircraft. Current starts with a 0–30 A scale and charge
+used with a 0–8,000 mAh scale; adjust both for your electrical system and pack.
+Battery bands begin at 15/30%, current at 22/27 A, charge used at 5,600/6,800 mAh,
+RSRP at −115/−105 dBm, CPU at 75/90%, and telemetry age at 0.3/0.7 seconds.
+Actual aircraft warnings remain based on reported conditions.
+
+The original untouched gray starter selection upgrades on reload. Custom
+sources, order, scales and explicit empty color bands are preserved. To replace
+a customized bank with this starter, use **Instruments → Restore defaults →
+Apply**. This leaves your top fields and display arrangement in place.
+
+
 ![Navigation field editor with source and presentation controls](images/cockpit/cockpit-fields.png)
 
 *Synthetic fixture. Navigation fields and the graphical bank have independent
@@ -374,7 +389,7 @@ over a camera image even when scene registration is unavailable.
 
 The default top fields are active waypoint, waypoint distance, ETE, estimated
 terrain AGL, ground speed and observed airborne total. The default bank shows battery 1
-remaining charge, current, charge used, cellular signal, Yonder CPU utilisation
+current, remaining charge, charge used, cellular signal, Yonder CPU utilisation
 and flight telemetry age. **Fields** and **Instruments** configure these selections;
 **Layout → Instrument panel** chooses placement. Expand the mission pane to see
 the preserved lateral-deviation scale: its white center triangle stays fixed while

@@ -5,6 +5,37 @@ const settings = await import(/* @vite-ignore */ path).catch(() => null);
 const api = () => { expect(settings).not.toBeNull(); return settings!; };
 
 describe('local instrument settings', () => {
+  const legacy = () => [
+    { id: 'battery.0.remainingPercent', kind: 'arc', min: 0, max: 100 },
+    { id: 'battery.0.currentA', kind: 'arc', min: 0, max: 60 },
+    { id: 'battery.0.consumedMah', kind: 'horizontal', min: 0, max: 10000 },
+    { id: 'modem.rsrpDbm', kind: 'horizontal', min: -140, max: -40 },
+    { id: 'host.cpuPercent', kind: 'horizontal', min: 0, max: 100 },
+    { id: 'link.telemetryAgeSeconds', kind: 'horizontal', min: 0, max: 5 },
+  ];
+  it('loads the approved mixed graphical bank with editable colored starter scales', () => {
+    const bank = api().defaultBankConfig();
+    expect(bank.map(slot => slot.kind)).toEqual(['arc', 'vertical', 'horizontal', 'horizontal', 'arc', 'horizontal']);
+    expect(bank.every(slot => slot.bands?.some(b => b.color === 'normal') && slot.bands?.some(b => b.color === 'warning'))).toBe(true);
+    expect(api().instrumentSlotsError(bank)).toBeNull();
+    bank[0].bands[0].to = 1;
+    expect(api().defaultBankConfig()[0].bands[0].to).toBe(22);
+  });
+  it('upgrades only the untouched gray starter bank, preserving saved custom scales, bands and order', () => {
+    expect(api().restoreBankConfig(legacy())).toEqual(api().defaultBankConfig());
+    for (const change of [
+      slots => { slots[0].bands = []; },
+      slots => { slots[0].max = 90; },
+      slots => { slots.reverse(); },
+      slots => { slots[0].kind = 'vertical'; },
+      slots => { slots[0].bands = [{ from: 10, to: 80, color: 'normal' }]; },
+    ]) {
+      const custom = legacy(); change(custom);
+      expect(api().restoreBankConfig(custom)).toEqual(custom);
+    }
+    expect(api().restoreBankConfig([])).toEqual([]);
+    expect(api().restoreBankConfig(null)).toEqual(api().defaultBankConfig());
+  });
   it('rejects a corrupted saved range as a whole and clones the fallback', () => {
     const fallback = [{ id: 'battery.0.currentA', kind: 'arc', min: 0, max: 40 }];
     const result = api().validateInstrumentSlots([{ ...fallback[0], max: -1 }], fallback);

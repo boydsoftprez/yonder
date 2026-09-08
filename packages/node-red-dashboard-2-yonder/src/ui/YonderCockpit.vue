@@ -587,7 +587,7 @@ import CockpitDisplaySetup from './cockpit/CockpitDisplaySetup.vue';
 import InstrumentBank from './cockpit/instruments/InstrumentBank.vue';
 import FlightDataBar from './cockpit/instruments/FlightDataBar.vue';
 import InstrumentationPanel from './cockpit/instruments/InstrumentationPanel.vue';
-import {defaultBankConfig,defaultTopConfig,validateInstrumentSlots} from './cockpit/instruments/instrument-settings';
+import {defaultBankConfig,defaultTopConfig,validateInstrumentSlots,restoreBankConfig} from './cockpit/instruments/instrument-settings';
 import {cockpitDisplaySettings} from './cockpit/cockpit-display-settings.mjs';
 import {homeNavigation,navigationItems,instrumentationItems,missingInstrumentItems,instrumentationAlerts,formatDuration,rescaleInstrumentSlots,gimbalOrientationItems,fenceStatusItems} from './cockpit/instrumentation-view.mjs';
 import MissionWaypointList from './cockpit/MissionWaypointList.vue';
@@ -966,7 +966,7 @@ export default {
       const saved = JSON.parse(localStorage.getItem('yonder-cockpit-v1') || 'null');
       if (saved) this.preferences = validatePfdPreferences(saved)
       const instruments=JSON.parse(localStorage.getItem('yonder-instrument-layout-v1')||'null');
-      if(instruments){this.displayConfig=cockpitDisplaySettings(instruments.display);this.bankInstrumentConfig=validateInstrumentSlots(instruments.bank,defaultBankConfig());this.topInstrumentConfig=validateInstrumentSlots(instruments.top,defaultTopConfig())}
+      if(instruments){this.displayConfig=cockpitDisplaySettings(instruments.display);this.bankInstrumentConfig=restoreBankConfig(instruments.bank);this.topInstrumentConfig=validateInstrumentSlots(instruments.top,defaultTopConfig())}
       const trail=JSON.parse(localStorage.getItem('yonder-own-trail-v1')||'null');
       if(trail){this.ownTrailOptions=trailPreferences(trail.options);this.ownTrailCleared=trail.cleared}
       const relay=localStorage.getItem('yonder-ground-relay-v1');

@@ -31,7 +31,7 @@
         <div class="editor-order"><button type="button" aria-label="Move earlier" :disabled="selected === 0" @click="move(-1)">Move earlier</button><button type="button" aria-label="Move later" :disabled="selected === draft.length - 1" @click="move(1)">Move later</button><button type="button" aria-label="Remove instrument" @click="removeSlot">Remove</button></div>
       </template>
       <p v-else class="source-detail">No fields selected. Add a reading or restore the defaults.</p>
-      <p class="display-note">These settings change this display only. Display bands do not set aircraft warnings or failsafes.</p>
+      <p class="display-note">Colored starter bands are editable display presets. Set scales and bands for your aircraft and equipment; they do not read or change aircraft warning or failsafe limits.</p>
       <p v-if="error" role="alert">{{ error }}</p>
       <footer><button type="button" aria-label="Restore default instruments" @click="restoreDefaults">Restore defaults</button><button type="button" aria-label="Cancel instrument changes" @click="emit('cancel')">Cancel</button><button type="button" class="apply-button" aria-label="Apply instrument changes" :disabled="!!error" @click="emit('apply', validateInstrumentSlots(draft, defaults))">Apply</button></footer>
     </section>

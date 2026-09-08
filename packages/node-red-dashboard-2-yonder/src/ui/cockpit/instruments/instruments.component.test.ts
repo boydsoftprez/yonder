@@ -41,7 +41,7 @@ describe('instrument faces', () => {
     const neutral = render('InstrumentGauge', { item: current });
     expect(neutral.findAll('[data-band]')).toHaveLength(0);
   });
-  it.each([[15, '#ef5a53'], [30, '#f4cb43'], [0, '#ef5a53'], [100, '#4ad47c']])('uses the highest matching band severity at %s regardless of band order', async (value, color) => {
+  it.each([[15, '#ff3333'], [30, '#ffff00'], [0, '#ff3333'], [100, '#00cf52']])('uses the highest matching band severity at %s regardless of band order', async (value, color) => {
     const bands = [{ from: 30, to: 100, color: 'normal' }, { from: 15, to: 30, color: 'caution' }, { from: 0, to: 15, color: 'warning' }];
     const settings = { id: current.id, kind: 'arc', min: 0, max: 100, bands };
     const wrapper = render('InstrumentGauge', { item: { ...current, value }, settings });

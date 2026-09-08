@@ -19,7 +19,7 @@ try{
  if(url.searchParams.has('ground'))await page.waitForFunction(()=>document.querySelector('.display-foot')?.textContent.includes('Cove terrain'),{},{timeout:60000});
  await page.evaluate(()=>{window.layoutPfd=document.querySelector('.pfd-svg');window.layoutMap=document.querySelector('.leaflet-container')});
  await b('Configure instruments').click();const editor=page.getByRole('dialog',{name:'Configure instruments',exact:true});
- for(const [index,from,to,color] of [[1,30,100,'normal'],[2,15,30,'caution'],[3,0,15,'warning']]){await b('Add display band',editor).click();await l(`Band ${index} minimum`).fill(String(from));await l(`Band ${index} maximum`).fill(String(to));await l(`Band ${index} color`).selectOption(color)}
+ await l('Band 1 maximum').fill('21');await l('Band 2 minimum').fill('21');
  await b('Apply instrument changes',editor).click();checks.push('Explicit local display bands applied');
  await shot('cockpit-main');
  await b('Display setup').click();await shot('cockpit-layout');await b('Close display setup').click();

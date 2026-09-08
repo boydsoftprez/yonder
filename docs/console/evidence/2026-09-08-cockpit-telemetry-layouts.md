@@ -114,3 +114,27 @@ live ADS-B/provider availability are not established by these tests. Unsupported
 streams in the pinned simulator stay unavailable. The pre-existing unverified
 nonzero climb-rate/capture behavior remains documented; no extra autopilot modes
 or guarantees are inferred from the display.
+
+## Approved instrument appearance restored
+
+The operator reported that the production bank had lost the color and mixed
+instrument styles of the approved design study. The comparison identified empty
+production default bands, a muted replacement palette and different recommended
+faces. The bank now uses the study's green/yellow/red palette, current/CPU arcs,
+vertical battery gauge and horizontal charge/signal/telemetry-age bars. The guide
+and editor identify their ranges as editable starter presentation presets, not
+limits read from the aircraft. Telemetry sources and actual warnings are unchanged.
+
+Only the exact untouched former six-slot gray bank upgrades on restoration.
+Customized sources, styles, scales, order, bands and explicit empty selections
+remain intact. The focused regression failed before the fix; all 62 covering
+settings, instrument, host and layout tests then passed. The cockpit production
+bundle built at 781.92 kB / 215.68 kB gzip. Browser inspection verified colored
+faces, retained stacked arrangement, the real editor's three bands, cancellation,
+and the existing terrain background. The earlier 22 guide captures above remain
+historical workflow captures; their palette predates this correction.
+
+The original study documents its source relationship in
+[its README](../../../packages/node-red-dashboard-2-yonder/cockpit/instruments/README.md):
+Vue/SVG gauges based on the community G3X conventions, not simulator-runtime
+components or a claimed pixel-identical certified-aircraft implementation.
