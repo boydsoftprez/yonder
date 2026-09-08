@@ -36,6 +36,8 @@ export type IntentAdmitted = { accepted: true; next: IntentGrant | null } | Inte
 export interface LiveIntent {
   readonly owner: string;
   readonly gesture: string;
+  /** Endpoint deadline: original grant freshness and forwarding lease combined. */
+  readonly expiresAt: number;
   readonly deadline: number;
   readonly rate: IntentRate;
   readonly signal: AbortSignal;
@@ -128,6 +130,7 @@ export class Intent {
         owner,
         gesture: active.grant.gesture,
         deadline: active.grant.deadline,
+        expiresAt: Math.min(active.grant.deadline, now + this.leaseMs),
         rate: Object.freeze({ pan: request.rate.pan as number, tilt: request.rate.tilt as number }),
         signal: controller.signal,
         isValid: () => {

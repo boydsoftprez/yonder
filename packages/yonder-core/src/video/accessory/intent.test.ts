@@ -153,6 +153,7 @@ describe("daemon-owned camera intent", () => {
     const renewal = next(intent, grant);
     const command = intent.live()!;
     expect(renewal.deadline).toBe(1_990);
+    expect(command.expiresAt).toBe(1_500);
     clock.advance(10, false);
     if (check === "live") expect(intent.live()).toBeNull();
     else expect(command.isValid()).toBe(false);
@@ -168,6 +169,8 @@ describe("daemon-owned camera intent", () => {
     const renewal = next(intent, grant);
     expect(renewal.deadline).toBe(1_600);
     const command = intent.live()!;
+    expect(command.deadline).toBe(1_500);
+    expect(command.expiresAt).toBe(1_220);
     clock.advance(120, false);
     expect(command.isValid()).toBe(false);
     expect(command.signal.aborted).toBe(true);
