@@ -2587,6 +2587,189 @@ Leave the board with `cam0` stopped (`{"action":"stop"}`), the endpoint in place
 
 ---
 
+### Task 12: The encoder is probed once, not on every poll
+
+**Found on the board, 2026-09-07**, running the branch through Task 11's Step 3. The Radxa
+sat at **75% busy on four cores with no camera running**; with `yonder-console` stopped it
+fell to **7.8%**. The cause is Task 1's probe meeting K-55's polling: every `GET
+/cameras/:id` calls `readEncoder()`, which on Rockchip shells out to `gst-inspect-1.0
+--exists` three times, and each of those spawns a `gst-plugin-scanner` that loads the MPP
+plugin and initialises MPP hardware — **3,030 MPP initialisations in twenty minutes**, two
+scanners pegged at ~100% of a core each, permanently. `ps` showed their parents plainly:
+`gst-inspect-1.0 --exists mppjpegdec` and `--exists mpph265enc`.
+
+On a Pi the same polling costs a few cheap `v4l2-ctl` calls and nobody noticed. On Rockchip
+it takes most of the board.
+
+**A board's encoder is silicon: it does not change while the daemon runs.** Probing it once
+satisfies R-CAM-13 exactly as written — it is still the machine in front of the daemon that
+answers, at runtime, and nothing is written to configuration (R-CAM-06 stays withdrawn).
+One shared answer also makes `server.ts:506`'s own stated wish true by construction: the
+line the renderer builds and the line a Start builds cannot differ by their encoder.
+
+**Files:**
+- Modify: `packages/yonder-core/src/daemon/server.ts` — the two `probeEncoder(...)` wiring sites (~506 in `buildRenderers`, ~1244 in the camera layer)
+- Test: `packages/yonder-core/src/daemon/server.wiring.test.ts`
+- Modify: `docs/known-issues.md` (K-66)
+
+**Interfaces:**
+- Produces: `export function onceAsync<T>(fn: () => Promise<T>): () => Promise<T>` in `packages/yonder-core/src/daemon/server.ts` (or a small module beside it, if that is the file's habit) — memoises the first *successful* answer; a rejection is not cached, and concurrent callers share one in-flight call.
+
+- [ ] **Step 1: Write the failing tests**
+
+In `packages/yonder-core/src/daemon/server.wiring.test.ts`:
+
+```ts
+describe("the board's encoder is probed once, not on every poll (K-66)", () => {
+  it("asks the board once however many times the page is read", async () => {
+    let probes = 0;
+    const runner: CommandRunner = async (argv) => {
+      if (argv[0] === "gst-inspect-1.0") { probes += 1; return { code: 1, stdout: "", stderr: "" }; }
+      return { code: 1, stdout: "", stderr: "No such file or directory" };
+    };
+    const encoder = onceAsync(() => probeEncoder({ runner }));
+    const answers = await Promise.all([encoder(), encoder(), encoder()]);
+    expect(probes).toBe(1);
+    expect(answers[0]).toBe(answers[1]);
+    expect(answers[2].element).toBe("x264enc");
+  });
+
+  it("shares one in-flight probe between callers that arrive together", async () => {
+    let started = 0;
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((r) => { release = r; });
+    const encoder = onceAsync(async () => { started += 1; await gate; return SOFTWARE_FIXTURE; });
+    const both = Promise.all([encoder(), encoder()]);
+    expect(started).toBe(1);
+    release?.();
+    await both;
+    expect(started).toBe(1);
+  });
+
+  it("does not cache a failure, so a board that answered badly once is asked again", async () => {
+    let calls = 0;
+    const encoder = onceAsync(async () => {
+      calls += 1;
+      if (calls === 1) throw new Error("the runner blew up");
+      return SOFTWARE_FIXTURE;
+    });
+    await expect(encoder()).rejects.toThrow("the runner blew up");
+    await expect(encoder()).resolves.toMatchObject({ element: "x264enc" });
+    expect(calls).toBe(2);
+  });
+});
+```
+
+`SOFTWARE_FIXTURE` is the file's existing `WIRED_ENCODER` constant; use that name if it is in scope, otherwise define a local `Encoder` with `element: "x264enc", h265: null, decoder: null, device: null, hardware: false, detail: "software"`.
+
+- [ ] **Step 2: Run them to see them fail**
+
+Run: `npx vitest run --root packages/yonder-core src/daemon/server.wiring.test.ts -t "probed once"`
+Expected: FAIL — `onceAsync` is not exported.
+
+- [ ] **Step 3: Write it, and use it at both sites**
+
+In `packages/yonder-core/src/daemon/server.ts`:
+
+```ts
+/**
+ * One answer for the life of the process, from the first call that succeeds.
+ *
+ * For a question whose answer is a property of the machine rather than of the
+ * moment. **The encoder is the case this exists for** (K-66): every read of a
+ * camera's page asks for it, the console polls those pages (K-55), and on a
+ * Rockchip board each ask shells out to `gst-inspect-1.0`, which spawns a
+ * plugin scanner, which loads the MPP plugin and initialises MPP hardware —
+ * measured at 3,030 initialisations in twenty minutes and most of a four-core
+ * board. A board's encoder is silicon and does not change while the daemon
+ * runs, so asking once is not a cache with a staleness problem; it is the
+ * right number of times to ask.
+ *
+ * **A rejection is not remembered.** A probe that threw says something about
+ * the moment — a runner that failed, a tool briefly absent — and a daemon
+ * that remembered it would answer "no encoder" for its whole life over one
+ * bad second. Callers arriving while the first call is still out share it,
+ * so a burst of polls at start-up is still one probe.
+ */
+export function onceAsync<T>(fn: () => Promise<T>): () => Promise<T> {
+  let held: Promise<T> | null = null;
+  return () => {
+    if (held === null) {
+      held = fn().catch((e: unknown) => { held = null; throw e; });
+    }
+    return held;
+  };
+}
+```
+
+Then, in `buildRenderers`, hoist one memo and use it for both consumers so they cannot
+disagree. Where the file today has, at the two sites:
+
+```ts
+    encoder: () => probeEncoder({ runner: opts.runner ?? systemRunner }),
+```
+and
+```ts
+      encoder: () => probeEncoder({ runner: probeRunner }),
+```
+
+give each block a `const encoder = onceAsync(() => probeEncoder({ runner: … }));` above it
+and pass `encoder` in place of the arrow. Keep the existing comments; add to the first one
+that the memo is what makes the renderer's line and a Start's line share an encoder rather
+than merely intending to. If both blocks are in one function and share a runner, one memo
+serves both — prefer that.
+
+- [ ] **Step 4: Run the tests**
+
+Run: `npx vitest run --root packages/yonder-core src/daemon/server.wiring.test.ts && npx vitest run --root packages/yonder-core`
+Expected: PASS; whole suite green.
+
+- [ ] **Step 5: File K-66**
+
+Append to `docs/known-issues.md`, in the file's own style (no `---` before the heading):
+
+```markdown
+### K-66 · ~~The encoder is re-probed on every poll, and on Rockchip that is most of the board~~ — CLOSED
+
+**Status:** Closed · **Requirements:** R-CAM-13, R-HW-03, R-UI-05
+
+Every read of a camera's page asked the board which encoder it has, and the console polls
+those pages (K-55). On a Pi that is a few cheap `v4l2-ctl` calls. On a Rockchip board the
+probe asks the GStreamer registry — `gst-inspect-1.0 --exists`, three times — and each ask
+spawns a `gst-plugin-scanner` that loads the MPP plugin and initialises MPP hardware.
+
+Measured on a Radxa Zero 3W, 2026-09-07, with **no camera running**:
+
+| | |
+|---|---|
+| Board busy, console running | **75%** of four cores |
+| Board busy, `yonder-console` stopped | **7.8%** |
+| MPP initialisations in twenty minutes | **3,030** |
+| `gst-plugin-scanner` processes | two, at ~100% of a core each, permanently |
+
+`ps` named the parents outright: `gst-inspect-1.0 --exists mppjpegdec` and
+`--exists mpph265enc`.
+
+**Closed by** probing once per daemon lifetime (`onceAsync` in `daemon/server.ts`). A
+board's encoder is silicon and does not change while the daemon runs, so this is not a
+cache with a staleness problem — it is the right number of times to ask. R-CAM-13 is
+untouched: the machine in front of the daemon still answers, at runtime, and nothing is
+written to configuration. A rejection is not remembered, so a bad second does not become a
+permanent answer.
+
+**K-55 remains open.** This removed the most expensive caller on one board; the polling
+rate and the shelling out are still what that entry describes.
+```
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add packages/yonder-core/src/daemon/server.ts packages/yonder-core/src/daemon/server.wiring.test.ts docs/known-issues.md
+git commit -s -m "fix(daemon): probe the board's encoder once, not on every poll — K-66, R-CAM-13, R-HW-03"
+```
+
+---
+
 ## Self-Review
 
 **Spec coverage** (`2026-09-05-rockchip-hardware-encode-design.md`, as revised by Task 8):
