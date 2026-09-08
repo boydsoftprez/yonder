@@ -193,7 +193,7 @@ media, and cameras. Normal configuration changes retain apply and rollback behav
 cameras:
   - id: cam0
     name: Nose
-    source: usb                    # usb only today — csi, hdmi and a second camera arrive later
+    source: usb                    # usb or accessory; detection supplies the source
     device: platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0  # the by-path name (R-CAM-05) — not the bus id v4l2-ctl prints, which resolves to nothing
     enabled: true
     autostart: false               # set true to restore this camera automatically at boot
@@ -292,6 +292,40 @@ Apply, names a reversed floor and ceiling, a reversed ladder, or a held size a c
 not offer by the field that is wrong, and never repairs one: swapping a reversed pair,
 clamping an out-of-range value, or substituting the nearest legal size would all be Yonder
 deciding what the operator meant, and R-CMD-04 is why that decision stays theirs.
+
+#### Pocket 2 accessory source
+
+Detection can adopt a Pocket 2 as `source: accessory` with the stable identity
+`device: pocket2:<USB-controller-name>`. It shares one daemon-owned USB session with
+the picture, controls and camera-card recorder. Peripheral USB mode must already be
+available; runtime detection reports missing or claimed controllers and changes no boot
+or network settings. A configured accessory listens asynchronously at startup even when
+its picture is stopped. Camera traffic loss clears active gestures and retries after a
+45-second detached interval; reconnecting never resumes motion.
+
+The camera's H.264 SPS supplies native dimensions, while frame timestamps supply its
+measured cadence. The observed native feed is 1280×720 at approximately 29.97 fps.
+The console's output resolution, frame rate, bitrate and independent preview settings
+configure Yonder's encodes. They do not claim to change the camera's fixed USB format.
+The packaged pipeline host and `avdec_h264` decoder are required for accessory video.
+
+`accessory_mount` is optional and absent or `null` by default, which inhibits motion.
+A measured profile contains `mount`, `envelopes`, `signs`, `limitDirections` and `actions`.
+Each envelope names its `mount`, mode (`0` Free, `1` FPV, `2` Follow) and measured
+ordered yaw/pitch/roll bounds in reported degrees. `signs.pan` and `signs.tilt` map public
+positive rates to reported-position direction (`1`, `-1`, or `null` when unknown).
+`limitDirections` may identify the reported direction farther into a lit yaw/pitch stop.
+Discrete action certificates contain `mount`, `fromMode`, `command` (`recentre`, or
+`mode` with its mode number), and complete `start` and `trajectory` yaw/pitch/roll boxes.
+Unmeasured axes and actions remain unavailable. The guard reserves the 500 ms intent
+allowance plus the measured 800 ms device stopping allowance. No gesture, grant or
+deadline is stored in configuration. Apply a measured profile through the normal
+configuration apply/rollback path; there is no motion-learning wizard.
+
+Pocket exposure, ISO, EV, rational shutter, focus, white balance and native card-format
+controls use the camera's own measured menu and observed state. Photographs and native
+recordings stay on its card; Yonder reports capture completion and medium state but
+cannot list, download or delete those files. Battery percentage remains unknown.
 
 #### Camera image controls
 

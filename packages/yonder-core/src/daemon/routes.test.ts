@@ -256,6 +256,7 @@ interface RouterOptions {
    *  no recorder, which every capture route says rather than answering with
    *  an empty list. */
   recorder?: Recorder;
+  accessory?: import('../video/accessory/source.js').AccessorySources;
 }
 
 function router(opts: RouterOptions = {}): Router {
@@ -277,6 +278,7 @@ function router(opts: RouterOptions = {}): Router {
     clock: frozenClock,
   });
   return createRouter({
+    accessory: opts.accessory,
     engine,
     configPath,
     credential,
@@ -2683,6 +2685,10 @@ describe("the camera routes", () => {
       // One read, one answer: the REC pill on the picture and the shutter key
       // under it must not be able to disagree.
       expect(view.deck.recorder).toEqual(view.recorder);
+      expect((view as any).picture.recording).toEqual(view.recorder);
+      expect((view as any).picture.path).toBe(view.camera.id);
+      expect((view as any).picture.cost).toBe(view.display.pictureCost);
+      expect((view as any).picture.aim).toEqual(view.aim);
     });
 
     it("hands one over as bytes with a content type, not as JSON", async () => {
@@ -3496,4 +3502,42 @@ describe("the telemetry routes", () => {
       expect(res.status).toBe(404);
     },
   );
+});
+
+describe('accessory route dispatch', () => {
+  function source() {
+    return { input: vi.fn(() => ({ endpoint: '/run/yonder/accessory/cam0.sock', native: { width: 1280, height: 720, fps: 29.97 }, live: true, generation: 1, reason: null })),
+      snapshot: vi.fn(() => ({ input: { endpoint: '/run/yonder/accessory/cam0.sock', native: { width: 1280, height: 720, fps: 29.97 }, live: true, generation: 1, reason: null },
+        generation: 1, state: { status: null, exposure: null, focus: null, batteryPercent: null }, attitude: null, envelope: null,
+        inhibition: 'attitude-missing', admitted: { pan: 0, tilt: 0 }, recentre: { allowed: false, reason: 'attitude-missing' }, modes: [{ allowed: false, reason: 'attitude-missing' }] })), discover: vi.fn(async () => ({ found: [], rejected: [] })), controls: vi.fn(async () => ({ completed: true })),
+      aim: vi.fn(async () => ({ accepted: true })) } as unknown as import('../video/accessory/source.js').AccessorySources;
+  }
+  const detected: Detection = { source: 'accessory', device: 'pocket2:test.udc', byPath: 'pocket2:test.udc', byPathStable: true,
+    card: 'DJI Pocket 2 (HG211)', capabilities: noCapabilities() };
+  it('starts native media despite no selectable formats and never sends the identity to V4L2 controls', async () => {
+    const accessory = source();
+    const route = provisioned({ cameras: { found: [detected], rejected: [] }, camera: { source: 'accessory', device: detected.byPath }, accessory });
+    expect((await route('POST', '/cameras/cam0/run', { action: 'start' })).status).toBe(200);
+    expect(spawned[0].join(' ')).toContain('appsrc name=accessory-source');
+    expect(spawned[0].join(' ')).not.toContain('/dev/v4l');
+    expect((await route('POST', '/cameras/cam0/controls', { kind: 'iso', value: 5 })).status).toBe(200);
+    expect(accessory.controls).toHaveBeenCalledWith(detected.byPath, { kind: 'iso', value: 5 });
+    expect(probed).toEqual([]);
+  });
+  it('passes exact authenticated aim requests before camera probes', async () => {
+    const accessory = source();
+    const route = provisioned({ cameras: { found: [detected], rejected: [] }, camera: { source: 'accessory', device: detected.byPath }, accessory });
+    const request = { op: 'slew', gesture: 'g', credential: 'c', deadline: 123, seq: 1, pan: 2, tilt: 0 };
+    expect((await route('POST', '/cameras/cam0/aim', { owner: 'session-derived', request })).status).toBe(200);
+    expect(accessory.aim).toHaveBeenCalledWith(detected.byPath, 'session-derived', request);
+    expect(probed).toEqual([]);
+    expect((await route('POST', '/cameras/cam0/aim', request)).status).toBe(400);
+  });
+  it('adopts the detected source despite an untrusted source field', async () => {
+    const accessory = source();
+    const route = provisioned({ cameras: { found: [detected], rejected: [] }, accessory });
+    const adopted = await route('POST', '/cameras', { device: detected.byPath, source: 'usb' });
+    expect(adopted.status).toBe(200);
+    expect(loadConfig(configPath).cameras.find(c => c.device === detected.byPath)?.source).toBe('accessory');
+  });
 });

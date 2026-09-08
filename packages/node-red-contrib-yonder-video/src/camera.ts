@@ -38,6 +38,16 @@ export = function register(RED: RED): void {
     (msg, config) => {
       const id = cameraId(msg, config);
       if (id === null) return { refuse: NO_CAMERA };
+      if (msg.topic === 'aim') {
+        // Already-issued requests only: never freshen an old flow slew at receipt.
+        const owner = msg.viewer;
+        const request = msg.payload as { op?: unknown; deadline?: unknown; credential?: unknown; gesture?: unknown } | null;
+        if (typeof owner !== 'string' || !/^[A-Za-z0-9_.:-]{1,128}$/.test(owner) || !request || typeof request !== 'object'
+          || !['slew', 'stop', 'recentre', 'mode'].includes(String(request.op))
+          || (request.op === 'slew' && (typeof request.deadline !== 'number' || typeof request.credential !== 'string' || typeof request.gesture !== 'string')))
+          return { refuse: 'Aim needs an authenticated viewer and an already-issued request; use the private console aim transport to obtain a grant' };
+        return { method: 'POST', path: `/cameras/${id}/aim`, body: { owner, request }, camera: id };
+      }
       if (msg.topic === "controls") {
         const controls = msg.payload;
         // Nothing here decides whether a value is one this device will take —

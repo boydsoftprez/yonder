@@ -79,11 +79,12 @@ function call(
     raw?: string;
     /** The content-type sent with `raw`. A form, unless something says otherwise. */
     type?: string;
+    headers?: Record<string, string>;
   } = {},
 ): Promise<Reply> {
   return new Promise((resolve, reject) => {
     let payload: Buffer | undefined;
-    const headers: Record<string, string> = {};
+    const headers: Record<string, string> = { ...opts.headers };
     if (opts.form !== undefined) {
       payload = Buffer.from(new URLSearchParams(opts.form).toString(), "utf8");
       headers["content-type"] = "application/x-www-form-urlencoded";
@@ -968,5 +969,40 @@ describe("the console's pages", () => {
     expect(setup).toMatch(/published default/i);
     expect(setup).not.toMatch(/secret (passphrase|wi-?fi)/i);
     expect(setup).toMatch(/lock/i);
+  });
+});
+
+describe('private accessory aim proxy', () => {
+  const gesture = { op: 'issue', clientGesture: 'physical-1' };
+  async function fixture() {
+    const transport = recording(200, '{"accepted":true,"grant":{"gesture":"g","credential":"secret","deadline":500}}');
+    const sessions = new SessionStore({ clock: fakeClock() });
+    await serve(consoleMiddleware({ client: new DaemonClient({ transport }), sessions }));
+    const token = sessions.mint();
+    return { transport, sessions, token, cookie: `${SESSION_COOKIE}=${token}`,
+      headers: { origin: `http://127.0.0.1:${port}`, 'x-yonder-aim': '1', 'sec-fetch-site': 'same-origin' } };
+  }
+  it('derives the owner from a current session and returns private grants only to the caller', async () => {
+    const f = await fixture();
+    const reply = await call('POST', '/video/cam1/aim', { cookie: f.cookie, headers: f.headers, json: gesture });
+    expect(reply.status).toBe(200); expect(reply.headers['cache-control']).toBe('no-store');
+    expect(f.transport.calls[0]).toMatchObject({ method: 'POST', path: '/cameras/cam1/aim', body: { owner: viewerFor(f.token), request: gesture } });
+    expect(passedThrough).toEqual([]);
+    f.sessions.revoke(f.token);
+    expect((await call('POST', '/video/cam1/aim', { cookie: f.cookie, headers: f.headers, json: gesture })).status).toBe(401);
+    expect(f.transport.calls).toHaveLength(1);
+  });
+  it('rejects cross-origin, forged owner fields and malformed JSON before the daemon', async () => {
+    const f = await fixture();
+    expect((await call('POST', '/video/cam1/aim', { cookie: f.cookie, headers: { ...f.headers, origin: 'http://attacker.invalid' }, json: gesture })).status).toBe(403);
+    expect((await call('POST', '/video/cam1/aim', { cookie: f.cookie, headers: f.headers, json: { ...gesture, owner: 'other' } })).status).toBe(400);
+    expect((await call('POST', '/video/cam1/aim', { cookie: f.cookie, headers: f.headers, raw: '{', type: 'application/json' })).status).toBe(400);
+    expect(f.transport.calls).toEqual([]);
+  });
+  it('forwards the exact one-use grant and deadline without freshening a slew', async () => {
+    const f = await fixture();
+    const request = { op: 'slew', gesture: 'g', credential: 'c', deadline: 12, seq: 2, pan: 2, tilt: -1 };
+    expect((await call('POST', '/video/cam1/aim', { cookie: f.cookie, headers: f.headers, json: request })).status).toBe(200);
+    expect(f.transport.calls[0].body).toEqual({ owner: viewerFor(f.token), request });
   });
 });

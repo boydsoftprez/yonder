@@ -215,6 +215,8 @@ export function preferring(opts: {
   const note = opts.note ?? ((message: string) => process.stderr.write(`${message}\n`));
 
   return (argv) => {
+    const accessory = argv.some(token => token.startsWith('--accessory-socket='));
+    if (!opts.usable() && accessory) throw new Error('Accessory video requires the packaged yonder-pipeline host');
     if (!opts.usable()) return opts.second(argv);
 
     const exits: ((arg: unknown) => void)[] = [];
@@ -238,7 +240,7 @@ export function preferring(opts: {
     };
 
     const ended = (fns: ((arg: unknown) => void)[], arg: unknown, why: string): void => {
-      if (early && !killed) {
+      if (early && !killed && !accessory) {
         // Closing the window here is what makes the fallback once-only: the
         // second runner's own early exit is a pipeline that failed, which is
         // the supervisor's business. A separate `fell` flag beside this line

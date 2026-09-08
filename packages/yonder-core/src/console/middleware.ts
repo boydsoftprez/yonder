@@ -8,6 +8,7 @@ import type { SessionStore } from "./session.js";
 import { whepHandler, WHEP_PREFIX, type WhepRequest, type WhepResponse } from "./whep.js";
 import { captureRequestFor, type CaptureAnswer, type CaptureHandler } from "./capture.js";
 import { cameraFor } from "../video/media-path.js";
+import { validAimRequest } from '../video/accessory/requests.js';
 
 /**
  * The gate on the front of the console.
@@ -507,6 +508,32 @@ export function consoleMiddleware(deps: ConsoleMiddlewareDeps): Middleware {
         return;
       }
 
+      const aim = /^\/video\/([^/]+)\/aim$/.exec(path);
+      if (aim) {
+        const token = sessionOf(req, deps.sessions);
+        if (!token) { sendJson(res, 401, { error: 'Log in to aim this camera' }); return; }
+        if (req.method !== 'POST') { sendJson(res, 405, { error: 'Aim requires POST' }); return; }
+        let originOkay = false;
+        try { const origin = new URL(String(req.headers.origin)); originOkay = origin.host === req.headers.host && ['http:', 'https:'].includes(origin.protocol); } catch { /* missing origin refuses */ }
+        if (!/^[a-z0-9][a-z0-9-]{0,31}$/.test(aim[1]) || !originOkay || req.headers['x-yonder-aim'] !== '1'
+          || !/^application\/json(?:;|$)/i.test(String(req.headers['content-type']))
+          || (req.headers['sec-fetch-site'] !== undefined && req.headers['sec-fetch-site'] !== 'same-origin')) {
+          sendJson(res, 403, { error: 'Use the same-origin camera aim control' }); return;
+        }
+        res.setHeader('pragma', 'no-cache');
+        void (async () => {
+          const submission = await readBody(req, 2048);
+          if (submission.tooLarge) { tooLarge(res); return; }
+          let request: unknown;
+          try { request = JSON.parse(submission.text); } catch { sendJson(res, 400, { error: 'Malformed aim JSON' }); return; }
+          if (!validAimRequest(request)) { sendJson(res, 400, { error: 'Malformed aim request' }); return; }
+          // Resolve authentication again after reading a body: logout invalidates renewal too.
+          if (sessionOf(req, deps.sessions) !== token) { sendJson(res, 401, { error: 'Aim session expired' }); return; }
+          const reply = await deps.client.request({ method: 'POST', path: `/cameras/${aim[1]}/aim`, body: { owner: viewerFor(token), request } });
+          sendJson(res, reply.ok ? reply.status : 503, reply.ok ? reply.body : { error: 'Camera service unavailable' });
+        })().catch(() => sendJson(res, 503, { error: 'Camera aim request failed' }));
+        return;
+      }
       const report = /^\/video\/([^/]+)\/report$/.exec(path);
       if (report !== null) {
         const streamPath = report[1];

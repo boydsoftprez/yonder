@@ -32,6 +32,7 @@ export interface Rejection {
   readonly reason: string;
 }
 export interface Detection {
+  readonly source?: 'usb' | 'accessory';
   readonly device: string;
   readonly card: string;
   /**
@@ -58,6 +59,15 @@ export interface Detection {
 export interface DetectResult {
   readonly found: Detection[];
   readonly rejected: Rejection[];
+}
+
+/** Independent probes: missing V4L2 must not hide a live accessory source. */
+export async function detectWithAccessory(usb: () => Promise<DetectResult>, accessory: () => DetectResult): Promise<DetectResult> {
+  let result: DetectResult;
+  try { result = await usb(); }
+  catch (error) { result = { found: [], rejected: [{ device: '', card: 'USB', reason: error instanceof Error ? error.message : 'USB probe failed' }] }; }
+  const other = accessory();
+  return { found: [...result.found, ...other.found], rejected: [...result.rejected, ...other.rejected] };
 }
 
 export interface ProbeOptions {

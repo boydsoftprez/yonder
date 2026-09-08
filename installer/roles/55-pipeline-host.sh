@@ -15,7 +15,7 @@
 #
 # python3-gi is the binding and gir1.2-gstreamer-1.0 is the description of
 # GStreamer it reads; either alone imports and then cannot find the other half.
-ensure_pkgs python3-gi gir1.2-gstreamer-1.0
+ensure_pkgs python3-gi gir1.2-gstreamer-1.0 gstreamer1.0-libav
 
 # And checked by asking Python, because "the package installed" and "the
 # bindings import" are different questions and only the second one matters -

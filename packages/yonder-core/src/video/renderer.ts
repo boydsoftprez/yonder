@@ -3,7 +3,7 @@ import type { Renderer } from "../apply/types.js";
 import type { Camera, Config } from "../schema/config.js";
 import { RTSP_BASE } from "../media/ports.js";
 import { noCapabilities } from "./capability.js";
-import { compose, encodeControl, encodesIn, type EncodeName } from "./pipeline.js";
+import { compose, refuse, encodeControl, encodesIn, type EncodeName } from "./pipeline.js";
 import type { Encoder } from "./probe/encoder.js";
 import type { EncoderChannel } from "./encoder.js";
 import type { Supervisor } from "./supervisor.js";
@@ -20,6 +20,7 @@ export interface VideoApplyReport {
 }
 
 export interface PipelineRendererOptions {
+  accessory?: (identity: string) => import('./accessory/source.js').AccessoryInput | undefined;
   /**
    * The one supervisor this process owns. Given, never constructed here: a
    * second supervisor would hold no handle to any running pipeline and would
@@ -55,7 +56,7 @@ export class PipelineRenderer implements Renderer {
   private readonly rtspBase: string;
   private readonly log: (line: string) => void;
 
-  constructor(opts: PipelineRendererOptions) {
+  constructor(private readonly opts: PipelineRendererOptions) {
     this.supervisor = opts.supervisor;
     this.channel = opts.channel;
     this.encoder = opts.encoder;
@@ -108,6 +109,10 @@ export class PipelineRenderer implements Renderer {
     for (const { camera, current } of running) {
       let next: string[];
       try {
+        if (camera.source === 'accessory') {
+          const refusal = refuse({ camera, capabilities: noCapabilities(), encoder, rtspBase: this.rtspBase, accessory: this.opts.accessory?.(camera.device) });
+          if (refusal) throw new Error(refusal);
+        }
         next = compose({
           camera,
           // This renderer probes no camera — a device round trip per apply,
@@ -147,6 +152,7 @@ export class PipelineRenderer implements Renderer {
           // papered over. `pipeline.test.ts` pins the disagreement so that it
           // cannot become invisible.
           capabilities: noCapabilities(),
+          accessory: this.opts.accessory?.(camera.device),
           encoder,
           rtspBase: this.rtspBase,
         });

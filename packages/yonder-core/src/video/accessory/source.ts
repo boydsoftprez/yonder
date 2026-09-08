@@ -1,0 +1,197 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+import { readdir } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import type { Camera } from '../../schema/config.js';
+import { noCapabilities, present, type CameraCapabilities } from '../capability.js';
+import type { Detection, DetectResult } from '../probe/camera.js';
+import { Pocket2Device, monotonicMilliseconds, type Pocket2DeviceOptions, type Pocket2Status } from './linux.js';
+import { CameraController, cameraControlDescriptors } from './controls.js';
+import { GimbalController, decodeGimbalAttitude } from './gimbal.js';
+import { guard, type GimbalAttitude, type GuardContext } from './guard.js';
+import type { IntentClock } from './intent.js';
+import { AccessoryMedia } from './media.js';
+import type { RecordingState, CameraMedium } from '../recorder.js';
+import { validAimRequest } from './requests.js';
+import { accessoryControls } from './present.js';
+
+export interface AccessoryInput {
+  endpoint: string;
+  native: { width: number; height: number; fps: number } | null;
+  live: boolean;
+  generation: number;
+  reason: string | null;
+}
+export interface AccessorySourceOptions {
+  cameras(): readonly Camera[];
+  controllers?: () => Promise<string[]>;
+  deviceFactory?: (options: Pocket2DeviceOptions) => Pick<Pocket2Device, 'start' | 'close' | 'snapshot' | 'sendCommand'>;
+  mediaFactory?: (endpoint: string) => AccessoryMedia;
+  mediaCapability?: () => Promise<string | null>;
+  root?: string;
+  clock?: IntentClock;
+}
+const clock: IntentClock = {
+  now: monotonicMilliseconds,
+  setTimer: (ms, fn) => { const timer = setTimeout(fn, ms); timer.unref(); return timer; },
+  clearTimer: timer => clearTimeout(timer as ReturnType<typeof setTimeout>),
+};
+type Owned = { device: ReturnType<NonNullable<AccessorySourceOptions['deviceFactory']>>; media: AccessoryMedia;
+  camera: CameraController; gimbal: GimbalController; attitude: GimbalAttitude | null; generation: number | null; error: string | null;
+  streamGeneration: number; admitted?: { owner: string; gesture: string; pan: number; tilt: number; until: number } };
+
+/** R-CAM-15: exactly one asynchronous USB owner shared by all daemon consumers. */
+export class AccessorySources {
+  private owned = new Map<string, Owned>();
+  private discovering?: Promise<void>;
+  private closed = false;
+  private discoveryReason: string | null = null;
+  private readonly clock: IntentClock;
+  constructor(private readonly options: AccessorySourceOptions) { this.clock = options.clock ?? clock; }
+  /** Config/render callers schedule listening; never await the USB handshake or reconnect. */
+  resume(cameras: readonly Camera[] = this.options.cameras()): void {
+    for (const camera of cameras) if (camera.source === 'accessory') void this.ensure(camera.device).catch(() => undefined);
+    for (const source of this.owned.values()) source.gimbal.refresh();
+  }
+  async discover(): Promise<DetectResult> {
+    if (!this.discovering) {
+      this.discovering = (async () => {
+        try {
+          const controllers = await (this.options.controllers ?? (() => readdir('/sys/class/udc')))();
+          this.discoveryReason = controllers.length ? null : 'No USB peripheral controller is available; accessory mode must already be enabled on this board.';
+          await Promise.all(controllers.filter(c => /^[a-zA-Z0-9_.:-]{1,120}$/.test(c)).map(c => this.ensure(`pocket2:${c}`)));
+        } catch (error) { this.discoveryReason = error instanceof Error ? error.message : 'USB peripheral controller discovery failed'; }
+      })().finally(() => { this.discovering = undefined; });
+    }
+    await this.discovering;
+    return this.detect();
+  }
+  detect(): DetectResult {
+    const result: DetectResult = { found: [], rejected: [] };
+    for (const [identity, source] of this.owned) {
+      const status = source.device.snapshot();
+      if (status.state === 'live' && status.manufacturer && status.model) result.found.push(this.detection(identity, source));
+      else result.rejected.push({ device: identity, card: 'Pocket 2 accessory', reason: source.error ?? status.reason ?? `Accessory ${status.state}; waiting for live camera identity` });
+    }
+    if (this.discoveryReason) result.rejected.push({ device: '', card: 'Accessory USB', reason: this.discoveryReason });
+    return result;
+  }
+  probe(identity: string): Detection | { device: string; card: string; reason: string } {
+    const found = this.detect().found.find(d => d.byPath === identity);
+    return found ?? { device: identity, card: 'Pocket 2', reason: this.input(identity)?.reason ?? 'Accessory camera is not live' };
+  }
+  private async ensure(identity: string): Promise<void> {
+    if (this.closed || this.owned.has(identity) || !/^pocket2:[a-zA-Z0-9_.:-]{1,120}$/.test(identity)) return;
+    const endpoint = `${this.options.root ?? '/run/yonder/accessory'}/${createHash('sha256').update(identity).digest('hex').slice(0, 20)}.sock`;
+    const media = (this.options.mediaFactory ?? (path => new AccessoryMedia(path)))(endpoint);
+    let source!: Owned;
+    const device = (this.options.deviceFactory ?? (opts => new Pocket2Device(opts)))({
+      controller: identity.slice(8), now: this.clock.now,
+      onStatus: status => this.status(source, status),
+      onCommand: frame => {
+        source.camera.update(frame);
+        if (frame.commandSet === 4 && frame.commandId === 5) {
+          source.attitude = decodeGimbalAttitude(frame, this.clock); source.gimbal.refresh();
+        }
+      },
+      onVideo: unit => {
+        if (!media.push(unit)) {
+          source.streamGeneration++; source.admitted = undefined; source.attitude = null; source.gimbal.reset();
+          source.camera.disconnect(); if (source.generation !== null) source.camera.connect();
+        }
+      },
+    });
+    source = { device, media, attitude: null, generation: null, error: null, streamGeneration: 0,
+      camera: new CameraController({ clock: this.clock, write: (cmd, options) => device.sendCommand(cmd, options) }),
+      gimbal: new GimbalController({ clock: this.clock, context: () => this.context(identity, source), write: (cmd, options) => device.sendCommand(cmd, options) }),
+    };
+    source.camera.disconnect(); source.gimbal.disconnect(); this.owned.set(identity, source);
+    try { source.error = await this.options.mediaCapability?.() ?? null; await media.start(); if (!this.closed) await device.start(); else await media.close(); }
+    catch (error) { source.error = error instanceof Error ? error.message : 'Accessory media unavailable'; }
+  }
+  private status(source: Owned, status: Pocket2Status): void {
+    if (status.state === 'live') {
+      if (source.generation !== status.generation) { source.generation = status.generation; source.camera.connect(); source.gimbal.connect(); }
+    } else {
+      source.generation = null; source.admitted = undefined; source.attitude = null; source.camera.disconnect(); source.gimbal.disconnect(); source.media.reset();
+    }
+  }
+  private context(identity: string, source: Owned): GuardContext {
+    const profile = this.options.cameras().find(c => c.source === 'accessory' && c.device === identity)?.accessory_mount;
+    return { now: this.clock.now(), attitudeMaxAgeMs: 500, attitude: source.attitude,
+      mount: profile?.mount ?? null, envelopes: profile?.envelopes ?? [], signs: profile?.signs ?? { pan: null, tilt: null },
+      limitDirections: profile?.limitDirections ?? {}, actions: profile?.actions ?? [], intentAllowanceMs: 500, deviceStopAllowanceMs: 800 };
+  }
+  input(identity: string): AccessoryInput | undefined {
+    const source = this.owned.get(identity); if (!source) return undefined;
+    const status = source.device.snapshot(), fps = source.media.clock.fps();
+    const live = !source.error && status.state === 'live' && status.lastVideoAt !== null && this.clock.now() - status.lastVideoAt < 3000;
+    return { endpoint: source.media.endpoint, native: source.media.dimensions && fps ? { ...source.media.dimensions, fps } : null,
+      live, generation: status.generation * 1_000_000 + source.streamGeneration, reason: source.error ?? status.reason ?? (live ? null : 'Accessory video is not fresh') };
+  }
+  snapshot(identity: string) {
+    const source = this.owned.get(identity); if (!source) return null;
+    const context = this.context(identity, source), status = source.device.snapshot();
+    const attitude = source.attitude && this.clock.now() - source.attitude.at < 500 ? source.attitude : null;
+    const verdict = guard({ kind: 'rate', pan: 1, tilt: 1 }, context);
+    const admitted = source.admitted;
+    const rate = admitted && admitted.until > this.clock.now() && guard({ kind: 'rate', pan: admitted.pan, tilt: admitted.tilt }, context).allowed
+      ? { pan: admitted.pan, tilt: admitted.tilt } : { pan: 0, tilt: 0 };
+    return { ...status, generation: status.generation * 1_000_000 + source.streamGeneration, input: this.input(identity), state: source.camera.readState(), attitude, admitted: rate,
+      mount: context.mount, envelope: context.envelopes.find(e => e.mount === context.mount && e.mode === attitude?.mode) ?? null,
+      recentre: guard({ kind: 'recentre' }, context), modes: ([0,1,2] as const).map(mode => guard({ kind: 'mode', mode }, context)),
+      inhibition: verdict.allowed ? null : verdict.reason, controls: accessoryControls(source.camera.readState()), descriptors: cameraControlDescriptors().map(d => d.kind === 'menu'
+        ? { ...d, options: d.values.map(value => ({ value, label: String(d.toDisplay(value)) })) } : d) };
+  }
+  private detection(identity: string, source: Owned): Detection {
+    const status = source.device.snapshot(), context = this.context(identity, source);
+    const envelope = context.envelopes.find(e => e.mount === context.mount && e.mode === source.attitude?.mode);
+    const capabilities: CameraCapabilities = { ...noCapabilities(),
+      aim: present({ pitch: { min: envelope?.pitch?.[0] ?? null, max: envelope?.pitch?.[1] ?? null }, yaw: { min: envelope?.yaw?.[0] ?? null, max: envelope?.yaw?.[1] ?? null }, mode: source.attitude ? String(source.attitude.mode) : 'unknown' }),
+      recording: present({ medium: 'camera' }), stills: present({ source: 'camera' }) };
+    return { source: 'accessory', device: identity, byPath: identity, byPathStable: true,
+      card: `${status.manufacturer} Pocket 2 (${status.model})`, capabilities };
+  }
+  async controls(identity: string, request: unknown) {
+    const source = this.owned.get(identity); if (!source) throw new Error('Accessory camera unavailable');
+    return source.camera.execute(request);
+  }
+  async aim(identity: string, owner: string, body: unknown): Promise<unknown> {
+    const source = this.owned.get(identity); if (!source) return { accepted: false, reason: 'unavailable' };
+    if (!validAimRequest(body)) return { accepted: false, reason: 'malformed' };
+    const b = body as Record<string, unknown>;
+    switch (b.op) {
+      case 'issue': { const reply = source.gimbal.issue(owner, typeof b.clientGesture === 'string' ? b.clientGesture : undefined); if (reply.accepted) source.admitted = undefined; return reply; }
+      case 'slew': {
+        const { gesture, credential, deadline, seq, pan, tilt } = b;
+        const reply = source.gimbal.admit(owner, { gesture, credential, deadline, seq, rate: { pan, tilt } });
+        if (reply.accepted) source.admitted = { owner, gesture: b.gesture as string, pan: b.pan as number, tilt: b.tilt as number, until: Math.min(b.deadline as number, this.clock.now() + 500) };
+        return reply;
+      }
+      case 'stop': if (typeof b.gesture !== 'string') break; source.gimbal.end(owner, b.gesture);
+        if (source.admitted?.owner === owner && source.admitted.gesture === b.gesture) source.admitted = undefined;
+        return { accepted: true };
+      case 'recentre': if (source.admitted?.owner === owner) source.admitted = undefined; return source.gimbal.action(owner, { kind: 'recentre' });
+      case 'mode': if (b.mode === 0 || b.mode === 1 || b.mode === 2) { if (source.admitted?.owner === owner) source.admitted = undefined; return source.gimbal.action(owner, { kind: 'mode', mode: b.mode }); }
+    }
+    return { accepted: false, reason: 'malformed' };
+  }
+  readonly medium: CameraMedium = {
+    listingReason: 'Files stay on the camera card; Yonder cannot list, download or delete them.',
+    holds: id => this.options.cameras().some(c => c.id === id && c.source === 'accessory'),
+    captures: async () => [],
+    state: async id => this.recordingState(id),
+    record: async (id, action) => { await this.controls(this.identity(id), { kind: `record-${action}` }); return this.recordingState(id); },
+    // This is the completion observation time, never a camera file timestamp or filename.
+    photo: async id => { await this.controls(this.identity(id), { kind: 'photo' }); return { destination: 'camera', kind: 'photo', held: 'camera', observedAt: Date.now() }; },
+  };
+  private identity(id: string): string { const camera = this.options.cameras().find(c => c.id === id && c.source === 'accessory'); if (!camera) throw new Error('Accessory camera unavailable'); return camera.device; }
+  private recordingState(id: string): RecordingState {
+    const status = this.owned.get(this.identity(id))?.camera.readState().status;
+    return { recording: status?.recordPhase === 'recording' || status?.recordPhase === 'starting' || status?.recordPhase === 'finalizing',
+      since: status && status.recordPhase !== 'idle' ? Date.now() - status.recordingSeconds * 1000 : null,
+      destination: 'camera', remainingSeconds: status?.remainingSeconds ?? null, remainingPhotos: status?.remainingPhotos ?? null,
+      bytes: null, ended: null, observed: !!status, phase: status?.recordPhase ?? null,
+      mediumReason: status ? (status.cardInserted && status.cardState === 'normal' ? 'Files stay on the camera card; listing and download are unavailable.' : 'No recognized writable camera card.') : 'Camera card status is not fresh.' };
+  }
+  async close(): Promise<void> { this.closed = true; await this.discovering; await Promise.all([...this.owned.values()].map(async s => { s.gimbal.close(); s.camera.close(); try { await s.device.close(); } finally { await s.media.close(); } })); }
+}

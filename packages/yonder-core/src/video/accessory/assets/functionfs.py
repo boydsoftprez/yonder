@@ -308,8 +308,8 @@ class Helper:
             raise ValueError('invalid controller')
         if not (Path('/sys/class/udc') / controller).exists():
             raise Unavailable('USB peripheral controller missing; peripheral mode must be configured separately')
-        lock_root = Path('/run/yonder-pocket2')
-        lock_root.mkdir(mode=0o700, exist_ok=True)
+        lock_root = Path('/run/yonder/accessory-usb')
+        lock_root.mkdir(mode=0o700, parents=True, exist_ok=True)
         # Persistent lock inode avoids races with a third opener during release.
         self.lock = os.open(lock_root / (controller + '.lock'), os.O_CREAT | os.O_RDWR | os.O_CLOEXEC, 0o600)
         try:
@@ -328,7 +328,7 @@ class Helper:
         descriptions = message['stages']
         if len(descriptions) != 2 or [d['stage'] for d in descriptions] != ['phone', 'accessory']:
             raise ValueError('invalid stage descriptors')
-        self.root = Path(tempfile.mkdtemp(prefix='yonder-pocket2-', dir='/run'))
+        self.root = Path(tempfile.mkdtemp(prefix='yonder-pocket2-', dir=lock_root))
         for description in descriptions:
             stage = Gadget(self.root, description['stage'])
             self.stages[stage.stage] = stage

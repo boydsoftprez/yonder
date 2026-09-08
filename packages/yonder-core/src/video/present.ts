@@ -661,6 +661,7 @@ const NOTHING_TO_REMOVE = "nothing is configured on this socket, so there is not
  */
 export function cameraIndex(input: {
   readonly found: readonly {
+    readonly source?: 'usb' | 'accessory';
     readonly device: string;
     readonly card: string;
     readonly byPath: string;
@@ -698,7 +699,7 @@ export function cameraIndex(input: {
   const cameras = input.found.map((detected): CameraRow => {
     const configured = input.cameras.find((c) => c.device === detected.byPath);
     const identity = identityWords(detected.byPath, detected.byPathStable);
-    const bus = `${configured?.source ?? "usb"} · ${detected.device}`;
+    const bus = `${configured?.source ?? detected.source ?? "usb"} · ${detected.device}`;
     if (configured === undefined) {
       return {
         id: null,
@@ -890,6 +891,8 @@ export interface DeckCapture {
 
 /** `ui-yonder-deck`'s whole payload — `YonderDeck.vue`'s own documented shape. */
 export interface CameraDeck {
+  readonly accessory?: ReturnType<import('./accessory/source.js').AccessorySources['snapshot']>;
+  readonly aim?: AimPanel;
   readonly camera: { readonly id: string; readonly name: string; readonly spec: string };
   readonly capabilities: CameraCapabilities;
   readonly descriptors: Record<string, DescriptorView>;
@@ -906,7 +909,7 @@ export interface CameraDeck {
     readonly preview: Camera["preview"];
   };
   readonly outputs: readonly DeckOutput[];
-  readonly captures: { readonly count: number };
+  readonly captures: { readonly count: number | null };
   /**
    * What this camera's recorder is doing, and what the medium has left
    * (R-CAM-17, R-STO-06).
@@ -1087,6 +1090,7 @@ const OUTPUT_LABEL: Record<OutputKind, string> = {
  * was actually sent — one calculation, two callers, neither of them this one.
  */
 export function cameraDeck(view: {
+  readonly accessory?: ReturnType<import('./accessory/source.js').AccessorySources['snapshot']>;
   readonly camera: Camera;
   readonly capabilities: CameraCapabilities | null;
   readonly encoder: { readonly element: string; readonly hardware: boolean };
@@ -1142,6 +1146,8 @@ export function cameraDeck(view: {
       spec: `${camera.source.toUpperCase()} · ${camera.codec.toUpperCase()} · `
         + `${camera.width}×${camera.height}p${camera.framerate} · ${view.encoder.element}`,
     },
+    accessory: view.accessory,
+    aim: aimPanel(caps, view.accessory, camera.id),
     // The two the board carries for a camera that has neither of its own.
     // See `deckCapture()` for why this is composed rather than read.
     capabilities: { ...caps, ...deckCapture(caps, view.recorder ?? null) },
@@ -1157,7 +1163,7 @@ export function cameraDeck(view: {
       costKbps: atIp(camera.bitrate_kbps),
       reach: outputReach(output.kind, view.paths),
     })),
-    captures: { count: view.captures ?? 0 },
+    captures: { count: view.accessory ? null : view.captures ?? 0 },
     recorder: view.recorder ?? null,
     orientation: deckOrientation(caps, camera, values),
   };
@@ -1230,6 +1236,13 @@ function deckOrientation(
 
 /** `ui-yonder-aim`'s whole payload — `YonderAim.vue`'s own documented shape. */
 export interface AimPanel {
+  readonly maxRate?: number;
+  readonly admitted?: { pan: number; tilt: number };
+  readonly modeInhibited?: string | null;
+  readonly recentreInhibited?: string | null;
+  readonly camera?: string;
+  readonly url?: string;
+  readonly generation?: number;
   readonly state: Capability<unknown>["state"];
   readonly reason: string | null;
   readonly pan: number | null;
@@ -1257,7 +1270,17 @@ export interface AimPanel {
  * claiming a fact about the gimbal that nothing read, which is the same
  * defect as an unmeasured rate one field over.
  */
-export function aimPanel(caps: CameraCapabilities | null): AimPanel {
+export function aimPanel(caps: CameraCapabilities | null, source?: ReturnType<import('./accessory/source.js').AccessorySources['snapshot']>, camera?: string): AimPanel {
+  if (source) {
+    const names = ['Free', 'FPV', 'Follow'];
+    return { camera, url: camera ? `/video/${camera}/aim` : undefined, generation: source.generation, maxRate: 10, admitted: source.admitted,
+      state: 'present', reason: null, pan: source.attitude?.yaw ?? null, tilt: source.attitude?.pitch ?? null,
+      modeInhibited: source.modes.some(mode => mode.allowed) ? null : source.modes.find(mode => !mode.allowed)?.reason ?? 'trajectory-unverified',
+      recentreInhibited: source.recentre.allowed ? null : source.recentre.reason,
+      bounds: source.envelope?.yaw && source.envelope?.pitch ? { pan: source.envelope.yaw, tilt: source.envelope.pitch } : null,
+      atLimit: { pitch: source.attitude?.pitchLimit ?? false, yaw: source.attitude?.yawLimit ?? false },
+      mode: source.attitude ? names[source.attitude.mode] ?? null : null, modes: names, inhibited: source.inhibition };
+  }
   const aim = (caps ?? noCapabilities()).aim;
   const empty = {
     pan: null, tilt: null, bounds: null,

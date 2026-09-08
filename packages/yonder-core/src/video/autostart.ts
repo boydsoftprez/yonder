@@ -30,6 +30,7 @@ export class CameraAutostart implements Renderer {
     supervisor: Supervisor;
     detect: () => Promise<DetectResult>;
     encoder: () => Promise<Encoder>;
+    accessory?: (identity: string) => import('./accessory/source.js').AccessoryInput | undefined;
     clock?: Clock;
     log: (line: string) => void;
   }) { this.clock = opts.clock ?? systemClock; }
@@ -115,7 +116,7 @@ export class CameraAutostart implements Renderer {
         const found = detection.found.find((d) => d.byPath === camera.device);
         if (!found) { this.waiting(id, `waiting for ${camera.device}`); continue; }
         const options = { camera, capabilities: found.capabilities, encoder,
-          rtspBase: RTSP_BASE, knownDevices: new Set(detection.found.map((d) => d.byPath)) };
+          rtspBase: RTSP_BASE, knownDevices: new Set(detection.found.map((d) => d.byPath)), accessory: this.opts.accessory?.(camera.device) };
         const reason = refuse(options);
         if (reason) { this.waiting(id, reason); continue; }
         try {

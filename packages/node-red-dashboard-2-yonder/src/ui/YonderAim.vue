@@ -22,10 +22,11 @@
               controls that cannot be worked; what they no longer do is each
               restate why.
             -->
-            <div v-if="effectiveReason" class="y-aimpanel__reason">{{ effectiveReason }}</div>
+            <div v-if="effectiveReason || aimError" class="y-aimpanel__reason">{{ aimError || effectiveReason }}</div>
 
             <YonderAimPad
                 :axes="PAD_AXES"
+                :max-rate="report.maxRate ?? 30"
                 :at-limit="atLimit"
                 :inhibited="padInhibited"
                 @slew="onSlew"
@@ -37,8 +38,9 @@
                 <span class="y-aimpanel__rate-v">{{ rateShown }}<i>°/s</i></span>
             </div>
 
-            <YonderPositionGauge label="Pan" unit="°" :value="pan" :min="panBounds.lo" :max="panBounds.hi" :dead="!hasBounds" :reason="gaugeReason" />
-            <YonderPositionGauge label="Tilt" unit="°" :value="tilt" :min="tiltBounds.lo" :max="tiltBounds.hi" :dead="!hasBounds" :reason="gaugeReason" />
+            <div class="y-aimpanel__reported">Reported position</div>
+            <YonderPositionGauge label="Pan" unit="°" :value="pan" :min="panBounds.lo" :max="panBounds.hi" :bounds-known="hasBounds" :dead="!hasBounds || pan === null" :reason="gaugeReason" />
+            <YonderPositionGauge label="Tilt" unit="°" :value="tilt" :min="tiltBounds.lo" :max="tiltBounds.hi" :bounds-known="hasBounds" :dead="!hasBounds || tilt === null" :reason="gaugeReason" />
 
             <div v-if="mode" class="y-aimpanel__modeline">{{ modeSentence }}</div>
             <YonderSegmented
@@ -46,11 +48,12 @@
                 :value="mode"
                 :options="modes"
                 :state="modeControlState"
-                :reason="gaugeReason"
+                :reason="report.modeInhibited || gaugeReason"
                 @change="onModeChange"
             />
 
-            <button type="button" class="y-aimpanel__recentre" :disabled="recentreDisabled" @click="pressRecentre">Recentre gimbal</button>
+            <button type="button" class="y-aimpanel__recentre" :disabled="recentreDisabled" :title="report.recentreInhibited || ''" @click="pressRecentre">Recentre gimbal</button>
+            <div v-if="report.recentreInhibited" class="y-aimpanel__reason">{{ report.recentreInhibited }}</div>
         </YonderColumn>
     </div>
 </template>
@@ -60,6 +63,7 @@ import YonderAimPad from './YonderAimPad.vue'
 import YonderPositionGauge from './YonderPositionGauge.vue'
 import YonderSegmented from './YonderSegmented.vue'
 import YonderColumn from './YonderColumn.vue'
+import { AimTransport } from './aim-transport.ts'
 
 /**
  * `ui-yonder-aim` — the gimbal panel as a node of its own (R-UI-28,
@@ -225,6 +229,8 @@ export default {
         commandedPan: 0,
         commandedTilt: 0,
         /** See this component's own doc comment on `Recentre`. */
+        aimTransport: null,
+        aimError: null,
         recentrePending: false
     }),
     computed: {
@@ -260,10 +266,10 @@ export default {
             return (this.report && this.report.reason) || ''
         },
         pan () {
-            return this.report && typeof this.report.pan === 'number' ? this.report.pan : 0
+            return this.report && typeof this.report.pan === 'number' ? this.report.pan : null
         },
         tilt () {
-            return this.report && typeof this.report.tilt === 'number' ? this.report.tilt : 0
+            return this.report && typeof this.report.tilt === 'number' ? this.report.tilt : null
         },
         bounds () {
             return (this.report && this.report.bounds) || null
@@ -359,7 +365,7 @@ export default {
         modeControlState () {
             if (!this.modes.length) return 'not-offered'
             if (this.aimState !== 'present') return this.aimState
-            if (this.inhibited) return 'gated'
+            if (this.inhibited || this.report?.modeInhibited) return 'gated'
             return 'present'
         },
         /** A full sentence, not a bare label — see this component's own
@@ -378,7 +384,7 @@ export default {
          * mode), or `recentrePending` (this press has not yet been
          * followed by a fresh report). */
         recentreDisabled () {
-            return this.aimState !== 'present' || Boolean(this.inhibited) || this.recentrePending
+            return this.aimState !== 'present' || Boolean(this.inhibited) || Boolean(this.report?.recentreInhibited) || this.recentrePending
         }
     },
     watch: {
@@ -390,12 +396,17 @@ export default {
          * up, which is the safe direction to fail in. */
         report () {
             this.recentrePending = false
+            this.aimTransport?.refresh()
         }
     },
     created () {
         this.$dataTracker(this.id)
+        this.aimTransport = new AimTransport(() => this.report, (rate, reason) => { this.commandedPan = rate.pan; this.commandedTilt = rate.tilt; this.aimError = reason })
+        this.$socket.on?.('disconnect', this.aimDisconnect)
     },
+    beforeUnmount () { this.aimTransport?.close(); this.$socket.off?.('disconnect', this.aimDisconnect) },
     methods: {
+        aimDisconnect () { this.aimTransport?.stop() },
         /** Every message this node posts leaves through here — one seam,
          * the same reasoning `YonderDeck`'s own `post()` gives for having
          * exactly one. */
@@ -405,6 +416,7 @@ export default {
         /** Relayed verbatim (coordinator resolution 3) — `seq` is the
          * pad's own lifetime-monotonic counter, never recomputed here. */
         onSlew (e) {
+            if (this.report?.url) { this.aimTransport.update(e); return }
             this.commandedPan = e.pan
             this.commandedTilt = e.tilt
             this.post({ slew: { pan: e.pan, tilt: e.tilt, seq: e.seq, gesture: e.gesture } })
@@ -414,11 +426,13 @@ export default {
          * deliberately does not follow `YonderDeck.buildAim()`'s own choice
          * to add `pan: 0, tilt: 0` to its stop relay. */
         onStop (e) {
+            if (this.report?.url) { this.aimTransport.stop(); return }
             this.commandedPan = 0
             this.commandedTilt = 0
             this.post({ stop: { gesture: e.gesture } })
         },
         onModeChange (m) {
+            if (this.report?.url) { void this.aimTransport.action({ op: 'mode', mode: this.modes.indexOf(m) }); return }
             this.post({ mode: m })
         },
         pressRecentre () {
@@ -428,6 +442,7 @@ export default {
             // not reach in a real browser.
             if (this.recentreDisabled) return
             this.recentrePending = true
+            if (this.report?.url) { void this.aimTransport.action({ op: 'recentre' }).finally(() => { this.recentrePending = false }); return }
             this.post({ recentre: true })
         }
     }
@@ -498,6 +513,7 @@ export default {
     color: var(--yonder-label, #7f8a95);
 }
 
+.y-aimpanel__reported,
 .y-aimpanel__modeline {
     font-size: 12px;
     color: var(--yonder-value, #ffffff);

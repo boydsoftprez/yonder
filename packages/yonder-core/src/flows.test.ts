@@ -2159,7 +2159,8 @@ describe("flows/flows.json camera pages", () => {
       expect(otherwise, `${id} passes anything it does not recognise`).toBeGreaterThanOrEqual(0);
       expect(wires[otherwise], `${id}'s else output leads somewhere`).toEqual([]);
       for (const r of rules) {
-        if (r.t !== "else") expect(r.v).toBe("start");
+        if (r.t !== "else") expect(["start", "path"]).toContain(r.v);
+        if (r.v === "path") expect(wires[rules.indexOf(r)]).toEqual(["cam-thumb-select"]);
       }
     }
   });
@@ -2455,9 +2456,8 @@ describe("flows/flows.json camera pages", () => {
    */
   it("tells the picture whether its camera is running", () => {
     const pick = flows.find((n) => n.id === "pick-cam-picture");
-    const jsonata = ((pick?.rules as { to?: string; tot?: string }[]) ?? [])
-      .find((r) => r.tot === "jsonata");
-    expect(jsonata?.to, "the picture is never told the run state").toContain("running");
+    // The daemon composes run state, aim and recorder together; wiring projects the value.
+    expect(pick?.rules).toEqual([{ t: "set", p: "payload", pt: "msg", to: "payload.picture", tot: "msg" }]);
   });
 
   /** R-UI-10: every action on this page is on the rail, and only there. */
@@ -2803,8 +2803,7 @@ describe("flows/flows.json camera pages", () => {
     expect(picture?.path).toBe("");
     const from = flows.find((n) => n.id === "pick-cam-picture");
     expect((from?.wires as string[][])[0]).toEqual(["pic-camera"]);
-    expect(JSON.stringify(from?.rules)).toContain("payload.camera.id");
-    expect(JSON.stringify(from?.rules)).toContain("payload.display.pictureCost");
+    expect(from?.rules).toEqual([{ t: "set", p: "payload", pt: "msg", to: "payload.picture", tot: "msg" }]);
     expect((flows.find((n) => n.id === "camera-read")?.wires as string[][])[0])
       .toContain("pick-cam-picture");
   });
@@ -2869,13 +2868,13 @@ describe("flows/flows.json camera pages", () => {
     expect(route?.property).toBe("payload");
     const rules = route?.rules as { t: string; v: string }[];
     expect(rules.map((r) => r.v))
-      .toEqual(["control", "apply", "output", "mode", "shutter", "captures"]);
+      .toEqual(["nativeControl", "control", "apply", "output", "mode", "shutter", "captures"]);
     for (const rule of rules) expect(rule.t, "each is a has-key test").toBe("hask");
 
     const wires = route?.wires as string[][];
     expect(wires.map((w) => w[0]))
       .toEqual([
-        "cam-control-msg", "cam-apply-msg", "cam-output-msg", "cam-deck-mode",
+        "cam-native-control-msg", "cam-control-msg", "cam-apply-msg", "cam-output-msg", "cam-deck-mode",
         "cam-at-captures-act", "cam-at-read",
       ]);
     // **A rule per output, checked rather than assumed.** A switch with more
@@ -3008,11 +3007,8 @@ describe("flows/flows.json camera pages", () => {
   it("gives the picture the recorder's own state to count from", () => {
     const pick = flows.find((n) => n.id === "pick-cam-picture");
     const rules = pick?.rules as { p: string; to: string; tot: string }[];
-    expect(rules[0]).toEqual({ t: "set", p: "rec", pt: "msg", to: "payload.recorder", tot: "msg" });
-    expect(rules.some((r) => r.p === "payload.recording" && r.to === "rec" && r.tot === "msg"))
-      .toBe(true);
-    // And the scratch key does not travel on to the widget.
-    expect(rules.at(-1)).toMatchObject({ t: "delete", p: "rec" });
+    expect(rules).toEqual([{ t: "set", p: "payload", pt: "msg", to: "payload.picture", tot: "msg" }]);
+    // The route test proves picture.recording is the recorder observation verbatim.
   });
 });
 

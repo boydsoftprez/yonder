@@ -108,6 +108,8 @@ export = function register(RED: RED): void {
     },
     (value) => {
       const body = value as {
+        destination?: unknown;
+        kind?: unknown;
         captures?: unknown;
         name?: unknown;
         recording?: unknown;
@@ -117,6 +119,7 @@ export = function register(RED: RED): void {
 
       // The listing: how many, which is what the link beside the shutter key
       // says too.
+      if (body?.destination === 'camera' && body?.kind === 'photo') return 'Photo saved to camera card';
       if (Array.isArray(body?.captures)) {
         const n = body.captures.length;
         return n === 1 ? "1 capture" : `${String(n)} captures`;

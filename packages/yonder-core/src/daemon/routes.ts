@@ -144,6 +144,7 @@ export interface RouterDeps {
    * this daemon cannot detect cameras, not that none is attached.
    */
   cameras?: CameraProbes;
+  accessory?: import('../video/accessory/source.js').AccessorySources;
   /** Which encoder this board actually has (R-CAM-13). Injected, like `cameras`. */
   encoder?: () => Promise<Encoder>;
   /**
@@ -276,6 +277,8 @@ export interface CameraProbes {
  * what the configuration asked for.
  */
 export interface CameraView {
+  picture?: { path: string; cost: string; running: boolean; recording: RecordingState | null; aim: AimPanel; cameras: { id: string; name: string; active: boolean; caption: string }[] };
+  accessory?: ReturnType<import('../video/accessory/source.js').AccessorySources['snapshot']>;
   camera: Camera;
   run: CameraRun;
   /** The `/dev` node this camera's by-path name resolves to now, or null. */
@@ -649,7 +652,7 @@ const VIEWER_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
  * matching at all. The difference is not cosmetic: a guard nothing can reach
  * is a guard no test can prove.
  */
-const CAMERA_ROUTE = /^\/cameras\/(.+?)(?:\/(run|probe|stream-address|controls|settings|apply|record|photo|captures(?:\/[^/]+)?|outputs\/(?:rtp|rtsp|srt)|viewers\/[^/]+))?$/;
+const CAMERA_ROUTE = /^\/cameras\/(.+?)(?:\/(run|probe|stream-address|controls|aim|settings|apply|record|photo|captures(?:\/[^/]+)?|outputs\/(?:rtp|rtsp|srt)|viewers\/[^/]+))?$/;
 
 const WANTS: readonly Want[] = ["video", "stills", "off"];
 
@@ -865,6 +868,7 @@ export function createRouter(deps: RouterDeps): Router {
     body: unknown,
     say: (line: string) => void,
   ): Promise<RouteResult> => {
+
     const viewers = deps.viewers;
     if (viewers === undefined) {
       return noCameraLayer(`${method} /cameras/${id}/viewers/${viewer}`, say);
@@ -1034,6 +1038,14 @@ export function createRouter(deps: RouterDeps): Router {
     query: string,
     say: (line: string) => void,
   ): Promise<RouteResult> => {
+    if (verb === 'aim') {
+      const camera = loadConfig(deps.configPath).cameras.find(c => c.id === id);
+      if (!camera) return { status: 404, body: { error: 'Camera not configured' } };
+      if (method !== 'POST' || camera.source !== 'accessory' || !deps.accessory) return { status: 409, body: { error: 'This camera has no accessory aim controller' } };
+      const input = body as { owner?: unknown; request?: unknown } | null;
+      if (!input || typeof input.owner !== 'string' || !/^[A-Za-z0-9_.:-]{1,128}$/.test(input.owner)) return { status: 400, body: { error: 'Authenticated aim owner required' } };
+      return { status: 200, body: await deps.accessory.aim(camera.device, input.owner, input.request) };
+    }
     // Before the probes, deliberately. A browser saying what it is watching
     // and what it is measuring needs no `v4l2-ctl` run on its behalf, and a
     // sweep of the board on every statistic — at a report a second, per
@@ -1186,16 +1198,8 @@ export function createRouter(deps: RouterDeps): Router {
         ? undefined
         : await deps.recorder.captures(id);
       const heldCaptures = listed === undefined || isRefusal(listed) ? [] : listed.ok;
-      return {
-        camera,
-        run,
-        device,
-        card: answer?.card ?? null,
-        byPathStable,
-        capabilities,
-        reason: rejection?.reason ?? null,
-        encoder,
-        display: cameraStrip({
+      const accessorySnapshot = camera.source === 'accessory' ? deps.accessory?.snapshot(camera.device) : undefined;
+      const display = cameraStrip({
           camera, run, device, byPathStable, encoder,
           refusal: refuse({
             camera,
@@ -1203,8 +1207,23 @@ export function createRouter(deps: RouterDeps): Router {
             encoder,
             rtspBase: RTSP_BASE,
             knownDevices: known,
+            accessory: accessorySnapshot?.input,
           }),
-        }),
+        });
+      return {
+        camera,
+        accessory: accessorySnapshot,
+        run,
+        device,
+        card: answer?.card ?? null,
+        byPathStable,
+        capabilities,
+        reason: rejection?.reason ?? null,
+        encoder,
+        display,
+        picture: { path: id, cost: display.pictureCost, running: run.state === 'running', recording: recorderState,
+          aim: aimPanel(capabilities, accessorySnapshot, id),
+          cameras: config.cameras.map(c => ({ id: c.id, name: c.name, active: c.id === id, caption: `${c.source.toUpperCase()} · ${supervisor.state(c.id).state}` })) },
         // From what the device answered a moment ago, never from a list. A
         // camera that answered nothing yields every row, which is the honest
         // reading: an operator has to be able to tell *this camera cannot*
@@ -1214,6 +1233,7 @@ export function createRouter(deps: RouterDeps): Router {
         // above — never a second sweep, so the deck and the readout strip
         // can never disagree about the same camera.
         deck: cameraDeck({
+          accessory: accessorySnapshot,
           camera, capabilities, encoder, paths: await reachPaths(),
           // The same two facts the `recorder` field below carries, on the
           // deck's own payload: the capture column draws the shutter key's
@@ -1224,7 +1244,7 @@ export function createRouter(deps: RouterDeps): Router {
           recorder: recorderState,
           captures: heldCaptures.length,
         }),
-        aim: aimPanel(capabilities),
+        aim: aimPanel(capabilities, accessorySnapshot, id),
         // From the recorder that holds the recording, never from a count of
         // files on the disk: a file is there whether or not anything is still
         // writing to it, and a page drawing a REC pill off the second would
@@ -1256,6 +1276,7 @@ export function createRouter(deps: RouterDeps): Router {
           encoder,
           rtspBase: RTSP_BASE,
           knownDevices: known,
+          accessory: accessorySnapshot?.input,
         }),
       };
     };
@@ -1298,7 +1319,8 @@ export function createRouter(deps: RouterDeps): Router {
         capabilities: found.capabilities ?? noCapabilities(),
         encoder: found.encoder,
         rtspBase: RTSP_BASE,
-      }));
+        accessory: deps.accessory?.input(camera.device),
+      }), { retryForever: camera.source === 'accessory' });
       return { status: 200, body: supervisor.state(id) };
     }
 
@@ -1316,6 +1338,11 @@ export function createRouter(deps: RouterDeps): Router {
      * confirmation window.
      */
     if (method === "POST" && verb === "controls") {
+      if (camera.source === 'accessory') {
+        if (!deps.accessory) return { status: 503, body: { error: 'Accessory source unavailable' } };
+        try { await deps.accessory.controls(camera.device, body); return { status: 200, body: await view(false) }; }
+        catch (error) { return { status: 409, body: { error: error instanceof Error ? error.message : 'Camera command failed' } }; }
+      }
       const apply = deps.applyControls;
       if (apply === undefined) return noCameraLayer(`${method} /cameras/${id}/controls`, say);
 
@@ -1381,6 +1408,12 @@ export function createRouter(deps: RouterDeps): Router {
     if (method === "POST" && verb === "settings") {
       const next = setCameraSettings(config, id, body as CameraSettings);
       if (!next.ok) return { status: 400, body: { error: next.error } };
+      if (camera.source === 'accessory') {
+        const target = next.config.cameras.find(c => c.id === id)!;
+        const input = deps.accessory?.input(camera.device);
+        if (input?.native && (target.width > input.native.width || target.height > input.native.height || target.framerate > Math.ceil(input.native.fps)))
+          return { status: 400, body: { error: 'Output settings exceed the observed native accessory video' } };
+      }
       return { status: 200, body: await deps.engine.apply(next.config) };
     }
 
@@ -1443,6 +1476,10 @@ export function createRouter(deps: RouterDeps): Router {
       const offers = formats !== undefined && formats.state === "present" ? formats.value : [];
       const rungs = PREVIEW_RUNGS.filter((rung) => {
         const [w, h] = rung.split("x").map(Number);
+        if (camera.source === 'accessory') {
+          const native = deps.accessory?.input(camera.device)?.native;
+          return !!native && w <= native.width && h <= native.height;
+        }
         return offers.some((f) => f.width === w && f.height === h);
       });
       /**
@@ -1474,7 +1511,11 @@ export function createRouter(deps: RouterDeps): Router {
       // the strength of an empty list would make an unprobed camera
       // unconfigurable — `refuse()` states *that* fact, in its own words, at
       // the moment a pipeline is composed.
-      const refusal = staged && offers.length > 0 ? captureRefusal(offers, wanted) : null;
+      const native = camera.source === 'accessory' ? deps.accessory?.input(camera.device)?.native : null;
+      const refusal = camera.source === 'accessory' && staged
+        ? !native ? 'Native accessory input has not been observed' : wanted.width > native.width || wanted.height > native.height || wanted.framerate > Math.ceil(native.fps)
+          ? 'Output settings exceed native accessory video' : null
+        : staged && offers.length > 0 ? captureRefusal(offers, wanted) : null;
       // Named for the picker that has to change, so `draftPathFor()` puts the
       // sentence under a control rather than under the form: `width` when the
       // size itself is not on offer, `framerate` when the size is fine and the
@@ -1768,6 +1809,7 @@ export function createRouter(deps: RouterDeps): Router {
       // thrown exception carries none of the third, and a camera that simply
       // did not appear sends an operator looking for the one that vanished.
       if (method === "GET" && path === "/cameras") {
+        await deps.accessory?.discover();
         if (deps.cameras === undefined) return noCameraLayer("GET /cameras", say);
         const config = loadConfig(deps.configPath);
         const { found, rejected } = await deps.cameras.detect();
@@ -1887,7 +1929,7 @@ export function createRouter(deps: RouterDeps): Router {
           // and `Global Shutter Camera: Global S` is at least a thing they
           // can recognise while they think of a better one.
           name: detected.card.slice(0, 48),
-          source: "usb",
+          source: detected.source ?? "usb",
           device,
         } as (typeof next.cameras)[number]);
         say(`cameras: adopted ${device} as ${id}`);

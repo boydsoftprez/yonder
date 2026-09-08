@@ -46,6 +46,25 @@ const mppOpts = { ...opts, encoder: MPP };
 const mpp = () => compose(mppOpts);
 const mppText = () => mpp().join(" ");
 
+describe('accessory input', () => {
+  const accessory = { endpoint: '/run/yonder/accessory/cam1.sock', live: true, generation: 1, reason: null, native: { width: 1280, height: 720, fps: 29.97 } };
+  const input = { ...opts, camera: { ...CAMERA, source: 'accessory' as const, device: 'pocket2:test.udc' }, capabilities: noCapabilities(), accessory };
+  it('uses timestamped appsrc and H264 decode before the existing independent encodes', () => {
+    expect(refuse(input)).toBeNull(); const line = compose(input).join(' ');
+    expect(line).toContain('--accessory-socket=/run/yonder/accessory/cam1.sock');
+    expect(line).toContain('appsrc name=accessory-source'); expect(line).toContain('h264parse ! avdec_h264');
+    expect(line).toContain('tee name=raw'); expect(line).not.toContain('v4l2src'); expect(line).not.toContain('jpegdec');
+    expect(line.match(/v4l2h264enc/g)).toHaveLength(2);
+    expect(encodesIn(compose(input)).stream).toBe(2000);
+  });
+  it('keeps native input separate from selectable camera formats and refuses upscaling', () => {
+    expect(input.capabilities.formats.state).toBe('not-offered');
+    expect(refuse({ ...input, camera: { ...input.camera, width: 1920 } })).toContain('exceeds native');
+    expect(refuse({ ...input, accessory: { ...accessory, native: null } })).toContain('timestamp cadence');
+    expect(refuse({ ...input, accessory: { ...accessory, live: false } })).toContain('not live');
+  });
+});
+
 describe("compose", () => {
   it("captures the format the camera actually offered", () => {
     expect(text()).toContain("v4l2src");

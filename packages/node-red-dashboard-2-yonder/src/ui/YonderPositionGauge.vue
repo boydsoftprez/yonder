@@ -81,6 +81,7 @@ export default {
         value: { type: Number, default: 0 },
         min: { type: Number, default: -180 },
         max: { type: Number, default: 180 },
+        boundsKnown: { type: Boolean, default: true },
         unit: { type: String, default: '' },
         precision: { type: Number, default: 1 },
         /** True when this axis answers with no reading at all (§7). */
@@ -93,7 +94,7 @@ export default {
             return this.max - this.min
         },
         showZero () {
-            return this.span > 0 && this.min <= 0 && this.max >= 0
+            return this.boundsKnown && this.span > 0 && this.min <= 0 && this.max >= 0
         },
         shown () {
             if (this.dead) return '—'
@@ -116,6 +117,7 @@ export default {
             return (this.fraction(v) * TRACK_WIDTH) + 'px'
         },
         boundText (v) {
+            if (!this.boundsKnown) return '—'
             return this.unit ? `${v}${this.unit}` : String(v)
         }
     }

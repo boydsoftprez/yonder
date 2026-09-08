@@ -9,6 +9,7 @@ import YonderSetBar from './YonderSetBar.vue'
 import YonderTextField from './YonderTextField.vue'
 import YonderShutter from './YonderShutter.vue'
 import YonderAimPad from './YonderAimPad.vue'
+import { AimTransport } from './aim-transport.ts'
 import { createDraftStore } from './draft.ts'
 import { LABELS, captureDestination, captureRefusal, captureSizes, deckDraft, draftPathFor, endedWords, interruption } from 'yonder-core/presentation'
 
@@ -409,10 +410,14 @@ export default {
        * cannot start a competing capture.
        */
       shutterPending: false,
+      aimTransport: null,
+      aimError: null,
     }
   },
   created () {
     this.$dataTracker(this.id)
+    this.aimTransport = new AimTransport(() => this.report?.aim, (_rate, reason) => { this.aimError = reason })
+    this.$socket.on?.('disconnect', this.aimDisconnect)
   },
   mounted () {
     // Task 21's own round trip: `yonder.draft` is Dashboard's client store,
@@ -424,6 +429,7 @@ export default {
       : null
     if (saved) this.draftStore.restore(saved)
   },
+  beforeUnmount () { this.aimTransport?.close(); this.$socket.off?.('disconnect', this.aimDisconnect) },
   computed: {
     mode () {
       return this.props.mode === 'setup' ? 'setup' : 'live'
@@ -471,6 +477,7 @@ export default {
      * exists to stop.
      */
     shutterMode () {
+      if (this.report?.accessory) return this.report.accessory.state?.status?.mode ?? null
       const caps = this.report ? (this.report.capabilities || {}) : {}
       const has = (key) => Boolean(caps[key]) && caps[key].state !== 'not-offered'
       if (!has('recording')) return has('stills') ? 'photo' : null
@@ -505,9 +512,12 @@ export default {
      */
     report () {
       this.shutterPending = false
+      this.aimTransport?.refresh()
     },
   },
   methods: {
+    aimDisconnect () { this.aimTransport?.stop() },
+    nativeControl (command) { this.post({ nativeControl: command }) },
     hasDraft (path) {
       return Object.prototype.hasOwnProperty.call(this.draft, path)
     },
@@ -661,6 +671,7 @@ export default {
       this.post({ captures: 'read' })
     },
     setWorkMode (v) {
+      if (this.report?.accessory) { this.nativeControl({ kind: 'mode', value: v === 'Photo' ? 0 : 1 }); return }
       this.workMode = v === 'Photo' ? 'photo' : 'video'
     },
     /** `advertised`/`gated`, in the one sentence every disabled control on
@@ -828,7 +839,33 @@ export default {
      * the "omit the whole group" half of R-UI-20, not merely drawing an
      * empty one (an empty box and an absent one say different things,
      * `YonderColumn`'s own reasoning). */
+    nativeControls (group) {
+      return (this.report.accessory?.controls || []).filter(d => d.group === group && d.key !== 'mode').map(d => {
+        if (d.state === 'not-offered') return this.fact(d.key, d.label, d.reason)
+        return h(YonderPicker, { key: d.key, label: d.label, value: d.value, options: d.options,
+          state: d.state, reason: d.reason || '', onChange: value => {
+            const selected = d.options.find(option => String(option.value) === String(value))
+            if (selected && d.state === 'present') this.nativeControl(selected.command)
+          } })
+      })
+    },
+    buildNativeGroup (group) {
+      const controls = this.nativeControls(group)
+      return controls.length ? h(YonderColumn, { legend: GROUP_LEGEND[group], key: group }, () => controls) : null
+    },
+    buildNativeShape () {
+      const native = this.report.accessory?.input?.native
+      if (!native) return [this.fact('native', 'Native input', 'Waiting for SPS dimensions and camera frame clock')]
+      const capture = this.report.policy.capture
+      const sizes = ['1280x720', '854x480', '640x360'].filter(size => { const [w,h] = size.split('x').map(Number); return w <= native.width && h <= native.height })
+      const rates = [30,25,24,20,15,10,5,1].filter(rate => rate <= Math.ceil(native.fps))
+      return [this.fact('native', 'Native input', `${native.width}×${native.height} · ${native.fps.toFixed(2)} fps · fixed USB feed`),
+        h(YonderPicker, { key: 'captureSize', label: 'Output resolution', value: `${this.draftValue('width', capture.width)}x${this.draftValue('height', capture.height)}`,
+          options: sizes.map(value => ({ value, label: value.replace('x', '×') })), onChange: value => { const [w,h] = value.split('x').map(Number); this.stage('width', w); this.stage('height', h) } }),
+        h(YonderPicker, { key: 'captureRate', label: 'Output frame rate', value: this.draftValue('framerate', capture.framerate), options: rates.map(value => ({ value: String(value), label: `${value} fps` })), onChange: value => this.stage('framerate', Number(value)) })]
+    },
     buildGroup (groupId) {
+      if (this.report?.accessory) return this.buildNativeGroup(groupId)
       const r = this.report
       const setup = this.mode === 'setup'
       const keys = (GROUP_KEYS[groupId] || []).filter((key) => {
@@ -946,6 +983,8 @@ export default {
           class: 'y-deck__mode',
           label: 'Mode',
           options: ['Video', 'Photo'],
+          state: r.accessory ? (r.accessory.controls?.find(d => d.key === 'mode')?.state || 'gated') : 'present',
+          reason: r.accessory?.controls?.find(d => d.key === 'mode')?.reason || '',
           value: mode === 'photo' ? 'Photo' : 'Video',
           onChange: (v) => this.setWorkMode(v),
         }))
@@ -974,6 +1013,10 @@ export default {
        * itself draws, so the number beside the link and the number in the
        * panel cannot disagree.
        */
+      if (r.accessory) {
+        children.push(h('div', { class: 'y-deck__ended' }, this.recorder?.mediumReason || 'Camera card status unknown'))
+        children.push(...this.nativeControls('capture'))
+      } else {
       const count = (r.captures && typeof r.captures.count === 'number') ? r.captures.count : 0
       children.push(h('button', {
         type: 'button',
@@ -981,6 +1024,7 @@ export default {
         key: 'captures',
         onClick: () => this.openCaptures(),
       }, `Captures (${count}) \u203a`))
+      }
 
       return h(YonderColumn, { legend: GROUP_LEGEND.capture, key: 'capture' }, () => children)
     },
@@ -1099,6 +1143,7 @@ export default {
      * this column.
      */
     buildCaptureShape () {
+      if (this.report?.accessory) return this.buildNativeShape()
       const r = this.report
       const cap = r.capabilities && r.capabilities.formats
       // The one state that draws no control: a camera that answered no format
@@ -1291,14 +1336,18 @@ export default {
         ? (aim.reason || 'not answering')
         : aim.state === 'gated'
           ? `${aim.by.label} has it`
-          : null
+          : (this.report.aim?.inhibited || null)
       return h('div', { class: 'y-deck__aim' }, [
         h('div', { class: 'y-deck__aim-h' }, 'Aim'),
+        this.aimError ? h('div', { class: 'y-deck__ended' }, this.aimError) : null,
+        this.report.aim?.admitted ? h('div', { class: 'y-deck__ended' }, `Admitted rate ${Math.hypot(this.report.aim.admitted.pan, this.report.aim.admitted.tilt).toFixed(1)} °/s`) : null,
         h(YonderAimPad, {
           axes: { pan: 'present', tilt: 'present', roll: 'advertised' },
+          maxRate: this.report.aim?.maxRate ?? 30,
           inhibited,
-          onSlew: (e) => this.post({ aim: { pan: e.pan, tilt: e.tilt, seq: e.seq, gesture: e.gesture } }),
-          onStop: (e) => this.post({ aim: { gesture: e.gesture, pan: 0, tilt: 0 } }),
+          atLimit: this.report.aim?.atLimit || {},
+          onSlew: (e) => this.report.aim?.url ? this.aimTransport.update(e) : this.post({ aim: { pan: e.pan, tilt: e.tilt, seq: e.seq, gesture: e.gesture } }),
+          onStop: (e) => this.report.aim?.url ? this.aimTransport.stop() : this.post({ aim: { gesture: e.gesture, pan: 0, tilt: 0 } }),
         }),
       ])
     },

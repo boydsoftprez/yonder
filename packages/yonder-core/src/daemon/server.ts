@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { createServer, type Server } from "node:http";
-import { unlinkSync, existsSync, mkdirSync, chmodSync } from "node:fs";
+import { unlinkSync, existsSync, mkdirSync, chmodSync, accessSync, constants } from "node:fs";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { ApplyEngine } from "../apply/engine.js";
@@ -34,7 +34,8 @@ import { MediaRenderer, MEDIA_CONFIG_PATH } from "../media/renderer.js";
 import { Supervisor, systemSpawner, type ProcessSpawner } from "../video/supervisor.js";
 import { PipelineRenderer } from "../video/renderer.js";
 import { CameraAutostart } from "../video/autostart.js";
-import { detectCameras, probeCamera } from "../video/probe/camera.js";
+import { detectCameras, probeCamera, detectWithAccessory } from "../video/probe/camera.js";
+import { AccessorySources } from '../video/accessory/source.js';
 import { probeEncoder, type Encoder } from "../video/probe/encoder.js";
 import { applyControls } from "../video/controls.js";
 import { EncoderChannel } from "../video/encoder.js";
@@ -114,6 +115,8 @@ export function onceAsync<T>(fn: () => Promise<T>): () => Promise<T> {
 }
 
 export interface ServerOptions {
+  /** Only production main enables Linux accessory ownership; tests inject explicitly. */
+  accessory?: boolean | AccessorySources;
   socketPath: string;
   configPath: string;
   journalPath: string;
@@ -216,6 +219,7 @@ export interface CameraLayer {
 }
 
 export interface BuildRenderersOptions {
+  accessory?: AccessorySources;
   cameraLayer?: CameraLayer;
   secretsPath: string;
   runner?: CommandRunner;
@@ -539,6 +543,7 @@ export function buildRenderers(opts: BuildRenderersOptions): {
    */
   const encoders = new EncoderChannel({ supervisor, clock: opts.clock });
   const pipelineRenderer = new PipelineRenderer({
+    accessory: identity => opts.accessory?.input(identity),
     supervisor,
     channel: encoders,
     // The same memo the start route composes with, over the same runner as
@@ -556,9 +561,10 @@ export function buildRenderers(opts: BuildRenderersOptions): {
   // pipelines last, because a pipeline is composed from what the renderers
   // above it have already settled.
   const cameraAutostart = new CameraAutostart({
+    accessory: identity => opts.accessory?.input(identity),
     supervisor,
-    detect: () => opts.cameraLayer?.cameras.detect()
-      ?? detectCameras({ runner: opts.runner ?? systemRunner }),
+    detect: () => detectWithAccessory(() => opts.cameraLayer?.cameras.detect() ?? detectCameras({ runner: opts.runner ?? systemRunner }),
+      () => opts.accessory?.detect() ?? { found: [], rejected: [] }),
     encoder: () => opts.cameraLayer?.encoder() ?? encoder(),
     clock: opts.clock,
     log,
@@ -568,6 +574,7 @@ export function buildRenderers(opts: BuildRenderersOptions): {
   if (consoleRenderer !== undefined) renderers.push(consoleRenderer);
   if (mediaRenderer !== undefined) renderers.push(mediaRenderer);
   if (mavlinkRenderer !== undefined) renderers.push(mavlinkRenderer);
+  if (opts.accessory) renderers.push({ name: 'accessory', render: async config => { opts.accessory!.resume(config.cameras); } });
   renderers.push(pipelineRenderer, cameraAutostart);
 
   return {
@@ -692,6 +699,15 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
       return DEFAULT_CONFIG;
     }
   };
+  const accessory = opts.accessory === true ? new AccessorySources({ cameras: () => reachConfig().cameras,
+    mediaCapability: async () => {
+      try { accessSync('/usr/local/bin/yonder-pipeline', constants.X_OK); }
+      catch { return 'Accessory video requires the packaged yonder-pipeline host'; }
+      const answer = await (opts.runner ?? systemRunner)(['gst-inspect-1.0', 'avdec_h264']);
+      return answer.code === 0 ? null : 'Accessory video requires the avdec_h264 GStreamer decoder';
+    },
+  }) : opts.accessory || undefined;
+  accessory?.resume();
   /** `usb` is in the schema's interface list and no renderer writes one. */
   const reachOrder = (config: Config): PathName[] =>
     config.network.priority.filter((i): i is PathName => i !== "usb");
@@ -782,6 +798,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
 
   try {
     built = buildRenderers({
+      accessory,
       secretsPath: opts.secretsPath ?? "/etc/yonder/secrets.yaml",
       runner: opts.runner,
       clock,
@@ -960,6 +977,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
      * holding rather than from the document (K-48).
      */
     recorder = new Recorder({
+      onCamera: accessory?.medium,
       channel: supervisor,
       cameras: () => reachConfig().cameras,
       reserveMb: () => reachConfig().storage.reserve_mb,
@@ -1241,6 +1259,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   };
 
   const route = createRouter({
+    accessory,
     engine,
     configPath: opts.configPath,
     credential,
@@ -1296,8 +1315,8 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
       // injecting a fake runner gets a fake v4l2-ctl for free, and nothing
       // reaches a real one by omission.
       cameras: {
-        detect: () => detectCameras({ runner: probeRunner }),
-        probe: (node, card) => probeCamera(node, card, { runner: probeRunner }),
+        detect: () => detectWithAccessory(() => detectCameras({ runner: probeRunner }), () => accessory?.detect() ?? { found: [], rejected: [] }),
+        probe: async (node, card) => node.startsWith('pocket2:') && accessory ? accessory.probe(node) : probeCamera(node, card, { runner: probeRunner }),
       },
       // The very same successful answer the pipeline renderer uses. Camera
       // page polls and an apply can arrive together; both share one in-flight
@@ -1507,7 +1526,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
         built?.mavlinkListener?.close();
         server.close(() => {
           if (existsSync(opts.socketPath)) unlinkSync(opts.socketPath);
-          resolve();
+          void (accessory?.close() ?? Promise.resolve()).catch(error => warn(`accessory cleanup: ${String(error)}`)).finally(resolve);
         });
       }),
   };
@@ -1515,6 +1534,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
 
 async function main(): Promise<void> {
   await startServer({
+    accessory: true,
     socketPath: process.env.YONDER_SOCKET ?? "/run/yonder/core.sock",
     configPath: process.env.YONDER_CONFIG ?? "/etc/yonder/config.yaml",
     journalPath: process.env.YONDER_JOURNAL ?? DEFAULT_JOURNAL_PATH,

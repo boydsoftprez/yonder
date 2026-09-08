@@ -188,6 +188,7 @@ function newGestureId () {
 export default {
     name: 'YonderAimPad',
     props: {
+        maxRate: { type: Number, default: MAX_RATE },
         /** Per-axis capability state. Only `roll`'s absence from
          * `'present'` is drawn (struck) — the pad has no gesture for a
          * third axis at all. */
@@ -265,8 +266,8 @@ export default {
                 x: CENTER + ux * Math.min(d, RIM),
                 y: CENTER + uy * Math.min(d, RIM),
                 // Screen y grows downward; tilt does not, hence the sign flip.
-                panRate: ux * k * MAX_RATE,
-                tiltRate: -uy * k * MAX_RATE
+                panRate: ux * k * (Number.isFinite(this.maxRate) && this.maxRate > 0 ? Math.min(this.maxRate, MAX_RATE) : 0),
+                tiltRate: -uy * k * (Number.isFinite(this.maxRate) && this.maxRate > 0 ? Math.min(this.maxRate, MAX_RATE) : 0)
             }
         },
         down (e) {

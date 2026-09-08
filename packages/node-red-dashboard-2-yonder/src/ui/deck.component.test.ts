@@ -1318,3 +1318,18 @@ describe("the size and rate the camera captures", () => {
     expect(factLabels(wrapper)).not.toContain("Capture formats");
   });
 });
+
+describe('native Pocket controls', () => {
+  it('draws measured ISO/WB choices, sends native commands, and labels output shape separately', async () => {
+    const native = { state: { status: { mode: 'video' } }, input: { native: { width: 1280, height: 720, fps: 29.97 } }, controls: [
+      { key: 'iso', group: 'exposure', label: 'ISO', value: '5', state: 'present', options: [{ value: '5', label: '400', command: { kind: 'iso', value: 5 } }, { value: '9', label: '6400', command: { kind: 'iso', value: 9 } }] },
+      { key: 'white-balance', group: 'exposure', label: 'White balance', value: '0', state: 'present', options: [{ value: '0', label: 'Auto', command: { kind: 'white-balance', value: 0 } }, { value: '65', label: '6500 K', command: { kind: 'white-balance', value: 65 } }] },
+    ] };
+    const { wrapper, emit } = deck(makeStore(makeReport({ accessory: native })), 'live');
+    expect(wrapper.text()).toContain('29.97 fps'); expect(wrapper.text()).toContain('Output resolution');
+    const wb = pickerByLabel(wrapper, 'White balance');
+    expect(wb.text()).toContain('Auto'); await wb.find('select').setValue('65');
+    expect(emit).toHaveBeenLastCalledWith('widget-action', 'd1', { payload: { nativeControl: { kind: 'white-balance', value: 65 } } });
+    expect(wrapper.text()).not.toContain('Captures (0)'); wrapper.unmount();
+  });
+});

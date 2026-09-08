@@ -4502,29 +4502,10 @@
         "rules": [
             {
                 "t": "set",
-                "p": "rec",
-                "pt": "msg",
-                "to": "payload.recorder",
-                "tot": "msg"
-            },
-            {
-                "t": "set",
                 "p": "payload",
                 "pt": "msg",
-                "to": "{\"path\": payload.camera.id, \"cost\": payload.display.pictureCost, \"running\": payload.run.state = \"running\"}",
-                "tot": "jsonata"
-            },
-            {
-                "t": "set",
-                "p": "payload.recording",
-                "pt": "msg",
-                "to": "rec",
+                "to": "payload.picture",
                 "tot": "msg"
-            },
-            {
-                "t": "delete",
-                "p": "rec",
-                "pt": "msg"
             }
         ],
         "action": "",
@@ -5689,6 +5670,11 @@
         "rules": [
             {
                 "t": "hask",
+                "v": "nativeControl",
+                "vt": "str"
+            },
+            {
+                "t": "hask",
                 "v": "control",
                 "vt": "str"
             },
@@ -5720,10 +5706,13 @@
         ],
         "checkall": "false",
         "repair": false,
-        "outputs": 6,
+        "outputs": 7,
         "x": 700,
         "y": 2280,
         "wires": [
+            [
+                "cam-native-control-msg"
+            ],
             [
                 "cam-control-msg"
             ],
@@ -8614,19 +8603,78 @@
                 "vt": "str"
             },
             {
+                "t": "hask",
+                "v": "path",
+                "vt": "str"
+            },
+            {
                 "t": "else"
             }
         ],
         "checkall": "false",
         "repair": false,
-        "outputs": 2,
+        "outputs": 3,
         "x": 700,
         "y": 3600,
         "wires": [
             [
                 "cam-at-stream"
             ],
+            [
+                "cam-thumb-select"
+            ],
             []
+        ]
+    },
+    {
+        "id": "cam-native-control-msg",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "the native camera command",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "controls",
+                "tot": "str"
+            },
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "payload.nativeControl",
+                "tot": "msg"
+            }
+        ],
+        "x": 1000,
+        "y": 2210,
+        "wires": [
+            [
+                "cam-at-controls"
+            ]
+        ]
+    },
+    {
+        "id": "cam-thumb-select",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "open the selected camera",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload.camera",
+                "pt": "msg",
+                "to": "payload.path",
+                "tot": "msg"
+            }
+        ],
+        "x": 1000,
+        "y": 3640,
+        "wires": [
+            [
+                "cam-open"
+            ]
         ]
     }
 ]

@@ -94,6 +94,7 @@
 </template>
 
 <script>
+import { AimTransport } from './aim-transport.ts'
 import YonderStateOverlay from './YonderStateOverlay.vue'
 import YonderThumbStrip from './YonderThumbStrip.vue'
 import { atIp, cameraFor, DESCRIPTORS, heldWords } from 'yonder-core/presentation'
@@ -799,6 +800,7 @@ export default {
          * went. Read here so the watcher below has one thing to watch. */
         saved () {
             const v = this.fromPayload('saved')
+            if (v?.held === 'camera' && v.kind === 'photo' && Number.isFinite(v.observedAt)) return { ...v, at: v.observedAt }
             return v && typeof v === 'object' && Number.isFinite(v.at) ? v : null
         },
         cameras () {
@@ -817,7 +819,7 @@ export default {
          * here — see this file's own doc comment on why the full four-state
          * vocabulary is `YonderAim.vue`'s own territory, not drawn twice. */
         aimable () {
-            return Boolean(this.aim && this.aim.state === 'present')
+            return Boolean(this.aim && this.aim.state === 'present' && !this.aim.inhibited)
         },
         stats () {
             const v = this.fromPayload('stats')
@@ -858,6 +860,7 @@ export default {
         }
     },
     watch: {
+        aim () { this.aimTransport?.refresh() },
         /**
          * A key on the rail, arriving as a message.
          *
@@ -956,6 +959,8 @@ export default {
         this.$dataTracker(this.id)
     },
     mounted () {
+        this.aimTransport = new AimTransport(() => this.aim)
+        this.$socket.on?.('disconnect', this.aimDisconnect)
         this.tick = setInterval(() => { this.now = Date.now() }, 1000)
         // The media clock, which is the only honest source for the age this
         // component draws. See the note on `lastFrameAt` above.
@@ -974,6 +979,8 @@ export default {
         this.requestLive()
     },
     beforeUnmount () {
+        this.aimTransport?.close()
+        this.$socket.off?.('disconnect', this.aimDisconnect)
         clearTimeout(this.flashTimer)
         clearInterval(this.tick)
         clearTimeout(this.retryTimer)
@@ -991,6 +998,7 @@ export default {
         this.teardown()
     },
     methods: {
+        aimDisconnect () { this.aimTransport?.stop(); this.endDragGesture() },
         /**
          * One field of this picture's own richer state (R-VID-18, R-UI-28):
          * the live message first, then the last message that set it, then a
@@ -1386,6 +1394,8 @@ export default {
             this.post('start')
         },
         onThumbGo (id) {
+            this.aimTransport?.stop()
+            this.endDragGesture()
             this.sentPath = id
             this.post({ path: id })
         },
@@ -1404,8 +1414,8 @@ export default {
             return {
                 // Screen y grows downward; tilt does not, hence the sign flip
                 // — the identical convention `YonderAimPad.at()` states.
-                pan: (dx / d) * k * DRAG_MAX_RATE,
-                tilt: -(dy / d) * k * DRAG_MAX_RATE
+                pan: (dx / d) * k * (this.aim?.maxRate ?? DRAG_MAX_RATE),
+                tilt: -(dy / d) * k * (this.aim?.maxRate ?? DRAG_MAX_RATE)
             }
         },
         dragDown (e) {
@@ -1442,7 +1452,8 @@ export default {
             this.orbX = e.clientX - rect.left
             this.orbY = e.clientY - rect.top
             this.dragSeq += 1
-            this.post({ slew: { pan: a.pan, tilt: a.tilt, seq: this.dragSeq, gesture: this.dragGesture } })
+            if (this.aim?.url) this.aimTransport?.update({ pan: a.pan, tilt: a.tilt, gesture: this.dragGesture })
+            else this.post({ slew: { pan: a.pan, tilt: a.tilt, seq: this.dragSeq, gesture: this.dragGesture } })
         },
         /** Ends the active gesture, if there is one — idempotent, and the
          * single place that idempotency lives, the identical shape
@@ -1453,7 +1464,8 @@ export default {
             if (this.dragGesture === null) return
             const g = this.dragGesture
             this.dragGesture = null
-            this.post({ stop: { gesture: g } })
+            if (this.aim?.url) this.aimTransport?.stop()
+            else this.post({ stop: { gesture: g } })
         },
         /** Every one of the eight endings reaches here — see this file's own
          * top-of-file doc comment. No `pointerId` guard of its own, for the

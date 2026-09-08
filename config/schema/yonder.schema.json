@@ -384,7 +384,362 @@
           "source": {
             "type": "string",
             "enum": [
-              "usb"
+              "usb",
+              "accessory"
+            ]
+          },
+          "accessory_mount": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "mount": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64
+                  },
+                  "envelopes": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "yaw": {
+                          "type": "array",
+                          "minItems": 2,
+                          "maxItems": 2,
+                          "items": [
+                            {
+                              "type": "number",
+                              "minimum": -360,
+                              "maximum": 360
+                            },
+                            {
+                              "type": "number",
+                              "minimum": -360,
+                              "maximum": 360
+                            }
+                          ]
+                        },
+                        "pitch": {
+                          "type": "array",
+                          "minItems": 2,
+                          "maxItems": 2,
+                          "items": [
+                            {
+                              "type": "number",
+                              "minimum": -360,
+                              "maximum": 360
+                            },
+                            {
+                              "type": "number",
+                              "minimum": -360,
+                              "maximum": 360
+                            }
+                          ]
+                        },
+                        "roll": {
+                          "type": "array",
+                          "minItems": 2,
+                          "maxItems": 2,
+                          "items": [
+                            {
+                              "type": "number",
+                              "minimum": -360,
+                              "maximum": 360
+                            },
+                            {
+                              "type": "number",
+                              "minimum": -360,
+                              "maximum": 360
+                            }
+                          ]
+                        },
+                        "mount": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64
+                        },
+                        "mode": {
+                          "type": "number",
+                          "enum": [
+                            0,
+                            1,
+                            2
+                          ]
+                        }
+                      },
+                      "required": [
+                        "mount",
+                        "mode"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "maxItems": 12
+                  },
+                  "signs": {
+                    "type": "object",
+                    "properties": {
+                      "pan": {
+                        "anyOf": [
+                          {
+                            "type": "number",
+                            "enum": [
+                              1,
+                              -1
+                            ]
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "tilt": {
+                        "anyOf": [
+                          {
+                            "type": "number",
+                            "enum": [
+                              1,
+                              -1
+                            ]
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "pan",
+                      "tilt"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "limitDirections": {
+                    "type": "object",
+                    "properties": {
+                      "yaw": {
+                        "type": "number",
+                        "enum": [
+                          1,
+                          -1
+                        ]
+                      },
+                      "pitch": {
+                        "type": "number",
+                        "enum": [
+                          1,
+                          -1
+                        ]
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "actions": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "mount": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64
+                        },
+                        "fromMode": {
+                          "type": "number",
+                          "enum": [
+                            0,
+                            1,
+                            2
+                          ]
+                        },
+                        "command": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "const": "recentre"
+                                }
+                              },
+                              "required": [
+                                "kind"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "const": "mode"
+                                },
+                                "mode": {
+                                  "type": "number",
+                                  "enum": [
+                                    0,
+                                    1,
+                                    2
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "kind",
+                                "mode"
+                              ],
+                              "additionalProperties": false
+                            }
+                          ]
+                        },
+                        "start": {
+                          "type": "object",
+                          "properties": {
+                            "yaw": {
+                              "type": "array",
+                              "minItems": 2,
+                              "maxItems": 2,
+                              "items": [
+                                {
+                                  "type": "number",
+                                  "minimum": -360,
+                                  "maximum": 360
+                                },
+                                {
+                                  "type": "number",
+                                  "minimum": -360,
+                                  "maximum": 360
+                                }
+                              ]
+                            },
+                            "pitch": {
+                              "type": "array",
+                              "minItems": 2,
+                              "maxItems": 2,
+                              "items": [
+                                {
+                                  "type": "number",
+                                  "minimum": -360,
+                                  "maximum": 360
+                                },
+                                {
+                                  "type": "number",
+                                  "minimum": -360,
+                                  "maximum": 360
+                                }
+                              ]
+                            },
+                            "roll": {
+                              "type": "array",
+                              "minItems": 2,
+                              "maxItems": 2,
+                              "items": [
+                                {
+                                  "type": "number",
+                                  "minimum": -360,
+                                  "maximum": 360
+                                },
+                                {
+                                  "type": "number",
+                                  "minimum": -360,
+                                  "maximum": 360
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "yaw",
+                            "pitch",
+                            "roll"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "trajectory": {
+                          "type": "object",
+                          "properties": {
+                            "yaw": {
+                              "type": "array",
+                              "minItems": 2,
+                              "maxItems": 2,
+                              "items": [
+                                {
+                                  "type": "number",
+                                  "minimum": -360,
+                                  "maximum": 360
+                                },
+                                {
+                                  "type": "number",
+                                  "minimum": -360,
+                                  "maximum": 360
+                                }
+                              ]
+                            },
+                            "pitch": {
+                              "type": "array",
+                              "minItems": 2,
+                              "maxItems": 2,
+                              "items": [
+                                {
+                                  "type": "number",
+                                  "minimum": -360,
+                                  "maximum": 360
+                                },
+                                {
+                                  "type": "number",
+                                  "minimum": -360,
+                                  "maximum": 360
+                                }
+                              ]
+                            },
+                            "roll": {
+                              "type": "array",
+                              "minItems": 2,
+                              "maxItems": 2,
+                              "items": [
+                                {
+                                  "type": "number",
+                                  "minimum": -360,
+                                  "maximum": 360
+                                },
+                                {
+                                  "type": "number",
+                                  "minimum": -360,
+                                  "maximum": 360
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "yaw",
+                            "pitch",
+                            "roll"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "mount",
+                        "fromMode",
+                        "command",
+                        "start",
+                        "trajectory"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "maxItems": 32
+                  }
+                },
+                "required": [
+                  "mount",
+                  "envelopes",
+                  "signs",
+                  "limitDirections",
+                  "actions"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
             ]
           },
           "device": {

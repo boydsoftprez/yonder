@@ -646,3 +646,22 @@ describe("a recording whose pipeline goes away", () => {
     expect((await b.recorder.state("cam0")).recording).toBe(false);
   });
 });
+
+describe('native accessory capture dispatch', () => {
+  it('uses observed camera recording state and never spends board space or invents photo files', async () => {
+    const observed = { recording: true, since: 1000, destination: 'camera' as const, remainingSeconds: 120, remainingPhotos: 40, bytes: null, ended: null, observed: true, phase: 'recording' };
+    const medium: CameraMedium = { holds: id => id === 'cam1', captures: async () => [], state: vi.fn(async () => observed),
+      record: vi.fn(async () => observed), photo: vi.fn(async () => ({ destination: 'camera', kind: 'photo' })) };
+    const b = on({ onCamera: medium, running: { cam0: 'running', cam1: 'stopped' } });
+    expect(await b.recorder.state('cam1')).toEqual(observed);
+    expect(await b.recorder.record('cam1', 'start')).toEqual({ ok: observed });
+    expect(medium.record).toHaveBeenCalledWith('cam1', 'start');
+    expect(await b.recorder.photo('cam1')).toEqual({ ok: { destination: 'camera', kind: 'photo' } });
+    expect(b.sent).toEqual([]); expect(b.freeReads).toEqual([]);
+  });
+  it('reports an absent native card without silently recording to the board', async () => {
+    const b = on({ onCamera: { holds: () => true, captures: async () => [], record: async () => { throw new Error('No recognized camera card'); } } });
+    expect(await b.recorder.record('cam1', 'start')).toEqual({ refused: 'No recognized camera card', because: 'unanswered' });
+    expect(b.sent).toEqual([]);
+  });
+});
