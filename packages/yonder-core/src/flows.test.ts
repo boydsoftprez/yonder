@@ -401,7 +401,7 @@ describe("flows/flows.json", () => {
     // purpose: a page added without a line here is a page nobody decided to
     // ship, and the capture gate would photograph it anyway.
     expect(pages.map((p) => p.name).sort())
-      .toEqual(["Camera", "Cameras", "Diagnostics", "Log", "Network", "Status", "Telemetry"]);
+      .toEqual(["Camera", "Cameras", "Cockpit", "Diagnostics", "Log", "Network", "Status", "Telemetry"]);
 
     const groups = flows.filter((n) => n.type === "ui-group");
     for (const page of pages) {
@@ -1741,6 +1741,7 @@ describe("flows/flows.json camera pages", () => {
     // rail, because R-UI-10 puts every action there and only there.
     { group: "group-cam-aim", suffix: "-cam", hidden: "widgets" },
     { group: "group-cameras-pending", suffix: "-cameras", hidden: "group" },
+    { group: "group-cockpit-pending", suffix: "-cockpit", hidden: "group" },
     // The camera pages, reached by R-UI-15 on merge. They carry the banner in
     // their own idiom: the annunciator alone in the group (no `ui-text`, which
     // ADR-0009 keeps off these two pages) and CONFIRM/REVERT as a softkey row
@@ -2130,7 +2131,7 @@ describe("flows/flows.json camera pages", () => {
     expect(up).toEqual(["cam-rate-preview"]);
     // And both reach the picture, or the key is a control that does nothing.
     for (const id of ["cam-rate-full", "cam-rate-preview"]) {
-      expect((flows.find((n) => n.id === id)?.wires as string[][])[0]).toEqual(["pic-camera"]);
+      expect((flows.find((n) => n.id === id)?.wires as string[][])[0]).toEqual(["pic-camera", "pic-cockpit"]);
     }
   });
 
@@ -2160,7 +2161,7 @@ describe("flows/flows.json camera pages", () => {
       expect(wires[otherwise], `${id}'s else output leads somewhere`).toEqual([]);
       for (const r of rules) {
         if (r.t !== "else") expect(["start", "path"]).toContain(r.v);
-        if (r.v === "path") expect(wires[rules.indexOf(r)]).toEqual(["cam-thumb-select"]);
+        if (r.v === "path") expect(wires[rules.indexOf(r)]).toEqual(["cam-pic-go"]);
       }
     }
   });
@@ -2802,7 +2803,7 @@ describe("flows/flows.json camera pages", () => {
     expect(picture?.cost).toBe("");
     expect(picture?.path).toBe("");
     const from = flows.find((n) => n.id === "pick-cam-picture");
-    expect((from?.wires as string[][])[0]).toEqual(["pic-camera"]);
+    expect((from?.wires as string[][])[0]).toEqual(["pic-camera", "pic-cockpit"]);
     expect(from?.rules).toEqual([{ t: "set", p: "payload", pt: "msg", to: "payload.picture", tot: "msg" }]);
     expect((flows.find((n) => n.id === "camera-read")?.wires as string[][])[0])
       .toContain("pick-cam-picture");
@@ -2993,7 +2994,7 @@ describe("flows/flows.json camera pages", () => {
     // Copies, and no expression: the words for where it went are
     // `heldWords()`'s, in the component that draws them.
     expect(JSON.stringify(saved?.rules)).not.toContain("jsonata");
-    expect((saved?.wires as string[][])[0]).toEqual(["pic-camera"]);
+    expect((saved?.wires as string[][])[0]).toEqual(["pic-camera", "pic-cockpit"]);
   });
 
   /**
@@ -3325,5 +3326,60 @@ describe("flows/flows.json reads the configuration again", () => {
     expect(byId("read-config")?.type).toBe("yonder-config");
     expect(wiresOf("button-reread").flat()).toContain("read-config");
     expect(wiresOf("read-config")[0]).toEqual(wiresOf("watch-config")[0]);
+  });
+});
+
+describe('Cockpit restoration — R-UI-28', () => {
+  const node = (id: string) => flows.find(n => n.id === id);
+  const targets = (id: string) => node(id)?.wires?.flat() ?? [];
+
+  it('serves the existing 8+4 picture and aim layout independently of a deck', () => {
+    expect(node('page-cockpit')).toMatchObject({ type: 'ui-page', name: 'Cockpit', path: '/cockpit', layout: 'grid', visible: true, disabled: false, order: 5, theme: 'palette' });
+    expect(node('group-cockpit-picture')).toMatchObject({ page: 'page-cockpit', width: 8 });
+    expect(node('group-cockpit-aim')).toMatchObject({ page: 'page-cockpit', width: 4 });
+    const groups = new Set(flows.filter(n => n.page === 'page-cockpit').map(n => n.id));
+    const widgets = flows.filter(n => n.group && groups.has(n.group));
+    expect(widgets.map(n => n.type).sort()).toEqual(['ui-yonder-aim', 'ui-yonder-annunciator', 'ui-yonder-picture', 'ui-yonder-softkeys']);
+    expect(node('pic-cockpit')).toMatchObject({ type: 'ui-yonder-picture', path: '' });
+    expect(node('aim-cockpit')).toMatchObject({ type: 'ui-yonder-aim' });
+  });
+
+  it('feeds standalone widgets with the current source-composed picture and private-aim status contracts', () => {
+    expect(targets('camera-read')).toEqual(expect.arrayContaining(['pick-cam-picture', 'pick-cam-aim']));
+    expect(node('pick-cam-picture')?.rules).toEqual([{ t: 'set', p: 'payload', pt: 'msg', to: 'payload.picture', tot: 'msg' }]);
+    expect(targets('pick-cam-picture')).toEqual(['pic-camera', 'pic-cockpit']);
+    expect(targets('pick-cam-aim')).toEqual(['aim-camera', 'aim-cockpit']);
+    expect(node('pick-cam-aim')?.rules).toEqual([{ t: 'set', p: 'payload', pt: 'msg', to: 'payload.aim', tot: 'jsonata' }]);
+    for (const id of ['cam-rate-full', 'cam-rate-preview', 'cam-caps-saved']) expect(targets(id)).toEqual(['pic-camera', 'pic-cockpit']);
+    // Native controls remain routed through the new Task40 adapter.
+    expect((node('cam-deck-route')?.rules as { v: string }[]).map(r => r.v)).toContain('nativeControl');
+  });
+
+  it('changes the selected camera on the strip without navigating out of Cockpit or echoing picture commands', () => {
+    expect(targets('pic-cockpit')).toEqual(['cam-pic-act']);
+    const route = node('cam-pic-act')!;
+    const rules = route.rules as { t: string; v?: string }[];
+    const path = rules.findIndex(r => r.t === 'hask' && r.v === 'path');
+    expect(route.wires?.[path]).toEqual(['cam-pic-go']);
+    expect(route.wires?.[rules.findIndex(r => r.t === 'else')]).toEqual([]);
+    expect(node('cam-pic-go')?.rules).toEqual([
+      { t: 'set', p: 'camera', pt: 'flow', to: 'payload.path', tot: 'msg' },
+      { t: 'delete', p: 'topic', pt: 'msg' },
+      { t: 'set', p: 'payload', pt: 'msg', to: '', tot: 'str' },
+    ]);
+    expect(targets('cam-pic-go')).toEqual(['cam-at-read']);
+    expect(targets('cam-at-read')).toEqual(['camera-read']);
+    expect(node('cam-thumb-select')).toBeUndefined();
+  });
+
+  it('keeps pending confirmation reachable and visible for the Cockpit surface', () => {
+    expect(node('group-cockpit-pending')).toMatchObject({ page: 'page-cockpit', visible: false });
+    expect(targets('poll-pending')).toEqual(expect.arrayContaining(['ann-pending-cockpit', 'keys-pending-cockpit']));
+    expect(targets('keys-pending-cockpit')).toEqual(['tag-pending-key']);
+    expect(JSON.parse(node('keys-pending-cockpit')?.keys as string).map((key: { action: string }) => key.action)).toEqual(['confirm', 'revert']);
+    for (const operation of ['show', 'hide']) {
+      const rule = (node(`${operation}-pending-banner`)?.rules as { to: string }[])[0];
+      expect(JSON.parse(rule.to).groups[operation]).toContain('group-cockpit-pending');
+    }
   });
 });
