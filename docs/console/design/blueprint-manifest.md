@@ -786,6 +786,7 @@ camera-page findings above.
 | F-17 | Ground internet by default, explicit aircraft proxy, browser offline packs and bounded local traffic trails | `ground-data.mjs`, offline store, ground relay and renderer provider contract; R-FLT-11, [source and offline guide](../../cockpit-ground-data.md), browser import and cancellation evidence |
 | F-18 | Compact recurring flight updates with separately versioned mission and command details, adjustable read rate and visible JSON bandwidth | `flight-wire.ts`, cockpit routes and `cockpit-api.mjs`; R-FLT-12, compact/reconnect/background-transfer and delayed-options tests |
 | F-19 | Own-aircraft gold breadcrumb trail, time/distance/since-power-on windows, miles or NM, show/hide and local clear/restore. Retain current-boot observations through browser closure, recover only the selected window, and expose gaps or reduced history. | `own-trail.ts`, `own-trail.mjs`, `OwnTrailSettings.vue`, map layer and authenticated history route; R-FLT-15, boot/reconnect/rollover/bounds/window/transport/component tests and browser trail geometry checks |
+| F-20 | Fresh AUTO FROM → TO, active/next waypoint badges and local list following; shared HSI/expanded CDI leg course with target/path checks at sequence changes | `mission-sequence.mjs`, `navigation-view.mjs`, `YonderCockpit.vue`; R-FLT-20, [real QuadPlane sequencing and browser evidence](../evidence/2026-09-07-cockpit-sequencing.md) |
 
 The [cockpit walkthrough](../../cockpit-user-guide.md) covers each shortcut,
 confirmation, mission action conversion and loiter upload. The

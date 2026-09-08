@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <template>
   <div class="cockpit-course-strip">
-    <div class="cockpit-course-bearing"><small>{{guidance.radialValid?'LOITER CENTER':'NAV BEARING'}}</small><b>{{angle}}</b></div>
+    <div class="cockpit-course-bearing"><small>{{guidance.radialValid?'LOITER CENTER':guidance.trackTitle||'LEG COURSE'}}</small><b>{{angle}}</b></div>
     <div class="cockpit-deviation">
       <svg class="lateral-deviation-display" viewBox="0 0 200 46" role="img" :aria-label="guidance.radialValid?'Loiter radial deviation':'Lateral course deviation'">
         <g fill="none" stroke="currentColor" stroke-width="1.5"><circle v-for="x in [14,57,143,186]" :key="x" :cx="x" cy="25" r="2.7" /></g>

@@ -14,6 +14,16 @@ The metadata carries parameter units, defaults, enum options and firmware notes.
 Navigation geometry in `cockpit-state.mjs` is original spherical geometry; no
 simulator host, legacy flight-plan classes or external checkout is required.
 
+AUTO leg sequencing and target/path checks in `mission-sequence.mjs` are
+Yonder-authored. Their telemetry interpretation was checked against ArduPilot
+revision `dbe792162d06cab66c3475fd5556bf7a120f119e`:
+[`AP_L1_Control.cpp`](https://github.com/ArduPilot/ardupilot/blob/dbe792162d06cab66c3475fd5556bf7a120f119e/libraries/AP_L1_Control/AP_L1_Control.cpp)
+defines the steering-bearing correction and left-positive cross-track sign;
+[`GCS_MAVLink_Plane.cpp`](https://github.com/ArduPilot/ardupilot/blob/dbe792162d06cab66c3475fd5556bf7a120f119e/ArduPlane/GCS_MAVLink_Plane.cpp)
+publishes navigation-controller and next-target observations independently of
+the mission-current message. No Garmin or Microsoft implementation is used for
+this sequence display or CDI handoff.
+
 Turn cues use independently authored Yonder geometry and standard coordinated-turn
 physics. Behavioral references are Garmin's [G3X Touch Pilot's Guide,
 190-02472-00 Rev D](https://static.garmin.com/pumac/190-02472-00_d.pdf),

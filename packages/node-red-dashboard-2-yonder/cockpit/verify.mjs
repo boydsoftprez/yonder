@@ -39,7 +39,26 @@ for(const [name,width,height] of [['laptop',1440,900],['tablet',1024,768],['port
  await wind.click();await page.getByLabel('Wind display mode',{exact:true}).selectOption('components');
  await page.getByRole('button',{name:'Close PFD controls'}).click();
  await page.screenshot({path:`${artifacts}/${name}-full.png`});
- if(width>=768){await page.getByRole('button',{name:'Expand mission',exact:true}).click();assert.equal(await page.getByRole('main').getAttribute('data-layout'),'mission');await page.screenshot({path:`${artifacts}/${name}-mission.png`});await page.getByRole('button',{name:'Return to full PFD',exact:true}).click();}
+ if(width>=768){
+  await page.getByRole('button',{name:'Expand mission',exact:true}).click();assert.equal(await page.getByRole('main').getAttribute('data-layout'),'mission');
+  const course=await page.locator('.pfd-course-pointer').getAttribute('transform');
+  await page.evaluate(()=>window.cockpitFixture.leg(3,-25));
+  await page.locator('[data-mission-seq="3"][aria-current="step"]').waitFor();
+  assert.match(await page.locator('.cockpit-mission-summary').innerText(),/WP02 → WP03.*NEXT IN PLAN WP04/s);
+  assert.notEqual(await page.locator('.pfd-course-pointer').getAttribute('transform'),course);
+  assert.ok(Number(await page.locator('.pfd-cdi-bar').getAttribute('x1'))>0);
+  assert.equal(await page.locator('.cdi-moving-bar').getAttribute('transform'),'translate(108.6 0)');
+  await page.evaluate(()=>window.cockpitFixture.leg(9));
+  await page.locator('[data-mission-seq="9"][aria-current="step"]').waitFor();
+  const followed=await page.locator('.cockpit-mission-list').evaluate(list=>{const row=list.querySelector('[aria-current="step"]'),a=row.getBoundingClientRect(),b=list.getBoundingClientRect();return list.scrollTop>0&&a.top>=b.top-1&&a.bottom<=b.bottom+1});
+  assert.ok(followed,'active waypoint follows into view when the mission advances');
+  await page.locator('.cockpit-mission-list').dispatchEvent('wheel',{deltaY:-100});
+  assert.equal(await page.getByRole('button',{name:'Follow active mission leg',exact:true}).getAttribute('aria-pressed'),'false');
+  await page.getByRole('button',{name:'Follow active mission leg',exact:true}).click();
+  await page.screenshot({path:`${artifacts}/${name}-mission.png`});
+  await page.evaluate(()=>window.cockpitFixture.leg(2));
+  await page.getByRole('button',{name:'Return to full PFD',exact:true}).click();
+ }
  await page.getByRole('button',{name:'Airspeed controls',exact:true}).click();await page.getByRole('dialog',{name:'Airspeed reference',exact:true}).waitFor();await page.screenshot({path:`${artifacts}/${name}-airspeed.png`});await page.getByRole('button',{name:'Close PFD controls'}).click();
  assert.equal(await page.evaluate(()=>window.cockpitFixture.calls.length),0);
 }

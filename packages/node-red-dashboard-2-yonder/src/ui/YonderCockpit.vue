@@ -142,19 +142,21 @@
           @click="layout='mission'"
         >↗</button></header>
       <div class="cockpit-mission-summary">
-        <b>{{guidance.targetName||'No active item'}}</b><span>{{guidance.valid?fmt(guidance.distanceM/1852,2)+' NM':'Guidance unavailable'}}<template
+        <div class="cockpit-mission-sequence"><b v-if="!draft&&missionProgress.activeSeq!==null">{{missionProgress.fromName||'ACTIVE'}} → {{missionProgress.activeName}}</b><b v-else>{{draft?'LOCAL DRAFT':guidance.targetName||'No active mission leg'}}</b><small v-if="!draft&&missionProgress.activeSeq!==null">{{missionProgress.nextName?'NEXT IN PLAN '+missionProgress.nextName:missionProgress.nextReason}}</small></div><span :title="guidance.reason">{{guidance.valid?fmt(guidance.distanceM/1852,2)+' NM':'Awaiting guidance'}}<template
             v-if="guidance.eteSeconds!==null&&guidance.eteSeconds!==undefined"
           > · ETE {{fmt(guidance.eteSeconds)}} s</template></span></div>
       <NavigationDeviation v-if="layout==='mission'" :guidance="guidance" :scale="cdiScale" />
-      <div class="cockpit-mission-list"><button
+      <div ref="missionList" class="cockpit-mission-list" @wheel.passive="pauseMissionFollow" @touchstart.passive="pauseMissionFollow"><button
           v-for="item in shownMission.items"
           :key="item.seq"
-          :class="{active:!draft&&item.seq===snapshot.mission?.currentSeq}"
+          :class="{active:!draft&&item.seq===missionProgress.activeSeq,next:!draft&&item.seq===missionProgress.nextSeq}"
+          :aria-current="!draft&&item.seq===missionProgress.activeSeq?'step':undefined"
+          :data-mission-seq="item.seq"
           @click="openMission({seq:item.seq})"
-        ><b>{{String(item.seq).padStart(2,'0')}}</b><span>{{commandName(item)}}<small>{{[0,3,5,6,10,11].includes(item.frame)?fmt(item.alt)+' m '+datum(item.frame):'Command '+item.command}}</small></span></button>
+        ><b>{{String(item.seq).padStart(2,'0')}}</b><span>{{commandName(item)}}<small>{{[0,3,5,6,10,11].includes(item.frame)?fmt(item.alt)+' m '+datum(item.frame):'Command '+item.command}}</small></span><em v-if="!draft&&item.seq===missionProgress.activeSeq" class="mission-sequence-badge">→ ACTIVE</em><em v-else-if="!draft&&item.seq===missionProgress.nextSeq" class="mission-sequence-badge">NEXT</em></button>
         <p v-if="!shownMission.items.length">{{snapshot.mission?.message||'No received mission items'}}</p>
       </div>
-      <nav><button @click="openMission(null)">Mission controls</button><button
+      <nav><button @click="openMission(null)">Mission controls</button><button v-if="!draft" aria-label="Follow active mission leg" :aria-pressed="preferences.display.followMission" @click="setOption('followMission',!preferences.display.followMission)">{{preferences.display.followMission?'Following active':'Follow active'}}</button><button
           v-if="layout==='mission'"
           @click="$refs.importFile.click()"
         >Import</button><button
@@ -559,6 +561,7 @@
 </main>
 </template>
 <script>
+import {missionSequence} from './cockpit/mission-sequence.mjs';
 import { markRaw } from 'vue'
 import { createGroundDataProvider } from './cockpit/ground-data.mjs'
 import {
@@ -733,6 +736,8 @@ export default {
     }
   },
   computed: {
+    missionProgress(){return missionSequence(this.agedSnapshot)},
+    missionFollowKey(){return [this.missionProgress.activeSeq,!!this.draft,this.layout,this.mobileInset,this.preferences.display.followMission].join('/')},
     trafficMapOnlyCount(){return (this.trafficReport.tracks||[]).filter(track=>!Number.isFinite(track.altitudeMslM)).length},
     ownTrailDisplay(){return selectOwnTrail(this.snapshot.ownTrail,this.ownTrailOptions,this.ownTrailCleared,this.snapshot.at+Math.floor(Math.max(0,this.elapsed)/1000)*1000)},
     draftContextChanged(){return !!this.draft&&(!this.draftContext||this.draftContext.generation!==(this.snapshot.identity?.generation||null)||this.draftContext.revision!==(this.snapshot.mission?.revision||null))},
@@ -848,6 +853,7 @@ export default {
     }
   },
   watch: {
+    missionFollowKey(){this.followMissionLeg()},
     sourceMode() { this.dataOptions('sourceMode') },
     report: {
       handler(v) {
@@ -952,6 +958,14 @@ export default {
       this.$el.style.setProperty('--cockpit-height', height + 'px')
     },
     fmt,
+    pauseMissionFollow(){if(this.preferences.display.followMission)this.setOption('followMission',false)},
+    followMissionLeg(){
+      this.$nextTick(()=>{
+        if(this.draft||!this.preferences.display.followMission||this.missionProgress.activeSeq===null)return;
+        const list=this.$refs.missionList,row=list?.querySelector('[aria-current="step"]');
+        if(row&&list.clientHeight)list.scrollTop+=row.getBoundingClientRect().top-list.getBoundingClientRect().top;
+      })
+    },
     missionWire,
     commandName: item => getCommand(item.command)?.label || `Command ${item.command}`,
     datum: frame => ({

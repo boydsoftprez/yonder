@@ -50,6 +50,7 @@ export const displayDefaults = Object.freeze({
   skidBall: true,
   standardRatePointers: true,
   turnRate: true,
+  followMission: true,
   stripPlacement: 'mfd',
   layout: 'split'
 });
@@ -85,7 +86,7 @@ export function validatePfdPreferences(input = {}) {
       references[key] = parseReference(key, input?.references?.[key]);
     } catch {}
   }
-  for (const key of ['pitchLadder', 'secondary', 'syntheticVision', 'fdVisible', 'skidBall', 'standardRatePointers', 'turnRate'])
+  for (const key of ['pitchLadder', 'secondary', 'syntheticVision', 'fdVisible', 'skidBall', 'standardRatePointers', 'turnRate', 'followMission'])
     if (typeof input?.display?.[key] === 'boolean') display[key] = input.display[key];
   for (const key of ['tapeOpacity', 'hsiOpacity'])
     if (Number.isFinite(input?.display?.[key])) display[key] = Math.max(.1, Math.min(1, input.display[key]));

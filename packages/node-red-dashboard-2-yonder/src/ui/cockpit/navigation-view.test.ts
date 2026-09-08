@@ -17,7 +17,7 @@ function snapshot(operations=[direct()]) {
       rollDeg:2, pitchDeg:3, headingDeg:87, fdReady:true, navRollDeg:4, navPitchDeg:5,
       positionTarget:{...target}, navController:{ageMs:0, autopilotId:3, mode:'GUIDED',
         positionTarget:{...target}, navBearingDeg:0, targetBearingDeg:0, crossTrackM:12}},
-    mission:{currentFresh:true, currentSeq:1, items:[{seq:1, command:16, frame:0, x:35.02, y:-84, z:120, params:[0,0,0,0]}]}};
+    mission:{synchronization:'verified',currentFresh:true, currentSeq:1, items:[{seq:1, command:16, frame:0, x:35.02, y:-84, z:120, params:[0,0,0,0]}]}};
 }
 
 describe('GUIDED lateral navigation ownership',()=>{
@@ -60,7 +60,7 @@ describe('GUIDED lateral navigation ownership',()=>{
     expect(navigationView(state).valid).toBe(false); // Mode history alone does not change current GUIDED telemetry.
     Object.assign(state.telemetry,{mode:'AUTO',customMode:10});
     Object.assign(state.telemetry.navController,{mode:'AUTO',missionSeq:1});
-    expect(navigationView(state)).toMatchObject({valid:true,targetName:'WP1',lateralValid:true});
+    expect(navigationView(state)).toMatchObject({valid:true,targetName:'WP1',lateralValid:false});
   });
   it('marks absent ownership and stale operation details unavailable instead of guessing from a fresh waypoint',()=>{
     for(const state of [snapshot([]),snapshot([{...heading(),vehicleGeneration:'old-aircraft'}]),

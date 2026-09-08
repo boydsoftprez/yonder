@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import {isPositionItem} from './mission-import.mjs';
 import {guidedNavigationUnavailable, guidedSource} from './guided-navigation.mjs';
+import {missionSequence,missionLegMatch} from './mission-sequence.mjs';
 import {
   aircraftMission,
   bearing,
@@ -62,11 +63,13 @@ export function navigationView(snapshot, elapsed = 0) {
       eteSeconds: t.groundspeedKt > 1 ? dist / (t.groundspeedKt * 1852 / 3600) : null
     };
   }
-  if (t.mode !== 'AUTO' || !snapshot.mission?.currentFresh) return base;
+  if (t.mode !== 'AUTO' || !snapshot.mission?.currentFresh || snapshot.mission.synchronization!=='verified') return base;
   const target = mission.items.find(item => item.seq === snapshot.mission.currentSeq),
     dist = distance(p, target);
   if(!target||!isPositionItem(target)||dist===null)return {...base,reason:'Current item has no fixed geographic target'};
-  const lateralValid = !!(fresh && n.mode === 'AUTO' && target.command === 16 && n.missionSeq === target.seq);
+  const sequence=missionSequence(snapshot);
+  const lateralValid = !!(fresh && n.mode === 'AUTO' && target.command === 16 && n.missionSeq === target.seq
+    && missionLegMatch(target,sequence,n,t.groundspeedKt));
   return {
     ...base,
     valid: true,
@@ -77,9 +80,12 @@ export function navigationView(snapshot, elapsed = 0) {
     bearingDeg: bearing(p, target),
     lateralValid,
     crossTrackM: lateralValid ? -n.crossTrackM : null,
-    desiredTrackDeg: lateralValid ? n.navBearingDeg : null,
-    trackTitle: 'NAV BEARING',
-    reason: lateralValid ? 'Autopilot cross-track' : 'Target bearing only',
+    desiredTrackDeg: lateralValid ? sequence.courseDeg : null,
+    trackTitle: 'LEG COURSE',
+    fromSeq: sequence.fromSeq,
+    fromName: sequence.fromName,
+    nextSeq: sequence.nextSeq,
+    reason: lateralValid ? 'Uploaded leg · autopilot cross-track' : 'Waiting for matching leg guidance · target bearing only',
     eteSeconds: t.groundspeedKt > 1 ? dist / (t.groundspeedKt * 1852 / 3600) : null
   };
 }

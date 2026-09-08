@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// R-FLT-18, R-CMD-04/09, R-TEL-01/06: opt-in real-firmware smoke in a fresh, disposable simulator.
+// R-FLT-18/20, R-CMD-04/09, R-TEL-01/06: opt-in real-firmware smoke in a fresh, disposable simulator.
 // Usage: node packages/yonder-core/scripts/quadplane-sitl-smoke.mjs --firmware-dir DIR --output FILE
 // DIR contains the checksummed official ArduPlane 4.7.1 bin/arduplane and quadplane.parm.
 // Build yonder-core first. Never attaches to the existing research preview or to hardware.
@@ -15,6 +15,7 @@ import {decodeDatagram} from '../dist/mav/protocol.js';
 import {VehicleService} from '../dist/mav/vehicle.js';
 import {systemClock} from '../dist/apply/types.js';
 import demo from '../../node-red-dashboard-2-yonder/src/ui/cockpit/data/cove-vtol-demo.mjs';
+import {navigationView,cdiDeflection} from '../../node-red-dashboard-2-yonder/src/ui/cockpit/navigation-view.mjs';
 
 const args=process.argv.slice(2),options={};
 for(let i=0;i<args.length;i+=2){assert(['--firmware-dir','--output'].includes(args[i])&&args[i+1],'Expected --firmware-dir DIR and optional --output FILE');options[args[i]]=args[i+1];}
@@ -24,7 +25,7 @@ for(const [file,hash] of [['bin/arduplane','1b6f6810016531f81a2ab240c1353aa73103
 const port=5778,name=`yonder-quadplane-smoke-${randomUUID().slice(0,8)}`,runtime=mkdtempSync(join(tmpdir(),'yonder-quadplane-sitl-'));
 const evidence={schema:1,sourceCommit:'dbe792162d06cab66c3475fd5556bf7a120f119e',firmware:'Official ArduPlane 4.7.1',model:'quadplane',evidence:'Independent disposable SITL; no physical aircraft',startedAt:new Date().toISOString(),stages:[],outcome:'running'};
 let started=false,socket,service,firstBytes;
-const commands=[], extendedStates=[], flightSamples=[];let lastSample=0;
+const commands=[], extendedStates=[], flightSamples=[], navigationSamples=[];let lastSample=0;
 const docker=(...args)=>execFileSync('docker',args,{encoding:'utf8',timeout:30000,stdio:['ignore','pipe','pipe']}).trim();
 const wait=ms=>new Promise(r=>setTimeout(r,ms));
 async function until(predicate,description,timeout=20000){const end=Date.now()+timeout;while(Date.now()<end){const result=predicate();if(result)return result;await wait(100);}throw new Error(`Timed out: ${description}`);}
@@ -50,7 +51,9 @@ try{
  const splitter=new MavLinkPacketSplitter();splitter.on('data',({buffer})=>{
   service.receive(buffer);
   for(const f of decodeDatagram(buffer)) if(f.id===245) extendedStates.push({at:Date.now(),vtolState:f.data.vtolState,landedState:f.data.landedState});
-  const now=Date.now();if(now-lastSample>500){lastSample=now;const s=service.snapshot(),t=s.telemetry;flightSamples.push({at:now,mode:t.mode,armed:t.armed,seq:s.mission.currentSeq,lat:t.latitude,lon:t.longitude,altitudeM:t.relativeAltitudeM,groundspeedKt:t.groundspeedKt,airspeedKt:t.airspeedKt,verticalSpeedFpm:t.verticalSpeedFpm});}
+  const now=Date.now();if(now-lastSample>500){lastSample=now;const s=service.snapshot(),t=s.telemetry;flightSamples.push({at:now,mode:t.mode,armed:t.armed,seq:s.mission.currentSeq,lat:t.latitude,lon:t.longitude,altitudeM:t.relativeAltitudeM,groundspeedKt:t.groundspeedKt,airspeedKt:t.airspeedKt,verticalSpeedFpm:t.verticalSpeedFpm});
+    if(t.mode==='AUTO'){const g=navigationView(s);navigationSamples.push({at:now,currentSeq:s.mission.currentSeq,view:g,deflection:cdiDeflection(g,250),nav:t.navController});}
+  }
  });splitter.on('error',()=>{});socket.on('data',bytes=>splitter.write(bytes));
  if(firstBytes)splitter.write(firstBytes);
  await until(()=>service.snapshot().connected,'ArduPlane heartbeat');assert.equal(service.snapshot().identity.autopilot,3);assert.equal(service.snapshot().identity.vehicleType,1);
@@ -93,16 +96,25 @@ try{
  console.log(`Takeoff completed: ${transition.telemetry.relativeAltitudeM.toFixed(1)} m, route item 02 active`);
  await until(()=>extendedStates.some(s=>s.at>takeoffAt&&s.vtolState===4),'autopilot reports fixed-wing transition completed',90000);
  await until(()=>service.snapshot().telemetry.relativeAltitudeM>85 && service.snapshot().telemetry.airspeedKt>30,'forward flight climbing toward the 300 ft route',90000);
- await until(()=>service.snapshot().mission.currentSeq>=3,'first geographic waypoint completed',90000);
+ await until(()=>service.snapshot().mission.currentSeq>=5,'three geographic waypoints completed',240000);
+ for(const seq of [2,3,4]){
+   const samples=navigationSamples.filter(s=>s.currentSeq===seq&&s.view.lateralValid);
+   assert(samples.length>=2,`Live CDI must follow route item ${seq}, not only a fixture`);
+   assert(samples.every(s=>s.view.seq===seq&&s.nav.missionSeq===seq&&s.view.fromSeq===seq-1),'CDI source and displayed leg must agree');
+   assert(samples.every(s=>Number.isFinite(s.view.desiredTrackDeg)&&Math.abs(s.deflection)<=1),'Course and deviation remain finite and bounded');
+ }
+ evidence.stages.push({action:'CDI sequenced through route items 02, 03 and 04',courses:[2,3,4].map(seq=>({seq,course:navigationSamples.find(s=>s.currentSeq===seq&&s.view.lateralValid).view.desiredTrackDeg}))});
  assert(extendedStates.some(s=>s.at>takeoffAt&&s.vtolState===3),'Autopilot reported multicopter flight');
  assert(extendedStates.some(s=>s.at>takeoffAt&&s.vtolState===1),'Autopilot reported transition to fixed wing');
- evidence.stages.push({action:'transition and first route waypoint completed',telemetry:service.snapshot().telemetry,mission:service.snapshot().mission});
+ evidence.stages.push({action:'transition and three route waypoints completed',telemetry:service.snapshot().telemetry,mission:service.snapshot().mission});
  assert.equal(commands.filter(c=>c.command===300).length,1,'Only one mission start request');
  evidence.outcome='passed';
 
 }catch(error){evidence.outcome='failed';evidence.error=error.message;if(started)evidence.simulatorLog=docker('logs','--tail','40',name);if(service)evidence.lastSnapshot=service.snapshot();console.error(error.message);process.exitCode=1;}
 finally{
- evidence.commands=commands;evidence.extendedStates=extendedStates;evidence.flightSamples=flightSamples;service?.close();socket?.destroy();
+ evidence.commands=commands;evidence.extendedStates=extendedStates;evidence.flightSamples=flightSamples;evidence.navigationSamples=navigationSamples;service?.close();socket?.destroy();
+ // Preserve observations even if Docker cleanup fails or stalls.
+ if(options['--output']){const file=resolve(options['--output']);mkdirSync(dirname(file),{recursive:true});writeFileSync(file,JSON.stringify({...evidence,cleanup:'pending'},null,2)+'\n');}
  if(started){assert.equal(docker('inspect','--format','{{index .Config.Labels "yonder.test"}}',name),'quadplane-mission-smoke');docker('rm','-f',name);}
  rmSync(runtime,{recursive:true,force:true});evidence.finishedAt=new Date().toISOString();
  if(options['--output']){const file=resolve(options['--output']);mkdirSync(dirname(file),{recursive:true});writeFileSync(file,JSON.stringify(evidence,null,2)+'\n');}

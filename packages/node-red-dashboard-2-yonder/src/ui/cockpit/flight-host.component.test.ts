@@ -2,9 +2,27 @@
 import {expect,it,vi} from 'vitest';
 import {mount} from '@vue/test-utils';
 import YonderCockpit from '../YonderCockpit.vue';
-import {fixture} from '../../../cockpit/fixture.mjs';
+import {fixture,fixtureLeg} from '../../../cockpit/fixture.mjs';
 import coveDemo from './data/cove-demo.json';
 function host(){const report=fixture();report.capabilities.flightControl=['heading','altitude','speed','loiter'].map(kind=>({kind,available:true}));return mount(YonderCockpit,{props:{id:'flight-host-test',report,api:{command:vi.fn(async()=>({accepted:true,operationId:'one'}))}},global:{stubs:{YonderCockpitMap:true,YonderPicture:true,TerrainVision:true}}})}
+it('sequences the list, HSI and expanded CDI together without changing aircraft state',async()=>{
+ const w=host();w.vm.layout='mission';await w.vm.$nextTick();
+ expect(w.get('[aria-current="step"]').attributes('data-mission-seq')).toBe('2');
+ expect(w.get('.cockpit-mission-summary').text()).toContain('NEXT IN PLAN WP03');
+ const before=w.get('.pfd-course-pointer').attributes('transform');
+ const next=fixtureLeg(w.props('report'),3,-25);
+ await w.setProps({report:next});
+ expect(w.get('[aria-current="step"]').attributes('data-mission-seq')).toBe('3');
+ expect(w.get('.cockpit-mission-summary').text()).toContain('WP02 → WP03');
+ expect(w.get('.cockpit-mission-summary').text()).toContain('NEXT IN PLAN WP04');
+ expect(w.get('.pfd-course-pointer').attributes('transform')).not.toBe(before);
+ expect(Number(w.get('.pfd-cdi-bar').attributes('x1'))).toBeGreaterThan(0);
+ expect(w.get('.cdi-moving-bar').attributes('transform')).toBe('translate(108.6 0)');
+ await w.get('[aria-label="Follow active mission leg"]').trigger('click');expect(w.vm.preferences.display.followMission).toBe(false);
+ const stale={...next,mission:{...next.mission,currentFresh:false}};await w.setProps({report:stale});
+ expect(w.find('[aria-current="step"]').exists()).toBe(false);expect(w.find('.pfd-cdi-bar').exists()).toBe(false);
+ expect(w.props('api').command).not.toHaveBeenCalled();w.unmount();localStorage.clear();
+});
 it('keeps fresh zero-age instruments visible between clock ticks and exposes local turn-cue settings',async()=>{
  const w=host();await w.setData({now:w.vm.receivedAt-190});
  expect(w.find('.skid-ball').exists()).toBe(true);expect(w.find('.turn-unavailable').exists()).toBe(false);

@@ -51,6 +51,28 @@ targets have their own freshness checks. AUTO straight-leg CDI and GUIDED loiter
 radial error are different indications. ETE means estimated travel time to the
 point; it is not a turn countdown.
 
+During **AUTO**, the aircraft mission inset shows **FROM → TO**, highlights the
+reported active item in magenta and marks the **NEXT** geographic item. **NEXT IN
+PLAN** means the uploaded order; it skips ordinary action items but stops at a
+mission jump or return command instead of guessing what the autopilot will do.
+A local draft is labeled separately and has no aircraft-active badges.
+
+The list brings the active item into view as the aircraft advances. Scrolling or
+touching the list pauses that behavior so you can browse. Press **Follow active**
+at the bottom to resume; the button reads **Following active** while enabled.
+Expand the mission inset to see the larger lateral-deviation scale beside the PFD.
+These list controls only change this browser's display.
+
+For an AUTO waypoint leg, the HSI course arrow uses the uploaded **FROM → TO**
+course. ArduPlane's steering bearing varies while capturing the path and is not
+the leg course. The magenta needle in both displays uses the autopilot's measured
+cross-track error and points toward the correction. At a waypoint handoff, the
+needle waits for telemetry whose sequence, target and path agree with the new leg.
+Distance and bearing remain available while lateral guidance is unavailable.
+An external rejoin or mission jump can produce a path with a different origin;
+the cockpit shows target bearing only until the uploaded leg can be verified
+against telemetry, rather than inventing a commanded course.
+
 During a GUIDED heading request, ArduPlane continues transmitting its previous
 geographic target. The cockpit suppresses that target's bearing, distance, ETE
 and CDI instead of presenting it as the commanded path. Measured flight-director
