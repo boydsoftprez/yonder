@@ -68,6 +68,41 @@ existing simulator or hardware; the original research ports remain separate.
 Ctrl-C closes the service and removes only its own container and temporary storage.
 Mission state in this disposable simulator is lost on exit; export local edits.
 
+### QuadPlane vertical takeoff
+
+For the VTOL preview, use the same verified ArduPlane executable with its upstream
+QuadPlane physics model and defaults. Download the separate parameter file:
+
+```sh
+curl --fail --location https://raw.githubusercontent.com/ArduPilot/ardupilot/dbe792162d06cab66c3475fd5556bf7a120f119e/Tools/autotest/default_params/quadplane.parm --output vendor/cockpit-sitl/quadplane.parm
+node scripts/cockpit/sitl-preview.mjs --firmware-dir vendor/cockpit-sitl --model quadplane --public-data
+```
+
+The QuadPlane defaults SHA-256 is
+`3b736735829637583fcac4349d1dabc925dddb29dacf3cd023ddbf30587c24e9`.
+The helper validates it before starting Docker. Omitting `--model` retains the
+fixed-wing preview; it never changes another running instance or aircraft parameters.
+The header identifies **ArduPlane QuadPlane SITL**. QLOITER appearing in the mode
+list alone does not mean a simulator has a VTOL physics model or configuration.
+
+Select **Display & data → Load VTOL cove example as local draft**. This variant
+uses `NAV_VTOL_TAKEOFF` at **180 ft / 54.864 m**, followed by the original thirteen
+geographic waypoints at **300 ft / 91.44 m**. Item 01 is takeoff; item 02 is the
+first geographic waypoint. ArduPlane owns the transition; Yonder sends no timed
+mode changes. The original cove example remains available unchanged.
+Follow the [vertical takeoff walkthrough](../../docs/cockpit-user-guide.md#vertical-takeoff-in-the-quadplane-simulator).
+
+The opt-in flight check uses a separate disposable QuadPlane on port 5778:
+
+```sh
+node packages/yonder-core/scripts/quadplane-sitl-smoke.mjs --firmware-dir vendor/cockpit-sitl --output vendor/quadplane-sitl-smoke.json
+```
+
+It uploads the same VTOL example, selects QLOITER, arms normally, requests mission
+start once, and verifies vertical climb, takeoff completion near 180 ft, reported
+multicopter/transition/fixed-wing states, climb toward 300 ft and waypoint progress.
+It commands only its own uniquely labeled simulator and removes it afterward.
+
 The separate protocol smoke command is
 `node packages/yonder-core/scripts/vehicle-sitl-smoke.mjs --firmware-dir vendor/cockpit-sitl --output vendor/cockpit-sitl-smoke.json`.
 That bounded smoke explicitly commands its own simulator, uses port 5764, records

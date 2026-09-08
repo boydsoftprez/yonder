@@ -23,21 +23,27 @@ const args = process.argv.slice(2),
   index = args.indexOf("--firmware-dir");
 assert(
   index >= 0 && args[index + 1],
-  "Usage: node scripts/cockpit/sitl-preview.mjs --firmware-dir DIR [--public-data] [--http-port PORT] [--vehicle-port PORT]",
+  "Usage: node scripts/cockpit/sitl-preview.mjs --firmware-dir DIR [--model plane|quadplane] [--public-data] [--http-port PORT] [--vehicle-port PORT]",
 );
 assert(
-  args.every((a, i) => i === index || i === index + 1 || a === "--public-data" || ['--http-port','--vehicle-port'].includes(a) || ['--http-port','--vehicle-port'].includes(args[i-1])),
+  args.every((a, i) => i === index || i === index + 1 || a === "--public-data" || ['--http-port','--vehicle-port','--model'].includes(a) || ['--http-port','--vehicle-port','--model'].includes(args[i-1])),
   "Unknown option",
 );
 const firmware = resolve(args[index + 1]);
+const modelIndex = args.indexOf('--model');
+const model = modelIndex < 0 ? 'plane' : args[modelIndex + 1];
+assert(['plane', 'quadplane'].includes(model), 'Model must be plane or quadplane');
+const defaultsFile = model === 'quadplane' ? 'quadplane.parm' : 'plane.parm';
 for (const [file, hash] of [
   [
     "bin/arduplane",
     "1b6f6810016531f81a2ab240c1353aa7310334079b4c0954ecac8d17cf1adabe",
   ],
   [
-    "plane.parm",
-    "93ba9a70c771609a90b81249d6a1d5a9df8d48bef7d149b42b2d9c7fbd06494a",
+    defaultsFile,
+    model === 'quadplane'
+      ? "3b736735829637583fcac4349d1dabc925dddb29dacf3cd023ddbf30587c24e9"
+      : "93ba9a70c771609a90b81249d6a1d5a9df8d48bef7d149b42b2d9c7fbd06494a",
   ],
 ])
   assert.equal(
@@ -126,11 +132,11 @@ try {
     "ubuntu@sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517",
     "/opt/sitl/bin/arduplane",
     "--model",
-    "plane",
+    model,
     "--home",
     "35.9607874,-83.3668696,315.641734,90",
     "--defaults",
-    "/opt/sitl/plane.parm",
+    `/opt/sitl/${defaultsFile}`,
     "--speedup",
     "1",
     "--sysid",
@@ -202,7 +208,7 @@ try {
     submit: (request) => service.submit(request),
     snapshot: (options) => {
       const state = service.snapshot(options);
-      state.telemetry.source = "ArduPlane SITL";
+      state.telemetry.source = model === 'quadplane' ? 'ArduPlane QuadPlane SITL' : 'ArduPlane SITL';
       return state;
     },
   };

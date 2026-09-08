@@ -454,7 +454,9 @@
             settings</button><button @click="panel=null;$refs.pfd.open('director')">Flight director
             settings</button><button @click="$refs.importFile.click()">Import WPL / QGC plan</button><button
             @click="newMission"
-          >Create empty local mission</button><button @click="loadDemo">Load cove example as local draft</button>
+          >Create empty local mission</button><button @click="loadDemo()">Load cove example as local draft</button>
+          <button @click="loadDemo(true)">Load VTOL cove example as local draft</button>
+          <p>VTOL example: QuadPlane vertical takeoff to 180 ft above home, then transition toward item 02 and climb to the 300 ft route. Requires a configured QuadPlane simulator or aircraft.</p>
         </template>
         <template v-else-if="panel==='draft-conflict'">
           <h3>Draft context changed</h3>
@@ -563,6 +565,7 @@ import {
   validateCameraCalibration
 } from 'yonder-core/terrain'
 import coveDemo from './cockpit/data/cove-demo.json'
+import coveVtolDemo from './cockpit/data/cove-vtol-demo.mjs'
 import CameraTerrainOverlay from './cockpit/CameraTerrainOverlay.vue'
 import TrafficVision from './cockpit/TrafficVision.vue'
 import TerrainVision from './cockpit/TerrainVision.vue'
@@ -1047,14 +1050,14 @@ export default {
     undo() {
       if (this.history.length) this.draft = this.history.pop()
     },
-    loadDemo() {
+    loadDemo(vtol = false) {
       this.captureDraftContext();
-      this.draft = clone(coveDemo);
-      this.draft.source = 'Local cove example';
+      this.draft = clone(vtol ? coveVtolDemo : coveDemo);
+      this.draft.source = vtol ? 'Local QuadPlane cove example' : 'Local cove example';
       this.history = [];
       this.panel = null;
       this.layout = 'mission';
-      this.error = 'Cove example loaded locally; aircraft mission is unchanged'
+      this.error = `${vtol ? 'VTOL cove' : 'Cove'} example loaded locally; aircraft mission is unchanged`
     },
     newMission() {
       this.captureDraftContext();

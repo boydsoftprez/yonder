@@ -33,8 +33,10 @@
       <template v-if="!selected&&selection?.lat===undefined">
         <div class="mission-touch-section-label">FLIGHT CONTROLS · AIRCRAFT</div>
         <div class="mission-action-grid mission-compact-actions"><button class="mission-execute" :disabled="commandDisabled||sitl.armed===true" @click="send({action:'arm'})">Arm aircraft</button><button class="mission-execute" :disabled="commandDisabled||sitl.armed!==true" @click="send({action:'disarm'})">Disarm aircraft</button></div>
-        <div class="mission-mode-grid" role="group" aria-label="Aircraft flight mode"><button v-for="mode in (sitl.modes||[])" :key="mode" class="mission-execute" :disabled="commandDisabled" :aria-pressed="sitl.mode===mode" @click="send({action:'mode',mode})">{{mode}}</button></div>
         <button class="mission-touch-wide mission-execute" :disabled="commandDisabled||draft||!mission" @click="$emit('start')">Start aircraft mission<small>Explicit start request · does not silently arm</small></button>
+        <p v-if="draft" class="mission-touch-note">You are viewing a local draft. Upload and verify your changes first. To start the uploaded mission, choose Show aircraft mission, then reopen Mission controls.</p>
+        <p v-else-if="!mission" class="mission-touch-note">Read and verify the aircraft mission before starting.</p>
+        <div class="mission-mode-grid" role="group" aria-label="Aircraft flight mode"><button v-for="mode in (sitl.modes||[])" :key="mode" class="mission-execute" :disabled="commandDisabled" :aria-pressed="sitl.mode===mode" @click="send({action:'mode',mode})">{{mode}}</button></div>
       </template>
       <button class="mission-touch-wide mission-execute" :disabled="commandDisabled" @click="send({action:'mission-clear'})">Clear aircraft mission…<small>Review removal and verify readback</small></button><p class="mission-touch-note">Draft edits stay in this browser until uploaded. An accepted command response is separate from actual mode, mission progress and peripheral effects.</p>
     </div>

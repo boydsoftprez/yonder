@@ -139,6 +139,42 @@ not publish this field show **NO WIND DATA** until their core is updated.
    wire item zero. This does not set the aircraft home. An unread mission or
    unavailable actual home remains blocked.
 
+### Vertical takeoff in the QuadPlane simulator
+
+Use the preview whose header says **ArduPlane QuadPlane SITL**. A fixed-wing
+simulator cannot hover just because its mode list includes QLOITER. The launcher
+setup is in [Native cockpit previews](../scripts/cockpit/README.md#quadplane-vertical-takeoff).
+
+1. **Aircraft → Request flight telemetry**, wait for completion, then **Read
+   aircraft mission**. Allow the fresh simulator's sensors to settle.
+2. **Display & data → Load VTOL cove example as local draft**. Item **01 Vtol
+   Takeoff** climbs vertically to **180 ft (54.864 m)**. The first geographic
+   waypoint is **02**, and the route remains at **300 ft above home**.
+3. **Mission controls → Upload draft to aircraft → Confirm & send**. Wait for the
+   downloaded copy to be verified. Select **Show aircraft mission**; this closes
+   the panel. Reopen **Mission controls**. Its heading must no longer say
+   **LOCAL DRAFT**. Starting a draft is disabled even after a successful upload.
+4. Select **QLOITER** in the mode list and **Confirm & send**. This selects hover
+   control; it does not itself start a climb.
+5. **Arm aircraft → Confirm & send**. Normal autopilot arming checks remain on.
+6. **Start aircraft mission → Confirm & send**. The start button is directly below
+   Arm/Disarm and above the mode list. Close the panel to watch the PFD.
+
+ArduPlane enters **AUTO**, takes off vertically at the current position, completes
+the takeoff near 180 ft, then transitions toward item 02 and climbs toward the
+route altitude. It remains in AUTO during these phases. A transition takes time;
+180 ft is the vertical takeoff completion target, not an instantaneous change to
+fully established fixed-wing flight. Mission altitude readback is quantized to
+centimetres (54.86 m). For this ground-start demo the takeoff point is home.
+
+The standard QuadPlane takeoff command uses a height above the takeoff point; if
+re-executed in flight, its default behavior can add that height to the current
+altitude. Use **Resume Mission** or **Continue AUTO from this item** on the desired
+route waypoint to continue the route, rather than restarting the takeoff item.
+QLOITER manual takeoff needs pilot throttle input; selecting the mode alone is
+not a climb command. This walkthrough uses the automatic VTOL mission instead.
+The VTOL example preserves the original route and contains no landing command.
+
 Imported sequence gaps are preserved for inspection/export; the aircraft service
 validates the exact outgoing wire sequence and reports unsupported transfers.
 Draft edits normalize authored ordering and remap jumps. A draft retains the vehicle generation and mission revision on which it began. A changed aircraft or mission requires an explicit conflict review before the draft can be kept for the current aircraft. A local draft item cannot
