@@ -828,32 +828,40 @@ check against.
 | 48 — a fixture the gate can photograph the whole camera page with | **Done.** L-10, L-11, L-12, L-13, L-17, L-20 and L-22 photographed; **L-21 closed by Task 49**, which gave the strip its own named press. Still owed, and put to the operator: L-11's four other head words, L-12's round trip and L-13's ladder change, all of which need a viewer on video |
 | Phase 5 (deferred, Pocket 2) | L-52, L-79, L-83, **L-37** — the gimbal's mode list needs §8.7's `0x44` enumeration; until then the panel states the fact where the control would be, and never the render's three modes |
 
-**Unbuilt, with no owner — fourteen rows**
+**Unbuilt, with no owner — seven rows**
 
 *(L-18 and L-43 left this list in Task 33b, built rather than deferred: under
 rule 7 an element the blueprint draws needing another feature built is a
 reason to build that feature, and the shutter's own route was that feature.
 L-17, L-23, L-92 and S-11 left it the same way in Task 47, which was written
 against this list — and with them the drifted L-91 the link could not exist
-without.)*
+without. **L-97 and C-23 left it by having shipped**, and the list went on
+naming them: L-97's rail is sticky and measured at the top of every page that
+scrolls, and C-23's `ADD` key adopts a detected camera and was pressed on the
+board on 2026-09-07. A summary table that outlives its own rows is the failure
+this section exists to prevent, in the other direction.)*
 
 Under CLAUDE.md rule 7 these are not deferred. They are missing, and until each
 has a named owner or is built, no camera surface is finished.
 
 | Row | What is missing |
 |---|---|
-| L-02, L-03 | `CAMERAS` and `SYSTEM` section headings in the sidebar |
-| L-04, L-05 | One sidebar entry per camera, and its selected state (R-UI-03) |
 | L-93 | The `SRT` output row |
-| S-04, S-05 | The `RECORD FORMAT` and `SENSOR SIZE` bench-only fields |
 | C-04 | A thumbnail on each Cameras row |
 | C-15, C-16 | **The `ENCODING USED` meter and `room for one more 1080p30 stream`** |
 | C-20 | `starting the gimbal would need 2.1 more` |
 | C-22 | **`ADD BY ADDRESS` — K-54** |
-| C-23 | **An action that adopts a detected camera — K-54, and see C-4** |
 | C-24 | The Cameras page's `APPLY` key |
 
-Three of those — L-56, C-15/C-16 and C-22/C-23 — are the three CLAUDE.md rule 7
+**Six rows that were on this list have an owner and are not missing in this
+sense**, and listing them here read as though nobody had them: **L-02 to L-05**
+(the sidebar) are a substrate limit, checked on the board against Dashboard 2
+v1.31.0, with three ways forward recorded on the rows — **the operator's**;
+**S-04 and S-05** are Pocket 2 bench fields, held with Phase 5 by the
+operator's decision of 2026-09-05. Neither is built, and neither is ownerless.
+
+Three of the rows above — L-56, C-15/C-16 and C-22 — are what CLAUDE.md rule 7
 names as the reason this file exists. **L-56 is now built** (as two pickers, the
-operator's decision — see §1.7); the other two are still open. The remaining
-rows are the same shape and had not been found before this audit.
+operator's decision — see §1.7) and **C-23 with it** (the `ADD` key, `61bf4cc`,
+pressed on the board); C-15/C-16 and C-22 are still open. The remaining rows are
+the same shape and had not been found before this audit.
