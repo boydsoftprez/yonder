@@ -2254,3 +2254,47 @@ Two ways to close it, and neither is this file's to choose:
 The second is the honest one and the first is the convenient one. Recorded
 rather than decided.
 
+
+### K-62 · The picture invites a drag to slew, and the flow drops the gesture
+
+**Status:** Open — the choice is the operator's · **Requirements:** R-VID-18, R-UI-26, R-CMD-04
+
+Found by the final review of the instrument library branch on 2026-09-07.
+`YonderPicture.vue` has carried a drag-to-slew layer since the aim work (spec
+§6, "the orb only"), and Task 47 gave it two things it never had: its feed —
+`payload.aim` now reaches the picture, where before it stopped at the aim panel,
+so the layer had been dark on every page — and its affordance, `DRAG TO SLEW ·
+RELEASE TO STOP`, centred on the picture whenever a gimbal answers `present`.
+The gesture itself emits `{ slew: { pan, tilt, seq, gesture } }` for every
+pointer move, and that message falls to `cam-pic-act`'s third output, which is
+wired to nothing. The aim panel's own output is routed nowhere either.
+
+So a board with a gimbal attached and answering would now print an instruction,
+accept the gesture, and discard every message in silence — the shape of
+defect this branch has already met twice (`7103700`; Task 34's `hask path`
+fix), and worse here because the console has said what to do first. An
+operator dragging a live picture over an aircraft and seeing nothing move cannot
+tell a dead route from a stuck gimbal.
+
+**Why it is this way.** There is no route for a slew to reach: the daemon has
+no aim command route at all — `aimPanel` is composed into the camera read and
+nothing accepts a command back. Building it is the gimbal phase (Tasks 35–40),
+deferred by the operator on 2026-09-05 with the DJI Pocket 2; and no gimbal is
+on the bench, so no camera on this branch's hardware answers `present`, and no
+operator can meet the hint before the route exists. R-CMD-04 is untouched:
+nothing here originates a command; the question is only whether an operator's
+own gesture reaches one.
+
+Two ways to close it, and neither is this file's to choose:
+
+1. **Leave the hint, and let the route land with the gimbal phase.** The hint is
+   drawn only when a gimbal answers, which today is never; the manifest names
+   Phase 5 as the owner of the gesture's destination. Nothing to build now; the
+   inconsistency exists only on hardware this branch does not yet support.
+2. **Draw the hint only when the gesture has somewhere to go.** Gate the
+   affordance on the command path existing rather than on `aimable` alone —
+   which today means hiding it — and record L-17 as *built, not offered* until
+   Phase 5 wires the route. Honest on every board, at the cost of a blueprint
+   element the operator cannot see until then.
+
+Option 1 is the coordinator's reading; the manifest row L-17 records the owner.
