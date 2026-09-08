@@ -1240,6 +1240,7 @@ export interface AimPanel {
   readonly admitted?: { pan: number; tilt: number };
   readonly modeInhibited?: string | null;
   readonly recentreInhibited?: string | null;
+  readonly directionalRefusals?: string[];
   readonly camera?: string;
   readonly url?: string;
   readonly generation?: number;
@@ -1277,6 +1278,7 @@ export function aimPanel(caps: CameraCapabilities | null, source?: ReturnType<im
       state: 'present', reason: null, pan: source.attitude?.yaw ?? null, tilt: source.attitude?.pitch ?? null,
       modeInhibited: source.modes.some(mode => mode.allowed) ? null : source.modes.find(mode => !mode.allowed)?.reason ?? 'trajectory-unverified',
       recentreInhibited: source.recentre.allowed ? null : source.recentre.reason,
+      directionalRefusals: Object.entries(source.directions ?? {}).flatMap(([label, result]) => result.allowed ? [] : [`${label}: ${result.reason.replaceAll('-', ' ')}`]),
       bounds: source.envelope?.yaw && source.envelope?.pitch ? { pan: source.envelope.yaw, tilt: source.envelope.pitch } : null,
       atLimit: { pitch: source.attitude?.pitchLimit ?? false, yaw: source.attitude?.yawLimit ?? false },
       mode: source.attitude ? names[source.attitude.mode] ?? null : null, modes: names, inhibited: source.inhibition };

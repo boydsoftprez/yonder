@@ -1341,6 +1341,7 @@ export default {
       return h('div', { class: 'y-deck__aim' }, [
         h('div', { class: 'y-deck__aim-h' }, 'Aim'),
         this.aimError ? h('div', { class: 'y-deck__ended' }, this.aimError) : null,
+        !inhibited && this.report.aim?.directionalRefusals?.length ? h('div', { class: 'y-deck__ended' }, this.report.aim.directionalRefusals.join(' · ')) : null,
         this.report.aim?.admitted ? h('div', { class: 'y-deck__ended' }, `Admitted rate ${Math.hypot(this.report.aim.admitted.pan, this.report.aim.admitted.tilt).toFixed(1)} °/s`) : null,
         h(YonderAimPad, {
           ref: 'aimPad',

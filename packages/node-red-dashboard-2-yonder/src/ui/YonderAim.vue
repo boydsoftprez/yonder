@@ -23,6 +23,7 @@
               restate why.
             -->
             <div v-if="effectiveReason || aimError" class="y-aimpanel__reason">{{ aimError || effectiveReason }}</div>
+            <div v-if="!effectiveReason && report.directionalRefusals?.length" class="y-aimpanel__reason">{{ report.directionalRefusals.join(' · ') }}</div>
 
             <YonderAimPad
                 ref="aimPad"

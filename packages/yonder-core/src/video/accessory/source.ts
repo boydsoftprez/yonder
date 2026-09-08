@@ -13,6 +13,7 @@ import { AccessoryMedia } from './media.js';
 import type { RecordingState, CameraMedium } from '../recorder.js';
 import { validAimRequest } from './requests.js';
 import { accessoryControls } from './present.js';
+import { AccessoryWriter } from './writer.js';
 
 export interface AccessoryInput {
   endpoint: string;
@@ -100,9 +101,10 @@ export class AccessorySources {
         }
       },
     });
+    const writer = new AccessoryWriter(this.clock, (command, options) => device.sendCommand(command, options));
     source = { device, media, attitude: null, generation: null, error: null, streamGeneration: 0,
-      camera: new CameraController({ clock: this.clock, write: (cmd, options) => device.sendCommand(cmd, options) }),
-      gimbal: new GimbalController({ clock: this.clock, context: () => this.context(identity, source), write: (cmd, options) => device.sendCommand(cmd, options) }),
+      camera: new CameraController({ clock: this.clock, write: (cmd, options) => writer.write(cmd, options) }),
+      gimbal: new GimbalController({ clock: this.clock, context: () => this.context(identity, source), write: (cmd, options) => writer.write(cmd, options) }),
     };
     source.camera.disconnect(); source.gimbal.disconnect(); this.owned.set(identity, source);
     try { source.error = await this.options.mediaCapability?.() ?? null; await media.start(); if (!this.closed) await device.start(); else await media.close(); }
@@ -132,11 +134,17 @@ export class AccessorySources {
     const source = this.owned.get(identity); if (!source) return null;
     const context = this.context(identity, source), status = source.device.snapshot();
     const attitude = source.attitude && this.clock.now() - source.attitude.at < 500 ? source.attitude : null;
-    const verdict = guard({ kind: 'rate', pan: 1, tilt: 1 }, context);
+    // A directional stopping margin is not a global interlock. Zero tests
+    // shared prerequisites; every actual rate is still guarded at dispatch.
+    const verdict = guard({ kind: 'rate', pan: 0, tilt: 0 }, context);
+    const directions = {
+      'Pan +': guard({ kind: 'rate', pan: 0.1, tilt: 0 }, context), 'Pan −': guard({ kind: 'rate', pan: -0.1, tilt: 0 }, context),
+      'Tilt +': guard({ kind: 'rate', pan: 0, tilt: 0.1 }, context), 'Tilt −': guard({ kind: 'rate', pan: 0, tilt: -0.1 }, context),
+    };
     const admitted = source.admitted;
     const rate = admitted && admitted.until > this.clock.now() && guard({ kind: 'rate', pan: admitted.pan, tilt: admitted.tilt }, context).allowed
       ? { pan: admitted.pan, tilt: admitted.tilt } : { pan: 0, tilt: 0 };
-    return { ...status, generation: status.generation * 1_000_000 + source.streamGeneration, input: this.input(identity), state: source.camera.readState(), attitude, admitted: rate,
+    return { ...status, generation: status.generation * 1_000_000 + source.streamGeneration, input: this.input(identity), state: source.camera.readState(), attitude, admitted: rate, directions,
       mount: context.mount, envelope: context.envelopes.find(e => e.mount === context.mount && e.mode === attitude?.mode) ?? null,
       recentre: guard({ kind: 'recentre' }, context), modes: ([0,1,2] as const).map(mode => guard({ kind: 'mode', mode }, context)),
       inhibition: verdict.allowed ? null : verdict.reason, controls: accessoryControls(source.camera.readState()), descriptors: cameraControlDescriptors().map(d => d.kind === 'menu'

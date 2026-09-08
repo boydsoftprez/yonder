@@ -83,3 +83,72 @@ it('admits a fresh public slew through the actual Intent rate shape and preserve
   expect(options.deadline).toBe(issued.grant.deadline); expect(options.admission()).toBe(true); expect(options.signal.aborted).toBe(false);
   h.stale(); expect(options.admission()).toBe(false); expect(options.signal.aborted).toBe(true); await h.source.close();
 });
+
+it.each([{ yaw: 89, pitch: 0, flags: 0, pan: -1, tilt: 0 }, { yaw: 0, pitch: 39, flags: 0, pan: 0, tilt: -1 }, { yaw: 0, pitch: 0, flags: 2, pan: -1, tilt: 0 }])(
+  'keeps safe inward/other-axis gestures available at directional boundaries $yaw/$pitch/$flags', async ({ yaw, pitch, flags, pan, tilt }) => {
+    const h = harness();
+    h.camera.accessory_mount = { mount: 'synthetic', envelopes: [{ mount: 'synthetic', mode: 2, yaw: [-90,90], pitch: [-40,40] }], signs: { pan: 1, tilt: 1 }, limitDirections: { yaw: 1, pitch: 1 }, actions: [] };
+    await h.source.discover(); h.live();
+    const payload = Buffer.alloc(11); payload.writeInt16LE(pitch * 10, 0); payload.writeInt16LE(yaw * 10, 4); payload[6] = 2 << 6; payload[10] = flags;
+    h.callbacks().onCommand!(decodeDuml(encodeDuml({ sender: 4, receiver: 2, commandSet: 4, commandId: 5, sequence: 1, payload }))!);
+    expect(h.source.snapshot(h.camera.device)!.inhibition).toBeNull();
+    const issued = await h.source.aim(h.camera.device, 'owner', { op: 'issue', clientGesture: 'inward' }) as any;
+    expect(await h.source.aim(h.camera.device, 'owner', { op: 'slew', ...issued.grant, seq: 1, pan, tilt })).toMatchObject({ accepted: true });
+    expect(h.device.sendCommand).toHaveBeenCalledOnce(); await h.source.close();
+  });
+
+async function contentionHarness() {
+  const h = harness();
+  h.camera.accessory_mount = { mount: 'synthetic', envelopes: [{ mount: 'synthetic', mode: 2, yaw: [-90,90], pitch: [-40,40] }], signs: { pan: 1, tilt: 1 }, limitDirections: {}, actions: [] };
+  await h.source.discover(); h.live();
+  const push = (sender: number, commandSet: number, commandId: number, payload: Buffer) => h.callbacks().onCommand!(decodeDuml(encodeDuml({ sender, senderIndex: 0, receiver: 2, commandSet, commandId, payload }))!);
+  const fresh = (iso = 3) => {
+    const status = Buffer.alloc(31); status.writeUInt32LE(0x200, 0); status[4] = 1; status.writeUInt32LE(1000, 5);
+    const exposure = Buffer.alloc(48); exposure[20] = 4; exposure[5] = iso;
+    const attitude = Buffer.alloc(11); attitude[6] = 2 << 6;
+    push(1,2,0x80,status); push(1,2,0x81,exposure); push(4,4,5,attitude);
+  };
+  fresh();
+  let release!: () => void; const blocked = new Promise<void>(done => { release = done; });
+  let active = false; let first = true; const wire: { command: any; options: any }[] = [];
+  (h.device.sendCommand as any).mockImplementation(async (command: any, options: any) => {
+    if (active) throw new Error('Pocket 2 command already pending');
+    if (!options.admission()) throw new Error('admission failed');
+    active = true; wire.push({ command, options });
+    try { if (first) { first = false; await blocked; } } finally { active = false; }
+  });
+  return { ...h, fresh, wire, release };
+}
+const settleSource = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
+
+it('serializes a camera write and a fresh rate through one actual shared device writer', async () => {
+  const h = await contentionHarness();
+  const camera = h.source.controls(h.camera.device, { kind: 'iso', value: 5 }).catch(error => error);
+  try {
+    await settleSource(); expect(h.wire).toHaveLength(1);
+    const issued = await h.source.aim(h.camera.device, 'owner', { op: 'issue', clientGesture: 'physical' }) as any;
+    expect(await h.source.aim(h.camera.device, 'owner', { op: 'slew', ...issued.grant, seq: 1, pan: 2, tilt: 0 })).toMatchObject({ accepted: true });
+    await settleSource(); expect(h.device.sendCommand).toHaveBeenCalledTimes(1);
+    h.now.value = 1100; h.release(); await settleSource(); h.fresh(5);
+    expect(await camera).toMatchObject({ completed: true });
+    expect(h.wire).toHaveLength(2); expect(h.wire[1].command.commandSet).toBe(4);
+    expect(h.wire[1].options.deadline).toBe(issued.grant.deadline); expect(h.wire[1].options.signal.aborted).toBe(false);
+    expect(await h.source.aim(h.camera.device, 'owner', { op: 'issue', clientGesture: 'next-physical' })).toMatchObject({ accepted: true });
+  } finally { h.release(); await h.source.close(); await camera; }
+});
+
+it('retires an expired rate waiting behind camera I/O without replay or disabling fresh aim', async () => {
+  vi.useFakeTimers(); const h = await contentionHarness();
+  const camera = h.source.controls(h.camera.device, { kind: 'iso', value: 5 }).catch(error => error);
+  try {
+    await settleSource();
+    const issued = await h.source.aim(h.camera.device, 'owner', { op: 'issue', clientGesture: 'physical' }) as any;
+    await h.source.aim(h.camera.device, 'owner', { op: 'slew', ...issued.grant, seq: 1, pan: 2, tilt: 0 });
+    h.now.value = 1600; await vi.advanceTimersByTimeAsync(600); h.release(); await settleSource(); h.fresh(5);
+    expect(await camera).toMatchObject({ completed: true }); expect(h.wire).toHaveLength(1);
+    const next = await h.source.aim(h.camera.device, 'owner', { op: 'issue', clientGesture: 'next-physical' }) as any;
+    expect(next).toMatchObject({ accepted: true });
+    expect(await h.source.aim(h.camera.device, 'owner', { op: 'slew', ...next.grant, seq: 1, pan: 2, tilt: 0 })).toMatchObject({ accepted: true });
+    h.now.value = 1700; await vi.advanceTimersByTimeAsync(100); expect(h.wire).toHaveLength(2);
+  } finally { h.release(); await h.source.close(); await camera; vi.useRealTimers(); }
+});

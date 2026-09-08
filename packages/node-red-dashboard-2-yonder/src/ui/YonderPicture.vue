@@ -60,7 +60,7 @@
 
             <div v-if="dragGesture" class="y-pic__orb" :style="{ left: orbX + 'px', top: orbY + 'px' }"></div>
 
-            <div v-if="reason" class="y-pic__reason">{{ reason }}</div>
+            <div v-if="reason || aimRefusal" class="y-pic__reason">{{ aimRefusal || reason }}</div>
             <div v-if="mode === 'off'" class="y-pic__off">
                 not requested · this changes nothing the aircraft sends anyone else
             </div>
@@ -606,6 +606,7 @@ export default {
             flashing: false,
             flashTimer: null,
             savedTo: '',
+            aimRefusal: null,
             /** The drag-to-slew layer's own gesture state — see this file's
              * own doc comment on why this mirrors `YonderAimPad` method-for-
              * method rather than sharing its implementation. */
@@ -962,7 +963,7 @@ export default {
         this.$dataTracker(this.id)
     },
     mounted () {
-        this.aimTransport = new AimTransport(() => this.aim)
+        this.aimTransport = new AimTransport(() => this.aim, (_rate, reason) => { this.aimRefusal = reason })
         this.$socket.on?.('disconnect', this.aimDisconnect)
         this.tick = setInterval(() => { this.now = Date.now() }, 1000)
         // The media clock, which is the only honest source for the age this
