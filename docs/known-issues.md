@@ -2306,6 +2306,8 @@ Two ways to close it, and neither is this file's to choose:
 The second is the honest one and the first is the convenient one. Recorded
 rather than decided.
 
+---
+
 ### K-62 · The Pi's ISP scaler is over budget in the preview branch, and drops frames to say so
 
 **Status:** Open · **Requirements:** R-CAM-10, R-HW-05, R-VID-13
@@ -2358,6 +2360,8 @@ point of a four-core board.
 
 Evidence: [`ffmpeg-as-the-pipeline-composer.md`](hardware/ffmpeg-as-the-pipeline-composer.md).
 
+---
+
 ### K-63 · ~~On a Rockchip board no camera starts, and the console says the board has no hardware encoder~~ — CLOSED
 
 **Status:** Closed · **Requirements:** R-HW-03, R-CAM-07, R-CAM-08, R-CAM-10, R-CAM-13
@@ -2378,6 +2382,8 @@ string that says what the probe knows; and the plugin carried in the payload and
 by `52-gst-rockchip.sh`. Proven on the board — see
 [`rockchip-video-shipped.md`](hardware/rockchip-video-shipped.md).
 
+---
+
 ### K-64 · ~~`make-payload.sh --only <one component>` ends with `ZT_DEB: unbound variable`~~ — CLOSED
 
 **Status:** Closed · **Requirements:** R-CFG-07
@@ -2387,6 +2393,8 @@ ZeroTier block sets; under `set -u` a run that staged its component correctly th
 A build step whose exit status says it failed after it succeeded is one CI cannot use, and
 the comment beside the summary already said the report had to be a lookup rather than a
 variable. It now is.
+
+---
 
 ### K-65 · The camera page has no codec control
 
@@ -2400,3 +2408,36 @@ note in `configuration.md` takes the same position) and not the intended one.
 **What closes it:** a choice on the camera page offered only where `view.encoder.h265` is
 not null, refused with the encoder named where it is (the same sentence `refuse()` already
 produces), and the capture gate re-run for the page that changed.
+
+---
+
+### K-66 · ~~The encoder is re-probed on every poll, and on Rockchip that is most of the board~~ — CLOSED
+
+**Status:** Closed · **Requirements:** R-CAM-13, R-HW-03, R-UI-05
+
+Every read of a camera's page asked the board which encoder it has, and the console polls
+those pages (K-55). On a Pi that is a few cheap `v4l2-ctl` calls. On a Rockchip board the
+probe asks the GStreamer registry — `gst-inspect-1.0 --exists`, three times — and each ask
+spawns a `gst-plugin-scanner` that loads the MPP plugin and initialises MPP hardware.
+
+Measured on a Radxa Zero 3W, 2026-09-07, with **no camera running**:
+
+| | |
+|---|---|
+| Board busy, console running | **75%** of four cores |
+| Board busy, `yonder-console` stopped | **7.8%** |
+| MPP initialisations in twenty minutes | **3,030** |
+| `gst-plugin-scanner` processes | two, at ~100% of a core each, permanently |
+
+`ps` named the parents outright: `gst-inspect-1.0 --exists mppjpegdec` and
+`--exists mpph265enc`.
+
+**Closed by** probing once per daemon lifetime (`onceAsync` in `daemon/server.ts`). A
+board's encoder is silicon and does not change while the daemon runs, so this is not a
+cache with a staleness problem — it is the right number of times to ask. R-CAM-13 is
+untouched: the machine in front of the daemon still answers, at runtime, and nothing is
+written to configuration. A rejection is not remembered, so a bad second does not become a
+permanent answer.
+
+**K-55 remains open.** This removed the most expensive caller on one board; the polling
+rate and the shelling out are still what that entry describes.

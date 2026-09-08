@@ -80,6 +80,38 @@ export const PROVISION_RESTART_DELAY_MS = 1_500;
  */
 export const SIGNAL_POLL_SECONDS = 2;
 
+/**
+ * One answer for the life of the process, from the first call that succeeds.
+ *
+ * For a question whose answer is a property of the machine rather than of the
+ * moment. **The encoder is the case this exists for** (K-66): every read of a
+ * camera's page asks for it, the console polls those pages (K-55), and on a
+ * Rockchip board each ask shells out to `gst-inspect-1.0`, which spawns a
+ * plugin scanner, which loads the MPP plugin and initialises MPP hardware —
+ * measured at 3,030 initialisations in twenty minutes and most of a four-core
+ * board. A board's encoder is silicon and does not change while the daemon
+ * runs, so asking once is not a cache with a staleness problem; it is the
+ * right number of times to ask.
+ *
+ * **A rejection is not remembered.** A probe that threw says something about
+ * the moment — a runner that failed, a tool briefly absent — and a daemon
+ * that remembered it would answer "no encoder" for its whole life over one
+ * bad second. Callers arriving while the first call is still out share it,
+ * so a burst of polls at start-up is still one probe.
+ */
+export function onceAsync<T>(fn: () => Promise<T>): () => Promise<T> {
+  let held: Promise<T> | null = null;
+  return () => {
+    if (held === null) {
+      held = fn().catch((e: unknown) => {
+        held = null;
+        throw e;
+      });
+    }
+    return held;
+  };
+}
+
 export interface ServerOptions {
   socketPath: string;
   configPath: string;
@@ -306,6 +338,8 @@ export function buildRenderers(opts: BuildRenderersOptions): {
   remoteRenderer: RemoteRenderer;
   /** Present only when `opts.mediaConfigPath` said where the file goes. */
   mediaRenderer?: MediaRenderer;
+  /** The board's encoder, probed once and shared by every daemon consumer. */
+  encoder: () => Promise<Encoder>;
   /**
    * The one supervisor this process owns, for the whole of its life.
    *
@@ -478,6 +512,8 @@ export function buildRenderers(opts: BuildRenderersOptions): {
     ...(opts.clock === undefined ? {} : { clock: opts.clock }),
   });
 
+  const encoder = onceAsync(() => probeEncoder({ runner: opts.runner ?? systemRunner }));
+
   /**
    * K-48: an applied bitrate reaching the running encoder.
    *
@@ -499,11 +535,12 @@ export function buildRenderers(opts: BuildRenderersOptions): {
    */
   const pipelineRenderer = new PipelineRenderer({
     supervisor,
-    // The same probe the start route composes with, over the same runner as
+    // The same memo the start route composes with, over the same runner as
     // everything else here — so a test injecting a fake runner cannot reach a
     // real `v4l2-ctl`, and the line this renderer builds for a camera and the
-    // line a Start would build for it cannot differ by their encoder.
-    encoder: () => probeEncoder({ runner: opts.runner ?? systemRunner }),
+    // line a Start would build for it cannot differ by their encoder. Sharing
+    // the memo makes that agreement true by construction rather than intent.
+    encoder,
     log,
   });
 
@@ -528,6 +565,7 @@ export function buildRenderers(opts: BuildRenderersOptions): {
     zerotier,
     remoteRenderer,
     ...(mediaRenderer === undefined ? {} : { mediaRenderer }),
+    encoder,
     supervisor,
     ...(mavlinkRenderer === undefined ? {} : { mavlinkRenderer }),
     ...(mavlinkListener === undefined ? {} : { mavlinkListener }),
@@ -1241,7 +1279,10 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
         detect: () => detectCameras({ runner: probeRunner }),
         probe: (node, card) => probeCamera(node, card, { runner: probeRunner }),
       },
-      encoder: () => probeEncoder({ runner: probeRunner }),
+      // The very same successful answer the pipeline renderer uses. Camera
+      // page polls and an apply can arrive together; both share one in-flight
+      // probe and can never compose against different encoders.
+      encoder: built.encoder,
       // Over the same runner as everything else in this block, for the same
       // reason: a test that injects a fake runner must get a fake v4l2-ctl
       // for POST …/controls too, not a real one by omission.

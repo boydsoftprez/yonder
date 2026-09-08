@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildRenderers, consolePathsFromEnv, startServer, SIGNAL_POLL_SECONDS } from "./server.js";
+import { buildRenderers, consolePathsFromEnv, onceAsync, startServer, SIGNAL_POLL_SECONDS } from "./server.js";
 import { SecretStore } from "../secrets/store.js";
 import { AdminCredential, ADMIN_PASSWORD_SECRET } from "../console/credential.js";
 import { hashPassword } from "../console/password.js";
@@ -41,7 +41,7 @@ import { compose } from "../video/pipeline.js";
 import { noCapabilities, present } from "../video/capability.js";
 import type { ProcessSpawner } from "../video/supervisor.js";
 import { RTSP_BASE } from "../media/ports.js";
-import type { Encoder } from "../video/probe/encoder.js";
+import { probeEncoder, type Encoder } from "../video/probe/encoder.js";
 
 /**
  * What `buildRenderers` probes for on a board with no `v4l2-ctl` to answer:
@@ -75,6 +75,127 @@ import type { CommandRunner } from "../net/runner.js";
 let dir: string;
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), "yonder-wire-")); });
 afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
+
+describe("the board's encoder is probed once, not on every poll (K-66)", () => {
+  it("asks the board once however many times the page is read", async () => {
+    let probes = 0;
+    const runner: CommandRunner = async (argv) => {
+      if (argv[0] === "gst-inspect-1.0") {
+        probes += 1;
+        return { code: 1, stdout: "", stderr: "" };
+      }
+      return { code: 1, stdout: "", stderr: "No such file or directory" };
+    };
+    const encoder = onceAsync(() => probeEncoder({ runner }));
+
+    const answers = await Promise.all([encoder(), encoder(), encoder()]);
+
+    expect(probes).toBe(1);
+    expect(answers[0]).toBe(answers[1]);
+    expect(answers[2].element).toBe("x264enc");
+  });
+
+  it("shares one in-flight probe between callers that arrive together", async () => {
+    let started = 0;
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const encoder = onceAsync(async () => {
+      started += 1;
+      await gate;
+      return WIRED_ENCODER;
+    });
+
+    const both = Promise.all([encoder(), encoder()]);
+
+    expect(started).toBe(1);
+    release?.();
+    await both;
+    expect(started).toBe(1);
+  });
+
+  it("does not cache a failure, so a board that answered badly once is asked again", async () => {
+    let calls = 0;
+    const encoder = onceAsync(async () => {
+      calls += 1;
+      if (calls === 1) throw new Error("the runner blew up");
+      return WIRED_ENCODER;
+    });
+
+    await expect(encoder()).rejects.toThrow("the runner blew up");
+    await expect(encoder()).resolves.toMatchObject({ element: "x264enc" });
+    expect(calls).toBe(2);
+  });
+
+  it("wires every camera-page poll to the daemon's one encoder answer", async () => {
+    const socketPath = join(dir, "core.sock");
+    const configPath = join(dir, "config.yaml");
+    const journalPath = join(dir, "apply.json");
+    const secretsPath = join(dir, "secrets.yaml");
+    saveConfig(configPath, { ...DEFAULT_CONFIG, cameras: [wiredCamera(2_000)] } as never);
+    new SecretStore(secretsPath).ensureValue(
+      ADMIN_PASSWORD_SECRET,
+      hashPassword("an operator's password"),
+    );
+    let probes = 0;
+    const runner: CommandRunner = async (argv) => {
+      if (argv[0] === "gst-inspect-1.0") {
+        probes += 1;
+        return { code: 1, stdout: "", stderr: "" };
+      }
+      return { code: 0, stdout: "", stderr: "" };
+    };
+    const server = await startServer({
+      socketPath, configPath, journalPath, secretsPath,
+      renderers: [], runner, counters: noCounters,
+    });
+    try {
+      const answers = await Promise.all([
+        call(socketPath, "GET", "/cameras/cam0"),
+        call(socketPath, "GET", "/cameras/cam0"),
+        call(socketPath, "GET", "/cameras/cam0"),
+      ]);
+
+      expect(answers.map((answer) => answer.status)).toEqual([200, 200, 200]);
+      expect(probes).toBe(1);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("gives the pipeline renderer the camera routes' encoder answer", async () => {
+    let probes = 0;
+    const runner: CommandRunner = async (argv) => {
+      if (argv[0] === "gst-inspect-1.0") probes += 1;
+      return { code: 1, stdout: "", stderr: "" };
+    };
+    const spawns: string[][] = [];
+    const spawner: ProcessSpawner = (argv) => {
+      spawns.push(argv);
+      return { kill: () => {}, on: () => {} };
+    };
+    const built = buildRenderers({
+      secretsPath: join(dir, "secrets.yaml"),
+      remoteStatePath: join(dir, "remote.json"),
+      runner,
+      spawner,
+    });
+    const camera = wiredCamera(2_000);
+    built.supervisor.start(camera.id, compose({
+      camera, capabilities: noCapabilities(), encoder: WIRED_ENCODER, rtspBase: RTSP_BASE,
+    }));
+    try {
+      await built.encoder();
+      const renderer = built.renderers.find((candidate) => candidate.name === "video");
+      expect(renderer).toBeDefined();
+      await renderer?.render({ ...DEFAULT_CONFIG, cameras: [camera] } as never);
+
+      expect(probes).toBe(1);
+      expect(spawns).toHaveLength(1);
+    } finally {
+      built.supervisor.stop(camera.id);
+    }
+  });
+});
 
 import { buildRenderers, consolePathsFromEnv, mavlinkFromEnv, startServer, SIGNAL_POLL_SECONDS } from "./server.js";
 
