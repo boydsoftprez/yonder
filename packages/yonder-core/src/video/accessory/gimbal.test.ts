@@ -59,8 +59,20 @@ describe('intent-bound gimbal dispatcher', () => {
     const old = f.writes[0]; f.freshAdvance(10); expect(f.admit(r.next, -5, 2, 1).accepted).toBe(true);
     expect(old.options.signal!.aborted).toBe(true); expect(old.options.admission!()).toBe(false);
     old.resolve(); await settle(); f.freshAdvance(89); expect(f.writes).toHaveLength(1);
-    f.freshAdvance(1); expect(f.writes).toHaveLength(2);
+    f.freshAdvance(1); expect(f.writes).toHaveLength(1);
+    f.freshAdvance(10); expect(f.writes).toHaveLength(2);
     expect(Buffer.from(f.writes[1].command.payload!).toString('hex')).toBe('ceff0000ecff80'); f.controller.close();
+  });
+  it('delayed transport completion cannot compress actual rate dispatches below 100 ms', async () => {
+    const f = fixture(); const dispatched: number[] = []; f.admit(f.issue());
+    f.context.attitude!.at = 1199; f.clock.advance(199, false);
+    expect(f.writes[0].options.admission!()).toBe(true); dispatched.push(f.clock.time);
+    f.writes[0].resolve(); await settle();
+    f.freshAdvance(1); expect(f.writes).toHaveLength(1);
+    f.freshAdvance(98); expect(f.writes).toHaveLength(1);
+    f.freshAdvance(1); expect(f.writes).toHaveLength(2);
+    expect(f.writes[1].options.admission!()).toBe(true); dispatched.push(f.clock.time);
+    expect(dispatched).toEqual([1199, 1299]); f.controller.close();
   });
   it('never overlaps writes or builds a backlog when a writer stalls', async () => {
     const f = fixture(); f.admit(f.issue());
@@ -151,6 +163,23 @@ describe('intent-bound gimbal dispatcher', () => {
     expect(f.admit(f.issue()).accepted).toBe(false);
     f.context.attitude!.mode = 1; f.context.attitude!.at = 1000;
     expect(f.admit(f.issue())).toMatchObject({ accepted: false, reason: 'mode-unobserved' }); f.controller.close();
+  });
+  it.each([{ kind: 'recentre' }, { kind: 'mode', mode: 2 }] as const)('unobserved mode transition blocks subsequent $kind but admits its own queued write', async followup => {
+    const f = fixture(); const first = f.controller.action('alice', { kind: 'mode', mode: 2 });
+    expect(f.writes[0].options.admission!()).toBe(true);
+    f.controller.refresh(); expect(f.writes[0].options.signal!.aborted).toBe(false);
+    f.writes[0].resolve(); expect(await first).toEqual({ accepted: true });
+    const blocked = f.controller.action('alice', followup);
+    f.writes[1]?.resolve();
+    expect(await blocked).toEqual({ accepted: false, reason: 'mode-unobserved' });
+    expect(f.writes).toHaveLength(1);
+    // A separately measured target-mode certificate becomes usable only after
+    // valid newer telemetry actually observes that mode.
+    f.context.actions.push({ ...f.context.actions[followup.kind === 'mode' ? 1 : 0], fromMode: 2 });
+    f.context.attitude!.mode = 2; f.freshAdvance(1);
+    const accepted = f.controller.action('alice', followup);
+    expect(f.writes).toHaveLength(2); expect(f.writes[1].options.admission!()).toBe(true);
+    f.writes[1].resolve(); expect(await accepted).toEqual({ accepted: true }); f.controller.close();
   });
   it('the discrete-action API cannot inject a rate without Intent admission', async () => {
     const f = fixture();

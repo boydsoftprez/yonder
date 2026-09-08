@@ -16,6 +16,7 @@ export type MotionRefusal = { accepted: false; reason: GuardReason | 'busy' | 'u
 export interface GimbalControllerOptions {
   clock: IntentClock;
   context(): GuardContext;
+  /** Resolve only when actual transport I/O completes, never merely on enqueue. */
   write(command: Omit<DumlCommand, 'sequence'>, options: AccessoryCommandOptions): Promise<void>;
   leaseMs?: number;
 }
@@ -25,10 +26,10 @@ export class GimbalController {
   private readonly leaseMs: number;
   private timer?: unknown;
   private pending = false;
-  private lastWriteAt = -Infinity;
+  private lastCompletedAt = -Infinity;
   private available = true;
   private closed = false;
-  private awaitingMode?: { mode: number; after: number };
+  private awaitingMode?: { mode: number; after: number; signal: AbortSignal };
   private discrete?: { controller: AbortController; command: Exclude<MotionCommand, { kind: 'rate' }>; deadline: number };
 
   constructor(private readonly options: GimbalControllerOptions) {
@@ -86,7 +87,7 @@ export class GimbalController {
     const action = { controller: new AbortController(), command: { ...command }, deadline: reserved.grant.deadline };
     this.discrete = action;
     this.watchAction(action);
-    if (command.kind === 'mode') this.awaitingMode = { mode: command.mode, after: this.options.clock.now() };
+    if (command.kind === 'mode') this.awaitingMode = { mode: command.mode, after: this.options.clock.now(), signal: action.controller.signal };
     const wire = this.wire(command);
     this.pending = true;
     try {
@@ -100,16 +101,18 @@ export class GimbalController {
       if (this.discrete === action) this.reset();
     }
   }
-  private check(command: MotionCommand): GuardResult {
+  private check(command: MotionCommand, signal?: AbortSignal): GuardResult {
     const context = { ...this.options.context(), now: this.options.clock.now() };
-    if (command.kind === 'rate' && this.awaitingMode) {
+    // Only the original mode command may pass its own unresolved transition.
+    const ownTransition = this.awaitingMode !== undefined && this.awaitingMode.signal === signal;
+    if (this.awaitingMode && !ownTransition) {
       if (context.attitude?.mode !== this.awaitingMode.mode || context.attitude.at <= this.awaitingMode.after) {
         return { allowed: false, reason: 'mode-unobserved' };
       }
     }
     if (command.kind === 'rate' && context.intentAllowanceMs < this.leaseMs) return { allowed: false, reason: 'stop-allowance-unknown' };
     const verdict = guard(command, context);
-    if (command.kind === 'rate' && verdict.allowed) this.awaitingMode = undefined;
+    if (verdict.allowed && !ownTransition) this.awaitingMode = undefined;
     return verdict;
   }
   private rateAdmission(live: LiveIntent): boolean {
@@ -119,7 +122,7 @@ export class GimbalController {
   }
   private discreteAdmission(action: NonNullable<GimbalController['discrete']>): boolean {
     if (this.discrete !== action || action.controller.signal.aborted) return false;
-    if (!this.available || this.closed || this.options.clock.now() >= action.deadline || !this.check(action.command).allowed) {
+    if (!this.available || this.closed || this.options.clock.now() >= action.deadline || !this.check(action.command, action.controller.signal).allowed) {
       this.reset(); return false;
     }
     return true;
@@ -129,15 +132,14 @@ export class GimbalController {
     const live = this.intent.live();
     if (!live || !this.rateAdmission(live)) return;
     const now = this.options.clock.now();
-    if (!this.pending && now - this.lastWriteAt >= 100) {
-      this.lastWriteAt = now;
+    if (!this.pending && now - this.lastCompletedAt >= 100) {
       this.pending = true;
       // Keep the original view's expiry, abort signal and physical admission all
       // the way through Pocket2Device's serialized queue to actual dispatch.
       void this.writeRate(live);
     }
     if (live.signal.aborted) return;
-    const cadence = now - this.lastWriteAt >= 100 ? 100 : 100 - (now - this.lastWriteAt);
+    const cadence = now - this.lastCompletedAt >= 100 ? 100 : 100 - (now - this.lastCompletedAt);
     this.timer = this.options.clock.setTimer(Math.max(1, Math.min(cadence, this.freshFor())), () => this.pump());
   }
   private async writeRate(live: LiveIntent): Promise<void> {
@@ -147,7 +149,12 @@ export class GimbalController {
       });
     } catch {
       if (!live.signal.aborted) this.disconnect();
-    } finally { this.pending = false; }
+    } finally {
+      // Enqueue can precede actual transport dispatch by an arbitrary delay.
+      // Waiting after completion conservatively preserves the wire cadence.
+      this.lastCompletedAt = this.options.clock.now();
+      this.pending = false;
+    }
   }
   private watchAction(action: NonNullable<GimbalController['discrete']>): void {
     this.clearTimer();
