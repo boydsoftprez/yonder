@@ -2390,7 +2390,9 @@ R-CAM-10 did not fire — `refusal` was `null` right before the pipeline died.
 `compose()`'s Rockchip branches — `mppjpegdec`, `mpph264enc`/`mpph265enc` carrying `bps`,
 the preview scaled inside its encoder through RGA, no scaler element at all; a detail
 string that says what the probe knows; and the plugin carried in the payload and installed
-by `52-gst-rockchip.sh`. Proven on the board — see
+by `52-gst-rockchip.sh`. Proven on the board on 2026-09-08: the deployed H.264
+main/preview delivered about 30/15 fps across three daemon starts, and live Apply
+measured 2.0346 → 3.5035 Mb/s without changing the running process. See
 [`rockchip-video-shipped.md`](hardware/rockchip-video-shipped.md).
 
 ---
@@ -2474,8 +2476,9 @@ its stream lock.
 
 **Closed by** composing both MPP encoders with `max-pending=1`, so submission and output
 draining stay paired. The same bound applies to the H.264 preview when the main stream
-uses H.265. Three consecutive H.264 start/read/stop cycles with the changed argv delivered
-both streams; the composer regression covers both codecs and preserves the Pi pipeline.
+uses H.265. Three consecutive ordinary daemon Stop/Start cycles of the deployed fix
+delivered both streams at about 30/15 fps, followed by clean H.264 decoding on the Mac
+over ZeroTier. The composer regression covers both codecs and preserves the Pi pipeline.
 The reusable [`rockchip-rtsp-restarts.py`](../scripts/spikes/rockchip-rtsp-restarts.py) bench
 runs the actual pipeline argv, checks concurrent RTSP delivery and can enforce measured
 frame rates. Hardware evidence and remaining acceptance work are recorded in
