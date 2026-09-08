@@ -11,6 +11,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'pocket2'))
 from aoa_session import Envelope
 import duml
+from gimbal_stop_log import consume_session_log
 parser=argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--logdir', type=Path, default=Path('/var/tmp/aoa'))
 parser.add_argument('--mounted-ready', action='store_true', help='camera is secured with clearance for the requested motion')
@@ -38,11 +39,7 @@ def poll(seconds):
                     if kind=='frame' and f.crc_ok and (f.cmdset,f.cmdid)==(4,5) and len(f.payload)>=11:
                         pitch,roll,yaw=struct.unpack_from('<hhh',f.payload)
                         samples.append({'t':now,'pitch':pitch/10,'roll':roll/10,'yaw':yaw/10,'limits':f.payload[10]&7,'flags':f.payload[10],'mode':f.payload[6]>>6})
-        textbuf+=log.read()
-        lines=textbuf.split('\n');textbuf=lines.pop()
-        for line in lines:
-            if 'us -> camera  inject[' in line:sent.append({'t':time.monotonic(),'line':line})
-            if 'REFUSED' in line:raise RuntimeError(line)
+        textbuf=consume_session_log(textbuf, log.read(), sent, time.monotonic())
         time.sleep(.005)
 def inject(spec):
     with open(root/'inject.txt','a') as f:f.write(spec+'\n')

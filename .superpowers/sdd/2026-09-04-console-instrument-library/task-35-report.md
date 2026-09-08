@@ -91,3 +91,44 @@ Self-review checked the brief line by line, malformed-length recovery, split
 magic, exact Python descriptor bytes, input bounds, callback separation,
 timer lifecycle, session and per-command abort propagation, dispatch-time
 admission, address reversal and the absence of any motion-producing path.
+
+## Review fix round 1
+
+The safe header inventory derived from the private 4 MiB capture contains 284
+complete media records: 114 H.264 records with kind byte `11`, and 170 AAC
+records with kind byte `24`. It established that payload length is a 24-bit
+field: little-endian bytes 4–5 plus byte 7 as the high byte, while byte 6 alone
+is the constant `ff`.
+
+The media parser now uses that complete length, including records whose low
+word is zero. A capture-derived synthetic regression uses the real header
+`000001ff799aff019011620025ec1b00` and verifies its 105,081-byte H.264 payload
+across fragmented `4a57` envelopes. A second regression covers length 65,536.
+Known AAC records are consumed without reaching `onVideo`; unknown kind bytes
+are reported through `onError` and consumed at their declared boundary.
+
+The mounted stop probe now rejects either session write-failure message before
+it can count the misleading transmit line that follows. Its focused Python
+regression covers both `bulk IN write failed` and the exhausted EAGAIN retry.
+Root checked the original five-run session log separately and found no bulk IN
+failure, refusal, traceback or bulk OUT failure, so those five measurements
+remain qualified.
+
+Fresh review-fix verification:
+
+```text
+npx vitest run src/video/accessory/duml.test.ts src/video/accessory/aoa.test.ts --root packages/yonder-core
+2 files passed; 29 tests passed
+
+python3 scripts/spikes/gimbal_stop_bound_test.py
+1 test passed, with both failure-message cases
+
+python3 -m py_compile scripts/spikes/gimbal-stop-bound.py scripts/spikes/gimbal_stop_log.py scripts/spikes/gimbal_stop_bound_test.py
+exit 0
+
+npm run build -w yonder-core
+exit 0
+```
+
+The private camera capture was not copied into the repository and is not part
+of the commit.

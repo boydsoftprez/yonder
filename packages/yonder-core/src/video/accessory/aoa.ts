@@ -26,6 +26,8 @@ export const SESSION_LIVENESS_MS = 1_000;
 const ENVELOPE_MAGIC = Uint8Array.of(0x55, 0xcc);
 const VIDEO_MAGIC = Uint8Array.of(0x00, 0x00, 0x01, 0xff);
 const VIDEO_HEADER_BYTES = 16;
+const MEDIA_KIND_H264 = 0x11;
+const MEDIA_KIND_AAC = 0x24;
 
 const DESCRIPTORS_MAGIC_V2 = 3;
 const STRINGS_MAGIC = 2;
@@ -254,12 +256,13 @@ export interface H264AccessUnit {
   readonly data: Uint8Array;
   /** Camera timestamp in milliseconds, observed as a 30 fps clock. */
   readonly timestamp: number;
-  /** The record's varying third field, retained raw until its meaning is known. */
+  /** Header bytes 8..11 retained raw; byte 9 within them is the H264 kind. */
   readonly metadata: number;
 }
 
 type VideoEvent =
   | { readonly kind: "unit"; readonly unit: H264AccessUnit }
+  | { readonly kind: "ignored-audio" }
   | { readonly kind: "error"; readonly error: Error };
 
 class Pocket2VideoSplitter {
@@ -287,21 +290,37 @@ class Pocket2VideoSplitter {
       }
       if (this.buffer.length < VIDEO_HEADER_BYTES) break;
       const view = new DataView(this.buffer.buffer, this.buffer.byteOffset, this.buffer.byteLength);
-      const length = view.getUint16(4, true);
-      if (length === 0 || view.getUint16(6, true) !== 0x00ff) {
+      // Confirmed against 284 records from the Pocket 2: bytes 4..5 are the
+      // low word, byte 6 is ff, and byte 7 is the high length byte. Eight
+      // captured H264 keyframes use that high byte, including 105081 bytes.
+      const length = view.getUint16(4, true) | (this.buffer[7]! << 16);
+      if (length === 0 || this.buffer[6] !== 0xff) {
         events.push({ kind: "error", error: new Error("malformed Pocket 2 video record header") });
         this.buffer = this.buffer.slice(1);
         continue;
       }
       if (this.buffer.length < VIDEO_HEADER_BYTES + length) break;
-      events.push({
-        kind: "unit",
-        unit: {
-          data: this.buffer.slice(VIDEO_HEADER_BYTES, VIDEO_HEADER_BYTES + length),
-          metadata: view.getUint32(8, true),
-          timestamp: view.getUint32(12, true),
-        },
-      });
+      const mediaKind = this.buffer[9]!;
+      if (mediaKind === MEDIA_KIND_H264) {
+        events.push({
+          kind: "unit",
+          unit: {
+            data: this.buffer.slice(VIDEO_HEADER_BYTES, VIDEO_HEADER_BYTES + length),
+            metadata: view.getUint32(8, true),
+            timestamp: view.getUint32(12, true),
+          },
+        });
+      } else if (mediaKind === MEDIA_KIND_AAC) {
+        // Route 4a57 multiplexes AAC with H264. Audio is not a product feature
+        // in this task, so consume its complete record without sending it to
+        // the video callback.
+        events.push({ kind: "ignored-audio" });
+      } else {
+        events.push({
+          kind: "error",
+          error: new Error(`unknown Pocket 2 media kind 0x${mediaKind.toString(16).padStart(2, "0")}`),
+        });
+      }
       this.buffer = this.buffer.slice(VIDEO_HEADER_BYTES + length);
     }
     return events;
@@ -473,7 +492,7 @@ export class AccessorySession {
       } else if (sameRoute(envelopeEvent.route, AOA_VIDEO_ROUTE)) {
         for (const videoEvent of this.video.push(envelopeEvent.payload)) {
           if (videoEvent.kind === "error") this.report(videoEvent.error);
-          else this.onVideo?.(videoEvent.unit);
+          else if (videoEvent.kind === "unit") this.onVideo?.(videoEvent.unit);
         }
       } else {
         this.report(new Error(`unknown AOA route ${Buffer.from(envelopeEvent.route).toString("hex")}`));

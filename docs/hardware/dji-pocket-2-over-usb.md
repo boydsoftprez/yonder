@@ -99,7 +99,7 @@ Two routes were seen, and they are two channels:
 | Route | Carries | Observed |
 |---|---|---|
 | `49 57` | DUML command frames, several back to back | 2,676 envelopes, 14–562 bytes, in a 7 s session |
-| `4a 57` | **H.264 video** | 313 envelopes, almost all 8,192 bytes; 1.55 MB in 7 s |
+| `4a 57` | **H.264 and AAC media records** | 313 envelopes, almost all 8,192 bytes; 1.55 MB in 7 s |
 
 Zero bytes fell outside an envelope in 2.2 MB of capture. The board sends on route
 `49 57`; the camera answered every frame sent that way.
@@ -136,8 +136,8 @@ the payload was expected to carry something — and it did not matter for the pi
 
 **No live-view subscribe was sent.** The video route began within a second of the
 accessory being enabled, and again on every subsequent run. Each video segment is preceded
-by a 16-byte record beginning `00 00 01 ff` — a frame header, contents not yet decoded —
-followed by Annex-B H.264 in 8 KB chunks. The stream carries an SPS (`67 64 00 28`:
+by a 16-byte record beginning `00 00 01 ff` — a frame header, decoded below — followed by
+media payload in 8 KB chunks. H.264 records carry an SPS (`67 64 00 28`:
 High profile, level 4.0), PPS, access-unit delimiters, SEI, and an IDR roughly every two
 seconds. Average rate about 1.7 Mb/s, with bursts to 8 Mb/s at a keyframe.
 
@@ -380,21 +380,26 @@ and the right payload is not derivable from the library — it has no symbol tab
 setters the SDK names cannot be traced to their wire structs without a decompiler. The
 board's transcode is the plan; this is the optimisation left on the table.
 
-### The video frame record, decoded
+### The media frame record, decoded
 
-Every access unit on the video route is preceded by a 16-byte record. From 104 of them:
+Every access unit on the media route is preceded by a 16-byte record. A later capture
+confirmed the layout across 284 complete records: 114 H.264 and 170 AAC.
 
 ```
-00 00 01 ff | u16 length | u16 0x00ff | u32 varies | u32 timestamp
+00 00 01 ff | u16 length low | ff | u8 length high | u8 | u8 kind | u16 | u32 timestamp
 ```
 
-- `length` is the size of the H.264 that follows, to the byte (63,291 for the first
-  record, which held SPS, PPS and the IDR; 512–630 for ordinary P-frames).
+- `length` is the 24-bit size of the payload that follows: little-endian bytes 4–5 plus
+  byte 7 as the high byte. It reaches 105,081 bytes in the capture; eight keyframes are
+  larger than 64 KiB, and records with a zero low word remain non-empty when byte 7 is set.
+- Header byte 6 is always `ff`. Byte 9 identifies H.264 as `11` and AAC as `24`; H.264
+  begins with an Annex-B start code and AAC with an ADTS header.
 - `timestamp` advances 21–34 ms per record — a 30 fps clock in milliseconds.
-- the third field changes irregularly and is not yet understood; `0x00ff` never changes.
+- The other header bytes change and are retained raw until their meaning is known.
 
-So the daemon's job on this route is: read 16 bytes, read `length` bytes of Annex-B,
-repeat — and it has the presentation time for free.
+So the daemon's job on this route is: read 16 bytes, read the full 24-bit `length`, emit
+only kind `11` to the H.264 path, and consume kind `24` separately. The timestamp comes
+with each record.
 
 ### The pitch run, and what it cost
 

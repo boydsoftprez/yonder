@@ -24,13 +24,15 @@ const flush = async (): Promise<void> => {
   await Promise.resolve();
 };
 
-function videoRecord(data: Uint8Array, timestamp = 0x12345678): Uint8Array {
+function videoRecord(data: Uint8Array, timestamp = 0x12345678, kind = 0x11): Uint8Array {
   const record = new Uint8Array(16 + data.length);
   const view = new DataView(record.buffer);
-  record.set(bytes("00 00 01 ff"), 0);
-  view.setUint16(4, data.length, true);
-  view.setUint16(6, 0x00ff, true);
-  view.setUint32(8, 0x89abcdef, true);
+  // Capture-derived header fields. Length is low16 at 4 plus byte 7 as
+  // high8; byte 6 is the constant ff. Byte 9 classifies H264/AAC.
+  record.set(bytes("00 00 01 ff 00 00 ff 00 90 11 62 00 00 00 00 00"), 0);
+  view.setUint16(4, data.length & 0xffff, true);
+  record[7] = data.length >>> 16;
+  record[9] = kind;
   view.setUint32(12, timestamp, true);
   record.set(data, 16);
   return record;
@@ -170,7 +172,71 @@ describe("AccessorySession", () => {
     expect(commands).toHaveLength(1);
     expect(commands[0]).toMatchObject({ commandSet: 4, commandId: 0x05, sequence: 92 });
     expect(commands[0]?.raw).toEqual(command.subarray(8));
-    expect(video).toEqual([{ data: h264, timestamp: 0x12345678, metadata: 0x89abcdef }]);
+    expect(video).toEqual([{ data: h264, timestamp: 0x12345678, metadata: 0x00621190 }]);
+    session.close();
+  });
+
+  it("uses the capture-proven high length byte for a 105081-byte H264 keyframe", () => {
+    const video: Uint8Array[] = [];
+    const errors: Error[] = [];
+    const session = new AccessorySession({
+      transport: recordingTransport(),
+      onVideo: (unit) => { video.push(unit.data); },
+      onError: (error) => { errors.push(error); },
+    });
+    session.enable();
+    const h264 = new Uint8Array(105_081).fill(0x5a);
+    h264.set(bytes("00 00 00 01 67 64 00 28"));
+    const record = videoRecord(h264, 0x001bec25);
+    expect(hex(record.subarray(0, 16))).toBe("000001ff799aff019011620025ec1b00");
+    for (let offset = 0; offset < record.length; offset += 8_192) {
+      session.receive(encodeAoaEnvelope(AOA_VIDEO_ROUTE, record.subarray(offset, offset + 8_192)));
+    }
+    expect(video).toHaveLength(1);
+    expect(video[0]).toEqual(h264);
+    expect(errors).toEqual([]);
+    session.close();
+  });
+
+  it("accepts a media length whose low 16 bits are zero", () => {
+    const video: Uint8Array[] = [];
+    const session = new AccessorySession({
+      transport: recordingTransport(),
+      onVideo: (unit) => { video.push(unit.data); },
+    });
+    session.enable();
+    const h264 = new Uint8Array(65_536).fill(0x33);
+    h264.set(bytes("00 00 00 01 65"));
+    const record = videoRecord(h264);
+    expect(hex(record.subarray(0, 8))).toBe("000001ff0000ff01");
+    session.receive(encodeAoaEnvelope(AOA_VIDEO_ROUTE, record.subarray(0, 37)));
+    session.receive(encodeAoaEnvelope(AOA_VIDEO_ROUTE, record.subarray(37)));
+    expect(video).toEqual([h264]);
+    session.close();
+  });
+
+  it("drops known AAC records and reports an unknown media kind instead of emitting either as H264", () => {
+    const video: Uint8Array[] = [];
+    const errors: Error[] = [];
+    const session = new AccessorySession({
+      transport: recordingTransport(),
+      onVideo: (unit) => { video.push(unit.data); },
+      onError: (error) => { errors.push(error); },
+    });
+    session.enable();
+    const aac = new Uint8Array(512).fill(0x21);
+    aac.set(bytes("ff f1 4c 80 40 02 00 21"));
+    const h264 = bytes("00 00 00 01 61 e0 10 10");
+    const mixed = Uint8Array.from([
+      ...videoRecord(aac, 0x001bec31, 0x24),
+      ...videoRecord(h264, 0x001bec46, 0x11),
+      ...videoRecord(bytes("01 02 03"), 0x001bec67, 0x7f),
+    ]);
+    for (let offset = 0; offset < mixed.length; offset += 113) {
+      session.receive(encodeAoaEnvelope(AOA_VIDEO_ROUTE, mixed.subarray(offset, offset + 113)));
+    }
+    expect(video).toEqual([h264]);
+    expect(errors.map((error) => error.message)).toEqual(["unknown Pocket 2 media kind 0x7f"]);
     session.close();
   });
 
