@@ -91,14 +91,15 @@ export class GimbalController {
     this.watchAction(action);
     // Recentre's measured 02 01 payload also transitions to Follow mode 2.
     const targetMode = command.kind === 'mode' ? command.mode : 2;
-    this.awaitingMode = { mode: targetMode, after: this.options.clock.now(), signal: action.controller.signal };
     const wire = this.wire(command);
     this.pending = true;
     try {
       await this.options.write(wire, { signal: action.controller.signal, deadline: action.deadline, admission: () => {
         if (!this.discreteAdmission(action)) return false;
-        // Refresh/watchdog checks do not move this boundary. Only actual
-        // serialized dispatch establishes how new target-mode readback must be.
+        // A successful arbiter admission may precede endpoint admission. From
+        // this point dispatch is possible, so cancellation must retain the
+        // interlock. Each later admission refreshes the readback cutoff;
+        // refresh/watchdog checks do not establish or move it.
         this.awaitingMode = { mode: targetMode, after: this.options.clock.now(), signal: action.controller.signal };
         return true;
       } });

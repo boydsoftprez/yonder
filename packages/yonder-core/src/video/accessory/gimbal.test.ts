@@ -177,6 +177,7 @@ describe('intent-bound gimbal dispatcher', () => {
   });
   it('mode acceptance inhibits rates until fresh target-mode readback', async () => {
     const f = fixture(); const p = f.controller.action('alice', { kind: 'mode', mode: 2 });
+    expect(f.writes[0].options.admission!()).toBe(true);
     f.writes[0].resolve(); await p;
     expect(f.admit(f.issue())).toMatchObject({ accepted: false, reason: 'mode-unobserved' });
     f.context.attitude!.mode = 2;
@@ -223,6 +224,7 @@ describe('intent-bound gimbal dispatcher', () => {
   });
   it('invalid target-mode telemetry cannot clear the mode observation interlock', async () => {
     const f = fixture(); const p = f.controller.action('alice', { kind: 'mode', mode: 2 });
+    expect(f.writes[0].options.admission!()).toBe(true);
     f.writes[0].resolve(); await p;
     f.context.attitude!.mode = 2; f.context.attitude!.at = 2000;
     expect(f.admit(f.issue()).accepted).toBe(false);
@@ -263,6 +265,44 @@ describe('intent-bound gimbal dispatcher', () => {
     f.clock.advance(120, false); expect(f.writes[0].options.admission!()).toBe(false); c.close();
     f.context.intentAllowanceMs = 100;
     expect(f.admit(f.issue())).toMatchObject({ accepted: false, reason: 'stop-allowance-unknown' }); f.controller.close();
+  });
+  it.each([
+    [{ kind: 'recentre' }, 'expiry'], [{ kind: 'mode', mode: 2 }, 'expiry'],
+    [{ kind: 'recentre' }, 'reset'], [{ kind: 'mode', mode: 2 }, 'reset'],
+  ] as const)('a queued %j retired by %s before admission permits fresh motion without reconnect', async (command, retire) => {
+    const f = fixture(); const action = f.controller.action('alice', command); const queued = f.writes[0];
+    expect(f.controller.issue('alice')).toMatchObject({ accepted: false, reason: 'busy' });
+    expect(await f.controller.action('alice', command)).toMatchObject({ accepted: false, reason: 'busy' });
+    if (retire === 'expiry') f.freshAdvance(500); else f.controller.reset();
+    expect(queued.options.signal!.aborted).toBe(true);
+    expect(queued.options.admission!()).toBe(false);
+    queued.reject(new Error('cancelled before dispatch')); expect((await action).accepted).toBe(false);
+    f.freshAdvance(1);
+    const grant = f.issue(); expect(f.admit(grant)).toMatchObject({ accepted: true });
+    expect(f.writes).toHaveLength(2);
+    f.controller.end('alice', grant.gesture); f.writes[1].resolve(); await settle();
+    const freshAction = f.controller.action('alice', command);
+    expect(f.writes).toHaveLength(3); expect(f.writes[2].options.admission!()).toBe(true);
+    f.writes[2].resolve(); expect(await freshAction).toEqual({ accepted: true }); f.controller.close();
+  });
+  it.each([
+    [{ kind: 'recentre' }, 'expiry'], [{ kind: 'mode', mode: 2 }, 'expiry'],
+    [{ kind: 'recentre' }, 'reset'], [{ kind: 'mode', mode: 2 }, 'reset'],
+  ] as const)('a %j retired by %s after possible dispatch retains the target-mode interlock', async (command, retire) => {
+    const f = fixture(); const action = f.controller.action('alice', command); const queued = f.writes[0];
+    // An arbiter may admit before the AOA writer. Once either admission succeeds,
+    // a later cancellation cannot prove the transition never reached hardware.
+    expect(queued.options.admission!()).toBe(true);
+    if (retire === 'expiry') f.freshAdvance(500); else f.controller.reset();
+    expect(queued.options.admission!()).toBe(false);
+    queued.reject(new Error('cancelled after admission')); expect((await action).accepted).toBe(false);
+    f.freshAdvance(1);
+    expect(f.admit(f.issue())).toMatchObject({ accepted: false, reason: 'mode-unobserved' });
+    const blocked = f.controller.action('alice', command); f.writes[1]?.resolve();
+    expect(await blocked).toEqual({ accepted: false, reason: 'mode-unobserved' });
+    expect(f.writes).toHaveLength(1);
+    f.context.attitude!.mode = 2; f.freshAdvance(1);
+    expect(f.admit(f.issue())).toMatchObject({ accepted: true }); f.controller.close();
   });
   it('discrete pending I/O is revoked when attitude ages out, even without another push', async () => {
     const f = fixture(); const p = f.controller.action('alice', { kind: 'recentre' });
