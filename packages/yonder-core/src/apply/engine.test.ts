@@ -92,7 +92,7 @@ describe("ApplyEngine", () => {
     });
     const boot = e.renderCurrent();
     try {
-      await expect(e.apply(changed())).rejects.toThrow(/pending/);
+      await expect(e.apply(changed())).rejects.toThrow(/still being carried out/);
       await expect(e.renderCurrent()).rejects.toThrow(/in flight/);
     } finally { release(); await boot; }
     expect(loadConfig(configPath)).toEqual(DEFAULT_CONFIG);
