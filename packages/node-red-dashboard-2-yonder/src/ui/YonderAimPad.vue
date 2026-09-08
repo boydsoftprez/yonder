@@ -229,7 +229,7 @@ export default {
         /** R-CMD-04: an inhibition that arrives mid-gesture stops the
          * aircraft immediately, not on the operator's next release. */
         inhibited (now) {
-            if (now) this.endGesture()
+            if (now) this.onEnd()
         }
     },
     mounted () {

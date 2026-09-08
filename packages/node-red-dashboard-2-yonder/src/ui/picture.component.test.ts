@@ -2016,3 +2016,14 @@ describe("the recording pill and the still's confirmation", () => {
     expect(wrapper.find(".y-pic__flash").exists()).toBe(false);
   });
 });
+
+it.each(['teardown', 'retry'])('retires the physical aim gesture on media %s', async (method) => {
+  const { wrapper } = mountPicture(); await settle();
+  const vm = wrapper.vm as any;
+  const stopped = vi.spyOn(vm.aimTransport, 'stop');
+  vm.dragGesture = 'physical-press'; vm.dragPointerId = 7;
+  vm[method]();
+  expect(stopped).toHaveBeenCalled();
+  expect(vm.dragGesture).toBeNull(); expect(vm.dragPointerId).toBeNull();
+  wrapper.unmount();
+});

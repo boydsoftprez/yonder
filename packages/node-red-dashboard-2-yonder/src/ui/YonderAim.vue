@@ -25,6 +25,7 @@
             <div v-if="effectiveReason || aimError" class="y-aimpanel__reason">{{ aimError || effectiveReason }}</div>
 
             <YonderAimPad
+                ref="aimPad"
                 :axes="PAD_AXES"
                 :max-rate="report.maxRate ?? 30"
                 :at-limit="atLimit"
@@ -394,7 +395,8 @@ export default {
          * player who presses Recentre and immediately loses the report
          * feed (page torn down, camera unplugged) simply keeps the guard
          * up, which is the safe direction to fail in. */
-        report () {
+        report (now, before) {
+            if (now?.generation !== before?.generation || now?.url !== before?.url) this.$refs.aimPad?.onEnd()
             this.recentrePending = false
             this.aimTransport?.refresh()
         }
@@ -406,7 +408,7 @@ export default {
     },
     beforeUnmount () { this.aimTransport?.close(); this.$socket.off?.('disconnect', this.aimDisconnect) },
     methods: {
-        aimDisconnect () { this.aimTransport?.stop() },
+        aimDisconnect () { this.aimTransport?.stop(); this.$refs.aimPad?.onEnd() },
         /** Every message this node posts leaves through here — one seam,
          * the same reasoning `YonderDeck`'s own `post()` gives for having
          * exactly one. */

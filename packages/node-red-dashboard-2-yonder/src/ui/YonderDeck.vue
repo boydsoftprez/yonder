@@ -510,13 +510,14 @@ export default {
      * both arrive as a report, and a flag cleared only on success would leave
      * the key dead for ever after a refusal.
      */
-    report () {
+    report (now, before) {
+      if (now?.aim?.generation !== before?.aim?.generation || now?.aim?.url !== before?.aim?.url) this.$refs.aimPad?.onEnd()
       this.shutterPending = false
       this.aimTransport?.refresh()
     },
   },
   methods: {
-    aimDisconnect () { this.aimTransport?.stop() },
+    aimDisconnect () { this.aimTransport?.stop(); this.$refs.aimPad?.onEnd() },
     nativeControl (command) { this.post({ nativeControl: command }) },
     hasDraft (path) {
       return Object.prototype.hasOwnProperty.call(this.draft, path)
@@ -1342,6 +1343,7 @@ export default {
         this.aimError ? h('div', { class: 'y-deck__ended' }, this.aimError) : null,
         this.report.aim?.admitted ? h('div', { class: 'y-deck__ended' }, `Admitted rate ${Math.hypot(this.report.aim.admitted.pan, this.report.aim.admitted.tilt).toFixed(1)} °/s`) : null,
         h(YonderAimPad, {
+          ref: 'aimPad',
           axes: { pan: 'present', tilt: 'present', roll: 'advertised' },
           maxRate: this.report.aim?.maxRate ?? 30,
           inhibited,

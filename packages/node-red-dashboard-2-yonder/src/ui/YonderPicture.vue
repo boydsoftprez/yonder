@@ -860,7 +860,10 @@ export default {
         }
     },
     watch: {
-        aim () { this.aimTransport?.refresh() },
+        aim (now, before) {
+            if (now?.generation !== before?.generation || now?.url !== before?.url) this.onDragEnd()
+            this.aimTransport?.refresh()
+        },
         /**
          * A key on the rail, arriving as a message.
          *
@@ -921,7 +924,7 @@ export default {
          * `updateFromEvent` needs for a fault arriving between presses (see
          * this file's own top-of-file doc comment). */
         aimable (now) {
-            if (!now) this.endDragGesture()
+            if (!now) this.onDragEnd()
         },
         /**
          * **A still landed** (L-18, R-UI-05).
@@ -998,7 +1001,7 @@ export default {
         this.teardown()
     },
     methods: {
-        aimDisconnect () { this.aimTransport?.stop(); this.endDragGesture() },
+        aimDisconnect () { this.aimTransport?.stop(); this.onDragEnd() },
         /**
          * One field of this picture's own richer state (R-VID-18, R-UI-28):
          * the live message first, then the last message that set it, then a
@@ -1059,6 +1062,8 @@ export default {
          * replaces it.
          */
         teardown () {
+            this.aimTransport?.stop()
+            this.onDragEnd()
             // Anything still in flight belongs to nobody from here on.
             this.session += 1
             this.stopReporting()
@@ -1327,6 +1332,8 @@ export default {
             }
         },
         retry () {
+            this.aimTransport?.stop()
+            this.onDragEnd()
             // A picture nobody is asking for does not reconnect: an off view
             // that kept negotiating would be spending a cellular uplink on a
             // stream with nothing on screen indicating it.
@@ -1395,7 +1402,7 @@ export default {
         },
         onThumbGo (id) {
             this.aimTransport?.stop()
-            this.endDragGesture()
+            this.onDragEnd()
             this.sentPath = id
             this.post({ path: id })
         },
