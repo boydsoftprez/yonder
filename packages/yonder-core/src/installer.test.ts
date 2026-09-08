@@ -752,11 +752,104 @@ describe("the UART role", () => {
       {
         DRY_RUN: opts.dryRun === true ? "1" : "0",
         YONDER_BOOT_DIR: bootDir,
+        YONDER_ARMBIAN_ENV: join(dir, "no-armbian-here"),
         YONDER_SYSTEMD_DIRS: opts.systemdDirs ?? join(dir, "no-systemd-here"),
       },
       opts.path,
     );
   }
+
+  function armbianFixture(env: string, opts: { overlay?: boolean } = {}) {
+    const boot = join(dir, "armbian-boot");
+    const dtb = join(boot, "dtb", "rockchip", "overlay");
+    const user = join(boot, "overlay-user");
+    mkdirSync(dtb, { recursive: true });
+    if (opts.overlay !== false) writeFileSync(join(dtb, "rk3568-uart2-m0.dtbo"), "dtbo bytes");
+    const envFile = join(boot, "armbianEnv.txt");
+    writeFileSync(envFile, env);
+    return { envFile, dtb, user };
+  }
+  function runArmbian(f: ReturnType<typeof armbianFixture>, opts: { dryRun?: boolean; path: string }) {
+    return sh(
+      `set -eu; . '${COMMON}'; . '${UART_ROLE}'`,
+      {
+        DRY_RUN: opts.dryRun === true ? "1" : "0",
+        YONDER_BOOT_DIR: join(dir, "no-pi-boot-here"),
+        YONDER_ARMBIAN_ENV: f.envFile,
+        YONDER_DTB_OVERLAY_DIR: f.dtb,
+        YONDER_USER_OVERLAY_DIR: f.user,
+        YONDER_SYSTEMD_DIRS: join(dir, "no-systemd-here"),
+      },
+      opts.path,
+    );
+  }
+  // A Radxa Zero 3W's armbianEnv.txt as Armbian 26.8.1 ships it, with the
+  // USB host overlay the camera needs already in user_overlays.
+  const ARMBIAN = [
+    "verbosity=1", "bootlogo=false", "console=both", "extraargs=cma=256M", "overlay_prefix=rk35xx",
+    "fdtfile=rockchip/rk3566-radxa-zero3.dtb", "rootdev=UUID=2bae8c0f", "rootfstype=ext4",
+    "user_overlays=dwc3-host", "usbstoragequirks=0x2537:0x1066:u", "",
+  ].join("\n");
+
+  it("frees UART2 on Armbian: copies the overlay, names it, takes the serial console off, disables the FIQ getty (R-MAV-02, R-HW-04)", () => {
+    const f = armbianFixture(ARMBIAN);
+    const { path, log } = stubSystemdTools();
+    const r = runArmbian(f, { path });
+    expect(r.code).toBe(0);
+    expect(existsSync(join(f.user, "uart2-m0.dtbo"))).toBe(true);
+    const env = readFileSync(f.envFile, "utf8");
+    expect(env).toContain("user_overlays=dwc3-host uart2-m0\n");
+    expect(env).toContain("console=display\n");
+    expect(env).not.toContain("console=both");
+    expect(env).toContain("overlay_prefix=rk35xx\n");
+    expect(env).toContain("extraargs=cma=256M\n");
+    expect(readFileSync(log, "utf8")).toContain("deb-systemd-helper disable serial-getty@ttyFIQ0.service");
+    expect(r.out).toContain("takes hardware effect at the next boot");
+  });
+
+  it("is idempotent on Armbian: a second run changes nothing and says so", () => {
+    const f = armbianFixture(ARMBIAN);
+    const { path } = stubSystemdTools();
+    runArmbian(f, { path });
+    const once = readFileSync(f.envFile, "utf8");
+    const r = runArmbian(f, { path });
+    expect(r.code).toBe(0);
+    expect(readFileSync(f.envFile, "utf8")).toBe(once);
+    expect(r.out).toContain("already carries uart2-m0");
+  });
+
+  it("adds user_overlays when the file has none, and rewrites console=serial too", () => {
+    const f = armbianFixture(ARMBIAN.replace("user_overlays=dwc3-host\n", "").replace("console=both", "console=serial"));
+    const r = runArmbian(f, { path: stubSystemdTools().path });
+    expect(r.code).toBe(0);
+    const env = readFileSync(f.envFile, "utf8");
+    expect(env).toContain("user_overlays=uart2-m0\n");
+    expect(env).toContain("console=display\n");
+  });
+
+  it("leaves console=display alone", () => {
+    const f = armbianFixture(ARMBIAN.replace("console=both", "console=display"));
+    const r = runArmbian(f, { path: stubSystemdTools().path });
+    expect(r.code).toBe(0);
+    expect(readFileSync(f.envFile, "utf8").match(/^console=/gm)).toEqual(["console="]);
+    expect(r.out).toContain("no serial console");
+  });
+
+  it("dies when the image carries no uart2-m0 overlay, naming what it looked for", () => {
+    const f = armbianFixture(ARMBIAN, { overlay: false });
+    const r = runArmbian(f, { path: stubSystemdTools().path });
+    expect(r.code).not.toBe(0);
+    expect(r.out).toContain("no rk3568-uart2-m0.dtbo");
+  });
+
+  it("says what it would do on Armbian on a dry run, and writes nothing", () => {
+    const f = armbianFixture(ARMBIAN);
+    const r = runArmbian(f, { dryRun: true, path: stubSystemdTools().path });
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("would");
+    expect(readFileSync(f.envFile, "utf8")).toBe(ARMBIAN);
+    expect(existsSync(join(f.user, "uart2-m0.dtbo"))).toBe(false);
+  });
 
   const STANZA = "# yonder-uart\nenable_uart=1\ndtoverlay=disable-bt\n";
 

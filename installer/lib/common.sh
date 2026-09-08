@@ -54,6 +54,15 @@
 : "${YONDER_GST_PLUGIN_DIR:=/usr/lib/aarch64-linux-gnu/gstreamer-1.0}"
 : "${YONDER_GST_REGISTRY_DIRS:=/root/.cache/gstreamer-1.0 /var/cache/gstreamer-1.0 /home/yonder/.cache/gstreamer-1.0}"
 
+# Armbian's boot layout, which R-HW-03's boards use: one file of key=value
+# pairs u-boot reads, the kernel's overlays, and the directory user overlays
+# are loaded from. Overridable for the same reason YONDER_BOOT_DIR is: a role
+# that rewrites a boot file is worth testing against a fixture. An install
+# never sets any of them.
+: "${YONDER_ARMBIAN_ENV:=/boot/armbianEnv.txt}"
+: "${YONDER_DTB_OVERLAY_DIR:=/boot/dtb/rockchip/overlay}"
+: "${YONDER_USER_OVERLAY_DIR:=/boot/overlay-user}"
+
 # The one path the systemd unit's ExecStart names, and a symlink this
 # installer points at whichever node the install actually resolved.
 #

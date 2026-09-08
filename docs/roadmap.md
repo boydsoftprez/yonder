@@ -407,6 +407,8 @@ code and unit tests and an explicit note that it has never run on hardware.
 - The router carried in the offline payload, installed off, started by the control plane —
   R-MAV-17, R-CFG-07
 - Flight-controller autodetect by baud sweep — R-MAV-01, R-MAV-02
+- The header UART freed by the installer on both boot layouts, Armbian included — R-MAV-02,
+  R-HW-04
 - Three ground-station endpoints, settable from the console — R-MAV-03
 - Loopback-only ingest by default — R-MAV-07
 - Autocast: telemetry up at boot with no operator action — R-MAV-08, R-MAV-09

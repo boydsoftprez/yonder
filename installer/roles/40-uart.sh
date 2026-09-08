@@ -3,19 +3,97 @@
 # and Bluetooth off it. R-MAV-02, R-HW-04.
 # shellcheck shell=sh
 
-# This role knows one boot layout: a Raspberry Pi's /boot/firmware, holding
-# config.txt and cmdline.txt. Every board family this installer supports
-# today — R-HW-01, R-HW-02 — uses it; R-HW-03's Radxa boards do not, and
-# are out of scope until M8 (docs/roadmap.md; the same three header pins
-# carry UART2 there instead, per §2 of the telemetry-plumbing design, but
-# nothing wires that up yet). So a root that carries neither file is not a
+# Two boot layouts. A Raspberry Pi's /boot/firmware holds config.txt and
+# cmdline.txt (R-HW-01, R-HW-02); Armbian, which R-HW-03's Radxa boards run,
+# holds one armbianEnv.txt u-boot reads (R-HW-04: which is decided by what
+# is on disk, never by a board name). A root that carries neither is not a
 # broken install to stop over — it is a target this role has nothing to do
 # on, the same reasoning 40-zerotier.sh applies to a payload that was never
 # built: say what is missing, and leave the rest of the install to finish.
+if [ -f "$YONDER_ARMBIAN_ENV" ]; then
+    # What the bench found on a Radxa Zero 3W, and what this arm reverses:
+    # ttyS1 is Bluetooth's, UART2 is the boot console reached through the
+    # FIQ debugger on ttyFIQ0, and every other UART is disabled in the device
+    # tree. The image ships rk3568-uart2-m0.dtbo — compatible with
+    # radxa,zero3; it enables uart2 and disables fiq_debugger — and only
+    # user_overlays= resolves on this image: overlays= looks for
+    # rk35xx-*.dtbo, of which there are none. See
+    # docs/hardware/rockchip-video-shipped.md.
+    ua_dtbo="$YONDER_DTB_OVERLAY_DIR/rk3568-uart2-m0.dtbo"
+    ua_user="$YONDER_USER_OVERLAY_DIR/uart2-m0.dtbo"
+    [ -f "$ua_dtbo" ] || die "no rk3568-uart2-m0.dtbo under $YONDER_DTB_OVERLAY_DIR; this image cannot free the header UART, and the autopilot would have no UART to answer on"
+    ensure_dir "$YONDER_USER_OVERLAY_DIR" 0755
+    if [ -f "$ua_user" ]; then
+        log "$ua_user already present"
+    else
+        log "copying the UART2 overlay to $ua_user"
+        run cp "$ua_dtbo" "$ua_user"
+    fi
+
+    # user_overlays= is a space-separated list; the token is added once, the
+    # rest of the line and every other line left exactly as they were.
+    ua_names_overlay() {
+        # shellcheck disable=SC2020 # space and tab both mapped to newline, on purpose
+        sed -n 's/^user_overlays=//p' "$1" | tr ' \t' '\n\n' | grep -qxF "$2"
+    }
+    ua_add_overlay() {
+        awk -v tok="$2" '
+            BEGIN { done = 0 }
+            /^user_overlays=/ {
+                rest = substr($0, 15)
+                $0 = (rest == "" ? "user_overlays=" tok : "user_overlays=" rest " " tok)
+                done = 1
+            }
+            { print }
+            END { if (!done) print "user_overlays=" tok }
+        ' "$1" > "$1.new" && mv "$1.new" "$1"
+    }
+    if ua_names_overlay "$YONDER_ARMBIAN_ENV" uart2-m0; then
+        log "$YONDER_ARMBIAN_ENV already carries uart2-m0 in user_overlays"
+    else
+        log "adding uart2-m0 to user_overlays in $YONDER_ARMBIAN_ENV"
+        run ua_add_overlay "$YONDER_ARMBIAN_ENV" uart2-m0
+    fi
+
+    # console=both and console=serial put a login console on UART2 at
+    # 1500000 baud — the same two pins — and it would answer the autopilot.
+    # console=display keeps tty1 and drops console=ttyS2 from the command
+    # line. Only that one value is rewritten.
+    ua_drop_serial_console() {
+        sed -E 's/^console=(both|serial)$/console=display/' "$1" > "$1.new" && mv "$1.new" "$1"
+    }
+    if grep -Eq '^console=(both|serial)$' "$YONDER_ARMBIAN_ENV"; then
+        log "setting console=display in $YONDER_ARMBIAN_ENV; R-NET-07's access point, not this port, is the way back into a board that will not boot"
+        run ua_drop_serial_console "$YONDER_ARMBIAN_ENV"
+    else
+        log "$YONDER_ARMBIAN_ENV puts no serial console on the UART"
+    fi
+
+    # The getty the FIQ debugger's console carries. Disabled for the next
+    # boot, not stopped now, for the reason the Pi arm gives below: this
+    # install may be running from that very console.
+    log "disabling the getty on ttyFIQ0 for next boot, without stopping it now"
+    disable_unit_offline serial-getty@ttyFIQ0.service
+    assert_unit_disabled serial-getty@ttyFIQ0.service
+
+    if [ "$DRY_RUN" = "1" ]; then
+        log "would check that $ua_user exists, that user_overlays names uart2-m0, and that no serial console remains"
+    else
+        [ -f "$ua_user" ] || die "$ua_user is not there; the overlay would not load"
+        ua_names_overlay "$YONDER_ARMBIAN_ENV" uart2-m0 \
+            || die "$YONDER_ARMBIAN_ENV does not name uart2-m0; the UART would stay the boot console's"
+        if grep -Eq '^console=(both|serial)$' "$YONDER_ARMBIAN_ENV"; then
+            die "$YONDER_ARMBIAN_ENV still puts a login console on the UART; it would answer the autopilot instead of mavlink-router"
+        fi
+        log "UART2 is staged for the autopilot, as /dev/ttyS2; it takes hardware effect at the next boot"
+    fi
+    return 0
+fi
+
 ua_cfg="$YONDER_BOOT_DIR/config.txt"
 ua_cmdline="$YONDER_BOOT_DIR/cmdline.txt"
 if [ ! -f "$ua_cfg" ] || [ ! -f "$ua_cmdline" ]; then
-    log "no config.txt/cmdline.txt under $YONDER_BOOT_DIR; not a Raspberry Pi boot layout, skipping"
+    log "no config.txt/cmdline.txt under $YONDER_BOOT_DIR and no $YONDER_ARMBIAN_ENV; neither boot layout, skipping"
     return 0
 fi
 
