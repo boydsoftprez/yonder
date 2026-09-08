@@ -23,7 +23,7 @@ function fixture() {
   devices.push(device);
   return { device, children, onCommand };
 }
-async function live(f: ReturnType<typeof fixture>) {
+async function phone(f: ReturnType<typeof fixture>) {
   await f.device.start();
   const h = f.children.at(-1)!;
   h.emit({ type: "ready" });
@@ -31,8 +31,14 @@ async function live(f: ReturnType<typeof fixture>) {
     h.emit({ type: "setup", id: index + 1, stage: "phone", setup: { requestType: 64, request: 52, value: 0, index, length: text.length + 1 } });
     h.emit({ type: "control-data", id: index + 1, data: Buffer.from(text + "\0").toString("base64") });
   }
+  return h;
+}
+async function live(f: ReturnType<typeof fixture>) {
+  const h = await phone(f);
   h.emit({ type: "setup", id: 3, stage: "phone", setup: { requestType: 64, request: 53, value: 0, index: 0, length: 0 } });
   h.emit({ type: "control-done", id: 3 });
+  h.emit({ type: "event", stage: "phone", event: "DISABLE" });
+  h.emit({ type: "event", stage: "phone", event: "UNBIND" });
   h.emit({ type: "event", stage: "accessory", event: "ENABLE" });
   h.emit({ type: "data", data: Buffer.from(encodeAoaEnvelope(AOA_COMMAND_ROUTE, encodeDuml({ commandSet: 2, commandId: 128, sequence: 7, ack: 0 }))).toString("base64") });
   return h;
@@ -41,6 +47,7 @@ it("prepares both descriptors before phone binding and verifies live identity th
   const f = fixture(); const h = await live(f);
   expect(h.messages[0]).toMatchObject({ type: "prepare", controller: "fe980000.usb" });
   expect(h.messages[0].stages.map((s: any) => s.productId)).toEqual(["4ee1", "2d00"]);
+  expect(h.messages[0].stages.map((s: any) => s.serial)).toEqual(["0001", "0001"]);
   expect(h.messages.some(m => m.type === "bind" && m.stage === "accessory")).toBe(true);
   expect(f.device.snapshot()).toMatchObject({ state: "live", identity: "pocket2:fe980000.usb", manufacturer: "DJI", model: "HG211" });
   expect(f.onCommand).toHaveBeenCalledOnce();
@@ -190,4 +197,57 @@ it("bounds an absent handshake and refuses a second queued caller command", asyn
   const canceled = expect(pending).rejects.toThrow();
   await expect(other.device.sendCommand({ commandSet: 4, commandId: 12 })).rejects.toThrow(/pending/);
   await other.device.close(); await canceled;
+});
+
+it.each(["DISABLE", "UNBIND"])("invalidates phone identity on unexpected %s and requires new strings", async event => {
+  const f = fixture(); const h = await phone(f);
+  const generation = f.device.snapshot().generation;
+  expect(f.device.snapshot()).toMatchObject({ manufacturer: "DJI", model: "HG211" });
+  h.emit({ type: "event", stage: "phone", event });
+  expect(f.device.snapshot()).toMatchObject({ state: "stale", manufacturer: null, model: null });
+  expect(f.device.snapshot().generation).toBeGreaterThan(generation);
+  h.emit({ type: "setup", id: 3, stage: "phone", setup: { requestType: 64, request: 53, value: 0, index: 0, length: 0 } });
+  expect(h.messages.some(m => m.type === "bind" && m.stage === "accessory")).toBe(false);
+  await vi.advanceTimersByTimeAsync(45_000);
+  const replacement = f.children.at(-1)!;
+  expect(replacement).not.toBe(h);
+  replacement.emit({ type: "ready" });
+  replacement.emit({ type: "setup", id: 1, stage: "phone", setup: { requestType: 64, request: 53, value: 0, index: 0, length: 0 } });
+  expect(replacement.messages.at(-1)).toMatchObject({ type: "control", action: "stall" });
+  replacement.emit({ type: "control-done", id: 1 });
+  expect(replacement.messages.some(m => m.type === "bind" && m.stage === "accessory")).toBe(false);
+});
+
+it.each(["SIGHUP", "SIGSEGV", "SIGABRT", "SIGTERM", "SIGINT"])("treats helper signal exit %s as uncertain cleanup and never retries", async signal => {
+  const { EventEmitter } = await import("node:events");
+  const { PassThrough } = await import("node:stream");
+  const { NdjsonFunctionFsHelper } = await import("./linux.js");
+  const child: any = new EventEmitter();
+  child.stdin = new PassThrough(); child.stdout = new PassThrough(); child.stderr = new PassThrough();
+  child.kill = vi.fn(() => true);
+  const factory = vi.fn(event => new NdjsonFunctionFsHelper(event, { spawn: (() => child) as any }));
+  const statuses: string[] = [];
+  const device = new Pocket2Device({ controller: "test.udc", helperFactory: factory, onStatus: status => statuses.push(status.state) });
+  await device.start();
+  child.stdout.write('{"type":"ready"}\n');
+  child.emit("close", null, signal);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(device.snapshot()).toMatchObject({ state: "fault", reason: expect.stringMatching(/cleanup incomplete/) });
+  await vi.advanceTimersByTimeAsync(60_000);
+  expect(factory).toHaveBeenCalledOnce();
+  await expect(device.close()).rejects.toThrow(/cleanup/);
+  expect(statuses).not.toContain("closed");
+  expect(statuses).not.toContain("detached-backoff");
+});
+it("accepts numeric clean exit after the helper handles termination and cleanup", async () => {
+  const { EventEmitter } = await import("node:events");
+  const { PassThrough } = await import("node:stream");
+  const { NdjsonFunctionFsHelper } = await import("./linux.js");
+  const child: any = new EventEmitter();
+  child.stdin = new PassThrough(); child.stdout = new PassThrough(); child.stderr = new PassThrough();
+  child.kill = vi.fn(() => { queueMicrotask(() => child.emit("close", 0, null)); return true; });
+  const device = new Pocket2Device({ controller: "test.udc", helperFactory: event => new NdjsonFunctionFsHelper(event, { spawn: (() => child) as any }) });
+  await device.start(); await device.close();
+  expect(device.snapshot().state).toBe("closed");
+  expect(child.kill).toHaveBeenCalledWith("SIGTERM");
 });

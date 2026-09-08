@@ -161,10 +161,26 @@ class LifecycleTests(unittest.TestCase):
         finally:
             os.close(read); os.close(write)
 
+    def test_complete_functionfs_components_fit_kernel_and_workqueue_names(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for stage in ('accessory', 'phone'):
+                gadget = ffs.Gadget(pathlib.Path(directory), stage)
+                description = dict(vendorId='18d1', productId='2d00', manufacturer='test', product='test', serial='0001', descriptors='AA==', strings='AA==')
+                with patch.object(gadget, 'directory') as directory_created, patch.object(ffs.Path, 'write_text', autospec=True) as write_text, patch.object(ffs.Path, 'symlink_to'), patch.object(ffs, 'command') as command, patch.object(ffs, 'open_endpoint', return_value=42), patch.object(ffs.os, 'write', side_effect=lambda fd, data: len(data)):
+                    gadget.prepare(description)
+                components = [call.args[0].name for call in directory_created.call_args_list if call.args[0].parent.name == 'functions']
+                self.assertEqual(len(components), 1)
+                self.assertLessEqual(len(components[0]), 40, stage)
+                instance = command.call_args.args[3]
+                self.assertEqual(components[0], 'ffs.' + instance)
+                self.assertLess(len('ffs-' + instance), 24, stage)
+                self.assertTrue(gadget.name.startswith('yonder-pocket2-'))
+                serial_writes = [call.args[1] for call in write_text.call_args_list if call.args[0].name == 'serialnumber']
+                self.assertEqual(serial_writes, ['0001'])
+
     def test_failed_exclusive_gadget_creation_never_unbinds_another_owner(self):
         with tempfile.TemporaryDirectory() as directory:
             gadget = ffs.Gadget(pathlib.Path(directory), 'accessory')
-            self.assertLessEqual(len(gadget.name), 40)
             with patch.object(ffs.Path, 'read_text') as read:
                 self.assertEqual(gadget.close(), [])
                 read.assert_not_called()

@@ -192,7 +192,11 @@ def command(*args):
 class Gadget:
     def __init__(self, root, stage):
         self.stage = stage
-        self.name = 'yonder-pocket2-' + uuid.uuid4().hex[:14] + '-' + stage
+        token = uuid.uuid4().hex[:12]
+        self.name = 'yonder-pocket2-' + token + '-' + stage
+        # Include ffs. in configfs's component limit and leave room for the
+        # ffs- workqueue prefix plus NUL in the kernel's 24-byte name buffer.
+        self.function_name = 'yp2-' + token + '-' + stage[0]
         self.gadget = Path('/sys/kernel/config/usb_gadget') / self.name
         self.mount = root / self.name
         self.fds = []
@@ -213,19 +217,19 @@ class Gadget:
                            ('bcdUSB', '0x0200'), ('bcdDevice', '0x0100')]:
             (self.gadget / key).write_text(value)
         self.directory(self.gadget / 'strings/0x409')
-        for key, value in [('manufacturer', description['manufacturer']), ('product', description['product']), ('serialnumber', self.name)]:
+        for key, value in [('manufacturer', description['manufacturer']), ('product', description['product']), ('serialnumber', description['serial'])]:
             (self.gadget / 'strings/0x409' / key).write_text(value)
         self.directory(self.gadget / 'configs/c.1')
         self.directory(self.gadget / 'configs/c.1/strings/0x409')
         (self.gadget / 'configs/c.1/strings/0x409/configuration').write_text(self.stage)
         (self.gadget / 'configs/c.1/MaxPower').write_text('500')
-        function = self.gadget / ('functions/ffs.' + self.name)
+        function = self.gadget / ('functions/ffs.' + self.function_name)
         self.directory(function)
         link = self.gadget / 'configs/c.1' / function.name
         link.symlink_to(function)
         self.link = link
         self.directory(self.mount)
-        command('mount', '-t', 'functionfs', self.name, str(self.mount))
+        command('mount', '-t', 'functionfs', self.function_name, str(self.mount))
         self.mounted = True
         self.ep0 = open_endpoint(self.mount / 'ep0')
         self.fds.append(self.ep0)

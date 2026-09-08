@@ -80,7 +80,9 @@ export class NdjsonFunctionFsHelper implements FunctionFsHelper {
       const kill = setTimeout(() => this.child.kill("SIGKILL"), 2_000);
       try {
         const result = await this.exited;
-        if (result.signal === "SIGKILL" || result.code === 2) throw new Error("FunctionFS cleanup was not completed");
+        // Handled SIGTERM/SIGINT finish Python cleanup and return a numeric code.
+        // Any signal-valued exit bypassed that path, so owned resources are uncertain.
+        if (result.signal !== null || result.code === 2) throw new Error("FunctionFS cleanup was not completed");
       } finally { clearTimeout(kill); }
     })();
     return this.closePromise;
@@ -155,8 +157,8 @@ export class Pocket2Device {
         try { this.receive(message); } catch { void this.retire("fault", "Invalid FunctionFS message or control sequence"); }
       });
       this.helper.send({ type: "prepare", controller: this.options.controller, stages: [
-        { stage: "phone", vendorId: "18d1", productId: "4ee1", manufacturer: "Google", product: "Pixel", descriptors: b64(functionFsDescriptors("phone")), strings: b64(functionFsStrings()) },
-        { stage: "accessory", vendorId: "18d1", productId: "2d00", manufacturer: "Android", product: "Android Accessory", descriptors: b64(functionFsDescriptors("accessory")), strings: b64(functionFsStrings()) },
+        { stage: "phone", vendorId: "18d1", productId: "4ee1", manufacturer: "Google", product: "Pixel", serial: "0001", descriptors: b64(functionFsDescriptors("phone")), strings: b64(functionFsStrings()) },
+        { stage: "accessory", vendorId: "18d1", productId: "2d00", manufacturer: "Android", product: "Android Accessory", serial: "0001", descriptors: b64(functionFsDescriptors("accessory")), strings: b64(functionFsStrings()) },
       ] });
     } catch { void this.retire("unavailable", "FunctionFS helper unavailable"); }
   }
@@ -186,7 +188,10 @@ export class Pocket2Device {
       case "event":
         if (message.stage !== "phone" && message.stage !== "accessory") throw new Error();
         if (message.stage === "accessory" && message.event === "ENABLE") this.enable();
-        else if (message.stage === "accessory" && ["DISABLE", "UNBIND"].includes(message.event)) {
+        // After START completion the state is accessory; phone detach then is the
+        // deliberate handover. Earlier detach invalidates the current camera strings.
+        else if (["DISABLE", "UNBIND"].includes(message.event)
+          && (message.stage === "accessory" || this.status.state === "phone")) {
           void this.retire("stale", "Pocket 2 USB disconnected");
         } else if (!["BIND", "UNBIND", "ENABLE", "DISABLE", "SUSPEND", "RESUME"].includes(message.event)) throw new Error();
         break;
@@ -279,7 +284,7 @@ export class Pocket2Device {
     const helper = this.helper; this.helper = undefined;
     let complete!: () => void;
     this.stopping = new Promise<void>(resolve => { complete = resolve; });
-    this.status = { ...this.status, generation: this.status.generation + 1 };
+    this.status = { ...this.status, generation: this.status.generation + 1, manufacturer: null, model: null };
     this.update(state, reason);
     clearTimeout(this.startupTimer); clearInterval(this.freshnessTimer);
     this.write?.reject(new Error(reason)); this.session?.close(); this.session = undefined;
