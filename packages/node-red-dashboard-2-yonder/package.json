@@ -109,7 +109,9 @@
     "test": "vitest run",
     "gallery": "npm run build -w yonder-core && node gallery/build-themes.mjs && vite build --config gallery/vite.config.mjs",
     "cockpit:dev": "vite --config cockpit/vite.config.mjs",
-    "cockpit:verify": "node cockpit/verify.mjs"
+    "cockpit:verify": "node cockpit/verify.mjs",
+    "cockpit:guide": "node cockpit/guide.mjs && node cockpit/guide-terrain.mjs",
+    "cockpit:guide:sitl": "node cockpit/guide-sitl.mjs"
   },
   "dependencies": {
     "leaflet": "1.9.4",

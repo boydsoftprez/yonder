@@ -4,6 +4,7 @@
   <section ref="root" class="mission-touch" role="dialog" aria-modal="true" :aria-label="title" @keydown="keyboard">
     <header class="mission-touch-header"><button v-if="view!=='context'" class="mission-touch-back" @click="view='context';localError=''" aria-label="Back to mission actions">‹</button><div><small>{{draft?'LOCAL DRAFT':'MISSION CONTROL'}} · AIRCRAFT</small><h2>{{title}}</h2></div><button class="mission-touch-close" @click="$emit('close')" aria-label="Close mission controls">×</button></header>
     <div class="mission-link-status" :class="{connected:linked}"><span>{{linked?'Vehicle connected':'Vehicle unavailable'}}</span><b>{{sitl.mode||'—'}} · {{sitl.armed===true?'ARMED':sitl.armed===false?'DISARMED':'—'}}</b></div>
+    <p v-if="sitl.unavailableReason" class="mission-touch-note" role="status">{{sitl.unavailableReason}}</p>
     <div class="mission-command-result pending" role="status" v-if="pending">Waiting for the aircraft response…</div>
     <div class="mission-command-result" :class="{rejected:result.ok===false}" role="status" v-else-if="result"><strong>{{result.state||'Command status'}}</strong><span>{{result.message||result.result}}</span></div>
     <p class="mission-touch-error" role="alert" v-if="error||localError">{{localError||error}}</p>

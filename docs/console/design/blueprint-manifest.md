@@ -790,7 +790,7 @@ camera-page findings above.
 | F-21 | Unit-selectable instruments, references, flight requests and mission altitude/speed fields; active-leg bracket, touch altitude cells and estimated waypoint AGL | `flight-units.mjs`, `FlightUnits.vue`, `MissionWaypointList.vue`; R-FLT-21/22, conversion, unchanged-value and draft-only interaction tests |
 | F-22 | Mission profile with separate planned altitude, ground and mapped surface, distance inspection, coverage/datum/survey details and bounded source loading | `mission-profile.mjs`, `mission-terrain.mjs`, `MissionPlanning.vue`; R-FLT-22, [planning evidence](../evidence/2026-09-07-cockpit-planning.md) |
 
-The [cockpit walkthrough](../../cockpit-user-guide.md) covers each shortcut,
+The [illustrated cockpit walkthrough](../../cockpit-user-guide.md#how-to-use-it) covers each shortcut,
 confirmation, mission action conversion and loiter upload. The
 [protocol evidence](../evidence/2026-09-07-flight-control-protocol.md) records
 one-shot persistence and measured simulator behavior, including the slow
@@ -798,5 +798,7 @@ nonzero-rate altitude result. Unsupported firmware and unobserved command effect
 remain explicit limits, not deferred capture indicators.
 
 The component fixture explicitly identifies synthetic telemetry and has no vehicle
-transport. Browser imagery is an artifact, not a committed pixel reference. The
+transport. Automated gate imagery remains an artifact, not a committed pixel reference.
+The guide separately includes selected, captioned [instructional screenshots](../../images/cockpit/README.md)
+and a [surface walkthrough record](../evidence/2026-09-08-cockpit-guide.md). The
 normal page uses the daemon's actual telemetry and authenticated operations.

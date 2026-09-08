@@ -4,5 +4,7 @@
 import {computed} from 'vue';
 import {toDisplay,fromDisplay} from './flight-units.mjs';
 const props=defineProps({modelValue:[Number,String],unit:String,min:Number,max:Number});defineEmits(['update:modelValue']);
-const display=computed(()=>{if(props.modelValue===''||props.modelValue===null||props.modelValue===undefined)return '';const value=toDisplay(Number(props.modelValue),props.unit);return value===null?'':Number(value.toFixed(6))});
+// Round the visible conversion only; opening a form or switching units must
+// not rewrite the stored quantity (for example 91.439999 m reads as 300 ft).
+const display=computed(()=>{if(props.modelValue===''||props.modelValue===null||props.modelValue===undefined)return '';const value=toDisplay(Number(props.modelValue),props.unit);return value===null?'':Number(value.toFixed(3))});
 </script>

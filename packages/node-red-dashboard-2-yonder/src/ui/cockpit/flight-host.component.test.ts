@@ -68,3 +68,13 @@ it('explains the draft start restriction and places Start before the mode list f
  expect(start().element.compareDocumentPosition(w.get('[aria-label="Aircraft flight mode"]').element)&4).toBe(4);
  expect(w.props('api').command).not.toHaveBeenCalled();w.unmount();
 });
+it('disables mission aircraft actions while command details refresh but retains local editing',async()=>{
+ const w=host();await w.setProps({report:{...w.props('report'),_detailsReady:false}});
+ await w.get('.cockpit-mission nav button').trigger('click');
+ expect(w.findAll('.mission-touch .mission-execute').every(b=>b.attributes('disabled')!==undefined)).toBe(true);
+ expect(w.get('.mission-touch').text()).toContain('Aircraft details are refreshing');
+ expect(w.findAll('.mission-touch button').find(b=>b.text().startsWith('Add mission item'))?.attributes('disabled')).toBeUndefined();
+ await w.setProps({report:{...w.props('report'),_detailsReady:true}});
+ expect(w.findAll('.mission-touch .mission-mode-grid button').every(b=>b.attributes('disabled')===undefined)).toBe(true);
+ expect(w.props('api').command).not.toHaveBeenCalled();w.unmount();
+});

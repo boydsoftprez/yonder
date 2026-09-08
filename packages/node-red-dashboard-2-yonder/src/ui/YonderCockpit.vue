@@ -839,7 +839,9 @@ export default {
     vehicleControls() {
       const last = this.snapshot.operations?.at(-1);
       return {
-        available: !!this.source?.command,
+        available: this.canCommand,
+        unavailableReason: this.snapshot._detailsReady === false
+          ? 'Aircraft details are refreshing. Flight controls return when the current details arrive.' : null,
         connected: this.snapshot.connected,
         mode: this.telemetry.mode,
         armed: this.telemetry.armed,
@@ -908,6 +910,7 @@ export default {
       }
     });
     window.addEventListener('resize', this.fitViewport);
+    document.addEventListener('keydown', this.lostFocusEscape);
     if (this.report || this.props.report) this.ingest(this.report || this.props.report);
     this.source = this.api || (!this.report && !this.props.report ? createCockpitApi() : null);
     this.$el.setAttribute('data-mobile-inset', this.mobileInset);
@@ -932,6 +935,7 @@ export default {
   beforeUnmount() {
     this.viewportObserver?.disconnect();
     window.removeEventListener('resize', this.fitViewport);
+    document.removeEventListener('keydown', this.lostFocusEscape);
     this.disposed = true;
     clearInterval(this.timer);
     clearTimeout(this.pollTimer);
@@ -1368,6 +1372,13 @@ export default {
       try{const result=await this.groundData.preloadTerrainPack(this.groundRelayUrl);this.groundStatus=this.groundData.status();this.dataMessage=(result.title||result.id)+' saved in this browser'}
       catch(e){this.dataMessage='Ground preload failed: '+e.message}
       finally{this.dataBusy=false}
+    },
+    lostFocusEscape(event) {
+      // A focused command button can disable while busy, moving focus to body.
+      // The main element no longer receives that key; retain dialog dismissal.
+      if (event.key === 'Escape' && !event.defaultPrevented &&
+          document.activeElement === document.body &&
+          (this.panel || this.reviewing || this.missionOpen)) this.cancelPanel();
     },
     cancelPanel() {
       this.panel = null;

@@ -1,0 +1,96 @@
+{
+  "date": "2026-09-08",
+  "scope": "Instructional screenshots, not pixel-regression baselines",
+  "images": [
+    {
+      "file": "terrain-overview.png",
+      "source": "guide",
+      "sha256": "2e41604a8fcf48a99338e1ba4c2afb6b208124572e44766518979e48efb2f8d3",
+      "bytes": 446265
+    },
+    {
+      "file": "telemetry-setup.png",
+      "source": "guide-sitl",
+      "sha256": "e7a678087d6d888d2077f9d9492e68aba01bb72d4874f394e16af1d77e744b54",
+      "bytes": 46618
+    },
+    {
+      "file": "display-units.png",
+      "source": "guide",
+      "sha256": "059e8a69503528c063f4b1ea8fd96b725e7623cef68e4d88deee25e0be4c8f67",
+      "bytes": 55939
+    },
+    {
+      "file": "mission-list.png",
+      "source": "guide",
+      "sha256": "21dc6b5d7021c2f7cee7fac75b49b059e5026881b137f556f6ba8962fb63c94a",
+      "bytes": 342276
+    },
+    {
+      "file": "mission-loiter.png",
+      "source": "guide",
+      "sha256": "a0060da3f66c8dd47f9939ebd657d6dfa725d2f989d473b537b89307af2d60c5",
+      "bytes": 53347
+    },
+    {
+      "file": "mission-loiter-save.png",
+      "source": "guide",
+      "sha256": "5088c7dbd570fec79cbae655dd714ffb7e7ba3317bed6a199703c3f7c48fd1e4",
+      "bytes": 65733
+    },
+    {
+      "file": "loiter-now.png",
+      "source": "guide",
+      "sha256": "fd47cc23f2d07c22f90b84d75abe592323b2c1417399bd885d885b58a2619107",
+      "bytes": 62106
+    },
+    {
+      "file": "command-review.png",
+      "source": "guide",
+      "sha256": "2854007b40c4b788c0440f93e85e8697e76c7f27f9259549fa36722e9f2fbe41",
+      "bytes": 28397
+    },
+    {
+      "file": "start-aircraft-mission.png",
+      "source": "guide-sitl",
+      "sha256": "f58dd01cda23d859d79ba2d3e486b35e9ee1a13677d131d6bcbce96faa6b2c9b",
+      "bytes": 82121
+    },
+    {
+      "file": "terrain-profile.png",
+      "source": "guide",
+      "sha256": "073df6f818ea6d1d2d2e18c4f4a999967bda6fe19574de86e5c25ae7cad62b95",
+      "bytes": 455816
+    },
+    {
+      "file": "data-connection.png",
+      "source": "guide",
+      "sha256": "2a70ef8100af67c2758df1c010dac8cde0e35fdc1a7dd65b39ffb9038a4c1aab",
+      "bytes": 81943
+    },
+    {
+      "file": "traffic.png",
+      "source": "guide",
+      "sha256": "2d925536f85e454e1f50aa9ff715149ede28db5750ff290c5f831470a2f6e615",
+      "bytes": 37575
+    },
+    {
+      "file": "breadcrumbs.png",
+      "source": "guide",
+      "sha256": "bfa6c730d412510e822df28d50e83b82790fb145acb0c4d8854e1eb5d01411ec",
+      "bytes": 45364
+    },
+    {
+      "file": "slip-turn.png",
+      "source": "guide",
+      "sha256": "1ce471705628a3098f903936b84649e80e4caea8142d4d5d9fc514a8826312ff",
+      "bytes": 85645
+    },
+    {
+      "file": "wind.png",
+      "source": "guide",
+      "sha256": "6f8357907dc9472fbe7927d9e2b932d3350b0568905a31580f3ce5427580f590",
+      "bytes": 51628
+    }
+  ]
+}

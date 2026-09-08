@@ -33,3 +33,11 @@ it('opens a waypoint altitude cell into a local draft edit and draws the active 
  await edit.get('[aria-label="Alt parameter 7"]').setValue('600');await edit.get('form').trigger('submit');
  const changed=edit.emitted('edit')?.[0]?.[0];expect(changed.kind).toBe('replace');expect(changed.seq).toBe(2);expect(changed.item.alt).toBeCloseTo(182.88);expect(edit.emitted('command')).toBeUndefined();expect(m.items.find(i=>i.seq===2).alt).not.toBeCloseTo(182.88);edit.unmount();list.unmount();
 });
+it('shows readable converted input precision without changing the stored quantity',async()=>{
+ const {default:FlightUnitInput}=await import('./FlightUnitInput.vue');
+ const w=mount(FlightUnitInput,{props:{modelValue:91.439999,unit:'ft'}});
+ expect(w.get('input').element.value).toBe('300');
+ await w.setProps({unit:'m'});expect(w.get('input').element.value).toBe('91.44');
+ expect(w.emitted('update:modelValue')).toBeUndefined();expect(w.props('modelValue')).toBe(91.439999);
+ w.unmount();
+});

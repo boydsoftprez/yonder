@@ -53,3 +53,14 @@ it('renders exactly one instrument strip in either supported placement and none 
  }
  wrapper.unmount();
 });
+
+it('Escape dismisses an open host dialog after a busy control loses focus to the body',async()=>{
+ const wrapper=cockpit();
+ (wrapper.vm as any).panel='status';await wrapper.vm.$nextTick();
+ expect(wrapper.find('[aria-label="Aircraft status"]').exists()).toBe(true);
+ document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+ await wrapper.vm.$nextTick();
+ expect(wrapper.find('[aria-label="Aircraft status"]').exists()).toBe(false);
+ expect((wrapper.props('api') as any).command).not.toHaveBeenCalled();
+ wrapper.unmount();
+});
