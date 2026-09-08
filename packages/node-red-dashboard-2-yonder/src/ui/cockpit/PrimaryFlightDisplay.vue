@@ -121,6 +121,7 @@
           <circle v-for="x in [-48,-24,24,48]" :cx="x" cy="0" r="2" stroke="#edf5fa" stroke-width="1"/>
         </g>
         <g v-if="bearingValid" class="pfd-bearing-pointer" :transform="'rotate('+(guidance.bearingDeg-displayFlight.heading)+')'" stroke="#63e5f0" stroke-width="3" fill="none"><path d="M0 -93 V-26 M-7 -81 L0 -93 L7 -81 M0 28 V88"/></g>
+        <g v-if="homeNavigation&&Number.isFinite(homeNavigation.bearingDeg)&&flight.heading!==null" class="pfd-home-pointer" :transform="'rotate('+(homeNavigation.bearingDeg-displayFlight.heading)+')'" :data-bearing="homeNavigation.bearingDeg" aria-label="Bearing to reported home; not commanded guidance"><path d="M0 -98L-8 -117H8Z"/><text x="0" y="-107" text-anchor="middle">H</text></g>
         <path d="M0 -15 L4 -3 L19 6 V9 L3 4 L3 18 L8 22 V24 L0 21 L-8 24 V22 L-3 18 L-3 4 L-19 9 V6 L-4 -3 Z" fill="white" stroke="#08111c"/>
         <path d="M0 -109 L-7 -120 H7 Z" fill="white"/>
         <text v-if="radialValid" x="0" y="42" text-anchor="middle" class="pfd-radial-label">LOITER</text>
@@ -133,10 +134,11 @@
         <g v-if="options.secondary"><text x="25" y="530">PITCH / BANK</text><text x="25" y="556" class="pfd-secondary-value">{{flight.attitudeValid?fixed(flight.pitch)+'° / '+fixed(flight.roll)+'°':'—'}}</text></g>
         <text x="616" y="443" text-anchor="end">{{guidance.preview?'PREVIEW':guidance.targetName?'FLIGHT MODE':'MISSION'}} GPS</text><text x="616" y="474" text-anchor="end" class="pfd-fix-value">{{guidance.targetName||(guidance.target?'WP'+String(guidance.seq).padStart(3,'0'):'—')}}</text>
         <g v-if="options.secondary"><text x="616" y="530" text-anchor="end">{{bearingValid?'BEARING':guidance.trackTitle||'DESIRED TRACK'}}</text><text x="616" y="556" text-anchor="end" class="pfd-secondary-value">{{navValid?angle(guidance.desiredTrackDeg):radialValid?angle(guidance.pathBearingDeg):bearingValid?angle(guidance.bearingDeg):'—'}}</text></g>
-        <text x="320" y="638" text-anchor="middle">HEADING · TRUE NORTH</text>
+        <text x="320" y="638" text-anchor="middle">{{homeNavigation?.distanceM!==null&&homeNavigation?.distanceM!==undefined?'HOME '+homeNavigation.label+' · '+(Number.isFinite(homeNavigation.bearingDeg)?angle(homeNavigation.bearingDeg)+' T':'AT HOME'):'HEADING · TRUE NORTH'}}</text>
       </g>
       <g class="pfd-reference-labels"><text v-if="references.airspeed!==null" :x="25-viewport.edgeShift" y="22">REF {{fixed(shown('airspeed',references.airspeed))}} {{unitLabels[selectedUnits.speedUnit]}}</text><text v-if="references.altitude!==null" :x="587+viewport.edgeShift" y="22" text-anchor="end">REF {{fixed(shown('altitude',references.altitude))}} {{unitLabels[selectedUnits.altitudeUnit]}}</text><text v-if="references.heading!==null" x="424" y="382" text-anchor="middle">HDG REF {{angle(references.heading)}}</text><text v-if="references.vsi!==null" x="25" y="495">REF {{fixed(shown('vsi',references.vsi))}} {{unitLabels[selectedUnits.verticalSpeedUnit]}}</text></g>
     </svg>
+    <div v-if="reportedFlightState" class="pfd-reported-flight-state" aria-label="Reported aircraft flight state">{{reportedFlightState}}</div>
     <div class="pfd-touch-surfaces" role="group" aria-label="Touch flight instruments">
       <button class="pfd-hotspot pfd-touch-speed" :style="hit([6-viewport.edgeShift,35,124,355])" aria-label="Airspeed controls" @click="open('airspeed')"><span>IAS</span></button>
       <button class="pfd-hotspot pfd-touch-altitude" :style="hit([477+viewport.edgeShift,35,110,355])" aria-label="Set altitude reference" @click="open('altitude')"><span>ALT</span></button>
@@ -206,7 +208,7 @@ export default {
     PfdSkidBall,
     PfdTurnRate
   },
-  props: ['flight', 'guidance', 'telemetry', 'cdiScale', 'references', 'options', 'mission', 'trafficTracks',
+  props: ['flight', 'guidance', 'telemetry', 'cdiScale', 'references', 'options', 'mission', 'trafficTracks', 'homeNavigation', 'reportedFlightState',
     'trafficOptions', 'trafficSelected', 'trafficNow', 'backgroundReady', 'backgroundLabel', 'terrainReport', 'snapshot'
   ],
   emits: ['reference', 'option', 'navigate', 'traffic-select', 'flight-controls'],

@@ -47,9 +47,9 @@ it('renders exactly one instrument strip in either supported placement and none 
  const wrapper=cockpit();
  for(const placement of ['mfd','pfd','hidden']){
   (wrapper.vm as any).setOption('stripPlacement',placement);await wrapper.vm.$nextTick();
-  expect(wrapper.findAll('[aria-label="Aircraft instrument data"]')).toHaveLength(placement==='hidden'?0:1);
-  if(placement==='mfd'){expect(wrapper.find('.cockpit-navigation-data [aria-label="Aircraft instrument data"]').exists()).toBe(true);expect(wrapper.findAll('.pfd-telemetry-strip button')).toHaveLength(5);}
-  if(placement==='pfd')expect(wrapper.find('[aria-label="Primary flight display"] [aria-label="Aircraft instrument data"]').exists()).toBe(true);
+  expect(wrapper.findAll('[aria-label="Aircraft instrument bank"]')).toHaveLength(placement==='hidden'?0:1);
+  if(placement==='mfd'){expect(wrapper.attributes('data-bank-placement')).toBe('top');expect(wrapper.findAll('.instrument-bank-reading')).toHaveLength(6);}
+  if(placement==='pfd'){expect(wrapper.attributes('data-bank-placement')).toBe('side');expect(wrapper.find('.pfd-telemetry-strip').exists()).toBe(false);}
  }
  wrapper.unmount();
 });
@@ -73,5 +73,5 @@ it('supports a scoped instrument preview without replacing the actual PFD or its
  expect(wrapper.find('[aria-label="Primary flight display"]').exists()).toBe(true);
  expect(wrapper.find('.cockpit-navigation-data .pfd-telemetry-strip').exists()).toBe(false);
  wrapper.unmount();
- const normal=cockpit();(normal.vm as any).setOption('stripPlacement','mfd');await normal.vm.$nextTick();expect(normal.find('.cockpit-navigation-data .pfd-telemetry-strip').exists()).toBe(true);normal.unmount();
+ const normal=cockpit();(normal.vm as any).setOption('stripPlacement','mfd');await normal.vm.$nextTick();expect(normal.find('.cockpit-navigation-data .instrument-bank').exists()).toBe(true);normal.unmount();
 });

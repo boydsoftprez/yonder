@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { createHash, randomUUID } from "node:crypto";
-import { common, minimal, standard, MavLinkProtocolV2, type MavLinkData } from "node-mavlink";
+import { ardupilotmega, common, minimal, standard, MavLinkProtocolV2, type MavLinkData } from "node-mavlink";
 import { decodeDatagram, type DecodedFrame } from "./protocol.js";
 import { decodeMissionItem, encodeMissionItem, MAX_MISSION_ITEMS, missionFrame, missionRevision, validateCommandParameters, validateMission, verifyMission } from "./mission.js";
 import { isPlane, PLANE_MODES, VehicleTelemetry } from "./vehicle-telemetry.js";
 import type { MissionItem, MissionSnapshot, OperatorRequest, OperationAdmission, VehicleAction, VehicleIdentity, VehicleOperation, VehicleServiceOptions, VehicleSnapshot } from "./types.js";
+import { AircraftInstrumentation } from './instrumentation.js';
+import type { InstrumentationSnapshot } from './instrumentation-types.js';
 import { OwnTrail } from './own-trail.js';
 
 export const VEHICLE_SOURCE_SYSTEM = 254;
@@ -12,7 +14,7 @@ export const VEHICLE_SOURCE_COMPONENT = 191;
 const HEARTBEAT_MS = 3000, COMMAND_MS = 5000, MAX_OPERATIONS = 256;
 const IMMEDIATE = new Set([178, 181, 182, 183, 184, 206]);
 const FLIGHT_COMMANDS = { heading: 43002, altitude: 43001, speed: 43000, loiter: 192 } as const;
-type Step = { name: string; command: number; params: number[]; int?: { frame: number; x: number; y: number; z: number }; observes?: (frame: DecodedFrame) => boolean; requiredMode?: number; acceptedMessage?: string };
+type Step = { name: string; command: number; params: number[]; int?: { frame: number; x: number; y: number; z: number }; observes?: (frame: DecodedFrame) => boolean; requiredMode?: number; acceptedMessage?: string; optional?: boolean };
 interface Work {
   op: VehicleOperation; stage: "command" | "upload" | "count" | "items";
   steps: Step[]; step: number; stepSent: boolean; sentSequence: number; deadline: number; absoluteDeadline: number;
@@ -30,6 +32,7 @@ export class VehicleService {
   private lastHeartbeat: number | null = null;
   private flightSwVersion: number | null = null;
   private telemetry = new VehicleTelemetry();
+  private instruments = new AircraftInstrumentation();
   private ownTrail = new OwnTrail();
   private mission = emptyMission();
   private missionAt: number | null = null;
@@ -67,13 +70,18 @@ export class VehicleService {
         if(!samePeer||this.identity?.autopilot!==m.autopilot||this.identity.vehicleType!==m.type)this.ownTrail=new OwnTrail();
         else this.ownTrail.break();
         this.abort("Selected autopilot changed or reconnected; previous outcome is unknown");
+        const sameDevice = samePeer && this.identity?.autopilot === m.autopilot && this.identity.vehicleType === m.type;
         this.identity = { system: frame.system, component: frame.component, autopilot: m.autopilot, vehicleType: m.type, generation: randomUUID() };
+        this.instruments.select(this.identity, sameDevice);
         this.telemetry = new VehicleTelemetry(); this.mission = emptyMission(); this.missionAt = null; this.missionOpaqueId = 0;
         this.uncertain.clear(); this.missionUncertain = false; this.flightSwVersion = null;
       }
       this.lastHeartbeat = now;
     }
-    if (!this.identity || frame.system !== this.identity.system || frame.component !== this.identity.component || !this.connected()) return;
+    if (!this.identity || frame.system !== this.identity.system || !this.connected()) return;
+    this.instruments.receive(frame, now, this.identity);
+    // Peripheral instrumentation never grants mission/command or fast-flight admission.
+    if (frame.component !== this.identity.component) return;
     this.receiveSequence++; this.sequence++;
     if (m instanceof standard.AutopilotVersion) this.flightSwVersion = m.flightSwVersion;
     if (m instanceof common.MissionCurrent) {
@@ -107,6 +115,7 @@ export class VehicleService {
       if (m instanceof common.CommandAck && this.recipient(m) && m.command === step?.command && this.receiveSequence > work.sentSequence && work.stepSent) {
         work.op.ack = { command: m.command, result: m.result, progress: m.progress <= 100 ? m.progress : null, at: now };
         if (m.result === 5) { work.deadline = this.now() + COMMAND_MS; this.status(work, "in-progress", "Autopilot reports command in progress"); return; }
+        if (m.result !== 0 && step.optional) { this.nextStep(work, "rejected", `Optional stream unavailable: autopilot refused request (${m.result})`); return; }
         if (m.result !== 0) { this.finish(work, "rejected", `Autopilot refused command (${m.result})`, "unavailable"); return; }
         this.status(work, "accepted", "Autopilot accepted; awaiting observed effect");
         if (!step.observes) this.nextStep(work, "accepted", step.acceptedMessage ?? "Autopilot accepted; physical effect is not measured by this command");
@@ -124,6 +133,10 @@ export class VehicleService {
     // The firmware version proves the adapter family, not optional build features. ACK is authoritative.
     if (this.flightSwVersion !== 0x040701ff) return "Flight controls are currently verified for ArduPlane 4.7.1 stable only";
     return null;
+  }
+  instrumentation(): InstrumentationSnapshot {
+    this.tick();
+    return this.instruments.snapshot(this.now(), this.connected(), this.identity);
   }
   snapshot(options: { details?: boolean } = {}): VehicleSnapshot {
     this.tick();
@@ -171,7 +184,7 @@ export class VehicleService {
     const summary = action.kind === "mission-upload" ? { kind: "mission-upload" as const, itemCount: action.items.length, revision: missionRevision(action.items) } : structuredClone(action);
     const now = this.now(), op: VehicleOperation = { id: request.id, sessionId: request.sessionId, vehicleGeneration: request.vehicleGeneration, action: summary, createdAt: now, sentAt: null, updatedAt: now, state: "queued", ack: null, effect: { state: "waiting", at: null, message: "Awaiting operator-requested operation" }, message: "Queued", steps: [] };
     this.operations.push(op); this.requests.set(key, fingerprint);
-    const work: Work = { op, steps, step: 0, stepSent: false, sentSequence: this.receiveSequence, stage: "command", deadline: now + COMMAND_MS, absoluteDeadline: now + 120_000,
+    const work: Work = { op, steps, step: 0, stepSent: false, sentSequence: this.receiveSequence, stage: "command", deadline: now + COMMAND_MS, absoluteDeadline: now + (kind === "stream-setup" ? Math.max(120_000, (steps.length + 1) * COMMAND_MS) : 120_000),
       uploaded: new Set(), received: new Map(), count: null, requested: null, expected: request.action.kind === "mission-upload" ? structuredClone(request.action.items) : request.action.kind === "mission-clear" ? [] : null, retries: 0 };
     this.active = work; this.sequence++;
     this.options.log?.(`vehicle-command at=${now} session=${request.sessionId} id=${request.id} request=${JSON.stringify(request.action)}`);
@@ -234,6 +247,20 @@ export class VehicleService {
         ...[148, 242].map(id => ({ name: `Request message ${id}`, command: 512, params: [id, 0, 0, 0, 0, 0, 0] })),
         { name: "Request wind estimate at 1 Hz", command: 511, params: [168, 1000000, 0, 0, 0, 0, 0] },
         { name: "Request calibrated primary acceleration at 5 Hz", command: 511, params: [27, 200000, 0, 0, 0, 0, 0] },
+        ...[
+          common.SystemTime, common.BatteryStatus, common.ExtendedSysState, common.Gps2Raw,
+          common.EstimatorStatus, ardupilotmega.EkfStatusReport, common.Vibration,
+          ardupilotmega.Rpm, ardupilotmega.EscTelemetry1To4, ardupilotmega.EscTelemetry5To8,
+          ardupilotmega.EscTelemetry9To12, ardupilotmega.EscTelemetry13To16,
+          ardupilotmega.EscTelemetry17To20, ardupilotmega.EscTelemetry21To24,
+          ardupilotmega.EscTelemetry25To28, ardupilotmega.EscTelemetry29To32,
+          common.EfiStatus, common.GeneratorStatus, common.DistanceSensor, ardupilotmega.RangeFinder,
+          common.TerrainReport, common.FenceStatus, common.PowerStatus, ardupilotmega.HwStatus, ardupilotmega.McuStatus,
+          ardupilotmega.MemInfo, common.RadioStatus, common.RcChannels, common.ServoOutputRaw,
+          common.CameraInformation, common.CameraCaptureStatus, common.StorageInformation,
+          common.GimbalDeviceAttitudeStatus,
+        ].map(type => ({ name: `Request optional ${type.MSG_NAME} at 1 Hz`, command: 511,
+          params: [type.MSG_ID, 1000000, 0, 0, 0, 0, 0], optional: true })),
       ];
       default: return [];
     }
@@ -247,11 +274,14 @@ export class VehicleService {
     else Object.assign(message, { _param5: step.params[4], _param6: step.params[5], _param7: step.params[6] });
     this.send(message, work);
   }
-  private nextStep(work: Work, state: "accepted" | "observed", message: string): void {
+  private nextStep(work: Work, state: "accepted" | "observed" | "rejected", message: string): void {
     work.op.steps.push({ action: work.steps[work.step].name, state, message });
     work.step++;
     if (work.step < work.steps.length) this.sendStep(work);
-    else this.finish(work, state, message, state === "observed" ? "observed" : "unavailable");
+    else if (work.op.action.kind === "stream-setup") {
+      const refused = work.op.steps.filter(step => step.state === "rejected").length;
+      this.finish(work, "accepted", refused ? `Essential streams requested; ${refused} optional instrumentation streams unavailable` : "Aircraft stream requests acknowledged; readings appear when reported by installed sensors", "unavailable");
+    } else this.finish(work, state, message, state === "observed" ? "observed" : "unavailable");
   }
   private send(message: MavLinkData, work: Work, after?: () => void): void {
     const identity = this.identity;
@@ -299,6 +329,14 @@ export class VehicleService {
       work.deadline = this.now() + COMMAND_MS;
       if (work.stage === "count") this.send(Object.assign(new common.MissionRequestList(), { missionType: 0 }), work);
       else this.requestItem(work, true);
+      return;
+    }
+    if (work.stage === "command" && work.steps[work.step]?.optional) {
+      // COMMAND_ACK for SET_MESSAGE_INTERVAL carries no requested message ID. A late
+      // ACK after timeout cannot safely be assigned to another optional request.
+      this.uncertain.add(work.steps[work.step].command);
+      work.op.steps.push({ action: work.steps[work.step].name, state: "unknown", message: "Optional stream request timed out; remaining optional requests stopped" });
+      this.finish(work, "accepted", "Essential streams requested; optional instrumentation setup incomplete after timeout, remaining requests stopped", "unavailable");
       return;
     }
     if (work.stage === "command" && work.op.ack?.result === 0) {

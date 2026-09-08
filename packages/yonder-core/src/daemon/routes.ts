@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { cockpitCameras } from "../cockpit/camera.js";
 import { cockpitRoute, type CockpitServices } from "../cockpit/routes.js";
+import { CockpitInstruments, HostInstruments, type HostInstrumentOptions } from '../cockpit/host-instruments.js';
 import { ApplyEngine } from "../apply/engine.js";
 import { loadConfig } from "../config/load.js";
 import { ConfigError } from "../config/errors.js";
@@ -58,6 +59,7 @@ import { SweepInProgressError, type DetectOutcome } from "../mav/detect.js";
 
 export interface RouterDeps {
   cockpit?: CockpitServices;
+  hostInstruments?: HostInstrumentOptions;
   engine: ApplyEngine;
   configPath: string;
   /**
@@ -712,6 +714,20 @@ const LATCHED_BITS: readonly (readonly [keyof SupplyFlags, string])[] = [
 ];
 
 export function createRouter(deps: RouterDeps): Router {
+  const instruments = deps.cockpit?.instruments ?? new CockpitInstruments({
+    now: deps.hostInstruments?.now,
+    vehicle: deps.cockpit?.vehicle,
+    host: new HostInstruments({ ...deps.hostInstruments,
+      media: deps.hostInstruments?.media ?? (deps.supervisor ? async () => {
+        const cameras = loadConfig(deps.configPath).cameras.slice(0, 8);
+        return Promise.all(cameras.map(async camera => {
+          let recorder: RecordingState | null = null;
+          try { recorder = await deps.recorder?.state(camera.id) ?? null; } catch { /* This camera's medium could not be read. */ }
+          return { id: camera.id, run: deps.supervisor!.state(camera.id), recorder };
+        }));
+      } : undefined),
+    }),
+  });
   let cameraProbeAt = 0;
   let cameraProbe: DetectResult | null = null;
   let cameraProbing = false;
@@ -1754,7 +1770,7 @@ export function createRouter(deps: RouterDeps): Router {
         };
       }
 
-      const cockpit = await cockpitRoute({...deps.cockpit, cameraState: deps.cockpit?.cameraState ?? cameraState}, method, path, body);
+      const cockpit = await cockpitRoute({...deps.cockpit, instruments, cameraState: deps.cockpit?.cameraState ?? cameraState}, method, path, body);
       if (cockpit !== null) return cockpit;
 
       // ---- what the console's pages read -------------------------------

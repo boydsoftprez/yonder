@@ -41,6 +41,7 @@ describe("authenticated cockpit boundary", () => {
     const { url, calls } = await harness(null);
     expect((await fetch(url + "/cockpit/api/state")).status).toBe(401);
     expect((await fetch(url + "/cockpit/api/trail")).status).toBe(401);
+    expect((await fetch(url + "/cockpit/api/instruments")).status).toBe(401);
     expect((await fetch(url + "/cockpit/api/command", post({}))).status).toBe(
       401,
     );
@@ -117,6 +118,14 @@ describe("authenticated cockpit boundary", () => {
     await fetch(url + "/cockpit/api/state");
     expect(calls[0]).toEqual({ method: "GET", path: "/cockpit/state" });
   });
+});
+
+it('relays instrumentation only as an authenticated read', async () => {
+  const { url, calls } = await harness();
+  expect((await fetch(url + '/cockpit/api/instruments')).status).toBe(202);
+  expect(calls).toEqual([{ method: 'GET', path: '/cockpit/instruments' }]);
+  expect((await fetch(url + '/cockpit/api/instruments', post({}))).status).toBe(405);
+  expect(calls).toHaveLength(1);
 });
 
 it('permits bounded read-only aircraft trail cursors behind the same session',async()=>{

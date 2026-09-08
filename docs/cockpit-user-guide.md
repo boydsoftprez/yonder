@@ -1,7 +1,8 @@
 # Using the Yonder cockpit
 
-The Cockpit page is the flight display. Systems opens the existing device settings;
-Cameras retains capture, stream, exposure and other camera controls. The cockpit
+The Cockpit page is the flight display. **YONDER Systems ›** in its header opens
+device settings; the cockpit's **Systems** tab inspects telemetry. Cameras retains
+capture, stream, exposure and other camera controls. The cockpit
 uses the authenticated device session. Opening a panel or editing a local reference
 never sends an aircraft command.
 
@@ -16,13 +17,18 @@ not depict a physical flight.
 
 ### 1. Find your way around
 
-![PFD with mission inset on the left, moving map on the right and persistent flight controls above](images/cockpit/terrain-overview.png)
+![Single PFD with top navigation fields, a graphical instrument bank, mission and map insets](images/cockpit/cockpit-main.png)
 
-*Display specimen: synthetic aircraft pose over the surveyed Cove terrain pack.
-The mission and map expansion arrows are at the top-right of their insets.*
+*Production cockpit with synthetic fixture readings. The default keeps one PFD,
+navigation fields across the top and graphical instruments beside the PFD.*
 
-- **Top strip:** Direct-To, Heading, Altitude / Speed, Loiter, Resume Mission,
+- **Navigation fields:** the top readings are configurable through **Fields**.
+  Tap a reading to inspect its source, age and recent history.
+- **Flight-control strip:** Direct-To, Heading, Altitude / Speed, Loiter, Resume Mission,
   RTL, Modes and Arm / Disarm prepare aircraft requests.
+- **Instrument bank:** tap **Instruments** to choose readings and gauge styles;
+  tap an individual instrument to inspect it. **Layout** in the header chooses
+  the bank's position and the PFD/MFD arrangement.
 - **Top-right Aircraft button:** telemetry setup and operation results. After a
   request its text can change to **accepted**, **observed** or another outcome;
   it still opens **Aircraft status**.
@@ -32,7 +38,9 @@ The mission and map expansion arrows are at the top-right of their insets.*
   traffic-status button opens traffic controls. In the expanded map, **Mission
   actions** opens the same panel as **Mission controls** beneath the mission list.
 - **Below the PFD:** **PFD Menu**, **Mission**, **FD** and **Display** open local
-  instrument settings. On a narrow screen use the bottom **Mission / Map** selector.
+  PFD settings. On a narrow screen use the bottom **Mission / Map** selector.
+- **Expanded multifunction display (MFD):** **Map**, **Flight plan**, **Systems**
+  and **Telemetry** select its page. **×** returns to a single PFD with insets.
 
 Long panels scroll inside the dialog. Close them with **×** or **Escape**.
 
@@ -43,7 +51,9 @@ actual aircraft, use the top strip and its separate **Confirm & send** dialog.
 
 1. Open the top-right **Aircraft** status button.
 2. Press **Request flight telemetry**. Wait until the operation finishes; this
-   explicitly requests the streams used by the instruments.
+   explicitly requests the streams used by the instruments, including optional
+   slower sensor reports. An unsupported optional stream is reported; accepting
+   a request does not establish that its sensor is present.
 3. Press **Read aircraft mission** and wait for **Complete vehicle mission
    downloaded**. The list now represents the mission received from the aircraft.
 4. Close the panel with **×** or **Escape**. Check the actual mode, armed state
@@ -54,17 +64,74 @@ actual aircraft, use the top strip and its separate **Confirm & send** dialog.
 *QuadPlane SITL. Telemetry setup and mission reading do not arm or start it.
 Aircraft-status altitude details use their explicitly labeled metres.*
 
-### 3. Choose units and instrument presentation
+### 3. Arrange the display and choose readings
 
-Press **Display** below the PFD, or **PFD Menu → Attitude & display**. Choose
-the **Altitude**, **Speed** and **Vertical speed** units. Tape/HSI
-transparency and **Instrument strip** placement are in the same panel. These
-preferences save in this browser as you change them.
+Press **Layout** in the header to open **Display setup**. The same panel is
+available through **Display → Instrument panel & PFD/MFD layout** below the PFD,
+or **PFD Menu → Attitude & display → Instrument panel & PFD/MFD layout**.
 
-![Attitude and display controls with independently selectable flight units](images/cockpit/display-units.png)
+1. Choose **Screen arrangement**: **Single PFD with insets** is the default;
+   **PFD beside MFD** and **PFD above MFD** open a separate multifunction pane.
+2. Choose **Instrument panel**: **Beside the PFD**, **Across the top**, **On the
+   MFD**, or **Hidden**. If it is on the MFD, open an MFD page to see it.
+3. Show or hide **Navigation fields across the top** and the **HOME bearing
+   pointer on the HSI**. Choose navigation distance in nautical miles, miles or
+   kilometres, and choose **Altitude**, **Speed** and **Vertical speed** units.
+4. Changes save in this browser immediately. **Restore display defaults** also
+   restores the default field and instrument selections. Tape and HSI transparency
+   remain under **Display** below the PFD.
 
-*Fixture example with metres, mph and m/s selected. The live aircraft values do
-not change when their display units change.*
+![Display setup with screen arrangement, instrument placement and units](images/cockpit/cockpit-layout.png)
+
+*Synthetic fixture. Layout and units change this browser's presentation; the
+aircraft's measurements and autopilot settings stay the same.*
+
+Press **Fields** beside the top readings, or **Instruments** on the bank:
+
+1. Select a numbered slot, or **+** to add one. Search by name, category or source
+   using **Find a reading**, then choose an **Instrument source**. Sensor and
+   component instances are separate choices.
+2. Choose **Presentation**: recommended, numeric field, arc gauge, horizontal or
+   vertical scale, elapsed time, bearing pointer, or status indicator.
+3. For a graphical scale, set its minimum/maximum and optional color bands.
+   **Use source scale** removes those overrides. These limits and bands are local
+   display choices; they do not configure aircraft warnings or failsafes.
+4. Use **Move earlier**, **Move later** or **Remove** to arrange slots. Press
+   **Apply** to save, or **Cancel** to discard this edit. **Restore defaults**
+   previews the default selection; press **Apply** to keep it.
+
+Each selection supports up to 16 distinct readings and up to eight nonoverlapping
+bands per reading. Invalid scales or bands must be corrected before applying.
+
+![Navigation field editor with source and presentation controls](images/cockpit/cockpit-fields.png)
+
+*Synthetic fixture. Navigation fields and the graphical bank have independent
+saved selections; both can use any catalog reading.*
+
+![Graphical instrument editor with local scale and band controls](images/cockpit/cockpit-instruments.png)
+
+*Synthetic fixture. Display bands are chosen for the example and do not represent
+aircraft limits. Unit changes preserve the physical bounds of navigation gauges.*
+
+To explore readings, use **Layout → Open systems**, then search or choose a
+category. With the search clear and at least one bank reading selected, expand
+**Pinned instruments** below the search for the same graphical bank and saved
+configuration used by the PFD; tap a gauge for its detail.
+Tap a catalog row for its **Inspector**, or use the MFD's **Telemetry** tab to
+search and select a **Telemetry source** directly. The inspector gives the source,
+field ID, age, quality, value/unit and unavailable reason, with **Pin to
+instruments** and **Pin to navigation fields**. Tapping an already displayed field
+or gauge opens this same detail view; it does not open its configuration editor.
+
+![Grouped Systems catalog with telemetry readings and categories](images/cockpit/cockpit-systems.png)
+
+*Synthetic fixture catalog. A source only reports when its required telemetry or
+companion service supplies usable data; selecting it does not create a sensor.*
+
+![Telemetry inspector with source selection, provenance, pin controls and recent history](images/cockpit/cockpit-telemetry.png)
+
+*Synthetic fixture. Recent history shows received numeric samples; blank spans
+retain missing data and gaps. Read the source and quality before using a value.*
 
 Press **FD** for V-bar/crossbar director cues. Tap the wind box or skid ball for
 their settings. The [instrument reference below](#start-with-the-flight-display)
@@ -146,8 +213,10 @@ and reading the mission:
 3. **Mission controls → Show aircraft mission**. This closes the panel; reopen
    **Mission controls**. Its heading must no longer say **LOCAL DRAFT**.
 4. Select **QLOITER → Confirm & send**. Reopen **Mission controls**.
-5. **Arm aircraft → Confirm & send**. Wait until the actual state is **ARMED**.
-   Reopen **Mission controls**.
+5. Wait for the simulator's EKF3 and GPS to be ready. Then **Arm aircraft →
+   Confirm & send**, and wait until the actual state is **ARMED**. Normal prearm
+   checks remain enabled. If arming is refused, read the aircraft's status message
+   and wait for readiness. Reopen **Mission controls** after arming succeeds.
 6. Press **Start aircraft mission**, directly below Arm/Disarm and above the
    mode grid, then **Confirm & send**.
 
@@ -232,6 +301,10 @@ recorder or send a flight command.*
 | Start aircraft mission is grey | If the heading says **LOCAL DRAFT**, upload and verify, choose **Show aircraft mission**, then reopen Mission controls. Read the aircraft mission first if none is available. |
 | Buttons briefly disable after a command | Wait for fresh aircraft details and the pending operation. The panel explains when details are refreshing. |
 | No instruments / FLIGHT DATA UNAVAILABLE | Check the source and connection; use Aircraft status → Request flight telemetry. Do not interpret missing measurements as zero. |
+| A gauge or category is unavailable | Tap it and read its source, age and reason. Optional reports require the corresponding firmware, sensor or companion service; Request flight telemetry cannot supply absent hardware. |
+| Fields or graphical instruments have disappeared | Open **Layout**, enable **Navigation fields across the top** or change **Instrument panel** from Hidden. For **On the MFD**, open an MFD page. |
+| A timer ends with `*` | It has partial observed history. Inspect it for late attachment, clock handoff or excluded telemetry gaps; it is not a complete flight log. |
+| Arming is refused during the simulator demo | Wait for EKF3 and GPS readiness and inspect the reported prearm reason. Keep the normal autopilot prearm checks enabled. |
 | Heading, altitude, speed or radius unavailable | Those extended GUIDED controls require a fresh supported ArduPlane 4.7.1 identity. Opening Modes does not prove every optional feature is available. |
 | Accepted, but no HDG/ALT capture announcement | Acceptance is an ACK. These controls have no verified capture annunciation; inspect actual mode, measured motion and Aircraft status. |
 | Request times out or says unknown | Inspect actual aircraft state before deciding to repeat it. The browser does not retry a flight command automatically. |
@@ -242,20 +315,33 @@ recorder or send a flight command.*
 | Skid ball, wind or director disappears | Open its settings for the missing/stale-data reason. Visibility can also be restored from **PFD Menu**. |
 | Camera is unavailable / registration unavailable | Select a detected camera and start its stream in Cameras. Use **Use synthetic terrain** for the terrain background. Registered annotations also require physical calibration and capture-time pose; those are not supplied by these screenshots. |
 
-The [walkthrough verification record](console/evidence/2026-09-08-cockpit-guide.md)
+The [walkthrough verification record](console/evidence/2026-09-08-cockpit-telemetry-layouts.md)
 lists the checks performed, fixes found and limits that still need hardware or
 live-provider evidence. Detailed explanations follow below.
 
 ## Start with the flight display
 
-The default view keeps one PFD visible, with a mission inset at the lower left and
-a map/traffic inset at the lower right. Press either inset's expansion arrow for a
-larger pane alongside the same PFD. The return arrow restores the full display.
-Narrow screens provide a Mission/Map selector and stack an expanded pane below the
-PFD. The scene fills the available viewport. The tapes move toward its edges while
+The default view keeps one PFD visible, with a mission inset at the lower left,
+a map/traffic inset at the lower right, top navigation fields and a graphical
+instrument bank. Press either inset's expansion arrow for a larger multifunction
+pane alongside the same PFD. **Layout** also offers a PFD above the MFD. The MFD
+tabs open the map, flight plan/profile, systems catalog or telemetry inspector.
+Its **×** restores the single PFD with insets. On smaller screens, a side bank
+moves across the top; narrow screens provide a Mission/Map selector and stack an
+expanded pane below the PFD. The scene fills the available viewport. The tapes move toward its edges while
 the attitude reference, VSI, HSI circles and director retain a uniform scale; touch
 regions follow those positions. Insets remain below the primary tape scales.
 Keyboard Tab reaches controls; Escape dismisses an open panel.
+
+![PFD beside a separate multifunction pane](images/cockpit/cockpit-split.png)
+
+*Synthetic fixture with **PFD beside MFD** selected. Changing the MFD page keeps
+the same PFD active and preserves the map instance.*
+
+![PFD above a separate multifunction pane](images/cockpit/cockpit-stacked.png)
+
+*Synthetic fixture with **PFD above MFD** selected. This is an optional arrangement;
+**Single PFD with insets** remains the default.*
 
 The persistent control strip provides **Direct-To**, **Heading**, **Altitude /
 Speed**, **Loiter**, **Resume Mission**, **RTL**, **Modes**, and **Arm / Disarm**.
@@ -272,7 +358,7 @@ as current. Aircraft status contains the complete operation messages.
 
 The tapes default to indicated airspeed in knots and reported MSL altitude in feet.
 The VSI defaults to measured climb in feet per minute. These units are selectable
-in **Display** below the PFD, or in the **Altitude / Speed** controls.
+in **Layout**, **Display** below the PFD, or the **Altitude / Speed** controls.
 Choose **KT / MPH / m/s**, **FT / M**, and **FT/MIN / m/s** independently.
 Changing units preserves the physical value and saves locally. The HSI heading is true north. Magenta
 flight-director cues show the autopilot's reported desired pitch and bank, and
@@ -286,7 +372,14 @@ reference; it is not a command. Display & data selects day/night palette, tape a
 HSI transparency, background and optional sources. The PFD remains screen-fixed
 over a camera image even when scene registration is unavailable.
 
-The Instrument strip setting in the **Display** panel below the PFD offers **Mission / navigation** (a data band above the PFD), **PFD**, or **Hidden**. The band shows current bus voltage, current, battery, throttle and GPS satellite count. Expand the mission pane to see the preserved lateral-deviation scale: its white center triangle stays fixed while the magenta bar uses the same guidance and full-scale setting as the HSI. GUIDED loiter labels radial OUT/IN error; unavailable guidance removes the bar.
+The default top fields are active waypoint, waypoint distance, ETE, estimated
+terrain AGL, ground speed and observed airborne total. The default bank shows battery 1
+remaining charge, current, charge used, cellular signal, Yonder CPU utilisation
+and flight telemetry age. **Fields** and **Instruments** configure these selections;
+**Layout → Instrument panel** chooses placement. Expand the mission pane to see
+the preserved lateral-deviation scale: its white center triangle stays fixed while
+the magenta bar uses the same guidance and full-scale setting as the HSI. GUIDED
+loiter labels radial OUT/IN error; unavailable guidance removes the bar.
 
 Missing or expired measurements show unavailable indications. GPS altitude,
 fused global altitude and height above home are separate readings in Aircraft
@@ -340,6 +433,103 @@ fresh target coordinates restores geographic guidance; actual AUTO restores
 mission navigation. Missing request history and external heading overrides are
 explicit limitations of GUIDED ownership, not evidence of an active waypoint.
 
+
+## Telemetry catalog, sources and flight time
+
+**Systems** groups received readings into the following categories. Search matches
+names, field IDs and source descriptions. Each sensor/component instance remains
+separate: for example, individual battery reports and the flight controller's
+battery summary do not become one battery. A family that has never been received
+does not produce invented readings; representative unavailable entries explain
+missing sources. The catalog is bounded and reports when readings are omitted.
+
+| Category | Readings and required sources |
+| --- | --- |
+| Navigation | Active waypoint, distance/ETE, desired track and lateral deviation; reported IAS/ground speed and height above home; calculated home distance/bearing/relative direction, remaining planned distance and recorded ground-track distance. These require fresh flight telemetry and, where applicable, verified mission geometry, reported home, retained trail or compatible terrain. |
+| Flight time | Flight-controller power-on time and observed armed, airborne and AUTO-execution totals. They use reported boot, heartbeat and landed-state messages; see the counter rules below. |
+| Electrical | Per-battery voltage, current, remaining charge, consumed mAh/Wh, temperature, remaining time, charge state and fault flags, plus the independent system battery summary. The flight controller needs configured battery monitors and must report each supported field. |
+| Propulsion | ESC temperature, voltage/current, charge used and reported RPM; separate RPM sensors; engine/EFI health, RPM, fuel, pressure, temperature, throttle and ignition readings; generator power, current, voltage, temperature, runtime and maintenance time. These require the corresponding ESC, RPM, EFI or generator telemetry and firmware support. |
+| Navigation health | Separate GPS fix, satellites, coordinates, altitude, speed/course, accuracy and dilution readings; estimator flags, ratios, variances and accuracy. Each depends on its GPS or estimator report; a second receiver is not assumed. |
+| Terrain | Rangefinder/distance-sensor measurements, orientation, limits and signal/variance; flight-controller terrain elevation, clearance, grid spacing and block counts. A downward range sensor, aircraft terrain report and browser terrain estimate remain distinct sources. |
+| Aircraft state | Reported mode, armed state, landed state and VTOL state. VTOL transition labels require the autopilot's explicit state report; altitude or speed does not determine a transition. |
+| Controller health | Flight-controller scheduler load, sensor presence/enabled/health flags, memory, communication/error counts, board/servo power, MCU temperature/voltage, vibration and IMU clipping. MCU measurements require hardware-monitor support; they are separate from the companion board's temperature and CPU use. |
+| Fence & alerts | Reported fence breach, breach count/type/time and mitigation. A missing fence report does not establish that no breach or alert exists. |
+| Links & controls | Flight telemetry age; aircraft modem signal/state/operator/technology; telemetry-radio signal/noise/errors and transmit buffer; RC signal/channels and raw servo outputs. Modem data comes from the companion's modem service; RC/output/radio fields require their aircraft messages. Raw radio signal units remain raw and do not indicate throughput. |
+| Payload | MAVLink camera identity/capabilities, image/recording and camera-storage reports; gimbal attitude, rates, flags and failures; companion camera pipeline and recording state, duration, bytes, destination and remaining-time estimate. Camera/gimbal telemetry, configured companion pipelines and the recorder are separate dependencies. |
+| Yonder system | Companion CPU utilisation, board thermal sensor, memory use/total/available, uptime and recording-medium free storage. These use the companion operating system; unsupported OS readings remain unavailable. |
+
+The inspector's **Source**, **Field**, **Age**, **Quality** and **Reported value**
+identify what you are viewing. Aircraft sources retain MAVLink message, system
+and component identity; companion sources begin **Companion**. Browser calculations
+state their input sources. A calculated navigation or gimbal value is shown in its
+displayed units; inspect its underlying catalog readings for the reported inputs.
+Do not read **Yonder CPU utilisation** as flight-controller load, **Yonder Uptime**
+as autopilot boot time, or a companion recording as MAVLink camera recording.
+Browser video/network behavior does not measure onboard CPU or recording state.
+
+Gimbal roll, pitch and yaw can be calculated from a fresh, valid reported attitude
+and its frame flags. Yaw labeled **°T** is referenced to true north; **° REL** is
+relative to vehicle heading. The raw quaternion, angular rates and frame flags
+remain inspectable. An invalid or ambiguous frame suppresses the calculated
+orientation. These readings do not establish camera calibration or scene registration.
+ESC RPM interpretation is described with its source; no extra pole-count conversion
+is assumed. Unsupported or ambiguous zero ESC values remain unavailable. Vibration
+and telemetry-radio fields retain raw units where no physical unit is established.
+
+Readings expire independently. A fresh battery value does not refresh an old
+temperature or GPS report. A dash, missing pointer or unavailable reason means the
+measurement cannot currently be used; it is not a measured zero. **Quality** can be
+reported, calculated, partial or unavailable. **Recent history** displays up to 120
+numeric samples; missing readings and gaps stay blank. History is a short browser
+view and begins again after reload or a changed aircraft; it is not a flight log.
+
+The slower instrumentation read runs separately at up to **1 Hz**. Opening the
+catalog, pinning a value, changing a layout or polling readings sends no aircraft
+command and does not start cameras or recording. **Aircraft → Request flight
+telemetry** is the explicit stream-configuration action. Optional sensors may
+still be absent or their interval requests may be unsupported. The **Display &
+data** bandwidth line separates fast flight and instrumentation JSON payloads;
+it excludes HTTP overhead, video and public data.
+
+### Interpret the counters and navigation estimates
+
+- **Power-on time** is the flight controller's latest reported boot timestamp.
+  `SYSTEM_TIME` can supply it initially; once `GLOBAL_POSITION_INT` supplies a
+  valid boot timestamp, that message is the clock authority. If it stops, the
+  reading expires rather than switching back to a competing clock. The number
+  is not extrapolated between reports.
+- **Observed armed total** adds intervals bracketed by fresh armed heartbeats.
+  **Observed airborne total** adds intervals bracketed by explicit **IN_AIR**
+  reports with fresh heartbeat context. It excludes TAKEOFF, LANDING, transition
+  boundaries and gaps, so it is not a complete takeoff-to-landing flight timer.
+  **Observed AUTO execution total** counts fresh armed AUTO intervals and pauses
+  in other modes. These totals accumulate across arm cycles until the collector
+  or confirmed boot history resets; they are not elapsed time for one sortie.
+- A trailing **`*`** means partial observed history. Attachment after boot or
+  takeoff cannot recover earlier time, and gaps are excluded. Browser reloads
+  retain service-side counters; a service restart starts new partial history.
+  An observed autopilot reboot or a changed reported hardware identity resets
+  them. A source-clock handoff can leave preceding continuity unverified; the
+  inspector gives the reason. Without a reported hardware ID, reused vehicle
+  IDs cannot prove physical-device continuity.
+- **HOME** on the HSI and home fields use direct surface distance and bearing
+  from fresh aircraft and reported home positions. They do not describe the
+  autopilot's RTL route, target altitude or obstacle clearance. Bearing is
+  undefined at home. **Height above home** is independent of terrain AGL.
+- **ETE** uses current progress toward the active point. **Remaining planned
+  distance** sums resolvable straight plan legs and becomes unavailable at an
+  unresolved loiter, return or jump. It excludes turns and climb/landing paths.
+  **Recorded ground-track distance** has partial observed history, including
+  late attachment and gaps; it is separate from planned distance.
+
+The header's **NOTICES** button remains available when the bank is hidden.
+It opens **Aircraft notices**, with current reported sensor-health, battery, fence
+and VTOL conditions plus recent aircraft status messages. **Inspect reading**
+opens a structured source where applicable. Status messages are historical reports;
+they do not by themselves establish that a condition is still active.
+These reports do not use your local gauge color bands, and their absence does
+not establish complete aircraft health. Yonder never sends an automatic aircraft
+command in response to a reading or notice.
 
 ## Altitude, airspeed and climb requests
 
@@ -416,7 +606,7 @@ The same touch panel controls **Standard-rate bank pointers** and the **HSI
 turn-rate arc**. Green triangles on the upper roll scale show the bank required
 for a coordinated, level 3°/second turn. They are labeled **STD · EST TAS** because
 true airspeed is estimated from ground velocity minus the autopilot's wind vector.
-They hide below 50 KT estimated TAS, as in the G3X, or when either input expires.
+They hide below 50 KT estimated TAS or when either input expires.
 The panel gives the current estimate and the reason when unavailable. WIND does
 not carry estimator confidence; this is not a directly measured TAS indication.
 
@@ -516,7 +706,9 @@ setup is in [Native cockpit previews](../scripts/cockpit/README.md#quadplane-ver
    **LOCAL DRAFT**. Starting a draft is disabled even after a successful upload.
 4. Select **QLOITER** in the mode list and **Confirm & send**. This selects hover
    control; it does not itself start a climb.
-5. **Arm aircraft → Confirm & send**. Normal autopilot arming checks remain on.
+5. Wait for EKF3 and GPS readiness, then **Arm aircraft → Confirm & send**.
+   Normal autopilot prearm checks remain enabled. If the request is refused,
+   read the reported reason and let the simulator become ready before retrying.
 6. **Start aircraft mission → Confirm & send**. The start button is directly below
    Arm/Disarm and above the mode list. Close the panel to watch the PFD.
 
@@ -700,6 +892,11 @@ oldest history, which is explicitly reported. This is a display trail, not a
 replacement for the aircraft's flight log.
 
 ## Terrain, imagery and traffic
+
+![Synthetic aircraft pose over surveyed terrain with mission and map insets](images/cockpit/terrain-overview.png)
+
+*Synthetic aircraft over the repository's surveyed USGS 2016 Cove terrain pack.
+The survey and its coverage are independent of the selected cockpit layout.*
 
 Public-data placement, offline preparation and the explicit aircraft-proxy option
 are described in [Ground geographic data](cockpit-ground-data.md). Sources start

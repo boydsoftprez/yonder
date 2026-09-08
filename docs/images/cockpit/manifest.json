@@ -1,96 +1,138 @@
 {
   "date": "2026-09-08",
-  "scope": "Instructional screenshots, not pixel-regression baselines",
+  "scope": "Instructional screenshots of native cockpit; fixture and SITL provenance in README",
   "images": [
     {
-      "file": "terrain-overview.png",
-      "source": "guide",
-      "sha256": "2e41604a8fcf48a99338e1ba4c2afb6b208124572e44766518979e48efb2f8d3",
-      "bytes": 446265
+      "file": "cockpit-main.png",
+      "source": "layout-guide",
+      "sha256": "20bb26e28ba882169a295a309bb214e3d3b83fafdfa6d790c814a46cfca172d9",
+      "bytes": 528987
     },
     {
       "file": "telemetry-setup.png",
       "source": "guide-sitl",
-      "sha256": "e7a678087d6d888d2077f9d9492e68aba01bb72d4874f394e16af1d77e744b54",
-      "bytes": 46618
+      "sha256": "3d9c89d234c04902970eccf19d82ee091993ff80adb655b78d8642eed1a07b26",
+      "bytes": 45673
     },
     {
-      "file": "display-units.png",
-      "source": "guide",
-      "sha256": "059e8a69503528c063f4b1ea8fd96b725e7623cef68e4d88deee25e0be4c8f67",
-      "bytes": 55939
+      "file": "cockpit-layout.png",
+      "source": "layout-guide",
+      "sha256": "7bd93bdf0a3ddfcfd01eddb472a8a0e19bc580f92a523211e603170697f3cca4",
+      "bytes": 348680
+    },
+    {
+      "file": "cockpit-fields.png",
+      "source": "layout-guide",
+      "sha256": "fb12a772bdeaa780c556df08c79cdc0fc1f4a6600435ac21523d1d119c255cad",
+      "bytes": 362119
+    },
+    {
+      "file": "cockpit-instruments.png",
+      "source": "layout-guide",
+      "sha256": "096ae17e7c3da59fe8d8b2df05f33a2f24929f5dafa175c4c1aa2e51f0606367",
+      "bytes": 342968
+    },
+    {
+      "file": "cockpit-systems.png",
+      "source": "layout-guide",
+      "sha256": "e33ba6dd9c262d579c2f1c8551539d07788f88b7c3ebe3711b86d59462d29bf0",
+      "bytes": 470819
+    },
+    {
+      "file": "cockpit-telemetry.png",
+      "source": "layout-guide",
+      "sha256": "7f7af988bde70b5b8317c6839369c1ba3067316a69cd108087babc55f3157ba3",
+      "bytes": 450949
     },
     {
       "file": "mission-list.png",
       "source": "guide",
-      "sha256": "21dc6b5d7021c2f7cee7fac75b49b059e5026881b137f556f6ba8962fb63c94a",
-      "bytes": 342276
+      "sha256": "53da29991f0285cd6aa46b9210d73b4ffc655fcd3095219fe08572838cf50296",
+      "bytes": 337806
     },
     {
       "file": "mission-loiter.png",
       "source": "guide",
-      "sha256": "a0060da3f66c8dd47f9939ebd657d6dfa725d2f989d473b537b89307af2d60c5",
-      "bytes": 53347
+      "sha256": "835f71281f06d6d733ed217b3bbe5b4ef9b501908c2aafd7d4806482ba62fe7c",
+      "bytes": 53346
     },
     {
       "file": "mission-loiter-save.png",
       "source": "guide",
-      "sha256": "5088c7dbd570fec79cbae655dd714ffb7e7ba3317bed6a199703c3f7c48fd1e4",
-      "bytes": 65733
+      "sha256": "e805d3aefa3bdef24bc0b44c9a8897f3e50a394227ad22ca476d2eecd69e7385",
+      "bytes": 65727
     },
     {
       "file": "loiter-now.png",
       "source": "guide",
-      "sha256": "fd47cc23f2d07c22f90b84d75abe592323b2c1417399bd885d885b58a2619107",
-      "bytes": 62106
+      "sha256": "b93893c55e3544b2aa45771e4d26ad187a8299dcb78c86c90f990efa7b84517f",
+      "bytes": 62115
     },
     {
       "file": "command-review.png",
       "source": "guide",
-      "sha256": "2854007b40c4b788c0440f93e85e8697e76c7f27f9259549fa36722e9f2fbe41",
-      "bytes": 28397
+      "sha256": "43ba240dc225a8608dd77b9c027934ab2ccb56f3a97a9142e363da7bd16407eb",
+      "bytes": 28395
     },
     {
       "file": "start-aircraft-mission.png",
       "source": "guide-sitl",
-      "sha256": "f58dd01cda23d859d79ba2d3e486b35e9ee1a13677d131d6bcbce96faa6b2c9b",
-      "bytes": 82121
+      "sha256": "4a032832bf545fa994a651adb9ceeb7354dd87bb84a94e654167fb6c9c2fae2d",
+      "bytes": 82117
     },
     {
       "file": "terrain-profile.png",
       "source": "guide",
-      "sha256": "073df6f818ea6d1d2d2e18c4f4a999967bda6fe19574de86e5c25ae7cad62b95",
-      "bytes": 455816
+      "sha256": "e78291c6856b0d26a1dbfcc824caa19cd78290f519b67f279afd868037fea497",
+      "bytes": 439469
     },
     {
       "file": "data-connection.png",
       "source": "guide",
-      "sha256": "2a70ef8100af67c2758df1c010dac8cde0e35fdc1a7dd65b39ffb9038a4c1aab",
-      "bytes": 81943
+      "sha256": "33e5a029fdb0244eba01b973c3868ba5ea4a1df72931685ac1820f23fc058d64",
+      "bytes": 81948
     },
     {
       "file": "traffic.png",
       "source": "guide",
-      "sha256": "2d925536f85e454e1f50aa9ff715149ede28db5750ff290c5f831470a2f6e615",
-      "bytes": 37575
+      "sha256": "1a82636cf9aed0710c6ebee79d5ce494a663a83f68eb6dcfda707577f735db79",
+      "bytes": 37555
     },
     {
       "file": "breadcrumbs.png",
       "source": "guide",
-      "sha256": "bfa6c730d412510e822df28d50e83b82790fb145acb0c4d8854e1eb5d01411ec",
-      "bytes": 45364
+      "sha256": "f808429f0808e161e269b1c3c814229f4732d0809514fa623940a032372040e3",
+      "bytes": 45352
+    },
+    {
+      "file": "cockpit-split.png",
+      "source": "layout-guide",
+      "sha256": "6a140cec55d8ff9c63e696836ca7f5492aae6d7839c366ecb451a516c9fcaae8",
+      "bytes": 430396
+    },
+    {
+      "file": "cockpit-stacked.png",
+      "source": "layout-guide",
+      "sha256": "633b62452be69cadf5bf2564d59159920cb3a77e3dfe6ebdc5ebda8b08984f24",
+      "bytes": 413234
     },
     {
       "file": "slip-turn.png",
       "source": "guide",
-      "sha256": "1ce471705628a3098f903936b84649e80e4caea8142d4d5d9fc514a8826312ff",
-      "bytes": 85645
+      "sha256": "9c5d9f330719e882dcaaffda81ec210dc3554a1f11a800d2d11fe08d25bf0892",
+      "bytes": 85648
     },
     {
       "file": "wind.png",
       "source": "guide",
-      "sha256": "6f8357907dc9472fbe7927d9e2b932d3350b0568905a31580f3ce5427580f590",
-      "bytes": 51628
+      "sha256": "fc7c9fe07877da490a075c3573d10acc0070096d83db55fce663a00cc8a58112",
+      "bytes": 51630
+    },
+    {
+      "file": "terrain-overview.png",
+      "source": "guide",
+      "sha256": "a14eed44134faad1f224b5836cde82b0798aed9b73bf555cb3054236a24d173e",
+      "bytes": 439392
     }
   ]
 }

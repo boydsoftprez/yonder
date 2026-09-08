@@ -1,3 +1,4 @@
+import {unpackInstruments} from './instrumentation-client.mjs';
 // SPDX-License-Identifier: GPL-3.0-or-later
 import {unpackFlight} from 'yonder-core/cockpit-wire';
 import {createOwnTrailClient} from './own-trail.mjs';
@@ -6,10 +7,12 @@ import {createOwnTrailClient} from './own-trail.mjs';
 export function createCockpitApi(fetchFn=(...args)=>fetch(...args)){
   let details=null,mission=null,missionKey=null,latest=null,detailsTask=null,missionTask=null;
   let detailsRetry=0,missionRetry=0,detailsError='',missionError='',closed=false;
-  let receivedBytes=0,flightBytes=0,detailsTransfers=0,missionTransfers=0;
+  let flightResponseMs=null,flightResponseAt=null;
+  let receivedBytes=0,flightBytes=0,instrumentBytes=0,instrumentTransfers=0,detailsTransfers=0,missionTransfers=0;
   const controllers=new Set(),samples=[];
   const trail=createOwnTrailClient(request);
   async function request(url,init={}){
+    const started=Date.now();
     const controller=new AbortController();controllers.add(controller);
     const timer=setTimeout(()=>controller.abort(),5000);
     try{
@@ -22,7 +25,7 @@ export function createCockpitApi(fetchFn=(...args)=>fetch(...args)){
       }
       const bytes=new TextEncoder().encode(JSON.stringify(body)).length,now=Date.now();
       receivedBytes+=bytes;samples.push({at:now,bytes});while(samples.length>256||samples[0]?.at<now-10000)samples.shift();
-      if(url.endsWith('/flight'))flightBytes=bytes;
+      if(url.endsWith('/flight')){flightBytes=bytes;if(response.ok){flightResponseMs=Math.max(0,now-started);flightResponseAt=now}}if(url.endsWith('/instruments'))instrumentBytes=bytes;
       if(!response.ok){const error=new Error(body?.error||body?.message||(response.status>=500?`Flight service unavailable (HTTP ${response.status}) · check the local simulator or aircraft connection`:`Console request failed (${response.status})`));error.admissionRejected=response.status>=400&&response.status<500;throw error;}
       return body;
     }finally{clearTimeout(timer);controllers.delete(controller);}
@@ -59,10 +62,11 @@ export function createCockpitApi(fetchFn=(...args)=>fetch(...args)){
       return {...details,...snapshot,ownTrail:trail.view(),_detailsReady:details?.detailKey===wire.d,_missionReady:!!cached.mission,
         detailError:detailsError||missionError};
     },
+    instruments:async()=>{instrumentTransfers++;return unpackInstruments(await request('/cockpit/api/instruments'))},
     dataOptions:options=>request('/cockpit/api/data-options',{method:'POST',headers:{'content-type':'application/json','x-yonder-cockpit':'1'},body:JSON.stringify(options)}),
     setTrailOptions:options=>trail.configure(options),
     command:body=>request('/cockpit/api/command',{method:'POST',headers:{'content-type':'application/json','x-yonder-cockpit':'1'},body:JSON.stringify(body)}),
-    stats(){const now=Date.now(),recent=samples.filter(s=>s.at>=now-10000);const span=recent.length?Math.max(1,(now-recent[0].at)/1000):1;return {transport:'compact-v1',flightBytes,receivedBytes,bytesPerSecond:recent.reduce((sum,s)=>sum+s.bytes,0)/span,detailsTransfers,missionTransfers};},
+    stats(){const now=Date.now(),recent=samples.filter(s=>s.at>=now-10000);const span=recent.length?Math.max(1,(now-recent[0].at)/1000):1;return {transport:'compact-v1',flightBytes,flightResponseMs,flightResponseAgeMs:flightResponseAt===null?null:Math.max(0,now-flightResponseAt),instrumentBytes,instrumentTransfers,receivedBytes,bytesPerSecond:recent.reduce((sum,s)=>sum+s.bytes,0)/span,detailsTransfers,missionTransfers};},
     close(){closed=true;trail.close();for(const controller of controllers)controller.abort();controllers.clear();}
   };
 }

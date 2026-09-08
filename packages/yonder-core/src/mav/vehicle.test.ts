@@ -413,3 +413,68 @@ it("rechecks firmware evidence before a queued flight-control transaction can wr
   r.feed(Object.assign(new standard.AutopilotVersion(), { flightSwVersion: 0x040600ff, capabilities: 0n, uid: 0n }));
   await flush(); expect(r.sent).toHaveLength(0); expect(r.service.snapshot().operations[0].state).toBe("failed"); r.service.close();
 });
+
+describe('separate slow aircraft instrumentation',()=>{
+  it('admits selected-system peripherals for readings without admitting their mission or command traffic',async()=>{
+    const r=rig();r.heartbeat();
+    const battery=()=>Object.assign(new common.BatteryStatus(),{id:0,voltages:[12000,...Array(9).fill(65535)],voltagesExt:[0,0,0,0]});
+    r.feed(battery(),1,154);r.feed(battery(),2,154);
+    expect(r.service.instrumentation().fields['battery.c154.0.voltageV'].value).toBe(12);
+    r.feed(Object.assign(new common.MissionCurrent(),{seq:9}),1,154);expect(r.service.snapshot().mission.currentSeq).toBeNull();
+    r.request({kind:'mode',customMode:15});await flush();
+    r.feed(Object.assign(new common.CommandAck(),{command:176,result:0}),1,154);expect(r.service.snapshot().operations.at(-1)?.ack).toBeNull();
+    r.feed(Object.assign(new minimal.Heartbeat(),{autopilot:8,type:30,customMode:15}),1,154);expect(r.service.snapshot().operations.at(-1)?.state).toBe('sent');
+    r.service.close();
+  });
+  it('keeps polling passive and retains service counters across reconnect while new aircraft reset them',async()=>{
+    const r=rig();r.heartbeat(0,true);r.feed(Object.assign(new common.ExtendedSysState(),{landedState:2}));
+    r.clock.advance(1000);r.heartbeat(0,true);r.feed(Object.assign(new common.ExtendedSysState(),{landedState:2}));
+    expect(r.service.instrumentation().fields['flight.airborneSeconds'].value).toBe(1);
+    for(let i=0;i<20;i++)r.service.instrumentation();await flush();expect(r.sent).toHaveLength(0);
+    r.clock.advance(5000);r.heartbeat(0,true);r.feed(Object.assign(new common.ExtendedSysState(),{landedState:2}));expect(r.service.instrumentation().fields['flight.airborneSeconds'].value).toBe(1);
+    r.clock.advance(5000);r.feed(Object.assign(new minimal.Heartbeat(),{autopilot:3,type:1,baseMode:128}),2);r.feed(Object.assign(new common.ExtendedSysState(),{landedState:2}),2);expect(r.service.instrumentation().fields['flight.airborneSeconds'].value).toBe(0);
+    r.service.close();
+  });
+  it('finishes essential setup before optional requests and reports refused optional streams without abandoning the batch',async()=>{
+    const r=rig();r.heartbeat();r.request({kind:'stream-setup'},{confirmed:false});await flush();
+    for(let i=0;i<12;i++){r.ack(i===8||i===9?512:511);await flush();}
+    const optionalStart=r.sent.length;expect(optionalStart).toBe(13);
+    r.ack(511,3);await flush();expect(r.sent.length).toBe(optionalStart+1);
+    for(let i=0;i<60&&r.service.snapshot().busy;i++){r.ack(511);await flush();}
+    expect(r.service.snapshot().busy).toBe(false);expect(r.service.snapshot().operations.at(-1)?.state).toBe('accepted');
+    expect(r.service.snapshot().operations.at(-1)?.message).toMatch(/1 optional.*unavailable/);
+    expect(r.service.snapshot().operations.at(-1)?.steps.some(s=>s.state==='rejected')).toBe(true);
+    r.service.close();
+  });
+  it('ends an optional timeout visibly without sending another ambiguous interval request',async()=>{
+    const r=rig();r.heartbeat();r.request({kind:'stream-setup'},{confirmed:false});await flush();
+    for(let i=0;i<12;i++){r.ack(i===8||i===9?512:511);await flush();}
+    const count=r.sent.length;r.clock.advance(2500);r.heartbeat();r.clock.advance(2500);r.heartbeat();await flush();
+    expect(r.sent).toHaveLength(count);expect(r.service.snapshot().busy).toBe(false);
+    expect(r.service.snapshot().operations.at(-1)?.message).toMatch(/Essential.*optional.*incomplete/);
+    expect(r.request({kind:'stream-setup'},{id:'after-timeout'}).accepted).toBe(false);
+    r.service.close();
+  });
+});
+
+describe('instrument counter hardware identity',()=>{
+  it('resets observed history when a reported hardware UID replaces the same MAVLink peer',()=>{
+    const r=rig();r.heartbeat(0,true);r.feed(Object.assign(new standard.AutopilotVersion(),{uid:111n,capabilities:0n}));
+    r.clock.advance(1000);r.heartbeat(0,true);expect(r.service.instrumentation().fields['flight.armedSeconds'].value).toBe(1);
+    r.clock.advance(5000);r.heartbeat(0,true);r.feed(Object.assign(new standard.AutopilotVersion(),{uid:111n,capabilities:0n}));
+    expect(r.service.instrumentation().fields['flight.armedSeconds'].value).toBe(1);
+    r.feed(Object.assign(new standard.AutopilotVersion(),{uid:222n,capabilities:0n}));r.heartbeat(0,true);
+    expect(r.service.instrumentation().fields['flight.armedSeconds'].value).toBe(0);
+    expect(r.service.instrumentation().fields['fc.hardwareUid'].value).toBe('222');r.service.close();
+  });
+});
+
+describe('explicit MCU telemetry setup',()=>{
+  it('requests MCU_STATUS at one hertz only during an explicit stream setup',async()=>{
+    const r=rig();r.heartbeat();r.service.instrumentation();await flush();expect(r.sent).toHaveLength(0);
+    r.request({kind:'stream-setup'},{confirmed:false});await flush();
+    for(let i=0;i<70&&r.service.snapshot().busy;i++){const message=r.sent.at(-1)?.data;r.ack(message.command);await flush();}
+    expect(r.sent.some(frame=>frame.data.command===511&&frame.data._param1===11039&&frame.data._param2===1000000)).toBe(true);
+    r.service.close();
+  });
+});

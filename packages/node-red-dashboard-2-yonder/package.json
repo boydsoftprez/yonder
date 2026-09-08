@@ -111,7 +111,8 @@
     "cockpit:dev": "vite --config cockpit/vite.config.mjs",
     "cockpit:verify": "node cockpit/verify.mjs",
     "cockpit:guide": "node cockpit/guide.mjs && node cockpit/guide-terrain.mjs",
-    "cockpit:guide:sitl": "node cockpit/guide-sitl.mjs"
+    "cockpit:guide:sitl": "node cockpit/guide-sitl.mjs",
+    "cockpit:guide:layouts": "node cockpit/layout-guide.mjs"
   },
   "dependencies": {
     "leaflet": "1.9.4",

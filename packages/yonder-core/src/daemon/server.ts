@@ -8,6 +8,7 @@ import { warn, note, trace } from "../log.js";
 import { VehicleService } from "../mav/vehicle.js";
 import { TerrainPackService } from "../terrain/service.js";
 import { CockpitData } from "../cockpit/data.js";
+import type { HostInstrumentOptions } from '../cockpit/host-instruments.js';
 import { createRouter, type CameraProbes, type DiagProbes } from "./routes.js";
 import { AdminCredential } from "../console/credential.js";
 import { ConsoleRenderer } from "../console/renderer.js";
@@ -43,7 +44,7 @@ import { EncoderChannel } from "../video/encoder.js";
 import { Viewers } from "../video/viewers.js";
 import { Adaptation } from "../video/adaptation.js";
 import { CAPTURES_ROOT, Recorder } from "../video/recorder.js";
-import { freeSpaceOn } from "../system/read.js";
+import { freeSpaceOn, systemReader } from "../system/read.js";
 import { readSupply } from "../system/supply.js";
 import { ZeroTierCli } from "../remote/zerotier/cli.js";
 import { readTraffic } from "../remote/traffic.js";
@@ -84,6 +85,8 @@ export const PROVISION_RESTART_DELAY_MS = 1_500;
 export const SIGNAL_POLL_SECONDS = 2;
 
 export interface ServerOptions {
+  /** Injected file/space readers for instrumentation; production supplies Linux readers below. */
+  hostInstruments?: Pick<HostInstrumentOptions, 'readFile' | 'freeBytes'>;
   socketPath: string;
   configPath: string;
   journalPath: string;
@@ -807,6 +810,16 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
       }
     }
   };
+  const readModemState = async (configureSignal: boolean) => {
+    const config = loadConfig(opts.configPath);
+    const paths = await modemClient.modems();
+    if (paths.length === 0) return modemState(config, null, null, { rssi: null, rsrq: null, rsrp: null, snr: null });
+    const modem = await modemClient.modem(paths[0]);
+    if (configureSignal) await armSignal(modem.path);
+    const bearer = await modemClient.connectedBearer(modem);
+    const signal = await modemClient.signal(modem.path);
+    return modemState(config, modem, bearer, signal);
+  };
 
   // The one poll loop for the mesh's throughput, running on `clock` like
   // every other timer this daemon owns. Started unconditionally — it costs
@@ -1197,6 +1210,13 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   catch { note("cockpit: prepared terrain pack unavailable; regional terrain remains optional"); }
   const route = createRouter({
     cockpit: {vehicle: built?.vehicle, data: cockpitData, terrain: terrainPack},
+    hostInstruments: {
+      now: () => clock.now(),
+      readFile: opts.hostInstruments?.readFile ?? systemReader,
+      freeBytes: opts.hostInstruments?.freeBytes ?? (() => freeSpaceOn(CAPTURES_ROOT)),
+      // R-FLT-26: instrumentation reads cached modem reports; opening an instrument never enables reporting.
+      ...(built ? { modem: () => readModemState(false) } : {}),
+    },
     engine,
     configPath: opts.configPath,
     credential,
@@ -1219,23 +1239,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
       // from the configuration — the APN comes off the connected bearer, so
       // this reports what the link is actually using rather than what was
       // asked for, which is the pair that disagrees exactly when it matters.
-      modemState: async () => {
-        const config = loadConfig(opts.configPath);
-        const paths = await modemClient.modems();
-        // No modem is an ordinary answer, not a failure. A board without one
-        // is an ordinary board, and an appliance is a named adapter
-        // ModemManager will never have heard of — modemState says which of
-        // those this is, and the nulls are what "not measured" looks like.
-        // Never zeroes: 0 dBm is a real and extraordinary reading.
-        if (paths.length === 0) {
-          return modemState(config, null, null, { rssi: null, rsrq: null, rsrp: null, snr: null });
-        }
-        const modem = await modemClient.modem(paths[0]);
-        await armSignal(modem.path);
-        const bearer = await modemClient.connectedBearer(modem);
-        const signal = await modemClient.signal(modem.path);
-        return modemState(config, modem, bearer, signal);
-      },
+      modemState: () => readModemState(true),
       secrets: built.secrets,
       // The interface's kernel byte counters, not ZeroTier's own /metrics —
       // measured empty (0 bytes) on a real board. This is the same call the

@@ -3,6 +3,12 @@
 <main
   class="y-cockpit"
   :data-layout="layout"
+  :data-arrangement="displayConfig.arrangement"
+  :data-bank-placement="bankPlacement"
+  :data-mfd-open="mfdOpen||undefined"
+  :data-mfd-page="mfdPage"
+  :data-custom-instruments="customInstrumentSlot||undefined"
+  :style="{'--cockpit-bank-count':Math.max(1,bankInstrumentConfig.length)}"
   :data-palette="palette"
   :data-background="background"
   :data-embedded="props.embedded||undefined"
@@ -19,10 +25,11 @@
       @click="openFlightControls('modes')"
     >{{ telemetry.mode || 'NO MODE' }} ·
       {{telemetry.armed===true?'ARMED':telemetry.armed===false?'DISARMED':'—'}}</button><button
-      @click="panel='display'">Display & data</button><button
+      @click="panel='display'">Display & data</button><button aria-label="Display setup" @click="panel='display-setup'">Layout</button><button v-if="instrumentAlerts.length" class="cockpit-alert-summary" :title="instrumentAlerts.map(a=>a.label).join(' · ')" @click="panel='alerts'">{{instrumentAlerts.length}} NOTICE{{instrumentAlerts.length===1?'':'S'}}</button><button
       @click="panel='status'"
       aria-label="Aircraft and command status"
     >{{snapshot.operations?.at(-1)?.state || 'Aircraft'}}</button></header>
+  <FlightDataBar v-if="!customInstrumentSlot&&displayConfig.showDataBar" :items="instrumentItems" :config="topInstrumentConfig" @select="openInstrument" @update:config="setTopInstrumentConfig"/>
   <FlightControlPanel
     ref="flightControls"
     :snapshot="agedSnapshot"
@@ -33,12 +40,15 @@
     @request="({action,label})=>review(action,label)"
     @pick-target="pickFlightTarget"
   />
-  <div v-if="preferences.display.stripPlacement==='mfd'" class="cockpit-navigation-data" aria-label="Mission and navigation instrument data">
+  <div v-if="customInstrumentSlot?preferences.display.stripPlacement==='mfd':['side','top'].includes(bankPlacement)" class="cockpit-navigation-data" aria-label="Mission and navigation instrument data">
     <slot name="instrument-strip" :telemetry="displayTelemetry" :live="flight.live">
-      <TelemetryStrip :telemetry="displayTelemetry" :live="flight.live" @open="panel='status'" />
+      <InstrumentBank :items="instrumentItems" :config="bankInstrumentConfig" :placement="bankPlacement" @select="openInstrument" @update:config="setBankInstrumentConfig"/>
     </slot>
   </div>
   <div class="cockpit-body">
+    <nav v-if="mfdOpen" class="cockpit-mfd-pages" aria-label="Multifunction display pages"><button v-for="page in mfdPages" :key="page.id" :aria-pressed="mfdPage===page.id" @click="openMfdPage(page.id)">{{page.label}}</button><button aria-label="Close multifunction display" @click="closeMfd">×</button></nav>
+    <InstrumentBank v-if="mfdOpen&&bankPlacement==='mfd'" class="cockpit-mfd-bank" :items="instrumentItems" :config="bankInstrumentConfig" placement="top" @select="openInstrument" @update:config="setBankInstrumentConfig"/>
+    <section v-if="mfdOpen&&['systems','inspector'].includes(mfdPage)" class="cockpit-systems-pane" aria-label="Multifunction systems"><InstrumentationPanel :items="instrumentItems" :history="instrumentHistory" :selected-id="selectedInstrument" :bank-config="bankInstrumentConfig" :top-config="topInstrumentConfig" :view="mfdPage==='inspector'||selectedInstrument?'inspector':'systems'" @select="selectedInstrument=$event" @update:bankConfig="setBankInstrumentConfig" @update:topConfig="setTopInstrumentConfig"/><p v-if="instrumentError" class="cockpit-instrument-error" role="status">{{instrumentError}}</p></section>
     <PrimaryFlightDisplay
       ref="pfd"
       class="cockpit-primary"
@@ -48,7 +58,9 @@
       :telemetry="displayTelemetry"
       :mission="actualMission"
       :references="preferences.references"
-      :options="{...preferences.display,syntheticVision:onlineTerrain}"
+      :options="{...preferences.display,stripPlacement:customInstrumentSlot?preferences.display.stripPlacement:'hidden',syntheticVision:onlineTerrain}"
+      :home-navigation="displayConfig.homePointer?homeInfo:null"
+      :reported-flight-state="reportedFlightState"
       :cdi-scale="cdiScale"
       :background-ready="backgroundReady"
       :background-label="backgroundLabel"
@@ -131,15 +143,16 @@
       </template>
     </PrimaryFlightDisplay>
     <section
+      v-show="!mfdOpen||mfdPage==='mission'"
       class="cockpit-mission"
-      :class="{expanded:layout==='mission'}"
+      :class="{expanded:mfdOpen&&mfdPage==='mission'}"
       aria-label="Mission inset"
     >
       <header>
         <strong>{{draft?(draftContextChanged?'DRAFT · CONTEXT CHANGED':'LOCAL DRAFT'):'AIRCRAFT MISSION'}}</strong><button
-          v-if="layout==='mission'"
+          v-if="mfdOpen"
           aria-label="Return to full PFD"
-          @click="layout='full'"
+          @click="closeMfd"
         >↙</button><button
           v-else
           aria-label="Expand mission"
@@ -148,7 +161,7 @@
       <div class="cockpit-mission-summary">
         <div class="cockpit-mission-sequence"><b v-if="!draft&&missionProgress.activeSeq!==null">{{missionProgress.fromName||'ACTIVE'}} → {{missionProgress.activeName}}</b><b v-else>{{draft?'LOCAL DRAFT':guidance.targetName||'No active mission leg'}}</b><small v-if="!draft&&missionProgress.activeSeq!==null">{{missionProgress.nextName?'NEXT IN PLAN '+missionProgress.nextName:missionProgress.nextReason}}</small></div><span :title="guidance.reason">{{guidance.valid?fmt(guidance.distanceM/1852,2)+' NM':'Awaiting guidance'}}<template
             v-if="guidance.eteSeconds!==null&&guidance.eteSeconds!==undefined"
-          > · ETE {{fmt(guidance.eteSeconds)}} s</template></span></div>
+          > · ETE {{formatDuration(guidance.eteSeconds)}}</template></span></div>
       <NavigationDeviation v-if="layout==='mission'&&missionView==='list'" :guidance="guidance" :scale="cdiScale" />
       <div v-if="layout==='mission'" class="mission-view-tabs"><button :aria-pressed="missionView==='list'" @click="missionView='list'">Waypoints</button><button aria-label="Show terrain profile" :aria-pressed="missionView==='profile'" @click="missionView='profile'">Profile</button></div>
       <div v-if="layout==='mission'&&missionView==='list'" class="mission-waypoint-head"><span>WAYPOINT</span><span>ALTITUDE / AGL</span><span>DTK / DIS</span></div>
@@ -166,14 +179,15 @@
         >Cancel location</button></nav>
     </section>
     <section
+      v-show="!mfdOpen||mfdPage==='map'"
       class="cockpit-map-pane"
-      :class="{expanded:layout==='map'}"
+      :class="{expanded:mfdOpen&&mfdPage==='map'}"
       aria-label="Map inset"
     >
       <header><strong>MAP · TRAFFIC {{trafficRange}} NM</strong><button
-          v-if="layout==='map'"
+          v-if="mfdOpen"
           aria-label="Return to full PFD"
-          @click="layout='full'"
+          @click="closeMfd"
         >↙</button><button
           v-else
           aria-label="Expand map"
@@ -231,6 +245,7 @@
       @click="mobileInset='map'"
       :aria-pressed="mobileInset==='map'"
     >Map</button></nav>
+  <CockpitDisplaySetup v-if="panel==='display-setup'" :config="displayConfig" :flight-options="preferences.display" @option="setDisplayOption" @flight-option="setOption" @page="openMfdPage" @reset="resetDisplaySetup" @close="panel=null"/>
   <MissionTouch
     v-if="missionOpen"
     :mission="shownMission"
@@ -328,7 +343,7 @@
     </section>
   </div>
   <div
-    v-if="panel"
+    v-if="panel&&panel!=='display-setup'"
     class="cockpit-scrim"
     @click.self="panel=null"
   >
@@ -337,17 +352,24 @@
       class="cockpit-dialog"
       role="dialog"
       aria-modal="true"
-      :aria-label="panel==='display'?'Cockpit display and data sources':panel==='traffic'?'Traffic display':panel==='trail'?'Aircraft breadcrumb settings':'Aircraft status'"
+      :aria-label="panel==='alerts'?'Aircraft notices':panel==='display'?'Cockpit display and data sources':panel==='traffic'?'Traffic display':panel==='trail'?'Aircraft breadcrumb settings':'Aircraft status'"
       @keydown="trap"
     >
       <header>
-        <h2>{{panel==='display'?'Display & data':panel==='traffic'?'Traffic':panel==='trail'?'Aircraft breadcrumbs':'Aircraft status'}}</h2><button
+        <h2>{{panel==='alerts'?'Aircraft notices':panel==='display'?'Display & data':panel==='traffic'?'Traffic':panel==='trail'?'Aircraft breadcrumbs':'Aircraft status'}}</h2><button
           @click="panel=null"
           aria-label="Close cockpit panel"
         >×</button>
       </header>
       <div class="cockpit-dialog-body">
-        <template v-if="panel==='display'">
+        <template v-if="panel==='alerts'">
+          <h3>Reported conditions</h3><p v-if="!instrumentAlerts.some(a=>!a.id.startsWith('status.'))">No current structured condition is reported in these readings.</p>
+          <div v-for="notice in instrumentAlerts.filter(a=>!a.id.startsWith('status.'))" :key="notice.id" class="cockpit-aircraft-notice"><strong>{{notice.label}}</strong><p>{{notice.reason}}</p><button @click="openInstrument(notice.id)">Inspect reading</button></div>
+          <h3>Recent aircraft messages</h3><p>These are received messages; a past message does not establish that its condition is still active.</p>
+          <div v-for="notice in (snapshot.statustext||[]).slice(-15).reverse()" :key="notice.at+'-'+notice.text" class="cockpit-aircraft-notice"><strong>{{notice.text}}</strong><small>Reported severity {{notice.severity}} · {{new Date(notice.at).toLocaleTimeString()}}</small></div>
+          <p v-if="!(snapshot.statustext||[]).length">No aircraft messages received.</p>
+        </template>
+        <template v-else-if="panel==='display'">
           <OwnTrailSettings :options="ownTrailOptions" :status="ownTrailDisplay" @change="setOwnTrailOptions" @clear="clearOwnTrail" @restore="restoreOwnTrail" />
           <fieldset class="cockpit-data-settings"><legend>Connection & offline data</legend>
             <label>Public data connection<select v-model="sourceMode" aria-label="Public data connection">
@@ -362,7 +384,7 @@
             <label>Display telemetry updates<select v-model.number="telemetryRate" aria-label="Display telemetry updates">
               <option v-for="rate in [1,2,4,8]" :key="rate" :value="rate">{{rate}} / second</option>
             </select></label>
-            <p v-if="connectionStats">Flight payload {{fmt(connectionStats.flightBytes)}} bytes · received JSON {{fmt(connectionStats.bytesPerSecond/1024,1)}} KiB/s. Mission transfers {{connectionStats.missionTransfers}}; detail transfers {{connectionStats.detailsTransfers}}. Excludes HTTP overhead, video and public data.</p>
+            <p v-if="connectionStats">Flight payload {{fmt(connectionStats.flightBytes)}} bytes · instrumentation {{fmt(connectionStats.instrumentBytes)}} bytes at up to 1 Hz · received JSON {{fmt(connectionStats.bytesPerSecond/1024,1)}} KiB/s. Mission transfers {{connectionStats.missionTransfers}}; detail transfers {{connectionStats.detailsTransfers}}. Excludes HTTP overhead, video and public data.</p>
             <div class="cockpit-actions">
               <button :disabled="dataBusy" @click="$refs.terrainPackFiles.click()">Import terrain folder</button>
               <button :disabled="dataBusy" @click="$refs.offlineMapFiles.click()">Import offline map folder</button>
@@ -561,6 +583,13 @@
 </main>
 </template>
 <script>
+import CockpitDisplaySetup from './cockpit/CockpitDisplaySetup.vue';
+import InstrumentBank from './cockpit/instruments/InstrumentBank.vue';
+import FlightDataBar from './cockpit/instruments/FlightDataBar.vue';
+import InstrumentationPanel from './cockpit/instruments/InstrumentationPanel.vue';
+import {defaultBankConfig,defaultTopConfig,validateInstrumentSlots} from './cockpit/instruments/instrument-settings';
+import {cockpitDisplaySettings} from './cockpit/cockpit-display-settings.mjs';
+import {homeNavigation,navigationItems,instrumentationItems,missingInstrumentItems,instrumentationAlerts,formatDuration,rescaleInstrumentSlots,gimbalOrientationItems,fenceStatusItems} from './cockpit/instrumentation-view.mjs';
 import MissionWaypointList from './cockpit/MissionWaypointList.vue';
 import MissionPlanning from './cockpit/MissionPlanning.vue';
 import {missionSequence} from './cockpit/mission-sequence.mjs';
@@ -628,6 +657,7 @@ const clone = value => JSON.parse(JSON.stringify(value))
 export default {
   name: 'YonderCockpit',
   components: {
+    CockpitDisplaySetup,InstrumentBank,FlightDataBar,InstrumentationPanel,
     MissionWaypointList,MissionPlanning,
     TelemetryStrip,
     NavigationDeviation,
@@ -674,7 +704,10 @@ export default {
   data() {
     return {
       snapshot: this.report || this.props.report || empty(),
-      layout: 'full',
+      layout: 'full',viewportWidth:1200,
+      displayConfig:cockpitDisplaySettings(),bankInstrumentConfig:defaultBankConfig(),topInstrumentConfig:defaultTopConfig(),
+      instrumentation:null,instrumentReceivedAt:Date.now(),instrumentTimer:null,instrumentBusy:false,instrumentError:'',selectedInstrument:null,instrumentHistory:{},
+      mfdPages:[{id:'map',label:'Map'},{id:'mission',label:'Flight plan'},{id:'systems',label:'Systems'},{id:'inspector',label:'Telemetry'}],
       palette: document.documentElement.getAttribute('data-theme') === 'day' ? 'day' : 'night',
       mobileInset: 'map',
       preferences: validatePfdPreferences(),
@@ -740,6 +773,18 @@ export default {
     }
   },
   computed: {
+    customInstrumentSlot(){return !!this.$slots['instrument-strip']},
+    bankPlacement(){return this.customInstrumentSlot?'top':this.displayConfig.bankPlacement==='side'&&this.viewportWidth<960?'top':this.displayConfig.bankPlacement},
+    mfdOpen(){return this.displayConfig.arrangement!=='single'||this.layout!=='full'},
+    mfdPage(){return this.layout==='full'?'map':this.layout},
+    instrumentItems(){
+      const nav=navigationItems(this.snapshot,this.guidance,this.terrainReport,{...this.preferences.display,distanceUnit:this.displayConfig.distanceUnit},this.elapsed);
+      const observed=instrumentationItems(this.snapshot,this.instrumentation||this.snapshot.instruments||{},{elapsedMs:Math.max(0,this.now-this.instrumentReceivedAt)});
+      const ids=new Set(observed.map(i=>i.id));const response=this.connectionStats,latency={id:'link.httpResponseMs',label:'Browser to Yonder response time',shortLabel:'HTTP RESPONSE',category:'Links & controls',value:response?.flightResponseMs??null,unit:'ms',kind:'horizontal',min:0,max:1000,available:Number.isFinite(response?.flightResponseMs)&&response.flightResponseAgeMs<5000,ageMs:response?.flightResponseAgeMs??null,source:'Browser flight request round trip',quality:'calculated',reason:'Includes server processing and both network directions; not flight-controller command latency'};const all=[...observed,...gimbalOrientationItems(observed),...fenceStatusItems(observed),latency,...nav.filter(i=>!ids.has(i.id))];return [...all,...missingInstrumentItems(all)];
+    },
+    instrumentAlerts(){return instrumentationAlerts(this.instrumentItems,this.snapshot)},
+    reportedFlightState(){return this.instrumentItems.filter(i=>['flight.vtolState','flight.landedState'].includes(i.id)&&i.available).map(i=>i.value).join(' · ')},
+    homeInfo(){const home=homeNavigation(this.snapshot,this.elapsed),label=this.instrumentItems.find(i=>i.id==='nav.homeDistance');return {...home,label:label?.available?`${label.value.toFixed(2)} ${label.unit}`:'—'}},
     missionProgress(){return missionSequence(this.agedSnapshot)},
     trafficMapOnlyCount(){return (this.trafficReport.tracks||[]).filter(track=>!Number.isFinite(track.altitudeMslM)).length},
     ownTrailDisplay(){return selectOwnTrail(this.snapshot.ownTrail,this.ownTrailOptions,this.ownTrailCleared,this.snapshot.at+Math.floor(Math.max(0,this.elapsed)/1000)*1000)},
@@ -920,6 +965,8 @@ export default {
     try {
       const saved = JSON.parse(localStorage.getItem('yonder-cockpit-v1') || 'null');
       if (saved) this.preferences = validatePfdPreferences(saved)
+      const instruments=JSON.parse(localStorage.getItem('yonder-instrument-layout-v1')||'null');
+      if(instruments){this.displayConfig=cockpitDisplaySettings(instruments.display);this.bankInstrumentConfig=validateInstrumentSlots(instruments.bank,defaultBankConfig());this.topInstrumentConfig=validateInstrumentSlots(instruments.top,defaultTopConfig())}
       const trail=JSON.parse(localStorage.getItem('yonder-own-trail-v1')||'null');
       if(trail){this.ownTrailOptions=trailPreferences(trail.options);this.ownTrailCleared=trail.cleared}
       const relay=localStorage.getItem('yonder-ground-relay-v1');
@@ -932,7 +979,10 @@ export default {
       this.refreshGroundTraffic();
       this.groundStatus=this.groundData.status()
     }, 200);
-    if (this.source?.state && !this.report && !this.props.report) this.poll()
+    if (this.source?.state && !this.report && !this.props.report) this.poll();
+    if(this.snapshot.instruments)this.instrumentReceivedAt=Date.now();
+    if(this.source?.instruments&&!this.report&&!this.props.report)this.pollInstruments();
+    this.instrumentTimer=setInterval(()=>{if(this.source?.instruments&&!this.report&&!this.props.report)this.pollInstruments();this.recordInstrumentHistory()},1000)
   },
   beforeUnmount() {
     this.viewportObserver?.disconnect();
@@ -940,17 +990,30 @@ export default {
     document.removeEventListener('keydown', this.lostFocusEscape);
     this.disposed = true;
     clearInterval(this.timer);
+    clearInterval(this.instrumentTimer);
     clearTimeout(this.pollTimer);
     clearTimeout(this.dataOptionTimer);
     this.source?.close?.();
     this.groundData.close()
   },
   methods: {
+    formatDuration,
+    persistInstruments(){try{localStorage.setItem('yonder-instrument-layout-v1',JSON.stringify({display:this.displayConfig,bank:this.bankInstrumentConfig,top:this.topInstrumentConfig}))}catch{this.instrumentError='Layout could not be saved; it remains active for this session'}},
+    setDisplayOption(key,value){const previous=this.instrumentItems;this.displayConfig=cockpitDisplaySettings({...this.displayConfig,[key]:value});if(key==='arrangement'&&value==='single')this.layout='full';if(key==='distanceUnit')this.rescaleInstrumentUnits(previous);this.persistInstruments();this.$nextTick(this.fitViewport)},
+    resetDisplaySetup(){this.displayConfig=cockpitDisplaySettings();this.bankInstrumentConfig=defaultBankConfig();this.topInstrumentConfig=defaultTopConfig();this.layout='full';this.persistInstruments()},
+    setBankInstrumentConfig(config){this.bankInstrumentConfig=validateInstrumentSlots(config,defaultBankConfig());this.persistInstruments()},
+    setTopInstrumentConfig(config){this.topInstrumentConfig=validateInstrumentSlots(config,defaultTopConfig());this.persistInstruments()},
+    openMfdPage(page){if(!['map','mission','systems','inspector'].includes(page))return;if(page==='systems')this.selectedInstrument=null;this.layout=page;this.panel=null;this.$nextTick(this.fitViewport)},
+    closeMfd(){this.layout='full';this.displayConfig=cockpitDisplaySettings({...this.displayConfig,arrangement:'single'});this.persistInstruments();this.$nextTick(this.fitViewport)},
+    openInstrument(id){if(id.startsWith('status.')){this.panel='alerts';return}this.openMfdPage('systems');this.selectedInstrument=id},
+    async pollInstruments(){if(this.instrumentBusy||this.disposed)return;this.instrumentBusy=true;const started=Date.now();try{const value=await this.source.instruments();if(!this.disposed){this.instrumentation=value;this.instrumentReceivedAt=started;this.instrumentError=value.truncated?`${value.truncated} additional readings omitted by the bounded telemetry transfer`:''}}catch(e){if(!this.disposed)this.instrumentError=e.message||'Instrumentation unavailable'}finally{this.instrumentBusy=false}},
+    recordInstrumentHistory(){if(this.disposed)return;const now=Date.now(),items=this.instrumentItems,byId=new Map(items.map(i=>[i.id,i])),keys=[...new Set([this.selectedInstrument,...this.bankInstrumentConfig.map(s=>s.id),...this.topInstrumentConfig.map(s=>s.id),...items.map(i=>i.id)])].filter(Boolean).slice(0,256);for(const key of keys){const item=byId.get(key);if(!item||(typeof item.value!=='number'&&!this.instrumentHistory[key]))continue;const series=this.instrumentHistory[key]||[];series.push({t:now,v:item.available&&Number.isFinite(item.value)?item.value:null});this.instrumentHistory[key]=series.filter(p=>now-p.t<=180000).slice(-180)}for(const key of Object.keys(this.instrumentHistory))if(!keys.includes(key))delete this.instrumentHistory[key]},
     saveOwnTrail(){try{localStorage.setItem('yonder-own-trail-v1',JSON.stringify({options:this.ownTrailOptions,cleared:this.ownTrailCleared}))}catch{this.error='Trail preferences could not be saved; this session still works'}},
     setOwnTrailOptions(options){this.ownTrailOptions=trailPreferences(options);this.source?.setTrailOptions?.(this.ownTrailOptions);this.saveOwnTrail()},
     clearOwnTrail(){const trail=this.snapshot.ownTrail;if(trail)this.ownTrailCleared={epoch:trail.epoch,after:trail.latest};this.saveOwnTrail()},
     restoreOwnTrail(){this.ownTrailCleared=null;this.saveOwnTrail()},
     fitViewport() {
+      if(this.$el?.clientWidth)this.viewportWidth=this.$el.clientWidth;
       if (!this.$el || this.props.embedded) return;
       const top = this.$el.getBoundingClientRect().top;
       let bottomSpacing = 4;
@@ -976,8 +1039,10 @@ export default {
       11: 'above terrain'
     } [frame] || `frame ${frame}`),
     ingest(value) {
+      if((this.snapshot.identity?.generation??null)!==(value.identity?.generation??null))this.instrumentHistory={};
       this.snapshot = value.ownTrail?{...value,ownTrail:markRaw(value.ownTrail)}:value;
       this.receivedAt = Date.now();
+      if(value.instruments){this.instrumentation=value.instruments;this.instrumentReceivedAt=this.receivedAt}
       if(this.pendingOperationId){
         const operation=value.operations?.find(op=>op.id===this.pendingOperationId);
         if(operation){this.error=operation.state+' · '+operation.message;if(['observed','accepted','rejected','failed','unknown'].includes(operation.state))this.pendingOperationId=null}
@@ -1020,7 +1085,11 @@ export default {
       this.preferences.references[key] = value;
       this.persist()
     },
+    rescaleInstrumentUnits(previous){this.bankInstrumentConfig=rescaleInstrumentSlots(this.bankInstrumentConfig,previous,this.instrumentItems);this.topInstrumentConfig=rescaleInstrumentSlots(this.topInstrumentConfig,previous,this.instrumentItems);this.instrumentHistory={};this.persistInstruments()},
     setOption(key, value) {
+      const previous=this.instrumentItems;
+      if(key==='stripPlacement'&&!this.customInstrumentSlot){this.setDisplayOption('bankPlacement',({pfd:'side',mfd:'top',hidden:'hidden'})[value]||'side')}
+      if(['altitudeUnit','speedUnit','verticalSpeedUnit'].includes(key))this.instrumentHistory={};
       if (key === 'syntheticVision') {
         this.onlineTerrain = value;
         return
@@ -1032,9 +1101,14 @@ export default {
           [key]: value
         }
       });
-      this.persist()
+      this.persist();
+      if(['altitudeUnit','speedUnit','verticalSpeedUnit'].includes(key))this.rescaleInstrumentUnits(previous)
     },
     navigate(target) {
+      if(target==='instrument-layout'){this.panel='display-setup';return}
+      if(target==='instruments'){this.openMfdPage('systems');return}
+      if(['mission','waypoints'].includes(target)){this.openMfdPage('mission');return}
+      if(target==='direct'){this.openFlightControls('direct');return}
       if (target === 'display' || target === 'settings') {
         this.panel = 'display';
         return
@@ -1410,6 +1484,7 @@ export default {
 </script>
 <style src="./cockpit/prototype.css"></style>
 <style src="./cockpit/cockpit.css"></style>
+<style src="./cockpit/cockpit-layouts.css"></style>
 <style scoped>
 .cockpit-data-settings { border: 1px solid var(--cockpit-border, #52616e); padding: 12px; margin-bottom: 16px; min-width: 0; }
 .cockpit-data-settings legend { font-weight: 700; padding: 0 6px; }

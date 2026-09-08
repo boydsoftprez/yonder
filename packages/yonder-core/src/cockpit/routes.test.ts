@@ -3,7 +3,9 @@ import { it, expect, vi } from "vitest";
 import { createRouter } from "../daemon/routes.js";
 import { VehicleService } from "../mav/vehicle.js";
 import { CockpitData } from "./data.js";
+import { heartbeatV2, validSysStatusBytes } from '../mav/testing.js';
 import { cockpitRoute } from './routes.js';
+import { unpackInstruments } from '../../../node-red-dashboard-2-yonder/src/ui/cockpit/instrumentation-client.mjs';
 import type { AdminCredential } from "../console/credential.js";
 import type { ApplyEngine } from "../apply/engine.js";
 const clock = {
@@ -11,6 +13,37 @@ const clock = {
   setTimer: () => 0,
   clearTimer: () => {},
 };
+it('gates instrumentation before reading host services, then serves host data without a vehicle', async () => {
+  let reads = 0;
+  const credential = { isSet: () => false } as AdminCredential;
+  const router = createRouter({ engine: {} as ApplyEngine, credential, configPath: '/unused',
+    hostInstruments: { now: clock.now, readFile: path => { reads++; return path === '/proc/uptime' ? '1234 1000' : null; } } });
+  expect((await router('GET', '/cockpit/instruments', undefined)).status).toBe(403);
+  expect(reads).toBe(0);
+  credential.isSet = () => true;
+  const response = await router('GET', '/cockpit/instruments', undefined);
+  expect(response.status).toBe(200);
+  expect(unpackInstruments(response.body)).toMatchObject({ generation: null, connected: false, fields: { 'host.uptimeSeconds': { value: 1234 } } });
+  expect(reads).toBe(4);
+  expect((await router('POST', '/cockpit/instruments', undefined)).status).toBe(404);
+  expect(reads).toBe(4);
+});
+it('reads compact instruments independently from camera probes, public data and aircraft commands', async () => {
+  const send = vi.fn(async () => {}), vehicle = new VehicleService({ clock, send });
+  vehicle.receive(heartbeatV2(1, 1, 3));
+  vehicle.receive(validSysStatusBytes());
+  const probes = vi.fn(async () => { throw Error('must not probe'); });
+  const router = createRouter({ engine: {} as ApplyEngine, credential: { isSet: () => true } as AdminCredential, configPath: '/unused',
+    cockpit: { vehicle, cameraState: probes }, hostInstruments: { now: clock.now } });
+  const response = await router('GET', '/cockpit/instruments', undefined);
+  expect(response.status).toBe(200);
+  const decoded = unpackInstruments(response.body);
+  expect(decoded.fields).toHaveProperty('host.cpuPercent');
+  expect(decoded).toMatchObject({ connected: true, fields: { 'battery.system.voltageV': { value: 12.6 }, 'fc.loadPercent': { value: 30 } } });
+  expect(decoded.generation).toBeTruthy();
+  expect(probes).not.toHaveBeenCalled(); expect(send).not.toHaveBeenCalled();
+  vehicle.close();
+});
 it('serves compact flight and separate details without triggering public traffic fetches',async()=>{
  const vehicle=new VehicleService({clock,send:async()=>{}}),data=new CockpitData();
  const cameraState=async()=>({cameras:[],camera:null});

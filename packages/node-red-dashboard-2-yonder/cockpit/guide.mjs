@@ -38,9 +38,9 @@ try{
   await button('PFD Menu').click();await shot('pfd-menu',dialog());
   await page.getByRole('button',{name:/^Attitude & display/}).click();
   await label('Speed units').selectOption('mph');await label('Altitude units').selectOption('m');await label('Vertical speed units').selectOption('mps');
-  await label('Instrument strip placement').selectOption('pfd');await shot('display-units',dialog());await close();
+  await shot('display-units',dialog());await close();
   assert.match(await page.locator('.pfd-svg').textContent(),/MPH/);
-  await button('Attitude and display settings').click();await label('Speed units').selectOption('kt');await label('Altitude units').selectOption('ft');await label('Vertical speed units').selectOption('fpm');await label('Instrument strip placement').selectOption('mfd');await close();
+  await button('Attitude and display settings').click();await label('Speed units').selectOption('kt');await label('Altitude units').selectOption('ft');await label('Vertical speed units').selectOption('fpm');await close();
   await button('FD').click();await label('Flight director style').selectOption('crossbar');await shot('flight-director',dialog());await label('Flight director style').selectOption('vbar');await close();
   for(const [hotspot,name] of [['Wind display settings','wind'],['Slip and skid indicator settings','slip-turn']]){await button(hotspot).click();await shot(name,dialog());await close()}
  });

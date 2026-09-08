@@ -15,6 +15,7 @@ import { VehicleService } from "../../packages/yonder-core/dist/mav/vehicle.js";
 import { systemClock } from "../../packages/yonder-core/dist/apply/types.js";
 import { CockpitData } from "../../packages/yonder-core/dist/cockpit/data.js";
 import { TerrainPackService } from "../../packages/yonder-core/dist/terrain/service.js";
+import { CockpitInstruments, HostInstruments } from "../../packages/yonder-core/dist/cockpit/host-instruments.js";
 import { cockpitRoute } from "../../packages/yonder-core/dist/cockpit/routes.js";
 import { cockpitProxy } from "../../packages/yonder-core/dist/console/cockpit.js";
 import { DaemonClient } from "../../packages/yonder-core/dist/console/client.js";
@@ -204,6 +205,7 @@ try {
     ),
   );
   const vehicle = {
+    instrumentation: () => service.instrumentation(),
     trailPage:(...args)=>service.trailPage(...args),
     submit: (request) => service.submit(request),
     snapshot: (options) => {
@@ -212,10 +214,12 @@ try {
       return state;
     },
   };
+  // The local simulator has no airborne companion OS/modem measurements.
+  const instruments = new CockpitInstruments({ vehicle, host: new HostInstruments({ read: () => null }) });
   const client = new DaemonClient({
     transport: async (request) => {
       const result = await cockpitRoute(
-        { vehicle, data, terrain },
+        { vehicle, data, terrain, instruments },
         request.method,
         request.path,
         request.body,

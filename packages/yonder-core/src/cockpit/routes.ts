@@ -5,7 +5,10 @@ import type { OperatorRequest } from "../mav/types.js";
 import type { CockpitData } from "./data.js";
 import { createHash } from 'node:crypto';
 import { packFlight } from './flight-wire.js';
+import { packInstruments } from './instrumentation-wire.js';
+import type { CockpitInstruments } from './host-instruments.js';
 export interface CockpitServices {
+  instruments?: Pick<CockpitInstruments, 'snapshot'>;
   vehicle?: VehicleService;
   data?: CockpitData;
   terrain?: TerrainPackService;
@@ -19,6 +22,9 @@ export async function cockpitRoute(
   body: unknown,
 ): Promise<{ status: number; body: unknown } | null> {
   if (!path.startsWith("/cockpit/")) return null;
+  if (path === '/cockpit/instruments' && method === 'GET') return services.instruments
+    ? { status: 200, body: packInstruments(await services.instruments.snapshot()) }
+    : { status: 503, body: { error: 'Instrumentation service unavailable' } };
   const trail=/^\/cockpit\/trail(?:\/([a-zA-Z0-9-]{1,64})\/(\d{1,12})(?:\/(\d{1,12})\/(\d{1,12}))?)?$/.exec(path);
   if(trail&&method==='GET')return services.vehicle
     ?{status:200,body:services.vehicle.trailPage(trail[1],Number(trail[2]??0),Number(trail[3]??0),Number(trail[4]??0))}

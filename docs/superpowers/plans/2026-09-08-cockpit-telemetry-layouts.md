@@ -57,7 +57,7 @@ export interface InstrumentationSnapshot {
 Stable keys include `battery.0.voltageV`, `battery.0.currentA`,
 `battery.0.remainingPercent`, `battery.0.consumedMah`,
 `battery.0.consumedWh`, `flight.bootSeconds`, `flight.armedSeconds`,
-`flight.airborneSeconds`, `flight.landedState`, `flight.vtolState`,
+`flight.airborneSeconds`, `flight.autoSeconds`, `flight.landedState`, `flight.vtolState`,
 `host.cpuPercent`, `host.temperatureC`, `host.memoryPercent`,
 `modem.rsrpDbm`, `modem.rsrqDb`, `modem.sinrDb`.
 Other keys are grouped by `gps`, `ekf`, `vibration`, `esc`, `efi`, `generator`,
@@ -72,7 +72,7 @@ gaps are retained.
 
 ## Tasks and ownership
 
-- [ ] **1. Aircraft instrumentation and timers.** Implement the shared types,
+- [x] **1. Aircraft instrumentation and timers.** Implement the shared types,
   bounded MAVLink collector, per-field expiry and service-side counters. Cover
   battery/energy, propulsion, GPS/estimator, terrain/range, VTOL/landed state,
   flight-controller health, fence, radio/RC/outputs and payload messages present
@@ -81,7 +81,7 @@ gaps are retained.
   mission origin checks. Integrate the collector into explicit stream setup.
   Tests: sentinel units, instance isolation, expiry, source filtering, timer
   late attach/gap/reboot, and zero unsolicited commands.
-- [ ] **2. Host readings and compact route.** Implement true CPU utilisation,
+- [x] **2. Host readings and compact route.** Implement true CPU utilisation,
   memory/temperature/uptime/storage, modem signal and available recording/video
   facts with injected readers and shared caches. Add authenticated
   `/cockpit/instruments`, merge vehicle and host readings, and bounded compact
@@ -89,14 +89,14 @@ gaps are retained.
   Own `cockpit/routes.ts`, new host/wire modules, daemon wiring and relevant
   route tests. Tests: CPU delta, unavailable OS fields, cache/coalescing,
   authorization, wire validation and payload size.
-- [ ] **3. Instrument and data-field surfaces.** Promote the approved graphical
+- [x] **3. Instrument and data-field surfaces.** Promote the approved graphical
   style into native cockpit components: reusable gauge faces, configurable bank,
   configurable navigation data bar, grouped systems page, inspector and bounded
   trend view. All operate on normalized UI items; no backend fetches/commands.
   Own new components under `src/ui/cockpit/instruments/`; do not edit the host.
   Test local apply/cancel/default/reorder, source selection, no-data/expiry,
   range validation, accessible tap targets and trend gaps.
-- [ ] **4. Host layout and navigation integration.** Root owns `YonderCockpit`,
+- [x] **4. Host layout and navigation integration.** Root owns `YonderCockpit`,
   PFD integration, client API and UI catalog/derived navigation adapter. Add
   display setup with single-PFD default, split and stacked MFD, MFD tabs for map,
   flight plan/profile and systems/inspector, and instrument placements top/side/
@@ -105,7 +105,7 @@ gaps are retained.
   instrument polling independently from flight updates; clamp history and cancel
   requests on unmount. Tests: saved config validation, stale source suppression,
   home geometry, actual mission sequencing, layout switch identity, no sends.
-- [ ] **5. Verify and document.** Run targeted package tests and builds, then
+- [x] **5. Verify and document.** Run targeted package tests and builds, then
   production browser workflows at laptop/iPad sizes with fixture and owned SITL.
   Compare current screenshots to the supplied reference structure and inspect
   absent elements. Update guide, screenshots, blueprint and evidence, listing

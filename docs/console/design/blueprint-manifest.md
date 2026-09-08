@@ -760,15 +760,16 @@ seventeen rows are the same shape and had not been found before this audit.
 
 ## Touch cockpit — approved September 2026 extension
 
-The approved cockpit behavior is recorded in [the integration design](../../cockpit-integration-design.md).
+The approved cockpit behavior is recorded in [the integration design](../../cockpit-integration-design.md)
+and the [telemetry and layout plan](../../superpowers/plans/2026-09-08-cockpit-telemetry-layouts.md).
 It preserves the existing authored PFD and mission controls in the native
 `ui-yonder-cockpit` widget. This table covers the new page; it does not close older
 camera-page findings above.
 
 | ID | Approved behavior | Implementation / evidence |
 |---|---|---|
-| F-01 | One full-width PFD scene with translucent instruments, measured VSI, HSI/CDI and reported director cues; preserve instrument proportions and move touch regions with the tapes | `PrimaryFlightDisplay.vue`, `flight-workflow.mjs`; R-FLT-01/03, viewport/hit-region tests and laptop/tablet/narrow fixture checks |
-| F-02 | Left mission inset and right satellite/hybrid moving map; expand with the same PFD still present | `YonderCockpit.vue`, `YonderCockpitMap.vue`; landscape/portrait browser checks |
+| F-01 | One PFD scene with translucent instruments, measured VSI, HSI/CDI and reported director cues; preserve instrument proportions and move touch regions with the tapes as space changes | `PrimaryFlightDisplay.vue`, `flight-workflow.mjs`; R-FLT-01/03, viewport/hit-region tests and laptop/tablet/narrow fixture checks |
+| F-02 | Default single PFD with left mission inset and right satellite/hybrid moving map; expand with the same PFD still present | `YonderCockpit.vue`, `YonderCockpitMap.vue`; landscape/portrait browser checks; additional arrangements in F-25 |
 | F-03 | Tap instruments for references/settings, distinguish local bugs from actual autopilot targets | Preserved PFD control forms and `cockpit-state.mjs` adapter |
 | F-04 | Import/edit/export Mission Planner missions, contextual waypoint/map actions, explicit review before transmission | Preserved mission catalog/forms; authenticated operation service and byte-level tests; R-FLT-02/04/05 |
 | F-05 | Real ADS-B map/vision targets with selected range, stale state and observed trails | `TrafficFeed`, map/vision components; geometric datum and timestamp regressions |
@@ -789,6 +790,13 @@ camera-page findings above.
 | F-20 | Fresh AUTO FROM → TO, active/next waypoint badges and local list following; shared HSI/expanded CDI leg course with target/path checks at sequence changes | `mission-sequence.mjs`, `navigation-view.mjs`, `YonderCockpit.vue`; R-FLT-20, [real QuadPlane sequencing and browser evidence](../evidence/2026-09-07-cockpit-sequencing.md) |
 | F-21 | Unit-selectable instruments, references, flight requests and mission altitude/speed fields; active-leg bracket, touch altitude cells and estimated waypoint AGL | `flight-units.mjs`, `FlightUnits.vue`, `MissionWaypointList.vue`; R-FLT-21/22, conversion, unchanged-value and draft-only interaction tests |
 | F-22 | Mission profile with separate planned altitude, ground and mapped surface, distance inspection, coverage/datum/survey details and bounded source loading | `mission-profile.mjs`, `mission-terrain.mjs`, `MissionPlanning.vue`; R-FLT-22, [planning evidence](../evidence/2026-09-07-cockpit-planning.md) |
+| F-23 | Selectable catalog for navigation/home, flight time, electrical/propulsion, GPS/estimator, range/terrain, aircraft/controller state, fence, links/controls, payload and companion health; retain sensor/component identity, source, age, units and unavailable reasons | `instrumentation.ts`, `host-instruments.ts`, `instrumentation-view.mjs`; R-FLT-23/26, collector/source/expiry tests and the [catalog reference](../../cockpit-user-guide.md#telemetry-catalog-sources-and-flight-time) |
+| F-24 | Configurable top navigation fields and graphical instruments with independent selections; touch source/style/scale/band/order controls, Apply/Cancel/defaults, inspection and pinning; local display scales do not set aircraft failsafes | Native `FlightDataBar.vue`, `InstrumentBank.vue`, `InstrumentGauge.vue`, `InstrumentConfigEditor.vue`; R-FLT-24, validation/unit-preservation/component tests and [illustrated controls](../../cockpit-user-guide.md#3-arrange-the-display-and-choose-readings) |
+| F-25 | Single PFD with insets by default; optional PFD beside or above a tabbed MFD; instrument bank beside PFD, across top, on MFD or hidden; validated per-browser persistence and restore defaults | `CockpitDisplaySetup.vue`, `cockpit-display-settings.mjs`, `cockpit-layouts.css`, `YonderCockpit.vue`; R-FLT-25, same-PFD/map identity, saved-settings and no-command layout tests; [arrangement specimens](../../cockpit-user-guide.md#start-with-the-flight-display) |
+| F-26 | MFD Map / Flight plan / Systems / Telemetry pages; grouped searchable catalog with collapsible Pinned instruments sharing the PFD bank configuration; direct source picker, inspector provenance/quality, pin/unpin and bounded numeric history with visible gaps | `InstrumentationPanel.vue`, `YonderCockpit.vue`; R-FLT-24/25, direct-selection, no-data, focus, pin and trend-gap tests; [Systems and Telemetry walkthrough](../../cockpit-user-guide.md#3-arrange-the-display-and-choose-readings) |
+| F-27 | Separate reported boot, observed armed and observed airborne counters; late attachment, gaps and reboot remain explicit; calculated HOME geometry is distinct from RTL route; reported VTOL/landed state and frame-labeled gimbal orientation | `flight-counters.ts`, `instrumentation-view.mjs`, `PrimaryFlightDisplay.vue`; R-FLT-23, authoritative boot-clock, partial-history, navigation geometry and gimbal-frame tests; [interpretation rules](../../cockpit-user-guide.md#interpret-the-counters-and-navigation-estimates) |
+| F-28 | Separate bounded compact instrumentation at up to 1 Hz, cached companion CPU/memory/temperature/storage and passive modem/media readings; preserve fast flight transport and explicit stream setup | `instrumentation-wire.ts`, `host-instruments.ts`, cockpit routes, `instrumentation-client.mjs`, `cockpit-api.mjs`; R-FLT-26, auth/wire/cache/CPU-delta/independent-expiry and passive-read tests |
+| F-29 | Reported condition and aircraft-message notices remain accessible independently of instrument selection; recent status messages are labeled historical and gauge color bands remain local presentation | `instrumentationAlerts`, `YonderCockpit.vue`; R-FLT-24, reported-health/fence/battery/VTOL and unavailable-data checks; no automatic aircraft action |
 
 The [illustrated cockpit walkthrough](../../cockpit-user-guide.md#how-to-use-it) covers each shortcut,
 confirmation, mission action conversion and loiter upload. The
@@ -803,8 +811,17 @@ The guide separately includes selected, captioned [instructional screenshots](..
 and a [surface walkthrough record](../evidence/2026-09-08-cockpit-guide.md). The
 normal page uses the daemon's actual telemetry and authenticated operations.
 
-The [graphical instrument study](../../../packages/node-red-dashboard-2-yonder/cockpit/instruments/README.md)
-is a separate, unapproved design preview using the native PFD and a scoped
-instrument-strip slot (R-UI-09). It demonstrates selectable arc and linear
-instruments with fixture readings/limits; it does not replace the current
-production strip or establish live integration for its proposed readings.
+The approved graphical instrument and layout features now run in the production
+cockpit as native components. **Layout** opens **Display setup**; the PFD's
+**Display → Instrument panel & PFD/MFD layout** opens the same controls. **Fields**
+and **Instruments** configure saved selections; tapping a reading opens its
+inspector. The earlier [graphical instrument study](../../../packages/node-red-dashboard-2-yonder/cockpit/instruments/README.md)
+remains a separate fixture preview; its sample readings and limits do not enter
+live telemetry.
+
+Hardware-dependent availability remains explicit. ESC, EFI, generator, extra GPS,
+range, MCU, camera and gimbal readings require their corresponding reports;
+companion modem/media/OS facts have separate sources. The catalog is a bounded
+reading inspector, not a complete raw MAVLink log. Software and fixture/SITL
+evidence do not establish physical sensor or camera validation, and no unavailable
+autopilot capture mode is inferred from this layout.

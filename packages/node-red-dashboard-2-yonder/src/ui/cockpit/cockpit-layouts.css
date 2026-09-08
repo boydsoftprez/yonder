@@ -1,0 +1,54 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+/* R-FLT-25: one persistent PFD/map; the grid changes their presentation only. */
+.y-cockpit{--cockpit-bank-width:clamp(150px,calc((var(--cockpit-height,100dvh) - 215px) * 1.4 / var(--cockpit-bank-count,6) + 15px),210px)}
+.y-cockpit>.flight-data-bar{flex:none;z-index:9}
+.y-cockpit>.cockpit-navigation-data>.instrument-bank{max-height:100%;min-height:0}
+.y-cockpit[data-bank-placement=side]:not([data-custom-instruments]){display:grid;grid-template-columns:var(--cockpit-bank-width) minmax(0,1fr);grid-template-rows:auto auto auto minmax(0,1fr)}
+.y-cockpit[data-bank-placement=side]:not([data-custom-instruments])>.cockpit-header{grid-area:1/1/2/-1}
+.y-cockpit[data-bank-placement=side]:not([data-custom-instruments])>.flight-data-bar{grid-area:2/1/3/-1}
+.y-cockpit[data-bank-placement=side]:not([data-custom-instruments])>.flight-control-host{grid-area:3/1/4/-1}
+.y-cockpit[data-bank-placement=side]:not([data-custom-instruments])>.cockpit-navigation-data{grid-area:4/1/5/2;min-height:0;overflow:hidden}
+.y-cockpit[data-bank-placement=side]:not([data-custom-instruments])>.cockpit-body{grid-area:4/2/5/3;min-width:0}
+.y-cockpit[data-bank-placement=side]:not([data-custom-instruments])[data-layout=full]:not([data-mfd-open]) :is(.cockpit-mission,.cockpit-map-pane){width:clamp(115px,calc((100cqw - var(--cockpit-bank-width) - 320px)/2 - 14px),370px)}
+.y-cockpit[data-mfd-open] .cockpit-body{display:grid;grid-template-columns:minmax(300px,1fr) minmax(330px,.85fr);grid-template-rows:44px auto minmax(0,1fr)}
+.y-cockpit[data-mfd-open] .cockpit-body>.cockpit-primary{grid-area:1/1/4/2;height:100%;min-width:0}
+.y-cockpit[data-mfd-open] .pfd-secondary>:not(:last-child),.y-cockpit[data-mfd-open] :is(.pfd-touch-vsi,.pfd-touch-bank,.pfd-touch-navigation){display:none}
+.y-cockpit[data-mfd-open] .cockpit-body>.cockpit-forecast{grid-area:1/1/4/2;position:relative;place-self:end start;inset:auto;margin:0 0 76px 10px;max-width:190px}
+.y-cockpit .cockpit-mfd-pages{grid-area:1/2/2/3;display:flex;min-width:0;min-height:44px;background:#0b202c;border:1px solid #698797;z-index:7;overflow:auto}
+.y-cockpit .cockpit-mfd-pages button{flex:1;min-width:70px;min-height:42px;border:0;border-right:1px solid #587282;border-radius:0;padding:5px;font-size:12px;white-space:nowrap;background:#112f40}
+.y-cockpit .cockpit-mfd-pages button[aria-pressed=true]{color:#81deff;background:#1b455c;box-shadow:inset 0 -3px #80d8f4}
+.y-cockpit .cockpit-mfd-pages button:last-child{flex:none;min-width:44px}
+.y-cockpit .cockpit-mfd-bank{grid-area:2/2/3/3;max-height:190px;min-height:0;overflow:auto}
+.y-cockpit[data-mfd-open] .cockpit-body>:is(.cockpit-mission,.cockpit-map-pane,.cockpit-systems-pane){grid-area:3/2/4/3;position:relative;inset:auto;width:100%;height:100%;max-height:none;min-width:0;min-height:0;margin:0;box-shadow:none;border-radius:0}
+.y-cockpit[data-mfd-open] .cockpit-body>.cockpit-systems-pane{background:#081923;border:1px solid #587282;overflow:auto}
+.y-cockpit .cockpit-systems-pane .instrumentation-panel{min-height:100%}
+.y-cockpit .cockpit-instrument-error{padding:10px;font-size:12px;color:#e5c9a9}
+.y-cockpit[data-arrangement=stacked][data-mfd-open] .cockpit-body{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(220px,1.3fr) 44px auto minmax(200px,1fr);overflow:auto}
+.y-cockpit[data-arrangement=stacked][data-mfd-open] .cockpit-body>.cockpit-primary{grid-area:1/1/2/2}
+.y-cockpit[data-arrangement=stacked][data-mfd-open] .cockpit-body>.cockpit-forecast{grid-area:1/1/2/2}
+.y-cockpit[data-arrangement=stacked] .cockpit-mfd-pages{grid-area:2/1/3/2}
+.y-cockpit[data-arrangement=stacked] .cockpit-mfd-bank{grid-area:3/1/4/2}
+.y-cockpit[data-arrangement=stacked][data-mfd-open] .cockpit-body>:is(.cockpit-mission,.cockpit-map-pane,.cockpit-systems-pane){grid-area:4/1/5/2}
+.y-cockpit .cockpit-alert-summary{color:#ffe0a0;border-color:#d4a448;white-space:nowrap}
+.y-cockpit .cockpit-aircraft-notice{padding:10px 0;border-bottom:1px solid #486373}.y-cockpit .cockpit-aircraft-notice strong{display:block;font-size:14px;line-height:1.4}.y-cockpit .cockpit-aircraft-notice small{display:block;margin-top:5px;color:#a9c1ce;font-size:11px}
+.y-cockpit .pfd-reported-flight-state{position:absolute;top:38px;left:50%;transform:translateX(-50%);z-index:4;padding:3px 8px;background:#061923d9;color:#d8f1f5;font-size:10px;white-space:nowrap;pointer-events:none}
+.y-cockpit .pfd-home-pointer{stroke:#e5edee;fill:#06121e;stroke-width:1.8}
+.y-cockpit .pfd-home-pointer text{font-size:10px;stroke:none;fill:#f7fbfc;font-weight:bold}
+.y-cockpit[data-mfd-open]>.cockpit-mobile-tabs{display:none}
+@container yonder-cockpit (max-width:960px){
+ .y-cockpit[data-bank-placement=side]:not([data-custom-instruments]){display:flex}
+ .y-cockpit[data-bank-placement=side]:not([data-custom-instruments])>.cockpit-navigation-data{flex:none;max-height:178px;overflow:auto}
+ .y-cockpit[data-bank-placement=side]:not([data-custom-instruments]) .instrument-bank-faces{grid-template-columns:repeat(var(--instrument-count),minmax(105px,1fr));grid-template-rows:128px;overflow:auto}
+ .y-cockpit[data-bank-placement=side]:not([data-custom-instruments])[data-layout=full]:not([data-mfd-open]) :is(.cockpit-mission,.cockpit-map-pane){width:clamp(115px,calc((100cqw - 320px)/2 - 14px),370px)}
+ .y-cockpit[data-mfd-open] .cockpit-body{grid-template-columns:minmax(0,1fr) minmax(290px,.85fr)}
+ .y-cockpit[data-arrangement=stacked][data-mfd-open] .cockpit-body{grid-template-columns:minmax(0,1fr)}
+}
+@container yonder-cockpit (max-width:600px){
+ .y-cockpit[data-mfd-open] .cockpit-body{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(220px,1.3fr) 44px auto minmax(200px,1fr);overflow:auto}
+ .y-cockpit[data-mfd-open] .cockpit-body>.cockpit-primary{grid-area:1/1/2/2}
+ .y-cockpit[data-mfd-open] .cockpit-body>.cockpit-forecast{grid-area:1/1/2/2}
+ .y-cockpit .cockpit-mfd-pages{grid-area:2/1/3/2}
+ .y-cockpit .cockpit-mfd-bank{grid-area:3/1/4/2}
+ .y-cockpit[data-mfd-open] .cockpit-body>:is(.cockpit-mission,.cockpit-map-pane,.cockpit-systems-pane){grid-area:4/1/5/2}
+ .y-cockpit .cockpit-header{overflow-x:auto}
+}

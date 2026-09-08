@@ -32,6 +32,7 @@ const terrain = await TerrainPackService.open(
 );
 const vehicle = {
   snapshot: () => fixture(),
+  instrumentation: () => fixture().instruments,
   submit: () => ({
     accepted: false,
     status: 400,
@@ -41,7 +42,7 @@ const vehicle = {
 const client = new DaemonClient({
   transport: async (request) => {
     const result = await cockpitRoute(
-      { vehicle, data, terrain },
+      { vehicle, data, terrain, instruments: { snapshot: async () => fixture().instruments } },
       request.method,
       request.path,
       request.body,

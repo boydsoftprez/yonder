@@ -28,7 +28,7 @@
         <label class="pfd-option pfd-range"><span>HSI background <b>{{Math.round(options.hsiOpacity*100)}}%</b></span><input aria-label="HSI background opacity" type="range" min="10" max="100" step="5" :value="options.hsiOpacity*100" @input="$emit('option','hsiOpacity',Number($event.target.value)/100)"></label>
         <label class="pfd-option"><span>Pitch ladder</span><input type="checkbox" :checked="options.pitchLadder" @change="$emit('option','pitchLadder',$event.target.checked)"></label>
         <label class="pfd-option"><span>Secondary readouts<small>Pitch / bank and desired track</small></span><input type="checkbox" :checked="options.secondary" @change="$emit('option','secondary',$event.target.checked)"></label>
-        <label class="pfd-option"><span>Instrument strip</span><select aria-label="Instrument strip placement" :value="options.stripPlacement" @change="$emit('option','stripPlacement',$event.target.value)"><option value="mfd">Mission / navigation</option><option value="pfd">PFD</option><option value="hidden">Hidden</option></select></label>
+        <button class="pfd-wide-button" @click="navigate('instrument-layout')">Instrument panel &amp; PFD/MFD layout</button>
         <button class="pfd-wide-button" @click="navigate('display')">Background, insets &amp; data sources →</button>
         <button class="pfd-wide-button" @click="$emit('panel','director')">Flight director settings →</button>
         <button class="pfd-wide-button" @click="$emit('panel','wind')">Wind display settings →</button>
