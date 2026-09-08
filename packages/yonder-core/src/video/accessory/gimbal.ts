@@ -87,11 +87,19 @@ export class GimbalController {
     const action = { controller: new AbortController(), command: { ...command }, deadline: reserved.grant.deadline };
     this.discrete = action;
     this.watchAction(action);
-    if (command.kind === 'mode') this.awaitingMode = { mode: command.mode, after: this.options.clock.now(), signal: action.controller.signal };
+    // Recentre's measured 02 01 payload also transitions to Follow mode 2.
+    const targetMode = command.kind === 'mode' ? command.mode : 2;
+    this.awaitingMode = { mode: targetMode, after: this.options.clock.now(), signal: action.controller.signal };
     const wire = this.wire(command);
     this.pending = true;
     try {
-      await this.options.write(wire, { signal: action.controller.signal, deadline: action.deadline, admission: () => this.discreteAdmission(action) });
+      await this.options.write(wire, { signal: action.controller.signal, deadline: action.deadline, admission: () => {
+        if (!this.discreteAdmission(action)) return false;
+        // Refresh/watchdog checks do not move this boundary. Only actual
+        // serialized dispatch establishes how new target-mode readback must be.
+        this.awaitingMode = { mode: targetMode, after: this.options.clock.now(), signal: action.controller.signal };
+        return true;
+      } });
       return action.controller.signal.aborted ? { accepted: false, reason: 'revoked' } : { accepted: true };
     } catch {
       if (!action.controller.signal.aborted) this.disconnect();
@@ -103,7 +111,7 @@ export class GimbalController {
   }
   private check(command: MotionCommand, signal?: AbortSignal): GuardResult {
     const context = { ...this.options.context(), now: this.options.clock.now() };
-    // Only the original mode command may pass its own unresolved transition.
+    // Only the original discrete command may pass its own unresolved transition.
     const ownTransition = this.awaitingMode !== undefined && this.awaitingMode.signal === signal;
     if (this.awaitingMode && !ownTransition) {
       if (context.attitude?.mode !== this.awaitingMode.mode || context.attitude.at <= this.awaitingMode.after) {

@@ -156,6 +156,43 @@ describe('intent-bound gimbal dispatcher', () => {
     f.freshAdvance(1);
     expect(f.admit(f.issue())).toMatchObject({ accepted: true }); f.controller.close();
   });
+  it.each([0, 1] as const)('recentre from mode %s inhibits rates until newer Follow 2 readback', async fromMode => {
+    const f = fixture(); f.context.attitude!.mode = fromMode;
+    f.context.envelopes[0].mode = fromMode; f.context.actions[0].fromMode = fromMode;
+    const p = f.controller.action('alice', { kind: 'recentre' });
+    expect(f.writes[0].options.admission!()).toBe(true);
+    f.writes[0].resolve(); expect(await p).toEqual({ accepted: true });
+    expect(f.admit(f.issue())).toMatchObject({ accepted: false, reason: 'mode-unobserved' });
+    f.context.attitude!.mode = 2;
+    expect(f.admit(f.issue())).toMatchObject({ accepted: false, reason: 'mode-unobserved' });
+    f.freshAdvance(1);
+    expect(f.admit(f.issue())).toMatchObject({ accepted: true }); f.controller.close();
+  });
+  it.each([{ kind: 'recentre' }, { kind: 'mode', mode: 2 }] as const)('recentre acceptance blocks subsequent $kind until Follow 2 is observed', async followup => {
+    const f = fixture(); const first = f.controller.action('alice', { kind: 'recentre' });
+    expect(f.writes[0].options.admission!()).toBe(true);
+    f.controller.refresh(); expect(f.writes[0].options.signal!.aborted).toBe(false);
+    f.writes[0].resolve(); expect(await first).toEqual({ accepted: true });
+    const blocked = f.controller.action('alice', followup); f.writes[1]?.resolve();
+    expect(await blocked).toEqual({ accepted: false, reason: 'mode-unobserved' });
+    expect(f.writes).toHaveLength(1);
+    f.context.actions.push({ ...f.context.actions[followup.kind === 'mode' ? 1 : 0], fromMode: 2 });
+    f.context.attitude!.mode = 2; f.freshAdvance(1);
+    const accepted = f.controller.action('alice', followup);
+    expect(f.writes).toHaveLength(2); expect(f.writes[1].options.admission!()).toBe(true);
+    f.writes[1].resolve(); expect(await accepted).toEqual({ accepted: true }); f.controller.close();
+  });
+  it.each([{ kind: 'recentre' }, { kind: 'mode', mode: 2 }] as const)('$kind needs target readback newer than actual delayed dispatch, not enqueue', async command => {
+    const f = fixture(); const first = f.controller.action('alice', command);
+    f.context.actions.push({ ...f.context.actions[command.kind === 'mode' ? 1 : 0], fromMode: 2 });
+    // A separately valid target pose arrives while I/O remains queued.
+    f.context.attitude!.mode = 2; f.freshAdvance(10);
+    expect(f.writes[0].options.admission!()).toBe(true);
+    f.writes[0].resolve(); expect(await first).toEqual({ accepted: true });
+    expect(f.admit(f.issue())).toMatchObject({ accepted: false, reason: 'mode-unobserved' });
+    f.freshAdvance(1);
+    expect(f.admit(f.issue())).toMatchObject({ accepted: true }); f.controller.close();
+  });
   it('invalid target-mode telemetry cannot clear the mode observation interlock', async () => {
     const f = fixture(); const p = f.controller.action('alice', { kind: 'mode', mode: 2 });
     f.writes[0].resolve(); await p;

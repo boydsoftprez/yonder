@@ -91,6 +91,23 @@ describe('physical motion guard (synthetic measured context)', () => {
     c.actions = context().actions; c.attitude!.pitchLimit = true;
     expect(guard(command, c)).toEqual({ allowed: false, reason: 'at-limit' });
   });
+  it.each([0, 1] as const)('recentre from mode %s requires a measured Follow 2 target envelope', fromMode => {
+    const c = context(); c.attitude!.mode = fromMode;
+    c.envelopes[0].mode = fromMode; c.actions[0].fromMode = fromMode;
+    c.envelopes.pop();
+    expect(guard({ kind: 'recentre' }, c)).toEqual({ allowed: false, reason: 'envelope-unknown' });
+  });
+  it('recentre trajectory must fit both the source and Follow 2 envelopes', () => {
+    const c = context();
+    c.actions[0].start = { yaw: [-1, 1], pitch: [-1, 1], roll: [-1, 1] };
+    c.actions[0].trajectory = { yaw: [-10, 10], pitch: [-10, 10], roll: [-2, 2] };
+    c.envelopes[1].yaw = [-5, 5];
+    expect(guard({ kind: 'recentre' }, c)).toEqual({ allowed: false, reason: 'trajectory-unverified' });
+    c.envelopes[1].yaw = [-50, 50]; c.envelopes[0].yaw = [-5, 5];
+    expect(guard({ kind: 'recentre' }, c)).toEqual({ allowed: false, reason: 'trajectory-unverified' });
+    c.envelopes[0].yaw = [-10, 10]; c.envelopes[1].yaw = [-10, 10];
+    expect(guard({ kind: 'recentre' }, c)).toEqual({ allowed: true });
+  });
   it('mode transition needs the target envelope as well as the source envelope', () => {
     const c = context(); c.envelopes.pop();
     expect(guard({ kind: 'mode', mode: 2 }, c)).toEqual({ allowed: false, reason: 'envelope-unknown' });

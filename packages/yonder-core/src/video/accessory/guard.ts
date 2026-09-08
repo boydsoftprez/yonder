@@ -89,7 +89,10 @@ export function guard(cmd: MotionCommand, c: GuardContext): GuardResult {
   if (!regionValid(envelope)) return refuse('envelope-unknown');
   if (!contains(envelope, a)) return refuse('outside-envelope');
   if (a.pitchLimit || a.yawLimit) return refuse('at-limit');
-  const target = cmd.kind === 'mode' ? c.envelopes.find(e => e.mount === c.mount && e.mode === cmd.mode) : envelope;
+  // Measured 4/4c 02 01 recentre also selects Follow mode 2. Its entire
+  // certified trajectory must fit both the observed source and that target.
+  const targetMode = cmd.kind === 'mode' ? cmd.mode : 2;
+  const target = c.envelopes.find(e => e.mount === c.mount && e.mode === targetMode);
   if (!target || !regionValid(target)) return refuse('envelope-unknown');
   const verified = c.actions.some(action => action.mount === c.mount && action.fromMode === a.mode
     && action.command.kind === cmd.kind && (cmd.kind !== 'mode' || (action.command.kind === 'mode' && action.command.mode === cmd.mode))
