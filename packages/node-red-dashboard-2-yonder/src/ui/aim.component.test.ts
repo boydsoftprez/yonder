@@ -292,6 +292,46 @@ describe("position against bounds", () => {
         expect(pan.text()).toContain("position has not been established yet");
     });
 
+    /**
+     * K-65. `aimPanel()` answers `pan: null` for a gimbal that is `present`
+     * and has never said where it is pointing — §8.7's attitude push is
+     * unbuilt — and its own comment says why: *a zero would be a claim*.
+     * This panel drew that claim: `PAN 0.0 °`, with a pointer on the track,
+     * under a heading reading `Reported position`. Nothing reported it.
+     */
+    it("an axis nothing has reported reads dead, not zero", () => {
+        const { wrapper } = mountAim(makeReport({ pan: null as unknown as number, tilt: null as unknown as number }));
+        for (const label of ["Pan", "Tilt"]) {
+            const g = gaugeByLabel(wrapper, label);
+            expect(g.find(".y-pg__val").text()).toBe("—");
+            expect(g.find(".y-pg__ptr").exists()).toBe(false);
+            expect(g.classes()).toContain("is-dead");
+        }
+    });
+
+    it("says why it has no reading in its own words, not the head's", () => {
+        const { wrapper } = mountAim(makeReport({
+            pan: null as unknown as number,
+            tilt: null as unknown as number,
+            inhibited: "the motion guard is not built yet, so nothing is sent",
+        }));
+        const pan = gaugeByLabel(wrapper, "Pan");
+        expect(pan.text()).toContain("this gimbal has not said where it is pointing");
+        // The head's own sentence is said once, above — never again under a
+        // gauge. That repetition is the defect K-63 closed.
+        expect(pan.text()).not.toContain("the motion guard is not built yet");
+    });
+
+    it("is per axis: one reported and one not draws one reading and one dash", () => {
+        const { wrapper } = mountAim(makeReport({ pan: 42.5, tilt: null as unknown as number }));
+        const pan = gaugeByLabel(wrapper, "Pan");
+        const tilt = gaugeByLabel(wrapper, "Tilt");
+        expect(pan.find(".y-pg__val").text()).toContain("42.5");
+        expect(pan.classes()).not.toContain("is-dead");
+        expect(tilt.find(".y-pg__val").text()).toBe("—");
+        expect(tilt.classes()).toContain("is-dead");
+    });
+
     it("bounds being null is a fact about reporting, independent of aimState — the pad and Recentre stay live", () => {
         // Proves the two facts are wired from two different payload fields,
         // not one flag doing both jobs: present with no bounds yet still

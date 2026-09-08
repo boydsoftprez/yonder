@@ -795,7 +795,7 @@ export const SPECIMENS = [
   },
   {
     title: "Aim panel — live, on its own",
-    note: "Task 23: ui-yonder-aim, mounted with no deck and no camera page around it (R-UI-28) — everything here comes from this one payload. The badge reads RATE CONTROL in the select tone; Commanded rate sits below the two gauges as a bounded value, real only while dragging the pad above it, and its ceiling is YonderAimPad's own MAX_RATE rather than a number written down twice. Roll stays struck through even here — no camera this project supports has a roll motor, so YonderAim.vue hardcodes it exactly as YonderDeck.buildAim() does, not derived from this payload. This is the render aim.pocket2.png draws, part for part.",
+    note: "Task 23: ui-yonder-aim, mounted with no deck and no camera page around it (R-UI-28) — everything here comes from this one payload. The badge reads RATE CONTROL in the select tone; Commanded rate sits below the two gauges as a bounded value, real only while dragging the pad above it, and its ceiling is YonderAimPad's own MAX_RATE rather than a number written down twice. Roll stays struck through even here — no camera this project supports has a roll motor, so YonderAim.vue hardcodes it rather than deriving it from this payload. This is the render aim.pocket2.png draws, part for part.",
     component: YonderAim,
     props: {
       report: {

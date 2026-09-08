@@ -50,8 +50,16 @@
                  above them. Without it the two rows read as controls sitting
                  loose under the dial. -->
             <div class="y-aimpanel__sub">Reported position</div>
-            <YonderPositionGauge label="Pan" unit="°" :value="pan" :min="panBounds.lo" :max="panBounds.hi" :dead="!hasBounds" :reason="gaugeReason" />
-            <YonderPositionGauge label="Tilt" unit="°" :value="tilt" :min="tiltBounds.lo" :max="tiltBounds.hi" :dead="!hasBounds" :reason="gaugeReason" />
+            <!-- K-65: `dead` is *no reading* as well as *no bounds*, per axis.
+                 `aimPanel()` answers `pan: null` for a gimbal that has never
+                 said where it is pointing, and its own comment says why — "a
+                 zero would be a claim" — and this panel drew that claim, with
+                 a pointer on the track, under a heading reading `Reported
+                 position`. An unreported axis carries its own sentence rather
+                 than the head's: the two are different facts, and repeating
+                 the head under each gauge is the defect K-63 closed. -->
+            <YonderPositionGauge label="Pan" unit="°" :value="pan" :min="panBounds.lo" :max="panBounds.hi" :dead="!hasBounds || !panReported" :reason="reasonFor(panReported)" />
+            <YonderPositionGauge label="Tilt" unit="°" :value="tilt" :min="tiltBounds.lo" :max="tiltBounds.hi" :dead="!hasBounds || !tiltReported" :reason="reasonFor(tiltReported)" />
 
             <!-- L-36: below the gauges, and against its bounds. Above them it
                  shared a line with the annunciator drawn beneath this panel
@@ -330,11 +338,26 @@ export default {
         reason () {
             return (this.report && this.report.reason) || ''
         },
+        /** **Whether this axis has been reported at all** (K-65, R-UI-20).
+         *  `aimPanel()` answers `null` where §8.7's attitude push has said
+         *  nothing, and that is a different fact from an axis reporting zero.
+         *  Per axis rather than for the pair, because a gimbal reporting one
+         *  and not the other is a state this panel can already be handed and
+         *  would otherwise draw half a claim. */
+        panReported () {
+            return Boolean(this.report) && typeof this.report.pan === 'number'
+        },
+        tiltReported () {
+            return Boolean(this.report) && typeof this.report.tilt === 'number'
+        },
+        /** The number the pointer is drawn at. Zero is harmless for an axis
+         *  that was never reported because the gauge is `dead` there and draws
+         *  no pointer at all — the honesty is in `panReported`, never here. */
         pan () {
-            return this.report && typeof this.report.pan === 'number' ? this.report.pan : 0
+            return this.panReported ? this.report.pan : 0
         },
         tilt () {
-            return this.report && typeof this.report.tilt === 'number' ? this.report.tilt : 0
+            return this.tiltReported ? this.report.tilt : 0
         },
         bounds () {
             return (this.report && this.report.bounds) || null
@@ -543,6 +566,20 @@ export default {
         this.$dataTracker(this.id)
     },
     methods: {
+        /**
+         * **Why a gauge has no reading, in the words true of that gauge.**
+         *
+         * An axis nothing has reported says so itself (K-65). Any other dead
+         * gauge — one whose gimbal has not stated its bounds — keeps
+         * `gaugeReason`, which is what this panel said before and what
+         * `position against bounds` asserts. The two are not the same fact
+         * and must not borrow each other's sentence: the head's own reason
+         * is said once, above, and repeating it under each gauge is the
+         * defect K-63 closed.
+         */
+        reasonFor (reported) {
+            return reported ? this.gaugeReason : 'this gimbal has not said where it is pointing'
+        },
         /** Every message this node posts leaves through here — one seam,
          * the same reasoning `YonderDeck`'s own `post()` gives for having
          * exactly one. */

@@ -1487,3 +1487,37 @@ describe("the outputs group", () => {
     }
   });
 });
+
+/**
+ * K-64: this deck drew a dial of its own, and `ui-yonder-aim` draws the panel
+ * the blueprint puts beside the picture — so a camera with a gimbal answering
+ * had **two** dials on one page, posting two different messages (`{ aim }`
+ * here, `{ slew }` there). Nothing on the bench could reach it: every board
+ * this repository has run on answers `aim: not-offered`, and the deck's block
+ * returned null for that, so it stood from Task 23 until the gate's own
+ * fixture answered `present` and photographed it.
+ *
+ * The blueprint's Live render with a gimbal (`live.pocket2.night.png`) draws
+ * one panel, top right, and nothing aim-shaped anywhere in the deck below it.
+ * This test is that render, asserted.
+ */
+describe("the aim pad the deck used to draw", () => {
+  const aiming = makeReport({ capabilities: { aim: present({ pan: 0, tilt: 0 }) } });
+
+  it("is not drawn here, in either mode, however the camera answers", () => {
+    for (const mode of ["live", "setup"] as const) {
+      const { wrapper } = deck(makeStore(aiming), mode);
+      expect(wrapper.find(".y-aim__dial").exists()).toBe(false);
+      expect(wrapper.find(".y-deck__aim").exists()).toBe(false);
+      expect(wrapper.text()).not.toContain("Aim");
+    }
+  });
+
+  it("emits no aim message, because there is nothing here to press", async () => {
+    const { wrapper, emit } = deck(makeStore(aiming), "live");
+    await wrapper.vm.$nextTick();
+    for (const [, , msg] of emit.mock.calls) {
+      expect(Object.keys((msg as { payload: object }).payload)).not.toContain("aim");
+    }
+  });
+});

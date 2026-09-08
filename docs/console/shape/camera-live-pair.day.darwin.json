@@ -11,7 +11,7 @@
         "x": 268,
         "y": 76,
         "w": 663,
-        "h": 678
+        "h": 714
       }
     },
     {
@@ -29,7 +29,7 @@
         "x": 943,
         "y": 76,
         "w": 325,
-        "h": 678
+        "h": 714
       }
     },
     {
@@ -38,14 +38,14 @@
         "x": 960,
         "y": 93,
         "w": 291,
-        "h": 584
+        "h": 620
       }
     },
     {
       "key": "nrdb-ui-widget.nrdb-ui-yonder-annunciator",
       "box": {
         "x": 960,
-        "y": 689,
+        "y": 725,
         "w": 291,
         "h": 48
       }
@@ -54,7 +54,7 @@
       "key": "nrdb-ui-group#2",
       "box": {
         "x": 268,
-        "y": 766,
+        "y": 802,
         "w": 1000,
         "h": 82
       }
@@ -63,7 +63,7 @@
       "key": "nrdb-ui-widget.nrdb-ui-yonder-databar",
       "box": {
         "x": 285,
-        "y": 783,
+        "y": 819,
         "w": 966,
         "h": 48
       }
@@ -72,25 +72,25 @@
       "key": "nrdb-ui-group.yonder-deck-live",
       "box": {
         "x": 268,
-        "y": 860,
+        "y": 896,
         "w": 1000,
-        "h": 1619
+        "h": 1439
       }
     },
     {
       "key": "nrdb-ui-widget.nrdb-ui-yonder-deck",
       "box": {
         "x": 285,
-        "y": 877,
+        "y": 913,
         "w": 966,
-        "h": 1585
+        "h": 1405
       }
     },
     {
       "key": "nrdb-ui-group.yonder-captures",
       "box": {
         "x": 268,
-        "y": 2491,
+        "y": 2348,
         "w": 1000,
         "h": 145
       }
@@ -99,7 +99,7 @@
       "key": "nrdb-ui-widget.nrdb-ui-yonder-captures",
       "box": {
         "x": 285,
-        "y": 2508,
+        "y": 2365,
         "w": 966,
         "h": 111
       }
@@ -108,7 +108,7 @@
       "key": "nrdb-ui-group#3",
       "box": {
         "x": 268,
-        "y": 2648,
+        "y": 2505,
         "w": 1000,
         "h": 112
       }
@@ -117,7 +117,7 @@
       "key": "nrdb-ui-widget.nrdb-ui-yonder-databar",
       "box": {
         "x": 285,
-        "y": 2665,
+        "y": 2522,
         "w": 966,
         "h": 78
       }

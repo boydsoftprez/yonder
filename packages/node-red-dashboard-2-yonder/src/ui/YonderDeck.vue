@@ -8,7 +8,6 @@ import YonderSegmented from './YonderSegmented.vue'
 import YonderSetBar from './YonderSetBar.vue'
 import YonderTextField from './YonderTextField.vue'
 import YonderShutter from './YonderShutter.vue'
-import YonderAimPad from './YonderAimPad.vue'
 import { createDraftStore } from './draft.ts'
 import { LABELS, captureDestination, captureRefusal, captureSizes, deckDraft, draftPathFor, endedWords, interruption } from 'yonder-core/presentation'
 
@@ -134,9 +133,12 @@ import { LABELS, captureDestination, captureRefusal, captureSizes, deckDraft, dr
  * settings, rarely touched, that do not need to compete for space with
  * Exposure and Colour on the page an operator watches while flying.
  *
- * `group: 'aim'` is deliberately not one of `SLOTS`' four columns — the aim
- * panel sits beside the picture on Live only, the same placement the
- * blueprint gives it, and never appears on Setup.
+ * `group: 'aim'` is deliberately not one of `SLOTS`' four columns, and this
+ * deck draws no aim control at all: `ui-yonder-aim` is the panel, beside the
+ * picture on Live, which is where the blueprint puts it and the only place it
+ * appears. This deck drew a second dial of its own until K-64 — one page, two
+ * dials, posting two different messages — and the blueprint's own Live render
+ * has one panel and nothing aim-shaped anywhere in the deck below it.
  */
 export const CAPABILITY_LAYOUT = {
   /* **`formats` is drawn by the Stream column's two pickers** (R-CAM-14,
@@ -1359,34 +1361,6 @@ export default {
       }, () => drawn)
     },
     /**
-     * The gimbal pad — Live only, beside the picture, never one of `SLOTS`
-     * (the blueprint's own placement). `inhibited` is derived straight from
-     * `capabilities.aim` — `present` is live, `advertised`/`gated` disable
-     * the whole pad with the reason, and `not-offered` omits it entirely,
-     * the same three-way split every other capability on this page draws.
-     * Every `slew`/`stop` is relayed to the socket exactly as `YonderAimPad`
-     * computed it (R-CMD-04: this deck relays, it never originates one).
-     */
-    buildAim () {
-      if (this.mode !== 'live') return null
-      const aim = this.report.capabilities && this.report.capabilities.aim
-      if (!aim || aim.state === 'not-offered') return null
-      const inhibited = aim.state === 'advertised'
-        ? (aim.reason || 'not answering')
-        : aim.state === 'gated'
-          ? `${aim.by.label} has it`
-          : null
-      return h('div', { class: 'y-deck__aim' }, [
-        h('div', { class: 'y-deck__aim-h' }, 'Aim'),
-        h(YonderAimPad, {
-          axes: { pan: 'present', tilt: 'present', roll: 'advertised' },
-          inhibited,
-          onSlew: (e) => this.post({ aim: { pan: e.pan, tilt: e.tilt, seq: e.seq, gesture: e.gesture } }),
-          onStop: (e) => this.post({ aim: { gesture: e.gesture, pan: 0, tilt: 0 } }),
-        }),
-      ])
-    },
-    /**
      * What is staged, what it would interrupt, and what the device refused.
      *
      * **The interruption is computed here, from this deck's own draft**
@@ -1510,7 +1484,6 @@ export default {
     return h('div', { class: ['y-deck', 'y-deck--' + this.mode] }, [
       h(YonderPlacard, { kind: 'Camera', name: cam.name || '', unit: cam.spec || '' }),
       this.buildPending(),
-      this.buildAim(),
       h('div', { class: 'y-deck__cols' }, slots.map((slot, i) => h('div', { class: 'y-deck__slot', key: i }, slot))),
       this.buildOutputs(),
       this.buildRail(),
@@ -1630,16 +1603,6 @@ export default {
 }
 .y-deck__slot:first-child {
     border-left-width: 0;
-}
-.y-deck__aim {
-    padding: 10px 16px 0;
-}
-.y-deck__aim-h {
-    font-size: 10.5px;
-    letter-spacing: 0.16em;
-    text-transform: uppercase;
-    color: var(--yonder-label, #7f8a95);
-    margin-bottom: 8px;
 }
 .y-deck__out {
     display: flex;

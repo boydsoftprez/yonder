@@ -2407,7 +2407,7 @@ Put to them 2026-09-08.
 
 ### K-64 · The Camera page draws two aim pads, and neither knows about the other
 
-**Status:** Open · **Requirements:** R-CAM-11, R-UI-28, R-UI-20
+**Status:** Closed by `HEAD` — the deck's dial is deleted · **Requirements:** R-CAM-11, R-UI-28, R-UI-20
 
 Found in the same photograph as K-63. `camera-live-pair.*.png` carries an `AIM`
 legend and a slew dial in the group at the top right — `ui-yonder-aim` — and a
@@ -2435,6 +2435,16 @@ the surface the blueprint draws, the deck's block is not in the blueprint at
 all, and `YonderAimPad` keeps both of its call sites' tests either way — but
 that is a decision about a surface, so it is the operator's.
 
+**Closed by reading the render.** `live.pocket2.night.png` is the blueprint's
+own Live page with a gimbal answering, and it draws **one** aim panel, top
+right, with nothing aim-shaped anywhere in the deck below it — the deck's four
+columns there are Capture, Preview, Exposure and Optics. Rule 7 makes that the
+answer rather than a preference: the panel is drawn, the deck's dial is not.
+`buildAim()`, its two style rules and the deck's `YonderAimPad` import are
+gone; `deck.component.test.ts`'s *the aim pad the deck used to draw* asserts
+that a camera answering `aim: present` draws no dial and emits no `aim`
+message in either mode, which is the render, asserted.
+
 **What this entry does *not* say, having nearly said it.** The first reading of
 that photograph was that the deck's dial *overflows*, painted across the staged
 line and down into the soft-key rail. It does not. The rail group is
@@ -2451,7 +2461,7 @@ this artefact, and the gate's clip rule was right to report nothing.
 
 ### K-65 · The gimbal has not said where it is pointing, and both gauges read 0.0°
 
-**Status:** Open · **Requirements:** R-CAM-11, R-UI-20, R-VID-18
+**Status:** Closed by `HEAD` — an unreported axis reads `—` · **Requirements:** R-CAM-11, R-UI-20, R-VID-18
 
 `aimPanel()` in `packages/yonder-core/src/video/present.ts` answers `pan: null`
 and `tilt: null` for a gimbal that is `present`, and says why in its own words:
@@ -2488,5 +2498,30 @@ where it is.
 sentence twice more, under each gauge, which is the defect K-63 has just
 closed. The two have to move together, and how they move is the operator's
 (see K-63's own "what is not closed").
+
+**Closed, and the collision above dissolved rather than decided.** The two
+sentences are about two different facts, so neither has to borrow the other:
+`dead` is now *this axis has no reading* as well as *this gimbal has stated no
+bounds*, per axis, and `reasonFor()` gives a gauge with nothing to report its
+own words — *this gimbal has not said where it is pointing* — while any other
+dead gauge keeps `gaugeReason` exactly as `position against bounds` asserts.
+The head's own sentence is still said once, above, and never again beneath a
+gauge. Three tests hold it: an unreported axis reads `—` with no pointer; it
+says why in its own words and not the head's; and one axis reported with the
+other not draws one reading and one dash. Both mutations — `dead` back to
+`!hasBounds`, and the gauge borrowing the head's sentence — are caught by
+those tests by name.
+
+**One blemish this leaves, and it is the operator's.** A gimbal that has
+reported neither axis — the only state anything can produce today, because
+§8.7's push reports attitude as a unit — now carries *this gimbal has not said
+where it is pointing* under **both** gauges. Each row states its own fact,
+which is what makes the per-axis case (one reported, one not) readable, and it
+is how a field states its own condition anywhere else on this console. But two
+identical lines stacked is the shape of the defect this entry's neighbour just
+closed. The alternative is one sentence beneath the pair, naming the axes when
+only some are missing — more code, one less repetition, and a second placement
+for the same kind of sentence. Built as the per-axis form; say the word and it
+becomes the other.
 
 ---
