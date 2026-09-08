@@ -55,7 +55,7 @@ import type { OpenPort } from "../mav/detect.js";
 import { AP_CONNECTION, DEFAULT_AP_PASSPHRASE } from "../net/profiles.js";
 import { scanForNetworks } from "../net/scan.js";
 import { ping, reachable } from "../diag/probe.js";
-import { systemRunner, type CommandRunner } from "../net/runner.js";
+import { inFlightRunner, redactArgv, systemRunner, type CommandRunner } from "../net/runner.js";
 import { systemClock, type Clock, type Renderer } from "../apply/types.js";
 import { DEFAULT_CONFIG, type Config } from "../schema/config.js";
 
@@ -835,6 +835,27 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
     ?? new MmcliClient(opts.runner ?? systemRunner, trace);
 
   /**
+   * Read-only clients for the status routes and reach watch.
+   *
+   * `ReachMonitor.state()` asks three views of the same instant in parallel;
+   * each used to spawn its own identical nmcli and mmcli processes. The
+   * wrapper shares only commands that are still in flight and forgets them as
+   * soon as they settle. Separate client instances keep the renderer, radio
+   * verification, scan and fallback on `client`/`modemClient` above, over the
+   * direct runner: a poll begun before a write can never satisfy its fresh
+   * post-write check (R-CFG-03, R-NET-07).
+   *
+   * Log under the shared call rather than in both clients, so the journal says
+   * how many processes actually ran instead of how many readers wanted one.
+   */
+  const observationRunner = inFlightRunner(async (argv, options) => {
+    trace(redactArgv(argv).join(" "));
+    return (opts.runner ?? systemRunner)(argv, options);
+  });
+  const observationClient = new NmcliClient(observationRunner);
+  const observationModemClient = new MmcliClient(observationRunner);
+
+  /**
    * Turn on ModemManager's detailed signal reporting, once per modem.
    *
    * R-CEL-10. A modem reports only a coarse quality percentage until this is
@@ -1090,7 +1111,11 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   // is wiring, not a second place that decides what a modem is. What may be
   // remembered about a modem and what may not is R-CEL-13, stated there with
   // its tests.
-  const modemPort = new ModemNetPort(modemClient, clock);
+  const modemPort = new ModemNetPort(observationModemClient, clock);
+  // The fallback is checked once and is deliberately outside observation
+  // sharing. Its answer decides whether the access point comes up (R-NET-07),
+  // so it reads through the direct clients even if a page read is in flight.
+  const fallbackModemPort = new ModemNetPort(modemClient, clock);
 
   // Which way out is working, assembled from the parts in net/reach/.
   //
@@ -1108,7 +1133,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
     ...(opts.counters !== undefined ? { counters: opts.counters } : {}),
     devices: async () => {
       const config = reachConfig();
-      const [devices, net] = await Promise.all([client.devices(), modemPort.interfaceFor(config)]);
+      const [devices, net] = await Promise.all([observationClient.devices(), modemPort.interfaceFor(config)]);
       return pathDevices(config, devices, net);
     },
     // What NetworkManager says about the interfaces themselves, so a port
@@ -1118,14 +1143,14 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
     // `cdc-wdm0` and has no entry at all for the `wwan0` the bytes go out of.
     down: async () => {
       const config = reachConfig();
-      const [devices, net] = await Promise.all([client.devices(), modemPort.interfaceFor(config)]);
+      const [devices, net] = await Promise.all([observationClient.devices(), modemPort.interfaceFor(config)]);
       return pathsDown(devices, pathDevices(config, devices, net), pathDevices(config, devices));
     },
     order: () => reachOrder(reachConfig()),
     holding: async () => {
       const config = reachConfig();
       const [devices, addresses, net] = await Promise.all([
-        client.devices(), client.activeIpv4(), modemPort.interfaceFor(config),
+        observationClient.devices(), observationClient.activeIpv4(), modemPort.interfaceFor(config),
       ]);
       return pathsHolding(
         reachOrder(config),
@@ -1167,7 +1192,19 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
     // ask — so wiring this in can only ever make the fallback fire *more*
     // readily than the address check alone, never less. That direction is the
     // one rule 6 allows.
-    carrying: () => reach.carrying(),
+    carrying: () => reach.carrying(async () => {
+      const config = reachConfig();
+      const [devices, addresses, net] = await Promise.all([
+        client.devices(), client.activeIpv4(), fallbackModemPort.interfaceFor(config),
+      ]);
+      return pathsHolding(
+        reachOrder(config),
+        pathDevices(config, devices, net),
+        addresses,
+        config.network.ap.address.split("/")[0] ?? "",
+        pathDevices(config, devices),
+      );
+    }),
     // The fallback's only action is `nmcli connection up yonder-ap`, and that
     // profile exists only because a render created it. On a cold boot the
     // render may still be waiting for the radio when the deadline lands —
@@ -1275,7 +1312,9 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
     ...(built === undefined ? {} : {
       scan: () => scanForNetworks(client),
       netState: async () => {
-        const [devices, addresses] = await Promise.all([client.devices(), client.activeIpv4()]);
+        const [devices, addresses] = await Promise.all([
+          observationClient.devices(), observationClient.activeIpv4(),
+        ]);
         return networkState(loadConfig(opts.configPath), devices, addresses);
       },
       // What the modem says about itself, read from ModemManager and never
@@ -1284,7 +1323,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
       // asked for, which is the pair that disagrees exactly when it matters.
       modemState: async () => {
         const config = loadConfig(opts.configPath);
-        const paths = await modemClient.modems();
+        const paths = await observationModemClient.modems();
         // No modem is an ordinary answer, not a failure. A board without one
         // is an ordinary board, and an appliance is a named adapter
         // ModemManager will never have heard of — modemState says which of
@@ -1293,10 +1332,10 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
         if (paths.length === 0) {
           return modemState(config, null, null, { rssi: null, rsrq: null, rsrp: null, snr: null });
         }
-        const modem = await modemClient.modem(paths[0]);
+        const modem = await observationModemClient.modem(paths[0]);
         await armSignal(modem.path);
-        const bearer = await modemClient.connectedBearer(modem);
-        const signal = await modemClient.signal(modem.path);
+        const bearer = await observationModemClient.connectedBearer(modem);
+        const signal = await observationModemClient.signal(modem.path);
         return modemState(config, modem, bearer, signal);
       },
       secrets: built.secrets,
@@ -1341,9 +1380,9 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
       addresses: async () => {
         const config = reachConfig();
         const [local, mesh, devices, net] = await Promise.all([
-          client.activeIpv4(),
+          observationClient.activeIpv4(),
           readRemoteState(config, built.zerotier, { readTraffic }),
-          client.devices(),
+          observationClient.devices(),
           modemPort.interfaceFor(config),
         ]);
         /**

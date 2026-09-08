@@ -31,6 +31,49 @@ export interface CommandOptions {
 }
 
 /**
+ * Share an identical command only while its process is still running.
+ *
+ * This is deliberately a runner wrapper rather than a cache. The entry is
+ * removed as soon as the command settles, on success or failure, so a later
+ * poll always asks the device again. Callers get separate result objects: a
+ * parser or diagnostic may annotate its answer without changing another
+ * caller's view of the same observation.
+ *
+ * Use this only to build clients that issue read-only observations. A writer
+ * and the read that verifies it must use the underlying runner directly; if
+ * they shared a command already in flight from before the write, the verifier
+ * could decide from the board that existed before the change (R-CFG-03,
+ * R-NET-07).
+ */
+export function inFlightRunner(runner: CommandRunner): CommandRunner {
+  const pending = new Map<string, Promise<CommandResult>>();
+  return (argv, opts) => {
+    const env = opts?.env === undefined
+      ? null
+      : Object.entries(opts.env).sort(([a], [b]) => a.localeCompare(b));
+    const key = JSON.stringify([argv, env]);
+    let shared = pending.get(key);
+    if (shared === undefined) {
+      const ownArgv = [...argv];
+      const ownOpts = opts?.env === undefined ? undefined : { env: { ...opts.env } };
+      let started: Promise<CommandResult>;
+      try {
+        started = runner(ownArgv, ownOpts);
+      } catch (e) {
+        started = Promise.reject(e);
+      }
+      let tracked: Promise<CommandResult>;
+      tracked = started.finally(() => {
+        if (pending.get(key) === tracked) pending.delete(key);
+      });
+      pending.set(key, tracked);
+      shared = tracked;
+    }
+    return shared.then((result) => ({ ...result }));
+  };
+}
+
+/**
  * The renderer logs what it ran so an operator can reproduce it by hand. That
  * log must never carry a pre-shared key.
  */

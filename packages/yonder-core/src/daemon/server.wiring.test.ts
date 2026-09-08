@@ -720,6 +720,30 @@ describe("the daemon serves what M3a assembles", () => {
     }
   });
 
+  it("shares identical pending CLI observations within one reach-state read, then reads fresh", async () => {
+    const config = structuredClone(DEFAULT_CONFIG);
+    config.network.modem.enabled = true;
+    config.network.modem.mode = "auto";
+    saveConfig(configPath, config);
+    const seen: string[][] = [];
+    const server = await serve(seen);
+    try {
+      // Start-up rendering uses the direct clients. Count only route observations.
+      seen.length = 0;
+      expect((await call(socketPath, "GET", "/reach/state")).status).toBe(200);
+      const count = (word: string) => seen.filter((argv) => argv.join(" ") === word).length;
+      const devices = "nmcli -t -f DEVICE,TYPE,STATE,CONNECTION device status";
+      const modems = "mmcli -L --output-keyvalue";
+      const modem = "mmcli -m /org/freedesktop/ModemManager1/Modem/0 --output-keyvalue";
+      expect([count(devices), count(modems), count(modem)]).toEqual([1, 1, 1]);
+
+      expect((await call(socketPath, "GET", "/reach/state")).status).toBe(200);
+      expect([count(devices), count(modems), count(modem)]).toEqual([2, 2, 2]);
+    } finally {
+      await server.close();
+    }
+  });
+
   /**
    * R-CEL-13, at the socket rather than in the unit that decides it.
    *

@@ -214,9 +214,9 @@ export class ReachMonitor {
    * that stand it down, and when every path holding an address is failing
    * this answers false. See `carryingOn`.
    */
-  async carrying(): Promise<boolean> {
+  async carrying(readHolding: () => Promise<PathName[]> = this.holding): Promise<boolean> {
     try {
-      return this.carryingOn(await this.holding());
+      return this.carryingOn(await readHolding());
     } catch (e) {
       this.log(`network: cannot tell whether anything is carrying traffic (${(e as Error).message})`);
       return true;
@@ -247,9 +247,14 @@ export class ReachMonitor {
    * for as long as the dead cable stayed plugged in — see `activePath`.
    */
   async inUseNow(): Promise<{ path: PathName; device: string } | null> {
-    const path = activePath(await this.holding(), this.standing);
+    // Independent and taken together. In production `holding()` needs the
+    // same device observation to attribute addresses to paths; the
+    // observation runner shares that pending command, so this is one device
+    // snapshot rather than a second subprocess after the first settles.
+    const [holding, devices] = await Promise.all([this.holding(), this.devices()]);
+    const path = activePath(holding, this.standing);
     if (path === null) return null;
-    const device = (await this.devices())[path];
+    const device = devices[path];
     return device === undefined ? null : { path, device };
   }
 

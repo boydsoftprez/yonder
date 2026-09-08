@@ -203,6 +203,29 @@ describe("ReachMonitor.state", () => {
     expect(await monitor.inUseNow()).toEqual({ path: "modem", device: "wwan0" });
   });
 
+  it("starts the independent holding and device observations together", async () => {
+    const { clock } = fixedClock();
+    const standing = new Standing({ clock });
+    let devicesStarted = false;
+    let release: (() => void) | undefined;
+    const holding = new Promise<PathName[]>((resolve) => {
+      release = () => { resolve(["modem"]); };
+    });
+    const monitor = new ReachMonitor({
+      standing,
+      probe: async () => true,
+      devices: async () => { devicesStarted = true; return { modem: "wwan0" }; },
+      down: async () => [],
+      order: () => ["modem"],
+      holding: () => holding,
+    });
+
+    const answer = monitor.inUseNow();
+    expect(devicesStarted).toBe(true);
+    release?.();
+    await expect(answer).resolves.toEqual({ path: "modem", device: "wwan0" });
+  });
+
   /**
    * **A board whose every path has been stood down still names one.**
    *
@@ -430,6 +453,12 @@ describe("ReachMonitor.carrying", () => {
   it("is true while the path in use has not been stood down", async () => {
     const { monitor } = build({ inUse: "modem" });
     expect(await monitor.carrying()).toBe(true);
+  });
+
+  it("can take the watchdog's direct fresh holding read instead of the shared observation", async () => {
+    const { monitor } = build({ inUseThrows: true, reaches: () => false });
+    for (let i = 0; i < FAILURES_TO_STAND_DOWN; i++) await monitor.test("modem");
+    await expect(monitor.carrying(async () => ["modem"])).resolves.toBe(false);
   });
 
   it("is false once the path in use has been stood down", async () => {
