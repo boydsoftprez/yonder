@@ -19,6 +19,12 @@ it('saves local layout choices and can hide instruments without hiding navigatio
  const w=host();await w.get('[aria-label="Display setup"]').trigger('click');await w.get('[aria-label="Instrument placement"]').setValue('hidden');await w.get('[aria-label="Display arrangement"]').setValue('split');expect(w.attributes('data-arrangement')).toBe('split');expect(JSON.parse(localStorage.getItem('yonder-instrument-layout-v1')||'null')?.display.arrangement).toBe('split');w.unmount();
  const restored=host();await restored.vm.$nextTick();expect(restored.attributes('data-arrangement')).toBe('split');expect(restored.find('[aria-label="Aircraft instrument bank"]').exists()).toBe(false);expect(restored.find('[aria-label="Navigation data fields"]').exists()).toBe(true);expect(restored.props('api').command).not.toHaveBeenCalled();restored.unmount();
 });
+it('reveals the lower MFD when a reading opens its inspector without commanding the aircraft',async()=>{
+ const w=host();await w.get('[aria-label="Display setup"]').trigger('click');await w.get('[aria-label="Display arrangement"]').setValue('stacked');
+ const body=w.get('.cockpit-body').element,pages=w.get('.cockpit-mfd-pages').element;Object.defineProperty(pages,'offsetTop',{value:640});
+ w.vm.openInstrument('host.cpuPercent');await w.vm.$nextTick();
+ expect(body.scrollTop).toBe(640);expect(w.vm.selectedInstrument).toBe('host.cpuPercent');expect(w.props('api').command).not.toHaveBeenCalled();w.unmount();
+});
 it('accounts for time spent receiving an instrumentation response before calling its readings fresh',async()=>{
  vi.useFakeTimers();vi.setSystemTime(1000);const w=host();let finish;w.vm.source={instruments:()=>new Promise(resolve=>{finish=resolve})};
  const pending=w.vm.pollInstruments();vi.setSystemTime(6000);finish({generation:'fixture-only',connected:true,fields:{'fc.loadPercent':{value:20,unit:'%',source:'SYS_STATUS',ageMs:0,ttlMs:3000,quality:'reported'}}});await pending;w.vm.now=6000;

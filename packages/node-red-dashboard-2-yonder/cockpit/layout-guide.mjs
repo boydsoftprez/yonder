@@ -26,7 +26,15 @@ try{
  await b('Configure navigation fields').click();await page.getByRole('button',{name:/^Edit slot 2:/}).click();await l('Instrument source').selectOption('nav.homeDistance');await shot('cockpit-fields');await b('Cancel instrument changes',page.getByRole('dialog',{name:'Configure navigation fields',exact:true})).click();
  const saved=await page.evaluate(()=>localStorage.getItem('yonder-instrument-layout-v1'));
  await b('Configure instruments').click();await l('Presentation').selectOption('vertical');await shot('cockpit-instruments');await b('Cancel instrument changes',page.getByRole('dialog',{name:'Configure instruments',exact:true})).click();assert.equal(await page.evaluate(()=>localStorage.getItem('yonder-instrument-layout-v1')),saved);checks.push('Source/style preview cancels without saving');
- await layout('stacked');await shot('cockpit-stacked');await layout('split');await shot('cockpit-split');
+ await layout('stacked');
+ await b('Display setup').click();await l('Instrument placement').selectOption('mfd');await b('Close display setup').click();
+ const stacked=await page.evaluate(()=>{const body=document.querySelector('.cockpit-body'),pfd=document.querySelector('.cockpit-primary'),map=document.querySelector('.cockpit-map-pane'),bank=document.querySelector('.cockpit-mfd-bank .instrument-bank-faces');return {pfd:pfd.getBoundingClientRect().height,map:map.getBoundingClientRect().height,bank:bank.clientHeight,bankContent:bank.scrollHeight,body:body.clientHeight,content:body.scrollHeight}});
+ assert(stacked.pfd>=560&&stacked.map>=480,'stacked displays retain readable heights');assert(stacked.bank>=145&&stacked.bankContent<=stacked.bank+1,'MFD instrument faces must not be vertically clipped');assert(stacked.content>stacked.body,'stacked display area scrolls');
+ const controlsTop=await page.locator('.flight-control-host').evaluate(e=>e.getBoundingClientRect().top);
+ await page.getByRole('region',{name:'PFD and MFD displays',exact:true}).press('End');await page.waitForTimeout(400);
+ assert(await page.locator('.cockpit-body').evaluate(e=>e.scrollTop>0));assert.equal(await page.locator('.flight-control-host').evaluate(e=>e.getBoundingClientRect().top),controlsTop);
+ await b('Display setup').click();await l('Instrument placement').selectOption('side');await b('Close display setup').click();await page.getByRole('region',{name:'PFD and MFD displays',exact:true}).press('Home');await shot('cockpit-stacked');checks.push('Readable stacked displays, unclipped MFD bank and keyboard scrolling below fixed flight controls');
+ await layout('split');await shot('cockpit-split');
  assert(await page.evaluate(()=>window.layoutPfd===document.querySelector('.pfd-svg')&&window.layoutMap===document.querySelector('.leaflet-container')));checks.push('Same PFD and map retained across MFD layouts');
  await b('Systems',mfd()).click();await b('Pinned instruments').waitFor();await shot('cockpit-systems');
  await b('Telemetry',mfd()).click();await l('Search telemetry sources').fill('nav.homeDistance');await l('Telemetry source').selectOption('nav.homeDistance');await page.getByRole('region',{name:'Selected reading inspector',exact:true}).waitFor();await shot('cockpit-telemetry');

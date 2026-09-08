@@ -156,3 +156,28 @@ readout heights of 19–21 px and no horizontal page overflow. Original side-ban
 placement and normal browser dimensions were restored after checking. All 63
 covering component/settings tests passed, including the order regression that
 failed before the change. The production cockpit bundle built successfully.
+
+
+## Preserve display height with an MFD
+
+The operator's screenshot exposed a stacked-layout failure that the earlier
+viewport-overflow checks missed. Fractional rows compressed the PFD to 220 px
+(151 px of instrument canvas), the map to 200 px and a 145-px MFD instrument row
+into 48 visible pixels. The stacked grid now assigns each display its own bounded
+working height and lets the display area scroll under the persistent top controls.
+The MFD bank retains its complete intrinsic row; it does not absorb grid shrinkage.
+Short side-by-side views also scroll rather than clipping their instrument bank.
+
+Browser reproduction and post-fix inspection covered 1280×720, 1024×768,
+768×1024 and 390×844. PFD heights were 560–840 px, map heights 556–720 px,
+and every MFD instrument row had clientHeight = scrollHeight = 145 px. There was
+no horizontal page overflow. End/Home scrolling moved the displays while keeping
+the controls and fields in place. Explicit MFD page access brought its tabs to
+the top of the scrolling area. Side-by-side verification also retained the full
+145-px bank and a 480-px map. Normal browser dimensions were restored.
+
+A keyboard-focusable named display region and explicit-page reveal behavior are
+covered by the host checks. All 64 covering component/settings tests passed and
+the production bundle built (783.58 kB, 216.15 kB gzip). The reusable layout guide
+now includes full-height, no-clipping and keyboard-scroll assertions; this pass
+executed those behaviors through the browser tools, not another complete SITL run.

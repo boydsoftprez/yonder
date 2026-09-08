@@ -81,6 +81,13 @@ or **PFD Menu → Attitude & display → Instrument panel & PFD/MFD layout**.
    restores the default field and instrument selections. Tape and HSI transparency
    remain under **Display** below the PFD.
 
+With **PFD above MFD**, each display keeps a readable working height. Scroll down
+inside the display area to reach the MFD; the header, autopilot actions and user
+fields remain above that area. The instrument bank on the MFD shows its full
+faces. **Open map**, **Open flight plan**, **Open systems** and inspecting a
+reading bring the selected lower pane into view. Keyboard users can Tab to
+**PFD and MFD displays** and use Page Up/Page Down or Home/End to scroll.
+
 ![Display setup with screen arrangement, instrument placement and units](images/cockpit/cockpit-layout.png)
 
 *Synthetic fixture. Layout and units change this browser's presentation; the
@@ -343,7 +350,8 @@ pane alongside the same PFD. **Layout** also offers a PFD above the MFD. The MFD
 tabs open the map, flight plan/profile, systems catalog or telemetry inspector.
 Its **×** restores the single PFD with insets. On smaller screens, a side bank
 moves across the top; narrow screens provide a Mission/Map selector and stack an
-expanded pane below the PFD. The scene fills the available viewport. The tapes move toward its edges while
+expanded pane below the PFD. Stacked displays keep their own heights and scroll
+beneath the top controls. The scene fills its PFD viewport. The tapes move toward its edges while
 the attitude reference, VSI, HSI circles and director retain a uniform scale; touch
 regions follow those positions. Insets remain below the primary tape scales.
 Keyboard Tab reaches controls; Escape dismisses an open panel.
@@ -355,8 +363,9 @@ the same PFD active and preserves the map instance.*
 
 ![PFD above a separate multifunction pane](images/cockpit/cockpit-stacked.png)
 
-*Synthetic fixture with **PFD above MFD** selected. This is an optional arrangement;
-**Single PFD with insets** remains the default.*
+*Earlier compact arrangement specimen. The current **PFD above MFD** layout
+keeps full-height displays with vertical scrolling. **Single PFD with insets**
+remains the default.*
 
 The persistent control strip provides **Direct-To**, **Heading**, **Altitude /
 Speed**, **Loiter**, **Resume Mission**, **RTL**, **Modes**, and **Arm / Disarm**.

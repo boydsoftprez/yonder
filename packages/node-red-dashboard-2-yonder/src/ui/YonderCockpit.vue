@@ -45,7 +45,7 @@
       <InstrumentBank :items="instrumentItems" :config="bankInstrumentConfig" :placement="bankPlacement" @select="openInstrument" @update:config="setBankInstrumentConfig"/>
     </slot>
   </div>
-  <div class="cockpit-body">
+  <div class="cockpit-body" :tabindex="mfdOpen?0:undefined" :role="mfdOpen?'region':undefined" :aria-label="mfdOpen?'PFD and MFD displays':undefined">
     <nav v-if="mfdOpen" class="cockpit-mfd-pages" aria-label="Multifunction display pages"><button v-for="page in mfdPages" :key="page.id" :aria-pressed="mfdPage===page.id" @click="openMfdPage(page.id)">{{page.label}}</button><button aria-label="Close multifunction display" @click="closeMfd">×</button></nav>
     <InstrumentBank v-if="mfdOpen&&bankPlacement==='mfd'" class="cockpit-mfd-bank" :items="instrumentItems" :config="bankInstrumentConfig" placement="top" @select="openInstrument" @update:config="setBankInstrumentConfig"/>
     <section v-if="mfdOpen&&['systems','inspector'].includes(mfdPage)" class="cockpit-systems-pane" aria-label="Multifunction systems"><InstrumentationPanel :items="instrumentItems" :history="instrumentHistory" :selected-id="selectedInstrument" :bank-config="bankInstrumentConfig" :top-config="topInstrumentConfig" :view="mfdPage==='inspector'||selectedInstrument?'inspector':'systems'" @select="selectedInstrument=$event" @update:bankConfig="setBankInstrumentConfig" @update:topConfig="setTopInstrumentConfig"/><p v-if="instrumentError" class="cockpit-instrument-error" role="status">{{instrumentError}}</p></section>
@@ -1003,7 +1003,7 @@ export default {
     resetDisplaySetup(){this.displayConfig=cockpitDisplaySettings();this.bankInstrumentConfig=defaultBankConfig();this.topInstrumentConfig=defaultTopConfig();this.layout='full';this.persistInstruments()},
     setBankInstrumentConfig(config){this.bankInstrumentConfig=validateInstrumentSlots(config,defaultBankConfig());this.persistInstruments()},
     setTopInstrumentConfig(config){this.topInstrumentConfig=validateInstrumentSlots(config,defaultTopConfig());this.persistInstruments()},
-    openMfdPage(page){if(!['map','mission','systems','inspector'].includes(page))return;if(page==='systems')this.selectedInstrument=null;this.layout=page;this.panel=null;this.$nextTick(this.fitViewport)},
+    openMfdPage(page){if(!['map','mission','systems','inspector'].includes(page))return;if(page==='systems')this.selectedInstrument=null;this.layout=page;this.panel=null;this.$nextTick(()=>{this.fitViewport();const body=this.$el?.querySelector('.cockpit-body'),pages=this.$el?.querySelector('.cockpit-mfd-pages');if(body&&pages)body.scrollTop=pages.offsetTop})},
     closeMfd(){this.layout='full';this.displayConfig=cockpitDisplaySettings({...this.displayConfig,arrangement:'single'});this.persistInstruments();this.$nextTick(this.fitViewport)},
     openInstrument(id){if(id.startsWith('status.')){this.panel='alerts';return}this.openMfdPage('systems');this.selectedInstrument=id},
     async pollInstruments(){if(this.instrumentBusy||this.disposed)return;this.instrumentBusy=true;const started=Date.now();try{const value=await this.source.instruments();if(!this.disposed){this.instrumentation=value;this.instrumentReceivedAt=started;this.instrumentError=value.truncated?`${value.truncated} additional readings omitted by the bounded telemetry transfer`:''}}catch(e){if(!this.disposed)this.instrumentError=e.message||'Instrumentation unavailable'}finally{this.instrumentBusy=false}},

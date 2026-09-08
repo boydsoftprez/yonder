@@ -11,6 +11,7 @@
     <label>Navigation distance<select aria-label="Navigation distance units" :value="config.distanceUnit" @change="$emit('option','distanceUnit',$event.target.value)"><option value="nm">Nautical miles</option><option value="mi">Miles</option><option value="km">Kilometres</option></select></label>
     <FlightUnits :options="flightOptions" @option="(key,value)=>$emit('flight-option',key,value)"/>
     <p>The same PFD stays active while you change pages. Tap Fields or Instruments to choose readings, sources, order and gauge styles.</p>
+    <p v-if="config.arrangement==='stacked'">The PFD and MFD keep their own display heights. Scroll down within the displays to reach the MFD; flight controls and user fields stay above the scrolling area.</p>
     <p v-if="config.bankPlacement==='mfd'&&config.arrangement==='single'">Open an MFD page to see its instrument panel.</p>
     <div class="cockpit-display-actions"><button @click="$emit('page','map')">Open map</button><button @click="$emit('page','mission')">Open flight plan</button><button @click="$emit('page','systems')">Open systems</button><button @click="$emit('reset')">Restore display defaults</button></div>
    </div>
