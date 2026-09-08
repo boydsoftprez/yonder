@@ -18,7 +18,8 @@ import type { CameraRun, Supervisor } from "./supervisor.js";
  * which is worse than refusing the change. This file is the route a new rate
  * has that is not a respawn.
  *
- * **A respawn is not the fallback, because it does not have to be.** Task 1
+ * **This channel never respawns.** Manual Apply's renderer owns the fallback
+ * when a host cannot accept live control. Task 1
  * measured the daemon's own pipeline on this board, three times:
  * `v4l2h264enc` took `extra-controls` while playing and moved from ~0.97 to
  * 3.01 Mb/s, with every timestamp gap falling *before* the retune call and
@@ -146,16 +147,17 @@ const RECONFIGURE_MS = 5_000;
  * The last state this camera's encoder actually confirmed. Seeded from the
  * launch line it is running under, and moved only by the process.
  *
- * `since` is the supervisor's own timestamp for the run this was seeded
- * from, and it is what makes the seed expire: a pipeline that stopped and
+ * `generation` identifies the actual spawn this was seeded from, and makes
+ * the seed expire: a pipeline that stopped and
  * started again — a crash and its retry, or an operator pressing Stop then
  * Start — is running its launch line from the top, and what the process
  * before it confirmed is not what this one is doing. The restart counter
- * alone will not do, because `Supervisor.start()` resets it to zero.
+ * alone will not do, because `Supervisor.start()` resets it to zero. A clock
+ * timestamp also changes on settle and can be identical across rapid starts.
  */
 interface Confirmed {
   pid: number | null;
-  since: number;
+  generation: number;
   stream: number | null;
   preview: number | null;
   shape: PreviewShape | null;
@@ -169,6 +171,10 @@ export class EncoderChannel {
   private readonly confirmed = new Map<string, Confirmed>();
   private readonly waiting = new Map<number, { camera: string; settle(a: Answer): void }>();
   private next = 1;
+  private readonly pending = new Set<Promise<unknown>>();
+
+  /** Drain commands issued before a manual render takes its observed snapshot. */
+  async settled(): Promise<void> { await Promise.all([...this.pending]); }
 
   constructor(opts: {
     supervisor: Supervisor; clock?: Clock; retuneMs?: number; reconfigureMs?: number;
@@ -184,7 +190,14 @@ export class EncoderChannel {
    * Move one encode of a running camera to `kbps`, without respawning
    * anything (R-VID-07, R-CTL-03).
    */
-  async retune(camera: Camera, encode: EncodeName, kbps: number): Promise<Ack<number>> {
+  retune(camera: Camera, encode: EncodeName, kbps: number): Promise<Ack<number>> {
+    const request = this.retuneNow(camera, encode, kbps);
+    const tracked = request.catch(() => {}).finally(() => this.pending.delete(tracked));
+    this.pending.add(tracked);
+    return request;
+  }
+
+  private async retuneNow(camera: Camera, encode: EncodeName, kbps: number): Promise<Ack<number>> {
     const argv = this.supervisor.argv(camera.id);
     if (argv === null) return notRunning(camera.id);
 
@@ -228,7 +241,14 @@ export class EncoderChannel {
    * branch's: the operator's stream, its outputs and a board recording are
    * downstream of a different encode and do not move for this.
    */
-  async reconfigurePreview(camera: Camera, shape: PreviewShape): Promise<Ack<PreviewShape>> {
+  reconfigurePreview(camera: Camera, shape: PreviewShape): Promise<Ack<PreviewShape>> {
+    const request = this.reconfigurePreviewNow(camera, shape);
+    const tracked = request.catch(() => {}).finally(() => this.pending.delete(tracked));
+    this.pending.add(tracked);
+    return request;
+  }
+
+  private async reconfigurePreviewNow(camera: Camera, shape: PreviewShape): Promise<Ack<PreviewShape>> {
     const argv = this.supervisor.argv(camera.id);
     if (argv === null) return notRunning(camera.id);
 
@@ -291,18 +311,18 @@ export class EncoderChannel {
 
   /** What this camera's encoder last confirmed, seeded from the launch line
    *  the process is running under — the first time it is asked for, and again
-   *  whenever the pipeline it was seeded from has been replaced (`since`). */
+   *  whenever the pipeline it was seeded from has been replaced (`generation`). */
   private hold(camera: string, argv: readonly string[]): Confirmed {
-    const since = this.supervisor.state(camera).since;
+    const generation = this.supervisor.generation(camera);
     const held = this.confirmed.get(camera);
     if (held === undefined) {
-      const seed = { pid: null, since, ...encodesIn(argv) };
+      const seed = { pid: null, generation, ...encodesIn(argv) };
       this.confirmed.set(camera, seed);
       return seed;
     }
-    if (held.since !== since) {
+    if (held.generation !== generation) {
       const fresh = encodesIn(argv);
-      held.since = since;
+      held.generation = generation;
       // A new process has no pid to be compared against the old one's, and
       // `settle` is told so rather than left to read a break into the change.
       held.pid = null;

@@ -1815,6 +1815,50 @@ describe("the camera routes", () => {
    * device — the exact thing R-CFG-01's single writer exists to prevent.
    */
   describe("DELETE /cameras/:id", () => {
+    it.each(["revert", "rejected"])("retires a failed retry before asynchronous DELETE apply (%s)", async (outcome) => {
+      vi.useFakeTimers();
+      try {
+        saveConfig(configPath, cameraConfig());
+        const credential = new AdminCredential(new SecretStore(secretsPath));
+        credential.set(GOOD);
+        let exit: (arg: unknown) => void = () => {};
+        let spawns = 0;
+        const supervisor = new Supervisor({ spawner: () => {
+          spawns++;
+          return { kill() {}, on(event, fn) { if (event === "exit") exit = fn; } };
+        } });
+        let release: () => void = () => {};
+        const blocked = new Promise<void>((resolve) => { release = resolve; });
+        let first = true;
+        const engine = new ApplyEngine({ configPath, journalPath, renderers: [{
+          name: "slow", async render() {
+            if (!first) return;
+            first = false;
+            await blocked;
+            if (outcome === "rejected") throw new Error("renderer rejected removal");
+          },
+        }] });
+        const r = createRouter({ engine, configPath, credential, supervisor });
+        supervisor.start("cam0", ["pipeline"]);
+        exit(1);
+        expect(supervisor.state("cam0").state).toBe("failed");
+        const removing = r("DELETE", "/cameras/cam0", undefined);
+        await vi.advanceTimersByTimeAsync(1500);
+        expect(spawns).toBe(1);
+        release();
+        const response = await removing;
+        if (outcome === "revert") {
+          expect(response.status).toBe(200);
+          expect(loadConfig(configPath).cameras).toEqual([]);
+          await engine.revertNow((response.body as { id: string }).id);
+        }
+        expect(loadConfig(configPath).cameras.map((c) => c.id)).toEqual(["cam0"]);
+        await vi.advanceTimersByTimeAsync(60_000);
+        expect(spawns).toBe(1);
+        expect(supervisor.state("cam0").state).toBe("stopped");
+      } finally { vi.useRealTimers(); }
+    });
+
     /** The ordinary case, and the one the operator was actually in. */
     it("removes a camera whose socket has nothing on it", async () => {
       // `cameras` is the *other* camera's detection, so the configured

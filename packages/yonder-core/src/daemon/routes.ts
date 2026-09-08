@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import type { PipelineRenderer } from "../video/renderer.js";
 import { ApplyEngine } from "../apply/engine.js";
 import { loadConfig } from "../config/load.js";
 import { ConfigError } from "../config/errors.js";
@@ -164,6 +165,7 @@ export interface RouterDeps {
    * station is watching.
    */
   supervisor?: Supervisor;
+  pipelineRenderer?: PipelineRenderer;
   /**
    * Who is watching each camera, and what each of them is being sent
    * (R-VID-11, R-VID-13; spec §8.2).
@@ -1113,6 +1115,10 @@ export function createRouter(deps: RouterDeps): Router {
         say(`DELETE /cameras/${id}: ${refusal}`);
         return { status: 409, body: { error: refusal } };
       }
+      // A failed run can still have a retry armed. Retire it synchronously,
+      // before apply yields to a renderer. Revert restores configuration,
+      // not runtime Start intent (R-CTL-01); a rejected removal stays stopped.
+      deps.supervisor?.stop(id);
       const next = structuredClone(held);
       next.cameras = next.cameras.filter((c) => c.id !== id);
       say(`cameras: removed ${id}, which was configured on ${going.device}`);
@@ -1498,17 +1504,17 @@ export function createRouter(deps: RouterDeps): Router {
         const renamed = next.config.cameras.find((c) => c.id === id);
         if (renamed !== undefined) renamed.name = name;
       }
+      const applied = await deps.engine.apply(next.config);
+      const video = deps.pipelineRenderer?.report(id);
       return {
         status: 200,
         body: {
-          ...await deps.engine.apply(next.config),
-          // What this apply will interrupt, from the same function the deck
-          // calls over its own staged draft before the press — so the warning
-          // an operator read and the one the answer carries are one
-          // calculation, not two. (`YonderDeck.buildPending()` is the other
-          // caller; both reach `interruption()` through `apply/draft-shape.ts`,
-          // which exists so a browser can.)
-          interruption: interruption(draft, {
+          ...applied,
+          ...(video === undefined ? {} : { video }),
+          // The renderer reports what actually happened, including a live
+          // host refusal falling back to a restart. Draft-only callers still
+          // use the static warning when this daemon has no video renderer.
+          interruption: video?.interruption ?? interruption(draft, {
             width: camera.width,
             height: camera.height,
             framerate: camera.framerate,

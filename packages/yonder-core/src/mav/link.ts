@@ -125,6 +125,7 @@ export class LinkTracker {
   private readonly windowMs: number;
 
   private lastOutcome: DetectOutcome | null = null;
+  private selectedLink: { device: string; baud: number } | null = null;
 
   private heartbeatRing: number[] = [];
   private lastHeartbeatAtMs: number | null = null;
@@ -151,7 +152,19 @@ export class LinkTracker {
    * mistake §6 made about ground stations one level up.
    */
   observed(outcome: DetectOutcome): void {
+    this.selectedLink = null;
     this.lastOutcome = outcome;
+    this.heartbeatRing = [];
+    this.lastHeartbeatAtMs = null;
+  }
+
+  /** A router started on an explicitly selected port (R-MAV-01, R-MAV-10).
+   * This establishes identity only, never a detected vehicle or live link. */
+  selected(link: { device: string; baud: number }): void {
+    const held = this.selectedLink ?? (this.lastOutcome?.kind === "found" ? this.lastOutcome : null);
+    if (held?.device === link.device && held.baud === link.baud) return;
+    this.selectedLink = { ...link };
+    this.lastOutcome = null;
     this.heartbeatRing = [];
     this.lastHeartbeatAtMs = null;
   }
@@ -303,8 +316,8 @@ export class LinkTracker {
 
     return {
       phase,
-      device: outcome?.device ?? null,
-      baud: outcome?.kind === "found" ? outcome.baud : null,
+      device: outcome?.device ?? this.selectedLink?.device ?? null,
+      baud: outcome?.kind === "found" ? outcome.baud : this.selectedLink?.baud ?? null,
       vehicle: outcome?.kind === "found" ? outcome.vehicle : null,
       system: outcome?.kind === "found" ? outcome.system : null,
       heartbeatHz,

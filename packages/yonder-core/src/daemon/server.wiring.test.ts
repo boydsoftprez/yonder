@@ -162,6 +162,33 @@ describe("the board's encoder is probed once, not on every poll (K-66)", () => {
     }
   });
 
+  it("shares acknowledged rates between manual rendering and the daemon's adaptation channel", async () => {
+    let spawnCount = 0;
+    const built = buildRenderers({
+      secretsPath: join(dir, "secrets.yaml"), remoteStatePath: join(dir, "remote.json"),
+      runner: async () => ({ code: 1, stdout: "", stderr: "" }),
+      spawner: () => {
+        spawnCount++;
+        const inbox: ((line: string) => void)[] = [];
+        return { kill() {}, on() {}, onMessage(fn) { inbox.push(fn); }, send(line) {
+          const command = JSON.parse(line);
+          for (const fn of inbox) fn(JSON.stringify({ id: command.id, pid: 42,
+            observed: Number(command.sets[0].value), continuous: true }));
+        } };
+      },
+    });
+    const camera = wiredCamera(2000);
+    built.supervisor.start(camera.id, compose({ camera, capabilities: noCapabilities(), encoder: WIRED_ENCODER, rtspBase: RTSP_BASE }));
+    try {
+      await built.encoders.retune(camera, "stream", 1300);
+      expect(built.encoders.inForce(camera.id)?.stream).toBe(1300);
+      const changed = wiredCamera(3000);
+      await built.pipelineRenderer.render({ ...DEFAULT_CONFIG, cameras: [changed] } as never);
+      expect(built.encoders.inForce(camera.id)?.stream).toBe(3000);
+      expect(spawnCount).toBe(1);
+    } finally { built.supervisor.stop(camera.id); }
+  });
+
   it("gives the pipeline renderer the camera routes' encoder answer", async () => {
     let probes = 0;
     const runner: CommandRunner = async (argv) => {

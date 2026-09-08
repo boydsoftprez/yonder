@@ -138,7 +138,7 @@ Parameter writes are vehicle commands. R-CMD applies to every requirement here.
 |---|---|---|
 | R-CTL-01 | Start and stop each stream independently | 1 |
 | R-CTL-02 | Set resolution | 1 |
-| R-CTL-03 | Set bitrate | 1 |
+| R-CTL-03 | Set bitrate through the applied configuration. A running encoder with live control accepts bitrate-only changes without restarting the pipeline; acknowledgements report the observed rate and continuity. Apply rollback restores the previous configured rate through the same path. Where live control is unavailable or refuses the value, restart with the requested settings and report the interruption or failure. Bitrate changes retain R-CFG-03 confirmation protection | 1 |
 | R-CTL-04 | Set contrast and brightness | 2 |
 | R-CTL-05 | **Turn the picture the right way up.** Flip horizontally, flip vertically and rotate, using the camera's own controls where it has them and the board's pipeline where it does not — an inverted or side-on mount is ordinary on an airframe, and a stream nobody can turn upright is a stream nobody can use. Rotation is by degrees rather than a boolean. Mirroring is not a rotation and needs its own control: 180° is both flips together, and neither flip alone is any rotation | 2 |
 | R-CTL-06 | Toggle HDR where the sensor supports it | 3 |

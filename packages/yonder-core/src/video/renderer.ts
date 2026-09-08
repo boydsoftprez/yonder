@@ -3,61 +3,22 @@ import type { Renderer } from "../apply/types.js";
 import type { Camera, Config } from "../schema/config.js";
 import { RTSP_BASE } from "../media/ports.js";
 import { noCapabilities } from "./capability.js";
-import { compose } from "./pipeline.js";
+import { compose, encodeControl, encodesIn, type EncodeName } from "./pipeline.js";
 import type { Encoder } from "./probe/encoder.js";
+import type { EncoderChannel } from "./encoder.js";
 import type { Supervisor } from "./supervisor.js";
 
-/**
- * Making the running pipelines match the configuration that was applied
- * (R-VID-07, R-CFG-03).
- *
- * **This is K-48's fix.** An operator changed a camera's bitrate on Setup,
- * pressed Apply and confirmed it. `config.yaml` took the new value and the
- * console said `confirmed`, and `gst-launch-1.0` went on running
- * `video_bitrate=100000` on both branches — same pid, no restart, twenty
- * seconds later. `pipeline.ts` bakes the rate into the launch line, so a
- * respawn is the only way a new value reaches the encoder, and nothing
- * performed one. An apply was silently a no-op for the picture, which is
- * worse than refusing the change.
- *
- * **Why a respawn and not a live retune.** `EncoderChannel` exists
- * (`video/encoder.ts`) and it is right: it answered `notControllable` on this
- * board because `gst-launch-1.0` reads its pipeline from argv and then takes
- * no instruction — no property interface, no socket, no stdin protocol — and
- * `v4l2h264enc`'s controls are per-open-handle, so no outside process can
- * reach the encoder either (K-53).
- *
- * **The program that answers is now in this repository**
- * (`installer/payload/yonder-pipeline`), so that reasoning no longer holds as
- * written, and this comment says so rather than leaving a citation that has
- * gone dead. **Nothing here changes on the strength of it.** A respawn is
- * still the sanctioned path for an apply, and still the only path on a board
- * with no host installed or one where the host will not start — both of
- * which `systemSpawner` supports on purpose. Whether an apply should prefer a
- * live retune where the running pipeline can take one, and what a rollback
- * then means, is a decision about the apply engine and not one this file may
- * make on its own.
- *
- * **Why a `Renderer` and not a hook on the apply route.** The apply engine
- * drives renderers inside validate → snapshot → apply → confirm-or-revert, so
- * being one is what buys the confirmation window and the rollback for
- * nothing: a change that is not confirmed takes the pipeline back with it,
- * which is R-CFG-03 applied to the picture. A camera left on a bitrate the
- * operator did not keep is a camera the rollback did not reach.
- *
- * **It relays; it decides nothing** (R-CMD-04, R-CMD-05). It restarts what
- * the operator applied and it never chooses a value, never starts a camera
- * that is not running, and never stops one for any reason but to start it
- * again a line later.
- *
- * **Composer-agnostic, deliberately.** This file does not know which fields
- * of a camera reach the launch line. It composes the line the new
- * configuration implies and compares it, token for token, against the line
- * the running pipeline was actually started with. Differ, restart; same,
- * leave it entirely alone. Add a field to the launch line tomorrow and this
- * keeps working with no edit here — and, just as important, a field that
- * reaches no launch line (`name`) costs nobody a picture.
- */
+/** Apply and rollback reach the running picture through the same renderer
+ * (R-CTL-03, R-CFG-03). Bitrate-only edits prefer the shared live channel;
+ * unavailable control and structural pipeline changes retain the respawn path.
+ * A video failure is reported without blocking a network repair. */
+export interface VideoApplyReport {
+  outcome: "unchanged" | "retuned" | "restarted" | "failed";
+  interruption: string[];
+  continuous?: boolean;
+  detail?: string;
+}
+
 export interface PipelineRendererOptions {
   /**
    * The one supervisor this process owns. Given, never constructed here: a
@@ -66,6 +27,7 @@ export interface PipelineRendererOptions {
    * no-op K-48 already is, rebuilt one layer up.
    */
   supervisor: Supervisor;
+  channel?: EncoderChannel;
   /**
    * Which encoder this board has (R-CAM-13). The same injected probe
    * `POST /cameras/:id/run` composes with, so the line this file builds for a
@@ -83,64 +45,43 @@ export interface PipelineRendererOptions {
 export class PipelineRenderer implements Renderer {
   readonly name = "video";
   private readonly supervisor: Supervisor;
+  private readonly channel?: EncoderChannel;
+  private rendering = false;
+  get busy(): boolean { return this.rendering; }
+  private reports = new Map<string, VideoApplyReport>();
+
+  report(id: string): VideoApplyReport | undefined { return this.reports.get(id); }
   private readonly encoder: () => Promise<Encoder>;
   private readonly rtspBase: string;
   private readonly log: (line: string) => void;
 
   constructor(opts: PipelineRendererOptions) {
     this.supervisor = opts.supervisor;
+    this.channel = opts.channel;
     this.encoder = opts.encoder;
     this.rtspBase = opts.rtspBase ?? RTSP_BASE;
     this.log = opts.log ?? (() => {});
   }
 
-  /**
-   * **The comparison is the whole design.** `supervisor.argv(id)` is the line
-   * a running pipeline was actually started with — not a copy of the
-   * configuration, which is the mistake K-48 is made of: every file that
-   * answered from `config.yaml` agreed with `config.yaml` and was wrong about
-   * the encoder. `compose()` builds the line this configuration implies. The
-   * two are either equal or they are not, and nothing here has to know which
-   * field moved.
-   *
-   * **Equality has to be exact, and cheaply so.** The two lines are built by
-   * the same function from the same constants, so an unchanged configuration
-   * yields an identical argv and no camera moves. That is why `rtspBase`
-   * defaults to the value the start route spends rather than being restated:
-   * a second answer to *where does a pipeline publish* would make every apply
-   * differ from every running line, and every apply would drop every
-   * camera's picture — on an aircraft, for a Wi-Fi change.
-   *
-   * **A camera with no running pipeline is left exactly as it is.** Start and
-   * Stop are runtime actions that survive no apply (R-CTL-01): a
-   * configuration change must never put a camera on the air that the operator
-   * took off it. `argv()` is null for a camera that is stopped, and *also*
-   * null in the gap between a failed spawn and its retry — so a camera that
-   * is in backoff when an apply lands keeps climbing its old ladder. That is
-   * the narrow case this seam does not reach; it is recorded in K-48 rather
-   * than papered over here.
-   *
-   * **Nothing in this file may fail an apply.** Renderers run in sequence and
-   * a failure stops the ones behind it, so this one is last and it swallows
-   * what it cannot do — an encoder that will not answer, a configuration
-   * `compose()` refuses to build, a spawner that will not spawn. Rule 6: the
-   * console is how an operator fixes a device and video is not, and a camera
-   * that could not be restarted must never be the reason a network change
-   * cannot be applied. Every one of them is said out loud instead.
-   */
+  /** Compare composed structure with the retained recipe, and changed rates
+   * with the host's observed values. Adopt a recipe only after it takes effect,
+   * so later applies, rollback and crash recovery all refer to the same rate. */
   async render(config: Config): Promise<void> {
+    this.rendering = true;
+    try { await this.renderPipelines(config); }
+    finally { this.rendering = false; }
+  }
+
+  private async renderPipelines(config: Config): Promise<void> {
+    this.reports = new Map(config.cameras.map((c) => [c.id, { outcome: "unchanged", interruption: [] }]));
+    await this.channel?.settled();
     // Nothing is probed and nothing is composed for a board with no pipeline
     // running — which is every board at start-up, where `renderCurrent()`
     // runs this before anything has ever been started. A `v4l2-ctl` sweep on
     // every apply, to answer a question about no cameras, is a cost with no
     // reader.
     //
-    // The line each one is running is taken here, in one pass, rather than
-    // read again inside the loop. Two cameras cannot share an id — the schema
-    // refuses it, because mediamtx takes one publisher per path — so a
-    // restart below can only ever move the entry it names, and a second read
-    // would be a guard against a case that cannot arise and that no test
-    // could turn red.
+    // Capture each recipe after earlier live commands have settled.
     const running = config.cameras
       .map((camera) => ({ camera, current: this.supervisor.argv(camera.id) }))
       .filter((r): r is { camera: Camera; current: readonly string[] } => r.current !== null);
@@ -158,6 +99,9 @@ export class PipelineRenderer implements Renderer {
         `video: this board's encoder could not be read (${(e as Error).message}), `
         + `so ${running.length} running pipeline(s) were left as they are`,
       );
+      for (const { camera } of running) this.reports.set(camera.id, {
+        outcome: "failed", interruption: [], detail: `could not read the encoder: ${(e as Error).message}`,
+      });
       return;
     }
 
@@ -217,10 +161,48 @@ export class PipelineRenderer implements Renderer {
           `video: ${camera.id}'s configuration could not be composed `
           + `(${(e as Error).message}), so its pipeline was left as it is`,
         );
+        this.reports.set(camera.id, { outcome: "failed", interruption: [], detail: `could not compose the pipeline: ${(e as Error).message}` });
         continue;
       }
 
-      if (same(current, next)) continue;
+      const targetRates = encodesIn(next);
+      const observed = this.channel?.inForce(camera.id);
+      const fixedRateDiffers = observed != null && (["stream", "preview"] as const).some((branch) =>
+        camera[branch].mode === "fixed" && targetRates[branch] !== null && observed[branch] !== targetRates[branch]);
+      if (same(current, next) && !fixedRateDiffers) continue;
+      if (this.channel !== undefined && same(withRates(current, encodesIn(next)), next)) {
+        const generation = this.supervisor.generation(camera.id);
+        let accepted = true;
+        let continuous = true;
+        const target = encodesIn(next);
+        try {
+          for (const branch of ["stream", "preview"] as const) {
+            const wanted = target[branch];
+            // An unchanged adaptive policy owns its current observed rate.
+            if (camera[branch].mode !== "fixed" && encodesIn(current)[branch] === wanted) continue;
+            if (wanted === null || this.channel.inForce(camera.id)?.[branch] === wanted) continue;
+            const ack = await this.channel.retune(camera, branch, wanted);
+            if ("notControllable" in ack || ack.observed !== wanted) { accepted = false; break; }
+            continuous &&= ack.continuous;
+          }
+        } catch (e) {
+          accepted = false;
+          this.log(`video: ${camera.id} could not retune (${(e as Error).message}); trying its new launch line`);
+        }
+        // A Stop/crash during the request must never be turned into a Start.
+        if (generation !== this.supervisor.generation(camera.id) || this.supervisor.argv(camera.id) === null) {
+          this.reports.set(camera.id, { outcome: "failed", interruption: ["the pipeline stopped before its settings could be applied"] });
+          continue;
+        }
+        if (accepted) {
+          this.supervisor.adoptArgv(camera.id, next);
+          this.reports.set(camera.id, { outcome: "retuned", continuous,
+            interruption: continuous ? [] : ["the encoder reported a break in the picture"],
+          });
+          this.log(`video: ${camera.id}'s running encoder accepted its new bitrate`);
+          continue;
+        }
+      }
 
       try {
         // Stop, then start, and in that order: the supervisor's own start
@@ -237,8 +219,10 @@ export class PipelineRenderer implements Renderer {
           `video: ${camera.id} was stopped for its new settings and could not be `
           + `started again (${(e as Error).message}); start it from the camera page`,
         );
+        this.reports.set(camera.id, { outcome: "failed", interruption: ["the picture stopped and could not be restarted"], detail: (e as Error).message });
         continue;
       }
+      this.reports.set(camera.id, { outcome: "restarted", interruption: ["restarts the picture"], detail: "new pipeline started; waiting for the supervisor to observe it running" });
       this.log(`video: ${camera.id}'s settings changed, so its pipeline was restarted`);
     }
   }
@@ -247,4 +231,21 @@ export class PipelineRenderer implements Renderer {
 /** Two launch lines, token for token. */
 function same(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && a.every((token, i) => token === b[i]);
+}
+
+/** Replace only the known bitrate property of each named encode. All other
+ * tokens still have to match exactly; codec/source/preview-size edits restart. */
+function withRates(argv: readonly string[], rates: { stream: number | null; preview: number | null }): string[] {
+  const next = [...argv];
+  for (const branch of ["stream", "preview"] as EncodeName[]) {
+    const rate = rates[branch];
+    if (rate === null) continue;
+    const set = encodeControl(argv, branch, rate);
+    if (set === null) continue;
+    const start = next.indexOf(`name=${set.element}`);
+    for (let i = start + 1; start >= 0 && i < next.length && next[i] !== "!"; i++) {
+      if (next[i].startsWith(`${set.property}=`)) next[i] = `${set.property}=${set.value}`;
+    }
+  }
+  return next;
 }

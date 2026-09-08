@@ -414,6 +414,8 @@ CAMERAS_SENSOR="$ROOT/cameras-sensor.json"
 SENSOR_OVERLAY="$REPO/scripts/fixtures/camera-sensor-turns.json"
 cp "$CAMERAS" "$CAMERAS_LIVE" || die "could not stage the camera fixture at $CAMERAS_LIVE"
 [ -f "$SENSOR_OVERLAY" ] || die "no sensor-turns overlay at $SENSOR_OVERLAY"
+# JavaScript template interpolation must reach Node literally.
+# shellcheck disable=SC2016
 BASE="$CAMERAS" OVERLAY="$SENSOR_OVERLAY" OUT="$CAMERAS_SENSOR" node -e '
 const { readFileSync, writeFileSync } = require("node:fs");
 const base = JSON.parse(readFileSync(process.env.BASE, "utf8"));

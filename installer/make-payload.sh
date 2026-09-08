@@ -79,7 +79,10 @@ ZEROTIER_SHA256_amd64=75589dbdc989546629e8676b186b1e7854b3fa3b5dac061b93f8c8e427
 # leave an open listener rather than a broken configuration.
 MEDIAMTX_VERSION=${MEDIAMTX_VERSION:-1.20.1}
 MEDIAMTX_BASE=${MEDIAMTX_BASE:-https://github.com/bluenviron/mediamtx/releases/download}
+# Indirectly read by the architecture-selected eval below.
+# shellcheck disable=SC2034
 MEDIAMTX_SHA256_arm64=d1689f0bfefb1864e5ed3dcc8495eb2d7ec0a654f90bf3cd48980cb3bd08718a
+# shellcheck disable=SC2034
 MEDIAMTX_SHA256_amd64=81b143f55a5d23d4a8c028d52869c14ea4a59919900528698fcc97a747fd69c6
 # mavlink-router. The one component that is *built* rather than downloaded:
 # it is not in Debian, there is no published binary, and it is a Meson/C++

@@ -83,10 +83,11 @@ elif getent group yonder-media >/dev/null 2>&1; then
     run chmod 2750 "$mtx_etc"
     # A post-condition, not a hope: the failure this prevents is a service
     # that starts, cannot open its configuration, and restarts for ever.
-    case "$(ls -ld "$mtx_etc" | cut -c1-10)" in
-        *s*) log "$mtx_etc is setgid, so the daemon's writes inherit yonder-media" ;;
-        *)   die "$mtx_etc is not setgid; the configuration yonder-core writes would land root:root and mediamtx could not read it" ;;
-    esac
+    if [ -g "$mtx_etc" ]; then
+        log "$mtx_etc is setgid, so the daemon's writes inherit yonder-media"
+    else
+        die "$mtx_etc is not setgid; the configuration yonder-core writes would land root:root and mediamtx could not read it"
+    fi
 else
     die "the yonder-media account does not exist; installer/roles/10-base.sh creates it"
 fi

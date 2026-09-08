@@ -1367,6 +1367,17 @@ Found by review during Task 29 (`75f8c46`).
 
 **Status:** Closed · **Requirements:** R-VID-07, R-UI-05, R-CFG-03
 
+**2026-09-08 final-review integration:** manual Apply now shares the daemon's
+`EncoderChannel` with adaptation. Bitrate-only changes compare the host's observed
+rate, retune both MPP codecs, and retain the acknowledged recipe for crash restart.
+Confirmation expiry and explicit rollback render the previous configured rate through
+the same channel. A missing, silent or refusing host falls back to respawn; the camera
+apply response reports the actual interruption and video failure separately from the
+configuration result. Bitrate/stream/preview confirmation protection is unchanged.
+Real-engine, real-supervisor route tests cover these lifecycle paths; final deployed
+hardware evidence belongs in `docs/hardware/rockchip-video-shipped.md`. The older
+respawn-only account below records the original closure, not the current preferred path.
+
 Found by the operator on the development board, then reproduced at the daemon.
 
 Change a camera's bitrate on Setup, Apply, confirm. `config.yaml` takes the new

@@ -546,6 +546,19 @@ describe("MavlinkRenderer — a pinned field the router is not honouring", () =>
   /** The file a router on the header UART at 57 600 would be running under. */
   const onTheUart = () => routerConfig(config().mavlink, { device: "/dev/ttyAMA0", baud: 57600 });
 
+  it("replaces a silent sweep's identity after starting a pinned serial link, without inventing a vehicle", async () => {
+    const tracker = new LinkTracker();
+    const h = harness({ tracker });
+    await h.renderer.render(config());
+    expect(h.renderer.state().phase).toBe("silent");
+    await h.renderer.render(config({ serial: { device: "/dev/pts/0", baud: 115200 } }));
+    expect(h.renderer.routerRunning).toBe(true);
+    expect(h.renderer.state()).toMatchObject({
+      phase: "searching", device: "/dev/pts/0", baud: 115200,
+      vehicle: null, system: null, heartbeatHz: null, lastHeardMs: null,
+    });
+  });
+
   it("moves to a pinned device the router is not on, without stopping the link to find out", async () => {
     const u = unit("active");
     const h = harness({ reply: u.reply, serial: { "/dev/ttyACM0": { 115200: heartbeatV2(1, 1, 3) } } });

@@ -360,6 +360,8 @@ export function buildRenderers(opts: BuildRenderersOptions): {
    * with the settings that were kept.
    */
   supervisor: Supervisor;
+  encoders: EncoderChannel;
+  pipelineRenderer: PipelineRenderer;
   /** Present only when `opts.mavlink` said how to open a serial port. */
   mavlinkRenderer?: MavlinkRenderer;
   /**
@@ -533,8 +535,10 @@ export function buildRenderers(opts: BuildRenderersOptions): {
    * assembled only sometimes is a fix that is applied only sometimes, and
    * this branch has been bitten by exactly that before.
    */
+  const encoders = new EncoderChannel({ supervisor, clock: opts.clock });
   const pipelineRenderer = new PipelineRenderer({
     supervisor,
+    channel: encoders,
     // The same memo the start route composes with, over the same runner as
     // everything else here — so a test injecting a fake runner cannot reach a
     // real `v4l2-ctl`, and the line this renderer builds for a camera and the
@@ -567,6 +571,8 @@ export function buildRenderers(opts: BuildRenderersOptions): {
     ...(mediaRenderer === undefined ? {} : { mediaRenderer }),
     encoder,
     supervisor,
+    encoders,
+    pipelineRenderer,
     ...(mavlinkRenderer === undefined ? {} : { mavlinkRenderer }),
     ...(mavlinkListener === undefined ? {} : { mavlinkListener }),
     generated,
@@ -887,9 +893,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
    * `POST …/viewers/:viewer` says so rather than accepting statistics nothing
    * would act on.
    */
-  const encoders = built === undefined
-    ? undefined
-    : new EncoderChannel({ supervisor: built.supervisor, clock });
+  const encoders = built?.encoders;
   // The same object the channel above was built on, named here because the
   // recorder needs it too. The two are absent together — there is one
   // condition, `buildRenderers` having thrown — and the pair below says so.
@@ -914,7 +918,10 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
     viewers = watching;
     adaptation = new Adaptation({
       channel,
-      cameras: () => reachConfig().cameras,
+      // Manual apply/rollback drains the same channel before reading rates.
+      // Do not enqueue an adaptive decision from a policy being replaced.
+      cameras: () => built?.pipelineRenderer.busy || ["applying", "reverting"].includes(engine.status().state)
+        ? [] : reachConfig().cameras,
       clock,
       // Before anything is decided, so a Full rate hold nobody renewed is not
       // still being charged to the path when the allowance is worked out.
@@ -1289,6 +1296,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
       applyControls: (opts) => applyControls({ ...opts, runner: probeRunner }),
       // One supervisor, for the process's lifetime. See buildRenderers.
       supervisor: built.supervisor,
+      pipelineRenderer: built.pipelineRenderer,
       // The one value this router can reach in the secret store, and the one
       // route that spends it is GET /cameras/:id/stream-address (R-SEC-10).
       // Absent until the media server has been configured once, which the

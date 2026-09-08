@@ -609,6 +609,11 @@ export class MavlinkRenderer implements Renderer {
 
     const link = await this.resolve(mavlink);
     if (link === null) return;
+    const reportSelected = (): void => {
+      if (this.running && mavlink.serial.device !== "auto" && mavlink.serial.baud !== "auto") {
+        this.tracker.selected(link);
+      }
+    };
 
     const desired = routerConfig(wanted, link);
     const current = this.read();
@@ -616,6 +621,7 @@ export class MavlinkRenderer implements Renderer {
       this.adopted = link;
       // Nothing about the router's configuration changed.
       if (!this.running && mayStart) await this.startRouter(wanted, "start");
+      reportSelected();
       return;
     }
 
@@ -636,6 +642,7 @@ export class MavlinkRenderer implements Renderer {
     } else if (mayStart) {
       await this.startRouter(wanted, "start");
     }
+    reportSelected();
   }
 
   /**

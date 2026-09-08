@@ -45,7 +45,9 @@ those two notes and from the board on 2026-09-07, not from documentation.
   by board name. The registry and `/dev/mpp_service` are the evidence.
 - **Nothing may make the device unreachable.** A codec change is exempt from the
   confirmation window (`CAMERA_EXEMPT_LEAVES` already lists `codec`); a `mavlink.endpoints`
-  change is exempt (`R-CFG-12`); nothing here touches an interface, a route or a radio.
+  change is exempt (`R-CFG-12`). Bitrate, stream policy and preview policy deliberately
+  retain the R-CFG-03 / R-NET-07 confirmation window, including live retunes;
+  interruption and reachability protection are separate decisions.
   The one reboot (Task 11's UART role) is staged, not live.
 - **Yonder relays commands and never originates them** (`R-CMD-04`, `R-CMD-05`).
 - **A node without tests will not be merged.** Mutation-check every guard: delete it, watch
@@ -2524,7 +2526,7 @@ Expected: about **26%** with `yonder-core`, Node-RED and mediamtx idle at ~21–
 ssh root@<radxa> 'rate() { /usr/lib/jellyfin-ffmpeg/ffprobe -v error -rtsp_transport tcp -read_intervals "%+10" -select_streams v:0 -show_entries packet=size -of csv=p=0 rtsp://127.0.0.1:8554/cam0 | awk "{sum += \$1} END {printf \"%.0f kB (%.0f kb/s)\\n\", sum/1024, sum*8/10/1000}"; }; echo "before: $(rate)"; curl -s --unix-socket /run/yonder/core.sock http://localhost/cameras/cam0 | python3 -c "import json,sys; print(json.load(sys.stdin)[\"run\"])"; echo; curl -s -X POST --unix-socket /run/yonder/core.sock -H "Content-Type: application/json" -d "{\"streamBitrate\":3500}" http://localhost/cameras/cam0/apply | head -c 600; echo; sleep 3; echo "after: $(rate)"; curl -s --unix-socket /run/yonder/core.sock http://localhost/cameras/cam0 | python3 -c "import json,sys; print(json.load(sys.stdin)[\"run\"])"; echo'
 ```
 
-Expected: `before` about `2500 kB (2000 kb/s)` (2000 kb/s × 10 s ÷ 8); the apply answer's `interruption` says the picture is **not** restarted; `after` about `4375 kB (3500 kb/s)`; the two `run` readings show the **same `since`** — the pipeline that was running is the pipeline still running, and its rate moved. Confirm the apply with `POST /confirm` carrying the id the answer returned (or watch it be kept without a window — `codec`, `bitrate_kbps` under `stream` are what `interruption()` and `CAMERA_EXEMPT_LEAVES` decide; record which happened).
+Expected: `before` about `2500 kB (2000 kb/s)` (2000 kb/s × 10 s ÷ 8); the apply answer's `interruption` says the picture is **not** restarted; `after` about `4375 kB (3500 kb/s)`; the two `run` readings show the **same `since`** — the pipeline that was running is the pipeline still running, and its rate moved. Confirm the apply with `POST /confirm` carrying the id the answer returned. Bitrate, stream and preview changes deliberately retain the 120-second R-CFG-03 / R-NET-07 window; `codec` alone is exempt. Repeat once without confirming: the timer must restore the previous running bitrate through the same live channel without changing `since`. A host refusal must instead report its fallback restart or failure; an empty interruption list requires a continuous acknowledged change.
 
 - [ ] **Step 5: H.265**
 

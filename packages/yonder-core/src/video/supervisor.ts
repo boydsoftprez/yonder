@@ -307,6 +307,7 @@ export class Supervisor {
   private readonly spawner: ProcessSpawner;
   private readonly clock: Clock;
   private readonly entries = new Map<string, Entry>();
+  private readonly generations = new Map<string, number>();
   private readonly listeners: ((id: string, line: string) => void)[] = [];
 
   constructor(opts: { spawner?: ProcessSpawner; clock?: Clock } = {}) {
@@ -401,8 +402,11 @@ export class Supervisor {
   }
 
   /**
-   * The command line this camera's pipeline is **running under**, or null
-   * when none is.
+   * The effective launch recipe of the running pipeline, or null when none
+   * is running. Initially its spawned argv; `adoptArgv` advances it only
+   * after a manual live change is acknowledged. Crash retries use this same
+   * recipe, although the OS process command line still shows its launch-time
+   * arguments after a live retune.
    *
    * Deliberately not part of `CameraRun`: `state()` is served to the console
    * on every camera read, and a launch line is a diagnostic rather than
@@ -420,6 +424,16 @@ export class Supervisor {
     return entry?.proc ? entry.argv : null;
   }
 
+  /** Identity of a spawn, independent of clock granularity or settle time. */
+  generation(id: string): number { return this.generations.get(id) ?? 0; }
+
+  /** Acknowledged effective recipe, also used on the next crash retry. The
+   * caller has already verified the live host took these properties. */
+  adoptArgv(id: string, argv: string[]): void {
+    const entry = this.entries.get(id);
+    if (entry?.proc) entry.argv = [...argv];
+  }
+
   /** Lines the running pipelines send back, tagged with the camera each came
    *  from. Registered once; survives every restart of every pipeline. */
   onMessage(fn: (id: string, line: string) => void): void {
@@ -427,6 +441,7 @@ export class Supervisor {
   }
 
   private spawn(id: string, entry: Entry): void {
+    this.generations.set(id, this.generation(id) + 1);
     entry.run = { ...entry.run, state: "starting", since: this.clock.now() };
     const proc = this.spawner(entry.argv);
     entry.proc = proc;
