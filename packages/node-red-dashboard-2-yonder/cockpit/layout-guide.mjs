@@ -34,6 +34,10 @@ try{
  await page.getByRole('region',{name:'PFD and MFD displays',exact:true}).press('End');await page.waitForTimeout(400);
  assert(await page.locator('.cockpit-body').evaluate(e=>e.scrollTop>0));assert.equal(await page.locator('.flight-control-host').evaluate(e=>e.getBoundingClientRect().top),controlsTop);
  await b('Display setup').click();await l('Instrument placement').selectOption('side');await b('Close display setup').click();await page.getByRole('region',{name:'PFD and MFD displays',exact:true}).press('Home');await shot('cockpit-stacked');checks.push('Readable stacked displays, unclipped MFD bank and keyboard scrolling below fixed flight controls');
+ await b('Display setup').click();await l('Instrument placement').selectOption('mfd-left');await b('Close display setup').click();
+ const leftBank=await page.evaluate(()=>{const b=document.querySelector('.cockpit-mfd-bank'),m=document.querySelector('.cockpit-map-pane'),f=b.querySelector('.instrument-bank-faces');return {placement:b.dataset.placement,right:b.getBoundingClientRect().right,mapLeft:m.getBoundingClientRect().left,height:f.clientHeight,content:f.scrollHeight}});
+ assert.equal(leftBank.placement,'side');assert(Math.abs(leftBank.right-leftBank.mapLeft)<1);assert(leftBank.content<=leftBank.height+1);checks.push('Left MFD instrument column retains complete gauge rows beside its page');
+ await b('Display setup').click();await l('Instrument placement').selectOption('side');await b('Close display setup').click();
  await layout('split');await shot('cockpit-split');
  assert(await page.evaluate(()=>window.layoutPfd===document.querySelector('.pfd-svg')&&window.layoutMap===document.querySelector('.leaflet-container')));checks.push('Same PFD and map retained across MFD layouts');
  await b('Systems',mfd()).click();await b('Pinned instruments').waitFor();await shot('cockpit-systems');

@@ -72,8 +72,10 @@ or **PFD Menu → Attitude & display → Instrument panel & PFD/MFD layout**.
 
 1. Choose **Screen arrangement**: **Single PFD with insets** is the default;
    **PFD beside MFD** and **PFD above MFD** open a separate multifunction pane.
-2. Choose **Instrument panel**: **Beside the PFD**, **Across the top**, **On the
-   MFD**, or **Hidden**. If it is on the MFD, open an MFD page to see it.
+2. Choose **Instrument panel**: **Beside the PFD**, **Across the top**, **Across
+   the top of the MFD**, **Left side of the MFD**, or **Hidden**. For a vertical
+   column beside the MFD map or flight plan, choose **Left side of the MFD**.
+   If you are using a single PFD, press **Open map** to reveal the MFD.
 3. Show or hide **Navigation fields across the top** and the **HOME bearing
    pointer on the HSI**. Choose navigation distance in nautical miles, miles or
    kilometres, and choose **Altitude**, **Speed** and **Vertical speed** units.
@@ -84,7 +86,9 @@ or **PFD Menu → Attitude & display → Instrument panel & PFD/MFD layout**.
 With **PFD above MFD**, each display keeps a readable working height. Scroll down
 inside the display area to reach the MFD; the header, autopilot actions and user
 fields remain above that area. The instrument bank on the MFD shows its full
-faces. **Open map**, **Open flight plan**, **Open systems** and inspecting a
+faces. With **Left side of the MFD**, the column stays beside Map, Flight plan,
+Systems and Telemetry. Narrow screens stack the displays while keeping that
+column to the left of the MFD page. **Open map**, **Open flight plan**, **Open systems** and inspecting a
 reading bring the selected lower pane into view. Keyboard users can Tab to
 **PFD and MFD displays** and use Page Up/Page Down or Home/End to scroll.
 
@@ -324,7 +328,7 @@ recorder or send a flight command.*
 | Buttons briefly disable after a command | Wait for fresh aircraft details and the pending operation. The panel explains when details are refreshing. |
 | No instruments / FLIGHT DATA UNAVAILABLE | Check the source and connection; use Aircraft status → Request flight telemetry. Do not interpret missing measurements as zero. |
 | A gauge or category is unavailable | Tap it and read its source, age and reason. Optional reports require the corresponding firmware, sensor or companion service; Request flight telemetry cannot supply absent hardware. |
-| Fields or graphical instruments have disappeared | Open **Layout**, enable **Navigation fields across the top** or change **Instrument panel** from Hidden. For **On the MFD**, open an MFD page. |
+| Fields or graphical instruments have disappeared | Open **Layout**, enable **Navigation fields across the top** or change **Instrument panel** from Hidden. For either MFD placement, open an MFD page. |
 | A timer ends with `*` | It has partial observed history. Inspect it for late attachment, clock handoff or excluded telemetry gaps; it is not a complete flight log. |
 | Arming is refused during the simulator demo | Wait for EKF3 and GPS readiness and inspect the reported prearm reason. Keep the normal autopilot prearm checks enabled. |
 | Heading, altitude, speed or radius unavailable | Those extended GUIDED controls require a fresh supported ArduPlane 4.7.1 identity. Opening Modes does not prove every optional feature is available. |

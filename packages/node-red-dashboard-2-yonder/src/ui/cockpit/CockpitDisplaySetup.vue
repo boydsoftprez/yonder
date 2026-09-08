@@ -5,14 +5,14 @@
    <header><h2>Display setup</h2><button aria-label="Close display setup" @click="$emit('close')">×</button></header>
    <div class="cockpit-dialog-body">
     <label>Screen arrangement<select aria-label="Display arrangement" :value="config.arrangement" @change="$emit('option','arrangement',$event.target.value)"><option value="single">Single PFD with insets</option><option value="split">PFD beside MFD</option><option value="stacked">PFD above MFD</option></select></label>
-    <label>Instrument panel<select aria-label="Instrument placement" :value="config.bankPlacement" @change="$emit('option','bankPlacement',$event.target.value)"><option value="side">Beside the PFD</option><option value="top">Across the top</option><option value="mfd">On the MFD</option><option value="hidden">Hidden</option></select></label>
+    <label>Instrument panel<select aria-label="Instrument placement" :value="config.bankPlacement" @change="$emit('option','bankPlacement',$event.target.value)"><option value="side">Beside the PFD</option><option value="top">Across the top</option><option value="mfd">Across the top of the MFD</option><option value="mfd-left">Left side of the MFD</option><option value="hidden">Hidden</option></select></label>
     <label class="cockpit-check-option"><span>Navigation fields across the top</span><input type="checkbox" :checked="config.showDataBar" @change="$emit('option','showDataBar',$event.target.checked)"></label>
     <label class="cockpit-check-option"><span>HOME bearing pointer on the HSI</span><input type="checkbox" :checked="config.homePointer" @change="$emit('option','homePointer',$event.target.checked)"></label>
     <label>Navigation distance<select aria-label="Navigation distance units" :value="config.distanceUnit" @change="$emit('option','distanceUnit',$event.target.value)"><option value="nm">Nautical miles</option><option value="mi">Miles</option><option value="km">Kilometres</option></select></label>
     <FlightUnits :options="flightOptions" @option="(key,value)=>$emit('flight-option',key,value)"/>
     <p>The same PFD stays active while you change pages. Tap Fields or Instruments to choose readings, sources, order and gauge styles.</p>
     <p v-if="config.arrangement==='stacked'">The PFD and MFD keep their own display heights. Scroll down within the displays to reach the MFD; flight controls and user fields stay above the scrolling area.</p>
-    <p v-if="config.bankPlacement==='mfd'&&config.arrangement==='single'">Open an MFD page to see its instrument panel.</p>
+    <p v-if="['mfd','mfd-left'].includes(config.bankPlacement)&&config.arrangement==='single'">Open an MFD page to see its instrument panel.</p>
     <div class="cockpit-display-actions"><button @click="$emit('page','map')">Open map</button><button @click="$emit('page','mission')">Open flight plan</button><button @click="$emit('page','systems')">Open systems</button><button @click="$emit('reset')">Restore display defaults</button></div>
    </div>
   </section>

@@ -181,3 +181,23 @@ covered by the host checks. All 64 covering component/settings tests passed and
 the production bundle built (783.58 kB, 216.15 kB gzip). The reusable layout guide
 now includes full-height, no-clipping and keyboard-scroll assertions; this pass
 executed those behaviors through the browser tools, not another complete SITL run.
+
+
+## Left-side MFD instruments
+
+Added **Layout → Instrument panel → Left side of the MFD**. The old `mfd` saved
+value remains the horizontal MFD bank, now labeled **Across the top of the MFD**;
+`mfd-left` selects the vertical column. It uses the existing bank and saved gauge
+sources, scales and bands. PFD and map components remain mounted across the change.
+Named grid areas reserve a real MFD column in both display arrangements. Below
+960 px the left-bank layout stacks the displays, retaining the column beside the
+MFD page. Its minimum height accounts for the selected instrument count.
+
+The selection/persistence regression failed before implementation, then all 65
+covering component/settings tests passed using the dashboard's Vue-aware test
+configuration. The production build passed at 785.71 kB / 216.45 kB gzip.
+Browser checks verified the column beside Map, Flight plan, Systems and Telemetry,
+both arrangements, saved restoration, and 1440-, 1024-, 768- and 390-px widths.
+Instrument rows remained fully visible, the bank's right edge matched the page's
+left edge, and the page had no horizontal overflow. The stacked arrangement and
+normal browser dimensions were restored after checking. No flight commands changed.

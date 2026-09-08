@@ -47,7 +47,7 @@
   </div>
   <div class="cockpit-body" :tabindex="mfdOpen?0:undefined" :role="mfdOpen?'region':undefined" :aria-label="mfdOpen?'PFD and MFD displays':undefined">
     <nav v-if="mfdOpen" class="cockpit-mfd-pages" aria-label="Multifunction display pages"><button v-for="page in mfdPages" :key="page.id" :aria-pressed="mfdPage===page.id" @click="openMfdPage(page.id)">{{page.label}}</button><button aria-label="Close multifunction display" @click="closeMfd">×</button></nav>
-    <InstrumentBank v-if="mfdOpen&&bankPlacement==='mfd'" class="cockpit-mfd-bank" :items="instrumentItems" :config="bankInstrumentConfig" placement="top" @select="openInstrument" @update:config="setBankInstrumentConfig"/>
+    <InstrumentBank v-if="mfdOpen&&['mfd','mfd-left'].includes(bankPlacement)" class="cockpit-mfd-bank" :items="instrumentItems" :config="bankInstrumentConfig" :placement="bankPlacement==='mfd-left'?'side':'top'" @select="openInstrument" @update:config="setBankInstrumentConfig"/>
     <section v-if="mfdOpen&&['systems','inspector'].includes(mfdPage)" class="cockpit-systems-pane" aria-label="Multifunction systems"><InstrumentationPanel :items="instrumentItems" :history="instrumentHistory" :selected-id="selectedInstrument" :bank-config="bankInstrumentConfig" :top-config="topInstrumentConfig" :view="mfdPage==='inspector'||selectedInstrument?'inspector':'systems'" @select="selectedInstrument=$event" @update:bankConfig="setBankInstrumentConfig" @update:topConfig="setTopInstrumentConfig"/><p v-if="instrumentError" class="cockpit-instrument-error" role="status">{{instrumentError}}</p></section>
     <PrimaryFlightDisplay
       ref="pfd"
