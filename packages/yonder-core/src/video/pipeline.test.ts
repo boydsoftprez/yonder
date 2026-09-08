@@ -46,6 +46,26 @@ const mppOpts = { ...opts, encoder: MPP };
 const mpp = () => compose(mppOpts);
 const mppText = () => mpp().join(" ");
 
+describe('a main encode with no permanent consumer', () => {
+  it.each([
+    ['usb', 'empty'], ['usb', 'disabled'], ['usb', 'enabled'],
+    ['accessory', 'empty'], ['accessory', 'disabled'], ['accessory', 'enabled'],
+  ] as const)('keeps the %s preview independent when outputs are %s and the recorder detaches', (source, outputState) => {
+    const outputs = outputState === 'empty' ? [] : [{ ...rtspOutput, enabled: outputState === 'enabled' }];
+    const camera = { ...CAMERA, source, outputs, device: source === 'accessory' ? 'pocket2:test.udc' : CAMERA.device };
+    const argv = compose({ ...opts, camera, accessory: source === 'accessory'
+      ? { endpoint: '/run/yonder/accessory/cam0.sock', live: true, generation: 1, reason: null, native: { width: 1280, height: 720, fps: 29.97 } }
+      : undefined });
+    // The host observes main's sink pad; it attaches no permanent drain.
+    // Its dynamic recorder can release the last request pad at any time.
+    expect(argv.join(' ')).toContain('tee name=main allow-not-linked=true');
+    expect(argv.filter(token => token === 'main.')).toHaveLength(outputState === 'enabled' ? 1 : 0);
+    expect(argv).toContain('name=enc-stream'); expect(argv).toContain('name=enc-preview');
+    expect(argv).toContain(`location=${opts.rtspBase}/${camera.id}-preview`);
+    expect(argv).not.toContain('fakesink');
+  });
+});
+
 describe('accessory input', () => {
   const accessory = { endpoint: '/run/yonder/accessory/cam1.sock', live: true, generation: 1, reason: null, native: { width: 1280, height: 720, fps: 29.97 } };
   const input = { ...opts, camera: { ...CAMERA, source: 'accessory' as const, device: 'pocket2:test.udc' }, capabilities: noCapabilities(), accessory };

@@ -474,9 +474,11 @@ export function compose(opts: ComposeOptions): string[] {
     "tee", "name=raw",
   );
 
-  // The full-rate encode, then the fork to its consumers.
+  // R-VID-13/16, R-CAM-17: preview remains live with no enabled full-rate
+  // output and after the recorder releases main's last request pad. The
+  // host's sink-pad probe observes traffic but is not a downstream consumer.
   push("raw.", LINK, ...QUEUE, LINK, ...encode(main, "stream", camera.bitrate_kbps, null), LINK,
-    parser(camera.codec), LINK, "tee", "name=main");
+    parser(camera.codec), LINK, "tee", "name=main", "allow-not-linked=true");
   // A disabled output contributes no branch at all (R-VID-16) — not a branch
   // that opens a socket and sits muted, which is a different claim to an
   // operator than "stopped". See the note on `CameraOutput.enabled`.
