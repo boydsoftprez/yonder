@@ -48,16 +48,55 @@ describe('camera native encoding and availability', () => {
         expect(wire).toMatchObject({ receiver: 1, commandSet: 2, commandId: id });
         expect(Buffer.from(wire.payload!).toString('hex')).toBe(hex);
     });
-    it.each([null, {}, { kind: 'iso', value: NaN }, { kind: 'iso', value: 4 }, { kind: 'iso', value: '3' },
+    it.each([null, {}, { kind: 'iso', value: NaN }, { kind: 'iso', value: 10 }, { kind: 'iso', value: '3' },
         { kind: 'mode', value: 2 }, { kind: 'photo', unexpected: true }, { kind: 'shutter', value: { reciprocal: true, integer: 60, decimal: NaN } },
         { kind: 'shutter', value: { reciprocal: false, integer: 60, decimal: 0 } }, { kind: 'focus-point', value: { x: Infinity, y: 0.5 } },
         { kind: 'focus-point', value: { x: 0.4, y: 0.5 } }, { kind: 'record-format', value: { format: 16, rate: 6, extra: 1 } },
         { kind: 'colour', value: 0 }, { kind: 'white-balance', value: 1 }, { kind: 'gain', value: 100 }])('rejects malformed or unmeasured value %j', input => {
         expect(() => encodeCameraCommand(input)).toThrow();
     });
+    it.each([
+        [{ kind: 'iso', value: 4 }, 0x2a, '04'], [{ kind: 'iso', value: 6 }, 0x2a, '06'],
+        [{ kind: 'iso', value: 7 }, 0x2a, '07'], [{ kind: 'iso', value: 9 }, 0x2a, '09'],
+        [{ kind: 'ev', value: 11 }, 0x2e, '0b'], [{ kind: 'ev', value: 12 }, 0x2e, '0c'],
+        [{ kind: 'ev', value: 13 }, 0x2e, '0d'], [{ kind: 'ev', value: 14 }, 0x2e, '0e'],
+        [{ kind: 'ev', value: 15 }, 0x2e, '0f'], [{ kind: 'ev', value: 17 }, 0x2e, '11'],
+        [{ kind: 'ev', value: 18 }, 0x2e, '12'], [{ kind: 'ev', value: 19 }, 0x2e, '13'],
+        [{ kind: 'ev', value: 20 }, 0x2e, '14'], [{ kind: 'ev', value: 21 }, 0x2e, '15'],
+        [{ kind: 'ev', value: 22 }, 0x2e, '16'],
+        [{ kind: 'shutter', value: { reciprocal: true, integer: 100, decimal: 0 } }, 0x28, '01648000'],
+        [{ kind: 'shutter', value: { reciprocal: true, integer: 500, decimal: 0 } }, 0x28, '01f48100'],
+        [{ kind: 'white-balance', value: 0 }, 0x2c, '0000'],
+        [{ kind: 'white-balance', value: 40 }, 0x2c, '0628'],
+        [{ kind: 'white-balance', value: 65 }, 0x2c, '0641'],
+    ])('encodes newly measured command %j exactly', (input, id, hex) => {
+        const wire = encodeCameraCommand(input);
+        expect(wire.commandId).toBe(id);
+        expect(Buffer.from(wire.payload!).toString('hex')).toBe(hex);
+    });
+    it.each([
+        { kind: 'iso', value: 2 }, { kind: 'ev', value: 9 }, { kind: 'ev', value: 23 },
+        { kind: 'shutter', value: { reciprocal: true, integer: 30, decimal: 0 } },
+        { kind: 'shutter', value: { reciprocal: true, integer: 250, decimal: 0 } },
+        { kind: 'shutter', value: { reciprocal: true, integer: 60, decimal: 5 } },
+        { kind: 'white-balance', value: 50 }, { kind: 'white-balance', value: 4000 },
+        { kind: 'white-balance', value: '40' }, { kind: 'white-balance', value: NaN },
+    ])('keeps unmeasured option %j unavailable', input => expect(() => encodeCameraCommand(input)).toThrow());
+    it('labels automatic white balance independently of Kelvin conversion', () => {
+        const wb = cameraControlDescriptors().find(d => d.key === 'white-balance');
+        if (wb?.kind !== 'menu') throw new Error('White balance menu missing');
+        expect(wb.values).toEqual([0, 40, 65]);
+        expect(wb.labels).toEqual({ 0: 'Auto', 40: '4000 K', 65: '6500 K' });
+        expect(wb.toDisplay(40)).toBe(4000); expect(wb.toDisplay(65)).toBe(6500);
+        expect(wb.toRaw(4000)).toBe(40); expect(wb.toRaw(6500)).toBe(65);
+        expect(() => wb.toRaw(5000)).toThrow(); expect(Object.isFrozen(wb.labels)).toBe(true);
+        const iso = cameraControlDescriptors().find(d => d.key === 'iso');
+        if (iso?.kind !== 'menu') throw new Error('ISO menu missing');
+        expect(iso.toDisplay(9)).toBe(6400); expect(iso.toRaw(6400)).toBe(9);
+    });
     it('keeps measured options and unavailable controls honest without a fabricated linear shutter range', () => {
         const descriptors = cameraControlDescriptors();
-        expect(descriptors.find(d => d.key === 'iso')).toMatchObject({ kind: 'menu', values: [3, 5, 8], evidence: 'measured' });
+        expect(descriptors.find(d => d.key === 'iso')).toMatchObject({ kind: 'menu', values: [3, 4, 5, 6, 7, 8, 9], evidence: 'measured' });
         expect(descriptors.find(d => d.key === 'shutter')).toMatchObject({ kind: 'shutter', unit: 's' });
         expect(descriptors.find(d => d.key === 'shutter')).not.toHaveProperty('step');
         const iso = descriptors.find(d => d.key === 'iso');
@@ -65,17 +104,55 @@ describe('camera native encoding and availability', () => {
             throw new Error('ISO menu missing');
         expect(iso.toDisplay(3)).toBe(100);
         expect(iso.toRaw(400)).toBe(5);
-        expect(() => iso.toRaw(200)).toThrow();
+        expect(() => iso.toRaw(12800)).toThrow();
         const ev = descriptors.find(d => d.key === 'ev');
         if (ev?.kind !== 'menu')
             throw new Error('EV menu missing');
         expect(ev.toDisplay(10)).toBe(-2);
         expect(ev.toRaw(0)).toBe(16);
-        for (const key of ['colour', 'filter', 'white-balance', 'zoom', 'live-format'])
+        expect(ev.values).toEqual([10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]);
+        expect(ev.toDisplay(11)).toBe(-5 / 3);
+        expect(ev.toDisplay(22)).toBe(2); expect(ev.toRaw(2)).toBe(22);
+        expect(descriptors.find(d => d.key === 'shutter')).toMatchObject({ values: [
+            { reciprocal: true, integer: 60, decimal: 0 }, { reciprocal: true, integer: 100, decimal: 0 },
+            { reciprocal: true, integer: 500, decimal: 0 }, { reciprocal: true, integer: 1000, decimal: 0 },
+        ] });
+        for (const key of ['colour', 'filter', 'zoom', 'live-format'])
             expect(descriptors.find(d => d.key === key)).toMatchObject({ kind: 'unavailable', reason: expect.any(String) });
     });
 });
 describe('observed camera operations', () => {
+    it.each([
+        ['iso', 3, 'iso-code-3'], ['iso', 4, 'iso-code-4'], ['iso', 5, 'iso-code-5'],
+        ['iso', 6, 'iso-code-6'], ['iso', 7, 'iso-code-7'], ['iso', 8, 'iso-code-8'], ['iso', 9, 'iso-code-9'],
+        ['ev', 10, 'ev-code-10'], ['ev', 11, 'ev-code-11'], ['ev', 12, 'ev-code-12'],
+        ['ev', 13, 'ev-code-13'], ['ev', 14, 'ev-code-14'], ['ev', 15, 'ev-code-15'],
+        ['ev', 16, 'ev-code-16'], ['ev', 17, 'ev-code-17'], ['ev', 18, 'ev-code-18'],
+        ['ev', 19, 'ev-code-19'], ['ev', 20, 'ev-code-20'], ['ev', 21, 'ev-code-21'], ['ev', 22, 'ev-code-22'],
+        ['white-balance', 40, 'wb-custom4000'], ['white-balance', 65, 'wb-custom6500'],
+        ['white-balance', 0, 'wb-auto'],
+    ] as const)('waits for retained readback for %s %s', async (kind, value, fixture) => {
+        const h = harness(); h.push(kind === 'iso' ? 'manual' : 'baseline', 0x81);
+        let done = false;
+        const op = h.camera.execute({ kind, value }).then(result => { done = true; return result; });
+        await flush(); expect(done).toBe(false);
+        h.push(fixture, 0x81); await expect(op).resolves.toMatchObject({ completed: true });
+    });
+    it.each([60, 100, 500, 1000])('confirms measured manual shutter 1/%s from retained readback', async integer => {
+        const h = harness(); h.push('manual', 0x81);
+        const op = h.camera.execute({ kind: 'shutter', value: { reciprocal: true, integer, decimal: 0 } });
+        await flush(); h.push(`manual-shutter-${integer}`, 0x81);
+        await expect(op).resolves.toMatchObject({ state: { exposure: { shutter: { denominator: integer } } } });
+    });
+    it('requires both custom white-balance mode and temperature before completion', async () => {
+        const h = harness();
+        let done = false;
+        const op = h.camera.execute({ kind: 'white-balance', value: 40 }).then(result => { done = true; return result; });
+        await flush();
+        h.push('wb-custom6500', 0x81); await flush(); expect(done).toBe(false);
+        h.push('wb-custom4000', 0x81, p => p[23] = 0); await flush(); expect(done).toBe(false);
+        h.push('wb-custom4000', 0x81); await op;
+    });
     it('does not complete record on dispatch/ack and rejects competing operations', async () => {
         const h = harness();
         let complete = false;

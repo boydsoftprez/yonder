@@ -82,6 +82,7 @@ describe('measured Pocket 2 state', () => {
             throw new Error('fixture did not decode');
         const actual = { mode: status.mode, cardInserted: status.cardInserted, recording: status.recordState === 2, recordingSeconds: status.recordingSeconds,
             exposureMode: exposure.exposureModeCode, isoCode: exposure.isoCode, iso: exposure.actualIso, shutterDenominator: exposure.shutter.denominator,
+            evCode: exposure.evCode, whiteBalanceCode: exposure.whiteBalanceCode, temperatureRaw: exposure.temperatureRaw,
             focusMode: focus.modeCode, focusPoint: focus.point, photoSizeCode: exposure.photoSizeCode, recordRateCode: exposure.recordRateCode };
         expect(actual).toMatchObject(fixture.expected);
     });

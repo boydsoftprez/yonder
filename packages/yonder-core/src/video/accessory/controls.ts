@@ -14,15 +14,18 @@ export type CameraCommand = {
     readonly value: 1 | 2 | 4;
 } | {
     readonly kind: 'iso';
-    readonly value: 3 | 5 | 8;
+    readonly value: 3 | 4 | 5 | 6 | 7 | 8 | 9;
 } | {
     readonly kind: 'ev';
-    readonly value: 10 | 16;
+    readonly value: 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21 | 22;
+} | {
+    readonly kind: 'white-balance';
+    readonly value: 0 | 40 | 65;
 } | {
     readonly kind: 'shutter';
     readonly value: Readonly<{
         reciprocal: true;
-        integer: 60 | 1000;
+        integer: 60 | 100 | 500 | 1000;
         decimal: 0;
     }>;
 } | {
@@ -50,6 +53,8 @@ export type CameraControlDescriptor = (Pick<ControlDescriptor, 'label' | 'unit' 
     readonly kind: 'menu';
     readonly evidence: 'measured';
     readonly values: readonly number[];
+    /** Prefer an explicit label over numeric display, e.g. Auto is not 0 K. */
+    readonly labels?: Readonly<Record<number, string>>;
 }) | {
     readonly key: string;
     readonly label: string;
@@ -63,24 +68,26 @@ export type CameraControlDescriptor = (Pick<ControlDescriptor, 'label' | 'unit' 
     readonly kind: 'unavailable';
     readonly reason: string;
 };
-const menu = (key: string, label: string, values: number[], unit = '', shown = values): CameraControlDescriptor => Object.freeze({
+const ISO_CODES = Object.freeze([3, 4, 5, 6, 7, 8, 9]);
+const EV_CODES = Object.freeze([10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]);
+const SHUTTER_INTEGERS = Object.freeze([60, 100, 500, 1000]);
+const menu = (key: string, label: string, values: readonly number[], unit = '', shown = values, labels?: Readonly<Record<number, string>>): CameraControlDescriptor => Object.freeze({
     key, label, kind: 'menu', unit, evidence: 'measured', values: Object.freeze(values),
     toDisplay: (raw: number) => shown[values.indexOf(option(raw, values))],
     toRaw: (display: number) => values[shown.indexOf(option(display, shown))],
+    ...(labels ? { labels: Object.freeze({ ...labels }) } : {}),
     ...(key === 'iso' ? { openWhen: (mode: number) => mode === 4 } : {}),
 });
 const DESCRIPTORS: readonly CameraControlDescriptor[] = Object.freeze([
-    menu('mode', 'Camera mode', [0, 1]), menu('exposure-mode', 'Exposure mode', [1, 2, 4]), menu('iso', 'ISO', [3, 5, 8], 'ISO', [100, 400, 3200]),
-    menu('ev', 'Exposure compensation', [10, 16], 'EV', [-2, 0]), menu('focus-mode', 'Autofocus', [1, 2]),
+    menu('mode', 'Camera mode', [0, 1]), menu('exposure-mode', 'Exposure mode', [1, 2, 4]), menu('iso', 'ISO', ISO_CODES, 'ISO', [100, 200, 400, 800, 1600, 3200, 6400]),
+    menu('ev', 'Exposure compensation', EV_CODES, 'EV', EV_CODES.map(code => (code - 16) / 3)), menu('focus-mode', 'Autofocus', [1, 2]),
+    menu('white-balance', 'White balance', [0, 40, 65], 'K', [0, 4000, 6500], { 0: 'Auto', 40: '4000 K', 65: '6500 K' }),
     menu('photo-size', 'Photo size code', [4, 5]), menu('record-format', 'Recording rate code (format 16)', [3, 6]),
-    Object.freeze({ key: 'shutter', label: 'Shutter', kind: 'shutter', unit: 's', evidence: 'measured', values: Object.freeze([
-            Object.freeze({ reciprocal: true, integer: 60, decimal: 0 }), Object.freeze({ reciprocal: true, integer: 1000, decimal: 0 })
-        ]) }),
+    Object.freeze({ key: 'shutter', label: 'Shutter', kind: 'shutter', unit: 's', evidence: 'measured', values: Object.freeze(SHUTTER_INTEGERS.map(integer => Object.freeze({ reciprocal: true, integer, decimal: 0 }))) }),
     Object.freeze({ key: 'focus-point', label: 'Focus point', kind: 'point', unit: 'normalized coordinates', evidence: 'measured', values: Object.freeze([
             Object.freeze({ x: 0.25, y: 0.25 }), Object.freeze({ x: 0.5, y: 0.5 })
         ]) }),
     ...[
-        ['white-balance', 'White balance', 'Effect was observed, but exact measured option payloads are not yet retained.'],
         ['colour', 'Colour', 'Command 0x3e returned e0 with no observable effect.'],
         ['filter', 'Filter', 'Command 0x42 had no observable effect.'],
         ['zoom', 'Digital zoom', 'No change to the live USB feed was observed.'],
@@ -129,12 +136,18 @@ export function encodeCameraCommand(input: unknown): Omit<DumlCommand, 'sequence
             break;
         case 'iso':
             id = 0x2a;
-            payload = Buffer.from([option(c.value, [3, 5, 8])]);
+            payload = Buffer.from([option(c.value, ISO_CODES)]);
             break;
         case 'ev':
             id = 0x2e;
-            payload = Buffer.from([option(c.value, [10, 16])]);
+            payload = Buffer.from([option(c.value, EV_CODES)]);
             break;
+        case 'white-balance': {
+            const value = option(c.value, [0, 40, 65]);
+            id = 0x2c;
+            payload = Buffer.from(value === 0 ? [0, 0] : [6, value]);
+            break;
+        }
         case 'focus-mode':
             id = 0x24;
             payload = Buffer.from([option(c.value, [1, 2])]);
@@ -156,7 +169,7 @@ export function encodeCameraCommand(input: unknown): Omit<DumlCommand, 'sequence
             id = 0x28;
             payload = Buffer.alloc(4);
             payload[0] = 1;
-            payload.writeUInt16LE(option(v.integer, [60, 1000]) | 0x8000, 1);
+            payload.writeUInt16LE(option(v.integer, SHUTTER_INTEGERS) | 0x8000, 1);
             payload[3] = option(v.decimal, [0]);
             break;
         }
@@ -401,6 +414,12 @@ export class CameraController {
                 break;
             case 'shutter':
                 matches = exposureFresh && e.shutter.reciprocal === c.value.reciprocal && e.shutter.integer === c.value.integer && e.shutter.decimal === c.value.decimal;
+                break;
+            case 'white-balance':
+                // Auto reports its current estimated temperature (e.g. 54), not
+                // the zero placeholder in the request. Custom requires both fields.
+                matches = exposureFresh && (c.value === 0 ? e.whiteBalanceCode === 0
+                    : e.whiteBalanceCode === 6 && e.temperatureRaw === c.value);
                 break;
             case 'focus-mode':
                 matches = focusFresh && f.modeCode === c.value;
