@@ -1,5 +1,6 @@
 // Display references and settings. These values never become aircraft commands.
 // SPDX-License-Identifier: GPL-3.0-or-later
+import {units} from './flight-units.mjs';
 export const referenceFields = Object.freeze({
   airspeed: {
     title: 'Airspeed reference',
@@ -51,6 +52,7 @@ export const displayDefaults = Object.freeze({
   standardRatePointers: true,
   turnRate: true,
   followMission: true,
+  ...units(),
   stripPlacement: 'mfd',
   layout: 'split'
 });
@@ -95,6 +97,7 @@ export function validatePfdPreferences(input = {}) {
   if (['pfd', 'mfd', 'hidden'].includes(input?.display?.stripPlacement)) display.stripPlacement = input.display
     .stripPlacement;
   if (['split', 'pfd-wide', 'mfd-wide', 'swap'].includes(input?.display?.layout)) display.layout = input.display.layout;
+  Object.assign(display,units(input?.display));
   return {
     references,
     display

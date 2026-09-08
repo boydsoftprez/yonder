@@ -17,7 +17,7 @@ it('requires reopening an editor after the aircraft changes',async()=>{const w=c
 it('defaults altitude to the tested maximum-rate request',async()=>{const w=controls();await w.get('[aria-label="Altitude / Speed"]').trigger('click');expect(w.get('[aria-label="Requested vertical rate"]').element.value).toBe('0');w.unmount()});
 it('requires an explicit MSL altitude for a changed Set Home action',async()=>{
  const item={...createMissionItem(16,{lat:35,lon:-84,alt:120,frame:6}),seq:1};
- const w=mount(MissionTouch,{props:{mission:{items:[item]},selection:{seq:1},sitl:{}}});
+ const w=mount(MissionTouch,{props:{mission:{items:[item]},selection:{seq:1},sitl:{},options:{altitudeUnit:'m'}}});
  await w.get('[aria-label="Change mission action"]').trigger('click');await w.get('[aria-label="Change to Do Set Home"]').trigger('click');
  expect(w.text()).toContain('Enter a new MSL altitude');expect(w.get('[aria-label="Alt parameter 7"]').element.value).toBe('');
  await w.get('form').trigger('submit');expect(w.emitted('edit')).toBeUndefined();

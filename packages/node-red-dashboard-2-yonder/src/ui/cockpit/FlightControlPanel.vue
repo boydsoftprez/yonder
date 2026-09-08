@@ -28,27 +28,30 @@
           </template>
           <form v-else class="flight-request-form" @submit.prevent="submit(actionKind)">
             <p class="mission-touch-note">This request enters GUIDED and sends one operator-selected target. An ACK confirms command acceptance; actual motion remains visible in the instruments.</p>
+            <FlightUnits v-if="['alt-speed','direct','loiter'].includes(panel)" :options="options" @option="(key,value)=>$emit('option',key,value)"/>
             <div v-if="panel==='alt-speed'" class="mission-categories"><button type="button" :aria-pressed="targetKind==='altitude'" @click="targetKind='altitude';error=''">Altitude</button><button type="button" :aria-pressed="targetKind==='speed'" @click="targetKind='speed';error=''">Airspeed</button></div>
             <div v-if="panel==='heading'" class="mission-field-grid">
-              <label class="mission-parameter-field"><span>True heading <small>degrees</small></span><input v-model="form.headingDeg" aria-label="Requested true heading" type="number" min="0" max="359.999" step="any" required></label>
-              <label class="mission-parameter-field"><span>Turn acceleration <small>m/s²</small></span><input v-model="form.turnAccelerationMps2" aria-label="Heading turn acceleration" type="number" min=".05" max="20" step="any" required></label>
+              <label class="mission-parameter-field"><span>True heading <small>degrees</small></span><input v-model="form.headingDeg" aria-label="Requested true heading" type="number" min="0" max="359.999" step="any" required /></label>
+              <label class="mission-parameter-field"><span>Turn acceleration <small>m/s²</small></span><input v-model="form.turnAccelerationMps2" aria-label="Heading turn acceleration" type="number" min=".05" max="20" step="any" required /></label>
             </div>
             <div v-if="panel==='direct'||panel==='loiter'" class="mission-field-grid">
-              <label class="mission-parameter-field"><span>Latitude <small>degrees</small></span><input v-model="form.lat" aria-label="Target latitude" type="number" min="-90" max="90" step="any" required></label>
-              <label class="mission-parameter-field"><span>Longitude <small>degrees</small></span><input v-model="form.lon" aria-label="Target longitude" type="number" min="-180" max="180" step="any" required></label>
+              <label class="mission-parameter-field"><span>Latitude <small>degrees</small></span><input v-model="form.lat" aria-label="Target latitude" type="number" min="-90" max="90" step="any" required /></label>
+              <label class="mission-parameter-field"><span>Longitude <small>degrees</small></span><input v-model="form.lon" aria-label="Target longitude" type="number" min="-180" max="180" step="any" required /></label>
               <button type="button" class="mission-touch-wide" @click="pickTarget">Choose target on map</button>
             </div>
             <div v-if="['direct','loiter','altitude'].includes(actionKind)" class="mission-field-grid">
-              <label class="mission-parameter-field"><span>Requested altitude <small>metres</small></span><input v-model="form.altitudeM" aria-label="Requested altitude metres" type="number" min="-1000" max="30000" step="any" required></label>
+              <label class="mission-parameter-field"><span>Requested altitude <small>{{unitLabels[selectedUnits.altitudeUnit]}}</small></span><FlightUnitInput v-model="form.altitudeM" :unit="selectedUnits.altitudeUnit" :aria-label="'Requested altitude '+unitLabels[selectedUnits.altitudeUnit]" :min="-1000" :max="30000" required /></label>
               <label class="mission-parameter-field"><span>Altitude datum</span><select v-model="form.datum" aria-label="Flight target altitude datum"><option value="home">Above home</option><option value="msl">Mean sea level</option></select></label>
-              <label v-if="actionKind==='altitude'" class="mission-parameter-field"><span>Vertical rate <small>m/s · 0 = maximum</small></span><input v-model="form.verticalRateMps" aria-label="Requested vertical rate" type="number" min="0" max="100" step="any" required></label>
+              <label v-if="actionKind==='altitude'" class="mission-parameter-field"><span>Requested climb / descent rate <small>{{unitLabels[selectedUnits.verticalSpeedUnit]}} · 0 = aircraft maximum</small></span><FlightUnitInput v-model="form.verticalRateMps" :unit="selectedUnits.verticalSpeedUnit" aria-label="Requested vertical rate" :min="0" :max="100" required /></label>
             </div>
             <div v-if="actionKind==='speed'" class="mission-field-grid">
-              <label class="mission-parameter-field"><span>Requested airspeed <small>m/s</small></span><input v-model="form.airspeedMps" aria-label="Requested airspeed metres per second" type="number" min=".01" max="300" step="any" required></label>
-              <label class="mission-parameter-field"><span>Acceleration <small>m/s² · 0 = maximum</small></span><input v-model="form.accelerationMps2" aria-label="Requested speed acceleration" type="number" min="0" max="20" step="any" required></label>
+              <label class="mission-parameter-field"><span>Requested airspeed <small>{{unitLabels[selectedUnits.speedUnit]}}</small></span><FlightUnitInput v-model="form.airspeedMps" :unit="selectedUnits.speedUnit" :aria-label="'Requested airspeed '+unitLabels[selectedUnits.speedUnit]" :min=".01" :max="300" required /></label>
+              <label class="mission-parameter-field"><span>Acceleration <small>m/s² · 0 = maximum</small></span><input v-model="form.accelerationMps2" aria-label="Requested speed acceleration" type="number" min="0" max="20" step="any" required /></label>
             </div>
+            <p v-if="actionKind==='altitude'" class="mission-touch-note" role="status">Choose a target altitude; the aircraft determines climb or descent. ArduPlane 4.7.1 accepts nonzero rate requests but the tested climb was much slower. This is not a verified VS-hold mode. Zero requests the aircraft maximum within its configured limits.</p>
+            <p v-if="actionKind==='speed'" class="mission-touch-note">This changes the requested airspeed. It does not select an IAS climb or FLC mode; ArduPlane manages speed and height together.</p>
             <template v-if="panel==='loiter'">
-              <div class="mission-field-grid"><label class="mission-parameter-field"><span>Radius <small>metres</small></span><input v-model="form.radiusM" aria-label="Requested loiter radius" type="number" min="1" max="65535" step="1" required></label><label class="mission-parameter-field"><span>Direction</span><select v-model="form.direction" aria-label="Requested loiter direction"><option value="cw">Clockwise</option><option value="ccw">Counterclockwise</option></select></label><label class="mission-parameter-field"><span>Duration</span><input aria-label="Requested loiter duration" value="Until another operator command" readonly></label></div>
+              <div class="mission-field-grid"><label class="mission-parameter-field"><span>Radius <small>metres</small></span><input v-model="form.radiusM" aria-label="Requested loiter radius" type="number" min="1" max="65535" step="1" required /></label><label class="mission-parameter-field"><span>Direction</span><select v-model="form.direction" aria-label="Requested loiter direction"><option value="cw">Clockwise</option><option value="ccw">Counterclockwise</option></select></label><label class="mission-parameter-field"><span>Duration</span><input aria-label="Requested loiter duration" value="Until another operator command" readonly></label></div>
               <div class="loiter-local-preview" aria-label="Local loiter circle preview"><svg viewBox="0 0 150 120" aria-hidden="true"><circle cx="75" cy="60" r="43"/><path d="M75 60 H118"/><path :d="form.direction==='cw'?'M116 44 L118 59 L130 50':'M107 62 L118 47 L129 61'" class="loiter-preview-arrow"/><circle cx="75" cy="60" r="3"/></svg><span><b>{{form.radiusM||'—'}} m · {{form.direction==='cw'?'Clockwise':'Counterclockwise'}}</b><small>Local plan preview · not the observed aircraft path</small></span></div>
               <p class="mission-touch-note">Timed or turn-count loiters are authored as mission items. This immediate GUIDED loiter has no timed exit.</p>
             </template>
@@ -60,10 +63,14 @@
   </div>
 </template>
 <script setup>
+import FlightUnits from './FlightUnits.vue';
+import FlightUnitInput from './FlightUnitInput.vue';
+import {units,unitLabels,unitText} from './flight-units.mjs';
 import {computed, nextTick, onBeforeUnmount, reactive, ref} from 'vue';
 import {flightAnnunciation, flightAvailability, flightModes, flightRequest, missionExecutionState} from './flight-workflow.mjs';
-const props=defineProps({snapshot:{type:Object,default:()=>({})},available:Boolean,selectedTarget:Object});
-const emit=defineEmits(['request','pick-target']);
+const props=defineProps({snapshot:{type:Object,default:()=>({})},available:Boolean,selectedTarget:Object,options:{type:Object,default:()=>({})}});
+const emit=defineEmits(['request','pick-target','option']);
+const selectedUnits=computed(()=>units(props.options));
 const editGeneration=ref(null);
 const panel=ref(null),targetKind=ref('altitude'),error=ref(''),dialog=ref(null);
 const form=reactive({headingDeg:'',turnAccelerationMps2:2,lat:'',lon:'',altitudeM:'',datum:'home',verticalRateMps:0,airspeedMps:'',accelerationMps2:1,radiusM:200,direction:'cw'});
@@ -73,7 +80,7 @@ const missionExecution=computed(()=>missionExecutionState(props.snapshot));
 const actionKind=computed(()=>panel.value==='alt-speed'?targetKind.value:panel.value==='resume'?(missionExecution.value.kind||'resume'):panel.value);
 const reason=computed(()=>panel.value&&editGeneration.value!==props.snapshot.identity?.generation?'The aircraft changed while editing. Close and reopen these controls.':flightAvailability(actionKind.value,props.snapshot,props.available));
 const modes=computed(()=>flightModes(props.snapshot));
-const actual=computed(()=>flightAnnunciation(props.snapshot));
+const actual=computed(()=>flightAnnunciation(props.snapshot,props.options));
 let previousFocus=null;
 async function open(kind,target){
   const aliases={altitude:'alt-speed',airspeed:'alt-speed',speed:'alt-speed',mode:'modes'};
@@ -90,7 +97,7 @@ function submit(kind,values=form){
   error.value='';
   const blocked=reason.value||flightAvailability(kind,props.snapshot,props.available);
   if(blocked){error.value=blocked;return}
-  try{emit('request',flightRequest(kind,values,props.snapshot));close()}catch(e){error.value=e.message}
+  try{const request=flightRequest(kind,values,props.snapshot);const u=selectedUnits.value;if(kind==='altitude')request.label=`GUIDED · altitude ${unitText(request.action.altitudeM,u.altitudeUnit)} ${values.datum==='home'?'above home':'MSL'} · requested rate ${request.action.verticalRateMps?unitText(request.action.verticalRateMps,u.verticalSpeedUnit):'aircraft maximum'} · rate response unverified`;if(kind==='speed')request.label=`GUIDED · airspeed ${unitText(request.action.airspeedMps,u.speedUnit,1)} · ${request.action.accelerationMps2} m/s² acceleration`;if(['direct','loiter'].includes(kind))request.label=`GUIDED · ${kind==='loiter'?('loiter '+request.action.radiusM+' m '+request.action.direction):'Direct-To'} · ${request.action.target.lat.toFixed(6)}°, ${request.action.target.lon.toFixed(6)}° · ${unitText(request.action.target.altitudeM,u.altitudeUnit)} ${values.datum==='home'?'above home':'MSL'}`;emit('request',request);close()}catch(e){error.value=e.message}
 }
 function pickTarget(){emit('pick-target',{kind:panel.value,target:{...form}});close()}
 function keyboard(event){

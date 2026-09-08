@@ -2,7 +2,7 @@
 <template>
   <button class="pfd-wind-display" aria-label="Wind display settings" :title="description" @click="$emit('open')">
     <svg viewBox="0 0 128 86" role="img" :aria-label="description">
-      <text class="wind-title" x="8" y="14">WIND · KT</text><text class="wind-est" x="118" y="14" text-anchor="end">EST</text>
+      <text class="wind-title" x="8" y="14">WIND · {{unitLabels[speedUnit]}}</text><text class="wind-est" x="118" y="14" text-anchor="end">EST</text>
       <g v-if="wind.available">
         <g v-if="mode==='components'" class="wind-components">
           <path class="wind-stem" d="M10 42 H46 M28 24 V60"/>
@@ -14,8 +14,8 @@
           <text class="wind-caption" x="65" y="79">{{head===0?'HEAD/TAIL':head>0?'HEAD':'TAIL'}}</text>
         </g>
         <g v-else class="wind-vector">
-          <g v-if="Math.round(wind.speedKt)>0" :transform="`translate(28 47) rotate(${wind.relativeFromDeg})`"><path class="wind-arrow" d="M0 -18 V18 M-7 11 L0 18 L7 11"/></g>
-          <text class="wind-value" x="64" y="49">{{Math.round(wind.speedKt)}}</text>
+          <g v-if="Math.round(speed(wind.speedKt))>0" :transform="`translate(28 47) rotate(${wind.relativeFromDeg})`"><path class="wind-arrow" d="M0 -18 V18 M-7 11 L0 18 L7 11"/></g>
+          <text class="wind-value" x="64" y="49">{{Math.round(speed(wind.speedKt))}}</text>
           <text v-if="mode==='direction'" class="wind-bearing" x="64" y="72">{{bearing}}° T</text>
         </g>
       </g>
@@ -25,14 +25,16 @@
 </template>
 <script setup>
 import {computed} from 'vue';
+import {toDisplay,unitLabels} from './flight-units.mjs';
 import {windState} from './wind-state.mjs';
-const props=defineProps({telemetry:{type:Object,default:()=>({})},mode:{type:String,default:'components'}});
+const props=defineProps({telemetry:{type:Object,default:()=>({})},mode:{type:String,default:'components'},speedUnit:{type:String,default:'kt'}});
 defineEmits(['open']);
 const wind=computed(()=>windState(props.telemetry));
-const head=computed(()=>Math.round(wind.value.headwindKt)||0),cross=computed(()=>Math.round(wind.value.crosswindKt)||0);
+const speed=n=>toDisplay(Number.isFinite(n)?n*1852/3600:null,props.speedUnit);
+const head=computed(()=>Math.round(speed(wind.value.headwindKt))||0),cross=computed(()=>Math.round(speed(wind.value.crosswindKt))||0);
 const bearing=computed(()=>String(Math.round(wind.value.directionFromDeg)%360).padStart(3,'0'));
 const description=computed(()=>wind.value.available
-  ? `Estimated wind from ${bearing.value} degrees true at ${Math.round(wind.value.speedKt)} knots; ${Math.abs(head.value)} knots ${head.value<0?'tailwind':'headwind'}; ${Math.abs(cross.value)} knots crosswind${cross.value===0?'':cross.value>0?' from right':' from left'}`
+  ? `Estimated wind from ${bearing.value} degrees true at ${Math.round(speed(wind.value.speedKt))} ${props.speedUnit==='kt'?'knots':unitLabels[props.speedUnit]}; ${Math.abs(head.value)} ${props.speedUnit==='kt'?'knots':unitLabels[props.speedUnit]} ${head.value<0?'tailwind':'headwind'}; ${Math.abs(cross.value)} ${props.speedUnit==='kt'?'knots':unitLabels[props.speedUnit]} crosswind${cross.value===0?'':cross.value>0?' from right':' from left'}`
   : `No wind data: ${wind.value.reason}`);
 </script>
 <style scoped>

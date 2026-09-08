@@ -10,7 +10,7 @@
 
     <div v-if="view==='context'" class="mission-touch-body">
       <template v-if="selected">
-        <div class="mission-selected-summary"><span>{{selectedMeta?.category||'Imported command'}} · MAV_CMD {{selected.command}}</span><b v-if="selectedMeta?.altitude">{{fmt(selected.alt,2)}} m <small>{{datumLabel(selected.frame)}}</small></b><p>{{selectedMeta?.description||'This imported command is preserved. Its parameters can be inspected below.'}}</p></div>
+        <div class="mission-selected-summary"><span>{{selectedMeta?.category||'Imported command'}} · MAV_CMD {{selected.command}}</span><b v-if="selectedMeta?.altitude">{{unitText(selected.alt,selectedUnits.altitudeUnit)}} <small>{{datumLabel(selected.frame)}}</small></b><p>{{selectedMeta?.description||'This imported command is preserved. Its parameters can be inspected below.'}}</p></div>
         <div class="mission-touch-section-label">AIRCRAFT ACTIONS</div>
         <div class="mission-action-grid"><button class="mission-execute" :disabled="commandDisabled||!flyTarget" @click="flySelected">Review fly-to<small>GUIDED · use this position and altitude</small></button><button class="mission-execute" :disabled="commandDisabled||!flyTarget" @click="$emit('flight-controls',{kind:'loiter',...flyTarget})">Loiter at this item…<small>Choose radius and direction, then review</small></button><button class="mission-execute" :disabled="commandDisabled||draft" @click="send({action:'set-current',seq:selected.seq})">Set current item<small>Keep the current flight mode</small></button><button class="mission-execute" :disabled="commandDisabled||draft" @click="send({action:'continue-auto',seq:selected.seq})">Continue AUTO from this item<small>Set current item, then select AUTO</small></button></div>
         <p class="mission-touch-note" v-if="!flyTarget">Fly-to requires a fixed geographic position and an MSL or home-relative altitude.</p><p class="mission-touch-note" v-if="draft">Upload and verify the draft before selecting one of its items as the aircraft's current mission item.</p>
@@ -56,9 +56,11 @@
         <div class="mission-field-grid"><label class="mission-parameter-field"><span>Radius <small>metres</small></span><input v-if="loiter.radiusIndex" aria-label="Loiter radius metres" type="number" min="0" step="any" :value="loiter.radiusM??0" @input="setLoiterRadius($event.target.value)"><input v-else aria-label="Loiter radius source" value="Aircraft WP_LOITER_RAD" readonly><small>{{loiter.radiusIndex?'0 uses the aircraft configured radius.':'Timed loiter uses the aircraft configured radius; only direction is stored here.'}}</small></label><label class="mission-parameter-field"><span>Direction</span><select aria-label="Loiter direction" :value="loiter.direction" @change="setLoiterDirection($event.target.value)"><option v-if="loiter.radiusIndex" value="default">Aircraft default (radius 0)</option><option value="cw">Clockwise</option><option value="ccw">Counterclockwise</option></select></label><label v-if="[17,31].includes(formCommand)" class="mission-parameter-field"><span>Duration</span><input aria-label="Loiter duration" :value="loiter.duration" readonly></label></div>
         <div class="loiter-local-preview" aria-label="Local mission loiter circle preview"><svg viewBox="0 0 150 120" aria-hidden="true"><circle cx="75" cy="60" r="43" :stroke-dasharray="loiter.radiusM?'none':'6 5'"/><path d="M75 60 H118"/><path v-if="loiter.direction!=='default'" :d="loiter.direction==='cw'?'M116 44 L118 59 L130 50':'M107 62 L118 47 L129 61'" class="loiter-preview-arrow"/><circle cx="75" cy="60" r="3"/></svg><span><b>{{loiter.radiusM?loiter.radiusM+' m':'Aircraft configured radius'}} · {{loiter.duration}}</b><small>Local draft preview · {{loiter.direction==='cw'?'Clockwise':loiter.direction==='ccw'?'Counterclockwise':'Aircraft direction'}}</small></span></div>
       </div>
+      <FlightUnits :options="options" @option="(key,value)=>$emit('option',key,value)"/>
       <div class="mission-field-grid">
-        <label v-for="param in formFields" :key="param.index" class="mission-parameter-field" :class="{'coordinate-field':meta?.location&&[5,6].includes(param.index)}"><span>{{param.label}} <small>P{{param.index}}{{param.unit?' · '+param.unit:''}}</small></span>
+        <label v-for="param in formFields" :key="param.index" class="mission-parameter-field" :class="{'coordinate-field':meta?.location&&[5,6].includes(param.index)}"><span>{{param.label}} <small>P{{param.index}}{{convertedUnit(param)?' · '+unitLabels[convertedUnit(param)]:param.unit?' · '+param.unit:''}}</small></span>
           <select v-if="fieldType(param)==='enum'" :aria-label="param.label+' parameter '+param.index" v-model="fieldValues[param.index]"><option v-if="!param.required" value="">Default</option><option v-for="option in param.options" :key="option.value" :value="String(option.value)">{{option.label}} ({{option.value}})</option></select>
+          <FlightUnitInput v-else-if="convertedUnit(param)" :aria-label="param.label+' parameter '+param.index" v-model="fieldValues[param.index]" :unit="convertedUnit(param)" :min="param.min" :max="param.max"/>
           <input v-else type="number" :aria-label="param.label+' parameter '+param.index" v-model="fieldValues[param.index]" :min="param.min" :max="param.max" :step="param.integer?1:'any'" inputmode="decimal" :placeholder="param.required?'Required':'Default'">
           <small class="mission-param-description" v-if="param.description">{{param.description}}</small><small class="mission-param-description" v-if="param.bitmask">Flags: {{param.options.map(o=>o.value+' = '+o.label).join(' · ')}}</small>
         </label>
@@ -98,6 +100,9 @@ import {
   createMissionItem,
   validateMissionItem
 } from './mission-commands.mjs';
+import FlightUnitInput from './FlightUnitInput.vue';
+import FlightUnits from './FlightUnits.vue';
+import {units,unitLabels,unitText} from './flight-units.mjs';
 import {changeMissionAction,loiterPresentation} from './mission-action-edit.mjs';
 
 const clone = value => JSON.parse(JSON.stringify(value));
@@ -111,8 +116,10 @@ const datumLabel = frame => ({
   11: 'above terrain'
 } [frame] || 'frame ' + frame);
 export default {
+  components:{FlightUnitInput,FlightUnits},
   props: {
     mission: Object,
+    options:{type:Object,default:()=>({})},
     selection: Object,
     sitl: {
       type: Object,
@@ -123,10 +130,12 @@ export default {
     draft: Boolean,
     canUndo: Boolean
   },
-  emits: ['close', 'edit', 'command', 'upload', 'undo', 'export', 'use-live', 'pick-location', 'start', 'flight-controls'],
+  emits: ['close', 'edit', 'command', 'upload', 'undo', 'export', 'use-live', 'pick-location', 'start', 'flight-controls','option'],
   setup(props, {
     emit
   }) {
+    const selectedUnits=computed(()=>units(props.options));
+    const convertedUnit=p=>p.index===7&&(meta.value?.altitude||view.value==='fly')?selectedUnits.value.altitudeUnit:p.unit==='m/s'&&formCommand.value===178?selectedUnits.value.speedUnit:null;
     const root = ref(null),
       view = ref('context'),
       query = ref(''),
@@ -260,6 +269,7 @@ export default {
       query.value = '';
       category.value = 'All';
       const s = props.selection;
+      if(s?.editAltitude&&selected.value){editSelected();return;}
       if (s?.action === 'insert' || s?.action === 'replace') startForm(s.command ?? s.item?.command ?? 16, {
         replace: s.action === 'replace',
         item: s.item || null,
@@ -455,6 +465,7 @@ export default {
       required: true
     }] : (meta.value?.params || []).filter(p=>!loiter.value || p.index!==(loiter.value.radiusIndex||3)).map(p=>loiter.value&&p.index===1?{...p,label:formCommand.value===19?'Duration':'Duration in turns'}:p));
     return {
+      selectedUnits,convertedUnit,unitLabels,unitText,
       root,
       view,
       query,

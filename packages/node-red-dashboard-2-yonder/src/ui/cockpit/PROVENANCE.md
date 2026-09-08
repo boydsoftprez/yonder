@@ -24,6 +24,13 @@ publishes navigation-controller and next-target observations independently of
 the mission-current message. No Garmin or Microsoft implementation is used for
 this sequence display or CDI handoff.
 
+The active-leg bracket, waypoint altitude cells and route-profile presentation
+are original Yonder Vue/SVG implementations. The operator supplied an active
+flight-plan display reference showing the FROM-to-TO bracket and separate altitude
+column. This is a behavioral/layout reference, not a copied simulator component.
+Mission altitudes remain ArduPlane mission values with explicit frames; no airport
+procedure constraints or Garmin VNAV capture behavior are implied.
+
 Turn cues use independently authored Yonder geometry and standard coordinated-turn
 physics. Behavioral references are Garmin's [G3X Touch Pilot's Guide,
 190-02472-00 Rev D](https://static.garmin.com/pumac/190-02472-00_d.pdf),

@@ -7,7 +7,7 @@
     <div ref="canvas" class="pfd-instrument-canvas">
     <slot name="traffic" :pose="displayPose" :viewport="viewport"/>
     <slot name="background" :pose="displayPose" :viewport="viewport"/>
-    <FlightModeAnnunciator :snapshot="modeSnapshot" :director-label="options.fdVisible?(director?'FD CUES':'FD NO DATA'):'FD OFF'" @open="$emit('flight-controls',$event)" @director="open('director')"/>
+    <FlightModeAnnunciator :snapshot="modeSnapshot" :options="options" :director-label="options.fdVisible?(director?'FD CUES':'FD NO DATA'):'FD OFF'" @open="$emit('flight-controls',$event)" @director="open('director')"/>
     <svg :viewBox="viewport.viewBox" class="pfd-svg" role="img" aria-label="Artificial horizon, airspeed and altitude tapes, vertical speed and heading">
       <defs>
         <linearGradient id="pfd-sky" x2="0" y2="1"><stop stop-color="#075096"/><stop offset="1" stop-color="#388eda"/></linearGradient>
@@ -60,32 +60,32 @@
       <g class="pfd-tapes"><g :transform="'translate('+(-viewport.edgeShift)+' 0)'">
         <rect x="24" y="63" width="88" height="296" rx="5" class="pfd-tape-background" :fill-opacity="options.tapeOpacity"/>
         <path d="M29 63 H107 Q112 63 112 68 V91 H24 V68 Q24 63 29 63 Z" class="pfd-tape-cap"/>
-        <text x="30" y="82" class="pfd-small">IAS</text><text x="105" y="82" text-anchor="end" class="pfd-unit">KT</text>
+        <text x="30" y="82" class="pfd-small">IAS</text><text x="105" y="82" text-anchor="end" class="pfd-unit">{{unitLabels[selectedUnits.speedUnit]}}</text>
         <g clip-path="url(#pfd-speed-clip)" class="pfd-scale-label">
           <line v-for="tick in speedMinorTicks" :key="tick.value" x1="105" x2="112" :y1="225+tick.offset" :y2="225+tick.offset"/>
           <g v-for="tick in speedTicks" :key="tick.value" :transform="'translate(0 '+(225+tick.offset)+')'"><line x1="94" x2="112" y1="0" y2="0"/><text x="85" y="8" text-anchor="end">{{tick.value}}</text></g>
         </g>
         <path d="M20 204 H73 V194 H99 V210 L114 225 L99 240 V256 H73 V246 H20 Z" class="pfd-readout-box"/>
-        <text x="69" y="238" text-anchor="middle" class="pfd-speed-value">{{fixed(flight.airspeed)}}</text>
+        <text x="69" y="238" text-anchor="middle" class="pfd-speed-value">{{reading('airspeed',flight.airspeed)}}</text>
         <path v-if="refOffset('airspeed',3)!==null" class="pfd-reference-bug" :transform="'translate(0 '+(225+refOffset('airspeed',3))+')'" d="M112 0 L125 -7 V7 Z"/>
-        <text x="26" y="382" class="pfd-unit">GS <tspan fill="white">{{fixed(flight.groundspeed)}} KT</tspan></text>
+        <text x="26" y="382" class="pfd-unit">GS <tspan fill="white">{{reading('airspeed',flight.groundspeed)}} {{unitLabels[selectedUnits.speedUnit]}}</tspan></text>
         </g><g class="pfd-altimeter" :transform="'translate('+(viewport.edgeShift-26)+' 0)'">
         <rect x="508" y="63" width="104" height="296" rx="5" class="pfd-tape-background" :fill-opacity="options.tapeOpacity"/>
         <path d="M513 63 H607 Q612 63 612 68 V91 H508 V68 Q508 63 513 63 Z" class="pfd-tape-cap"/>
-        <text x="514" y="82" class="pfd-small">MSL</text><text x="606" y="82" text-anchor="end" class="pfd-unit">FT</text>
+        <text x="514" y="82" class="pfd-small">MSL</text><text x="606" y="82" text-anchor="end" class="pfd-unit">{{unitLabels[selectedUnits.altitudeUnit]}}</text>
         <g clip-path="url(#pfd-altitude-clip)" class="pfd-scale-label">
           <line v-for="tick in altitudeMinorTicks" :key="tick.value" x1="508" x2="517" :y1="225+tick.offset" :y2="225+tick.offset"/>
           <g v-for="tick in altitudeTicks" :key="tick.value" :transform="'translate(0 '+(225+tick.offset)+')'"><line x1="508" x2="523" y1="0" y2="0"/><text x="606" y="7" text-anchor="end" font-size="20">{{tick.value.toLocaleString('en-US')}}</text></g>
         </g>
         <path d="M616 194 H583 V204 H523 L505 225 L523 246 H583 V256 H616 Z" class="pfd-readout-box"/>
-        <text x="565" y="235" text-anchor="middle" class="pfd-altitude-value">{{fixed(flight.altitude)}}</text>
-        <path v-if="refOffset('altitude',.35)!==null" class="pfd-reference-bug" :transform="'translate(0 '+(225+refOffset('altitude',.35))+')'" d="M508 0 L495 -7 V7 Z"/>
-        <text x="558" y="382" text-anchor="middle" class="pfd-unit pfd-agl-value" :aria-label="estimatedAgl===null?'AGL unavailable: fresh compatible terrain required':'Estimated height above terrain '+fixed(estimatedAgl)+' feet'">{{estimatedAgl!==null?'EST AGL '+fixed(estimatedAgl)+' FT':'AGL —'}}</text>
+        <text x="565" y="235" text-anchor="middle" class="pfd-altitude-value">{{fixed(shown('altitude',flight.altitude))}}</text>
+        <path v-if="refOffset('altitude',altitudeScale)!==null" class="pfd-reference-bug" :transform="'translate(0 '+(225+refOffset('altitude',altitudeScale))+')'" d="M508 0 L495 -7 V7 Z"/>
+        <text x="558" y="382" text-anchor="middle" class="pfd-unit pfd-agl-value" :aria-label="estimatedAgl===null?'AGL unavailable: fresh compatible terrain required':'Estimated height above terrain '+fixed(shown('altitude',estimatedAgl))+' '+unitLabels[selectedUnits.altitudeUnit]">{{estimatedAgl!==null?'EST AGL '+fixed(shown('altitude',estimatedAgl))+' '+unitLabels[selectedUnits.altitudeUnit]:'AGL —'}}</text>
         </g>
       </g>
       <!-- Scale and pointer adapted from Peter Heinrich's SDU460 PFD/VSI.svg,
            copyright 2024, GPL-3.0-or-later. See PROVENANCE.md. -->
-      <g class="pfd-vsi" :transform="'translate('+(590+viewport.edgeShift)+' 225)'" :aria-label="flight.vsi===null?'Vertical speed unavailable':'Vertical speed '+fixed(flight.vsi)+' feet per minute'">
+      <g class="pfd-vsi" :transform="'translate('+(590+viewport.edgeShift)+' 225)'" :aria-label="flight.vsi===null?'Vertical speed unavailable':'Vertical speed '+reading('vsi',flight.vsi)+' '+unitLabels[selectedUnits.verticalSpeedUnit]">
         <path d="M0 -128 H38 Q44 -128 44 -122 V-23 Q44 -13 24 -7 L12 0 L24 7 Q44 13 44 23 V122 Q44 128 38 128 H0 Z" class="pfd-tape-background" :fill-opacity="options.tapeOpacity"/>
         <path d="M0 -121 V121 M0 0 L14 -7 M0 0 L14 7" class="pfd-vsi-scale-line"/>
         <g v-for="tick in vsiTicks" :key="tick.value" :transform="'translate(0 '+(-tick.offset)+')'">
@@ -99,7 +99,7 @@
         </g>
         <path v-if="vsiReferenceOffset!==null" class="pfd-reference-bug pfd-vsi-reference" :transform="'translate(0 '+(-vsiReferenceOffset)+')'" d="M35 0 L44 -6 V6 Z"/>
         <text x="21" y="-141" text-anchor="middle" class="pfd-small">VS</text>
-        <text x="21" y="145" text-anchor="middle" class="pfd-unit">×1000</text><text x="21" y="158" text-anchor="middle" class="pfd-unit">FPM</text>
+        <text x="21" y="145" text-anchor="middle" class="pfd-unit">{{selectedUnits.verticalSpeedUnit==='fpm'?'×1000':''}}</text><text x="21" y="158" text-anchor="middle" class="pfd-unit">{{selectedUnits.verticalSpeedUnit==='fpm'?'FPM':'m/s'}}</text>
       </g>
       <g v-if="!flight.attitudeValid" class="pfd-attitude-fail"><path d="M170 120 L470 320 M470 120 L170 320" stroke="#ff5353" stroke-width="5"/><rect x="219" y="270" width="202" height="33" fill="#210c0c"/><text x="320" y="293" text-anchor="middle" fill="#ffd28e">ATTITUDE UNAVAILABLE</text></g>
       <line :x1="viewport.x" y1="396" :x2="viewport.x+viewport.width" y2="396" stroke="#394b5d" stroke-opacity=".25"/>
@@ -129,13 +129,13 @@
       <rect x="272" y="402" width="96" height="31" class="pfd-readout-box"/><text x="320" y="425" text-anchor="middle" class="pfd-heading-value">{{angle(flight.heading)}}</text>
       <g class="pfd-secondary">
         <rect x="17" y="420" width="168" height="85" rx="5" fill="black" :fill-opacity="options.tapeOpacity"/>
-        <text x="25" y="443">VERTICAL SPEED</text><text x="25" y="474" class="pfd-vsi-value">{{flight.vsi===null?'—':(flight.vsi>0?'+':'')+fixed(flight.vsi)}}<tspan font-size="12"> FPM</tspan></text>
+        <text x="25" y="443">VERTICAL SPEED</text><text x="25" y="474" class="pfd-vsi-value">{{flight.vsi===null?'—':(flight.vsi>0?'+':'')+reading('vsi',flight.vsi)}}<tspan font-size="12"> {{unitLabels[selectedUnits.verticalSpeedUnit]}}</tspan></text>
         <g v-if="options.secondary"><text x="25" y="530">PITCH / BANK</text><text x="25" y="556" class="pfd-secondary-value">{{flight.attitudeValid?fixed(flight.pitch)+'° / '+fixed(flight.roll)+'°':'—'}}</text></g>
         <text x="616" y="443" text-anchor="end">{{guidance.preview?'PREVIEW':guidance.targetName?'FLIGHT MODE':'MISSION'}} GPS</text><text x="616" y="474" text-anchor="end" class="pfd-fix-value">{{guidance.targetName||(guidance.target?'WP'+String(guidance.seq).padStart(3,'0'):'—')}}</text>
         <g v-if="options.secondary"><text x="616" y="530" text-anchor="end">{{bearingValid?'BEARING':guidance.trackTitle||'DESIRED TRACK'}}</text><text x="616" y="556" text-anchor="end" class="pfd-secondary-value">{{navValid?angle(guidance.desiredTrackDeg):radialValid?angle(guidance.pathBearingDeg):bearingValid?angle(guidance.bearingDeg):'—'}}</text></g>
         <text x="320" y="638" text-anchor="middle">HEADING · TRUE NORTH</text>
       </g>
-      <g class="pfd-reference-labels"><text v-if="references.airspeed!==null" :x="25-viewport.edgeShift" y="22">REF {{fixed(references.airspeed)}} KT</text><text v-if="references.altitude!==null" :x="587+viewport.edgeShift" y="22" text-anchor="end">REF {{fixed(references.altitude)}} FT</text><text v-if="references.heading!==null" x="424" y="382" text-anchor="middle">HDG REF {{angle(references.heading)}}</text><text v-if="references.vsi!==null" x="25" y="495">REF {{fixed(references.vsi)}} FPM</text></g>
+      <g class="pfd-reference-labels"><text v-if="references.airspeed!==null" :x="25-viewport.edgeShift" y="22">REF {{fixed(shown('airspeed',references.airspeed))}} {{unitLabels[selectedUnits.speedUnit]}}</text><text v-if="references.altitude!==null" :x="587+viewport.edgeShift" y="22" text-anchor="end">REF {{fixed(shown('altitude',references.altitude))}} {{unitLabels[selectedUnits.altitudeUnit]}}</text><text v-if="references.heading!==null" x="424" y="382" text-anchor="middle">HDG REF {{angle(references.heading)}}</text><text v-if="references.vsi!==null" x="25" y="495">REF {{fixed(shown('vsi',references.vsi))}} {{unitLabels[selectedUnits.verticalSpeedUnit]}}</text></g>
     </svg>
     <div class="pfd-touch-surfaces" role="group" aria-label="Touch flight instruments">
       <button class="pfd-hotspot pfd-touch-speed" :style="hit([6-viewport.edgeShift,35,124,355])" aria-label="Airspeed controls" @click="open('airspeed')"><span>IAS</span></button>
@@ -148,7 +148,7 @@
       <button class="pfd-hotspot pfd-touch-bank" :style="hit([6,514,185,77])" aria-label="Pitch and bank display settings" @click="open('attitude')"><span>ATTITUDE</span></button>
     </div>
     <PfdSkidBall v-if="options.skidBall!==false" :telemetry="telemetry" :style="{...hit([264,365,112,44]),transform:'translateY(-50%)'}" @open="open('slip')"/>
-    <PfdWindDisplay v-if="options.windDisplay!=='off'" :telemetry="telemetry" :mode="options.windDisplay||'components'" :style="hit([130-viewport.edgeShift,302,128,86])" @open="open('wind')"/>
+    <PfdWindDisplay v-if="options.windDisplay!=='off'" :telemetry="telemetry" :mode="options.windDisplay||'components'" :speed-unit="selectedUnits.speedUnit" :style="hit([130-viewport.edgeShift,302,128,86])" @open="open('wind')"/>
     <div v-if="!flight.live" class="pfd-loss" role="status">Flight instruments unavailable</div>
     </div>
     </div>
@@ -158,6 +158,7 @@
   </section>
 </template>
 <script>
+import {units,unitLabels,flightValue,toDisplay} from './flight-units.mjs';
 import { frameCadence } from "./frame-cadence.mjs";
 // SVG primary flight display, authored for the Yonder community navigation host.
 // SPDX-License-Identifier: GPL-3.0-or-later
@@ -272,28 +273,31 @@ export default {
       longitude: displayPose.value.lon,
       gpsAltitudeM: displayPose.value.altitude
     } : props.telemetry);
+    const selectedUnits=computed(()=>units(props.options));
+    const shown=(key,value)=>flightValue(key,value,props.options);
+    const reading=(key,value)=>{const v=shown(key,value);return Number.isFinite(v)?v.toLocaleString('en-US',{maximumFractionDigits:({vsi:selectedUnits.value.verticalSpeedUnit,airspeed:selectedUnits.value.speedUnit}[key])==='mps'?1:0}):'—'};
+    const altitudeScale=computed(()=>selectedUnits.value.altitudeUnit==='ft'?.35:1.2);
     const terrainReady = computed(() => props.backgroundReady === true);
     const director = computed(() => props.options.fdVisible ? flightDirectorCue(displayFlight.value) : null);
     const refOffset = (key, scale) => Number.isFinite(props.references[key]) && Number.isFinite(props.flight[key]) ?
-      Math.max(-126, Math.min(126, (props.flight[key] - props.references[key]) * scale)) : null;
+      Math.max(-126, Math.min(126, (shown(key,props.flight[key]) - shown(key,props.references[key])) * scale)) : null;
     const open = kind => panel.value = kind;
     expose({
       open
     });
-    const speedTicks = computed(() => tapeTicks(props.flight.airspeed, 10, 3).filter(x => x.value >= 0));
-    const altitudeTicks = computed(() => tapeTicks(props.flight.altitude, 100, .35));
-    const speedMinorTicks = computed(() => tapeTicks(props.flight.airspeed, 2, 3).filter(x => x.value >= 0 && x.value %
+    const speedTicks = computed(() => tapeTicks(shown('airspeed',props.flight.airspeed), 10, 3).filter(x => x.value >= 0));
+    const altitudeTicks = computed(() => tapeTicks(shown('altitude',props.flight.altitude), selectedUnits.value.altitudeUnit==='ft'?100:20, altitudeScale.value));
+    const speedMinorTicks = computed(() => tapeTicks(shown('airspeed',props.flight.airspeed), 2, 3).filter(x => x.value >= 0 && x.value %
       10 !== 0));
-    const altitudeMinorTicks = computed(() => tapeTicks(props.flight.altitude, 20, .35).filter(x => x.value % 100 !==
+    const altitudeMinorTicks = computed(() => tapeTicks(shown('altitude',props.flight.altitude), selectedUnits.value.altitudeUnit==='ft'?20:5, altitudeScale.value).filter(x => x.value % (selectedUnits.value.altitudeUnit==='ft'?100:20) !==
       0));
-    const vsiTicks = [-2000, -1500, ...Array.from({
+    const vsiTicks = computed(()=>[-2000, -1500, ...Array.from({
       length: 21
     }, (_, i) => (i - 10) * 100), 1500, 2000].map(value => ({
       value,
       offset: verticalSpeedOffset(value),
-      label: Math.abs(value) === 500 ? '.5' : [1000, 2000].includes(Math.abs(value)) ? String(Math.abs(value) /
-        1000) : ''
-    }));
+      label: [500,1000,2000].includes(Math.abs(value)) ? (selectedUnits.value.verticalSpeedUnit==='fpm'?(Math.abs(value)===500?'.5':String(Math.abs(value)/1000)):shown('vsi',Math.abs(value)).toFixed(1)) : ''
+    })));
     const vsiOffset = computed(() => verticalSpeedOffset(props.flight.vsi));
     const vsiReferenceOffset = computed(() => verticalSpeedOffset(props.references.vsi));
     const horizon = computed(() => attitudeTransform(displayFlight.value));
@@ -324,6 +328,7 @@ export default {
     const estimatedAgl = computed(() => terrainReady.value && props.flight.live && Number.isFinite(terrainStatus.value
       .estimatedAglM) ? terrainStatus.value.estimatedAglM / .3048 : null);
     return {
+      selectedUnits,unitLabels,shown,altitudeScale,reading,
       canvas,
       viewport,
       sceneExtent,

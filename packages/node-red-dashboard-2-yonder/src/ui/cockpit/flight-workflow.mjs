@@ -1,5 +1,6 @@
 // Operator-authored flight requests and observed-state presentation. No transport or timers.
 // SPDX-License-Identifier: GPL-3.0-or-later
+import {units,unitText} from './flight-units.mjs';
 const finite = value => typeof value === 'number' && Number.isFinite(value);
 const number = (value, label, min, max) => {
   if (value === '' || value === null || value === undefined || !Number.isFinite(Number(value)) || Number(value) < min || Number(value) > max) throw new Error(`${label} must be ${min} to ${max}`);
@@ -83,7 +84,7 @@ export function flightRequest(kind, form, snapshot) {
   } else throw new Error('Flight action unavailable');
   return {action, label};
 }
-export function flightAnnunciation(snapshot = {}) {
+export function flightAnnunciation(snapshot = {},options) {
   const telemetry = snapshot.telemetry || {}, operation = snapshot.operations?.filter(item => !item.vehicleGeneration || item.vehicleGeneration === snapshot.identity?.generation).at(-1);
   const fresh = snapshot.connected === true && telemetry.fields?.mode?.valid !== false && !!telemetry.mode;
   let request = '', outcome = '', tone = 'neutral';
@@ -92,8 +93,8 @@ export function flightAnnunciation(snapshot = {}) {
     const name = action.kind === 'mode' ? flightModes(snapshot).find(mode => mode.customMode === action.customMode)?.name || `mode ${action.customMode}` : action.kind;
     request = `Requested ${name || 'action'}`;
     if (action.kind === 'heading') request += ` ${action.headingDeg}° true`;
-    if (action.kind === 'altitude') request += ` ${action.altitudeM} m ${action.datum}`;
-    if (action.kind === 'speed') request += ` ${action.airspeedMps} m/s`;
+    if (action.kind === 'altitude') request += options?` ${unitText(action.altitudeM,units(options).altitudeUnit)} ${action.datum}`:` ${action.altitudeM} m ${action.datum}`;
+    if (action.kind === 'speed') request += options?` ${unitText(action.airspeedMps,units(options).speedUnit,1)}`:` ${action.airspeedMps} m/s`;
     if (action.kind === 'loiter') request += ` ${action.radiusM} m ${action.direction}`;
     outcome = operation.state === 'observed' ? 'Observed in telemetry' : operation.ack ? `ACK ${operation.ack.result === 0 ? 'accepted' : `result ${operation.ack.result}`} · ${operation.effect?.state === 'observed' ? 'effect observed' : 'effect not confirmed'}` : operation.state || 'pending';
     if (['rejected', 'failed', 'unknown'].includes(operation.state) && operation.ack) outcome = `${operation.state} · ${outcome}`;

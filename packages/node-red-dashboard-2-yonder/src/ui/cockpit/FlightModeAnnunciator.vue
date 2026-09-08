@@ -10,7 +10,7 @@
 <script setup>
 import {computed} from 'vue';
 import {flightAnnunciation} from './flight-workflow.mjs';
-const props=defineProps({snapshot:{type:Object,default:()=>({})},directorLabel:{type:String,default:'FD OFF'}});
+const props=defineProps({snapshot:{type:Object,default:()=>({})},directorLabel:{type:String,default:'FD OFF'},options:Object});
 defineEmits(['open','director']);
-const state=computed(()=>flightAnnunciation(props.snapshot));
+const state=computed(()=>flightAnnunciation(props.snapshot,props.options));
 </script>

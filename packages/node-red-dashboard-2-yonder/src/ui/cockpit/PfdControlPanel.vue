@@ -10,18 +10,19 @@
         <p class="pfd-validation" role="alert" v-if="error">{{error}}</p>
         <div class="pfd-keypad"><button type="button" v-for="digit in ['1','2','3','4','5','6','7','8','9']" :key="digit" @click="key(digit)">{{digit}}</button><button type="button" @click="key('sign')" :disabled="field.min>=0" aria-label="Change sign">±</button><button type="button" @click="key('0')">0</button><button type="button" @click="key('back')" aria-label="Backspace">⌫</button></div>
         <div class="pfd-control-actions"><button type="button" @click="step(-field.coarse)">−{{field.coarse}}</button><button type="button" @click="set(liveValue)" :disabled="liveValue===null">Sync live</button><button type="button" @click="step(field.coarse)">+{{field.coarse}}</button></div>
-        <button v-if="kind==='altitude'" type="button" class="pfd-wide-button" @click="set(missionAltitude)" :disabled="missionAltitude===null">Use mission altitude · {{fmt(missionAltitude)}} FT MSL</button>
+        <button v-if="kind==='altitude'" type="button" class="pfd-wide-button" @click="set(missionAltitude)" :disabled="missionAltitude===null">Use mission altitude · {{fmt(missionAltitude)}} {{field.unit}} MSL</button>
         <p v-if="kind==='altitude'&&missionAltitude===null" class="pfd-control-note">No mission target with a known MSL altitude is available.</p>
         <div class="pfd-control-actions pfd-final-actions"><button type="button" @click="$emit('reference',kind,null);$emit('close')">Clear</button><button type="button" @click="$emit('close')">Cancel</button><button type="submit" class="primary">Apply</button></div>
       </form>
       <div v-else-if="kind==='menu'" class="pfd-menu-grid">
-        <button v-for="(f,key) in referenceFields" :key="key" @click="$emit('panel',key)">{{f.title}}<small>{{references[key]===null?'No local reference':fmt(references[key])+' '+f.unit}}</small></button>
+        <button v-for="(f,key) in referenceFields" :key="key" @click="$emit('panel',key)">{{f.title}}<small>{{references[key]===null?'No local reference':fmt(shown(key,references[key]))+' '+f.unit}}</small></button>
         <button @click="$emit('panel','attitude')">Attitude & display<small>Transparency · terrain · declutter</small></button><button @click="$emit('panel','director')">Flight director<small>Cue style & visibility</small></button>
         <button @click="$emit('panel','slip')">Slip / skid<small>Ball · sensor status</small></button>
         <button @click="$emit('panel','wind')">Wind<small>Components · arrow · direction</small></button>
         <button @click="$emit('panel','nav')">Mission navigation<small>Flight plan · direct-to</small></button><button @click="$emit('panel','status')">Aircraft data<small>GPS · battery · source</small></button>
       </div>
       <div v-else-if="kind==='attitude'" class="pfd-options">
+        <FlightUnits :options="options" @option="(key,value)=>$emit('option',key,value)"/>
         <label class="pfd-option"><span>Synthetic vision<small>{{terrainStatus?.message||'Terrain display'}}</small></span><input type="checkbox" :checked="options.syntheticVision" @change="$emit('option','syntheticVision',$event.target.checked)"></label>
         <label class="pfd-option pfd-range"><span>Tape background <b>{{Math.round(options.tapeOpacity*100)}}%</b></span><input aria-label="Tape background opacity" type="range" min="10" max="100" step="5" :value="options.tapeOpacity*100" @input="$emit('option','tapeOpacity',Number($event.target.value)/100)"></label>
         <label class="pfd-option pfd-range"><span>HSI background <b>{{Math.round(options.hsiOpacity*100)}}%</b></span><input aria-label="HSI background opacity" type="range" min="10" max="100" step="5" :value="options.hsiOpacity*100" @input="$emit('option','hsiOpacity',Number($event.target.value)/100)"></label>
@@ -91,16 +92,18 @@ import {
   onBeforeUnmount,
   nextTick
 } from 'vue';
+import FlightUnits from './FlightUnits.vue';
+import {units,unitLabels,flightValue,canonicalValue,unitFor} from './flight-units.mjs';
 import {windState} from './wind-state.mjs';
 import {slipSkidState} from './slip-skid.mjs';
 import {turnCueState} from './turn-cues.mjs';
 import {
   referenceFields,
   parseReference,
-  referenceStep,
   missionAltitudeFt
 } from './pfd-controls.mjs';
 export default {
+  components:{FlightUnits},
   props: ['kind', 'flight', 'guidance', 'telemetry', 'references', 'options', 'mission', 'terrainStatus'],
   emits: ['close', 'reference', 'option', 'navigate', 'panel'],
   setup(props, {
@@ -109,8 +112,10 @@ export default {
     const root = ref(null),
       input = ref(null),
       error = ref('');
-    const field = computed(() => referenceFields[props.kind]);
-    const draft = ref(field.value && props.references[props.kind] !== null ? String(props.references[props.kind]) : '');
+    const shown=(key,value)=>flightValue(key,value,props.options);
+    const displayFields=computed(()=>Object.fromEntries(Object.entries(referenceFields).map(([key,f])=>[key,{...f,unit:unitLabels[unitFor(key,props.options)]||f.unit,min:Math.ceil(shown(key,f.min)),max:Math.floor(shown(key,f.max)),step:Math.max(.1,Math.round(shown(key,f.step)*10)/10),coarse:Math.max(1,Math.round(shown(key,f.coarse)))}])));
+    const field = computed(() => displayFields.value[props.kind]);
+    const draft = ref(field.value && props.references[props.kind] !== null ? String(Number(shown(props.kind,props.references[props.kind]).toFixed(2))) : '');
     const previousFocus = document.activeElement;
     const titles = {
       menu: 'PFD touch menu',
@@ -122,8 +127,8 @@ export default {
       slip: 'Slip / skid'
     };
     const title = computed(() => field.value?.title || titles[props.kind]);
-    const liveValue = computed(() => props.flight[props.kind] ?? null);
-    const missionAltitude = computed(() => missionAltitudeFt(props.guidance.target, props.mission?.home));
+    const liveValue = computed(() => shown(props.kind,props.flight[props.kind] ?? null));
+    const missionAltitude = computed(() => shown('altitude',missionAltitudeFt(props.guidance.target, props.mission?.home)));
     const fmt = (value, digits = 0) => Number.isFinite(value) ? value.toLocaleString('en-US', {
       maximumFractionDigits: digits
     }) : '—';
@@ -140,16 +145,17 @@ export default {
       error.value = '';
       let value;
       try {
-        value = parseReference(props.kind, draft.value);
+        value = Number(draft.value);if(!Number.isFinite(value))throw new Error();
       } catch {
         value = liveValue.value;
       }
-      draft.value = String(referenceStep(props.kind, value, amount));
+      draft.value = String(Number((props.kind==='heading'?((value+amount)%360+360)%360:Math.max(field.value.min,Math.min(field.value.max,value+amount))).toFixed(2)));
     }
 
     function apply() {
       try {
-        emit('reference', props.kind, parseReference(props.kind, draft.value));
+        if(String(draft.value).trim()==='')throw new Error('Enter a numeric value');
+        emit('reference', props.kind, parseReference(props.kind, Number(canonicalValue(props.kind,draft.value,props.options).toFixed(8))));
         emit('close');
       } catch (e) {
         error.value = e.message;
@@ -212,7 +218,7 @@ export default {
       set,
       keyboard,
       navigate,
-      referenceFields
+      shown,referenceFields:displayFields
     };
   }
 }

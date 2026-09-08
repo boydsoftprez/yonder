@@ -1045,3 +1045,7 @@
  .y-cockpit .flight-mode-actual small { font-size:7px; margin-right:4px }
  .y-cockpit .flight-mode-actual strong { font-size:15px }
 }
+
+.y-cockpit .mission-view-tabs{display:flex;gap:6px;padding:6px 10px;border-bottom:1px solid #5267706b}.y-cockpit .mission-view-tabs button{min-height:36px;padding:5px 16px}.y-cockpit .mission-view-tabs button[aria-pressed="true"]{border-color:#fa8ae9;color:#fa8ae9}
+
+.y-cockpit .mission-waypoint-head{display:grid;grid-template-columns:minmax(100px,1fr) 112px 70px;gap:3px;padding:6px 0 6px 28px;font-size:9px;color:#b9d2e0}.y-cockpit .mission-waypoint-head span:not(:first-child){text-align:right;padding-right:7px}.y-cockpit .expanded .waypoint-table .waypoint-row small{font-size:9px}

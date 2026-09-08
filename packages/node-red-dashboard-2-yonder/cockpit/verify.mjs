@@ -44,6 +44,8 @@ for(const [name,width,height] of [['laptop',1440,900],['tablet',1024,768],['port
   const course=await page.locator('.pfd-course-pointer').getAttribute('transform');
   await page.evaluate(()=>window.cockpitFixture.leg(3,-25));
   await page.locator('[data-mission-seq="3"][aria-current="step"]').waitFor();
+  assert.equal(await page.locator('.mission-leg-connector').getAttribute('data-from'),'2');
+  assert.equal(await page.locator('.mission-leg-connector').getAttribute('data-to'),'3');
   assert.match(await page.locator('.cockpit-mission-summary').innerText(),/WP02 → WP03.*NEXT IN PLAN WP04/s);
   assert.notEqual(await page.locator('.pfd-course-pointer').getAttribute('transform'),course);
   assert.ok(Number(await page.locator('.pfd-cdi-bar').getAttribute('x1'))>0);
@@ -56,10 +58,39 @@ for(const [name,width,height] of [['laptop',1440,900],['tablet',1024,768],['port
   assert.equal(await page.getByRole('button',{name:'Follow active mission leg',exact:true}).getAttribute('aria-pressed'),'false');
   await page.getByRole('button',{name:'Follow active mission leg',exact:true}).click();
   await page.screenshot({path:`${artifacts}/${name}-mission.png`});
+  await page.getByRole('button',{name:'Edit altitude at waypoint 9',exact:true}).click();
+  await page.getByLabel('Alt parameter 7',{exact:true}).fill('600');
+  await page.getByRole('button',{name:'Save draft item',exact:true}).click();
+  assert.match(await page.locator('.cockpit-mission-summary').innerText(),/LOCAL DRAFT/);
+  assert.match(await page.getByRole('button',{name:'Edit altitude at waypoint 9',exact:true}).innerText(),/600 FT/);
+  assert.equal(await page.locator('.mission-leg-connector').count(),0);
+  await page.getByRole('button',{name:'Mission controls',exact:true}).click();
+  await page.getByRole('button',{name:/Show aircraft mission Return to the received mission/}).click();
+  await page.getByRole('button',{name:'Show terrain profile',exact:true}).click();
+  assert.equal(await page.getByRole('region',{name:'Mission terrain profile',exact:true}).count(),1);
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+  await page.getByRole('button',{name:'Waypoints',exact:true}).click();
   await page.evaluate(()=>window.cockpitFixture.leg(2));
   await page.getByRole('button',{name:'Return to full PFD',exact:true}).click();
  }
  await page.getByRole('button',{name:'Airspeed controls',exact:true}).click();await page.getByRole('dialog',{name:'Airspeed reference',exact:true}).waitFor();await page.screenshot({path:`${artifacts}/${name}-airspeed.png`});await page.getByRole('button',{name:'Close PFD controls'}).click();
+ if(name==='laptop'){
+  await page.getByRole('button',{name:'Attitude and display settings',exact:true}).click();
+  await page.getByLabel('Speed units',{exact:true}).selectOption('mph');
+  await page.getByLabel('Vertical speed units',{exact:true}).selectOption('mps');
+  await page.getByRole('button',{name:'Close PFD controls',exact:true}).click();
+  assert.match(await page.locator('.pfd-svg').textContent(),/MPH/);
+  assert.match(await page.locator('.pfd-wind-display').textContent(),/MPH/);
+  await page.getByRole('button',{name:'Altitude / Speed',exact:true}).click();
+  await page.getByLabel('Requested altitude FT',{exact:true}).fill('500');
+  await page.getByLabel('Vertical speed units',{exact:true}).selectOption('fpm');
+  await page.getByLabel('Requested vertical rate',{exact:true}).fill('300');
+  await page.getByLabel('Altitude units',{exact:true}).selectOption('m');
+  assert.equal(await page.getByLabel('Requested altitude M',{exact:true}).inputValue(),'152.4');
+  await page.getByLabel('Altitude units',{exact:true}).selectOption('ft');
+  await page.getByLabel('Speed units',{exact:true}).selectOption('kt');
+  await page.getByRole('button',{name:'Close flight controls',exact:true}).click();
+ }
  assert.equal(await page.evaluate(()=>window.cockpitFixture.calls.length),0);
 }
 await page.setViewportSize({width:1440,height:900});await page.goto(base);

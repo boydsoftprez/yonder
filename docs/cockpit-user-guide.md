@@ -29,8 +29,11 @@ An accepted GUIDED request does not change the displayed mode until fresh aircra
 telemetry reports the change. An unavailable mode is stated rather than retained
 as current. Aircraft status contains the complete operation messages.
 
-The tapes show indicated airspeed in knots and reported MSL altitude in feet. The
-VSI uses measured climb in feet per minute. The HSI heading is true north. Magenta
+The tapes default to indicated airspeed in knots and reported MSL altitude in feet.
+The VSI defaults to measured climb in feet per minute. These units are selectable
+under **PFD Display → Flight units**, or in the **Altitude / Speed** controls.
+Choose **KT / MPH / m/s**, **FT / M**, and **FT/MIN / m/s** independently.
+Changing units preserves the physical value and saves locally. The HSI heading is true north. Magenta
 flight-director cues show the autopilot's reported desired pitch and bank, and
 remain unavailable when those measurements are absent. Choose V-bar or crossbar
 cues from FD settings. The numeric VSI and pitch/bank summaries remain in split
@@ -73,6 +76,21 @@ An external rejoin or mission jump can produce a path with a different origin;
 the cockpit shows target bearing only until the uploaded leg can be verified
 against telemetry, rather than inventing a commanded course.
 
+The waypoint table draws a magenta bracket from the preceding item to an arrow
+at the active target. Following keeps both adjacent rows visible when there is
+room. The expanded table has **ALTITUDE / AGL** and **DTK / DIS** columns. DTK is
+the planned true course; distance is that leg's length, while the summary retains
+the aircraft's current distance and ETE to the active target.
+
+Tap the altitude cell beside a waypoint to open its draft editor directly. Enter
+the altitude in the selected units and choose **MSL**, **Above home**, or **Above
+terrain**. **Save draft item** changes the local plan; **Mission controls → Upload
+draft to aircraft** still requires review and confirmation. Mission speed-command
+fields also use the selected speed units. Other mission parameters retain their
+explicit catalog units. A missing altitude reads **— FT** or **— M**; it is never
+filled with zero. The smaller **AGL** value is estimated from the terrain pack
+at that waypoint, separate from the authored altitude datum.
+
 During a GUIDED heading request, ArduPlane continues transmitting its previous
 geographic target. The cockpit suppresses that target's bearing, distance, ETE
 and CDI instead of presenting it as the commanded path. Measured flight-director
@@ -80,6 +98,56 @@ pitch/bank remain available. A later accepted Direct-To/Loiter with matching
 fresh target coordinates restores geographic guidance; actual AUTO restores
 mission navigation. Missing request history and external heading overrides are
 explicit limitations of GUIDED ownership, not evidence of an active waypoint.
+
+
+## Altitude, airspeed and climb requests
+
+Use **Altitude / Speed** on the persistent strip:
+
+1. Under **Altitude**, enter a target altitude and choose **Above home** or **MSL**.
+2. Enter a positive **Requested climb / descent rate** magnitude in **FT/MIN** or
+   **m/s**. The target's relation to current altitude determines climb or descent.
+   Zero requests the aircraft maximum within its configured limits.
+3. Under **Airspeed**, choose **KT**, **MPH** or **m/s** and enter the requested speed.
+4. Review the request, then confirm separately to transmit it. These controls enter
+   GUIDED; they do not rewrite an AUTO mission's waypoint altitudes.
+
+ArduPlane 4.7.1 accepted a nonzero vertical-rate command in the retained simulator
+test but climbed much more slowly than requested. The panel states this limitation;
+it does not claim VS hold. Likewise, changing requested airspeed is not a verified
+IAS/FLC climb mode. The aircraft manages speed and height together, and the measured
+VSI shows what it actually does. No firmware modification or browser flight-control
+loop is introduced. See the [protocol evidence](console/evidence/2026-09-07-flight-control-protocol.md).
+
+## Flight-planning profile
+
+Press **Profile** at the bottom of the mission inset, or expand the inset and
+select its **Profile** tab. The PFD remains visible. The chart shows magenta planned
+altitude, green ground and an amber mapped-surface line. Move **Inspect along route**
+to read estimated AGL and clearance over mapped surface between waypoints. Select
+a waypoint on the chart or in the picker to see its altitude and edit it.
+
+The profile uses native prepared terrain from the selected source. It loads a
+bounded route sample set in the background for waypoint AGL, retains decoded tiles,
+and recalculates after edits or source changes. The ground browser/source supplies
+these data by default. With aircraft-proxied terrain selected, press **Load route
+terrain from aircraft** explicitly; the profile does not start that transfer merely
+because the page opened. There are at most 192 native tiles, 32 MiB decoded tile
+cache, two concurrent tile requests and 2,048 route samples per calculation.
+
+Check **Plan MSL datum** before comparing an imported plan with terrain. The default
+uses the aircraft's configured height reference; an unknown or mismatched reference
+removes calculated clearances. Source and survey details are expandable below the
+chart. Ground and surface coverage are reported independently. A missing surface
+sample means unknown obstacle clearance even when ground elevation is present.
+
+This is a sampled centreline planning view. Ordinary legs interpolate waypoint MSL
+altitudes; a pair of terrain-relative waypoints interpolates their ground offset.
+Climb performance, turn arcs, loiters, return/landing paths and unresolved mission
+jumps are not predicted. Visible limitations identify omitted geometry and sample
+or load limits. Gaps remain gaps; small objects between samples and obstacles absent
+from the survey are not established clear by this view.
+
 
 ## Slip / skid ball
 
