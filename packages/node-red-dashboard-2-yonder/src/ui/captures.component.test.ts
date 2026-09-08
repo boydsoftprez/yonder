@@ -265,3 +265,14 @@ describe("the captures panel", () => {
     expect(rows(wrapper)[0]!.find("img.y-caps__thumb").attributes("src")).toBe("");
   });
 });
+
+it('shows the unlistable camera medium without a fabricated zero count or board actions', () => {
+  const { wrapper } = panel({ camera: 'pocket', destination: 'camera', listing: 'unavailable', captures: [], reason: 'Files stay on the camera card; listing and download are unavailable.' });
+  expect(wrapper.text()).toContain("the camera's card");
+  expect(wrapper.text()).toContain('Files stay on the camera card');
+  expect(wrapper.text()).not.toContain('0 saved');
+  expect(wrapper.text()).not.toContain('Nothing saved to this board');
+  expect(wrapper.text()).not.toContain('deleting is immediate');
+  expect(wrapper.findAll('button, a, img, video')).toHaveLength(0);
+  wrapper.unmount();
+});

@@ -843,7 +843,7 @@ export default {
     nativeControls (group) {
       return (this.report.accessory?.controls || []).filter(d => d.group === group && d.key !== 'mode').map(d => {
         if (d.state === 'not-offered') return this.fact(d.key, d.label, d.reason)
-        return h(YonderPicker, { key: d.key, label: d.label, value: d.value, options: d.options,
+        return h(YonderPicker, { key: d.key, label: d.label, value: d.value, currentLabel: d.currentLabel, options: d.options,
           state: d.state, reason: d.reason || '', onChange: value => {
             const selected = d.options.find(option => String(option.value) === String(value))
             if (selected && d.state === 'present') this.nativeControl(selected.command)

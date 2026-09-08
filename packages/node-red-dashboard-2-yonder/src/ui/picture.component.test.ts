@@ -2027,3 +2027,25 @@ it.each(['teardown', 'retry'])('retires the physical aim gesture on media %s', a
   expect(vm.dragGesture).toBeNull(); expect(vm.dragPointerId).toBeNull();
   wrapper.unmount();
 });
+
+it('retains an initially hydrated camera when a later message carries only richer facts', async () => {
+  const messages = reactive<Record<string, { payload: unknown }>>({ n1: { payload: { path: 'pocket', cost: 'preview', running: true, aim: { state: 'present', pan: 4, tilt: 2 }, cameras: [{ id: 'pocket', name: 'Pocket', active: true }] } } });
+  const wrapper = mount(YonderPicture, { props: { id: 'n1', props: { path: '-preview', label: '', stillsAfterMs: 12000 } }, global: {
+    provide: { $socket: { emit: vi.fn() }, $dataTracker: () => {} }, mocks: { $store: { state: { data: { messages } } } },
+  } });
+  await settle();
+  expect((wrapper.vm as any).streamPath).toBe('pocket-preview');
+  messages.n1 = { payload: { saved: { held: 'camera', kind: 'photo', observedAt: Date.now() } } };
+  await nextTick(); await settle();
+  expect((wrapper.vm as any).streamPath).toBe('pocket-preview');
+  expect((wrapper.vm as any).cameraRunning).toBe(true);
+  expect(wrapper.text()).not.toContain('which camera');
+  expect((wrapper.vm as any).aim.pan).toBe(4);
+  wrapper.unmount();
+});
+
+it('hydrates state without replaying a cached full-rate action on mount', async () => {
+  const { wrapper } = mountWithRail('rate:full'); await settle();
+  expect((wrapper.vm as any).rate).toBe('preview');
+  wrapper.unmount();
+});

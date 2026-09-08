@@ -374,7 +374,7 @@ const BACKOFF_MS = [1000, 2000, 4000, 8000, 15000]
 /** The picture's own richer facts (R-VID-18), cached the same way `cost`
  * and the camera's own name already are — see `fromPayload`'s own doc
  * comment above for why one loop replaces eight hand-written pairs. */
-const PAYLOAD_KEYS = ['state', 'recording', 'cameras', 'downlink', 'aim', 'zoom', 'exposure', 'stats', 'saved']
+const PAYLOAD_KEYS = ['state', 'running', 'recording', 'cameras', 'downlink', 'aim', 'zoom', 'exposure', 'stats', 'saved']
 
 /** `+12.4` / `−12.4` — a proper minus sign, matching every other signed
  * reading this console already draws (`YonderAim.vue`'s own gauges, the
@@ -707,9 +707,8 @@ export default {
          * about it rather than guessing that a camera is stopped.
          */
         cameraRunning () {
-            const payload = this.command
-            if (!payload || typeof payload !== 'object') return null
-            return typeof payload.running === 'boolean' ? payload.running : null
+            const running = this.fromPayload('running')
+            return typeof running === 'boolean' ? running : null
         },
         told () {
             const payload = this.command
@@ -897,18 +896,7 @@ export default {
             this.requestLive()
         },
         command (value) {
-            if (value && typeof value === 'object') {
-                if (typeof value.cost === 'string') this.sentCost = value.cost
-                if (typeof value.path === 'string') this.sentPath = value.path
-                // R-VID-18: the picture's own richer facts, each cached
-                // independently so a later message naming only one of them
-                // (a path update, say) does not blank the rest — the same
-                // reasoning `sentCost`/`sentPath` already state, generalised.
-                for (const key of PAYLOAD_KEYS) {
-                    if (key in value) this.sentExtra[key] = value[key]
-                }
-                return
-            }
+            if (value && typeof value === 'object') { this.remember(value); return }
             if (typeof value !== 'string') return
             if (value.startsWith('mode:')) {
                 const mode = value.slice(5)
@@ -961,6 +949,8 @@ export default {
     },
     created () {
         this.$dataTracker(this.id)
+        // Hydrate cached state before partial messages replace it; never replay a cached action.
+        this.remember(this.command)
     },
     mounted () {
         this.aimTransport = new AimTransport(() => this.aim, (_rate, reason) => { this.aimRefusal = reason })
@@ -1002,6 +992,12 @@ export default {
         this.teardown()
     },
     methods: {
+        remember (value) {
+            if (!value || typeof value !== 'object') return
+            if (typeof value.cost === 'string') this.sentCost = value.cost
+            if (typeof value.path === 'string') this.sentPath = value.path
+            for (const key of PAYLOAD_KEYS) if (key in value) this.sentExtra[key] = value[key]
+        },
         aimDisconnect () { this.aimTransport?.stop(); this.onDragEnd() },
         /**
          * One field of this picture's own richer state (R-VID-18, R-UI-28):

@@ -3524,6 +3524,14 @@ describe('accessory route dispatch', () => {
     expect(accessory.controls).toHaveBeenCalledWith(detected.byPath, { kind: 'iso', value: 5 });
     expect(probed).toEqual([]);
   });
+  it('reports the camera-card captures panel as unavailable rather than an empty board directory', async () => {
+    const route = provisioned({ cameras: { found: [detected], rejected: [] }, camera: { source: 'accessory', device: detected.byPath }, accessory: source() });
+    const response = await route('GET', '/cameras/cam0', undefined);
+    expect(response.status).toBe(200);
+    expect((response.body as any).captures).toMatchObject({ camera: 'cam0', destination: 'camera', listing: 'unavailable', captures: [] });
+    expect((response.body as any).captures.reason).toContain('cannot list');
+    expect((response.body as any).captures).not.toHaveProperty('count');
+  });
   it('passes exact authenticated aim requests before camera probes', async () => {
     const accessory = source();
     const route = provisioned({ cameras: { found: [detected], rejected: [] }, camera: { source: 'accessory', device: detected.byPath }, accessory });

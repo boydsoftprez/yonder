@@ -344,7 +344,7 @@ export interface CameraView {
    * as; the difference between the two is a question about the *device*, and
    * `recorder: null` above is where it is answered.
    */
-  captures: { camera: string; captures: readonly Capture[] };
+  captures: { camera: string; captures: readonly Capture[]; destination?: 'camera'; listing?: 'unavailable'; reason?: string };
 }
 
 /**
@@ -1264,7 +1264,8 @@ export function createRouter(deps: RouterDeps): Router {
          * View and Download URL from an id, and the node that carries this to
          * the page emits a fresh message that has no `msg.camera` of its own.
          */
-        captures: { camera: id, captures: heldCaptures },
+        captures: { camera: id, captures: heldCaptures, ...(camera.source === 'accessory' ? { destination: 'camera' as const, listing: 'unavailable' as const,
+          reason: listed && isRefusal(listed) ? listed.refused : 'Files stay on the camera card; Yonder cannot list, download or delete them.' } : {}) },
         // Answered on the page rather than only on the start, so an operator
         // reads which of their settings this camera does not offer before
         // they press anything (R-CAM-10). `knownDevices` comes from the sweep

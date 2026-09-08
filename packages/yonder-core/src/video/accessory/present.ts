@@ -19,11 +19,12 @@ export function accessoryControls(state: CameraState) {
     if (!reason && d.key === 'ev' && ![1,2].includes(e?.exposureModeCode ?? -1)) reason = 'Program or shutter priority exposure has this control';
     if (!reason && d.key === 'photo-size' && s?.mode !== 'photo') reason = 'Photo mode has this control';
     if (!reason && d.key === 'record-format' && s?.mode !== 'video') reason = 'Video mode has this control';
-    const options = d.kind === 'menu' ? d.values.map(value => ({ value: String(value), label: d.labels?.[value] ?? labels[d.key]?.[value] ?? String(d.toDisplay(value)),
+    const options = d.kind === 'menu' ? d.values.map(value => ({ value: String(value), label: d.labels?.[value] ?? labels[d.key]?.[value] ?? String(d.key === 'ev' ? Number(d.toDisplay(value).toFixed(2)) : d.toDisplay(value)),
       command: { kind: d.key, value: d.key === 'record-format' ? { format: 16, rate: value } : value } }))
       : d.values.map(value => ({ value: JSON.stringify(value), label: d.kind === 'shutter' ? `1/${value.integer} s` : `${value.x}, ${value.y}`, command: { kind: d.key, value } }));
     const value = values[d.key];
     return { ...common, unit: d.unit, state: reason ? 'gated' : 'present', reason,
+      ...(d.key === 'iso' && e?.isoCode === 0 ? { currentLabel: `Auto · ISO ${e.actualIso ?? 'unknown'}` } : {}),
       value: value == null ? null : typeof value === 'object' ? JSON.stringify(value) : String(value), options,
       readback: d.key === 'iso' ? e?.actualIso ?? null : d.key === 'ev' ? e?.ev ?? null : null };
   });

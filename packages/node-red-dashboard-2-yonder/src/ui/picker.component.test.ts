@@ -212,3 +212,15 @@ it("takes its id from a counter, not from a Vue 2 property that does not exist h
     }
 });
 });
+
+it('shows a read-only observed value outside the writable menu without enabling that value as a command', async () => {
+  const w = mount(YonderPicker, { props: { label: 'ISO', value: '0', currentLabel: 'Auto · ISO 320', state: 'present',
+    options: [{ value: '3', label: '100' }, { value: '5', label: '400' }] } });
+  expect(w.find('.y-pick__value').text()).toBe('Auto · ISO 320');
+  const select = w.find('select');
+  expect((select.element as HTMLSelectElement).disabled).toBe(false);
+  expect((select.element as HTMLSelectElement).selectedOptions[0].textContent).toBe('Auto · ISO 320');
+  expect((select.element as HTMLSelectElement).selectedOptions[0].disabled).toBe(true);
+  expect(w.findAll('option').filter(o => !(o.element as HTMLOptionElement).disabled).map(o => o.attributes('value'))).toEqual(['3','5']);
+  await select.setValue('5'); expect(w.emitted('change')).toEqual([['5']]); w.unmount();
+});
