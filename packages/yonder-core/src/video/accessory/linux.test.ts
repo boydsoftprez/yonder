@@ -27,20 +27,27 @@ async function phone(f: ReturnType<typeof fixture>) {
   await f.device.start();
   const h = f.children.at(-1)!;
   h.emit({ type: "ready" });
+  h.emit({ type: "bound", stage: "phone" });
+  identify(h);
+  return h;
+}
+function identify(h: FakeHelper): void {
   for (const [index, text] of [[0, "DJI"], [1, "HG211"]] as const) {
     h.emit({ type: "setup", id: index + 1, stage: "phone", setup: { requestType: 64, request: 52, value: 0, index, length: text.length + 1 } });
     h.emit({ type: "control-data", id: index + 1, data: Buffer.from(text + "\0").toString("base64") });
   }
-  return h;
 }
-async function live(f: ReturnType<typeof fixture>) {
-  const h = await phone(f);
+function enableAccessory(h: FakeHelper): void {
   h.emit({ type: "setup", id: 3, stage: "phone", setup: { requestType: 64, request: 53, value: 0, index: 0, length: 0 } });
   h.emit({ type: "control-done", id: 3 });
   h.emit({ type: "event", stage: "phone", event: "DISABLE" });
   h.emit({ type: "event", stage: "phone", event: "UNBIND" });
   h.emit({ type: "event", stage: "accessory", event: "ENABLE" });
   h.emit({ type: "data", data: Buffer.from(encodeAoaEnvelope(AOA_COMMAND_ROUTE, encodeDuml({ commandSet: 2, commandId: 128, sequence: 7, ack: 0 }))).toString("base64") });
+}
+async function live(f: ReturnType<typeof fixture>) {
+  const h = await phone(f);
+  enableAccessory(h);
   return h;
 }
 it("prepares both descriptors before phone binding and verifies live identity through real protocol", async () => {
@@ -51,6 +58,90 @@ it("prepares both descriptors before phone binding and verifies live identity th
   expect(h.messages.some(m => m.type === "bind" && m.stage === "accessory")).toBe(true);
   expect(f.device.snapshot()).toMatchObject({ state: "live", identity: "pocket2:fe980000.usb", manufacturer: "DJI", model: "HG211" });
   expect(f.onCommand).toHaveBeenCalledOnce();
+});
+it("keeps a bound phone ready for five idle minutes and accepts a late camera without resource churn", async () => {
+  const f = fixture(); await f.device.start(); const h = f.children[0];
+  h.emit({ type: "ready" }); h.emit({ type: "bound", stage: "phone" });
+  const generation = f.device.snapshot().generation;
+  await vi.advanceTimersByTimeAsync(300_000);
+  expect(f.children).toHaveLength(1); expect(h.stopped).toBe(false);
+  expect(h.messages.map(m => m.type)).toEqual(["prepare", "bind"]);
+  expect(f.device.snapshot()).toMatchObject({ state: "phone", generation, manufacturer: null, model: null });
+  identify(h); enableAccessory(h);
+  expect(f.device.snapshot()).toMatchObject({ state: "live", generation, manufacturer: "DJI", model: "HG211" });
+  expect(f.onCommand).toHaveBeenCalledOnce();
+});
+it.each(["preparation", "binding", "wrong-stage-bound", "premature-phone-bound"])("retains the 15-second startup bound during %s", async phase => {
+  const f = fixture(); await f.device.start(); const h = f.children[0];
+  if (phase === "binding" || phase === "wrong-stage-bound") h.emit({ type: "ready" });
+  if (phase === "wrong-stage-bound") h.emit({ type: "bound", stage: "accessory" });
+  if (phase === "premature-phone-bound") h.emit({ type: "bound", stage: "phone" });
+  await vi.advanceTimersByTimeAsync(14_999); expect(h.stopped).toBe(false);
+  await vi.advanceTimersByTimeAsync(1); expect(h.stopped).toBe(true);
+  expect(f.device.snapshot()).toMatchObject({ state: "detached-backoff", reason: expect.stringMatching(/timed out/) });
+});
+it.each([
+  { requestType: 192, request: 51, value: 0, index: 0, length: 2 },
+  { requestType: 64, request: 52, value: 0, index: 0, length: 4 },
+  { requestType: 64, request: 53, value: 0, index: 0, length: 0 },
+])("starts a fresh 15-second handshake budget on the first recognized AOA request $request", async setup => {
+  const f = fixture(); await f.device.start(); const h = f.children[0];
+  h.emit({ type: "ready" }); h.emit({ type: "bound", stage: "phone" });
+  await vi.advanceTimersByTimeAsync(60_000);
+  h.emit({ type: "setup", stage: "phone", id: 7, setup });
+  if (setup.request === 52) h.emit({ type: "control-data", id: 7, data: Buffer.from("DJI\0").toString("base64") });
+  else h.emit({ type: "control-done", id: 7 });
+  await vi.advanceTimersByTimeAsync(14_999); expect(h.stopped).toBe(false);
+  await vi.advanceTimersByTimeAsync(1); expect(h.stopped).toBe(true);
+  expect(f.device.snapshot().reason).toMatch(/handshake timed out/);
+});
+it("late phone bound and further recognized or unknown setup cannot extend a begun handshake", async () => {
+  const f = fixture(); await f.device.start(); const h = f.children[0]; h.emit({ type: "ready" });
+  await vi.advanceTimersByTimeAsync(10_000);
+  const protocol = { requestType: 192, request: 51, value: 0, index: 0, length: 2 };
+  h.emit({ type: "setup", stage: "phone", id: 1, setup: protocol }); h.emit({ type: "control-done", id: 1 });
+  await vi.advanceTimersByTimeAsync(10_000);
+  h.emit({ type: "bound", stage: "phone" }); h.emit({ type: "bound", stage: "phone" });
+  for (const [id, setup] of [
+    [2, { ...protocol, request: 99 }], [3, { ...protocol, requestType: 128 }], [4, protocol],
+  ] as const) {
+    h.emit({ type: "setup", stage: "phone", id, setup }); h.emit({ type: "control-done", id });
+  }
+  await vi.advanceTimersByTimeAsync(4_999); expect(h.stopped).toBe(false);
+  await vi.advanceTimersByTimeAsync(1); expect(h.stopped).toBe(true);
+});
+it("unknown and non-AOA setup leave a bound idle phone waiting without starting a handshake", async () => {
+  const f = fixture(); await f.device.start(); const h = f.children[0];
+  h.emit({ type: "ready" }); h.emit({ type: "bound", stage: "phone" });
+  for (const [id, requestType, request] of [[1, 192, 99], [2, 128, 51]] as const) {
+    h.emit({ type: "setup", stage: "phone", id, setup: { requestType, request, value: 0, index: 0, length: 2 } });
+    expect(h.messages.at(-1)).toMatchObject({ type: "control", action: "stall" });
+    h.emit({ type: "control-done", id });
+  }
+  await vi.advanceTimersByTimeAsync(300_000);
+  expect(h.stopped).toBe(false); expect(f.children).toHaveLength(1); expect(f.device.snapshot().state).toBe("phone");
+});
+it("retired generation bound/setup events cannot change the replacement attachment wait or deadline", async () => {
+  const f = fixture(); await f.device.start(); const old = f.children[0];
+  old.emit({ type: "ready" }); old.emit({ type: "bound", stage: "phone" });
+  old.emit({ type: "error", message: "disconnected" }); await vi.advanceTimersByTimeAsync(45_000);
+  const h = f.children[1]; h.emit({ type: "ready" }); h.emit({ type: "bound", stage: "phone" });
+  const protocol = { requestType: 192, request: 51, value: 0, index: 0, length: 2 };
+  old.emit({ type: "setup", stage: "phone", id: 1, setup: protocol }); old.emit({ type: "bound", stage: "phone" });
+  await vi.advanceTimersByTimeAsync(300_000);
+  expect(f.children).toHaveLength(2); expect(h.stopped).toBe(false);
+  h.emit({ type: "setup", stage: "phone", id: 1, setup: protocol }); h.emit({ type: "control-done", id: 1 });
+  await vi.advanceTimersByTimeAsync(14_999); old.emit({ type: "bound", stage: "phone" });
+  await vi.advanceTimersByTimeAsync(1); expect(h.stopped).toBe(true);
+});
+it("shutdown cleans a bound idle phone and does not retry or accept late attachment", async () => {
+  const f = fixture(); await f.device.start(); const h = f.children[0];
+  h.emit({ type: "ready" }); h.emit({ type: "bound", stage: "phone" });
+  await vi.advanceTimersByTimeAsync(300_000); await f.device.close();
+  expect(h.stopped).toBe(true); expect(f.device.snapshot().state).toBe("closed");
+  h.emit({ type: "bound", stage: "phone" }); identify(h);
+  await vi.advanceTimersByTimeAsync(300_000); expect(f.children).toHaveLength(1);
+  expect(h.messages.map(m => m.type)).toEqual(["prepare", "bind"]);
 });
 it("stalls unknown OUT before reading its control data", async () => {
   const f = fixture(); await f.device.start(); const h = f.children[0];

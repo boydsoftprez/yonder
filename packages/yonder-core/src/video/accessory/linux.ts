@@ -115,6 +115,7 @@ export class Pocket2Device {
   private helper?: FunctionFsHelper;
   private session?: AccessorySession;
   private startupTimer?: ReturnType<typeof setTimeout>;
+  private handshakeStarted = false;
   private freshnessTimer?: ReturnType<typeof setInterval>;
   private retryTimer?: ReturnType<typeof setTimeout>;
   private enabledAt?: number;
@@ -147,10 +148,10 @@ export class Pocket2Device {
     if (this.closed) return;
     this.status = { ...this.status, generation: this.status.generation + 1,
       manufacturer: null, model: null, lastCommandAt: null, lastVideoAt: null };
-    this.enabledAt = undefined; this.control = undefined;
+    this.enabledAt = undefined; this.control = undefined; this.handshakeStarted = false;
     const generation = this.status.generation;
     this.update("preparing");
-    this.startupTimer = setTimeout(() => { void this.retire("fault", "Pocket 2 handshake timed out"); }, STARTUP_TIMEOUT_MS);
+    this.armStartupTimeout();
     try {
       this.helper = (this.options.helperFactory ?? (event => new NdjsonFunctionFsHelper(event)))(message => {
         if (generation !== this.status.generation || this.closed || this.stopping) return;
@@ -161,6 +162,15 @@ export class Pocket2Device {
         { stage: "accessory", vendorId: "18d1", productId: "2d00", manufacturer: "Android", product: "Android Accessory", serial: "0001", descriptors: b64(functionFsDescriptors("accessory")), strings: b64(functionFsStrings()) },
       ] });
     } catch { void this.retire("unavailable", "FunctionFS helper unavailable"); }
+  }
+  private armStartupTimeout(): void {
+    clearTimeout(this.startupTimer);
+    const generation = this.status.generation;
+    this.startupTimer = setTimeout(() => {
+      if (generation === this.status.generation && !this.closed) {
+        void this.retire("fault", "Pocket 2 handshake timed out");
+      }
+    }, STARTUP_TIMEOUT_MS);
   }
   private receive(message: Message): void {
     switch (message.type) {
@@ -204,7 +214,13 @@ export class Pocket2Device {
       case "error":
         void this.retire(message.code === "unavailable" ? "unavailable" : "fault",
           typeof message.message === "string" ? message.message.slice(0, 200) : "FunctionFS failed"); break;
-      case "bound": break;
+      case "bound":
+        // A prepared, successfully bound phone can wait passively for attachment.
+        // A late/duplicate bind result must never erase an active AOA deadline.
+        if (message.stage === "phone" && this.status.state === "phone" && !this.handshakeStarted) {
+          clearTimeout(this.startupTimer); this.startupTimer = undefined;
+        }
+        break;
       default: throw new Error();
     }
   }
@@ -215,6 +231,13 @@ export class Pocket2Device {
     // Validate policy before an OUT read; reading ep0 can acknowledge the request.
     if (setup.length >= 0 && setup.length <= 4_096) {
       const response = aoaSetupResponse(setup, new Uint8Array(setup.length));
+      if (response && message.stage === "phone" && this.status.state === "phone" && !this.handshakeStarted) {
+        // The first valid GET_PROTOCOL, SEND_STRING or START gets one bounded
+        // handshake window, independent of how long attachment took. Unknown
+        // setup and subsequent requests cannot start or extend this deadline.
+        this.handshakeStarted = true;
+        this.armStartupTimeout();
+      }
       if (response?.kind === "string" && message.stage === "phone" && this.status.state === "phone") action = { ...action, action: "read" };
       else if (response?.kind === "reply") action = { ...action, action: "write", data: b64(response.data) };
       else if (response?.kind === "start" && message.stage === "phone" && this.status.state === "phone"
