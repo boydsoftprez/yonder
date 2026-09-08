@@ -138,3 +138,21 @@ The original study documents its source relationship in
 [its README](../../../packages/node-red-dashboard-2-yonder/cockpit/instruments/README.md):
 Vue/SVG gauges based on the community G3X conventions, not simulator-runtime
 components or a claimed pixel-identical certified-aircraft implementation.
+
+
+## Gauge sizing and control order correction
+
+The operator requested larger faces in their allocated cells and the autopilot
+buttons above the user fields. Fixed-height HTML titles and secondary readings
+had reduced the SVG to 41 px inside a 77 px side-column gauge. Graphical titles,
+faces and secondary readings now share a scalable SVG, with reduced cell padding.
+The native DOM order and desktop grid both place flight controls before the
+configurable field row. No aircraft or telemetry behavior changes.
+
+At 1280×720 the side-bank numbers increased from roughly 10 px to 18–19 px high;
+the face uses the full 83 px instrument height. The top-strip numbers measured
+30–33 px. Browser checks at 768×1024 and 1024×768 verified the same row order,
+readout heights of 19–21 px and no horizontal page overflow. Original side-bank
+placement and normal browser dimensions were restored after checking. All 63
+covering component/settings tests passed, including the order regression that
+failed before the change. The production cockpit bundle built successfully.

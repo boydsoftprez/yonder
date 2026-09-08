@@ -387,6 +387,11 @@ reference; it is not a command. Display & data selects day/night palette, tape a
 HSI transparency, background and optional sources. The PFD remains screen-fixed
 over a camera image even when scene registration is unavailable.
 
+The autopilot action buttons sit directly below the cockpit header, above the
+configurable user fields. This order is the same in side-column and top-strip
+layouts, including keyboard navigation. Graphical gauges scale their titles,
+faces and secondary readings together to fill their allocated instrument space.
+
 The default top fields are active waypoint, waypoint distance, ETE, estimated
 terrain AGL, ground speed and observed airborne total. The default bank shows battery 1
 current, remaining charge, charge used, cellular signal, Yonder CPU utilisation

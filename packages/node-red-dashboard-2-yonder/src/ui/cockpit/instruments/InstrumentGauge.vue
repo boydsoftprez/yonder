@@ -1,8 +1,11 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <template>
   <div class="instrument-gauge" :class="[`instrument-gauge-${kind}`, { 'instrument-unavailable': !valid }]" :data-instrument-id="item.id" :title="description">
-    <span class="instrument-label">{{ item.shortLabel || item.label }}</span>
-    <svg v-if="graphical" class="instrument-face" viewBox="0 0 190 127" role="img" :aria-label="description">
+    <span v-if="!graphical" class="instrument-label">{{ item.shortLabel || item.label }}</span>
+    <svg v-if="graphical" class="instrument-face" :viewBox="`0 0 190 ${faceHeight}`" role="img" :aria-label="description">
+      <title>{{ description }}</title>
+      <text x="95" y="17" class="instrument-label">{{ item.shortLabel || item.label }}</text>
+      <g transform="translate(0 20)">
       <template v-if="kind === 'arc'">
         <path :d="arc(0, 1)" class="scale-back" />
         <path v-for="(band, i) in bands" :key="i" :d="arc(fraction(band.from), fraction(band.to))" :stroke="instrumentColors[band.color]" class="scale-band" :data-band="band.color" />
@@ -35,14 +38,15 @@
         <text x="95" y="120" class="instrument-number" :fill="tone">{{ display }}<tspan class="instrument-unit"> {{ displayUnit }}</tspan></text>
       </template>
       <path v-if="!valid" d="M44 8L146 100M146 8L44 100" class="missing-cross" />
+      </g>
+      <text v-if="faceDetail" x="95" :y="faceHeight - 5" class="instrument-detail">{{ faceDetail }}</text>
     </svg>
     <div v-else class="instrument-plain" :class="{ 'instrument-status': kind === 'status' }">
       <span v-if="kind === 'status'" class="status-mark" :style="{ background: valid && item.value !== false ? tone : 'transparent' }" aria-hidden="true" />
       <strong :style="{ color: tone }">{{ display }}</strong><span class="plain-unit">{{ displayUnit }}</span>
     </div>
-    <span v-if="!valid" class="instrument-detail instrument-reason">{{ item.reason || 'Data unavailable' }}</span>
-    <span v-else-if="graphical && kind !== 'bearing' && !hasRange" class="instrument-detail">Set a display scale</span>
-    <span v-else-if="item.secondary || item.quality === 'partial'" class="instrument-detail">{{ item.secondary || 'Partial history' }}</span>
+    <span v-if="!graphical&&!valid" class="instrument-detail instrument-reason">{{ item.reason || 'Data unavailable' }}</span>
+    <span v-else-if="!graphical&&(item.secondary || item.quality === 'partial')" class="instrument-detail">{{ item.secondary || 'Partial history' }}</span>
   </div>
 </template>
 <script setup lang="ts">
@@ -66,6 +70,10 @@ const tone = computed(() => {
   return color ? instrumentColors[color] : '#f5f8fa';
 });
 const graphical = computed(() => ['arc', 'horizontal', 'vertical', 'bearing'].includes(kind.value));
+// Title, face and secondary value share one scale, as in the approved study.
+// Fixed HTML rows previously squeezed the SVG to 41 px inside a 77 px instrument.
+const faceHeight = computed(() => kind.value === 'horizontal' ? 137 : kind.value === 'bearing' ? 165 : 150);
+const faceDetail = computed(() => !valid.value ? 'DATA UNAVAILABLE' : kind.value !== 'bearing' && !hasRange.value ? 'Set a display scale' : props.item.secondary || (props.item.quality === 'partial' ? 'Partial history' : ''));
 const description = computed(() => `${props.item.label}: ${valid.value ? `${display.value} ${displayUnit.value}` : (props.item.reason || 'Data unavailable')}${props.item.source ? `. Source: ${props.item.source}` : ''}`);
 const fraction = (value: number) => hasRange.value ? Math.max(0, Math.min(1, (value - min.value) / (max.value - min.value))) : 0;
 const point = (fraction: number, radius: number) => ({ x: 95 + Math.sin((-112 + 224 * fraction) * Math.PI / 180) * radius, y: 71 - Math.cos((-112 + 224 * fraction) * Math.PI / 180) * radius });
@@ -76,7 +84,7 @@ const tickText = (value: number) => value.toLocaleString('en-US', { maximumFract
 <style scoped>
 .instrument-gauge{display:flex;flex-direction:column;justify-content:center;min-height:0;height:100%;min-width:0;color:#f5f8fa;font-family:Arial,sans-serif;font-variant-numeric:tabular-nums;text-align:center}
 .instrument-label{display:block;font-size:clamp(11px,1.05vw,15px);font-weight:600;line-height:1.2;padding-top:3px;overflow-wrap:anywhere}
-.instrument-face{display:block;flex:1;min-height:0;width:100%;max-height:150px;overflow:visible;text-anchor:middle}
+.instrument-face{display:block;flex:1;min-height:0;width:100%;height:100%;overflow:visible;text-anchor:middle}.instrument-face>.instrument-label{font-size:18px;fill:#fff}.instrument-face>.instrument-detail{font-size:14px;fill:#c3d4dd}
 .scale-back{fill:none;stroke:#465158;stroke-width:9}.scale-band{fill:none;stroke-width:9}.scale-back-fill{fill:#465158}.scale-tick{stroke:#fff;stroke-width:1.4}.scale-label{font-size:11px;fill:#f8fafb;paint-order:stroke;stroke:#040b10;stroke-width:2px;stroke-linejoin:round}.instrument-number{font-size:28px;font-weight:600;paint-order:stroke;stroke:#030809;stroke-width:1.6px}.instrument-unit{font-size:14px;fill:#fff;font-weight:400}.instrument-pointer{fill:#fff;stroke:#020607;stroke-width:1.4}.missing-cross{stroke:#ef5a53;stroke-width:2.5;fill:none}.compass-circle{stroke:#73868f;stroke-width:2}
 .instrument-detail{display:block;font-size:11px;line-height:1.2;color:#c3d4dd;padding-bottom:3px;overflow-wrap:anywhere}.instrument-reason{color:#f2c2be}.instrument-plain{display:flex;flex-wrap:wrap;align-content:center;align-items:center;justify-content:center;gap:5px;flex:1;min-height:44px;padding:5px}.instrument-plain strong{font-size:25px;line-height:1.15;overflow-wrap:anywhere}.plain-unit{font-size:12px}.status-mark{height:10px;width:10px;flex:none;border:1px solid #b1c6d1;border-radius:50%}.instrument-status strong{font-size:20px}
 </style>

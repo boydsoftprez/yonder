@@ -4,6 +4,11 @@ import YonderCockpit from '../YonderCockpit.vue';
 import {fixture} from '../../../cockpit/fixture.mjs';
 beforeEach(()=>localStorage.clear());
 function host(){return mount(YonderCockpit,{props:{id:'layout-test',report:fixture(),api:{command:vi.fn()}},global:{stubs:{YonderCockpitMap:true,YonderPicture:true,TerrainVision:true},provide:{$socket:{emit:vi.fn()},$dataTracker:{}}}})}
+it('places autopilot controls before user fields in reading and keyboard order',()=>{
+ const w=host(),controls=w.get('.flight-control-host').element,fields=w.get('.flight-data-bar').element;
+ expect(controls.compareDocumentPosition(fields)&Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+ expect(w.props('api').command).not.toHaveBeenCalled();w.unmount();
+});
 it('keeps the same PFD and map when the operator enables a stacked MFD',async()=>{
  const w=host(),pfd=w.get('.pfd-svg').element,map=w.findComponent({name:'YonderCockpitMap'}).element;
  await w.get('[aria-label="Display setup"]').trigger('click');await w.get('[aria-label="Display arrangement"]').setValue('stacked');

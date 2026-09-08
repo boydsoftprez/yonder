@@ -29,7 +29,6 @@
       @click="panel='status'"
       aria-label="Aircraft and command status"
     >{{snapshot.operations?.at(-1)?.state || 'Aircraft'}}</button></header>
-  <FlightDataBar v-if="!customInstrumentSlot&&displayConfig.showDataBar" :items="instrumentItems" :config="topInstrumentConfig" @select="openInstrument" @update:config="setTopInstrumentConfig"/>
   <FlightControlPanel
     ref="flightControls"
     :snapshot="agedSnapshot"
@@ -40,6 +39,7 @@
     @request="({action,label})=>review(action,label)"
     @pick-target="pickFlightTarget"
   />
+  <FlightDataBar v-if="!customInstrumentSlot&&displayConfig.showDataBar" :items="instrumentItems" :config="topInstrumentConfig" @select="openInstrument" @update:config="setTopInstrumentConfig"/>
   <div v-if="customInstrumentSlot?preferences.display.stripPlacement==='mfd':['side','top'].includes(bankPlacement)" class="cockpit-navigation-data" aria-label="Mission and navigation instrument data">
     <slot name="instrument-strip" :telemetry="displayTelemetry" :live="flight.live">
       <InstrumentBank :items="instrumentItems" :config="bankInstrumentConfig" :placement="bankPlacement" @select="openInstrument" @update:config="setBankInstrumentConfig"/>
