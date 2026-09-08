@@ -9,8 +9,10 @@ export function decodeGimbalAttitude(frame: DumlFrame, clock: Pick<IntentClock, 
   if (frame.commandSet !== 4 || frame.commandId !== 5 || frame.sender !== 4 || frame.response
     || frame.payload.length < 11) return null;
   const p = Buffer.from(frame.payload);
+  // HG211 captures carry normal status bits 5/7 (0x20/0x80) during proven
+  // motion. Preserve faults for unclassified bit 2 and unproven bits 3/4/6.
   return { pitch: p.readInt16LE(0) / 10, roll: p.readInt16LE(2) / 10, yaw: p.readInt16LE(4) / 10,
-    mode: (p[6] >> 6) & 3, at: clock.now(), pitchLimit: !!(p[10] & 1), yawLimit: !!(p[10] & 2), fault: !!(p[10] & 0xfc) };
+    mode: (p[6] >> 6) & 3, at: clock.now(), pitchLimit: !!(p[10] & 1), yawLimit: !!(p[10] & 2), fault: !!(p[10] & 0x5c) };
 }
 export type MotionRefusal = { accepted: false; reason: GuardReason | 'busy' | 'unavailable' | 'revoked' | 'write-failed' };
 export interface GimbalControllerOptions {

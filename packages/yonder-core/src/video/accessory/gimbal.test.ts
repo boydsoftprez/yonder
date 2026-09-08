@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { decodeGimbalAttitude, GimbalController } from './gimbal.js';
 import type { GuardContext } from './guard.js';
 import type { IntentClock, IntentGrant } from './intent.js';
-import type { DumlFrame, DumlCommand } from './duml.js';
+import { decodeDuml, type DumlFrame, type DumlCommand } from './duml.js';
 import type { AccessoryCommandOptions } from './aoa.js';
 
 class Clock implements IntentClock {
@@ -31,9 +31,37 @@ const settle = async () => { await Promise.resolve(); await Promise.resolve(); a
 describe('gimbal attitude', () => {
   it('decodes signed tenths, mode high bits and pitch/yaw limit bits using injected monotonic time', () => {
     expect(decodeGimbalAttitude(frame(), { now: () => 1234 })).toEqual({ pitch: -12.3, roll: 4.5, yaw: 98.7, mode: 1, at: 1234, pitchLimit: true, yawLimit: true, fault: false });
-    for (const [byte, pitchLimit, yawLimit, fault] of [[1,true,false,false],[2,false,true,false],[4,false,false,true],[128,false,false,true]] as const) {
+    for (const [byte, pitchLimit, yawLimit, fault] of [[1,true,false,false],[2,false,true,false],[4,false,false,true]] as const) {
       const f = frame(); f.payload[10] = byte;
       expect(decodeGimbalAttitude(f, { now: () => 1 })).toMatchObject({ pitchLimit, yawLimit, fault });
+    }
+  });
+  it('decodes a captured normal HG211 attitude without inventing a fault', () => {
+    // HG211 bench, 2026-09-08: CRC-valid 4/05 frame from session-sample.bin.
+    // All 47 attitude pushes in that sample carry byte-10 flags 0xa0.
+    const captured = decodeDuml(Buffer.from(
+      '553a04700402b03b0004050200000074fe82001af9a00104e91b0083f0000064fc00000cd3703f4c254a3a78b10b3b76a8adbe0665a53f00bfbf', 'hex'));
+    expect(captured).not.toBeNull();
+    expect(decodeGimbalAttitude(captured!, { now: () => 1234 })).toEqual({
+      pitch: 0.2, roll: 0, yaw: -39.6, mode: 2, at: 1234, pitchLimit: false, yawLimit: false, fault: false,
+    });
+  });
+  it.each([
+    [0x80, false, false], [0xa0, false, false],
+    [0x81, true, false], [0x82, false, true], [0x83, true, true],
+    [0xa1, true, false], [0xa2, false, true], [0xa3, true, true],
+  ] as const)('normal status flags %s preserve pitch/yaw limits without becoming a fault', (flags, pitchLimit, yawLimit) => {
+    // The 0x80 and 0xa0 base flags are also independently retained throughout
+    // production yaw/pitch/recentre JSON observations. Limit combinations are synthetic.
+    const f = frame(); f.payload[10] = flags;
+    expect(decodeGimbalAttitude(f, { now: () => 1 })).toMatchObject({ pitchLimit, yawLimit, fault: false });
+  });
+  it.each([0x04, 0x08, 0x10, 0x40])('retains unclassified or unproven flag %s as a fault', faultBit => {
+    for (const base of [0, 0x80, 0xa0]) {
+      const f = frame(); f.payload[10] = base | faultBit;
+      expect(decodeGimbalAttitude(f, { now: () => 1 })).toMatchObject({ pitchLimit: false, yawLimit: false, fault: true });
+      f.payload[10] |= 3;
+      expect(decodeGimbalAttitude(f, { now: () => 1 })).toMatchObject({ pitchLimit: true, yawLimit: true, fault: true });
     }
   });
   it('rejects every truncation and unrelated/response frame without inventing zero attitude', () => {
