@@ -9,6 +9,9 @@ from unittest.mock import patch, MagicMock
 from types import SimpleNamespace
 import errno
 import tempfile
+import base64
+import json
+import struct
 
 spec = importlib.util.spec_from_file_location('functionfs', pathlib.Path(__file__).parent / 'assets/functionfs.py')
 ffs = importlib.util.module_from_spec(spec)
@@ -63,6 +66,126 @@ class FdTests(unittest.TestCase):
         self.assertEqual(ipc.push(b'{"type":'), [])
         self.assertEqual(ipc.push(b'"close"}\n'), [{'type': 'close'}])
         with self.assertRaises(ValueError): ipc.push(b'x' * 24001)
+
+class BackpressureTests(unittest.TestCase):
+    def test_blocked_parent_burst_pauses_bulk_but_services_control_and_write_then_resumes_intact(self):
+        helper = ffs.Helper()
+        ep0, bulk, phone_ep0 = 10001, 10002, 10003
+        stdout_read, stdout_write = os.pipe()
+        command_read, command_write = os.pipe()
+        raw_read, raw_write, raw_select = os.read, os.write, ffs.select.select
+        for fd in (stdout_read, stdout_write, command_read, command_write): os.set_blocking(fd, False)
+        try:
+            # A real full stdout pipe models a parent temporarily unable to read.
+            filler = 0
+            while True:
+                try: filler += raw_write(stdout_write, b'x' * 4096)
+                except BlockingIOError: break
+            stage = SimpleNamespace(stage='accessory', ep0=ep0, ep_in=command_write,
+                                    ep_out=bulk, control=None, events=ffs.Events())
+            helper.stages['accessory'] = stage
+            phone = SimpleNamespace(stage='phone', ep0=phone_ep0, ep_in=None, ep_out=None, control=None, events=ffs.Events())
+            helper.stages['phone'] = phone
+            chunks = [bytes([n]) * 16384 for n in range(80)]
+            received = bytearray()
+            state = dict(next_chunk=0, calls=0, pause=0, draining=False, input=b'', control_reads=[])
+            def drain():
+                while True:
+                    try: received.extend(raw_read(stdout_read, 65536))
+                    except BlockingIOError: break
+            def choose(reads, writes, errors, timeout):
+                state['calls'] += 1
+                self.assertLess(state['calls'], 250, 'paused bulk descriptor caused an always-ready loop')
+                self.assertLessEqual(len(helper.output), 1048576)
+                self.assertEqual(timeout, 0.02)
+                if state['draining']:
+                    drain()
+                    if state['next_chunk'] == len(chunks) and not helper.output:
+                        state['input'] = b''
+                        return [0], [], []
+                    readable = [bulk] if bulk in reads and state['next_chunk'] < len(chunks) else []
+                    writable = [1] if 1 in writes and raw_select([], [stdout_write], [], 0)[1] else []
+                    return readable, writable, []
+                self.assertFalse(raw_select([], [stdout_write], [], 0)[1])
+                if bulk in reads:
+                    return [bulk], [], []
+                # Once paused, stdin and ep0 must still be selectable; metadata
+                # and a pending IN command must progress before the parent drains.
+                self.assertIn(0, reads)
+                if state['pause'] == 0:
+                    self.assertIn(ep0, reads); self.assertIn(phone_ep0, reads)
+                    state['pause'] = 1
+                    state['input'] = json.dumps(dict(type='write', id=99, data=base64.b64encode(b'command').decode(), deadline=1000)).encode() + b'\n'
+                    return [0, ep0, phone_ep0], [], []
+                if state['pause'] == 1:
+                    self.assertIn(command_write, writes)
+                    state['pause'] = 2
+                    state['input'] = b'{"type":"control","id":1,"action":"read"}\n{"type":"control","id":2,"action":"read"}\n'
+                    return [0], [command_write], []
+                self.assertIsNone(helper.pending)
+                self.assertIsNone(stage.control); self.assertIsNone(phone.control)
+                self.assertIn(b'"type":"written","id":99', helper.output)
+                self.assertEqual(state['control_reads'], [ep0, phone_ep0])
+                # Only the initial filler has reached the real pipe so far.
+                drain(); self.assertEqual(received, b'x' * filler); received.clear()
+                state['draining'] = True
+                return [], [1], []
+            def read(fd, length):
+                if fd == 0: return state['input']
+                self.assertIn(fd, [ep0, phone_ep0])
+                return struct.pack('<BBHHHB3x', 64, 52, 0, 0, 16384, 4)
+            def bulk_read(fd, length, deadline):
+                if fd in (ep0, phone_ep0):
+                    self.assertEqual(length, 16384); self.assertEqual(deadline, 1000)
+                    state['control_reads'].append(fd)
+                    return (b'A' if fd == ep0 else b'P') * 16384
+                self.assertEqual(fd, bulk); self.assertEqual(length, 16384); self.assertEqual(deadline, 20)
+                self.assertLess(state['next_chunk'], len(chunks))
+                data = chunks[state['next_chunk']]; state['next_chunk'] += 1
+                return data
+            def endpoint_write(fd, data, deadline):
+                self.assertEqual(deadline, 1000)
+                self.assertEqual(fd, command_write)
+                return raw_write(fd, data)
+            with patch.object(ffs.os, 'set_blocking'), patch.object(ffs.select, 'select', side_effect=choose), patch.object(ffs.os, 'read', side_effect=read), patch.object(ffs.os, 'write', side_effect=lambda fd, data: raw_write(stdout_write if fd == 1 else fd, data)), patch.object(ffs, 'endpoint_read', side_effect=bulk_read), patch.object(ffs, 'endpoint_write', side_effect=endpoint_write), patch.object(ffs, 'now', return_value=0):
+                with self.assertRaises(ffs.Stop): helper.run()
+            self.assertEqual(state['pause'], 2)
+            self.assertEqual(raw_read(command_read, 64), b'command')
+            messages = [json.loads(line) for line in received.splitlines()]
+            self.assertEqual(b''.join(base64.b64decode(m['data']) for m in messages if m['type'] == 'data'), b''.join(chunks))
+            self.assertEqual([m['type'] for m in messages if m['type'] != 'data'], ['setup', 'setup', 'written', 'control-data', 'control-data'])
+            self.assertEqual([(m['id'], base64.b64decode(m['data'])) for m in messages if m['type'] == 'control-data'], [(1, b'A' * 16384), (2, b'P' * 16384)])
+            self.assertEqual(helper.output, bytearray())
+        finally:
+            for fd in (stdout_read, stdout_write, command_read, command_write): os.close(fd)
+
+    def test_bulk_pause_does_not_defer_pending_write_or_control_deadlines(self):
+        helper = ffs.Helper()
+        # Use valid complete IPC lines to approach the actual one-MiB cap.
+        while len(helper.output) + 22000 < 1048576:
+            helper.emit(type='data', data=base64.b64encode(b'x' * 16384).decode())
+        helper.stages['accessory'] = SimpleNamespace(ep0=42, ep_in=43, ep_out=44, control=None)
+        helper.pending = ffs.PendingWrite(7, b'command', 1000)
+        with patch.object(ffs, 'now', return_value=1000), patch.object(ffs, 'endpoint_write') as write:
+            with self.assertRaisesRegex(TimeoutError, 'write deadline'): helper.tick()
+            write.assert_not_called()
+        helper.pending = None
+        helper.stages['accessory'].control = dict(id=1, setup={}, action=None, data=b'', deadline=1000)
+        with patch.object(ffs, 'now', return_value=1000):
+            with self.assertRaisesRegex(TimeoutError, 'setup policy/data'): helper.tick()
+
+    def test_parent_close_is_serviced_while_bulk_is_paused(self):
+        helper = ffs.Helper()
+        while len(helper.output) + 22000 < 1048576:
+            helper.emit(type='data', data=base64.b64encode(b'x' * 16384).decode())
+        helper.stages['accessory'] = SimpleNamespace(ep0=42, ep_in=43, ep_out=44, control=None)
+        def choose(reads, writes, errors, timeout):
+            self.assertEqual(reads, [0, 42])
+            self.assertIn(1, writes)
+            return [0], [], []
+        with patch.object(ffs.os, 'set_blocking'), patch.object(ffs.select, 'select', side_effect=choose), patch.object(ffs.os, 'read', return_value=b'{"type":"close"}\n'), patch.object(ffs, 'endpoint_read') as read:
+            with self.assertRaises(ffs.Stop): helper.run()
+            read.assert_not_called()
 
 class LifecycleTests(unittest.TestCase):
     def test_owned_controller_lock_refuses_before_module_or_gadget_changes(self):

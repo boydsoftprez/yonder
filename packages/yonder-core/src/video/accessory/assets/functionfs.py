@@ -26,6 +26,9 @@ import uuid
 MAX_CHUNK = 16384
 MAX_LINE = 24000
 MAX_OUTPUT = 1024 * 1024
+# Keep room for control/event replies from both prepared stages and write/bind
+# completion while the bulk data producer is paused. The total cap is unchanged.
+CONTROL_OUTPUT_RESERVE = 4 * MAX_LINE
 EVENT_NAMES = ('BIND', 'UNBIND', 'ENABLE', 'DISABLE', 'SETUP', 'SUSPEND', 'RESUME')
 
 
@@ -299,6 +302,11 @@ class Helper:
             raise ValueError('IPC output queue limit')
         self.output.extend(line)
 
+    def can_read_bulk(self):
+        # A maximum-sized data chunk fits within one bounded IPC line. Check
+        # before reading USB bytes, so backpressure never consumes then drops data.
+        return len(self.output) + MAX_LINE + CONTROL_OUTPUT_RESERVE <= MAX_OUTPUT
+
     def prepare(self, message):
         if self.prepared:
             raise ValueError('already prepared')
@@ -408,7 +416,8 @@ class Helper:
         while True:
             self.tick()
             reads = [0] + [s.ep0 for s in self.stages.values() if s.control is None]
-            reads += [s.ep_out for s in self.stages.values() if s.ep_out is not None]
+            if self.can_read_bulk():
+                reads += [s.ep_out for s in self.stages.values() if s.ep_out is not None]
             writes = [1] if self.output else []
             if self.pending:
                 writes.append(self.stages['accessory'].ep_in)
@@ -451,7 +460,9 @@ class Helper:
                                         os.close(fd)
                                         stage.fds.remove(fd)
                                 stage.ep_in = stage.ep_out = None
-                if stage.ep_out is not None and stage.ep_out in readable:
+                # EP0 messages or an earlier stage may have consumed headroom
+                # after select was built. Recheck immediately before bulk I/O.
+                if stage.ep_out is not None and stage.ep_out in readable and self.can_read_bulk():
                     try:
                         data = endpoint_read(stage.ep_out, MAX_CHUNK, now() + 20)
                     except (BlockingIOError, TimeoutError):
