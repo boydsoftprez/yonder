@@ -197,3 +197,38 @@ a provider connection check, not an aircraft-location test. Nearby live traffic,
 terrain perspective and physical GPS recovery remain unverified until a GPS
 receiver is connected and reports a fix. The ground relay must remain running on
 the laptop; it is not an aircraft service or an installed background service.
+
+## Attitude cadence and mission-read follow-up
+
+Follow-up `9af9670` addresses two live usability failures. A ten-second Unix-socket
+sample observed at least 6.2 distinct attitude updates/second at the Pi, while the
+PFD's interpolator required a GPS pose and therefore stayed disabled on this
+no-GPS bench. Browser reads also waited a full interval after completing each
+response. The new 8 Hz default accounts for elapsed request time, remains
+serialized and is saved when the operator selects a rate. The source button opens
+the measured browser/attitude rates and explicit 10 Hz controller stream request.
+A separate attitude-only buffer smooths the horizon without providing fictitious
+coordinates to terrain or traffic.
+
+The HTTP page also reproduced `crypto.randomUUID is not a function` when reading
+the mission. Request IDs now use the browser's secure random byte generator when
+`randomUUID` is unavailable; authenticated session provenance and changing-command
+review are unchanged. The [browser API documents HTTP availability of
+getRandomValues](https://developer.mozilla.org/en-US/docs/Web/API/Crypto/getRandomValues).
+Mission controls now include Read aircraft mission beside Upload, preserve the
+draft, and distinguish missing readback from completed readback without home.
+
+All 39 targeted component, cadence, compact API, pose and mission-boundary tests
+passed. The build is 818.44 kB / 224.96 kB gzip. The installed Flight bundle hash is
+`325f5a90ae56f48c37a6476a347b230758eea8da7d63e640994e7fc3e95692e8`.
+Core PID 105058 and console PID 105234 remained active with zero restarts.
+
+In Chrome, the new default was visible and roughly 6–7 distinct attitude updates
+per second were observed under the current link/browser load. One mission read
+completed and verified an empty controller mission with no reported home. One
+explicit stream setup was accepted, including ATTITUDE at 10 Hz; 15 optional
+instrumentation requests were unavailable and were reported separately. The
+controller remained RTL/disarmed. No mission upload, arm, mode, target or start
+command was sent. Loading the Cove example as a local draft showed the new
+home-unavailable explanation and disabled upload until the controller provides
+the required home record. Physical flight and GPS recovery remain untested.
