@@ -24,6 +24,23 @@ function harness() {
 }
 
 describe('shared accessory source', () => {
+  it.each([[60, 0], [0, -120], [72, 96]])('accepts rated %s/%s requests through source admission and encodes the physical command', async (pan, tilt) => {
+    const h = harness();
+    await h.source.discover(); h.live();
+    const payload = Buffer.alloc(11); payload[10] = 0x80;
+    h.callbacks().onCommand!(decodeDuml(encodeDuml({ sender: 4, receiver: 2, commandSet: 4, commandId: 5, payload }))!);
+    const issued = await h.source.aim(h.camera.device, 'owner', { op: 'issue', clientGesture: 'rated-speed' }) as any;
+    expect(await h.source.aim(h.camera.device, 'owner', { op: 'slew', ...issued.grant, seq: 0, pan, tilt })).toMatchObject({ accepted: true });
+    expect(h.device.sendCommand).toHaveBeenCalledOnce();
+    const command = h.device.sendCommand.mock.calls[0][0] as any;
+    expect(command).toMatchObject({ commandSet: 4, commandId: 12 });
+    const bytes = Buffer.from(command.payload);
+    expect(bytes.readInt16LE(0)).toBe(pan * 10);
+    expect(bytes.readInt16LE(2)).toBe(0);
+    expect(bytes.readInt16LE(4)).toBe(tilt * 10);
+    expect(bytes[6]).toBe(0x80);
+    await h.source.close();
+  });
   it('resumes asynchronously and never creates a second driver for detection, read or capture state', async () => {
     const h = harness(); h.source.resume(); await h.source.discover(); h.live();
     for (let i = 0; i < 5; i++) { await h.source.discover(); h.source.snapshot(h.camera.device); await h.source.medium.state!('cam1'); }

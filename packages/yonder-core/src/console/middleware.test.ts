@@ -1177,10 +1177,16 @@ describe('private accessory aim proxy', () => {
     expect((await call('POST', '/video/cam1/aim', { cookie: f.cookie, headers: f.headers, raw: '{', type: 'application/json' })).status).toBe(400);
     expect(f.transport.calls).toEqual([]);
   });
-  it('forwards the exact one-use grant and deadline without freshening a slew', async () => {
+  it.each([[2, -1], [60, 0], [0, -120], [72, 96]])('forwards the exact one-use grant and deadline at %s/%s degrees per second', async (pan, tilt) => {
     const f = await fixture();
-    const request = { op: 'slew', gesture: 'g', credential: 'c', deadline: 12, seq: 2, pan: 2, tilt: -1 };
+    const request = { op: 'slew', gesture: 'g', credential: 'c', deadline: 12, seq: 2, pan, tilt };
     expect((await call('POST', '/video/cam1/aim', { cookie: f.cookie, headers: f.headers, json: request })).status).toBe(200);
     expect(f.transport.calls[0].body).toEqual({ owner: viewerFor(f.token), request });
+  });
+  it.each([[120.1, 0], [0, -120.1], [120, 120]])('refuses over-cap vectors %s/%s before forwarding', async (pan, tilt) => {
+    const f = await fixture();
+    const request = { op: 'slew', gesture: 'g', credential: 'c', deadline: 12, seq: 2, pan, tilt };
+    expect((await call('POST', '/video/cam1/aim', { cookie: f.cookie, headers: f.headers, json: request })).status).toBe(400);
+    expect(f.transport.calls).toHaveLength(0);
   });
 });

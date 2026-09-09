@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import { HG211_MAX_RATE_DEG_S } from './guard.js';
 /** Narrow authenticated transport grammar; Intent remains authoritative on grant admission. */
 export function validAimRequest(value: unknown): boolean {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
@@ -13,7 +14,8 @@ export function validAimRequest(value: unknown): boolean {
     case 'slew': return exact('op','gesture','credential','deadline','seq','pan','tilt') && id(b.gesture) && id(b.credential)
       && typeof b.deadline === 'number' && Number.isFinite(b.deadline)
       && Number.isSafeInteger(b.seq) && (b.seq as number) >= 0
-      && [b.pan, b.tilt].every(v => typeof v === 'number' && Number.isFinite(v) && Math.abs(v) <= 10);
+      && [b.pan, b.tilt].every(v => typeof v === 'number' && Number.isFinite(v))
+      && Math.hypot(b.pan as number, b.tilt as number) <= HG211_MAX_RATE_DEG_S;
     default: return false;
   }
 }
