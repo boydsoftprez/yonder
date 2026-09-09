@@ -20,9 +20,9 @@
         <option value="satellite" :disabled="!online">Satellite</option>
       </select>
     </div>
-    <div class="cockpit-map-status" role="status">
-      {{ positionMessage ? positionMessage + ' · ' + status : status
-      }}<span v-if="prediction?.points.length"> · {{ prediction.label }}</span>
+    <div class="cockpit-map-status" role="status" :title="status">
+      {{ positionMessage || status
+      }}<span v-if="aircraftPosition && prediction?.points.length"> · {{ prediction.label }}</span>
     </div>
     <div v-if="picking" class="cockpit-map-pick">
       Tap a location to choose the target

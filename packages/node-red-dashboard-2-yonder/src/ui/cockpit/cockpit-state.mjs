@@ -23,7 +23,7 @@ export function aircraftPositionMessage(t = {}) {
   if (aircraftMapPosition(t)) return '';
   if (!t.ready) return 'Aircraft position unavailable · waiting for fresh telemetry';
   if (finite(t.fixType) && t.fixType < 2)
-    return `No GPS fix${finite(t.satellites) ? ` · ${t.satellites} satellites` : ''} · aircraft position unavailable`;
+    return `No GPS fix${finite(t.satellites) ? ` · ${t.satellites} satellites` : ''}`;
   return 'Aircraft position unavailable · waiting for fresh GPS fix and coordinates';
 }
 export function agedTelemetry(source = {}, elapsed = 0) {
