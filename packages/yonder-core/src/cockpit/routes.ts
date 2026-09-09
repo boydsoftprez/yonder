@@ -45,7 +45,17 @@ export async function cockpitRoute(
     const camera=await services.cameraState?.();
     const snapshot=services.vehicle.snapshot({details:path==='/cockpit/details'});
     const dataOptions=services.data?.options;
-    const detailKey=createHash('sha256').update(JSON.stringify([snapshot.detailKey,camera,dataOptions])).digest('hex').slice(0,24);
+    const detailKey=createHash('sha256').update(JSON.stringify([snapshot.detailKey,camera,dataOptions],(key,value)=>{
+      // An unstarted camera's stopped status is synthesized with since=now.
+      // That observation time is not a state change: hashing it prevents the
+      // browser's flight and detail reads ever agreeing, blocking commands.
+      // Keep the original timestamp in the response and all real transitions
+      // (including a new running instance's since) in the version token.
+      if(key==='run'&&value?.state==='stopped'){
+        const {since:_,...state}=value;return state;
+      }
+      return value;
+    })).digest('hex').slice(0,24);
     if(path==='/cockpit/flight'){
       snapshot.telemetry.altitudeDatum=dataOptions?.aircraftDatum??'UNKNOWN';
       return {status:200,body:packFlight(snapshot,detailKey)};
