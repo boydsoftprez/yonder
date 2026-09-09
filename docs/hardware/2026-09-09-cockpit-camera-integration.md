@@ -276,3 +276,11 @@ action. The controller was connected, MANUAL and disarmed; its operation count
 remained zero. No physical home, mission-upload, arm, mode or start command was
 sent during this activation. The final installed manifest is at source
 `293fc31`; the rejected CBR artifact must not be included in a subsequent build.
+
+The camera task subsequently observed 96 seconds at the same run identity with
+zero restarts and stable USB generation. Existing local RTSP output measured
+30.31 fps and 2034.9 kb/s; kernel VBR mode 0 and the 2000000-bit/s target were
+confirmed. Power flags were `0x0`. QGroundControl was on its settings page during
+that interval, so the local output measurement is not an active QGroundControl
+delivery test. The camera task released the core-recovery hold for the separately
+coordinated network/diagnostics activation.
