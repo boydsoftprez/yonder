@@ -7,6 +7,7 @@ import {
 } from "./capability.js";
 import { describe, type DescriptorView } from "./descriptors.js";
 import { FLIP_KEYS, TURNED_BY_SAYS, turnedBy, turningSays, type FlipKey } from "./orientation.js";
+import { stillUrl } from "./media-path.js";
 import { outputReach, type OutputKind, type OutputReach, type ReachPaths } from "./outputs.js";
 import type { RecordingState } from "./recorder.js";
 import type { RunState } from "./supervisor.js";
@@ -1234,12 +1235,97 @@ function deckOrientation(
   };
 }
 
+/** One camera as the strip under the picture draws it (blueprint L-20). */
+export interface ThumbRow {
+  readonly id: string;
+  readonly name: string;
+  /** The camera the picture above the strip is showing. */
+  readonly active: boolean;
+  /** Whole seconds since the still was taken, or null where there is none. */
+  readonly ageSeconds: number | null;
+  /**
+   * Where the browser fetches the still, or null where there is nothing to
+   * fetch. Carries the still's own `at` as a query, so a new frame is a new
+   * address and a browser re-fetches exactly when there is a new frame —
+   * never a cached one under a fresh age, and never the same one twice.
+   */
+  readonly thumbSrc: string | null;
+  /** No pipeline: drawn as stopped, never as a stale frame. */
+  readonly stopped: boolean;
+}
+
+/** `payload.cameras` and `payload.downlink`, as `YonderPicture.vue` reads
+ *  them and `YonderThumbStrip.vue` draws them (blueprint L-20, L-22). */
+export interface ThumbStrip {
+  readonly cameras: readonly ThumbRow[];
+  readonly downlink: string;
+}
+
+/**
+ * The strip under the picture: every camera as a thumbnail, the others as
+ * periodic stills, and what all of those stills cost (R-VID-14, R-VID-11;
+ * blueprint L-20, L-22; spec §8.6).
+ *
+ * **One thumb per camera, the active one included** — the coordinator's own
+ * correction to §6's "the others as stills", so every camera keeps a fixed
+ * place in the strip whichever one is on the main picture.
+ *
+ * **The active camera carries no `thumbSrc`.** Its picture is the live one
+ * above the strip; fetching its still as well would be one more copy leaving
+ * the aircraft for a thumbnail of a picture already on screen — and a copy
+ * for a browser on *video* of that camera is one `Viewers` deliberately does
+ * not charge as a still, so it would be an uncounted transmission. The row
+ * is drawn, bordered and labelled `Live`, with nothing to fetch.
+ *
+ * **A stopped camera is stopped, not stale.** No frame can be taken from a
+ * pipeline that is not running, so the row says so; a still from before it
+ * stopped is not a picture of what the camera sees.
+ *
+ * `downlink` is the sum of every still copy leaving this device, for every
+ * viewer and every camera, in the words the blueprint draws under `OTHER
+ * CAMERAS` — and it is *counted in Path total*, the same copies
+ * `cost.path` already includes, stated on their own so an operator can see
+ * what the strip itself is costing.
+ */
+export function thumbStrip(view: {
+  readonly cameras: readonly Camera[];
+  readonly active: string;
+  /** The supervisor's own observation for each id (R-CTL-10). */
+  readonly run: (id: string) => RunState;
+  /** The still this device holds for each id — `Stills.latest`. */
+  readonly still: (id: string) => { readonly at: number } | null;
+  /** When this is composed, in the daemon's clock. */
+  readonly now: number;
+  /** Every still copy leaving this device, kb/s at IP — `Viewers.stillsKbps`. */
+  readonly stillsKbps: number;
+}): ThumbStrip {
+  const cameras = view.cameras.map((camera): ThumbRow => {
+    const active = camera.id === view.active;
+    const run = view.run(camera.id);
+    const stopped = run !== "running" && run !== "starting";
+    const still = stopped ? null : view.still(camera.id);
+    return {
+      id: camera.id,
+      name: camera.name,
+      active,
+      ageSeconds: still === null ? null : Math.max(0, Math.floor((view.now - still.at) / 1000)),
+      thumbSrc: still === null || active ? null : `${stillUrl(camera.id)}?at=${String(still.at)}`,
+      stopped,
+    };
+  });
+  return {
+    cameras,
+    downlink: `${String(Math.round(view.stillsKbps))} kb/s of stills · counted in Path total`,
+  };
+}
+
 /** `ui-yonder-aim`'s whole payload — `YonderAim.vue`'s own documented shape. */
 export interface AimPanel {
   readonly maxRate?: number;
   readonly admitted?: { pan: number; tilt: number };
   readonly modeInhibited?: string | null;
   readonly recentreInhibited?: string | null;
+  readonly motionNotice: string | null;
   readonly directionalRefusals?: string[];
   readonly camera?: string;
   readonly url?: string;
@@ -1278,6 +1364,7 @@ export function aimPanel(caps: CameraCapabilities | null, source?: ReturnType<im
       state: 'present', reason: null, pan: source.attitude?.yaw ?? null, tilt: source.attitude?.pitch ?? null,
       modeInhibited: source.modes.some(mode => mode.allowed) ? null : source.modes.find(mode => !mode.allowed)?.reason ?? 'trajectory-unverified',
       recentreInhibited: source.recentre.allowed ? null : source.recentre.reason,
+      motionNotice: source.motionNotice,
       directionalRefusals: Object.entries(source.directions ?? {}).flatMap(([label, result]) => result.allowed ? [] : [`${label}: ${result.reason.replaceAll('-', ' ')}`]),
       bounds: source.envelope?.yaw && source.envelope?.pitch ? { pan: source.envelope.yaw, tilt: source.envelope.pitch } : null,
       atLimit: { pitch: source.attitude?.pitchLimit ?? false, yaw: source.attitude?.yawLimit ?? false },
@@ -1288,6 +1375,7 @@ export function aimPanel(caps: CameraCapabilities | null, source?: ReturnType<im
     pan: null, tilt: null, bounds: null,
     atLimit: { pitch: false, yaw: false },
     mode: null, modes: [] as string[],
+    motionNotice: null,
   };
   if (aim.state === "not-offered") {
     return { state: "not-offered", reason: null, inhibited: null, ...empty };
@@ -1309,6 +1397,7 @@ export function aimPanel(caps: CameraCapabilities | null, source?: ReturnType<im
   return {
     state: "present",
     reason: null,
+    motionNotice: null,
     // §8.7's 20 Hz attitude push is unbuilt, so nothing has reported where
     // this gimbal is pointing. `null` is that fact; a zero would be a claim.
     pan: null,

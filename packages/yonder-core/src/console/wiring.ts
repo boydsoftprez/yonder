@@ -3,7 +3,7 @@ import type { ServerResponse } from "node:http";
 import { DaemonClient } from "./client.js";
 import { SessionStore } from "./session.js";
 import { setupMiddleware, consoleMiddleware, type Middleware } from "./middleware.js";
-import { captureHandler } from "./capture.js";
+import { captureHandler, stillHandler } from "./capture.js";
 
 /**
  * The things a generated `settings.js` calls into.
@@ -77,6 +77,7 @@ export function consoleGate(opts: GateOptions): Middleware {
     client,
     sessions: new SessionStore(),
     capture: captureHandler(opts.socketPath),
+    still: stillHandler(opts.socketPath),
     log,
   });
 }

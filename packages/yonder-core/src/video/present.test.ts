@@ -17,12 +17,15 @@ import {
   identityWords,
   LABELS,
   removalRefusal,
+  thumbStrip,
   uplinkBudget,
 } from "./present.js";
 import { advertised, gated, noCapabilities, notOffered, present } from "./capability.js";
 import type { CameraCapabilities } from "./capability.js";
 import type { Camera } from "../schema/config.js";
 import type { RecordingState } from "./recorder.js";
+import { stillUrl } from "./media-path.js";
+import type { RunState } from "./supervisor.js";
 
 const BY_PATH = "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0";
 
@@ -1173,6 +1176,23 @@ describe("aimPanel", () => {
     expect(panel.reason).toContain("no motor");
   });
 
+  it("forwards a terminal motion notice without turning it into global inhibition", () => {
+    const panel = aimPanel(null, {
+      generation: 4,
+      admitted: { pan: 0, tilt: 0 },
+      modes: [{ allowed: false, reason: "discrete-mount-unverified" }],
+      recentre: { allowed: false, reason: "discrete-mount-unverified" },
+      directions: {},
+      attitude: null,
+      envelope: null,
+      inhibition: null,
+      motionNotice: "the gimbal reached its native stop",
+    } as never, "pocket");
+
+    expect(panel.motionNotice).toBe("the gimbal reached its native stop");
+    expect(panel.inhibited).toBeNull();
+  });
+
   /**
    * **A reported position is a fact nothing reports yet**, and an envelope is
    * only drawn where the device answered both ends of both axes. §8.7's 20 Hz
@@ -1214,5 +1234,110 @@ describe("aimPanel", () => {
     // Half an envelope is not an envelope: a gauge drawn against a bound
     // nothing reported puts a scale on the page no device agreed to.
     expect(panel.bounds).toBeNull();
+  });
+});
+
+/**
+ * The strip under the picture (R-VID-14, R-VID-11; blueprint L-20, L-22).
+ *
+ * Composed here, from the camera index and each camera's latest still, so
+ * the words and the addresses have a test — and so a `change` node in
+ * `flows.json` moves an object rather than assembling one (CLAUDE.md rule 2).
+ */
+describe("thumbStrip", () => {
+  const NOW = 1_700_000_010_000;
+  const nose = camera({ id: "nose", name: "Nose" });
+  const tail = camera({ id: "tail", name: "Tail" });
+  const belly = camera({ id: "belly", name: "Belly" });
+  const running = (): RunState => "running";
+
+  it("draws one thumb per camera, in configured order, the active one first-class among them", () => {
+    const strip = thumbStrip({
+      cameras: [nose, tail, belly], active: "tail", run: running,
+      still: (id) => (id === "nose" ? { at: NOW - 4_200 } : id === "tail" ? { at: NOW - 1_000 } : null),
+      now: NOW, stillsKbps: 12.4,
+    });
+    expect(strip.cameras.map((c) => c.id)).toEqual(["nose", "tail", "belly"]);
+    expect(strip.cameras.map((c) => c.active)).toEqual([false, true, false]);
+    expect(strip.cameras.map((c) => c.name)).toEqual(["Nose", "Tail", "Belly"]);
+  });
+
+  it("gives the others a still's age in whole seconds and an address that changes with the frame", () => {
+    const at = NOW - 4_200;
+    const strip = thumbStrip({
+      cameras: [nose, tail], active: "tail", run: running,
+      still: (id) => (id === "nose" ? { at } : null),
+      now: NOW, stillsKbps: 0,
+    });
+    const [other] = strip.cameras;
+    expect(other).toMatchObject({ id: "nose", ageSeconds: 4, stopped: false });
+    // The address is the one the console serves, with the frame's own
+    // stamp on it: a new still is a new address, so a browser re-fetches
+    // exactly when there is something new — never a cached frame under a
+    // fresh age, never the same frame twice.
+    expect(other?.thumbSrc).toBe(`${stillUrl("nose")}?at=${String(at)}`);
+    const later = thumbStrip({
+      cameras: [nose, tail], active: "tail", run: running,
+      still: () => ({ at: at + 5_000 }), now: NOW + 5_000, stillsKbps: 0,
+    });
+    expect(later.cameras[0]?.thumbSrc).not.toBe(other?.thumbSrc);
+  });
+
+  it("gives the active camera no still to fetch: its picture is the live one above", () => {
+    const strip = thumbStrip({
+      cameras: [nose, tail], active: "nose", run: running,
+      still: () => ({ at: NOW - 1_000 }), now: NOW, stillsKbps: 0,
+    });
+    expect(strip.cameras[0]).toMatchObject({ id: "nose", active: true, thumbSrc: null });
+    expect(strip.cameras[1]?.thumbSrc).not.toBeNull();
+  });
+
+  it("draws a stopped camera as stopped, never as a stale frame", () => {
+    const strip = thumbStrip({
+      cameras: [nose, tail], active: "nose",
+      run: (id) => (id === "tail" ? "stopped" : "running"),
+      // Even where a still is on offer for it — a frame from before the
+      // pipeline stopped is not what the camera sees.
+      still: () => ({ at: NOW - 1_000 }), now: NOW, stillsKbps: 0,
+    });
+    expect(strip.cameras[1]).toEqual({
+      id: "tail", name: "Tail", active: false, ageSeconds: null, thumbSrc: null, stopped: true,
+    });
+    // `failed` is stopped too; `starting` is not.
+    expect(thumbStrip({
+      cameras: [tail], active: "nose", run: () => "failed", still: () => null, now: NOW, stillsKbps: 0,
+    }).cameras[0]?.stopped).toBe(true);
+    expect(thumbStrip({
+      cameras: [tail], active: "nose", run: () => "starting", still: () => null, now: NOW, stillsKbps: 0,
+    }).cameras[0]?.stopped).toBe(false);
+  });
+
+  it("draws a running camera with no still yet as waiting, not as stopped", () => {
+    const strip = thumbStrip({
+      cameras: [nose, tail], active: "nose", run: running, still: () => null, now: NOW, stillsKbps: 0,
+    });
+    expect(strip.cameras[1]).toMatchObject({ ageSeconds: null, thumbSrc: null, stopped: false });
+  });
+
+  it("never reports a negative age for a still stamped ahead of this composition", () => {
+    const strip = thumbStrip({
+      cameras: [nose, tail], active: "nose", run: running,
+      still: () => ({ at: NOW + 400 }), now: NOW, stillsKbps: 0,
+    });
+    expect(strip.cameras[1]?.ageSeconds).toBe(0);
+  });
+
+  it("states what every still copy costs, in the blueprint's own words, counted in the path total", () => {
+    expect(thumbStrip({
+      cameras: [nose], active: "nose", run: running, still: () => null, now: NOW, stillsKbps: 12.4,
+    }).downlink).toBe("12 kb/s of stills · counted in Path total");
+    expect(thumbStrip({
+      cameras: [nose], active: "nose", run: running, still: () => null, now: NOW, stillsKbps: 0,
+    }).downlink).toBe("0 kb/s of stills · counted in Path total");
+    // Never uppercased on the page — `kb/s` as `KB/S` says kilobytes — and
+    // the unit is kb/s because stills are small against the Mb/s beside them.
+    expect(thumbStrip({
+      cameras: [nose], active: "nose", run: running, still: () => null, now: NOW, stillsKbps: 165.5,
+    }).downlink).toMatch(/^166 kb\/s of stills/);
   });
 });

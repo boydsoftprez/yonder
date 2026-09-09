@@ -311,7 +311,7 @@ function readName(name: string): { at: number; width: number; height: number } |
 
 /** One line back from the pipeline host. `observed` is what the op produced,
  *  or `{ refused }` where the host declined — see `yonder-pipeline`. */
-interface Reply {
+export interface Reply {
   readonly id: string;
   readonly continuous: boolean;
   readonly observed: unknown;
@@ -944,7 +944,7 @@ function refusalIn(reply: Reply | null, id: string, what: string): Refusal | nul
   return null;
 }
 
-function parseReply(line: string): Reply | null {
+export function parseReply(line: string): Reply | null {
   let raw: unknown;
   try {
     raw = JSON.parse(line);

@@ -42,6 +42,7 @@ import { EncoderChannel } from "../video/encoder.js";
 import { Viewers } from "../video/viewers.js";
 import { Adaptation } from "../video/adaptation.js";
 import { CAPTURES_ROOT, Recorder } from "../video/recorder.js";
+import { Stills, STILLS_ROOT } from "../video/stills.js";
 import { freeSpaceOn } from "../system/read.js";
 import { readSupply } from "../system/supply.js";
 import { ZeroTierCli } from "../remote/zerotier/cli.js";
@@ -120,6 +121,8 @@ export interface ServerOptions {
   socketPath: string;
   configPath: string;
   journalPath: string;
+  /** Volatile still directory; production uses the daemon's runtime tmpfs. */
+  stillsRoot?: string;
   renderers: Renderer[];
   /** Where the device's secrets (the access-point passphrase, later the administrator password, …) live. */
   secretsPath?: string;
@@ -952,6 +955,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   let viewers: Viewers | undefined;
   let adaptation: Adaptation | undefined;
   let recorder: Recorder | undefined;
+  let stills: Stills | undefined;
   if (encoders !== undefined && supervisor !== undefined) {
     const channel = encoders;
     const watching = new Viewers({
@@ -965,6 +969,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
       // has already decided whether this browser is an active video
       // subscriber of that camera, which is the filter §8.2 asks for.
       onReport: (report) => { adaptation?.observe(report); },
+      stillFor: (id) => stills?.latest(id) ?? null,
     });
     viewers = watching;
     adaptation = new Adaptation({
@@ -1010,6 +1015,15 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
       clock,
       inForce: (id) => channel.inForce(id),
     });
+    stills = new Stills({
+      channel: supervisor,
+      cameras: () => reachConfig().cameras,
+      wanted: () => watching.wantingStills(),
+      generation: (id) => supervisor.generation(id),
+      root: opts.stillsRoot ?? STILLS_ROOT,
+      clock,
+    });
+    stills.start();
   }
   // The telemetry equivalent, and on its own clock for the same reason
   // (R-NET-10's argument, applied to the router's own counters): the sparkline
@@ -1424,6 +1438,8 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
     // command a pipeline through, and every capture route says so rather than
     // answering with an empty list that would read as *nothing was recorded*.
     ...(recorder === undefined ? {} : { recorder }),
+    ...(stills === undefined ? {} : { stills }),
+    clock,
     // Not behind `built`: the reach monitor is assembled from the runner and
     // the nmcli client, neither of which depends on the secret store, so a
     // board whose secrets.yaml is unreadable can still say which way out is
@@ -1461,6 +1477,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
         // caller has to inspect first.
         if (r.contentType !== undefined && Buffer.isBuffer(r.body)) {
           res.writeHead(r.status, {
+            ...r.headers,
             "content-type": r.contentType,
             "content-length": r.body.length,
           });
@@ -1557,6 +1574,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
         // that has already let go of its socket — and, unlike the others,
         // it would be commanding hardware while it did it.
         adaptation?.stop();
+        stills?.stop();
         // The fifth: the telemetry sampler, and with it any sweep this
         // renderer had scheduled for thirty seconds' time.
         built?.mavlinkRenderer?.close();

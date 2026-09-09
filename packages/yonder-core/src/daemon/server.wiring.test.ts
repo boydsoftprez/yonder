@@ -2072,3 +2072,247 @@ describe("the daemon serves the telemetry it measures", () => {
   });
 
 });
+
+/**
+ * The daemon takes stills for whoever is on them (R-VID-14, R-VID-11,
+ * R-STO-01; spec §8.6).
+ *
+ * The chain, end to end and on this socket: a browser says it wants stills,
+ * the daemon's own clock ticks, one `still` reaches one pipeline for that
+ * camera however many browsers asked, and the frame comes back out of
+ * `GET /cameras/:id/still` with its age — each answer counted as a copy.
+ */
+describe("the daemon takes stills for whoever is on them", () => {
+  let socketPath: string, configPath: string, journalPath: string, secretsPath: string, stillsRoot: string;
+  const noop: Renderer = { name: "noop", async render() {} };
+  // A JPEG's magic number and enough behind it to cost something at the
+  // interval — ten bytes every five seconds rounds to 0 kb/s.
+  const JPEG = Buffer.concat([
+    Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46]),
+    Buffer.alloc(20_000, 0x2e),
+  ]);
+
+  const NOSE = {
+    id: "cam0", name: "Nose", source: "usb",
+    device: "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0",
+    enabled: true, autostart: false,
+    width: 1280, height: 720, framerate: 30, codec: "h264", bitrate_kbps: 2000,
+    preview: {
+      mode: "adaptive", size: "auto", ladder_top: "1280x720", ladder_bottom: "640x360",
+      floor_kbps: 300, ceiling_kbps: 2000, bitrate_kbps: 400, framerate: 15,
+    },
+    controls: { brightness: null, contrast: null, rotation: 0 },
+    outputs: [],
+    stream: { mode: "adaptive", floor_kbps: 500, ceiling_kbps: 4000 },
+  } as unknown as Camera;
+  const TAIL = {
+    ...NOSE, id: "cam1", name: "Tail",
+    device: "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.4:1.0-video-index0",
+  } as unknown as Camera;
+
+  interface Sent { id: string | number; op: string; camera?: string; path?: string }
+
+  let now: number;
+  let timers: { at: number; fn: () => void }[];
+  let sent: Sent[];
+  const clock: Clock = {
+    now: () => now,
+    setTimer: (ms, fn) => { const t = { at: now + ms, fn }; timers.push(t); return t; },
+    clearTimer: (h) => { const i = timers.indexOf(h as never); if (i >= 0) timers.splice(i, 1); },
+  };
+  /** Move the clock and let what it started settle over the socket. */
+  async function advance(ms: number): Promise<void> {
+    now += ms;
+    for (const t of [...timers]) if (t.at <= now) { timers.splice(timers.indexOf(t), 1); t.fn(); }
+    for (let i = 0; i < 8; i += 1) await new Promise((r) => { setImmediate(r); });
+  }
+
+  beforeEach(() => {
+    socketPath = join(dir, "core.sock");
+    configPath = join(dir, "config.yaml");
+    journalPath = join(dir, "apply.json");
+    secretsPath = join(dir, "secrets.yaml");
+    stillsRoot = join(dir, "stills");
+    now = 1_000_000;
+    timers = [];
+    sent = [];
+    saveConfig(configPath, { ...DEFAULT_CONFIG, cameras: [NOSE, TAIL] } as never);
+    new SecretStore(secretsPath).ensureValue(ADMIN_PASSWORD_SECRET, hashPassword("an operator's password"));
+  });
+
+  /** A pipeline that answers a `still` the way `yonder-pipeline` does: it
+   *  writes a JPEG where it was told to and reports the frame's shape. */
+  const spawner: ProcessSpawner = () => {
+    const inbox: ((line: string) => void)[] = [];
+    return {
+      kill: () => {}, on: () => {},
+      onMessage: (fn: (line: string) => void) => { inbox.push(fn); },
+      send: (line: string) => {
+        const command = JSON.parse(line) as Sent;
+        sent.push(command);
+        if (command.op === "still" && typeof command.path === "string") {
+          writeFileSync(command.path, JPEG);
+          const observed = { path: command.path, bytes: JPEG.length, width: 1280, height: 720 };
+          for (const fn of inbox) fn(JSON.stringify({ id: command.id, pid: 7, continuous: true, observed }));
+        }
+      },
+    } as never;
+  };
+
+  async function serve(): Promise<{ close(): Promise<void> }> {
+    return startServer({
+      socketPath, configPath, journalPath, renderers: [noop], secretsPath,
+      runner: async () => ({ code: 0, stdout: "", stderr: "" }),
+      counters: noCounters,
+      clock,
+      spawner,
+      stillsRoot,
+      cameraLayer: {
+        cameras: {
+          detect: async () => ({
+            found: [NOSE, TAIL].map((c, i) => ({
+              device: `/dev/video${String(i)}`,
+              card: c.name,
+              byPath: c.device,
+              byPathStable: true,
+              capabilities: {
+                ...noCapabilities(),
+                formats: present([{ fourcc: "MJPG", width: 1280, height: 720, rates: [30, 24, 15] }]),
+              },
+            })),
+            rejected: [],
+          }),
+          probe: async (node: string, card: string) => ({ device: node, card, reason: "not re-probed here" }),
+        },
+        encoder: async () => ({
+          element: "v4l2h264enc", device: "/dev/video11", hardware: true,
+          codec: "h264" as const, detail: "hardware H.264 on /dev/video11",
+        }),
+        rtspPassword: () => null,
+      },
+    });
+  }
+
+  const stillsFor = (camera: string): Sent[] =>
+    sent.filter((s) => s.op === "still" && s.camera === camera);
+
+  function callBytes(path: string): Promise<{ status: number; headers: Record<string, string | string[] | undefined>; body: Buffer }> {
+    return new Promise((resolve, reject) => {
+      const req = request({ socketPath, method: "GET", path }, (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (c: Buffer) => chunks.push(c));
+        res.on("end", () => {
+          resolve({ status: res.statusCode ?? 0, headers: res.headers, body: Buffer.concat(chunks) });
+        });
+      });
+      req.on("error", reject);
+      req.end();
+    });
+  }
+
+  it("takes one frame per watched camera on its own clock, and serves it with its age", async () => {
+    const server = await serve();
+    try {
+      for (const id of ["cam0", "cam1"]) {
+        expect((await call(socketPath, "POST", `/cameras/${id}/run`, { action: "start" })).status).toBe(200);
+      }
+      // Let the supervisor's observed running state settle before the still
+      // timer is due; a starting pipeline is not yet a source of frames.
+      await advance(2_000);
+      // Two browsers on cam0's stills; nobody on cam1's.
+      for (const viewer of ["1f2e3d4c5b6a7089", "aaaa1111bbbb2222"]) {
+        const answer = await call(socketPath, "POST", `/cameras/cam0/viewers/${viewer}`, { want: "stills" });
+        expect(answer.status).toBe(200);
+        expect(answer.body).toMatchObject({ mine: { delivery: "stills", interval: 5_000, frameAge: null } });
+      }
+      // Nothing before the first tick, and nothing yet to serve — said in words.
+      const early = await callBytes("/cameras/cam0/still?viewer=1f2e3d4c5b6a7089");
+      expect(early.status).toBe(404);
+      expect(early.body.toString("utf8")).toContain("no still of cam0 yet");
+
+      await advance(3_000);
+      // **One frame for cam0**, for its two viewers; none for cam1.
+      expect(stillsFor("cam0")).toHaveLength(1);
+      expect(stillsFor("cam1")).toHaveLength(0);
+      // On the tmpfs stand-in, never the card.
+      expect(readFileSync(join(stillsRoot, "cam0.jpg"))).toEqual(JPEG);
+
+      await advance(1_500);
+      const served = await callBytes("/cameras/cam0/still?viewer=1f2e3d4c5b6a7089");
+      expect(served.status).toBe(200);
+      expect(served.headers["content-type"]).toBe("image/jpeg");
+      expect(served.body).toEqual(JPEG);
+      expect(served.headers["x-yonder-still-at"]).toBe(String(now - 1_500));
+      expect(served.headers["x-yonder-still-age"]).toBe("1500");
+
+      // The copy was counted for the viewer that fetched it, and the state
+      // it is told carries the frame's age (R-VID-11, R-VID-14).
+      const state = await call(socketPath, "POST", "/cameras/cam0/viewers/1f2e3d4c5b6a7089", {});
+      expect(state.body).toMatchObject({
+        mine: { delivery: "stills", frameAge: 1_000, size: "1280x720" },
+        overlay: { head: "stills", rate: "every 5 s" },
+      });
+      expect((state.body as { cost: { mine: number } }).cost.mine).toBeGreaterThan(0);
+      // The other viewer, sent nothing yet, is charged nothing yet.
+      const other = await call(socketPath, "POST", "/cameras/cam0/viewers/aaaa1111bbbb2222", {});
+      expect((other.body as { cost: { mine: number } }).cost.mine).toBe(0);
+
+      // And the camera page carries the strip: cam1 has no still to show
+      // until somebody is on its stills; cam0 is the active one.
+      const page = (await call(socketPath, "GET", "/cameras/cam0")).body as {
+        picture: { cameras: { id: string; active: boolean; thumbSrc: string | null; stopped: boolean }[]; downlink: string };
+      };
+      expect(page.picture.cameras.map((c) => [c.id, c.active, c.thumbSrc, c.stopped])).toEqual([
+        ["cam0", true, null, false],
+        ["cam1", false, null, false],
+      ]);
+      expect(page.picture.downlink).toMatch(/^\d+ kb\/s of stills · counted in Path total$/);
+      expect(page.picture.downlink).not.toMatch(/^0 kb/);
+
+      // A browser adds cam1 to its strip: the next tick takes cam1's frame
+      // and the page draws it as a still with an address of its own.
+      await call(socketPath, "POST", "/cameras/cam1/viewers/1f2e3d4c5b6a7089", { want: "stills" });
+      await advance(5_000);
+      expect(stillsFor("cam1")).toHaveLength(1);
+      const later = (await call(socketPath, "GET", "/cameras/cam0")).body as {
+        picture: { cameras: { id: string; thumbSrc: string | null; ageSeconds: number | null }[] };
+      };
+      expect(later.picture.cameras[1]).toMatchObject({ id: "cam1", ageSeconds: 0 });
+      expect(later.picture.cameras[1]?.thumbSrc).toMatch(/^\/video\/cam1\/still\?at=\d+$/);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("takes no frame at all while nobody is on stills", async () => {
+    const server = await serve();
+    try {
+      await call(socketPath, "POST", "/cameras/cam0/run", { action: "start" });
+      await call(socketPath, "POST", "/cameras/cam0/viewers/1f2e3d4c5b6a7089", { want: "video" });
+      for (let i = 0; i < 4; i += 1) await advance(5_000);
+      expect(stillsFor("cam0")).toHaveLength(0);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("answers a stopped camera in words, and stops taking frames when the daemon closes", async () => {
+    const server = await serve();
+    await call(socketPath, "POST", "/cameras/cam0/viewers/1f2e3d4c5b6a7089", { want: "stills" });
+    const stopped = await callBytes("/cameras/cam0/still?viewer=1f2e3d4c5b6a7089");
+    expect(stopped.status).toBe(404);
+    expect(stopped.body.toString("utf8")).toContain("cam0 is not running");
+
+    await call(socketPath, "POST", "/cameras/cam0/run", { action: "start" });
+    await advance(2_000);
+    await advance(3_000);
+    const taken = stillsFor("cam0").length;
+    expect(taken).toBe(1);
+
+    await server.close();
+    // A generator outliving its daemon would go on hanging branches off a
+    // running pipeline's tee for a process that has let go of its socket.
+    for (let i = 0; i < 4; i += 1) await advance(5_000);
+    expect(stillsFor("cam0")).toHaveLength(taken);
+  });
+});

@@ -31,9 +31,12 @@ import { compose, refuse } from "../video/pipeline.js";
 import { noCapabilities, summarise, type CameraCapabilities } from "../video/capability.js";
 import {
   aimPanel, cameraDeck, cameraIndex, cameraStrip, capabilityFacts, identityWords, removalRefusal,
-  uplinkBudget,
-  type AimPanel, type CameraDeck, type CameraStrip, type CapabilityFact,
+  thumbStrip, uplinkBudget,
+  type AimPanel, type CameraDeck, type CameraStrip, type CapabilityFact, type ThumbRow,
 } from "../video/present.js";
+import type { Stills } from "../video/stills.js";
+import { STILL_AGE_HEADER, STILL_AT_HEADER } from "../video/media-path.js";
+import { systemClock, type Clock } from "../apply/types.js";
 import { applyCameraDraft, deckDraft, interruption, validateDraft } from "../apply/draft.js";
 import { captureRefusal, captureSizes } from "../video/capability.js";
 import type { ReachPaths } from "../video/outputs.js";
@@ -198,6 +201,10 @@ export interface RouterDeps {
    * capture list that would read as *nothing has been recorded*.
    */
   recorder?: Recorder;
+  /** Periodic RAM stills generated from watched running pipelines. */
+  stills?: Stills;
+  /** Clock used to state thumbnail ages from completed frames. */
+  clock?: Clock;
   /**
    * The RTSP credential, resolved from `secrets.yaml`.
    *
@@ -277,7 +284,15 @@ export interface CameraProbes {
  * what the configuration asked for.
  */
 export interface CameraView {
-  picture?: { path: string; cost: string; running: boolean; recording: RecordingState | null; aim: AimPanel; cameras: { id: string; name: string; active: boolean; caption: string }[] };
+  picture?: {
+    path: string;
+    cost: string;
+    running: boolean;
+    recording: RecordingState | null;
+    aim: AimPanel;
+    cameras: (ThumbRow & { caption: string })[];
+    downlink: string;
+  };
   accessory?: ReturnType<import('../video/accessory/source.js').AccessorySources['snapshot']>;
   camera: Camera;
   run: CameraRun;
@@ -503,6 +518,8 @@ export interface RouteResult {
    * inspect before reading.
    */
   contentType?: string;
+  /** Metadata accompanying a byte response, such as a still's age. */
+  headers?: Record<string, string>;
 }
 
 export type Router = (method: string, path: string, body: unknown) => Promise<RouteResult>;
@@ -652,7 +669,7 @@ const VIEWER_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
  * matching at all. The difference is not cosmetic: a guard nothing can reach
  * is a guard no test can prove.
  */
-const CAMERA_ROUTE = /^\/cameras\/(.+?)(?:\/(run|probe|stream-address|controls|aim|settings|apply|record|photo|captures(?:\/[^/]+)?|outputs\/(?:rtp|rtsp|srt)|viewers\/[^/]+))?$/;
+const CAMERA_ROUTE = /^\/cameras\/(.+?)(?:\/(run|probe|stream-address|controls|aim|settings|apply|record|photo|still|captures(?:\/[^/]+)?|outputs\/(?:rtp|rtsp|srt)|viewers\/[^/]+))?$/;
 
 const WANTS: readonly Want[] = ["video", "stills", "off"];
 
@@ -1024,6 +1041,34 @@ export function createRouter(deps: RouterDeps): Router {
     return { status: 404, body: { error: `no route for ${method} /cameras/${id}/${verb}` } };
   };
 
+  /** Serve one already-complete RAM still and account for this copy. */
+  const stillRoute = (
+    method: string, id: string, query: string, say: (line: string) => void,
+  ): RouteResult => {
+    if (deps.stills === undefined) {
+      return noCameraLayer(`${method} /cameras/${id}/still`, say);
+    }
+    if (method !== "GET") {
+      return { status: 404, body: { error: `no route for ${method} /cameras/${id}/still` } };
+    }
+    const viewer = new URLSearchParams(query).get("viewer");
+    if (viewer !== null && !VIEWER_ID.test(viewer)) {
+      return { status: 404, body: { error: "that is not a viewer this device would have issued" } };
+    }
+    const answer = deps.stills.read(id);
+    if (isRefusal(answer)) return { status: 404, body: { error: answer.refused } };
+    if (viewer !== null) deps.viewers?.transmitted(viewer, id, answer.ok.bytes);
+    return {
+      status: 200,
+      body: answer.ok.body,
+      contentType: answer.ok.contentType,
+      headers: {
+        [STILL_AT_HEADER]: String(answer.ok.at),
+        [STILL_AGE_HEADER]: String(answer.ok.age),
+      },
+    };
+  };
+
   /**
    * Everything under `/cameras/<id>`.
    *
@@ -1060,14 +1105,16 @@ export function createRouter(deps: RouterDeps): Router {
     // running, and whether it is running is the supervisor's answer rather
     // than a fresh sweep of the board.
     if (verb === "record" || verb === "photo" || verb === "captures"
-      || verb.startsWith("captures/")) {
+      || verb.startsWith("captures/") || verb === "still") {
       // The configuration is still what says a camera exists — every other
       // answer here would be `Recorder`'s, and it reads the same list.
       const known = loadConfig(deps.configPath).cameras.some((c) => c.id === id);
       if (!known) {
         return { status: 404, body: { error: `no camera is configured with the id "${id}"` } };
       }
-      return captureRoute(method, id, verb, body, say);
+      return verb === "still"
+        ? stillRoute(method, id, query, say)
+        : captureRoute(method, id, verb, body, say);
     }
 
     /**
@@ -1210,6 +1257,14 @@ export function createRouter(deps: RouterDeps): Router {
             accessory: accessorySnapshot?.input,
           }),
         });
+      const thumbnails = thumbStrip({
+        cameras: config.cameras,
+        active: id,
+        run: (other) => supervisor.state(other).state,
+        still: (other) => deps.stills?.latest(other) ?? null,
+        now: (deps.clock ?? systemClock).now(),
+        stillsKbps: deps.viewers?.stillsKbps() ?? 0,
+      });
       return {
         camera,
         accessory: accessorySnapshot,
@@ -1223,7 +1278,14 @@ export function createRouter(deps: RouterDeps): Router {
         display,
         picture: { path: id, cost: display.pictureCost, running: run.state === 'running', recording: recorderState,
           aim: aimPanel(capabilities, accessorySnapshot, id),
-          cameras: config.cameras.map(c => ({ id: c.id, name: c.name, active: c.id === id, caption: `${c.source.toUpperCase()} · ${supervisor.state(c.id).state}` })) },
+          cameras: thumbnails.cameras.map((row) => {
+            const configured = config.cameras.find((c) => c.id === row.id)!;
+            return {
+              ...row,
+              caption: `${configured.source.toUpperCase()} · ${supervisor.state(row.id).state}`,
+            };
+          }),
+          downlink: thumbnails.downlink },
         // From what the device answered a moment ago, never from a list. A
         // camera that answered nothing yields every row, which is the honest
         // reading: an operator has to be able to tell *this camera cannot*
@@ -1563,6 +1625,7 @@ export function createRouter(deps: RouterDeps): Router {
             codec: camera.codec,
             stream: camera.stream,
             preview: camera.preview,
+            outputs: Object.fromEntries(camera.outputs.map((output) => [output.kind, output.enabled])),
           }),
         },
       };

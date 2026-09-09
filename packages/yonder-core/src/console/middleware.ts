@@ -6,7 +6,10 @@ import { CONSOLE_HOME } from "./settings.js";
 import type { DaemonClient } from "./client.js";
 import type { SessionStore } from "./session.js";
 import { whepHandler, WHEP_PREFIX, type WhepRequest, type WhepResponse } from "./whep.js";
-import { captureRequestFor, type CaptureAnswer, type CaptureHandler } from "./capture.js";
+import {
+  captureRequestFor, stillRequestFor,
+  type CaptureAnswer, type CaptureHandler, type StillHandler,
+} from "./capture.js";
 import { cameraFor } from "../video/media-path.js";
 import { validAimRequest } from '../video/accessory/requests.js';
 
@@ -304,6 +307,7 @@ export function viewerFor(token: string): string {
  */
 function sendCapture(res: ServerResponse, answer: CaptureAnswer): void {
   res.writeHead(answer.status, {
+    ...answer.headers,
     "content-type": answer.contentType,
     "cache-control": "no-store",
     "x-content-type-options": "nosniff",
@@ -409,6 +413,8 @@ export interface ConsoleMiddlewareDeps {
    * recorder answers the routes behind it.
    */
   capture?: CaptureHandler;
+  /** A camera's latest volatile still, relayed over the daemon socket. */
+  still?: StillHandler;
 }
 
 /**
@@ -503,6 +509,29 @@ export function consoleMiddleware(deps: ConsoleMiddlewareDeps): Middleware {
         }
         void (async () => {
           const answer = await serve(wanted);
+          sendCapture(res, answer);
+        })();
+        return;
+      }
+
+      const stillWanted = stillRequestFor(path);
+      if (stillWanted !== null) {
+        if (req.method !== "GET") {
+          sendProxied(res, { status: 405, body: "only GET reads a camera's still" });
+          return;
+        }
+        const token = sessionOf(req, deps.sessions);
+        if (token === undefined) {
+          sendProxied(res, { status: 401, body: "log in to read this camera's stills" });
+          return;
+        }
+        const serve = deps.still;
+        if (serve === undefined) {
+          sendProxied(res, { status: 404, body: "this device serves no stills" });
+          return;
+        }
+        void (async () => {
+          const answer = await serve({ camera: stillWanted.camera, viewer: viewerFor(token) });
           sendCapture(res, answer);
         })();
         return;
