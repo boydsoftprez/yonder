@@ -3,6 +3,7 @@
 # shellcheck shell=sh
 
 ensure_pkgs ca-certificates curl
+ensure_pkgs iproute2 iputils-ping traceroute iperf3 coreutils
 ensure_pkgs network-manager
 
 # dnsmasq-base, explicitly. NetworkManager only *Recommends* it, and every

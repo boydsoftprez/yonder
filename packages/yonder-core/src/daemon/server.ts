@@ -12,6 +12,7 @@ import type { HostInstrumentOptions } from '../cockpit/host-instruments.js';
 import { createRouter, type CameraProbes, type DiagProbes } from "./routes.js";
 import { AdminCredential } from "../console/credential.js";
 import { ConsoleRenderer } from "../console/renderer.js";
+import { resetConsoleAuth } from "../console/reset-auth.js";
 import { consolePaths, type ConsolePaths } from "../console/settings.js";
 import { loadConfig } from "../config/load.js";
 import { answerableAddresses } from "../net/dial-in.js";
@@ -32,6 +33,8 @@ import { HostnameRenderer } from "../system/hostname.js";
 import { FallbackWatchdog } from "../net/watchdog.js";
 import { joinSucceeded } from "../net/joined.js";
 import { networkState } from "../net/state.js";
+import { readInterfaces, defaultRouteDevice } from "../net/interfaces.js";
+import { DiagnosticJobs, systemDiagnosticRunner, type DiagnosticRunner } from "../diag/jobs.js";
 import { readRemoteState } from "../remote/state.js";
 import { RemoteRenderer } from "../remote/renderer.js";
 import { MediaRenderer, MEDIA_CONFIG_PATH } from "../media/renderer.js";
@@ -120,6 +123,7 @@ export function onceAsync<T>(fn: () => Promise<T>): () => Promise<T> {
 }
 
 export interface ServerOptions {
+  diagnosticRunner?: DiagnosticRunner;
   /** Only production main enables Linux accessory ownership; tests inject explicitly. */
   accessory?: boolean | AccessorySources;
   /** Injected file/space readers for instrumentation; production supplies Linux readers below. */
@@ -1165,6 +1169,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   // Every input is read fresh on each call rather than captured — see
   // reachConfig, above, which is where that is done and why.
   const reach = new ReachMonitor({
+    routeDevice: () => defaultRouteDevice(observationClient.runner),
     standing,
     probe: commandProbe(opts.runner ?? systemRunner),
     ...(opts.counters !== undefined ? { counters: opts.counters } : {}),
@@ -1305,6 +1310,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   // a network change, and there is no reason for setting one to issue a
   // single nmcli command.
   let provisionTimer: unknown;
+  let passwordTimer: unknown;
   const consoleRenderer = built?.consoleRenderer;
   const onProvisioned = consoleRenderer === undefined ? undefined : (): void => {
     if (provisionTimer !== undefined) clock.clearTimer(provisionTimer);
@@ -1327,6 +1333,11 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   // use. Built here rather than defaulted inside the router so that a test
   // injecting a fake runner cannot reach a real `ping` — see DiagProbes.
   const probeRunner = opts.runner ?? systemRunner;
+  const interfaces = () => readInterfaces(probeRunner, () => client.devices(), () => clock.now());
+  const diagnosticJobs = new DiagnosticJobs({
+    runner: opts.diagnosticRunner ?? systemDiagnosticRunner,
+    devices: async () => (await interfaces()).interfaces.map(i => i.device),
+  });
   const diag: DiagProbes = {
     ping: (host, count) => ping(host, { runner: probeRunner, clock, ...(count === undefined ? {} : { count }) }),
     reachable: () => reachable({ runner: probeRunner, clock }),
@@ -1337,6 +1348,24 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   try { terrainPack = await TerrainPackService.open(fileURLToPath(new URL("../terrain/assets/cove", import.meta.url))); }
   catch { note("cockpit: prepared terrain pack unavailable; regional terrain remains optional"); }
   const route = createRouter({
+    interfaces, diagnosticJobs,
+    onPasswordChanged: () => {
+      diagnosticJobs.close();
+      if (!opts.console) return;
+      if (passwordTimer !== undefined) clock.clearTimer(passwordTimer);
+      passwordTimer = clock.setTimer(PROVISION_RESTART_DELAY_MS, () => {
+        passwordTimer = undefined;
+        const paths = consolePaths(opts.console!);
+        void resetConsoleAuth(probeRunner, paths.unit, paths.userDir)
+          .catch(() => warn("Could not invalidate all console/editor sessions after the password change; restart the console and remove its saved editor sessions."));
+      });
+    },
+    rebootRefusal: () => built?.vehicle?.snapshot({ details: false }).telemetry.armed === true
+      ? "Disarm the aircraft before rebooting Yonder." : null,
+    reboot: async () => {
+      const result = await probeRunner(["shutdown", "-r", "+1"]);
+      if (result.code !== 0) throw new Error("Could not schedule system reboot");
+    },
     accessory,
     cockpit: {vehicle: built?.vehicle, data: cockpitData, terrain: terrainPack},
     hostInstruments: {
@@ -1580,6 +1609,8 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
         built?.cameraAutostart.close();
         for (const run of built?.supervisor.all() ?? []) built?.supervisor.stop(run.id);
         watchdog.stop();
+        diagnosticJobs.close();
+        if (passwordTimer !== undefined) clock.clearTimer(passwordTimer);
         // Stopped with it, and for the same reason one step further: a tick
         // loop outliving its daemon would go on running `curl` on somebody's
         // metered link on behalf of a process that has closed its socket.

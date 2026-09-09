@@ -68,7 +68,7 @@ describe("isProbeHost", () => {
     for (const host of [
       "1.1.1.1", "192.168.77.1", "8.8.8.8",
       "example.com", "a.b.c.d.example.com", "gateway", "my-router.local",
-      "example.com.", "xn--bcher-kva.example",
+      "example.com.", "xn--bcher-kva.example", "2001:db8::1", "::1",
     ]) {
       expect(isProbeHost(host), host).toBe(true);
     }
@@ -90,8 +90,6 @@ describe("isProbeHost", () => {
       "-i0.001",                    // a flag, not a host
       "--help",
       "192.168.1.1/24",             // a network, not a host
-      "2001:db8::1",                // IPv6 — K-22
-      "::1",
       "host name with spaces",
       "under_score.example.com",
       "-leading-hyphen.example",

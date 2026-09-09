@@ -941,7 +941,7 @@ describe("the daemon serves what M3a assembles", () => {
       await call(socketPath, "GET", "/modem/state");
       await call(socketPath, "GET", "/reach/state");
       expect(seen.some((a) => a[0] === "mmcli")).toBe(true);
-      expect(seen.every((a) => ["mmcli", "nmcli", "rfkill", "hostnamectl", "curl"].includes(a[0] ?? ""))).toBe(true);
+      expect(seen.every((a) => ["mmcli", "nmcli", "rfkill", "hostnamectl", "curl", "ip"].includes(a[0] ?? ""))).toBe(true);
     } finally {
       await server.close();
     }
@@ -1022,6 +1022,7 @@ describe("the daemon drives the reach watch", () => {
     const names = new Set<string>();
     return async (argv): Promise<CommandResult> => {
       seen.push(argv);
+      if (argv[0] === "ip") return { code: 0, stdout: JSON.stringify([{dst:"default",dev:"wwan0",metric:700}]), stderr: "" };
       if (argv[0] === "curl") return { code: reaches() ? 0 : 7, stdout: "", stderr: "" };
       if (argv[0] === "nmcli" && argv.includes("NAME,UUID,TYPE,DEVICE")) {
         return {
@@ -1214,6 +1215,7 @@ describe("the daemon drives the reach watch", () => {
     const names = new Set<string>([ETHERNET_CONNECTION, MODEM_CONNECTION]);
     return async (argv): Promise<CommandResult> => {
       seen.push(argv);
+      if (argv[0] === "ip") return { code: 0, stdout: JSON.stringify([{dst:"default",dev:"eth0",metric:100},{dst:"default",dev:"wwan0",metric:700}]), stderr: "" };
       // Ethernet works and the modem does not — the board in §2, one layer
       // up. Ethernet reaching something is what keeps the alternatives loop
       // out of this: any `curl` on wwan0 below is there because of a re-dial

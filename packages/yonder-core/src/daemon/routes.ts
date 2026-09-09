@@ -21,6 +21,8 @@ import type { NetworkState } from "../net/state.js";
 import type { ModemState } from "../net/modem/state.js";
 import type { PathName, ReachState } from "../net/reach/standing.js";
 import { setTheme, type ThemeRequest } from "../ui/theme.js";
+import type { InterfaceSnapshot } from "../net/interfaces.js";
+import { DiagnosticError, type DiagnosticJobs } from "../diag/jobs.js";
 import type { ScanResult } from "../net/scan.js";
 import type { BoardFacts } from "../system/facts.js";
 import type { Versions } from "../system/versions.js";
@@ -62,6 +64,11 @@ import type { LinkState } from "../mav/link.js";
 import { SweepInProgressError, type DetectOutcome } from "../mav/detect.js";
 
 export interface RouterDeps {
+  interfaces?: () => Promise<InterfaceSnapshot>;
+  diagnosticJobs?: DiagnosticJobs;
+  reboot?: () => Promise<void>;
+  rebootRefusal?: () => string | null;
+  onPasswordChanged?: () => void;
   cockpit?: CockpitServices;
   hostInstruments?: HostInstrumentOptions;
   engine: ApplyEngine;
@@ -1912,6 +1919,58 @@ export function createRouter(deps: RouterDeps): Router {
         const occurrence = supplyTransition(supply);
         if (occurrence !== null) say(occurrence);
         return { status: 200, body: { ...system(), supply } };
+      }
+
+      // R-NET-17 / R-DIA-07 / R-SEC-14: current observations and operator tools.
+      if (method === "GET" && path === "/net/interfaces") {
+        if (!deps.interfaces) return { status: 503, body: { error: "Current interface observations are unavailable." } };
+        return { status: 200, body: await deps.interfaces() };
+      }
+      if (method === "GET" && path === "/ui/preferences")
+        return { status: 200, body: { theme: loadConfig(deps.configPath).ui.theme } };
+      if (method === "POST" && path === "/admin/change-password") {
+        const decision = throttle.check();
+        if (!decision.allowed) return { status: 429, body: { error: "Too many attempts. Try again later.", retryAfter: decision.retryAfter } };
+        const b = body as Record<string, unknown> | undefined;
+        if (typeof b?.currentPassword !== "string" || typeof b.newPassword !== "string" || typeof b.confirmPassword !== "string"
+          || b.currentPassword.length > 1024 || b.newPassword.length > 1024)
+          return { status: 400, body: { error: "Enter the current password and the new password twice." } };
+        if (b.newPassword !== b.confirmPassword) return { status: 400, body: { error: "The new passwords do not match." } };
+        const result = deps.credential.change(b.currentPassword, b.newPassword);
+        throttle.record(result.ok || result.reason !== "incorrect-current");
+        if (!result.ok) return { status: result.reason === "incorrect-current" ? 401 : 400, body: { error: result.message } };
+        say("The administrator password was changed.");
+        deps.onPasswordChanged?.();
+        return { status: 200, body: { ok: true, signInAgain: true } };
+      }
+      if (method === "POST" && path === "/system/reboot") {
+        if ((body as { confirm?: unknown } | undefined)?.confirm !== "REBOOT")
+          return { status: 400, body: { error: "Confirm the system reboot." } };
+        if (!["idle", "confirmed"].includes(deps.engine.status().state)) return { status: 409, body: { error: "Finish or revert the pending configuration change before rebooting." } };
+        const reason = deps.rebootRefusal?.();
+        if (reason) return { status: 409, body: { error: reason } };
+        if (!deps.reboot) return { status: 503, body: { error: "System reboot is unavailable." } };
+        await deps.reboot();
+        say("The operator requested a system reboot.");
+        return { status: 200, body: { ok: true, message: "System reboot scheduled. The console will disconnect." } };
+      }
+      if (path === "/diag/jobs" || path.startsWith("/diag/jobs/")) {
+        if (!deps.diagnosticJobs) return { status: 503, body: { error: "Diagnostics are unavailable." } };
+        const owner = method === "GET" ? new URLSearchParams(query).get("owner") : (body as { owner?: unknown } | undefined)?.owner;
+        if (typeof owner !== "string" || !/^[a-zA-Z0-9_-]{1,128}$/.test(owner)) return { status: 400, body: { error: "A console session is required." } };
+        try {
+          if (method === "POST" && path === "/diag/jobs")
+            return { status: 202, body: deps.diagnosticJobs.start(owner, body) };
+          const match = /^\/diag\/jobs\/([a-f0-9-]{36})(\/cancel)?$/.exec(path);
+          if (match && ((method === "GET" && !match[2]) || (method === "POST" && match[2]))) {
+            const result = match[2] ? deps.diagnosticJobs.cancel(owner, match[1]!) : deps.diagnosticJobs.read(owner, match[1]!);
+            return result ? { status: 200, body: result } : { status: 404, body: { error: "Diagnostic expired or belongs to another session." } };
+          }
+          return { status: 405, body: { error: "Method not allowed." } };
+        } catch (error) {
+          if (error instanceof DiagnosticError) return { status: error.status, body: { error: error.message } };
+          throw error;
+        }
       }
 
       // ---- the cameras -------------------------------------------------

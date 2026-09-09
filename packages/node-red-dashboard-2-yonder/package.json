@@ -2,7 +2,7 @@
   "name": "node-red-dashboard-2-yonder",
   "version": "0.1.0",
   "license": "GPL-3.0-or-later",
-  "description": "Yonder's instrument objects for Dashboard 2.x — engine bars, tapes, annunciators, data bars, identities, soft keys, hold keys and sparklines. The console's visual language, built once (ADR-0009).",
+  "description": "Yonder's instrument objects for Dashboard 2.x \u2014 engine bars, tapes, annunciators, data bars, identities, soft keys, hold keys and sparklines. The console's visual language, built once (ADR-0009).",
   "keywords": [
     "node-red",
     "node-red-dashboard-2",
@@ -27,7 +27,10 @@
       "ui-yonder-index": "dist/index-widget.js",
       "ui-yonder-flow": "dist/flow.js",
       "ui-yonder-captures": "dist/captures.js",
-      "ui-yonder-cockpit": "dist/cockpit.js"
+      "ui-yonder-cockpit": "dist/cockpit.js",
+      "ui-yonder-interfaces": "dist/interfaces.js",
+      "ui-yonder-diagnostics": "dist/diagnostics.js",
+      "ui-yonder-settings": "dist/settings.js"
     }
   },
   "node-red-dashboard-2": {
@@ -100,6 +103,18 @@
       "ui-yonder-cockpit": {
         "output": "ui-yonder-cockpit.umd.js",
         "component": "YonderCockpit"
+      },
+      "ui-yonder-interfaces": {
+        "output": "ui-yonder-interfaces.umd.js",
+        "component": "YonderInterfaces"
+      },
+      "ui-yonder-diagnostics": {
+        "output": "ui-yonder-diagnostics.umd.js",
+        "component": "YonderDiagnostics"
+      },
+      "ui-yonder-settings": {
+        "output": "ui-yonder-settings.umd.js",
+        "component": "YonderSettings"
       }
     }
   },

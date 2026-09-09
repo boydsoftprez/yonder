@@ -401,7 +401,7 @@ describe("flows/flows.json", () => {
     // purpose: a page added without a line here is a page nobody decided to
     // ship, and the capture gate would photograph it anyway.
     expect(pages.map((p) => p.name).sort())
-      .toEqual(["Camera", "Cameras", "Cockpit", "Diagnostics", "Flight", "Log", "Network", "Status", "Telemetry"]);
+      .toEqual(["Camera", "Cameras", "Cockpit", "Diagnostics", "Flight", "Log", "Network", "Settings", "Status", "Telemetry"]);
 
     const groups = flows.filter((n) => n.type === "ui-group");
     for (const page of pages) {
@@ -472,19 +472,11 @@ describe("flows/flows.json", () => {
    * and where it goes — which is what would still be true if the rail changed
    * shape again.
    */
-  it("lets the operator choose day or night, and says what that costs", () => {
-    const rail = flows.find((n) => n.id === "keys-status");
-    expect(rail?.type).toBe("ui-yonder-softkeys");
-
-    const actions = (JSON.parse(String(rail?.keys ?? "[]")) as { action: string }[])
-      .map((k) => k.action)
-      .sort();
-    expect(actions).toEqual(["day", "night"]);
-
-    // The choice goes to a node, which posts it to POST /ui/theme — which is
-    // what makes it persist and what puts it behind the confirmation timer.
-    expect(rail?.wires).toEqual([["theme-apply"]]);
-    expect(flows.find((n) => n.id === "theme-apply")?.type).toBe("yonder-theme");
+  it("moves appearance and password controls to Settings", () => {
+    expect(flows.find(n => n.id === "settings-workspace")?.type).toBe("ui-yonder-settings");
+    expect(flows.find(n => n.id === "group-settings")?.page).toBe("page-settings");
+    expect(flows.find(n => n.id === "keys-status")?.wires).toEqual([["open-settings"]]);
+    expect(flows.find(n => n.id === "theme-apply")).toBeUndefined();
   });
 
   /**
@@ -649,7 +641,7 @@ describe("flows/flows.json ui-markdown", () => {
     };
     const notes = flows.filter((n) => n.type === "ui-markdown");
     expect(notes.map((n) => `${String(n.id)} (${String(pageNameOf(n.group))})`)).toEqual([
-      `note-reach (Diagnostics)`,
+
     ]);
   });
 });
@@ -1731,6 +1723,7 @@ describe("flows/flows.json camera pages", () => {
     { group: "group-status-pending", suffix: "", hidden: "group" },
     { group: "group-log-pending", suffix: "-log", hidden: "group" },
     { group: "group-diag-pending", suffix: "-diag", hidden: "group" },
+    { group: "group-settings-pending", suffix: "-settings", hidden: "group" },
     { group: "group-tel-pending", suffix: "-tel", hidden: "group" },
     // The two camera pages, reached by R-UI-15 on merge, in their own idiom.
     // The Camera page states it on the single lamp it already has — one lamp

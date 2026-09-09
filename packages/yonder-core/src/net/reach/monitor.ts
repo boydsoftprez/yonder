@@ -19,6 +19,7 @@ import {
 const ALL_PATHS: PathName[] = ["ethernet", "modem", "wifi_client"];
 
 export interface ReachMonitorOptions {
+  routeDevice?: () => Promise<string | null>;
   standing: Standing;
   probe: Probe;
   /** Defaults to the kernel's own counters. Injected so a test reaches no /sys. */
@@ -73,6 +74,7 @@ export interface ReachMonitorOptions {
  * an address cannot answer (K-42).
  */
 export class ReachMonitor {
+  private readonly routeDevice: (() => Promise<string | null>) | undefined;
   private readonly standing: Standing;
   private readonly probe: Probe;
   private readonly counters: CounterReader;
@@ -83,6 +85,7 @@ export class ReachMonitor {
   private readonly log: (line: string) => void;
 
   constructor(opts: ReachMonitorOptions) {
+    this.routeDevice = opts.routeDevice;
     this.standing = opts.standing;
     this.probe = opts.probe;
     this.counters = opts.counters ?? systemCounters;
@@ -170,7 +173,7 @@ export class ReachMonitor {
     ]);
     // Not `holding[0]`. See `activePath`: a stood-down path keeps its address,
     // so the head of this list is the path traffic moved *off*.
-    const inUse = activePath(holding, this.standing);
+    const inUse = await this.observedPath(devices, holding);
     const order = this.order();
     // Every path, not only the configured ones. A page that listed only what
     // `network.priority` names would go quiet about the path an operator has
@@ -252,10 +255,16 @@ export class ReachMonitor {
     // observation runner shares that pending command, so this is one device
     // snapshot rather than a second subprocess after the first settles.
     const [holding, devices] = await Promise.all([this.holding(), this.devices()]);
-    const path = activePath(holding, this.standing);
+    const path = await this.observedPath(devices, holding);
     if (path === null) return null;
     const device = devices[path];
     return device === undefined ? null : { path, device };
+  }
+
+  private async observedPath(devices: Partial<Record<PathName, string>>, holding: PathName[]): Promise<PathName | null> {
+    if (!this.routeDevice) return activePath(holding, this.standing);
+    const device = await this.routeDevice();
+    return ALL_PATHS.find(path => devices[path] === device) ?? null;
   }
 
   /**

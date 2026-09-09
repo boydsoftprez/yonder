@@ -11,6 +11,24 @@ import {
 import { DEFAULT_CONFIG, type Config } from "../../schema/config.js";
 import type { DeviceInfo } from "../nmcli/client.js";
 
+it("uses the kernel route when a higher-priority addressed Ethernet is only a LAN, and follows route changes", async () => {
+  const { clock } = fixedClock();
+  let route: string | null = "wwan0";
+  const monitor = new ReachMonitor({
+    standing: new Standing({ clock }), probe: async () => true, counters: () => null,
+    devices: async () => ({ ethernet: "eth0", modem: "wwan0" }), down: async () => [],
+    order: () => ["ethernet", "modem"], holding: async () => ["ethernet", "modem"],
+    routeDevice: async () => route,
+  });
+  expect((await monitor.state()).inUse).toBe("modem");
+  expect(await monitor.inUseNow()).toEqual({ path: "modem", device: "wwan0" });
+  route = "eth0";
+  expect((await monitor.state()).inUse).toBe("ethernet");
+  route = null;
+  expect((await monitor.state()).inUse).toBeNull();
+  expect(await monitor.inUseNow()).toBeNull();
+});
+
 function fixedClock(start = 1_000) {
   let now = start;
   return {

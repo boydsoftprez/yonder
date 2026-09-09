@@ -118,4 +118,13 @@ export class AdminCredential {
     if (stored === undefined) return false;
     return verifyPassword(plain, stored);
   }
+
+  /** R-SEC-14: reauthenticate before replacing a durable credential. */
+  change(current: string, password: string): { ok: true } | { ok: false; message: string; reason: string } {
+    if (!this.verify(current)) return { ok: false, reason: "incorrect-current", message: "The current password was not accepted." };
+    if (!password.trim() || password.length < MIN_PASSWORD_LENGTH || password.length > 1024)
+      return { ok: false, reason: "invalid-new", message: "Use a password between 8 and 1024 characters that is not only spaces." };
+    this.secrets.put(ADMIN_PASSWORD_SECRET, hashPassword(password));
+    return { ok: true };
+  }
 }

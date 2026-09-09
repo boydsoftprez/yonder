@@ -133,9 +133,14 @@ export class SecretStore {
    */
   put(name: string, value: string): void {
     if (this.bag[name] === value) return;
+    const previous = this.bag[name];
     this.bag[name] = value;
     guardSecretValue(value);
-    this.flush();
+    try { this.flush(); } catch (error) {
+      if (previous === undefined) delete this.bag[name];
+      else this.bag[name] = previous;
+      throw error;
+    }
   }
 
   resolve(ref: SecretRef): string {

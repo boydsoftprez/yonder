@@ -385,6 +385,16 @@ export class NetworkRenderer implements Renderer {
       }
     }
 
+    // Stored metrics do not update an already active connection. Reapply
+    // only a present, connected profile we just wrote, never a missing
+    // modem or its in-progress boot dial. No second profile write is needed.
+    for (const profile of desired) {
+      if (!EGRESS_CONNECTIONS.some(([name]) => name === profile.name)) continue;
+      if (profile.name === MODEM_CONNECTION && redial.length > 0) continue;
+      const active = devices.find(d => d.connection === profile.name && d.state === "connected");
+      if (active) await this.client.reapply(active.device);
+    }
+
     // The radio, arbitrated (K-13). One radio can be an access point or a
     // client, not both, so `radioPlan` decides which and in what order and
     // this loop carries it out. Nothing here is left to NetworkManager's

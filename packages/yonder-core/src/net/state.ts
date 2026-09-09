@@ -70,7 +70,7 @@ export function networkState(
       mode: "access-point",
       summary: `${WORDS["access-point"]}: ${config.network.ap.ssid}`,
       network: config.network.ap.ssid,
-      address: config.network.ap.address.split("/")[0] ?? null,
+      address: addressOf(addresses, wifi?.device),
     };
   }
 

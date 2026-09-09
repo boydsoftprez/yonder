@@ -18,6 +18,7 @@ import type { NodeMessage, RED, RedNode } from "./red.js";
  */
 
 export interface PollOptions {
+  failedPayload?: (message: string) => unknown;
   /** The route to read, including any query string. */
   path: (node: PollingNode) => string;
   /**
@@ -64,16 +65,22 @@ export function registerPoller(RED: RED, type: string, opts: PollOptions): void 
     node.client = clientFor(RED.settings);
     node.intervalMs = pollIntervalMs(config.interval);
     node.cursor = 0;
+    let reading = false;
+    let closed = false;
 
     const once = async (send: (m: NodeMessage) => void): Promise<void> => {
+      if (reading || closed) return;
+      reading = true;
       const reply = await node.client.request({ method: "GET", path: opts.path(node) });
+      reading = false;
+      if (closed) return;
       const result = fetched(reply);
       if (!result.ok) {
         // Never a silent nothing. An operator looking at a blank panel cannot
         // tell "there is nothing to show" from "this never loaded", and the
         // second is the one they have to act on (R-UI-05).
         node.status({ fill: "red", shape: "ring", text: "not answering" });
-        send({ payload: null, yonder: readFailure(result.message, Date.now()) });
+        send({ payload: opts.failedPayload?.(result.message) ?? null, yonder: readFailure(result.message, Date.now()) });
         return;
       }
       opts.seen?.(result.value, node);
@@ -94,6 +101,7 @@ export function registerPoller(RED: RED, type: string, opts: PollOptions): void 
     });
 
     node.on("close", (done) => {
+      closed = true;
       clearInterval(timer);
       done();
     });

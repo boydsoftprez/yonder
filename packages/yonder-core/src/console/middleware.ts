@@ -11,6 +11,7 @@ import {
   type CaptureAnswer, type CaptureHandler, type StillHandler,
 } from "./capture.js";
 import { cockpitProxy } from "./cockpit.js";
+import { maintenanceProxy } from "./maintenance.js";
 import { cameraFor } from "../video/media-path.js";
 import { validAimRequest } from '../video/accessory/requests.js';
 
@@ -437,6 +438,11 @@ export interface ConsoleMiddlewareDeps {
 export function consoleMiddleware(deps: ConsoleMiddlewareDeps): Middleware {
   const log = deps.log ?? (() => {});
   const whep = deps.whep ?? whepHandler();
+  const maintenance = maintenanceProxy({
+    client: deps.client,
+    session: req => { const token = sessionOf(req, deps.sessions); return token === undefined ? undefined : viewerFor(token); },
+    passwordChanged: () => deps.sessions.revokeAll(),
+  });
   const cockpit = cockpitProxy({client: deps.client, session: req => {
     const token = sessionOf(req, deps.sessions);
     return token === undefined ? undefined : viewerFor(token);
@@ -490,6 +496,7 @@ export function consoleMiddleware(deps: ConsoleMiddlewareDeps): Middleware {
     }
 
     if (cockpit(req, res)) return;
+    if (maintenance(req, res)) return;
 
     // The stream handshake, behind this console's own credential (R-SEC-13).
     // Handed the answer rather than placed below the check further down: a
