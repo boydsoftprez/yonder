@@ -552,6 +552,8 @@ export default {
     data () {
         return {
             mode: 'live',
+            wantsLive: true,
+            fallbackRetryTimer: null,
             pc: null,
             /** Aborts the handshake in flight, when nobody wants it any more. */
             abort: null,
@@ -988,6 +990,7 @@ export default {
         clearInterval(this.tick)
         clearTimeout(this.retryTimer)
         clearTimeout(this.stillsTimer)
+        clearTimeout(this.fallbackRetryTimer)
         if (this.$refs.video) {
             this.$refs.video.removeEventListener('timeupdate', this.onFrame)
             this.$refs.video.removeEventListener('loadedmetadata', this.onMetadata)
@@ -1229,6 +1232,7 @@ export default {
          * up. Same bug shape as `Supervisor.start()`, same fix.
          */
         requestLive () {
+            clearTimeout(this.fallbackRetryTimer)
             this.attempt = 0
             this.lastFrameAt = null
             this.reason = ''
@@ -1256,6 +1260,17 @@ export default {
             // this would be live video under a badge reading 'stills'.
             this.teardown()
             this.blank()
+            // Falling back is not an operator request to abandon live video.
+            // Start a new bounded attempt, rather than leaving the page stuck
+            // on stills until a reload. Explicit Stills/Off cancels this.
+            const session = this.session
+            clearTimeout(this.fallbackRetryTimer)
+            this.fallbackRetryTimer = setTimeout(() => {
+                if (this.wantsLive && this.mode === 'stills' && this.session === session) {
+                    this.mode = 'live'
+                    this.requestLive()
+                }
+            }, 5000)
         },
         /**
          * One handshake, and the rule that it may only ever speak for itself.
@@ -1393,6 +1408,8 @@ export default {
             if (this.mode === 'live') this.requestLive()
         },
         setMode (mode) {
+            this.wantsLive = mode === 'live'
+            clearTimeout(this.fallbackRetryTimer)
             this.mode = mode
             if (mode === 'live') {
                 this.requestLive()

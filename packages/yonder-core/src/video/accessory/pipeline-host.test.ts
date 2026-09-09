@@ -5,6 +5,28 @@ import { fileURLToPath } from 'node:url';
 
 /** Execute the shipped feeder, with only Gst buffers/clock replaced; real framed Unix I/O. */
 describe('packaged accessory appsrc feeder', () => {
+  it('restarts a stalled encoder even when its state-change thread cannot answer', () => {
+    const host = fileURLToPath(new URL('../../../../../installer/payload/yonder-pipeline', import.meta.url));
+    const program = `
+import ast, sys, types, time
+tree=ast.parse(open(sys.argv[1]).read())
+fn=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='watch_progress')
+class End(Exception): pass
+def end(code): raise End(code)
+for first, stall_at, expected in [(0,None,15),(0,1,6),(10,None,5)]:
+    tick=[0]; main=types.SimpleNamespace(count=first)
+    def pause(seconds):
+        tick[0]+=seconds
+        if stall_at is not None and tick[0]<=stall_at: main.count+=1
+    ns=dict(time=time,os=types.SimpleNamespace(_exit=end),note=lambda text:None)
+    exec(compile(ast.Module(body=[fn],type_ignores=[]),sys.argv[1],'exec'),ns)
+    try: ns['watch_progress'](main,lambda:tick[0],pause)
+    except End as e: assert e.args==(1,)
+    assert tick[0]==expected,(tick,expected)
+`;
+    const r=spawnSync('python3',['-c',program,host],{encoding:'utf8',timeout:5000});
+    expect(r.status,r.stderr).toBe(0);
+  });
   it('sets running-time PTS from wrapped camera timestamps and exits on generation EOF', () => {
     const host = fileURLToPath(new URL('../../../../../installer/payload/yonder-pipeline', import.meta.url));
     const program = `

@@ -441,12 +441,34 @@ describe("the twelve-second fall-back to stills", () => {
     expect(badge(wrapper)).toBe("stills");
     expect(reasonText(wrapper)).toMatch(/not streaming/i);
 
-    // And the attempt that was already scheduled when the deadline expired
-    // does not fire: a session negotiated behind a badge reading 'stills'
-    // would put live video under a caption saying it is not live.
+    // The old attempt is canceled. A fresh live attempt starts after a short
+    // stills interval, so recovery does not require reloading the page.
     const attempts = fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/whep")).length;
-    await advance(60_000);
+    await advance(4999);
     expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/whep"))).toHaveLength(attempts);
+    reply = { status: 201, sdp: ANSWER };
+    await advance(1);
+    expect(badge(wrapper)).toBe('live · preview');
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/whep'))).toHaveLength(attempts + 1);
+    pc(FakePeerConnection.made.length - 1).deliverTrack(); frames(wrapper); await settle();
+    expect(painted(wrapper)).not.toBeNull();
+  });
+
+  it.each(['off', 'stills'])('honors an explicit %s choice after automatic fallback', async mode => {
+    const { wrapper } = mountPicture(); await settle();
+    await advance(12000);
+    setMode(wrapper, mode);
+    const attempts = fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/whep')).length;
+    await advance(60000);
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/whep'))).toHaveLength(attempts);
+    expect(badge(wrapper)).toBe(mode);
+  });
+
+  it('cancels automatic fallback recovery when the widget is removed', async () => {
+    const { wrapper } = mountPicture(); await settle(); await advance(12000);
+    const attempts = fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/whep')).length;
+    wrapper.unmount(); await advance(60000);
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/whep'))).toHaveLength(attempts);
   });
 
   it("does not fall back when a frame has arrived", async () => {
@@ -567,7 +589,7 @@ describe("reconnecting", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("does not reconnect once it has fallen back to stills", async () => {
+  it("ignores a failed abandoned connection while waiting to retry from stills", async () => {
     const { wrapper } = mountPicture();
     await settle();
     await advance(12_000);
@@ -575,8 +597,10 @@ describe("reconnecting", () => {
     const attempts = fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/whep")).length;
 
     pc(0).goes("failed");
-    await advance(60_000);
+    await advance(4999);
     expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/whep"))).toHaveLength(attempts);
+    await advance(1);
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/whep'))).toHaveLength(attempts + 1);
   });
 
   /**

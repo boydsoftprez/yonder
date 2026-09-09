@@ -516,7 +516,9 @@ class Host(object):
                 ("queue", {}),
                 ("videoconvert", {}),
                 ("jpegenc", {}),
-                ("filesink", {"location": path}),
+                # A temporary capture must not make the live parent pipeline
+                # preroll again or wait on its clock during branch removal.
+                ("filesink", {"location": path, "async": False, "sync": False}),
             ])
         except BranchError as exc:
             return {"refused": str(exc)}
@@ -602,7 +604,7 @@ class Host(object):
                 ("queue", {}),
                 (self.parser_kind(), {}),
                 ("matroskamux", {}),
-                ("filesink", {"location": path}),
+                ("filesink", {"location": path, "async": False, "sync": False}),
             ])
         except BranchError as exc:
             return {"refused": str(exc)}
@@ -998,6 +1000,27 @@ def negotiated_shape(pairs):
 
 # -- the process ------------------------------------------------------------
 
+def watch_progress(main, now=time.monotonic, pause=time.sleep):
+    """A live process with no encoded frames is not a running video stream.
+
+    Read the atomic counter without taking its probe lock: the streaming
+    thread itself may be stuck in a GStreamer call while holding that lock.
+    Do not set pipeline state here; teardown is the operation that may be
+    deadlocked. Exiting releases this encoder's resources for the supervisor.
+    """
+    count = main.count
+    changed = now()
+    seen = count > 0
+    while True:
+        pause(0.5)
+        current = main.count
+        if current != count:
+            count, changed, seen = current, now(), True
+        elif now() - changed >= (5 if seen else 15):
+            note('encoded video stopped progressing; restarting the pipeline host')
+            os._exit(1)
+
+
 def watch_bus(pipeline):
     """`gst-launch-1.0`'s own behaviour: an error or an end of stream ends the
     process. The supervisor is what restarts a pipeline (R-CTL-01), and a host
@@ -1091,6 +1114,7 @@ def main(args):
             "claim would be one this program could not witness; it is left to "
             "gst-launch-1.0" % MAIN_TEE)
 
+    threading.Thread(target=watch_progress, args=(host.main,), daemon=True).start()
     if pipeline.set_state(Gst.State.PLAYING) == Gst.StateChangeReturn.FAILURE:
         die("that pipeline will not play")
 
