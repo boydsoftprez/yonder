@@ -164,3 +164,36 @@ Core PID 105058 and console PID 105234 remained unchanged, with NRestarts zero.
 The live Chrome page was observed in element fullscreen with a dark cockpit,
 readable instruments, the Exit full screen control, and no visible Dashboard
 sidebar/header. No camera or telemetry service was restarted.
+
+## Map position and ground traffic follow-up
+
+The bench controller reported fresh fused coordinates `0,0`, GPS fix 0 and zero
+satellites. The operator confirmed that no GPS module was connected. The earlier
+map treated those coordinates as ownship and centered ocean imagery there;
+traffic searched the same invalid aircraft location. Separately, direct ADSB.lol
+responses returned HTTP 200 without browser CORS permission. Esri imagery
+returned HTTP 200 with browser access allowed.
+
+Follow-ups `c3c8596` and `4a2bfb3` require fresh GPS fix and coordinates for map
+ownship, motion vectors and nearby traffic. The inset reports the missing GPS
+condition, keeps a world/mission overview available and resumes following when a
+fix arrives. A separate ADS-B relay origin preserves direct map/elevation sourcing
+and geographic caches. Both relay origins remain browser settings; no flight
+command is sent by configuring them.
+
+All 30 targeted state, map-component, host and provider tests passed. They cover
+no-fix suppression, acquired-fix recovery, stale fix metadata, relay isolation
+and retained imagery cache. The production Flight bundle built at 812.37 kB /
+223.04 kB gzip and was hot-replaced with SHA-256
+`48bc723fd8027f38d7ffcaef0b5f76a049300c40d66cb7974f9a5d82c86e2787`.
+Core PID 105058 and console PID 105234 remained active with zero restarts.
+
+Chrome on the live hardware page decoded 12 imagery/label tiles, displayed the
+missing-fix message and hid the invalid ownship marker. A laptop loopback relay
+with the exact hardware console origin passed browser access; its ADS-B-only
+address was saved in Chrome and the general relay address cleared. A separate
+ground query of the documented Cove demo area returned one real target. That was
+a provider connection check, not an aircraft-location test. Nearby live traffic,
+terrain perspective and physical GPS recovery remain unverified until a GPS
+receiver is connected and reports a fix. The ground relay must remain running on
+the laptop; it is not an aircraft service or an installed background service.
