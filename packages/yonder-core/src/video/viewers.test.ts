@@ -342,11 +342,27 @@ describe("Viewers and the stills it accounts for", () => {
     expect(viewers.stillsKbps()).toBe(still(80_000));
   });
 
+  it("does not overwrite a still-live partial bucket when the ring wraps", () => {
+    const { viewers, clock } = viewersOn();
+    clock.advance(499);
+    viewers.transmitted("v1", "cam0", 100_000);
+    clock.advance(4_501);
+    viewers.transmitted("v1", "cam0", 100_000);
+
+    // The first copy is 4,501 ms old, so both belong to the 5 s window even
+    // though the second has crossed ten 500 ms slot boundaries.
+    expect(viewers.stillsKbps()).toBe(still(200_000));
+    clock.advance(499);
+    expect(viewers.stillsKbps()).toBe(still(100_000));
+    clock.advance(4_501);
+    expect(viewers.stillsKbps()).toBe(0);
+  });
+
   it("bounds accounting storage while retaining every delivered byte", () => {
     const { viewers, clock } = viewersOn();
-    for (let bucket = 0; bucket < 10; bucket += 1) {
+    for (let bucket = 0; bucket < 11; bucket += 1) {
       for (let copy = 0; copy < 100; copy += 1) viewers.transmitted("v1", "cam0", 1_000);
-      if (bucket < 9) clock.advance(STILLS_INTERVAL_MS / 10);
+      if (bucket < 10) clock.advance(STILLS_INTERVAL_MS / 10);
     }
     expect(viewers.stillsKbps()).toBe(still(1_000_000));
 
@@ -354,7 +370,7 @@ describe("Viewers and the stills it accounts for", () => {
       subs: Map<string, Map<string, { stillTraffic: unknown[] }>>;
     };
     expect(internals.subs.get("v1")?.get("cam0")?.stillTraffic.filter(Boolean))
-      .toHaveLength(10);
+      .toHaveLength(11);
   });
 
   it("requests shared still generation for a thumbnail without changing video delivery", () => {

@@ -287,8 +287,9 @@ export interface ViewersOptions {
 
 const FULL_RATE_LEASE_MS = 15_000;
 const IDLE_MS = 60_000;
-/** Fixed rolling buckets keep exact byte totals without one object per fetch. */
-const STILL_TRAFFIC_BUCKETS = 10;
+/** Ten subdivisions plus the partial bucket preceding the current window. */
+const STILL_TRAFFIC_SUBDIVISIONS = 10;
+const STILL_TRAFFIC_BUCKETS = STILL_TRAFFIC_SUBDIVISIONS + 1;
 
 interface StillTrafficBucket {
   slot: number;
@@ -539,14 +540,16 @@ export class Viewers {
    *
    * The transmission is independent of selection: a browser on live video
    * may also receive the active thumbnail, and a fetch cannot silently turn
-   * an `off` selection into continuing generation demand. Ten rolling time
-   * buckets bound memory while retaining every delivered byte.
+   * an `off` selection into continuing generation demand. Eleven rolling
+   * time buckets bound memory while retaining every delivered
+   * byte. Expiry has one-tenth-interval granularity because transmissions in
+   * the same bucket share its latest timestamp.
    */
   transmitted(viewer: string, camera: string, bytes: number): void {
     const sub = this.hold(viewer, camera);
     if (sub === null || !Number.isFinite(bytes) || bytes <= 0) return;
     const now = this.clock.now();
-    const bucketMs = Math.max(1, Math.ceil(this.stillsIntervalMs / STILL_TRAFFIC_BUCKETS));
+    const bucketMs = Math.max(1, Math.ceil(this.stillsIntervalMs / STILL_TRAFFIC_SUBDIVISIONS));
     const slot = Math.floor(now / bucketMs);
     const index = slot % STILL_TRAFFIC_BUCKETS;
     const bucket = sub.stillTraffic[index];
