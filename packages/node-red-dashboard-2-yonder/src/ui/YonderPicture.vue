@@ -98,6 +98,7 @@
 
 <script>
 import { AimTransport } from './aim-transport.ts'
+import { AIM_RESPONSE_CHANGED, EXPO_KEY, SPEED_KEY, savedNumber, rateLimit, responseMagnitude } from './aim-response.ts'
 import { ThumbnailDemand } from './thumbnail-demand.ts'
 import YonderStateOverlay from './YonderStateOverlay.vue'
 import YonderThumbStrip from './YonderThumbStrip.vue'
@@ -617,6 +618,8 @@ export default {
             dragPointerId: null,
             dragGesture: null,
             dragSeq: 0,
+            responseExpo: savedNumber(EXPO_KEY, 50, 0, 100),
+            responseSpeed: savedNumber(SPEED_KEY, 60, 1, 120),
             orbX: 0,
             orbY: 0,
             downX: 0,
@@ -972,6 +975,7 @@ export default {
         window.addEventListener('blur', this.onDragBlur)
         document.addEventListener('visibilitychange', this.onDragVisibility)
         window.addEventListener('pagehide', this.onDragPageHide)
+        window.addEventListener(AIM_RESPONSE_CHANGED, this.onResponseChange)
         this.requestLive()
         this.refreshThumbnails()
     },
@@ -991,12 +995,21 @@ export default {
         window.removeEventListener('blur', this.onDragBlur)
         document.removeEventListener('visibilitychange', this.onDragVisibility)
         window.removeEventListener('pagehide', this.onDragPageHide)
+        window.removeEventListener(AIM_RESPONSE_CHANGED, this.onResponseChange)
         // A component torn down mid-hold must still stop the aircraft —
         // navigating away from the page is not a reason to keep slewing.
         this.onDragEnd()
         this.teardown()
     },
     methods: {
+        onResponseChange (e) {
+            const { key, value } = e.detail || {}
+            if (!Number.isFinite(value)) return
+            if (key === EXPO_KEY && value >= 0 && value <= 100) this.responseExpo = value
+            else if (key === SPEED_KEY && value >= 1 && value <= 120) this.responseSpeed = value
+            else return
+            this.onDragEnd()
+        },
         selectedStill () {
             const camera = cameraFor(this.streamPath)
             return this.cameras.find(row => row.id === camera)?.thumbSrc || this.props.stillsUrl || ''
@@ -1434,11 +1447,13 @@ export default {
             const d = Math.hypot(dx, dy)
             if (d <= DRAG_DEAD) return null
             const k = Math.min(1, (d - DRAG_DEAD) / DRAG_RANGE)
+            const speed = responseMagnitude(k, this.responseExpo,
+                Math.min(this.responseSpeed, rateLimit(this.aim?.maxRate ?? DRAG_MAX_RATE)))
             return {
                 // Screen y grows downward; tilt does not, hence the sign flip
                 // — the identical convention `YonderAimPad.at()` states.
-                pan: (dx / d) * k * (this.aim?.maxRate ?? DRAG_MAX_RATE),
-                tilt: -(dy / d) * k * (this.aim?.maxRate ?? DRAG_MAX_RATE)
+                pan: (dx / d) * speed,
+                tilt: -(dy / d) * speed
             }
         },
         dragDown (e) {

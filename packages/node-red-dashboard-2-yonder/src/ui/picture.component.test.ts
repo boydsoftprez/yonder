@@ -1850,6 +1850,23 @@ it('retires the displayed path and active pointer when camera selection clears i
    * in this file only ever inspects the *last* relayed slew, so a `NaN`
    * hiding in the first one goes unnoticed everywhere else.
    */
+  it('uses the same chosen speed as the pad and ends image dragging when the response changes', async () => {
+    const { wrapper, emit, press } = mountWithRail();
+    await settle();
+    await press({ aim: { state: 'present', maxRate: 120 } });
+    const el = frameEl(wrapper);
+    el.dispatchEvent(dragPoint('pointerdown', 100, 100));
+    el.dispatchEvent(dragPoint('pointermove', 1000, 100));
+    expect(slewCalls(emit).at(-1)?.[2].payload.slew.pan).toBe(60);
+    window.dispatchEvent(new CustomEvent('yonder-aim-response-changed', { detail: { key: 'yonder:aim:speed', value: 12 } }));
+    expect(stopCalls(emit)).toHaveLength(1);
+    el.dispatchEvent(dragPoint('pointermove', 1000, 100));
+    expect(slewCalls(emit)).toHaveLength(1);
+    el.dispatchEvent(dragPoint('pointerdown', 100, 100));
+    el.dispatchEvent(dragPoint('pointermove', 1000, 100));
+    expect(slewCalls(emit).at(-1)?.[2].payload.slew.pan).toBe(12);
+  });
+
   it("a press with no movement at all commands nothing — the dead zone, not merely 'no test checked'", async () => {
     const { wrapper, emit, press } = mountWithRail();
     await settle();

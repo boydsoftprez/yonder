@@ -4,6 +4,28 @@ import { AimTransport } from './aim-transport.js';
 
 afterEach(() => { vi.useRealTimers(); });
 describe('private current-gesture transport', () => {
+  it('uses the advertised speed cap and revokes a held rate when the cap falls', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date', 'performance'] });
+    const target = { url: '/video/cam1/aim', generation: 1, maxRate: 120 };
+    const calls: any[] = [];
+    const fetcher = vi.fn(async (_url, options: any) => {
+      const body = JSON.parse(options.body); calls.push(body);
+      return { ok: true, json: async () => ({ accepted: true,
+        grant: { gesture: 'g', credential: 'c', deadline: 500 }, next: { gesture: 'g', credential: 'c2', deadline: 600 } }) };
+    });
+    const t = new AimTransport(() => target, () => {}, fetcher as any);
+    t.update({ gesture: 'held', pan: 120, tilt: 0 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls[1]).toMatchObject({ op: 'slew', pan: 120 });
+    target.maxRate = 30; t.refresh();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(calls.map(c => c.op)).toEqual(['issue', 'slew', 'stop']);
+    target.maxRate = 500;
+    t.update({ gesture: 'diagonal', pan: 120, tilt: 120 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls).toHaveLength(3);
+    t.close();
+  });
   it('renews a stationary held pointer, samples its latest rate, and stops without replay', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date', 'performance'] }); const calls: any[] = [];
     const target = { url: '/video/cam1/aim', generation: 1, inhibited: null as string | null };

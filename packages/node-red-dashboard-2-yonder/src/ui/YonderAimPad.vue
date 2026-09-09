@@ -26,6 +26,12 @@
         </svg>
 
         <label class="y-aim__expo">
+            <span class="y-aim__expo-label">Maximum speed <output>{{ selectedSpeed }}°/s</output></span>
+            <input type="range" aria-label="Maximum gimbal speed" min="1" :max="rateLimit" step="1"
+                   :value="selectedSpeed" :disabled="rateLimit < 1"
+                   :aria-valuetext="`${selectedSpeed} degrees per second`" @input="changeSpeed" />
+        </label>
+        <label class="y-aim__expo">
             <span class="y-aim__expo-label">Stick expo <output>{{ expo }}%</output></span>
             <input type="range" aria-label="Stick expo" min="0" max="100" step="5"
                    :value="expo" :aria-valuetext="`${expo}% expo`" @input="changeExpo" />
@@ -38,6 +44,7 @@
 </template>
 
 <script>
+import { EXPO_KEY, SPEED_KEY, savedNumber, rateLimit, responseMagnitude, saveResponse } from './aim-response.ts'
 /**
  * The aim pad — a gimbal's pan and tilt, slewed at a rate for as long as an
  * operator holds the pad (R-CAM-11). This is the only control in this whole
@@ -150,19 +157,7 @@ const DEAD = 15
 const RIM = 44
 /** Degrees per second at the rim. */
 const MAX_RATE = 30
-const EXPO_KEY = 'yonder:aim:expo'
 const DEFAULT_EXPO = 50
-
-function savedExpo () {
-    try {
-        const saved = localStorage.getItem(EXPO_KEY)
-        if (saved !== null && saved.trim() !== '') {
-            const value = Number(saved)
-            if (Number.isFinite(value) && value >= 0 && value <= 100) return value
-        }
-    } catch { /* Browser preferences can be unavailable; aiming still works. */ }
-    return DEFAULT_EXPO
-}
 
 /**
  * A fresh id for a new gesture — module-scoped so two mounted pads (and,
@@ -199,10 +194,15 @@ export default {
         px: CENTER,
         py: CENTER,
         pointerId: null,
-        expo: savedExpo(),
+        expo: savedNumber(EXPO_KEY, DEFAULT_EXPO, 0, 100),
+        preferredSpeed: savedNumber(SPEED_KEY, 60, 1, 120),
         DIAL_SIZE
     }),
     computed: {
+        rateLimit () {
+            return rateLimit(this.maxRate)
+        },
+        selectedSpeed () { return Math.min(this.preferredSpeed, this.rateLimit) },
         /** A gesture is active exactly while the pointer is outside the
          * dead zone — not merely while it is physically held, so the puck
          * sits at rest even under a finger resting at dead centre. */
@@ -219,6 +219,7 @@ export default {
         }
     },
     watch: {
+        rateLimit () { this.onEnd() },
         /** R-CMD-04: an inhibition that arrives mid-gesture stops the
          * aircraft immediately, not on the operator's next release. */
         inhibited (now) {
@@ -242,13 +243,20 @@ export default {
         this.onEnd()
     },
     methods: {
+        changeSpeed (e) {
+            const value = Number(e.target.value)
+            if (!Number.isFinite(value) || value < 1 || value > this.rateLimit) return
+            this.onEnd()
+            this.preferredSpeed = value
+            saveResponse(SPEED_KEY, value)
+        },
         changeExpo (e) {
             const value = Number(e.target.value)
             if (!Number.isFinite(value) || value < 0 || value > 100) return
             // A response change ends existing intent; it cannot alter a held command.
             this.onEnd()
             this.expo = value
-            try { localStorage.setItem(EXPO_KEY, String(value)) } catch { /* Keep this session's preference. */ }
+            saveResponse(EXPO_KEY, value)
         },
         /** A pointer event's client coordinates, converted to this pad's
          * own geometry: null in the dead zone, false for unusable layout. */
@@ -267,16 +275,15 @@ export default {
             const k = Math.min(1, (d - DEAD) / (RIM - DEAD))
             // Shape radial magnitude, preserving diagonals and the full-throw cap.
             // 0% is linear; 100% is cubic. There is no time smoothing or stop tail.
-            const expo = this.expo / 100
-            const shaped = (1 - expo) * k + expo * k * k * k
+            const speed = responseMagnitude(k, this.expo, this.selectedSpeed)
             const ux = x / d
             const uy = y / d
             return {
                 x: CENTER + ux * Math.min(d, RIM),
                 y: CENTER + uy * Math.min(d, RIM),
                 // Screen y grows downward; tilt does not, hence the sign flip.
-                panRate: ux * shaped * (Number.isFinite(this.maxRate) && this.maxRate > 0 ? Math.min(this.maxRate, MAX_RATE) : 0),
-                tiltRate: -uy * shaped * (Number.isFinite(this.maxRate) && this.maxRate > 0 ? Math.min(this.maxRate, MAX_RATE) : 0)
+                panRate: ux * speed,
+                tiltRate: -uy * speed
             }
         },
         down (e) {

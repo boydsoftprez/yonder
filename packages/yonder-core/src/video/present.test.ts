@@ -1191,6 +1191,7 @@ describe("aimPanel", () => {
     } as never, "pocket");
 
     expect(panel.motionNotice).toBe("the gimbal reached its native stop");
+    expect(panel.maxRate).toBe(120);
     expect(panel.inhibited).toBeNull();
     expect(panel.generation).toBe(2);
   });

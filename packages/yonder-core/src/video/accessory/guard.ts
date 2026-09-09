@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+/** Published Pocket 2 controllable speed; native joint/fault/intent guards still apply. */
+export const HG211_MAX_RATE_DEG_S = 120;
 /** R-CAM-11 / R-TEL-15: unknown measurements remain unknown. */
 export interface GimbalAttitude {
   pitch: number; roll: number; yaw: number; mode: number; at: number;
@@ -59,7 +61,7 @@ export function guard(cmd: MotionCommand, c: GuardContext): GuardResult {
     || (cmd.kind === 'mode' && ![0, 1, 2].includes(cmd.mode))) return refuse('malformed-command');
   if (cmd.kind === 'rate') {
     if (![cmd.pan, cmd.tilt].every(Number.isFinite)) return refuse('malformed-command');
-    if (Math.abs(cmd.pan) > 10 || Math.abs(cmd.tilt) > 10) return refuse('rate-cap');
+    if (Math.hypot(cmd.pan, cmd.tilt) > HG211_MAX_RATE_DEG_S) return refuse('rate-cap');
   }
   const a = c.attitude;
   if (!a) return refuse('attitude-missing');

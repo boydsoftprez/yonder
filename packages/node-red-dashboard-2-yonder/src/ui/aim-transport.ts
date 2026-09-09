@@ -1,5 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-export interface AimTarget { url?: string; generation?: number; inhibited?: string | null }
+export interface AimTarget { url?: string; generation?: number; inhibited?: string | null; maxRate?: number }
+function withinRate(target: AimTarget, rate: { pan: number; tilt: number }): boolean {
+  const limit = target.maxRate === undefined ? 10 : target.maxRate;
+  return Number.isFinite(limit) && limit > 0 && [rate.pan, rate.tilt].every(Number.isFinite)
+    && Math.hypot(rate.pan, rate.tilt) <= Math.min(limit, 120);
+}
 type Grant = { gesture: string; credential: string; deadline: number };
 type Held = { client: string; pan: number; tilt: number; target: string; generation?: number; grant?: Grant; seq: number };
 /** Current held gesture only. No retry, backlog, wall-clock deadline, or reconnect resume. */
@@ -21,7 +26,7 @@ export class AimTransport {
   update(rate: { gesture: string; pan: number; tilt: number }): void {
     if (this.disposed || this.blocked === rate.gesture) return;
     const target = this.target();
-    if (!target?.url || target.inhibited || ![rate.pan, rate.tilt].every(v => Number.isFinite(v) && Math.abs(v) <= 10)
+    if (!target?.url || target.inhibited || !withinRate(target, rate)
       || (!rate.pan && !rate.tilt)) { this.stop(); this.blocked = rate.gesture; return; }
     if (this.held?.client !== rate.gesture) {
       this.stop();
@@ -33,7 +38,7 @@ export class AimTransport {
   private current(held: Held): boolean {
     const target = this.target();
     return !this.disposed && this.held === held && !!target && !target.inhibited && target.url === held.target
-      && target.generation === held.generation && !(typeof document !== 'undefined' && document.hidden);
+      && target.generation === held.generation && withinRate(target, held) && !(typeof document !== 'undefined' && document.hidden);
   }
   private async request(url: string, body: object): Promise<any> {
     const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), 450);

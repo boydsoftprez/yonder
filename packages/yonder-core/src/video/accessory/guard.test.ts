@@ -39,8 +39,16 @@ describe('physical motion guard (synthetic measured context)', () => {
     const c = context(); change(c);
     expect(guard(rate, c)).toEqual({ allowed: false, reason });
   });
-  it.each([NaN, Infinity, 10.1, -10.1])('refuses malformed or over-cap rate %s', pan => {
+  it.each([NaN, Infinity, 120.1, -120.1])('refuses malformed or over-cap rate %s', pan => {
     expect(guard({ ...rate, pan }, context()).allowed).toBe(false);
+  });
+  it('admits the documented controllable rate while bounding combined diagonal speed', () => {
+    expect(guard({ kind: 'rate', pan: 120, tilt: 0 }, context())).toEqual({ allowed: true });
+    expect(guard({ kind: 'rate', pan: 0, tilt: -120 }, context())).toEqual({ allowed: true });
+    expect(guard({ kind: 'rate', pan: 72, tilt: 96 }, context())).toEqual({ allowed: true });
+    expect(guard({ kind: 'rate', pan: 120, tilt: 120 }, context())).toEqual({ allowed: false, reason: 'rate-cap' });
+    const c = context(); c.attitude!.yawLimit = true;
+    expect(guard({ kind: 'rate', pan: 120, tilt: 0 }, c)).toEqual({ allowed: false, reason: 'limit-direction-unknown' });
   });
   it('does not use sign-to-world mappings and never exposes roll', () => {
     const c = context(); c.signs.tilt = null;

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import { HG211_MAX_RATE_DEG_S } from './accessory/guard.js';
 import type { Camera } from "../schema/config.js";
 import {
   CAPABILITY_KEYS, noCapabilities, present,
@@ -1361,7 +1362,7 @@ export function aimPanel(caps: CameraCapabilities | null, source?: ReturnType<im
     // Standalone Aim depends on USB/DUML continuity. A drag on the Picture
     // additionally depends on that picture's media epoch and retires with it.
     const generation = scope === 'picture' ? source.input?.generation ?? source.generation : source.controlGeneration;
-    return { camera, url: camera ? `/video/${camera}/aim` : undefined, generation, maxRate: 10, admitted: source.admitted,
+    return { camera, url: camera ? `/video/${camera}/aim` : undefined, generation, maxRate: HG211_MAX_RATE_DEG_S, admitted: source.admitted,
       state: 'present', reason: null, pan: source.attitude?.yaw ?? null, tilt: source.attitude?.pitch ?? null,
       modeInhibited: source.modes.some(mode => mode.allowed) ? null : source.modes.find(mode => !mode.allowed)?.reason ?? 'trajectory-unverified',
       recentreInhibited: source.recentre.allowed ? null : source.recentre.reason,

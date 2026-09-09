@@ -51,6 +51,16 @@ gesture; it adds no time smoothing or delayed stop. Invalid or unavailable brows
 storage uses the default. The picture reserves space for notices and thumbnails
 so their arrival or disappearance cannot resize the camera image during aiming.
 
+Maximum aiming speed is independent of expo. The Pocket 2 reports a 120°/s
+controllable maximum in [DJI's specifications](https://www.dji.com/pocket-2/specs).
+Replace the initial 10°/s bench ceiling with that capability, bound the combined
+pan/tilt magnitude, and let the browser choose 1–120°/s with a 60°/s default.
+Use the same response for the pad and image drag; a preference change ends any
+existing gesture. The original command expiry, device fault/limit flags and
+native control flags remain unchanged. Higher-rate physical stopping behavior
+has not yet been measured; the earlier 800 ms engineering allowance was based
+on 10°/s bench bursts and is not a verified guarantee at higher rates.
+
 A media timestamp discontinuity changes the media epoch; it does not invalidate
 fresh native camera/gimbal control telemetry. Standalone Aim uses the USB control
 epoch. Picture gestures still use the media epoch and end on their own media loss.

@@ -135,6 +135,25 @@ describe("mounting", () => {
 });
 
 describe('stick expo', () => {
+  it('offers independent speed selection, respects the camera cap, and ends an old hold on changes', async () => {
+    const w = mount(YonderAimPad, { props: { maxRate: 120 } });
+    dialOf(w).getBoundingClientRect = () => ({ left: 0, top: 0, width: DIAL_SIZE, height: DIAL_SIZE }) as DOMRect;
+    expect(w.get('input[aria-label="Maximum gimbal speed"]').element.value).toBe('60');
+    down(dialOf(w), RIM, 0);
+    expect(slews(w).at(-1)?.pan).toBeCloseTo(60);
+    await w.get('input[aria-label="Maximum gimbal speed"]').setValue('120');
+    expect(stops(w)).toHaveLength(1);
+    move(dialOf(w), RIM, 0);
+    expect(slews(w)).toHaveLength(1);
+    down(dialOf(w), RIM, 0);
+    expect(slews(w).at(-1)?.pan).toBeCloseTo(120);
+    await w.setProps({ maxRate: 10 });
+    expect(stops(w)).toHaveLength(2);
+    expect(w.get('input[aria-label="Maximum gimbal speed"]').element.value).toBe('10');
+    down(dialOf(w), RIM, 0);
+    expect(slews(w).at(-1)?.pan).toBeCloseTo(10);
+    w.unmount();
+  });
   it('defaults to half expo, preserves directions and reaches the reported maximum at full throw', () => {
     const w = mount(YonderAimPad, { props: { maxRate: 10 } });
     dialOf(w).getBoundingClientRect = () => ({ left: 0, top: 0, width: DIAL_SIZE, height: DIAL_SIZE }) as DOMRect;

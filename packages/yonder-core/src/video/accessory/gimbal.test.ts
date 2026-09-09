@@ -72,6 +72,17 @@ describe('gimbal attitude', () => {
   });
 });
 describe('intent-bound gimbal dispatcher', () => {
+  it('encodes the rated speed without weakening expiry or changing native control flags', async () => {
+    const f = fixture(); const grant = f.issue();
+    expect(f.admit(grant, 0, -120)).toMatchObject({ accepted: true });
+    expect(Buffer.from(f.writes[0].command.payload!).toString('hex')).toBe('0000000050fb80');
+    expect(f.writes[0].options.deadline).toBe(grant.deadline);
+    f.writes[0].resolve(); await settle();
+    f.freshAdvance(501); await settle();
+    expect(f.writes).toHaveLength(1);
+    expect(f.clock.timers.size).toBe(0);
+    f.controller.close();
+  });
   it('issue alone writes nothing; public pan/tilt encode direct yaw/pitch with zero roll at 10Hz', async () => {
     const f = fixture(); const grant = f.issue(); expect(f.writes).toHaveLength(0);
     expect(f.admit(grant)).toMatchObject({ accepted: true });
