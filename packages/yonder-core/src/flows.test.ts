@@ -2036,7 +2036,7 @@ describe("flows/flows.json camera pages", () => {
     // And whether there is anything to hold at all: the full-rate stream
     // exists only where an RTSP output does (R-UI-20).
     expect(JSON.stringify(cost?.rules)).toContain("payload.display.fullRate");
-    expect((flows.find((n) => n.id === "camera-read")?.wires as string[][])[0])
+    expect((flows.find((n) => n.id === "camera-response")?.wires as string[][])[0])
       .toContain("pick-cam-hold");
 
     const edge = flows.find((n) => n.id === "cam-hold-edge");
@@ -2286,7 +2286,7 @@ describe("flows/flows.json camera pages", () => {
    * camera cannot start*, which is the opposite of what a null refusal
    * means — so the caption is checked as well as the value.
    */
-  it("keeps the start refusal visible in the camera controls", () => { expect(flows.find(n=>n.id==='bar-cam-start')).toMatchObject({group:'group-cam-controls',height:0}); expect(flows.find(n=>n.id==='camera-read')?.wires?.flat()).toContain('pick-cam-start'); });
+  it("keeps the start refusal visible in the camera controls", () => { expect(flows.find(n=>n.id==='bar-cam-start')).toMatchObject({group:'group-cam-controls',height:0}); expect(flows.find(n=>n.id==='camera-response')?.wires?.flat()).toContain('pick-cam-start'); });
 
   /**
    * **The picture's own Start, and why R-UI-10 still holds around it.**
@@ -2551,7 +2551,7 @@ describe("flows/flows.json camera pages", () => {
     const from = flows.find((n) => n.id === "pick-cam-picture");
     expect((from?.wires as string[][])[0]).toEqual(["pic-camera", "pic-cockpit"]);
     expect(from?.rules).toEqual([{ t: "set", p: "payload", pt: "msg", to: "payload.picture", tot: "msg" }]);
-    expect((flows.find((n) => n.id === "camera-read")?.wires as string[][])[0])
+    expect((flows.find((n) => n.id === "camera-response")?.wires as string[][])[0])
       .toContain("pick-cam-picture");
   });
 
@@ -2640,7 +2640,7 @@ describe("flows/flows.json camera pages", () => {
    * read; the flow only selects.
    */
   it("draws the captures panel from the camera read, and routes its one press", () => {
-    expect((flows.find((n) => n.id === "camera-read")?.wires as string[][])[0])
+    expect((flows.find((n) => n.id === "camera-response")?.wires as string[][])[0])
       .toContain("pick-cam-captures");
     const pick = flows.find((n) => n.id === "pick-cam-captures");
     // Selection, not composition: the shape is the daemon's own.
@@ -3035,7 +3035,8 @@ describe('Cockpit restoration — R-UI-28', () => {
   });
 
   it('feeds standalone widgets with the current source-composed picture and private-aim status contracts', () => {
-    expect(targets('camera-read')).toEqual(expect.arrayContaining(['pick-cam-picture', 'pick-cam-aim']));
+    expect(targets('camera-read')).toEqual(['camera-response']);
+    expect(targets('camera-response')).toEqual(expect.arrayContaining(['pick-cam-picture', 'pick-cam-aim']));
     expect(node('pick-cam-picture')?.rules).toEqual([{ t: 'set', p: 'payload', pt: 'msg', to: 'payload.picture', tot: 'msg' }]);
     expect(targets('pick-cam-picture')).toEqual(['pic-camera', 'pic-cockpit']);
     expect(targets('pick-cam-aim')).toEqual(['aim-camera', 'aim-cockpit']);
@@ -3109,4 +3110,12 @@ it('retires the workspace from every camera selection writer and preserves rende
   for (const id of ['cam-at-controls', 'cam-at-settings', 'cam-at-captures-act', 'cam-at-stream', 'cam-at-refresh', 'cam-at-receive', 'cam-at-read']) expect(flows.find(n => n.id === id)?.rules).toEqual([
     { t: 'set', p: 'camera', pt: 'msg', to: '$exists(camera) ? camera : $flowContext("camera")', tot: 'jsonata' },
   ]);
+});
+
+it('gates read and refresh DTOs before every shared camera surface', () => {
+  expect(flows.find(n => n.id === 'camera-read')?.wires).toEqual([['camera-response']]);
+  expect(flows.find(n => n.id === 'camera-refresh')?.wires).toEqual([['camera-response', 'cam-workspace-result']]);
+  expect(flows.find(n => n.id === 'cam-workspace-selection')?.wires?.flat()).toContain('camera-response');
+  expect(flows.find(n => n.id === 'camera-response')?.type).toBe('yonder-camera-response');
+  expect(flows.find(n => n.id === 'camera-response')?.wires?.flat()).toEqual(expect.arrayContaining(['pick-cam-picture', 'pick-cam-aim', 'pick-cam-deck']));
 });

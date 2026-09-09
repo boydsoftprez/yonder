@@ -1738,6 +1738,22 @@ describe("the drag-to-slew layer — orb only (spec §6)", () => {
     expect(z(wrapper, ".y-pic__orb"), ".y-pic__orb").toBeGreaterThan(z(wrapper, ".y-pic__video"));
   });
 
+it('retires the displayed path and active pointer when camera selection clears its report', async () => {
+  const { wrapper, press } = mountWithRail();
+  await settle();
+  await press({ path: 'cam0', aim: { state: 'present', pan: 0, tilt: 0 } });
+  const el = frameEl(wrapper);
+  el.dispatchEvent(dragPoint('pointerdown', 200, 150));
+  el.dispatchEvent(dragPoint('pointermove', 240, 150));
+  await settle();
+  expect(wrapper.find('.y-pic__orb').exists()).toBe(true);
+  await press({ path: '', aim: null, cameras: [], running: null });
+  expect((wrapper.vm as any).streamPath).toBe('');
+  expect(wrapper.find('.y-pic__orb').exists()).toBe(false);
+  await press('rate:preview');
+  expect((wrapper.vm as any).streamPath).toBe('');
+});
+
   it("measures from where the pointer went down, not the centre of the frame (coordinator resolution 5)", async () => {
     // Two presses starting in very different places, moved by the *same*
     // 40px to the right, must command the identical rate: an operator whose

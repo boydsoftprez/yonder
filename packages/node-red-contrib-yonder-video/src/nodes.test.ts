@@ -39,6 +39,7 @@ const camerasNode = (await import("./cameras.js")).default ?? await import("./ca
 const cameraNode = (await import("./camera.js")).default ?? await import("./camera.js");
 const streamNode = (await import("./stream.js")).default ?? await import("./stream.js");
 const addressNode = (await import("./stream-address.js")).default ?? await import("./stream-address.js");
+const responseNode = (await import('./camera-response.js')).default ?? await import('./camera-response.js');
 const workspaceNode = (await import('./camera-workspace.js')).default ?? await import('./camera-workspace.js');
 const capturesNode = (await import("./captures.js")).default ?? await import("./captures.js");
 
@@ -113,7 +114,7 @@ describe("yonder-cameras", () => {
     const msg = await send(camerasNode, "yonder-cameras", { payload: { forget: "cam1" } });
     expect(asked).toEqual([{ method: "DELETE", path: "/cameras/cam1" }]);
     // Which camera the answer is about, on a message the node emitted fresh.
-    expect(msg.camera).toBeUndefined();
+    expect(msg.camera).toBe("cam1");
     expect((msg.payload as { camera: string }).camera).toBe("cam1");
   });
 
@@ -582,47 +583,60 @@ describe("yonder-captures", () => {
 
 
 describe('yonder-camera-workspace', () => {
-  it('keeps a loading-interval command on A and rejects its delayed read after selecting B', async () => {
+  it.each([undefined, 'probe'])('keeps commands on their camera and rejects late A %s before Picture, Aim and Deck projections', async (topic) => {
     const changeNode = createRequire(import.meta.url)('@node-red/nodes/core/function/15-change.js');
     const flows = JSON.parse(readFileSync(new URL('../../../flows/flows.json', import.meta.url), 'utf8'));
     const addressing = flows.find((node: any) => node.id === 'cam-at-controls');
     const selection = flows.find((node: any) => node.id === 'cam-workspace-selection');
     let finishA!: (reply: DaemonReply) => void;
-    replies.push(new Promise(resolve => { finishA = resolve; }), ok({}), ok({ deck: { camera: { id: 'cam1' }, controls: { B: true } } }));
+    replies.push(new Promise(resolve => { finishA = resolve; }), ok({}), ok({ deck: { camera: { id: 'cam1' }, controls: { B: true } }, picture: { path: 'cam1' }, aim: { url: '/video/cam1/aim' } }));
     const output: Received[] = [];
+    const pictures: Received[] = [], aims: Received[] = [];
     await new Promise<void>(resolve => {
-      void helper.load([workspaceNode, cameraNode, changeNode], [
-        { id: 'read', type: 'yonder-camera', wires: [['project']] },
+      void helper.load([workspaceNode, responseNode, cameraNode, changeNode], [
+        { id: 'read', type: 'yonder-camera', wires: [['response']] },
+        { id: 'response', type: 'yonder-camera-response', wires: [['project', 'picture-project', 'aim-project']] },
+        { id: 'picture-project', type: 'change', rules: flows.find((n: any) => n.id === 'pick-cam-picture').rules, wires: [['picture-out']] },
+        { id: 'aim-project', type: 'change', rules: flows.find((n: any) => n.id === 'pick-cam-aim').rules, wires: [['aim-out']] },
         { id: 'project', type: 'change', rules: [{ t: 'set', p: 'payload', pt: 'msg', to: 'payload.deck', tot: 'msg' }, { t: 'set', p: 'workspaceKind', pt: 'msg', to: 'report', tot: 'str' }], wires: [['workspace']] },
         { id: 'workspace', type: 'yonder-camera-workspace', wires: [['out']] },
-        { id: 'selection', type: 'change', rules: selection.rules, wires: [['workspace']] },
+        { id: 'selection', type: 'change', rules: selection.rules, wires: [['workspace', 'response']] },
         { id: 'address', type: 'change', rules: addressing.rules, wires: [['control']] },
         { id: 'control', type: 'yonder-camera', wires: [['control-out']] },
-        { id: 'out', type: 'helper' }, { id: 'control-out', type: 'helper' },
+        { id: 'out', type: 'helper' }, { id: 'control-out', type: 'helper' }, { id: 'picture-out', type: 'helper' }, { id: 'aim-out', type: 'helper' },
       ].map(node => ({ z: 'testflow', ...node })).concat([{ id: 'testflow', type: 'tab' }] as any), resolve);
     });
     const node = (id: string) => helper.getNode(id) as any;
     node('out').on('input', (message: Received) => output.push(message));
+    node('picture-out').on('input', (message: Received) => pictures.push(message));
+    node('aim-out').on('input', (message: Received) => aims.push(message));
     const tick = () => new Promise(resolve => setImmediate(resolve));
     node('workspace').receive({ workspaceKind: 'selection', camera: 'cam0' });
     node('workspace').receive({ workspaceKind: 'report', camera: 'cam0', payload: { camera: { id: 'cam0' }, controls: { A: true } } });
-    node('read').receive({ camera: 'cam0' }); // This response remains in flight.
+    node('read').receive({ camera: 'cam0', topic }); // This response remains in flight.
     await tick();
     node('selection').context().flow.set('camera', 'cam1');
     const cleared = new Promise<Received>(resolve => node('out').once('input', resolve));
     node('selection').receive({});
     expect((await cleared).payload).not.toHaveProperty('controls');
+    await tick(); await tick();
+    expect(pictures.at(-1)?.payload).toMatchObject({ path: '', aim: null });
+    expect(aims.at(-1)?.payload).toMatchObject({ state: 'gated', url: null });
     const controlled = new Promise<Received>(resolve => node('control-out').once('input', resolve));
     node('address').receive({ camera: 'cam0', topic: 'controls', payload: { brightness: 5 } });
     await controlled;
     expect(asked[1]).toMatchObject({ method: 'POST', path: '/cameras/cam0/controls' });
     const hydrated = new Promise<Received>(resolve => node('out').once('input', resolve));
-    node('read').receive({ camera: 'cam1' });
+    node('read').receive({ camera: 'cam1', topic });
     expect((await hydrated).payload).toMatchObject({ camera: { id: 'cam1' }, controls: { B: true } });
-    const count = output.length;
-    finishA(ok({ deck: { camera: { id: 'cam0' }, controls: { A: true } } }));
+    await tick(); await tick();
+    expect(pictures.at(-1)?.payload).toMatchObject({ path: 'cam1' });
+    expect(aims.at(-1)?.payload).toMatchObject({ url: '/video/cam1/aim' });
+    const count = output.length, pictureCount = pictures.length, aimCount = aims.length;
+    finishA(ok({ deck: { camera: { id: 'cam0' }, controls: { A: true } }, picture: { path: 'cam0' }, aim: { url: '/video/cam0/aim' } }));
     await tick(); await tick(); await tick();
     expect(output).toHaveLength(count);
+    expect(pictures).toHaveLength(pictureCount); expect(aims).toHaveLength(aimCount);
     expect(output.at(-1)?.payload).toMatchObject({ camera: { id: 'cam1' } });
   });
 

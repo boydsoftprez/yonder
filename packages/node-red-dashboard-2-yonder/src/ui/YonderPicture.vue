@@ -569,7 +569,7 @@ export default {
             /** The last cost the flow sent, held across later commands. */
             sentCost: '',
             /** The camera the flow last said this picture is of. */
-            sentPath: '',
+            sentPath: null,
             /** The path the session in hand was negotiated against. */
             negotiated: '',
             tick: null,
@@ -667,7 +667,7 @@ export default {
          */
         streamPath () {
             const configured = this.props.path || ''
-            const path = this.told || configured
+            const path = this.told ?? configured
             // `cameraFor` (`yonder-core/presentation`) is the one place
             // `-preview` is stripped — the console's own viewer-report route
             // strips it the identical way, from the identical function, so

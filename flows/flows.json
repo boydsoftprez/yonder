@@ -4298,13 +4298,7 @@
         "y": 2020,
         "wires": [
             [
-                "pick-cam-strip",
-                "pick-cam-start",
-                "pick-cam-deck",
-                "pick-cam-aim",
-                "pick-cam-picture",
-                "pick-cam-hold",
-                "pick-cam-captures"
+                "camera-response"
             ]
         ]
     },
@@ -8477,13 +8471,7 @@
         "y": 3700,
         "wires": [
             [
-                "pick-cam-strip",
-                "pick-cam-start",
-                "pick-cam-deck",
-                "pick-cam-aim",
-                "pick-cam-picture",
-                "pick-cam-hold",
-                "pick-cam-captures",
+                "camera-response",
                 "cam-workspace-result"
             ]
         ],
@@ -8498,7 +8486,8 @@
         "y": 3740,
         "wires": [
             [
-                "camera-workspace"
+                "camera-workspace",
+                "camera-response"
             ]
         ],
         "rules": [
@@ -8516,6 +8505,25 @@
                 "to": "selection",
                 "tot": "str"
             }
+        ]
+    },
+    {
+        "id": "camera-response",
+        "type": "yonder-camera-response",
+        "z": "yonder-console",
+        "name": "only the selected camera reaches its surfaces",
+        "x": 650,
+        "y": 2010,
+        "wires": [
+            [
+                "pick-cam-strip",
+                "pick-cam-start",
+                "pick-cam-deck",
+                "pick-cam-aim",
+                "pick-cam-picture",
+                "pick-cam-hold",
+                "pick-cam-captures"
+            ]
         ]
     }
 ]

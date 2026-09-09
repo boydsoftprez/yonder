@@ -1,0 +1,10 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<script type="text/html" data-template-name="yonder-camera-response">
+  <div class="form-row"><label for="node-input-name">Name</label><input id="node-input-name" type="text" /></div>
+</script>
+<script type="text/html" data-help-name="yonder-camera-response">
+  <p>Accepts read and refresh responses for the selected camera before their Picture, Aim and Deck projections. Selection messages use <code>workspaceKind: selection</code> and <code>camera</code>; a changed selection clears the previous picture and aim.</p>
+</script>
+<script type="text/javascript">
+  RED.nodes.registerType('yonder-camera-response', { category: 'yonder', color: '#c7d4e0', defaults: { name: { value: '' } }, inputs: 1, outputs: 1, icon: 'font-awesome/fa-video-camera', label: function () { return this.name || 'selected camera response'; } });
+</script>

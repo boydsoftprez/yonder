@@ -612,3 +612,18 @@ describe("an inhibition is not a fault, on every control that shows one", () => 
     });
 });
 });
+
+
+it('stops an active pad when selection retires the prior camera report', async () => {
+    const { wrapper, emit } = mountAim(makeReport());
+    const el = dial(wrapper);
+    press(el, 0, 0); drag(el, 40, 0);
+    expect(slewCalls(emit).length).toBeGreaterThan(0);
+    await wrapper.setProps({ props: { report: { state: 'gated', reason: 'Waiting for the selected camera report.', inhibited: 'Waiting for the selected camera report.', url: null, generation: null, pan: null, tilt: null, bounds: null, mode: null, modes: [] } } });
+    expect(emit.mock.calls.some(call => call[2]?.payload?.stop)).toBe(true);
+    const count = slewCalls(emit).length;
+    drag(el, 40, 0);
+    expect(slewCalls(emit)).toHaveLength(count);
+    expect(wrapper.text()).toContain('Waiting for the selected camera report.');
+    wrapper.unmount();
+});

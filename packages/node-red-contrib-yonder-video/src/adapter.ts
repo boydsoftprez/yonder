@@ -162,7 +162,7 @@ export function registerAdapter(
           shape: "dot",
           text: said,
         });
-        send({ payload: result.value, yonder: state });
+        send({ payload: result.value, yonder: state, ...(wanted.camera === undefined ? {} : { camera: wanted.camera }) });
         done();
       })();
     });
