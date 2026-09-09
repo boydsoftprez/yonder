@@ -32,6 +32,7 @@ export type Ask =
     method: "GET" | "POST" | "DELETE";
     path: string;
     body?: unknown;
+    timeoutMs?: number;
     /**
      * Which camera this request is about, when it is about one.
      *
@@ -108,9 +109,11 @@ export function registerAdapter(
           return;
         }
 
+        const operation = typeof msg.topic === 'string' ? msg.topic : wanted.path.endsWith('/run') ? String((wanted.body as { action?: unknown })?.action ?? 'run') : 'read';
         const reply = await node.client.request({
           method: wanted.method,
           path: wanted.path,
+          ...(wanted.timeoutMs === undefined ? {} : { timeoutMs: wanted.timeoutMs }),
           ...(wanted.body === undefined ? {} : { body: wanted.body }),
         });
         const result = fetched(reply);
@@ -137,7 +140,7 @@ export function registerAdapter(
           const problems = (reply.ok ? reply.body : undefined) as
             { problems?: unknown } | undefined;
           send({
-            payload: null,
+            payload: null, operation,
             yonder: readFailure(result.message, Date.now()),
             ...(Array.isArray(problems?.problems) ? { problems: problems.problems } : {}),
             // **Which camera this answer is about.** The node emits a fresh
@@ -162,7 +165,7 @@ export function registerAdapter(
           shape: "dot",
           text: said,
         });
-        send({ payload: result.value, yonder: state });
+        send({ payload: result.value, operation, yonder: state, ...(wanted.camera === undefined ? {} : { camera: wanted.camera }) });
         done();
       })();
     });

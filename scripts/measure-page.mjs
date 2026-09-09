@@ -178,6 +178,9 @@ export function measure([liveSelectors, fixedSelector, specimenValues, maskedKey
     if (el.clientHeight >= window.innerHeight - 4) continue;
     // A table body scrolling is a table doing its job. Prose is not.
     if (el.closest(".v-data-table__wrapper, .v-table__wrapper")) continue;
+    // A geographic viewport deliberately crops positioned map objects. Its
+    // controls are still measured individually; prose has no such exemption.
+    if (el.classList.contains("leaflet-container")) continue;
     clipped.push({
       key: keyOf(el),
       how: scrolls ? "hides" : "spills over what follows it",
@@ -205,6 +208,23 @@ export function measure([liveSelectors, fixedSelector, specimenValues, maskedKey
    */
   const truncated = [];
   for (const el of document.querySelectorAll("*")) {
+    if (el instanceof SVGTextContentElement) {
+      // SVG labels have no CSS content box. clientWidth/scrollWidth can be
+      // in different coordinate spaces after viewBox scaling and rotation.
+      // Compare painted bounds against the actual SVG viewport instead.
+      // A clipPath is a deliberate graphics viewport (e.g. moving tape ticks).
+      const svg = el.ownerSVGElement;
+      if (!svg || el.closest("[clip-path]")) continue;
+      const text = el.getBoundingClientRect(), viewport = svg.getBoundingClientRect();
+      if (text.width <= 0 || text.height <= 0 || !/hidden|clip|auto|scroll/.test(getComputedStyle(svg).overflowX)) continue;
+      const visible = Math.max(0, Math.min(text.right, viewport.right) - Math.max(text.left, viewport.left));
+      if (text.width > visible + 2) truncated.push({
+        key: keyOf(el) || `svg.${el.tagName.toLowerCase()}`,
+        how: "cuts off", visible: round(visible), content: round(text.width),
+        hidden: Math.round((1 - visible / text.width) * 100), text: words(el).slice(0, 80),
+      });
+      continue;
+    }
     // The page's own sideways scroll is a page-level finding, reported once
     // from `scrollWidth` below rather than once per element on the way down.
     if (el === document.documentElement || el === document.body) continue;
@@ -217,6 +237,7 @@ export function measure([liveSelectors, fixedSelector, specimenValues, maskedKey
     // exactly the case a log message or a rejection reason produces.
     if (el.classList.contains("v-table__wrapper")) continue;
     if (el.classList.contains("v-data-table__wrapper")) continue;
+    if (el.classList.contains("leaflet-container")) continue;
     // **Text**, which is what the rule is about. A track, a rail or a band is
     // drawn to a width and a pixel of rounding against its border is not a
     // reading anybody is missing: `y-budget__track` reported 420px of nothing

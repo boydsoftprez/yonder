@@ -21,6 +21,17 @@ const withCamera = (extra: Record<string, unknown> = {}) => ConfigSchema.parse({
 const PASSWORD = "Kx7-mfPq-2Rn4";
 const yaml = (cfg = withCamera()) => parse(mediamtxConfig({ config: cfg, rtspPassword: PASSWORD }));
 
+it('keeps the observation API private and separates its credential from RTSP players', () => {
+  const y = parse(mediamtxConfig({ config: withCamera(), rtspPassword: PASSWORD, observerPassword: 'observer-fixture-secret' }));
+  expect(y.api).toBe(true);
+  expect(y.apiAddress).toBe('127.0.0.1:9997');
+  expect(y.apiAllowOrigins).toEqual([]);
+  const privileged = y.authInternalUsers.filter((u: { permissions: { action: string }[] }) => u.permissions.some(p => p.action === 'api'));
+  expect(privileged).toEqual([{ user: 'yonder-observer', pass: 'observer-fixture-secret',
+    ips: ['127.0.0.1/32', '::1/128'], permissions: [{ action: 'api' }] }]);
+  expect(y.authInternalUsers.find((u: { user: string }) => u.user === 'yonder').permissions).toEqual([{ action: 'read' }]);
+});
+
 /** One entry of `authInternalUsers`, as the server reads it. */
 interface AuthUser {
   user: string;
@@ -48,7 +59,7 @@ describe("mediamtxConfig", () => {
     expect(y.moq).toBe(false);
   });
 
-  it("leaves no control surface listening either", () => {
+  it("keeps the observation API off when its private credential is absent", () => {
     // These four are off in the server's own defaults today. They are stated
     // anyway for the reason `moq` proves: a default is a decision somebody
     // else gets to change, and the API is a write path into what the aircraft

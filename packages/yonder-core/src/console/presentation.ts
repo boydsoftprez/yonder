@@ -84,7 +84,9 @@ export { atIp } from "../video/present.js";
  * address on the way in — two ends of one string, which is precisely what
  * this entry point exists to keep from being written twice.
  */
-export { cameraFor, captureUrl } from "../video/media-path.js";
+export {
+  cameraFor, captureUrl, stillUrl, STILL_AGE_HEADER, STILL_AT_HEADER,
+} from "../video/media-path.js";
 
 /**
  * The operator-facing word for each capability key — `whiteBalance` is not a

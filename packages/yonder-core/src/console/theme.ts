@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import type { Config } from "../schema/config.js";
+import { brandDataUri } from "./brand.js";
 
 /**
  * Day and night, as two designed palettes rather than a theme and its
@@ -398,9 +399,8 @@ html, body {
 ${panelCss(theme)}
 
 /* ---- the bar across the top -----------------------------------------
-   Machined chrome, not a white slab. It carries the wordmark as a placard:
-   letterspaced caps with a dark shadow, the way a legend is engraved into a
-   panel rather than printed on a card. */
+   The airframe identity is drawn from the same SVG source as the login.
+   The SVG is embedded in this stylesheet so even the logo needs no request. */
 .v-app-bar,
 .v-app-bar.v-toolbar {
   background: transparent !important;
@@ -418,18 +418,33 @@ ${panelCss(theme)}
   text-shadow: 0 1px 1px var(--yonder-engraved);
 }
 
+.v-app-bar-title {
+  display: flex;
+  align-items: center;
+}
+
 .v-app-bar-title::before {
-  content: "YONDER";
+  content: url("${brandDataUri(theme)}") / "Yonder";
   display: inline-block;
+  width: 150px;
+  height: 31.7px;
+  box-sizing: content-box;
+  flex-shrink: 0;
   margin-right: var(--yonder-space-3);
   padding-right: var(--yonder-space-3);
   border-right: 1px solid var(--yonder-bezel);
   box-shadow: 1px 0 0 var(--yonder-lip);
-  font-size: 0.75rem;
-  font-weight: 800;
-  letter-spacing: 0.22em;
-  color: var(--yonder-select);
-  vertical-align: baseline;
+  vertical-align: middle;
+  line-height: 0;
+}
+
+@media (max-width: 400px) {
+  .v-app-bar-title::before {
+    /* A replaced pseudo-element retains the image's intrinsic dimensions. */
+    content: url("${brandDataUri(theme, 120)}") / "Yonder";
+    width: 120px;
+    height: 25.36px;
+  }
 }
 
 /* The navigation drawer is panel, not page. */
@@ -973,6 +988,21 @@ ${panelCss(theme)}
   height: auto !important;
   min-height: 0;
   overflow: visible !important;
+}
+
+/* R-UI-29: variable camera controls and refusal text own their height.
+   The Picture widget is deliberately absent: it retains a bounded slot. */
+.nrdb-ui-widget.yonder-content-height {
+  grid-row-end: auto !important;
+  grid-template-rows: none !important;
+  height: auto !important;
+  min-height: 0;
+  overflow: visible !important;
+}
+.nrdb-ui-widget.yonder-content-height > :first-child {
+  grid-row-end: auto !important;
+  min-height: 0;
+  height: auto;
 }
 
 /* ---- the command-state language, in CSS ------------------------------

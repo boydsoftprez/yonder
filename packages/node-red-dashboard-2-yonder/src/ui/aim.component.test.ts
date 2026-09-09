@@ -106,7 +106,9 @@ function reasonLine(w: VueWrapper<any>) {
     return w.find(".y-aimpanel__reason");
 }
 function dial(w: VueWrapper<any>): Element {
-    return w.find(".y-aim__dial").element;
+    const element = w.find(".y-aim__dial").element;
+    element.getBoundingClientRect = () => ({ left: 0, top: 0, width: 132, height: 132 }) as DOMRect;
+    return element;
 }
 function recentreBtn(w: VueWrapper<any>) {
     return w.find(".y-aimpanel__recentre");
@@ -205,8 +207,8 @@ describe("the live report wins over the configured fallback", () => {
             makeReport({ mode: "FPV" }),
             makeReport({ mode: "Tilt lock" }),
         );
-        expect(wrapper.text()).toContain("Gimbal mode: FPV.");
-        expect(wrapper.text()).not.toContain("Gimbal mode: Tilt lock.");
+        expect(wrapper.findComponent({ name: "YonderSegmented" }).props("value")).toBe("FPV");
+        expect(wrapper.findComponent({ name: "YonderSegmented" }).props("value")).not.toBe("Tilt lock");
     });
 
     it("falls back to the configured report when the store has no message yet", () => {
@@ -218,7 +220,7 @@ describe("the live report wins over the configured fallback", () => {
                 mixins: [{ computed: { $store: () => store } }],
             },
         });
-        expect(wrapper.text()).toContain("Gimbal mode: Tilt lock.");
+        expect(wrapper.findComponent({ name: "YonderSegmented" }).props("value")).toBe("Tilt lock");
     });
 });
 
@@ -240,16 +242,13 @@ describe("position against bounds", () => {
         expect(parseFloat((tiltPtr.element as HTMLElement).style.left)).toBeCloseTo(0.25 * TRACK_WIDTH, 5);
     });
 
-    it("reads both axes dead, with the reason, when bounds is null", () => {
+    it("keeps observed position readable when the joint scale is unknown", () => {
         const { wrapper } = mountAim(makeReport({
             bounds: null, inhibited: "position has not been established yet",
         }));
-        const pan = gaugeByLabel(wrapper, "Pan");
-        const tilt = gaugeByLabel(wrapper, "Tilt");
-        expect(pan.find(".y-pg__val").text()).toBe("—");
-        expect(tilt.find(".y-pg__val").text()).toBe("—");
-        expect(pan.classes()).toContain("is-dead");
-        expect(pan.text()).toContain("position has not been established yet");
+        expect(wrapper.findAll('.y-aimpanel__position dd').map(item => item.text())).toEqual(['12.4°', '-6.0°']);
+        expect(wrapper.find('.y-pg').exists()).toBe(false);
+        expect(wrapper.text()).toContain("position has not been established yet");
     });
 
     it("bounds being null is a fact about reporting, independent of aimState — the pad and Recentre stay live", () => {
@@ -258,7 +257,7 @@ describe("position against bounds", () => {
         // lets the operator slew and Recentre; only the two readings go dead.
         const { wrapper } = mountAim(makeReport({ bounds: null, inhibited: null }));
         expect(recentreBtn(wrapper).attributes("disabled")).toBeUndefined();
-        expect(gaugeByLabel(wrapper, "Pan").classes()).toContain("is-dead");
+        expect(wrapper.find(".y-pg__ptr").exists()).toBe(false);
     });
 });
 
@@ -309,7 +308,7 @@ describe("the RATE CONTROL / NOT ANSWERING badge", () => {
 describe("the mode sentence", () => {
     it("states the current mode as a full sentence", () => {
         const { wrapper } = mountAim(makeReport({ mode: "Tilt lock" }));
-        expect(wrapper.text()).toContain("Gimbal mode: Tilt lock.");
+        expect(wrapper.findComponent({ name: "YonderSegmented" }).props("value")).toBe("Tilt lock");
     });
 
     it("draws nothing where the sentence would be when no mode is reported", () => {
@@ -466,8 +465,8 @@ describe("the dead state, with its reason", () => {
         expect(reasonLine(wrapper).text()).toBe(REASON);
         expect(badge(wrapper).text()).toBe("NOT ANSWERING");
         expect(wrapper.find(".y-aim__dial").exists()).toBe(true);
-        expect(gaugeByLabel(wrapper, "Pan").classes()).toContain("is-dead");
-        expect(gaugeByLabel(wrapper, "Tilt").classes()).toContain("is-dead");
+        expect(wrapper.find(".y-pg__ptr").exists()).toBe(false);
+        expect(wrapper.find(".y-aimpanel__position").exists()).toBe(true);
         expect(recentreBtn(wrapper).attributes("disabled")).toBeDefined();
     });
 
@@ -520,10 +519,9 @@ describe("the struck axis stays drawn", () => {
      * `YonderAimPad`'s own struck-axis logic, which is
      * `aimpad.component.test.ts`'s job already.
      */
-    it("draws roll struck through, every time this panel is live", () => {
+    it("omits roll when the camera offers no roll control", () => {
         const { wrapper } = mountAim(makeReport());
-        expect(wrapper.find(".y-aim__struck").exists()).toBe(true);
-        expect(wrapper.find(".y-aim__struck-label").text()).toContain("ROLL");
+        expect(wrapper.find(".y-aim__struck").exists()).toBe(false);
     });
 });
 
@@ -610,4 +608,19 @@ describe("an inhibition is not a fault, on every control that shows one", () => 
         expect(seg.props("state"), "an inhibition is a gate, not a fault").toBe("gated");
     });
 });
+});
+
+
+it('stops an active pad when selection retires the prior camera report', async () => {
+    const { wrapper, emit } = mountAim(makeReport());
+    const el = dial(wrapper);
+    press(el, 0, 0); drag(el, 40, 0);
+    expect(slewCalls(emit).length).toBeGreaterThan(0);
+    await wrapper.setProps({ props: { report: { state: 'gated', reason: 'Waiting for the selected camera report.', inhibited: 'Waiting for the selected camera report.', url: null, generation: null, pan: null, tilt: null, bounds: null, mode: null, modes: [] } } });
+    expect(emit.mock.calls.some(call => call[2]?.payload?.stop)).toBe(true);
+    const count = slewCalls(emit).length;
+    drag(el, 40, 0);
+    expect(slewCalls(emit)).toHaveLength(count);
+    expect(wrapper.text()).toContain('Waiting for the selected camera report.');
+    wrapper.unmount();
 });

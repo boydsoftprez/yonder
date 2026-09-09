@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { stringify } from "yaml";
 import type { Config } from "../schema/config.js";
-import { RTSP_PORT, SRT_PORT, WEBRTC_LOCAL_UDP_PORT, WEBRTC_PORT } from "./ports.js";
+import { RTSP_PORT, SRT_PORT, WEBRTC_LOCAL_UDP_PORT, WEBRTC_PORT, MEDIA_OBSERVER_PORT } from "./ports.js";
 
 /**
  * The media server's configuration, generated from Yonder's (R-SEC-13).
@@ -49,6 +49,7 @@ export interface MediaFacts {
   readonly config: Config;
   /** Resolved from secrets.yaml. Never logged, never in a support bundle. */
   readonly rtspPassword: string;
+  readonly observerPassword?: string;
 }
 
 /**
@@ -57,6 +58,8 @@ export interface MediaFacts {
  * (R-SEC-01).
  */
 export const RTSP_USER = "yonder";
+export const MEDIA_OBSERVER_USER = "yonder-observer";
+export const MEDIA_OBSERVER_SECRET = "media_observer_password";
 
 /**
  * Who may act without a password, and from where.
@@ -74,6 +77,7 @@ const LOOPBACK = ["127.0.0.1/32", "::1/128"];
 export function mediamtxConfig(facts: MediaFacts): string {
   const { config, rtspPassword } = facts;
   const cameras = config.cameras;
+  const observerEnabled = Boolean(facts.observerPassword) && cameras.some(camera => camera.outputs.some(output => output.kind === "rtsp" && output.enabled));
 
   // `publisher`, never a URL: mediamtx will otherwise dial out for a source,
   // which would be the aircraft fetching video rather than serving it.
@@ -118,6 +122,10 @@ export function mediamtxConfig(facts: MediaFacts): string {
       // Reading, and only reading. A ground station holding this may watch
       // what the aircraft sends; it may not replace it.
       { user: RTSP_USER, pass: rtspPassword, ips: [], permissions: [{ action: "read" }] },
+      ...(observerEnabled ? [{
+        user: MEDIA_OBSERVER_USER, pass: facts.observerPassword, ips: LOOPBACK,
+        permissions: [{ action: "api" }],
+      }] : []),
     ],
 
     // R-VID-04. Publishing and reading both happen here; the two entries above
@@ -151,10 +159,13 @@ export function mediamtxConfig(facts: MediaFacts): string {
     hls: false,
     moq: false,
 
-    // Not media, and off for the same reason. The API is a write path into
-    // what the server is serving; the other three are read paths into what
-    // this device is doing.
-    api: false,
+    // Administrative observation is private; unused diagnostic listeners stay off.
+    // The privileged daemon reads session metadata using a distinct secret.
+    // The generated file and secret are private; RTSP credentials grant no API
+    // access, and the console exposes no proxy to this internal listener.
+    api: observerEnabled,
+    apiAddress: "127.0.0.1:" + MEDIA_OBSERVER_PORT,
+    apiAllowOrigins: [],
     metrics: false,
     pprof: false,
     playback: false,

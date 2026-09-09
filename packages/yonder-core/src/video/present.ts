@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import { HG211_MAX_RATE_DEG_S } from './accessory/guard.js';
 import type { Camera } from "../schema/config.js";
 import {
   CAPABILITY_KEYS, noCapabilities, present,
@@ -6,7 +7,8 @@ import {
   type RecordingCapability, type StillsCapability,
 } from "./capability.js";
 import { describe, type DescriptorView } from "./descriptors.js";
-import { FLIP_KEYS, TURNED_BY_SAYS, turnedBy, turningSays, type FlipKey } from "./orientation.js";
+import { FLIP_KEYS, TURNED_BY_SAYS, turnedBy, turningSays, imageDirection, type FlipKey, type VideoDirection } from "./orientation.js";
+import { stillUrl } from "./media-path.js";
 import { outputReach, type OutputKind, type OutputReach, type ReachPaths } from "./outputs.js";
 import type { RecordingState } from "./recorder.js";
 import type { RunState } from "./supervisor.js";
@@ -314,6 +316,7 @@ export interface CameraStrip {
    * truth when everything is fine is worse than one that says nothing.
    */
   readonly startCheck: string;
+  readonly startBlocked: string | null;
   /**
    * What watching this camera in the browser costs, both copies, before it is
    * asked for (R-VID-11).
@@ -424,6 +427,7 @@ export function cameraStrip(view: {
       : "no full-rate stream on this camera; add an RTSP output",
     fullRate,
     startCheck: view.refusal ?? "nothing is stopping it",
+    startBlocked: view.refusal ?? null,
     device: view.device ?? "not resolved",
     identity: identityWords(view.device === null ? null : camera.device, view.byPathStable),
     encoder: `${view.encoder.element} · ${view.encoder.hardware ? "hardware" : "software"}`,
@@ -661,7 +665,7 @@ const NOTHING_TO_REMOVE = "nothing is configured on this socket, so there is not
  */
 export function cameraIndex(input: {
   readonly found: readonly {
-    readonly source?: "usb" | "csi";
+    readonly source?: "usb" | "accessory" | "csi";
     readonly device: string;
     readonly card: string;
     readonly byPath: string;
@@ -891,23 +895,30 @@ export interface DeckCapture {
 
 /** `ui-yonder-deck`'s whole payload — `YonderDeck.vue`'s own documented shape. */
 export interface CameraDeck {
-  readonly camera: { readonly id: string; readonly name: string; readonly spec: string };
+  readonly run?: { state: string; reason?: string };
+  readonly startBlocked?: string | null;
+  readonly runtime?: ReturnType<import("./viewers.js").Viewers["runtime"]>;
+  readonly accessory?: ReturnType<import('./accessory/source.js').AccessorySources['snapshot']>;
+  readonly aim?: AimPanel;
+  readonly camera: { readonly id: string; readonly name: string; readonly spec: string; readonly identity?: string };
   readonly capabilities: CameraCapabilities;
   readonly descriptors: Record<string, DescriptorView>;
   readonly values: Record<string, number | null>;
   readonly commanded: Record<string, number | null>;
   readonly policy: {
+    readonly image: Camera['image'];
     readonly capture: DeckCapture;
     readonly stream: Camera["stream"] & { bitrate_kbps: number };
     readonly preview: Camera["preview"];
   };
   readonly applied: {
+    readonly image: Camera['image'];
     readonly capture: DeckCapture;
     readonly stream: Camera["stream"] & { bitrate_kbps: number };
     readonly preview: Camera["preview"];
   };
   readonly outputs: readonly DeckOutput[];
-  readonly captures: { readonly count: number };
+  readonly captures: { readonly count: number | null };
   /**
    * What this camera's recorder is doing, and what the medium has left
    * (R-CAM-17, R-STO-06).
@@ -1088,6 +1099,11 @@ const OUTPUT_LABEL: Record<OutputKind, string> = {
  * was actually sent — one calculation, two callers, neither of them this one.
  */
 export function cameraDeck(view: {
+  readonly run?: CameraDeck["run"];
+  readonly identity?: string;
+  readonly startBlocked?: string | null;
+  readonly runtime?: CameraDeck["runtime"];
+  readonly accessory?: ReturnType<import('./accessory/source.js').AccessorySources['snapshot']>;
   readonly camera: Camera;
   readonly capabilities: CameraCapabilities | null;
   readonly encoder: { readonly element: string; readonly hardware: boolean };
@@ -1135,14 +1151,18 @@ export function cameraDeck(view: {
     },
     stream: { ...camera.stream, bitrate_kbps: camera.bitrate_kbps },
     preview: camera.preview,
+    image: camera.image ?? { brightness: 0, contrast: 100, saturation: 100, hue: 0 },
   };
   return {
     camera: {
       id: camera.id,
       name: camera.name,
+      identity: view.identity,
       spec: `${camera.source.toUpperCase()} · ${camera.codec.toUpperCase()} · `
         + `${camera.width}×${camera.height}p${camera.framerate} · ${view.encoder.element}`,
     },
+    accessory: view.accessory,
+    aim: aimPanel(caps, view.accessory, camera.id, 'control', camera.controls),
     // The two the board carries for a camera that has neither of its own.
     // See `deckCapture()` for why this is composed rather than read.
     capabilities: { ...caps, ...deckCapture(caps, view.recorder ?? null) },
@@ -1151,6 +1171,9 @@ export function cameraDeck(view: {
     commanded,
     policy,
     applied: policy,
+    runtime: view.runtime,
+    run: view.run,
+    startBlocked: view.startBlocked,
     outputs: camera.outputs.map((output) => ({
       kind: output.kind,
       label: OUTPUT_LABEL[output.kind],
@@ -1158,7 +1181,7 @@ export function cameraDeck(view: {
       costKbps: atIp(camera.bitrate_kbps),
       reach: outputReach(output.kind, view.paths),
     })),
-    captures: { count: view.captures ?? 0 },
+    captures: { count: view.accessory ? null : view.captures ?? 0 },
     recorder: view.recorder ?? null,
     orientation: deckOrientation(caps, camera, values),
   };
@@ -1229,8 +1252,99 @@ function deckOrientation(
   };
 }
 
+/** One camera as the strip under the picture draws it (blueprint L-20). */
+export interface ThumbRow {
+  readonly id: string;
+  readonly name: string;
+  /** The camera the picture above the strip is showing. */
+  readonly active: boolean;
+  /** Whole seconds since the still was taken, or null where there is none. */
+  readonly ageSeconds: number | null;
+  /**
+   * Where the browser fetches the still, or null where there is nothing to
+   * fetch. Carries the still's own `at` as a query, so a new frame is a new
+   * address and a browser re-fetches exactly when there is a new frame —
+   * never a cached one under a fresh age, and never the same one twice.
+   */
+  readonly thumbSrc: string | null;
+  /** No pipeline: drawn as stopped, never as a stale frame. */
+  readonly stopped: boolean;
+}
+
+/** `payload.cameras` and `payload.downlink`, as `YonderPicture.vue` reads
+ *  them and `YonderThumbStrip.vue` draws them (blueprint L-20, L-22). */
+export interface ThumbStrip {
+  readonly cameras: readonly ThumbRow[];
+  readonly downlink: string;
+}
+
+/**
+ * The strip under the picture: every camera as a thumbnail, the others as
+ * periodic stills, and what all of those stills cost (R-VID-14, R-VID-11;
+ * blueprint L-20, L-22; spec §8.6).
+ *
+ * **One thumb per camera, the active one included** — the coordinator's own
+ * correction to §6's "the others as stills", so every camera keeps a fixed
+ * place in the strip whichever one is on the main picture.
+ *
+ * The active row uses the same shared still as every other row. This keeps a
+ * one-camera device from presenting an empty strip; its delivered copy is
+ * accounted independently of the live-video selection.
+ *
+ * **A stopped camera is stopped, not stale.** No frame can be taken from a
+ * pipeline that is not running, so the row says so; a still from before it
+ * stopped is not a picture of what the camera sees.
+ *
+ * `downlink` is the sum of every still copy leaving this device, for every
+ * viewer and every camera, in the words the blueprint draws under `OTHER
+ * CAMERAS` — and it is *counted in Path total*, the same copies
+ * `cost.path` already includes, stated on their own so an operator can see
+ * what the strip itself is costing.
+ */
+export function thumbStrip(view: {
+  readonly cameras: readonly Camera[];
+  readonly active: string;
+  /** The supervisor's own observation for each id (R-CTL-10). */
+  readonly run: (id: string) => RunState;
+  /** The still this device holds for each id — `Stills.latest`. */
+  readonly still: (id: string) => { readonly at: number } | null;
+  /** When this is composed, in the daemon's clock. */
+  readonly now: number;
+  /** Every still copy leaving this device, kb/s at IP — `Viewers.stillsKbps`. */
+  readonly stillsKbps: number;
+}): ThumbStrip {
+  const cameras = view.cameras.map((camera): ThumbRow => {
+    const active = camera.id === view.active;
+    const run = view.run(camera.id);
+    const stopped = run !== "running" && run !== "starting";
+    const still = stopped ? null : view.still(camera.id);
+    return {
+      id: camera.id,
+      name: camera.name,
+      active,
+      ageSeconds: still === null ? null : Math.max(0, Math.floor((view.now - still.at) / 1000)),
+      thumbSrc: still === null ? null : `${stillUrl(camera.id)}?at=${String(still.at)}`,
+      stopped,
+    };
+  });
+  return {
+    cameras,
+    downlink: `${String(Math.round(view.stillsKbps))} kb/s of stills · counted in Path total`,
+  };
+}
+
 /** `ui-yonder-aim`'s whole payload — `YonderAim.vue`'s own documented shape. */
 export interface AimPanel {
+  readonly imageDirection?: VideoDirection;
+  readonly maxRate?: number;
+  readonly admitted?: { pan: number; tilt: number };
+  readonly modeInhibited?: string | null;
+  readonly recentreInhibited?: string | null;
+  readonly motionNotice: string | null;
+  readonly directionalRefusals?: string[];
+  readonly camera?: string;
+  readonly url?: string;
+  readonly generation?: number;
   readonly state: Capability<unknown>["state"];
   readonly reason: string | null;
   readonly pan: number | null;
@@ -1258,12 +1372,29 @@ export interface AimPanel {
  * claiming a fact about the gimbal that nothing read, which is the same
  * defect as an unmeasured rate one field over.
  */
-export function aimPanel(caps: CameraCapabilities | null): AimPanel {
+export function aimPanel(caps: CameraCapabilities | null, source?: ReturnType<import('./accessory/source.js').AccessorySources['snapshot']>, camera?: string,
+  scope: 'control' | 'picture' = 'control', imageControls: Partial<Camera['controls']> = {}): AimPanel {
+  if (source) {
+    const names = ['Free', 'FPV', 'Follow'];
+    // Standalone Aim depends on USB/DUML continuity. A drag on the Picture
+    // additionally depends on that picture's media epoch and retires with it.
+    const generation = scope === 'picture' ? source.input?.generation ?? source.generation : source.controlGeneration;
+    return { camera, url: camera ? `/video/${camera}/aim` : undefined, generation, imageDirection: imageDirection(imageControls), maxRate: HG211_MAX_RATE_DEG_S, admitted: source.admitted,
+      state: 'present', reason: null, pan: source.attitude?.yaw ?? null, tilt: source.attitude?.pitch ?? null,
+      modeInhibited: source.modes.some(mode => mode.allowed) ? null : source.modes.find(mode => !mode.allowed)?.reason ?? 'trajectory-unverified',
+      recentreInhibited: source.recentre.allowed ? null : source.recentre.reason,
+      motionNotice: source.motionNotice,
+      directionalRefusals: Object.entries(source.directions ?? {}).flatMap(([label, result]) => result.allowed ? [] : [`${label}: ${result.reason.replaceAll('-', ' ')}`]),
+      bounds: source.envelope?.yaw && source.envelope?.pitch ? { pan: source.envelope.yaw, tilt: source.envelope.pitch } : null,
+      atLimit: { pitch: source.attitude?.pitchLimit ?? false, yaw: source.attitude?.yawLimit ?? false },
+      mode: source.attitude ? names[source.attitude.mode] ?? null : null, modes: names, inhibited: source.inhibition };
+  }
   const aim = (caps ?? noCapabilities()).aim;
   const empty = {
     pan: null, tilt: null, bounds: null,
     atLimit: { pitch: false, yaw: false },
     mode: null, modes: [] as string[],
+    motionNotice: null,
   };
   if (aim.state === "not-offered") {
     return { state: "not-offered", reason: null, inhibited: null, ...empty };
@@ -1285,6 +1416,7 @@ export function aimPanel(caps: CameraCapabilities | null): AimPanel {
   return {
     state: "present",
     reason: null,
+    motionNotice: null,
     // §8.7's 20 Hz attitude push is unbuilt, so nothing has reported where
     // this gimbal is pointing. `null` is that fact; a zero would be a claim.
     pan: null,

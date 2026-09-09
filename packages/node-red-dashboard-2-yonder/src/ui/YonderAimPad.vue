@@ -4,15 +4,15 @@
         <svg ref="dial" class="y-aim__dial" :class="{ 'is-pushing': pushing, 'is-inhibited': !!inhibited }"
              :width="DIAL_SIZE" :height="DIAL_SIZE" viewBox="0 0 118 118"
              @pointerdown="down" @pointermove="move"
-             @pointerup="onEnd" @pointercancel="onEnd" @pointerleave="onEnd" @lostpointercapture="onEnd">
+             @pointerup="onEnd" @pointercancel="onEnd" @pointerleave="onLeave" @lostpointercapture="onEnd">
             <circle class="y-aim__ring" cx="59" cy="59" r="54" />
             <!-- crosshair, stopping short of the puck -->
             <g class="y-aim__cross">
                 <path d="M59 8v37 M59 73v38 M8 59h37 M73 59h38" />
             </g>
             <g class="y-aim__labels" font-size="7.5" font-family="ui-sans-serif,system-ui" letter-spacing=".8" text-anchor="middle">
-                <text x="59" y="24">TILT +</text><text x="59" y="89">PAN</text>
-                <text x="22" y="62">&#8722;</text><text x="96" y="62">+</text>
+                <text x="59" y="24">UP</text><text x="59" y="89">DOWN</text>
+                <text x="22" y="62">LEFT</text><text x="96" y="62">RIGHT</text>
             </g>
             <!-- an axis that will not answer stays on the pad, struck and labelled -->
             <g v-if="rollStruck" class="y-aim__struck">
@@ -25,12 +25,26 @@
             <circle class="y-aim__puck-core" :cx="px" :cy="py" r="6.5" />
         </svg>
 
+        <label class="y-aim__expo">
+            <span class="y-aim__expo-label">Max speed <output>{{ selectedSpeed }}°/s</output></span>
+            <input type="range" aria-label="Maximum gimbal speed" min="1" :max="rateLimit" step="1"
+                   :value="selectedSpeed" :disabled="rateLimit < 1"
+                   :aria-valuetext="`${selectedSpeed} degrees per second`" @input="changeSpeed" />
+        </label>
+        <label class="y-aim__expo">
+            <span class="y-aim__expo-label">Stick expo <output>{{ expo }}%</output></span>
+            <input type="range" aria-label="Stick expo" min="0" max="100" step="5"
+                   :value="expo" :aria-valuetext="`${expo}% expo`" @input="changeExpo" />
+            <span class="y-aim__expo-help">Soft center; full speed at the edge.</span>
+        </label>
+
         <div v-if="limited" class="y-aim__limit"><i class="y-aim__limit-dot" />At the limit</div>
         <div v-if="inhibited" class="y-aim__reason">{{ inhibited }}</div>
     </div>
 </template>
 
 <script>
+import { EXPO_KEY, SPEED_KEY, savedNumber, rateLimit, responseMagnitude, saveResponse } from './aim-response.ts'
 /**
  * The aim pad — a gimbal's pan and tilt, slewed at a rate for as long as an
  * operator holds the pad (R-CAM-11). This is the only control in this whole
@@ -87,8 +101,8 @@
  *
  * **Exactly one stop, for all eight endings, including the four that are
  * not pointer events at all** (coordinator resolution 5). `pointerup`,
- * `pointercancel`, `pointerleave` and `lostpointercapture` all reach the
- * same `onEnd()`, as do window `blur`, `visibilitychange` to hidden and
+ * `pointercancel`, uncaptured `pointerleave` and `lostpointercapture` reach
+ * the same `onEnd()`, as do window `blur`, `visibilitychange` to hidden and
  * `pagehide` (attached in `mounted()`/removed in `beforeUnmount()`, the
  * same lifecycle `YonderHoldKey` already uses for its own `visibilitychange`
  * listener). `onEnd()` itself is trivial — reset `pointerId` and call
@@ -127,43 +141,15 @@
  * struck, the same "not known is not assumed safe" rule R-CMD-04 states
  * for a command applied here to a reading.
  *
- * **`jsdom` has no pointer capture and measures nothing** (coordinator
- * resolution 8) — see `DIAL_SIZE`'s own comment below, and
- * `aimpad.component.test.ts`'s top-of-file comment for the third trap,
- * `@vue/test-utils`' own `trigger()` refusing a coordinate.
+ * Layout is measured at each input event. Tests provide explicit element
+ * bounds; a missing or degenerate layout ends the hold instead of inventing
+ * a direction. Pointer capture keeps a held gesture usable outside the rim.
  */
 
-/** The SVG viewBox's own centre — `viewBox="0 0 118 118"`. */
+/** The SVG viewBox's own centre and width/height. */
 const CENTER = 59
-/** The viewBox's own width/height, in SVG user units. */
 const VIEWBOX = 118
-/**
- * The dial's rendered size, in CSS pixels — bound into the template's own
- * `:width`/`:height` and used by `at()` below, never a measurement of the
- * rendered element.
- *
- * `jsdom` performs no layout at all: `getBoundingClientRect()` on the dial
- * returns a real `DOMRect`, not `undefined`, with `width` and `height` (and
- * `left`/`top`) reading zero — confirmed directly against this project's
- * own installed jsdom before writing a single test against it, the same
- * check `YonderSetBar`'s own `TRACK_WIDTH` comment describes for its track.
- * Converting a press with `(e.clientX - rect.left) / rect.width` is
- * therefore `x / 0` under every test in this file, which collapses every
- * press to whichever the clamp resolves an out-of-domain number to — the
- * exact "passes only because everything measures zero" failure the brief
- * warns against.
- *
- * The fix is the one this whole library already uses: the width the
- * geometry math assumes is this constant, the same number the dial's own
- * `:width`/`:height` render from, so the two can never drift apart and the
- * conversion is exact under `jsdom` and in a real browser alike. Only the
- * dial's own on-page *position* (`rect.left`/`rect.top`) still comes from
- * `getBoundingClientRect()` — a genuine layout fact no constant could stand
- * in for — and it reads zero here too, which is harmless: nothing in
- * `aimpad.component.test.ts` wraps the dial in an offset container, so a
- * press computed for SVG-space `(x, y)` lands at exactly that many CSS
- * pixels from the dial's own left/top edge either way.
- */
+/** Default visual size only; input uses the actual rendered bounds. */
 const DIAL_SIZE = 132
 /** The dashed centre: no command inside it (the dead zone). */
 const DEAD = 15
@@ -171,6 +157,7 @@ const DEAD = 15
 const RIM = 44
 /** Degrees per second at the rim. */
 const MAX_RATE = 30
+const DEFAULT_EXPO = 50
 
 /**
  * A fresh id for a new gesture — module-scoped so two mounted pads (and,
@@ -188,6 +175,7 @@ function newGestureId () {
 export default {
     name: 'YonderAimPad',
     props: {
+        maxRate: { type: Number, default: MAX_RATE },
         /** Per-axis capability state. Only `roll`'s absence from
          * `'present'` is drawn (struck) — the pad has no gesture for a
          * third axis at all. */
@@ -206,9 +194,15 @@ export default {
         px: CENTER,
         py: CENTER,
         pointerId: null,
+        expo: savedNumber(EXPO_KEY, DEFAULT_EXPO, 0, 100),
+        preferredSpeed: savedNumber(SPEED_KEY, 60, 1, 120),
         DIAL_SIZE
     }),
     computed: {
+        rateLimit () {
+            return rateLimit(this.maxRate)
+        },
+        selectedSpeed () { return Math.min(this.preferredSpeed, this.rateLimit) },
         /** A gesture is active exactly while the pointer is outside the
          * dead zone — not merely while it is physically held, so the puck
          * sits at rest even under a finger resting at dead centre. */
@@ -218,17 +212,18 @@ export default {
         /** Fails closed: an `axes` object that omits `roll` entirely reads
          * as struck, not present (see the component's own doc comment). */
         rollStruck () {
-            return this.axes?.roll !== 'present'
+            return this.axes?.roll === 'advertised' || this.axes?.roll === 'gated'
         },
         limited () {
             return Boolean(this.atLimit?.pitch || this.atLimit?.yaw)
         }
     },
     watch: {
+        rateLimit () { this.onEnd() },
         /** R-CMD-04: an inhibition that arrives mid-gesture stops the
          * aircraft immediately, not on the operator's next release. */
         inhibited (now) {
-            if (now) this.endGesture()
+            if (now) this.onEnd()
         }
     },
     mounted () {
@@ -248,25 +243,47 @@ export default {
         this.onEnd()
     },
     methods: {
+        changeSpeed (e) {
+            const value = Number(e.target.value)
+            if (!Number.isFinite(value) || value < 1 || value > this.rateLimit) return
+            this.onEnd()
+            this.preferredSpeed = value
+            saveResponse(SPEED_KEY, value)
+        },
+        changeExpo (e) {
+            const value = Number(e.target.value)
+            if (!Number.isFinite(value) || value < 0 || value > 100) return
+            // A response change ends existing intent; it cannot alter a held command.
+            this.onEnd()
+            this.expo = value
+            saveResponse(EXPO_KEY, value)
+        },
         /** A pointer event's client coordinates, converted to this pad's
-         * own geometry. `null` inside the dead zone. See `DIAL_SIZE`'s own
-         * comment for why the size used here is that constant and never a
-         * measurement of the dial. */
+         * own geometry: null in the dead zone, false for unusable layout. */
         at (e) {
             const rect = this.$refs.dial.getBoundingClientRect()
-            const x = ((e.clientX - rect.left) / DIAL_SIZE) * VIEWBOX - CENTER
-            const y = ((e.clientY - rect.top) / DIAL_SIZE) * VIEWBOX - CENTER
+            if (![rect.left, rect.top, rect.width, rect.height, e.clientX, e.clientY].every(Number.isFinite)
+                || rect.width <= 0 || rect.height <= 0) return false
+            // SVG's default xMidYMid meet paints a centered square, with
+            // letterboxing in a non-square viewport. Use that painted scale.
+            const scale = Math.min(rect.width, rect.height) / VIEWBOX
+            const x = (e.clientX - rect.left - rect.width / 2) / scale
+            const y = (e.clientY - rect.top - rect.height / 2) / scale
             const d = Math.hypot(x, y)
+            if (!Number.isFinite(d)) return false
             if (d <= DEAD) return null
             const k = Math.min(1, (d - DEAD) / (RIM - DEAD))
+            // Shape radial magnitude, preserving diagonals and the full-throw cap.
+            // 0% is linear; 100% is cubic. There is no time smoothing or stop tail.
+            const speed = responseMagnitude(k, this.expo, this.selectedSpeed)
             const ux = x / d
             const uy = y / d
             return {
                 x: CENTER + ux * Math.min(d, RIM),
                 y: CENTER + uy * Math.min(d, RIM),
                 // Screen y grows downward; tilt does not, hence the sign flip.
-                panRate: ux * k * MAX_RATE,
-                tiltRate: -uy * k * MAX_RATE
+                panRate: ux * speed,
+                tiltRate: -uy * speed
             }
         },
         down (e) {
@@ -278,7 +295,7 @@ export default {
             // pointer's own eventual release.
             if (this.pointerId !== null) return
             this.pointerId = e.pointerId
-            this.$refs.dial.setPointerCapture?.(e.pointerId)
+            try { this.$refs.dial.setPointerCapture?.(e.pointerId) } catch { /* Leave stops if capture was refused. */ }
             this.updateFromEvent(e)
         },
         move (e) {
@@ -293,6 +310,7 @@ export default {
         updateFromEvent (e) {
             if (this.inhibited) { this.endGesture(); return }
             const a = this.at(e)
+            if (a === false) { this.onEnd(); return }
             if (!a) { this.endGesture(); return }
             if (this.gesture === null) this.gesture = newGestureId()
             this.px = a.x
@@ -326,9 +344,17 @@ export default {
          * load-bearing. Resetting `pointerId` unconditionally is still
          * real work, not a guard: it is what lets a later, genuinely new
          * press through `down()`'s own re-entrancy guard. */
+        onLeave () {
+            try { if (this.pointerId !== null && this.$refs.dial.hasPointerCapture?.(this.pointerId)) return } catch { /* No known capture: stop. */ }
+            this.onEnd()
+        },
         onEnd () {
+            const pointerId = this.pointerId
             this.pointerId = null
             this.endGesture()
+            try {
+                if (pointerId !== null && this.$refs.dial?.hasPointerCapture?.(pointerId)) this.$refs.dial.releasePointerCapture?.(pointerId)
+            } catch { /* Already released by the browser. */ }
         }
     }
 }
@@ -336,18 +362,35 @@ export default {
 
 <style scoped>
 .y-aim {
-    display: inline-flex;
-    flex-direction: column;
-    align-items: flex-start;
+    display: grid;
+    grid-template-columns: 118px minmax(0, 1fr);
+    align-items: start;
+    width: 100%;
     gap: 8px;
     font-family: var(--yonder-font, system-ui, sans-serif);
 }
 .y-aim__dial {
+    grid-row: 1 / span 2;
+    width: 118px; height: 118px;
+    user-select: none; -webkit-user-select: none;
     cursor: grab;
     touch-action: none;
 }
 .y-aim__dial.is-pushing { cursor: grabbing; }
 .y-aim__dial.is-inhibited { cursor: not-allowed; }
+.y-aim__expo {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    grid-column: 2;
+    width: 100%;
+    max-width: 100%;
+    color: var(--yonder-label, #7f8a95);
+}
+.y-aim__expo-label { display: flex; justify-content: space-between; gap: 12px; font-size: 11px; }
+.y-aim__expo-label output { color: var(--yonder-value, #cdd5dc); font-variant-numeric: tabular-nums; }
+.y-aim__expo input { width: 100%; margin: 0; accent-color: var(--yonder-select, #2ad4f0); }
+.y-aim__expo-help { font-size: 10px; line-height: 1.4; }
 
 .y-aim__ring { fill: none; stroke: var(--yonder-divider, #2b333c); stroke-width: 1; }
 .y-aim__cross { stroke: var(--yonder-divider, #2b333c); stroke-width: 1; fill: none; }
@@ -377,6 +420,7 @@ export default {
 }
 
 .y-aim__limit {
+    grid-column: 1 / -1;
     display: inline-flex;
     align-items: center;
     gap: 6px;
@@ -401,6 +445,7 @@ export default {
    YonderPositionGauge's own dead-axis reason and every gated control in
    this library already use for "not available right now, not broken". */
 .y-aim__reason {
+    grid-column: 1 / -1;
     font-size: 11px;
     line-height: 1.4;
     max-width: 200px;

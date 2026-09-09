@@ -204,7 +204,7 @@ describe("renderReceive", () => {
       const noRtp = { ...FACTS, camera: { ...CAMERA, outputs: [CAMERA.outputs[1]] } as Camera };
       for (const kind of ["gstreamer", "dialog", "appsink"]) {
         expect(of(kind, noRtp).usable, kind).toBe(false);
-        expect(of(kind, noRtp).note, kind).toMatch(/no RTP output/);
+        expect(of(kind, noRtp).note, kind).toMatch(/No RTP destination/);
       }
       // The RTSP line is about a different output and is unaffected.
       expect(of("url", noRtp).usable).toBe(true);

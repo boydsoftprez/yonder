@@ -166,6 +166,20 @@ const LONG = "a value far too long for one hundred pixels of box to hold";
 
 // ---- specimens, and the three-way decision ---------------------------------
 {
+  const scaled = await sideways('<svg width="100" height="100" viewBox="0 0 400 400"><g transform="rotate(30 200 200)"><text x="100" y="200" font-size="40">NORTH</text></g></svg>');
+  const clipped = await sideways('<svg width="100" height="100" style="overflow:hidden"><text x="85" y="50" font-size="30">NORTH</text></svg>');
+  if (scaled.length === 0 && clipped.length === 1 && clipped[0].how === "cuts off") {
+    ok("scaled SVG labels fit their viewport; genuinely clipped SVG text is reported");
+  } else {
+    bad("SVG text is measured in rendered coordinates", `${JSON.stringify(scaled)} / ${JSON.stringify(clipped)}`);
+  }
+}
+{
+  const map = await sideways(`<div class="leaflet-container box hid host"><div style="position:absolute;left:400px;top:400px">geographic target</div><button class="box hid">${LONG}</button></div>`);
+  if (map.length === 1 && map[0].text === LONG.slice(0, 80)) ok("a geographic viewport clips placed targets, while overflowing control text is reported");
+  else bad("map viewport retains control-text checks", JSON.stringify(map));
+}
+{
   await tab.setContent(`<!doctype html><meta charset="utf-8">
     <div class="nrdb-ui-widget nrdb-ui-text">
       <span class="nrdb-ui-text-label">UPLINK</span><span class="reading">4.55 Mb/s</span>

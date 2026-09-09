@@ -27,8 +27,8 @@ import type { RED } from "./red.js";
  * confirmation window. A plain input carrying a payload still stays a read
  * (nothing about that changed) — a control change has to name itself.
  *
- * `msg.topic === "probe"` re-reads the one device — the Setup deck's
- * *Re-probe* key. It is a different route, not different behaviour: both
+ * `msg.topic === "probe"` re-reads the one device — the Camera workspace's
+ * *Refresh camera* key. It is a different route, not different behaviour: both
  * answer the same shape, and the daemon owns what a re-probe means.
  */
 export = function register(RED: RED): void {
@@ -38,6 +38,16 @@ export = function register(RED: RED): void {
     (msg, config) => {
       const id = cameraId(msg, config);
       if (id === null) return { refuse: NO_CAMERA };
+      if (msg.topic === 'aim') {
+        // Already-issued requests only: never freshen an old flow slew at receipt.
+        const owner = msg.viewer;
+        const request = msg.payload as { op?: unknown; deadline?: unknown; credential?: unknown; gesture?: unknown } | null;
+        if (typeof owner !== 'string' || !/^[A-Za-z0-9_.:-]{1,128}$/.test(owner) || !request || typeof request !== 'object'
+          || !['slew', 'stop', 'recentre', 'mode'].includes(String(request.op))
+          || (request.op === 'slew' && (typeof request.deadline !== 'number' || typeof request.credential !== 'string' || typeof request.gesture !== 'string')))
+          return { refuse: 'Aim needs an authenticated viewer and an already-issued request; use the private console aim transport to obtain a grant' };
+        return { method: 'POST', path: `/cameras/${id}/aim`, body: { owner, request }, camera: id };
+      }
       if (msg.topic === "controls") {
         const controls = msg.payload;
         // Nothing here decides whether a value is one this device will take —
@@ -50,7 +60,7 @@ export = function register(RED: RED): void {
         return { method: "POST", path: `/cameras/${id}/controls`, body: controls, camera: id };
       }
       /**
-       * The Setup deck's **Apply** — one whole draft, once (R-CFG-03).
+       * The Camera workspace's **Apply** — one whole draft, once (R-CFG-03).
        *
        * A different route from `settings` below, and the difference is the
        * defect this task is named for. `settings` takes one flat key at a
@@ -72,7 +82,7 @@ export = function register(RED: RED): void {
         if (draft === null || typeof draft !== "object" || Array.isArray(draft)) {
           return { refuse: "an apply needs a draft naming what to change" };
         }
-        return { method: "POST", path: `/cameras/${id}/apply`, body: draft, camera: id };
+        return { method: "POST", path: `/cameras/${id}/apply`, body: draft, camera: id, timeoutMs: 60000 };
       }
       /**
        * What this browser is watching, and what it measured (spec §8.2).
@@ -134,7 +144,7 @@ export = function register(RED: RED): void {
       // this changes what the camera *is* rather than what it is doing, so it
       // goes through the apply engine and inherits the confirmation window and
       // the rollback — which is why the answer is an apply's, and why the
-      // Setup deck's countdown is the engine's own and not a guess.
+      // Camera workspace's countdown is the engine's own and not a guess.
       if (msg.topic === "settings") {
         const settings = msg.payload;
         if (settings === null || typeof settings !== "object" || Array.isArray(settings)) {
@@ -203,7 +213,7 @@ export = function register(RED: RED): void {
      *
      * `applyStatus` is the same function `yonder-apply` uses, so the wording,
      * the tone and the deadline are the ones every other apply on this console
-     * produces — and the Setup deck's countdown is therefore the engine's own
+     * produces — and the Camera workspace's countdown is therefore the engine's own
      * answer rather than a prediction of it. Everything else this node asks
      * for is a question, and a question answered is confirmed.
      */

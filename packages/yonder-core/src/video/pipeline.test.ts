@@ -46,6 +46,45 @@ const mppOpts = { ...opts, encoder: MPP };
 const mpp = () => compose(mppOpts);
 const mppText = () => mpp().join(" ");
 
+describe('a main encode with no permanent consumer', () => {
+  it.each([
+    ['usb', 'empty'], ['usb', 'disabled'], ['usb', 'enabled'],
+    ['accessory', 'empty'], ['accessory', 'disabled'], ['accessory', 'enabled'],
+  ] as const)('keeps the %s preview independent when outputs are %s and the recorder detaches', (source, outputState) => {
+    const outputs = outputState === 'empty' ? [] : [{ ...rtspOutput, enabled: outputState === 'enabled' }];
+    const camera = { ...CAMERA, source, outputs, device: source === 'accessory' ? 'pocket2:test.udc' : CAMERA.device };
+    const argv = compose({ ...opts, camera, accessory: source === 'accessory'
+      ? { endpoint: '/run/yonder/accessory/cam0.sock', live: true, generation: 1, reason: null, native: { width: 1280, height: 720, fps: 29.97 } }
+      : undefined });
+    // The host observes main's sink pad; it attaches no permanent drain.
+    // Its dynamic recorder can release the last request pad at any time.
+    expect(argv.join(' ')).toContain('tee name=main allow-not-linked=true');
+    expect(argv.filter(token => token === 'main.')).toHaveLength(outputState === 'enabled' ? 1 : 0);
+    expect(argv).toContain('name=enc-stream'); expect(argv).toContain('name=enc-preview');
+    expect(argv).toContain(`location=${opts.rtspBase}/${camera.id}-preview`);
+    expect(argv).not.toContain('fakesink');
+  });
+});
+
+describe('accessory input', () => {
+  const accessory = { endpoint: '/run/yonder/accessory/cam1.sock', live: true, generation: 1, reason: null, native: { width: 1280, height: 720, fps: 29.97 } };
+  const input = { ...opts, camera: { ...CAMERA, source: 'accessory' as const, device: 'pocket2:test.udc' }, capabilities: noCapabilities(), accessory };
+  it('uses timestamped appsrc and H264 decode before the existing independent encodes', () => {
+    expect(refuse(input)).toBeNull(); const line = compose(input).join(' ');
+    expect(line).toContain('--accessory-socket=/run/yonder/accessory/cam1.sock');
+    expect(line).toContain('appsrc name=accessory-source'); expect(line).toContain('h264parse ! avdec_h264');
+    expect(line).toContain('tee name=raw'); expect(line).not.toContain('v4l2src'); expect(line).not.toContain('jpegdec');
+    expect(line.match(/v4l2h264enc/g)).toHaveLength(2);
+    expect(encodesIn(compose(input)).stream).toBe(2000);
+  });
+  it('keeps native input separate from selectable camera formats and refuses upscaling', () => {
+    expect(input.capabilities.formats.state).toBe('not-offered');
+    expect(refuse({ ...input, camera: { ...input.camera, width: 1920 } })).toContain('exceeds native');
+    expect(refuse({ ...input, accessory: { ...accessory, native: null } })).toContain('timestamp cadence');
+    expect(refuse({ ...input, accessory: { ...accessory, live: false } })).toContain('not live');
+  });
+});
+
 describe("compose", () => {
   it("feeds CSI NV12 frames directly to both hardware encoders", () => {
     const line = compose({ ...mppOpts, camera: { ...CAMERA, source: "csi" } });
@@ -629,5 +668,17 @@ describe("the runtime channel's half of the launch line", () => {
     expect(text()).toContain("caps=video/x-raw,width=640,height=360");
     expect(text()).toContain(`capsfilter name=${PREVIEW_CAPS_ELEMENT.rate}`);
     expect(text()).toContain("caps=video/x-raw,framerate=15/1");
+  });
+});
+
+describe('stream color processing', () => {
+  it('bypasses neutral settings and changes both encodes before the shared raw tee without another queue or codec', () => {
+    const neutral = { brightness: 0, contrast: 100, saturation: 100, hue: 0 };
+    const base = compose({ ...opts, camera: { ...CAMERA, image: neutral } });
+    expect(base).not.toContain('videobalance');
+    const adjusted = compose({ ...opts, camera: { ...CAMERA, image: { brightness: 10, contrast: 110, saturation: 115, hue: 9 } } });
+    expect(adjusted.join(' ')).toContain('videobalance name=image-balance brightness=0.1 contrast=1.1 saturation=1.15 hue=0.05 !');
+    expect(adjusted.indexOf('videobalance')).toBeLessThan(adjusted.indexOf('name=raw'));
+    for (const token of ['queue', 'jpegdec', 'v4l2h264enc']) expect(adjusted.filter(t => t === token)).toHaveLength(base.filter(t => t === token).length);
   });
 });

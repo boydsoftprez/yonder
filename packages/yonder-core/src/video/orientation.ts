@@ -165,6 +165,11 @@ function directionOf(turn: Turn): VideoDirection {
   return DIRECTION[turn.mirrored ? "mirrored" : "plain"][turn.quarters];
 }
 
+/** The applied display transform, including both sensor and board contributions. */
+export function imageDirection(controls: Partial<Camera['controls']>): VideoDirection {
+  return directionOf(asked(controls, () => true));
+}
+
 /**
  * The turn a set of controls asks for: **the flips first, then the
  * rotation.**

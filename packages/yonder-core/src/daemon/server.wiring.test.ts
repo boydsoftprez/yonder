@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
@@ -301,7 +301,7 @@ describe("buildRenderers", () => {
       runner: run,
       remoteStatePath: join(dir, "remote.json"),
     });
-    expect(renderers.map((r) => r.name)).toEqual(["hostname", "network", "remote", "video"]);
+    expect(renderers.map((r) => r.name)).toEqual(["hostname", "network", "remote", "video", "camera-autostart"]);
   });
 
   /**
@@ -318,7 +318,7 @@ describe("buildRenderers", () => {
       remoteStatePath: join(dir, "remote.json"),
     });
     expect(built.consoleRenderer).toBeUndefined();
-    expect(built.renderers.map((r) => r.name)).toEqual(["hostname", "network", "remote", "video"]);
+    expect(built.renderers.map((r) => r.name)).toEqual(["hostname", "network", "remote", "video", "camera-autostart"]);
   });
 
   /**
@@ -336,7 +336,7 @@ describe("buildRenderers", () => {
       remoteStatePath: join(dir, "remote.json"),
       console: { settings: join(dir, "console", "settings.js") },
     });
-    expect(built.renderers.map((r) => r.name)).toEqual(["hostname", "network", "remote", "console", "video"]);
+    expect(built.renderers.map((r) => r.name)).toEqual(["hostname", "network", "remote", "console", "video", "camera-autostart"]);
     expect(built.consoleRenderer).toBeDefined();
   });
 
@@ -381,7 +381,7 @@ describe("buildRenderers", () => {
       mediaConfigPath: join(dir, "mediamtx.yml"),
     });
     expect(built.renderers.map((r) => r.name))
-      .toEqual(["hostname", "network", "remote", "console", "media", "video"]);
+      .toEqual(["hostname", "network", "remote", "console", "media", "video", "camera-autostart"]);
     expect(built.mediaRenderer).toBeDefined();
   });
 
@@ -452,9 +452,9 @@ describe("buildRenderers", () => {
 
     const video = built.renderers.find((r) => r.name === "video");
     expect(video).toBeDefined();
-    // Last of all: a camera that cannot be restarted must be able to cost
-    // nothing behind it, and nothing is behind it.
-    expect(built.renderers[built.renderers.length - 1]).toBe(video);
+    // Video is followed only by background camera startup, which cannot fail an apply.
+    expect(built.renderers[built.renderers.length - 2]).toBe(video);
+    expect(built.renderers.at(-1)).toBe(built.cameraAutostart);
 
     // A camera on the air, started the way POST /cameras/:id/run starts one:
     // through the supervisor buildRenderers returned and the routes are
@@ -720,6 +720,30 @@ describe("the daemon serves what M3a assembles", () => {
     }
   });
 
+  it("shares identical pending CLI observations within one reach-state read, then reads fresh", async () => {
+    const config = structuredClone(DEFAULT_CONFIG);
+    config.network.modem.enabled = true;
+    config.network.modem.mode = "auto";
+    saveConfig(configPath, config);
+    const seen: string[][] = [];
+    const server = await serve(seen);
+    try {
+      // Start-up rendering uses the direct clients. Count only route observations.
+      seen.length = 0;
+      expect((await call(socketPath, "GET", "/reach/state")).status).toBe(200);
+      const count = (word: string) => seen.filter((argv) => argv.join(" ") === word).length;
+      const devices = "nmcli -t -f DEVICE,TYPE,STATE,CONNECTION device status";
+      const modems = "mmcli -L --output-keyvalue";
+      const modem = "mmcli -m /org/freedesktop/ModemManager1/Modem/0 --output-keyvalue";
+      expect([count(devices), count(modems), count(modem)]).toEqual([1, 1, 1]);
+
+      expect((await call(socketPath, "GET", "/reach/state")).status).toBe(200);
+      expect([count(devices), count(modems), count(modem)]).toEqual([2, 2, 2]);
+    } finally {
+      await server.close();
+    }
+  });
+
   /**
    * R-CEL-13, at the socket rather than in the unit that decides it.
    *
@@ -917,7 +941,7 @@ describe("the daemon serves what M3a assembles", () => {
       await call(socketPath, "GET", "/modem/state");
       await call(socketPath, "GET", "/reach/state");
       expect(seen.some((a) => a[0] === "mmcli")).toBe(true);
-      expect(seen.every((a) => ["mmcli", "nmcli", "rfkill", "hostnamectl", "curl"].includes(a[0] ?? ""))).toBe(true);
+      expect(seen.every((a) => ["mmcli", "nmcli", "rfkill", "hostnamectl", "curl", "ip"].includes(a[0] ?? ""))).toBe(true);
     } finally {
       await server.close();
     }
@@ -998,6 +1022,7 @@ describe("the daemon drives the reach watch", () => {
     const names = new Set<string>();
     return async (argv): Promise<CommandResult> => {
       seen.push(argv);
+      if (argv[0] === "ip") return { code: 0, stdout: JSON.stringify([{dst:"default",dev:"wwan0",metric:700}]), stderr: "" };
       if (argv[0] === "curl") return { code: reaches() ? 0 : 7, stdout: "", stderr: "" };
       if (argv[0] === "nmcli" && argv.includes("NAME,UUID,TYPE,DEVICE")) {
         return {
@@ -1190,6 +1215,7 @@ describe("the daemon drives the reach watch", () => {
     const names = new Set<string>([ETHERNET_CONNECTION, MODEM_CONNECTION]);
     return async (argv): Promise<CommandResult> => {
       seen.push(argv);
+      if (argv[0] === "ip") return { code: 0, stdout: JSON.stringify([{dst:"default",dev:"eth0",metric:100},{dst:"default",dev:"wwan0",metric:700}]), stderr: "" };
       // Ethernet works and the modem does not — the board in §2, one layer
       // up. Ethernet reaching something is what keeps the alternatives loop
       // out of this: any `curl` on wwan0 below is there because of a re-dial
@@ -1568,9 +1594,12 @@ describe("the daemon runs the rate controller", () => {
     } as never;
   };
 
-  async function serve(): Promise<{ close(): Promise<void> }> {
+  async function serve(rtspObservation: Parameters<typeof startServer>[0]['rtspObservation'] = {
+    sessions: async () => ({ items: [] }), tcp: async () => '', localAddresses: () => [],
+  }): Promise<{ close(): Promise<void> }> {
     return startServer({
       socketPath, configPath, journalPath, renderers: [noop], secretsPath,
+      rtspObservation,
       runner: async () => ({ code: 0, stdout: "", stderr: "" }),
       counters: noCounters,
       clock,
@@ -1602,7 +1631,7 @@ describe("the daemon runs the rate controller", () => {
   }
 
   const retunes = (): Sent[] =>
-    sent.filter((s) => s.op === "retune" && s.sets[0]?.element === "enc-stream");
+    sent.filter((s) => s.op === "retune" && s.sets[0]?.element === "enc-preview");
 
   it("moves a running encoder from a statistic that arrived on this socket", async () => {
     const server = await serve();
@@ -1626,15 +1655,16 @@ describe("the daemon runs the rate controller", () => {
         mine: { delivery: "video", source: "cam0-preview" },
       });
 
-      // One tick of the daemon's own clock, which is the thing that did not
-      // exist before this change.
-      advance(1_000);
-      await Promise.resolve();
+      // Fresh delivery over the probe dwell, on the real socket path.
+      for (let i=0;i<=6;i++) {
+        await call(socketPath,'POST','/cameras/cam0/viewers/1f2e3d4c5b6a7089',{want:'video',stats:{rtt:38,loss:0,egress:900,capacity:40000}});
+        advance(1000);await Promise.resolve();
+      }
 
       const moved = retunes();
       expect(moved).toHaveLength(1);
       // Its own applied ceiling, not the link's 40 Mb/s.
-      expect(moved[0].sets[0].value).toBe("controls,video_bitrate=4000000");
+      expect(moved[0].sets[0].value).toContain("video_bitrate=450000");
       // And the picture never restarted: one process, one launch line, one pid.
       expect(spawns).toHaveLength(1);
       expect(new Set(pids).size).toBe(1);
@@ -1656,6 +1686,38 @@ describe("the daemon runs the rate controller", () => {
     }
   });
 
+  it('adapts the main stream from external RTSP delivery without any browser report', async () => {
+    saveConfig(configPath, { ...DEFAULT_CONFIG, cameras: [{ ...ADAPTIVE,
+      outputs: [{ kind: 'rtsp', enabled: true, password: { secret: 'rtsp_password' } }],
+    }] } as never);
+    const reads = vi.fn(async () => ({ items: [{
+      id: '11111111-1111-1111-1111-111111111111', state: 'read', path: 'cam0',
+      remoteAddr: '10.20.0.2:45000', transport: 'TCP',
+      outboundBytes: now * 100, outboundRTPPackets: now,
+      outboundRTPPacketsReportedLost: 0, outboundRTPPacketsDiscarded: 0, inboundRTCPPackets: 0,
+    }] }));
+    const server = await serve({ sessions: reads, localAddresses: () => [],
+      tcp: async () => 'ESTAB 0 200000 10.20.0.1:8554 10.20.0.2:45000\n cubic rtt:40/2 bytes_acked:'
+        + now * 62.5 + ' notsent:190000\n' });
+    try {
+      await call(socketPath, 'POST', '/cameras/cam0/run', { action: 'start' });
+      for (let i = 0; i < 9; i++) {
+        advance(1000);
+        await call(socketPath, 'GET', '/cameras/cam0');
+      }
+      const main = sent.filter(s => s.op === 'retune' && s.sets[0]?.element === 'enc-stream');
+      expect(main.length).toBeGreaterThan(0);
+      expect(main.at(-1)?.sets[0].value).toContain('video_bitrate=500000');
+      expect(spawns).toHaveLength(1);
+      expect((await call(socketPath, 'GET', '/cameras/cam0')).body).toMatchObject({
+        deck: { runtime: { rtspFeedback: { readers: 1, status: 'active' }, streamKbps: 500 } },
+      });
+    } finally { await server.close(); }
+    const stoppedAt = reads.mock.calls.length;
+    advance(2000); await Promise.resolve();
+    expect(reads).toHaveBeenCalledTimes(stoppedAt);
+  });
+
   it("stops deciding when the daemon closes", async () => {
     const server = await serve();
     await call(socketPath, "POST", "/cameras/cam0/run", { action: "start" });
@@ -1663,7 +1725,10 @@ describe("the daemon runs the rate controller", () => {
       want: "video",
       stats: { rtt: 38, loss: 0, egress: 900, capacity: 40_000 },
     });
-    advance(1_000);
+    for (let i=0;i<=6;i++) {
+      await call(socketPath,'POST','/cameras/cam0/viewers/1f2e3d4c5b6a7089',{want:'video',stats:{rtt:38,loss:0,egress:900,capacity:40000}});
+      advance(1000);await Promise.resolve();
+    }
     const moved = retunes().length;
     expect(moved).toBe(1);
 
@@ -1737,7 +1802,7 @@ describe("buildRenderers", () => {
     // and unconditionally, behind telemetry, because a pipeline is composed
     // from what the renderers above it have already settled.
     expect(built.renderers.map((r) => r.name))
-      .toEqual(["hostname", "network", "remote", "console", "mavlink", "video"]);
+      .toEqual(["hostname", "network", "remote", "console", "mavlink", "video", "camera-autostart"]);
     expect(built.mavlinkRenderer).toBeDefined();
   });
 
@@ -2047,4 +2112,254 @@ describe("the daemon serves the telemetry it measures", () => {
     expect(bound).toBe(true);
   });
 
+});
+
+/**
+ * The daemon takes stills for whoever is on them (R-VID-14, R-VID-11,
+ * R-STO-01; spec §8.6).
+ *
+ * The chain, end to end and on this socket: a browser says it wants stills,
+ * the daemon's own clock ticks, one `still` reaches one pipeline for that
+ * camera however many browsers asked, and the frame comes back out of
+ * `GET /cameras/:id/still` with its age — each answer counted as a copy.
+ */
+describe("the daemon takes stills for whoever is on them", () => {
+  let socketPath: string, configPath: string, journalPath: string, secretsPath: string, stillsRoot: string;
+  const noop: Renderer = { name: "noop", async render() {} };
+  // A JPEG's magic number and enough behind it to cost something at the
+  // interval — ten bytes every five seconds rounds to 0 kb/s.
+  const JPEG = Buffer.concat([
+    Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46]),
+    Buffer.alloc(20_000, 0x2e),
+  ]);
+
+  const NOSE = {
+    id: "cam0", name: "Nose", source: "usb",
+    device: "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0",
+    enabled: true, autostart: false,
+    width: 1280, height: 720, framerate: 30, codec: "h264", bitrate_kbps: 2000,
+    preview: {
+      mode: "adaptive", size: "auto", ladder_top: "1280x720", ladder_bottom: "640x360",
+      floor_kbps: 300, ceiling_kbps: 2000, bitrate_kbps: 400, framerate: 15,
+    },
+    controls: { brightness: null, contrast: null, rotation: 0 },
+    outputs: [],
+    stream: { mode: "adaptive", floor_kbps: 500, ceiling_kbps: 4000 },
+  } as unknown as Camera;
+  const TAIL = {
+    ...NOSE, id: "cam1", name: "Tail",
+    device: "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.4:1.0-video-index0",
+  } as unknown as Camera;
+
+  interface Sent { id: string | number; op: string; camera?: string; path?: string }
+
+  let now: number;
+  let timers: { at: number; fn: () => void }[];
+  let sent: Sent[];
+  const clock: Clock = {
+    now: () => now,
+    setTimer: (ms, fn) => { const t = { at: now + ms, fn }; timers.push(t); return t; },
+    clearTimer: (h) => { const i = timers.indexOf(h as never); if (i >= 0) timers.splice(i, 1); },
+  };
+  /** Move the clock and let what it started settle over the socket. */
+  async function advance(ms: number): Promise<void> {
+    now += ms;
+    for (const t of [...timers]) if (t.at <= now) { timers.splice(timers.indexOf(t), 1); t.fn(); }
+    for (let i = 0; i < 8; i += 1) await new Promise((r) => { setImmediate(r); });
+  }
+
+  beforeEach(() => {
+    socketPath = join(dir, "core.sock");
+    configPath = join(dir, "config.yaml");
+    journalPath = join(dir, "apply.json");
+    secretsPath = join(dir, "secrets.yaml");
+    stillsRoot = join(dir, "stills");
+    now = 1_000_000;
+    timers = [];
+    sent = [];
+    saveConfig(configPath, { ...DEFAULT_CONFIG, cameras: [NOSE, TAIL] } as never);
+    new SecretStore(secretsPath).ensureValue(ADMIN_PASSWORD_SECRET, hashPassword("an operator's password"));
+  });
+
+  /** A pipeline that answers a `still` the way `yonder-pipeline` does: it
+   *  writes a JPEG where it was told to and reports the frame's shape. */
+  const spawner: ProcessSpawner = () => {
+    const inbox: ((line: string) => void)[] = [];
+    return {
+      kill: () => {}, on: () => {},
+      onMessage: (fn: (line: string) => void) => { inbox.push(fn); },
+      send: (line: string) => {
+        const command = JSON.parse(line) as Sent;
+        sent.push(command);
+        if (command.op === "still" && typeof command.path === "string") {
+          writeFileSync(command.path, JPEG);
+          const observed = { path: command.path, bytes: JPEG.length, width: 1280, height: 720 };
+          for (const fn of inbox) fn(JSON.stringify({ id: command.id, pid: 7, continuous: true, observed }));
+        }
+      },
+    } as never;
+  };
+
+  async function serve(): Promise<{ close(): Promise<void> }> {
+    return startServer({
+      socketPath, configPath, journalPath, renderers: [noop], secretsPath,
+      runner: async () => ({ code: 0, stdout: "", stderr: "" }),
+      counters: noCounters,
+      clock,
+      spawner,
+      stillsRoot,
+      cameraLayer: {
+        cameras: {
+          detect: async () => ({
+            found: [NOSE, TAIL].map((c, i) => ({
+              device: `/dev/video${String(i)}`,
+              card: c.name,
+              byPath: c.device,
+              byPathStable: true,
+              capabilities: {
+                ...noCapabilities(),
+                formats: present([{ fourcc: "MJPG", width: 1280, height: 720, rates: [30, 24, 15] }]),
+              },
+            })),
+            rejected: [],
+          }),
+          probe: async (node: string, card: string) => ({ device: node, card, reason: "not re-probed here" }),
+        },
+        encoder: async () => ({
+          element: "v4l2h264enc", device: "/dev/video11", hardware: true,
+          codec: "h264" as const, detail: "hardware H.264 on /dev/video11",
+        }),
+        rtspPassword: () => null,
+      },
+    });
+  }
+
+  const stillsFor = (camera: string): Sent[] =>
+    sent.filter((s) => s.op === "still" && s.camera === camera);
+
+  function callBytes(path: string): Promise<{ status: number; headers: Record<string, string | string[] | undefined>; body: Buffer }> {
+    return new Promise((resolve, reject) => {
+      const req = request({ socketPath, method: "GET", path }, (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (c: Buffer) => chunks.push(c));
+        res.on("end", () => {
+          resolve({ status: res.statusCode ?? 0, headers: res.headers, body: Buffer.concat(chunks) });
+        });
+      });
+      req.on("error", reject);
+      req.end();
+    });
+  }
+
+  it("takes one frame per watched camera on its own clock, and serves it with its age", async () => {
+    const server = await serve();
+    try {
+      for (const id of ["cam0", "cam1"]) {
+        expect((await call(socketPath, "POST", `/cameras/${id}/run`, { action: "start" })).status).toBe(200);
+      }
+      // Let the supervisor's observed running state settle before the still
+      // timer is due; a starting pipeline is not yet a source of frames.
+      await advance(2_000);
+      // The selected viewer keeps live video while its active thumbnail asks
+      // for the shared still; another viewer uses stills as its delivery.
+      const active = await call(socketPath, "POST", "/cameras/cam0/viewers/1f2e3d4c5b6a7089", {
+        want: "video", stills: true,
+      });
+      expect(active.status).toBe(200);
+      expect(active.body).toMatchObject({ mine: { delivery: "video" } });
+      const liveOnly = (active.body as { cost: { mine: number } }).cost.mine;
+      const fallback = await call(socketPath, "POST", "/cameras/cam0/viewers/aaaa1111bbbb2222", {
+        want: "stills",
+      });
+      expect(fallback.status).toBe(200);
+      expect(fallback.body).toMatchObject({ mine: { delivery: "stills", interval: 5_000, frameAge: null } });
+      // Nothing before the first tick, and nothing yet to serve — said in words.
+      const early = await callBytes("/cameras/cam0/still?viewer=1f2e3d4c5b6a7089");
+      expect(early.status).toBe(404);
+      expect(early.body.toString("utf8")).toContain("no still of cam0 yet");
+
+      await advance(3_000);
+      // **One frame for cam0**, for its two viewers; none for cam1.
+      expect(stillsFor("cam0")).toHaveLength(1);
+      expect(stillsFor("cam1")).toHaveLength(0);
+      // On the tmpfs stand-in, never the card.
+      expect(readFileSync(join(stillsRoot, "cam0.jpg"))).toEqual(JPEG);
+
+      await advance(1_500);
+      const served = await callBytes("/cameras/cam0/still?viewer=1f2e3d4c5b6a7089");
+      expect(served.status).toBe(200);
+      expect(served.headers["content-type"]).toBe("image/jpeg");
+      expect(served.body).toEqual(JPEG);
+      expect(served.headers["x-yonder-still-at"]).toBe(String(now - 1_500));
+      expect(served.headers["x-yonder-still-age"]).toBe("1500");
+
+      // The copy was counted for the viewer that fetched it, and the state
+      // it is told carries the frame's age (R-VID-11, R-VID-14).
+      const state = await call(socketPath, "POST", "/cameras/cam0/viewers/1f2e3d4c5b6a7089", {});
+      expect(state.body).toMatchObject({
+        mine: { delivery: "video" },
+      });
+      expect((state.body as { cost: { mine: number } }).cost.mine).toBeGreaterThan(liveOnly);
+      // The other viewer, sent nothing yet, is charged nothing yet.
+      const other = await call(socketPath, "POST", "/cameras/cam0/viewers/aaaa1111bbbb2222", {});
+      expect((other.body as { cost: { mine: number } }).cost.mine).toBe(0);
+
+      // And the camera page carries the strip: cam1 has no still to show
+      // until somebody is on its stills; cam0 is the active one.
+      const page = (await call(socketPath, "GET", "/cameras/cam0")).body as {
+        picture: { cameras: { id: string; active: boolean; thumbSrc: string | null; stopped: boolean }[]; downlink: string };
+      };
+      expect(page.picture.cameras.map((c) => [c.id, c.active, c.thumbSrc, c.stopped])).toEqual([
+        ["cam0", true, expect.stringMatching(/^\/video\/cam0\/still\?at=\d+$/), false],
+        ["cam1", false, null, false],
+      ]);
+      expect(page.picture.downlink).toMatch(/^\d+ kb\/s of stills · counted in Path total$/);
+      expect(page.picture.downlink).not.toMatch(/^0 kb/);
+
+      // A browser adds cam1 to its strip: the next tick takes cam1's frame
+      // and the page draws it as a still with an address of its own.
+      await call(socketPath, "POST", "/cameras/cam1/viewers/1f2e3d4c5b6a7089", { want: "stills" });
+      await advance(5_000);
+      expect(stillsFor("cam1")).toHaveLength(1);
+      const later = (await call(socketPath, "GET", "/cameras/cam0")).body as {
+        picture: { cameras: { id: string; thumbSrc: string | null; ageSeconds: number | null }[] };
+      };
+      expect(later.picture.cameras[1]).toMatchObject({ id: "cam1", ageSeconds: 0 });
+      expect(later.picture.cameras[1]?.thumbSrc).toMatch(/^\/video\/cam1\/still\?at=\d+$/);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("takes no frame at all while nobody is on stills", async () => {
+    const server = await serve();
+    try {
+      await call(socketPath, "POST", "/cameras/cam0/run", { action: "start" });
+      await call(socketPath, "POST", "/cameras/cam0/viewers/1f2e3d4c5b6a7089", { want: "video" });
+      for (let i = 0; i < 4; i += 1) await advance(5_000);
+      expect(stillsFor("cam0")).toHaveLength(0);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("answers a stopped camera in words, and stops taking frames when the daemon closes", async () => {
+    const server = await serve();
+    await call(socketPath, "POST", "/cameras/cam0/viewers/1f2e3d4c5b6a7089", { want: "stills" });
+    const stopped = await callBytes("/cameras/cam0/still?viewer=1f2e3d4c5b6a7089");
+    expect(stopped.status).toBe(404);
+    expect(stopped.body.toString("utf8")).toContain("cam0 is not running");
+
+    await call(socketPath, "POST", "/cameras/cam0/run", { action: "start" });
+    await advance(2_000);
+    await advance(3_000);
+    const taken = stillsFor("cam0").length;
+    expect(taken).toBe(1);
+
+    await server.close();
+    // A generator outliving its daemon would go on hanging branches off a
+    // running pipeline's tee for a process that has let go of its socket.
+    for (let i = 0; i < 4; i += 1) await advance(5_000);
+    expect(stillsFor("cam0")).toHaveLength(taken);
+  });
 });

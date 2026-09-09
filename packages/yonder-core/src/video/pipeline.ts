@@ -3,6 +3,7 @@ import { PREVIEW_RUNGS, type Camera, type CameraOutput, type PreviewRung } from 
 import { captureRefusal, type CameraCapabilities } from "./capability.js";
 import { orientation } from "./orientation.js";
 import type { Encoder } from "./probe/encoder.js";
+import type { AccessoryInput } from './accessory/source.js';
 
 /**
  * One camera, one pipeline, composed as a value (R-VID-05).
@@ -84,6 +85,7 @@ export const QUEUE = [
 ] as const;
 
 export interface ComposeOptions {
+  readonly accessory?: AccessoryInput;
   readonly camera: Camera;
   /**
    * What the device answered (R-CAM-14).
@@ -441,6 +443,14 @@ function turn(opts: ComposeOptions): string[] {
   return board.flip === null ? [] : ["videoflip", `video-direction=${board.flip}`, LINK];
 }
 
+/** No buffer, decoder or encoder is added, and neutral settings bypass entirely. */
+function color(opts: ComposeOptions): string[] {
+  const image = opts.camera.image;
+  if (!image || (image.brightness === 0 && image.contrast === 100 && image.saturation === 100 && image.hue === 0)) return [];
+  return ['videobalance', 'name=image-balance', `brightness=${image.brightness / 100}`,
+    `contrast=${image.contrast / 100}`, `saturation=${image.saturation / 100}`, `hue=${image.hue / 180}`, LINK];
+}
+
 export function compose(opts: ComposeOptions): string[] {
   const { camera, encoder, rtspBase } = opts;
   const main = encoderFor(encoder, camera.codec);
@@ -452,7 +462,16 @@ export function compose(opts: ComposeOptions): string[] {
   const argv: string[] = ["gst-launch-1.0", "-q"];
   const push = (...tokens: string[]): void => { argv.push(...tokens); };
 
-  push(
+  if (camera.source === 'accessory') {
+    if (!opts.accessory?.native || !/^\/[A-Za-z0-9/_.-]+\.sock$/.test(opts.accessory.endpoint)) throw new Error('Accessory framed media is not ready');
+    // Host consumes this private argument; composition remains entirely here.
+    argv.push(`--accessory-socket=${opts.accessory.endpoint}`);
+    push('appsrc', 'name=accessory-source', 'is-live=true', 'format=time', 'block=true', 'max-bytes=2000000',
+      'caps=video/x-h264,stream-format=byte-stream,alignment=au', LINK, 'h264parse', LINK, 'avdec_h264', LINK,
+      'videoscale', LINK, 'videorate', LINK,
+      `video/x-raw,width=${camera.width},height=${camera.height},framerate=${camera.framerate}/1`, LINK,
+      ...color(opts), ...turn(opts), 'tee', 'name=raw');
+  } else push(
     "v4l2src", `device=/dev/v4l/by-path/${camera.device}`, "io-mode=4", LINK,
     ...(camera.source === "csi" ? [
       `video/x-raw,format=NV12,width=${camera.width},height=${camera.height},framerate=${camera.framerate}/1`, LINK,
@@ -463,13 +482,15 @@ export function compose(opts: ComposeOptions): string[] {
     // against software's +8 for one branch, +4 against +14 for two.
     encoder.decoder ?? "jpegdec", LINK,
     ]),
-    ...turn(opts),
+    ...color(opts), ...turn(opts),
     "tee", "name=raw",
   );
 
-  // The full-rate encode, then the fork to its consumers.
+  // R-VID-13/16, R-CAM-17: preview remains live with no enabled full-rate
+  // output and after the recorder releases main's last request pad. The
+  // host's sink-pad probe observes traffic but is not a downstream consumer.
   push("raw.", LINK, ...QUEUE, LINK, ...encode(main, "stream", camera.bitrate_kbps, null), LINK,
-    parser(camera.codec), LINK, "tee", "name=main");
+    parser(camera.codec), LINK, "tee", "name=main", "allow-not-linked=true");
   // A disabled output contributes no branch at all (R-VID-16) — not a branch
   // that opens a socket and sits muted, which is a different claim to an
   // operator than "stopped". See the note on `CameraOutput.enabled`.
@@ -664,7 +685,7 @@ export function refuse(opts: ComposeOptions): string | null {
   // name — `usb-0000:01:00.0-1.3` — which looks like an answer, is a
   // different identifier from any by-path name, and has no entry under
   // /dev/v4l/by-path/ to resolve against.
-  if (knownDevices && !knownDevices.has(camera.device)) {
+  if (knownDevices && !knownDevices.has(camera.device) && camera.source !== 'accessory') {
     const offered = [...knownDevices].sort().join(", ");
     return offered
       ? `this board has no /dev/v4l/by-path/${camera.device}; the cameras it can see are ${offered}`
@@ -679,6 +700,14 @@ export function refuse(opts: ComposeOptions): string | null {
     return `this board has no H.265 encoder — its encoder is ${encoder.detail}; set codec to h264, or run this camera on a board that encodes H.265 (R-CAM-08)`;
   }
 
+  if (camera.source === 'accessory') {
+    if (!opts.accessory?.live) return opts.accessory?.reason ?? 'Accessory video is not live';
+    if (!opts.accessory.native) return 'Waiting for native SPS dimensions and camera timestamp cadence';
+    const native = opts.accessory.native;
+    if (camera.width > native.width || camera.height > native.height || camera.framerate > Math.ceil(native.fps))
+      return `Output exceeds native accessory video (${native.width}×${native.height}, ${native.fps.toFixed(2)} fps)`;
+    return null;
+  }
   if (capabilities.formats.state !== "present") {
     return "this camera has not answered with any capture format";
   }

@@ -49,7 +49,7 @@ export = function register(RED: RED): void {
             { at: Date.now() },
           );
           node.status({ fill: "red", shape: "ring", text: presentation(status.state).label });
-          send({ payload: status, yonder: status });
+          send({ payload: status, yonder: status, operation: 'confirm' });
           done();
           return;
         }
@@ -63,7 +63,7 @@ export = function register(RED: RED): void {
           shape: status.state === "confirmed" ? "dot" : "ring",
           text: presentation(status.state).label,
         });
-        send({ payload: status, yonder: status });
+        send({ payload: status, yonder: status, operation: 'confirm' });
         done();
       })();
     });

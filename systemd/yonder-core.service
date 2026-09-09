@@ -2,8 +2,8 @@
 [Unit]
 Description=Yonder core configuration service
 Documentation=https://github.com/boydsoftprez/yonder
-After=local-fs.target NetworkManager.service
-Wants=NetworkManager.service
+After=local-fs.target NetworkManager.service systemd-modules-load.service sys-kernel-config.mount
+Wants=NetworkManager.service sys-kernel-config.mount
 
 [Service]
 Type=simple
@@ -63,7 +63,10 @@ ProtectSystem=strict
 # console, no access point, no way in. A `-` makes a missing path ignored
 # instead, which is the safe direction for a directory the daemon writes only
 # when telemetry is installed at all.
-ReadWritePaths=/etc/yonder /var/lib/yonder /etc/mediamtx -/etc/mavlink-router
+# The installer loads libcomposite and mounts configfs before this namespace
+# is constructed. Missing kernel support costs the camera, never core startup.
+# FunctionFS mounts and flock files stay inside RuntimeDirectory=yonder.
+ReadWritePaths=/etc/yonder /var/lib/yonder /etc/mediamtx -/etc/mavlink-router -/sys/kernel/config/usb_gadget
 ProtectHome=yes
 NoNewPrivileges=yes
 PrivateTmp=yes

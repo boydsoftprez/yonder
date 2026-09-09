@@ -62,6 +62,7 @@ const reportCalls: { path: string; body: unknown }[] = [];
  * the way a dropped connection would — silently, from `sendReport`'s own
  * point of view, and never as a `reason` on screen. */
 let reportOutcome: "ok" | "fails" = "ok";
+let reportState: unknown = {};
 
 const fetchMock = vi.fn(async (url: string, init: unknown) => {
   // A viewer's own report, and the handshake, are two different exchanges
@@ -73,7 +74,7 @@ const fetchMock = vi.fn(async (url: string, init: unknown) => {
     const body: unknown = JSON.parse(String((init as { body?: string } | undefined)?.body ?? "{}"));
     reportCalls.push({ path: report[1]!, body });
     if (reportOutcome === "fails") throw new TypeError("Failed to fetch");
-    return { ok: true, status: 200, text: async () => "{}", headers: { get: () => null } };
+    return { ok: true, status: 200, text: async () => "{}", json: async () => reportState, headers: { get: () => null } };
   }
   if (reply === "throws") throw new TypeError("Failed to fetch");
   // A gated request answers when a test says so — or rejects with
@@ -309,23 +310,63 @@ function reasonText(wrapper: VueWrapper): string {
 }
 
 beforeEach(() => {
-  vi.useFakeTimers();
+  document.documentElement.removeAttribute("data-yonder-camera-auth");
+  document.documentElement.removeAttribute("data-yonder-auth-check");
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date', 'performance'] });
+  vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue();
   FakePeerConnection.made.length = 0;
   gates.length = 0;
   fetchMock.mockClear();
   reply = { status: 201, sdp: ANSWER, viewerHeader: "viewer-1" };
   reportCalls.length = 0;
   reportOutcome = "ok";
+  reportState = {};
   vi.stubGlobal("RTCPeerConnection", FakePeerConnection);
-  vi.stubGlobal("fetch", fetchMock);
+  vi.stubGlobal("fetch", (url: string, init: unknown) => url === "/session" ? Promise.resolve({ ok: true, status: 200 }) : fetchMock(url, init));
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
 describe("asking for the picture", () => {
+  it('starts muted playback when the negotiated track arrives', async () => {
+    const { wrapper } = mountPicture(); await settle();
+    pc().deliverTrack(); await settle();
+    expect(HTMLMediaElement.prototype.play).toHaveBeenCalled();
+    expect(wrapper.find('video').element.muted).toBe(true);
+  });
+  it('does not call a wall-clock correction a loss of media', async () => {
+    const { wrapper } = mountPicture(); await settle(); pc().deliverTrack(); frames(wrapper);
+    vi.setSystemTime(Date.now() + 3600000);
+    await advance(1000);
+    expect(badge(wrapper)).toBe('live · preview');
+  });
+  it('offers a working resume action if the browser refuses autoplay', async () => {
+    vi.mocked(HTMLMediaElement.prototype.play).mockRejectedValueOnce(new Error('autoplay refused'));
+    const { wrapper } = mountPicture(); await settle(); pc().deliverTrack(); await settle();
+    expect(wrapper.get('.y-pic__resume').text()).toBe('Resume live video');
+    await wrapper.get('.y-pic__resume').trigger('click'); await settle();
+    expect(wrapper.find('.y-pic__resume').exists()).toBe(false);
+  });
+  it('uses presented-frame callbacks and ignores callbacks from a retired session', async () => {
+    const { wrapper } = mountPicture(); await settle();
+    const callbacks: Array<() => void> = [];
+    const video = wrapper.find('video').element;
+    video.requestVideoFrameCallback = vi.fn((cb: any) => { callbacks.push(cb); return callbacks.length; });
+    video.cancelVideoFrameCallback = vi.fn();
+    pc().deliverTrack(); await settle();
+    callbacks[0](); await advance(4000);
+    expect(badge(wrapper)).toBe('no contact');
+    callbacks[1](); await settle();
+    expect(badge(wrapper)).toBe('live · preview');
+    setMode(wrapper,'off'); await settle();
+    callbacks[2](); await settle();
+    expect(badge(wrapper)).toBe('off');
+    expect(video.cancelVideoFrameCallback).toHaveBeenCalled();
+  });
   it("asks the console's own route for the preview path", async () => {
     // Through the console's route, not straight at the media server: that is
     // what puts the picture behind the interface's credential (R-SEC-13).
@@ -368,17 +409,17 @@ describe("why there is no picture", () => {
     reply = { status: 401 };
     const { wrapper } = mountPicture();
     await settle();
-    expect(reasonText(wrapper)).toMatch(/logged in/i);
+    expect(reasonText(wrapper)).toMatch(/sign in/i);
   });
 
   it("404 says the camera is not streaming, and where to start it", async () => {
     reply = { status: 404 };
     const { wrapper } = mountPicture();
     await settle();
-    expect(reasonText(wrapper)).toMatch(/not streaming/i);
+    expect(reasonText(wrapper)).toMatch(/not available/i);
   });
 
-  it("503 says the media server is not answering, and says nothing about the camera", async () => {
+  it("503 says The video service is unavailable. Reconnecting automatically., and says nothing about the camera", async () => {
     // The camera is the 404 above — the media server answered, and said that
     // path has no publisher. This is the case where it did not answer at all,
     // and an operator sent to look at a camera that is fine has been sent the
@@ -386,7 +427,7 @@ describe("why there is no picture", () => {
     reply = { status: 503 };
     const { wrapper } = mountPicture();
     await settle();
-    expect(reasonText(wrapper)).toMatch(/media server/i);
+    expect(reasonText(wrapper)).toMatch(/video service/i);
     expect(reasonText(wrapper)).not.toMatch(/camera/i);
   });
 
@@ -401,6 +442,7 @@ describe("why there is no picture", () => {
     const seen = new Set<string>();
     for (const next of [{ status: 401 }, { status: 404 }, { status: 503 }, "throws"] as const) {
       reply = next as typeof reply;
+      document.documentElement.removeAttribute('data-yonder-camera-auth');
       const { wrapper } = mountPicture();
       await settle();
       seen.add(reasonText(wrapper));
@@ -439,14 +481,36 @@ describe("the twelve-second fall-back to stills", () => {
 
     await advance(12_000);
     expect(badge(wrapper)).toBe("stills");
-    expect(reasonText(wrapper)).toMatch(/not streaming/i);
+    expect(reasonText(wrapper)).toMatch(/not available/i);
 
-    // And the attempt that was already scheduled when the deadline expired
-    // does not fire: a session negotiated behind a badge reading 'stills'
-    // would put live video under a caption saying it is not live.
-    const attempts = fetchMock.mock.calls.length;
-    await advance(60_000);
-    expect(fetchMock).toHaveBeenCalledTimes(attempts);
+    // The old attempt is canceled. A fresh live attempt starts after a short
+    // stills interval, so recovery does not require reloading the page.
+    const attempts = fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/whep")).length;
+    await advance(4999);
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/whep"))).toHaveLength(attempts);
+    reply = { status: 201, sdp: ANSWER };
+    await advance(1);
+    expect(badge(wrapper)).toBe('live · preview');
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/whep'))).toHaveLength(attempts + 1);
+    pc(FakePeerConnection.made.length - 1).deliverTrack(); frames(wrapper); await settle();
+    expect(painted(wrapper)).not.toBeNull();
+  });
+
+  it.each(['off', 'stills'])('honors an explicit %s choice after automatic fallback', async mode => {
+    const { wrapper } = mountPicture(); await settle();
+    await advance(12000);
+    setMode(wrapper, mode);
+    const attempts = fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/whep')).length;
+    await advance(60000);
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/whep'))).toHaveLength(attempts);
+    expect(badge(wrapper)).toBe(mode);
+  });
+
+  it('cancels automatic fallback recovery when the widget is removed', async () => {
+    const { wrapper } = mountPicture(); await settle(); await advance(12000);
+    const attempts = fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/whep')).length;
+    wrapper.unmount(); await advance(60000);
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/whep'))).toHaveLength(attempts);
   });
 
   it("does not fall back when a frame has arrived", async () => {
@@ -567,16 +631,18 @@ describe("reconnecting", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("does not reconnect once it has fallen back to stills", async () => {
+  it("ignores a failed abandoned connection while waiting to retry from stills", async () => {
     const { wrapper } = mountPicture();
     await settle();
     await advance(12_000);
     expect(badge(wrapper)).toBe("stills");
-    const attempts = fetchMock.mock.calls.length;
+    const attempts = fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/whep")).length;
 
     pc(0).goes("failed");
-    await advance(60_000);
-    expect(fetchMock).toHaveBeenCalledTimes(attempts);
+    await advance(4999);
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/whep"))).toHaveLength(attempts);
+    await advance(1);
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/whep'))).toHaveLength(attempts + 1);
   });
 
   /**
@@ -729,7 +795,7 @@ describe("off is not the link being down", () => {
 
     expect(badge(wrapper)).toBe("off");
     expect(wrapper.find(".y-pic__badge").classes()).toContain("tone-neutral");
-    expect(wrapper.find(".y-pic__off").text()).toMatch(/not requested/i);
+    expect(wrapper.find(".y-pic__off").text()).toMatch(/preview is off/i);
     expect(wrapper.text()).not.toMatch(/no contact/i);
     expect(wrapper.find(".y-pic__hatch").exists()).toBe(false);
   });
@@ -1043,7 +1109,7 @@ describe("reporting what this browser is measuring", () => {
     expect(fifth.loss).toBe(0);
   });
 
-  it("omits the whole stats object, not a partial one, when the browser has no capacity estimate", async () => {
+  it("retains delivery feedback when the browser has no capacity estimate", async () => {
     mountPicture();
     await settle();
 
@@ -1060,7 +1126,7 @@ describe("reporting what this browser is measuring", () => {
     // alive is swept for idleness and the controller loses the viewer
     // altogether. A browser with no bandwidth estimate is still a browser
     // watching the picture.
-    expect(reportCalls[0]!.body).toEqual({ want: "video" });
+    expect(reportCalls[0]!.body).toMatchObject({ want: "video", stats: { capacity: null, rtt: 50, egress: 620, loss: 0 } });
   });
 
   it("includes frameAge once a frame has painted, and carries none before one ever has", async () => {
@@ -1738,6 +1804,22 @@ describe("the drag-to-slew layer — orb only (spec §6)", () => {
     expect(z(wrapper, ".y-pic__orb"), ".y-pic__orb").toBeGreaterThan(z(wrapper, ".y-pic__video"));
   });
 
+it('retires the displayed path and active pointer when camera selection clears its report', async () => {
+  const { wrapper, press } = mountWithRail();
+  await settle();
+  await press({ path: 'cam0', aim: { state: 'present', pan: 0, tilt: 0 } });
+  const el = frameEl(wrapper);
+  el.dispatchEvent(dragPoint('pointerdown', 200, 150));
+  el.dispatchEvent(dragPoint('pointermove', 240, 150));
+  await settle();
+  expect(wrapper.find('.y-pic__orb').exists()).toBe(true);
+  await press({ path: '', aim: null, cameras: [], running: null });
+  expect((wrapper.vm as any).streamPath).toBe('');
+  expect(wrapper.find('.y-pic__orb').exists()).toBe(false);
+  await press('rate:preview');
+  expect((wrapper.vm as any).streamPath).toBe('');
+});
+
   it("measures from where the pointer went down, not the centre of the frame (coordinator resolution 5)", async () => {
     // Two presses starting in very different places, moved by the *same*
     // 40px to the right, must command the identical rate: an operator whose
@@ -1834,6 +1916,23 @@ describe("the drag-to-slew layer — orb only (spec §6)", () => {
    * in this file only ever inspects the *last* relayed slew, so a `NaN`
    * hiding in the first one goes unnoticed everywhere else.
    */
+  it('uses the same chosen speed as the pad and ends image dragging when the response changes', async () => {
+    const { wrapper, emit, press } = mountWithRail();
+    await settle();
+    await press({ aim: { state: 'present', maxRate: 120 } });
+    const el = frameEl(wrapper);
+    el.dispatchEvent(dragPoint('pointerdown', 100, 100));
+    el.dispatchEvent(dragPoint('pointermove', 1000, 100));
+    expect(slewCalls(emit).at(-1)?.[2].payload.slew.pan).toBe(60);
+    window.dispatchEvent(new CustomEvent('yonder-aim-response-changed', { detail: { key: 'yonder:aim:speed', value: 12 } }));
+    expect(stopCalls(emit)).toHaveLength(1);
+    el.dispatchEvent(dragPoint('pointermove', 1000, 100));
+    expect(slewCalls(emit)).toHaveLength(1);
+    el.dispatchEvent(dragPoint('pointerdown', 100, 100));
+    el.dispatchEvent(dragPoint('pointermove', 1000, 100));
+    expect(slewCalls(emit).at(-1)?.[2].payload.slew.pan).toBe(12);
+  });
+
   it("a press with no movement at all commands nothing — the dead zone, not merely 'no test checked'", async () => {
     const { wrapper, emit, press } = mountWithRail();
     await settle();
@@ -1917,8 +2016,8 @@ describe("stands alone, with no deck at all (R-UI-28)", () => {
     expect(wrapper.findComponent(YonderStateOverlay).props("head")).toBe("adaptive");
     expect(wrapper.find(".y-pic__rec").text()).toContain("00:01:04");
     const foot = wrapper.find(".y-pic__foot").text();
-    expect(foot).toContain("PAN");
-    expect(foot).toContain("TILT");
+    expect(foot).not.toContain("PAN");
+    expect(foot).not.toContain("TILT");
     expect(foot).toContain("ZOOM");
     expect(wrapper.findComponent(YonderThumbStrip).exists()).toBe(true);
     expect(wrapper.findComponent(YonderThumbStrip).props("cameras")).toHaveLength(1);
@@ -2015,4 +2114,112 @@ describe("the recording pill and the still's confirmation", () => {
     await advance(700);
     expect(wrapper.find(".y-pic__flash").exists()).toBe(false);
   });
+});
+
+it.each(['teardown', 'retry'])('retires the physical aim gesture on media %s', async (method) => {
+  const { wrapper } = mountPicture(); await settle();
+  const vm = wrapper.vm as any;
+  const stopped = vi.spyOn(vm.aimTransport, 'stop');
+  vm.dragGesture = 'physical-press'; vm.dragPointerId = 7;
+  vm[method]();
+  expect(stopped).toHaveBeenCalled();
+  expect(vm.dragGesture).toBeNull(); expect(vm.dragPointerId).toBeNull();
+  wrapper.unmount();
+});
+
+it('retains an initially hydrated camera when a later message carries only richer facts', async () => {
+  const messages = reactive<Record<string, { payload: unknown }>>({ n1: { payload: { path: 'pocket', cost: 'preview', running: true, aim: { state: 'present', pan: 4, tilt: 2 }, cameras: [{ id: 'pocket', name: 'Pocket', active: true }] } } });
+  const wrapper = mount(YonderPicture, { props: { id: 'n1', props: { path: '-preview', label: '', stillsAfterMs: 12000 } }, global: {
+    provide: { $socket: { emit: vi.fn() }, $dataTracker: () => {} }, mocks: { $store: { state: { data: { messages } } } },
+  } });
+  await settle();
+  expect((wrapper.vm as any).streamPath).toBe('pocket-preview');
+  messages.n1 = { payload: { saved: { held: 'camera', kind: 'photo', observedAt: Date.now() } } };
+  await nextTick(); await settle();
+  expect((wrapper.vm as any).streamPath).toBe('pocket-preview');
+  expect((wrapper.vm as any).cameraRunning).toBe(true);
+  expect(wrapper.text()).not.toContain('which camera');
+  expect((wrapper.vm as any).aim.pan).toBe(4);
+  wrapper.unmount();
+});
+
+it('hydrates state without replaying a cached full-rate action on mount', async () => {
+  const { wrapper } = mountWithRail('rate:full'); await settle();
+  expect((wrapper.vm as any).rate).toBe('preview');
+  wrapper.unmount();
+});
+
+it('keeps private aim metadata and drag availability without drawing gimbal values over the image', async () => {
+  const { wrapper } = mountPicture({ report: { aim: { state:'present', pan:12, tilt:6, url:'/video/pocket/aim', generation:1, maxRate:10 } } });
+  await settle();
+  expect((wrapper.vm as any).aimable).toBe(true);
+  expect(wrapper.findAll('.y-pic__foot-k').map(label => label.text())).not.toContain('PAN');
+  expect(wrapper.findAll('.y-pic__foot-k').map(label => label.text())).not.toContain('TILT');
+  wrapper.unmount();
+});
+
+
+it('reports thumbnail demand for the selected and other visible cameras and releases it on unmount', async () => {
+  const { wrapper } = mountPicture({ path:'front-preview', report: { cameras: [{id:'front',active:true,thumbSrc:'/video/front/still?v=1',ageSeconds:2},{id:'tail',active:false,thumbSrc:null,ageSeconds:null}] } });
+  await settle();
+  expect(reportCalls).toEqual(expect.arrayContaining([{path:'front',body:{want:'video',stills:true}},{path:'tail',body:{want:'off',stills:true}}]));
+  wrapper.unmount();await settle();
+  expect(reportCalls).toEqual(expect.arrayContaining([{path:'front',body:{want:'off',stills:false}},{path:'tail',body:{want:'off',stills:false}}]));
+});
+
+
+it('binds Picture Start to its displayed camera rather than a newer flow selection', async () => {
+  const { wrapper, emit } = mountWithRail({ running: false, runState: 'stopped' });
+  await settle();
+  (wrapper.vm as any).pressStart();
+  expect(emit).toHaveBeenLastCalledWith('widget-action', expect.any(String), { camera: 'cam0', payload: 'start' });
+});
+
+it('uses report-response encoder readback and measures receiver buffering on a monotonic interval', async () => {
+  const { wrapper } = mountPicture(); await settle();
+  reportState = { camera:'cam0', viewer:'viewer-1', overlay:{head:'adaptive',size:'1280×720',bitrate:'950 kb/s'}, mine:{receiverBufferMs:120,decodeMs:2.5} };
+  pc().statsReport=fakeStats({inbound:{jitterBufferDelay:10,jitterBufferEmittedCount:100,totalDecodeTime:1,framesDecoded:100},pair:{availableIncomingBitrate:undefined}});
+  await advance(1000);
+  pc().statsReport=fakeStats({inbound:{jitterBufferDelay:13.6,jitterBufferEmittedCount:130,totalDecodeTime:1.075,framesDecoded:130,bytesReceived:200000},pair:{availableIncomingBitrate:undefined}});
+  await advance(1000);
+  const body=reportCalls.at(-1)!.body as any;
+  expect(body.stats.receiverBufferMs).toBeCloseTo(120);
+  expect(body.stats.decodeMs).toBeCloseTo(2.5);
+  expect(body.stats.capacity).toBeNull();
+  expect(wrapper.find('.y-pic__toolbar').text()).toContain('950 kb/s');
+  expect(wrapper.find('.y-pic__toolbar').text()).toContain('Buffer 120 ms');
+  expect(wrapper.find('.y-pic__frame .y-pic__state').exists()).toBe(false);
+  reportState={camera:'another',viewer:'viewer-1',overlay:{head:'wrong'}};
+  await advance(1000);
+  expect(wrapper.find('.y-pic__toolbar').text()).not.toContain('wrong');
+});
+
+it('offers sign-in and stops retrying an expired session', async () => {
+  reply={status:401};const {wrapper}=mountPicture();await settle();
+  expect(wrapper.find('a.y-pic__action').text()).toBe('Sign in');
+  const calls=fetchMock.mock.calls.length;await advance(30000);
+  expect(fetchMock.mock.calls.length).toBe(calls);
+  expect(wrapper.findAll('.y-pic__view-modes button').every(button=>button.attributes('disabled')!==undefined)).toBe(true);
+});
+
+it('starts a stopped camera, distinguishes startup, and keeps an existing preview through running readback', async () => {
+  const {wrapper,emit}=mountPicture({report:{running:false,runState:'stopped'}});await settle();
+  expect(fetchMock).not.toHaveBeenCalled();expect(wrapper.text()).toContain('Start video');
+  await wrapper.get('.y-pic__start').trigger('click');await wrapper.get('.y-pic__start').trigger('click');
+  expect(emit.mock.calls.filter(call=>(call[2] as any)?.payload==='start')).toHaveLength(1);
+  await wrapper.setProps({props:{path:PATH,report:{running:null,runState:'starting'}}});await settle();
+  expect(wrapper.find('.y-pic__stopped').exists()).toBe(false);expect(badge(wrapper)).toBe('Starting video');
+  const count=FakePeerConnection.made.length;
+  await wrapper.setProps({props:{path:PATH,report:{running:true,runState:'running'}}});await settle();
+  expect(FakePeerConnection.made).toHaveLength(count);
+  await wrapper.get('.y-pic__action').trigger('click');
+  expect(emit).toHaveBeenLastCalledWith('widget-action','n1',{camera:'cam0',payload:'stop'});
+});
+
+it('local preview controls do not stop the camera stream', async () => {
+  const {wrapper,emit}=mountPicture({report:{running:true,runState:'running'}});await settle();
+  await wrapper.findAll('.y-pic__view-modes button').find(button=>button.text()==='Off')!.trigger('click');
+  expect(emit.mock.calls.some(call=>(call[2] as any)?.payload==='stop')).toBe(false);
+  expect(wrapper.get('.y-pic__action').text()).toBe('Stop video');
+  expect(wrapper.text()).toContain('Preview is off in this browser.');
 });

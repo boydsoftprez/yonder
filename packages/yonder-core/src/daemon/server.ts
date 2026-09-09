@@ -1,13 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { createServer, type Server } from "node:http";
-import { unlinkSync, existsSync, mkdirSync, chmodSync } from "node:fs";
+import { unlinkSync, existsSync, mkdirSync, chmodSync, accessSync, constants } from "node:fs";
 import { dirname, join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { ApplyEngine } from "../apply/engine.js";
 import { warn, note, trace } from "../log.js";
+import { VehicleService } from "../mav/vehicle.js";
+import { TerrainPackService } from "../terrain/service.js";
+import { CockpitData } from "../cockpit/data.js";
+import type { HostInstrumentOptions } from '../cockpit/host-instruments.js';
 import { createRouter, type CameraProbes, type DiagProbes } from "./routes.js";
 import { AdminCredential } from "../console/credential.js";
 import { ConsoleRenderer } from "../console/renderer.js";
+import { resetConsoleAuth } from "../console/reset-auth.js";
 import { consolePaths, type ConsolePaths } from "../console/settings.js";
 import { loadConfig } from "../config/load.js";
 import { answerableAddresses } from "../net/dial-in.js";
@@ -28,19 +33,26 @@ import { HostnameRenderer } from "../system/hostname.js";
 import { FallbackWatchdog } from "../net/watchdog.js";
 import { joinSucceeded } from "../net/joined.js";
 import { networkState } from "../net/state.js";
+import { readInterfaces, defaultRouteDevice } from "../net/interfaces.js";
+import { DiagnosticJobs, systemDiagnosticRunner, type DiagnosticRunner } from "../diag/jobs.js";
 import { readRemoteState } from "../remote/state.js";
 import { RemoteRenderer } from "../remote/renderer.js";
 import { MediaRenderer, MEDIA_CONFIG_PATH } from "../media/renderer.js";
 import { Supervisor, systemSpawner, type ProcessSpawner } from "../video/supervisor.js";
 import { PipelineRenderer } from "../video/renderer.js";
-import { detectCameras, probeCamera } from "../video/probe/camera.js";
+import { CameraAutostart } from "../video/autostart.js";
+import { detectCameras, probeCamera, detectWithAccessory } from "../video/probe/camera.js";
+import { AccessorySources } from '../video/accessory/source.js';
 import { probeEncoder, type Encoder } from "../video/probe/encoder.js";
 import { applyControls } from "../video/controls.js";
 import { EncoderChannel } from "../video/encoder.js";
 import { Viewers } from "../video/viewers.js";
 import { Adaptation } from "../video/adaptation.js";
+import { RtspFeedback, type RtspFeedbackOptions } from "../video/rtsp-feedback.js";
+import { MEDIA_OBSERVER_SECRET } from "../media/config.js";
 import { CAPTURES_ROOT, Recorder } from "../video/recorder.js";
-import { freeSpaceOn } from "../system/read.js";
+import { Stills, STILLS_ROOT } from "../video/stills.js";
+import { freeSpaceOn, systemReader } from "../system/read.js";
 import { readSupply } from "../system/supply.js";
 import { ZeroTierCli } from "../remote/zerotier/cli.js";
 import { readTraffic } from "../remote/traffic.js";
@@ -53,7 +65,7 @@ import type { OpenPort } from "../mav/detect.js";
 import { AP_CONNECTION, DEFAULT_AP_PASSPHRASE } from "../net/profiles.js";
 import { scanForNetworks } from "../net/scan.js";
 import { ping, reachable } from "../diag/probe.js";
-import { systemRunner, type CommandRunner } from "../net/runner.js";
+import { inFlightRunner, redactArgv, systemRunner, type CommandRunner } from "../net/runner.js";
 import { systemClock, type Clock, type Renderer } from "../apply/types.js";
 import { DEFAULT_CONFIG, type Config } from "../schema/config.js";
 
@@ -113,9 +125,18 @@ export function onceAsync<T>(fn: () => Promise<T>): () => Promise<T> {
 }
 
 export interface ServerOptions {
+  /** Observation dependencies for isolated integration tests. Not configuration. */
+  rtspObservation?: Pick<RtspFeedbackOptions, 'sessions' | 'tcp' | 'localAddresses'>;
+  diagnosticRunner?: DiagnosticRunner;
+  /** Only production main enables Linux accessory ownership; tests inject explicitly. */
+  accessory?: boolean | AccessorySources;
+  /** Injected file/space readers for instrumentation; production supplies Linux readers below. */
+  hostInstruments?: Pick<HostInstrumentOptions, 'readFile' | 'freeBytes'>;
   socketPath: string;
   configPath: string;
   journalPath: string;
+  /** Volatile still directory; production uses the daemon's runtime tmpfs. */
+  stillsRoot?: string;
   renderers: Renderer[];
   /** Where the device's secrets (the access-point passphrase, later the administrator password, …) live. */
   secretsPath?: string;
@@ -215,6 +236,8 @@ export interface CameraLayer {
 }
 
 export interface BuildRenderersOptions {
+  accessory?: AccessorySources;
+  cameraLayer?: CameraLayer;
   secretsPath: string;
   runner?: CommandRunner;
   log?: (line: string) => void;
@@ -362,6 +385,7 @@ export function buildRenderers(opts: BuildRenderersOptions): {
   supervisor: Supervisor;
   encoders: EncoderChannel;
   pipelineRenderer: PipelineRenderer;
+  cameraAutostart: CameraAutostart;
   /** Present only when `opts.mavlink` said how to open a serial port. */
   mavlinkRenderer?: MavlinkRenderer;
   /**
@@ -371,6 +395,7 @@ export function buildRenderers(opts: BuildRenderersOptions): {
    * function builds, the daemon opens sockets.
    */
   mavlinkListener?: LoopbackListener;
+  vehicle?: VehicleService;
   generated: string[];
 } {
   const log = opts.log ?? note;
@@ -477,6 +502,7 @@ export function buildRenderers(opts: BuildRenderersOptions): {
   // cannot exist is a port held for nothing.
   let mavlinkRenderer: MavlinkRenderer | undefined;
   let mavlinkListener: LoopbackListener | undefined;
+  let vehicle: VehicleService | undefined;
   if (opts.mavlink !== undefined) {
     const tracker = new LinkTracker({ clock: opts.clock ?? systemClock });
     mavlinkRenderer = new MavlinkRenderer({
@@ -488,7 +514,10 @@ export function buildRenderers(opts: BuildRenderersOptions): {
       log,
       clock: opts.clock,
     });
+    vehicle = new VehicleService({clock: opts.clock ?? systemClock, log, send: bytes => mavlinkListener!.send(bytes)});
     mavlinkListener = new LoopbackListener({
+      onDatagram: bytes => vehicle!.receive(bytes),
+      now: () => (opts.clock ?? systemClock).now(),
       tracker,
       log,
       ...(opts.mavlink.loopbackPort === undefined ? {} : { port: opts.mavlink.loopbackPort }),
@@ -507,8 +536,7 @@ export function buildRenderers(opts: BuildRenderersOptions): {
   // hostname on the DHCP request the network render is about to make.
   const hostname = new HostnameRenderer({ runner: opts.runner ?? systemRunner, log });
 
-  // Nothing is spawned by constructing it: a Supervisor holds no process
-  // until something calls start(), which only POST /cameras/:id/run does.
+  // One supervisor for automatic boot startup and the runtime Start/Stop routes.
   const supervisor = new Supervisor({
     spawner: opts.spawner ?? systemSpawner,
     ...(opts.clock === undefined ? {} : { clock: opts.clock }),
@@ -537,6 +565,7 @@ export function buildRenderers(opts: BuildRenderersOptions): {
    */
   const encoders = new EncoderChannel({ supervisor, clock: opts.clock });
   const pipelineRenderer = new PipelineRenderer({
+    accessory: identity => opts.accessory?.input(identity),
     supervisor,
     channel: encoders,
     // The same memo the start route composes with, over the same runner as
@@ -553,11 +582,22 @@ export function buildRenderers(opts: BuildRenderersOptions): {
   // depend on a configured device — media, telemetry — and the camera
   // pipelines last, because a pipeline is composed from what the renderers
   // above it have already settled.
+  const cameraAutostart = new CameraAutostart({
+    accessory: identity => opts.accessory?.input(identity),
+    supervisor,
+    detect: () => detectWithAccessory(() => opts.cameraLayer?.cameras.detect() ?? detectCameras({ runner: opts.runner ?? systemRunner }),
+      () => opts.accessory?.detect() ?? { found: [], rejected: [] }),
+    encoder: () => opts.cameraLayer?.encoder() ?? encoder(),
+    clock: opts.clock,
+    log,
+  });
+
   const renderers: Renderer[] = [hostname, renderer, remoteRenderer];
   if (consoleRenderer !== undefined) renderers.push(consoleRenderer);
   if (mediaRenderer !== undefined) renderers.push(mediaRenderer);
   if (mavlinkRenderer !== undefined) renderers.push(mavlinkRenderer);
-  renderers.push(pipelineRenderer);
+  if (opts.accessory) renderers.push({ name: 'accessory', render: async config => { opts.accessory!.resume(config.cameras); } });
+  renderers.push(pipelineRenderer, cameraAutostart);
 
   return {
     renderers,
@@ -573,8 +613,10 @@ export function buildRenderers(opts: BuildRenderersOptions): {
     supervisor,
     encoders,
     pipelineRenderer,
+    cameraAutostart,
     ...(mavlinkRenderer === undefined ? {} : { mavlinkRenderer }),
     ...(mavlinkListener === undefined ? {} : { mavlinkListener }),
+    ...(vehicle === undefined ? {} : { vehicle }),
     generated,
   };
 }
@@ -680,6 +722,16 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
       return DEFAULT_CONFIG;
     }
   };
+  const accessory = opts.accessory === true ? new AccessorySources({ cameras: () => reachConfig().cameras,
+    onFailure: failure => warn(`Pocket 2 transport: ${JSON.stringify(failure)}`),
+    mediaCapability: async () => {
+      try { accessSync('/usr/local/bin/yonder-pipeline', constants.X_OK); }
+      catch { return 'Accessory video requires the packaged yonder-pipeline host'; }
+      const answer = await (opts.runner ?? systemRunner)(['gst-inspect-1.0', 'avdec_h264']);
+      return answer.code === 0 ? null : 'Accessory video requires the avdec_h264 GStreamer decoder';
+    },
+  }) : opts.accessory || undefined;
+  accessory?.resume();
   /** `usb` is in the schema's interface list and no renderer writes one. */
   const reachOrder = (config: Config): PathName[] =>
     config.network.priority.filter((i): i is PathName => i !== "usb");
@@ -770,6 +822,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
 
   try {
     built = buildRenderers({
+      accessory,
       secretsPath: opts.secretsPath ?? "/etc/yonder/secrets.yaml",
       runner: opts.runner,
       clock,
@@ -782,6 +835,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
       ...(opts.console === undefined ? {} : { console: opts.console }),
       ...(opts.spawner === undefined ? {} : { spawner: opts.spawner }),
       ...(opts.mavlink === undefined ? {} : { mavlink: opts.mavlink }),
+      ...(opts.cameraLayer === undefined ? {} : { cameraLayer: opts.cameraLayer }),
     });
   } catch (e) {
     const message = (e as Error).message;
@@ -803,6 +857,27 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   // reason as the nmcli client above.
   const modemClient = built?.modemClient
     ?? new MmcliClient(opts.runner ?? systemRunner, trace);
+
+  /**
+   * Read-only clients for the status routes and reach watch.
+   *
+   * `ReachMonitor.state()` asks three views of the same instant in parallel;
+   * each used to spawn its own identical nmcli and mmcli processes. The
+   * wrapper shares only commands that are still in flight and forgets them as
+   * soon as they settle. Separate client instances keep the renderer, radio
+   * verification, scan and fallback on `client`/`modemClient` above, over the
+   * direct runner: a poll begun before a write can never satisfy its fresh
+   * post-write check (R-CFG-03, R-NET-07).
+   *
+   * Log under the shared call rather than in both clients, so the journal says
+   * how many processes actually ran instead of how many readers wanted one.
+   */
+  const observationRunner = inFlightRunner(async (argv, options) => {
+    trace(redactArgv(argv).join(" "));
+    return (opts.runner ?? systemRunner)(argv, options);
+  });
+  const observationClient = new NmcliClient(observationRunner);
+  const observationModemClient = new MmcliClient(observationRunner);
 
   /**
    * Turn on ModemManager's detailed signal reporting, once per modem.
@@ -841,6 +916,16 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
         warn(`modem: could not turn on detailed signal reporting (${(e as Error).message})`);
       }
     }
+  };
+  const readModemState = async (configureSignal: boolean) => {
+    const config = loadConfig(opts.configPath);
+    const paths = await modemClient.modems();
+    if (paths.length === 0) return modemState(config, null, null, { rssi: null, rsrq: null, rsrp: null, snr: null });
+    const modem = await modemClient.modem(paths[0]);
+    if (configureSignal) await armSignal(modem.path);
+    const bearer = await modemClient.connectedBearer(modem);
+    const signal = await modemClient.signal(modem.path);
+    return modemState(config, modem, bearer, signal);
   };
 
   // The one poll loop for the mesh's throughput, running on `clock` like
@@ -900,7 +985,9 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   const supervisor = built?.supervisor;
   let viewers: Viewers | undefined;
   let adaptation: Adaptation | undefined;
+  let rtspFeedback: RtspFeedback | undefined;
   let recorder: Recorder | undefined;
+  let stills: Stills | undefined;
   if (encoders !== undefined && supervisor !== undefined) {
     const channel = encoders;
     const watching = new Viewers({
@@ -914,6 +1001,8 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
       // has already decided whether this browser is an active video
       // subscriber of that camera, which is the filter §8.2 asks for.
       onReport: (report) => { adaptation?.observe(report); },
+      rtspFeedback: (id) => rtspFeedback?.state(id) ?? null,
+      stillFor: (id) => stills?.latest(id) ?? null,
     });
     viewers = watching;
     adaptation = new Adaptation({
@@ -929,6 +1018,16 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
       onDecisions: (decisions) => { watching.decided(decisions); },
     });
     adaptation.start();
+    rtspFeedback = new RtspFeedback({
+      ...opts.rtspObservation,
+      cameras: () => reachConfig().cameras,
+      password: () => built?.secrets.get(MEDIA_OBSERVER_SECRET) ?? null,
+      report: report => adaptation?.observe(report),
+      forget: (camera, viewer) => adaptation?.forget(camera, viewer),
+      blockIncrease: (camera, blocked) => adaptation?.blockRtspIncrease(camera, blocked),
+      clock,
+    });
+    rtspFeedback.start();
 
     /**
      * Recording to the board and taking a still (R-CAM-17, R-CAM-18,
@@ -947,6 +1046,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
      * holding rather than from the document (K-48).
      */
     recorder = new Recorder({
+      onCamera: accessory?.medium,
       channel: supervisor,
       cameras: () => reachConfig().cameras,
       reserveMb: () => reachConfig().storage.reserve_mb,
@@ -958,6 +1058,15 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
       clock,
       inForce: (id) => channel.inForce(id),
     });
+    stills = new Stills({
+      channel: supervisor,
+      cameras: () => reachConfig().cameras,
+      wanted: () => watching.wantingStills(),
+      generation: (id) => supervisor.generation(id),
+      root: opts.stillsRoot ?? STILLS_ROOT,
+      clock,
+    });
+    stills.start();
   }
   // The telemetry equivalent, and on its own clock for the same reason
   // (R-NET-10's argument, applied to the router's own counters): the sparkline
@@ -1000,6 +1109,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
     configPath: opts.configPath,
     journalPath: opts.journalPath,
     renderers: [...opts.renderers, ...netRenderers],
+    ...(built?.consoleRenderer ? { appearanceRenderer: built.consoleRenderer } : {}),
     renderTimeoutMs: opts.renderTimeoutMs,
     timeoutMs: windows.timeout * 1000,
     radioTimeoutMs: windows.radioTimeout * 1000,
@@ -1059,7 +1169,11 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   // is wiring, not a second place that decides what a modem is. What may be
   // remembered about a modem and what may not is R-CEL-13, stated there with
   // its tests.
-  const modemPort = new ModemNetPort(modemClient, clock);
+  const modemPort = new ModemNetPort(observationModemClient, clock);
+  // The fallback is checked once and is deliberately outside observation
+  // sharing. Its answer decides whether the access point comes up (R-NET-07),
+  // so it reads through the direct clients even if a page read is in flight.
+  const fallbackModemPort = new ModemNetPort(modemClient, clock);
 
   // Which way out is working, assembled from the parts in net/reach/.
   //
@@ -1072,12 +1186,13 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   // Every input is read fresh on each call rather than captured — see
   // reachConfig, above, which is where that is done and why.
   const reach = new ReachMonitor({
+    routeDevice: () => defaultRouteDevice(observationClient.runner),
     standing,
     probe: commandProbe(opts.runner ?? systemRunner),
     ...(opts.counters !== undefined ? { counters: opts.counters } : {}),
     devices: async () => {
       const config = reachConfig();
-      const [devices, net] = await Promise.all([client.devices(), modemPort.interfaceFor(config)]);
+      const [devices, net] = await Promise.all([observationClient.devices(), modemPort.interfaceFor(config)]);
       return pathDevices(config, devices, net);
     },
     // What NetworkManager says about the interfaces themselves, so a port
@@ -1087,14 +1202,14 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
     // `cdc-wdm0` and has no entry at all for the `wwan0` the bytes go out of.
     down: async () => {
       const config = reachConfig();
-      const [devices, net] = await Promise.all([client.devices(), modemPort.interfaceFor(config)]);
+      const [devices, net] = await Promise.all([observationClient.devices(), modemPort.interfaceFor(config)]);
       return pathsDown(devices, pathDevices(config, devices, net), pathDevices(config, devices));
     },
     order: () => reachOrder(reachConfig()),
     holding: async () => {
       const config = reachConfig();
       const [devices, addresses, net] = await Promise.all([
-        client.devices(), client.activeIpv4(), modemPort.interfaceFor(config),
+        observationClient.devices(), observationClient.activeIpv4(), modemPort.interfaceFor(config),
       ]);
       return pathsHolding(
         reachOrder(config),
@@ -1136,7 +1251,19 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
     // ask — so wiring this in can only ever make the fallback fire *more*
     // readily than the address check alone, never less. That direction is the
     // one rule 6 allows.
-    carrying: () => reach.carrying(),
+    carrying: () => reach.carrying(async () => {
+      const config = reachConfig();
+      const [devices, addresses, net] = await Promise.all([
+        client.devices(), client.activeIpv4(), fallbackModemPort.interfaceFor(config),
+      ]);
+      return pathsHolding(
+        reachOrder(config),
+        pathDevices(config, devices, net),
+        addresses,
+        config.network.ap.address.split("/")[0] ?? "",
+        pathDevices(config, devices),
+      );
+    }),
     // The fallback's only action is `nmcli connection up yonder-ap`, and that
     // profile exists only because a render created it. On a cold boot the
     // render may still be waiting for the radio when the deadline lands —
@@ -1200,6 +1327,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   // a network change, and there is no reason for setting one to issue a
   // single nmcli command.
   let provisionTimer: unknown;
+  let passwordTimer: unknown;
   const consoleRenderer = built?.consoleRenderer;
   const onProvisioned = consoleRenderer === undefined ? undefined : (): void => {
     if (provisionTimer !== undefined) clock.clearTimer(provisionTimer);
@@ -1222,12 +1350,48 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
   // use. Built here rather than defaulted inside the router so that a test
   // injecting a fake runner cannot reach a real `ping` — see DiagProbes.
   const probeRunner = opts.runner ?? systemRunner;
+  const interfaces = () => readInterfaces(probeRunner, () => client.devices(), () => clock.now());
+  const diagnosticJobs = new DiagnosticJobs({
+    runner: opts.diagnosticRunner ?? systemDiagnosticRunner,
+    devices: async () => (await interfaces()).interfaces.map(i => i.device),
+  });
   const diag: DiagProbes = {
     ping: (host, count) => ping(host, { runner: probeRunner, clock, ...(count === undefined ? {} : { count }) }),
     reachable: () => reachable({ runner: probeRunner, clock }),
   };
 
+  const cockpitData = new CockpitData({now: () => clock.now()});
+  let terrainPack: TerrainPackService | undefined;
+  try { terrainPack = await TerrainPackService.open(fileURLToPath(new URL("../terrain/assets/cove", import.meta.url))); }
+  catch { note("cockpit: prepared terrain pack unavailable; regional terrain remains optional"); }
   const route = createRouter({
+    interfaces, diagnosticJobs,
+    onPasswordChanged: () => {
+      diagnosticJobs.close();
+      if (!opts.console) return;
+      if (passwordTimer !== undefined) clock.clearTimer(passwordTimer);
+      passwordTimer = clock.setTimer(PROVISION_RESTART_DELAY_MS, () => {
+        passwordTimer = undefined;
+        const paths = consolePaths(opts.console!);
+        void resetConsoleAuth(probeRunner, paths.unit, paths.userDir)
+          .catch(() => warn("Could not invalidate all console/editor sessions after the password change; restart the console and remove its saved editor sessions."));
+      });
+    },
+    rebootRefusal: () => built?.vehicle?.snapshot({ details: false }).telemetry.armed === true
+      ? "Disarm the aircraft before rebooting Yonder." : null,
+    reboot: async () => {
+      const result = await probeRunner(["shutdown", "-r", "+1"]);
+      if (result.code !== 0) throw new Error("Could not schedule system reboot");
+    },
+    accessory,
+    cockpit: {vehicle: built?.vehicle, data: cockpitData, terrain: terrainPack},
+    hostInstruments: {
+      now: () => clock.now(),
+      readFile: opts.hostInstruments?.readFile ?? systemReader,
+      freeBytes: opts.hostInstruments?.freeBytes ?? (() => freeSpaceOn(CAPTURES_ROOT)),
+      // R-FLT-26: instrumentation reads cached modem reports; opening an instrument never enables reporting.
+      ...(built ? { modem: () => readModemState(false) } : {}),
+    },
     engine,
     configPath: opts.configPath,
     credential,
@@ -1243,30 +1407,16 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
     ...(built === undefined ? {} : {
       scan: () => scanForNetworks(client),
       netState: async () => {
-        const [devices, addresses] = await Promise.all([client.devices(), client.activeIpv4()]);
+        const [devices, addresses] = await Promise.all([
+          observationClient.devices(), observationClient.activeIpv4(),
+        ]);
         return networkState(loadConfig(opts.configPath), devices, addresses);
       },
       // What the modem says about itself, read from ModemManager and never
       // from the configuration — the APN comes off the connected bearer, so
       // this reports what the link is actually using rather than what was
       // asked for, which is the pair that disagrees exactly when it matters.
-      modemState: async () => {
-        const config = loadConfig(opts.configPath);
-        const paths = await modemClient.modems();
-        // No modem is an ordinary answer, not a failure. A board without one
-        // is an ordinary board, and an appliance is a named adapter
-        // ModemManager will never have heard of — modemState says which of
-        // those this is, and the nulls are what "not measured" looks like.
-        // Never zeroes: 0 dBm is a real and extraordinary reading.
-        if (paths.length === 0) {
-          return modemState(config, null, null, { rssi: null, rsrq: null, rsrp: null, snr: null });
-        }
-        const modem = await modemClient.modem(paths[0]);
-        await armSignal(modem.path);
-        const bearer = await modemClient.connectedBearer(modem);
-        const signal = await modemClient.signal(modem.path);
-        return modemState(config, modem, bearer, signal);
-      },
+      modemState: () => readModemState(true),
       secrets: built.secrets,
       // The interface's kernel byte counters, not ZeroTier's own /metrics —
       // measured empty (0 bytes) on a real board. This is the same call the
@@ -1283,8 +1433,8 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
       // injecting a fake runner gets a fake v4l2-ctl for free, and nothing
       // reaches a real one by omission.
       cameras: {
-        detect: () => detectCameras({ runner: probeRunner }),
-        probe: (node, card) => probeCamera(node, card, { runner: probeRunner }),
+        detect: () => detectWithAccessory(() => detectCameras({ runner: probeRunner }), () => accessory?.detect() ?? { found: [], rejected: [] }),
+        probe: async (node, card) => node.startsWith('pocket2:') && accessory ? accessory.probe(node) : probeCamera(node, card, { runner: probeRunner }),
       },
       // The very same successful answer the pipeline renderer uses. Camera
       // page polls and an apply can arrive together; both share one in-flight
@@ -1309,9 +1459,9 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
       addresses: async () => {
         const config = reachConfig();
         const [local, mesh, devices, net] = await Promise.all([
-          client.activeIpv4(),
+          observationClient.activeIpv4(),
           readRemoteState(config, built.zerotier, { readTraffic }),
-          client.devices(),
+          observationClient.devices(),
           modemPort.interfaceFor(config),
         ]);
         /**
@@ -1353,6 +1503,8 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
     // command a pipeline through, and every capture route says so rather than
     // answering with an empty list that would read as *nothing was recorded*.
     ...(recorder === undefined ? {} : { recorder }),
+    ...(stills === undefined ? {} : { stills }),
+    clock,
     // Not behind `built`: the reach monitor is assembled from the runner and
     // the nmcli client, neither of which depends on the secret store, so a
     // board whose secrets.yaml is unreadable can still say which way out is
@@ -1369,8 +1521,15 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
 
   const server: Server = createServer((req, res) => {
     const chunks: Buffer[] = [];
-    req.on("data", (c: Buffer) => chunks.push(c));
+    let cockpitLength = 0;
+    let cockpitTooLarge = false;
+    req.on("data", (c: Buffer) => {
+      cockpitLength += c.length;
+      if ((req.url ?? "").startsWith("/cockpit/") && cockpitLength > 512 * 1024) { cockpitTooLarge = true; chunks.length = 0; }
+      if (!cockpitTooLarge) chunks.push(c);
+    });
     req.on("end", () => {
+      if (cockpitTooLarge) { res.writeHead(413, {"content-type": "application/json"}); res.end(JSON.stringify({error: "Cockpit request exceeds size limit"})); return; }
       let body: unknown;
       if (chunks.length > 0) {
         try {
@@ -1390,6 +1549,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
         // caller has to inspect first.
         if (r.contentType !== undefined && Buffer.isBuffer(r.body)) {
           res.writeHead(r.status, {
+            ...r.headers,
             "content-type": r.contentType,
             "content-length": r.body.length,
           });
@@ -1463,7 +1623,11 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
         // other timer this daemon owns, and a poll loop outliving its daemon
         // would go on questioning NetworkManager — and could still reach a
         // render — on behalf of a process that has already closed.
+        built?.cameraAutostart.close();
+        for (const run of built?.supervisor.all() ?? []) built?.supervisor.stop(run.id);
         watchdog.stop();
+        diagnosticJobs.close();
+        if (passwordTimer !== undefined) clock.clearTimer(passwordTimer);
         // Stopped with it, and for the same reason one step further: a tick
         // loop outliving its daemon would go on running `curl` on somebody's
         // metered link on behalf of a process that has closed its socket.
@@ -1483,16 +1647,21 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
         // on writing bitrates into a running pipeline on behalf of a process
         // that has already let go of its socket — and, unlike the others,
         // it would be commanding hardware while it did it.
+        rtspFeedback?.stop();
         adaptation?.stop();
+        stills?.stop();
         // The fifth: the telemetry sampler, and with it any sweep this
         // renderer had scheduled for thirty seconds' time.
         built?.mavlinkRenderer?.close();
         // And the socket it shares a tracker with. A listener outliving its
         // daemon would hold :14559 against the next one to start.
+        built?.vehicle?.close();
+        cockpitData.close();
+        terrainPack?.clearCache();
         built?.mavlinkListener?.close();
         server.close(() => {
           if (existsSync(opts.socketPath)) unlinkSync(opts.socketPath);
-          resolve();
+          void (accessory?.close() ?? Promise.resolve()).catch(error => warn(`accessory cleanup: ${String(error)}`)).finally(resolve);
         });
       }),
   };
@@ -1500,6 +1669,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
 
 async function main(): Promise<void> {
   await startServer({
+    accessory: true,
     socketPath: process.env.YONDER_SOCKET ?? "/run/yonder/core.sock",
     configPath: process.env.YONDER_CONFIG ?? "/etc/yonder/config.yaml",
     journalPath: process.env.YONDER_JOURNAL ?? DEFAULT_JOURNAL_PATH,

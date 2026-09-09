@@ -3,10 +3,11 @@
     <div class="y-caps">
         <div class="y-caps__h">
             <span>Captures · {{ heldHere }}</span>
-            <em class="y-caps__n">{{ captures.length }} saved</em>
+            <em v-if="listable" class="y-caps__n">{{ captures.length }} saved</em>
         </div>
 
         <p v-if="!report" class="y-caps__none">Waiting for this camera's captures.</p>
+        <p v-else-if="!listable" class="y-caps__none">{{ report.reason || 'The camera holds these files; Yonder cannot list or download them.' }}</p>
         <p v-else-if="!captures.length" class="y-caps__none">Nothing saved to this board yet.</p>
 
         <ul v-else class="y-caps__list">
@@ -54,7 +55,7 @@
             </li>
         </ul>
 
-        <div class="y-caps__fine">
+        <div v-if="listable" class="y-caps__fine">
             free space is stated under the shutter key · deleting is immediate and cannot be undone
         </div>
     </div>
@@ -207,12 +208,14 @@ export default {
             return (this.report && typeof this.report.camera === 'string') ? this.report.camera : ''
         },
         captures () {
+            if (!this.listable) return []
             return this.report && Array.isArray(this.report.captures) ? this.report.captures : []
         },
+        listable () { return this.report?.listing !== 'unavailable' },
         /** The heading's own qualifier. Every listing this panel draws is one
          * camera's, and the board is where the ones it can act on live. */
         heldHere () {
-            return heldWords('board')
+            return heldWords(this.report?.destination === 'camera' ? 'camera' : 'board')
         }
     },
     watch: {
@@ -244,7 +247,7 @@ export default {
         /** Every message this node posts leaves through here — one seam, the
          * same reasoning `YonderDeck` and `YonderIndex` each give. */
         post (payload) {
-            this.$socket.emit('widget-action', this.id, { payload })
+            if (this.camera) this.$socket.emit('widget-action', this.id, { camera: this.camera, payload })
         },
         onCamera (c) {
             return c && c.held === 'camera'

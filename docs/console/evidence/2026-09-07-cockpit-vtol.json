@@ -1,0 +1,147 @@
+{
+  "schema": 1,
+  "sourceCommit": "dbe792162d06cab66c3475fd5556bf7a120f119e",
+  "firmware": "Official ArduPlane 4.7.1",
+  "model": "quadplane",
+  "evidence": "Independent disposable SITL; no physical aircraft",
+  "startedAt": "2026-09-08T00:35:49.041Z",
+  "finishedAt": "2026-09-08T00:37:15.578Z",
+  "outcome": "passed",
+  "stages": [
+    {
+      "action": "stream-setup",
+      "operation": "accepted",
+      "mode": "Mode 16",
+      "relativeAltitudeM": null,
+      "verticalSpeedFpm": null,
+      "airspeedKt": null,
+      "currentSeq": null,
+      "distanceFromHomeM": null
+    },
+    {
+      "action": "mission-download",
+      "operation": "observed",
+      "mode": "FBWA",
+      "relativeAltitudeM": -0.149,
+      "verticalSpeedFpm": 0,
+      "airspeedKt": 1.6119042689032959,
+      "currentSeq": 0,
+      "distanceFromHomeM": null
+    },
+    {
+      "action": "mission-upload",
+      "operation": "observed",
+      "mode": "FBWA",
+      "relativeAltitudeM": 0.1,
+      "verticalSpeedFpm": 0,
+      "airspeedKt": 1.972147301000339,
+      "currentSeq": 0,
+      "distanceFromHomeM": null
+    },
+    {
+      "action": "mode",
+      "operation": "observed",
+      "mode": "QLOITER",
+      "relativeAltitudeM": 0.149,
+      "verticalSpeedFpm": 2.6602879181269934,
+      "airspeedKt": 1.5145702058244177,
+      "currentSeq": 0,
+      "distanceFromHomeM": null
+    },
+    {
+      "action": "arm",
+      "operation": "observed",
+      "mode": "QLOITER",
+      "relativeAltitudeM": -0.141,
+      "verticalSpeedFpm": 2.3535161286475463,
+      "airspeedKt": 0.5144929911611392,
+      "currentSeq": 0,
+      "distanceFromHomeM": null
+    },
+    {
+      "action": "mission-start",
+      "operation": "accepted",
+      "mode": "AUTO",
+      "relativeAltitudeM": -0.145,
+      "verticalSpeedFpm": 2.2374126532181338,
+      "airspeedKt": 0.5360907985633688,
+      "currentSeq": 0,
+      "distanceFromHomeM": null
+    },
+    {
+      "action": "vertical takeoff observed",
+      "operation": null,
+      "mode": "AUTO",
+      "relativeAltitudeM": 10.132,
+      "verticalSpeedFpm": 490.8851281864501,
+      "airspeedKt": 1.8819294918175604,
+      "currentSeq": null,
+      "distanceFromHomeM": 0.7568780672747947
+    },
+    {
+      "action": "180 ft takeoff completed",
+      "operation": null,
+      "mode": "AUTO",
+      "relativeAltitudeM": 55.428,
+      "verticalSpeedFpm": 487.19517827973294,
+      "airspeedKt": 0.8785999683787941,
+      "currentSeq": 2,
+      "distanceFromHomeM": null
+    },
+    {
+      "action": "transition and first route waypoint completed",
+      "operation": null,
+      "mode": "AUTO",
+      "relativeAltitudeM": 85.156,
+      "verticalSpeedFpm": 388.9377661577411,
+      "airspeedKt": 51.63005845335583,
+      "currentSeq": 3,
+      "distanceFromHomeM": null
+    }
+  ],
+  "vtolStateChanges": [
+    {
+      "at": 1788827751834,
+      "vtolState": 4,
+      "landedState": 1
+    },
+    {
+      "at": 1788827794847,
+      "vtolState": 3,
+      "landedState": 1
+    },
+    {
+      "at": 1788827818858,
+      "vtolState": 1,
+      "landedState": 2
+    },
+    {
+      "at": 1788827828360,
+      "vtolState": 4,
+      "landedState": 2
+    }
+  ],
+  "missionStartCommandCount": 1,
+  "firstUploadedTakeoffItem": {
+    "seq": 1,
+    "command": 84,
+    "frame": 3,
+    "current": false,
+    "autocontinue": true,
+    "params": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "x": 0,
+    "y": 0,
+    "z": 54.86000061035156
+  },
+  "validation": {
+    "dashboardTests": 715,
+    "dashboardFiles": 58,
+    "dashboardBuild": "passed",
+    "browserFixtureWalkthrough": "passed; laptop, tablet, portrait and phone; no vehicle requests"
+  }
+}

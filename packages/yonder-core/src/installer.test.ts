@@ -309,7 +309,7 @@ describe("installer/roles/55-pipeline-host.sh", () => {
     // Both are in Debian main, on the footing 50-mediamtx.sh states for
     // gstreamer1.0-rtsp. make-payload.sh vendors what Debian does not carry,
     // against pinned fingerprints, and has no apt mechanism at all.
-    expect(role).toMatch(/^ensure_pkgs python3-gi gir1\.2-gstreamer-1\.0$/m);
+    expect(role).toMatch(/^ensure_pkgs python3-gi gir1\.2-gstreamer-1\.0 gstreamer1\.0-libav$/m);
   });
 
   it("asks Python whether it can import them, not dpkg whether they are there", () => {
@@ -1855,5 +1855,20 @@ describe("installer/roles/50-mediamtx.sh installs what every pipeline is made of
   it("no longer takes the weaker branch when gst-inspect-1.0 is absent — it dies", () => {
     expect(role).not.toContain("no gst-inspect-1.0 here to resolve");
     expect(role).toContain("still no gst-inspect-1.0");
+  });
+});
+
+describe('accessory daemon filesystem boundary', () => {
+  it('prepares configfs before core starts and grants only the gadget subtree', () => {
+    const role = readFileSync(join(ROOT, 'installer/roles/18-accessory-usb.sh'), 'utf8');
+    const unit = readFileSync(join(ROOT, 'systemd/yonder-core.service'), 'utf8');
+    expect(role).toContain('modprobe libcomposite'); expect(role).toContain('mount -t configfs');
+    expect(role).toContain('core installation continues');
+    expect(unit).toContain('After=local-fs.target NetworkManager.service systemd-modules-load.service sys-kernel-config.mount');
+    expect(unit).toContain('-/sys/kernel/config/usb_gadget');
+    expect(unit).toContain('ProtectSystem=strict'); expect(unit).not.toMatch(/^ReadWritePaths=.*(?:\s|=)\/sys(?:\s|$)/m);
+    const helper = readFileSync(join(ROOT, 'packages/yonder-core/src/video/accessory/assets/functionfs.py'), 'utf8');
+    expect(helper).toContain("Path('/run/yonder/accessory-usb')"); expect(helper).toContain('dir=lock_root');
+    expect(helper).toContain('fcntl.LOCK_EX | fcntl.LOCK_NB');
   });
 });

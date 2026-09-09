@@ -1,0 +1,343 @@
+{
+  "source": "Separate disposable ArduPlane 4.7.1 QuadPlane; all requests made through visible Vue controls",
+  "records": [
+    {
+      "name": "stream-setup completes",
+      "mode": "FBWA",
+      "armed": false,
+      "currentSeq": 0,
+      "relativeAltitudeM": -0.114,
+      "airspeedKt": 1.3262697481439611,
+      "verticalSpeedFpm": -2.99323133860286
+    },
+    {
+      "operation": "stream-setup",
+      "state": "accepted",
+      "message": "Autopilot accepted; physical effect is not measured by this command",
+      "effect": {
+        "state": "unavailable",
+        "at": 1788873184151,
+        "message": "Autopilot accepted; physical effect is not measured by this command"
+      }
+    },
+    {
+      "name": "mission-download completes",
+      "mode": "FBWA",
+      "armed": false,
+      "currentSeq": 0,
+      "relativeAltitudeM": -0.129,
+      "airspeedKt": 1.722407109279093,
+      "verticalSpeedFpm": -3.103079552960249
+    },
+    {
+      "operation": "mission-download",
+      "state": "observed",
+      "message": "Complete vehicle mission downloaded",
+      "effect": {
+        "state": "observed",
+        "at": 1788873184599,
+        "message": "Complete vehicle mission downloaded"
+      }
+    },
+    {
+      "name": "mission-upload completes",
+      "mode": "FBWA",
+      "armed": false,
+      "currentSeq": 0,
+      "relativeAltitudeM": -0.128,
+      "airspeedKt": 1.5332690840405947,
+      "verticalSpeedFpm": -2.5518519041224126
+    },
+    {
+      "operation": "mission-upload",
+      "state": "observed",
+      "message": "Mission accepted and downloaded copy verified; home is the actual vehicle home",
+      "effect": {
+        "state": "observed",
+        "at": 1788873185663,
+        "message": "Mission accepted and downloaded copy verified; home is the actual vehicle home"
+      }
+    },
+    {
+      "name": "15 wire items verified",
+      "mode": "FBWA",
+      "armed": false,
+      "currentSeq": 0,
+      "relativeAltitudeM": -0.128,
+      "airspeedKt": 1.5332690840405947,
+      "verticalSpeedFpm": -2.5518519041224126
+    },
+    {
+      "name": "mode completes",
+      "mode": "QLOITER",
+      "armed": false,
+      "currentSeq": 0,
+      "relativeAltitudeM": -0.016,
+      "airspeedKt": 1.1367321143140003,
+      "verticalSpeedFpm": -2.2101483681774807
+    },
+    {
+      "operation": "mode",
+      "state": "observed",
+      "message": "Requested aircraft state observed",
+      "effect": {
+        "state": "observed",
+        "at": 1788873186132,
+        "message": "Requested aircraft state observed"
+      }
+    },
+    {
+      "name": "QLOITER observed",
+      "mode": "QLOITER",
+      "armed": false,
+      "currentSeq": 0,
+      "relativeAltitudeM": -0.016,
+      "airspeedKt": 1.1367321143140003,
+      "verticalSpeedFpm": -2.2101483681774807
+    },
+    {
+      "name": "arm completes",
+      "mode": "QLOITER",
+      "armed": false,
+      "currentSeq": 0,
+      "relativeAltitudeM": 0.026,
+      "airspeedKt": 0.5015424981745467,
+      "verticalSpeedFpm": -1.4418580268663874
+    },
+    {
+      "operation": "arm",
+      "state": "accepted",
+      "message": "Autopilot accepted; awaiting observed effect",
+      "effect": {
+        "state": "waiting",
+        "at": null,
+        "message": "Awaiting operator-requested operation"
+      }
+    },
+    {
+      "name": "Armed observed",
+      "mode": "QLOITER",
+      "armed": true,
+      "currentSeq": 0,
+      "relativeAltitudeM": 0.051,
+      "airspeedKt": 0.566489901192501,
+      "verticalSpeedFpm": -0.4422371954048536
+    },
+    {
+      "name": "mission-start completes",
+      "mode": "AUTO",
+      "armed": true,
+      "currentSeq": 1,
+      "relativeAltitudeM": 0.075,
+      "airspeedKt": 0.8107876996499653,
+      "verticalSpeedFpm": 0.5098681266265659
+    },
+    {
+      "operation": "mission-start",
+      "state": "accepted",
+      "message": "Autopilot accepted; physical effect is not measured by this command",
+      "effect": {
+        "state": "unavailable",
+        "at": 1788873187974,
+        "message": "Autopilot accepted; physical effect is not measured by this command"
+      }
+    },
+    {
+      "name": "AUTO takeoff and measured positive VSI",
+      "mode": "AUTO",
+      "armed": true,
+      "currentSeq": 1,
+      "relativeAltitudeM": 10.154,
+      "airspeedKt": 1.1856883957370539,
+      "verticalSpeedFpm": 485.9268665313785
+    },
+    {
+      "name": "180 ft VTOL target advances to waypoint 02",
+      "mode": "AUTO",
+      "armed": true,
+      "currentSeq": 2,
+      "relativeAltitudeM": 56.541,
+      "airspeedKt": 1.8351550107383272,
+      "verticalSpeedFpm": 364.6953603414148
+    },
+    {
+      "name": "Mission advances beyond first geographic waypoint",
+      "mode": "AUTO",
+      "armed": true,
+      "currentSeq": 3,
+      "relativeAltitudeM": 66.67,
+      "airspeedKt": 42.375330173171,
+      "verticalSpeedFpm": 613.9753371711872
+    },
+    {
+      "name": "heading completes",
+      "mode": "GUIDED",
+      "armed": true,
+      "currentSeq": 3,
+      "relativeAltitudeM": 68.942,
+      "airspeedKt": 42.432831173066596,
+      "verticalSpeedFpm": 606.5046224068549
+    },
+    {
+      "operation": "heading",
+      "state": "accepted",
+      "message": "Autopilot accepted true-heading request; heading capture is not reported by this protocol",
+      "effect": {
+        "state": "unavailable",
+        "at": 1788873219935,
+        "message": "Autopilot accepted true-heading request; heading capture is not reported by this protocol"
+      }
+    },
+    {
+      "name": "GUIDED observed after heading request",
+      "mode": "GUIDED",
+      "armed": true,
+      "currentSeq": 3,
+      "relativeAltitudeM": 68.942,
+      "airspeedKt": 42.432831173066596,
+      "verticalSpeedFpm": 606.5046224068549
+    },
+    {
+      "name": "altitude completes",
+      "mode": "GUIDED",
+      "armed": true,
+      "currentSeq": 3,
+      "relativeAltitudeM": 69.537,
+      "airspeedKt": 42.71124887157455,
+      "verticalSpeedFpm": -290.2495110128846
+    },
+    {
+      "operation": "altitude",
+      "state": "accepted",
+      "message": "Autopilot accepted altitude request; monitor reported altitude and vertical speed, capture is not reported",
+      "effect": {
+        "state": "unavailable",
+        "at": 1788873220570,
+        "message": "Autopilot accepted altitude request; monitor reported altitude and vertical speed, capture is not reported"
+      }
+    },
+    {
+      "name": "speed completes",
+      "mode": "GUIDED",
+      "armed": true,
+      "currentSeq": 3,
+      "relativeAltitudeM": 68.662,
+      "airspeedKt": 44.53867506517437,
+      "verticalSpeedFpm": -76.59110614634037
+    },
+    {
+      "operation": "speed",
+      "state": "accepted",
+      "message": "Autopilot accepted airspeed request; speed capture is not reported by this protocol",
+      "effect": {
+        "state": "unavailable",
+        "at": 1788873221180,
+        "message": "Autopilot accepted airspeed request; speed capture is not reported by this protocol"
+      }
+    },
+    {
+      "name": "450 ft target reached within 5 m using maximum rate",
+      "mode": "GUIDED",
+      "armed": true,
+      "currentSeq": 3,
+      "relativeAltitudeM": 132.205,
+      "airspeedKt": 49.168363863654456,
+      "verticalSpeedFpm": 451.7540218323294
+    },
+    {
+      "name": "goto completes",
+      "mode": "GUIDED",
+      "armed": true,
+      "currentSeq": 3,
+      "relativeAltitudeM": 133.668,
+      "airspeedKt": 49.48858462966017,
+      "verticalSpeedFpm": 362.771397500531
+    },
+    {
+      "operation": "goto",
+      "state": "observed",
+      "message": "Requested aircraft state observed",
+      "effect": {
+        "state": "observed",
+        "at": 1788873239622,
+        "message": "Requested aircraft state observed"
+      }
+    },
+    {
+      "name": "loiter completes",
+      "mode": "GUIDED",
+      "armed": true,
+      "currentSeq": 3,
+      "relativeAltitudeM": 133.95,
+      "airspeedKt": 49.56370780071469,
+      "verticalSpeedFpm": 199.39396325059087
+    },
+    {
+      "operation": "loiter",
+      "state": "accepted",
+      "message": "Autopilot accepted loiter request; monitor GUIDED target and aircraft track, radius and direction are not reported",
+      "effect": {
+        "state": "unavailable",
+        "at": 1788873240216,
+        "message": "Autopilot accepted loiter request; monitor GUIDED target and aircraft track, radius and direction are not reported"
+      }
+    },
+    {
+      "name": "continue-auto completes",
+      "mode": "AUTO",
+      "armed": true,
+      "currentSeq": 3,
+      "relativeAltitudeM": 135.259,
+      "airspeedKt": 49.03461629319642,
+      "verticalSpeedFpm": 947.695735871335
+    },
+    {
+      "operation": "continue-auto",
+      "state": "observed",
+      "message": "Requested aircraft state observed",
+      "effect": {
+        "state": "observed",
+        "at": 1788873240381,
+        "message": "Requested aircraft state observed"
+      }
+    },
+    {
+      "name": "AUTO resume observed",
+      "mode": "AUTO",
+      "armed": true,
+      "currentSeq": 3,
+      "relativeAltitudeM": 135.259,
+      "airspeedKt": 49.03461629319642,
+      "verticalSpeedFpm": 947.695735871335
+    },
+    {
+      "name": "mode completes",
+      "mode": "RTL",
+      "armed": true,
+      "currentSeq": 3,
+      "relativeAltitudeM": 136.696,
+      "airspeedKt": 44.60566378566657,
+      "verticalSpeedFpm": -37.00662902959737
+    },
+    {
+      "operation": "mode",
+      "state": "observed",
+      "message": "Requested aircraft state observed",
+      "effect": {
+        "state": "observed",
+        "at": 1788873241001,
+        "message": "Requested aircraft state observed"
+      }
+    },
+    {
+      "name": "RTL observed",
+      "mode": "RTL",
+      "armed": true,
+      "currentSeq": 3,
+      "relativeAltitudeM": 136.696,
+      "airspeedKt": 44.60566378566657,
+      "verticalSpeedFpm": -37.00662902959737
+    }
+  ],
+  "errors": []
+}

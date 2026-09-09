@@ -29,6 +29,9 @@ export const SECRET_KEYS: ReadonlySet<string> = new Set([
   // The bare names a request body uses. `password` covers both the console's
   // POST /admin/password and POST /admin/verify.
   "password",
+  "currentPassword",
+  "newPassword",
+  "confirmPassword",
   "psk",
   "passphrase",
 ]);

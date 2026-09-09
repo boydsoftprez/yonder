@@ -182,7 +182,7 @@ describe("the captures panel", () => {
     await del().trigger("click");
     expect(emit).toHaveBeenCalledTimes(1);
     expect(emit.mock.calls[0]![2])
-      .toEqual({ payload: { remove: "2026-09-07T14-22-05-123Z-1280x720.jpg" } });
+      .toEqual({ camera: "cam0", payload: { remove: "2026-09-07T14-22-05-123Z-1280x720.jpg" } });
   });
 
   it("keeps the capture when the question is answered the other way", async () => {
@@ -264,4 +264,15 @@ describe("the captures panel", () => {
     const { wrapper } = panel({ captures: [capture()] });
     expect(rows(wrapper)[0]!.find("img.y-caps__thumb").attributes("src")).toBe("");
   });
+});
+
+it('shows the unlistable camera medium without a fabricated zero count or board actions', () => {
+  const { wrapper } = panel({ camera: 'pocket', destination: 'camera', listing: 'unavailable', captures: [], reason: 'Files stay on the camera card; listing and download are unavailable.' });
+  expect(wrapper.text()).toContain("the camera's card");
+  expect(wrapper.text()).toContain('Files stay on the camera card');
+  expect(wrapper.text()).not.toContain('0 saved');
+  expect(wrapper.text()).not.toContain('Nothing saved to this board');
+  expect(wrapper.text()).not.toContain('deleting is immediate');
+  expect(wrapper.findAll('button, a, img, video')).toHaveLength(0);
+  wrapper.unmount();
 });

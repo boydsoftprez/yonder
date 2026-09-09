@@ -244,3 +244,43 @@ describe("LoopbackListener", () => {
     }
   });
 });
+
+it("uses the existing loopback feed for explicit replies without sending on receipt", async () => {
+  const frames: Uint8Array[] = [];
+  const listener = new LoopbackListener({tracker:new LinkTracker(),port:0,onDatagram: bytes => frames.push(bytes)});
+  const peer = createSocket("udp4");
+  const replies: Buffer[] = [];
+  peer.on("message", data => replies.push(data));
+  try {
+    await expect(listener.send(VEHICLE)).rejects.toThrow(/peer/i);
+    await listener.start();
+    await new Promise<void>(resolve => peer.bind(0, LOOPBACK_ADDRESS, resolve));
+    await new Promise<void>((resolve,reject) => peer.send(VEHICLE,listener.bound!.port,LOOPBACK_ADDRESS,error => error ? reject(error) : resolve()));
+    await arrives(() => frames.length === 1);
+    expect(replies).toHaveLength(0);
+    expect(Buffer.from(frames[0]!)).toEqual(Buffer.from(VEHICLE));
+    await listener.send(STATION);
+    await arrives(() => replies.length === 1);
+    expect(replies[0]).toEqual(Buffer.from(STATION));
+    listener.close();
+    await expect(listener.send(STATION)).rejects.toThrow(/peer/i);
+  } finally {listener.close();peer.close();}
+});
+
+it('pins the validated router peer and ignores other local senders until stale',async()=>{
+ let now=100000;
+ const frames:Uint8Array[]=[],listener=new LoopbackListener({tracker:new LinkTracker(),port:0,now:()=>now,onDatagram:b=>frames.push(b)});
+ const router=createSocket('udp4'),noise=createSocket('udp4');
+ const delivered:Buffer[]=[],misdirected:Buffer[]=[];
+ router.on('message',d=>delivered.push(d));noise.on('message',d=>misdirected.push(d));
+ const send=async(socket:ReturnType<typeof createSocket>,bytes:Uint8Array)=>new Promise<void>((resolve,reject)=>socket.send(bytes,listener.bound!.port,LOOPBACK_ADDRESS,e=>e?reject(e):resolve()));
+ try {
+  await listener.start();await send(router,VEHICLE);await arrives(()=>frames.length===1);
+  await send(noise,Buffer.from('unrelated local packet'));await send(noise,VEHICLE);
+  await new Promise<void>(r=>setImmediate(r));await listener.send(STATION);await arrives(()=>delivered.length===1);
+  expect(misdirected).toHaveLength(0);expect(frames).toHaveLength(1);
+  now+=11000;await expect(listener.send(STATION)).rejects.toThrow(/peer/i);
+  await send(noise,VEHICLE);await arrives(()=>frames.length===2);
+  await listener.send(STATION);await arrives(()=>misdirected.length===1);
+ }finally{listener.close();router.close();noise.close();}
+});

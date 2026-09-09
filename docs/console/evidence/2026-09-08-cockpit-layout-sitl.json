@@ -1,0 +1,418 @@
+{
+  "source": "Separate disposable ArduPlane 4.7.1 QuadPlane; all requests made through visible Vue controls",
+  "records": [
+    {
+      "name": "stream-setup completes",
+      "mode": "FBWA",
+      "armed": false,
+      "currentSeq": 0,
+      "relativeAltitudeM": -0.013,
+      "airspeedKt": 0.5122644983666492,
+      "verticalSpeedFpm": -1.4414738563043585
+    },
+    {
+      "operation": "stream-setup",
+      "state": "accepted",
+      "message": "Essential streams requested; 12 optional instrumentation streams unavailable",
+      "effect": {
+        "state": "unavailable",
+        "at": 1788893010298,
+        "message": "Essential streams requested; 12 optional instrumentation streams unavailable"
+      }
+    },
+    {
+      "name": "mission-download completes",
+      "mode": "FBWA",
+      "armed": false,
+      "currentSeq": 0,
+      "relativeAltitudeM": 0.032,
+      "airspeedKt": 1.0613956410220555,
+      "verticalSpeedFpm": -0.26118150989224703
+    },
+    {
+      "operation": "mission-download",
+      "state": "observed",
+      "message": "Complete vehicle mission downloaded",
+      "effect": {
+        "state": "observed",
+        "at": 1788893010788,
+        "message": "Complete vehicle mission downloaded"
+      }
+    },
+    {
+      "name": "SITL EKF3 and GPS ready before arming",
+      "mode": "FBWA",
+      "armed": false,
+      "currentSeq": 0,
+      "relativeAltitudeM": 0.033,
+      "airspeedKt": 1.4117902736169439,
+      "verticalSpeedFpm": -0.2158563043262222
+    },
+    {
+      "name": "mission-upload completes",
+      "mode": "FBWA",
+      "armed": false,
+      "currentSeq": 0,
+      "relativeAltitudeM": 0.026,
+      "airspeedKt": 2.0823961715203847,
+      "verticalSpeedFpm": -0.29263422571445696
+    },
+    {
+      "operation": "mission-upload",
+      "state": "observed",
+      "message": "Mission accepted and downloaded copy verified; home is the actual vehicle home",
+      "effect": {
+        "state": "observed",
+        "at": 1788893012331,
+        "message": "Mission accepted and downloaded copy verified; home is the actual vehicle home"
+      }
+    },
+    {
+      "name": "15 wire items verified",
+      "mode": "FBWA",
+      "armed": false,
+      "currentSeq": 0,
+      "relativeAltitudeM": 0.026,
+      "airspeedKt": 2.0823961715203847,
+      "verticalSpeedFpm": -0.29263422571445696
+    },
+    {
+      "name": "mode completes",
+      "mode": "QLOITER",
+      "armed": false,
+      "currentSeq": 0,
+      "relativeAltitudeM": 0.031,
+      "airspeedKt": 0.6968387710352936,
+      "verticalSpeedFpm": -0.09521693962912281
+    },
+    {
+      "operation": "mode",
+      "state": "observed",
+      "message": "Requested aircraft state observed",
+      "effect": {
+        "state": "observed",
+        "at": 1788893013004,
+        "message": "Requested aircraft state observed"
+      }
+    },
+    {
+      "name": "QLOITER observed",
+      "mode": "QLOITER",
+      "armed": false,
+      "currentSeq": 0,
+      "relativeAltitudeM": 0.031,
+      "airspeedKt": 0.6968387710352936,
+      "verticalSpeedFpm": -0.09521693962912281
+    },
+    {
+      "name": "arm completes",
+      "mode": "QLOITER",
+      "armed": false,
+      "currentSeq": 0,
+      "relativeAltitudeM": -0.022,
+      "airspeedKt": 0.5092273456231552,
+      "verticalSpeedFpm": 0.4825608045830799
+    },
+    {
+      "operation": "arm",
+      "state": "accepted",
+      "message": "Autopilot accepted; awaiting observed effect",
+      "effect": {
+        "state": "waiting",
+        "at": null,
+        "message": "Awaiting operator-requested operation"
+      }
+    },
+    {
+      "name": "Armed observed",
+      "mode": "QLOITER",
+      "armed": true,
+      "currentSeq": 0,
+      "relativeAltitudeM": 0,
+      "airspeedKt": 1.3457939125291696,
+      "verticalSpeedFpm": 1.3623651535081762
+    },
+    {
+      "name": "mission-start completes",
+      "mode": "AUTO",
+      "armed": true,
+      "currentSeq": 0,
+      "relativeAltitudeM": 0.019,
+      "airspeedKt": 1.9354579258171019,
+      "verticalSpeedFpm": 1.8812573008884843
+    },
+    {
+      "operation": "mission-start",
+      "state": "accepted",
+      "message": "Autopilot accepted; physical effect is not measured by this command",
+      "effect": {
+        "state": "unavailable",
+        "at": 1788893015164,
+        "message": "Autopilot accepted; physical effect is not measured by this command"
+      }
+    },
+    {
+      "name": "AUTO takeoff and measured positive VSI",
+      "mode": "AUTO",
+      "armed": true,
+      "currentSeq": 1,
+      "relativeAltitudeM": 10.616,
+      "airspeedKt": 1.5454175791524103,
+      "verticalSpeedFpm": 487.16363944407226
+    },
+    {
+      "name": "180 ft VTOL target advances to waypoint 02",
+      "mode": "AUTO",
+      "armed": true,
+      "currentSeq": 2,
+      "relativeAltitudeM": 56.098,
+      "airspeedKt": 0.8611912153194563,
+      "verticalSpeedFpm": 464.1533836605103
+    },
+    {
+      "name": "Mission advances beyond first geographic waypoint",
+      "mode": "AUTO",
+      "armed": true,
+      "currentSeq": 3,
+      "relativeAltitudeM": 66.361,
+      "airspeedKt": 42.199887055300124,
+      "verticalSpeedFpm": 599.2119706521902
+    },
+    {
+      "name": "Live instrumentation and observed flight time",
+      "bytes": 9522,
+      "fieldCount": 156,
+      "fields": {
+        "flight.bootSeconds": {
+          "value": 184.756,
+          "unit": "s",
+          "source": "GLOBAL_POSITION_INT · Observed · system 1 component 1",
+          "ageMs": 83,
+          "ttlMs": 5000,
+          "quality": "reported"
+        },
+        "flight.armedSeconds": {
+          "value": 32.033,
+          "unit": "s",
+          "source": "Observed · system 1 component 1",
+          "ageMs": 791,
+          "ttlMs": 3000,
+          "quality": "partial",
+          "reason": "Armed intervals only; transition boundaries excluded. Total since collector attachment or last confirmed boot; gaps excluded. Before-attachment history excluded."
+        },
+        "flight.airborneSeconds": {
+          "value": 8.008,
+          "unit": "s",
+          "source": "Observed · system 1 component 1",
+          "ageMs": 789,
+          "ttlMs": 5000,
+          "quality": "partial",
+          "reason": "IN_AIR intervals only; TAKEOFF, LANDING and transition boundaries excluded. Total since collector attachment or last confirmed boot; gaps excluded. Before-attachment history excluded."
+        },
+        "flight.autoSeconds": {
+          "value": 31.108,
+          "unit": "s",
+          "source": "Observed · system 1 component 1",
+          "ageMs": 791,
+          "ttlMs": 3000,
+          "quality": "partial",
+          "reason": "Armed ArduPlane AUTO intervals only; pauses and transition boundaries excluded. Total since collector attachment or last confirmed boot; gaps excluded. Before-attachment history excluded."
+        },
+        "flight.vtolState": {
+          "value": "Transition to fixed wing",
+          "unit": "",
+          "source": "EXTENDED_SYS_STATE · system 1 component 1",
+          "ageMs": 789,
+          "ttlMs": 5000,
+          "quality": "reported"
+        },
+        "flight.landedState": {
+          "value": "In air",
+          "unit": "",
+          "source": "EXTENDED_SYS_STATE · system 1 component 1",
+          "ageMs": 789,
+          "ttlMs": 5000,
+          "quality": "reported"
+        },
+        "fc.loadPercent": {
+          "value": 0,
+          "unit": "%",
+          "source": "SYS_STATUS · system 1 component 1",
+          "ageMs": 8,
+          "ttlMs": 5000,
+          "quality": "reported"
+        }
+      }
+    },
+    {
+      "name": "heading completes",
+      "mode": "GUIDED",
+      "armed": true,
+      "currentSeq": 3,
+      "relativeAltitudeM": 70.412,
+      "airspeedKt": 42.41425615149996,
+      "verticalSpeedFpm": 709.9709172887219
+    },
+    {
+      "operation": "heading",
+      "state": "accepted",
+      "message": "Autopilot accepted true-heading request; heading capture is not reported by this protocol",
+      "effect": {
+        "state": "unavailable",
+        "at": 1788893047517,
+        "message": "Autopilot accepted true-heading request; heading capture is not reported by this protocol"
+      }
+    },
+    {
+      "name": "GUIDED observed after heading request",
+      "mode": "GUIDED",
+      "armed": true,
+      "currentSeq": 3,
+      "relativeAltitudeM": 70.412,
+      "airspeedKt": 42.41425615149996,
+      "verticalSpeedFpm": 709.9709172887219
+    },
+    {
+      "name": "altitude completes",
+      "mode": "GUIDED",
+      "armed": true,
+      "currentSeq": 3,
+      "relativeAltitudeM": 70.649,
+      "airspeedKt": 43.04128733360989,
+      "verticalSpeedFpm": -474.28941163491703
+    },
+    {
+      "operation": "altitude",
+      "state": "accepted",
+      "message": "Autopilot accepted altitude request; monitor reported altitude and vertical speed, capture is not reported",
+      "effect": {
+        "state": "unavailable",
+        "at": 1788893048359,
+        "message": "Autopilot accepted altitude request; monitor reported altitude and vertical speed, capture is not reported"
+      }
+    },
+    {
+      "name": "speed completes",
+      "mode": "GUIDED",
+      "armed": true,
+      "currentSeq": 3,
+      "relativeAltitudeM": 69.433,
+      "airspeedKt": 45.723857838443124,
+      "verticalSpeedFpm": -130.5991387742728
+    },
+    {
+      "operation": "speed",
+      "state": "accepted",
+      "message": "Autopilot accepted airspeed request; speed capture is not reported by this protocol",
+      "effect": {
+        "state": "unavailable",
+        "at": 1788893049039,
+        "message": "Autopilot accepted airspeed request; speed capture is not reported by this protocol"
+      }
+    },
+    {
+      "name": "450 ft target reached within 5 m using maximum rate",
+      "mode": "GUIDED",
+      "armed": true,
+      "currentSeq": 3,
+      "relativeAltitudeM": 133.034,
+      "airspeedKt": 49.28572759772468,
+      "verticalSpeedFpm": 413.24576054971595
+    },
+    {
+      "name": "goto completes",
+      "mode": "GUIDED",
+      "armed": true,
+      "currentSeq": 3,
+      "relativeAltitudeM": 134.351,
+      "airspeedKt": 49.484424714650636,
+      "verticalSpeedFpm": 327.4258666151195
+    },
+    {
+      "operation": "goto",
+      "state": "observed",
+      "message": "Requested aircraft state observed",
+      "effect": {
+        "state": "observed",
+        "at": 1788893067543,
+        "message": "Requested aircraft state observed"
+      }
+    },
+    {
+      "name": "loiter completes",
+      "mode": "GUIDED",
+      "armed": true,
+      "currentSeq": 3,
+      "relativeAltitudeM": 135.711,
+      "airspeedKt": 48.9596303029399,
+      "verticalSpeedFpm": 1117.345104067359
+    },
+    {
+      "operation": "loiter",
+      "state": "accepted",
+      "message": "Autopilot accepted loiter request; monitor GUIDED target and aircraft track, radius and direction are not reported",
+      "effect": {
+        "state": "unavailable",
+        "at": 1788893067991,
+        "message": "Autopilot accepted loiter request; monitor GUIDED target and aircraft track, radius and direction are not reported"
+      }
+    },
+    {
+      "name": "continue-auto completes",
+      "mode": "AUTO",
+      "armed": true,
+      "currentSeq": 3,
+      "relativeAltitudeM": 137.843,
+      "airspeedKt": 45.3305234146941,
+      "verticalSpeedFpm": 558.5721627933846
+    },
+    {
+      "operation": "continue-auto",
+      "state": "observed",
+      "message": "Requested aircraft state observed",
+      "effect": {
+        "state": "observed",
+        "at": 1788893068648,
+        "message": "Requested aircraft state observed"
+      }
+    },
+    {
+      "name": "AUTO resume observed",
+      "mode": "AUTO",
+      "armed": true,
+      "currentSeq": 3,
+      "relativeAltitudeM": 137.843,
+      "airspeedKt": 45.3305234146941,
+      "verticalSpeedFpm": 558.5721627933846
+    },
+    {
+      "name": "mode completes",
+      "mode": "RTL",
+      "armed": true,
+      "currentSeq": 3,
+      "relativeAltitudeM": 138.777,
+      "airspeedKt": 41.65973580939198,
+      "verticalSpeedFpm": -371.3699072364796
+    },
+    {
+      "operation": "mode",
+      "state": "observed",
+      "message": "Requested aircraft state observed",
+      "effect": {
+        "state": "observed",
+        "at": 1788893069235,
+        "message": "Requested aircraft state observed"
+      }
+    },
+    {
+      "name": "RTL observed",
+      "mode": "RTL",
+      "armed": true,
+      "currentSeq": 3,
+      "relativeAltitudeM": 138.777,
+      "airspeedKt": 41.65973580939198,
+      "verticalSpeedFpm": -371.3699072364796
+    }
+  ],
+  "errors": []
+}

@@ -15,6 +15,7 @@
                 @blur="focused = false"
                 @change="$emit('change', $event.target.value)"
             >
+                <option v-if="unlistedCurrent" :value="value" disabled>{{ currentLabel }}</option>
                 <option v-for="o in options" :key="o.value" :value="o.value">{{ o.label }}</option>
             </select>
         </div>
@@ -86,6 +87,8 @@ export default {
     props: {
         label: { type: String, default: '' },
         value: { type: [String, Number], default: '' },
+        // Observed readback outside the verified writable menu (e.g. Auto ISO).
+        currentLabel: { type: String, default: null },
         options: { type: Array, default: () => [] },
         state: { type: String, default: 'present' },
         reason: { type: String, default: '' }
@@ -119,8 +122,12 @@ export default {
          * such as `"3"` means nothing to an operator without it).
          */
         shownLabel () {
+            if (this.currentLabel !== null) return this.currentLabel
             const hit = this.options.find(o => String(o.value) === String(this.value))
             return hit ? hit.label : String(this.value)
+        },
+        unlistedCurrent () {
+            return this.currentLabel !== null && !this.options.some(o => String(o.value) === String(this.value))
         },
         toneClass () {
             return TONE_CLASS[this.state] || ''

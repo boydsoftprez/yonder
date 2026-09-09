@@ -101,3 +101,16 @@ it("draws no downlink line at all when nothing has been measured yet", () => {
   const w = strip({ cameras: [{ id: "cam-nose", name: "Nose", active: true }] });
   expect(w.find(".y-strip__dl").exists()).toBe(false);
 });
+
+it('shows real thumbnail age alongside the source caption, never inventing an age for an unavailable image', () => {
+  const w = mount(YonderThumbStrip, { props: { cameras: [
+    {id:'one', name:'Pocket', active:true, caption:'ACCESSORY · running', thumbSrc:'/video/one/still?v=1', ageSeconds:3},
+    {id:'two', name:'Other', active:false, caption:'USB · stopped', thumbSrc:null, ageSeconds:null},
+  ] } });
+  const rows = w.findAll('.y-strip__thumb');
+  expect(rows[0].get('img').attributes('src')).toBe('/video/one/still?v=1');
+  expect(rows[1].find('img').exists()).toBe(false);
+  expect(rows[0].text()).toContain('ACCESSORY · running'); expect(rows[0].text()).toContain('3 s ago');
+  expect(rows[1].get('.y-strip__img').attributes('style') ?? '').not.toContain('url(');
+  expect(rows[1].find('.y-strip__age').exists()).toBe(false);
+});

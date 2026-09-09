@@ -90,6 +90,42 @@ function reentrantKillSpawner() {
 const ARGV = ["gst-launch-1.0", "-q", "v4l2src"];
 
 describe("Supervisor", () => {
+  it("keeps retrying an autostart pipeline until its media server returns, and honors Stop", () => {
+    const { spawner, spawned } = fakeSpawner();
+    const { clock, advance } = fakeClock();
+    const s = new Supervisor({ spawner, clock });
+    s.start("cam0", ARGV, { retryForever: true });
+    for (let i = 0; i < 8; i++) {
+      spawned[spawned.length - 1].exit(1);
+      advance(30_000);
+    }
+    expect(spawned).toHaveLength(9);
+    advance(3000);
+    expect(s.state("cam0").state).toBe("running");
+    s.stop("cam0");
+    spawned[spawned.length - 1].exit(0);
+    advance(60_000);
+    expect(spawned).toHaveLength(9);
+    expect(s.state("cam0").state).toBe("stopped");
+  });
+
+  it("handles a synchronous spawn failure without wedging startup or losing retries", () => {
+    const { spawner, spawned } = fakeSpawner();
+    const { clock, advance } = fakeClock();
+    let ready = false;
+    const s = new Supervisor({ clock, spawner: (argv) => {
+      if (!ready) throw new Error("pipeline host unavailable");
+      return spawner(argv);
+    } });
+    expect(() => s.start("cam0", ARGV, { retryForever: true })).not.toThrow();
+    expect(s.state("cam0").state).toBe("failed");
+    ready = true;
+    advance(1000);
+    expect(spawned).toHaveLength(1);
+    advance(3000);
+    expect(s.state("cam0").state).toBe("running");
+  });
+
   it("starts stopped, because video does not autocast", () => {
     const s = new Supervisor({ spawner: fakeSpawner().spawner, clock: fakeClock().clock });
     expect(s.state("cam0")).toMatchObject({ state: "stopped", restarts: 0 });

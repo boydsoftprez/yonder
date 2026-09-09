@@ -1,0 +1,75 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+import type { FlightTelemetry, VehicleSnapshot } from '../mav/types.js';
+
+/** Versioned column order shared by the aircraft encoder and browser decoder. */
+export const FLIGHT_COLUMNS = ['rollDeg','pitchDeg','yawRateDegS','airspeedKt','groundspeedKt','headingDeg','trackDeg','altitudeFt','verticalSpeedFpm','latitude','longitude','globalAltitudeM','gpsAltitudeM','relativeAltitudeM','fixType','satellites','batteryV','currentA','batteryPercent','throttlePercent','mode','customMode','armed','navRollDeg','navPitchDeg'] as const;
+export interface FlightWire {
+  v: 1; at: number; s: number; g: string|null; c: boolean; b: boolean; d: string;
+  source: string; ready: boolean; fd: boolean; age: number|null; datum: string;
+  t: (number|string|boolean|null)[];
+  /** Sample age, source dictionary index, valid. Never inferred from HTTP receipt. */
+  a: [number|null,number,boolean][]; src: string[];
+  n: FlightTelemetry['navController']; p: FlightTelemetry['positionTarget']; h: FlightTelemetry['homePosition'];
+  m: Omit<VehicleSnapshot['mission'],'items'>;
+  r?: VehicleSnapshot['trail'];
+  /** Optional v1 extension: true FROM bearing, knots, sample age ms. Older clients ignore it. */
+  w?: [number,number,number] | null;
+  /** Optional acceleration: lateral g, normal g, sample age, source message ID. */
+  i?: [number,number,number,26|27] | null;
+  /** Heading deg/sec and age; optional, preserving the v1 scalar column order. */
+  tr?: [number,number] | null;
+  /** Estimated TAS knots, ground-velocity age, wind age. */
+  tas?: [number,number,number] | null;
+}
+export function packFlight(snapshot:VehicleSnapshot,detailKey:string):FlightWire {
+  const t=snapshot.telemetry, src:string[]=[];
+  const a=FLIGHT_COLUMNS.map(key=>{
+    const field=t.fields[key], source=field?.source ?? t.source;
+    let index=src.indexOf(source);if(index<0){index=src.length;src.push(source);}
+    return [field?.ageMs??null,index,field?.valid??t[key]!==null] as [number|null,number,boolean];
+  });
+  const {items:_,...mission}=snapshot.mission;
+  return {v:1,at:snapshot.at,s:snapshot.sequence,g:snapshot.identity?.generation??null,c:snapshot.connected,b:snapshot.busy,d:detailKey,
+    source:t.source,ready:t.ready,fd:t.fdReady,age:t.ageMs,datum:t.altitudeDatum??'UNKNOWN',
+    t:FLIGHT_COLUMNS.map(key=>t[key]??null),a,src,n:t.navController,p:t.positionTarget,h:t.homePosition,m:mission,...(snapshot.trail?{r:snapshot.trail}:{}),
+    w:t.wind?[t.wind.directionFromDeg,t.wind.speedKt,t.wind.ageMs]:null,
+    i:t.slipSkid?[t.slipSkid.lateralG,t.slipSkid.normalG,t.slipSkid.ageMs,t.slipSkid.source==='SCALED_IMU'?26:27]:null,
+    tr:t.turnRate?[t.turnRate.degS,t.turnRate.ageMs]:null,
+    tas:t.estimatedTrueAirspeed?[t.estimatedTrueAirspeed.knots,t.estimatedTrueAirspeed.velocityAgeMs,t.estimatedTrueAirspeed.windAgeMs]:null};
+}
+/** Reconstruct the existing PFD view while refusing another generation's details. */
+export function unpackFlight(wire:FlightWire,details:Partial<VehicleSnapshot>={}):VehicleSnapshot {
+  if(wire?.v!==1)throw new Error('Unsupported flight telemetry version');
+  if(!Array.isArray(wire.t)||wire.t.length!==FLIGHT_COLUMNS.length||!Array.isArray(wire.a)||wire.a.length!==FLIGHT_COLUMNS.length||!Array.isArray(wire.src)||!wire.m)throw new Error('Incomplete flight telemetry frame');
+  const sameVehicle=(details.identity?.generation??null)===wire.g;
+  const sameMission=sameVehicle&&details.mission?.revision===wire.m.revision;
+  const w=wire.w;
+  const i=wire.i;
+  const tr=wire.tr, tas=wire.tas;
+  const turnRate:FlightTelemetry['turnRate']=wire.c && Array.isArray(tr) && tr.length===2 && tr.every(Number.isFinite)
+    && Math.abs(tr[0])<=360 && tr[1]>=0 && tr[1]<2000 ? {degS:tr[0],ageMs:tr[1],source:'ATTITUDE'} : null;
+  const estimatedTrueAirspeed:FlightTelemetry['estimatedTrueAirspeed']=wire.c && Array.isArray(tas) && tas.length===3 && tas.every(Number.isFinite)
+    && tas[0]>=0 && tas[0]<=1943.8444924406 && tas[1]>=0 && tas[1]<2000 && tas[2]>=0 && tas[2]<5000
+    ? {knots:tas[0],velocityAgeMs:tas[1],windAgeMs:tas[2],source:'GLOBAL_POSITION_INT/WIND'} : null;
+  const slipSkid:FlightTelemetry['slipSkid']=wire.c && Array.isArray(i) && i.length===4 && i.every(Number.isFinite)
+    && Math.abs(i[0])<16 && i[1]>.2 && i[1]<16 && i[2]>=0 && i[2]<2000 && [26,27].includes(i[3])
+    ? {lateralG:i[0],normalG:i[1],ageMs:i[2],source:i[3]===26?'SCALED_IMU':'RAW_IMU'} : null;
+  const wind:FlightTelemetry['wind']=wire.c && Array.isArray(w) && w.length===3 && w.every(Number.isFinite)
+    && w[0]>=0 && w[0]<360 && w[1]>=0 && w[1]<=1943.8444924406 && w[2]>=0 && w[2]<5000
+    ? {directionFromDeg:w[0],speedKt:w[1],ageMs:w[2],source:'WIND'} : null;
+  const fields:FlightTelemetry['fields']={};
+  const values:Record<string,unknown>={};
+  FLIGHT_COLUMNS.forEach((key,index)=>{
+    const [age,sourceIndex,valid]=wire.a[index]!;
+    const value=wire.t[index]??null;
+    if(age!==null&&(!Number.isFinite(age)||age<0))throw new Error('Invalid flight sample age');
+    values[key]=valid?value:null;
+    fields[key]={source:wire.src[sourceIndex]??'Aircraft telemetry',ageMs:age,receivedAt:age===null?null:wire.at-age,valid:valid&&value!==null};
+  });
+  return {at:wire.at,sequence:wire.s,detailKey:wire.d,trail:wire.r,identity:sameVehicle?details.identity??null:null,connected:wire.c,ready:wire.c,busy:wire.b,
+    telemetry:{...values,source:wire.source,ready:wire.ready,fdReady:wire.fd,ageMs:wire.age,altitudeDatum:wire.datum,
+      fields,navController:wire.n,positionTarget:wire.p,homePosition:wire.h,wind,slipSkid,turnRate,estimatedTrueAirspeed} as FlightTelemetry,
+    mission:{...wire.m,currentFresh:wire.m.currentFresh&&sameMission,items:sameMission?details.mission!.items:[]},
+    operations:sameVehicle?details.operations??[]:[],statustext:sameVehicle?details.statustext??[]:[],
+    capabilities:sameVehicle&&details.capabilities?details.capabilities:{modes:[],commands:[],flightControl:[],terrainTargets:false,signing:'unsigned-only'}};
+}

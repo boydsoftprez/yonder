@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { applyCameraDraft, deckDraft, draftPathFor, interruption, validateDraft } from "./draft.js";
 import { DRAFT_PATHS } from "./draft-shape.js";
-import { ConfigSchema, DEFAULT_CONFIG, PREVIEW_RUNGS, type Config } from "../schema/config.js";
+import { Camera, ConfigSchema, DEFAULT_CONFIG, PREVIEW_RUNGS, type Config } from "../schema/config.js";
 
 const RUNGS = [...PREVIEW_RUNGS];
 
@@ -322,4 +322,40 @@ describe("DRAFT_PATHS — one table, read in both directions", () => {
     expect(draftPathFor("bitrate_kbps")).toBe("streamBitrate");
     expect(draftPathFor("somewhere.else")).toBeNull();
   });
+});
+
+describe('staged output enablement', () => {
+  it('translates output controls and rejects non-boolean values before apply', () => {
+    const translated = deckDraft({ outputRtp: false, outputRtsp: true });
+    expect(translated.unknown).toEqual([]);
+    expect(translated.draft.outputs).toEqual({ rtp: false, rtsp: true });
+    expect(validateDraft({ outputs: { rtsp: 'yes' } } as any, [])).toEqual([{ path: 'outputs.rtsp', message: 'Output enablement must be true or false' }]);
+  });
+  it('merges output switches without changing destinations and refuses unconfigured kinds', () => {
+    const config = structuredClone(DEFAULT_CONFIG);
+    config.cameras = [Camera.parse({ id: 'cam0', name: 'Camera', source: 'usb', device: 'test-camera', outputs: [{ kind: 'rtp', host: '192.0.2.1', port: 5600, enabled: true }] })];
+    const result = applyCameraDraft(config, 'cam0', { outputs: { rtp: false } });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.config.cameras[0].outputs).toEqual([{ ...config.cameras[0].outputs[0], enabled: false }]);
+    expect(config.cameras[0].outputs[0].enabled).toBe(true);
+    const rtsp = applyCameraDraft(config, 'cam0', { outputs: { rtsp: true } });
+    expect(rtsp.ok).toBe(true);
+    if (rtsp.ok) expect(rtsp.config.cameras[0].outputs).toContainEqual({ kind: 'rtsp', enabled: true, password: { secret: 'rtsp_password' } });
+    expect(config.cameras[0].outputs).toHaveLength(1);
+  });
+});
+
+it('stages stream color separately, preserves native controls, and rejects invalid values', () => {
+  const config = configWithCamera();
+  const { draft } = deckDraft({ imageBrightness: 12, imageContrast: 115, imageHue: -30 });
+  expect(draft.image).toEqual({ brightness: 12, contrast: 115, hue: -30 });
+  const result = applyCameraDraft(config, 'front', draft);
+  expect(result.ok).toBe(true);
+  if (result.ok) {
+    expect(result.config.cameras[0].image).toEqual({ brightness: 12, contrast: 115, saturation: 100, hue: -30 });
+    expect(result.config.cameras[0].controls).toEqual(config.cameras[0].controls);
+  }
+  expect(config.cameras[0].image.brightness).toBe(0);
+  expect(applyCameraDraft(config, 'front', { image: { brightness: 101 } }).ok).toBe(false);
+  expect(applyCameraDraft(config, 'front', { image: { hue: NaN } }).ok).toBe(false);
 });

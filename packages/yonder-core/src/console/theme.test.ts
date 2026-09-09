@@ -166,9 +166,17 @@ describe("themeCss", () => {
   it("fetches nothing from anywhere", () => {
     for (const theme of THEMES) {
       const css = themeCss(theme);
+      // The logo is a self-contained SVG carried inside the stylesheet.
+      // Only that embedded form may use url(); an external asset still fails.
+      const embeddedSvg = /url\("data:image\/svg\+xml;base64,([A-Za-z0-9+/=]+)"\)/g;
+      for (const match of css.matchAll(embeddedSvg)) {
+        const svg = Buffer.from(match[1], "base64").toString("utf8");
+        expect(svg, theme).toMatch(/^<svg\b/);
+        expect(svg, theme).not.toMatch(/<(?:script|image|foreignObject)\b|(?:href|src)=/i);
+      }
       expect(css, theme).not.toMatch(/https?:\/\//);
       expect(css, theme).not.toMatch(/@import/);
-      expect(css, theme).not.toMatch(/url\s*\(/);
+      expect(css.replace(embeddedSvg, ""), theme).not.toMatch(/url\s*\(/);
       expect(css, theme).not.toMatch(/fonts\.googleapis|cdn|unpkg|jsdelivr/i);
     }
   });
@@ -485,4 +493,12 @@ describe("themeCss sizes actions to their words", () => {
       expect(rule).toMatch(/flex:\s*0 0 auto/);
     });
   }
+});
+
+it('sizes the camera content widgets intrinsically without changing the bounded preview', () => {
+  const css = themeCss('night');
+  expect(css).toContain('.nrdb-ui-widget.yonder-content-height');
+  expect(css).toMatch(/\.nrdb-ui-widget\.yonder-content-height\s*\{[^}]*grid-row-end:\s*auto\s*!important/s);
+  expect(css).toMatch(/\.nrdb-ui-widget\.yonder-content-height\s*\{[^}]*grid-template-rows:\s*none\s*!important/s);
+  expect(css).not.toContain('.nrdb-ui-yonder-picture {');
 });

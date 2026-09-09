@@ -86,6 +86,9 @@ export interface Capture {
  * they actually have.
  */
 export interface RecordingState {
+  readonly observed?: boolean;
+  readonly phase?: string | null;
+  readonly mediumReason?: string;
   readonly recording: boolean;
   /** Epoch ms, or null when nothing is recording. */
   readonly since: number | null;
@@ -181,8 +184,12 @@ export interface PipelineChannel {
  * ever offers to fetch or delete one, because Yonder never saw the file.
  */
 export interface CameraMedium {
+  readonly listingReason?: string;
   holds(camera: string): boolean;
   captures(camera: string): Promise<readonly Capture[]>;
+  state?(camera: string): Promise<RecordingState>;
+  record?(camera: string, action: 'start' | 'stop'): Promise<RecordingState>;
+  photo?(camera: string): Promise<{ destination: 'camera'; kind: 'photo' }>;
 }
 
 export interface RecorderOptions {
@@ -304,7 +311,7 @@ function readName(name: string): { at: number; width: number; height: number } |
 
 /** One line back from the pipeline host. `observed` is what the op produced,
  *  or `{ refused }` where the host declined — see `yonder-pipeline`. */
-interface Reply {
+export interface Reply {
   readonly id: string;
   readonly continuous: boolean;
   readonly observed: unknown;
@@ -378,6 +385,7 @@ export class Recorder {
    * one number an operator watches while deciding whether to start.
    */
   async state(id: string): Promise<RecordingState> {
+    if (this.onCamera.holds(id) && this.onCamera.state) return this.onCamera.state(id);
     const camera = this.cameras().find((c) => c.id === id);
     // A pipeline that has stopped has taken the recording with it. Noticed
     // here rather than announced, because nothing tells this file when a
@@ -388,7 +396,13 @@ export class Recorder {
     }
     const open = this.open.get(id);
     const onCamera = this.onCamera.holds(id);
-    const free = await this.free();
+    // R-FLT-26: an unavailable measurement is not zero headroom. Admission and
+    // reserve enforcement still use free(), whose conservative fallback is zero.
+    let free: number | null = null;
+    try {
+      const measured = await this.freeBytes(this.root);
+      if (Number.isFinite(measured) && measured >= 0) free = measured;
+    } catch { /* The readout cannot estimate headroom on an unreadable medium. */ }
     return {
       recording: open !== undefined,
       since: open?.since ?? null,
@@ -399,11 +413,11 @@ export class Recorder {
       // medium — worse than none, because an operator would plan with it.
       // This build does not read a camera's card, so there the answer is that
       // nothing knows.
-      remainingSeconds: onCamera || camera === undefined
+      remainingSeconds: onCamera || camera === undefined || free === null
         ? null
         : this.remaining(free, this.rateKbps(camera)),
       // The same headroom, counted in the unit Photo mode works in.
-      remainingPhotos: onCamera || camera === undefined
+      remainingPhotos: onCamera || camera === undefined || free === null
         ? null
         : this.remainingStills(free, camera),
       bytes: open === undefined ? null : sizeOf(open.path),
@@ -419,6 +433,10 @@ export class Recorder {
     if (camera === undefined) return notFound(id);
     if (!this.hold(id)) return busy(id);
     try {
+      if (this.onCamera.holds(id) && this.onCamera.record) {
+        try { return { ok: await this.onCamera.record(id, action) }; }
+        catch (error) { return { because: 'unanswered', refused: error instanceof Error ? error.message : 'Camera capture failed' }; }
+      }
       return action === "start" ? await this.begin(camera) : await this.end(camera);
     } finally {
       this.release(id);
@@ -508,12 +526,16 @@ export class Recorder {
    * reported before it exists is a thumbnail that 404s, and the whole point
    * of waiting for the host's second buffer is that the frame is a real one.
    */
-  async photo(id: string): Promise<Answer<Capture>> {
+  async photo(id: string): Promise<Answer<Capture | { destination: 'camera'; kind: 'photo' }>> {
     const camera = this.cameras().find((c) => c.id === id);
     if (camera === undefined) return notFound(id);
     if (!this.hold(id)) return busy(id);
     try {
       if (this.onCamera.holds(id)) {
+        if (this.onCamera.photo) {
+          try { return { ok: await this.onCamera.photo(id) }; }
+          catch (error) { return { because: 'unanswered', refused: error instanceof Error ? error.message : 'Camera photo failed' }; }
+        }
         return {
           refused: `${id} takes its own photographs to its own medium, and this `
             + "build does not drive that camera",
@@ -575,6 +597,7 @@ export class Recorder {
    *  camera's own, in one list, each saying which. */
   async captures(id: string): Promise<Answer<readonly Capture[]>> {
     if (!this.cameras().some((c) => c.id === id)) return notFound(id);
+    if (this.onCamera.holds(id) && this.onCamera.listingReason) return { because: 'on-camera', refused: this.onCamera.listingReason };
     const held = await this.onCamera.captures(id);
     const mine: Capture[] = [];
     for (const name of this.listDir(id)) {
@@ -927,7 +950,7 @@ function refusalIn(reply: Reply | null, id: string, what: string): Refusal | nul
   return null;
 }
 
-function parseReply(line: string): Reply | null {
+export function parseReply(line: string): Reply | null {
   let raw: unknown;
   try {
     raw = JSON.parse(line);

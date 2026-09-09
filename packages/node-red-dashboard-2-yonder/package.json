@@ -26,7 +26,11 @@
       "ui-yonder-aim": "dist/aim.js",
       "ui-yonder-index": "dist/index-widget.js",
       "ui-yonder-flow": "dist/flow.js",
-      "ui-yonder-captures": "dist/captures.js"
+      "ui-yonder-captures": "dist/captures.js",
+      "ui-yonder-cockpit": "dist/cockpit.js",
+      "ui-yonder-interfaces": "dist/interfaces.js",
+      "ui-yonder-diagnostics": "dist/diagnostics.js",
+      "ui-yonder-settings": "dist/settings.js"
     }
   },
   "node-red-dashboard-2": {
@@ -95,6 +99,22 @@
       "ui-yonder-captures": {
         "output": "ui-yonder-captures.umd.js",
         "component": "YonderCaptures"
+      },
+      "ui-yonder-cockpit": {
+        "output": "ui-yonder-cockpit.umd.js",
+        "component": "YonderCockpit"
+      },
+      "ui-yonder-interfaces": {
+        "output": "ui-yonder-interfaces.umd.js",
+        "component": "YonderInterfaces"
+      },
+      "ui-yonder-diagnostics": {
+        "output": "ui-yonder-diagnostics.umd.js",
+        "component": "YonderDiagnostics"
+      },
+      "ui-yonder-settings": {
+        "output": "ui-yonder-settings.umd.js",
+        "component": "YonderSettings"
       }
     }
   },
@@ -102,9 +122,15 @@
     "build": "tsc -p tsconfig.json && node ../../scripts/copy-node-html.mjs && node scripts/build-widgets.mjs",
     "build:nodes": "tsc -p tsconfig.json && node ../../scripts/copy-node-html.mjs",
     "test": "vitest run",
-    "gallery": "npm run build -w yonder-core && node gallery/build-themes.mjs && vite build --config gallery/vite.config.mjs"
+    "gallery": "npm run build -w yonder-core && node gallery/build-themes.mjs && vite build --config gallery/vite.config.mjs",
+    "cockpit:dev": "vite --config cockpit/vite.config.mjs",
+    "cockpit:verify": "node cockpit/verify.mjs",
+    "cockpit:guide": "node cockpit/guide.mjs && node cockpit/guide-terrain.mjs",
+    "cockpit:guide:sitl": "node cockpit/guide-sitl.mjs",
+    "cockpit:guide:layouts": "node cockpit/layout-guide.mjs"
   },
   "dependencies": {
+    "leaflet": "1.9.4",
     "yonder-core": "^0.1.0"
   },
   "devDependencies": {

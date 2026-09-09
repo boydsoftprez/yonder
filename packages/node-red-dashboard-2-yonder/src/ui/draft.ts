@@ -1,77 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-/**
- * The shared draft (spec §7 "Editing on Live and Setup") — a browser-session
- * store of edits an operator has made but not yet applied, one per camera.
- *
- * **This is why the console does not apply on blur, and that defect is the
- * reason this whole plan exists.** On the shipped console a number typed
- * into a field reached the aircraft the moment focus left it: no
- * confirmation, no way back — an operator glancing away mid-edit sent a
- * half-typed value to a camera in flight. This store is where an edit waits
- * instead: an operator changes something on Live, sees it marked pending,
- * and applies it deliberately on Setup. So `set` never reaches outside its
- * own map — no import of a socket, no parameter that could carry one in, by
- * construction rather than by choice (R-CFG-03, R-UI-05).
- *
- * **Per camera, and it survives a page switch.** Dashboard remounts the
- * widget on every Live<->Setup flip and every camera switch — the
- * blueprint's own `DRAFTS` (`docs/console/design/instrument-library/gallery/
- * deck.js`) is module-scoped for exactly that reason, so a component
- * remount never resets it. This store cannot borrow that trick — it is
- * created fresh per Dashboard client-store entry rather than once at module
- * load — so `snapshot`/`restore` are the round trip that stands in for it:
- * the deck reads `yonder.draft` (Dashboard's client store) into a fresh
- * `createDraftStore()` on mount via `restore`, and keeps `yonder.draft`
- * caught up with `snapshot()` as edits happen.
- *
- * **A value equal to the applied one is not pending — checked at read time,
- * not write time.** `set` records whatever the operator asked for,
- * unconditionally; `pending` is what decides whether that is still worth
- * showing, by comparing the recorded value against the camera's
- * currently-applied state every time it is asked. `get` does not filter —
- * it is the raw draft, exactly what has been recorded — so `get` and
- * `pending` can legitimately disagree about one path: `get` says a value is
- * recorded there, `pending` says there is nothing to apply, because the two
- * now happen to match.
- *
- * **Why the comparison lives in `pending` and not in `set` (revised from
- * this file's first version).** A write-time comparison goes stale: draft
- * brightness at 50 while applied is 20 (pending, correctly); then applied
- * becomes 50 by some other route — a re-probe, another operator, a mode
- * change reporting back — and a store that decided at write time would
- * still list the edit as pending, offering to send 50 to a camera already
- * at 50. Comparing at read time answers with what is true *now*, every time
- * `pending` is asked, however applied got there. `set` therefore takes only
- * three arguments, exactly as the plan declares it, and `pending` takes the
- * camera's currently-applied state — supplied by the caller, which is
- * rendering from the report at exactly the moment it asks what is pending,
- * and so already has it — read only, never written.
- *
- * **An edit survives being matched, and that is the decision.** A draft
- * withdrawn by matching applied at the moment it is asked about is not the
- * same as a draft that was never recorded: the value is still in the map,
- * and if applied later drifts away from it without the operator touching
- * that field again, `pending` reports it once more.
- *
- * Keep that. The operator asked for that value and never withdrew it; it was
- * some other agent — a re-probe, a second operator, a mode change reporting a
- * value back — that briefly made it moot. Discarding their instruction
- * because something else coincidentally satisfied it would be the console
- * dropping a request nobody cancelled, which is worse than a request that
- * waits. `clear()` is how an operator withdraws one, and Discard is how they
- * reach it.
- *
- * Recorded because it was got wrong first: the change to read-time filtering
- * was asked for on the stated grounds that a withdrawn draft would *not*
- * come back, and this store's own implementer disproved that in a standalone
- * simulation before writing a line of it.
+/** Browser-local camera drafts. Editing never sends a device command.
+ * Reports are compared at read time. Only an explicit successful Apply/Keep
+ * acknowledges submitted values; edits made afterward remain pending.
+ * Dashboard's store survives navigation, and sessionStorage survives re-login
+ * or refresh in the same tab. Neither mechanism replays an Apply automatically.
  */
 
 /** A staged value: whatever a control on this console can be set to. */
 export type DraftValue = string | number | boolean;
 
-/** One edit Setup should list: what changed, and what it was changed to. */
+/** One edit the Camera workspace should list: what changed, and what it was changed to. */
 export interface PendingEdit {
   path: string;
   requested: DraftValue;
@@ -95,6 +34,8 @@ export interface DraftStore {
   pending(camera: string, applied: Record<string, DraftValue>): PendingEdit[];
   /** Discard every pending edit for `camera`. Every other camera is untouched. */
   clear(camera: string): void;
+  /** Retire confirmed submitted values; retain edits made afterward. */
+  acknowledge(camera: string, submitted: Record<string, DraftValue>): void;
   /** The whole store, as plain data — for Dashboard's client store to hold across a remount. */
   snapshot(): DraftSnapshot;
   /** Replace the whole store's state with a previous `snapshot()`. */
@@ -131,6 +72,12 @@ export function createDraftStore(): DraftStore {
     clear(camera) {
       cameras.delete(camera);
     },
+    acknowledge(camera, submitted) {
+      const held = cameras.get(camera);
+      if (!held) return;
+      for (const [path, value] of Object.entries(submitted)) if (held.get(path) === value) held.delete(path);
+      if (held.size === 0) cameras.delete(camera);
+    },
 
     snapshot() {
       const out: DraftSnapshot = {};
@@ -145,4 +92,23 @@ export function createDraftStore(): DraftStore {
       }
     },
   };
+}
+
+
+export const CAMERA_DRAFT_STORAGE = 'yonder:camera-drafts:v1';
+export function readCameraDrafts(): DraftSnapshot | null {
+  try {
+    const text = sessionStorage.getItem(CAMERA_DRAFT_STORAGE);
+    if (!text || text.length > 256000) return null;
+    const value = JSON.parse(text);
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    for (const fields of Object.values(value)) {
+      if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return null;
+      if (!Object.values(fields).every(v => typeof v === 'string' || typeof v === 'boolean' || typeof v === 'number' && Number.isFinite(v))) return null;
+    }
+    return value;
+  } catch { return null; }
+}
+export function saveCameraDrafts(value: DraftSnapshot): void {
+  try { sessionStorage.setItem(CAMERA_DRAFT_STORAGE, JSON.stringify(value)); } catch { /* In-memory drafts remain available. */ }
 }

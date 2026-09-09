@@ -134,10 +134,10 @@ function usability(
   const no = (why: string): { usable: false; note: string } =>
     ({ usable: false, note: `unusable — ${why}` });
   if (output === undefined) {
-    return no(`this camera has no ${what} output; add one in Setup`);
+    return no(kind === 'rtsp' ? 'Enable RTSP in Outputs on the Camera page.' : `No ${what} destination is configured.`);
   }
   if (!output.enabled) {
-    return no(`this camera's ${what} output is stopped; start it in Setup and nothing has to be typed again`);
+    return no(`this camera's ${what} output is stopped; enable it in Outputs on the Camera page and nothing has to be typed again`);
   }
   const reach = outputReach(kind, paths);
   return reach.reachable ? { usable: true, note: reach.note } : no(reach.note);
@@ -261,7 +261,7 @@ export function renderReceive(facts: ReceiveFacts): Rendering[] {
        * there is none.
        */
       body: rtsp === undefined || rtsp.kind !== "rtsp"
-        ? "This camera has no RTSP output configured. Add one in Setup to receive over RTSP."
+        ? "This camera has no RTSP output configured. Enable RTSP in Outputs on the Camera page."
         : rtspPassword === null
           ? `rtsp://yonder:<password>@${listenAt}:${rtspPort}/${camera.id}\n\n`
           + "This device's RTSP password is not yet generated; it is created the first "

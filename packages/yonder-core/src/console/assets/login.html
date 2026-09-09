@@ -43,7 +43,8 @@
     border-radius: 10px;
     padding: 1.75rem;
   }
-  h1 { font-size: 1.4rem; margin: 0 0 1.25rem; letter-spacing: -0.01em; }
+  h1 { font-size: 1.4rem; margin: 0 0 1.75rem; letter-spacing: -0.01em; }
+  h1 svg { display: block; width: 100%; max-width: 312px; height: auto; }
   label { display: block; font-weight: 600; margin: 0 0 .35rem; }
   input[type=password] {
     width: 100%;
@@ -80,19 +81,19 @@
 </head>
 <body>
 <main>
-  <h1>Yonder</h1>
+  <h1 aria-label="Yonder"><!--yonder:brand-->Yonder<!--/yonder:brand--></h1>
 
   <!--yonder:error-->
 
   <form method="post" action="/login">
+    <!--yonder:return-->
     <label for="password">Administrator password</label>
     <input id="password" name="password" type="password" autocomplete="current-password"
            required autofocus>
     <button type="submit">Sign in</button>
   </form>
 
-  <p class="note">Signing in ends when this console restarts, which it does whenever the
-    device's configuration changes.</p>
+  <p class="note">If your session expires or the console restarts, sign in again. Camera drafts are kept in this browser tab.</p>
 </main>
 </body>
 </html>

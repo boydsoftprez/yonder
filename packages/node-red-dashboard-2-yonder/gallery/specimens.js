@@ -1,4 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import YonderCockpit from "../src/ui/YonderCockpit.vue";
+import YonderInterfaces from "../src/ui/YonderInterfaces.vue";
+import YonderDiagnostics from "../src/ui/YonderDiagnostics.vue";
+import YonderSettings from "../src/ui/YonderSettings.vue";
+import {fixture as cockpitFixture} from "../cockpit/fixture.mjs";
 import YonderAim from "../src/ui/YonderAim.vue";
 import YonderAimPad from "../src/ui/YonderAimPad.vue";
 import YonderAnnunciator from "../src/ui/YonderAnnunciator.vue";
@@ -286,6 +291,39 @@ const BELLY_CAPABILITIES = {
 };
 
 export const SPECIMENS = [
+  {
+    title: "Current network interfaces",
+    note: "R-NET-17. Explicit gallery observation: Ethernet holds IPv4 and IPv6, with a gateway and metric. Production polls current kernel observations and clears unavailable data.",
+    component: YonderInterfaces,
+    props: { preview: true, snapshot: {
+      sampledAt: Date.now(), defaultRoutes: [{ family: 4, device: "eth0", gateway: "192.0.2.1" }], routes: [],
+      interfaces: [{ device: "eth0", kind: "ethernet", state: "connected", carrier: true, mtu: 1500,
+        addresses: [{ address: "192.0.2.20", prefix: 24, family: 4, scope: "global" }, { address: "2001:db8:1234:5678:abcd:ef01:2345:6789", prefix: 64, family: 6, scope: "global" }],
+        defaultRoutes: [{ family: 4, gateway: "192.0.2.1", metric: 100 }] }],
+    } },
+  },
+  {
+    title: "Diagnostic terminal",
+    note: "R-DIA-07. Completed example output, plainly a gallery fixture. Controls do not execute commands in gallery preview mode.",
+    component: YonderDiagnostics,
+    props: { preview: true, job: { id: "gallery", tool: "ping", host: "192.0.2.1", device: "eth0", command: "ping -4 -n -c 4 -I eth0 192.0.2.1",
+      status: "succeeded", startedAt: 0, finishedAt: 4000, exitCode: 0, truncated: false,
+      output: "4 packets transmitted, 4 received, 0% packet loss\nrtt min/avg/max/mdev = 3.1/4.2/5.3/0.8 ms\n" } },
+  },
+  {
+    title: "Device settings",
+    note: "R-UI-30 / R-SEC-14. Day selected and empty masked password fields. Gallery preview never sends a password or changes a device.",
+    component: YonderSettings,
+    props: { preview: true, theme: "day" },
+  },
+  {
+    title: "Cockpit — cove mission, synthetic telemetry",
+    note: "The production full-viewport cockpit mounted with the user's cove mission and explicitly synthetic flight data. Source feeds and aircraft transport are absent. Instrument dialogs, mission authoring and inset expansion remain interactive. Use the dedicated cockpit harness for viewport comparisons.",
+    component: YonderCockpit,
+    props: { report: cockpitFixture(), embedded: true },
+    payload: undefined,
+    part: false,
+  },
   {
     title: "Gauge — encoding used",
     note: "R-UI-09: caution at 60%, limit at 85%. 72% sits in the caution band, drawn amber.",

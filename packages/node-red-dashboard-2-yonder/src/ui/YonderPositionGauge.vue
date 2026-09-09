@@ -7,7 +7,7 @@
         </div>
         <div class="y-pg__trk" :style="{ width: TRACK_WIDTH + 'px' }">
             <i v-if="showZero" class="y-pg__zero" :style="{ left: pxAt(0) }" />
-            <i v-if="!dead" class="y-pg__ptr" :style="{ left: pxAt(value) }" />
+            <i v-if="!dead && boundsKnown" class="y-pg__ptr" :style="{ left: pxAt(value) }" />
         </div>
         <div class="y-pg__bounds">
             <span>{{ boundText(min) }}</span>
@@ -81,6 +81,7 @@ export default {
         value: { type: Number, default: 0 },
         min: { type: Number, default: -180 },
         max: { type: Number, default: 180 },
+        boundsKnown: { type: Boolean, default: true },
         unit: { type: String, default: '' },
         precision: { type: Number, default: 1 },
         /** True when this axis answers with no reading at all (§7). */
@@ -93,7 +94,7 @@ export default {
             return this.max - this.min
         },
         showZero () {
-            return this.span > 0 && this.min <= 0 && this.max >= 0
+            return this.boundsKnown && this.span > 0 && this.min <= 0 && this.max >= 0
         },
         shown () {
             if (this.dead) return '—'
@@ -116,6 +117,7 @@ export default {
             return (this.fraction(v) * TRACK_WIDTH) + 'px'
         },
         boundText (v) {
+            if (!this.boundsKnown) return '—'
             return this.unit ? `${v}${this.unit}` : String(v)
         }
     }

@@ -11,7 +11,7 @@
     <input type="text" id="node-input-name" placeholder="Name" /></div>
   <div class="form-tips">
     <b>Stands alone (R-UI-28).</b> This node draws the gimbal pad, the
-    reported pan/tilt against their bounds, the gimbal mode and Recentre from
+    reported pan/tilt against their bounds, the gimbal mode and Recenter from
     <code>msg.payload</code> alone &mdash; it does not read anything
     <code>ui-yonder-deck</code> draws, and needs no camera deck on the same
     page. Place it on the Cockpit, or beside a deck on a camera page; either
@@ -19,7 +19,7 @@
   </div>
 </script>
 <script type="text/html" data-help-name="ui-yonder-aim">
-<p>The gimbal panel &mdash; aim, reported position, gimbal mode and Recentre
+<p>The gimbal panel &mdash; aim, reported position, gimbal mode and Recenter
 &mdash; as a node of its own (R-UI-28, R-CAM-11), so a page like the Cockpit
 can carry it with no camera deck beside it.</p>
 <p>Reads one <code>msg.payload</code>:</p>
@@ -30,7 +30,7 @@ can carry it with no camera deck beside it.</p>
 <code>{ slew: { pan, tilt, seq, gesture } }</code> at a rate, for as long as
 it is held; releasing (however the release happens) sends
 <code>{ stop: { gesture } }</code> exactly once. Choosing a gimbal mode sends
-<code>{ mode }</code>; pressing Recentre sends <code>{ recentre: true }</code>
+<code>{ mode }</code>; pressing Recenter sends <code>{ recentre: true }</code>
 once per press, refusing a second press until a fresh report arrives.</p>
 <p><b>Nothing here decides to move.</b> Every one of the above is a relay of
 an operator's own press (R-CMD-04) &mdash; this node originates nothing, and

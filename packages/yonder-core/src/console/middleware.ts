@@ -6,8 +6,14 @@ import { CONSOLE_HOME } from "./settings.js";
 import type { DaemonClient } from "./client.js";
 import type { SessionStore } from "./session.js";
 import { whepHandler, WHEP_PREFIX, type WhepRequest, type WhepResponse } from "./whep.js";
-import { captureRequestFor, type CaptureAnswer, type CaptureHandler } from "./capture.js";
+import {
+  captureRequestFor, stillRequestFor,
+  type CaptureAnswer, type CaptureHandler, type StillHandler,
+} from "./capture.js";
+import { cockpitProxy } from "./cockpit.js";
+import { maintenanceProxy } from "./maintenance.js";
 import { cameraFor } from "../video/media-path.js";
+import { validAimRequest } from '../video/accessory/requests.js';
 
 /**
  * The gate on the front of the console.
@@ -113,6 +119,14 @@ function notFound(res: ServerResponse): void {
 }
 
 /** What came out of a request body. */
+/** Return only to this console, never to a caller-supplied external URL. */
+function consoleReturn(value: unknown): string {
+  return typeof value === 'string' && /^\/dashboard(?:\/[a-z0-9-]+)?\/?$/.test(value) ? value : CONSOLE_HOME;
+}
+function loginPage(target: unknown, error?: string): string {
+  return renderPage('login', error).replace('<!--yonder:return-->', `<input type="hidden" name="returnTo" value="${consoleReturn(target)}">`);
+}
+
 export interface Submission {
   fields: Record<string, string>;
   /** The body was larger than this console will read; nothing was parsed. */
@@ -303,6 +317,7 @@ export function viewerFor(token: string): string {
  */
 function sendCapture(res: ServerResponse, answer: CaptureAnswer): void {
   res.writeHead(answer.status, {
+    ...answer.headers,
     "content-type": answer.contentType,
     "cache-control": "no-store",
     "x-content-type-options": "nosniff",
@@ -408,6 +423,8 @@ export interface ConsoleMiddlewareDeps {
    * recorder answers the routes behind it.
    */
   capture?: CaptureHandler;
+  /** A camera's latest volatile still, relayed over the daemon socket. */
+  still?: StillHandler;
 }
 
 /**
@@ -421,10 +438,30 @@ export interface ConsoleMiddlewareDeps {
 export function consoleMiddleware(deps: ConsoleMiddlewareDeps): Middleware {
   const log = deps.log ?? (() => {});
   const whep = deps.whep ?? whepHandler();
+  const maintenance = maintenanceProxy({
+    client: deps.client,
+    session: req => { const token = sessionOf(req, deps.sessions); return token === undefined ? undefined : viewerFor(token); },
+    passwordChanged: () => deps.sessions.revokeAll(),
+  });
+  const cockpit = cockpitProxy({client: deps.client, session: req => {
+    const token = sessionOf(req, deps.sessions);
+    return token === undefined ? undefined : viewerFor(token);
+  }});
 
   return (req, res, next) => {
     const path = pathOf(req);
 
+    if (req.method === 'GET' && path === '/session') {
+      const authenticated = hasSession(req, deps.sessions);
+      sendJson(res, authenticated ? 200 : 401, { authenticated });
+      return;
+    }
+    if (req.method === 'GET' && path === '/login') {
+      const target = new URL(req.url ?? '/login', 'http://localhost').searchParams.get('returnTo');
+      if (hasSession(req, deps.sessions)) { res.writeHead(303, { location: consoleReturn(target), 'cache-control': 'no-store' }); res.end(); return; }
+      sendHtml(res, 200, loginPage(target));
+      return;
+    }
     if (req.method === "POST" && path === "/login") {
       void (async () => {
         const submission = await readFields(req);
@@ -434,7 +471,7 @@ export function consoleMiddleware(deps: ConsoleMiddlewareDeps): Middleware {
           res.setHeader("set-cookie", sessionCookie(deps.sessions.mint()));
           // 303, so the browser follows with a GET and a reload does not
           // re-post the password.
-          res.writeHead(303, { location: CONSOLE_HOME, "cache-control": "no-store" });
+          res.writeHead(303, { location: consoleReturn(submission.fields.returnTo), "cache-control": "no-store" });
           res.end();
           return;
         }
@@ -444,7 +481,7 @@ export function consoleMiddleware(deps: ConsoleMiddlewareDeps): Middleware {
         const message = attempt.retryAfter === undefined
           ? "That password was not accepted."
           : `Too many attempts. Try again in ${attempt.retryAfter} seconds.`;
-        sendHtml(res, attempt.retryAfter === undefined ? 401 : 429, renderPage("login", message));
+        sendHtml(res, attempt.retryAfter === undefined ? 401 : 429, loginPage(submission.fields.returnTo, message));
       })();
       return;
     }
@@ -457,6 +494,9 @@ export function consoleMiddleware(deps: ConsoleMiddlewareDeps): Middleware {
       res.end();
       return;
     }
+
+    if (cockpit(req, res)) return;
+    if (maintenance(req, res)) return;
 
     // The stream handshake, behind this console's own credential (R-SEC-13).
     // Handed the answer rather than placed below the check further down: a
@@ -507,6 +547,65 @@ export function consoleMiddleware(deps: ConsoleMiddlewareDeps): Middleware {
         return;
       }
 
+      const stillWanted = stillRequestFor(path);
+      if (stillWanted !== null) {
+        if (req.method !== "GET") {
+          sendProxied(res, { status: 405, body: "only GET reads a camera's still" });
+          return;
+        }
+        const token = sessionOf(req, deps.sessions);
+        if (token === undefined) {
+          sendProxied(res, { status: 401, body: "log in to read this camera's stills" });
+          return;
+        }
+        const serve = deps.still;
+        if (serve === undefined) {
+          sendProxied(res, { status: 404, body: "this device serves no stills" });
+          return;
+        }
+        void (async () => {
+          const answer = await serve({ camera: stillWanted.camera, viewer: viewerFor(token) });
+          sendCapture(res, answer);
+        })();
+        return;
+      }
+
+      const connection = /^\/video\/([a-z0-9][a-z0-9-]{0,31})\/connection$/.exec(path);
+      if (connection) {
+        if (!sessionOf(req, deps.sessions)) { sendJson(res, 401, { error: 'Sign in to view connection details' }); return; }
+        if (req.method !== 'GET') { sendJson(res, 405, { error: 'Connection details require GET' }); return; }
+        // Only this explicit read proxies the daemon's credential-bearing route.
+        void deps.client.request({ method: 'GET', path: `/cameras/${connection[1]}/stream-address` })
+          .then(reply => sendJson(res, reply.ok ? reply.status : 503, reply.ok ? reply.body : { error: 'Camera service unavailable' }))
+          .catch(() => sendJson(res, 503, { error: 'Connection details unavailable' }));
+        return;
+      }
+      const aim = /^\/video\/([^/]+)\/aim$/.exec(path);
+      if (aim) {
+        const token = sessionOf(req, deps.sessions);
+        if (!token) { sendJson(res, 401, { error: 'Log in to aim this camera' }); return; }
+        if (req.method !== 'POST') { sendJson(res, 405, { error: 'Aim requires POST' }); return; }
+        let originOkay = false;
+        try { const origin = new URL(String(req.headers.origin)); originOkay = origin.host === req.headers.host && ['http:', 'https:'].includes(origin.protocol); } catch { /* missing origin refuses */ }
+        if (!/^[a-z0-9][a-z0-9-]{0,31}$/.test(aim[1]) || !originOkay || req.headers['x-yonder-aim'] !== '1'
+          || !/^application\/json(?:;|$)/i.test(String(req.headers['content-type']))
+          || (req.headers['sec-fetch-site'] !== undefined && req.headers['sec-fetch-site'] !== 'same-origin')) {
+          sendJson(res, 403, { error: 'Use the same-origin camera aim control' }); return;
+        }
+        res.setHeader('pragma', 'no-cache');
+        void (async () => {
+          const submission = await readBody(req, 2048);
+          if (submission.tooLarge) { tooLarge(res); return; }
+          let request: unknown;
+          try { request = JSON.parse(submission.text); } catch { sendJson(res, 400, { error: 'Malformed aim JSON' }); return; }
+          if (!validAimRequest(request)) { sendJson(res, 400, { error: 'Malformed aim request' }); return; }
+          // Resolve authentication again after reading a body: logout invalidates renewal too.
+          if (sessionOf(req, deps.sessions) !== token) { sendJson(res, 401, { error: 'Aim session expired' }); return; }
+          const reply = await deps.client.request({ method: 'POST', path: `/cameras/${aim[1]}/aim`, body: { owner: viewerFor(token), request } });
+          sendJson(res, reply.ok ? reply.status : 503, reply.ok ? reply.body : { error: 'Camera service unavailable' });
+        })().catch(() => sendJson(res, 503, { error: 'Camera aim request failed' }));
+        return;
+      }
       const report = /^\/video\/([^/]+)\/report$/.exec(path);
       if (report !== null) {
         const streamPath = report[1];
@@ -533,7 +632,7 @@ export function consoleMiddleware(deps: ConsoleMiddlewareDeps): Middleware {
             // it will say so below — falling back to an empty submission
             // only keeps a malformed body from throwing uncaught here.
           }
-          // Only the three fields the daemon's own route reads are ever
+          // Only the four fields the daemon's own route reads are ever
           // relayed. **Never a viewer id from the body, in any field**: the
           // one thing that stops a script on the page reporting as, or
           // steering the rate of, a viewer that is not its own is that
@@ -541,8 +640,8 @@ export function consoleMiddleware(deps: ConsoleMiddlewareDeps): Middleware {
           // already decided, and nothing here reads it afterwards either.
           let relay: unknown = body;
           if (typeof body === "object" && body !== null && !Array.isArray(body)) {
-            const sent = body as { want?: unknown; fullRate?: unknown; stats?: unknown };
-            relay = { want: sent.want, fullRate: sent.fullRate, stats: sent.stats };
+            const sent = body as { want?: unknown; stills?: unknown; fullRate?: unknown; stats?: unknown };
+            relay = { want: sent.want, stills: sent.stills, fullRate: sent.fullRate, stats: sent.stats };
           }
           const reply = await deps.client.request({
             method: "POST",
@@ -600,7 +699,7 @@ export function consoleMiddleware(deps: ConsoleMiddlewareDeps): Middleware {
     // because a page is not an answer to a POST and an unauthenticated caller
     // must not be able to tell one route from another by what comes back.
     if (wantsPage(req)) {
-      sendHtml(res, 200, renderPage("login"));
+      sendHtml(res, 200, loginPage(path));
       return;
     }
     sendJson(res, 401, { error: "sign in to use this device" });

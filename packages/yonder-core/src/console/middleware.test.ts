@@ -17,7 +17,8 @@ import {
 } from "./middleware.js";
 import { Readable } from "node:stream";
 import { DaemonClient, type DaemonRequest, type Transport } from "./client.js";
-import type { CaptureAnswer } from "./capture.js";
+import type { CaptureAnswer, StillRequest } from "./capture.js";
+import { STILL_AGE_HEADER, STILL_AT_HEADER } from "../video/media-path.js";
 import { SessionStore } from "./session.js";
 import type { Clock } from "../apply/types.js";
 
@@ -79,11 +80,12 @@ function call(
     raw?: string;
     /** The content-type sent with `raw`. A form, unless something says otherwise. */
     type?: string;
+    headers?: Record<string, string>;
   } = {},
 ): Promise<Reply> {
   return new Promise((resolve, reject) => {
     let payload: Buffer | undefined;
-    const headers: Record<string, string> = {};
+    const headers: Record<string, string> = { ...opts.headers };
     if (opts.form !== undefined) {
       payload = Buffer.from(new URLSearchParams(opts.form).toString(), "utf8");
       headers["content-type"] = "application/x-www-form-urlencoded";
@@ -617,6 +619,20 @@ describe("consoleMiddleware — a viewer's own report", () => {
     expect(JSON.parse(res.body)).toEqual({ mine: {}, shared: {} });
   });
 
+  it("relays independent thumbnail demand beside live-video selection", async () => {
+    const transport = recording(200, '{"mine":{"delivery":"video"}}');
+    const sessions = new SessionStore({ clock: fakeClock() });
+    await serve(consoleMiddleware({ client: new DaemonClient({ transport }), sessions }));
+    const { cookie } = sessionCookie(sessions);
+
+    const res = await call("POST", "/video/cam0/report", {
+      json: { want: "video", stills: true }, cookie,
+    });
+
+    expect(transport.calls[0]?.body).toEqual({ want: "video", stills: true });
+    expect(res.status).toBe(200);
+  });
+
   it("leaves a path with no -preview suffix alone", async () => {
     const transport = recording(200, "{}");
     const sessions = new SessionStore({ clock: fakeClock() });
@@ -878,6 +894,169 @@ describe("consoleMiddleware — a capture's bytes", () => {
   });
 });
 
+/**
+ * **A camera's latest still, behind the same credential as the picture**
+ * (R-VID-14, R-VID-11, R-SEC-13).
+ *
+ * The picture fetches it on the interval it was told and the strip fetches
+ * one per other camera; every fetch is a copy leaving the aircraft and is
+ * counted against the browser that made it — so the viewer the relay names
+ * has to be the session's own, never anything the request said.
+ */
+describe("consoleMiddleware — a camera's latest still", () => {
+  function sessionCookie(sessions: SessionStore): string {
+    return `${SESSION_COOKIE}=${encodeURIComponent(sessions.mint())}`;
+  }
+  const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
+
+  /** A stand-in for the still proxy, recording what reached it. */
+  function recordingStill(answer?: Partial<CaptureAnswer>): {
+    handler: NonNullable<ConsoleMiddlewareDeps["still"]>;
+    seen: StillRequest[];
+  } {
+    const seen: StillRequest[] = [];
+    return {
+      seen,
+      handler: (req) => {
+        seen.push(req);
+        return Promise.resolve({
+          status: 200,
+          contentType: "image/jpeg",
+          body: Readable.from([JPEG]),
+          headers: { [STILL_AT_HEADER]: "1700000000000", [STILL_AGE_HEADER]: "2500" },
+          ...answer,
+        });
+      },
+    };
+  }
+
+  it("refuses without a session, and never asks for the still", async () => {
+    const still = recordingStill();
+    const sessions = new SessionStore({ clock: fakeClock() });
+    await serve(consoleMiddleware({
+      client: new DaemonClient({ transport: answering(200, "{}") }),
+      sessions,
+      still: still.handler,
+    }));
+
+    const res = await call("GET", "/video/cam0/still");
+
+    expect(res.status).toBe(401);
+    expect(still.seen, "an unauthenticated request must not reach the still").toEqual([]);
+    expect(passedThrough).toEqual([]);
+  });
+
+  it("serves the bytes and the frame's age to a session, the viewer derived from that session", async () => {
+    const still = recordingStill();
+    const sessions = new SessionStore({ clock: fakeClock() });
+    await serve(consoleMiddleware({
+      client: new DaemonClient({ transport: answering(200, "{}") }),
+      sessions,
+      still: still.handler,
+    }));
+    const cookie = sessionCookie(sessions);
+
+    const res = await callBytes("GET", "/video/cam0-preview/still?t=123", cookie);
+
+    expect(res.status).toBe(200);
+    expect(res.headers["content-type"]).toBe("image/jpeg");
+    expect(res.body).toEqual(JPEG);
+    // The age travels (R-VID-14) …
+    expect(res.headers[STILL_AT_HEADER]).toBe("1700000000000");
+    expect(res.headers[STILL_AGE_HEADER]).toBe("2500");
+    // … and so do this console's own rules, which nothing relayed overrides.
+    expect(res.headers["cache-control"]).toBe("no-store");
+    expect(res.headers["x-content-type-options"]).toBe("nosniff");
+    // The camera the stream path is of, and the session's own viewer — the
+    // same id the handshake answers with, so the copy is counted against
+    // the browser that fetched it and no other.
+    expect(still.seen).toEqual([{ camera: "cam0", viewer: viewerFor(cookie.split("=")[1]!.replace(/%.*/, "")) }]);
+  });
+
+  it("takes GET and nothing else — nothing a browser sends asks for a still to be taken", async () => {
+    const still = recordingStill();
+    const sessions = new SessionStore({ clock: fakeClock() });
+    await serve(consoleMiddleware({
+      client: new DaemonClient({ transport: answering(200, "{}") }),
+      sessions,
+      still: still.handler,
+    }));
+    for (const method of ["POST", "DELETE", "PUT"]) {
+      const res = await call(method, "/video/cam0/still", { cookie: sessionCookie(sessions) });
+      expect(res.status, method).toBe(405);
+    }
+    expect(still.seen).toEqual([]);
+  });
+
+  it("answers 404 in words on a console assembled with no still proxy", async () => {
+    const sessions = new SessionStore({ clock: fakeClock() });
+    await serve(consoleMiddleware({
+      client: new DaemonClient({ transport: answering(200, "{}") }),
+      sessions,
+    }));
+    const res = await call("GET", "/video/cam0/still", { cookie: sessionCookie(sessions) });
+    expect(res.status).toBe(404);
+    expect(res.body).toContain("serves no stills");
+  });
+
+  it("relays the daemon's refusal, in words, and never caches it", async () => {
+    const still = recordingStill({
+      status: 404, contentType: "application/json",
+      body: '{"error":"cam0 is not running: there is no pipeline to take a frame from"}',
+      headers: undefined,
+    });
+    const sessions = new SessionStore({ clock: fakeClock() });
+    await serve(consoleMiddleware({
+      client: new DaemonClient({ transport: answering(200, "{}") }),
+      sessions,
+      still: still.handler,
+    }));
+    const res = await call("GET", "/video/cam0/still", { cookie: sessionCookie(sessions) });
+    expect(res.status).toBe(404);
+    expect(res.body).toContain("cam0 is not running");
+    expect(res.headers["cache-control"]).toBe("no-store");
+  });
+
+  it("leaves the handshake, the report and the capture where they were", async () => {
+    const whep = recordingWhep();
+    const capture = recordingCaptureFor();
+    const still = recordingStill();
+    const sessions = new SessionStore({ clock: fakeClock() });
+    await serve(consoleMiddleware({
+      client: new DaemonClient({ transport: recording(200, "{}") }),
+      sessions,
+      whep: whep.handler,
+      capture: capture.handler,
+      still: still.handler,
+    }));
+    const cookie = sessionCookie(sessions);
+
+    await call("POST", "/video/cam0/whep", { raw: OFFER, type: "application/sdp", cookie });
+    await call("POST", "/video/cam0/report", { json: { want: "stills" }, cookie });
+    await callBytes("GET", "/video/cam0/captures/2026-09-07T14-22-05-123Z-1280x720.jpg", cookie);
+
+    expect(whep.seen).toHaveLength(1);
+    expect(capture.seen).toHaveLength(1);
+    expect(still.seen).toEqual([]);
+  });
+
+  /** The capture stand-in, as the describe above builds it, for the test
+   *  that holds the three routes apart. */
+  function recordingCaptureFor(): {
+    handler: NonNullable<ConsoleMiddlewareDeps["capture"]>;
+    seen: { camera: string; name: string }[];
+  } {
+    const seen: { camera: string; name: string }[] = [];
+    return {
+      seen,
+      handler: (req) => {
+        seen.push({ camera: req.camera, name: req.name });
+        return Promise.resolve({ status: 200, contentType: "image/jpeg", body: Readable.from([JPEG]) });
+      },
+    };
+  }
+});
+
 describe("viewerFor", () => {
   /**
    * It goes into messages the page carries around and posts back, so the one
@@ -969,4 +1148,78 @@ describe("the console's pages", () => {
     expect(setup).not.toMatch(/secret (passphrase|wi-?fi)/i);
     expect(setup).toMatch(/lock/i);
   });
+});
+
+describe('private accessory aim proxy', () => {
+  const gesture = { op: 'issue', clientGesture: 'physical-1' };
+  async function fixture() {
+    const transport = recording(200, '{"accepted":true,"grant":{"gesture":"g","credential":"secret","deadline":500}}');
+    const sessions = new SessionStore({ clock: fakeClock() });
+    await serve(consoleMiddleware({ client: new DaemonClient({ transport }), sessions }));
+    const token = sessions.mint();
+    return { transport, sessions, token, cookie: `${SESSION_COOKIE}=${token}`,
+      headers: { origin: `http://127.0.0.1:${port}`, 'x-yonder-aim': '1', 'sec-fetch-site': 'same-origin' } };
+  }
+  it('derives the owner from a current session and returns private grants only to the caller', async () => {
+    const f = await fixture();
+    const reply = await call('POST', '/video/cam1/aim', { cookie: f.cookie, headers: f.headers, json: gesture });
+    expect(reply.status).toBe(200); expect(reply.headers['cache-control']).toBe('no-store');
+    expect(f.transport.calls[0]).toMatchObject({ method: 'POST', path: '/cameras/cam1/aim', body: { owner: viewerFor(f.token), request: gesture } });
+    expect(passedThrough).toEqual([]);
+    f.sessions.revoke(f.token);
+    expect((await call('POST', '/video/cam1/aim', { cookie: f.cookie, headers: f.headers, json: gesture })).status).toBe(401);
+    expect(f.transport.calls).toHaveLength(1);
+  });
+  it('rejects cross-origin, forged owner fields and malformed JSON before the daemon', async () => {
+    const f = await fixture();
+    expect((await call('POST', '/video/cam1/aim', { cookie: f.cookie, headers: { ...f.headers, origin: 'http://attacker.invalid' }, json: gesture })).status).toBe(403);
+    expect((await call('POST', '/video/cam1/aim', { cookie: f.cookie, headers: f.headers, json: { ...gesture, owner: 'other' } })).status).toBe(400);
+    expect((await call('POST', '/video/cam1/aim', { cookie: f.cookie, headers: f.headers, raw: '{', type: 'application/json' })).status).toBe(400);
+    expect(f.transport.calls).toEqual([]);
+  });
+  it.each([[2, -1], [60, 0], [0, -120], [72, 96]])('forwards the exact one-use grant and deadline at %s/%s degrees per second', async (pan, tilt) => {
+    const f = await fixture();
+    const request = { op: 'slew', gesture: 'g', credential: 'c', deadline: 12, seq: 2, pan, tilt };
+    expect((await call('POST', '/video/cam1/aim', { cookie: f.cookie, headers: f.headers, json: request })).status).toBe(200);
+    expect(f.transport.calls[0].body).toEqual({ owner: viewerFor(f.token), request });
+  });
+  it.each([[120.1, 0], [0, -120.1], [120, 120]])('refuses over-cap vectors %s/%s before forwarding', async (pan, tilt) => {
+    const f = await fixture();
+    const request = { op: 'slew', gesture: 'g', credential: 'c', deadline: 12, seq: 2, pan, tilt };
+    expect((await call('POST', '/video/cam1/aim', { cookie: f.cookie, headers: f.headers, json: request })).status).toBe(400);
+    expect(f.transport.calls).toHaveLength(0);
+  });
+});
+
+it('returns to the requested camera page after reauthentication and rejects external return URLs', async () => {
+  const {middleware}=consoleWith(answering(200,'{"ok":true}'));await serve(middleware);
+  const page=await call('GET','/dashboard/camera');
+  expect(page.body).toContain('name="returnTo" value="/dashboard/camera"');
+  const login=await call('POST','/login',{form:{password:GOOD,returnTo:'/dashboard/camera'}});
+  expect(login.headers.location).toBe('/dashboard/camera');
+  const outside=await call('POST','/login',{form:{password:GOOD,returnTo:'//example.com'}});
+  expect(outside.headers.location).toBe(CONSOLE_HOME);
+});
+
+it('checks an existing session without redirecting to an HTML login page', async () => {
+  const {middleware,sessions}=consoleWith(answering(200,'{"ok":true}'));await serve(middleware);
+  expect((await call('GET','/session')).status).toBe(401);
+  const token=sessions.mint();
+  const response=await call('GET','/session',{cookie:`${SESSION_COOKIE}=${token}`});
+  expect(response.status).toBe(200);expect(JSON.parse(response.body)).toEqual({authenticated:true});
+});
+
+
+it('reads connection settings only for a signed-in explicit GET, with no caching', async () => {
+  const transport=recording(200,JSON.stringify({renderings:[{kind:'url',body:'rtsp://example.test/camera'}]}));
+  const {middleware,sessions}=consoleWith(transport);await serve(middleware);
+  expect((await call('GET','/video/cam3/connection')).status).toBe(401);
+  expect(transport.calls).toHaveLength(0);
+  const cookie=`${SESSION_COOKIE}=${sessions.mint()}`;
+  expect((await call('POST','/video/cam3/connection',{cookie})).status).toBe(405);
+  expect(transport.calls).toHaveLength(0);
+  const reply=await call('GET','/video/cam3/connection',{cookie});
+  expect(reply.status).toBe(200);expect(reply.headers['cache-control']).toBe('no-store');
+  expect(JSON.parse(reply.body).renderings[0].kind).toBe('url');
+  expect(transport.calls[0]).toMatchObject({method:'GET',path:'/cameras/cam3/stream-address'});
 });

@@ -25,17 +25,8 @@ import YonderAimPad from "./YonderAimPad.vue";
  *    the call happens, while every other test in this file leaves it
  *    unstubbed and un-thrown — proof the guard is what keeps a missing
  *    implementation from taking the component down with it.
- * 2. **jsdom performs no layout.** `getBoundingClientRect()` on the dial
- *    returns a real `DOMRect` with every field, `width`/`height`/`left`/`top`
- *    included, reading zero. `YonderAimPad.vue` answers this exactly the way
- *    `YonderSetBar` and `YonderPositionGauge` already do: the pointer
- *    geometry is driven from `DIAL_SIZE`, a JS-owned constant the dial's own
- *    `:width`/`:height` bind to, never from a measurement of the rendered
- *    element. Only the dial's on-page *position* still comes from
- *    `getBoundingClientRect()` (`rect.left`/`rect.top`), which is a genuine
- *    layout fact no constant could stand in for — it reads zero here too,
- *    which is harmless, since nothing in this file wraps the dial in an
- *    offset container and `toClient()` below accounts for exactly that.
+ * 2. **jsdom performs no layout.** Each dial gets an explicit 132px layout
+ *    fixture; scaled/offset and invalid-layout tests replace those bounds.
  * 3. **`@vue/test-utils@2.5.0`'s own `trigger("pointerdown", { clientX })`
  *    throws in this project's jsdom** — `setbar.component.test.ts`'s own
  *    top comment explains the cause (jsdom's `PointerEvent` inherits
@@ -60,11 +51,8 @@ const DEAD = 15;
 const RIM = 44;
 
 /**
- * The inverse of the component's own `at()`: a point in SVG units to the
- * `clientX`/`clientY` that lands there. Exact because `rect.left`/`rect.top`
- * read zero under this project's jsdom (confirmed) and nothing here wraps
- * the dial in an offset container, so a press at SVG-space `(x, y)` really
- * does land at exactly this many CSS pixels from the dial's own origin.
+ * SVG points mapped into the explicit default 132px layout fixture.
+ * Scaled and offset cases below supply client coordinates independently.
  */
 function toClient(xSvg: number, ySvg: number) {
   return {
@@ -78,7 +66,9 @@ function pad(props: {
   atLimit?: { pitch?: boolean; yaw?: boolean };
   inhibited?: string | null;
 }) {
-  return mount(YonderAimPad, { props });
+  const wrapper = mount(YonderAimPad, { props });
+  wrapper.find('.y-aim__dial').element.getBoundingClientRect = () => ({ left: 0, top: 0, width: DIAL_SIZE, height: DIAL_SIZE }) as DOMRect;
+  return wrapper;
 }
 
 function dialOf(w: VueWrapper): Element {
@@ -116,6 +106,7 @@ function goHidden(): void {
 
 afterEach(() => {
   Object.defineProperty(document, "hidden", { configurable: true, value: false });
+  localStorage.clear();
 });
 
 function slews(w: VueWrapper): Array<{ pan: number; tilt: number; seq: number; gesture: string }> {
@@ -140,6 +131,71 @@ describe("mounting", () => {
     expect(w.find(".y-aim__puck-core").exists()).toBe(true);
     expect(Number(w.find(".y-aim__puck-core").attributes("cx"))).toBe(CENTER);
     expect(Number(w.find(".y-aim__puck-core").attributes("cy"))).toBe(CENTER);
+  });
+});
+
+describe('stick expo', () => {
+  it('offers independent speed selection, respects the camera cap, and ends an old hold on changes', async () => {
+    const w = mount(YonderAimPad, { props: { maxRate: 120 } });
+    dialOf(w).getBoundingClientRect = () => ({ left: 0, top: 0, width: DIAL_SIZE, height: DIAL_SIZE }) as DOMRect;
+    expect(w.get('input[aria-label="Maximum gimbal speed"]').element.value).toBe('60');
+    down(dialOf(w), RIM, 0);
+    expect(slews(w).at(-1)?.pan).toBeCloseTo(60);
+    await w.get('input[aria-label="Maximum gimbal speed"]').setValue('120');
+    expect(stops(w)).toHaveLength(1);
+    move(dialOf(w), RIM, 0);
+    expect(slews(w)).toHaveLength(1);
+    down(dialOf(w), RIM, 0);
+    expect(slews(w).at(-1)?.pan).toBeCloseTo(120);
+    await w.setProps({ maxRate: 10 });
+    expect(stops(w)).toHaveLength(2);
+    expect(w.get('input[aria-label="Maximum gimbal speed"]').element.value).toBe('10');
+    down(dialOf(w), RIM, 0);
+    expect(slews(w).at(-1)?.pan).toBeCloseTo(10);
+    w.unmount();
+  });
+  it('defaults to half expo, preserves directions and reaches the reported maximum at full throw', () => {
+    const w = mount(YonderAimPad, { props: { maxRate: 10 } });
+    dialOf(w).getBoundingClientRect = () => ({ left: 0, top: 0, width: DIAL_SIZE, height: DIAL_SIZE }) as DOMRect;
+    expect(w.get('input[aria-label="Stick expo"]').element.value).toBe('50');
+    const halfThrow = (DEAD + RIM) / 2;
+    down(dialOf(w), halfThrow, 0);
+    expect(slews(w).at(-1)?.pan).toBeCloseTo(3.125);
+    move(dialOf(w), -halfThrow, 0);
+    expect(slews(w).at(-1)?.pan).toBeCloseTo(-3.125);
+    move(dialOf(w), 0, -halfThrow);
+    expect(slews(w).at(-1)?.tilt).toBeCloseTo(3.125);
+    move(dialOf(w), 400, -400);
+    const last = slews(w).at(-1)!;
+    expect(Math.hypot(last.pan, last.tilt)).toBeCloseTo(10);
+    expect(last.pan).toBeCloseTo(last.tilt);
+    w.unmount();
+  });
+
+  it('supports linear and cubic response and remembers the browser preference', async () => {
+    const w = pad({});
+    await w.get('input[aria-label="Stick expo"]').setValue('0');
+    down(dialOf(w), (DEAD + RIM) / 2, 0);
+    expect(slews(w).at(-1)?.pan).toBeCloseTo(15);
+    await w.get('input[aria-label="Stick expo"]').setValue('100');
+    expect(stops(w)).toHaveLength(1);
+    move(dialOf(w), RIM, 0); // changing the response cannot resume the old hold
+    expect(slews(w)).toHaveLength(1);
+    down(dialOf(w), (DEAD + RIM) / 2, 0);
+    expect(slews(w).at(-1)?.pan).toBeCloseTo(3.75);
+    fire(dialOf(w), 'pointerup');
+    expect(stops(w)).toHaveLength(2);
+    w.unmount();
+    const restored = pad({});
+    expect(restored.get('input[aria-label="Stick expo"]').element.value).toBe('100');
+    restored.unmount();
+  });
+
+  it.each(['NaN', '-10', '101', ''])('uses the default for an invalid saved preference %s', saved => {
+    localStorage.setItem('yonder:aim:expo', saved);
+    const w = pad({});
+    expect(w.get('input[aria-label="Stick expo"]').element.value).toBe('50');
+    w.unmount();
   });
 });
 
@@ -174,7 +230,7 @@ describe("a rate, never a position", () => {
     expect(Math.abs(last.pan)).toBeLessThanOrEqual(30);
   });
 
-  it("pushing up yields a positive tilt rate, matching the TILT + label", () => {
+  it("pushing up yields a positive tilt rate, matching the Up label", () => {
     // Screen y grows downward; "up" is negative SVG y. A dropped sign here
     // would point the reading the wrong way against the pad's own label.
     const w = pad({});
@@ -426,7 +482,7 @@ describe("the struck axis — one the device advertises and will not answer", ()
     const present = pad({ axes: { pan: "present", tilt: "present", roll: "present" } });
     expect(present.find(".y-aim__struck").exists()).toBe(false);
 
-    const struck = pad({ axes: { pan: "present", tilt: "present", roll: "not-offered" } });
+    const struck = pad({ axes: { pan: "present", tilt: "present", roll: "advertised" } });
     expect(struck.find(".y-aim__struck").exists()).toBe(true);
     expect(struck.find(".y-aim__struck-label").text()).toContain("ROLL");
   });
@@ -435,11 +491,11 @@ describe("the struck axis — one the device advertises and will not answer", ()
     expect(pad({}).find(".y-aim__struck").exists()).toBe(false);
   });
 
-  it("fails closed: an axes object with roll simply absent is struck, not present", () => {
+  it("omits an axis the camera does not offer", () => {
     // R-CMD-04's own spirit, applied to a reading rather than a command:
     // an axis this page was never told about is not assumed safe.
     const w = pad({ axes: { pan: "present", tilt: "present" } });
-    expect(w.find(".y-aim__struck").exists()).toBe(true);
+    expect(w.find(".y-aim__struck").exists()).toBe(false);
   });
 });
 
@@ -612,4 +668,49 @@ it("a press refused while inhibited cannot start slewing when the inhibition lif
     move(dial, 40, 0);
     expect(w.emitted("slew")).toHaveLength(1);
 });
+});
+
+it('keeps captured motion outside the pad until real release and stops only once', () => {
+  const w = pad({}); const el = dialOf(w) as SVGElement;
+  let captured: number | null = null;
+  el.setPointerCapture = vi.fn(id => { captured = id; });
+  el.hasPointerCapture = vi.fn(id => captured === id);
+  el.releasePointerCapture = vi.fn(() => { captured = null; });
+  down(el, RIM, 0, 7);
+  const gesture = slews(w).at(-1)?.gesture;
+  fire(el, 'pointerleave');
+  expect(stops(w)).toHaveLength(0);
+  move(el, 400, 0, 7);
+  expect(slews(w).at(-1)).toMatchObject({ gesture, pan: 30 });
+  fire(el, 'pointerup'); fire(el, 'lostpointercapture');
+  expect(stops(w)).toEqual([{ gesture }]);
+});
+
+it.each([
+  { left: 40, top: 80, width: 264, height: 264 },
+  { left: 20, top: 30, width: 198, height: 99 },
+  { left: 25, top: 35, width: 99, height: 198 },
+])('maps the painted dial rim using centered SVG meet scaling %j', rect => {
+  const w = pad({}); const el = dialOf(w);
+  el.getBoundingClientRect = () => rect as DOMRect;
+  // The SVG paints a square dial centered inside wide or tall viewports.
+  const paintedRim = 44 * Math.min(rect.width, rect.height) / 118;
+  const center = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  const dispatch = (dx: number, dy: number, type = 'pointermove') => el.dispatchEvent(new PointerEvent(type, { pointerId: 1, clientX: center.x + dx, clientY: center.y + dy }));
+  dispatch(0, 0, 'pointerdown'); expect(slews(w)).toHaveLength(0);
+  dispatch(paintedRim, 0); expect(slews(w).at(-1)?.pan).toBeCloseTo(30);
+  expect(slews(w).at(-1)?.tilt).toBeCloseTo(0);
+  dispatch(0, -paintedRim); expect(slews(w).at(-1)?.tilt).toBeCloseTo(30);
+  dispatch(0, paintedRim); expect(slews(w).at(-1)?.tilt).toBeCloseTo(-30);
+  dispatch(-paintedRim, 0); expect(slews(w).at(-1)?.pan).toBeCloseTo(-30);
+});
+
+it.each(['width', 'height'].flatMap(axis => [0, -1, NaN, Infinity].map(value => ({ axis, value }))))('ends the hold on invalid bounds %j without resuming on layout recovery', ({ axis, value }) => {
+  const w = pad({}); const el = dialOf(w);
+  down(el, RIM, 0);
+  el.getBoundingClientRect = () => ({ left: 0, top: 0, width: 132, height: 132, [axis]: value }) as DOMRect;
+  move(el, RIM, 0); expect(stops(w)).toHaveLength(1);
+  const before = slews(w).length;
+  el.getBoundingClientRect = () => ({ left: 0, top: 0, width: 132, height: 132 }) as DOMRect;
+  move(el, RIM, 0); expect(slews(w)).toHaveLength(before);
 });

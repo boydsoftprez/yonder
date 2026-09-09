@@ -54,6 +54,83 @@ function changed(): Config {
 }
 
 describe("ApplyEngine", () => {
+  it("keeps Day/Night requests within the appearance renderer even when hardware is unavailable", async () => {
+    const appearance = renderer("console");
+    const hardware = { name: "network", render: vi.fn(async () => { throw new Error("modem unavailable"); }) };
+    const e = new ApplyEngine({ configPath, journalPath, renderers: [hardware, appearance], appearanceRenderer: appearance });
+    const c = structuredClone(DEFAULT_CONFIG); c.ui.theme = "night";
+    await e.apply(c, { appearanceOnly: true });
+    expect(loadConfig(configPath).ui.theme).toBe("night");
+    expect(e.status().state).toBe("confirmed");
+    expect(hardware.render).not.toHaveBeenCalled();
+    expect(appearance.calls.map(c => c.ui.theme)).toEqual(["night"]);
+    await e.apply(c, { appearanceOnly: true }); // Same choice can repair a stale stylesheet.
+    expect(hardware.render).not.toHaveBeenCalled();
+  });
+  it("does not let the appearance hint skip a network or other configuration change", async () => {
+    const appearance = renderer("console");
+    const hardware = { name: "network", render: vi.fn(async () => { throw new Error("hardware failure"); }) };
+    const e = new ApplyEngine({ configPath, journalPath, renderers: [hardware, appearance], appearanceRenderer: appearance });
+    await expect(e.apply(changed(), { appearanceOnly: true })).rejects.toThrow("hardware failure");
+    expect(hardware.render).toHaveBeenCalled();
+    expect(loadConfig(configPath).system.hostname).toBe(DEFAULT_CONFIG.system.hostname);
+  });
+  it("rolls back a failed appearance write within the same renderer scope", async () => {
+    const hardware = renderer("network"); const seen: string[] = [];
+    const appearance = { name: "console", render: async (c: Config) => { seen.push(c.ui.theme); if (c.ui.theme === "night") throw new Error("theme write failed"); } };
+    const e = new ApplyEngine({ configPath, journalPath, renderers: [hardware, appearance], appearanceRenderer: appearance });
+    const c = structuredClone(DEFAULT_CONFIG); c.ui.theme = "night";
+    await expect(e.apply(c, { appearanceOnly: true })).rejects.toThrow("theme write failed");
+    expect(seen).toEqual(["night", "day"]);
+    expect(hardware.calls).toEqual([]);
+    expect(loadConfig(configPath).ui.theme).toBe("day");
+    expect(e.status().state).toBe("idle");
+  });
+  it("initializes telemetry and video at boot even when the network render fails", async () => {
+    const telemetry = renderer("telemetry");
+    const video = renderer("video");
+    const e = new ApplyEngine({ configPath, journalPath, renderers: [
+      { name: "network", async render() { throw new Error("modem activation failed"); } },
+      telemetry, video,
+    ] });
+    await expect(e.renderCurrent()).rejects.toThrow(/modem activation failed/);
+    expect(telemetry.calls).toHaveLength(1);
+    expect(video.calls).toHaveLength(1);
+    expect(loadConfig(configPath)).toEqual(DEFAULT_CONFIG);
+    expect(existsSync(journalPath)).toBe(false);
+    expect(e.status().state).toBe("idle");
+  });
+
+  it("continues boot initialization after a renderer times out", async () => {
+    const { clock, advance } = fakeClock();
+    const telemetry = renderer("telemetry");
+    const e = new ApplyEngine({ configPath, journalPath, clock, renderTimeoutMs: 100,
+      renderers: [{ name: "network", render: () => new Promise(() => {}) }, telemetry],
+    });
+    const boot = e.renderCurrent();
+    const failure = expect(boot).rejects.toThrow(/network.*timed out/);
+    advance(101);
+    await failure;
+    expect(telemetry.calls).toHaveLength(1);
+  });
+
+  it("reserves the configuration while boot renderers are running", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let calls = 0;
+    const { clock } = fakeClock();
+    const e = new ApplyEngine({ configPath, journalPath, clock,
+      renderers: [{ name: "slow", render: () => ++calls === 1 ? gate : Promise.resolve() }],
+    });
+    const boot = e.renderCurrent();
+    try {
+      await expect(e.apply(changed())).rejects.toThrow(/still being carried out/);
+      await expect(e.renderCurrent()).rejects.toThrow(/in flight/);
+    } finally { release(); await boot; }
+    expect(loadConfig(configPath)).toEqual(DEFAULT_CONFIG);
+    expect(e.status().state).toBe("idle");
+  });
+
   it("starts idle", () => {
     const { clock } = fakeClock();
     const e = new ApplyEngine({ configPath, journalPath, renderers: [renderer()], clock });

@@ -22,10 +22,14 @@
               controls that cannot be worked; what they no longer do is each
               restate why.
             -->
-            <div v-if="effectiveReason" class="y-aimpanel__reason">{{ effectiveReason }}</div>
+            <div v-if="effectiveReason || aimError || report.motionNotice" class="y-aimpanel__reason">{{ aimError || effectiveReason || report.motionNotice }}</div>
+            <div v-if="!effectiveReason && report.directionalRefusals?.length" class="y-aimpanel__reason">{{ report.directionalRefusals.join(' · ') }}</div>
 
+            <p v-if="signInRequired" class="y-aimpanel__reason"><a :href="signInHref">Sign in</a> to use camera controls.</p>
             <YonderAimPad
+                ref="aimPad"
                 :axes="PAD_AXES"
+                :max-rate="report.maxRate ?? 30"
                 :at-limit="atLimit"
                 :inhibited="padInhibited"
                 @slew="onSlew"
@@ -37,29 +41,39 @@
                 <span class="y-aimpanel__rate-v">{{ rateShown }}<i>°/s</i></span>
             </div>
 
-            <YonderPositionGauge label="Pan" unit="°" :value="pan" :min="panBounds.lo" :max="panBounds.hi" :dead="!hasBounds" :reason="gaugeReason" />
-            <YonderPositionGauge label="Tilt" unit="°" :value="tilt" :min="tiltBounds.lo" :max="tiltBounds.hi" :dead="!hasBounds" :reason="gaugeReason" />
+            <div class="y-aimpanel__reported">Reported position</div>
+            <dl v-if="!hasBounds" class="y-aimpanel__position">
+                <div><dt>Pan</dt><dd>{{ pan === null ? '—' : pan.toFixed(1) + '°' }}</dd></div>
+                <div><dt>Tilt</dt><dd>{{ tilt === null ? '—' : tilt.toFixed(1) + '°' }}</dd></div>
+            </dl>
+            <template v-else>
+                <YonderPositionGauge label="Pan" unit="°" :value="pan" :min="panBounds.lo" :max="panBounds.hi" :bounds-known="hasBounds" :dead="aimState !== 'present' || pan === null" :reason="gaugeReason" />
+                <YonderPositionGauge label="Tilt" unit="°" :value="tilt" :min="tiltBounds.lo" :max="tiltBounds.hi" :bounds-known="hasBounds" :dead="aimState !== 'present' || tilt === null" :reason="gaugeReason" />
+            </template>
 
-            <div v-if="mode" class="y-aimpanel__modeline">{{ modeSentence }}</div>
+            <div v-if="modeControlState === 'not-offered'" class="y-aimpanel__mode">{{ modeSentence }}</div>
             <YonderSegmented
                 label="Gimbal mode"
                 :value="mode"
                 :options="modes"
                 :state="modeControlState"
-                :reason="gaugeReason"
+                :reason="report.modeInhibited || gaugeReason"
                 @change="onModeChange"
             />
 
-            <button type="button" class="y-aimpanel__recentre" :disabled="recentreDisabled" @click="pressRecentre">Recentre gimbal</button>
+            <button type="button" class="y-aimpanel__recentre" :disabled="recentreDisabled" :title="report.recentreInhibited || ''" @click="pressRecentre">Recenter gimbal</button>
+            <div v-if="report.recentreInhibited" class="y-aimpanel__reason">{{ report.recentreInhibited }}</div>
         </YonderColumn>
     </div>
 </template>
 
 <script>
+import { cameraSessionMixin } from './camera-session.ts'
 import YonderAimPad from './YonderAimPad.vue'
 import YonderPositionGauge from './YonderPositionGauge.vue'
 import YonderSegmented from './YonderSegmented.vue'
 import YonderColumn from './YonderColumn.vue'
+import { AimTransport } from './aim-transport.ts'
 
 /**
  * `ui-yonder-aim` — the gimbal panel as a node of its own (R-UI-28,
@@ -193,7 +207,7 @@ import YonderColumn from './YonderColumn.vue'
  * component's own doc comment on why this mirrors `YonderDeck.buildAim()`'s
  * identical, separately-hardcoded object rather than importing one from it.
  */
-const PAD_AXES = { pan: 'present', tilt: 'present', roll: 'advertised' }
+const PAD_AXES = { pan: 'present', tilt: 'present', roll: 'not-offered' }
 
 /** A payload `bounds` axis (`[lo, hi]` or missing) to the pair
  * `YonderPositionGauge` needs, falling back to the blueprint's own default
@@ -210,6 +224,7 @@ function boundsOf (bounds, axis, lo, hi) {
 
 export default {
     name: 'YonderAim',
+    mixins: [cameraSessionMixin],
     inject: ['$socket', '$dataTracker'],
     components: { YonderAimPad, YonderPositionGauge, YonderSegmented, YonderColumn },
     props: {
@@ -225,6 +240,8 @@ export default {
         commandedPan: 0,
         commandedTilt: 0,
         /** See this component's own doc comment on `Recentre`. */
+        aimTransport: null,
+        aimError: null,
         recentrePending: false
     }),
     computed: {
@@ -260,10 +277,10 @@ export default {
             return (this.report && this.report.reason) || ''
         },
         pan () {
-            return this.report && typeof this.report.pan === 'number' ? this.report.pan : 0
+            return this.report && typeof this.report.pan === 'number' ? this.report.pan : null
         },
         tilt () {
-            return this.report && typeof this.report.tilt === 'number' ? this.report.tilt : 0
+            return this.report && typeof this.report.tilt === 'number' ? this.report.tilt : null
         },
         bounds () {
             return (this.report && this.report.bounds) || null
@@ -303,6 +320,7 @@ export default {
          * `data()` — so the pad's own `watch: { inhibited }` keeps reacting
          * exactly as Task 20 built it (coordinator resolution 6). */
         padInhibited () {
+            if (this.signInRequired) return 'Sign in required'
             // Truthy so the pad refuses a press, but **short**: a camera that
             // is not answering at all is the panel's fact and its head says it
             // in full. The pad used to repeat that whole sentence, and so did
@@ -359,7 +377,7 @@ export default {
         modeControlState () {
             if (!this.modes.length) return 'not-offered'
             if (this.aimState !== 'present') return this.aimState
-            if (this.inhibited) return 'gated'
+            if (this.signInRequired || this.inhibited || this.report?.modeInhibited) return 'gated'
             return 'present'
         },
         /** A full sentence, not a bare label — see this component's own
@@ -378,7 +396,7 @@ export default {
          * mode), or `recentrePending` (this press has not yet been
          * followed by a fresh report). */
         recentreDisabled () {
-            return this.aimState !== 'present' || Boolean(this.inhibited) || this.recentrePending
+            return this.signInRequired || this.aimState !== 'present' || Boolean(this.inhibited) || Boolean(this.report?.recentreInhibited) || this.recentrePending
         }
     },
     watch: {
@@ -388,23 +406,33 @@ export default {
          * player who presses Recentre and immediately loses the report
          * feed (page torn down, camera unplugged) simply keeps the guard
          * up, which is the safe direction to fail in. */
-        report () {
+        report (now, before) {
+            if (now?.generation !== before?.generation || now?.url !== before?.url || now?.imageDirection !== before?.imageDirection) this.$refs.aimPad?.onEnd()
             this.recentrePending = false
+            this.aimTransport?.refresh()
         }
     },
     created () {
         this.$dataTracker(this.id)
+        this.aimTransport = new AimTransport(() => this.report, (rate, reason) => { this.commandedPan = rate.pan; this.commandedTilt = rate.tilt; this.aimError = reason })
+        this.$socket.on?.('disconnect', this.aimDisconnect)
     },
+    beforeUnmount () { this.aimTransport?.close(); this.$socket.off?.('disconnect', this.aimDisconnect) },
     methods: {
+        onCameraSessionExpired () { this.aimDisconnect() },
+        aimDisconnect () { this.aimTransport?.stop(); this.$refs.aimPad?.onEnd() },
         /** Every message this node posts leaves through here — one seam,
          * the same reasoning `YonderDeck`'s own `post()` gives for having
          * exactly one. */
         post (payload) {
+            if (this.signInRequired) return
             this.$socket.emit('widget-action', this.id, { payload })
         },
         /** Relayed verbatim (coordinator resolution 3) — `seq` is the
          * pad's own lifetime-monotonic counter, never recomputed here. */
         onSlew (e) {
+            if (this.signInRequired) return
+            if (this.report?.url) { this.aimTransport.update(e); return }
             this.commandedPan = e.pan
             this.commandedTilt = e.tilt
             this.post({ slew: { pan: e.pan, tilt: e.tilt, seq: e.seq, gesture: e.gesture } })
@@ -414,11 +442,13 @@ export default {
          * deliberately does not follow `YonderDeck.buildAim()`'s own choice
          * to add `pan: 0, tilt: 0` to its stop relay. */
         onStop (e) {
+            if (this.report?.url) { this.aimTransport.stop(); return }
             this.commandedPan = 0
             this.commandedTilt = 0
             this.post({ stop: { gesture: e.gesture } })
         },
         onModeChange (m) {
+            if (this.report?.url) { void this.aimTransport.action({ op: 'mode', mode: this.modes.indexOf(m) }); return }
             this.post({ mode: m })
         },
         pressRecentre () {
@@ -428,6 +458,7 @@ export default {
             // not reach in a real browser.
             if (this.recentreDisabled) return
             this.recentrePending = true
+            if (this.report?.url) { void this.aimTransport.action({ op: 'recentre' }).finally(() => { this.recentrePending = false }); return }
             this.post({ recentre: true })
         }
     }
@@ -435,6 +466,10 @@ export default {
 </script>
 
 <style scoped>
+.y-aimpanel__position { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 0 0 10px; }
+.y-aimpanel__position div { display: flex; justify-content: space-between; gap: 8px; }
+.y-aimpanel__position dt { color: var(--yonder-label, #7f8a95); font-size: 11px; }
+.y-aimpanel__position dd { margin: 0; font-variant-numeric: tabular-nums; font-size: 13px; color: var(--yonder-value, #fff); }
 .y-aimpanel {
     font-family: var(--yonder-font, system-ui, sans-serif);
 }
@@ -498,6 +533,7 @@ export default {
     color: var(--yonder-label, #7f8a95);
 }
 
+.y-aimpanel__reported,
 .y-aimpanel__modeline {
     font-size: 12px;
     color: var(--yonder-value, #ffffff);

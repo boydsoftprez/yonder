@@ -19,6 +19,7 @@ import {
 const ALL_PATHS: PathName[] = ["ethernet", "modem", "wifi_client"];
 
 export interface ReachMonitorOptions {
+  routeDevice?: () => Promise<string | null>;
   standing: Standing;
   probe: Probe;
   /** Defaults to the kernel's own counters. Injected so a test reaches no /sys. */
@@ -73,6 +74,7 @@ export interface ReachMonitorOptions {
  * an address cannot answer (K-42).
  */
 export class ReachMonitor {
+  private readonly routeDevice: (() => Promise<string | null>) | undefined;
   private readonly standing: Standing;
   private readonly probe: Probe;
   private readonly counters: CounterReader;
@@ -83,6 +85,7 @@ export class ReachMonitor {
   private readonly log: (line: string) => void;
 
   constructor(opts: ReachMonitorOptions) {
+    this.routeDevice = opts.routeDevice;
     this.standing = opts.standing;
     this.probe = opts.probe;
     this.counters = opts.counters ?? systemCounters;
@@ -170,7 +173,7 @@ export class ReachMonitor {
     ]);
     // Not `holding[0]`. See `activePath`: a stood-down path keeps its address,
     // so the head of this list is the path traffic moved *off*.
-    const inUse = activePath(holding, this.standing);
+    const inUse = await this.observedPath(devices, holding);
     const order = this.order();
     // Every path, not only the configured ones. A page that listed only what
     // `network.priority` names would go quiet about the path an operator has
@@ -214,9 +217,9 @@ export class ReachMonitor {
    * that stand it down, and when every path holding an address is failing
    * this answers false. See `carryingOn`.
    */
-  async carrying(): Promise<boolean> {
+  async carrying(readHolding: () => Promise<PathName[]> = this.holding): Promise<boolean> {
     try {
-      return this.carryingOn(await this.holding());
+      return this.carryingOn(await readHolding());
     } catch (e) {
       this.log(`network: cannot tell whether anything is carrying traffic (${(e as Error).message})`);
       return true;
@@ -247,10 +250,21 @@ export class ReachMonitor {
    * for as long as the dead cable stayed plugged in — see `activePath`.
    */
   async inUseNow(): Promise<{ path: PathName; device: string } | null> {
-    const path = activePath(await this.holding(), this.standing);
+    // Independent and taken together. In production `holding()` needs the
+    // same device observation to attribute addresses to paths; the
+    // observation runner shares that pending command, so this is one device
+    // snapshot rather than a second subprocess after the first settles.
+    const [holding, devices] = await Promise.all([this.holding(), this.devices()]);
+    const path = await this.observedPath(devices, holding);
     if (path === null) return null;
-    const device = (await this.devices())[path];
+    const device = devices[path];
     return device === undefined ? null : { path, device };
+  }
+
+  private async observedPath(devices: Partial<Record<PathName, string>>, holding: PathName[]): Promise<PathName | null> {
+    if (!this.routeDevice) return activePath(holding, this.standing);
+    const device = await this.routeDevice();
+    return ALL_PATHS.find(path => devices[path] === device) ?? null;
   }
 
   /**

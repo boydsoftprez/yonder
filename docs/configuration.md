@@ -178,14 +178,25 @@ A `cameras:` list validates, gets its defaults, and goes through apply and rollb
 any other section; since M4 it also runs — the pipeline, the media server's configuration
 and the console's camera pages are all generated from it ([roadmap](roadmap.md)).
 
+Set `enabled: true` and `autostart: true` on each camera that must return after a
+power cycle. Yonder resolves the saved device identity, checks its capture capabilities,
+and starts the pipeline in the background. Missing hardware is retried every five seconds;
+automatically started pipelines retry failures with backoff capped at thirty seconds.
+Runtime Stop cancels startup and pipeline retries until the daemon next starts. Changing
+`autostart` on a camera that was off at boot selects the next boot's behavior; Start runs it
+immediately. A configuration change that suspends an automatic camera is reversible.
+
+At boot, a failed modem activation is logged and initialization continues to telemetry,
+media, and cameras. Normal configuration changes retain apply and rollback behavior.
+
 ```yaml
 cameras:
   - id: cam0
     name: Nose
-    source: usb                    # usb only today — csi, hdmi and a second camera arrive later
+    source: usb                    # usb or accessory; detection supplies the source
     device: platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0  # the by-path name (R-CAM-05) — not the bus id v4l2-ctl prints, which resolves to nothing
     enabled: true
-    autostart: false               # off by default; video has no equivalent of R-MAV-08
+    autostart: false               # set true to restore this camera automatically at boot
     width: 1280
     height: 720
     framerate: 30
@@ -281,6 +292,40 @@ Apply, names a reversed floor and ceiling, a reversed ladder, or a held size a c
 not offer by the field that is wrong, and never repairs one: swapping a reversed pair,
 clamping an out-of-range value, or substituting the nearest legal size would all be Yonder
 deciding what the operator meant, and R-CMD-04 is why that decision stays theirs.
+
+#### Pocket 2 accessory source
+
+Detection can adopt a Pocket 2 as `source: accessory` with the stable identity
+`device: pocket2:<USB-controller-name>`. It shares one daemon-owned USB session with
+the picture, controls and camera-card recorder. Peripheral USB mode must already be
+available; runtime detection reports missing or claimed controllers and changes no boot
+or network settings. A configured accessory listens asynchronously at startup even when
+its picture is stopped. Camera traffic loss clears active gestures and retries after a
+45-second detached interval; reconnecting never resumes motion.
+
+The camera's H.264 SPS supplies native dimensions, while frame timestamps supply its
+measured cadence. The observed native feed is 1280×720 at approximately 29.97 fps.
+The console's output resolution, frame rate, bitrate and independent preview settings
+configure Yonder's encodes. They do not claim to change the camera's fixed USB format.
+The packaged pipeline host and `avdec_h264` decoder are required for accessory video.
+
+`accessory_mount` is optional and absent or `null` by default, which inhibits motion.
+A measured profile contains `mount`, `envelopes`, `signs`, `limitDirections` and `actions`.
+Each envelope names its `mount`, mode (`0` Free, `1` FPV, `2` Follow) and measured
+ordered yaw/pitch/roll bounds in reported degrees. `signs.pan` and `signs.tilt` map public
+positive rates to reported-position direction (`1`, `-1`, or `null` when unknown).
+`limitDirections` may identify the reported direction farther into a lit yaw/pitch stop.
+Discrete action certificates contain `mount`, `fromMode`, `command` (`recentre`, or
+`mode` with its mode number), and complete `start` and `trajectory` yaw/pitch/roll boxes.
+Unmeasured axes and actions remain unavailable. The guard reserves the 500 ms intent
+allowance plus the measured 800 ms device stopping allowance. No gesture, grant or
+deadline is stored in configuration. Apply a measured profile through the normal
+configuration apply/rollback path; there is no motion-learning wizard.
+
+Pocket exposure, ISO, EV, rational shutter, focus, white balance and native card-format
+controls use the camera's own measured menu and observed state. Photographs and native
+recordings stay on its card; Yonder reports capture completion and medium state but
+cannot list, download or delete those files. Battery percentage remains unknown.
 
 #### Camera image controls
 
@@ -484,6 +529,11 @@ without a list of device identifiers written from a vendor's documentation (R-CE
 replace the `hilink`/`stick` sketch that appeared in this reference before M3a: that sketch
 was never implemented and never shipped, so no device in the field can be carrying either
 value.
+
+Enabled modem profiles reconnect automatically with unlimited NetworkManager
+activation retries (R-CEL-06). A slow modem can finish registering after boot without
+requiring a console reconnect. A password reported as `<hidden>` is unreadable, so
+it does not trigger a redial. A password-only change takes effect on the next dial.
 
 **An enabled appliance must name its adapter.** `interface` is the whole of how this device
 locates one, so `enabled: true` with `mode: appliance` and no `interface` is refused —

@@ -24,6 +24,7 @@ export = function register(RED: RED): void {
   registerPoller(RED, "yonder-netstate", {
     path: () => "/net/state",
     payload: (value) => value,
+    failedPayload: () => ({ summary: "Wi-Fi state unavailable — waiting for a new observation", address: "—" }),
     describe: (value) =>
       String((value as { summary?: unknown } | undefined)?.summary ?? "unknown"),
   });

@@ -47,3 +47,37 @@ export function cameraFor(streamPath: string): string {
 export function captureUrl(camera: string, name: string): string {
   return `/video/${encodeURIComponent(camera)}/captures/${encodeURIComponent(name)}`;
 }
+
+/**
+ * Where a camera's latest still arrives for a browser (R-VID-14, R-SEC-13).
+ *
+ * The picture fetches it on the interval it was told, and the strip under
+ * the picture fetches one per other camera; both go through the console,
+ * which relays them to the daemon's `GET /cameras/:id/still` and counts
+ * each answer as one transmission (R-VID-11). The same family and the same
+ * reasoning as `captureUrl` above: one place the shape is written, so the
+ * component that builds it and the middleware that matches it cannot drift.
+ *
+ * **The camera id, never a media path.** A still is neither the preview nor
+ * the full-rate copy, so there is no `-preview` to carry; `cameraFor()`
+ * strips one off on the way in for a caller that passes a stream path.
+ */
+export function stillUrl(camera: string): string {
+  return `/video/${encodeURIComponent(cameraFor(camera))}/still`;
+}
+
+/**
+ * The two headers a still travels with (R-VID-14): when it was taken, in the
+ * daemon's clock, and how old it was when it was served — the second because
+ * a browser cannot compare this device's clock with its own, and the age is
+ * what it draws.
+ *
+ * Here, in the one import-free file about these addresses, because three
+ * things read them and none may import the others: the daemon's route sets
+ * them, the console's relay copies them through, and the picture reads them
+ * off the answer. `console/capture.ts` must not import `daemon/routes.ts` —
+ * that file's own doc comment says why — and a browser bundle must not
+ * import either.
+ */
+export const STILL_AT_HEADER = "x-yonder-still-at";
+export const STILL_AGE_HEADER = "x-yonder-still-age";

@@ -538,6 +538,14 @@ const Stream = z.object({
 const ctl = (lo: number, hi: number) =>
   z.number().int().min(lo).max(hi).nullable().default(null);
 
+/** Stream-only color adjustments. Neutral values omit the processing element. */
+export const CameraImage = z.object({
+  brightness: z.number().int().min(-100).max(100).default(0),
+  contrast: z.number().int().min(0).max(200).default(100),
+  saturation: z.number().int().min(0).max(200).default(100),
+  hue: z.number().int().min(-180).max(180).default(0),
+}).strict();
+
 export const CameraControls = z.object({
   brightness: z.number().int().min(-100).max(100).nullable().default(null),
   contrast: z.number().int().min(-100).max(100).nullable().default(null),
@@ -599,11 +607,30 @@ export type CameraControls = z.infer<typeof CameraControls>;
  * reader, and asking here means it can never hold a hand-typed copy of this
  * field list that quietly drifts from it.
  */
+const AngleBounds = z.tuple([z.number().finite().min(-360).max(360), z.number().finite().min(-360).max(360)])
+  .refine(([low, high]) => low <= high, 'bounds must be ordered');
+const PoseRegion = z.object({ yaw: AngleBounds, pitch: AngleBounds, roll: AngleBounds }).strict();
+const GimbalMode = z.union([z.literal(0), z.literal(1), z.literal(2)]);
+const RateSign = z.union([z.literal(1), z.literal(-1)]);
+/** R-CAM-11: explicitly measured mount geometry; no inferred factory envelope. */
+export const AccessoryMount = z.object({
+  mount: z.string().min(1).max(64),
+  envelopes: z.array(PoseRegion.partial().extend({ mount: z.string().min(1).max(64), mode: GimbalMode }).strict()).max(12),
+  signs: z.object({ pan: RateSign.nullable(), tilt: RateSign.nullable() }).strict(),
+  limitDirections: z.object({ yaw: RateSign.optional(), pitch: RateSign.optional() }).strict(),
+  actions: z.array(z.object({
+    mount: z.string().min(1).max(64), fromMode: GimbalMode,
+    command: z.discriminatedUnion('kind', [z.object({ kind: z.literal('recentre') }).strict(), z.object({ kind: z.literal('mode'), mode: GimbalMode }).strict()]),
+    start: PoseRegion, trajectory: PoseRegion,
+  }).strict()).max(32),
+}).strict();
+
 export const CameraShape = z.object({
   id: CameraId,
   name: z.string().min(1).max(48),
-  /** R-CAM-01: CSI uses a prepared ISP media graph and uncompressed NV12. */
-  source: z.enum(["usb", "csi"]),
+  /** R-CAM-01: CSI uses the board ISP; accessory cameras supply framed media. */
+  source: z.enum(["usb", "accessory", "csi"]),
+  accessory_mount: AccessoryMount.nullable().optional(),
   /** A `by-path` name, without the `/dev/v4l/by-path/` prefix. See above. */
   device: z.string().min(1).max(128),
   enabled: z.boolean().default(true),
@@ -628,6 +655,7 @@ export const CameraShape = z.object({
   bitrate_kbps: z.number().int().min(100).max(20000).default(2000),
   preview: Preview.default({}),
   controls: CameraControls.default({}),
+  image: CameraImage.default({}),
   outputs: z.array(CameraOutput).max(8).default([]),
   stream: Stream.default({}),
 }).strict();
@@ -647,7 +675,12 @@ export const CameraShape = z.object({
  * edit (`apply/draft.ts`), never something this transform does again once a
  * value is on record.
  */
-export const Camera = CameraShape.transform((camera) => ({
+export const Camera = CameraShape.superRefine((camera, ctx) => {
+  if (camera.source === 'accessory' && !/^pocket2:[a-zA-Z0-9_.:-]{1,120}$/.test(camera.device))
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['device'], message: 'accessory identity must name a Pocket 2 USB controller' });
+  if (camera.source !== 'accessory' && camera.accessory_mount != null)
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['accessory_mount'], message: 'mount geometry belongs to an accessory camera' });
+}).transform((camera) => ({
   ...camera,
   stream: {
     ...camera.stream,
@@ -742,6 +775,7 @@ export const ConfigSchema = z.object({
   mavlink: Mavlink.default({}),
 }).strict().superRefine((config, ctx) => {
   const seen = new Set<string>();
+  const accessories = new Set<string>();
   // Every name this configuration would ask the media server to serve. Two
   // cameras cannot share one: mediamtx takes one publisher per path, so the
   // second pipeline's ANNOUNCE is refused and that camera dies with `400`
@@ -760,6 +794,10 @@ export const ConfigSchema = z.object({
     mediaPaths.add(name);
   };
   for (const [i, cam] of config.cameras.entries()) {
+    if (cam.source === 'accessory') {
+      if (accessories.has(cam.device)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['cameras', i, 'device'], message: 'This USB controller already has a configured accessory camera' });
+      accessories.add(cam.device);
+    }
     if (seen.has(cam.id)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,

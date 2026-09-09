@@ -757,3 +757,77 @@ Three of those — L-56, C-15/C-16 and C-22/C-23 — are the three CLAUDE.md rul
 names as the reason this file exists. **L-56 is now built** (as two pickers, the
 operator's decision — see §1.7); the other two are still open. The remaining
 seventeen rows are the same shape and had not been found before this audit.
+
+## Touch cockpit — approved September 2026 extension
+
+The approved cockpit behavior is recorded in [the integration design](../../cockpit-integration-design.md)
+and the [telemetry and layout plan](../../superpowers/plans/2026-09-08-cockpit-telemetry-layouts.md).
+It preserves the existing authored PFD and mission controls in the native
+`ui-yonder-cockpit` widget. The flight display is served on **Flight** (`/dashboard/flight`); the existing
+**Cockpit** retains the camera picture/aim surface. This table covers the new
+flight page; it does not close older
+camera-page findings above.
+
+| ID | Approved behavior | Implementation / evidence |
+|---|---|---|
+| F-01 | One PFD scene with translucent instruments, measured VSI, HSI/CDI and reported director cues; preserve instrument proportions and move touch regions with the tapes as space changes | `PrimaryFlightDisplay.vue`, `flight-workflow.mjs`; R-FLT-01/03, viewport/hit-region tests and laptop/tablet/narrow fixture checks |
+| F-02 | Default single PFD with left mission inset and right satellite/hybrid moving map; expand with the same PFD still present | `YonderCockpit.vue`, `YonderCockpitMap.vue`; landscape/portrait browser checks; additional arrangements in F-25 |
+| F-03 | Tap instruments for references/settings, distinguish local bugs from actual autopilot targets | Preserved PFD control forms and `cockpit-state.mjs` adapter |
+| F-04 | Import/edit/export Mission Planner missions, contextual waypoint/map actions, explicit review before transmission | Preserved mission catalog/forms; authenticated operation service and byte-level tests; R-FLT-02/04/05 |
+| F-05 | Real ADS-B map/vision targets with selected range, stale state and observed trails | `TrafficFeed`, map/vision components; geometric datum and timestamp regressions |
+| F-06 | Detailed terrain with source/age/coverage, smooth independent pose updates | Prepared USGS ground/surface pack, retained Terrarium renderer and bounded tile service |
+| F-07 | Fixed ELP camera selection and registered terrain overlays | Existing Yonder camera stream plus calibrated projection component. Physical lens/mount and frame-time verification remains required; unavailable registration is stated |
+| F-08 | Time/distance projected path and waypoint ETE | Original prediction adapter. No invented autopilot turn countdown; source-missing intent is unavailable |
+| F-09 | Authenticated production page and ongoing config-revert indication | Shipped `page-flight`, `group-flight-pending`; routing and flow contract tests |
+| F-10 | Source fidelity without importing restricted simulator assets | Attribution file beside cockpit components; retained permissive/GPL assets and original behavior adapters |
+| F-11 | Persistent Direct-To, Heading, Altitude / Speed, Loiter, Resume Mission, RTL, complete supplied mode list and separate arm/disarm access. Verified fresh Home (0) offers a distinct reviewed mission start; resume requires a verified current authored item 1–1999. Neither action arms. | `FlightControlPanel.vue`, `flight-workflow.mjs`, `YonderCockpit.vue`; R-FLT-13, review/confirmation, start/resume boundary and map-target component tests |
+| F-12 | Top-center actual mode/armed annunciation; requested action, ACK and observed state stay distinct from FD cue availability | `FlightModeAnnunciator.vue`, `flightAnnunciation`; R-FLT-03/13, actual/request transition and stale-generation tests. No heading/altitude capture mode is invented |
+| F-13 | One-shot supported GUIDED heading, altitude, speed and geographic loiter requests with explicit units, datum, rate and radius/direction | `VehicleService`, `flightRequest`; R-FLT-02/05/13, [ArduPlane 4.7.1 byte/ACK and isolated SITL evidence](../evidence/2026-09-07-flight-control-protocol.md). ACK-only controls do not claim observed capture |
+| F-14 | Change an existing mission action, preserving item identity/jump references and compatible geographic fields while resetting incompatible parameters | `MissionTouch.vue`, `mission-action-edit.mjs`, `editMission`; R-FLT-04/14, waypoint-to-loiter and jump-preservation tests |
+| F-15 | Separate loiter radius, direction and duration controls with a local circle preview before upload; timed loiter states its aircraft-configured radius | Pinned Plane command catalog, `loiterPresentation`, local preview; R-FLT-05/14, parameter-index/direction tests and interactive mission form checks |
+| F-16 | An unavailable selected camera offers an explicit synthetic-terrain switch | `YonderCockpit.vue`; R-FLT-09, camera-fallback component test. Terrain coverage/datum and registration limits remain visible |
+| F-17 | Ground internet by default, explicit aircraft proxy, browser offline packs and bounded local traffic trails | `ground-data.mjs`, offline store, ground relay and renderer provider contract; R-FLT-11, [source and offline guide](../../cockpit-ground-data.md), browser import and cancellation evidence |
+| F-18 | Compact recurring flight updates with separately versioned mission and command details, adjustable read rate and visible JSON bandwidth | `flight-wire.ts`, cockpit routes and `cockpit-api.mjs`; R-FLT-12, compact/reconnect/background-transfer and delayed-options tests |
+| F-19 | Own-aircraft gold breadcrumb trail, time/distance/since-power-on windows, miles or NM, show/hide and local clear/restore. Retain current-boot observations through browser closure, recover only the selected window, and expose gaps or reduced history. | `own-trail.ts`, `own-trail.mjs`, `OwnTrailSettings.vue`, map layer and authenticated history route; R-FLT-15, boot/reconnect/rollover/bounds/window/transport/component tests and browser trail geometry checks |
+| F-20 | Fresh AUTO FROM → TO, active/next waypoint badges and local list following; shared HSI/expanded CDI leg course with target/path checks at sequence changes | `mission-sequence.mjs`, `navigation-view.mjs`, `YonderCockpit.vue`; R-FLT-20, [real QuadPlane sequencing and browser evidence](../evidence/2026-09-07-cockpit-sequencing.md) |
+| F-21 | Unit-selectable instruments, references, flight requests and mission altitude/speed fields; active-leg bracket, touch altitude cells and estimated waypoint AGL | `flight-units.mjs`, `FlightUnits.vue`, `MissionWaypointList.vue`; R-FLT-21/22, conversion, unchanged-value and draft-only interaction tests |
+| F-22 | Mission profile with separate planned altitude, ground and mapped surface, distance inspection, coverage/datum/survey details and bounded source loading | `mission-profile.mjs`, `mission-terrain.mjs`, `MissionPlanning.vue`; R-FLT-22, [planning evidence](../evidence/2026-09-07-cockpit-planning.md) |
+| F-23 | Selectable catalog for navigation/home, flight time, electrical/propulsion, GPS/estimator, range/terrain, aircraft/controller state, fence, links/controls, payload and companion health; retain sensor/component identity, source, age, units and unavailable reasons | `instrumentation.ts`, `host-instruments.ts`, `instrumentation-view.mjs`; R-FLT-23/26, collector/source/expiry tests and the [catalog reference](../../cockpit-user-guide.md#telemetry-catalog-sources-and-flight-time) |
+| F-24 | Configurable top navigation fields and graphical instruments with independent selections; approved colored arc/vertical/bar starter bank with editable presentation limits and preservation of customized profiles; touch source/style/scale/band/order controls, Apply/Cancel/defaults, inspection and pinning; local display scales do not set aircraft failsafes | Native `FlightDataBar.vue`, `InstrumentBank.vue`, `InstrumentGauge.vue`, `InstrumentConfigEditor.vue`; R-FLT-24, validation/unit-preservation/component tests and [illustrated controls](../../cockpit-user-guide.md#3-arrange-the-display-and-choose-readings) |
+| F-25 | Single PFD with insets by default; optional PFD beside or above a tabbed MFD with readable display heights, unclipped gauges and scrolling below persistent controls; instrument bank beside PFD, across top, across the MFD top, on the MFD left or hidden; validated per-browser persistence and restore defaults; independent cockpit palette and operator-invoked full screen with usable settings dialogs; app-header action row with compact Flight/Menu access, visible RTL, no duplicate brand or bottom toolbar, and dialogs above the app header | `CockpitDisplaySetup.vue`, `cockpit-display-settings.mjs`, `cockpit-layouts.css`, `cockpit-chrome.css`, `CockpitOverlay.vue`, `YonderCockpit.vue`; R-FLT-25, same-PFD/map identity, saved-settings and no-command layout tests; [arrangement specimens](../../cockpit-user-guide.md#start-with-the-flight-display) |
+| F-26 | MFD Map / Flight plan / Systems / Telemetry pages; grouped searchable catalog with collapsible Pinned instruments sharing the PFD bank configuration; direct source picker, inspector provenance/quality, pin/unpin and bounded numeric history with visible gaps | `InstrumentationPanel.vue`, `YonderCockpit.vue`; R-FLT-24/25, direct-selection, no-data, focus, pin and trend-gap tests; [Systems and Telemetry walkthrough](../../cockpit-user-guide.md#3-arrange-the-display-and-choose-readings) |
+| F-27 | Separate reported boot, observed armed and observed airborne counters; late attachment, gaps and reboot remain explicit; calculated HOME geometry is distinct from RTL route; reported VTOL/landed state and frame-labeled gimbal orientation | `flight-counters.ts`, `instrumentation-view.mjs`, `PrimaryFlightDisplay.vue`; R-FLT-23, authoritative boot-clock, partial-history, navigation geometry and gimbal-frame tests; [interpretation rules](../../cockpit-user-guide.md#interpret-the-counters-and-navigation-estimates) |
+| F-28 | Separate bounded compact instrumentation at up to 1 Hz, cached companion CPU/memory/temperature/storage and passive modem/media readings; preserve fast flight transport and explicit stream setup | `instrumentation-wire.ts`, `host-instruments.ts`, cockpit routes, `instrumentation-client.mjs`, `cockpit-api.mjs`; R-FLT-26, auth/wire/cache/CPU-delta/independent-expiry and passive-read tests |
+| F-29 | Reported condition and aircraft-message notices remain accessible independently of instrument selection; recent status messages are labeled historical and gauge color bands remain local presentation | `instrumentationAlerts`, `YonderCockpit.vue`; R-FLT-24, reported-health/fence/battery/VTOL and unavailable-data checks; no automatic aircraft action |
+| F-30 | Home editor from mission controls, HOME row or map; local planning coordinates/MSL elevation with units, terrain estimate, Undo and controller-copy; separate controller command with old/new review and matching readback; preserve authored waypoint heights and jump targets | `MissionHome.vue`, `mission-home.mjs`, `mission-edit.mjs`, `vehicle.ts`; R-FLT-04, [behavior reference and validation](../evidence/2026-09-09-home-workflow.md) |
+
+The [illustrated cockpit walkthrough](../../cockpit-user-guide.md#how-to-use-it) covers each shortcut,
+confirmation, mission action conversion and loiter upload. The
+[protocol evidence](../evidence/2026-09-07-flight-control-protocol.md) records
+one-shot persistence and measured simulator behavior, including the slow
+nonzero-rate altitude result. Unsupported firmware and unobserved command effects
+remain explicit limits, not deferred capture indicators.
+
+The component fixture explicitly identifies synthetic telemetry and has no vehicle
+transport. Automated gate imagery remains an artifact, not a committed pixel reference.
+The guide separately includes selected, captioned [instructional screenshots](../../images/cockpit/README.md)
+and a [surface walkthrough record](../evidence/2026-09-08-cockpit-guide.md). The
+normal page uses the daemon's actual telemetry and authenticated operations.
+
+The approved graphical instrument and layout features now run in the production
+cockpit as native components. **Display → Layout & units** opens **Display setup**;
+attitude settings can open the same editor. The app header hosts one responsive
+control row through Dashboard's `app-bar-actions` outlet. **Flight ▾** exposes the
+remaining commands on tablet widths; **RTL** stays visible. Dialogs cover the
+header and move into the fullscreen root when needed. **Fields**
+and **Instruments** configure saved selections; tapping a reading opens its
+inspector. The earlier [graphical instrument study](../../../packages/node-red-dashboard-2-yonder/cockpit/instruments/README.md)
+remains a separate fixture preview; its sample readings and limits do not enter
+live telemetry.
+
+Hardware-dependent availability remains explicit. ESC, EFI, generator, extra GPS,
+range, MCU, camera and gimbal readings require their corresponding reports;
+companion modem/media/OS facts have separate sources. The catalog is a bounded
+reading inspector, not a complete raw MAVLink log. Software and fixture/SITL
+evidence do not establish physical sensor or camera validation, and no unavailable
+autopilot capture mode is inferred from this layout.

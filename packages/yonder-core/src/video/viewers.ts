@@ -55,6 +55,38 @@ import type { Decision, LinkReport } from "./rate.js";
 export type Want = "video" | "stills" | "off";
 
 /**
+ * How often a stills viewer is sent a frame, in ms (R-VID-14).
+ *
+ * One figure, here, that `video/stills.ts` takes its timer from and this
+ * file promises every stills subscriber as `mine.interval` — so the interval
+ * a picture is told and the interval frames are actually taken at cannot be
+ * two numbers.
+ */
+export const STILLS_INTERVAL_MS = 5_000;
+
+/** The still this device holds for a camera, as this file needs to know it:
+ *  when it was taken and how big it is. `video/stills.ts` holds the rest. */
+export interface StillHeld {
+  readonly at: number;
+  readonly bytes: number;
+}
+
+/**
+ * What one transmitted copy of a still costs, in kb/s at IP (R-VID-11,
+ * R-VID-14).
+ *
+ * **A rate, from a size and the interval it is sent at.** A still is not a
+ * stream; what the uplink carries is one JPEG every interval, per browser
+ * that fetches it, and that is `bytes × 8 / interval`. Stated at IP like every
+ * other figure on this console, so a still copy and a video copy add up in
+ * one path total rather than two layers.
+ */
+export function stillCostKbps(bytes: number, intervalMs: number): number {
+  if (!(bytes > 0) || !(intervalMs > 0)) return 0;
+  return atIp((bytes * 8) / intervalMs);
+}
+
+/**
  * One browser's own measurement of the path its picture is arriving on.
  *
  * `rtt`, `loss`, `egress` and `capacity` are what `rate.ts` reasons about and
@@ -77,7 +109,9 @@ export interface ViewerStats {
   /** What is arriving on this path, kb/s at IP. */
   readonly egress: number;
   /** What this path is measured to carry, kb/s at IP. */
-  readonly capacity: number;
+  readonly capacity: number | null;
+  readonly receiverBufferMs?: number;
+  readonly decodeMs?: number;
   /** Milliseconds since this browser last painted a frame. */
   readonly frameAge?: number;
   /** What it is rendering — `"1280x720"`, or whatever it actually got. */
@@ -112,13 +146,23 @@ export interface SharedState {
 
 /** One browser's own delivery of one camera. */
 export interface MineState {
+  readonly receiverBufferMs?: number | null;
+  readonly decodeMs?: number | null;
   readonly delivery: Want;
   /** The media path this browser is being served from, or null when off. */
   readonly source: string | null;
-  readonly size: PreviewRung | null;
+  /** A preview rung on video; on stills, the frame's own shape as the host
+   *  reported it, which is the capture size and not a rung. */
+  readonly size: string | null;
   readonly fps: number | null;
   readonly kbps: number | null;
-  /** Milliseconds since this browser last painted, as *it* measured it. */
+  /**
+   * Milliseconds since this browser last painted, as *it* measured it — on
+   * video. On stills, the age of the still this device is holding for the
+   * camera, as *this device* measured it (R-VID-14): a browser showing an
+   * `<img>` has no media clock to report, and the daemon is the one thing
+   * that knows when the frame was taken.
+   */
   readonly frameAge: number | null;
   /** The stills interval, in ms, while this browser is on stills. */
   readonly interval: number | null;
@@ -163,7 +207,7 @@ export interface CostState {
  * same reason every other rendering in this package is.
  */
 export interface OverlayState {
-  readonly head: "adaptive" | "floor" | "held" | "full-rate" | "stills";
+  readonly head: "adaptive" | "floor" | "held" | "fixed" | "full-rate" | "stills";
   readonly size: string;
   readonly rate: string;
   readonly bitrate: string;
@@ -220,8 +264,19 @@ export interface ViewersOptions {
    * nothing.
    */
   readonly idleMs?: number;
-  /** How often a stills viewer is sent a frame. Task 34 generates them. */
+  /** How often a stills viewer is sent a frame. `STILLS_INTERVAL_MS`, which
+   *  is also what `video/stills.ts` takes them at. */
   readonly stillsIntervalMs?: number;
+  /**
+   * The still this device holds for a camera, or null — `Stills.latest`.
+   *
+   * What a stills viewer's `frameAge` is read from, and what its `size` is
+   * read from. Injected rather than reached for, so this file stays a
+   * register of who is watching and never touches a file.
+   */
+  readonly stillFor?: (camera: string) => (StillHeld & {
+    readonly width?: number | null; readonly height?: number | null;
+  }) | null;
   /** Published on every change, and on every reconnect. */
   readonly onState?: (state: PreviewState) => void;
   /**
@@ -232,11 +287,21 @@ export interface ViewersOptions {
    * see this file's header on why.
    */
   readonly onReport?: (report: CameraReport) => void;
+  readonly rtspFeedback?: (camera: string) => import('./rtsp-feedback.js').RtspFeedbackState | null;
 }
 
 const FULL_RATE_LEASE_MS = 15_000;
 const IDLE_MS = 60_000;
-const STILLS_INTERVAL_MS = 5_000;
+/** Ten subdivisions plus the partial bucket preceding the current window. */
+const STILL_TRAFFIC_SUBDIVISIONS = 10;
+const STILL_TRAFFIC_BUCKETS = STILL_TRAFFIC_SUBDIVISIONS + 1;
+
+interface StillTrafficBucket {
+  slot: number;
+  /** Latest transmission represented by this bucket. */
+  at: number;
+  bytes: number;
+}
 
 /** One browser's subscription to one camera. */
 interface Subscription {
@@ -245,6 +310,10 @@ interface Subscription {
   fullRateUntil: number | null;
   stats: ViewerStats | null;
   statsAt: number | null;
+  /** Thumbnail generation demand, independent of the selected delivery. */
+  stillDemand: boolean;
+  /** Actual delivered JPEG bytes in a bounded rolling interval. */
+  stillTraffic: StillTrafficBucket[];
   /** The last time this browser said anything at all about this camera. */
   heardAt: number;
   revision: number;
@@ -260,8 +329,11 @@ export class Viewers {
   private readonly leaseMs: number;
   private readonly idleMs: number;
   private readonly stillsIntervalMs: number;
+  private readonly stillFor: NonNullable<ViewersOptions["stillFor"]>;
   private readonly onState: (state: PreviewState) => void;
   private readonly onReport: (report: CameraReport) => void;
+  private readonly rtspFeedback?: ViewersOptions['rtspFeedback'];
+  private readonly streamSteps = new Map<string, { reason: string; at: number }>();
 
   /** viewer → camera → subscription. */
   private readonly subs = new Map<string, Map<string, Subscription>>();
@@ -275,8 +347,10 @@ export class Viewers {
     this.leaseMs = opts.fullRateLeaseMs ?? FULL_RATE_LEASE_MS;
     this.idleMs = opts.idleMs ?? IDLE_MS;
     this.stillsIntervalMs = opts.stillsIntervalMs ?? STILLS_INTERVAL_MS;
+    this.stillFor = opts.stillFor ?? ((): null => null);
     this.onState = opts.onState ?? ((): void => {});
     this.onReport = opts.onReport ?? ((): void => {});
+    this.rtspFeedback = opts.rtspFeedback;
   }
 
   /**
@@ -340,6 +414,7 @@ export class Viewers {
         loss: stats.loss,
         egress: stats.egress,
         capacity: stats.capacity,
+        encode: sub.fullRateUntil !== null && sub.fullRateUntil > at ? "stream" : "preview",
         at,
       });
     }
@@ -383,6 +458,8 @@ export class Viewers {
    */
   decided(decisions: readonly Decision[]): void {
     for (const camera of new Set(decisions.map((d) => d.camera))) {
+      const stream = decisions.find(d => d.camera === camera && d.encode === 'stream');
+      if (stream) this.streamSteps.set(camera, { reason: stream.reason, at: stream.at });
       const mine = decisions.filter((d) => d.camera === camera && d.encode === "preview");
       const chosen = mine.find((d) => d.action === "shortfall")
         ?? mine.find((d) => d.action === "size")
@@ -425,6 +502,14 @@ export class Viewers {
    * answers a browser's own post answers with the state the post produced,
    * which has already been published.
    */
+  runtime(camera: string) {
+    const run = this.running(camera);
+    return { streamKbps: run?.stream ?? null, previewKbps: run?.preview ?? null,
+      shape: run?.shape ?? null, decision: this.steps.get(camera) ?? null,
+      streamDecision: this.streamSteps.get(camera) ?? null,
+      rtspFeedback: this.rtspFeedback?.(camera) ?? null };
+  }
+
   state(camera: string, viewer: string): PreviewState {
     return this.compose(camera, viewer, this.clock.now());
   }
@@ -432,6 +517,95 @@ export class Viewers {
   /** Every viewer of a camera, in the order they first subscribed. */
   watching(camera: string): readonly string[] {
     return [...this.subs].filter(([, c]) => c.has(camera)).map(([v]) => v);
+  }
+
+  /**
+   * Every enabled camera with at least one browser on its stills, in
+   * configured order (R-VID-14; spec §8.6).
+   *
+   * What `video/stills.ts` asks on every tick, and the whole of how "one
+   * still per camera per interval, whoever is watching" is decided: a camera
+   * is in this list once however many browsers want it, and not at all when
+   * none does — so three viewers cost the pipeline one frame, and no viewer
+   * costs it nothing.
+   */
+  wantingStills(): readonly string[] {
+    return this.cameras()
+      .filter((camera) => camera.enabled)
+      .map((camera) => camera.id)
+      .filter((id) => this.watching(id).some((v) => {
+        const sub = this.subs.get(v)?.get(id);
+        return sub?.want === "stills" || sub?.stillDemand === true;
+      }));
+  }
+
+  /** Request or release periodic still generation without changing video delivery. */
+  requestStills(viewer: string, camera: string, wanted: boolean): void {
+    const sub = this.hold(viewer, camera);
+    if (sub === null) return;
+    sub.stillDemand = wanted;
+    this.publishAll();
+  }
+
+  /**
+   * One copy of a still left this device for this browser (R-VID-11).
+   *
+   * Called by the route that serves the bytes, once per answer — which is
+   * what makes two browsers on one camera's stills two transmissions of one
+   * image, and the same browser fetching twice two transmissions too. What
+   * is recorded is the size of the copy and when it went; what a stills
+   * copy *costs* is that size over the interval it is sent at, worked out
+   * where the cost is composed.
+   *
+   * The transmission is independent of selection: a browser on live video
+   * may also receive the active thumbnail, and a fetch cannot silently turn
+   * an `off` selection into continuing generation demand. Eleven rolling
+   * time buckets bound memory while retaining every delivered
+   * byte. Expiry has one-tenth-interval granularity because transmissions in
+   * the same bucket share its latest timestamp.
+   */
+  transmitted(viewer: string, camera: string, bytes: number): void {
+    const sub = this.hold(viewer, camera);
+    if (sub === null || !Number.isFinite(bytes) || bytes <= 0) return;
+    const now = this.clock.now();
+    const bucketMs = Math.max(1, Math.ceil(this.stillsIntervalMs / STILL_TRAFFIC_SUBDIVISIONS));
+    const slot = Math.floor(now / bucketMs);
+    const index = slot % STILL_TRAFFIC_BUCKETS;
+    const bucket = sub.stillTraffic[index];
+    if (bucket === undefined || bucket.slot !== slot) {
+      sub.stillTraffic[index] = { slot, at: now, bytes };
+    } else {
+      bucket.at = now;
+      bucket.bytes += bytes;
+    }
+    this.publishAll();
+  }
+
+  /**
+   * Every still copy leaving this device, summed, in kb/s at IP — what the
+   * strip under the picture states as `… kb/s of stills · counted in Path
+   * total` (blueprint L-22). Every viewer, every camera, each copy once: the
+   * same count `cost.path` includes, taken out on its own.
+   */
+  stillsKbps(): number {
+    let total = 0;
+    const now = this.clock.now();
+    for (const camera of this.cameras()) {
+      if (!camera.enabled) continue;
+      for (const watcher of this.watching(camera.id)) {
+        total += this.stillCopy(this.subs.get(watcher)?.get(camera.id), now);
+      }
+    }
+    return total;
+  }
+
+  /** Recent delivered still bytes for this browser/camera, stated as a rate. */
+  private stillCopy(sub: Subscription | undefined, now: number): number {
+    if (sub === undefined) return 0;
+    const bytes = sub.stillTraffic
+      .filter((bucket) => now - bucket.at < this.stillsIntervalMs)
+      .reduce((total, bucket) => total + bucket.bytes, 0);
+    return stillCostKbps(bytes, this.stillsIntervalMs);
   }
 
   /** The subscription for this pair, creating it if the camera is configured
@@ -452,6 +626,7 @@ export class Viewers {
     }
     const made: Subscription = {
       want: "off", fullRateUntil: null, stats: null, statsAt: null,
+      stillDemand: false, stillTraffic: [],
       heardAt: now, revision: 0, published: null,
     };
     cameras.set(camera, made);
@@ -485,8 +660,8 @@ export class Viewers {
     const run = this.running(camera);
     const sub = this.subs.get(viewer)?.get(camera);
     const shared = sharedState(configured, run, this.steps.get(camera) ?? null);
-    const mine = this.mineState(camera, configured, run, sub);
-    const cost = this.costState(camera, viewer, run, mine);
+    const mine = this.mineState(camera, configured, run, sub, now);
+    const cost = this.costState(camera, viewer, run, now);
     return {
       camera, viewer, revision: sub?.revision ?? 0, at: now,
       shared, mine, cost, overlay: overlayFor(shared, mine, cost),
@@ -495,7 +670,7 @@ export class Viewers {
 
   private mineState(
     camera: string, configured: Camera | undefined,
-    run: RunningEncodes | null, sub: Subscription | undefined,
+    run: RunningEncodes | null, sub: Subscription | undefined, now: number,
   ): MineState {
     const delivery: Want = sub?.want ?? "off";
     const full = delivery === "video" && sub !== undefined && sub.fullRateUntil !== null;
@@ -509,11 +684,23 @@ export class Viewers {
       };
     }
     if (delivery === "stills") {
+      // The still this device is holding for the camera — its shape, and
+      // its age *as this device measured it* (R-VID-14). Null where there is
+      // none yet, or the camera has stopped: nothing is being painted, and
+      // an age of nothing is not zero. Whole seconds, because the page draws
+      // seconds and a revision per millisecond would be a change per tick.
+      const still = this.stillFor(camera);
+      const shape = still?.width != null && still.height != null
+        ? `${String(still.width)}x${String(still.height)}`
+        : null;
+      const transmitted = sub === undefined ? 0 : this.stillCopy(sub, now);
       return {
-        delivery, source: `${camera}-preview`,
-        size: run?.shape?.size ?? null, fps: null,
-        kbps: sub?.stats?.egress ?? null,
-        frameAge: sub?.stats?.frameAge ?? null,
+        delivery, source: `${camera}-still`,
+        size: shape, fps: null,
+        // What this browser's copy costs, or null before one has been sent:
+        // a still nothing has transmitted is not a rate.
+        kbps: transmitted === 0 ? null : transmitted,
+        frameAge: still === null ? null : Math.max(0, Math.floor((now - still.at) / 1000) * 1000),
         interval: this.stillsIntervalMs, fullRate: false,
         statsAt: sub?.statsAt ?? null,
       };
@@ -527,6 +714,8 @@ export class Viewers {
       fps: full ? configured.framerate : run?.shape?.fps ?? null,
       kbps: full ? run?.stream ?? null : run?.preview ?? null,
       frameAge: sub?.stats?.frameAge ?? null,
+      receiverBufferMs: sub?.stats?.receiverBufferMs ?? null,
+      decodeMs: sub?.stats?.decodeMs ?? null,
       interval: null, fullRate: full,
       statsAt: sub?.statsAt ?? null,
     };
@@ -539,13 +728,12 @@ export class Viewers {
    * video costs a copy of whichever encode it is being served — the main
    * stream while it holds Full rate, the preview otherwise — so two browsers
    * on one preview cost two copies of one encode, which is what actually
-   * leaves. A viewer on stills costs what it has measured arriving, because
-   * nothing on this device generates a still yet (Task 34) and a figure
-   * nothing measured would be an invention.
+   * leaves. Delivered still bytes are added over their rolling interval,
+   * independently of whether that viewer selected video, stills or off.
+   * Generation remains one frame per camera; each successful HTTP copy adds
+   * its own bytes and expires without a later heartbeat re-dating it.
    */
-  private costState(
-    camera: string, viewer: string, run: RunningEncodes | null, mine: MineState,
-  ): CostState {
+  private costState(camera: string, viewer: string, run: RunningEncodes | null, now: number): CostState {
     let path = 0;
     let ours = 0;
     for (const configured of this.cameras()) {
@@ -556,12 +744,14 @@ export class Viewers {
       for (const output of configured.outputs) if (output.enabled) path += stream;
       for (const watcher of this.watching(configured.id)) {
         const sub = this.subs.get(watcher)?.get(configured.id);
-        if (sub === undefined || sub.want === "off") continue;
-        const copy = sub.want === "stills"
-          ? sub.stats?.egress ?? 0
-          : sub.fullRateUntil !== null ? stream : preview;
-        path += copy;
-        if (watcher === viewer) ours += copy;
+        if (sub === undefined) continue;
+        const still = this.stillCopy(sub, now);
+        path += still;
+        if (watcher === viewer) ours += still;
+        if (sub.want === "off" || sub.want === "stills") continue;
+        const video = sub.fullRateUntil !== null ? stream : preview;
+        path += video;
+        if (watcher === viewer) ours += video;
       }
     }
     const shared = atIp(
@@ -614,16 +804,21 @@ function overlayFor(shared: SharedState, mine: MineState, cost: CostState): Over
     ? "full-rate"
     : mine.delivery === "stills"
       ? "stills"
-      : shared.pinned
-        ? "floor"
-        : shared.held !== null || shared.mode === "fixed"
-          ? "held"
-          : "adaptive";
+      : shared.mode === "fixed"
+        ? "fixed"
+        : shared.pinned
+          ? "floor"
+          : shared.held !== null ? "held" : "adaptive";
   const size = mine.size ?? shared.size;
   return {
     head,
     size: size === null ? "" : size.replace("x", "×"),
-    rate: mine.fps === null ? "" : `${mine.fps} fps`,
+    // A stills viewer has no frame rate; what it has is an interval, and the
+    // head line reads `STILLS · every 5 s` (spec §8.2, blueprint L-11) in
+    // the slot a rate would otherwise take.
+    rate: mine.delivery === "stills"
+      ? (mine.interval === null ? "" : `every ${String(mine.interval / 1000)} s`)
+      : mine.fps === null ? "" : `${mine.fps} fps`,
     bitrate: mine.kbps === null ? "" : `${mbps(atIp(mine.kbps))} Mb/s`,
     detail: shared.kbps === null
       ? ""

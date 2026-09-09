@@ -1,6 +1,43 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <template>
     <div class="y-pic">
+        <header class="y-pic__toolbar" aria-label="Video status">
+            <div class="y-pic__controls">
+                <strong v-if="selectedCameraName" class="y-pic__camera" :title="selectedCameraName">{{ selectedCameraName }}</strong>
+                <div class="y-pic__view-modes" role="group" aria-label="This preview">
+                    <span>This preview</span>
+                    <button v-for="choice in ['live', 'stills', 'off']" :key="choice" type="button" :aria-pressed="mode === choice" :disabled="signInRequired" @click="setMode(choice)">{{ { live: 'Live', stills: 'Stills', off: 'Off' }[choice] }}</button>
+                </div>
+                <a v-if="signInRequired" :href="signInHref" class="y-pic__action">Sign in</a>
+                <button v-else type="button" class="y-pic__action" :disabled="!videoControl.action || videoRequestPending" @click="pressVideoAction">{{ videoRequestPending ? 'Requesting…' : videoControl.label }}</button>
+            </div>
+            <div class="y-pic__hud">
+                <span class="y-pic__badge" :class="'tone-' + tone">{{ caption }}</span>
+                <span v-if="staleFor > 0" class="y-pic__age">{{ ageText }}</span>
+                <span v-if="cost && !previewState" class="y-pic__cost">{{ cost }}</span>
+            </div>
+
+            <!-- R-VID-18: what the shared preview encode is doing, composed
+                 verbatim from Task 19's own part — see this file's own doc
+                 comment on why this is a second, orthogonal fact from the
+                 badge above rather than a replacement for it. -->
+            <YonderStateOverlay v-if="previewState" class="y-pic__state" :head="previewState.head" :size="previewState.size" :rate="previewState.rate" :bitrate="previewState.bitrate" :step="previewState.step" />
+
+            <div v-if="recording" class="y-pic__rec"><i class="y-pic__rec-dot"></i>REC {{ recording.elapsed }}</div>
+
+            <div v-if="footItems.length" class="y-pic__foot">
+                <span v-for="item in footItems" :key="item.key" class="y-pic__foot-item">
+                    <span class="y-pic__foot-k">{{ item.label }}</span>{{ item.text }}
+                </span>
+            </div>
+
+            <div v-if="stats" class="y-pic__osd">
+                <span class="y-pic__foot-k">LINK</span>{{ stats.linkMbps.toFixed(2) }} Mb/s<br />
+                <span class="y-pic__foot-k">DROP</span>{{ stats.dropPct.toFixed(1) }} %
+            </div>
+
+            <span v-if="deliveryState?.mine?.receiverBufferMs != null" class="y-pic__receiver" title="Browser jitter buffer and decode time; these do not measure total camera-to-screen latency.">Buffer {{ Math.round(deliveryState.mine.receiverBufferMs) }} ms<span v-if="deliveryState.mine.decodeMs != null"> · decode {{ deliveryState.mine.decodeMs.toFixed(1) }} ms</span></span>
+        </header>
       <div class="y-pic__fit">
         <div
             ref="frame"
@@ -21,79 +58,52 @@
                 autoplay
                 muted
                 playsinline
+                @pause="onPlaybackPause"
             ></video>
             <img v-if="mode === 'stills' && stillSrc" class="y-pic__video" :src="stillSrc" alt="" />
             <div v-if="staleFor > 0" class="y-pic__hatch"></div>
-
-            <div class="y-pic__hud">
-                <span class="y-pic__badge" :class="'tone-' + tone">{{ caption }}</span>
-                <span v-if="staleFor > 0" class="y-pic__age">{{ ageText }}</span>
-                <span v-if="cost" class="y-pic__cost">{{ cost }}</span>
-            </div>
-
-            <!-- R-VID-18: what the shared preview encode is doing, composed
-                 verbatim from Task 19's own part — see this file's own doc
-                 comment on why this is a second, orthogonal fact from the
-                 badge above rather than a replacement for it. -->
-            <YonderStateOverlay v-if="previewState" class="y-pic__state" v-bind="previewState" />
-
-            <div v-if="recording" class="y-pic__rec"><i class="y-pic__rec-dot"></i>REC {{ recording.elapsed }}</div>
 
             <!-- L-18: a still landed. The flash is the confirmation that
                  something happened at the moment the key was pressed
                  (R-UI-05); the banner says where it went. -->
             <div v-if="flashing" class="y-pic__flash" aria-hidden="true"></div>
-            <div v-if="flashing" class="y-pic__saved">
-                <i class="y-pic__saved-dot" aria-hidden="true"></i>Saved · to {{ savedTo }}
-            </div>
-
-            <div v-if="footItems.length" class="y-pic__foot">
-                <span v-for="item in footItems" :key="item.key" class="y-pic__foot-item">
-                    <span class="y-pic__foot-k">{{ item.label }}</span>{{ item.text }}
-                </span>
-            </div>
-
-            <div v-if="stats" class="y-pic__osd">
-                <span class="y-pic__foot-k">LINK</span>{{ stats.linkMbps.toFixed(2) }} Mb/s<br />
-                <span class="y-pic__foot-k">DROP</span>{{ stats.dropPct.toFixed(1) }} %
-            </div>
 
             <div v-if="dragGesture" class="y-pic__orb" :style="{ left: orbX + 'px', top: orbY + 'px' }"></div>
 
-            <div v-if="reason" class="y-pic__reason">{{ reason }}</div>
             <div v-if="mode === 'off'" class="y-pic__off">
-                not requested · this changes nothing the aircraft sends anyone else
+                Preview is off in this browser.
             </div>
-            <!--
-              **The one action this page draws off the rail, and it is the
-              operator's decision that it is here** (R-UI-10 puts every action
-              on the rail, and only there).
-
-              Starting a camera meant scrolling past the whole deck to the foot
-              of the page, with nothing above saying that was where to go. The
-              empty picture is what an operator is already looking at when a
-              camera is stopped, so it is what says so and offers the one thing
-              worth doing about it. The rail keeps START too: this adds a way
-              in, it does not move the control.
-            -->
-            <div v-if="cameraRunning === false" class="y-pic__stopped">
-                <span class="y-pic__stopped-l">This camera is not running</span>
-                <button type="button" class="y-pic__start" @click="pressStart">Start it</button>
+            <div v-if="!signInRequired && ['stopped', 'failed'].includes(cameraRunState)" class="y-pic__stopped">
+                <span class="y-pic__stopped-l">{{ videoControl.message }}</span>
+                <button type="button" class="y-pic__start" :disabled="videoRequestPending || !videoControl.action" @click="pressStart">{{ videoRequestPending ? 'Requesting…' : videoControl.label }}</button>
             </div>
         </div>
       </div>
 
-        <YonderThumbStrip
-            v-if="cameras.length"
-            class="y-pic__strip"
-            :cameras="cameras"
-            :downlink="downlink"
-            @go="onThumbGo"
-        />
+        <div class="y-pic__notices">
+            <button v-if="playbackBlocked" type="button" class="y-pic__resume" @click="resumePlayback">Resume live video</button>
+            <div v-if="signInRequired || reason || aimRefusal" class="y-pic__reason" role="status">{{ signInRequired ? 'Your session expired. Sign in to restore video and controls.' : aimRefusal || reason }}</div>
+            <div v-if="flashing" class="y-pic__saved" role="status"><i class="y-pic__saved-dot" aria-hidden="true"></i>Saved · to {{ savedTo }}</div>
+        </div>
+
+        <div class="y-pic__thumbnails">
+            <YonderThumbStrip
+                v-if="cameras.length"
+                class="y-pic__strip"
+                :cameras="cameras"
+                :downlink="downlink"
+                @go="onThumbGo"
+            />
+        </div>
     </div>
 </template>
 
 <script>
+import { videoAction, previewFailure } from './camera-workflow.ts'
+import { cameraSessionMixin, expireCameraSession } from './camera-session.ts'
+import { AimTransport } from './aim-transport.ts'
+import { AIM_RESPONSE_CHANGED, EXPO_KEY, SPEED_KEY, savedNumber, rateLimit, responseMagnitude } from './aim-response.ts'
+import { ThumbnailDemand } from './thumbnail-demand.ts'
 import YonderStateOverlay from './YonderStateOverlay.vue'
 import YonderThumbStrip from './YonderThumbStrip.vue'
 import { atIp, cameraFor, DESCRIPTORS, heldWords } from 'yonder-core/presentation'
@@ -373,7 +383,7 @@ const BACKOFF_MS = [1000, 2000, 4000, 8000, 15000]
 /** The picture's own richer facts (R-VID-18), cached the same way `cost`
  * and the camera's own name already are — see `fromPayload`'s own doc
  * comment above for why one loop replaces eight hand-written pairs. */
-const PAYLOAD_KEYS = ['state', 'recording', 'cameras', 'downlink', 'aim', 'zoom', 'exposure', 'stats', 'saved']
+const PAYLOAD_KEYS = ['state', 'runState', 'runReason', 'startBlocked', 'running', 'recording', 'cameras', 'downlink', 'aim', 'zoom', 'exposure', 'stats', 'saved']
 
 /** `+12.4` / `−12.4` — a proper minus sign, matching every other signed
  * reading this console already draws (`YonderAim.vue`'s own gauges, the
@@ -457,7 +467,9 @@ const REPORT_INTERVAL_MS = 1000
 function sampleReport (report) {
     let inbound = null
     let pair = null
-    report.forEach((entry) => {
+    const entries = new Map()
+    report.forEach((entry, id) => {
+        entries.set(entry.id || id, entry)
         if (!inbound && entry.type === 'inbound-rtp' && (entry.kind === 'video' || entry.mediaType === 'video')) {
             inbound = entry
         }
@@ -465,23 +477,29 @@ function sampleReport (report) {
             pair = entry
         }
     })
+    const selected = entries.get(inbound?.transportId)?.selectedCandidatePairId
+    if (selected) pair = entries.get(selected) || null
     if (!inbound || !pair) return null
     if (typeof inbound.packetsLost !== 'number' || typeof inbound.packetsReceived !== 'number'
         || typeof inbound.bytesReceived !== 'number' || typeof pair.currentRoundTripTime !== 'number') {
         return null
     }
     return {
-        at: Date.now(),
+        at: performance.now(),
         packetsLost: inbound.packetsLost,
         packetsReceived: inbound.packetsReceived,
         bytesReceived: inbound.bytesReceived,
         currentRoundTripTime: pair.currentRoundTripTime,
-        availableIncomingBitrate: typeof pair.availableIncomingBitrate === 'number'
+        availableIncomingBitrate: typeof pair.availableIncomingBitrate === 'number' && Number.isFinite(pair.availableIncomingBitrate) && pair.availableIncomingBitrate > 0
             ? pair.availableIncomingBitrate
             : null,
         frameWidth: typeof inbound.frameWidth === 'number' ? inbound.frameWidth : null,
         frameHeight: typeof inbound.frameHeight === 'number' ? inbound.frameHeight : null,
-        framesPerSecond: typeof inbound.framesPerSecond === 'number' ? inbound.framesPerSecond : null
+        framesPerSecond: typeof inbound.framesPerSecond === 'number' ? inbound.framesPerSecond : null,
+        jitterBufferDelay: inbound.jitterBufferDelay,
+        jitterBufferEmittedCount: inbound.jitterBufferEmittedCount,
+        totalDecodeTime: inbound.totalDecodeTime,
+        framesDecoded: inbound.framesDecoded
     }
 }
 
@@ -508,13 +526,10 @@ function reportBody (camera, prev, sample, lastFrameAt) {
     // through the identical `atIp()` the rate controller already reasons in,
     // rather than a second, unmeasured overhead figure invented here.
     const egress = atIp((byteDelta * 8) / 1000 / dtSeconds)
-    if (sample.availableIncomingBitrate === null) {
-        // ViewerStats.capacity is required, and a guessed one is worse than
-        // none: the rate controller would be acting on a number nobody
-        // measured. Reporting nothing this tick is the honest answer, not a
-        // reason to invent a figure this browser does not have.
-        return {}
-    }
+    const averageMs = (time, priorTime, count, priorCount) => [time, priorTime, count, priorCount].every(Number.isFinite)
+        && count > priorCount && time >= priorTime ? (time - priorTime) * 1000 / (count - priorCount) : null
+    const receiverBufferMs = averageMs(sample.jitterBufferDelay, prev.jitterBufferDelay, sample.jitterBufferEmittedCount, prev.jitterBufferEmittedCount)
+    const decodeMs = averageMs(sample.totalDecodeTime, prev.totalDecodeTime, sample.framesDecoded, prev.framesDecoded)
     return {
         stats: {
             camera,
@@ -526,7 +541,9 @@ function reportBody (camera, prev, sample, lastFrameAt) {
             // is not run through `atIp()`, which is calibrated for a
             // configured *encoder* rate and would double-count an overhead
             // this figure does not carry in the first place.
-            capacity: sample.availableIncomingBitrate / 1000,
+            capacity: sample.availableIncomingBitrate === null ? null : sample.availableIncomingBitrate / 1000,
+            ...(receiverBufferMs !== null ? { receiverBufferMs } : {}),
+            ...(decodeMs !== null ? { decodeMs } : {}),
             ...(lastFrameAt !== null ? { frameAge: Math.max(0, sample.at - lastFrameAt) } : {}),
             ...(sample.frameWidth && sample.frameHeight ? { size: `${sample.frameWidth}x${sample.frameHeight}` } : {}),
             ...(sample.framesPerSecond ? { fps: sample.framesPerSecond } : {})
@@ -536,6 +553,7 @@ function reportBody (camera, prev, sample, lastFrameAt) {
 
 export default {
     name: 'YonderPicture',
+    mixins: [cameraSessionMixin],
     components: { YonderStateOverlay, YonderThumbStrip },
     inject: ['$socket', '$dataTracker'],
     props: {
@@ -546,6 +564,11 @@ export default {
     data () {
         return {
             mode: 'live',
+            videoRequestPending: false,
+            videoRequestTimer: null,
+            wantsLive: true,
+            fallbackRetryTimer: null,
+            deliveryState: null,
             pc: null,
             /** Aborts the handshake in flight, when nobody wants it any more. */
             abort: null,
@@ -560,6 +583,9 @@ export default {
             session: 0,
             attempt: 0,
             lastFrameAt: null,
+            frameNow: performance.now(),
+            frameCallback: null,
+            playbackBlocked: false,
             now: Date.now(),
             reason: '',
             stillSrc: '',
@@ -568,7 +594,7 @@ export default {
             /** The last cost the flow sent, held across later commands. */
             sentCost: '',
             /** The camera the flow last said this picture is of. */
-            sentPath: '',
+            sentPath: null,
             /** The path the session in hand was negotiated against. */
             negotiated: '',
             tick: null,
@@ -605,12 +631,15 @@ export default {
             flashing: false,
             flashTimer: null,
             savedTo: '',
+            aimRefusal: null,
             /** The drag-to-slew layer's own gesture state — see this file's
              * own doc comment on why this mirrors `YonderAimPad` method-for-
              * method rather than sharing its implementation. */
             dragPointerId: null,
             dragGesture: null,
             dragSeq: 0,
+            responseExpo: savedNumber(EXPO_KEY, 50, 0, 100),
+            responseSpeed: savedNumber(SPEED_KEY, 60, 1, 120),
             orbX: 0,
             orbY: 0,
             downX: 0,
@@ -629,7 +658,9 @@ export default {
              * something to compute a delta against — see `sampleReport`'s
              * own doc comment on why the first tick after any reset has
              * none. Reset on every new connection alongside `viewerId`. */
-            reportBaseline: null
+            reportBaseline: null,
+            thumbnailDemand: null,
+            thumbnailTimer: null
         }
     },
     computed: {
@@ -663,7 +694,7 @@ export default {
          */
         streamPath () {
             const configured = this.props.path || ''
-            const path = this.told || configured
+            const path = this.told ?? configured
             // `cameraFor` (`yonder-core/presentation`) is the one place
             // `-preview` is stripped — the console's own viewer-report route
             // strips it the identical way, from the identical function, so
@@ -704,10 +735,14 @@ export default {
          * picture not yet told a camera — and the picture then draws nothing
          * about it rather than guessing that a camera is stopped.
          */
+        selectedCameraName () { return this.cameras.find(row => row.id === cameraFor(this.streamPath))?.name || this.props.label || '' },
+        cameraRunState () {
+            return this.fromPayload('runState') || (this.cameraRunning === true ? 'running' : this.cameraRunning === false ? 'stopped' : 'unknown')
+        },
+        videoControl () { return videoAction(this.cameraRunState, this.cameraRunning, this.fromPayload('startBlocked')) },
         cameraRunning () {
-            const payload = this.command
-            if (!payload || typeof payload !== 'object') return null
-            return typeof payload.running === 'boolean' ? payload.running : null
+            const running = this.fromPayload('running')
+            return typeof running === 'boolean' ? running : null
         },
         told () {
             const payload = this.command
@@ -717,7 +752,7 @@ export default {
         },
         staleFor () {
             if (this.mode !== 'live' || this.lastFrameAt === null) return 0
-            return Math.max(0, Math.floor((this.now - this.lastFrameAt) / 1000) - 2)
+            return Math.max(0, Math.floor((this.frameNow - this.lastFrameAt) / 1000) - 2)
         },
         degradeFilter () {
             if (this.staleFor === 0) return 'none'
@@ -734,6 +769,10 @@ export default {
             return 'good'
         },
         caption () {
+            if (this.signInRequired) return 'Sign in required'
+            if (this.cameraRunState === 'starting') return 'Starting video'
+            if (this.cameraRunState === 'stopped') return 'Video stopped'
+            if (this.cameraRunState === 'failed') return 'Video unavailable'
             if (this.mode === 'off') return 'off'
             if (this.mode === 'stills') return 'stills'
             if (this.staleFor > 0) return 'no contact'
@@ -765,6 +804,7 @@ export default {
          * simply running the *existing* suite first and reading the warning.
          */
         previewState () {
+            if (this.deliveryState?.camera === cameraFor(this.streamPath)) return this.deliveryState.overlay
             const v = this.fromPayload('state')
             return v && typeof v === 'object' ? v : null
         },
@@ -799,6 +839,7 @@ export default {
          * went. Read here so the watcher below has one thing to watch. */
         saved () {
             const v = this.fromPayload('saved')
+            if (v?.held === 'camera' && v.kind === 'photo' && Number.isFinite(v.observedAt)) return { ...v, at: v.observedAt }
             return v && typeof v === 'object' && Number.isFinite(v.at) ? v : null
         },
         cameras () {
@@ -817,7 +858,8 @@ export default {
          * here — see this file's own doc comment on why the full four-state
          * vocabulary is `YonderAim.vue`'s own territory, not drawn twice. */
         aimable () {
-            return Boolean(this.aim && this.aim.state === 'present')
+            if (this.signInRequired) return false
+            return Boolean(this.aim && this.aim.state === 'present' && !this.aim.inhibited)
         },
         stats () {
             const v = this.fromPayload('stats')
@@ -836,14 +878,6 @@ export default {
          */
         footItems () {
             const items = []
-            if (this.aimable) {
-                if (typeof this.aim.pan === 'number') {
-                    items.push({ key: 'pan', label: 'PAN', text: signed(this.aim.pan) + '°' })
-                }
-                if (typeof this.aim.tilt === 'number') {
-                    items.push({ key: 'tilt', label: 'TILT', text: signed(this.aim.tilt) + '°' })
-                }
-            }
             const zoom = this.fromPayload('zoom')
             if (typeof zoom === 'number') {
                 const d = DESCRIPTORS.zoom
@@ -858,6 +892,17 @@ export default {
         }
     },
     watch: {
+        cameraRunState (value, before) {
+            if (value !== before) { this.videoRequestPending = false; clearTimeout(this.videoRequestTimer) }
+            if (['stopped', 'failed'].includes(value)) { clearTimeout(this.retryTimer); clearTimeout(this.stillsTimer); this.teardown(); this.reason = ''; this.blank() }
+            else if (this.wantsLive && !this.signInRequired && ['stopped', 'failed'].includes(before)) this.requestLive()
+        },
+        cameras () { this.refreshThumbnails() },
+        mode () { this.refreshThumbnails() },
+        aim (now, before) {
+            if (now?.generation !== before?.generation || now?.url !== before?.url || now?.imageDirection !== before?.imageDirection) this.onDragEnd()
+            this.aimTransport?.refresh()
+        },
         /**
          * A key on the rail, arriving as a message.
          *
@@ -890,18 +935,7 @@ export default {
             this.requestLive()
         },
         command (value) {
-            if (value && typeof value === 'object') {
-                if (typeof value.cost === 'string') this.sentCost = value.cost
-                if (typeof value.path === 'string') this.sentPath = value.path
-                // R-VID-18: the picture's own richer facts, each cached
-                // independently so a later message naming only one of them
-                // (a path update, say) does not blank the rest — the same
-                // reasoning `sentCost`/`sentPath` already state, generalised.
-                for (const key of PAYLOAD_KEYS) {
-                    if (key in value) this.sentExtra[key] = value[key]
-                }
-                return
-            }
+            if (value && typeof value === 'object') { this.remember(value); return }
             if (typeof value !== 'string') return
             if (value.startsWith('mode:')) {
                 const mode = value.slice(5)
@@ -918,7 +952,7 @@ export default {
          * `updateFromEvent` needs for a fault arriving between presses (see
          * this file's own top-of-file doc comment). */
         aimable (now) {
-            if (!now) this.endDragGesture()
+            if (!now) this.onDragEnd()
         },
         /**
          * **A still landed** (L-18, R-UI-05).
@@ -954,43 +988,98 @@ export default {
     },
     created () {
         this.$dataTracker(this.id)
+        // Hydrate cached state before partial messages replace it; never replay a cached action.
+        this.remember(this.command)
     },
     mounted () {
-        this.tick = setInterval(() => { this.now = Date.now() }, 1000)
+        this.thumbnailDemand = new ThumbnailDemand()
+        this.thumbnailTimer = setInterval(() => this.refreshThumbnails(), 5000)
+        this.aimTransport = new AimTransport(() => this.aim, (_rate, reason) => { this.aimRefusal = reason })
+        this.$socket.on?.('disconnect', this.aimDisconnect)
+        this.tick = setInterval(() => { this.now = Date.now(); this.frameNow = performance.now() }, 1000)
         // The media clock, which is the only honest source for the age this
         // component draws. See the note on `lastFrameAt` above.
         if (this.$refs.video) {
-            this.$refs.video.addEventListener('timeupdate', this.onFrame)
+            this.$refs.video.addEventListener('timeupdate', this.onTimeUpdate)
             this.$refs.video.addEventListener('loadedmetadata', this.onMetadata)
         }
         // The drag layer's own four non-pointer endings — see this file's
         // own doc comment on "all eight endings".
         this.onDragBlur = () => this.onDragEnd()
-        this.onDragVisibility = () => { if (document.hidden) this.onDragEnd() }
+        this.onDragVisibility = () => { if (document.hidden) this.onDragEnd(); this.refreshThumbnails() }
         this.onDragPageHide = () => this.onDragEnd()
         window.addEventListener('blur', this.onDragBlur)
         document.addEventListener('visibilitychange', this.onDragVisibility)
         window.addEventListener('pagehide', this.onDragPageHide)
+        window.addEventListener(AIM_RESPONSE_CHANGED, this.onResponseChange)
         this.requestLive()
+        this.refreshThumbnails()
     },
     beforeUnmount () {
+        clearTimeout(this.videoRequestTimer)
+        clearInterval(this.thumbnailTimer)
+        this.thumbnailDemand?.close()
+        this.aimTransport?.close()
+        this.$socket.off?.('disconnect', this.aimDisconnect)
         clearTimeout(this.flashTimer)
         clearInterval(this.tick)
         clearTimeout(this.retryTimer)
         clearTimeout(this.stillsTimer)
+        clearTimeout(this.fallbackRetryTimer)
         if (this.$refs.video) {
-            this.$refs.video.removeEventListener('timeupdate', this.onFrame)
+            this.$refs.video.removeEventListener('timeupdate', this.onTimeUpdate)
             this.$refs.video.removeEventListener('loadedmetadata', this.onMetadata)
         }
         window.removeEventListener('blur', this.onDragBlur)
         document.removeEventListener('visibilitychange', this.onDragVisibility)
         window.removeEventListener('pagehide', this.onDragPageHide)
+        window.removeEventListener(AIM_RESPONSE_CHANGED, this.onResponseChange)
         // A component torn down mid-hold must still stop the aircraft —
         // navigating away from the page is not a reason to keep slewing.
         this.onDragEnd()
         this.teardown()
     },
     methods: {
+        onCameraSessionExpired () {
+            clearTimeout(this.retryTimer); clearTimeout(this.stillsTimer); clearTimeout(this.fallbackRetryTimer)
+            this.aimTransport?.stop(); this.onDragEnd(); this.thumbnailDemand?.close(); this.teardown(); this.blank()
+        },
+        pressVideoAction () {
+            if (this.signInRequired || this.videoRequestPending || !this.videoControl.action) return
+            const camera = cameraFor(this.streamPath)
+            if (!camera) return
+            this.videoRequestPending = true
+            clearTimeout(this.videoRequestTimer)
+            this.videoRequestTimer = setTimeout(() => { this.videoRequestPending = false }, 10000)
+            this.$socket.emit('widget-action', this.id, { camera, payload: this.videoControl.action })
+        },
+        onResponseChange (e) {
+            const { key, value } = e.detail || {}
+            if (!Number.isFinite(value)) return
+            if (key === EXPO_KEY && value >= 0 && value <= 100) this.responseExpo = value
+            else if (key === SPEED_KEY && value >= 1 && value <= 120) this.responseSpeed = value
+            else return
+            this.onDragEnd()
+        },
+        selectedStill () {
+            const camera = cameraFor(this.streamPath)
+            return this.cameras.find(row => row.id === camera)?.thumbSrc || this.props.stillsUrl || ''
+        },
+        refreshThumbnails () {
+            if (this.signInRequired) return
+            const camera = cameraFor(this.streamPath)
+            const rows = document.hidden ? [] : this.cameras.map(row => ({ id: row.id, want: row.id === camera ? (this.mode === 'live' ? 'video' : this.mode === 'stills' ? 'stills' : 'off') : 'off' }))
+            if (!document.hidden && this.mode === 'stills' && camera && !rows.some(row => row.id === camera)) rows.push({ id: camera, want: 'stills' })
+            this.thumbnailDemand?.set(rows)
+            if (this.mode === 'stills') this.stillSrc = this.selectedStill()
+        },
+        remember (value) {
+            if (!value || typeof value !== 'object') return
+            if (typeof value.cost === 'string') this.sentCost = value.cost
+            if (typeof value.path === 'string') this.sentPath = value.path
+            for (const key of PAYLOAD_KEYS) if (key in value) this.sentExtra[key] = value[key]
+        },
+        aimDisconnect () { this.aimTransport?.stop(); this.onDragEnd() },
         /**
          * One field of this picture's own richer state (R-VID-18, R-UI-28):
          * the live message first, then the last message that set it, then a
@@ -1014,10 +1103,43 @@ export default {
          * completes and delivers nothing keeps counting, which is what the
          * fall-back to stills is waiting to hear.
          */
+        onTimeUpdate () {
+            if (typeof this.$refs.video?.requestVideoFrameCallback !== 'function') this.onFrame()
+        },
         onFrame () {
-            this.lastFrameAt = Date.now()
+            if (this.mode !== 'live') return
+            this.lastFrameAt = performance.now()
+            this.frameNow = this.lastFrameAt
+            this.playbackBlocked = false
             this.attempt = 0
             this.reason = ''
+        },
+        watchFrames () {
+            const video = this.$refs.video
+            if (typeof video?.requestVideoFrameCallback !== 'function') return
+            const session = this.session
+            const frame = () => {
+                if (session !== this.session || this.mode !== 'live') return
+                this.onFrame()
+                this.frameCallback = video.requestVideoFrameCallback(frame)
+            }
+            this.frameCallback = video.requestVideoFrameCallback(frame)
+        },
+        async resumePlayback () {
+            if (this.signInRequired) return
+            const video = this.$refs.video, session = this.session
+            if (!video || this.mode !== 'live') return
+            video.muted = true
+            try {
+                await video.play()
+                if (session === this.session) this.playbackBlocked = false
+            } catch {
+                if (session === this.session) this.playbackBlocked = true
+            }
+        },
+        onPlaybackPause () {
+            if (this.signInRequired) return
+            if (this.mode === 'live' && this.pc?.connectionState === 'connected' && this.$refs.video?.srcObject) this.playbackBlocked = true
         },
         /**
          * The decoder's own report of the stream it just negotiated (defect
@@ -1051,6 +1173,13 @@ export default {
          * replaces it.
          */
         teardown () {
+            this.deliveryState = null
+            if (this.frameCallback !== null) this.$refs.video?.cancelVideoFrameCallback?.(this.frameCallback)
+            this.frameCallback = null
+            this.playbackBlocked = false
+            this.thumbnailDemand?.set([])
+            this.aimTransport?.stop()
+            this.onDragEnd()
             // Anything still in flight belongs to nobody from here on.
             this.session += 1
             this.stopReporting()
@@ -1138,12 +1267,19 @@ export default {
             // restarts, or a subscription swept after `IDLE_MS`, must not leave
             // a live picture reporting into nothing until the page is reloaded.
             body.want = this.mode === 'live' ? 'video' : this.mode === 'stills' ? 'stills' : 'off'
+            if (this.cameras.length) body.stills = !document.hidden
             try {
-                await fetch(`/video/${this.negotiated}/report`, {
+                const response = await fetch(`/video/${this.negotiated}/report`, {
                     method: 'POST',
                     headers: { 'content-type': 'application/json' },
                     body: JSON.stringify(body)
                 })
+                if (session !== this.session) return
+                if (response.status === 401) { expireCameraSession(); return }
+                if (!response.ok) return
+                const state = await response.json()
+                if (session === this.session && state?.camera === cameraFor(this.negotiated)
+                    && state.viewer === this.viewerId && state.overlay && typeof state.overlay === 'object') this.deliveryState = state
             } catch {
                 // Silent, and no retry-storm: the next tick is one second
                 // away regardless of whether this one reached the network.
@@ -1188,6 +1324,8 @@ export default {
          * up. Same bug shape as `Supervisor.start()`, same fix.
          */
         requestLive () {
+            if (this.signInRequired || ['stopped', 'failed'].includes(this.cameraRunState)) return
+            clearTimeout(this.fallbackRetryTimer)
             this.attempt = 0
             this.lastFrameAt = null
             this.reason = ''
@@ -1209,12 +1347,23 @@ export default {
          */
         toStills () {
             this.mode = 'stills'
-            this.stillSrc = this.props.stillsUrl || ''
+            this.stillSrc = this.selectedStill()
             clearTimeout(this.retryTimer)
             // Nothing is watching the session now, and a track arriving after
             // this would be live video under a badge reading 'stills'.
             this.teardown()
             this.blank()
+            // Falling back is not an operator request to abandon live video.
+            // Start a new bounded attempt, rather than leaving the page stuck
+            // on stills until a reload. Explicit Stills/Off cancels this.
+            const session = this.session
+            clearTimeout(this.fallbackRetryTimer)
+            this.fallbackRetryTimer = setTimeout(() => {
+                if (this.wantsLive && this.mode === 'stills' && this.session === session) {
+                    this.mode = 'live'
+                    this.requestLive()
+                }
+            }, 5000)
         },
         /**
          * One handshake, and the rule that it may only ever speak for itself.
@@ -1242,6 +1391,7 @@ export default {
          * applied at three awaits out of five is a rule nobody can rely on.
          */
         async connect () {
+            if (this.signInRequired || ['stopped', 'failed'].includes(this.cameraRunState)) return
             this.teardown()
             this.negotiated = this.streamPath
             // Nothing has said which camera this is yet. Not a fault and not a
@@ -1263,7 +1413,11 @@ export default {
                 // Negotiation, not media: `lastFrameAt` is deliberately not
                 // set here. The track exists; nothing has painted yet, and
                 // `onFrame` is what says otherwise.
-                if (this.$refs.video) this.$refs.video.srcObject = e.streams[0]
+                if (this.$refs.video) {
+                    this.$refs.video.srcObject = e.streams[0]
+                    this.watchFrames()
+                    this.resumePlayback()
+                }
             }
             pc.onconnectionstatechange = () => {
                 if (!mine()) return
@@ -1294,14 +1448,11 @@ export default {
                 // treat a missing channel as a reason the picture is wrong.
                 this.viewerId = answer.headers.get(VIEWER_HEADER)
                 if (!answer.ok) {
-                    // Distinguished deliberately. Only one of these is worth
-                    // walking outside for.
-                    this.reason = answer.status === 401
-                        ? 'this session is not logged in'
-                        : answer.status === 404
-                            ? 'this camera is not streaming; start it on the rail'
-                            : 'the media server is not answering'
-                    this.retry()
+                    const failure = previewFailure(answer.status)
+                    this.reason = failure.message
+                    if (failure.signIn) expireCameraSession()
+                    else if (failure.retry) this.retry()
+                    else { clearTimeout(this.stillsTimer); clearTimeout(this.fallbackRetryTimer); this.teardown() }
                     return
                 }
                 const sdp = await answer.text()
@@ -1319,10 +1470,12 @@ export default {
             }
         },
         retry () {
+            this.aimTransport?.stop()
+            this.onDragEnd()
             // A picture nobody is asking for does not reconnect: an off view
             // that kept negotiating would be spending a cellular uplink on a
             // stream with nothing on screen indicating it.
-            if (this.mode !== 'live') return
+            if (this.mode !== 'live' || this.signInRequired || ['stopped', 'failed'].includes(this.cameraRunState)) return
             const wait = BACKOFF_MS[Math.min(this.attempt, BACKOFF_MS.length - 1)]
             this.attempt += 1
             clearTimeout(this.retryTimer)
@@ -1350,6 +1503,9 @@ export default {
             if (this.mode === 'live') this.requestLive()
         },
         setMode (mode) {
+            if (this.signInRequired || !['live', 'stills', 'off'].includes(mode)) return
+            this.wantsLive = mode === 'live'
+            clearTimeout(this.fallbackRetryTimer)
             this.mode = mode
             if (mode === 'live') {
                 this.requestLive()
@@ -1361,7 +1517,7 @@ export default {
                 // A mode the operator chose is not a failure, and carries no
                 // reason: 'off' is 'not requested', never 'no contact'.
                 this.reason = ''
-                this.stillSrc = mode === 'stills' ? (this.props.stillsUrl || '') : ''
+                this.stillSrc = mode === 'stills' ? this.selectedStill() : ''
             }
             this.$socket.emit('widget-action', this.id, { payload: `mode:${mode}`, topic: this.props.label })
         },
@@ -1383,9 +1539,11 @@ export default {
         /** The same word the rail's START sends, down the same switch, so
          *  there is one way a camera is started and not two. */
         pressStart () {
-            this.post('start')
+            if (this.videoControl.action === 'start') this.pressVideoAction()
         },
         onThumbGo (id) {
+            this.aimTransport?.stop()
+            this.onDragEnd()
             this.sentPath = id
             this.post({ path: id })
         },
@@ -1401,11 +1559,13 @@ export default {
             const d = Math.hypot(dx, dy)
             if (d <= DRAG_DEAD) return null
             const k = Math.min(1, (d - DRAG_DEAD) / DRAG_RANGE)
+            const speed = responseMagnitude(k, this.responseExpo,
+                Math.min(this.responseSpeed, rateLimit(this.aim?.maxRate ?? DRAG_MAX_RATE)))
             return {
                 // Screen y grows downward; tilt does not, hence the sign flip
                 // — the identical convention `YonderAimPad.at()` states.
-                pan: (dx / d) * k * DRAG_MAX_RATE,
-                tilt: -(dy / d) * k * DRAG_MAX_RATE
+                pan: (dx / d) * speed,
+                tilt: -(dy / d) * speed
             }
         },
         dragDown (e) {
@@ -1442,7 +1602,8 @@ export default {
             this.orbX = e.clientX - rect.left
             this.orbY = e.clientY - rect.top
             this.dragSeq += 1
-            this.post({ slew: { pan: a.pan, tilt: a.tilt, seq: this.dragSeq, gesture: this.dragGesture } })
+            if (this.aim?.url) this.aimTransport?.update({ pan: a.pan, tilt: a.tilt, gesture: this.dragGesture })
+            else this.post({ slew: { pan: a.pan, tilt: a.tilt, seq: this.dragSeq, gesture: this.dragGesture } })
         },
         /** Ends the active gesture, if there is one — idempotent, and the
          * single place that idempotency lives, the identical shape
@@ -1453,7 +1614,8 @@ export default {
             if (this.dragGesture === null) return
             const g = this.dragGesture
             this.dragGesture = null
-            this.post({ stop: { gesture: g } })
+            if (this.aim?.url) this.aimTransport?.stop()
+            else this.post({ stop: { gesture: g } })
         },
         /** Every one of the eight endings reaches here — see this file's own
          * top-of-file doc comment. No `pointerId` guard of its own, for the
@@ -1469,6 +1631,32 @@ export default {
 </script>
 
 <style scoped>
+.y-pic__camera { max-width:24ch; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; }
+.y-pic__controls { display:flex; flex:1 0 100%; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; }
+.y-pic__view-modes { display:flex; align-items:center; gap:4px; font-size:12px; }
+.y-pic__view-modes > span { margin-right:6px; }
+.y-pic__controls button, .y-pic__action { padding:5px 9px; border:1px solid var(--yonder-divider); border-radius:3px; background:var(--yonder-pane); color:var(--yonder-value); font:inherit; font-size:12px; cursor:pointer; text-decoration:none; }
+.y-pic__controls button[aria-pressed="true"] { border-color:var(--yonder-select); background:color-mix(in srgb,var(--yonder-select) 12%, transparent); }
+.y-pic__controls button:disabled { opacity:.55; cursor:default; }
+.y-pic__controls :focus-visible { outline:2px solid var(--yonder-select); outline-offset:2px; }
+
+.y-pic__toolbar {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px;
+    padding: 7px 12px; overflow: auto;
+    background: var(--yonder-pane, #0a0e13); color: var(--yonder-value, #fff);
+    border-bottom: 1px solid var(--yonder-divider, #2b333c);
+}
+.y-pic__toolbar .y-pic__hud, .y-pic__toolbar .y-pic__state,
+.y-pic__toolbar .y-pic__rec, .y-pic__toolbar .y-pic__foot, .y-pic__toolbar .y-pic__osd {
+    position: static; inset: auto; max-width: 100%; margin: 0; background: transparent;
+}
+.y-pic__toolbar .y-pic__state { flex: 1 1 260px; }
+.y-pic__toolbar .y-pic__rec { margin-left: auto; }
+.y-pic__toolbar .y-pic__cost { color: var(--yonder-value, #fff); }
+@media (min-width: 1300px) {
+    :global(#nrdb-page-page-camera #nrdb-ui-group-group-cam-picture) { grid-column-end: span min(9, var(--layout-columns)) !important; }
+    :global(#nrdb-page-page-camera #nrdb-ui-group-group-cam-aim) { grid-column-end: span min(3, var(--layout-columns)) !important; }
+}
 /* **The widget's whole slot**, and a grid so the picture and the strip
    under it divide it explicitly: one flexible row for the picture, one
    `auto` row for the strip. `minmax(0, 1fr)` in both axes rather than `1fr`,
@@ -1479,7 +1667,8 @@ export default {
     height: 100%;
     min-height: 0;
     display: grid;
-    grid-template-rows: minmax(0, 1fr) auto;
+    /* Status/thumbnail arrivals must not resize the image while aiming. */
+    grid-template-rows: auto minmax(0, 1fr) minmax(34px, auto) 80px;
     grid-template-columns: minmax(0, 1fr);
 }
 /* **Takes the shape of the video it is showing, and never more room than it
@@ -1533,6 +1722,27 @@ export default {
     max-height: 100%;
 }
 .y-pic__frame.is-aiming { cursor: crosshair; touch-action: none; }
+/* Camera is the dedicated viewing page: its video owns the column width.
+   One content-sized Dashboard row lets the aspect ratio determine its height;
+   the compact supporting rows stay below it without changing the image size.
+   Other compositions, including Cockpit, keep their configured widget slots. */
+:global(#nrdb-page-page-camera .nrdb-ui-yonder-picture) {
+    display: block !important;
+    grid-row-end: span 1 !important;
+    height: auto !important;
+}
+#nrdb-page-page-camera .y-pic {
+    height: auto;
+    grid-template-rows: auto auto minmax(34px, auto) 80px;
+}
+#nrdb-page-page-camera .y-pic__fit {
+    container-type: normal;
+    display: block;
+}
+#nrdb-page-page-camera .y-pic__frame {
+    width: 100%;
+    max-height: none;
+}
 /* **Every overlay below is given an explicit `z-index`** (defect 2 — this
    file's own top-of-file doc comment). A hardware-decoded `<video>` can
    composite in a layer of its own that ignores DOM order, so nothing here
@@ -1598,26 +1808,6 @@ export default {
     opacity: 0.55;
     pointer-events: none;
 }
-.y-pic__saved {
-    position: absolute;
-    z-index: 8;
-    left: 50%;
-    top: 50%;
-    transform: translate(-50%, -50%);
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    font-size: 12px;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    padding: 7px 13px;
-    border-radius: 2px;
-    background: rgba(4, 6, 10, 0.82);
-    border: 1px solid var(--yonder-select, #2ad4f0);
-    color: var(--yonder-select, #2ad4f0);
-    pointer-events: none;
-    white-space: nowrap;
-}
 .y-pic__saved-dot {
     width: 6px;
     height: 6px;
@@ -1639,7 +1829,7 @@ export default {
        a vertical one, because it holds however many lines either box wraps
        to, where a vertical-only guess let a wrapped line land inside the OSD
        box's own height.
-       
+
        **136px, not the 104px this first carried.** Review measured the OSD's
        real footprint at about 118px across several frame widths, not the 90px
        this had assumed, leaving a ~14px shortfall that a two- or three-digit
@@ -1724,5 +1914,27 @@ export default {
 /* The strip sits *beneath* the picture, not on top of it — see this file's
    own top-of-file doc comment on why it is a normal-flow sibling of
    `.y-pic__frame` rather than one more absolutely-positioned overlay. */
+.y-pic__notices, .y-pic__thumbnails { min-width: 0; min-height: 0; overflow: auto; }
+.y-pic__resume { padding: 4px 10px; margin: 2px 0; border: 1px solid currentColor; border-radius: 3px; color: var(--yonder-select, #2ad4f0); background: transparent; font: inherit; cursor: pointer; }
+.y-pic__thumbnails { overflow-y: hidden; }
 .y-pic__strip { margin-top: 8px; }
+
+.y-pic__reason { color: var(--yonder-waiting, #ffcf28); }
+.y-pic__saved { color: var(--yonder-good, #6ddd97); }
+.y-pic__reason, .y-pic__saved {
+    position: static;
+    inset: auto;
+    transform: none;
+    width: auto;
+    max-width: 100%;
+    padding: 7px 0;
+    margin: 0;
+    background: transparent;
+    border: 0;
+    text-align: left;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    font-size: 12px;
+    line-height: 1.4;
+}
 </style>

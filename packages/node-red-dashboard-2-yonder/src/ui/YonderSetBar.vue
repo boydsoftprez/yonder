@@ -14,7 +14,7 @@
                :aria-label="grabAriaLabel" :style="{ left: pct(grabAt) }" />
         </div>
         <div v-if="fine" class="y-sb__fine">{{ fine }}</div>
-        <div v-if="hasRequested" class="y-sb__note">Pending &middot; apply on Setup</div>
+        <div v-if="hasRequested" class="y-sb__note">Unsaved change · applied {{ fixedActual }}<template v-if="unit"> {{ unit }}</template></div>
         <div v-if="reason" class="y-sb__why" :class="toneClass">{{ reason }}</div>
     </div>
 </template>
@@ -155,6 +155,7 @@ const TRACK_WIDTH = 220
  * cause.
  */
 function fixed (value, precision) {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return '——'
     // **The nudge follows the sign, and that is not a detail.** Adding
     // `Number.EPSILON` outright only ever pushes upward, which happens to fix
     // the positive half-boundary cases and silently breaks the negative ones:
@@ -207,14 +208,15 @@ export default {
          * one's to restate as a number it cannot vouch for. */
         shown () {
             if (this.state === 'gated') return '——'
-            return fixed(this.actual, this.precision)
+            return fixed(this.dragAt !== null ? this.dragAt : this.hasRequested ? this.requested : this.actual, this.precision)
         },
+        fixedActual () { return fixed(this.actual, this.precision) },
         /** Both readings go dark only under `gated`: the fault state
          * (`advertised`) still has a device answering honestly, and losing
          * the evidence would hide exactly the thing an operator needs to
          * see — the value stuck at its old setting. */
         showActual () {
-            return this.state !== 'gated'
+            return this.state !== 'gated' && Number.isFinite(this.actual)
         },
         showCommanded () {
             return this.state !== 'gated' && this.commanded !== null && this.commanded !== undefined &&

@@ -70,6 +70,8 @@ control channel and not the picture:
 from __future__ import annotations
 
 import json
+import socket
+import struct
 import os
 import sys
 import threading
@@ -514,7 +516,9 @@ class Host(object):
                 ("queue", {}),
                 ("videoconvert", {}),
                 ("jpegenc", {}),
-                ("filesink", {"location": path}),
+                # A temporary capture must not make the live parent pipeline
+                # preroll again or wait on its clock during branch removal.
+                ("filesink", {"location": path, "async": False, "sync": False}),
             ])
         except BranchError as exc:
             return {"refused": str(exc)}
@@ -600,7 +604,7 @@ class Host(object):
                 ("queue", {}),
                 (self.parser_kind(), {}),
                 ("matroskamux", {}),
-                ("filesink", {"location": path}),
+                ("filesink", {"location": path, "async": False, "sync": False}),
             ])
         except BranchError as exc:
             return {"refused": str(exc)}
@@ -996,6 +1000,27 @@ def negotiated_shape(pairs):
 
 # -- the process ------------------------------------------------------------
 
+def watch_progress(main, now=time.monotonic, pause=time.sleep):
+    """A live process with no encoded frames is not a running video stream.
+
+    Read the atomic counter without taking its probe lock: the streaming
+    thread itself may be stuck in a GStreamer call while holding that lock.
+    Do not set pipeline state here; teardown is the operation that may be
+    deadlocked. Exiting releases this encoder's resources for the supervisor.
+    """
+    count = main.count
+    changed = now()
+    seen = count > 0
+    while True:
+        pause(0.5)
+        current = main.count
+        if current != count:
+            count, changed, seen = current, now(), True
+        elif now() - changed >= (5 if seen else 15):
+            note('encoded video stopped progressing; restarting the pipeline host')
+            os._exit(1)
+
+
 def watch_bus(pipeline):
     """`gst-launch-1.0`'s own behaviour: an error or an end of stream ends the
     process. The supervisor is what restarts a pipeline (R-CTL-01), and a host
@@ -1018,7 +1043,58 @@ def watch_bus(pipeline):
         os._exit(1)
 
 
+def accessory_feed(pipeline, endpoint):
+    """Private framed AUs. Camera milliseconds, never SPS timing, drive running-time PTS."""
+    source = pipeline.get_by_name('accessory-source')
+    if source is None:
+        die('accessory endpoint requires the composed accessory-source appsrc')
+    def exact(stream, length):
+        data = bytearray()
+        while len(data) < length:
+            chunk = stream.recv(length - len(data))
+            if not chunk:
+                raise EOFError('accessory stream generation ended')
+            data.extend(chunk)
+        return bytes(data)
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as stream:
+            stream.settimeout(5)
+            stream.connect(endpoint)
+            previous = None
+            elapsed = 0
+            origin = None
+            while True:
+                length, timestamp = struct.unpack('!II', exact(stream, 8))
+                if not 0 < length <= 2000000:
+                    raise ValueError('invalid accessory frame length')
+                data = exact(stream, length)
+                delta = 0 if previous is None else (timestamp - previous) & 0xffffffff
+                if delta > 1000:
+                    raise ValueError('accessory timestamp reset')
+                elapsed += delta
+                previous = timestamp
+                if origin is None:
+                    clock = pipeline.get_clock()
+                    if clock is None:
+                        raise ValueError('pipeline running clock unavailable')
+                    origin = max(0, clock.get_time() - pipeline.get_base_time())
+                buffer = Gst.Buffer.new_allocate(None, length, None)
+                buffer.fill(0, data)
+                buffer.pts = origin + elapsed * Gst.MSECOND
+                buffer.dts = buffer.pts
+                buffer.duration = (delta or 33) * Gst.MSECOND
+                if source.emit('push-buffer', buffer) != Gst.FlowReturn.OK:
+                    raise ValueError('accessory appsrc stopped accepting frames')
+    except Exception as exc:
+        note('accessory media ended: %s' % exc)
+        os._exit(1)
+
+
 def main(args):
+    endpoints = [arg.split('=', 1)[1] for arg in args if arg.startswith('--accessory-socket=')]
+    args = [arg for arg in args if not arg.startswith('--accessory-socket=')]
+    if len(endpoints) > 1 or (endpoints and (not endpoints[0].startswith('/') or not endpoints[0].endswith('.sock'))):
+        die('invalid accessory media endpoint')
     tokens = parse_options(args)
     Gst.init(None)
     try:
@@ -1038,8 +1114,12 @@ def main(args):
             "claim would be one this program could not witness; it is left to "
             "gst-launch-1.0" % MAIN_TEE)
 
+    threading.Thread(target=watch_progress, args=(host.main,), daemon=True).start()
     if pipeline.set_state(Gst.State.PLAYING) == Gst.StateChangeReturn.FAILURE:
         die("that pipeline will not play")
+
+    if endpoints:
+        threading.Thread(target=accessory_feed, args=(pipeline, endpoints[0]), daemon=True).start()
 
     thread = threading.Thread(target=watch_bus, args=(pipeline,))
     thread.daemon = True

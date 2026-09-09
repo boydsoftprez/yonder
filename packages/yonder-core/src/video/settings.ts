@@ -27,7 +27,7 @@ import type { Camera, Config } from "../schema/config.js";
  */
 
 /**
- * The fields a camera's Setup deck can change, and the two kinds they fall
+ * The fields a camera's Camera workspace can change, and the two kinds they fall
  * into.
  *
  * Written out rather than "anything in the schema", because the two kinds are
@@ -59,7 +59,7 @@ export type CameraSettingKey = (typeof CAMERA_SETTING_KEYS)[number];
  * seven happen to share their name with the `Camera` leaf they write —
  * `width` writes `width`, `enabled` writes `enabled` — which makes it easy to
  * assume that correspondence is automatic. `preview_bitrate_kbps` is the
- * exception: it is the Setup deck's name for a value that actually lives at
+ * exception: it is the Camera workspace's name for a value that actually lives at
  * `preview.bitrate_kbps`, so the leaf it is load-bearing or exempt *as* is
  * `preview` — a name `CameraSettingKey` itself does not contain, and a plain
  * `CAMERA_EXEMPT_LEAVES.has(key)` string comparison can never match.
