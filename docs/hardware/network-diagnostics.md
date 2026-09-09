@@ -28,7 +28,25 @@ does not represent every ground-station peer's latency.
 
 ## Diagnostics
 
-Choose Ping, Traceroute, Route lookup, or Bandwidth. Supply a hostname or IP address,
+Choose Internet speed test, Ping, Traceroute, Route lookup, or Advanced bandwidth.
+The default Internet speed test uses Cloudflare's public HTTPS download/upload
+endpoints from the board. No target host or server setup is required. Pick the
+interface or leave Automatic route selected, then Start internet speed test.
+It reports download/upload estimates and median TCP connection latency, shows
+progress, and supports Cancel and Save output. It sends synthetic data only.
+The test payload is capped at about 27 MB, excluding protocol overhead, and the
+whole job is limited to 75 seconds. Completed payload bytes are displayed;
+an interrupted partial request can consume additional data within that cap.
+
+This is a short, single-connection HTTP measurement: it is not the Ookla engine
+or a guarantee of an ISP's advertised line rate. The two payloads per direction
+adapt to the first sample and target a few seconds within the cap. Download timing
+excludes response setup; upload timing includes transmission and acknowledgement,
+not merely the small response body. Failed or incomplete transfers are not
+reported as zero-speed measurements. Cloudflare's endpoints are documented in its
+[official speed-test project](https://github.com/cloudflare/speedtest).
+
+For Ping, Traceroute, Route lookup, or Advanced bandwidth, supply a hostname or IP address,
 an IPv4/IPv6 family, and optionally a currently present interface. Automatic route
 lets the kernel choose. Selecting an interface binds the test to it; a removed
 interface is refused rather than silently testing another link.
@@ -38,13 +56,14 @@ command, running/completion state, elapsed time and exit code. Cancel stops the
 process; Save output downloads the text. Revisiting Diagnostics in the same browser
 tab recovers its last job. Only the initiating authenticated session can read or
 cancel it. Tests run one at a time, expire after ten minutes, stop within 30 seconds,
-and retain at most 64 Ki characters of output. No arbitrary shell is exposed.
+and retain at most 64 Ki characters of output. The public internet speed test has
+the separate 75-second bound above. No arbitrary shell is exposed.
 
 Traceroute sends one probe per hop, up to 20 hops. An asterisk means that hop did
 not answer. Filtering or a hop's ICMP policy can produce asterisks on a working
 path, so they are not a conclusive failure indication.
 
-Bandwidth uses an operator-selected **iperf3 server**. Run `iperf3 -s` on the
+Advanced bandwidth uses an operator-selected **iperf3 server**. Run `iperf3 -s` on the
 target, then choose upload or download, port, duration (2–10 seconds) and rate
 ceiling (1–100 Mb/s). Defaults are five seconds and 10 Mb/s, approximately 6.25 MB
 of payload plus protocol overhead. The result is capped by that ceiling and shares
@@ -123,3 +142,42 @@ An isolated browser password change invalidated the old session (401), and the n
 password signed in successfully (200). The operator's real password was not changed.
 The reboot control's confirmation and configuration/armed guards were tested
 without issuing an operating-system reboot.
+
+The public internet speed test was added and installed as `da8298e`. A real
+Cloudflare test from the Pi over Ethernet completed with 251.1 Mb/s download,
+161.2 Mb/s upload and 14.0 ms median TCP connection latency, transferring 27 MB
+of test payload. These are quick HTTPS estimates from that run, not a link-rate
+guarantee. The installed job API accepted the new test without a hostname and
+cancelled it correctly. Focused backend/UI tests and day/night/mobile browser
+checks passed. Activation preserved the console process and configuration,
+observed 45.04 seconds of USB absence, then verified 30 seconds of unchanged
+camera run/start/restart state.
+
+## Day/Night regression and repair
+
+The added route-metric check initially asked the kernel about NetworkManager's
+modem control device, `cdc-wdm0`. That is not a kernel network interface:
+the modem routes on `wwan0`. This caused theme and camera configuration requests
+to fail before their renderers ran. The repair resolves `GENERAL.IP-IFACE`
+before inspecting modem routes and retains the control-device name for
+NetworkManager's reapply operation.
+
+Theme requests also now select the appearance renderer alone, after comparing the
+entire validated configuration to ensure only `ui.theme` differs. The existing
+reservation, durable journal, persistence and rollback remain in force. A hint
+cannot exempt a network or camera configuration change.
+
+Combined revision `a559da8` includes this repair and the approved material brand.
+All 3,632 core tests passed. On the Pi, Day → Night → Day completed in 0.230,
+0.185 and 0.333 seconds, with the saved palette and generated stylesheet agreeing.
+Brand SVGs survived each change; all service PIDs and the camera run/start/restart
+state stayed unchanged. Day was left selected. The new logo was also visually
+verified on the actual unauthenticated login page.
+
+The first installation attempt exposed an overly short deployment allowance:
+a FunctionFS startup timeout and the camera's 45-second retry delayed publication.
+Both streams were healthy at 22:51:55 in the device journal, but the 80-second
+overall deadline expired at 22:52:20, five seconds before the required 30-second
+stability observation could finish. The updater rolled back. The accepted retry
+allowed 180 seconds for readiness while retaining the same 30-second continuous
+running/start/restart check and logging the camera's actual refusal messages.

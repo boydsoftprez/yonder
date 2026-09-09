@@ -394,7 +394,16 @@ export class NetworkRenderer implements Renderer {
       if (profile.name === MODEM_CONNECTION && redial.length > 0) continue;
       const active = devices.find(d => d.connection === profile.name && d.state === "connected");
       const metric = Number(profile.settings.find(([name]) => name === "ipv4.route-metric")?.[1]);
-      if (active && Number.isFinite(metric) && await routeMetricDiffers(this.client.runner, active.device, metric))
+      if (!active || !Number.isFinite(metric)) continue;
+      // NetworkManager addresses a modem by its control port (cdc-wdm0);
+      // the kernel routes packets on its IP interface (wwan0). Reapply still
+      // goes to the NM device, but route observations must use the IP name.
+      const ipDevice = active.type === "gsm"
+        ? (await this.client.exec(["nmcli", "-g", "GENERAL.IP-IFACE", "device", "show", active.device])).trim()
+        : active.device;
+      if (!ipDevice || ipDevice === "--") continue; // IP layer not present yet.
+      if (!/^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,14}$/.test(ipDevice)) throw new Error("Invalid IP interface reported by NetworkManager");
+      if (await routeMetricDiffers(this.client.runner, ipDevice, metric))
         await this.client.reapply(active.device);
     }
 

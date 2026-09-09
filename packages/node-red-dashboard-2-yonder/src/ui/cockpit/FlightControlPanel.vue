@@ -2,16 +2,19 @@
 <template>
   <div class="flight-control-host">
     <nav class="flight-control-strip" aria-label="Persistent aircraft flight controls">
-      <button v-for="shortcut in shortcuts" :key="shortcut.kind" :aria-label="shortcut.label" :aria-expanded="panel===shortcut.kind" @click="open(shortcut.kind)"><span>{{shortcut.label}}</span><small>{{shortcut.detail}}</small></button>
+      <button v-for="shortcut in shortcuts" :key="shortcut.kind" :aria-label="shortcut.label" :data-flight-extended="['loiter','resume','modes','arm'].includes(shortcut.kind)" :data-flight-medium="['heading','alt-speed'].includes(shortcut.kind)" :data-flight-direct="shortcut.kind==='direct'" :aria-expanded="panel===shortcut.kind" @click="open(shortcut.kind)"><span>{{shortcut.label}}</span><small>{{shortcut.detail}}</small></button>
+      <button v-if="compact" class="flight-more" aria-label="More flight controls" @click="open('menu')">Flight ▾</button>
     </nav>
-    <div v-if="panel" class="mission-touch-scrim flight-control-scrim" @click.self="close">
+    <CockpitOverlay v-if="panel" @escape="close">
+    <div class="mission-touch-scrim flight-control-scrim" @click.self="close">
       <section ref="dialog" class="mission-touch flight-control-dialog" role="dialog" aria-modal="true" :aria-label="title" @keydown="keyboard">
-        <header class="mission-touch-header"><div><small>AIRCRAFT CONTROLS · REVIEW BEFORE SEND</small><h2>{{title}}</h2></div><button aria-label="Close flight controls" @click="close">×</button></header>
+        <header class="mission-touch-header"><button v-if="fromMenu" aria-label="Back to flight controls" @click="open('menu')">‹</button><div><small>AIRCRAFT CONTROLS · REVIEW BEFORE SEND</small><h2>{{title}}</h2></div><button aria-label="Close flight controls" @click="close">×</button></header>
         <div class="flight-control-actual"><small>REPORTED BY AIRCRAFT</small><strong>{{actual.mode}}</strong><span>{{actual.armed}}</span></div>
         <div class="mission-touch-body">
           <p v-if="reason" class="mission-touch-error" role="status">{{reason}}</p>
           <p v-if="error" class="mission-touch-error" role="alert">{{error}}</p>
-          <template v-if="panel==='modes'">
+          <template v-if="panel==='menu'"><div class="cockpit-menu-grid"><button v-for="item in shortcuts" :key="item.kind" @click="open(item.kind)">{{item.label}}<small>{{item.detail}}</small></button></div></template>
+          <template v-else-if="panel==='modes'">
             <p class="mission-touch-note">All modes supported by this aircraft. Highlight shows the reported mode.</p>
             <div class="mission-mode-grid" aria-label="Supported aircraft modes"><button v-for="mode in modes" :key="mode.customMode" :aria-pressed="actual.fresh&&snapshot.telemetry?.mode===mode.name" :disabled="!!reason" @click="submit('mode',{mode:mode.name})">{{mode.name}}<small>{{mode.source==='advertised'?'Aircraft advertised':'Firmware known'}}</small></button></div>
             <p v-if="!modes.length" class="mission-touch-note">Supported modes unavailable.</p>
@@ -60,29 +63,33 @@
         </div>
       </section>
     </div>
+    </CockpitOverlay>
   </div>
 </template>
 <script setup>
+import CockpitOverlay from './CockpitOverlay.vue';
 import FlightUnits from './FlightUnits.vue';
 import FlightUnitInput from './FlightUnitInput.vue';
 import {units,unitLabels,unitText} from './flight-units.mjs';
 import {computed, nextTick, onBeforeUnmount, reactive, ref} from 'vue';
 import {flightAnnunciation, flightAvailability, flightModes, flightRequest, missionExecutionState} from './flight-workflow.mjs';
-const props=defineProps({snapshot:{type:Object,default:()=>({})},available:Boolean,selectedTarget:Object,options:{type:Object,default:()=>({})}});
+const props=defineProps({snapshot:{type:Object,default:()=>({})},available:Boolean,compact:Boolean,selectedTarget:Object,options:{type:Object,default:()=>({})}});
 const emit=defineEmits(['request','pick-target','option']);
 const selectedUnits=computed(()=>units(props.options));
 const editGeneration=ref(null);
 const panel=ref(null),targetKind=ref('altitude'),error=ref(''),dialog=ref(null);
+const fromMenu=ref(false);
 const form=reactive({headingDeg:'',turnAccelerationMps2:2,lat:'',lon:'',altitudeM:'',datum:'home',verticalRateMps:0,airspeedMps:'',accelerationMps2:1,radiusM:200,direction:'cw'});
 const shortcuts=[{kind:'direct',label:'Direct-To',detail:'Position'},{kind:'heading',label:'Heading',detail:'True heading'},{kind:'alt-speed',label:'Altitude / Speed',detail:'GUIDED targets'},{kind:'loiter',label:'Loiter',detail:'Circle target'},{kind:'resume',label:'Resume Mission',detail:'AUTO · current item'},{kind:'rtl',label:'RTL',detail:'Return mode'},{kind:'modes',label:'Modes',detail:'All supported'},{kind:'arm',label:'Arm / Disarm',detail:'Aircraft state'}];
 const title=computed(()=>shortcuts.find(item=>item.kind===panel.value)?.label||'Flight controls');
 const missionExecution=computed(()=>missionExecutionState(props.snapshot));
 const actionKind=computed(()=>panel.value==='alt-speed'?targetKind.value:panel.value==='resume'?(missionExecution.value.kind||'resume'):panel.value);
-const reason=computed(()=>panel.value&&editGeneration.value!==props.snapshot.identity?.generation?'The aircraft changed while editing. Close and reopen these controls.':flightAvailability(actionKind.value,props.snapshot,props.available));
+const reason=computed(()=>panel.value==='menu'?null:panel.value&&editGeneration.value!==props.snapshot.identity?.generation?'The aircraft changed while editing. Close and reopen these controls.':flightAvailability(actionKind.value,props.snapshot,props.available));
 const modes=computed(()=>flightModes(props.snapshot));
 const actual=computed(()=>flightAnnunciation(props.snapshot,props.options));
 let previousFocus=null;
 async function open(kind,target){
+  fromMenu.value=kind!=='menu'&&(panel.value==='menu'||fromMenu.value);
   const aliases={altitude:'alt-speed',airspeed:'alt-speed',speed:'alt-speed',mode:'modes'};
   targetKind.value=['airspeed','speed'].includes(kind)?'speed':'altitude';
   if(!panel.value)previousFocus=document.activeElement;
@@ -92,7 +99,7 @@ async function open(kind,target){
   Object.assign(form,{headingDeg:t.headingDeg??'',lat:t.latitude??'',lon:t.longitude??'',altitudeM:t.relativeAltitudeM??'',datum:'home',airspeedMps:Number.isFinite(t.airspeedKt)?Math.round(t.airspeedKt*.514444*10)/10:''},props.selectedTarget||{},target||{});
   await nextTick();dialog.value?.querySelector('button,input,select')?.focus();
 }
-function close(){panel.value=null;previousFocus?.isConnected&&previousFocus.focus()}
+function close(){panel.value=null;fromMenu.value=false;previousFocus?.isConnected&&previousFocus.focus()}
 function submit(kind,values=form){
   error.value='';
   const blocked=reason.value||flightAvailability(kind,props.snapshot,props.available);

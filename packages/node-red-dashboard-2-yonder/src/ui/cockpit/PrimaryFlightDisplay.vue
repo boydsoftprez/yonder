@@ -154,7 +154,7 @@
     <div v-if="!flight.live" class="pfd-loss" role="status">Flight instruments unavailable</div>
     </div>
     </div>
-    <nav class="pfd-menu-strip" aria-label="PFD touch menu"><button @click="open('menu')">PFD Menu</button><button @click="open('nav')">Mission</button><button @click="open('director')">FD</button><button @click="open('attitude')">Display</button></nav>
+    <nav v-if="options.menuStrip!==false" class="pfd-menu-strip" aria-label="PFD touch menu"><button @click="open('menu')">PFD settings</button><button @click="$emit('navigate','mission')">Flight plan</button><button @click="open('director')">FD</button><button @click="$emit('navigate','settings')">Display</button></nav>
     <footer class="display-foot"><span>Touch an instrument · cyan = local reference</span><span>{{backgroundLabel||'Conventional horizon'}}</span></footer>
     <PfdControlPanel v-if="panel" :key="panel" :kind="panel" :flight="flight" :guidance="guidance" :telemetry="telemetry" :references="references" :options="options" :mission="mission" :terrain-status="terrainStatus" @close="panel=null" @panel="open" @reference="(key,value)=>$emit('reference',key,value)" @option="(key,value)=>$emit('option',key,value)" @navigate="$emit('navigate',$event)"/>
   </section>
@@ -298,7 +298,7 @@ export default {
       Math.max(-126, Math.min(126, (shown(key,props.flight[key]) - shown(key,props.references[key])) * scale)) : null;
     const open = kind => panel.value = kind;
     expose({
-      open
+      open, close:()=>panel.value=null
     });
     const speedTicks = computed(() => tapeTicks(shown('airspeed',props.flight.airspeed), 10, 3).filter(x => x.value >= 0));
     const altitudeTicks = computed(() => tapeTicks(shown('altitude',props.flight.altitude), selectedUnits.value.altitudeUnit==='ft'?100:20, altitudeScale.value));

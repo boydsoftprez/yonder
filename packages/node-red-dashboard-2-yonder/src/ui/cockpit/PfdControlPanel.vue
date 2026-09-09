@@ -1,4 +1,5 @@
 <template>
+<CockpitOverlay @escape="$emit('close')">
 <div class="pfd-modal-scrim" @click.self="$emit('close')">
     <section class="pfd-control-panel" ref="root" role="dialog" aria-modal="true" :aria-label="title" @keydown="keyboard">
       <header><div><small>PFD · TOUCH CONTROL</small><h2>{{title}}</h2></div><button @click="$emit('close')" aria-label="Close PFD controls">×</button></header>
@@ -19,7 +20,7 @@
         <button @click="$emit('panel','attitude')">Attitude & display<small>Transparency · terrain · declutter</small></button><button @click="$emit('panel','director')">Flight director<small>Cue style & visibility</small></button>
         <button @click="$emit('panel','slip')">Slip / skid<small>Ball · sensor status</small></button>
         <button @click="$emit('panel','wind')">Wind<small>Components · arrow · direction</small></button>
-        <button @click="$emit('panel','nav')">Mission navigation<small>Flight plan · direct-to</small></button><button @click="$emit('panel','status')">Aircraft data<small>GPS · battery · source</small></button>
+        <button @click="$emit('panel','nav')">Navigation indications<small>CDI · active guidance</small></button><button @click="navigate('status')">Aircraft status<small>GPS · telemetry · source</small></button>
       </div>
       <div v-else-if="kind==='attitude'" class="pfd-options">
         <FlightUnits :options="options" @option="(key,value)=>$emit('option',key,value)"/>
@@ -29,7 +30,7 @@
         <label class="pfd-option"><span>Pitch ladder</span><input type="checkbox" :checked="options.pitchLadder" @change="$emit('option','pitchLadder',$event.target.checked)"></label>
         <label class="pfd-option"><span>Secondary readouts<small>Pitch / bank and desired track</small></span><input type="checkbox" :checked="options.secondary" @change="$emit('option','secondary',$event.target.checked)"></label>
         <button class="pfd-wide-button" @click="navigate('instrument-layout')">Instrument panel &amp; PFD/MFD layout</button>
-        <button class="pfd-wide-button" @click="navigate('display')">Background, insets &amp; data sources →</button>
+        <button class="pfd-wide-button" @click="navigate('sources')">Map, terrain &amp; data →</button>
         <button class="pfd-wide-button" @click="$emit('panel','director')">Flight director settings →</button>
         <button class="pfd-wide-button" @click="$emit('panel','wind')">Wind display settings →</button>
         <button class="pfd-wide-button" @click="$emit('panel','slip')">Slip / skid ball settings →</button>
@@ -73,7 +74,7 @@
         <dl class="pfd-data-list"><div><dt>Navigation source</dt><dd>{{guidance.preview?'Local preview':guidance.guidanceSource||'MAVLink'}}</dd></div><div><dt>Active item / mode</dt><dd>{{guidance.targetName||(guidance.seq===null||guidance.seq===undefined?'—':'WP'+String(guidance.seq).padStart(3,'0'))}}</dd></div><div><dt>{{guidance.trackTitle||'Desired track'}}</dt><dd>{{guidance.valid&&Number.isFinite(guidance.radialValid?guidance.pathBearingDeg:guidance.desiredTrackDeg)?fmt(guidance.radialValid?guidance.pathBearingDeg:guidance.desiredTrackDeg)+'° TRUE':'—'}}</dd></div><div><dt>Distance</dt><dd>{{guidance.valid?fmt(guidance.distanceM/1852,2)+' NM':'—'}}</dd></div></dl>
         <p v-if="guidance.radialValid" class="pfd-control-note">GUIDED loiter: the magenta pointer identifies the circle center. The crossbar moves toward the center when outside the requested circle, and away when inside. This is radial path error, not a straight-leg course deviation.</p>
         <p class="pfd-control-note" v-if="!guidance.valid">{{guidance.reason||'Waiting for mission guidance'}}</p>
-        <div class="pfd-menu-grid"><button @click="navigate('mission')">Mission flight plan</button><button @click="navigate('direct')">Direct-to preview</button><button @click="navigate('waypoints')">Mission waypoints</button><button @click="navigate('settings')">Map settings</button></div>
+        <div class="pfd-menu-grid"><button @click="navigate('mission')">Flight plan</button><button @click="navigate('direct')">Direct-To</button><button @click="navigate('sources')">Map & data settings</button></div>
       </div>
       <div v-else-if="kind==='status'" class="pfd-options">
         <dl class="pfd-data-list"><div><dt>Source</dt><dd>{{telemetry.source||'Waiting'}}</dd></div><div><dt>Instruments</dt><dd>{{flight.live?'Live':'Unavailable'}}</dd></div><div><dt>Mode / arm state</dt><dd>{{flight.live?(telemetry.mode+' / '+(telemetry.armed?'Armed':'Disarmed')):'—'}}</dd></div><div><dt>GPS fix / satellites</dt><dd>{{flight.live?fmt(telemetry.fixType)+' / '+fmt(telemetry.satellites):'—'}}</dd></div><div><dt>Battery</dt><dd>{{flight.live?fmt(telemetry.batteryV,1):'—'}} V · {{flight.live?fmt(telemetry.batteryPercent):'—'}}%</dd></div><div><dt>Current</dt><dd>{{flight.live?fmt(telemetry.currentA,1):'—'}} A</dd></div><div><dt>Terrain</dt><dd>{{terrainStatus?.message||'Off'}}</dd></div></dl>
@@ -81,8 +82,10 @@
       </div>
     </section>
   </div>
+</CockpitOverlay>
 </template>
 <script>
+import CockpitOverlay from './CockpitOverlay.vue';
 // Touch controls for the local Yonder display, not autopilot commands.
 // SPDX-License-Identifier: GPL-3.0-or-later
 import {
@@ -103,7 +106,7 @@ import {
   missionAltitudeFt
 } from './pfd-controls.mjs';
 export default {
-  components:{FlightUnits},
+  components:{CockpitOverlay,FlightUnits},
   props: ['kind', 'flight', 'guidance', 'telemetry', 'references', 'options', 'mission', 'terrainStatus'],
   emits: ['close', 'reference', 'option', 'navigate', 'panel'],
   setup(props, {

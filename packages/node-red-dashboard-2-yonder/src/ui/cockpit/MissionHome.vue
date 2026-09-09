@@ -1,5 +1,6 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <template>
+<CockpitOverlay @escape="$emit('close')">
  <div class="mission-touch-scrim" @click.self="$emit('close')">
   <section ref="root" class="mission-touch" role="dialog" aria-modal="true" aria-label="Mission home" @keydown="keyboard">
    <header class="mission-touch-header"><div><small>MISSION PLANNING · AIRCRAFT REFERENCE</small><h2>Home</h2></div><button class="mission-touch-close" aria-label="Close home editor" @click="$emit('close')">×</button></header>
@@ -31,8 +32,10 @@
    </form>
   </section>
  </div>
+</CockpitOverlay>
 </template>
 <script setup>
+import CockpitOverlay from './CockpitOverlay.vue';
 import {ref,reactive,computed,onMounted,onBeforeUnmount,nextTick} from 'vue';
 import FlightUnitInput from './FlightUnitInput.vue';
 import {unitText} from './flight-units.mjs';

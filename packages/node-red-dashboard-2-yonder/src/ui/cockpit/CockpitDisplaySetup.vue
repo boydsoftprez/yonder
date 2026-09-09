@@ -1,5 +1,6 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <template>
+<CockpitOverlay @escape="$emit('close')">
  <div class="cockpit-scrim" @click.self="$emit('close')" @keydown="keyboard">
   <section ref="dialog" class="cockpit-dialog cockpit-display-setup" role="dialog" aria-modal="true" aria-label="Display setup">
    <header><h2>Display setup</h2><button aria-label="Close display setup" @click="$emit('close')">×</button></header>
@@ -17,8 +18,10 @@
    </div>
   </section>
  </div>
+</CockpitOverlay>
 </template>
 <script setup>
+import CockpitOverlay from './CockpitOverlay.vue';
 import {ref,nextTick,onMounted,onBeforeUnmount} from 'vue';
 import FlightUnits from './FlightUnits.vue';
 defineProps({config:Object,flightOptions:Object});const emit=defineEmits(['option','flight-option','page','reset','close']);

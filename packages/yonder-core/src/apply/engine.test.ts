@@ -54,6 +54,38 @@ function changed(): Config {
 }
 
 describe("ApplyEngine", () => {
+  it("keeps Day/Night requests within the appearance renderer even when hardware is unavailable", async () => {
+    const appearance = renderer("console");
+    const hardware = { name: "network", render: vi.fn(async () => { throw new Error("modem unavailable"); }) };
+    const e = new ApplyEngine({ configPath, journalPath, renderers: [hardware, appearance], appearanceRenderer: appearance });
+    const c = structuredClone(DEFAULT_CONFIG); c.ui.theme = "night";
+    await e.apply(c, { appearanceOnly: true });
+    expect(loadConfig(configPath).ui.theme).toBe("night");
+    expect(e.status().state).toBe("confirmed");
+    expect(hardware.render).not.toHaveBeenCalled();
+    expect(appearance.calls.map(c => c.ui.theme)).toEqual(["night"]);
+    await e.apply(c, { appearanceOnly: true }); // Same choice can repair a stale stylesheet.
+    expect(hardware.render).not.toHaveBeenCalled();
+  });
+  it("does not let the appearance hint skip a network or other configuration change", async () => {
+    const appearance = renderer("console");
+    const hardware = { name: "network", render: vi.fn(async () => { throw new Error("hardware failure"); }) };
+    const e = new ApplyEngine({ configPath, journalPath, renderers: [hardware, appearance], appearanceRenderer: appearance });
+    await expect(e.apply(changed(), { appearanceOnly: true })).rejects.toThrow("hardware failure");
+    expect(hardware.render).toHaveBeenCalled();
+    expect(loadConfig(configPath).system.hostname).toBe(DEFAULT_CONFIG.system.hostname);
+  });
+  it("rolls back a failed appearance write within the same renderer scope", async () => {
+    const hardware = renderer("network"); const seen: string[] = [];
+    const appearance = { name: "console", render: async (c: Config) => { seen.push(c.ui.theme); if (c.ui.theme === "night") throw new Error("theme write failed"); } };
+    const e = new ApplyEngine({ configPath, journalPath, renderers: [hardware, appearance], appearanceRenderer: appearance });
+    const c = structuredClone(DEFAULT_CONFIG); c.ui.theme = "night";
+    await expect(e.apply(c, { appearanceOnly: true })).rejects.toThrow("theme write failed");
+    expect(seen).toEqual(["night", "day"]);
+    expect(hardware.calls).toEqual([]);
+    expect(loadConfig(configPath).ui.theme).toBe("day");
+    expect(e.status().state).toBe("idle");
+  });
   it("initializes telemetry and video at boot even when the network render fails", async () => {
     const telemetry = renderer("telemetry");
     const video = renderer("video");

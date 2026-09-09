@@ -1,0 +1,16 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<svg xmlns="http://www.w3.org/2000/svg" width="468" height="280" viewBox="-8 -8 468 280" role="img" aria-label="Yonder" focusable="false"><defs>
+    <filter id="yonder-brand-day-shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="3" stdDeviation="2" flood-color="#000000" flood-opacity=".24"/>
+    </filter>
+    <linearGradient id="yonder-brand-day-blue" x1="0" y1="0" x2=".2" y2="1">
+      <stop stop-color="#5e9bc3"/>
+      <stop offset=".5" stop-color="#2c5f8f"/>
+      <stop offset="1" stop-color="#234c70"/>
+    </linearGradient>
+    <linearGradient id="yonder-brand-day-ink" x1="0" y1="0" x2=".15" y2="1">
+      <stop stop-color="#555c62"/>
+      <stop offset=".5" stop-color="#292e33"/>
+      <stop offset="1" stop-color="#3d444a"/>
+    </linearGradient>
+  </defs><g filter="url(#yonder-brand-day-shadow)"><g stroke="#ffffff" stroke-opacity=".22" stroke-width="1.4" stroke-linejoin="round" paint-order="stroke fill"><path fill="url(#yonder-brand-day-blue)" d="M16 164 188 75 170 162 0 204Z M264 75 436 164 452 204 282 162Z"/><path fill="url(#yonder-brand-day-ink)" d="M226 0 251 45 278 175 233 264V117L226 103 219 117V264L174 175 201 45Z"/></g></g></svg>

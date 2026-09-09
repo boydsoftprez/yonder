@@ -74,9 +74,9 @@ describe('touch configuration', () => {
     let fullscreen:Element|null=frame;Object.defineProperty(document,'fullscreenElement',{configurable:true,get:()=>fullscreen});
     try{
       await wrapper.get('[aria-label="Configure instruments"]').trigger('click');
-      expect(document.querySelector('.instrument-editor-scrim')?.parentElement).toBe(frame);
+      expect(document.querySelector('.instrument-editor-scrim')?.closest('[data-cockpit-overlay]')?.parentElement).toBe(frame);
       fullscreen=null;document.dispatchEvent(new Event('fullscreenchange'));await wrapper.vm.$nextTick();
-      expect(document.querySelector('.instrument-editor-scrim')?.parentElement).toBe(document.body);
+      expect(document.querySelector('.instrument-editor-scrim')?.closest('[data-cockpit-overlay]')?.parentElement).toBe(document.body);
       await new DOMWrapper(document.body).get('[aria-label="Cancel instrument changes"]').trigger('click');
       expect(document.querySelector('.instrument-editor-scrim')).toBeNull();expect(wrapper.emitted('update:config')).toBeUndefined();
     }finally{wrapper.unmount();wrappers.splice(wrappers.indexOf(wrapper),1);frame.remove();if(old)Object.defineProperty(document,'fullscreenElement',old);else delete (document as any).fullscreenElement;}
@@ -88,7 +88,7 @@ describe('touch configuration', () => {
     (launch.element as HTMLElement).focus();
     await launch.trigger('click');
     const scrim = document.querySelector('.instrument-editor-scrim')!;
-    expect(scrim.parentElement).toBe(document.body);
+    expect(scrim.closest('[data-cockpit-overlay]')?.parentElement).toBe(document.body);
     expect(wrapper.element.contains(scrim)).toBe(false);
     const editor = new DOMWrapper(scrim);
     await editor.get('[aria-label^="Edit slot 2:"]').trigger('click');

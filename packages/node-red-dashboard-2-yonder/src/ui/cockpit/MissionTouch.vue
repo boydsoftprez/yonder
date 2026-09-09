@@ -1,5 +1,6 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <template>
+<CockpitOverlay @escape="$emit('close')">
 <div class="mission-touch-scrim" @click.self="$emit('close')">
   <section ref="root" class="mission-touch" role="dialog" aria-modal="true" :aria-label="title" @keydown="keyboard">
     <header class="mission-touch-header"><button v-if="view!=='context'" class="mission-touch-back" @click="view='context';localError=''" aria-label="Back to mission actions">‹</button><div><small>{{draft?'LOCAL DRAFT':'MISSION CONTROL'}} · AIRCRAFT</small><h2>{{title}}</h2></div><button class="mission-touch-close" @click="$emit('close')" aria-label="Close mission controls">×</button></header>
@@ -34,12 +35,10 @@
       <p v-if="draft&&uploadStatus?.ready===false" class="mission-touch-note" role="status">{{uploadStatus.reason}}</p>
       <div class="mission-action-grid mission-compact-actions"><button :disabled="commandDisabled" @click="$emit('read')">Read aircraft mission<small>Keep this draft; refresh the controller mission and home</small></button><button :disabled="pending||!canUndo" @click="$emit('undo')">Undo edit</button><button :disabled="!mission" @click="$emit('export')">Export .waypoints</button><button class="mission-execute" :disabled="commandDisabled||!draft||!mission||uploadStatus?.ready===false" @click="$emit('upload')">Upload draft to aircraft<small>Transfer, then verify readback</small></button><button :disabled="pending||!draft" @click="$emit('use-live')">Show aircraft mission<small>Return to the received mission</small></button></div>
       <template v-if="!selected&&selection?.lat===undefined">
-        <div class="mission-touch-section-label">FLIGHT CONTROLS · AIRCRAFT</div>
-        <div class="mission-action-grid mission-compact-actions"><button class="mission-execute" :disabled="commandDisabled||sitl.armed===true" @click="send({action:'arm'})">Arm aircraft</button><button class="mission-execute" :disabled="commandDisabled||sitl.armed!==true" @click="send({action:'disarm'})">Disarm aircraft</button></div>
         <button class="mission-touch-wide mission-execute" :disabled="commandDisabled||draft||!mission" @click="$emit('start')">Start aircraft mission<small>Explicit start request · does not silently arm</small></button>
         <p v-if="draft" class="mission-touch-note">You are viewing a local draft. Upload and verify your changes first. To start the uploaded mission, choose Show aircraft mission, then reopen Mission controls.</p>
         <p v-else-if="!mission" class="mission-touch-note">Read and verify the aircraft mission before starting.</p>
-        <div class="mission-mode-grid" role="group" aria-label="Aircraft flight mode"><button v-for="mode in (sitl.modes||[])" :key="mode" class="mission-execute" :disabled="commandDisabled" :aria-pressed="sitl.mode===mode" @click="send({action:'mode',mode})">{{mode}}</button></div>
+        <button class="mission-touch-wide" @click="$emit('flight-controls',{kind:'menu'})">Flight controls…<small>Modes · arming · heading · altitude and speed</small></button>
       </template>
       <button class="mission-touch-wide mission-execute" :disabled="commandDisabled" @click="send({action:'mission-clear'})">Clear aircraft mission…<small>Review removal and verify readback</small></button><p class="mission-touch-note">Draft edits stay in this browser until uploaded. An accepted command response is separate from actual mode, mission progress and peripheral effects.</p>
     </div>
@@ -84,8 +83,10 @@
     </div>
   </section>
   </div>
+</CockpitOverlay>
 </template>
 <script>
+import CockpitOverlay from './CockpitOverlay.vue';
 // Touch mission authoring and explicit commands for the connected aircraft.
 // SPDX-License-Identifier: GPL-3.0-or-later
 import {
@@ -119,7 +120,7 @@ const datumLabel = frame => ({
   11: 'above terrain'
 } [frame] || 'frame ' + frame);
 export default {
-  components:{FlightUnitInput,FlightUnits},
+  components:{CockpitOverlay,FlightUnitInput,FlightUnits},
   props: {
     mission: Object,
     options:{type:Object,default:()=>({})},
