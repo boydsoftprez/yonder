@@ -300,6 +300,26 @@ const argvOf = (calls: string[][], verb: string, name: string) =>
   calls.find((c) => c[1] === "connection" && c[2] === verb && c[3] === name);
 
 describe("NetworkRenderer", () => {
+  it("reads modem routes on the IP interface and reapplies the NetworkManager control device", async () => {
+    const config = structuredClone(DEFAULT_CONFIG);
+    config.network.ap.enabled = false; config.network.modem.enabled = true;
+    for (const oldMetric of [700, 800]) {
+      const { renderer, calls } = harness({
+        devices: "cdc-wdm0:gsm:connected:yonder-modem\n", connections: [MODEM_CONNECTION],
+        fails: {
+          "nmcli -g GENERAL.IP-IFACE device show cdc-wdm0": { code: 0, stdout: "wwan0\n", stderr: "" },
+          "ip -j -4 route show default dev cdc-wdm0": { code: 1, stdout: "", stderr: 'Cannot find device "cdc-wdm0"' },
+          "ip -j -6 route show default dev cdc-wdm0": { code: 1, stdout: "", stderr: 'Cannot find device "cdc-wdm0"' },
+          "ip -j -4 route show default dev wwan0": { code: 0, stdout: JSON.stringify([{ dst: "default", metric: oldMetric }]), stderr: "" },
+          "ip -j -6 route show default dev wwan0": { code: 0, stdout: "[]", stderr: "" },
+        },
+      });
+      await renderer.render(config);
+      expect(calls.some(c => c[0] === "ip" && c.includes("cdc-wdm0"))).toBe(false);
+      expect(calls.some(c => c.join(" ") === "ip -j -4 route show default dev wwan0")).toBe(true);
+      expect(calls.some(c => c.join(" ") === "nmcli device reapply cdc-wdm0")).toBe(oldMetric !== 700);
+    }
+  });
   it("takes changed default-route metrics live without reapplying already-correct routes", async () => {
     const config = structuredClone(DEFAULT_CONFIG); config.network.ap.enabled = false;
     for (const oldMetric of [100, 800]) {

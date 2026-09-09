@@ -1093,6 +1093,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
     configPath: opts.configPath,
     journalPath: opts.journalPath,
     renderers: [...opts.renderers, ...netRenderers],
+    ...(built?.consoleRenderer ? { appearanceRenderer: built.consoleRenderer } : {}),
     renderTimeoutMs: opts.renderTimeoutMs,
     timeoutMs: windows.timeout * 1000,
     radioTimeoutMs: windows.radioTimeout * 1000,
