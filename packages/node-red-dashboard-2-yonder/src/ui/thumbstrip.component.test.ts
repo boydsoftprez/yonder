@@ -109,5 +109,6 @@ it('shows real thumbnail age alongside the source caption, never inventing an ag
   ] } });
   const rows = w.findAll('.y-strip__thumb');
   expect(rows[0].text()).toContain('ACCESSORY · running'); expect(rows[0].text()).toContain('3 s ago');
-  expect(rows[1].find('.y-strip__img').exists()).toBe(false); expect(rows[1].find('.y-strip__age').exists()).toBe(false);
+  expect(rows[1].get('.y-strip__img').attributes('style') ?? '').not.toContain('url(');
+  expect(rows[1].find('.y-strip__age').exists()).toBe(false);
 });

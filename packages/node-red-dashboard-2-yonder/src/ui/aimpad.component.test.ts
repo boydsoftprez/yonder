@@ -106,6 +106,7 @@ function goHidden(): void {
 
 afterEach(() => {
   Object.defineProperty(document, "hidden", { configurable: true, value: false });
+  localStorage.clear();
 });
 
 function slews(w: VueWrapper): Array<{ pan: number; tilt: number; seq: number; gesture: string }> {
@@ -130,6 +131,52 @@ describe("mounting", () => {
     expect(w.find(".y-aim__puck-core").exists()).toBe(true);
     expect(Number(w.find(".y-aim__puck-core").attributes("cx"))).toBe(CENTER);
     expect(Number(w.find(".y-aim__puck-core").attributes("cy"))).toBe(CENTER);
+  });
+});
+
+describe('stick expo', () => {
+  it('defaults to half expo, preserves directions and reaches the reported maximum at full throw', () => {
+    const w = mount(YonderAimPad, { props: { maxRate: 10 } });
+    dialOf(w).getBoundingClientRect = () => ({ left: 0, top: 0, width: DIAL_SIZE, height: DIAL_SIZE }) as DOMRect;
+    expect(w.get('input[aria-label="Stick expo"]').element.value).toBe('50');
+    const halfThrow = (DEAD + RIM) / 2;
+    down(dialOf(w), halfThrow, 0);
+    expect(slews(w).at(-1)?.pan).toBeCloseTo(3.125);
+    move(dialOf(w), -halfThrow, 0);
+    expect(slews(w).at(-1)?.pan).toBeCloseTo(-3.125);
+    move(dialOf(w), 0, -halfThrow);
+    expect(slews(w).at(-1)?.tilt).toBeCloseTo(3.125);
+    move(dialOf(w), 400, -400);
+    const last = slews(w).at(-1)!;
+    expect(Math.hypot(last.pan, last.tilt)).toBeCloseTo(10);
+    expect(last.pan).toBeCloseTo(last.tilt);
+    w.unmount();
+  });
+
+  it('supports linear and cubic response and remembers the browser preference', async () => {
+    const w = pad({});
+    await w.get('input[aria-label="Stick expo"]').setValue('0');
+    down(dialOf(w), (DEAD + RIM) / 2, 0);
+    expect(slews(w).at(-1)?.pan).toBeCloseTo(15);
+    await w.get('input[aria-label="Stick expo"]').setValue('100');
+    expect(stops(w)).toHaveLength(1);
+    move(dialOf(w), RIM, 0); // changing the response cannot resume the old hold
+    expect(slews(w)).toHaveLength(1);
+    down(dialOf(w), (DEAD + RIM) / 2, 0);
+    expect(slews(w).at(-1)?.pan).toBeCloseTo(3.75);
+    fire(dialOf(w), 'pointerup');
+    expect(stops(w)).toHaveLength(2);
+    w.unmount();
+    const restored = pad({});
+    expect(restored.get('input[aria-label="Stick expo"]').element.value).toBe('100');
+    restored.unmount();
+  });
+
+  it.each(['NaN', '-10', '101', ''])('uses the default for an invalid saved preference %s', saved => {
+    localStorage.setItem('yonder:aim:expo', saved);
+    const w = pad({});
+    expect(w.get('input[aria-label="Stick expo"]').element.value).toBe('50');
+    w.unmount();
   });
 });
 

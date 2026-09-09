@@ -79,16 +79,20 @@
         </div>
       </div>
 
-        <div v-if="reason || aimRefusal" class="y-pic__reason" role="status">{{ aimRefusal || reason }}</div>
-        <div v-if="flashing" class="y-pic__saved" role="status"><i class="y-pic__saved-dot" aria-hidden="true"></i>Saved · to {{ savedTo }}</div>
+        <div class="y-pic__notices">
+            <div v-if="reason || aimRefusal" class="y-pic__reason" role="status">{{ aimRefusal || reason }}</div>
+            <div v-if="flashing" class="y-pic__saved" role="status"><i class="y-pic__saved-dot" aria-hidden="true"></i>Saved · to {{ savedTo }}</div>
+        </div>
 
-        <YonderThumbStrip
-            v-if="cameras.length"
-            class="y-pic__strip"
-            :cameras="cameras"
-            :downlink="downlink"
-            @go="onThumbGo"
-        />
+        <div class="y-pic__thumbnails">
+            <YonderThumbStrip
+                v-if="cameras.length"
+                class="y-pic__strip"
+                :cameras="cameras"
+                :downlink="downlink"
+                @go="onThumbGo"
+            />
+        </div>
     </div>
 </template>
 
@@ -1510,7 +1514,8 @@ export default {
     height: 100%;
     min-height: 0;
     display: grid;
-    grid-template-rows: minmax(0, 1fr) auto auto auto;
+    /* Status/thumbnail arrivals must not resize the image while aiming. */
+    grid-template-rows: minmax(0, 1fr) 34px 148px;
     grid-template-columns: minmax(0, 1fr);
 }
 /* **Takes the shape of the video it is showing, and never more room than it
@@ -1735,6 +1740,7 @@ export default {
 /* The strip sits *beneath* the picture, not on top of it — see this file's
    own top-of-file doc comment on why it is a normal-flow sibling of
    `.y-pic__frame` rather than one more absolutely-positioned overlay. */
+.y-pic__notices, .y-pic__thumbnails { min-width: 0; min-height: 0; overflow: auto; }
 .y-pic__strip { margin-top: 8px; }
 
 .y-pic__reason { color: var(--yonder-waiting, #ffcf28); }

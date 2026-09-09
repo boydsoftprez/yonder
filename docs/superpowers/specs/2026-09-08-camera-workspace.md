@@ -44,6 +44,13 @@ inhibition, page loss and real control-generation changes still retire the gestu
 The first rate follows its grant immediately; subsequent requests are paced from
 the preceding request start and remain single-flight. Rate limits are unchanged.
 
+The pad also provides browser-local stick expo from 0% (linear) to 100% (cubic),
+defaulting to 50%. Apply the curve to radial magnitude after the dead zone so
+directions and the full-throw rate stay unchanged. Changing expo ends the current
+gesture; it adds no time smoothing or delayed stop. Invalid or unavailable browser
+storage uses the default. The picture reserves space for notices and thumbnails
+so their arrival or disappearance cannot resize the camera image during aiming.
+
 A media timestamp discontinuity changes the media epoch; it does not invalidate
 fresh native camera/gimbal control telemetry. Standalone Aim uses the USB control
 epoch. Picture gestures still use the media epoch and end on their own media loss.

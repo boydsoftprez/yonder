@@ -9,7 +9,7 @@
             :class="{ on: cam.active }"
             @click="$emit('go', cam.id)"
         >
-            <span v-if="cam.thumbSrc" class="y-strip__img" :style="{ backgroundImage: 'url(' + cam.thumbSrc + ')' }" />
+            <span class="y-strip__img" :style="cam.thumbSrc ? { backgroundImage: 'url(' + cam.thumbSrc + ')' } : {}" aria-hidden="true" />
             <span class="y-strip__cap">{{ cam.caption || (cam.active ? 'Live' : ('Still · ' + (cam.ageSeconds ?? 0) + ' s')) }}</span>
             <span v-if="cam.thumbSrc && Number.isFinite(cam.ageSeconds) && cam.ageSeconds >= 0" class="y-strip__age">{{ cam.ageSeconds }} s ago</span>
             <span v-if="cam.name" class="y-strip__name">{{ cam.name }}</span>
@@ -92,6 +92,7 @@ export default {
 .y-strip__img {
     width: 100%;
     height: 46px;
+    flex-shrink: 0;
     border-radius: 2px;
     background-color: var(--yonder-display, #04060a);
     background-size: cover;

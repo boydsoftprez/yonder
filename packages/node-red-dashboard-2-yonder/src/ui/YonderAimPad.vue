@@ -25,6 +25,13 @@
             <circle class="y-aim__puck-core" :cx="px" :cy="py" r="6.5" />
         </svg>
 
+        <label class="y-aim__expo">
+            <span class="y-aim__expo-label">Stick expo <output>{{ expo }}%</output></span>
+            <input type="range" aria-label="Stick expo" min="0" max="100" step="5"
+                   :value="expo" :aria-valuetext="`${expo}% expo`" @input="changeExpo" />
+            <span class="y-aim__expo-help">More expo softens the centre. Full throw keeps the maximum rate.</span>
+        </label>
+
         <div v-if="limited" class="y-aim__limit"><i class="y-aim__limit-dot" />At the limit</div>
         <div v-if="inhibited" class="y-aim__reason">{{ inhibited }}</div>
     </div>
@@ -143,6 +150,19 @@ const DEAD = 15
 const RIM = 44
 /** Degrees per second at the rim. */
 const MAX_RATE = 30
+const EXPO_KEY = 'yonder:aim:expo'
+const DEFAULT_EXPO = 50
+
+function savedExpo () {
+    try {
+        const saved = localStorage.getItem(EXPO_KEY)
+        if (saved !== null && saved.trim() !== '') {
+            const value = Number(saved)
+            if (Number.isFinite(value) && value >= 0 && value <= 100) return value
+        }
+    } catch { /* Browser preferences can be unavailable; aiming still works. */ }
+    return DEFAULT_EXPO
+}
 
 /**
  * A fresh id for a new gesture — module-scoped so two mounted pads (and,
@@ -179,6 +199,7 @@ export default {
         px: CENTER,
         py: CENTER,
         pointerId: null,
+        expo: savedExpo(),
         DIAL_SIZE
     }),
     computed: {
@@ -221,6 +242,14 @@ export default {
         this.onEnd()
     },
     methods: {
+        changeExpo (e) {
+            const value = Number(e.target.value)
+            if (!Number.isFinite(value) || value < 0 || value > 100) return
+            // A response change ends existing intent; it cannot alter a held command.
+            this.onEnd()
+            this.expo = value
+            try { localStorage.setItem(EXPO_KEY, String(value)) } catch { /* Keep this session's preference. */ }
+        },
         /** A pointer event's client coordinates, converted to this pad's
          * own geometry: null in the dead zone, false for unusable layout. */
         at (e) {
@@ -236,14 +265,18 @@ export default {
             if (!Number.isFinite(d)) return false
             if (d <= DEAD) return null
             const k = Math.min(1, (d - DEAD) / (RIM - DEAD))
+            // Shape radial magnitude, preserving diagonals and the full-throw cap.
+            // 0% is linear; 100% is cubic. There is no time smoothing or stop tail.
+            const expo = this.expo / 100
+            const shaped = (1 - expo) * k + expo * k * k * k
             const ux = x / d
             const uy = y / d
             return {
                 x: CENTER + ux * Math.min(d, RIM),
                 y: CENTER + uy * Math.min(d, RIM),
                 // Screen y grows downward; tilt does not, hence the sign flip.
-                panRate: ux * k * (Number.isFinite(this.maxRate) && this.maxRate > 0 ? Math.min(this.maxRate, MAX_RATE) : 0),
-                tiltRate: -uy * k * (Number.isFinite(this.maxRate) && this.maxRate > 0 ? Math.min(this.maxRate, MAX_RATE) : 0)
+                panRate: ux * shaped * (Number.isFinite(this.maxRate) && this.maxRate > 0 ? Math.min(this.maxRate, MAX_RATE) : 0),
+                tiltRate: -uy * shaped * (Number.isFinite(this.maxRate) && this.maxRate > 0 ? Math.min(this.maxRate, MAX_RATE) : 0)
             }
         },
         down (e) {
@@ -334,6 +367,18 @@ export default {
 }
 .y-aim__dial.is-pushing { cursor: grabbing; }
 .y-aim__dial.is-inhibited { cursor: not-allowed; }
+.y-aim__expo {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    width: 200px;
+    max-width: 100%;
+    color: var(--yonder-label, #7f8a95);
+}
+.y-aim__expo-label { display: flex; justify-content: space-between; gap: 12px; font-size: 11px; }
+.y-aim__expo-label output { color: var(--yonder-value, #cdd5dc); font-variant-numeric: tabular-nums; }
+.y-aim__expo input { width: 100%; margin: 0; accent-color: var(--yonder-select, #2ad4f0); }
+.y-aim__expo-help { font-size: 10px; line-height: 1.4; }
 
 .y-aim__ring { fill: none; stroke: var(--yonder-divider, #2b333c); stroke-width: 1; }
 .y-aim__cross { stroke: var(--yonder-divider, #2b333c); stroke-width: 1; fill: none; }
