@@ -2,6 +2,8 @@
 /** R-CAM-11 / R-TEL-15: unknown measurements remain unknown. */
 export interface GimbalAttitude {
   pitch: number; roll: number; yaw: number; mode: number; at: number;
+  /** Camera attitude in the world frame, not body-relative joint travel. */
+  quaternion?: import('./rotation-progress.js').WorldQuaternion | null;
   pitchLimit: boolean; yawLimit: boolean;
   /** Unclassified limit bits (including bit 2), never a verified roll limit. */
   fault: boolean;
@@ -20,6 +22,10 @@ export interface MeasuredAction {
 }
 export interface GuardContext {
   now: number; attitudeMaxAgeMs: number; attitude: GimbalAttitude | null;
+  /** A separate, current installation proof. A world-angle box alone is not portable. */
+  discreteApplicable?: boolean;
+  /** Exact device-native actions established independently of world-angle boxes. */
+  nativeActions?: readonly Exclude<MotionCommand, { kind: 'rate' }>[];
   mount: string | null; envelopes: MeasuredEnvelope[];
   /** Positive public rate to reported attitude, after wire conversion. */
   signs: { pan: 1 | -1 | null; tilt: 1 | -1 | null };
@@ -31,7 +37,7 @@ export interface GuardContext {
 export type GuardReason = 'malformed-command' | 'rate-cap' | 'attitude-missing' | 'attitude-stale'
   | 'attitude-malformed' | 'mode-unknown' | 'fault' | 'envelope-unknown' | 'outside-envelope'
   | 'sign-unknown' | 'stop-allowance-unknown' | 'stop-margin' | 'limit-direction-unknown'
-  | 'into-limit' | 'at-limit' | 'trajectory-unverified' | 'mode-unobserved';
+  | 'into-limit' | 'at-limit' | 'trajectory-unverified' | 'mode-unobserved' | 'discrete-mount-unverified';
 export type GuardResult = { allowed: true } | { allowed: false; reason: GuardReason };
 const axes = ['yaw', 'pitch', 'roll'] as const;
 const refuse = (reason: GuardReason): GuardResult => ({ allowed: false, reason });
@@ -63,32 +69,24 @@ export function guard(cmd: MotionCommand, c: GuardContext): GuardResult {
     || [a.pitchLimit, a.yawLimit, a.fault].some(value => typeof value !== 'boolean')) return refuse('attitude-malformed');
   if (![0, 1, 2].includes(a.mode)) return refuse('mode-unknown');
   if (a.fault) return refuse('fault');
-  const envelope = c.envelopes.find(e => e.mount === c.mount && e.mode === a.mode);
-  if (!c.mount || !envelope) return refuse('envelope-unknown');
   if (cmd.kind === 'rate') {
     if (![c.intentAllowanceMs, c.deviceStopAllowanceMs].every(v => Number.isFinite(v) && v > 0)) return refuse('stop-allowance-unknown');
-    const seconds = (c.intentAllowanceMs + c.deviceStopAllowanceMs) / 1000;
-    for (const [input, axis, limit] of [['pan', 'yaw', a.yawLimit], ['tilt', 'pitch', a.pitchLimit]] as const) {
-      if (cmd[input] === 0) continue;
-      const bounds = envelope[axis];
-      if (!boundsValid(bounds)) return refuse('envelope-unknown');
-      if (a[axis] < bounds[0] || a[axis] > bounds[1]) return refuse('outside-envelope');
-      const sign = c.signs[input];
-      if (sign !== 1 && sign !== -1) return refuse('sign-unknown');
-      const velocity = cmd[input] * sign;
-      if (limit) {
-        const into = c.limitDirections[axis];
-        if (into !== 1 && into !== -1) return refuse('limit-direction-unknown');
-        if (Math.sign(velocity) === into) return refuse('into-limit');
-      }
-      const stopped = a[axis] + velocity * seconds;
-      if (stopped < bounds[0] || stopped > bounds[1]) return refuse('stop-margin');
-    }
+    // Native 0x80 rate control retains the camera's own clamps. Ground Euler
+    // angles and the old sign/range profile cannot establish joint travel after
+    // body reorientation. Neither the flagged joint's command-axis mapping nor
+    // an escape direction is verified across orientations, so any lit flag
+    // inhibits all nonzero motion, including a proposed other-axis escape.
+    if ((cmd.pan !== 0 || cmd.tilt !== 0) && (a.yawLimit || a.pitchLimit)) return refuse('limit-direction-unknown');
     return { allowed: true };
   }
+  if (a.pitchLimit || a.yawLimit) return refuse('at-limit');
+  if (c.nativeActions?.some(action => action.kind === cmd.kind
+    && (cmd.kind === 'recentre' || (action.kind === 'mode' && action.mode === cmd.mode)))) return { allowed: true };
+  if (c.discreteApplicable !== true) return refuse('discrete-mount-unverified');
+  const envelope = c.envelopes.find(e => e.mount === c.mount && e.mode === a.mode);
+  if (!c.mount || !envelope) return refuse('envelope-unknown');
   if (!regionValid(envelope)) return refuse('envelope-unknown');
   if (!contains(envelope, a)) return refuse('outside-envelope');
-  if (a.pitchLimit || a.yawLimit) return refuse('at-limit');
   // Measured 4/4c 02 01 recentre also selects Follow mode 2. Its entire
   // certified trajectory must fit both the observed source and that target.
   const targetMode = cmd.kind === 'mode' ? cmd.mode : 2;

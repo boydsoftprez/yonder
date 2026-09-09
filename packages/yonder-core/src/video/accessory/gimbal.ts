@@ -3,6 +3,7 @@ import type { DumlCommand, DumlFrame } from './duml.js';
 import type { AccessoryCommandOptions } from './aoa.js';
 import { Intent, type IntentAdmitted, type IntentClock, type IntentIssued, type LiveIntent } from './intent.js';
 import { guard, type GimbalAttitude, type GuardContext, type GuardReason, type GuardResult, type MotionCommand } from './guard.js';
+import { normalizedQuaternion, RotationProgress } from './rotation-progress.js';
 
 /** Caller supplies only CRC-validated DUML frames, and the transport's monotonic clock. */
 export function decodeGimbalAttitude(frame: DumlFrame, clock: Pick<IntentClock, 'now'>): GimbalAttitude | null {
@@ -12,7 +13,8 @@ export function decodeGimbalAttitude(frame: DumlFrame, clock: Pick<IntentClock, 
   // HG211 captures carry normal status bits 5/7 (0x20/0x80) during proven
   // motion. Preserve faults for unclassified bit 2 and unproven bits 3/4/6.
   return { pitch: p.readInt16LE(0) / 10, roll: p.readInt16LE(2) / 10, yaw: p.readInt16LE(4) / 10,
-    mode: (p[6] >> 6) & 3, at: clock.now(), pitchLimit: !!(p[10] & 1), yawLimit: !!(p[10] & 2), fault: !!(p[10] & 0x5c) };
+    mode: (p[6] >> 6) & 3, at: clock.now(), pitchLimit: !!(p[10] & 1), yawLimit: !!(p[10] & 2), fault: !!(p[10] & 0x5c),
+    quaternion: p.length >= 40 ? normalizedQuaternion([24,28,32,36].map(offset => p.readFloatLE(offset))) : null };
 }
 export type MotionRefusal = { accepted: false; reason: GuardReason | 'busy' | 'unavailable' | 'revoked' | 'write-failed' };
 export interface GimbalControllerOptions {
@@ -20,6 +22,7 @@ export interface GimbalControllerOptions {
   context(): GuardContext;
   /** Resolve only when actual transport I/O completes, never merely on enqueue. */
   write(command: Omit<DumlCommand, 'sequence'>, options: AccessoryCommandOptions): Promise<void>;
+  onMotionNotice?(notice: string | null): void;
   leaseMs?: number;
 }
 /** One per camera. R-CAM-11 / R-CMD-04: repeats only fresh operator intent. */
@@ -33,6 +36,11 @@ export class GimbalController {
   private closed = false;
   private awaitingMode?: { mode: number; after: number; signal: AbortSignal };
   private discrete?: { controller: AbortController; command: Exclude<MotionCommand, { kind: 'rate' }>; deadline: number };
+  private readonly progress = new RotationProgress();
+  private rateEpoch?: Readonly<{ gesture: string; owner: string; generation: number; mode: number }>;
+  private generation = 0;
+  private notice: string | null = null;
+  get motionNotice(): string | null { return this.notice; }
 
   constructor(private readonly options: GimbalControllerOptions) {
     this.leaseMs = options.leaseMs ?? 500;
@@ -41,7 +49,9 @@ export class GimbalController {
   issue(owner: string, clientGesture?: string): IntentIssued | MotionRefusal {
     if (!this.available || this.closed) return { accepted: false, reason: 'unavailable' };
     if (this.discrete) return { accepted: false, reason: 'busy' };
-    return this.intent.issue(owner, clientGesture);
+    const reply = this.intent.issue(owner, clientGesture);
+    if (reply.accepted) { this.rateEpoch = undefined; this.progress.reset(); this.setNotice(null); }
+    return reply;
   }
   admit(owner: string, request: unknown): IntentAdmitted | MotionRefusal {
     if (!this.available || this.closed) return { accepted: false, reason: 'unavailable' };
@@ -50,10 +60,17 @@ export class GimbalController {
     if (!result.accepted) return result;
     const live = this.intent.live();
     if (!live) { this.clearTimer(); return result; }
+    const effective = quantizedRate(live.rate);
+    if (!effective.pan && !effective.tilt) { this.reset(); return { accepted: true, next: null }; }
     const verdict = this.check({ kind: 'rate', ...live.rate });
     if (!verdict.allowed) { this.intent.reset(); this.clearTimer(); return { accepted: false, reason: verdict.reason }; }
+    if (!this.rateEpoch || this.rateEpoch.gesture !== live.gesture) {
+      this.progress.reset();
+      this.rateEpoch = Object.freeze({ gesture: live.gesture, owner: live.owner, generation: this.generation, mode: this.options.context().attitude!.mode });
+    }
     live.signal.addEventListener('abort', () => this.clearTimer(), { once: true });
     this.pump();
+    if (!this.intent.live()) return { accepted: false, reason: 'revoked' };
     return result;
   }
   end(owner: string, gesture: string): void { this.intent.end(owner, gesture); }
@@ -65,9 +82,10 @@ export class GimbalController {
   }
   reset(): void {
     this.clearTimer(); this.intent.reset();
+    this.rateEpoch = undefined; this.progress.reset(); this.generation++;
     this.discrete?.controller.abort(); this.discrete = undefined;
   }
-  disconnect(): void { this.available = false; this.awaitingMode = undefined; this.reset(); }
+  disconnect(): void { this.available = false; this.awaitingMode = undefined; this.reset(); this.setNotice(null); }
   /** Fresh transport traffic permits new operator gestures; it originates no command. */
   connect(): void { if (!this.closed) this.available = true; }
   close(): void { this.closed = true; this.disconnect(); }
@@ -129,8 +147,19 @@ export class GimbalController {
   private rateAdmission(live: LiveIntent): boolean {
     if (!this.available || this.closed || !live.isValid() || this.intent.live() !== live) return false;
     if (!this.check({ kind: 'rate', ...live.rate }).allowed) { this.intent.reset(); this.clearTimer(); return false; }
+    const epoch = this.rateEpoch, context = this.options.context();
+    if (!epoch || epoch.generation !== this.generation) return false;
+    if (context.attitude!.mode !== epoch.mode) {
+      this.cancelMotion('Gimbal mode changed; release and start a new gesture.'); return false;
+    }
+    const notice = this.progress.observe(epoch, context.attitude!, this.options.clock.now());
+    if (notice) { this.cancelMotion(notice); return false; }
     return true;
   }
+  private setNotice(notice: string | null): void {
+    this.notice = notice; this.options.onMotionNotice?.(notice);
+  }
+  private cancelMotion(notice: string): void { this.reset(); this.setNotice(notice); }
   private discreteAdmission(action: NonNullable<GimbalController['discrete']>): boolean {
     if (this.discrete !== action || action.controller.signal.aborted) return false;
     if (!this.available || this.closed || this.options.clock.now() >= action.deadline || !this.check(action.command, action.controller.signal).allowed) {
@@ -154,10 +183,18 @@ export class GimbalController {
     this.timer = this.options.clock.setTimer(Math.max(1, Math.min(cadence, this.freshFor())), () => this.pump());
   }
   private async writeRate(live: LiveIntent): Promise<void> {
+    const epoch = this.rateEpoch;
     try {
       await this.options.write(this.wire({ kind: 'rate', ...live.rate }), {
         signal: live.signal, deadline: live.expiresAt, admission: () => this.rateAdmission(live),
       });
+      // Promise completion is actual endpoint completion, not admission/enqueue.
+      // Renewal preserves the gesture epoch; release, reset and mode/source
+      // changes do not. A late canceled write cannot seed any later window.
+      if (epoch && this.rateEpoch === epoch && epoch.generation === this.generation && !live.signal.aborted && live.isValid()) {
+        const context = this.options.context();
+        this.progress.completed(epoch, quantizedRate(live.rate), this.options.clock.now(), context.attitude?.at ?? this.options.clock.now(), context.deviceStopAllowanceMs);
+      }
     } catch {
       if (!live.signal.aborted) this.disconnect();
     } finally {
@@ -192,4 +229,7 @@ export class GimbalController {
     payload[6] = 0x80;
     return { ...common, commandId: 0x0c, payload };
   }
+}
+function quantizedRate(rate: { pan: number; tilt: number }): { pan: number; tilt: number } {
+  return { pan: Math.trunc(rate.pan * 10) / 10, tilt: Math.trunc(rate.tilt * 10) / 10 };
 }

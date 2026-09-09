@@ -84,7 +84,40 @@ it('admits a fresh public slew through the actual Intent rate shape and preserve
   h.stale(); expect(options.admission()).toBe(false); expect(options.signal.aborted).toBe(true); await h.source.close();
 });
 
-it.each([{ yaw: 89, pitch: 0, flags: 0, pan: -1, tilt: 0 }, { yaw: 0, pitch: 39, flags: 0, pan: 0, tilt: -1 }, { yaw: 0, pitch: 0, flags: 2, pan: -1, tilt: 0 }])(
+it('reports world position without joint bounds and permits measured native actions independently of the obsolete mount profile', async()=>{
+  const h=harness();await h.source.discover();h.live();
+  const payload=Buffer.alloc(40);payload.writeInt16LE(1799,0);payload.writeInt16LE(-1545,4);payload[6]=0x80;payload.writeFloatLE(1,24);
+  h.callbacks().onCommand!(decodeDuml(encodeDuml({sender:4,receiver:2,commandSet:4,commandId:5,payload}))!);
+  expect(h.source.snapshot(h.camera.device)).toMatchObject({attitude:{pitch:179.9,yaw:-154.5},envelope:null,inhibition:null,motionNotice:null,recentre:{allowed:true}});
+  expect(await h.source.aim(h.camera.device,'owner',{op:'recentre'})).toMatchObject({accepted:true});
+  expect(h.device.sendCommand).toHaveBeenCalledOnce();expect((h.device.sendCommand as any).mock.calls[0][0].payload).toEqual(Buffer.from([2,1]));
+  await h.source.close();
+});
+
+it('publishes a terminal no-rotation notice with zero admitted rate and leaves the live source ready for new intent',async()=>{
+  vi.useFakeTimers();const h=harness();
+  const attitude=()=>{const payload=Buffer.alloc(40);payload[6]=0x80;payload[10]=0xa0;payload.writeFloatLE(1,24);
+    h.callbacks().onCommand!(decodeDuml(encodeDuml({sender:4,receiver:2,commandSet:4,commandId:5,payload}))!);};
+  try {
+    await h.source.discover();h.live();attitude();
+    (h.device.sendCommand as any).mockImplementation(async (_cmd:any,options:any)=>{if(!options.admission())throw new Error('refused');});
+    let grant=(await h.source.aim(h.camera.device,'owner',{op:'issue',clientGesture:'one'}) as any).grant;
+    let refusal:string|undefined;
+    for(let seq=1;seq<=30;seq++){
+      const reply=await h.source.aim(h.camera.device,'owner',{op:'slew',...grant,seq,pan:5,tilt:0}) as any;
+      if(!reply.accepted){refusal=reply.reason;break;}grant=reply.next;
+      await settleSource();h.now.value+=100;attitude();await vi.advanceTimersByTimeAsync(100);
+    }
+    expect(h.device.snapshot().state).toBe('live');
+    expect(h.source.snapshot(h.camera.device)).toMatchObject({admitted:{pan:0,tilt:0},inhibition:null});
+    expect(h.source.snapshot(h.camera.device)?.motionNotice).toContain('No camera rotation observed');
+    expect(refusal).toContain('No camera rotation observed');
+    expect(await h.source.aim(h.camera.device,'owner',{op:'issue',clientGesture:'two'})).toMatchObject({accepted:true});
+    expect(h.source.snapshot(h.camera.device)?.motionNotice).toBeNull();
+  }finally{await h.source.close();vi.useRealTimers();}
+});
+
+it.each([{ yaw: 89, pitch: 0, flags: 0, pan: -1, tilt: 0 }, { yaw: 0, pitch: 39, flags: 0, pan: 0, tilt: -1 }])(
   'keeps safe inward/other-axis gestures available at directional boundaries $yaw/$pitch/$flags', async ({ yaw, pitch, flags, pan, tilt }) => {
     const h = harness();
     h.camera.accessory_mount = { mount: 'synthetic', envelopes: [{ mount: 'synthetic', mode: 2, yaw: [-90,90], pitch: [-40,40] }], signs: { pan: 1, tilt: 1 }, limitDirections: { yaw: 1, pitch: 1 }, actions: [] };

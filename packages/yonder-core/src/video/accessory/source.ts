@@ -36,6 +36,12 @@ const clock: IntentClock = {
   setTimer: (ms, fn) => { const timer = setTimeout(fn, ms); timer.unref(); return timer; },
   clearTimer: timer => clearTimeout(timer as ReturnType<typeof setTimeout>),
 };
+// HG211 native actions measured in clear horizontal and upright poses. This is
+// an exact-command policy, not a portable joint trajectory or factory range.
+const HG211_NATIVE_ACTIONS = Object.freeze([
+  Object.freeze({ kind: 'recentre' as const }),
+  ...([0, 1, 2] as const).map(mode => Object.freeze({ kind: 'mode' as const, mode })),
+]);
 type Owned = { device: ReturnType<NonNullable<AccessorySourceOptions['deviceFactory']>>; media: AccessoryMedia;
   camera: CameraController; gimbal: GimbalController; attitude: GimbalAttitude | null; generation: number | null; error: string | null;
   streamGeneration: number; admitted?: { owner: string; gesture: string; pan: number; tilt: number; until: number } };
@@ -104,7 +110,8 @@ export class AccessorySources {
     const writer = new AccessoryWriter(this.clock, (command, options) => device.sendCommand(command, options));
     source = { device, media, attitude: null, generation: null, error: null, streamGeneration: 0,
       camera: new CameraController({ clock: this.clock, write: (cmd, options) => writer.write(cmd, options) }),
-      gimbal: new GimbalController({ clock: this.clock, context: () => this.context(identity, source), write: (cmd, options) => writer.write(cmd, options) }),
+      gimbal: new GimbalController({ clock: this.clock, context: () => this.context(identity, source), write: (cmd, options) => writer.write(cmd, options),
+        onMotionNotice: notice => { if (notice) source.admitted = undefined; } }),
     };
     source.camera.disconnect(); source.gimbal.disconnect(); this.owned.set(identity, source);
     try { source.error = await this.options.mediaCapability?.() ?? null; await media.start(); if (!this.closed) await device.start(); else await media.close(); }
@@ -119,9 +126,12 @@ export class AccessorySources {
   }
   private context(identity: string, source: Owned): GuardContext {
     const profile = this.options.cameras().find(c => c.source === 'accessory' && c.device === identity)?.accessory_mount;
+    const status = source.device.snapshot();
     return { now: this.clock.now(), attitudeMaxAgeMs: 500, attitude: source.attitude,
       mount: profile?.mount ?? null, envelopes: profile?.envelopes ?? [], signs: profile?.signs ?? { pan: null, tilt: null },
-      limitDirections: profile?.limitDirections ?? {}, actions: profile?.actions ?? [], intentAllowanceMs: 500, deviceStopAllowanceMs: 800 };
+      limitDirections: profile?.limitDirections ?? {}, actions: profile?.actions ?? [], intentAllowanceMs: 500, deviceStopAllowanceMs: 800,
+      discreteApplicable: false,
+      nativeActions: status.state === 'live' && status.manufacturer === 'DJI' && status.model === 'HG211' ? HG211_NATIVE_ACTIONS : [] };
   }
   input(identity: string): AccessoryInput | undefined {
     const source = this.owned.get(identity); if (!source) return undefined;
@@ -142,19 +152,18 @@ export class AccessorySources {
       'Tilt +': guard({ kind: 'rate', pan: 0, tilt: 0.1 }, context), 'Tilt −': guard({ kind: 'rate', pan: 0, tilt: -0.1 }, context),
     };
     const admitted = source.admitted;
-    const rate = admitted && admitted.until > this.clock.now() && guard({ kind: 'rate', pan: admitted.pan, tilt: admitted.tilt }, context).allowed
+    const rate = !source.gimbal.motionNotice && admitted && admitted.until > this.clock.now() && guard({ kind: 'rate', pan: admitted.pan, tilt: admitted.tilt }, context).allowed
       ? { pan: admitted.pan, tilt: admitted.tilt } : { pan: 0, tilt: 0 };
     return { ...status, generation: status.generation * 1_000_000 + source.streamGeneration, input: this.input(identity), state: source.camera.readState(), attitude, admitted: rate, directions,
-      mount: context.mount, envelope: context.envelopes.find(e => e.mount === context.mount && e.mode === attitude?.mode) ?? null,
+      mount: context.mount, envelope: null as import('./guard.js').MeasuredEnvelope | null, motionNotice: source.gimbal.motionNotice,
       recentre: guard({ kind: 'recentre' }, context), modes: ([0,1,2] as const).map(mode => guard({ kind: 'mode', mode }, context)),
       inhibition: verdict.allowed ? null : verdict.reason, controls: accessoryControls(source.camera.readState()), descriptors: cameraControlDescriptors().map(d => d.kind === 'menu'
         ? { ...d, options: d.values.map(value => ({ value, label: String(d.toDisplay(value)) })) } : d) };
   }
   private detection(identity: string, source: Owned): Detection {
-    const status = source.device.snapshot(), context = this.context(identity, source);
-    const envelope = context.envelopes.find(e => e.mount === context.mount && e.mode === source.attitude?.mode);
+    const status = source.device.snapshot();
     const capabilities: CameraCapabilities = { ...noCapabilities(),
-      aim: present({ pitch: { min: envelope?.pitch?.[0] ?? null, max: envelope?.pitch?.[1] ?? null }, yaw: { min: envelope?.yaw?.[0] ?? null, max: envelope?.yaw?.[1] ?? null }, mode: source.attitude ? String(source.attitude.mode) : 'unknown' }),
+      aim: present({ pitch: { min: null, max: null }, yaw: { min: null, max: null }, mode: source.attitude ? String(source.attitude.mode) : 'unknown' }),
       recording: present({ medium: 'camera' }), stills: present({ source: 'camera' }) };
     return { source: 'accessory', device: identity, byPath: identity, byPathStable: true,
       card: `${status.manufacturer} Pocket 2 (${status.model})`, capabilities };
@@ -172,7 +181,8 @@ export class AccessorySources {
       case 'slew': {
         const { gesture, credential, deadline, seq, pan, tilt } = b;
         const reply = source.gimbal.admit(owner, { gesture, credential, deadline, seq, rate: { pan, tilt } });
-        if (reply.accepted) source.admitted = { owner, gesture: b.gesture as string, pan: b.pan as number, tilt: b.tilt as number, until: Math.min(b.deadline as number, this.clock.now() + 500) };
+        if (reply.accepted) source.admitted = reply.next ? { owner, gesture: b.gesture as string, pan: b.pan as number, tilt: b.tilt as number, until: Math.min(b.deadline as number, this.clock.now() + 500) } : undefined;
+        if (!reply.accepted && source.gimbal.motionNotice) return { ...reply, reason: source.gimbal.motionNotice };
         return reply;
       }
       case 'stop': if (typeof b.gesture !== 'string') break; source.gimbal.end(owner, b.gesture);

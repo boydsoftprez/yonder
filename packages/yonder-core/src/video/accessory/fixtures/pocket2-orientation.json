@@ -1,0 +1,105 @@
+{
+  "provenance": "Pocket 2 bench, 2026-09-08. Retained 45-byte payloads from validated 4/05 pushes; test envelopes are reconstructed. World orientation only; no joint geometry.",
+  "cases": [
+    {
+      "name": "horizontal-up-yaw-positive-1",
+      "wireRateHex": "32000000000080",
+      "samples": [
+        {
+          "elapsedMs": 6,
+          "payloadHex": "81030000c5fb8200f5f8a0014e373a00a9d50000000000002332d4beb28812bff763d3be1b17133f7a30a73f00",
+          "worldEuler": {
+            "pitch": 89.7,
+            "roll": 0,
+            "yaw": -108.3
+          }
+        },
+        {
+          "elapsedMs": 1508,
+          "payloadHex": "81030000f5fb8200f5f8a0012a3d3a008bd700000000d1ff875ce0be4bf70dbfe283dfbe07810e3f9178af3f00",
+          "worldEuler": {
+            "pitch": 89.7,
+            "roll": 0,
+            "yaw": -103.5
+          }
+        }
+      ],
+      "rotationDegrees": 4.81418
+    },
+    {
+      "name": "horizontal-up-pitch-positive-1",
+      "wireRateHex": "00000000320080",
+      "samples": [
+        {
+          "elapsedMs": 15,
+          "payloadHex": "81030000c3fb8200f6f8a0014b083b0095d5000000000200bfa5d3bebebd12bfaae8d2be0541133fe11da93f00",
+          "worldEuler": {
+            "pitch": 89.7,
+            "roll": 0,
+            "yaw": -108.5
+          }
+        },
+        {
+          "elapsedMs": 1519,
+          "payloadHex": "52030000c3fb8200f6f8a001260e3b0095d50000cfff0200ce3ddcbe717c0cbf91ebc9be7b3b193f53c5ae3f00",
+          "worldEuler": {
+            "pitch": 85,
+            "roll": 0,
+            "yaw": -108.5
+          }
+        }
+      ],
+      "rotationDegrees": 4.76979
+    },
+    {
+      "name": "upright-yaw-positive-1",
+      "wireRateHex": "32000000000080",
+      "samples": [
+        {
+          "elapsedMs": 30,
+          "payloadHex": "fc060000f7f98200f9f80001dc933d00a4c300000100fbff00b10dbb01b079bf13c661beba691c3c8dccab3f00",
+          "worldEuler": {
+            "pitch": 178.8,
+            "roll": 0,
+            "yaw": -154.5
+          }
+        },
+        {
+          "elapsedMs": 1535,
+          "payloadHex": "fc06000027fa8200c9f80001b8993d0086c500000100faff375f27bba41877bf77c385beedbe1a3ce15caa3f00",
+          "worldEuler": {
+            "pitch": 178.8,
+            "roll": 0,
+            "yaw": -149.7
+          }
+        }
+      ],
+      "rotationDegrees": 4.81484
+    },
+    {
+      "name": "upright-pitch-positive-1",
+      "wireRateHex": "00000000320080",
+      "samples": [
+        {
+          "elapsedMs": 46,
+          "payloadHex": "fc060000f7f98200f9f80001f86a3f00a4c300000100fcff57610fbb87b079bf7ebb61beec5a1e3cfa19a83f00",
+          "worldEuler": {
+            "pitch": 178.8,
+            "roll": 0,
+            "yaw": -154.5
+          }
+        },
+        {
+          "elapsedMs": 1450,
+          "payloadHex": "cd060000f7f98200f9f8000170703f00a4c30000d1fffcff7e1337bc7d6179bf7b7461bed67d4a3df92fa53f00",
+          "worldEuler": {
+            "pitch": 174.1,
+            "roll": 0,
+            "yaw": -154.5
+          }
+        }
+      ],
+      "rotationDegrees": 4.6748
+    }
+  ]
+}

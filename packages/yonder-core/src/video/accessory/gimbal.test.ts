@@ -19,7 +19,7 @@ function frame(hex = '85ff2d00db034000000003'): DumlFrame {
 function fixture() {
   const clock = new Clock();
   const box = { yaw: [-50, 50], pitch: [-40, 40], roll: [-5, 5] } as const;
-  const context: GuardContext = { now: 1000, attitudeMaxAgeMs: 200, attitude: { pitch: 0, roll: 0, yaw: 0, mode: 1, at: 1000, pitchLimit: false, yawLimit: false, fault: false }, mount: 'test', envelopes: [{ mount: 'test', mode: 1, ...box }, { mount: 'test', mode: 2, ...box }], signs: { pan: 1, tilt: 1 }, limitDirections: {}, intentAllowanceMs: 500, deviceStopAllowanceMs: 800, actions: [{ mount: 'test', fromMode: 1, command: { kind: 'recentre' }, start: box, trajectory: box }, { mount: 'test', fromMode: 1, command: { kind: 'mode', mode: 2 }, start: box, trajectory: box }] };
+  const context: GuardContext = { now: 1000, discreteApplicable: true, attitudeMaxAgeMs: 200, attitude: { pitch: 0, roll: 0, yaw: 0, mode: 1, at: 1000, pitchLimit: false, yawLimit: false, fault: false }, mount: 'test', envelopes: [{ mount: 'test', mode: 1, ...box }, { mount: 'test', mode: 2, ...box }], signs: { pan: 1, tilt: 1 }, limitDirections: {}, intentAllowanceMs: 500, deviceStopAllowanceMs: 800, actions: [{ mount: 'test', fromMode: 1, command: { kind: 'recentre' }, start: box, trajectory: box }, { mount: 'test', fromMode: 1, command: { kind: 'mode', mode: 2 }, start: box, trajectory: box }] };
   const writes: { command: DumlCommand; options: AccessoryCommandOptions; resolve: () => void; reject: (e: Error) => void }[] = [];
   const controller = new GimbalController({ clock, context: () => context, write: (command, options) => new Promise<void>((resolve, reject) => writes.push({ command, options, resolve, reject })) });
   const issue = (owner = 'alice') => { const r = controller.issue(owner); if (!r.accepted) throw new Error(r.reason); return r.grant; };
@@ -30,7 +30,7 @@ function fixture() {
 const settle = async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); };
 describe('gimbal attitude', () => {
   it('decodes signed tenths, mode high bits and pitch/yaw limit bits using injected monotonic time', () => {
-    expect(decodeGimbalAttitude(frame(), { now: () => 1234 })).toEqual({ pitch: -12.3, roll: 4.5, yaw: 98.7, mode: 1, at: 1234, pitchLimit: true, yawLimit: true, fault: false });
+    expect(decodeGimbalAttitude(frame(), { now: () => 1234 })).toEqual({ pitch: -12.3, roll: 4.5, yaw: 98.7, mode: 1, at: 1234, pitchLimit: true, yawLimit: true, fault: false, quaternion: null });
     for (const [byte, pitchLimit, yawLimit, fault] of [[1,true,false,false],[2,false,true,false],[4,false,false,true]] as const) {
       const f = frame(); f.payload[10] = byte;
       expect(decodeGimbalAttitude(f, { now: () => 1 })).toMatchObject({ pitchLimit, yawLimit, fault });
@@ -42,7 +42,7 @@ describe('gimbal attitude', () => {
     const captured = decodeDuml(Buffer.from(
       '553a04700402b03b0004050200000074fe82001af9a00104e91b0083f0000064fc00000cd3703f4c254a3a78b10b3b76a8adbe0665a53f00bfbf', 'hex'));
     expect(captured).not.toBeNull();
-    expect(decodeGimbalAttitude(captured!, { now: () => 1234 })).toEqual({
+    expect(decodeGimbalAttitude(captured!, { now: () => 1234 })).toMatchObject({
       pitch: 0.2, roll: 0, yaw: -39.6, mode: 2, at: 1234, pitchLimit: false, yawLimit: false, fault: false,
     });
   });
@@ -118,12 +118,12 @@ describe('intent-bound gimbal dispatcher', () => {
     expect(w.options.admission!()).toBe(false); expect(w.options.signal!.aborted).toBe(true);
     w.resolve(); await settle(); f.controller.connect(); f.freshAdvance(1000); expect(f.writes).toHaveLength(1); f.controller.close();
   });
-  it.each(['stale','limit','mode','bounds'] as const)('queued dispatch rechecks latest %s and retires the gesture', async change => {
+  it.each(['stale','limit','mode','fault'] as const)('queued dispatch rechecks latest %s and retires the gesture', async change => {
     const f = fixture(); const g = f.issue(); const r = f.admit(g); const w = f.writes[0];
     if (change === 'stale') f.clock.advance(200,false);
     if (change === 'limit') { f.context.attitude!.yawLimit = true; f.context.limitDirections.yaw = 1; }
     if (change === 'mode') f.context.attitude!.mode = 3;
-    if (change === 'bounds') f.context.envelopes = [];
+    if (change === 'fault') f.context.attitude!.fault = true;
     expect(w.options.admission!()).toBe(false); expect(w.options.signal!.aborted).toBe(true);
     f.context.attitude!.at = f.clock.time; f.context.attitude!.yawLimit = false; f.context.attitude!.mode = 1;
     w.resolve(); await settle(); f.freshAdvance(100);
