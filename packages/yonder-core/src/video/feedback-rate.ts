@@ -29,7 +29,7 @@ export class FeedbackRate {
   tick(camera: Camera, running: RunningEncodes, reports: readonly LinkReport[], now: number): Decision[] {
     const active = new Set(reports.map(report => report.viewer));
     for (const viewer of this.histories.keys()) if (!active.has(viewer)) this.histories.delete(viewer);
-    const reason = 'Waiting for fresh receiver feedback; no independent bandwidth estimate is available.';
+    const reason = 'Waiting for fresh receiver feedback. Browser bitrate estimates are not independent link-capacity measurements.';
     const decisions: Array<Mutable<Decision>> = [
       { action: 'hold-rate', camera: camera.id, encode: 'stream', kbps: running.stream, at: now, reason },
       { action: 'hold-rate', camera: camera.id, encode: 'preview', kbps: running.preview, at: now, reason },
@@ -65,7 +65,7 @@ export class FeedbackRate {
         else if (receiving) { state.healthy ??= now; state.congested = null; }
         else { state.healthy = null; state.congested = null; }
         why = congested ? `Receiver congestion (${(loss * 100).toFixed(1)}% loss${queued ? ', RTT increased' : ''}).`
-          : receiving ? 'Receiver delivery is healthy; probing within the applied bounds.' : 'No received video to evaluate; holding the rate.';
+          : receiving ? `Receiver delivery is healthy; probing within ${policy.floor_kbps}–${policy.ceiling_kbps} kb/s.` : 'No received video to evaluate; holding the rate.';
         decision.reason = why;
         if (this.busy) { decision.reason = 'Waiting for the encoder to confirm the preceding change.'; continue; }
         if (congested && now - state.congested! >= 1000 && now - state.changed >= 1000) {

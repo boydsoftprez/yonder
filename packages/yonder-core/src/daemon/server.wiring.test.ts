@@ -1650,15 +1650,16 @@ describe("the daemon runs the rate controller", () => {
         mine: { delivery: "video", source: "cam0-preview" },
       });
 
-      // One tick of the daemon's own clock, which is the thing that did not
-      // exist before this change.
-      advance(1_000);
-      await Promise.resolve();
+      // Fresh delivery over the probe dwell, on the real socket path.
+      for (let i=0;i<=6;i++) {
+        await call(socketPath,'POST','/cameras/cam0/viewers/1f2e3d4c5b6a7089',{want:'video',stats:{rtt:38,loss:0,egress:900,capacity:40000}});
+        advance(1000);await Promise.resolve();
+      }
 
       const moved = retunes();
       expect(moved).toHaveLength(1);
       // Its own applied ceiling, not the link's 40 Mb/s.
-      expect(moved[0].sets[0].value).toContain("video_bitrate=2000000");
+      expect(moved[0].sets[0].value).toContain("video_bitrate=450000");
       // And the picture never restarted: one process, one launch line, one pid.
       expect(spawns).toHaveLength(1);
       expect(new Set(pids).size).toBe(1);
@@ -1687,7 +1688,10 @@ describe("the daemon runs the rate controller", () => {
       want: "video",
       stats: { rtt: 38, loss: 0, egress: 900, capacity: 40_000 },
     });
-    advance(1_000);
+    for (let i=0;i<=6;i++) {
+      await call(socketPath,'POST','/cameras/cam0/viewers/1f2e3d4c5b6a7089',{want:'video',stats:{rtt:38,loss:0,egress:900,capacity:40000}});
+      advance(1000);await Promise.resolve();
+    }
     const moved = retunes().length;
     expect(moved).toBe(1);
 

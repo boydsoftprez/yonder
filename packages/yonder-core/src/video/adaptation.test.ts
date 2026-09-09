@@ -157,6 +157,14 @@ function shapeOf(command: Sent): { size: string; fps: number } {
 const retunes = (sent: readonly Sent[], element: string): Sent[] =>
   sent.filter((s) => s.op === "retune" && s.sets[0]?.element === element);
 
+async function healthyPreview(b: ReturnType<typeof board>, camera = 'cam0') {
+  b.viewers.subscribe('v1',camera,'video');
+  for (let i=0;i<=6;i++) {
+    b.viewers.report('v1',{camera,rtt:40,loss:0,egress:900,capacity:40000});
+    b.adaptation.tick();await b.adaptation.settled();b.advance(1000);
+  }
+}
+
 describe("Adaptation, the caller the rate controller did not have", () => {
   it("moves a real encoder from a browser's own statistic, without restarting the picture", async () => {
     const b = board();
@@ -167,15 +175,13 @@ describe("Adaptation, the caller the rate controller did not have", () => {
     b.viewers.subscribe("v1", "cam0", "video");
     b.viewers.report("v1", { camera: "cam0", rtt: 40, loss: 0, egress: 900, capacity: 40_000 });
 
-    // One tick of the daemon's own clock.
-    b.adaptation.tick();
-    await b.adaptation.settled();
+    await healthyPreview(b);
 
     const stream = retunes(b.sent, ENCODE_ELEMENT.preview);
     expect(stream).toHaveLength(1);
     // Its own applied ceiling, not the link's 40 Mb/s.
-    expect(stream[0].sets[0].value).toContain("video_bitrate=2000000");
-    expect(b.channel.inForce("cam0")).toMatchObject({ stream: 2000, preview: 2000 });
+    expect(stream[0].sets[0].value).toContain("video_bitrate=450000");
+    expect(b.channel.inForce("cam0")).toMatchObject({ stream: 2000, preview: 450 });
     // The pipeline was never respawned: one process, one launch line, and the
     // picture on screen never went black.
     expect(b.spawns).toHaveLength(spawnedOnce);
@@ -210,6 +216,7 @@ describe("Adaptation, the caller the rate controller did not have", () => {
     b.viewers.subscribe("v1", "cam1", "video");
     // Only cam0's browser has measured anything.
     b.viewers.report("v1", { camera: "cam0", rtt: 40, loss: 0, egress: 900, capacity: 40_000 });
+    await healthyPreview(b);
     const decisions = b.adaptation.tick();
     await b.adaptation.settled();
 
@@ -236,8 +243,7 @@ describe("Adaptation, the caller the rate controller did not have", () => {
     b.start(SECOND);
     b.viewers.subscribe("v1", "cam1", "video");
     b.viewers.report("v1", { camera: "cam1", rtt: 40, loss: 0, egress: 900, capacity: 40_000 });
-    b.adaptation.tick();
-    await b.adaptation.settled();
+    await healthyPreview(b,'cam1');
     expect(retunes(b.sent, ENCODE_ELEMENT.preview).length).toBeGreaterThan(0);
 
     // The operator removed the tail camera and applied it.
@@ -253,8 +259,10 @@ describe("Adaptation, the caller the rate controller did not have", () => {
     b.viewers.report("v1", { camera: "cam0", rtt: 40, loss: 0, egress: 900, capacity: 40_000 });
 
     b.adaptation.start();
-    b.advance(1_000);
-    await b.adaptation.settled();
+    for (let i=0;i<=6;i++) {
+      b.viewers.report('v1',{camera:'cam0',rtt:40,loss:0,egress:900,capacity:40000});
+      b.advance(1000);await b.adaptation.settled();
+    }
     const moved = retunes(b.sent, ENCODE_ELEMENT.preview).length;
     expect(moved).toBe(1);
 
@@ -366,11 +374,13 @@ describe("a browser statistic, in at the route", () => {
         mine: { delivery: "video", source: "cam0-preview", frameAge: 120 },
       });
 
-      r.adaptation.tick();
-      await r.adaptation.settled();
+      for (let i=0;i<=6;i++) {
+        await r.route('POST','/cameras/cam0/viewers/abc123',{want:'video',stats:{rtt:42,loss:0,egress:900,capacity:40000}});
+        r.adaptation.tick();await r.adaptation.settled();r.advance(1000);
+      }
       const stream = retunes(r.sent, ENCODE_ELEMENT.preview);
       expect(stream).toHaveLength(1);
-      expect(stream[0].sets[0].value).toContain("video_bitrate=2000000");
+      expect(stream[0].sets[0].value).toContain("video_bitrate=450000");
       expect(r.spawns).toHaveLength(1);
     } finally {
       r.done();

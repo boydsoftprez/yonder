@@ -958,16 +958,20 @@ describe('receiver feedback without a bandwidth estimate', () => {
   });
   it('does not reserve an unused main stream from measured preview capacity', async () => {
     const f = fixture();
-    await f.sample(0, { capacity: atIp(1200) });
+    // An explicitly aggregate link report retains the measured-capacity path.
+    await f.sample(0, { capacity: atIp(1200), encode: undefined });
     expect(f.channel.inForce('cam0')!.preview).toBe(1200);
   });
 });
 
 
-it('uses a browser capacity estimate only for that browser encode when RTSP is configured', async () => {
+it('probes healthy browser delivery even when its estimate stays at 400 kb/s and RTSP is configured', async () => {
   const f=fakeChannel({preview:400});
   const controller=new RateController({channel:f.channel,policy:()=>CAMERA,thresholds:THRESHOLDS});
-  controller.observe({viewer:'browser',encode:'preview',capacity:atIp(1200),egress:400,rtt:40,loss:0,at:0});
-  controller.tick(0);await controller.settled();
-  expect(f.retunes).toEqual([{encode:'preview',kbps:1200}]);
+  for (let at=0;at<=15000;at+=1000) {
+    controller.observe({viewer:'browser',encode:'preview',capacity:400,egress:400,rtt:40,loss:0,at});
+    controller.tick(at);await controller.settled();
+  }
+  expect(f.running.preview).toBeGreaterThan(400);
+  expect(f.retunes.every(change=>change.encode==='preview')).toBe(true);
 });

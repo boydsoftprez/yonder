@@ -32,7 +32,7 @@ separate facts: unknown capacity still carries loss, RTT and delivery evidence;
 report responses update video state; Going out reads the encoder's actual rate.
 Frame-age measurements use a consistent monotonic clock.
 
-With no capacity estimate, fresh healthy delivery earns a bounded upward probe
+For browser receivers, fresh healthy delivery earns a bounded upward probe
 after five seconds: approximately 10%, limited to 50–200 kb/s per step. Sustained
 loss above 2% or RTT inflation above the receiver's recent baseline backs off
 25%, subject to a one-second dwell. Applied floors and ceilings always bound
@@ -42,10 +42,13 @@ not headroom; unseen outputs hold, and the UI says why. Refused targets are
 latched, asynchronous changes do not overlap in this fallback, and completed
 requests are removed from pending bookkeeping.
 
-Browser capacity estimates are scoped to the subscribed encode, so a configured
-RTSP output cannot be subtracted from a separate browser connection estimate.
-Legacy aggregate-link reports still reserve enabled main-stream outputs, but no
-longer reserve an unused main encode. RTT history is
+Browser bitrate estimates are retained as estimates, not treated as hard link
+capacity. In the live check, an estimate near 400 kb/s still produced a shortfall
+while the configured preview remained at 1150 kb/s. Browser receivers now use
+bounded delivery probes even when an estimate is present. This also prevents a
+configured RTSP output from consuming a separate browser connection's budget.
+Legacy independent aggregate-link reports retain the measured-capacity path and
+no longer reserve an unused main encode. RTT history is
 per receiver and expires, so a bench LAN baseline does not persist indefinitely
 on a different path. These are media-path observations, not a modem speed test;
 a LAN preview does not validate an independent LTE/ground-station path.
@@ -98,7 +101,7 @@ now update intended running recipes during backoff, while an explicit operator
 Stop remains stopped. A regression reproduces removal of the RTSP path between
 crash and retry.
 
-The final correction run passed 3,384 core tests with two old connection-scope
-expectations failing; after correcting those expectations, all 65 daemon wiring
-tests passed. The 60 video-node tests, 106 picture/thumbnail tests and full build
-also passed. No decoder threading change was installed.
+Validation: all 3,386 core tests passed after the apply/rollback correction,
+along with 60 video-node and 106 picture/thumbnail tests. The final browser-probe
+change passed 133 rate, adaptation and daemon wiring tests and the core build.
+No decoder threading change was installed.

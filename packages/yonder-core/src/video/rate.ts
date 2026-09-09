@@ -313,7 +313,7 @@ export class RateController {
       const policy = camera[encode], rate = running[encode];
       return policy.mode === "adaptive" && rate !== null && (rate < policy.floor_kbps || rate > policy.ceiling_kbps);
     });
-    if (fresh.some(r => r.capacity === null) || (link === null && outside)) {
+    if (fresh.some(r => r.encode !== undefined || r.capacity === null) || (link === null && outside)) {
       this.pinnedSince = null; this.headroomSince = null;
       return this.feedback.tick(camera, running, fresh, now);
     }
@@ -327,10 +327,6 @@ export class RateController {
         `no fresh report from any viewer in the last ${seconds(this.staleAfterMs)}: `
         + "what the link can carry is unknown, so nothing moves");
     }
-
-    // WebRTC estimates belong to the subscribed encode/connection, not to
-    // every configured output on the board. Never subtract unrelated RTSP.
-    if (fresh.every(report => report.encode !== undefined)) return this.scoped(camera, running, fresh, now);
 
     // What the path is actually getting through, rather than what it
     // measured: a link losing a tenth of what is put on it is not carrying
@@ -427,29 +423,6 @@ export class RateController {
 
   /** One encode's rate: what it may have, whether that is a change worth
    *  making, and what it will be spending once this tick is carried out. */
-  private scoped(camera: Camera, running: RunningEncodes, reports: readonly LinkReport[], now: number): Decision[] {
-    const decisions: Decision[] = [];
-    let size: Decision = this.holdSize(camera, running.shape?.size ?? null, now, "No preview receiver feedback; its size is held.");
-    for (const encode of ["stream", "preview"] as const) {
-      const matching = reports.filter(report => report.encode === encode && report.capacity !== null);
-      if (!matching.length) {
-        decisions.push(this.holdRate(camera, encode, running[encode], now, "No receiver feedback for this output; its bitrate is held."));
-        continue;
-      }
-      const link = matching.reduce((a,b) => a.capacity! * (1-a.loss) <= b.capacity! * (1-b.loss) ? a : b);
-      const carrying = Math.max(0, Math.floor(link.capacity! * (1-link.loss)));
-      const policy = camera[encode];
-      const result = this.rateFor(camera, encode, { now, running, floor:policy.floor_kbps, ceiling:policy.ceiling_kbps,
-        fixed:policy.mode === "fixed", available:carrying, fixedReason:"Fixed bitrate is selected." });
-      decisions.push(result.decision);
-      if (encode === "preview") {
-        this.rttFloor = this.feedback.baseline(link,now);
-        size = this.sizeFor(camera,{now,running,allowance:result.allowance,shortfall:result.decision.action === "shortfall",link,carrying});
-      }
-    }
-    return [...decisions,size];
-  }
-
   private rateFor(camera: Camera, encode: EncodeName, ctx: {
     now: number; running: RunningEncodes; available: number;
     floor: number; ceiling: number; fixed: boolean; fixedReason: string;
