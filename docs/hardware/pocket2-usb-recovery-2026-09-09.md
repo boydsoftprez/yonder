@@ -1,6 +1,7 @@
 # Pocket 2 USB recovery investigation — 2026-09-09
 
-Requirements: R-CAM-15, R-CAM-11. This records inspection, not a successful wake or recovery.
+Requirements: R-CAM-15, R-CAM-11. This records inspection and one unsuccessful
+camera-only recovery attempt; it does not establish a USB power-on method.
 
 ## Recovered earlier research
 
@@ -63,15 +64,81 @@ This places the current problem before DUML: the Pi is waiting for the camera's
 host to enumerate it. The observations cannot distinguish a powered-off camera
 from a stalled camera/USB-controller state.
 
-## Recommended next step
+## Approved recovery attempt
 
-One controlled, camera-only transport recovery is the useful next experiment:
-release the owned FunctionFS helper, keep the gadget absent for at least the
-previously measured 45 seconds, and observe the next enumeration and protocol
-traffic with lifecycle tracing. Leave core/network services running and send no
-unverified reboot, firmware, or gimbal commands. Stop after that bounded attempt
-rather than loop blindly. This is a proposed experiment, not an operation that
-has been performed or a proven power-on method.
+The operator approved one camera-only recovery. Preflight checked the core
+process, helper parent and command line, boot identity, and detached controller.
+A process descriptor tied one SIGTERM to that exact FunctionFS helper. The
+helper released its resources cleanly, and the existing core-owned recovery
+path performed its delayed retry. Core, console, network and media services
+remained active, with the same core process and boot identity throughout.
+
+A private, bounded trace instance recorded gadget lifecycle and endpoint
+enable/disable events during the 75-second observation. Its four events were
+all Pi-side actions. The disconnect and subsequent connect both returned zero,
+with **45.238246 seconds** between them on the same monotonic clock. The new
+helper successfully bound the phone gadget, but the controller remained
+`not attached`, with speed unknown. No host enumeration, fresh camera status,
+attitude or video followed during the remaining approximately 30 seconds.
+
+The corresponding kernel log showed normal FunctionFS cleanup and phone bind,
+without the endpoint-stop/FIFO-flush timeouts seen in the earlier failed
+deployment. It recorded no undervoltage event during this attempt; the current
+alarm was zero, and the CPU maximum remained 1.8 GHz. These observations do not
+establish the cause of the earlier failure.
+
+The trace was saved and its private tracing instance removed. During that
+observation there was no second retirement, controller reset, camera command,
+gimbal movement, service restart or Pi reboot. The driver was left at the phone
+stage, waiting for the camera to initiate enumeration.
+
+The bounded attempt did not recover the camera. Its observations alone cannot
+distinguish an off camera from a stalled camera host/controller.
+
+## Physical return and subsequent write failures
+
+The operator subsequently confirmed turning on or reconnecting the camera. The
+camera enumerated again and eventually supplied fresh 720p video, native gimbal
+status and normal microSD status. That return is not evidence of remote USB wake.
+Starting the preview through the production API then decoded 30 actual frames.
+
+The link later retired with the captured reason **`Pocket 2 write deadline
+expired`**. The same reason was captured after another operator aiming attempt.
+Core and console process identities stayed unchanged, and the current voltage
+alarm was zero. Existing automatic recovery did restore fresh traffic between
+these failures. This establishes an outstanding transport-write failure; it does
+not yet identify whether USB completion or its IPC notification missed the bound.
+
+The operator also reported a zoom-like picture jump and missing stick expo.
+Browser measurements showed the image element changing from about 725 pixels
+wide to 422 pixels as status/thumbnail layout changed, without a CSS transform
+or a change from `object-fit: contain`. Browser-only fixes added radial stick
+expo (0–100%, default 50%) and reserved notice/thumbnail space. The three affected
+widget bundles were installed without restarting either service or the USB
+helper, and the new slider was verified in the real browser. The picture remained
+about 402 by 226 pixels when the next contact loss cleared the thumbnail report.
+The UI correction does not claim to repair the separate write timeout.
+
+A subsequent 55-second syscall trace observed 156 endpoint writes: 56 native
+gimbal rate commands, 50 heartbeat commands and 50 pings. Every observed write
+completed; the longest endpoint write took 2.119 ms. The helper remained alive
+and the controller configured when the tracer detached. This was a healthy
+interval, including tracer overhead; it did not reproduce the intermittent
+failure or prove that the timeout was fixed. No motion command was originated
+by the inspection script.
+
+The operator then reported that maximum speed was too slow. The installed
+driver and browser transport both enforced the initial 10°/s bench cap, while
+[DJI rates the camera at 120°/s](https://www.dji.com/pocket-2/specs). A subsequent
+change uses the published ceiling with a combined pan/tilt magnitude bound and
+an independent browser speed selector, defaulting to 60°/s. Both the pad and
+image drag share the selected speed and expo. The source and browser builds
+passed, with 386 focused speed/control/presentation tests passing. The prepared
+bundle and rollback copies are staged; deployment requiring a core restart is
+awaiting operator approval. Higher-rate physical motion and stopping are not
+yet verified.
+
+## Implementation follow-up
 
 For the implementation, preserve the disconnect interval across process
 restarts and retain the initiating transport-failure reason in the journal.
