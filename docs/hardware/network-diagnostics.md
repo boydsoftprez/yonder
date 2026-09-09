@@ -152,3 +152,32 @@ cancelled it correctly. Focused backend/UI tests and day/night/mobile browser
 checks passed. Activation preserved the console process and configuration,
 observed 45.04 seconds of USB absence, then verified 30 seconds of unchanged
 camera run/start/restart state.
+
+## Day/Night regression and repair
+
+The added route-metric check initially asked the kernel about NetworkManager's
+modem control device, `cdc-wdm0`. That is not a kernel network interface:
+the modem routes on `wwan0`. This caused theme and camera configuration requests
+to fail before their renderers ran. The repair resolves `GENERAL.IP-IFACE`
+before inspecting modem routes and retains the control-device name for
+NetworkManager's reapply operation.
+
+Theme requests also now select the appearance renderer alone, after comparing the
+entire validated configuration to ensure only `ui.theme` differs. The existing
+reservation, durable journal, persistence and rollback remain in force. A hint
+cannot exempt a network or camera configuration change.
+
+Combined revision `a559da8` includes this repair and the approved material brand.
+All 3,632 core tests passed. On the Pi, Day → Night → Day completed in 0.230,
+0.185 and 0.333 seconds, with the saved palette and generated stylesheet agreeing.
+Brand SVGs survived each change; all service PIDs and the camera run/start/restart
+state stayed unchanged. Day was left selected. The new logo was also visually
+verified on the actual unauthenticated login page.
+
+The first installation attempt exposed an overly short deployment allowance:
+a FunctionFS startup timeout and the camera's 45-second retry delayed publication.
+Both streams were healthy at 22:51:55 in the device journal, but the 80-second
+overall deadline expired at 22:52:20, five seconds before the required 30-second
+stability observation could finish. The updater rolled back. The accepted retry
+allowed 180 seconds for readiness while retaining the same 30-second continuous
+running/start/restart check and logging the camera's actual refusal messages.
