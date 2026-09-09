@@ -142,3 +142,13 @@ An isolated browser password change invalidated the old session (401), and the n
 password signed in successfully (200). The operator's real password was not changed.
 The reboot control's confirmation and configuration/armed guards were tested
 without issuing an operating-system reboot.
+
+The public internet speed test was added and installed as `da8298e`. A real
+Cloudflare test from the Pi over Ethernet completed with 251.1 Mb/s download,
+161.2 Mb/s upload and 14.0 ms median TCP connection latency, transferring 27 MB
+of test payload. These are quick HTTPS estimates from that run, not a link-rate
+guarantee. The installed job API accepted the new test without a hostname and
+cancelled it correctly. Focused backend/UI tests and day/night/mobile browser
+checks passed. Activation preserved the console process and configuration,
+observed 45.04 seconds of USB absence, then verified 30 seconds of unchanged
+camera run/start/restart state.
