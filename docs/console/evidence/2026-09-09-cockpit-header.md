@@ -61,3 +61,30 @@ was in concurrent camera use, so that run does not establish native fullscreen
 entry. Fullscreen target/state preservation is covered by the component tests;
 no browser security policy was changed. No real flight action or home update was
 sent during this walkthrough.
+
+## Pi installation and live verification
+
+UI source commit `136c596` is based on combined source `8ba18f9`, preserving the
+installed `a559da8` core, network, Day/Night and material-brand work. Only
+`ui-yonder-cockpit.umd.js` was copied into the installed widget resources, after
+verifying both the staged hash above and the previous installed hash
+`39f81ccecba38af17c2ff2896a1275bdcd9e970b314ef715391105112cea639a`.
+The old bundle is backed up in
+`/opt/yonder/backups/20260909-cockpit-header-136c596/`.
+Replacement used an atomic rename; no service restart or configuration apply was
+issued by this task.
+
+Authenticated Chrome at the Pi's `/dashboard/flight` showed the actual MANUAL,
+disarmed controller and incoming telemetry with the new header. The operator's
+saved nine-field selection and speed/distance units were retained. At 1512×754,
+the header stayed 65 px high, the action row 45.4 px, and the PFD canvas measured
+1048×519 px with those fields. Home opened at y=12…742, above the header, with
+12 px between its two action groups in the no-controller-home state. It was
+closed without editing or sending anything. The updated Flight tab was left open.
+
+Ethernet/mDNS became unavailable between staging attempts; the known ZeroTier
+address succeeded. Subsequent boot-time inspection showed a board reboot before
+the bundle installation, so the earlier and later service PIDs are not claimed
+to be unchanged. The final bundle hash matched, and core, console, MAVLink router
+and MediaMTX all reported active. Other deployment owners received the UI commit
+and installed bundle hash for preservation in their future integrations.
