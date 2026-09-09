@@ -25,16 +25,16 @@ corrupted regions while the cheaper browser preview remained usable.
   temporary route was removed and the original 2800-byte path MTU restored.
   The short sequential test does not isolate changing radio conditions.
 
-## Encoder correction
+## Encoder experiment and withdrawn correction
 
 The main encoder accepted a 2,000,000 bit/s target, but kernel readback from
 its existing file descriptor showed bitrate mode 0 (VBR), and a subsequent
 local sample measured approximately 3.06 Mb/s at 30 fps. The target property
 alone was insufficient evidence that the network budget was respected.
 
-`video/pipeline.ts` now supplies `video_bitrate_mode=1` (CBR) when starting or
-retuning a V4L2 H.264 encoder. Both main and preview use it; Adaptive still
-adjusts the target. Existing preview keyframe settings are preserved.
+The candidate change to `video/pipeline.ts` supplied `video_bitrate_mode=1` (CBR) when starting or
+retuning a V4L2 H.264 encoder. Both main and preview used it; Adaptive still adjusted the target. Existing
+preview keyframe settings were preserved.
 
 A separate 320×180, 15 fps hardware encoder test on the Pi verified startup
 and retuning: kernel readback remained mode 1, and observed output changed
@@ -50,3 +50,24 @@ host and adaptation tests check launch and retune behavior. The local hardware
 test proves the controls; production video quality and delivery still require
 verification after the coordinated activation. External RTSP receiver feedback
 is not yet connected to Yonder's Adaptive controller and remains a separate gap.
+
+
+## Full-pipeline acceptance failure
+
+The combined hardware pipeline did not remain operational after the candidate
+was installed. The native USB source remained live, but the pipeline repeatedly
+stopped receiving fresh frames and exited after its private accessory-media
+connection closed. Raising the preview startup target from 100 to 500 kb/s did
+not resolve it. No full-pipeline V4L2 error established the exact mechanism.
+
+The CBR production change was therefore withdrawn and the previous pipeline
+composition restored. The small synthetic test was insufficient evidence for
+the full camera graph. Do not describe this experiment as a deployed fix, or
+attribute every excess-byte sample uniquely to VBR mode. Restoring video takes
+priority over further encoder experiments on the live device.
+
+Ethernet was connected during this deployment, changing ZeroTier from the
+cellular/public path to a direct LAN peer. Subsequent clear video or zero
+server discards on Ethernet cannot establish that LTE delivery was repaired.
+The camera-workflow owner retains the encoder-budget investigation; the
+network-diagnostics task owns underlay throughput and routing investigation.

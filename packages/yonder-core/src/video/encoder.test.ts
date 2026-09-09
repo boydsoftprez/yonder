@@ -155,7 +155,7 @@ describe("EncoderChannel.retune", () => {
     expect(spawned[0].sent[0].op).toBe("retune");
     expect(spawned[0].sent[0].sets).toEqual([{
       element: "enc-stream", property: "extra-controls",
-      value: "controls,video_bitrate_mode=1,video_bitrate=3000000",
+      value: "controls,video_bitrate=3000000",
     }]);
     spawned[0].answer();
     expect(await pending).toEqual({
@@ -172,7 +172,7 @@ describe("EncoderChannel.retune", () => {
     void channel.retune(camera, "preview", 800);
     expect(spawned[0].sent[0].sets[0]).toEqual({
       element: "enc-preview", property: "extra-controls",
-      value: "controls,video_bitrate_mode=1,video_bitrate=800000,h264_i_frame_period=15",
+      value: "controls,video_bitrate=800000,h264_i_frame_period=15",
     });
   });
 
@@ -192,7 +192,7 @@ describe("EncoderChannel.retune", () => {
     // would be a second policy, disagreeing silently with the first.
     const { channel, spawned, camera } = running();
     void channel.retune(camera, "stream", 9999);
-    expect(spawned[0].sent[0].sets[0].value).toBe("controls,video_bitrate_mode=1,video_bitrate=9999000");
+    expect(spawned[0].sent[0].sets[0].value).toBe("controls,video_bitrate=9999000");
   });
 });
 
