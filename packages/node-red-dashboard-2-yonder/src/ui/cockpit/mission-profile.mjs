@@ -21,7 +21,10 @@ export function planRoute(mission={}){
   if([17,18,19,20,21,31,85].includes(item.command)){previous=null;limitations.add('Loiter, return and landing geometry omitted');continue;}
   if(![16,22,84].includes(item.command))continue;
   let p=item;
-  if([22,84].includes(item.command)&&item.lat===0&&item.lon===0&&validPosition(mission.home))p={...item,lat:mission.home.lat,lon:mission.home.lon};
+  if([22,84].includes(item.command)&&item.lat===0&&item.lon===0){
+   if(!validPosition(mission.home)){previous=null;limitations.add('Takeoff location requires a planning home');continue;}
+   p={...item,lat:mission.home.lat,lon:mission.home.lon};
+  }
   if(!validPosition(p)){previous=null;limitations.add('Unresolved waypoint position');continue;}
   const length=previous?distance(previous,p):0;
   if(previous&&length>=1){legs.push({from:previous,to:p,startM:totalM,lengthM:length,courseDeg:bearing(previous,p)});totalM+=length;}
