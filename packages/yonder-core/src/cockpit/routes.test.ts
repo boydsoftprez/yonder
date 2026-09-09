@@ -6,6 +6,7 @@ import { CockpitData } from "./data.js";
 import { heartbeatV2, validSysStatusBytes } from '../mav/testing.js';
 import { cockpitRoute } from './routes.js';
 import { unpackInstruments } from '../../../node-red-dashboard-2-yonder/src/ui/cockpit/instrumentation-client.mjs';
+import { createCockpitApi } from '../../../node-red-dashboard-2-yonder/src/ui/cockpit/cockpit-api.mjs';
 import type { AdminCredential } from "../console/credential.js";
 import type { ApplyEngine } from "../apply/engine.js";
 const clock = {
@@ -70,6 +71,39 @@ it('serves recorded trail pages without public-data calls or aircraft commands',
  expect((wire?.body as object)).toHaveProperty('r.tail',null);
  expect((wire?.body as object)).not.toHaveProperty('r.points');
  expect(send).not.toHaveBeenCalled();expect(poll).not.toHaveBeenCalled();vehicle.close();data.close();
+});
+it('keeps command details usable while a stopped camera reports a new observation timestamp',async()=>{
+ const send=vi.fn(async()=>{}),vehicle=new VehicleService({clock,send});
+ vehicle.receive(heartbeatV2(1,1,3));
+ let since=1000,state='stopped',profileId='profile-one';
+ const cameraState=async()=>{
+   const camera={id:'cam3',profileId,run:{id:'cam3',state,since:++since,restarts:0}};
+   return {cameras:[camera],camera};
+ };
+ const services={vehicle,cameraState},paths:string[]=[];
+ const read=async(path:string)=>{
+   paths.push(path);const result=await cockpitRoute(services,'GET',path.replace('/cockpit/api/','/cockpit/'),undefined);
+   return {ok:result?.status===200,json:async()=>result?.body};
+ };
+ const first=await cockpitRoute(services,'GET','/cockpit/flight',undefined);
+ const details=await cockpitRoute(services,'GET','/cockpit/details',undefined);
+ expect((details?.body as {detailKey:string}).detailKey).toBe((first?.body as {d:string}).d);
+ expect((details?.body as any).camera.run.since).toBe(1002);
+ const api=createCockpitApi(read);
+ try{
+   await api.state();await new Promise(resolve=>setTimeout(resolve,0));
+   const ready=await api.state();
+   expect(ready).toMatchObject({connected:true,_detailsReady:true,identity:{generation:vehicle.snapshot().identity!.generation},capabilities:{homeControl:{available:true}}});
+   await api.state();expect(paths.filter(p=>p.endsWith('/details'))).toHaveLength(1);
+   profileId='profile-two';expect((await api.state())._detailsReady).toBe(false);
+   await new Promise(resolve=>setTimeout(resolve,0));expect((await api.state())._detailsReady).toBe(true);
+   // Actual state changes and running-instance timestamps still invalidate.
+   state='running';expect((await api.state())._detailsReady).toBe(false);
+   const runOne=await cockpitRoute(services,'GET','/cockpit/flight',undefined);
+   const runTwo=await cockpitRoute(services,'GET','/cockpit/flight',undefined);
+   expect((runOne?.body as {d:string}).d).not.toBe((runTwo?.body as {d:string}).d);
+   expect(send).not.toHaveBeenCalled();
+ }finally{api.close();vehicle.close()}
 });
 it('changes the detail token for source selection while attitude receipt is independent',async()=>{
  const vehicle=new VehicleService({clock,send:async()=>{}}),data=new CockpitData();
