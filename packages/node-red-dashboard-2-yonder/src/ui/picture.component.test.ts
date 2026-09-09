@@ -310,6 +310,8 @@ function reasonText(wrapper: VueWrapper): string {
 }
 
 beforeEach(() => {
+  document.documentElement.removeAttribute("data-yonder-camera-auth");
+  document.documentElement.removeAttribute("data-yonder-auth-check");
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date', 'performance'] });
   vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue();
   FakePeerConnection.made.length = 0;
@@ -320,7 +322,7 @@ beforeEach(() => {
   reportOutcome = "ok";
   reportState = {};
   vi.stubGlobal("RTCPeerConnection", FakePeerConnection);
-  vi.stubGlobal("fetch", fetchMock);
+  vi.stubGlobal("fetch", (url: string, init: unknown) => url === "/session" ? Promise.resolve({ ok: true, status: 200 }) : fetchMock(url, init));
 });
 
 afterEach(() => {
@@ -407,17 +409,17 @@ describe("why there is no picture", () => {
     reply = { status: 401 };
     const { wrapper } = mountPicture();
     await settle();
-    expect(reasonText(wrapper)).toMatch(/logged in/i);
+    expect(reasonText(wrapper)).toMatch(/sign in/i);
   });
 
   it("404 says the camera is not streaming, and where to start it", async () => {
     reply = { status: 404 };
     const { wrapper } = mountPicture();
     await settle();
-    expect(reasonText(wrapper)).toMatch(/not streaming/i);
+    expect(reasonText(wrapper)).toMatch(/not available/i);
   });
 
-  it("503 says the media server is not answering, and says nothing about the camera", async () => {
+  it("503 says The video service is unavailable. Reconnecting automatically., and says nothing about the camera", async () => {
     // The camera is the 404 above — the media server answered, and said that
     // path has no publisher. This is the case where it did not answer at all,
     // and an operator sent to look at a camera that is fine has been sent the
@@ -425,7 +427,7 @@ describe("why there is no picture", () => {
     reply = { status: 503 };
     const { wrapper } = mountPicture();
     await settle();
-    expect(reasonText(wrapper)).toMatch(/media server/i);
+    expect(reasonText(wrapper)).toMatch(/video service/i);
     expect(reasonText(wrapper)).not.toMatch(/camera/i);
   });
 
@@ -440,6 +442,7 @@ describe("why there is no picture", () => {
     const seen = new Set<string>();
     for (const next of [{ status: 401 }, { status: 404 }, { status: 503 }, "throws"] as const) {
       reply = next as typeof reply;
+      document.documentElement.removeAttribute('data-yonder-camera-auth');
       const { wrapper } = mountPicture();
       await settle();
       seen.add(reasonText(wrapper));
@@ -478,7 +481,7 @@ describe("the twelve-second fall-back to stills", () => {
 
     await advance(12_000);
     expect(badge(wrapper)).toBe("stills");
-    expect(reasonText(wrapper)).toMatch(/not streaming/i);
+    expect(reasonText(wrapper)).toMatch(/not available/i);
 
     // The old attempt is canceled. A fresh live attempt starts after a short
     // stills interval, so recovery does not require reloading the page.
@@ -792,7 +795,7 @@ describe("off is not the link being down", () => {
 
     expect(badge(wrapper)).toBe("off");
     expect(wrapper.find(".y-pic__badge").classes()).toContain("tone-neutral");
-    expect(wrapper.find(".y-pic__off").text()).toMatch(/not requested/i);
+    expect(wrapper.find(".y-pic__off").text()).toMatch(/preview is off/i);
     expect(wrapper.text()).not.toMatch(/no contact/i);
     expect(wrapper.find(".y-pic__hatch").exists()).toBe(false);
   });
@@ -2166,7 +2169,7 @@ it('reports thumbnail demand for the selected and other visible cameras and rele
 
 
 it('binds Picture Start to its displayed camera rather than a newer flow selection', async () => {
-  const { wrapper, emit } = mountWithRail();
+  const { wrapper, emit } = mountWithRail({ running: false, runState: 'stopped' });
   await settle();
   (wrapper.vm as any).pressStart();
   expect(emit).toHaveBeenLastCalledWith('widget-action', expect.any(String), { camera: 'cam0', payload: 'start' });
@@ -2189,4 +2192,34 @@ it('uses report-response encoder readback and measures receiver buffering on a m
   reportState={camera:'another',viewer:'viewer-1',overlay:{head:'wrong'}};
   await advance(1000);
   expect(wrapper.find('.y-pic__toolbar').text()).not.toContain('wrong');
+});
+
+it('offers sign-in and stops retrying an expired session', async () => {
+  reply={status:401};const {wrapper}=mountPicture();await settle();
+  expect(wrapper.find('a.y-pic__action').text()).toBe('Sign in');
+  const calls=fetchMock.mock.calls.length;await advance(30000);
+  expect(fetchMock.mock.calls.length).toBe(calls);
+  expect(wrapper.findAll('.y-pic__view-modes button').every(button=>button.attributes('disabled')!==undefined)).toBe(true);
+});
+
+it('starts a stopped camera, distinguishes startup, and keeps an existing preview through running readback', async () => {
+  const {wrapper,emit}=mountPicture({report:{running:false,runState:'stopped'}});await settle();
+  expect(fetchMock).not.toHaveBeenCalled();expect(wrapper.text()).toContain('Start video');
+  await wrapper.get('.y-pic__start').trigger('click');await wrapper.get('.y-pic__start').trigger('click');
+  expect(emit.mock.calls.filter(call=>(call[2] as any)?.payload==='start')).toHaveLength(1);
+  await wrapper.setProps({props:{path:PATH,report:{running:null,runState:'starting'}}});await settle();
+  expect(wrapper.find('.y-pic__stopped').exists()).toBe(false);expect(badge(wrapper)).toBe('Starting video');
+  const count=FakePeerConnection.made.length;
+  await wrapper.setProps({props:{path:PATH,report:{running:true,runState:'running'}}});await settle();
+  expect(FakePeerConnection.made).toHaveLength(count);
+  await wrapper.get('.y-pic__action').trigger('click');
+  expect(emit).toHaveBeenLastCalledWith('widget-action','n1',{camera:'cam0',payload:'stop'});
+});
+
+it('local preview controls do not stop the camera stream', async () => {
+  const {wrapper,emit}=mountPicture({report:{running:true,runState:'running'}});await settle();
+  await wrapper.findAll('.y-pic__view-modes button').find(button=>button.text()==='Off')!.trigger('click');
+  expect(emit.mock.calls.some(call=>(call[2] as any)?.payload==='stop')).toBe(false);
+  expect(wrapper.get('.y-pic__action').text()).toBe('Stop video');
+  expect(wrapper.text()).toContain('Preview is off in this browser.');
 });

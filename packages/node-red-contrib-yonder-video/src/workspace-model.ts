@@ -38,7 +38,7 @@ export class CameraWorkspace {
       case 'pending':
         if (!object(body) || typeof body.pending !== 'boolean') return null;
         this.pending = structuredClone({ ...body, expiresAt: status?.expiresAt ?? null, movesRadio: status?.movesRadio === true,
-          state: status?.state ?? 'idle', message: status?.message ?? '' });
+          state: body.engineState ?? status?.state ?? 'idle', observedAt: body.observedAt ?? status?.at ?? null, message: status?.message ?? '' });
         break;
       case 'result':
         if (this.selected && typeof message.camera === 'string' && message.camera !== this.selected) return null;
@@ -48,7 +48,7 @@ export class CameraWorkspace {
         if (typeof message.camera === 'string' && this.report && message.camera !== this.report.camera.id) return null;
         if (Array.isArray(message.problems)) this.problems = structuredClone(message.problems);
         else if (status.state !== 'rejected') this.problems = [];
-        this.result = structuredClone(status); break;
+        this.result = structuredClone({ ...status, ...(typeof message.operation === 'string' ? { operation: message.operation } : {}) }); break;
       default: return null;
     }
     return structuredClone({ ...this.report, problems: this.problems, problemsFor: this.report?.camera.id,

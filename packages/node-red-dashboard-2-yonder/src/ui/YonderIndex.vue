@@ -5,8 +5,9 @@
             <YonderPlacard kind="Cameras" />
             <span class="y-idx__summary">{{ summaryText }}</span>
         </div>
+        <p v-if="signInRequired" role="status"><a :href="signInHref">Sign in</a> to manage cameras.</p>
         <div class="y-idx__display">
-            <YonderColumn legend="Flying">
+            <YonderColumn legend="Cameras">
                 <template v-if="cameras.length">
                     <div
                         v-for="cam in cameras"
@@ -30,7 +31,7 @@
                                 v-if="cam.id"
                                 type="button"
                                 class="y-idx__k y-idx__forget"
-                                :disabled="!!cam.removal"
+                                :disabled="signInRequired || !!cam.removal"
                                 :title="cam.removal || ('Take ' + cam.name + ' out of the configuration on this device')"
                                 @click="forget(cam)"
                             >FORGET<i aria-hidden="true">&minus;</i></button>
@@ -44,14 +45,14 @@
                             <button
                                 v-else
                                 type="button"
-                                class="y-idx__k y-idx__adopt"
+                                class="y-idx__k y-idx__adopt" :disabled="signInRequired"
                                 :title="'Configure ' + cam.name + ', so it has a page'"
                                 @click="adopt(cam)"
                             >ADD<i aria-hidden="true">&plus;</i></button>
                         </span>
                     </div>
                 </template>
-                <p v-else class="y-idx__none">No camera.</p>
+                <p v-else class="y-idx__none">No cameras found. Connect a camera, then choose Refresh cameras.</p>
             </YonderColumn>
 
             <YonderColumn v-if="rejected.length" legend="Seen, and not usable" qualifier="why">
@@ -65,6 +66,7 @@
 </template>
 
 <script>
+import { cameraSessionMixin } from './camera-session.ts'
 import YonderPlacard from './YonderPlacard.vue'
 import YonderColumn from './YonderColumn.vue'
 import YonderReadout from './YonderReadout.vue'
@@ -194,6 +196,7 @@ const TONE_CLASS = {
 
 export default {
     name: 'YonderIndex',
+    mixins: [cameraSessionMixin],
     inject: ['$socket', '$dataTracker'],
     components: { YonderPlacard, YonderColumn, YonderReadout },
     props: {
@@ -234,6 +237,7 @@ export default {
          * the same reasoning `YonderDeck`'s and `YonderAim`'s own `post()`
          * give for having exactly one. */
         post (payload) {
+            if (this.signInRequired) return
             this.$socket.emit('widget-action', this.id, { payload })
         },
         /** The id, never the row's own index in `cameras` (coordinator

@@ -134,7 +134,7 @@ function usability(
   const no = (why: string): { usable: false; note: string } =>
     ({ usable: false, note: `unusable — ${why}` });
   if (output === undefined) {
-    return no(`this camera has no ${what} output; configure an RTP destination`);
+    return no(kind === 'rtsp' ? 'Enable RTSP in Outputs on the Camera page.' : `No ${what} destination is configured.`);
   }
   if (!output.enabled) {
     return no(`this camera's ${what} output is stopped; enable it in Outputs on the Camera page and nothing has to be typed again`);

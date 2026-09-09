@@ -11,7 +11,7 @@ export class CameraResponse {
       this.selected = selected;
       const reason = 'Waiting for the selected camera report.';
       return { camera: selected, payload: {
-        picture: { path: '', cost: '', state: null, running: null, recording: null, cameras: [], downlink: null,
+        picture: { path: '', cost: '', state: null, running: null, runState: null, runReason: null, startBlocked: null, recording: null, cameras: [], downlink: null,
           aim: null, zoom: null, exposure: null, stats: null, saved: null },
         aim: { state: 'gated', reason, inhibited: reason, url: null, generation: null,
           pan: null, tilt: null, bounds: null, mode: null, modes: [] },

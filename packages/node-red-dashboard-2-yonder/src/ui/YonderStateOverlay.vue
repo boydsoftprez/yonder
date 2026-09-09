@@ -69,8 +69,9 @@
  */
 const HEAD_WORD = {
     adaptive: 'ADAPTIVE',
-    floor: 'AT THE FLOOR',
-    held: 'HELD',
+    floor: 'MINIMUM BITRATE',
+    held: 'FIXED SIZE',
+    fixed: 'FIXED BITRATE',
     'full-rate': 'FULL RATE',
     stills: 'STILLS'
 }
@@ -78,6 +79,7 @@ const TONE_CLASS = {
     adaptive: 'tone-good',
     floor: 'tone-waiting',
     held: 'tone-neutral',
+    fixed: 'tone-neutral',
     'full-rate': 'tone-select',
     stills: 'tone-bad'
 }

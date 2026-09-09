@@ -1,6 +1,8 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <script>
 import { h } from 'vue'
+import YonderIdentity from './YonderIdentity.vue'
+import { expireCameraSession } from './camera-session.ts'
 import YonderPlacard from './YonderPlacard.vue'
 import YonderColumn from './YonderColumn.vue'
 import YonderPicker from './YonderPicker.vue'
@@ -8,7 +10,9 @@ import YonderSegmented from './YonderSegmented.vue'
 import YonderSetBar from './YonderSetBar.vue'
 import YonderTextField from './YonderTextField.vue'
 import YonderShutter from './YonderShutter.vue'
-import { createDraftStore } from './draft.ts'
+import { createDraftStore, readCameraDrafts, saveCameraDrafts } from './draft.ts'
+import { cameraSessionMixin } from './camera-session.ts'
+import { videoAction } from './camera-workflow.ts'
 import { LABELS, captureDestination, captureRefusal, captureSizes, deckDraft, draftPathFor, endedWords, interruption } from 'yonder-core/presentation'
 
 /** One camera workspace: immediate camera controls, staged picture/output
@@ -254,6 +258,7 @@ export function appliedForDraft (payload) {
 
 export default {
   name: 'YonderDeck',
+  mixins: [cameraSessionMixin],
   inject: ['$socket', '$dataTracker'],
   props: {
     id: { type: String, required: true },
@@ -267,6 +272,11 @@ export default {
        * dependency that tells Vue the plain `Map`s inside `draftStore` (never
        * reactive on their own) have changed. See `stage()`. */
       draftVersion: 0,
+      awaitingOperation: null,
+      submittedDraft: null,
+      dismissedResult: null,
+      transactionReceivedAt: null,
+      connectionOpen: false, connectionLoading: false, connectionRows: [], connectionError: null, connectionRequest: 0,
       /**
        * **Video or Photo — the browser's, not the device's** (blueprint
        * L-43).
@@ -303,30 +313,32 @@ export default {
   },
   created () {
     this.$dataTracker(this.id)
-  },
-  mounted () {
-    this.clockTimer = setInterval(() => { this.now = Date.now() }, 1000)
-    // Task 21's own round trip: `yonder.draft` is Dashboard's client store,
-    // which this component's own remounts do not clear — restoring into a
-    // fresh `draftStore` here is what makes a draft survive the Live<->Setup
-    // flip and the camera switch that remounts this component every time.
+    // Restore before the session mixin can persist an expired session's edits.
     const saved = this.$store && this.$store.state && this.$store.state.yonder
       ? this.$store.state.yonder.draft
       : null
-    if (saved) this.draftStore.restore(saved)
+    if (saved || readCameraDrafts()) { this.draftStore.restore(saved || readCameraDrafts()); this.draftVersion++ }
   },
-  beforeUnmount () { clearInterval(this.clockTimer) },
+  mounted () { this.clockTimer = setInterval(() => { this.now = Date.now() }, 1000) },
+  beforeUnmount () { clearInterval(this.clockTimer); this.closeConnection() },
   computed: {
     message () { return this.$store?.state?.data?.messages?.[this.id]?.payload || this.props.report || null },
     workspace () { return this.message?.workspace || {} },
     transaction () { return this.workspace.pending || null },
+    resultKey () { return JSON.stringify(this.workspace.result || null) },
+    engineBusy () { return ['applying', 'reverting'].includes(this.transaction?.state) || !!(this.awaitingOperation && this.now - this.awaitingOperation.at < 65000) },
+    operationProgress () {
+      const kind = this.awaitingOperation?.kind || (this.transaction?.state === 'reverting' ? 'revert' : 'apply')
+      return { apply: 'Applying changes. Waiting for the device…', confirm: 'Keeping these settings…', revert: 'Restoring the previous settings…', probe: 'Refreshing camera information…', start: 'Starting video…', stop: 'Stopping video…' }[kind] || 'Waiting for the device…'
+    },
+    videoControl () { return videoAction(this.report?.run?.state, null, this.report?.startBlocked) },
     operationResult () {
       const result = this.workspace.result
-      if (!result || result.state === 'idle') return null
+      if (!result || result.state === 'idle' || this.dismissedResult === this.resultKey || this.transaction?.pending) return null
       if (result.state === 'confirmed' && Number.isFinite(result.at) && this.now - result.at > 8000) return null
       return result
     },
-    canApply () { return this.pendingEdits.length > 0 && !this.transaction?.pending && this.transaction?.state !== 'rejected' },
+    canApply () { return !this.signInRequired && !this.engineBusy && this.pendingEdits.length > 0 && !this.transaction?.pending && this.transaction?.state !== 'rejected' },
     /**
      * The whole report, live in preference to configured — the same rule
      * every other widget in this package states for its own narrower slice
@@ -386,6 +398,12 @@ export default {
     },
   },
   watch: {
+    resultKey () { this.settleOperation() },
+    transaction (value, before) {
+      if (value?.observedAt !== before?.observedAt || value?.id !== before?.id || this.transactionReceivedAt === null) this.transactionReceivedAt = this.now
+      if (value?.pending && this.submittedDraft && !this.submittedDraft.id) this.submittedDraft.id = value.id
+      if (value?.pending && this.awaitingOperation?.kind === 'apply') this.awaitingOperation = null
+    },
     /**
      * A fresh report is the device's own answer, whatever it says.
      *
@@ -396,15 +414,76 @@ export default {
      */
     report (now, before) {
       this.shutterPending = false
+      if (now?.camera?.id !== before?.camera?.id) { this.awaitingOperation = null; this.closeConnection() }
+      else if (JSON.stringify(now?.outputs) !== JSON.stringify(before?.outputs)) this.closeConnection()
+      this.settleOperation()
     },
   },
   methods: {
+    onCameraSessionExpired () { this.persistDraft(); this.awaitingOperation = null; this.closeConnection() },
+    closeConnection () { this.connectionRequest++; this.connectionOpen = false; this.connectionLoading = false; this.connectionRows = []; this.connectionError = null },
+    async loadConnection () {
+      if (this.signInRequired || !this.camera || this.connectionLoading) return
+      this.connectionOpen = true; this.connectionLoading = true; this.connectionRows = []; this.connectionError = null
+      const request = ++this.connectionRequest
+      const abort = new AbortController(); const timer = setTimeout(() => abort.abort(), 5000)
+      try {
+        const response = await fetch(`/video/${encodeURIComponent(this.camera)}/connection`, { credentials: 'same-origin', cache: 'no-store', signal: abort.signal })
+        if (request !== this.connectionRequest) return
+        if (response.status === 401) { expireCameraSession(); return }
+        if (!response.ok) throw new Error('Connection details are unavailable. Try Refresh details.')
+        const body = await response.json()
+        if (request === this.connectionRequest) this.connectionRows = Array.isArray(body.renderings) ? body.renderings : []
+      } catch { if (request === this.connectionRequest) this.connectionError = 'Connection details are unavailable. Try Refresh details.' }
+      finally { clearTimeout(timer); if (request === this.connectionRequest) this.connectionLoading = false }
+    },
+    buildConnection () {
+      if (!this.connectionOpen) return null
+      return h('section', { class: 'y-deck__connection', 'aria-label': 'Connection details', 'aria-live': 'polite' }, [
+        h('h2', { class: 'y-deck__transaction-head' }, 'Connection details'),
+        this.report?.camera?.identity ? h('p', this.report.camera.identity) : null,
+        this.connectionLoading ? h('p', 'Loading connection details…') : null,
+        this.connectionError ? h('p', this.connectionError) : null,
+        ...this.connectionRows.map(row => h('div', { key: row.kind }, [
+          h(YonderIdentity, { id: `${this.id}-connection-${row.kind}`, props: { label: row.title }, text: row.body }),
+          h('p', { class: 'y-deck__connection-note' }, row.note),
+        ])),
+        h('button', { class: 'y-deck__key', disabled: this.connectionLoading || this.signInRequired, onClick: () => this.loadConnection() }, 'Refresh details'),
+      ])
+    },
+    requestOperation (kind, payload) {
+      if (this.signInRequired || this.engineBusy) return
+      this.awaitingOperation = { kind, camera: this.camera, at: this.now, baseline: this.resultKey }
+      this.dismissedResult = this.resultKey
+      this.post(payload)
+    },
+    settleOperation () {
+      const result = this.workspace.result
+      const waiting = this.awaitingOperation
+      if (waiting && waiting.camera === this.camera && this.resultKey !== waiting.baseline && result
+          && (!result.operation || result.operation === waiting.kind || waiting.kind === 'probe' && result.operation === 'read')) {
+        if (this.submittedDraft && result.id) this.submittedDraft.id ||= result.id
+        if (result.state === 'confirmed' && ['apply', 'confirm'].includes(waiting.kind) && this.submittedDraft
+            && (!result.id || this.submittedDraft.id === result.id)) this.submittedDraft.confirmed = true
+        this.awaitingOperation = null
+      }
+      const submitted = this.submittedDraft
+      if (submitted?.confirmed && submitted.camera === this.camera && !this.transaction?.pending
+          && Object.entries(submitted.values).every(([key, value]) => String(this.appliedFlat[key]) === String(value))) {
+        this.draftStore.acknowledge(this.camera, submitted.values)
+        this.submittedDraft = null
+        this.persistDraft()
+      }
+    },
     field (component, props) {
       const paths = props.key === 'captureSize' ? ['width', 'height'] : props.key === 'captureRate' ? ['framerate'] : [props.key]
-      const pending = paths.some(path => this.pendingEdits.some(edit => edit.path === path))
-      return h(component, { ...props, class: [props.class, { 'y-field--pending': pending }], 'data-pending': pending ? 'true' : undefined,
-        ...(pending && component !== YonderSetBar && component !== YonderTextField ? { reason: 'Unsaved change' } : {}),
-        ...(pending && component === YonderTextField ? { hint: 'Unsaved change' } : {}) })
+      const dirty = paths.some(path => this.pendingEdits.some(edit => edit.path === path))
+      const confirming = !dirty && this.transaction?.pending && this.submittedDraft?.camera === this.camera && paths.some(path => path in this.submittedDraft.values)
+      const pending = dirty || confirming
+      const notice = dirty ? 'Unsaved change' : 'Applied · awaiting Keep'
+      return h(component, { ...props, ...(confirming && component === YonderSetBar ? { fine: notice } : {}), class: [props.class, { 'y-field--pending': pending }], 'data-pending': pending ? 'true' : undefined,
+        ...(pending && component !== YonderSetBar && component !== YonderTextField ? { reason: notice } : {}),
+        ...(pending && component === YonderTextField ? { hint: notice } : {}) })
     },
     nativeControl (command) { this.post({ nativeControl: command }) },
     hasDraft (path) {
@@ -442,7 +521,7 @@ export default {
     },
     stagedReason (path, fallback) {
       return this.pendingEdits.some((e) => e.path === path)
-        ? 'Staged change'
+        ? 'Unsaved change'
         : (fallback || '')
     },
     draftValue (path, fallback) {
@@ -460,6 +539,7 @@ export default {
     },
     persistDraft () {
       this.draftVersion += 1
+      saveCameraDrafts(this.draftStore.snapshot())
       if (!this.$store || !this.$store.state) return
       if (!this.$store.state.yonder) this.$store.state.yonder = {}
       this.$store.state.yonder.draft = this.draftStore.snapshot()
@@ -467,6 +547,7 @@ export default {
     /** Every message this deck actually posts leaves through here — one
      * seam, so `deck.component.test.ts` can spy on exactly one thing. */
     post (payload) {
+      if (this.signInRequired) return
       if (payload.transaction) this.$socket.emit('widget-action', this.id, { payload })
       else if (this.camera) this.$socket.emit('widget-action', this.id, { camera: this.camera, payload })
     },
@@ -515,10 +596,14 @@ export default {
      */
     apply () {
       if (!this.canApply) return
-      this.post({ apply: this.draftStore.get(this.camera) })
+      const values = Object.fromEntries(this.pendingEdits.map(edit => [edit.path, edit.requested]))
+      this.submittedDraft = { camera: this.camera, values, id: null, confirmed: false }
+      this.requestOperation('apply', { apply: values })
     },
     discard () {
+      if (this.engineBusy) return
       this.draftStore.clear(this.camera)
+      this.submittedDraft = null
       this.persistDraft()
     },
     toggleOutput (kind, enabled) {
@@ -733,13 +818,13 @@ export default {
           const choices = d.options.map(option => ({ ...option, display: Number(option.label) }))
           const current = choices.find(option => String(option.value) === String(d.value))
           return this.field(YonderSetBar, { key: 'nativeBrightness', label: 'Brightness (EV)', unit: 'EV', min: -2, max: 2, step: 1 / 3, precision: 2,
-            actual: current?.display ?? null, state: d.state, reason: d.reason || '', onSet: value => {
+            actual: current?.display ?? null, state: this.signInRequired ? 'gated' : d.state, reason: d.reason || '', onSet: value => {
               const selected = choices.reduce((a, b) => Math.abs(b.display - value) < Math.abs(a.display - value) ? b : a)
               if (d.state === 'present') this.nativeControl(selected.command)
             } })
         }
         return this.field(YonderPicker, { key: d.key, label: d.label, value: d.value, currentLabel: d.currentLabel, options: d.options,
-          state: d.state, reason: d.reason || '', onChange: value => {
+          state: this.signInRequired ? 'gated' : d.state, reason: d.reason || '', onChange: value => {
             const selected = d.options.find(option => String(option.value) === String(value))
             if (selected && d.state === 'present') this.nativeControl(selected.command)
           } })
@@ -908,7 +993,8 @@ export default {
        */
       if (r.accessory) {
         children.push(h('div', { class: 'y-deck__ended' }, this.recorder?.mediumReason || 'Camera card status unknown'))
-        children.push(...this.nativeControls('capture'))
+        const formats = this.nativeControls('capture')
+        if (formats.length) children.push(h('details', { class: 'y-deck__advanced' }, [h('summary', 'Device formats'), h('p', { class: 'y-deck__hint' }, 'Advanced format codes reported by the camera.'), ...formats]))
       } else {
       const count = (r.captures && typeof r.captures.count === 'number') ? r.captures.count : 0
       children.push(h('button', {
@@ -1317,19 +1403,21 @@ export default {
       const buttons = active
         ? (transaction.keys || []).filter(key => ['confirm', 'revert'].includes(key.action)).map(key => h('button', {
           type: 'button', class: ['y-deck__key', { 'y-deck__key--warn': key.action === 'confirm' }],
-          onClick: () => this.post({ transaction: `camera-${key.action}` }),
+          disabled: this.signInRequired || this.engineBusy, onClick: () => this.requestOperation(key.action, { transaction: `camera-${key.action}` }),
         }, key.action === 'confirm' ? 'Keep' : 'Revert'))
-        : [h('button', { type: 'button', class: 'y-deck__key y-deck__key--warn', disabled: !this.canApply, onClick: () => this.apply() }, 'Apply'),
-          h('button', { type: 'button', class: 'y-deck__key', disabled: this.pendingEdits.length === 0, onClick: () => this.discard() }, 'Discard edits')]
-      const seconds = Number.isFinite(transaction?.expiresAt) ? Math.max(0, Math.ceil((transaction.expiresAt - this.now) / 1000)) : null
+        : [h('button', { type: 'button', class: 'y-deck__key y-deck__key--warn', disabled: !this.canApply, onClick: () => this.apply() }, this.engineBusy && (!this.awaitingOperation || ['apply','confirm','revert'].includes(this.awaitingOperation.kind)) ? (this.awaitingOperation?.kind === 'confirm' ? 'Keeping…' : this.awaitingOperation?.kind === 'revert' || transaction?.state === 'reverting' ? 'Reverting…' : 'Applying…') : 'Apply'),
+          h('button', { type: 'button', class: 'y-deck__key', disabled: this.engineBusy || this.pendingEdits.length === 0, onClick: () => this.discard() }, 'Discard edits')]
+      const seconds = Number.isFinite(transaction?.expiresAt) ? Math.max(0, Math.ceil((transaction.expiresAt - (Number.isFinite(transaction.observedAt) && this.transactionReceivedAt !== null ? transaction.observedAt + this.now - this.transactionReceivedAt : this.now)) / 1000)) : null
       return h('section', { class: 'y-deck__transaction', 'aria-label': 'Configuration changes' }, [
-        h('div', { class: 'y-deck__transaction-head' }, active ? 'Configuration pending' : 'Configuration changes'),
-        active ? h('p', { class: 'y-deck__transaction-message' }, transaction.what || transaction.message) : null,
+        h('div', { class: 'y-deck__transaction-head' }, this.engineBusy ? 'Updating configuration' : active ? 'Keep or revert these changes' : 'Configuration changes'),
+        active ? h('p', { class: 'y-deck__transaction-message' }, transaction.movesRadio ? transaction.what || transaction.message : 'These settings are active. Choose Keep to save them or Revert to restore the previous settings.') : null,
         active && seconds !== null ? h('p', { class: 'y-deck__transaction-countdown' }, `${seconds} seconds until automatic revert`) : null,
-        active ? h('p', { class: 'y-deck__transaction-message' }, transaction.why || '') : this.buildPending(),
-        !active && this.pendingEdits.length === 0 ? h('p', { class: 'y-deck__transaction-message' }, 'No local changes staged.') : null,
+        !active ? this.buildPending() : null,
+        this.awaitingOperation && !this.engineBusy && !active ? h('p', { class: 'y-deck__transaction-message', role: 'status' }, 'No completion reply received. Refresh camera to check the current settings before retrying.') : null,
+        this.engineBusy ? h('p', { class: 'y-deck__transaction-message', role: 'status' }, this.operationProgress) : null,
+        !active && !this.engineBusy && this.pendingEdits.length === 0 ? h('p', { class: 'y-deck__transaction-message' }, 'No local changes staged.') : null,
         transaction?.state === 'rejected' ? h('p', { class: 'y-deck__transaction-error' }, transaction.message) : null,
-        this.operationResult ? h('p', { class: ['y-deck__result', `is-${this.operationResult.state}`], role: 'status' }, this.operationResult.message) : null,
+        this.operationResult ? h('p', { class: ['y-deck__result', `is-${this.operationResult.state}`], role: 'status' }, ['Last action: ', this.operationResult.message, h('button', { type: 'button', class: 'y-deck__dismiss', 'aria-label': 'Dismiss message', onClick: () => { this.dismissedResult = this.resultKey } }, 'Dismiss')]) : null,
         h('div', { class: 'y-deck__rail' }, buttons),
       ])
     },
@@ -1350,14 +1438,16 @@ export default {
     const cam = r.camera || {}
     return h('div', { class: 'y-deck y-deck--workspace' }, [
       h(YonderPlacard, { kind: 'Camera', name: cam.name || '', unit: cam.spec || '' }),
+      this.signInRequired ? h('div', { class: 'y-deck__transaction', role: 'status' }, [h('a', { href: this.signInHref }, 'Sign in'), ' to restore camera controls. Your unsaved edits are kept.']) : null,
       this.buildRail(),
       h('div', { class: 'y-deck__tools' }, [
-        h('button', { type: 'button', class: 'y-deck__key', onClick: () => this.post({ video: 'stop' }) }, 'Stop video'),
-        h('button', { type: 'button', class: 'y-deck__key', onClick: () => this.post({ refresh: true }) }, 'Refresh camera'),
-        h('button', { type: 'button', class: 'y-deck__key', onClick: () => this.post({ connection: true }) }, 'Connection details'),
+        h('button', { type: 'button', class: 'y-deck__key', disabled: this.signInRequired || this.engineBusy || !this.videoControl.action, onClick: () => this.requestOperation(this.videoControl.action, { video: this.videoControl.action }) }, this.videoControl.label),
+        h('button', { type: 'button', class: 'y-deck__key', disabled: this.signInRequired || this.engineBusy, onClick: () => this.requestOperation('probe', { refresh: true }) }, 'Refresh camera'),
+        h('button', { type: 'button', class: 'y-deck__key', disabled: this.signInRequired, 'aria-expanded': this.connectionOpen, onClick: () => this.connectionOpen ? this.closeConnection() : this.loadConnection() }, this.connectionOpen ? 'Hide connection details' : 'Connection details'),
       ]),
+      this.buildConnection(),
       h('h2', { class: 'y-deck__section' }, 'Camera image and capture'),
-      h('p', { class: 'y-deck__hint' }, 'Camera controls take effect immediately and show the device readback.'),
+      h('p', { class: 'y-deck__hint' }, "Camera exposure and capture changes take effect immediately. The controls show the camera's readback."),
       this.buildSlots(IMAGE_SLOTS),
       h('h2', { class: 'y-deck__section' }, 'Stream, picture and outputs'),
       h('p', { class: 'y-deck__hint' }, 'These edits are staged until you press Apply.'),
@@ -1369,6 +1459,10 @@ export default {
 </script>
 
 <style scoped>
+.y-deck__connection { padding: 16px; border: 1px solid var(--yonder-divider); overflow-wrap: anywhere; font-size: 12px; }
+.y-deck__connection-note { margin: 4px 0 18px; line-height: 1.5; }
+.y-deck__dismiss { margin-left:12px; color:inherit; font:inherit; text-decoration:underline; background:none; border:0; cursor:pointer; }
+
 .y-deck__transaction {
     margin: 12px 0;
     padding: 14px 16px;

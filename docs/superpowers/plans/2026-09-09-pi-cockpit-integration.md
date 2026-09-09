@@ -33,7 +33,7 @@ the earlier proposed integration base in the live-cockpit bench plan.
 - [x] Build and test the integrated packages and authenticated console HTTP routes.
 - [ ] Complete native-browser inspection; the initial browser automation session detached.
 - [x] Incorporate the camera task's committed driver fix and rerun affected checks.
-- [ ] Incorporate its subsequent bounded camera-workflow correction before activation.
+- [x] Incorporate its subsequent bounded camera-workflow correction before activation.
 - [x] Confirm Pi identity, architecture, installed build, active services, free
   space, camera endpoint ownership and the actual flight-controller connection.
 - [x] Stage matching artifacts in a separate release directory.
@@ -51,3 +51,8 @@ Camera/Cockpit remain intact; the native flight display is a separate Flight pag
 Staged candidate: integration commit `963e19c`, including camera head `073f8f1`.
 The staging manifest remains on hold until the additional camera-workflow pass
 is committed and incorporated. No production activation has occurred.
+
+Camera workflow commit `55be6d5` has been incorporated. The camera task explicitly
+released the activation hold after validation; the combined build and all workspace
+tests passed. Its existing Camera browser owns the positive authenticated endpoint
+and preview/thumbnail UI checks after restart, avoiding an extra media viewer.

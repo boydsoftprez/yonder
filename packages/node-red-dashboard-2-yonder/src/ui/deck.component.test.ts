@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { mount, type VueWrapper } from "@vue/test-utils";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { nextTick, reactive } from "vue";
 import YonderDeck, { CAPABILITY_LAYOUT, appliedForDraft } from "./YonderDeck.vue";
 import { CAPABILITY_KEYS } from "yonder-core/presentation";
@@ -1398,4 +1398,60 @@ describe('unified camera workspace', () => {
     await wrapper.findAll('button').find(b => b.text() === 'Apply')!.trigger('click');
     expect(emit).toHaveBeenLastCalledWith('widget-action','d1',{ camera: 'elp', payload: { apply: { outputRtsp:false } } }); wrapper.unmount();
   });
+});
+
+
+beforeEach(() => { sessionStorage.removeItem('yonder:camera-drafts:v1'); document.documentElement.removeAttribute('data-yonder-camera-auth'); document.documentElement.removeAttribute('data-yonder-auth-check'); });
+
+it('keeps camera drafts through refresh and expired authentication without replaying Apply', async () => {
+  const first=deck(makeStore(makeReport()),'live');first.wrapper.vm.stage('imageBrightness',20);await nextTick();
+  expect(first.wrapper.findAll('[data-pending="true"]').length).toBeGreaterThan(0);first.wrapper.unmount();
+  const second=deck(makeStore(makeReport()),'live');await nextTick();
+  expect(second.wrapper.vm.draft.imageBrightness).toBe(20);expect(second.emit).not.toHaveBeenCalled();
+  const {expireCameraSession}=await import('./camera-session.js');expireCameraSession();await nextTick();
+  second.wrapper.vm.apply();second.wrapper.vm.nativeControl({kind:'ev',value:18});
+  expect(second.emit).not.toHaveBeenCalled();expect(second.wrapper.text()).toContain('Sign in');
+  expect(JSON.parse(sessionStorage.getItem('yonder:camera-drafts:v1')!)).toHaveProperty('elp.imageBrightness',20);
+  second.wrapper.unmount();
+});
+
+it('prevents duplicate Apply and retires confirmed edits while preserving a newer draft', async () => {
+  const initial=makeReport();const store=reactive(makeStore(initial));const {wrapper,emit}=deck(store,'live');
+  wrapper.vm.stage('imageBrightness',20);wrapper.vm.apply();wrapper.vm.apply();await nextTick();
+  expect(emit.mock.calls.filter(call=>(call[2] as any)?.payload?.apply)).toHaveLength(1);
+  expect(wrapper.text()).toContain('Applying changes');
+  wrapper.vm.stage('imageBrightness',30);
+  const policy={...(initial as any).policy,image:{brightness:20,contrast:100,saturation:100,hue:0}};
+  store.state.data.messages.d1={payload:{...initial,policy,workspace:{pending:{pending:true,id:'change-1',state:'pending'},result:{state:'pending',operation:'apply',id:'change-1',at:1,message:'Applied'}}}};
+  await nextTick();wrapper.vm.requestOperation('confirm',{transaction:'camera-confirm'});
+  store.state.data.messages.d1={payload:{...initial,policy,workspace:{pending:{pending:false,state:'confirmed'},result:{state:'confirmed',operation:'confirm',id:'change-1',at:2,message:'Kept'}}}};
+  await nextTick();
+  expect(wrapper.vm.draft.imageBrightness).toBe(30);expect(wrapper.vm.awaitingOperation).toBeNull();
+  wrapper.unmount();
+});
+
+
+it('opens all receiver settings beside their verdicts and clears them on camera change', async () => {
+  const report=makeReport();report.camera.identity='stable socket identity';
+  const store=reactive(makeStore(report));const {wrapper}=deck(store,'live');
+  const renderings=['url','gstreamer','dialog','appsink'].map(kind=>({kind,title:kind,body:`${kind} receiver setting`,note:`${kind} reachability verdict`,usable:false}));
+  const held=globalThis.fetch;globalThis.fetch=vi.fn(async()=>({ok:true,status:200,json:async()=>({renderings})})) as any;
+  try {
+    expect(wrapper.find('.y-deck__connection').exists()).toBe(false);
+    await wrapper.vm.loadConnection();await nextTick();
+    expect(wrapper.find('.y-deck__connection').text()).toContain('stable socket identity');
+    for(const row of renderings){expect(wrapper.text()).toContain(row.body);expect(wrapper.text()).toContain(row.note)}
+    expect(wrapper.findAll('.y-deck__connection .y-id__copy')).toHaveLength(4);
+    store.state.data.messages.d1={payload:{...report,camera:{...report.camera,id:'second'}}};await nextTick();
+    expect(wrapper.find('.y-deck__connection').exists()).toBe(false);
+  } finally {globalThis.fetch=held;wrapper.unmount()}
+});
+
+it('restores edits before handling a session that was already expired on mount', async () => {
+  sessionStorage.setItem('yonder:camera-drafts:v1',JSON.stringify({elp:{imageBrightness:25}}));
+  document.documentElement.setAttribute('data-yonder-camera-auth','expired');
+  const {wrapper,emit}=deck(makeStore(makeReport()),'live');await nextTick();
+  expect(wrapper.vm.draft.imageBrightness).toBe(25);
+  expect(JSON.parse(sessionStorage.getItem('yonder:camera-drafts:v1')!).elp.imageBrightness).toBe(25);
+  expect(wrapper.text()).toContain('Sign in');expect(emit).not.toHaveBeenCalled();wrapper.unmount();
 });

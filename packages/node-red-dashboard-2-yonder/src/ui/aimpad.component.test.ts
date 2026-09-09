@@ -482,7 +482,7 @@ describe("the struck axis — one the device advertises and will not answer", ()
     const present = pad({ axes: { pan: "present", tilt: "present", roll: "present" } });
     expect(present.find(".y-aim__struck").exists()).toBe(false);
 
-    const struck = pad({ axes: { pan: "present", tilt: "present", roll: "not-offered" } });
+    const struck = pad({ axes: { pan: "present", tilt: "present", roll: "advertised" } });
     expect(struck.find(".y-aim__struck").exists()).toBe(true);
     expect(struck.find(".y-aim__struck-label").text()).toContain("ROLL");
   });
@@ -491,11 +491,11 @@ describe("the struck axis — one the device advertises and will not answer", ()
     expect(pad({}).find(".y-aim__struck").exists()).toBe(false);
   });
 
-  it("fails closed: an axes object with roll simply absent is struck, not present", () => {
+  it("omits an axis the camera does not offer", () => {
     // R-CMD-04's own spirit, applied to a reading rather than a command:
     // an axis this page was never told about is not assumed safe.
     const w = pad({ axes: { pan: "present", tilt: "present" } });
-    expect(w.find(".y-aim__struck").exists()).toBe(true);
+    expect(w.find(".y-aim__struck").exists()).toBe(false);
   });
 });
 

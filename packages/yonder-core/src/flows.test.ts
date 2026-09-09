@@ -1855,16 +1855,9 @@ describe("flows/flows.json camera pages", () => {
    * `index.component.test.ts`; this holds the half that lives in the wiring.
    */
   it("shows each camera's identity, not only its /dev node", () => {
-    const bar = on(camera).find((n) => n.type === "ui-yonder-databar"
-      && String(n.cells).includes("\"key\":\"identity\""));
-    expect(bar, "the camera page never shows its identity").toBeDefined();
-    const cell = (JSON.parse(String(bar?.cells)) as { key: string; kind?: string }[])
-      .find((c) => c.key === "identity");
-    expect(cell?.kind, "a 130-character sentence is not a reading").toBe("note");
-    // Fed from the same read as the rest of the strip, so it can never be a
-    // value this file typed in.
-    expect((flows.find((n) => n.id === "pick-cam-strip")?.wires as string[][])[0])
-      .toContain(bar?.id);
+    // Identity now travels with the unified deck; its rendering is component-tested.
+    expect(flows.find(n=>n.id==='pick-cam-deck')?.rules).toContainEqual({t:'set',p:'payload',pt:'msg',to:'payload.deck',tot:'msg'});
+    expect(flows.some(n=>n.id==='bar-camera'||n.id==='pick-cam-strip')).toBe(false);
   });
 
   /**
@@ -1979,7 +1972,7 @@ describe("flows/flows.json camera pages", () => {
    */
   it("starts with one unified controls group and no alternative layout", () => { expect(flows.find(n=>n.id==='group-cam-controls')?.visible).toBe(true); expect(flows.some(n=>n.id==='group-cam-setup'||n.id==='group-cam-live')).toBe(false); });
 
-  it("expands connection details without hiding preview, Aim or transaction controls", () => { const show=flows.find(n=>n.id==='cam-show-connection'); expect(JSON.parse((show?.rules as {to:string}[])[0].to)).toEqual({groups:{show:['group-cam-receive']}}); expect(flows.some(n=>n.id==='deck-live'||n.id==='deck-setup')).toBe(false); });
+  it("keeps connection details in the camera workspace", () => { expect(flows.some(n=>n.id==='cam-show-connection'||n.id==='deck-live'||n.id==='deck-setup')).toBe(false); });
 
   /**
    * **One widget per deck, and no group left for a stock widget to be
@@ -2076,7 +2069,7 @@ describe("flows/flows.json camera pages", () => {
       expect(otherwise, `${id} passes anything it does not recognise`).toBeGreaterThanOrEqual(0);
       expect(wires[otherwise], `${id}'s else output leads somewhere`).toEqual([]);
       for (const r of rules) {
-        if (r.t !== "else") expect(["start", "path"]).toContain(r.v);
+        if (r.t !== "else") expect(["start", "stop", "path"]).toContain(r.v);
         if (r.v === "path") expect(wires[rules.indexOf(r)]).toEqual(["cam-pic-go"]);
       }
     }
@@ -2120,43 +2113,9 @@ describe("flows/flows.json camera pages", () => {
    * the device's real credential: the RTSP line carries a resolved one.
    */
   it("shows all four receivers, each with a means of copying it", () => {
-    const line = flows.find((n) => n.type === "yonder-stream-address");
-    expect(line, "there is no stream address node").toBeDefined();
-    expect((line?.wires as string[][])[0]).toEqual(["pick-cam-receive", "cam-workspace-result"]);
-
-    const pick = flows.find((n) => n.id === "pick-cam-receive");
-    const fed = (pick?.wires as string[][])[0];
-    // One identity per rendering `renderReceive()` produces, keyed on the
-    // property the pick node sets — so a rendering added there and not drawn
-    // here is a widget bound to nothing, which renders an em dash for ever.
-    // widget id · the payload property it binds · the rendering it must read.
-    // `rtsp` and `url` differ on purpose: the surface's word for the line and
-    // `renderReceive()`'s word for the rendering are not the same word, and
-    // that mismatch is exactly where a rule can be pointed at the wrong one.
-    for (const [id, key, kind] of [
-      ["identity-cam-gstreamer", "gstreamer", "gstreamer"],
-      ["identity-cam-dialog", "dialog", "dialog"],
-      ["identity-cam-appsink", "appsink", "appsink"],
-      ["identity-cam-rtsp", "rtsp", "url"],
-    ]) {
-      const widget = flows.find((n) => n.id === id);
-      expect(widget?.type, `${id} is not an identity`).toBe("ui-yonder-identity");
-      expect(widget?.key, `${id} reads the wrong property`).toBe(key);
-      expect(fed, `${id} is never fed`).toContain(id);
-      // **The source, not only the target.** Asserting that *something* sets
-      // `payload.dialog` says nothing about what it is set to: pointing that
-      // rule at the gstreamer body leaves this file green, leaves the shape
-      // reference unmoved (the identity rows are a fixed height), and hands a
-      // QGroundControl operator a GStreamer command line in the Ground
-      // station box. The two note rules below were already exact; these four
-      // were not.
-      const rules = pick?.rules as { p: string; to: string; tot: string }[];
-      const rule = rules.find((r) => r.p === `payload.${key}`);
-      expect(rule?.to, `payload.${key} reads the wrong rendering`)
-        .toBe(`payload.renderings[kind="${kind}"].body`);
-      // A move, never a composition (CLAUDE.md rule 2).
-      expect(rule?.tot).toBe("jsonata");
-    }
+    // Explicit authenticated HTTP read in the deck replaces credential-bearing
+    // messages broadcast on camera selection. Route and component tests cover it.
+    expect(flows.some(n=>n.type==='yonder-stream-address')).toBe(false);
   });
 
   /**
@@ -2174,28 +2133,7 @@ describe("flows/flows.json camera pages", () => {
    * sentence is three chances to disagree about one fact.
    */
   it("draws each address's verdict beside it, in the words yonder-core chose", () => {
-    const bar = flows.find((n) => n.id === "bar-cam-reach");
-    expect(bar?.type, "nothing draws whether an address can be used").toBe("ui-yonder-databar");
-    expect(bar?.group).toBe("group-cam-receive");
-    const cells = JSON.parse(String(bar?.cells)) as { key: string; kind?: string }[];
-    expect(cells.map((c) => c.key)).toEqual(["pushNote", "listenNote"]);
-    // A sentence, declared as one: a reading's cell is `white-space: nowrap`
-    // and would take the strip off the side of the page (R-UI-25).
-    for (const c of cells) expect(c.kind, `${c.key} is a sentence, not a reading`).toBe("note");
-
-    const pick = flows.find((n) => n.id === "pick-cam-receive");
-    expect((pick?.wires as string[][])[0]).toContain("bar-cam-reach");
-    // **The daemon's own note, moved and never composed here.** A JSONata
-    // expression joining "unusable" to a reason beside a wire coordinate is
-    // CLAUDE.md rule 2, so `receive.ts` puts the word in the sentence and
-    // this file only carries it.
-    const rules = pick?.rules as { p: string; to: string }[];
-    for (const [p, to] of [
-      ["payload.pushNote", 'payload.renderings[kind="gstreamer"].note'],
-      ["payload.listenNote", 'payload.renderings[kind="url"].note'],
-    ]) {
-      expect(rules.find((r) => r.p === p)?.to, `${p} is not a move`).toBe(to);
-    }
+    expect(flows.some(n=>n.id==='group-cam-receive'||n.id==='bar-cam-reach')).toBe(false);
   });
 
   /**
@@ -2212,16 +2150,8 @@ describe("flows/flows.json camera pages", () => {
    * composed in `video/present.ts` from the configuration, read whole.
    */
   it("writes no camera's name into the wiring, and draws the one it is sent", () => {
-    expect(flows.find((n) => n.id === "pic-camera")?.label,
-      "the picture is labelled with a camera name this file typed in").toBe("");
-    const bar = flows.find((n) => n.id === "bar-camera");
-    const cells = JSON.parse(String(bar?.cells)) as { key: string }[];
-    expect(cells.map((c) => c.key), "the readout strip never names its camera")
-      .toContain("name");
-    // From the same composed payload as the rest of the strip, so it can
-    // never be a value this file typed in.
-    expect((flows.find((n) => n.id === "pick-cam-strip")?.wires as string[][])[0])
-      .toContain("bar-camera");
+    expect(flows.find(n=>n.id==='pic-camera')?.label).toBe('');
+    expect(flows.find(n=>n.id==='pick-cam-picture')?.rules).toContainEqual({t:'set',p:'payload',pt:'msg',to:'payload.picture',tot:'msg'});
   });
 
   /**
@@ -2287,7 +2217,7 @@ describe("flows/flows.json camera pages", () => {
    * camera cannot start*, which is the opposite of what a null refusal
    * means — so the caption is checked as well as the value.
    */
-  it("keeps the start refusal visible in the camera controls", () => { expect(flows.find(n=>n.id==='bar-cam-start')).toMatchObject({group:'group-cam-controls',height:0}); expect(flows.find(n=>n.id==='camera-response')?.wires?.flat()).toContain('pick-cam-start'); });
+  it("keeps the start refusal in the composed picture and deck", () => { expect(flows.find(n=>n.id==='camera-response')?.wires?.flat()).toContain('pick-cam-picture'); expect(flows.some(n=>n.id==='bar-cam-start')).toBe(false); });
 
   /**
    * **The picture's own Start, and why R-UI-10 still holds around it.**
@@ -2336,14 +2266,14 @@ describe("flows/flows.json camera pages", () => {
    * is asserted to reach the node that says so out loud (R-UI-05: an operator
    * must be able to tell "nothing happened" from "this did nothing").
    */
-  it("routes every camera workspace action to a real consumer", () => { const route=flows.find(n=>n.id==='cam-deck-route')!; const rules=route.rules as {v:string}[]; expect(rules.map(r=>r.v)).toEqual(['nativeControl','control','apply','shutter','captures','transaction','video','refresh','connection']); expect(route.wires).toHaveLength(rules.length); for(const targets of route.wires!) expect(targets.length).toBeGreaterThan(0); });
+  it("routes every camera workspace action to a real consumer", () => { const route=flows.find(n=>n.id==='cam-deck-route')!; const rules=route.rules as {v:string}[]; expect(rules.map(r=>r.v)).toEqual(['nativeControl','control','apply','shutter','captures','transaction','video','refresh']); expect(route.wires).toHaveLength(rules.length); for(const targets of route.wires!) expect(targets.length).toBeGreaterThan(0); });
 
   /**
    * A key that reached `yonder-stream` with anything but start or stop would
    * spend a round trip to be told so, and the operator would read the daemon's
    * refusal about the deck key they pressed.
    */
-  it("has no layout mode command in the stream path", () => { expect(flows.find(n=>n.id==='cam-video-msg')?.rules).toEqual([{t:'set',p:'payload',pt:'msg',to:'payload.video',tot:'msg'}]); expect(flows.find(n=>n.id==='cam-pic-act')?.rules).toEqual([{t:'eq',v:'start',vt:'str'},{t:'hask',v:'path',vt:'str'},{t:'else'}]); });
+  it("has no layout mode command in the stream path", () => { expect(flows.find(n=>n.id==='cam-video-msg')?.rules).toEqual([{t:'set',p:'payload',pt:'msg',to:'payload.video',tot:'msg'}]); expect(flows.find(n=>n.id==='cam-pic-act')?.rules).toEqual([{t:'eq',v:'start',vt:'str'},{t:'eq',v:'stop',vt:'str'},{t:'hask',v:'path',vt:'str'},{t:'else'}]); });
 
   /**
    * **No camera's id is written into this file.**
@@ -3060,7 +2990,7 @@ describe('Cockpit restoration — R-UI-28', () => {
       { t: 'set', p: 'payload', pt: 'msg', to: '', tot: 'str' },
       { t: 'delete', p: 'camera', pt: 'msg' },
     ]);
-    expect(targets('cam-pic-go')).toEqual(['cam-at-read','cam-at-receive','cam-workspace-selection']);
+    expect(targets('cam-pic-go')).toEqual(['cam-at-read','cam-workspace-selection']);
     expect(targets('cam-at-read')).toEqual(['camera-read']);
     expect(node('cam-thumb-select')).toBeUndefined();
   });
@@ -3108,7 +3038,7 @@ it('retires the workspace from every camera selection writer and preserves rende
     { t: 'set', p: 'camera', pt: 'msg', to: 'camera', tot: 'flow' },
     { t: 'set', p: 'workspaceKind', pt: 'msg', to: 'selection', tot: 'str' },
   ]);
-  for (const id of ['cam-at-controls', 'cam-at-settings', 'cam-at-captures-act', 'cam-at-stream', 'cam-at-refresh', 'cam-at-receive', 'cam-at-read']) expect(flows.find(n => n.id === id)?.rules).toEqual([
+  for (const id of ['cam-at-controls', 'cam-at-settings', 'cam-at-captures-act', 'cam-at-stream', 'cam-at-refresh', 'cam-at-read']) expect(flows.find(n => n.id === id)?.rules).toEqual([
     { t: 'set', p: 'camera', pt: 'msg', to: '$exists(camera) ? camera : $flowContext("camera")', tot: 'jsonata' },
   ]);
 });

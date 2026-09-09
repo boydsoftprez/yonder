@@ -12,6 +12,15 @@ reports; the Pocket 2 pages are drawn from the command matrix in
 Committed for the reason the camera-view mockups were: that set was written to a
 scratch directory and came within one cleanup of being lost.
 
+## Current Camera workspace
+
+The operator's subsequent workflow corrections are specified in R-UI-29 and
+[the Camera workflow audit](../../camera-workflow-audit-2026-09-09.md).
+The current Camera page uses one workspace, a video status strip above the
+picture, inline Apply/Keep/Revert, and expandable connection details. The old
+Live/Setup and rail renders remain historical references. The production-component
+fixture is `packages/node-red-dashboard-2-yonder/gallery/camera-workflow.html`.
+
 ## Run it
 
 ```

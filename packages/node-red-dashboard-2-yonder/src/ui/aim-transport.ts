@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import { expireCameraSession } from './camera-session.js';
 import { screenToCamera } from './aim-response.js';
 export interface AimTarget { url?: string; generation?: number; inhibited?: string | null; maxRate?: number; imageDirection?: string }
 function withinRate(target: AimTarget, rate: { pan: number; tilt: number }): boolean {
@@ -48,6 +49,7 @@ export class AimTransport {
     try {
       const response = await this.fetcher(url, { method: 'POST', credentials: 'same-origin', cache: 'no-store', signal: controller.signal,
         headers: { 'Content-Type': 'application/json', 'X-Yonder-Aim': '1' }, body: JSON.stringify(body) });
+      if (response.status === 401) expireCameraSession();
       if (!response.ok) throw new Error(`Aim request failed (${response.status})`);
       const reply = await response.json();
       if (!reply?.accepted) throw new Error(reply?.reason ?? 'Aim refused');
