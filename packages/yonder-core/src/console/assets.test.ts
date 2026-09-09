@@ -27,6 +27,15 @@ describe("renderPage", () => {
     expect(renderPage("login", "")).toBe(renderPage("login"));
   });
 
+  it("serves the login identity inline without changing the sign-in form", () => {
+    const page = renderPage("login");
+    expect(page).toContain('<h1 aria-label="Yonder"><svg');
+    expect(page).not.toContain("yonder:brand");
+    expect(page).not.toMatch(/<(?:script|image|img|foreignObject)\b|(?:href|src)=/i);
+    expect(page).toContain('<form method="post" action="/login">');
+    expect(page).toContain('autocomplete="current-password"');
+  });
+
   /**
    * The messages spliced in come from this project, so this is belt and
    * braces rather than the only thing standing between a page and an

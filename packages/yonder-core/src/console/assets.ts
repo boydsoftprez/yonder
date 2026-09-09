@@ -2,6 +2,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { brandSvg } from "./brand.js";
 
 /**
  * The console's three pages, read from disk beside this module.
@@ -24,14 +25,16 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 
 /** Where an error message is spliced in, when there is one. */
 const ERROR_MARKER = "<!--yonder:error-->";
+const BRAND_MARKER = "<!--yonder:brand-->Yonder<!--/yonder:brand-->";
 
 const cache = new Map<PageName, string>();
 
-/** The raw file, read once per process. */
+/** The page with its local vector identity, prepared once per process. */
 export function pageSource(name: PageName): string {
   const cached = cache.get(name);
   if (cached !== undefined) return cached;
-  const text = readFileSync(join(HERE, "assets", `${name}.html`), "utf8");
+  const text = readFileSync(join(HERE, "assets", `${name}.html`), "utf8")
+    .replace(BRAND_MARKER, brandSvg({ treatment: "material", decorative: true }));
   cache.set(name, text);
   return text;
 }
