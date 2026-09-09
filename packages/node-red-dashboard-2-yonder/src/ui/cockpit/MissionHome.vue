@@ -18,15 +18,15 @@
     </div>
     <p v-if="note" class="mission-touch-note" role="status">{{note}}</p>
     <p v-if="error||externalError" class="mission-touch-error" role="alert">{{error||externalError}}</p>
-    <p v-if="difference" class="mission-touch-note">Compared with reported controller home: {{difference.distanceM.toFixed(0)}} m horizontal; {{unitText(difference.altitudeM,altitudeUnit)}} elevation difference.</p>
+    <p v-if="difference" class="mission-touch-note">Controller home is {{difference.distanceM.toFixed(0)}} m from these coordinates<template v-if="Math.abs(difference.altitudeM)<.05">, at the same elevation.</template><template v-else> and {{unitText(Math.abs(difference.altitudeM),altitudeUnit)}} {{difference.altitudeM>0?'higher':'lower'}} than the entered elevation.</template></p>
     <div class="mission-action-grid"><button type="submit" class="mission-primary" :disabled="loading">Save planning home</button><button type="button" :disabled="!controllerHome" @click="useController">Use controller home for planning<small>Copy the reported reference into this draft</small></button></div>
     <div class="mission-touch-section-label">CONTROLLER HOME</div>
     <p class="mission-touch-note" v-if="controllerHome">Reported: {{controllerHome.lat.toFixed(7)}}°, {{controllerHome.lon.toFixed(7)}}° · {{unitText(controllerHome.alt,altitudeUnit)}} MSL</p>
     <p class="mission-touch-note" v-else>The controller has not reported a home position.</p>
     <p class="mission-touch-note">Changes return-home and above-home altitude references. In RTL or QRTL it can redirect the aircraft.</p>
     <button type="button" class="mission-touch-wide mission-execute" :disabled="!canSet||busy||loading" @click="review">Set controller home…<small>Review the coordinates and MSL elevation above, then confirm</small></button>
-    <p v-if="!canSet" class="mission-touch-note">{{unavailableReason||'Connect an ArduPlane controller with home-command support.'}}</p>
-    <p v-if="operation" class="mission-command-result" :class="{rejected:['rejected','failed','unknown'].includes(operation.state)}" role="status">Last controller-home request: {{operation.state}} · {{operation.message}}</p>
+    <p v-if="!canSet" class="mission-touch-note">{{unavailableReason||'Controller-home command support has not been reported. Check the aircraft connection and server version.'}}</p>
+    <p v-if="operation" class="mission-command-result" :class="{rejected:['rejected','failed','unknown'].includes(operation.state)||operation.effect?.state==='mismatch'}" role="status">Last controller-home request: {{operation.effect?.state==='mismatch'?'Home change not verified':operation.state}} · {{operation.message}}</p>
     <details class="mission-touch-note"><summary>Home reference and GPS</summary><p>The controller may lock an explicitly set home; check its reported value before flight. This does not set an EKF origin or provide a live GPS position. A Do Set Home mission item is a separate action that runs during mission execution.</p></details>
    </form>
   </section>

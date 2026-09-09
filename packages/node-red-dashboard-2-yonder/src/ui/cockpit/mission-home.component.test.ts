@@ -6,6 +6,12 @@ import YonderCockpit from '../YonderCockpit.vue';
 import {fixture} from '../../../cockpit/fixture.mjs';
 const hosts=[];afterEach(()=>{hosts.splice(0).forEach(w=>w.unmount());localStorage.clear()});
 function host(){const report=fixture();report.capabilities.homeControl={available:true,confirmation:'readback'};const api={command:vi.fn(async()=>({accepted:true,operationId:'test-home'}))};const w=mount(YonderCockpit,{props:{id:'home-editor-test',report,api},global:{stubs:{YonderCockpitMap:true,YonderPicture:true,TerrainVision:true}}});hosts.push(w);return {w,api}}
+it('distinguishes ACK acceptance without matching readback from verified home',async()=>{
+ const w=mount(MissionHome,{props:{operation:{state:'accepted',effect:{state:'mismatch'},message:'Home readback did not match'}}});hosts.push(w);
+ expect(w.get('.mission-command-result').text()).toContain('Home change not verified');
+ await w.setProps({operation:{state:'observed',effect:{state:'observed'},message:'Matching home observed'}});
+ expect(w.get('.mission-command-result').text()).toContain('observed');expect(w.find('.mission-command-result.rejected').exists()).toBe(false);
+});
 it('keeps unit changes lossless and treats copying controller home as a local save',async()=>{
  const original={lat:35,lon:-84,alt:91.439999};const w=mount(MissionHome,{props:{home:original,controllerHome:{...original,alt:100},canSet:true}});hosts.push(w);
  await w.get('[aria-label="Home elevation units"]').setValue('m');await w.get('[aria-label="Home elevation units"]').setValue('ft');
