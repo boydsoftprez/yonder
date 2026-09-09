@@ -33,6 +33,7 @@ export const GROUND_DATA_DEFAULTS = Object.freeze({
   traffic: false,
   trafficRadiusNm: 25,
   groundRelayUrl: "",
+  trafficRelayUrl: "",
 });
 export function publicTileUrl(layer, z, x, y) {
   validTile(layer, z, x, y);
@@ -292,16 +293,15 @@ export function createGroundDataProvider({
         const path = `/traffic/${c.lat.toFixed(5)}/${c.lon.toFixed(5)}/${c.radiusNm}`;
         let result;
         try { result = await request(
-          groundUrl(
-            path,
-            `https://api.adsb.lol/v2/point/${c.lat.toFixed(5)}/${c.lon.toFixed(5)}/${c.radiusNm}`,
-          ),
+            (settings.trafficRelayUrl || settings.groundRelayUrl)
+              ? (settings.trafficRelayUrl || settings.groundRelayUrl) + path
+              : `https://api.adsb.lol/v2/point/${c.lat.toFixed(5)}/${c.lon.toFixed(5)}/${c.radiusNm}`,
           4 * 1024 * 1024,
           signal,
           false,
         ); } catch (error) {
           if (error instanceof TypeError)
-            throw new DataFetchError(settings.groundRelayUrl
+            throw new DataFetchError(settings.trafficRelayUrl || settings.groundRelayUrl
               ? 'Ground traffic relay connection failed · check the relay address and allowed browser origin'
               : 'ADSB.lol browser connection failed · check ground internet or select a ground relay for browser access');
           throw error;
@@ -346,10 +346,10 @@ export function createGroundDataProvider({
           throw new Error("Invalid traffic radius");
         next.trafficRadiusNm = value.trafficRadiusNm;
       }
-      if (value.groundRelayUrl !== undefined) {
-        if (typeof value.groundRelayUrl !== "string")
+      for (const key of ['groundRelayUrl', 'trafficRelayUrl']) if (value[key] !== undefined) {
+        if (typeof value[key] !== "string")
           throw new Error("Invalid ground relay URL");
-        const raw = value.groundRelayUrl.trim();
+        const raw = value[key].trim();
         if (raw) {
           const u = new URL(raw);
           if (
@@ -362,8 +362,8 @@ export function createGroundDataProvider({
             /\/cockpit/.test(raw)
           )
             throw new Error("Use the origin of an operator-owned ground relay");
-          next.groundRelayUrl = u.origin;
-        } else next.groundRelayUrl = "";
+          next[key] = u.origin;
+        } else next[key] = "";
       }
       const geographicChanged = [
         "mode",
@@ -374,6 +374,7 @@ export function createGroundDataProvider({
       const trafficChanged = [
         "mode",
         "groundRelayUrl",
+        "trafficRelayUrl",
         "traffic",
         "trafficRadiusNm",
       ].some((key) => next[key] !== settings[key]);

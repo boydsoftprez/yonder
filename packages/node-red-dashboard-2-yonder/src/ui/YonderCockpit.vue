@@ -382,6 +382,9 @@
             <p v-if="sourceMode==='ground'">The device’s network route still matters: connect the iPad or laptop to ground internet if its default connection would otherwise use the aircraft modem.</p>
             <label v-if="sourceMode==='ground'">Optional ground relay origin<input v-model="groundRelayInput" type="url" placeholder="https://ground.example" aria-label="Ground relay origin" /></label>
             <button v-if="sourceMode==='ground'" @click="applyGroundRelay">Apply ground relay</button>
+            <label v-if="sourceMode==='ground'">Optional ADS-B relay origin<input v-model="trafficRelayInput" type="url" placeholder="https://ground.example" aria-label="ADS-B relay origin" /></label>
+            <button v-if="sourceMode==='ground'" @click="applyTrafficRelay">Apply ADS-B relay</button>
+            <p v-if="sourceMode==='ground'">An ADS-B relay changes only traffic sourcing. Imagery and terrain keep their selected connection. Leave it blank to use the general ground relay or direct ADSB.lol access.</p>
             <label>Display telemetry updates<select v-model.number="telemetryRate" aria-label="Display telemetry updates">
               <option v-for="rate in [1,2,4,8]" :key="rate" :value="rate">{{rate}} / second</option>
             </select></label>
@@ -618,6 +621,8 @@ import {
   flightView,
   fmt,
   prediction,
+  aircraftMapPosition,
+  aircraftPositionMessage,
   aircraftMission,
   missionWire,
   targetAction,
@@ -720,6 +725,8 @@ export default {
       sourceMode: 'ground',
       groundRelayUrl: '',
       groundRelayInput: '',
+      trafficRelayUrl: '',
+      trafficRelayInput: '',
       groundStatus: {},
       dataMessage: '',
       dataBusy: false,
@@ -974,6 +981,8 @@ export default {
       if(trail){this.ownTrailOptions=trailPreferences(trail.options);this.ownTrailCleared=trail.cleared}
       const relay=localStorage.getItem('yonder-ground-relay-v1');
       if(relay){this.groundRelayInput=relay;this.applyGroundRelay()}
+      const trafficRelay=localStorage.getItem('yonder-traffic-relay-v1');
+      if(trafficRelay){this.trafficRelayInput=trafficRelay;this.applyTrafficRelay()}
     } catch {}
     this.source?.setTrailOptions?.(this.ownTrailOptions);
     this.timer = setInterval(() => {
@@ -1416,7 +1425,7 @@ export default {
       event.target.value = ''
     },
     configureGroundData() {
-      this.groundData.configure({mode:this.sourceMode,terrain:this.onlineTerrain,imagery:this.onlineMap,traffic:this.onlineTraffic,trafficRadiusNm:this.trafficRange,groundRelayUrl:this.groundRelayUrl});
+      this.groundData.configure({mode:this.sourceMode,terrain:this.onlineTerrain,imagery:this.onlineMap,traffic:this.onlineTraffic,trafficRadiusNm:this.trafficRange,groundRelayUrl:this.groundRelayUrl,trafficRelayUrl:this.trafficRelayUrl});
       this.groundStatus=this.groundData.status()
     },
     dataOptions(key) {
@@ -1441,14 +1450,21 @@ export default {
     },
     refreshGroundTraffic() {
       if(this.report||this.props.report)return;
-      const center=this.flight.live&&Number.isFinite(this.telemetry.latitude)&&Number.isFinite(this.telemetry.longitude)?{lat:this.telemetry.latitude,lon:this.telemetry.longitude}:null;
-      this.groundData.pollTraffic(center).catch(e=>{if(!this.disposed)this.dataMessage=e.message});
-      this.trafficReport=this.groundData.trafficSnapshot(center)
+      const telemetry={...this.telemetry,ready:this.flight.live},center=aircraftMapPosition(telemetry);
+      if(center)this.groundData.pollTraffic(center).catch(e=>{if(!this.disposed)this.dataMessage=e.message});
+      const report=this.groundData.trafficSnapshot(center);
+      this.trafficReport=!center&&this.onlineTraffic&&this.sourceMode!=='offline'
+        ? {...report,status:'unavailable',tracks:[],message:'Traffic paused · '+aircraftPositionMessage(telemetry)} : report
     },
     applyGroundRelay() {
       const previous=this.groundRelayUrl;
       try{this.groundRelayUrl=this.groundRelayInput.trim();this.configureGroundData();try{localStorage.setItem('yonder-ground-relay-v1',this.groundRelayUrl)}catch{};this.dataMessage=this.groundRelayUrl?'Ground relay selected':'Direct browser providers selected'}
       catch(e){this.groundRelayUrl=previous;this.dataMessage=e.message}
+    },
+    applyTrafficRelay() {
+      const previous=this.trafficRelayUrl;
+      try{this.trafficRelayUrl=this.trafficRelayInput.trim();this.configureGroundData();try{localStorage.setItem('yonder-traffic-relay-v1',this.trafficRelayUrl)}catch{};this.dataMessage=this.trafficRelayUrl?'ADS-B ground relay selected · imagery and terrain unchanged':'ADS-B uses the general ground relay or direct browser provider'}
+      catch(e){this.trafficRelayUrl=previous;this.dataMessage=e.message}
     },
     async importGroundFiles(kind,event) {
       const files=Array.from(event.target.files||[]);if(!files.length)return;

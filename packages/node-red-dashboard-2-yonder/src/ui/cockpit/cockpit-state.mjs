@@ -12,6 +12,20 @@ export const fmt = (value, digits = 0) => finite(value) ? value.toLocaleString('
   maximumFractionDigits: digits
 }) : '—';
 export const validPosition = p => finite(p?.lat) && finite(p?.lon) && Math.abs(p.lat) <= 90 && Math.abs(p.lon) <= 180;
+// R-FLT-11: receiving fused coordinates does not establish a GPS fix. In
+// particular, an uninitialised controller can keep publishing fresh 0,0.
+// Callers pass aged telemetry so expired coordinates/fix metadata are excluded.
+export function aircraftMapPosition(t = {}) {
+  const point = {lat: t.latitude, lon: t.longitude};
+  return t.ready === true && finite(t.fixType) && t.fixType >= 2 && validPosition(point) ? point : null;
+}
+export function aircraftPositionMessage(t = {}) {
+  if (aircraftMapPosition(t)) return '';
+  if (!t.ready) return 'Aircraft position unavailable · waiting for fresh telemetry';
+  if (finite(t.fixType) && t.fixType < 2)
+    return `No GPS fix${finite(t.satellites) ? ` · ${t.satellites} satellites` : ''} · aircraft position unavailable`;
+  return 'Aircraft position unavailable · waiting for fresh GPS fix and coordinates';
+}
 export function agedTelemetry(source = {}, elapsed = 0) {
   // A packet can arrive between UI clock ticks. Negative elapsed time must not
   // turn a fresh zero-age sample into invalid negative-age data for one frame.
@@ -76,7 +90,7 @@ export function prediction(t = {}, {
   const span = finite(distanceM) && speed > 0 ? Math.min(120, distanceM / speed) : Math.max(1, Math.min(120, seconds));
   const label = finite(distanceM) ? `${fmt(distanceM)} m measured-motion estimate` :
     `${fmt(span)} s measured-motion estimate`;
-  if (!t.ready || !validPosition(point) || !finite(t.groundspeedKt) || speed < 0 || !finite(t.trackDeg ?? t.headingDeg))
+  if (!aircraftMapPosition(t) || !finite(t.groundspeedKt) || speed < 0 || !finite(t.trackDeg ?? t.headingDeg))
     return {
       points: [],
       label,

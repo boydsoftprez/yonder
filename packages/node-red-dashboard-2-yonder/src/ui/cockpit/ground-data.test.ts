@@ -5,6 +5,28 @@ import { createGroundDataProvider } from "./ground-data.mjs";
 const png = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
 const image = () =>
   new Response(png, { headers: { "content-type": "image/png" } });
+it('routes an explicit ADS-B relay independently of public imagery, terrain and their caches',async()=>{
+ const now=1788790000000,urls=[];
+ const p=createGroundDataProvider({now:()=>now,fetchImpl:async url=>{
+  urls.push(url);return url.includes('/traffic/')?new Response(JSON.stringify({now,ac:[{hex:'abc123',lat:35.96,lon:-83.36,seen_pos:0}]})):image();
+ }});
+ p.configure({terrain:true,imagery:true,traffic:true,trafficRadiusNm:10});
+ await p.tile('imagery',2,1,1);const revision=p.revision;
+ p.configure({trafficRelayUrl:'http://127.0.0.1:4223'});
+ expect(p.revision).toBe(revision);
+ await p.tile('imagery',2,1,1);await p.tile('elevation',2,1,1);
+ expect(await p.terrainManifest()).toBeNull();
+ await p.pollTraffic({lat:35.96,lon:-83.36});
+ expect(p.trafficSnapshot({lat:35.96,lon:-83.36}).tracks).toHaveLength(1);
+ expect(urls).toEqual([
+  'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/2/1/1',
+  'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/2/1/1.png',
+  'http://127.0.0.1:4223/traffic/35.96000/-83.36000/10',
+ ]);
+ expect(()=>p.configure({trafficRelayUrl:'https://name:password@ground.example'})).toThrow(/origin/);
+ p.configure({mode:'offline'});await p.pollTraffic({lat:35.96,lon:-83.36});expect(urls).toHaveLength(3);
+ p.close();
+});
 it('explains failed direct browser traffic and allows an explicitly selected ground relay',async()=>{
  const now=1788790000000,urls=[];
  const p=createGroundDataProvider({now:()=>now,fetchImpl:async url=>{

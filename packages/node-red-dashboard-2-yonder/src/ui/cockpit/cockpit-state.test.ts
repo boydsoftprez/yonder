@@ -15,7 +15,7 @@ describe('production cockpit state boundary', () => {
   });
   it('predicts measured travel without presenting ETE as a turn countdown', () => {
     expect(state).not.toBeNull();
-    const path = state!.prediction({ latitude: 35, longitude: -84, groundspeedKt: 60, headingDeg: 90, ready: true }, { seconds: 30 });
+    const path = state!.prediction({ latitude: 35, longitude: -84, groundspeedKt: 60, headingDeg: 90, ready: true, fixType:3 }, { seconds: 30 });
     expect(path.label).toBe('30 s measured-motion estimate');
     expect(path.distanceM).toBeCloseTo(926, 0);
     expect(path.points.at(-1).lon).toBeGreaterThan(-84);
@@ -29,6 +29,20 @@ describe('production cockpit state boundary', () => {
     expect(state).not.toBeNull();
     expect(state!.cameraOverlayGate({ calibration: { valid: true }, framePose: null }).ready).toBe(false);
   });
+});
+
+it('requires a fresh GPS fix for ownship, traffic centering and the motion vector',()=>{
+ const t={ready:true,latitude:0,longitude:0,fixType:0,satellites:0,groundspeedKt:20,headingDeg:90};
+ expect(state!.aircraftMapPosition(t)).toBeNull();
+ expect(state!.aircraftPositionMessage(t)).toMatch(/No GPS fix.*0 satellites/);
+ expect(state!.prediction(t).points).toEqual([]);
+ // Zero coordinates can also be a real location; the fix, not a zero check,
+ // distinguishes that location from the uninitialised bench controller.
+ expect(state!.aircraftMapPosition({...t,fixType:2})).toEqual({lat:0,lon:0});
+ const expired=state!.agedTelemetry({...t,fixType:3,fields:{fixType:{valid:true,ageMs:4900}}},200);
+ expect(state!.aircraftMapPosition(expired)).toBeNull();
+ expect(state!.aircraftMapPosition({...t,fixType:3,latitude:null})).toBeNull();
+ expect(state!.aircraftMapPosition({...t,fixType:3,ready:false})).toBeNull();
 });
 
 it('keeps instrument projection aligned when the viewport widens', async()=>{

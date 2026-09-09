@@ -45,3 +45,28 @@ it('explains map-only traffic and links directly to ground-data setup without a 
  expect(w.find('input[aria-label="Ground relay origin"]').exists()).toBe(true);
  expect(api.command).not.toHaveBeenCalled();
 });
+
+it('pauses traffic on a bench controller without GPS and resumes at the acquired fix',async()=>{
+ const provider={pollTraffic:vi.fn(async()=>{}),trafficSnapshot:vi.fn(()=>({tracks:[{id:'old'}]}))};
+ const context={report:null,props:{},flight:{live:true},telemetry:{ready:true,fixType:0,satellites:0,latitude:0,longitude:0},onlineTraffic:true,sourceMode:'ground',groundData:provider};
+ YonderCockpit.methods.refreshGroundTraffic.call(context);
+ expect(provider.pollTraffic).not.toHaveBeenCalled();
+ expect(context.trafficReport).toMatchObject({tracks:[],message:expect.stringMatching(/paused.*No GPS fix.*0 satellites/)});
+ Object.assign(context.telemetry,{fixType:3,latitude:35,longitude:-84});
+ YonderCockpit.methods.refreshGroundTraffic.call(context);
+ expect(provider.pollTraffic).toHaveBeenCalledWith({lat:35,lon:-84});
+ expect(provider.trafficSnapshot).toHaveBeenLastCalledWith({lat:35,lon:-84});
+ context.telemetry.fixType=null;
+ YonderCockpit.methods.refreshGroundTraffic.call(context);
+ expect(provider.pollTraffic).toHaveBeenCalledTimes(1);
+ expect(context.trafficReport.tracks).toEqual([]);
+});
+
+it('exposes a traffic-only relay without changing aircraft data settings or sending commands',async()=>{
+ const {w,api,provider}=host();await flushPromises();w.vm.panel='display';await w.vm.$nextTick();
+ await w.find('input[aria-label="ADS-B relay origin"]').setValue('http://127.0.0.1:4223');
+ await w.findAll('button').find(b=>b.text()==='Apply ADS-B relay')!.trigger('click');
+ expect(provider.configure).toHaveBeenLastCalledWith(expect.objectContaining({groundRelayUrl:'',trafficRelayUrl:'http://127.0.0.1:4223',mode:'ground'}));
+ expect(api.dataOptions).not.toHaveBeenCalled();expect(api.command).not.toHaveBeenCalled();
+ localStorage.removeItem('yonder-traffic-relay-v1');
+});

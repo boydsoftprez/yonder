@@ -24,6 +24,14 @@ HTTP/TLS overhead, compressed wire size, video and public geographic downloads.
 | Offline | Explicitly imported map files; a missing tile stays missing | Imported browser package only | Unavailable; no requests |
 | Aircraft | Explicit same-origin aircraft proxy requests | Explicit aircraft package requests | Current points from `/cockpit/api/traffic`; trails reconstructed locally |
 
+Ownship and nearby traffic require fresh coordinates and a reported GPS fix (2D
+or better for the map; synthetic vision has stricter attitude, height and 3D-fix
+requirements). Fresh `GLOBAL_POSITION_INT` packets alone do not establish that
+fix. Without it, the map names the missing condition and satellite count, hides
+ownship and its motion vector, and pauses nearby searches. Valid data resumes
+following and traffic automatically. A new map shows a world overview or available
+mission geometry until then; after fix loss it keeps the viewed area for planning.
+
 There is no automatic change of mode after an error. In particular, ground failure never switches public downloads or a terrain package onto the aircraft link. Mode/source changes abort pending browser requests and invalidate source-specific render caches. Aircraft proxying must also be explicitly enabled in the authenticated aircraft data settings.
 
 ## Prepare the ground browser
@@ -72,6 +80,16 @@ node scripts/cockpit/ground-data-server.mjs --allow-origin http://127.0.0.1:4196
 
 The service binds loopback. Set the allowed origin to the exact cockpit page origin. Set the cockpit's ground relay origin to `http://127.0.0.1:4197` only when that relay is intentionally in use. Remote tablets require an operator-managed HTTPS ground service; a laptop's loopback address does not identify the laptop from a tablet. Browser private-network/mixed-content permissions still apply and failures remain visible. Do not deploy this helper on the aircraft and label it ground internet.
 
+For **traffic only**, omit `--terrain-dir` and enter the relay address in
+**Display & data → ADS-B relay origin**, then press **Apply ADS-B relay**. Leave
+**Ground relay origin** blank to keep imagery and public elevation direct. This
+traffic-specific address is saved in that browser and overrides the general relay
+only for ADS-B; it does not invalidate map/terrain caches or change aircraft
+settings. Clearing it restores the general relay or direct ADSB.lol connection.
+The helper must remain running on the ground computer. The `--allow-origin` value
+must match the hardware console's scheme, host and port, not an earlier simulator
+page. An empty search with a healthy connection still does not prove clear airspace.
+
 The relay accepts GET for fixed geographic/traffic paths and explicitly listed package files. It rejects other origins, command methods, arbitrary target URLs, oversized responses and excessive concurrency. It does not bypass provider authentication, quotas or refusal: a provider's HTTP 403 remains unavailable. The optional `--terrain-dir` makes a ground package available for on-demand viewing after its origin is selected in the browser. The separate explicit `preloadTerrainPack(origin)` action downloads the complete package to IndexedDB and verifies it just like a local file import. Starting the relay does not preload anything.
 
 Ground traffic polls at most every five seconds, with five-second relay cache
@@ -86,7 +104,7 @@ not bypass the relay cooldown. Existing observations still expire normally.
 
 Import `createGroundDataProvider` from `src/ui/cockpit/ground-data.mjs`. Construct one provider for the cockpit and pass it as `dataProvider` to `YonderCockpitMap`, `TerrainVision` and `CameraTerrainOverlay`. Close it when the cockpit unmounts.
 
-- `configure({mode, terrain, imagery, traffic, trafficRadiusNm, groundRelayUrl})`: validated source settings. Radius is an integer from 1 through 100 NM. Defaults are ground mode, 25 NM and all sources off.
+- `configure({mode, terrain, imagery, traffic, trafficRadiusNm, groundRelayUrl, trafficRelayUrl})`: validated source settings. Radius is an integer from 1 through 100 NM. Defaults are ground mode, 25 NM, both relay origins blank and all sources off. The traffic relay overrides the general relay for traffic only.
 - `options`, `revision`, `subscribe(callback)`, `status()`: inspect settings/status and invalidate renderers on changes; subscribe returns an unsubscribe function. `terrainStream` identifies the selected relay manifest, while `offlineTerrain` identifies an explicitly imported complete package. `terrainPackedCacheBytes` reports compressed session terrain bytes.
 - `tile(layer,z,x,y,{signal})`: selected-source image Blob, with bounded fetch/cache and no fallback.
 - `terrainManifest({signal})` and `terrainTile(descriptor,{signal})`: selected-source manifest and raw decoded DTM/DSM bytes.

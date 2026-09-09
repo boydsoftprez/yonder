@@ -5,7 +5,7 @@
     <div class="cockpit-map-tools">
       <button @click="zoom(1)" aria-label="Zoom map in">+</button
       ><button @click="zoom(-1)" aria-label="Zoom map out">−</button
-      ><button @click="fitTrafficRange" :disabled="!snapshot?.telemetry?.ready" aria-label="Fit traffic range">Fit {{range}} NM</button
+      ><button @click="fitTrafficRange" :disabled="!aircraftPosition" aria-label="Fit traffic range">Fit {{range}} NM</button
       ><button
         @click="
           follow = !follow;
@@ -21,7 +21,7 @@
       </select>
     </div>
     <div class="cockpit-map-status" role="status">
-      {{ status
+      {{ positionMessage ? positionMessage + ' · ' + status : status
       }}<span v-if="prediction?.points.length"> · {{ prediction.label }}</span>
     </div>
     <div v-if="picking" class="cockpit-map-pick">
@@ -35,7 +35,7 @@ let L = null;
 import "leaflet/dist/leaflet.css";
 import { createProviderTileLayer } from "./ground/leaflet-provider.mjs";
 import { isPositionItem } from "./mission-import.mjs";
-import { fmt, validPosition, distance } from "./cockpit-state.mjs";
+import { fmt, validPosition, distance, aircraftMapPosition, aircraftPositionMessage } from "./cockpit-state.mjs";
 export default {
   name: "YonderCockpitMap",
   props: {
@@ -60,6 +60,10 @@ export default {
     now: Number,
   },
   emits: ["select", "location", "traffic-select"],
+  computed: {
+    aircraftPosition() { return aircraftMapPosition(this.snapshot?.telemetry); },
+    positionMessage() { return aircraftPositionMessage(this.snapshot?.telemetry); },
+  },
   data: () => ({
     map: null,
     route: null,
@@ -70,6 +74,7 @@ export default {
     basemap: "grid",
     follow: true,
     centered: false,
+    overviewCentered: false,
     status: "Local grid · data sources off",
     observer: null,
     hold: null,
@@ -77,6 +82,7 @@ export default {
     unsubscribeProvider: null,
   }),
   async mounted() {
+    this.basemap = this.online ? 'hybrid' : 'grid';
     L = (await import("leaflet")).default;
     if (!this.$refs.canvas) return;
     this.map = markRaw(
@@ -209,8 +215,8 @@ export default {
   },
   methods: {
     fitTrafficRange(){
-      const t=this.snapshot?.telemetry,here={lat:t?.latitude,lon:t?.longitude};
-      if(!this.map||!t?.ready||!validPosition(here))return;
+      const here=this.aircraftPosition;
+      if(!this.map||!here)return;
       this.follow=true;this.centered=true;
       this.map.fitBounds(L.latLng(here.lat,here.lon).toBounds(this.range*1852*2),{animate:false,padding:[20,20]});
     },
@@ -269,10 +275,7 @@ export default {
       this.route.clearLayers();
       this.tracks.clearLayers();
       const t = this.snapshot?.telemetry || {},
-        here = {
-          lat: t.latitude,
-          lon: t.longitude,
-        },
+        here = this.aircraftPosition,
         points = (this.mission?.items || []).filter(isPositionItem);
       if (points.length)
         L.polyline(
@@ -299,7 +302,7 @@ export default {
         });
         marker.on("click", () => this.$emit("select", p.seq));
       }
-      if (validPosition(here) && t.ready) {
+      if (here) {
         const svg = `<svg viewBox="0 0 40 44" style="transform:rotate(${Number.isFinite(t.headingDeg) ? t.headingDeg : 0}deg)"><path fill="white" stroke="#152a38" d="M20 2L24 17L37 25V29L24 25L23 35L29 39V42L20 39L11 42V39L17 35L16 25L3 29V25L16 17Z"/></svg>`;
         L.marker([here.lat, here.lon], {
           icon: L.divIcon({
@@ -319,7 +322,12 @@ export default {
           this.centered=true;
         }
       }
-      if (this.prediction?.points.length)
+      if (!here && !this.centered && !this.overviewCentered && points.length) {
+        this.map.fitBounds(points.map(p => [p.lat, p.lon]), {animate:false, padding:[20,20], maxZoom:14});
+        this.overviewCentered = true;
+        // This is a mission overview; acquiring a fix still centers ownship.
+      }
+      if (here && this.prediction?.points.length)
         L.polyline(
           this.prediction.points.map((p) => [p.lat, p.lon]),
           {
