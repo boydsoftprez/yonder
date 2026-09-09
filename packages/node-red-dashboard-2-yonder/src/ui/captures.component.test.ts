@@ -182,7 +182,7 @@ describe("the captures panel", () => {
     await del().trigger("click");
     expect(emit).toHaveBeenCalledTimes(1);
     expect(emit.mock.calls[0]![2])
-      .toEqual({ payload: { remove: "2026-09-07T14-22-05-123Z-1280x720.jpg" } });
+      .toEqual({ camera: "cam0", payload: { remove: "2026-09-07T14-22-05-123Z-1280x720.jpg" } });
   });
 
   it("keeps the capture when the question is answered the other way", async () => {

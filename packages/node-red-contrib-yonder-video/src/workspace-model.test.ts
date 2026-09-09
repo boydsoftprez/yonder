@@ -48,3 +48,20 @@ it('keeps refused draft problems across camera polls until a successful operatio
   expect(model.receive({ workspaceKind:'report',payload:report })).toMatchObject({ problems: [{path:'width',message:'Not offered'}],problemsFor:'cam0' });
   expect(model.receive({ workspaceKind:'result', camera:'cam0',yonder:{state:'confirmed',message:'Applied',at:1100} })).toMatchObject({ problems:[] });
 });
+
+it('retires on selection immediately and ignores a slow A success after B has hydrated', () => {
+  const model = new CameraWorkspace();
+  model.receive({ workspaceKind: 'selection', camera: 'cam0' });
+  model.receive({ workspaceKind: 'report', camera: 'cam0', payload: report });
+  model.receive({ workspaceKind: 'pending', payload: { pending: true, id: 'global' } });
+  const loading = model.receive({ workspaceKind: 'selection', camera: 'cam1' });
+  expect(loading).not.toHaveProperty('camera');
+  expect(loading).not.toHaveProperty('controls');
+  expect(loading).toMatchObject({ workspace: { pending: { id: 'global' } } });
+  const b = { camera: { id: 'cam1' }, controls: { cameraB: true } };
+  model.receive({ workspaceKind: 'report', camera: 'cam1', payload: b });
+  expect(model.receive({ workspaceKind: 'report', camera: 'cam0', payload: report })).toBeNull();
+  expect(model.receive({ workspaceKind: 'report', camera: 'cam0', yonder: { state: 'rejected', message: 'Old failure' } })).toBeNull();
+  expect(model.receive({ workspaceKind: 'result', camera: 'cam0', yonder: { state: 'confirmed', message: 'Old control' } })).toBeNull();
+  expect(model.receive({ workspaceKind: 'pending', payload: { pending: false } })).toMatchObject(b);
+});

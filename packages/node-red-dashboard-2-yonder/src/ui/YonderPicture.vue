@@ -1409,7 +1409,8 @@ export default {
         /** The same word the rail's START sends, down the same switch, so
          *  there is one way a camera is started and not two. */
         pressStart () {
-            this.post('start')
+            const camera = cameraFor(this.streamPath)
+            if (camera) this.$socket.emit('widget-action', this.id, { camera, payload: 'start' })
         },
         onThumbGo (id) {
             this.aimTransport?.stop()

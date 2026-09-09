@@ -456,7 +456,8 @@ export default {
     /** Every message this deck actually posts leaves through here — one
      * seam, so `deck.component.test.ts` can spy on exactly one thing. */
     post (payload) {
-      this.$socket.emit('widget-action', this.id, { payload })
+      if (payload.transaction) this.$socket.emit('widget-action', this.id, { payload })
+      else if (this.camera) this.$socket.emit('widget-action', this.id, { camera: this.camera, payload })
     },
     /**
      * An image control — the live-command half of the defect fix. Posts

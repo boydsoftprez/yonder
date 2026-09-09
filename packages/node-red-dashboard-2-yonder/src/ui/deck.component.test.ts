@@ -814,7 +814,7 @@ describe("the capture column: one key, following the mode", () => {
     const store = reactive(makeStore(makeReport({ capabilities: both, recorder: recorder() })));
     const { wrapper, emit } = deck(store, "live");
     await wrapper.find(".y-shutter__btn").trigger("click");
-    expect(emit.mock.calls[0]![2]).toEqual({ payload: { shutter: "record" } });
+    expect(emit.mock.calls[0]![2]).toEqual({ camera: 'elp', payload: { shutter: "record" } });
 
     // The device answers, and only then is the key a stop. A deck that kept
     // its own guess would send `stop` here whether or not anything started.
@@ -825,14 +825,14 @@ describe("the capture column: one key, following the mode", () => {
     };
     await nextTick();
     await wrapper.find(".y-shutter__btn").trigger("click");
-    expect(emit.mock.calls[1]![2]).toEqual({ payload: { shutter: "stop" } });
+    expect(emit.mock.calls[1]![2]).toEqual({ camera: 'elp', payload: { shutter: "stop" } });
   });
 
   it("takes a photograph in Photo mode", async () => {
     const { wrapper, emit } = deck(makeStore(makeReport({ capabilities: both, recorder: recorder() })), "live");
     await mode(wrapper).findAll("button")[1]!.trigger("click");
     await wrapper.find(".y-shutter__btn").trigger("click");
-    expect(emit.mock.calls[0]![2]).toEqual({ payload: { shutter: "photo" } });
+    expect(emit.mock.calls[0]![2]).toEqual({ camera: 'elp', payload: { shutter: "photo" } });
   });
 
   /**
@@ -854,7 +854,7 @@ describe("the capture column: one key, following the mode", () => {
     const link = wrapper.find(".y-deck__captures");
     expect(link.text()).toBe("Captures (3) \u203a");
     await link.trigger("click");
-    expect(emit.mock.calls[0]![2]).toEqual({ payload: { captures: "read" } });
+    expect(emit.mock.calls[0]![2]).toEqual({ camera: 'elp', payload: { captures: "read" } });
   });
 
   /**
@@ -1047,14 +1047,14 @@ describe("the three that turn the picture", () => {
     const { wrapper, emit } = deck(makeStore(report), "live");
 
     await segByLabel(wrapper, "Mirror").findAll("button")[1].trigger("click");
-    expect(emit).toHaveBeenCalledWith("widget-action", "d1", { payload: { control: "horizontalFlip", value: true } });
+    expect(emit).toHaveBeenCalledWith("widget-action", "d1", { camera: 'elp', payload: { control: "horizontalFlip", value: true } });
 
     emit.mockClear();
     await pickerByLabel(wrapper, "Rotation").find("select").setValue("270");
     // The degrees themselves, as a number — `config.yaml` stores degrees and
     // `applyControls` writes them; a string would reach `v4l2-ctl` as one.
     expect(emit).toHaveBeenCalledTimes(1);
-    expect(emit).toHaveBeenCalledWith("widget-action", "d1", { payload: { control: "rotation", value: 270 } });
+    expect(emit).toHaveBeenCalledWith("widget-action", "d1", { camera: 'elp', payload: { control: "rotation", value: 270 } });
     expect(wrapper.vm.pendingEdits, "a device write is not a policy edit").toHaveLength(0);
   });
 
@@ -1332,12 +1332,12 @@ describe('native Pocket controls', () => {
     expect(isoSelect.disabled).toBe(false); expect(isoSelect.selectedOptions[0].disabled).toBe(true);
     expect(isoSelect.selectedOptions[0].textContent).toBe('Auto · ISO 320');
     await iso.find('select').setValue('9');
-    expect(emit).toHaveBeenLastCalledWith('widget-action', 'd1', { payload: { nativeControl: { kind: 'iso', value: 9 } } });
+    expect(emit).toHaveBeenLastCalledWith('widget-action', 'd1', { camera: 'elp', payload: { nativeControl: { kind: 'iso', value: 9 } } });
     const wb = pickerByLabel(wrapper, 'White balance');
     expect((wb.find('select').element as HTMLSelectElement).disabled).toBe(false);
     expect(wb.findAll('option').every(option => !(option.element as HTMLOptionElement).disabled)).toBe(true);
     expect(wb.text()).toContain('Auto'); await wb.find('select').setValue('65');
-    expect(emit).toHaveBeenLastCalledWith('widget-action', 'd1', { payload: { nativeControl: { kind: 'white-balance', value: 65 } } });
+    expect(emit).toHaveBeenLastCalledWith('widget-action', 'd1', { camera: 'elp', payload: { nativeControl: { kind: 'white-balance', value: 65 } } });
     expect(wrapper.text()).not.toContain('Captures (0)'); wrapper.unmount();
   });
 });
@@ -1353,6 +1353,23 @@ describe('unified camera workspace', () => {
       ['Apply', ''], ['Discard edits', ''],
     ]);
     expect(emit).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+  it('binds every camera action to the rendered report during another camera loading interval', async () => {
+    const store = reactive(makeStore(makeReport()));
+    const { wrapper, emit } = deck(store, 'live');
+    // The server may already have selected B while this client still displays A.
+    for (const payload of [{ control: 'brightness', value: 5 }, { nativeControl: { kind: 'iso', value: 3 } }, { apply: { outputRtsp: false } }, { shutter: 'photo' }, { captures: 'read' }, { video: 'stop' }, { refresh: true }, { connection: true }]) {
+      (wrapper.vm as any).post(payload);
+      expect(emit).toHaveBeenLastCalledWith('widget-action', 'd1', { camera: 'elp', payload });
+    }
+    store.state.data.messages.d1.payload = { workspace: { pending: null } };
+    await nextTick();
+    const before = emit.mock.calls.length;
+    (wrapper.vm as any).post({ shutter: 'photo' });
+    expect(emit).toHaveBeenCalledTimes(before);
+    (wrapper.vm as any).post({ transaction: 'camera-revert' });
+    expect(emit).toHaveBeenLastCalledWith('widget-action', 'd1', { payload: { transaction: 'camera-revert' } });
     wrapper.unmount();
   });
   it('has one persistent transaction area with no Live/Setup navigation or embedded Aim', () => {
@@ -1379,6 +1396,6 @@ describe('unified camera workspace', () => {
     await output.findAll('button').find(b => b.text() === 'Off')!.trigger('click');
     expect(emit).not.toHaveBeenCalled();
     await wrapper.findAll('button').find(b => b.text() === 'Apply')!.trigger('click');
-    expect(emit).toHaveBeenLastCalledWith('widget-action','d1',{ payload: { apply: { outputRtsp:false } } }); wrapper.unmount();
+    expect(emit).toHaveBeenLastCalledWith('widget-action','d1',{ camera: 'elp', payload: { apply: { outputRtsp:false } } }); wrapper.unmount();
   });
 });

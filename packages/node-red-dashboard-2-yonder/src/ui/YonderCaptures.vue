@@ -247,7 +247,7 @@ export default {
         /** Every message this node posts leaves through here — one seam, the
          * same reasoning `YonderDeck` and `YonderIndex` each give. */
         post (payload) {
-            this.$socket.emit('widget-action', this.id, { payload })
+            if (this.camera) this.$socket.emit('widget-action', this.id, { camera: this.camera, payload })
         },
         onCamera (c) {
             return c && c.held === 'camera'

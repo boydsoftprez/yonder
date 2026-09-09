@@ -2067,3 +2067,11 @@ it('reports thumbnail demand for the selected and other visible cameras and rele
   wrapper.unmount();await settle();
   expect(reportCalls).toEqual(expect.arrayContaining([{path:'front',body:{want:'off',stills:false}},{path:'tail',body:{want:'off',stills:false}}]));
 });
+
+
+it('binds Picture Start to its displayed camera rather than a newer flow selection', async () => {
+  const { wrapper, emit } = mountWithRail();
+  await settle();
+  (wrapper.vm as any).pressStart();
+  expect(emit).toHaveBeenLastCalledWith('widget-action', expect.any(String), { camera: 'cam0', payload: 'start' });
+});

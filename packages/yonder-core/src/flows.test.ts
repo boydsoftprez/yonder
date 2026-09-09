@@ -2459,7 +2459,7 @@ describe("flows/flows.json camera pages", () => {
     expect(rules.find((r) => r.p === "camera")).toEqual({
       t: "set", p: "camera", pt: "flow", to: "payload.camera", tot: "jsonata",
     });
-    const page = rules.at(-1);
+    const page = rules.find(r => r.p === "payload");
     expect(page?.p).toBe("payload");
     expect(JSON.parse(String(page?.to))).toEqual({ page: "Camera" });
     // **A press is routed before it is acted on**, because a row now sends
@@ -2619,7 +2619,7 @@ describe("flows/flows.json camera pages", () => {
     const at = flows.find((n) => n.id === "cam-at-captures-act");
     expect(at?.type).toBe("change");
     // Addressing only: which camera this is about. Nothing composes a body.
-    expect(at?.rules).toEqual([{ t: "set", p: "camera", pt: "msg", to: "camera", tot: "flow" }]);
+    expect(at?.rules).toEqual([{ t: "set", p: "camera", pt: "msg", to: '$exists(camera) ? camera : $flowContext("camera")', tot: "jsonata" }]);
     const target = (at?.wires as string[][])[0]?.[0];
     const node = flows.find((n) => n.id === target);
     expect(node?.type, "a shutter press reaches the capture node").toBe("yonder-captures");
@@ -3056,8 +3056,9 @@ describe('Cockpit restoration — R-UI-28', () => {
       { t: 'set', p: 'camera', pt: 'flow', to: 'payload.path', tot: 'msg' },
       { t: 'delete', p: 'topic', pt: 'msg' },
       { t: 'set', p: 'payload', pt: 'msg', to: '', tot: 'str' },
+      { t: 'delete', p: 'camera', pt: 'msg' },
     ]);
-    expect(targets('cam-pic-go')).toEqual(['cam-at-read','cam-at-receive']);
+    expect(targets('cam-pic-go')).toEqual(['cam-at-read','cam-at-receive','cam-workspace-selection']);
     expect(targets('cam-at-read')).toEqual(['camera-read']);
     expect(node('cam-thumb-select')).toBeUndefined();
   });
@@ -3096,4 +3097,16 @@ describe('unified Camera workspace wiring — R-UI-29', () => {
     expect(flows.some(n => n.type === 'ui-notification' && n.id.startsWith('toast-cam'))).toBe(false);
     expect(node('ann-camera')).toBeUndefined();
   });
+});
+
+
+it('retires the workspace from every camera selection writer and preserves rendered action targets', () => {
+  for (const id of ['cam-open', 'cam-pic-go', 'cam-identify']) expect(flows.find(n => n.id === id)?.wires?.flat()).toContain('cam-workspace-selection');
+  expect(flows.find(n => n.id === 'cam-workspace-selection')?.rules).toEqual([
+    { t: 'set', p: 'camera', pt: 'msg', to: 'camera', tot: 'flow' },
+    { t: 'set', p: 'workspaceKind', pt: 'msg', to: 'selection', tot: 'str' },
+  ]);
+  for (const id of ['cam-at-controls', 'cam-at-settings', 'cam-at-captures-act', 'cam-at-stream', 'cam-at-refresh', 'cam-at-receive', 'cam-at-read']) expect(flows.find(n => n.id === id)?.rules).toEqual([
+    { t: 'set', p: 'camera', pt: 'msg', to: '$exists(camera) ? camera : $flowContext("camera")', tot: 'jsonata' },
+  ]);
 });

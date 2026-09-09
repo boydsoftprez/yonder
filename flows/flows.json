@@ -4330,7 +4330,9 @@
         "x": 780,
         "y": 1980,
         "wires": [
-            []
+            [
+                "cam-workspace-selection"
+            ]
         ]
     },
     {
@@ -4343,8 +4345,8 @@
                 "t": "set",
                 "p": "camera",
                 "pt": "msg",
-                "to": "camera",
-                "tot": "flow"
+                "to": "$exists(camera) ? camera : $flowContext(\"camera\")",
+                "tot": "jsonata"
             }
         ],
         "action": "",
@@ -4370,8 +4372,8 @@
                 "t": "set",
                 "p": "camera",
                 "pt": "msg",
-                "to": "camera",
-                "tot": "flow"
+                "to": "$exists(camera) ? camera : $flowContext(\"camera\")",
+                "tot": "jsonata"
             }
         ],
         "action": "",
@@ -4397,8 +4399,8 @@
                 "t": "set",
                 "p": "camera",
                 "pt": "msg",
-                "to": "camera",
-                "tot": "flow"
+                "to": "$exists(camera) ? camera : $flowContext(\"camera\")",
+                "tot": "jsonata"
             }
         ],
         "action": "",
@@ -4424,8 +4426,8 @@
                 "t": "set",
                 "p": "camera",
                 "pt": "msg",
-                "to": "camera",
-                "tot": "flow"
+                "to": "$exists(camera) ? camera : $flowContext(\"camera\")",
+                "tot": "jsonata"
             }
         ],
         "action": "",
@@ -4451,8 +4453,8 @@
                 "t": "set",
                 "p": "camera",
                 "pt": "msg",
-                "to": "camera",
-                "tot": "flow"
+                "to": "$exists(camera) ? camera : $flowContext(\"camera\")",
+                "tot": "jsonata"
             }
         ],
         "action": "",
@@ -5394,8 +5396,8 @@
                 "t": "set",
                 "p": "camera",
                 "pt": "msg",
-                "to": "camera",
-                "tot": "flow"
+                "to": "$exists(camera) ? camera : $flowContext(\"camera\")",
+                "tot": "jsonata"
             }
         ],
         "action": "",
@@ -5566,6 +5568,11 @@
                 "pt": "msg",
                 "to": "{\"page\":\"Camera\"}",
                 "tot": "json"
+            },
+            {
+                "t": "delete",
+                "p": "camera",
+                "pt": "msg"
             }
         ],
         "action": "",
@@ -5579,7 +5586,8 @@
             [
                 "console-control",
                 "cam-at-read",
-                "cam-at-receive"
+                "cam-at-receive",
+                "cam-workspace-selection"
             ]
         ]
     },
@@ -8232,6 +8240,11 @@
                 "pt": "msg",
                 "to": "",
                 "tot": "str"
+            },
+            {
+                "t": "delete",
+                "p": "camera",
+                "pt": "msg"
             }
         ],
         "action": "",
@@ -8244,7 +8257,8 @@
         "wires": [
             [
                 "cam-at-read",
-                "cam-at-receive"
+                "cam-at-receive",
+                "cam-workspace-selection"
             ]
         ]
     },
@@ -8449,8 +8463,8 @@
                 "t": "set",
                 "p": "camera",
                 "pt": "msg",
-                "to": "camera",
-                "tot": "flow"
+                "to": "$exists(camera) ? camera : $flowContext(\"camera\")",
+                "tot": "jsonata"
             }
         ]
     },
@@ -8474,5 +8488,34 @@
             ]
         ],
         "camera": ""
+    },
+    {
+        "id": "cam-workspace-selection",
+        "type": "change",
+        "z": "yonder-console",
+        "name": "retire controls when the camera selection changes",
+        "x": 1000,
+        "y": 3740,
+        "wires": [
+            [
+                "camera-workspace"
+            ]
+        ],
+        "rules": [
+            {
+                "t": "set",
+                "p": "camera",
+                "pt": "msg",
+                "to": "camera",
+                "tot": "flow"
+            },
+            {
+                "t": "set",
+                "p": "workspaceKind",
+                "pt": "msg",
+                "to": "selection",
+                "tot": "str"
+            }
+        ]
     }
 ]

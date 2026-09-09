@@ -6,6 +6,7 @@ const object = (value: unknown): value is Value => !!value && typeof value === '
 /** Complete hydration snapshots, never a second configuration or command writer. */
 export class CameraWorkspace {
   private report: Value | null = null;
+  private selected: string | null = null;
   private pending: Value | null = null;
   private result: Value | null = null;
   private problems: unknown[] = [];
@@ -14,7 +15,15 @@ export class CameraWorkspace {
     const body = message.payload;
     const status = object(message.yonder) ? message.yonder : null;
     switch (message.workspaceKind) {
+      case 'selection': {
+        const camera = typeof message.camera === 'string' && message.camera ? message.camera : null;
+        if (camera === this.selected) return null;
+        this.selected = camera;
+        this.report = null; this.problems = []; this.result = null; this.readFailure = false;
+        break;
+      }
       case 'report':
+        if (this.selected && (message.camera ?? (object(body) && object(body.camera) ? body.camera.id : null)) !== this.selected) return null;
         if (!object(body) || !object(body.camera) || typeof body.camera.id !== 'string') {
           if (status?.state !== 'rejected') return null;
           if (typeof message.camera === 'string' && this.report?.camera.id !== message.camera) {
@@ -32,6 +41,7 @@ export class CameraWorkspace {
           state: status?.state ?? 'idle', message: status?.message ?? '' });
         break;
       case 'result':
+        if (this.selected && typeof message.camera === 'string' && message.camera !== this.selected) return null;
         this.readFailure = false;
         if (!status && typeof body === 'string') { this.result = { state: 'rejected', message: body, at: Date.now() }; break; }
         if (!status || !['pending', 'confirmed', 'rejected'].includes(status.state)) return null;

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from "vitest";
+import { createRequire } from "node:module";
 import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -16,7 +17,7 @@ import type { DaemonClient, DaemonReply, DaemonRequest } from "yonder-core";
  * where it is tested without a Node-RED and without a camera.
  */
 
-const replies: DaemonReply[] = [];
+const replies: (DaemonReply | Promise<DaemonReply>)[] = [];
 const asked: DaemonRequest[] = [];
 
 vi.mock("yonder-core", async (importOriginal) => {
@@ -581,6 +582,50 @@ describe("yonder-captures", () => {
 
 
 describe('yonder-camera-workspace', () => {
+  it('keeps a loading-interval command on A and rejects its delayed read after selecting B', async () => {
+    const changeNode = createRequire(import.meta.url)('@node-red/nodes/core/function/15-change.js');
+    const flows = JSON.parse(readFileSync(new URL('../../../flows/flows.json', import.meta.url), 'utf8'));
+    const addressing = flows.find((node: any) => node.id === 'cam-at-controls');
+    const selection = flows.find((node: any) => node.id === 'cam-workspace-selection');
+    let finishA!: (reply: DaemonReply) => void;
+    replies.push(new Promise(resolve => { finishA = resolve; }), ok({}), ok({ deck: { camera: { id: 'cam1' }, controls: { B: true } } }));
+    const output: Received[] = [];
+    await new Promise<void>(resolve => {
+      void helper.load([workspaceNode, cameraNode, changeNode], [
+        { id: 'read', type: 'yonder-camera', wires: [['project']] },
+        { id: 'project', type: 'change', rules: [{ t: 'set', p: 'payload', pt: 'msg', to: 'payload.deck', tot: 'msg' }, { t: 'set', p: 'workspaceKind', pt: 'msg', to: 'report', tot: 'str' }], wires: [['workspace']] },
+        { id: 'workspace', type: 'yonder-camera-workspace', wires: [['out']] },
+        { id: 'selection', type: 'change', rules: selection.rules, wires: [['workspace']] },
+        { id: 'address', type: 'change', rules: addressing.rules, wires: [['control']] },
+        { id: 'control', type: 'yonder-camera', wires: [['control-out']] },
+        { id: 'out', type: 'helper' }, { id: 'control-out', type: 'helper' },
+      ].map(node => ({ z: 'testflow', ...node })).concat([{ id: 'testflow', type: 'tab' }] as any), resolve);
+    });
+    const node = (id: string) => helper.getNode(id) as any;
+    node('out').on('input', (message: Received) => output.push(message));
+    const tick = () => new Promise(resolve => setImmediate(resolve));
+    node('workspace').receive({ workspaceKind: 'selection', camera: 'cam0' });
+    node('workspace').receive({ workspaceKind: 'report', camera: 'cam0', payload: { camera: { id: 'cam0' }, controls: { A: true } } });
+    node('read').receive({ camera: 'cam0' }); // This response remains in flight.
+    await tick();
+    node('selection').context().flow.set('camera', 'cam1');
+    const cleared = new Promise<Received>(resolve => node('out').once('input', resolve));
+    node('selection').receive({});
+    expect((await cleared).payload).not.toHaveProperty('controls');
+    const controlled = new Promise<Received>(resolve => node('control-out').once('input', resolve));
+    node('address').receive({ camera: 'cam0', topic: 'controls', payload: { brightness: 5 } });
+    await controlled;
+    expect(asked[1]).toMatchObject({ method: 'POST', path: '/cameras/cam0/controls' });
+    const hydrated = new Promise<Received>(resolve => node('out').once('input', resolve));
+    node('read').receive({ camera: 'cam1' });
+    expect((await hydrated).payload).toMatchObject({ camera: { id: 'cam1' }, controls: { B: true } });
+    const count = output.length;
+    finishA(ok({ deck: { camera: { id: 'cam0' }, controls: { A: true } } }));
+    await tick(); await tick(); await tick();
+    expect(output).toHaveLength(count);
+    expect(output.at(-1)?.payload).toMatchObject({ camera: { id: 'cam1' } });
+  });
+
   it('clears retired camera controls through the actual node before hydrating the newly selected camera', async () => {
     const inputs = [
       { workspaceKind: 'report', payload: { camera: { id: 'cam0' }, controls: { oldCamera: true } } },
