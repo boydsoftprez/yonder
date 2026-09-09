@@ -445,7 +445,7 @@ export default {
         this.connectionLoading ? h('p', 'Loading connection details…') : null,
         this.connectionError ? h('p', this.connectionError) : null,
         ...this.connectionRows.map(row => h('div', { key: row.kind }, [
-          h(YonderIdentity, { id: `${this.id}-connection-${row.kind}`, props: { label: row.title }, text: row.body }),
+          h(YonderIdentity, { id: `${this.id}-connection-${row.kind}`, props: { label: row.title }, text: row.kind === 'url' && !String(row.body).startsWith('rtsp://') ? '' : row.body }),
           h('p', { class: 'y-deck__connection-note' }, row.note),
         ])),
         h('button', { class: 'y-deck__key', disabled: this.connectionLoading || this.signInRequired, onClick: () => this.loadConnection() }, 'Refresh details'),
@@ -1460,6 +1460,9 @@ export default {
 
 <style scoped>
 .y-deck__connection { padding: 16px; border: 1px solid var(--yonder-divider); overflow-wrap: anywhere; font-size: 12px; }
+.y-deck__connection :deep(.y-id) { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: start; gap: 6px 12px; }
+.y-deck__connection :deep(.y-id__k) { grid-column: 1 / -1; }
+.y-deck__connection :deep(.y-id__v) { white-space: pre-wrap; overflow-wrap: anywhere; overflow: visible; text-overflow: clip; }
 .y-deck__connection-note { margin: 4px 0 18px; line-height: 1.5; }
 .y-deck__dismiss { margin-left:12px; color:inherit; font:inherit; text-decoration:underline; background:none; border:0; cursor:pointer; }
 
