@@ -19,10 +19,12 @@
       href="/dashboard/status"
       class="cockpit-brand"
       aria-label="Open systems settings"
-    >YONDER <span>Systems ›</span></a><span
+    >YONDER <span>Systems ›</span></a><button
       class="cockpit-source"
       :class="{unavailable:!flight.live}"
-    >{{ flight.live ? (telemetry.source || 'MAVLink') : 'FLIGHT DATA UNAVAILABLE' }}</span><button
+      aria-label="Telemetry rate and aircraft status"
+      @click="panel='status'"
+    >{{ flight.live ? (telemetry.source || 'MAVLink') : 'FLIGHT DATA UNAVAILABLE' }}<template v-if="connectionStats&&Number.isFinite(connectionStats.flightHz)"> · {{connectionStats.flightHz.toFixed(1)}} Hz</template></button><button
       @click="openFlightControls('modes')"
     >{{ telemetry.mode || 'NO MODE' }} ·
       {{telemetry.armed===true?'ARMED':telemetry.armed===false?'DISARMED':'—'}}</button><button
@@ -257,12 +259,14 @@
     :busy="sending||snapshot.busy"
     :error="error"
     :draft="!!draft"
+    :upload-status="missionUploadStatus"
     :can-undo="history.length>0"
     @close="missionOpen=false"
     @edit="edit"
     @command="missionAction"
     @flight-controls="missionFlightControls"
     @upload="reviewUpload"
+    @read="sendReadAction('mission-download')"
     @undo="undo"
     @export="exportMission"
     @use-live="draft=null;history=[];missionOpen=false"
@@ -385,9 +389,7 @@
             <label v-if="sourceMode==='ground'">Optional ADS-B relay origin<input v-model="trafficRelayInput" type="url" placeholder="https://ground.example" aria-label="ADS-B relay origin" /></label>
             <button v-if="sourceMode==='ground'" @click="applyTrafficRelay">Apply ADS-B relay</button>
             <p v-if="sourceMode==='ground'">An ADS-B relay changes only traffic sourcing. Imagery and terrain keep their selected connection. Leave it blank to use the general ground relay or direct ADSB.lol access.</p>
-            <label>Display telemetry updates<select v-model.number="telemetryRate" aria-label="Display telemetry updates">
-              <option v-for="rate in [1,2,4,8]" :key="rate" :value="rate">{{rate}} / second</option>
-            </select></label>
+            <TelemetrySettings :rate="telemetryRate" :stats="connectionStats" :can-request="canCommand&&!sending" @rate="telemetryRate=$event" @request="sendReadAction('stream-setup')"/>
             <p v-if="connectionStats">Flight payload {{fmt(connectionStats.flightBytes)}} bytes · instrumentation {{fmt(connectionStats.instrumentBytes)}} bytes at up to 1 Hz · received JSON {{fmt(connectionStats.bytesPerSecond/1024,1)}} KiB/s. Mission transfers {{connectionStats.missionTransfers}}; detail transfers {{connectionStats.detailsTransfers}}. Excludes HTTP overhead, video and public data.</p>
             <div class="cockpit-actions">
               <button :disabled="dataBusy" @click="$refs.terrainPackFiles.click()">Import terrain folder</button>
@@ -528,6 +530,7 @@
           <p>{{trafficReport.attribution||'Source attribution appears with an enabled feed'}}</p>
         </template>
         <template v-else>
+          <TelemetrySettings :rate="telemetryRate" :stats="connectionStats" :can-request="canCommand&&!sending" @rate="telemetryRate=$event" @request="sendReadAction('stream-setup')"/>
           <dl>
             <div>
               <dt>Telemetry</dt>
@@ -551,9 +554,6 @@
             </div>
           </dl>
           <div class="cockpit-actions"><button
-              :disabled="!canCommand"
-              @click="sendReadAction('stream-setup')"
-            >Request flight telemetry</button><button
               :disabled="!canCommand"
               @click="sendReadAction('mission-download')"
             >Read aircraft mission</button><button @click="openFlightControls('modes')">Autopilot controls</button>
@@ -612,6 +612,8 @@ import NavigationDeviation from './cockpit/NavigationDeviation.vue'
 import PrimaryFlightDisplay from './cockpit/PrimaryFlightDisplay.vue'
 import FlightControlPanel from './cockpit/FlightControlPanel.vue'
 import MissionTouch from './cockpit/MissionTouch.vue'
+import TelemetrySettings from './cockpit/TelemetrySettings.vue'
+import {defaultTelemetryRate,telemetryRates,telemetryPollDelay,cockpitRequestId} from './cockpit/telemetry-cadence.mjs'
 import YonderCockpitMap from './cockpit/YonderCockpitMap.vue'
 import OwnTrailSettings from './cockpit/OwnTrailSettings.vue'
 import {selectOwnTrail,trailPreferences} from './cockpit/own-trail.mjs'
@@ -625,6 +627,7 @@ import {
   aircraftPositionMessage,
   aircraftMission,
   missionWire,
+  missionUploadReadiness,
   targetAction,
   cameraOverlayGate,
   createCockpitApi
@@ -672,6 +675,7 @@ export default {
     PrimaryFlightDisplay,
     FlightControlPanel,
     MissionTouch,
+    TelemetrySettings,
     YonderCockpitMap,
     OwnTrailSettings,
     YonderPicture
@@ -735,7 +739,7 @@ export default {
       dataOptionTimer: null,
       dataSyncing: false,
       dataSyncPending: false,
-      telemetryRate: 4,
+      telemetryRate: defaultTelemetryRate,
       connectionStats: null,
       trafficReport: {
         tracks: [],
@@ -794,6 +798,7 @@ export default {
     reportedFlightState(){return this.instrumentItems.filter(i=>['flight.vtolState','flight.landedState'].includes(i.id)&&i.available).map(i=>i.value).join(' · ')},
     homeInfo(){const home=homeNavigation(this.snapshot,this.elapsed),label=this.instrumentItems.find(i=>i.id==='nav.homeDistance');return {...home,label:label?.available?`${label.value.toFixed(2)} ${label.unit}`:'—'}},
     missionProgress(){return missionSequence(this.agedSnapshot)},
+    missionUploadStatus(){return missionUploadReadiness(this.snapshot)},
     trafficMapOnlyCount(){return (this.trafficReport.tracks||[]).filter(track=>!Number.isFinite(track.altitudeMslM)).length},
     ownTrailDisplay(){return selectOwnTrail(this.snapshot.ownTrail,this.ownTrailOptions,this.ownTrailCleared,this.snapshot.at+Math.floor(Math.max(0,this.elapsed)/1000)*1000)},
     draftContextChanged(){return !!this.draft&&(!this.draftContext||this.draftContext.generation!==(this.snapshot.identity?.generation||null)||this.draftContext.revision!==(this.snapshot.mission?.revision||null))},
@@ -911,6 +916,7 @@ export default {
     }
   },
   watch: {
+    telemetryRate(value){if(telemetryRates.includes(value))try{localStorage.setItem('yonder-telemetry-rate-v1',String(value))}catch{}},
     palette(value) { if(['day','night'].includes(value)){try{localStorage.setItem('yonder-cockpit-palette-v1',value)}catch{}} },
     sourceMode() { this.dataOptions('sourceMode') },
     report: {
@@ -972,6 +978,8 @@ export default {
     this.groundData.refreshOffline().then(()=>{ if(!this.disposed)this.groundStatus=this.groundData.status() }).catch(e=>{this.dataMessage='Browser storage unavailable: '+e.message});
     try {
       const palette=localStorage.getItem('yonder-cockpit-palette-v1');
+      const rate=Number(localStorage.getItem('yonder-telemetry-rate-v1'));
+      if(telemetryRates.includes(rate))this.telemetryRate=rate;
       if(['day','night'].includes(palette))this.palette=palette;
       const saved = JSON.parse(localStorage.getItem('yonder-cockpit-v1') || 'null');
       if (saved) this.preferences = validatePfdPreferences(saved)
@@ -1087,6 +1095,7 @@ export default {
     },
     async poll() {
       if (this.disposed) return;
+      const started=performance.now();
       try {
         const state = await this.source.state();
         if (this.error === this.pollError) this.error = '';
@@ -1096,7 +1105,7 @@ export default {
         this.pollError = e.name === 'AbortError' ? 'Telemetry request timed out' : e.message;
         this.error = this.pollError
       } finally {
-        if (!this.disposed) this.pollTimer = setTimeout(() => this.poll(), 1000/this.telemetryRate)
+        if (!this.disposed) this.pollTimer = setTimeout(() => this.poll(), telemetryPollDelay(this.telemetryRate,performance.now()-started))
       }
     },
     persist() {
@@ -1360,7 +1369,7 @@ export default {
       this.sending = true;
       try {
         const response = await this.source.command({
-          id: crypto.randomUUID(),
+          id: cockpitRequestId(),
           vehicleGeneration: current.generation,
           ...(current.revision ? {
             expectedMissionRevision: current.revision
@@ -1389,7 +1398,7 @@ export default {
       this.sending = true;
       try {
         const response = await this.source.command({
-          id: crypto.randomUUID(),
+          id: cockpitRequestId(),
           vehicleGeneration: this.snapshot.identity.generation,
           confirmed: false,
           action: {

@@ -4,7 +4,9 @@ const fields = ['lat', 'lon', 'altitude', 'heading', 'pitch', 'roll'];
 const delta = (a, b) => ((b - a + 540) % 360) - 180;
 const wrap = value => ((value + 180) % 360 + 360) % 360 - 180;
 export class PosePresentation {
-  constructor(delayMs = 100) {
+  constructor(delayMs = 100, {attitudeOnly = false} = {}) {
+    this.attitudeOnly = attitudeOnly;
+    this.fields = attitudeOnly ? ['heading', 'pitch', 'roll'] : fields;
     this.adaptive = delayMs === null;
     this.delayMs = delayMs ?? 280;
     this.samples = [];
@@ -20,8 +22,8 @@ export class PosePresentation {
     if (this.adaptive) this.delayMs = 280;
   }
   push(pose, time, sampleId) {
-    if (!pose || !Number.isFinite(time) || !fields.every(key => Number.isFinite(pose[key])) || Math.abs(pose.lat) >
-      85 || Math.abs(pose.lon) > 180 || Math.abs(pose.roll) > 180 || Math.abs(pose.pitch) > 90) {
+    if (!pose || !Number.isFinite(time) || !this.fields.every(key => Number.isFinite(pose[key])) || (!this.attitudeOnly && (Math.abs(pose.lat) >
+      85 || Math.abs(pose.lon) > 180)) || Math.abs(pose.roll) > 180 || Math.abs(pose.pitch) > 90) {
       this.reset();
       return;
     }
@@ -29,7 +31,7 @@ export class PosePresentation {
     if (sampleId !== undefined && sampleId === this.sampleId) return;
     const last = this.samples.at(-1);
     if (last) {
-      const moved = Math.hypot((pose.lat - last.pose.lat) * 111195, delta(last.pose.lon, pose.lon) * 111195 * Math
+      const moved = this.attitudeOnly ? 0 : Math.hypot((pose.lat - last.pose.lat) * 111195, delta(last.pose.lon, pose.lon) * 111195 * Math
         .cos(pose.lat * Math.PI / 180));
       const interval = time - last.time;
       if (interval <= 0 || interval > (this.adaptive ? 1500 : 500) || moved > 250 || Math.abs(pose.altitude - last.pose.altitude) > 200) this.reset();
@@ -64,7 +66,7 @@ export class PosePresentation {
         out = {
           ...b.pose
         };
-      for (const key of [...fields, 'navPitch', 'navRoll']) {
+      for (const key of [...this.fields, 'navPitch', 'navRoll']) {
         if (!Number.isFinite(a.pose[key]) || !Number.isFinite(b.pose[key])) continue;
         out[key] = a.pose[key] + (['lon', 'heading', 'roll', 'navRoll'].includes(key) ? delta(a.pose[key], b.pose[
           key]) : b.pose[key] - a.pose[key]) * fraction;

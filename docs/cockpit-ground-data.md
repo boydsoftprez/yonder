@@ -9,7 +9,11 @@ connection even for a direct public URL. Give the ground device its own internet
 route to keep public downloads away from the aircraft link.
 
 The same panel exposes **Display telemetry updates** at 1, 2, 4 or 8 reads per
-second and reports received JSON bytes. The recurring `/cockpit/api/flight`
+second (8 by default, saved per browser) and reports achieved browser reads,
+distinct attitude observations and received JSON bytes. Requests are serialized;
+the interval accounts for response time instead of adding a full extra wait.
+These observed rates are not a count of every MAVLink packet at the controller.
+The recurring `/cockpit/api/flight`
 response carries scalar telemetry, freshness, navigation and mission progress.
 It omits the mission list, command history and traffic. Separate `/details` and
 `/mission` reads refresh only when their tokens change and do not block flight

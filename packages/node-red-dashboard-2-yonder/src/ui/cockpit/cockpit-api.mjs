@@ -2,6 +2,7 @@ import {unpackInstruments} from './instrumentation-client.mjs';
 // SPDX-License-Identifier: GPL-3.0-or-later
 import {unpackFlight} from 'yonder-core/cockpit-wire';
 import {createOwnTrailClient} from './own-trail.mjs';
+import {TelemetryCadence} from './telemetry-cadence.mjs';
 
 /** Flight reads never wait for mission/history downloads or retransmit commands. */
 export function createCockpitApi(fetchFn=(...args)=>fetch(...args)){
@@ -10,6 +11,7 @@ export function createCockpitApi(fetchFn=(...args)=>fetch(...args)){
   let flightResponseMs=null,flightResponseAt=null;
   let receivedBytes=0,flightBytes=0,instrumentBytes=0,instrumentTransfers=0,detailsTransfers=0,missionTransfers=0;
   const controllers=new Set(),samples=[];
+  const cadence=new TelemetryCadence();
   const trail=createOwnTrailClient(request);
   async function request(url,init={}){
     const started=Date.now();
@@ -54,11 +56,12 @@ export function createCockpitApi(fetchFn=(...args)=>fetch(...args)){
       const wire=await request('/cockpit/api/flight');
       // Decode/version-check before using indexes or starting any dependent reads.
       unpackFlight(wire,{});
-      if(latest&&latest.g!==wire.g){details=null;mission=null;missionKey=null;detailsRetry=0;missionRetry=0;}
+      if(latest&&latest.g!==wire.g){details=null;mission=null;missionKey=null;detailsRetry=0;missionRetry=0;cadence.reset();}
       latest=wire;refreshDetails(wire);refreshMission(wire);
       trail.observe(wire.r);
       const cached={...(details||{}),mission:missionKey===JSON.stringify([wire.g,wire.m.revision])?mission:undefined};
       const snapshot=unpackFlight(wire,cached);
+      cadence.observe(snapshot.telemetry,Date.now());
       return {...details,...snapshot,ownTrail:trail.view(),_detailsReady:details?.detailKey===wire.d,_missionReady:!!cached.mission,
         detailError:detailsError||missionError};
     },
@@ -66,7 +69,7 @@ export function createCockpitApi(fetchFn=(...args)=>fetch(...args)){
     dataOptions:options=>request('/cockpit/api/data-options',{method:'POST',headers:{'content-type':'application/json','x-yonder-cockpit':'1'},body:JSON.stringify(options)}),
     setTrailOptions:options=>trail.configure(options),
     command:body=>request('/cockpit/api/command',{method:'POST',headers:{'content-type':'application/json','x-yonder-cockpit':'1'},body:JSON.stringify(body)}),
-    stats(){const now=Date.now(),recent=samples.filter(s=>s.at>=now-10000);const span=recent.length?Math.max(1,(now-recent[0].at)/1000):1;return {transport:'compact-v1',flightBytes,flightResponseMs,flightResponseAgeMs:flightResponseAt===null?null:Math.max(0,now-flightResponseAt),instrumentBytes,instrumentTransfers,receivedBytes,bytesPerSecond:recent.reduce((sum,s)=>sum+s.bytes,0)/span,detailsTransfers,missionTransfers};},
+    stats(){const now=Date.now(),recent=samples.filter(s=>s.at>=now-10000);const span=recent.length?Math.max(1,(now-recent[0].at)/1000):1;return {...cadence.stats(now),transport:'compact-v1',flightBytes,flightResponseMs,flightResponseAgeMs:flightResponseAt===null?null:Math.max(0,now-flightResponseAt),instrumentBytes,instrumentTransfers,receivedBytes,bytesPerSecond:recent.reduce((sum,s)=>sum+s.bytes,0)/span,detailsTransfers,missionTransfers};},
     close(){closed=true;trail.close();for(const controller of controllers)controller.abort();controllers.clear();}
   };
 }

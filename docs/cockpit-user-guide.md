@@ -70,8 +70,13 @@ actual aircraft, use the top strip and its separate **Confirm & send** dialog.
 
 ### 2. Connect the instruments and read the aircraft mission
 
-1. Open the top-right **Aircraft** status button.
-2. Press **Request flight telemetry**. Wait until the operation finishes; this
+1. Open the top-right **Aircraft** status button, or tap the **MAVLink · Hz** source
+   button. **Browser update target** defaults to **8 / second**; 1, 2, 4 and 8 are
+   selectable and saved in this browser. **Display & data** has the same controls.
+   The measured browser rate and distinct attitude rate include link delays and
+   missed samples; neither counts every controller packet. Attitude animates
+   between received samples even without GPS. System readings remain up to 1 Hz.
+2. Press **Request flight telemetry · attitude 10 Hz**. Wait until the operation finishes; this
    explicitly requests the streams used by the instruments, including optional
    slower sensor reports. An unsupported optional stream is reported; accepting
    a request does not establish that its sensor is present.
@@ -79,6 +84,14 @@ actual aircraft, use the top strip and its separate **Confirm & send** dialog.
    downloaded**. The list now represents the mission received from the aircraft.
 4. Close the panel with **×** or **Escape**. Check the actual mode, armed state
    and source before using flight controls.
+
+**Mission controls → Read aircraft mission** performs the same read while keeping
+the local draft. The upload area states which prerequisite is missing. If readback
+completes but no home record is available, repeatedly reading alone cannot supply
+it: the controller must establish home (normally after connecting GPS and acquiring
+a fix). Yonder keeps the draft and does not substitute its example/file home for
+the aircraft's home. Once the record is available, review the draft against the
+newly read aircraft mission, then use **Upload draft to aircraft → Confirm & send**.
 
 ![Aircraft status with explicit telemetry and mission-read controls](images/cockpit/telemetry-setup.png)
 

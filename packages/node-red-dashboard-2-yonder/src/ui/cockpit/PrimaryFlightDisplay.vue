@@ -232,15 +232,20 @@ export default {
         message: 'Terrain unavailable'
       });
     const displayPose = shallowRef(null),
-      presentation = new PosePresentation(null);
+      presentation = new PosePresentation(null),
+      displayAttitude = shallowRef(null),
+      attitudePresentation = new PosePresentation(null, {attitudeOnly:true});
     let animation = 0;
     const updatePresentation = () => {
       const next = presentation.at(performance.now()),
         previous = displayPose.value;
       if (next === null || previous === null || Object.keys(next).some(key => next[key] !== previous[key]))
         displayPose.value = next;
+      const attitude = attitudePresentation.at(performance.now()), oldAttitude = displayAttitude.value;
+      if (attitude === null || oldAttitude === null || Object.keys(attitude).some(key => attitude[key] !== oldAttitude[key]))
+        displayAttitude.value = attitude;
     };
-    watch([() => props.snapshot?.identity?.generation, () => props.telemetry.altitudeDatum], () => presentation.reset());
+    watch([() => props.snapshot?.identity?.generation, () => props.telemetry.altitudeDatum], () => {presentation.reset();attitudePresentation.reset()});
     watch([() => props.telemetry, () => props.flight.live, () => props.flight.attitudeValid], () => {
       const pose = terrainPose(props.flight, props.telemetry);
       presentation.push(pose ? {
@@ -248,6 +253,13 @@ export default {
         navPitch: props.flight.navPitch,
         navRoll: props.flight.navRoll
       } : null, performance.now(), props.snapshot?.at);
+      // Attitude is usable on the bench without geographic position. Keep this
+      // buffer separate: an attitude-only sample must never reach the terrain
+      // or traffic slots as a made-up aircraft position.
+      const f=props.flight, t=props.telemetry;
+      attitudePresentation.push(f.live&&f.attitudeValid?{
+        heading:f.heading,pitch:f.pitch,roll:f.roll,navPitch:f.navPitch,navRoll:f.navRoll
+      }:null, performance.now(), t.fields?.rollDeg?.receivedAt ?? props.snapshot?.at);
       updatePresentation();
     }, {
       immediate: true
@@ -261,13 +273,14 @@ export default {
       animation = requestAnimationFrame(animate);
     });
     onBeforeUnmount(() => cancelAnimationFrame(animation));
-    const displayFlight = computed(() => displayPose.value && props.flight.live ? {
+    const instrumentPose = computed(() => displayPose.value || displayAttitude.value);
+    const displayFlight = computed(() => instrumentPose.value && props.flight.live ? {
       ...props.flight,
-      roll: displayPose.value.roll,
-      pitch: displayPose.value.pitch,
-      heading: displayPose.value.heading,
-      navPitch: displayPose.value.navPitch,
-      navRoll: displayPose.value.navRoll
+      roll: instrumentPose.value.roll,
+      pitch: instrumentPose.value.pitch,
+      heading: instrumentPose.value.heading,
+      navPitch: instrumentPose.value.navPitch,
+      navRoll: instrumentPose.value.navRoll
     } : props.flight);
     const displayTelemetry = computed(() => displayPose.value && props.flight.live ? {
       ...props.telemetry,

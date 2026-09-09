@@ -178,11 +178,11 @@ export function aircraftMission(snapshot = {}) {
   };
 }
 export function missionWire(draft, snapshot) {
+  const readiness=missionUploadReadiness(snapshot);
+  if (!readiness.ready) throw new Error(readiness.reason);
   let home = aircraftMission(snapshot).homeRecord;
   const actualHome=snapshot.telemetry?.homePosition;
   if(!home&&snapshot.identity?.autopilot===3&&snapshot.mission?.synchronization==='verified'&&snapshot.mission.items.length===0&&validPosition(actualHome)&&finite(actualHome.alt)){home={seq:0,command:16,frame:0,params:[0,0,0,0],x:actualHome.lat,y:actualHome.lon,z:actualHome.alt,current:true,autocontinue:true};}
-  if (snapshot.identity?.autopilot === 3 && !home) throw new Error(
-    'Read the aircraft mission first to verify its home record before uploading a draft');
   const entries = draft.items.map(({
     lat,
     lon,
@@ -201,6 +201,14 @@ export function missionWire(draft, snapshot) {
   return home ? [{
     ...home
   }, ...entries] : entries;
+}
+export function missionUploadReadiness(snapshot = {}) {
+  if (snapshot.identity?.autopilot !== 3 || aircraftMission(snapshot).homeRecord) return {ready:true,reason:''};
+  if (snapshot.mission?.synchronization !== 'verified')
+    return {ready:false,needsRead:true,reason:'Read the aircraft mission first to verify its home record. Your local draft will be kept.'};
+  const home=snapshot.telemetry?.homePosition;
+  if (snapshot.mission.items.length===0 && validPosition(home) && finite(home.alt)) return {ready:true,reason:''};
+  return {ready:false,needsRead:false,reason:'Aircraft mission read completed, but the controller has not provided a home record. With no GPS connected, a home position may be unavailable. Let the controller establish home, then request flight telemetry and read the mission again. Your local draft is kept.'};
 }
 export function guidanceView(snapshot, elapsed = 0) {
   const t = snapshot.telemetry || {},

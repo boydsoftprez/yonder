@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import {describe,it,expect} from 'vitest';
-import {aircraftMission,missionWire,createCockpitApi} from './cockpit-state.mjs';
+import {aircraftMission,missionWire,missionUploadReadiness,createCockpitApi} from './cockpit-state.mjs';
 import {MISSION_COMMANDS,createMissionItem,validateMissionItem} from './mission-commands.mjs';
 import {editMission,exportWpl} from './mission-edit.mjs';
 import {parseMission} from './mission-import.mjs';
@@ -18,3 +18,10 @@ describe('production mission boundaries',()=>{
 });
 it('requires a received ArduPilot home before uploading a new local draft',()=>{const local={items:[{seq:1,command:16,frame:3,params:[0,0,0,0],lat:35,lon:-84,alt:80,current:false,autocontinue:true}]};expect(()=>missionWire(local,{identity:{autopilot:3},telemetry:{homePosition:{lat:35,lon:-84,alt:315}},mission:{items:[]}})).toThrow(/Read the aircraft mission first/)});
 it('supports the first upload after a verified empty ArduPlane mission read',()=>{const local={items:[{seq:1,command:16,frame:3,params:[0,0,0,0],lat:35,lon:-84,alt:80,current:false,autocontinue:true}]};const wire=missionWire(local,{identity:{autopilot:3},telemetry:{homePosition:{lat:35,lon:-84,alt:315}},mission:{items:[],synchronization:'verified'}});expect(wire[0]).toMatchObject({seq:0,command:16,frame:0,x:35,y:-84,z:315});expect(wire[1].seq).toBe(1)});
+it('distinguishes an unread mission from verified empty readback without a home',()=>{
+ const state={identity:{autopilot:3},telemetry:{homePosition:null},mission:{items:[],synchronization:'unknown'}};
+ expect(missionUploadReadiness(state)).toMatchObject({ready:false,needsRead:true});
+ state.mission.synchronization='verified';
+ expect(missionUploadReadiness(state)).toMatchObject({ready:false,needsRead:false,reason:expect.stringMatching(/read completed.*home record/)});
+ expect(()=>missionWire({items:[],home:{lat:35,lon:-84,alt:300}},state)).toThrow(/not provided a home/);
+});
