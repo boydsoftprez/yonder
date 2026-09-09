@@ -216,6 +216,7 @@ Preserve the disconnect interval automatically across ordinary process
 restarts, rather than only in this deployment procedure. Keeping the
 USB/keepalive owner independent of routine core/UI restarts follows the separate
 camera-daemon boundary proposed in the original research. Those ownership
-changes remain unimplemented. Automatic live-view recovery after the stills
-fallback also remains to be completed; the operator should not need a page
-refresh. Root owns these items and the remaining camera acceptance checks.
+changes remain unimplemented. Live-view recovery after the stills fallback and
+stalled-encoder recovery are now implemented and checked in the
+[preview recovery note](pocket2-preview-recovery-2026-09-09.md). Root owns the
+remaining ownership changes and camera acceptance checks.
