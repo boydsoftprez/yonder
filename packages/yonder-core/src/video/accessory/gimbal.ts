@@ -241,7 +241,7 @@ export class GimbalController {
     const payload = Buffer.alloc(7);
     // Truncate toward zero so quantization cannot exceed the guarded speed.
     payload.writeInt16LE(Math.trunc(command.pan * 10), 0);
-    payload.writeInt16LE(Math.trunc(-command.tilt * 10), 4);
+    payload.writeInt16LE(Math.trunc(command.tilt * 10), 4);
     payload[6] = 0x80;
     return { ...common, commandId: 0x0c, payload };
   }

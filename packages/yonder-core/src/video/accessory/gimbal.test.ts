@@ -72,11 +72,11 @@ describe('gimbal attitude', () => {
   });
 });
 describe('intent-bound gimbal dispatcher', () => {
-  it('issue alone writes nothing; signed rates encode yaw/zero-roll/inverted pitch at 10Hz', async () => {
+  it('issue alone writes nothing; public pan/tilt encode direct yaw/pitch with zero roll at 10Hz', async () => {
     const f = fixture(); const grant = f.issue(); expect(f.writes).toHaveLength(0);
     expect(f.admit(grant)).toMatchObject({ accepted: true });
     expect(f.writes[0].command).toMatchObject({ receiver: 4, commandSet: 4, commandId: 12, ack: 0 });
-    expect(Buffer.from(f.writes[0].command.payload!).toString('hex')).toBe('32000000140080');
+    expect(Buffer.from(f.writes[0].command.payload!).toString('hex')).toBe('32000000ecff80');
     expect(f.writes[0].options.deadline).toBe(1500); expect(f.writes[0].options.admission!()).toBe(true);
     f.writes[0].resolve(); await settle(); f.freshAdvance(99); expect(f.writes).toHaveLength(1);
     f.freshAdvance(1); expect(f.writes).toHaveLength(2);
@@ -89,7 +89,17 @@ describe('intent-bound gimbal dispatcher', () => {
     old.resolve(); await settle(); f.freshAdvance(89); expect(f.writes).toHaveLength(1);
     f.freshAdvance(1); expect(f.writes).toHaveLength(1);
     f.freshAdvance(10); expect(f.writes).toHaveLength(2);
-    expect(Buffer.from(f.writes[1].command.payload!).toString('hex')).toBe('ceff0000ecff80'); f.controller.close();
+    expect(Buffer.from(f.writes[1].command.payload!).toString('hex')).toBe('ceff0000140080'); f.controller.close();
+  });
+  it.each([
+    ['screen up', 0, 3, '000000001e0080'],
+    ['screen down', 0, -3, '00000000e2ff80'],
+    ['fractional pan/down', 3.09, -2.09, '1e000000ecff80'],
+  ] as const)('%s keeps public direction and truncates toward zero', (_name, pan, tilt, payload) => {
+    const f = fixture();
+    expect(f.admit(f.issue(), pan, tilt)).toMatchObject({ accepted: true });
+    expect(Buffer.from(f.writes[0].command.payload!).toString('hex')).toBe(payload);
+    f.controller.close();
   });
   it('delayed transport completion cannot compress actual rate dispatches below 100 ms', async () => {
     const f = fixture(); const dispatched: number[] = []; f.admit(f.issue());
