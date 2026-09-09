@@ -195,6 +195,21 @@ during the restart and was refreshed; it then showed advancing 640×360 live
 video, speed 60°/s and the operator's retained 70% expo. This is bounded
 post-fix evidence, not a claim that every intermittent cause has been eliminated.
 
+## Primary-picture layout correction
+
+The operator reported that the fixed notice/thumbnail reservation had made the
+primary video too small. The dedicated Camera page now lets the picture occupy
+its full column width, with height derived from the video aspect ratio. Compact
+horizontal camera cards and a stable notice row sit beneath it. Cockpit keeps
+its configured widget slot.
+
+The real desktop browser measured 783×441 pixels for the video, compared with
+the preceding 402×226 display. Supporting content fit its rows without overflow
+or overlap. The 98 picture/thumbnail tests and widget build passed. Only the
+picture's browser bundle was replaced; core and console process identities were
+unchanged and USB remained configured. Narrow-screen and alternate-palette
+visual acceptance are not claimed by this check.
+
 ## Remaining follow-up
 
 Preserve the disconnect interval automatically across ordinary process
