@@ -309,7 +309,8 @@ function reasonText(wrapper: VueWrapper): string {
 }
 
 beforeEach(() => {
-  vi.useFakeTimers();
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date', 'performance'] });
+  vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue();
   FakePeerConnection.made.length = 0;
   gates.length = 0;
   fetchMock.mockClear();
@@ -321,11 +322,47 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
 describe("asking for the picture", () => {
+  it('starts muted playback when the negotiated track arrives', async () => {
+    const { wrapper } = mountPicture(); await settle();
+    pc().deliverTrack(); await settle();
+    expect(HTMLMediaElement.prototype.play).toHaveBeenCalled();
+    expect(wrapper.find('video').element.muted).toBe(true);
+  });
+  it('does not call a wall-clock correction a loss of media', async () => {
+    const { wrapper } = mountPicture(); await settle(); pc().deliverTrack(); frames(wrapper);
+    vi.setSystemTime(Date.now() + 3600000);
+    await advance(1000);
+    expect(badge(wrapper)).toBe('live · preview');
+  });
+  it('offers a working resume action if the browser refuses autoplay', async () => {
+    vi.mocked(HTMLMediaElement.prototype.play).mockRejectedValueOnce(new Error('autoplay refused'));
+    const { wrapper } = mountPicture(); await settle(); pc().deliverTrack(); await settle();
+    expect(wrapper.get('.y-pic__resume').text()).toBe('Resume live video');
+    await wrapper.get('.y-pic__resume').trigger('click'); await settle();
+    expect(wrapper.find('.y-pic__resume').exists()).toBe(false);
+  });
+  it('uses presented-frame callbacks and ignores callbacks from a retired session', async () => {
+    const { wrapper } = mountPicture(); await settle();
+    const callbacks: Array<() => void> = [];
+    const video = wrapper.find('video').element;
+    video.requestVideoFrameCallback = vi.fn((cb: any) => { callbacks.push(cb); return callbacks.length; });
+    video.cancelVideoFrameCallback = vi.fn();
+    pc().deliverTrack(); await settle();
+    callbacks[0](); await advance(4000);
+    expect(badge(wrapper)).toBe('no contact');
+    callbacks[1](); await settle();
+    expect(badge(wrapper)).toBe('live · preview');
+    setMode(wrapper,'off'); await settle();
+    callbacks[2](); await settle();
+    expect(badge(wrapper)).toBe('off');
+    expect(video.cancelVideoFrameCallback).toHaveBeenCalled();
+  });
   it("asks the console's own route for the preview path", async () => {
     // Through the console's route, not straight at the media server: that is
     // what puts the picture behind the interface's credential (R-SEC-13).

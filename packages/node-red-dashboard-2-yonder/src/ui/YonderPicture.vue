@@ -21,6 +21,7 @@
                 autoplay
                 muted
                 playsinline
+                @pause="onPlaybackPause"
             ></video>
             <img v-if="mode === 'stills' && stillSrc" class="y-pic__video" :src="stillSrc" alt="" />
             <div v-if="staleFor > 0" class="y-pic__hatch"></div>
@@ -80,6 +81,7 @@
       </div>
 
         <div class="y-pic__notices">
+            <button v-if="playbackBlocked" type="button" class="y-pic__resume" @click="resumePlayback">Resume live video</button>
             <div v-if="reason || aimRefusal" class="y-pic__reason" role="status">{{ aimRefusal || reason }}</div>
             <div v-if="flashing" class="y-pic__saved" role="status"><i class="y-pic__saved-dot" aria-hidden="true"></i>Saved · to {{ savedTo }}</div>
         </div>
@@ -568,6 +570,9 @@ export default {
             session: 0,
             attempt: 0,
             lastFrameAt: null,
+            frameNow: performance.now(),
+            frameCallback: null,
+            playbackBlocked: false,
             now: Date.now(),
             reason: '',
             stillSrc: '',
@@ -729,7 +734,7 @@ export default {
         },
         staleFor () {
             if (this.mode !== 'live' || this.lastFrameAt === null) return 0
-            return Math.max(0, Math.floor((this.now - this.lastFrameAt) / 1000) - 2)
+            return Math.max(0, Math.floor((this.frameNow - this.lastFrameAt) / 1000) - 2)
         },
         degradeFilter () {
             if (this.staleFor === 0) return 'none'
@@ -962,11 +967,11 @@ export default {
         this.thumbnailTimer = setInterval(() => this.refreshThumbnails(), 5000)
         this.aimTransport = new AimTransport(() => this.aim, (_rate, reason) => { this.aimRefusal = reason })
         this.$socket.on?.('disconnect', this.aimDisconnect)
-        this.tick = setInterval(() => { this.now = Date.now() }, 1000)
+        this.tick = setInterval(() => { this.now = Date.now(); this.frameNow = performance.now() }, 1000)
         // The media clock, which is the only honest source for the age this
         // component draws. See the note on `lastFrameAt` above.
         if (this.$refs.video) {
-            this.$refs.video.addEventListener('timeupdate', this.onFrame)
+            this.$refs.video.addEventListener('timeupdate', this.onTimeUpdate)
             this.$refs.video.addEventListener('loadedmetadata', this.onMetadata)
         }
         // The drag layer's own four non-pointer endings — see this file's
@@ -992,7 +997,7 @@ export default {
         clearTimeout(this.stillsTimer)
         clearTimeout(this.fallbackRetryTimer)
         if (this.$refs.video) {
-            this.$refs.video.removeEventListener('timeupdate', this.onFrame)
+            this.$refs.video.removeEventListener('timeupdate', this.onTimeUpdate)
             this.$refs.video.removeEventListener('loadedmetadata', this.onMetadata)
         }
         window.removeEventListener('blur', this.onDragBlur)
@@ -1054,10 +1059,41 @@ export default {
          * completes and delivers nothing keeps counting, which is what the
          * fall-back to stills is waiting to hear.
          */
+        onTimeUpdate () {
+            if (typeof this.$refs.video?.requestVideoFrameCallback !== 'function') this.onFrame()
+        },
         onFrame () {
-            this.lastFrameAt = Date.now()
+            if (this.mode !== 'live') return
+            this.lastFrameAt = performance.now()
+            this.frameNow = this.lastFrameAt
+            this.playbackBlocked = false
             this.attempt = 0
             this.reason = ''
+        },
+        watchFrames () {
+            const video = this.$refs.video
+            if (typeof video?.requestVideoFrameCallback !== 'function') return
+            const session = this.session
+            const frame = () => {
+                if (session !== this.session || this.mode !== 'live') return
+                this.onFrame()
+                this.frameCallback = video.requestVideoFrameCallback(frame)
+            }
+            this.frameCallback = video.requestVideoFrameCallback(frame)
+        },
+        async resumePlayback () {
+            const video = this.$refs.video, session = this.session
+            if (!video || this.mode !== 'live') return
+            video.muted = true
+            try {
+                await video.play()
+                if (session === this.session) this.playbackBlocked = false
+            } catch {
+                if (session === this.session) this.playbackBlocked = true
+            }
+        },
+        onPlaybackPause () {
+            if (this.mode === 'live' && this.pc?.connectionState === 'connected' && this.$refs.video?.srcObject) this.playbackBlocked = true
         },
         /**
          * The decoder's own report of the stream it just negotiated (defect
@@ -1091,6 +1127,9 @@ export default {
          * replaces it.
          */
         teardown () {
+            if (this.frameCallback !== null) this.$refs.video?.cancelVideoFrameCallback?.(this.frameCallback)
+            this.frameCallback = null
+            this.playbackBlocked = false
             this.thumbnailDemand?.set([])
             this.aimTransport?.stop()
             this.onDragEnd()
@@ -1319,7 +1358,11 @@ export default {
                 // Negotiation, not media: `lastFrameAt` is deliberately not
                 // set here. The track exists; nothing has painted yet, and
                 // `onFrame` is what says otherwise.
-                if (this.$refs.video) this.$refs.video.srcObject = e.streams[0]
+                if (this.$refs.video) {
+                    this.$refs.video.srcObject = e.streams[0]
+                    this.watchFrames()
+                    this.resumePlayback()
+                }
             }
             pc.onconnectionstatechange = () => {
                 if (!mine()) return
@@ -1794,6 +1837,7 @@ export default {
    own top-of-file doc comment on why it is a normal-flow sibling of
    `.y-pic__frame` rather than one more absolutely-positioned overlay. */
 .y-pic__notices, .y-pic__thumbnails { min-width: 0; min-height: 0; overflow: auto; }
+.y-pic__resume { padding: 4px 10px; margin: 2px 0; border: 1px solid currentColor; border-radius: 3px; color: var(--yonder-select, #2ad4f0); background: transparent; font: inherit; cursor: pointer; }
 .y-pic__thumbnails { overflow-y: hidden; }
 .y-pic__strip { margin-top: 8px; }
 
