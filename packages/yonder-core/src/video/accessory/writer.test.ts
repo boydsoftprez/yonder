@@ -29,4 +29,35 @@ describe('bounded accessory writer arbitration', () => {
     controller.abort(); await expect(waiting).rejects.toThrow('canceled');
     release(); await first; expect(endpoint).toHaveBeenCalledOnce();
   });
+  it('expires a queued command at its original deadline and never dispatches it', async () => {
+    let now = 1000, serial = 0;
+    const timers = new Map<number, { at: number; fn: () => void }>();
+    const boundedClock: IntentClock = {
+      now: () => now,
+      setTimer: (ms, fn) => { const id = ++serial; timers.set(id, { at: now + ms, fn }); return id; },
+      clearTimer: id => { timers.delete(id as number); },
+    };
+    let release!: () => void;
+    const endpoint = vi.fn(() => new Promise<void>(resolve => { release = resolve; }));
+    const writer = new AccessoryWriter(boundedClock, endpoint);
+    const first = writer.write(command, {
+      signal: new AbortController().signal, deadline: 2000, admission: () => true,
+    });
+    const admission = vi.fn(() => false);
+    const queued = writer.write(command, {
+      signal: new AbortController().signal, deadline: 1050, admission,
+    });
+    const expired = expect(queued).rejects.toThrow('expired before dispatch');
+
+    now = 1050;
+    for (const [id, timer] of [...timers]) {
+      if (timer.at <= now) { timers.delete(id); timer.fn(); }
+    }
+    await expired;
+    expect(admission).toHaveBeenCalledOnce();
+    expect(endpoint).toHaveBeenCalledOnce();
+    release();
+    await first;
+    expect(endpoint).toHaveBeenCalledOnce();
+  });
 });

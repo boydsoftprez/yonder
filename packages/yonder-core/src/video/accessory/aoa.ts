@@ -341,9 +341,11 @@ export interface AccessorySessionOptions {
 
 export interface AccessoryCommandOptions {
   /**
-   * Cancels this command independently of the link. It is checked when the
-   * serialized writer actually reaches the command, so an expired gesture
-   * cannot move after waiting behind backpressure.
+   * Cancels this command independently of the link until physical dispatch.
+   * It is checked when the serialized writer reaches the command, so an
+   * expired gesture cannot move after waiting behind backpressure. Once one
+   * write is admitted, cancellation cannot retract its bytes and must not be
+   * mistaken for a link failure while its completion acknowledgement arrives.
    */
   readonly signal?: AbortSignal;
   /** Absolute CLOCK_MONOTONIC milliseconds, preserved through the command queue. */
@@ -523,6 +525,7 @@ export class AccessorySession {
     const combined = combineAbortSignals(sessionSignal, commandSignal);
     const envelope = encodeAoaEnvelope(AOA_COMMAND_ROUTE, frame);
     let admitted = true;
+    let dispatched = false;
     const pending = this.writeTail.then(async () => {
       try {
         if (!this.linkEnabled || generation !== this.generation || combined.signal.aborted) {
@@ -532,7 +535,13 @@ export class AccessorySession {
           admitted = false;
           throw new Error("accessory command admission expired");
         }
-        await this.transport.write(envelope, combined.signal, deadline);
+        // Command cancellation remains authoritative through the synchronous
+        // admission above. From this point the one physical write is already
+        // committed: only link/session teardown may abort it. Its original
+        // deadline remains unchanged and still bounds completion.
+        combined.dispose();
+        dispatched = true;
+        await this.transport.write(envelope, sessionSignal, deadline);
       } finally {
         combined.dispose();
       }
@@ -541,7 +550,7 @@ export class AccessorySession {
     return pending.catch((reason: unknown) => {
       const error = asError(reason);
       if (admitted && this.linkEnabled && generation === this.generation
-        && !sessionSignal.aborted && commandSignal?.aborted !== true) {
+        && !sessionSignal.aborted && (dispatched || commandSignal?.aborted !== true)) {
         this.report(error);
         this.stop("accessory session disconnected after transport error");
       }

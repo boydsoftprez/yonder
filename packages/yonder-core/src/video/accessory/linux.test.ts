@@ -3,6 +3,9 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { Pocket2Device, type FunctionFsHelper } from "./linux.js";
 import { AOA_COMMAND_ROUTE, encodeAoaEnvelope } from "./aoa.js";
 import { encodeDuml } from "./duml.js";
+import { GimbalController } from "./gimbal.js";
+import type { GuardContext } from "./guard.js";
+import type { IntentClock } from "./intent.js";
 
 class FakeHelper implements FunctionFsHelper {
   messages: Record<string, any>[] = [];
@@ -148,19 +151,57 @@ it("stalls unknown OUT before reading its control data", async () => {
   h.emit({ type: "setup", id: 9, stage: "phone", setup: { requestType: 64, request: 99, value: 0, index: 0, length: 12 } });
   expect(h.messages.at(-1)).toEqual({ type: "control", id: 9, action: "stall" });
 });
-it("retires active canceled writes, forwards the absolute deadline, and never replays queued commands", async () => {
+it.each(["pointer release", "intent renewal"])("keeps USB live when %s lands after physical dispatch but before written IPC", async reason => {
   const f = fixture(); const h = await live(f); const abort = new AbortController();
+  const generation = f.device.snapshot().generation;
   const pending = f.device.sendCommand({ commandSet: 4, commandId: 12 }, { signal: abort.signal, deadline: Date.now() + 100 });
-  const rejected = expect(pending).rejects.toThrow();
   await vi.advanceTimersByTimeAsync(0);
   expect(h.messages.at(-1)).toMatchObject({ type: "write", deadline: Date.now() + 100 });
-  abort.abort(); await rejected;
+  const id = h.messages.at(-1)!.id;
+  abort.abort(new Error(reason));
   await vi.advanceTimersByTimeAsync(0);
-  expect(h.stopped).toBe(true);
-  expect(f.device.snapshot().state).toBe("detached-backoff");
-  await vi.advanceTimersByTimeAsync(44_999); expect(f.children).toHaveLength(1);
-  await vi.advanceTimersByTimeAsync(1); expect(f.children).toHaveLength(2);
-  expect(f.children[1].messages.map(m => m.type)).toEqual(["prepare"]);
+  expect(h.stopped).toBe(false);
+  expect(f.device.snapshot()).toMatchObject({ state: "live", generation });
+  h.emit({ type: "written", id });
+  await expect(pending).resolves.toBeUndefined();
+  await vi.advanceTimersByTimeAsync(45_000);
+  expect(f.children).toHaveLength(1);
+});
+it.each(["release", "renewal"] as const)("an actual gimbal %s during written IPC wait does not retire USB", async action => {
+  const f = fixture(); const h = await live(f); const generation = f.device.snapshot().generation;
+  const intentClock: IntentClock = {
+    now: () => Date.now(),
+    setTimer: (ms, fn) => setTimeout(fn, ms),
+    clearTimer: timer => clearTimeout(timer as ReturnType<typeof setTimeout>),
+  };
+  const context: GuardContext = {
+    now: Date.now(), attitudeMaxAgeMs: 500,
+    attitude: { pitch: 0, roll: 0, yaw: 0, mode: 2, at: Date.now(),
+      pitchLimit: false, yawLimit: false, fault: false, quaternion: [1, 0, 0, 0] },
+    mount: null, envelopes: [], signs: { pan: null, tilt: null }, limitDirections: {},
+    intentAllowanceMs: 500, deviceStopAllowanceMs: 800, actions: [],
+  };
+  const gimbal = new GimbalController({ clock: intentClock, context: () => ({ ...context, now: Date.now() }),
+    write: (command, options) => f.device.sendCommand(command, options) });
+  const issued = gimbal.issue("operator", "physical");
+  if (!issued.accepted) throw new Error(issued.reason);
+  const admitted = gimbal.admit("operator", { ...issued.grant, seq: 1, rate: { pan: 1, tilt: 0 } });
+  if (!admitted.accepted || !admitted.next) throw new Error("rate was not admitted");
+  await vi.advanceTimersByTimeAsync(0);
+  const write = h.messages.at(-1)!;
+  expect(write.type).toBe("write");
+
+  if (action === "release") gimbal.end("operator", issued.grant.gesture);
+  else expect(gimbal.admit("operator", { ...admitted.next, seq: 2, rate: { pan: 2, tilt: 0 } })).toMatchObject({ accepted: true });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(h.stopped).toBe(false);
+  expect(f.device.snapshot()).toMatchObject({ state: "live", generation });
+
+  h.emit({ type: "written", id: write.id });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(h.stopped).toBe(false);
+  expect(f.device.snapshot()).toMatchObject({ state: "live", generation });
+  gimbal.close();
 });
 it("expires blocked writes even when the camera is silent", async () => {
   const f = fixture(); const h = await live(f);

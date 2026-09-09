@@ -353,7 +353,38 @@ describe("AccessorySession", () => {
     session.close();
   });
 
-  it("combines a command abort with the session signal for an active write", async () => {
+  it("lets one admitted physical write settle after normal command cancellation", async () => {
+    let active: AbortSignal | undefined;
+    let finish!: () => void;
+    let settled = false;
+    const transport: AoaBulkTransport = {
+      write: (_data, signal) => new Promise<void>((resolve, reject) => {
+        active = signal;
+        finish = resolve;
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      }),
+    };
+    const session = new AccessorySession({ transport });
+    session.enable();
+    const gesture = new AbortController();
+    const pending = session.sendCommand(
+      { commandSet: 4, commandId: 0x0c, payload: bytes("64 00 00 00 00 00 80") },
+      { signal: gesture.signal },
+    ).then(() => { settled = true; });
+    await flush();
+    expect(active?.aborted).toBe(false);
+    gesture.abort(new Error("lease expired"));
+    await flush();
+    expect(active?.aborted).toBe(false);
+    expect(settled).toBe(false);
+    expect(session.enabled).toBe(true);
+    finish();
+    await pending;
+    expect(settled).toBe(true);
+    session.close();
+  });
+
+  it("still aborts the admitted physical write on a real session disconnect", async () => {
     let active: AbortSignal | undefined;
     const transport: AoaBulkTransport = {
       write: (_data, signal) => new Promise<void>((_resolve, reject) => {
@@ -368,13 +399,14 @@ describe("AccessorySession", () => {
       { commandSet: 4, commandId: 0x0c, payload: bytes("64 00 00 00 00 00 80") },
       { signal: gesture.signal },
     );
+    const outcome = pending.then(() => null, (error: Error) => error);
     await flush();
+
+    gesture.abort(new Error("pointer released"));
     expect(active?.aborted).toBe(false);
-    gesture.abort(new Error("lease expired"));
-    await expect(pending).rejects.toThrow("lease expired");
+    session.disconnect();
     expect(active?.aborted).toBe(true);
-    expect(session.enabled).toBe(true);
-    session.close();
+    expect((await outcome)?.message).toMatch(/disconnected/);
   });
 
   it("surfaces transport and malformed-input errors and stops the link", async () => {
