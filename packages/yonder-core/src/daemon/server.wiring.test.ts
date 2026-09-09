@@ -2219,12 +2219,19 @@ describe("the daemon takes stills for whoever is on them", () => {
       // Let the supervisor's observed running state settle before the still
       // timer is due; a starting pipeline is not yet a source of frames.
       await advance(2_000);
-      // Two browsers on cam0's stills; nobody on cam1's.
-      for (const viewer of ["1f2e3d4c5b6a7089", "aaaa1111bbbb2222"]) {
-        const answer = await call(socketPath, "POST", `/cameras/cam0/viewers/${viewer}`, { want: "stills" });
-        expect(answer.status).toBe(200);
-        expect(answer.body).toMatchObject({ mine: { delivery: "stills", interval: 5_000, frameAge: null } });
-      }
+      // The selected viewer keeps live video while its active thumbnail asks
+      // for the shared still; another viewer uses stills as its delivery.
+      const active = await call(socketPath, "POST", "/cameras/cam0/viewers/1f2e3d4c5b6a7089", {
+        want: "video", stills: true,
+      });
+      expect(active.status).toBe(200);
+      expect(active.body).toMatchObject({ mine: { delivery: "video" } });
+      const liveOnly = (active.body as { cost: { mine: number } }).cost.mine;
+      const fallback = await call(socketPath, "POST", "/cameras/cam0/viewers/aaaa1111bbbb2222", {
+        want: "stills",
+      });
+      expect(fallback.status).toBe(200);
+      expect(fallback.body).toMatchObject({ mine: { delivery: "stills", interval: 5_000, frameAge: null } });
       // Nothing before the first tick, and nothing yet to serve — said in words.
       const early = await callBytes("/cameras/cam0/still?viewer=1f2e3d4c5b6a7089");
       expect(early.status).toBe(404);
@@ -2249,10 +2256,9 @@ describe("the daemon takes stills for whoever is on them", () => {
       // it is told carries the frame's age (R-VID-11, R-VID-14).
       const state = await call(socketPath, "POST", "/cameras/cam0/viewers/1f2e3d4c5b6a7089", {});
       expect(state.body).toMatchObject({
-        mine: { delivery: "stills", frameAge: 1_000, size: "1280x720" },
-        overlay: { head: "stills", rate: "every 5 s" },
+        mine: { delivery: "video" },
       });
-      expect((state.body as { cost: { mine: number } }).cost.mine).toBeGreaterThan(0);
+      expect((state.body as { cost: { mine: number } }).cost.mine).toBeGreaterThan(liveOnly);
       // The other viewer, sent nothing yet, is charged nothing yet.
       const other = await call(socketPath, "POST", "/cameras/cam0/viewers/aaaa1111bbbb2222", {});
       expect((other.body as { cost: { mine: number } }).cost.mine).toBe(0);
@@ -2263,7 +2269,7 @@ describe("the daemon takes stills for whoever is on them", () => {
         picture: { cameras: { id: string; active: boolean; thumbSrc: string | null; stopped: boolean }[]; downlink: string };
       };
       expect(page.picture.cameras.map((c) => [c.id, c.active, c.thumbSrc, c.stopped])).toEqual([
-        ["cam0", true, null, false],
+        ["cam0", true, expect.stringMatching(/^\/video\/cam0\/still\?at=\d+$/), false],
         ["cam1", false, null, false],
       ]);
       expect(page.picture.downlink).toMatch(/^\d+ kb\/s of stills · counted in Path total$/);

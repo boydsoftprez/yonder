@@ -411,6 +411,36 @@ describe("a browser statistic, in at the route", () => {
     }
   });
 
+  it("accepts thumbnail still demand without changing selected video delivery", async () => {
+    const r = routed();
+    try {
+      r.start();
+      const answer = await r.route("POST", "/cameras/cam0/viewers/abc123", {
+        want: "video", stills: true,
+      });
+      expect(answer.status).toBe(200);
+      expect(answer.body).toMatchObject({ mine: { delivery: "video" } });
+      expect(r.viewers.wantingStills()).toEqual(["cam0"]);
+
+      await r.route("POST", "/cameras/cam0/viewers/abc123", { stills: false });
+      expect(r.viewers.wantingStills()).toEqual([]);
+      expect(r.viewers.state("cam0", "abc123").mine.delivery).toBe("video");
+    } finally {
+      r.done();
+    }
+  });
+
+  it("refuses a non-boolean thumbnail demand", async () => {
+    const r = routed();
+    try {
+      const answer = await r.route("POST", "/cameras/cam0/viewers/abc123", { stills: "yes" });
+      expect(answer.status).toBe(400);
+      expect(r.viewers.wantingStills()).toEqual([]);
+    } finally {
+      r.done();
+    }
+  });
+
   it("ends one page's subscription without touching a configured output", async () => {
     const r = routed();
     try {

@@ -853,11 +853,13 @@ export function createRouter(deps: RouterDeps): Router {
   /**
    * One browser's own statistic, and what it wants (spec §8.2).
    *
-   * `POST /cameras/<id>/viewers/<viewer>` carries any of three things, each
+   * `POST /cameras/<id>/viewers/<viewer>` carries any of four things, each
    * optional and each independent of the others:
    *
    *   - `want` — `"video"`, `"stills"` or `"off"`, what this browser is
    *     asking this camera for;
+   *   - `stills` — whether the thumbnail strip also needs a periodic frame,
+   *     independently of the selected delivery;
    *   - `fullRate` — true while the operator holds the key, false the moment
    *     they let go (R-VID-13);
    *   - `stats` — the browser's own WebRTC measurement of the path its
@@ -909,12 +911,15 @@ export function createRouter(deps: RouterDeps): Router {
     if (body !== undefined && (typeof body !== "object" || body === null || Array.isArray(body))) {
       return { status: 400, body: { error: "a viewer report is an object" } };
     }
-    const sent = (body ?? {}) as { want?: unknown; fullRate?: unknown; stats?: unknown };
+    const sent = (body ?? {}) as { want?: unknown; stills?: unknown; fullRate?: unknown; stats?: unknown };
     if (sent.want !== undefined && !WANTS.includes(sent.want as Want)) {
       return { status: 400, body: { error: 'want is "video", "stills" or "off"' } };
     }
     if (sent.fullRate !== undefined && typeof sent.fullRate !== "boolean") {
       return { status: 400, body: { error: "fullRate is true while the key is held and false when it is let go" } };
+    }
+    if (sent.stills !== undefined && typeof sent.stills !== "boolean") {
+      return { status: 400, body: { error: "stills is true while this camera has a visible thumbnail" } };
     }
     const stats = sent.stats === undefined ? undefined : viewerStats(id, sent.stats);
     if (sent.stats !== undefined && stats === null) {
@@ -932,6 +937,7 @@ export function createRouter(deps: RouterDeps): Router {
     // measured — so a report arriving in the same post as the subscription
     // that made it evidence is treated as evidence.
     if (sent.want !== undefined) viewers.subscribe(viewer, id, sent.want as Want);
+    if (sent.stills !== undefined) viewers.requestStills(viewer, id, sent.stills);
     if (sent.fullRate !== undefined) viewers.fullRate(viewer, id, sent.fullRate);
     if (stats !== undefined && stats !== null) viewers.report(viewer, stats);
     return { status: 200, body: viewers.state(id, viewer) };

@@ -589,7 +589,7 @@ export function consoleMiddleware(deps: ConsoleMiddlewareDeps): Middleware {
             // it will say so below — falling back to an empty submission
             // only keeps a malformed body from throwing uncaught here.
           }
-          // Only the three fields the daemon's own route reads are ever
+          // Only the four fields the daemon's own route reads are ever
           // relayed. **Never a viewer id from the body, in any field**: the
           // one thing that stops a script on the page reporting as, or
           // steering the rate of, a viewer that is not its own is that
@@ -597,8 +597,8 @@ export function consoleMiddleware(deps: ConsoleMiddlewareDeps): Middleware {
           // already decided, and nothing here reads it afterwards either.
           let relay: unknown = body;
           if (typeof body === "object" && body !== null && !Array.isArray(body)) {
-            const sent = body as { want?: unknown; fullRate?: unknown; stats?: unknown };
-            relay = { want: sent.want, fullRate: sent.fullRate, stats: sent.stats };
+            const sent = body as { want?: unknown; stills?: unknown; fullRate?: unknown; stats?: unknown };
+            relay = { want: sent.want, stills: sent.stills, fullRate: sent.fullRate, stats: sent.stats };
           }
           const reply = await deps.client.request({
             method: "POST",

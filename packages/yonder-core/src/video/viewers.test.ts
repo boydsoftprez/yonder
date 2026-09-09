@@ -295,29 +295,77 @@ describe("Viewers and the stills it accounts for", () => {
     expect(stillCostKbps(100_000, 0)).toBe(0);
   });
 
-  it("charges the last copy sent, not every copy ever sent", () => {
+  it("charges every copy sent within the accounting window", () => {
     const { viewers } = viewersOn();
     viewers.subscribe("v1", "cam0", "stills");
     viewers.transmitted("v1", "cam0", 100_000);
     viewers.transmitted("v1", "cam0", 80_000);
-    expect(viewers.state("cam0", "v1").cost.mine).toBe(still(80_000));
+    expect(viewers.state("cam0", "v1").cost.mine).toBe(still(180_000));
   });
 
-  it("takes a fetch by a browser that said nothing as asking for stills", () => {
+  it("counts a fetch without turning it into continuing still demand", () => {
     const { viewers } = viewersOn();
     viewers.transmitted("v1", "cam0", 100_000);
-    expect(viewers.state("cam0", "v1").mine.delivery).toBe("stills");
-    expect(viewers.wantingStills()).toEqual(["cam0"]);
+    expect(viewers.state("cam0", "v1").mine.delivery).toBe("off");
+    expect(viewers.wantingStills()).toEqual([]);
     expect(viewers.state("cam0", "v1").cost.mine).toBe(still(100_000));
   });
 
-  it("leaves a video viewer on video, and does not charge its fetch as a still", () => {
+  it("counts a strip fetch independently while leaving its viewer on video", () => {
     const { viewers } = viewersOn();
     viewers.subscribe("v1", "cam0", "video");
     viewers.transmitted("v1", "cam0", 100_000);
     expect(viewers.state("cam0", "v1").mine.delivery).toBe("video");
-    expect(viewers.state("cam0", "v1").cost.mine).toBe(atIp(900));
+    expect(viewers.state("cam0", "v1").cost.mine).toBe(atIp(900) + still(100_000));
+    expect(viewers.stillsKbps()).toBe(still(100_000));
+  });
+
+  it("ages transmitted traffic out even while subscription heartbeats continue", () => {
+    const { viewers, clock } = viewersOn();
+    viewers.subscribe("v1", "cam0", "video");
+    viewers.transmitted("v1", "cam0", 100_000);
+    expect(viewers.stillsKbps()).toBe(still(100_000));
+
+    clock.advance(STILLS_INTERVAL_MS);
+    viewers.subscribe("v1", "cam0", "video");
     expect(viewers.stillsKbps()).toBe(0);
+    expect(viewers.state("cam0", "v1").cost.mine).toBe(atIp(900));
+  });
+
+  it("expires an older copy while retaining newer bytes from the same viewer", () => {
+    const { viewers, clock } = viewersOn();
+    viewers.transmitted("v1", "cam0", 100_000);
+    clock.advance(STILLS_INTERVAL_MS / 2);
+    viewers.transmitted("v1", "cam0", 80_000);
+    clock.advance(STILLS_INTERVAL_MS / 2);
+
+    expect(viewers.stillsKbps()).toBe(still(80_000));
+  });
+
+  it("bounds accounting storage while retaining every delivered byte", () => {
+    const { viewers, clock } = viewersOn();
+    for (let bucket = 0; bucket < 10; bucket += 1) {
+      for (let copy = 0; copy < 100; copy += 1) viewers.transmitted("v1", "cam0", 1_000);
+      if (bucket < 9) clock.advance(STILLS_INTERVAL_MS / 10);
+    }
+    expect(viewers.stillsKbps()).toBe(still(1_000_000));
+
+    const internals = viewers as unknown as {
+      subs: Map<string, Map<string, { stillTraffic: unknown[] }>>;
+    };
+    expect(internals.subs.get("v1")?.get("cam0")?.stillTraffic.filter(Boolean))
+      .toHaveLength(10);
+  });
+
+  it("requests shared still generation for a thumbnail without changing video delivery", () => {
+    const { viewers } = viewersOn();
+    viewers.subscribe("v1", "cam0", "video");
+    viewers.requestStills("v1", "cam0", true);
+    expect(viewers.wantingStills()).toEqual(["cam0"]);
+    expect(viewers.state("cam0", "v1").mine.delivery).toBe("video");
+
+    viewers.requestStills("v1", "cam0", false);
+    expect(viewers.wantingStills()).toEqual([]);
   });
 
   it("refuses to count a copy for a camera this device does not have", () => {

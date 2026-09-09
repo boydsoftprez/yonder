@@ -1270,12 +1270,9 @@ export interface ThumbStrip {
  * correction to §6's "the others as stills", so every camera keeps a fixed
  * place in the strip whichever one is on the main picture.
  *
- * **The active camera carries no `thumbSrc`.** Its picture is the live one
- * above the strip; fetching its still as well would be one more copy leaving
- * the aircraft for a thumbnail of a picture already on screen — and a copy
- * for a browser on *video* of that camera is one `Viewers` deliberately does
- * not charge as a still, so it would be an uncounted transmission. The row
- * is drawn, bordered and labelled `Live`, with nothing to fetch.
+ * The active row uses the same shared still as every other row. This keeps a
+ * one-camera device from presenting an empty strip; its delivered copy is
+ * accounted independently of the live-video selection.
  *
  * **A stopped camera is stopped, not stale.** No frame can be taken from a
  * pipeline that is not running, so the row says so; a still from before it
@@ -1309,7 +1306,7 @@ export function thumbStrip(view: {
       name: camera.name,
       active,
       ageSeconds: still === null ? null : Math.max(0, Math.floor((view.now - still.at) / 1000)),
-      thumbSrc: still === null || active ? null : `${stillUrl(camera.id)}?at=${String(still.at)}`,
+      thumbSrc: still === null ? null : `${stillUrl(camera.id)}?at=${String(still.at)}`,
       stopped,
     };
   });

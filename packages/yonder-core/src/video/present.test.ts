@@ -1283,13 +1283,15 @@ describe("thumbStrip", () => {
     expect(later.cameras[0]?.thumbSrc).not.toBe(other?.thumbSrc);
   });
 
-  it("gives the active camera no still to fetch: its picture is the live one above", () => {
+  it("gives the active camera a real thumbnail, including when it is the only camera", () => {
     const strip = thumbStrip({
-      cameras: [nose, tail], active: "nose", run: running,
+      cameras: [nose], active: "nose", run: running,
       still: () => ({ at: NOW - 1_000 }), now: NOW, stillsKbps: 0,
     });
-    expect(strip.cameras[0]).toMatchObject({ id: "nose", active: true, thumbSrc: null });
-    expect(strip.cameras[1]?.thumbSrc).not.toBeNull();
+    expect(strip.cameras[0]).toMatchObject({
+      id: "nose", active: true, ageSeconds: 1,
+      thumbSrc: `${stillUrl("nose")}?at=${String(NOW - 1_000)}`,
+    });
   });
 
   it("draws a stopped camera as stopped, never as a stale frame", () => {

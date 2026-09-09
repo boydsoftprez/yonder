@@ -619,6 +619,20 @@ describe("consoleMiddleware — a viewer's own report", () => {
     expect(JSON.parse(res.body)).toEqual({ mine: {}, shared: {} });
   });
 
+  it("relays independent thumbnail demand beside live-video selection", async () => {
+    const transport = recording(200, '{"mine":{"delivery":"video"}}');
+    const sessions = new SessionStore({ clock: fakeClock() });
+    await serve(consoleMiddleware({ client: new DaemonClient({ transport }), sessions }));
+    const { cookie } = sessionCookie(sessions);
+
+    const res = await call("POST", "/video/cam0/report", {
+      json: { want: "video", stills: true }, cookie,
+    });
+
+    expect(transport.calls[0]?.body).toEqual({ want: "video", stills: true });
+    expect(res.status).toBe(200);
+  });
+
   it("leaves a path with no -preview suffix alone", async () => {
     const transport = recording(200, "{}");
     const sessions = new SessionStore({ clock: fakeClock() });

@@ -2884,22 +2884,23 @@ describe("the camera routes", () => {
 
       expect((await r("GET", "/cameras/cam0/still?viewer=aaaa", undefined)).status).toBe(200);
       const oneCopy = viewers.state("cam0", "aaaa").cost.path;
+      expect((await r("GET", "/cameras/cam0/still?viewer=aaaa", undefined)).status).toBe(200);
       expect((await r("GET", "/cameras/cam0/still?viewer=bbbb", undefined)).status).toBe(200);
-      // Two browsers, two copies of one image: each is charged its own, and
-      // **the path carries both** — a daemon counting the still once per
-      // camera would leave the second browser's copy off the path total,
-      // which is the mutation this last line exists to catch.
+      // Three answers, including two to one session, are three copies of one
+      // image. Sharing generation must not collapse actual transmissions.
       expect(copy).toBeGreaterThan(0);
-      expect(viewers.state("cam0", "aaaa").cost.mine).toBe(copy);
+      expect(viewers.state("cam0", "aaaa").cost.mine).toBe(2 * copy);
       expect(viewers.state("cam0", "bbbb").cost.mine).toBe(copy);
-      expect(viewers.stillsKbps()).toBe(2 * copy);
-      expect(viewers.state("cam0", "aaaa").cost.path).toBe(oneCopy + copy);
-      expect(viewers.state("cam0", "aaaa").mine).toMatchObject({ delivery: "stills", frameAge: 0 });
+      expect(viewers.stillsKbps()).toBe(3 * copy);
+      expect(viewers.state("cam0", "aaaa").cost.path).toBe(oneCopy + 2 * copy);
+      expect(viewers.state("cam0", "aaaa")).toMatchObject({
+        mine: { delivery: "off", frameAge: null }, cost: { mine: 2 * copy },
+      });
 
       // A caller naming no viewer — a shell on the socket — is served and
       // counted against nobody: nothing left the aircraft.
       expect((await r("GET", "/cameras/cam0/still", undefined)).status).toBe(200);
-      expect(viewers.stillsKbps()).toBe(2 * copy);
+      expect(viewers.stillsKbps()).toBe(3 * copy);
     });
 
     it("says in words that there is no still yet", async () => {
@@ -2966,7 +2967,7 @@ describe("the camera routes", () => {
         picture: { cameras: Record<string, unknown>[]; downlink: string };
       };
       // One row per configured camera. This one is active, with its still's
-      // age and nothing to fetch — its picture is the live one above. The
+      // age and a real image even when it is the only available camera. The
       // other is **stopped on the page even though the generator's stand-in
       // holds a frame for it**: the run state is the supervisor's, and a
       // camera the supervisor is not running has no still to show, whatever
@@ -2974,7 +2975,8 @@ describe("the camera routes", () => {
       // the one supervisor both read).
       expect(stills.latest("tail")?.at).toBe(taken);
       expect(page.picture.cameras).toMatchObject([
-        { id: "cam0", name: expect.any(String), active: true, ageSeconds: 4, thumbSrc: null, stopped: false },
+        { id: "cam0", name: expect.any(String), active: true, ageSeconds: 4,
+          thumbSrc: expect.stringMatching(/^\/video\/cam0\/still\?at=\d+$/), stopped: false },
         { id: "tail", name: "Tail", active: false, ageSeconds: null, thumbSrc: null, stopped: true },
       ]);
       // And what every still copy is costing, in the blueprint's words —

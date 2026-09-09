@@ -287,6 +287,15 @@ export interface ViewersOptions {
 
 const FULL_RATE_LEASE_MS = 15_000;
 const IDLE_MS = 60_000;
+/** Fixed rolling buckets keep exact byte totals without one object per fetch. */
+const STILL_TRAFFIC_BUCKETS = 10;
+
+interface StillTrafficBucket {
+  slot: number;
+  /** Latest transmission represented by this bucket. */
+  at: number;
+  bytes: number;
+}
 
 /** One browser's subscription to one camera. */
 interface Subscription {
@@ -295,12 +304,10 @@ interface Subscription {
   fullRateUntil: number | null;
   stats: ViewerStats | null;
   statsAt: number | null;
-  /**
-   * The last still actually transmitted to this browser for this camera, or
-   * null before one has been. What a stills copy is costed from (R-VID-11):
-   * a subscriber that has fetched nothing has cost the uplink nothing yet.
-   */
-  still: StillHeld | null;
+  /** Thumbnail generation demand, independent of the selected delivery. */
+  stillDemand: boolean;
+  /** Actual delivered JPEG bytes in a bounded rolling interval. */
+  stillTraffic: StillTrafficBucket[];
   /** The last time this browser said anything at all about this camera. */
   heardAt: number;
   revision: number;
@@ -506,7 +513,18 @@ export class Viewers {
     return this.cameras()
       .filter((camera) => camera.enabled)
       .map((camera) => camera.id)
-      .filter((id) => this.watching(id).some((v) => this.subs.get(v)?.get(id)?.want === "stills"));
+      .filter((id) => this.watching(id).some((v) => {
+        const sub = this.subs.get(v)?.get(id);
+        return sub?.want === "stills" || sub?.stillDemand === true;
+      }));
+  }
+
+  /** Request or release periodic still generation without changing video delivery. */
+  requestStills(viewer: string, camera: string, wanted: boolean): void {
+    const sub = this.hold(viewer, camera);
+    if (sub === null) return;
+    sub.stillDemand = wanted;
+    this.publishAll();
   }
 
   /**
@@ -519,18 +537,25 @@ export class Viewers {
    * copy *costs* is that size over the interval it is sent at, worked out
    * where the cost is composed.
    *
-   * A browser that fetches a still of a camera it has said nothing about is
-   * asking for stills of it: the subscription is made and set to `stills`,
-   * so the copy is counted rather than lost between the fetch and the report
-   * that would have followed it. A browser on *video* of that camera keeps
-   * its video subscription — a video copy and a still copy are not both
-   * being sent to one picture, and nothing on this console fetches one.
+   * The transmission is independent of selection: a browser on live video
+   * may also receive the active thumbnail, and a fetch cannot silently turn
+   * an `off` selection into continuing generation demand. Ten rolling time
+   * buckets bound memory while retaining every delivered byte.
    */
   transmitted(viewer: string, camera: string, bytes: number): void {
     const sub = this.hold(viewer, camera);
-    if (sub === null) return;
-    if (sub.want === "off") sub.want = "stills";
-    sub.still = { at: this.clock.now(), bytes };
+    if (sub === null || !Number.isFinite(bytes) || bytes <= 0) return;
+    const now = this.clock.now();
+    const bucketMs = Math.max(1, Math.ceil(this.stillsIntervalMs / STILL_TRAFFIC_BUCKETS));
+    const slot = Math.floor(now / bucketMs);
+    const index = slot % STILL_TRAFFIC_BUCKETS;
+    const bucket = sub.stillTraffic[index];
+    if (bucket === undefined || bucket.slot !== slot) {
+      sub.stillTraffic[index] = { slot, at: now, bytes };
+    } else {
+      bucket.at = now;
+      bucket.bytes += bytes;
+    }
     this.publishAll();
   }
 
@@ -542,20 +567,23 @@ export class Viewers {
    */
   stillsKbps(): number {
     let total = 0;
+    const now = this.clock.now();
     for (const camera of this.cameras()) {
       if (!camera.enabled) continue;
       for (const watcher of this.watching(camera.id)) {
-        total += this.stillCopy(this.subs.get(watcher)?.get(camera.id));
+        total += this.stillCopy(this.subs.get(watcher)?.get(camera.id), now);
       }
     }
     return total;
   }
 
-  /** What one browser's copy of one camera's stills costs, or 0 where it is
-   *  not on stills or has been sent none yet. */
-  private stillCopy(sub: Subscription | undefined): number {
-    if (sub === undefined || sub.want !== "stills" || sub.still === null) return 0;
-    return stillCostKbps(sub.still.bytes, this.stillsIntervalMs);
+  /** Recent delivered still bytes for this browser/camera, stated as a rate. */
+  private stillCopy(sub: Subscription | undefined, now: number): number {
+    if (sub === undefined) return 0;
+    const bytes = sub.stillTraffic
+      .filter((bucket) => now - bucket.at < this.stillsIntervalMs)
+      .reduce((total, bucket) => total + bucket.bytes, 0);
+    return stillCostKbps(bytes, this.stillsIntervalMs);
   }
 
   /** The subscription for this pair, creating it if the camera is configured
@@ -575,7 +603,8 @@ export class Viewers {
       return held;
     }
     const made: Subscription = {
-      want: "off", fullRateUntil: null, stats: null, statsAt: null, still: null,
+      want: "off", fullRateUntil: null, stats: null, statsAt: null,
+      stillDemand: false, stillTraffic: [],
       heardAt: now, revision: 0, published: null,
     };
     cameras.set(camera, made);
@@ -610,7 +639,7 @@ export class Viewers {
     const sub = this.subs.get(viewer)?.get(camera);
     const shared = sharedState(configured, run, this.steps.get(camera) ?? null);
     const mine = this.mineState(camera, configured, run, sub, now);
-    const cost = this.costState(camera, viewer, run);
+    const cost = this.costState(camera, viewer, run, now);
     return {
       camera, viewer, revision: sub?.revision ?? 0, at: now,
       shared, mine, cost, overlay: overlayFor(shared, mine, cost),
@@ -642,14 +671,13 @@ export class Viewers {
       const shape = still?.width != null && still.height != null
         ? `${String(still.width)}x${String(still.height)}`
         : null;
+      const transmitted = sub === undefined ? 0 : this.stillCopy(sub, now);
       return {
         delivery, source: `${camera}-still`,
         size: shape, fps: null,
         // What this browser's copy costs, or null before one has been sent:
         // a still nothing has transmitted is not a rate.
-        kbps: sub?.still === null || sub === undefined
-          ? null
-          : stillCostKbps(sub.still.bytes, this.stillsIntervalMs),
+        kbps: transmitted === 0 ? null : transmitted,
         frameAge: still === null ? null : Math.max(0, Math.floor((now - still.at) / 1000) * 1000),
         interval: this.stillsIntervalMs, fullRate: false,
         statsAt: sub?.statsAt ?? null,
@@ -676,14 +704,12 @@ export class Viewers {
    * video costs a copy of whichever encode it is being served — the main
    * stream while it holds Full rate, the preview otherwise — so two browsers
    * on one preview cost two copies of one encode, which is what actually
-   * leaves. A viewer on stills costs the copy it was last sent, over the
-   * interval it is sent at (`stillCostKbps`): one frame is taken per camera
-   * per interval however many browsers want it, and **every transmitted
-   * copy is charged** — three browsers on one camera's stills is three
-   * copies of one image, and a browser that has fetched none yet is charged
-   * for none.
+   * leaves. Delivered still bytes are added over their rolling interval,
+   * independently of whether that viewer selected video, stills or off.
+   * Generation remains one frame per camera; each successful HTTP copy adds
+   * its own bytes and expires without a later heartbeat re-dating it.
    */
-  private costState(camera: string, viewer: string, run: RunningEncodes | null): CostState {
+  private costState(camera: string, viewer: string, run: RunningEncodes | null, now: number): CostState {
     let path = 0;
     let ours = 0;
     for (const configured of this.cameras()) {
@@ -694,12 +720,14 @@ export class Viewers {
       for (const output of configured.outputs) if (output.enabled) path += stream;
       for (const watcher of this.watching(configured.id)) {
         const sub = this.subs.get(watcher)?.get(configured.id);
-        if (sub === undefined || sub.want === "off") continue;
-        const copy = sub.want === "stills"
-          ? this.stillCopy(sub)
-          : sub.fullRateUntil !== null ? stream : preview;
-        path += copy;
-        if (watcher === viewer) ours += copy;
+        if (sub === undefined) continue;
+        const still = this.stillCopy(sub, now);
+        path += still;
+        if (watcher === viewer) ours += still;
+        if (sub.want === "off" || sub.want === "stills") continue;
+        const video = sub.fullRateUntil !== null ? stream : preview;
+        path += video;
+        if (watcher === viewer) ours += video;
       }
     }
     const shared = atIp(
