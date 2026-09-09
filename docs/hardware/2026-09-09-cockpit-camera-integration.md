@@ -61,3 +61,34 @@ runtime changes. After a subsequent operator reboot, `get_throttled` reported
 `0x0`; its final USB-helper validation remains owned by that task. Its tested fix
 must be incorporated by commit before activating the combined release. Staging
 under a separate directory does not modify the installed camera or services.
+
+
+## Final driver integration and staged hardware check
+
+Camera head `073f8f1` was subsequently merged in integration commit `963e19c`.
+Both native-AIO helper files are present and match the installed fix byte-for-byte.
+The combined core then passed 3,589 tests across 151 files, and the two Python
+helper suites passed 31 tests. The earlier 876 dashboard and 355 other workspace
+tests remain applicable: the added driver commits do not change those packages.
+
+An eight-second passive AF_PACKET copy of only the router's existing loopback
+UDP destination 14559 collected 610 datagrams containing 18,782 MAVLink bytes.
+The integrated VehicleService decoded that recording with a send callback that
+rejects any transmission; its send count stayed zero. It reported ArduPlane
+system/component 1/1, disarmed RTL, approximately −0.01° roll, −4.49° pitch, 45°
+heading, 10.657 V battery and no GPS fix, with 100 instrumentation fields. These
+are captured bench observations, not a claim of a continuously live deployed PFD.
+
+The complete candidate was copied to a separate `cockpit-staging/963e19c`
+directory under the device user's home. A manifest verifies every staged file,
+and the daemon module graph loads with the board's bundled Node runtime. Only
+the two helper files changed after the initial copy, so a small delta carried
+the final USB fix. Installed service paths and configuration remain untouched.
+
+After the USB validation, restart coordination was handed to the integration
+task. The operator then requested a further bounded camera-workflow correction;
+both tasks agreed to hold activation until that committed pass can be included.
+The staged manifest explicitly carries that hold. Once incorporated, activation
+must preserve at least 45 seconds of USB absence across the core restart and
+restore the previously running preview. This is a scheduling boundary between
+shared-service updates, not an incompatible hardware or software architecture.

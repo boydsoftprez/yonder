@@ -36,7 +36,8 @@ the earlier proposed integration base in the live-cockpit bench plan.
 - [ ] Incorporate its subsequent bounded camera-workflow correction before activation.
 - [x] Confirm Pi identity, architecture, installed build, active services, free
   space, camera endpoint ownership and the actual flight-controller connection.
-- [ ] Stage matching artifacts in a separate release directory. Keep a reversible
+- [x] Stage matching artifacts in a separate release directory.
+- [ ] Keep a reversible
   installed-build/configuration snapshot and coordinate the shared restart.
 - [ ] Deploy the combined release during the agreed window, verify camera/media
   continuity and read real flight-controller telemetry in the authenticated cockpit.
@@ -46,3 +47,7 @@ the earlier proposed integration base in the live-cockpit bench plan.
 The operator connected the flight controller during this task. The existing
 telemetry service automatically linked ArduPlane system 1 on ttyAMA0 at 115200.
 Camera/Cockpit remain intact; the native flight display is a separate Flight page.
+
+Staged candidate: integration commit `963e19c`, including camera head `073f8f1`.
+The staging manifest remains on hold until the additional camera-workflow pass
+is committed and incorporated. No production activation has occurred.
