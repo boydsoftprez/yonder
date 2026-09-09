@@ -703,6 +703,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
     }
   };
   const accessory = opts.accessory === true ? new AccessorySources({ cameras: () => reachConfig().cameras,
+    onFailure: failure => warn(`Pocket 2 transport: ${JSON.stringify(failure)}`),
     mediaCapability: async () => {
       try { accessSync('/usr/local/bin/yonder-pipeline', constants.X_OK); }
       catch { return 'Accessory video requires the packaged yonder-pipeline host'; }

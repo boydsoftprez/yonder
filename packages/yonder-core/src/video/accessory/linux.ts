@@ -5,7 +5,7 @@ import {
   AccessorySession, aoaSetupResponse, functionFsDescriptors, functionFsStrings,
   type AccessoryCommandOptions, type H264AccessUnit, type UsbSetupPacket,
 } from "./aoa.js";
-import type { DumlCommand, DumlFrame } from "./duml.js";
+import { decodeDuml, type DumlCommand, type DumlFrame } from "./duml.js";
 
 /** R-CAM-15: one owned FunctionFS generation, never a persisted command queue. */
 export const FUNCTIONFS_HELPER_PATH = fileURLToPath(new URL("./assets/functionfs.py", import.meta.url));
@@ -13,6 +13,9 @@ export const DETACHED_BACKOFF_MS = 45_000;
 export const TRAFFIC_TIMEOUT_MS = 3_000;
 const STARTUP_TIMEOUT_MS = 15_000;
 const WRITE_TIMEOUT_MS = 1_000;
+// The helper enforces the physical deadline independently. Its completed-write
+// notification may arrive later through the same IPC pipe as the video.
+export const WRITE_CONFIRMATION_GRACE_MS = 1_000;
 const MAX_LINE = 24_000;
 const MAX_CHUNK = 16_384;
 export const monotonicMilliseconds = (): number => Number(process.hrtime.bigint() / 1_000_000n);
@@ -107,6 +110,13 @@ export interface Pocket2DeviceOptions {
   readonly onCommand?: (frame: DumlFrame) => void;
   readonly onVideo?: (unit: H264AccessUnit) => void;
   readonly onStatus?: (status: Pocket2Status) => void;
+  readonly onFailure?: (failure: Pocket2Failure) => void;
+}
+export interface Pocket2Failure {
+  at: number; generation: number; reason: string;
+  lastCommandAgeMs: number | null; lastVideoAgeMs: number | null;
+  pendingWrite: { id: number; startedAt: number; deadline: number; elapsedMs: number;
+    commandSet: number | null; commandId: number | null; response: boolean | null } | null;
 }
 
 export class Pocket2Device {
@@ -120,7 +130,9 @@ export class Pocket2Device {
   private retryTimer?: ReturnType<typeof setTimeout>;
   private enabledAt?: number;
   private control?: { id: number; setup: UsbSetupPacket; start: boolean };
-  private write?: { id: number; reject: (reason: Error) => void; resolve: () => void };
+  private write?: { id: number; startedAt: number; deadline: number;
+    commandSet: number | null; commandId: number | null; response: boolean | null;
+    reject: (reason: Error) => void; resolve: () => void };
   private serial = 0;
   private stopping?: Promise<void>;
   private closed = false;
@@ -294,8 +306,13 @@ export class Pocket2Device {
         if (error) reject(error); else resolve();
       };
       const abort = (): void => { void this.retire("stale", "Pocket 2 active write canceled"); };
-      const timer = setTimeout(() => { void this.retire("stale", "Pocket 2 write deadline expired"); }, Math.max(0, deadline - this.now()));
-      this.write = { id, resolve: () => finish(), reject: error => finish(error) };
+      // This timer supervises confirmation, not USB dispatch. Do not replace or
+      // extend the deadline sent to the helper, including partial writes.
+      const timer = setTimeout(() => { void this.retire("stale", "Pocket 2 write confirmation timed out"); }, Math.max(0, deadline + WRITE_CONFIRMATION_GRACE_MS - this.now()));
+      const command = decodeDuml(data.subarray(8));
+      this.write = { id, startedAt: this.now(), deadline, commandSet: command?.commandSet ?? null,
+        commandId: command?.commandId ?? null, response: command?.response ?? null,
+        resolve: () => finish(), reject: error => finish(error) };
       signal.addEventListener("abort", abort, { once: true });
       try { this.helper!.send({ type: "write", id, data: b64(data), deadline }); }
       catch { void this.retire("fault", "Pocket 2 endpoint write failed"); }
@@ -307,6 +324,15 @@ export class Pocket2Device {
     const helper = this.helper; this.helper = undefined;
     let complete!: () => void;
     this.stopping = new Promise<void>(resolve => { complete = resolve; });
+    if (!this.closed) {
+      const at = this.now(), write = this.write;
+      const failure: Pocket2Failure = { at, generation: this.status.generation, reason,
+        lastCommandAgeMs: this.status.lastCommandAt === null ? null : at - this.status.lastCommandAt,
+        lastVideoAgeMs: this.status.lastVideoAt === null ? null : at - this.status.lastVideoAt,
+        pendingWrite: write ? { id: write.id, startedAt: write.startedAt, deadline: write.deadline, elapsedMs: at - write.startedAt,
+          commandSet: write.commandSet, commandId: write.commandId, response: write.response } : null };
+      try { this.options.onFailure?.(failure); } catch { /* Diagnostics cannot prevent retirement. */ }
+    }
     this.status = { ...this.status, generation: this.status.generation + 1, manufacturer: null, model: null };
     this.update(state, reason);
     clearTimeout(this.startupTimer); clearInterval(this.freshnessTimer);

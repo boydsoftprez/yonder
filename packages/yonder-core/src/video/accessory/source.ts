@@ -28,6 +28,7 @@ export interface AccessorySourceOptions {
   deviceFactory?: (options: Pocket2DeviceOptions) => Pick<Pocket2Device, 'start' | 'close' | 'snapshot' | 'sendCommand'>;
   mediaFactory?: (endpoint: string) => AccessoryMedia;
   mediaCapability?: () => Promise<string | null>;
+  onFailure?: Pocket2DeviceOptions['onFailure'];
   root?: string;
   clock?: IntentClock;
 }
@@ -93,6 +94,7 @@ export class AccessorySources {
     let source!: Owned;
     const device = (this.options.deviceFactory ?? (opts => new Pocket2Device(opts)))({
       controller: identity.slice(8), now: this.clock.now,
+      onFailure: this.options.onFailure,
       onStatus: status => this.status(source, status),
       onCommand: frame => {
         source.camera.update(frame);

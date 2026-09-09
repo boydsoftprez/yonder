@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { Pocket2Device, type FunctionFsHelper } from "./linux.js";
+import { Pocket2Device, WRITE_CONFIRMATION_GRACE_MS, type FunctionFsHelper } from "./linux.js";
 import { AOA_COMMAND_ROUTE, encodeAoaEnvelope } from "./aoa.js";
 import { encodeDuml } from "./duml.js";
 import { GimbalController } from "./gimbal.js";
@@ -21,10 +21,11 @@ afterEach(async () => { await Promise.all(devices.map(d => d.close())); devices 
 function fixture() {
   const children: FakeHelper[] = [];
   const onCommand = vi.fn();
-  const device = new Pocket2Device({ controller: "fe980000.usb", now: () => Date.now(), onCommand,
+  const onFailure = vi.fn();
+  const device = new Pocket2Device({ controller: "fe980000.usb", now: () => Date.now(), onCommand, onFailure,
     helperFactory: (event) => { const helper = new FakeHelper(event); children.push(helper); return helper; } });
   devices.push(device);
-  return { device, children, onCommand };
+  return { device, children, onCommand, onFailure };
 }
 async function phone(f: ReturnType<typeof fixture>) {
   await f.device.start();
@@ -203,11 +204,38 @@ it.each(["release", "renewal"] as const)("an actual gimbal %s during written IPC
   expect(f.device.snapshot()).toMatchObject({ state: "live", generation });
   gimbal.close();
 });
-it("expires blocked writes even when the camera is silent", async () => {
+it("keeps the original endpoint deadline while allowing delayed completion IPC", async () => {
+  const f = fixture(); const h = await live(f); const generation = f.device.snapshot().generation;
+  const deadline = Date.now() + 80;
+  const pending = f.device.sendCommand({ commandSet: 4, commandId: 12 }, { deadline });
+  await vi.advanceTimersByTimeAsync(0);
+  const write = h.messages.at(-1)!;
+  expect(write).toMatchObject({ type: 'write', deadline });
+  await vi.advanceTimersByTimeAsync(90);
+  expect(h.stopped).toBe(false);
+  h.emit({ type: 'written', id: write.id }); await pending;
+  expect(f.device.snapshot()).toMatchObject({ state: 'live', generation });
+  expect(f.onFailure).not.toHaveBeenCalled();
+});
+it("a helper endpoint-deadline failure retires immediately without waiting for IPC grace", async () => {
+  const f = fixture(); const h = await live(f);
+  const deadline = Date.now() + 80;
+  const pending = f.device.sendCommand({ commandSet: 4, commandId: 12, payload: Uint8Array.of(1,2,3) }, { deadline });
+  const rejected = expect(pending).rejects.toThrow(/endpoint deadline/);
+  await vi.advanceTimersByTimeAsync(80);
+  h.emit({ type: 'error', message: 'endpoint deadline expired' }); await rejected;
+  expect(h.stopped).toBe(true);
+  expect(f.onFailure).toHaveBeenCalledOnce();
+  expect(f.onFailure.mock.calls[0][0]).toMatchObject({ reason: 'endpoint deadline expired',
+    pendingWrite: { commandSet: 4, commandId: 12, deadline, elapsedMs: 80 } });
+  expect(f.onFailure.mock.calls[0][0].pendingWrite).not.toHaveProperty('payload');
+});
+it("bounds an unconfirmed write even when the helper and camera are silent", async () => {
   const f = fixture(); const h = await live(f);
   const pending = f.device.sendCommand({ commandSet: 4, commandId: 12 }, { deadline: Date.now() + 80 });
-  const rejected = expect(pending).rejects.toThrow(/deadline/);
-  await vi.advanceTimersByTimeAsync(80); await rejected; expect(h.stopped).toBe(true);
+  const rejected = expect(pending).rejects.toThrow(/confirmation timed out/);
+  await vi.advanceTimersByTimeAsync(80 + WRITE_CONFIRMATION_GRACE_MS - 1); expect(h.stopped).toBe(false);
+  await vi.advanceTimersByTimeAsync(1); await rejected; expect(h.stopped).toBe(true);
 });
 it("uses valid inbound traffic for liveness and cancels the detached retry on close", async () => {
   const f = fixture(); const h = await live(f);
@@ -246,7 +274,7 @@ it("preserves camera video timestamps", async () => {
   const frames: any[] = []; let helper!: FakeHelper;
   const device = new Pocket2Device({ controller: "test.udc", now: () => Date.now(), onVideo: frame => frames.push(frame), helperFactory: event => helper = new FakeHelper(event) });
   devices.push(device);
-  const f = { device, children: [] as FakeHelper[], onCommand: vi.fn() };
+  const f = { device, children: [] as FakeHelper[], onCommand: vi.fn(), onFailure: vi.fn() };
   await device.start(); f.children.push(helper);
   await live(f);
   const record = Buffer.from("000001ff0500ff00901162002a0000000000000165", "hex");
