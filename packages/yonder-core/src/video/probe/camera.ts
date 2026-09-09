@@ -7,6 +7,7 @@ import {
 import { DESCRIPTORS, sentenceLabel } from "../descriptors.js";
 import { parseControls, parseDevices, parseFormats } from "./parse.js";
 import { byPathNames, systemByPath, type ByPathReader } from "./bypath.js";
+import { probeRockchipCsi } from "./csi.js";
 
 /**
  * Detection on demand (R-CAM-12).
@@ -32,6 +33,7 @@ export interface Rejection {
   readonly reason: string;
 }
 export interface Detection {
+  readonly source?: "usb" | "csi";
   readonly device: string;
   readonly card: string;
   /**
@@ -295,6 +297,10 @@ async function probeNode(
       device: node, card,
       reason: `could not read this device's formats: ${formats.stderr.trim() || `exit ${formats.code}`}`,
     };
+  }
+  if (/Size:\s*Stepwise/.test(formats.stdout) &&
+      (/^rkisp(?:1)?_mainpath$/.test(card) || byPath.get(node)?.startsWith("platform-rkisp-"))) {
+    return probeRockchipCsi(node, card, runner, byPath);
   }
   const parsed = parseFormats(formats.stdout);
   if (parsed.length === 0) {

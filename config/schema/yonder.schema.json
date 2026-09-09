@@ -384,7 +384,8 @@
           "source": {
             "type": "string",
             "enum": [
-              "usb"
+              "usb",
+              "csi"
             ]
           },
           "device": {

@@ -454,11 +454,15 @@ export function compose(opts: ComposeOptions): string[] {
 
   push(
     "v4l2src", `device=/dev/v4l/by-path/${camera.device}`, "io-mode=4", LINK,
-    `image/jpeg,width=${camera.width},height=${camera.height},framerate=${camera.framerate}/1`, LINK,
+    ...(camera.source === "csi" ? [
+      `video/x-raw,format=NV12,width=${camera.width},height=${camera.height},framerate=${camera.framerate}/1`, LINK,
+    ] : [
+      `image/jpeg,width=${camera.width},height=${camera.height},framerate=${camera.framerate}/1`, LINK,
     // Spec §5: decode in hardware where the board has it, so the frames
     // never leave the SoC between capture and encode. Measured at +3 points
     // against software's +8 for one branch, +4 against +14 for two.
     encoder.decoder ?? "jpegdec", LINK,
+    ]),
     ...turn(opts),
     "tee", "name=raw",
   );

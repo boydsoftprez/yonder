@@ -661,6 +661,7 @@ const NOTHING_TO_REMOVE = "nothing is configured on this socket, so there is not
  */
 export function cameraIndex(input: {
   readonly found: readonly {
+    readonly source?: "usb" | "csi";
     readonly device: string;
     readonly card: string;
     readonly byPath: string;
@@ -698,7 +699,7 @@ export function cameraIndex(input: {
   const cameras = input.found.map((detected): CameraRow => {
     const configured = input.cameras.find((c) => c.device === detected.byPath);
     const identity = identityWords(detected.byPath, detected.byPathStable);
-    const bus = `${configured?.source ?? "usb"} · ${detected.device}`;
+    const bus = `${configured?.source ?? detected.source ?? "usb"} · ${detected.device}`;
     if (configured === undefined) {
       return {
         id: null,

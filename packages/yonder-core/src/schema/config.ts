@@ -602,8 +602,8 @@ export type CameraControls = z.infer<typeof CameraControls>;
 export const CameraShape = z.object({
   id: CameraId,
   name: z.string().min(1).max(48),
-  /** M6 adds `csi` and `hdmi`; M5 adds the accessory camera. One today. */
-  source: z.enum(["usb"]),
+  /** R-CAM-01: CSI uses a prepared ISP media graph and uncompressed NV12. */
+  source: z.enum(["usb", "csi"]),
   /** A `by-path` name, without the `/dev/v4l/by-path/` prefix. See above. */
   device: z.string().min(1).max(128),
   enabled: z.boolean().default(true),

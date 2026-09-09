@@ -47,6 +47,13 @@ const mpp = () => compose(mppOpts);
 const mppText = () => mpp().join(" ");
 
 describe("compose", () => {
+  it("feeds CSI NV12 frames directly to both hardware encoders", () => {
+    const line = compose({ ...mppOpts, camera: { ...CAMERA, source: "csi" } });
+    expect(line).toContain("video/x-raw,format=NV12,width=1280,height=720,framerate=30/1");
+    expect(line).not.toContain("mppjpegdec");
+    expect(line).not.toContain("jpegdec");
+    expect(line.filter((token) => token === "mpph264enc")).toHaveLength(2);
+  });
   it("captures the format the camera actually offered", () => {
     expect(text()).toContain("v4l2src");
     expect(text()).toContain("image/jpeg,width=1280,height=720,framerate=30/1");
