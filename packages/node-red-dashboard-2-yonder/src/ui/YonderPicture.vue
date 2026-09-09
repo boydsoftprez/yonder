@@ -1530,7 +1530,7 @@ export default {
     min-height: 0;
     display: grid;
     /* Status/thumbnail arrivals must not resize the image while aiming. */
-    grid-template-rows: minmax(0, 1fr) 34px 148px;
+    grid-template-rows: minmax(0, 1fr) 34px 80px;
     grid-template-columns: minmax(0, 1fr);
 }
 /* **Takes the shape of the video it is showing, and never more room than it
@@ -1584,6 +1584,27 @@ export default {
     max-height: 100%;
 }
 .y-pic__frame.is-aiming { cursor: crosshair; touch-action: none; }
+/* Camera is the dedicated viewing page: its video owns the column width.
+   One content-sized Dashboard row lets the aspect ratio determine its height;
+   the compact supporting rows stay below it without changing the image size.
+   Other compositions, including Cockpit, keep their configured widget slots. */
+:global(#nrdb-page-page-camera .nrdb-ui-yonder-picture) {
+    display: block !important;
+    grid-row-end: span 1 !important;
+    height: auto !important;
+}
+#nrdb-page-page-camera .y-pic {
+    height: auto;
+    grid-template-rows: auto 34px 80px;
+}
+#nrdb-page-page-camera .y-pic__fit {
+    container-type: normal;
+    display: block;
+}
+#nrdb-page-page-camera .y-pic__frame {
+    width: 100%;
+    max-height: none;
+}
 /* **Every overlay below is given an explicit `z-index`** (defect 2 — this
    file's own top-of-file doc comment). A hardware-decoded `<video>` can
    composite in a layer of its own that ignores DOM order, so nothing here
@@ -1756,6 +1777,7 @@ export default {
    own top-of-file doc comment on why it is a normal-flow sibling of
    `.y-pic__frame` rather than one more absolutely-positioned overlay. */
 .y-pic__notices, .y-pic__thumbnails { min-width: 0; min-height: 0; overflow: auto; }
+.y-pic__thumbnails { overflow-y: hidden; }
 .y-pic__strip { margin-top: 8px; }
 
 .y-pic__reason { color: var(--yonder-waiting, #ffcf28); }

@@ -11,7 +11,7 @@ The operator has authorized restructuring the Camera page after using the Pocket
 - Use one persistent transaction area on Camera. Before Apply it shows the local draft and Apply/Discard; after Apply it shows the authoritative pending transaction, remaining time, Keep and Revert. Device-confirmed changes keep their existing semantics. Every other surface retains the visible pending actions required by R-UI-15.
 - Show camera errors and operation results inline. Routine polling, page changes, and successful Keep/Revert must not create a popup over the controls. Preserve actionable notices unrelated to this camera revision.
 - Put pan/tilt values in Aim, outside the image. Keep Picture's private gesture metadata and tested release/loss handling. Remove generic idle READY noise and duplicate Aim controls.
-- Let variable controls and messages determine their content height. Keep the preview in a deliberate bounded slot. No child content may paint over another widget; verify this in the actual Dashboard browser at desktop and narrow widths in both palettes.
+- Let variable controls and messages determine their content height. On the dedicated Camera page, the video fills its column and its aspect ratio determines its height. Notices and a compact horizontal thumbnail strip occupy stable rows beneath it; they must not shrink the primary picture. Cockpit retains its configured picture slot. No child content may paint over another widget; verify this in the actual Dashboard browser at desktop and narrow widths in both palettes.
 
 ## Thumbnail and still chain
 

@@ -7,6 +7,7 @@
             type="button"
             class="y-strip__thumb"
             :class="{ on: cam.active }"
+            :title="[cam.name, cam.caption].filter(Boolean).join(' · ')"
             @click="$emit('go', cam.id)"
         >
             <span class="y-strip__img" :style="cam.thumbSrc ? { backgroundImage: 'url(' + cam.thumbSrc + ')' } : {}" aria-hidden="true" />
@@ -66,20 +67,25 @@ export default {
 </script>
 
 <style scoped>
-.y-strip__age { display: block; font-size: 10px; color: var(--yonder-label, #7f8a95); }
+.y-strip__age { display: block; grid-column: 2; grid-row: 3; font-size: 10px; color: var(--yonder-label, #7f8a95); }
 .y-strip {
     display: flex;
-    flex-wrap: wrap;
-    align-items: flex-end;
+    flex-wrap: nowrap;
+    align-items: center;
     gap: 8px;
     font-family: var(--yonder-font, system-ui, sans-serif);
 }
 .y-strip__thumb {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 2px;
-    width: 84px;
+    display: grid;
+    grid-template-columns: 64px minmax(0, 1fr);
+    grid-template-rows: 14px 16px 14px;
+    align-items: center;
+    gap: 1px 8px;
+    width: 216px;
+    height: 56px;
+    flex: 0 0 216px;
+    box-sizing: border-box;
+    text-align: left;
     padding: 4px;
     border: 1px solid var(--yonder-divider, #2b333c);
     border-radius: 3px;
@@ -90,7 +96,9 @@ export default {
 }
 .y-strip__thumb.on { border-color: var(--yonder-select, #2ad4f0); }
 .y-strip__img {
-    width: 100%;
+    grid-column: 1;
+    grid-row: 1 / 4;
+    width: 64px;
     height: 46px;
     flex-shrink: 0;
     border-radius: 2px;
@@ -99,6 +107,8 @@ export default {
     background-position: center;
 }
 .y-strip__cap {
+    grid-column: 2;
+    grid-row: 1;
     font-size: 9.5px;
     letter-spacing: 0.04em;
     text-transform: uppercase;
@@ -107,13 +117,25 @@ export default {
 }
 .y-strip__thumb.on .y-strip__cap { color: var(--yonder-select, #2ad4f0); font-weight: 700; }
 .y-strip__name {
+    grid-column: 2;
+    grid-row: 2;
     font-size: 10px;
     font-weight: 600;
     color: var(--yonder-value, #ffffff);
 }
+.y-strip__cap, .y-strip__name, .y-strip__age {
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
 .y-strip__dl {
     margin-left: auto;
     align-self: center;
+    flex: 0 0 auto;
+    max-width: 280px;
+    min-width: 160px;
+    line-height: 1.4;
     font-size: 10.5px;
     color: var(--yonder-label, #7f8a95);
 }
