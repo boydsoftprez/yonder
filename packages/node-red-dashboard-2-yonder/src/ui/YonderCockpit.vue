@@ -10,6 +10,7 @@
   :data-custom-instruments="customInstrumentSlot||undefined"
   :style="{'--cockpit-bank-count':Math.max(1,bankInstrumentConfig.length)}"
   :data-palette="palette"
+  :data-fullscreen="fullscreen||undefined"
   :data-background="background"
   :data-embedded="props.embedded||undefined"
   @keydown.esc="cancelPanel"
@@ -25,7 +26,7 @@
       @click="openFlightControls('modes')"
     >{{ telemetry.mode || 'NO MODE' }} ·
       {{telemetry.armed===true?'ARMED':telemetry.armed===false?'DISARMED':'—'}}</button><button
-      @click="panel='display'">Display & data</button><button aria-label="Display setup" @click="panel='display-setup'">Layout</button><button v-if="instrumentAlerts.length" class="cockpit-alert-summary" :title="instrumentAlerts.map(a=>a.label).join(' · ')" @click="panel='alerts'">{{instrumentAlerts.length}} NOTICE{{instrumentAlerts.length===1?'':'S'}}</button><button
+      @click="panel='display'">Display & data</button><button :aria-label="fullscreen?'Exit full screen':'Enter full screen'" :aria-pressed="fullscreen" :disabled="fullscreenBusy" @click="toggleFullscreen">{{fullscreen?'Exit full screen':'Full screen'}}</button><button aria-label="Display setup" @click="panel='display-setup'">Layout</button><button v-if="instrumentAlerts.length" class="cockpit-alert-summary" :title="instrumentAlerts.map(a=>a.label).join(' · ')" @click="panel='alerts'">{{instrumentAlerts.length}} NOTICE{{instrumentAlerts.length===1?'':'S'}}</button><button
       @click="panel='status'"
       aria-label="Aircraft and command status"
     >{{snapshot.operations?.at(-1)?.state || 'Aircraft'}}</button></header>
@@ -708,7 +709,7 @@ export default {
       displayConfig:cockpitDisplaySettings(),bankInstrumentConfig:defaultBankConfig(),topInstrumentConfig:defaultTopConfig(),
       instrumentation:null,instrumentReceivedAt:Date.now(),instrumentTimer:null,instrumentBusy:false,instrumentError:'',selectedInstrument:null,instrumentHistory:{},
       mfdPages:[{id:'map',label:'Map'},{id:'mission',label:'Flight plan'},{id:'systems',label:'Systems'},{id:'inspector',label:'Telemetry'}],
-      palette: document.documentElement.getAttribute('data-theme') === 'day' ? 'day' : 'night',
+      palette: 'night',fullscreen:false,fullscreenBusy:false,
       mobileInset: 'map',
       preferences: validatePfdPreferences(),
       background: 'terrain',
@@ -903,6 +904,7 @@ export default {
     }
   },
   watch: {
+    palette(value) { if(['day','night'].includes(value)){try{localStorage.setItem('yonder-cockpit-palette-v1',value)}catch{}} },
     sourceMode() { this.dataOptions('sourceMode') },
     report: {
       handler(v) {
@@ -947,8 +949,6 @@ export default {
     }
   },
   mounted() {
-    this.palette = getComputedStyle(document.documentElement).getPropertyValue('--yonder-theme').includes('day') ?
-      'day' : this.palette;
     this.$nextTick(() => {
       this.fitViewport();
       if (typeof ResizeObserver !== 'undefined') {
@@ -957,12 +957,15 @@ export default {
       }
     });
     window.addEventListener('resize', this.fitViewport);
+    document.addEventListener('fullscreenchange', this.fullscreenChanged);
     document.addEventListener('keydown', this.lostFocusEscape);
     if (this.report || this.props.report) this.ingest(this.report || this.props.report);
     this.source = this.api || (!this.report && !this.props.report ? createCockpitApi() : null);
     this.$el.setAttribute('data-mobile-inset', this.mobileInset);
     this.groundData.refreshOffline().then(()=>{ if(!this.disposed)this.groundStatus=this.groundData.status() }).catch(e=>{this.dataMessage='Browser storage unavailable: '+e.message});
     try {
+      const palette=localStorage.getItem('yonder-cockpit-palette-v1');
+      if(['day','night'].includes(palette))this.palette=palette;
       const saved = JSON.parse(localStorage.getItem('yonder-cockpit-v1') || 'null');
       if (saved) this.preferences = validatePfdPreferences(saved)
       const instruments=JSON.parse(localStorage.getItem('yonder-instrument-layout-v1')||'null');
@@ -987,6 +990,7 @@ export default {
   beforeUnmount() {
     this.viewportObserver?.disconnect();
     window.removeEventListener('resize', this.fitViewport);
+    document.removeEventListener('fullscreenchange', this.fullscreenChanged);
     document.removeEventListener('keydown', this.lostFocusEscape);
     this.disposed = true;
     clearInterval(this.timer);
@@ -998,6 +1002,17 @@ export default {
   },
   methods: {
     formatDuration,
+    fullscreenChanged(){if(this.disposed)return;this.fullscreen=document.fullscreenElement===this.$el;this.$nextTick(this.fitViewport)},
+    async toggleFullscreen(){
+      if(this.fullscreenBusy)return;this.fullscreenBusy=true;
+      try{
+        if(document.fullscreenElement===this.$el)await document.exitFullscreen();
+        else if(typeof this.$el?.requestFullscreen==='function')await this.$el.requestFullscreen({navigationUI:'hide'});
+        else {this.error='Full screen is not available in this browser.';return}
+        this.fullscreenChanged();
+      }catch{if(!this.disposed)this.error='Full screen was blocked by the browser. Try the Full screen button again.'}
+      finally{this.fullscreenBusy=false}
+    },
     persistInstruments(){try{localStorage.setItem('yonder-instrument-layout-v1',JSON.stringify({display:this.displayConfig,bank:this.bankInstrumentConfig,top:this.topInstrumentConfig}))}catch{this.instrumentError='Layout could not be saved; it remains active for this session'}},
     setDisplayOption(key,value){const previous=this.instrumentItems;this.displayConfig=cockpitDisplaySettings({...this.displayConfig,[key]:value});if(key==='arrangement'&&value==='single')this.layout='full';if(key==='distanceUnit')this.rescaleInstrumentUnits(previous);this.persistInstruments();this.$nextTick(this.fitViewport)},
     resetDisplaySetup(){this.displayConfig=cockpitDisplaySettings();this.bankInstrumentConfig=defaultBankConfig();this.topInstrumentConfig=defaultTopConfig();this.layout='full';this.persistInstruments()},
@@ -1014,6 +1029,7 @@ export default {
     restoreOwnTrail(){this.ownTrailCleared=null;this.saveOwnTrail()},
     fitViewport() {
       if(this.$el?.clientWidth)this.viewportWidth=this.$el.clientWidth;
+      if(this.$el&&document.fullscreenElement===this.$el){this.$el.style.setProperty('--cockpit-height',window.innerHeight+'px');return}
       if (!this.$el || this.props.embedded) return;
       const top = this.$el.getBoundingClientRect().top;
       let bottomSpacing = 4;

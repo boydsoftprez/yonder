@@ -65,3 +65,12 @@
  .y-cockpit[data-mfd-open] .cockpit-body>:is(.cockpit-mission,.cockpit-map-pane,.cockpit-systems-pane){grid-area:4/1/5/2}
  .y-cockpit .cockpit-header{overflow-x:auto}
 }
+
+/* Instrument faces keep their authored contrast even with bright surrounding controls. */
+.y-cockpit[data-palette=day] .instrument-bank button.instrument-bank-reading,
+.y-cockpit[data-palette=day] .flight-data-bar button.flight-data-field{background:#03090d;color:#f5f9fc}
+.y-cockpit[data-palette=day] .cockpit-brand{color:#125d79}
+.y-cockpit[data-palette=day] .cockpit-brand span{color:#395967}
+/* Native element fullscreen excludes the Dashboard header/sidebar without remounting the PFD. */
+.y-cockpit:fullscreen{position:fixed;inset:0;width:100vw;height:100dvh;max-width:none;max-height:none;margin:0;border:0}
+.y-cockpit::backdrop{background:#030708}

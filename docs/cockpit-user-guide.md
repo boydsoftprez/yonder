@@ -22,6 +22,20 @@ The combined Raspberry Pi installation serves **Flight** at
 camera workspace. See the [hardware integration record](hardware/2026-09-09-cockpit-camera-integration.md)
 for the verified runtime and bench limitations.
 
+### Full screen and display colors
+
+Press **Full screen** in the cockpit header to fill the screen with the flight
+display and hide Yonder's surrounding navigation. Use **Exit full screen** in
+that same header, or press **Esc**, to return. The PFD, mission and selected
+layout remain active; settings and instrument editors remain available.
+Fullscreen must be entered with a button press, and browser support varies.
+
+The cockpit starts with its dark **Night** palette independently of Yonder's
+settings pages. **Display & data → Palette** selects **Day** or **Night** and
+saves that choice in this browser. Instrument faces and the top data band keep
+dark backgrounds with readable labels in both palettes. Changing the cockpit
+palette does not change the device's overall theme or aircraft settings.
+
 ### 1. Find your way around
 
 ![Single PFD with top navigation fields, a graphical instrument bank, mission and map insets](images/cockpit/cockpit-main.png)

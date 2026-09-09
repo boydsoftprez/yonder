@@ -8,7 +8,7 @@ afterEach(() => { for (const wrapper of wrappers.splice(0)) wrapper.unmount(); }
 const current = { id: 'battery.0.currentA', label: 'Current', category: 'Electrical', value: 8.4, unit: 'A', available: true, source: 'Battery 0 · component 1', ageMs: 240, quality: 'reported', kind: 'arc', min: 0, max: 40 };
 const reserve = { ...current, id: 'battery.1.currentA', label: 'Reserve current', value: 2, source: 'Battery 1 · component 1' };
 const cpu = { ...current, id: 'host.cpuPercent', label: 'CPU', category: 'Yonder system', value: 50, unit: '%', source: 'Yonder host', min: 0, max: 100, kind: 'horizontal' };
-function render(name: string, props: any, teleportStub = true) { expect(modules[name]).not.toBeNull(); const wrapper = mount(modules[name].default, { props, attachTo: document.body, global: { stubs: { teleport: teleportStub } } }); wrappers.push(wrapper); return wrapper; }
+function render(name: string, props: any, teleportStub = true, attachTo:Element=document.body) { expect(modules[name]).not.toBeNull(); const wrapper = mount(modules[name].default, { props, attachTo, global: { stubs: { teleport: teleportStub } } }); wrappers.push(wrapper); return wrapper; }
 
 describe('instrument faces', () => {
   it.each([
@@ -67,6 +67,20 @@ describe('instrument faces', () => {
 });
 
 describe('touch configuration', () => {
+  it('keeps the editor inside the fullscreen element and returns it to the body after fullscreen exit',async()=>{
+    const old=Object.getOwnPropertyDescriptor(document,'fullscreenElement');
+    const frame=document.createElement('main');document.body.append(frame);
+    const wrapper=render('InstrumentBank',{items:[current],config:[{id:current.id,kind:'arc',min:0,max:40}]},false,frame);
+    let fullscreen:Element|null=frame;Object.defineProperty(document,'fullscreenElement',{configurable:true,get:()=>fullscreen});
+    try{
+      await wrapper.get('[aria-label="Configure instruments"]').trigger('click');
+      expect(document.querySelector('.instrument-editor-scrim')?.parentElement).toBe(frame);
+      fullscreen=null;document.dispatchEvent(new Event('fullscreenchange'));await wrapper.vm.$nextTick();
+      expect(document.querySelector('.instrument-editor-scrim')?.parentElement).toBe(document.body);
+      await new DOMWrapper(document.body).get('[aria-label="Cancel instrument changes"]').trigger('click');
+      expect(document.querySelector('.instrument-editor-scrim')).toBeNull();expect(wrapper.emitted('update:config')).toBeUndefined();
+    }finally{wrapper.unmount();wrappers.splice(wrappers.indexOf(wrapper),1);frame.remove();if(old)Object.defineProperty(document,'fullscreenElement',old);else delete (document as any).fullscreenElement;}
+  });
   it.each(['FlightDataBar', 'InstrumentBank', 'InstrumentationPanel'])('portals the %s editor outside host stacking contexts and retains cancel/focus behavior', async name => {
     const config = [{ id: current.id }, { id: cpu.id }];
     const wrapper = render(name, { items: [current, reserve, cpu], ...(name === 'InstrumentationPanel' ? { bankConfig: config } : { config }) }, false);
