@@ -94,3 +94,9 @@ undervoltage. Its final RTSP read therefore failed; that run is not a stable
 preview pass. The operator confirmed the GPIO supply was connected. After a
 subsequent reboot, the installed helper remained present and the power flags
 were clear; preview validation was repeated in that state.
+
+The clean-power repeat ran for 126.6 seconds with the same USB generation,
+continuous native 720p input, zero preview restarts and `throttled=0x0` throughout.
+A subsequent RTSP check decoded 30 frames successfully. The installed helper
+survived the operator's reboot. These are bounded acceptance results for the
+reproduced driver fault, not a claim that every historical dropout is attributed.
