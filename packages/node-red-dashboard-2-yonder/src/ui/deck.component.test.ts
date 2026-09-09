@@ -1343,6 +1343,18 @@ describe('native Pocket controls', () => {
 });
 
 describe('unified camera workspace', () => {
+  it.each([null, { workspace: { pending: { pending: false, state: 'idle' } } }])('renders the waiting transaction area before a camera report: %j', (payload) => {
+    const { wrapper, emit } = deck(makeStore(payload), 'live');
+    expect(wrapper.findAll('.y-deck__transaction')).toHaveLength(1);
+    expect(wrapper.text()).toContain("Waiting for this camera's report.");
+    expect(wrapper.text()).toContain('No local changes staged.');
+    expect(wrapper.find('.y-deck__pending').exists()).toBe(false);
+    expect(wrapper.findAll('button').map(button => [button.text(), button.attributes('disabled')])).toEqual([
+      ['Apply', ''], ['Discard edits', ''],
+    ]);
+    expect(emit).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
   it('has one persistent transaction area with no Live/Setup navigation or embedded Aim', () => {
     const { wrapper } = deck(makeStore(makeReport({ capabilities: { aim: present({ pitch: { min: -40, max: 40 }, yaw: { min: -90, max: 90 }, mode: 'Follow' }) } })), 'live');
     expect(wrapper.find('.y-deck__transaction').exists()).toBe(true);

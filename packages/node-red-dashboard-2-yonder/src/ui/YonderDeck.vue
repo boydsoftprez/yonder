@@ -1236,6 +1236,7 @@ export default {
      *   draft going away *is* the refusal ceasing to apply.
      */
     buildPending () {
+      if (!this.report) return null
       const pending = this.pendingEdits
       const mine = this.report.problemsFor === this.camera
       const problems = (mine && pending.length > 0 && Array.isArray(this.report.problems))
