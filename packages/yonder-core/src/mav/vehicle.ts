@@ -25,6 +25,9 @@ const emptyMission = (): MissionSnapshot => ({ revision: null, items: [], synchr
 const number = (v: unknown, min = -1e9, max = 1e9): v is number => typeof v === "number" && Number.isFinite(v) && v >= min && v <= max;
 const integer = (v: unknown, min: number, max: number): v is number => number(v, min, max) && Number.isInteger(v);
 const readonlyAction = (a: VehicleAction) => a.kind === "stream-setup" || a.kind === "mission-download";
+const validHome = (v: any) => v && number(v.lat, -90, 90) && number(v.lon, -180, 180) && number(v.alt, -1000, 30000);
+const sameHome = (a: any, b: any) => a === null || b === null ? a === b : validHome(a) && validHome(b) &&
+  Math.abs(a.lat-b.lat)<=2e-7 && Math.abs(a.lon-b.lon)<=2e-7 && Math.abs(a.alt-b.alt)<=0.1;
 
 /** One selected aircraft, one transaction, and one explicitly injected send path. R-CMD-04/05/09. */
 export class VehicleService {
@@ -149,6 +152,7 @@ export class VehicleService {
       telemetry, trail:this.ownTrail.summary(), mission: { ...this.mission, items: options.details === false ? [] : this.mission.items, currentFresh: connected && this.missionAt !== null && now - this.missionAt < 2000 && this.mission.synchronization === "verified" },
       operations: options.details === false ? [] : this.operations, busy: this.active !== null,
       capabilities: { modes: isPlane(this.identity) ? Object.entries(PLANE_MODES).map(([id, name]) => ({ name, customMode: Number(id), source: "firmware-known" as const })) : [],
+        homeControl: { available:isPlane(this.identity), reason:isPlane(this.identity)?null:"Controller home handling is verified for ArduPlane only", confirmation:"readback" as const },
         commands: isPlane(this.identity) ? [...IMMEDIATE].map(command => ({ command, source: "firmware-known" as const })) : [], terrainTargets: false, signing: "unsigned-only" as const,
         flightControl: Object.entries(FLIGHT_COMMANDS).map(([kind, command]) => ({ kind: kind as keyof typeof FLIGHT_COMMANDS, command, source: "firmware-known" as const, available: reason === null, reason, requiredMode: 15 as const, entersGuided: true as const, confirmation: "acknowledgement" as const })) },
       statustext: options.details === false ? [] : this.texts });
@@ -177,6 +181,7 @@ export class VehicleService {
     if (missionChange && this.mission.revision !== null && request.expectedMissionRevision !== this.mission.revision) return reject(409, "Vehicle mission changed; review the current revision");
     if (["set-current", "continue-auto", "mission-start"].includes(kind) && this.mission.synchronization !== "verified") return reject(409, "Download and verify the current vehicle mission first");
     const action = request.action;
+    if (action.kind === "set-home" && !sameHome(action.expectedHome,this.telemetry.snapshot(this.now(),true,this.identity).homePosition)) return reject(409,"Controller home changed; reopen Home and review again");
     if ((action.kind === "set-current" || action.kind === "continue-auto") && !this.mission.items.some(i => i.seq === action.seq)) return reject(400, "Selected sequence is not in the downloaded mission");
     if (this.missionUncertain && ["mission-upload", "mission-clear"].includes(kind)) return reject(409, "Prior transfer outcome is unknown; download the vehicle mission before another upload");
     const steps = this.steps(request.action);
@@ -195,6 +200,8 @@ export class VehicleService {
     if (!action || typeof action !== "object") return "An action is required";
     switch (action.kind) {
       case "stream-setup": case "mission-download": case "mission-clear": case "mission-start": return null;
+      case "set-home": return validHome(action.home) && (action.expectedHome === null || validHome(action.expectedHome)) &&
+        (Math.round(action.home.lat*1e7)!==0 || Math.round(action.home.lon*1e7)!==0) ? null : "Home requires explicit latitude, longitude and MSL elevation (-1000 to 30000 m). Zero/zero is ArduPlane's current-location sentinel";
       case "mode": return integer(action.customMode, 0, 0xffffffff) && PLANE_MODES[action.customMode] ? null : "Unsupported mode for the current command adapter";
       case "arm": return typeof action.armed === "boolean" ? null : "Arm state must be boolean";
       case "set-current": return integer(action.seq, 1, MAX_MISSION_ITEMS - 1) ? null : "Invalid mission sequence";
@@ -241,6 +248,10 @@ export class VehicleService {
         } }];
       }
       case "mission-start": return [{ name: "Mission start", command: 300, params: [0, 0, 0, 0, 0, 0, 0] }];
+      case "set-home": return [
+        {name:"Set controller home",command:179,params:[0,0,0,0],int:{frame:0,x:Math.round(action.home.lat*1e7),y:Math.round(action.home.lon*1e7),z:action.home.alt},acceptedMessage:"Controller accepted home command; requesting home readback"},
+        {name:"Verify controller home",command:512,params:[242,0,0,0,0,0,0],observes:frame=>frame.data instanceof common.HomePosition && sameHome(action.home,{lat:frame.data.latitude/1e7,lon:frame.data.longitude/1e7,alt:frame.data.altitude/1000})},
+      ];
       case "immediate": return [{ name: `Command ${action.command}`, command: action.command, params: action.params.map(p => p === null ? NaN : p) }];
       case "stream-setup": return [
         ...[[30, 10], [33, 10], [74, 10], [62, 10], [24, 2], [1, 2], [42, 2], [87, 2]].map(([id, hz]) => ({ name: `Request message ${id} at ${hz} Hz`, command: 511, params: [id, Math.round(1e6 / hz), 0, 0, 0, 0, 0] })),
@@ -289,6 +300,9 @@ export class VehicleService {
     const bytes = this.protocol.serialize(message, this.wireSequence++ % 256);
     this.writeChain = this.writeChain.then(async () => {
       if (this.active !== work || !this.connected() || this.identity?.generation !== work.op.vehicleGeneration) return;
+      if (work.op.action.kind === "set-home" && work.step === 0 && !sameHome(work.op.action.expectedHome,this.telemetry.snapshot(this.now(),true,this.identity).homePosition)) {
+        this.finish(work,"failed","Controller home changed before sending; reopen Home and review again","unavailable");return;
+      }
       if (work.op.action.kind in FLIGHT_COMMANDS && this.flightControlReason()) {
         this.finish(work, "failed", "Aircraft firmware evidence changed before the flight control was sent; review again", "unavailable"); return;
       }

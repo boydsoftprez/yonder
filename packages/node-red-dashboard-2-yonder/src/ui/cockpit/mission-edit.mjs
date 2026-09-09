@@ -3,6 +3,7 @@
 import {
   validateMissionItem
 } from './mission-commands.mjs';
+import {planningHome} from './mission-home.mjs';
 
 const fail = message => {
   throw new Error(`Mission draft: ${message}`);
@@ -42,6 +43,12 @@ export function editMission(mission, operation) {
   checkMission(mission);
   if (!operation || typeof operation !== 'object') fail('operation must be an object');
   const draft = clone(mission);
+  if(operation.kind==='set-home'){
+    draft.home=planningHome(operation.home);
+    draft.name=String(draft.name||'Mission').replace(/ \(draft\)$/,'')+' (draft)';
+    draft.source='Local mission draft';
+    return draft; // Home metadata does not renumber items or rewrite jump targets.
+  }
   // Object identity is deliberately separate from a mutable mission sequence.
   const entries = draft.items.map(item => ({
     oldSeq: item.seq,

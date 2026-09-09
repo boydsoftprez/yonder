@@ -208,7 +208,7 @@ export function missionUploadReadiness(snapshot = {}) {
     return {ready:false,needsRead:true,reason:'Read the aircraft mission first to verify its home record. Your local draft will be kept.'};
   const home=snapshot.telemetry?.homePosition;
   if (snapshot.mission.items.length===0 && validPosition(home) && finite(home.alt)) return {ready:true,reason:''};
-  return {ready:false,needsRead:false,reason:'Aircraft mission read completed, but the controller has not provided a home record. With no GPS connected, a home position may be unavailable. Let the controller establish home, then request flight telemetry and read the mission again. Your local draft is kept.'};
+  return {ready:false,needsRead:false,reason:'Aircraft mission read completed, but the controller has not provided a home record. Open Home… to set and verify controller home, or request flight telemetry after the controller establishes home. Your local draft is kept.'};
 }
 export function guidanceView(snapshot, elapsed = 0) {
   const t = snapshot.telemetry || {},

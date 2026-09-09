@@ -3,6 +3,7 @@ import type { Clock } from "../apply/types.js";
 
 export type AltitudeDatum = "msl" | "home" | "terrain";
 export interface GeoTarget { lat: number; lon: number; altitudeM: number; datum: AltitudeDatum }
+export interface HomeReference { lat: number; lon: number; alt: number }
 export interface VehicleIdentity { system: number; component: number; autopilot: number; vehicleType: number; generation: string }
 export interface FieldValidity { source: string; receivedAt: number | null; ageMs: number | null; valid: boolean; reason?: string }
 /** ArduPlane's reported horizontal estimate. WIND carries no estimator confidence flag. */
@@ -54,6 +55,7 @@ export interface FlightTelemetry {
 }
 export type VehicleAction =
   | { kind: "stream-setup" }
+  | { kind: "set-home"; home: HomeReference; expectedHome: HomeReference | null }
   | { kind: "mode"; customMode: number }
   | { kind: "arm"; armed: boolean }
   | { kind: "goto"; target: GeoTarget }
@@ -86,6 +88,7 @@ export interface VehicleSnapshot {
   trail?: OwnTrailSummary;
   telemetry: FlightTelemetry; mission: MissionSnapshot; operations: VehicleOperation[]; busy: boolean;
   capabilities: { modes: { name: string; customMode: number; source: "advertised" | "firmware-known" }[]; commands: { command: number; source: "advertised" | "firmware-known" }[]; terrainTargets: boolean; signing: "unsigned-only";
+    homeControl?: { available: boolean; reason: string | null; confirmation: "readback" };
     flightControl: { kind: "heading" | "altitude" | "speed" | "loiter"; command: number; source: "firmware-known"; available: boolean; reason: string | null; requiredMode: 15; entersGuided: true; confirmation: "acknowledgement" }[] };
   statustext: { at: number; severity: number; text: string }[];
 }

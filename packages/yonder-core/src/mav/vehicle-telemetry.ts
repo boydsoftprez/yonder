@@ -87,7 +87,9 @@ export class VehicleTelemetry {
     }
     const nav = connected && this.nav && now - this.nav.at < 2000 ? { ...this.nav.value, ageMs: now - this.nav.at } : null;
     const target = connected && this.target && now - this.target.at < 2000 ? { ...this.target.value, ageMs: now - this.target.at } : null;
-    const ready = connected && ["rollDeg", "pitchDeg", "airspeedKt", "altitudeFt", "verticalSpeedFpm", "latitude", "longitude"].every(k => fields[k].valid);
+    // Geographic consumers validate their own fix/coordinates. Missing GPS
+    // must not blank otherwise valid attitude and air-data instruments.
+    const ready = connected && ["rollDeg", "pitchDeg", "airspeedKt", "altitudeFt", "verticalSpeedFpm"].every(k => fields[k].valid);
     const fdReady = connected && isPlane(identity) && nav !== null && [5, 6, 7, 10, 11, 12, 15].includes(values.customMode as number) && nav.mode === values.mode && fields.rollDeg.valid && fields.pitchDeg.valid;
     const at = Math.max(...[...this.values.values()].map(s => s.at));
     const wind = connected && this.wind && now >= this.wind.at && now - this.wind.at < 5000

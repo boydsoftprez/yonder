@@ -28,9 +28,52 @@ const sample = (): MissionItem[] => [
   { seq: 0, command: 16, frame: 0, params: [0, 0, 0, 0], x: 35, y: -83, z: 300, current: false, autocontinue: true },
   { seq: 1, command: 16, frame: 3, params: [0, 0, 0, null], x: 35.1234567, y: -83.1234567, z: 100, current: false, autocontinue: true },
 ];
+
+describe('explicit controller home',()=>{
+ const home={lat:35.9612345,lon:-83.3654321,alt:333.25};
+ const homeMessage=(value=home)=>Object.assign(new common.HomePosition(),{latitude:Math.round(value.lat*1e7),longitude:Math.round(value.lon*1e7),altitude:Math.round(value.alt*1000)});
+ it('requires confirmation, bounded coordinates and explicit home context',async()=>{
+  const r=rig();r.heartbeat();
+  expect(r.request({kind:'set-home',home,expectedHome:null},{confirmed:false}).accepted).toBe(false);
+  for(const invalid of [{...home,lat:91},{...home,alt:Infinity},{...home,lat:0,lon:0}])expect(r.request({kind:'set-home',home:invalid,expectedHome:null}).accepted).toBe(false);
+  expect(r.request({kind:'set-home',home} as any).accepted).toBe(false);
+  await flush();expect(r.sent).toHaveLength(0);r.service.close();
+ });
+ it('uses COMMAND_INT, awaits acceptance and verifies a fresh matching HOME_POSITION',async()=>{
+  const r=rig();r.heartbeat();expect(r.service.snapshot().capabilities.homeControl?.available).toBe(true);
+  r.request({kind:'set-home',home,expectedHome:null});await flush();
+  expect(r.sent[0].id).toBe(75);expect(r.sent[0].data).toMatchObject({command:179,frame:0,_param1:0,_param5:359612345,_param6:-833654321,_param7:333.25});
+  r.feed(homeMessage());expect(r.service.snapshot().operations.at(-1)?.state).toBe('sent');
+  r.ack(179);await flush();expect(r.sent.at(-1)?.data).toMatchObject({command:512,_param1:242});
+  r.ack(512);expect(r.service.snapshot().busy).toBe(true);
+  r.feed(homeMessage(),2);r.feed(homeMessage(),1,2);r.feed(homeMessage({...home,alt:340}));expect(r.service.snapshot().busy).toBe(true);
+  r.feed(homeMessage());await flush();
+  expect(r.service.snapshot().operations.at(-1)).toMatchObject({state:'observed',effect:{state:'observed'}});
+  expect(r.service.snapshot().telemetry.homePosition).toEqual(home);
+  expect(r.sent.map(f=>f.data.command)).toEqual([179,512]);r.service.close();
+ });
+ it('rejects changed home at admission and again before writing',async()=>{
+  const r=rig();r.heartbeat();r.feed(homeMessage());
+  expect(r.request({kind:'set-home',home,expectedHome:null}).accepted).toBe(false);
+  expect(r.request({kind:'set-home',home:{...home,alt:350},expectedHome:home}).accepted).toBe(true);
+  r.feed(homeMessage({...home,alt:340}));await flush();
+  expect(r.sent).toHaveLength(0);expect(r.service.snapshot().operations.at(-1)?.state).toBe('failed');r.service.close();
+ });
+ it('does not send readback after controller rejection and never claims ACK alone as success',async()=>{
+  const r=rig();r.heartbeat();r.request({kind:'set-home',home,expectedHome:null});await flush();r.ack(179,2);await flush();
+  expect(r.sent).toHaveLength(1);expect(r.service.snapshot().operations.at(-1)?.state).toBe('rejected');r.service.close();
+  const q=rig();q.heartbeat();q.request({kind:'set-home',home,expectedHome:null});await flush();q.ack(179);await flush();q.ack(512);
+  for(let i=0;i<5;i++){q.clock.advance(1000);q.heartbeat()}
+  expect(q.service.snapshot().operations.at(-1)).toMatchObject({state:'accepted',effect:{state:'mismatch'}});q.service.close();
+ });
+});
 function missionWire(item: MissionItem) { return Object.assign(new common.MissionItemInt(), { seq: item.seq, command: item.command, frame: item.frame, param1: item.params[0] ?? NaN, param2: item.params[1] ?? NaN, param3: item.params[2] ?? NaN, param4: item.params[3] ?? NaN, x: Math.round(item.x! * 1e7), y: Math.round(item.y! * 1e7), z: item.z!, autocontinue: 1 }); }
 
 describe("vehicle telemetry", () => {
+  it('keeps valid flight instruments ready without fused geographic position',()=>{
+    const r=rig();r.heartbeat();r.feed(Object.assign(new common.Attitude(),{roll:0,pitch:0}));r.feed(Object.assign(new common.VfrHud(),{airspeed:0,groundspeed:0,alt:300,climb:0,heading:90}));
+    expect(r.service.snapshot().telemetry).toMatchObject({ready:true,latitude:null,longitude:null,fixType:null});r.service.close();
+  });
   it("starts passive and selects an actual autopilot without assuming system one", () => {
     const r = rig(); expect(r.sent).toHaveLength(0);
     r.feed(Object.assign(new minimal.Heartbeat(), { autopilot: 8, type: 6 }), 255);

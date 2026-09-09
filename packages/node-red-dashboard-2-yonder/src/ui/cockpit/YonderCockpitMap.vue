@@ -59,7 +59,7 @@ export default {
     },
     now: Number,
   },
-  emits: ["select", "location", "traffic-select"],
+  emits: ["select", "location", "traffic-select", "home-select"],
   computed: {
     aircraftPosition() { return aircraftMapPosition(this.snapshot?.telemetry); },
     positionMessage() { return aircraftPositionMessage(this.snapshot?.telemetry); },
@@ -277,6 +277,12 @@ export default {
       const t = this.snapshot?.telemetry || {},
         here = this.aircraftPosition,
         points = (this.mission?.items || []).filter(isPositionItem);
+      const home=this.mission?.home;
+      if(validPosition(home)){
+        const marker=L.marker([home.lat,home.lon],{title:'Edit home on map',icon:L.divIcon({className:'cockpit-home-marker',html:'<span>H</span>',iconSize:[44,44],iconAnchor:[22,22]})}).addTo(this.route);
+        marker.bindTooltip('HOME',{permanent:true,direction:'left'});
+        marker.on('click',()=>this.$emit('home-select'));
+      }
       if (points.length)
         L.polyline(
           points.map((p) => [p.lat, p.lon]),
@@ -322,8 +328,9 @@ export default {
           this.centered=true;
         }
       }
-      if (!here && !this.centered && !this.overviewCentered && points.length) {
-        this.map.fitBounds(points.map(p => [p.lat, p.lon]), {animate:false, padding:[20,20], maxZoom:14});
+      const overview=[...points,...(validPosition(home)?[home]:[])];
+      if (!here && !this.centered && !this.overviewCentered && overview.length) {
+        this.map.fitBounds(overview.map(p => [p.lat, p.lon]), {animate:false, padding:[20,20], maxZoom:14});
         this.overviewCentered = true;
         // This is a mission overview; acquiring a fix still centers ownship.
       }
@@ -394,3 +401,7 @@ export default {
   },
 };
 </script>
+<style>
+.cockpit-home-marker { display:grid;place-items:center; }
+.cockpit-home-marker span { display:grid;place-items:center;width:24px;height:24px;border:2px solid #74d7ed;border-radius:3px;background:#112d3d;color:white;font:bold 16px sans-serif;box-shadow:0 1px 5px #000; }
+</style>

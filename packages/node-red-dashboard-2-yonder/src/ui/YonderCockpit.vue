@@ -167,6 +167,7 @@
           > · ETE {{formatDuration(guidance.eteSeconds)}}</template></span></div>
       <NavigationDeviation v-if="layout==='mission'&&missionView==='list'" :guidance="guidance" :scale="cdiScale" />
       <div v-if="layout==='mission'" class="mission-view-tabs"><button :aria-pressed="missionView==='list'" @click="missionView='list'">Waypoints</button><button aria-label="Show terrain profile" :aria-pressed="missionView==='profile'" @click="missionView='profile'">Profile</button></div>
+      <button v-if="layout==='mission'" class="mission-home-summary" aria-label="Edit mission home" @click="openHome()">HOME · {{draft?'planning':'reported'}}<span>{{shownMission.home?`${fmt(shownMission.home.lat,5)}°, ${fmt(shownMission.home.lon,5)}° · ${homeElevationLabel}`:'Not set · choose a planning home'}}</span></button>
       <div v-if="layout==='mission'&&missionView==='list'" class="mission-waypoint-head"><span>WAYPOINT</span><span>ALTITUDE / AGL</span><span>DTK / DIS</span></div>
       <MissionWaypointList v-show="layout!=='mission'||missionView==='list'" :mission="shownMission" :progress="missionProgress" :profile="missionProfile" :draft="!!draft" :options="preferences.display" :follow="preferences.display.followMission" :view-key="layout+'/'+mobileInset+'/'+missionView" @select="openMission" @pause-follow="pauseMissionFollow"/>
       <MissionPlanning :visible="layout==='mission'&&missionView==='profile'" :mission="shownMission" :provider="groundData" :enabled="onlineTerrain" :draft="!!draft" :options="preferences.display" :aircraft-datum="telemetry.altitudeDatum" @report="missionProfile=$event" @select="openMission"/>
@@ -201,7 +202,7 @@
         :snapshot="agedSnapshot"
         :mission="shownMission"
         :prediction="predicted"
-        :picking="!!picking||!!flightPicking"
+        :picking="!!picking||!!flightPicking||homePicking"
         :online="onlineMap"
         :traffic="trafficReport"
         :range="trafficRange"
@@ -211,7 +212,9 @@
         @select="seq=>openMission({seq})"
         @location="mapLocation"
         @traffic-select="selectedTraffic=$event;panel='traffic'"
+        @home-select="openHome()"
       />
+      <div v-if="homePicking" class="cockpit-target-prompt" role="status">Choose home on the map · review elevation next<button @click="resumeHome()">Cancel home selection</button></div>
       <div v-if="flightPicking" class="cockpit-target-prompt" role="status">Select {{flightPicking.kind==='loiter'?'loiter center':'Direct-To target'}} on the map<button @click="flightPicking=null">Cancel target selection</button></div>
       <footer><button aria-label="Aircraft breadcrumb settings" @click="panel='trail'">Trail</button><button @click="panel='traffic'">{{trafficReport.message||'Traffic feed off'}}</button><button
           v-if="layout==='map'"
@@ -267,16 +270,18 @@
     @flight-controls="missionFlightControls"
     @upload="reviewUpload"
     @read="sendReadAction('mission-download')"
+    @home="openHome"
     @undo="undo"
     @export="exportMission"
     @use-live="draft=null;history=[];missionOpen=false"
     @pick-location="pickLocation"
     @start="review({kind:'mission-start'},'Start aircraft mission')"
   />
+  <MissionHome v-if="homeOpen" :home="shownMission.home" :controller-home="snapshot.telemetry?.homePosition" :initial="homeForm" :options="preferences.display" :can-set="canCommand&&snapshot.capabilities?.homeControl?.available===true" :unavailable-reason="snapshot.capabilities?.homeControl?.reason" :external-error="homeError" :busy="sending||snapshot.busy" :operation="homeOperation" :provider="groundData" :terrain-enabled="onlineTerrain" @close="closeHome" @save="saveHome" @pick="pickHome" @review="reviewHome"/>
   <div
     v-if="reviewing"
     class="cockpit-scrim"
-    @click.self="reviewing=null"
+    @click.self="cancelReview"
   >
     <section
       ref="reviewDialog"
@@ -288,7 +293,7 @@
     >
       <header>
         <h2>Review aircraft command</h2><button
-          @click="reviewing=null"
+          @click="cancelReview"
           aria-label="Cancel command review"
         >×</button>
       </header>
@@ -307,10 +312,17 @@
             <dt>Transfer</dt>
             <dd>{{reviewing.action.items.length}} wire items including home · {{shownMission.name}}</dd>
           </div>
+          <template v-if="reviewing.action.kind==='mission-upload'&&snapshot.identity?.autopilot===3">
+            <div><dt>Planning home elevation</dt><dd>{{homeElevationLabel}}</dd></div>
+            <div><dt>Controller home used by upload</dt><dd>{{reviewing.action.items[0].x}}°, {{reviewing.action.items[0].y}}° · {{reviewing.action.items[0].z}} m MSL</dd></div>
+          </template>
           <div v-if="reviewing.action.kind==='mission-clear'">
             <dt>Removal</dt>
             <dd>{{snapshot.mission?.items?.length||0}} aircraft wire items</dd>
-          </div><template v-if="reviewing.action.kind==='immediate'">
+          </div><template v-if="reviewing.action.kind==='set-home'">
+            <div><dt>New controller home</dt><dd>{{fmt(reviewing.action.home.lat,7)}}°, {{fmt(reviewing.action.home.lon,7)}}° · {{homeReviewElevation}}</dd></div>
+            <div><dt>Previous controller home</dt><dd>{{reviewing.action.expectedHome?`${fmt(reviewing.action.expectedHome.lat,7)}°, ${fmt(reviewing.action.expectedHome.lon,7)}° · ${reviewing.action.expectedHome.alt} m MSL`:'Not reported'}}</dd></div>
+          </template><template v-if="reviewing.action.kind==='immediate'">
             <div>
               <dt>Command</dt>
               <dd>{{commandName(reviewing.action)}}</dd>
@@ -333,13 +345,15 @@
             </div>
           </template>
         </dl>
+        <p v-if="reviewing.action.kind==='set-home'">This changes the controller's return-home reference and home-relative altitude reference. In RTL or QRTL it can redirect the aircraft. The planning draft stays as authored. Yonder requests and checks home readback after acceptance.</p>
+        <p v-if="reviewing.action.kind==='mission-upload'">Waypoint altitude numbers stay as authored. Above-home heights use the controller's home elevation; a different planning elevation changes the preview, not that uploaded reference.</p>
         <p>The autopilot validates and executes this request. Acceptance and observed effect are reported separately.
         </p>
         <p
           v-if="contextChanged"
           role="alert"
-        >The aircraft or mission changed. Cancel and review the current state.</p>
-        <div class="cockpit-actions"><button @click="reviewing=null">Cancel</button><button
+        >The aircraft, mission or controller home changed. Cancel and review the current state.</p>
+        <div class="cockpit-actions"><button @click="cancelReview">Cancel</button><button
             class="cockpit-confirm"
             :disabled="sending||contextChanged||!canCommand"
             @click="confirmCommand"
@@ -612,6 +626,9 @@ import NavigationDeviation from './cockpit/NavigationDeviation.vue'
 import PrimaryFlightDisplay from './cockpit/PrimaryFlightDisplay.vue'
 import FlightControlPanel from './cockpit/FlightControlPanel.vue'
 import MissionTouch from './cockpit/MissionTouch.vue'
+import MissionHome from './cockpit/MissionHome.vue'
+import {controllerHomeRequest,sameHome} from './cockpit/mission-home.mjs'
+import {unitText} from './cockpit/flight-units.mjs'
 import TelemetrySettings from './cockpit/TelemetrySettings.vue'
 import {defaultTelemetryRate,telemetryRates,telemetryPollDelay,cockpitRequestId} from './cockpit/telemetry-cadence.mjs'
 import YonderCockpitMap from './cockpit/YonderCockpitMap.vue'
@@ -675,6 +692,7 @@ export default {
     PrimaryFlightDisplay,
     FlightControlPanel,
     MissionTouch,
+    MissionHome,
     TelemetrySettings,
     YonderCockpitMap,
     OwnTrailSettings,
@@ -740,6 +758,7 @@ export default {
       dataSyncing: false,
       dataSyncPending: false,
       telemetryRate: defaultTelemetryRate,
+      homeOpen:false,homePicking:false,homeForm:null,homeReturnLayout:'full',homeError:'',
       connectionStats: null,
       trafficReport: {
         tracks: [],
@@ -799,6 +818,9 @@ export default {
     homeInfo(){const home=homeNavigation(this.snapshot,this.elapsed),label=this.instrumentItems.find(i=>i.id==='nav.homeDistance');return {...home,label:label?.available?`${label.value.toFixed(2)} ${label.unit}`:'—'}},
     missionProgress(){return missionSequence(this.agedSnapshot)},
     missionUploadStatus(){return missionUploadReadiness(this.snapshot)},
+    homeElevationLabel(){return unitText(this.shownMission.home?.alt,this.preferences.display.altitudeUnit||'ft')+' MSL'},
+    homeReviewElevation(){return unitText(this.reviewing?.action.home?.alt,this.homeForm?.altitudeUnit||this.preferences.display.altitudeUnit||'ft')+' MSL ('+fmt(this.reviewing?.action.home?.alt,2)+' m)'},
+    homeOperation(){return this.snapshot.operations?.filter(op=>op.action?.kind==='set-home'&&op.vehicleGeneration===this.snapshot.identity?.generation).at(-1)||null},
     trafficMapOnlyCount(){return (this.trafficReport.tracks||[]).filter(track=>!Number.isFinite(track.altitudeMslM)).length},
     ownTrailDisplay(){return selectOwnTrail(this.snapshot.ownTrail,this.ownTrailOptions,this.ownTrailCleared,this.snapshot.at+Math.floor(Math.max(0,this.elapsed)/1000)*1000)},
     draftContextChanged(){return !!this.draft&&(!this.draftContext||this.draftContext.generation!==(this.snapshot.identity?.generation||null)||this.draftContext.revision!==(this.snapshot.mission?.revision||null))},
@@ -894,7 +916,7 @@ export default {
     },
     contextChanged() {
       return !!this.reviewing && (this.reviewing.generation !== this.snapshot.identity?.generation || this.reviewing
-        .revision !== (this.snapshot.mission?.revision || null))
+        .revision !== (this.snapshot.mission?.revision || null) || (this.reviewing.action.kind==='set-home'&&!sameHome(this.reviewing.action.expectedHome,this.snapshot.telemetry?.homePosition??null)))
     },
     vehicleControls() {
       const last = this.snapshot.operations?.at(-1);
@@ -1159,6 +1181,19 @@ export default {
       this.missionOpen = true;
       this.error = ''
     },
+    openHome(point=null){
+      this.homeReturnLayout=this.layout;this.homeForm=point?{...this.shownMission.home,...point,mapSelected:true}:null;
+      this.homeOpen=true;this.missionOpen=false;this.panel=null;this.homePicking=false;this.picking=null;this.flightPicking=null;this.error='';this.homeError='';
+    },
+    closeHome(){this.homeOpen=false;this.homePicking=false;this.homeForm=null;this.layout=this.homeReturnLayout},
+    saveHome(home){this.edit({kind:'set-home',home});this.closeHome();this.error='Planning home saved locally; controller home is unchanged'},
+    pickHome(form){this.homeForm=clone(form);this.homeOpen=false;this.homePicking=true;this.layout='map'},
+    resumeHome(point=null){if(point)this.homeForm={...this.homeForm,...point,mapSelected:true};this.homePicking=false;this.homeOpen=true},
+    reviewHome(home,form){
+      try{this.homeError='';const action=controllerHomeRequest(home,this.snapshot.telemetry?.homePosition??null);this.homeForm=clone(form);this.review(action,'Set controller home');if(this.reviewing)this.homeOpen=false}
+      catch(e){this.homeError=e.message}
+    },
+    cancelReview(){const home=this.reviewing?.action.kind==='set-home';this.reviewing=null;if(home)this.homeOpen=true},
     edit(operation) {
       try {
         const previous = clone(this.shownMission),
@@ -1253,6 +1288,7 @@ export default {
       this.layout = 'map'
     },
     mapLocation(point) {
+      if(this.homePicking){this.resumeHome(point);return;}
       if(this.flightPicking){
         const intent=this.flightPicking;
         this.flightPicking=null;
@@ -1384,7 +1420,8 @@ export default {
         }
         this.pendingOperationId=response.operationId;
         this.error = `Request queued · ${response.operationId}. Awaiting aircraft result.`;
-        this.reviewing = null
+        this.reviewing = null;
+        if(current.action.kind==='set-home')this.homeOpen=true
       } catch (e) {
         this.reviewing = null;
         this.error = e.admissionRejected ? 'Request rejected: ' + e.message :
@@ -1495,9 +1532,11 @@ export default {
       // The main element no longer receives that key; retain dialog dismissal.
       if (event.key === 'Escape' && !event.defaultPrevented &&
           document.activeElement === document.body &&
-          (this.panel || this.reviewing || this.missionOpen)) this.cancelPanel();
+          (this.panel || this.reviewing || this.missionOpen || this.homeOpen)) this.cancelPanel();
     },
     cancelPanel() {
+      if(this.reviewing?.action.kind==='set-home'){this.cancelReview();return;}
+      if(this.homeOpen){this.closeHome();return;}
       this.panel = null;
       this.reviewing = null;
       this.missionOpen = false
@@ -1530,4 +1569,6 @@ export default {
 .cockpit-data-settings { border: 1px solid var(--cockpit-border, #52616e); padding: 12px; margin-bottom: 16px; min-width: 0; }
 .cockpit-data-settings legend { font-weight: 700; padding: 0 6px; }
 .cockpit-data-settings p { overflow-wrap: anywhere; }
+.mission-home-summary { display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 12px;text-align:left;color:#81dcec; }
+.mission-home-summary span { margin-left:auto;font-size:12px;color:#dbeaf0; }
 </style>

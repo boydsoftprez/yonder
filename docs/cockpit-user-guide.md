@@ -87,11 +87,54 @@ actual aircraft, use the top strip and its separate **Confirm & send** dialog.
 
 **Mission controls → Read aircraft mission** performs the same read while keeping
 the local draft. The upload area states which prerequisite is missing. If readback
-completes but no home record is available, repeatedly reading alone cannot supply
-it: the controller must establish home (normally after connecting GPS and acquiring
-a fix). Yonder keeps the draft and does not substitute its example/file home for
-the aircraft's home. Once the record is available, review the draft against the
-newly read aircraft mission, then use **Upload draft to aircraft → Confirm & send**.
+completes but no home record is available, open **Home…** to set a specified
+controller home and verify its response, or wait for the controller to establish
+home and request flight telemetry. Yonder keeps the draft and does not substitute
+its example/file home for the aircraft's home. Once the record is available, review
+the draft against the newly read aircraft mission, then use **Upload draft to
+aircraft → Confirm & send**.
+
+### Manage planning and controller home
+
+Open **Mission controls → Home…**, or tap the **HOME** row above the expanded
+waypoint list. On a map, right-click or touch-hold a position and choose **Home…**;
+this fills the chosen coordinates for review. The map's **HOME** marker also
+opens the editor.
+
+1. Enter latitude, longitude and **Home elevation MSL**. Choose feet or metres;
+   switching units preserves the physical elevation. **Choose home on map** lets
+   you tap the location and returns to the form with your entered elevation kept.
+   Review that elevation for the new location. **Cancel home selection** returns
+   to the previous values.
+2. Optionally press **Use terrain elevation**. This samples the selected prepared
+   EGM96 terrain package and labels the estimate and source. A missing package,
+   incompatible datum or coverage gap leaves elevation for manual entry. The
+   button does not sample public elevation tiles outside a prepared package.
+3. **Save planning home** changes the local draft, its terrain profile and exported
+   waypoint file. **Undo edit** in Mission controls restores the prior draft.
+   Waypoint altitude values, order and jump targets are preserved. For example,
+   raising planning-home elevation by 100 ft raises the previewed MSL height of a
+   waypoint authored 300 ft above home by 100 ft.
+4. **Use controller home for planning** copies the reported controller reference
+   directly into the local draft. It sends no controller command.
+5. To change the actual aircraft reference, enter the desired coordinates and MSL
+   elevation, then press **Set controller home…**. Review the old and new values
+   and press **Confirm & send**. In RTL/QRTL a home change can redirect the
+   aircraft. Home-relative flight altitude references also change. Cancel returns
+   to the editor with the fields preserved.
+6. Wait for the controller request to become **observed**, and check its reported
+   coordinates/elevation. Acceptance alone is not verified readback. A changed
+   controller home or aircraft invalidates an open review. Check the reported home
+   again after a reconnect or reboot; editing the planning home never silently
+   resets it.
+
+For a bench controller without GPS, a specified home can be accepted by ArduPlane;
+the controller's response is authoritative. After reading an empty mission and
+verifying a manually set controller home, the first mission upload can proceed.
+This does not provide a GPS fix or set the EKF origin. **Do Set Home** in the
+mission-command catalog remains a separate mission-execution action.
+The [behavior and protocol reference](console/evidence/2026-09-09-home-workflow.md)
+records the distinction verified against Mission Planner and ArduPlane.
 
 ![Aircraft status with explicit telemetry and mission-read controls](images/cockpit/telemetry-setup.png)
 

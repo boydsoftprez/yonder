@@ -170,6 +170,9 @@ describe("compose", () => {
   it("carries a fixed bitrate, in bits, on both encodes (R-VID-08)", () => {
     expect(text()).toContain("video_bitrate=2000000");
     expect(text()).toContain("video_bitrate=400000");
+    // Both targets are link budgets, including the adaptively adjusted one.
+    // Leaving V4L2 in its default VBR mode permits traffic above that budget.
+    expect(text().match(/video_bitrate_mode=1/g)).toHaveLength(2);
   });
 
   it("uses x264enc where the board has no hardware encoder", () => {
@@ -581,7 +584,7 @@ describe("the runtime channel's half of the launch line", () => {
   it("builds a retune from the pipeline that is running, in the encoder's own units", () => {
     expect(encodeControl(argv(), "stream", 3000)).toEqual({
       element: "enc-stream", property: "extra-controls",
-      value: "controls,video_bitrate=3000000",
+      value: "controls,video_bitrate_mode=1,video_bitrate=3000000",
     });
     const soft = compose({ ...opts, encoder: {
       element: "x264enc", h265: null, decoder: null, device: null, hardware: false, detail: "software",
@@ -598,7 +601,7 @@ describe("the runtime channel's half of the launch line", () => {
     // encoder's default — R-VID-09 undone by a bitrate change. The stream's
     // encode has no short GOP and must not acquire one here either.
     expect(encodeControl(argv(), "preview", 800)?.value)
-      .toBe("controls,video_bitrate=800000,h264_i_frame_period=15");
+      .toBe("controls,video_bitrate_mode=1,video_bitrate=800000,h264_i_frame_period=15");
     expect(encodeControl(argv(), "stream", 800)?.value).not.toContain("i_frame_period");
   });
 

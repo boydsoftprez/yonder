@@ -30,6 +30,7 @@
       </template>
 
       <div class="mission-touch-section-label">DRAFT & MISSION</div>
+      <button class="mission-touch-wide" :disabled="pending" @click="$emit('home',selection?.lat!==undefined?{lat:selection.lat,lon:selection.lon}:null)">Home…<small>{{selection?.lat!==undefined?'Use this map location · review planning and controller home':'Edit planning home · inspect or set controller home'}}</small></button>
       <p v-if="draft&&uploadStatus?.ready===false" class="mission-touch-note" role="status">{{uploadStatus.reason}}</p>
       <div class="mission-action-grid mission-compact-actions"><button :disabled="commandDisabled" @click="$emit('read')">Read aircraft mission<small>Keep this draft; refresh the controller mission and home</small></button><button :disabled="pending||!canUndo" @click="$emit('undo')">Undo edit</button><button :disabled="!mission" @click="$emit('export')">Export .waypoints</button><button class="mission-execute" :disabled="commandDisabled||!draft||!mission||uploadStatus?.ready===false" @click="$emit('upload')">Upload draft to aircraft<small>Transfer, then verify readback</small></button><button :disabled="pending||!draft" @click="$emit('use-live')">Show aircraft mission<small>Return to the received mission</small></button></div>
       <template v-if="!selected&&selection?.lat===undefined">
@@ -133,7 +134,7 @@ export default {
     uploadStatus: Object,
     canUndo: Boolean
   },
-  emits: ['close', 'edit', 'command', 'upload', 'read', 'undo', 'export', 'use-live', 'pick-location', 'start', 'flight-controls','option'],
+  emits: ['close', 'edit', 'command', 'upload', 'read', 'home', 'undo', 'export', 'use-live', 'pick-location', 'start', 'flight-controls','option'],
   setup(props, {
     emit
   }) {
