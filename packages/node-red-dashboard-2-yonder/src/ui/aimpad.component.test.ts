@@ -620,21 +620,29 @@ it('keeps captured motion outside the pad until real release and stops only once
   expect(stops(w)).toEqual([{ gesture }]);
 });
 
-it.each([{ left: 40, top: 80, width: 264, height: 264 }, { left: 20, top: 30, width: 198, height: 99 }])('maps direction and centre from actual rendered bounds %j', rect => {
+it.each([
+  { left: 40, top: 80, width: 264, height: 264 },
+  { left: 20, top: 30, width: 198, height: 99 },
+  { left: 25, top: 35, width: 99, height: 198 },
+])('maps the painted dial rim using centered SVG meet scaling %j', rect => {
   const w = pad({}); const el = dialOf(w);
   el.getBoundingClientRect = () => rect as DOMRect;
-  const dispatch = (x: number, y: number, type = 'pointermove') => el.dispatchEvent(new PointerEvent(type, { pointerId: 1, clientX: rect.left + x * rect.width, clientY: rect.top + y * rect.height }));
-  dispatch(.5, .5, 'pointerdown'); expect(slews(w)).toHaveLength(0);
-  dispatch(1, .5); expect(slews(w).at(-1)).toMatchObject({ pan: 30, tilt: -0 });
-  dispatch(.5, 0); expect(slews(w).at(-1)?.tilt).toBeCloseTo(30);
-  dispatch(.5, 1); expect(slews(w).at(-1)?.tilt).toBeCloseTo(-30);
-  dispatch(0, .5); expect(slews(w).at(-1)?.pan).toBeCloseTo(-30);
+  // The SVG paints a square dial centered inside wide or tall viewports.
+  const paintedRim = 44 * Math.min(rect.width, rect.height) / 118;
+  const center = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  const dispatch = (dx: number, dy: number, type = 'pointermove') => el.dispatchEvent(new PointerEvent(type, { pointerId: 1, clientX: center.x + dx, clientY: center.y + dy }));
+  dispatch(0, 0, 'pointerdown'); expect(slews(w)).toHaveLength(0);
+  dispatch(paintedRim, 0); expect(slews(w).at(-1)?.pan).toBeCloseTo(30);
+  expect(slews(w).at(-1)?.tilt).toBeCloseTo(0);
+  dispatch(0, -paintedRim); expect(slews(w).at(-1)?.tilt).toBeCloseTo(30);
+  dispatch(0, paintedRim); expect(slews(w).at(-1)?.tilt).toBeCloseTo(-30);
+  dispatch(-paintedRim, 0); expect(slews(w).at(-1)?.pan).toBeCloseTo(-30);
 });
 
-it.each([0, -1, NaN, Infinity])('ends the hold on invalid rendered width %s without resuming on layout recovery', width => {
+it.each(['width', 'height'].flatMap(axis => [0, -1, NaN, Infinity].map(value => ({ axis, value }))))('ends the hold on invalid bounds %j without resuming on layout recovery', ({ axis, value }) => {
   const w = pad({}); const el = dialOf(w);
   down(el, RIM, 0);
-  el.getBoundingClientRect = () => ({ left: 0, top: 0, width, height: 132 }) as DOMRect;
+  el.getBoundingClientRect = () => ({ left: 0, top: 0, width: 132, height: 132, [axis]: value }) as DOMRect;
   move(el, RIM, 0); expect(stops(w)).toHaveLength(1);
   const before = slews(w).length;
   el.getBoundingClientRect = () => ({ left: 0, top: 0, width: 132, height: 132 }) as DOMRect;

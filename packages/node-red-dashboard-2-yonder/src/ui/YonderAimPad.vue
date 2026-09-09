@@ -227,8 +227,11 @@ export default {
             const rect = this.$refs.dial.getBoundingClientRect()
             if (![rect.left, rect.top, rect.width, rect.height, e.clientX, e.clientY].every(Number.isFinite)
                 || rect.width <= 0 || rect.height <= 0) return false
-            const x = ((e.clientX - rect.left) / rect.width) * VIEWBOX - CENTER
-            const y = ((e.clientY - rect.top) / rect.height) * VIEWBOX - CENTER
+            // SVG's default xMidYMid meet paints a centered square, with
+            // letterboxing in a non-square viewport. Use that painted scale.
+            const scale = Math.min(rect.width, rect.height) / VIEWBOX
+            const x = (e.clientX - rect.left - rect.width / 2) / scale
+            const y = (e.clientY - rect.top - rect.height / 2) / scale
             const d = Math.hypot(x, y)
             if (!Number.isFinite(d)) return false
             if (d <= DEAD) return null
