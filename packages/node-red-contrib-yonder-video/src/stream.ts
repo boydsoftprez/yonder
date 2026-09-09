@@ -33,7 +33,7 @@ export = function register(RED: RED): void {
       if (action === null) {
         return { refuse: 'this control must send "start" or "stop"' };
       }
-      return { method: "POST", path: `/cameras/${id}/run`, body: { action } };
+      return { method: "POST", path: `/cameras/${id}/run`, camera: id, body: { action } };
     },
     (value) => {
       const run = value as { state?: unknown; reason?: unknown } | undefined;

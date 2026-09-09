@@ -88,7 +88,7 @@ it("takes the caution tone at the floor, the fault tone on stills, select at ful
   // `stills` and `full-rate` alike. The caption is part of what this test
   // promises in its own name ("takes the tone"), so the words are pinned
   // here rather than left to the first test's single `adaptive` case.
-  expect(overlay({ head: "floor" }).text()).toContain("AT THE FLOOR");
+  expect(overlay({ head: "floor" }).text()).toContain("MINIMUM BITRATE");
   expect(overlay({ head: "stills" }).text()).toContain("STILLS");
   expect(overlay({ head: "full-rate" }).text()).toContain("FULL RATE");
 

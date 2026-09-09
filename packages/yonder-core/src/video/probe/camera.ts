@@ -377,7 +377,7 @@ async function probeNode(
   };
 }
 
-/** One camera, re-probed — the Setup deck's *Re-probe* key. */
+/** One camera, re-probed — the Camera workspace's *Refresh camera* key. */
 export async function probeCamera(
   node: string,
   card: string,

@@ -25,6 +25,7 @@
             <div v-if="effectiveReason || aimError || report.motionNotice" class="y-aimpanel__reason">{{ aimError || effectiveReason || report.motionNotice }}</div>
             <div v-if="!effectiveReason && report.directionalRefusals?.length" class="y-aimpanel__reason">{{ report.directionalRefusals.join(' · ') }}</div>
 
+            <p v-if="signInRequired" class="y-aimpanel__reason"><a :href="signInHref">Sign in</a> to use camera controls.</p>
             <YonderAimPad
                 ref="aimPad"
                 :axes="PAD_AXES"
@@ -67,6 +68,7 @@
 </template>
 
 <script>
+import { cameraSessionMixin } from './camera-session.ts'
 import YonderAimPad from './YonderAimPad.vue'
 import YonderPositionGauge from './YonderPositionGauge.vue'
 import YonderSegmented from './YonderSegmented.vue'
@@ -205,7 +207,7 @@ import { AimTransport } from './aim-transport.ts'
  * component's own doc comment on why this mirrors `YonderDeck.buildAim()`'s
  * identical, separately-hardcoded object rather than importing one from it.
  */
-const PAD_AXES = { pan: 'present', tilt: 'present', roll: 'advertised' }
+const PAD_AXES = { pan: 'present', tilt: 'present', roll: 'not-offered' }
 
 /** A payload `bounds` axis (`[lo, hi]` or missing) to the pair
  * `YonderPositionGauge` needs, falling back to the blueprint's own default
@@ -222,6 +224,7 @@ function boundsOf (bounds, axis, lo, hi) {
 
 export default {
     name: 'YonderAim',
+    mixins: [cameraSessionMixin],
     inject: ['$socket', '$dataTracker'],
     components: { YonderAimPad, YonderPositionGauge, YonderSegmented, YonderColumn },
     props: {
@@ -317,6 +320,7 @@ export default {
          * `data()` — so the pad's own `watch: { inhibited }` keeps reacting
          * exactly as Task 20 built it (coordinator resolution 6). */
         padInhibited () {
+            if (this.signInRequired) return 'Sign in required'
             // Truthy so the pad refuses a press, but **short**: a camera that
             // is not answering at all is the panel's fact and its head says it
             // in full. The pad used to repeat that whole sentence, and so did
@@ -373,7 +377,7 @@ export default {
         modeControlState () {
             if (!this.modes.length) return 'not-offered'
             if (this.aimState !== 'present') return this.aimState
-            if (this.inhibited || this.report?.modeInhibited) return 'gated'
+            if (this.signInRequired || this.inhibited || this.report?.modeInhibited) return 'gated'
             return 'present'
         },
         /** A full sentence, not a bare label — see this component's own
@@ -392,7 +396,7 @@ export default {
          * mode), or `recentrePending` (this press has not yet been
          * followed by a fresh report). */
         recentreDisabled () {
-            return this.aimState !== 'present' || Boolean(this.inhibited) || Boolean(this.report?.recentreInhibited) || this.recentrePending
+            return this.signInRequired || this.aimState !== 'present' || Boolean(this.inhibited) || Boolean(this.report?.recentreInhibited) || this.recentrePending
         }
     },
     watch: {
@@ -415,16 +419,19 @@ export default {
     },
     beforeUnmount () { this.aimTransport?.close(); this.$socket.off?.('disconnect', this.aimDisconnect) },
     methods: {
+        onCameraSessionExpired () { this.aimDisconnect() },
         aimDisconnect () { this.aimTransport?.stop(); this.$refs.aimPad?.onEnd() },
         /** Every message this node posts leaves through here — one seam,
          * the same reasoning `YonderDeck`'s own `post()` gives for having
          * exactly one. */
         post (payload) {
+            if (this.signInRequired) return
             this.$socket.emit('widget-action', this.id, { payload })
         },
         /** Relayed verbatim (coordinator resolution 3) — `seq` is the
          * pad's own lifetime-monotonic counter, never recomputed here. */
         onSlew (e) {
+            if (this.signInRequired) return
             if (this.report?.url) { this.aimTransport.update(e); return }
             this.commandedPan = e.pan
             this.commandedTilt = e.tilt

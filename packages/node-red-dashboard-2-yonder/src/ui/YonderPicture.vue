@@ -2,6 +2,15 @@
 <template>
     <div class="y-pic">
         <header class="y-pic__toolbar" aria-label="Video status">
+            <div class="y-pic__controls">
+                <strong v-if="selectedCameraName" class="y-pic__camera" :title="selectedCameraName">{{ selectedCameraName }}</strong>
+                <div class="y-pic__view-modes" role="group" aria-label="This preview">
+                    <span>This preview</span>
+                    <button v-for="choice in ['live', 'stills', 'off']" :key="choice" type="button" :aria-pressed="mode === choice" :disabled="signInRequired" @click="setMode(choice)">{{ { live: 'Live', stills: 'Stills', off: 'Off' }[choice] }}</button>
+                </div>
+                <a v-if="signInRequired" :href="signInHref" class="y-pic__action">Sign in</a>
+                <button v-else type="button" class="y-pic__action" :disabled="!videoControl.action || videoRequestPending" @click="pressVideoAction">{{ videoRequestPending ? 'Requesting…' : videoControl.label }}</button>
+            </div>
             <div class="y-pic__hud">
                 <span class="y-pic__badge" :class="'tone-' + tone">{{ caption }}</span>
                 <span v-if="staleFor > 0" class="y-pic__age">{{ ageText }}</span>
@@ -62,30 +71,18 @@
             <div v-if="dragGesture" class="y-pic__orb" :style="{ left: orbX + 'px', top: orbY + 'px' }"></div>
 
             <div v-if="mode === 'off'" class="y-pic__off">
-                not requested · this changes nothing the aircraft sends anyone else
+                Preview is off in this browser.
             </div>
-            <!--
-              **The one action this page draws off the rail, and it is the
-              operator's decision that it is here** (R-UI-10 puts every action
-              on the rail, and only there).
-
-              Starting a camera meant scrolling past the whole deck to the foot
-              of the page, with nothing above saying that was where to go. The
-              empty picture is what an operator is already looking at when a
-              camera is stopped, so it is what says so and offers the one thing
-              worth doing about it. The rail keeps START too: this adds a way
-              in, it does not move the control.
-            -->
-            <div v-if="cameraRunning === false" class="y-pic__stopped">
-                <span class="y-pic__stopped-l">This camera is not running</span>
-                <button type="button" class="y-pic__start" @click="pressStart">Start it</button>
+            <div v-if="!signInRequired && ['stopped', 'failed'].includes(cameraRunState)" class="y-pic__stopped">
+                <span class="y-pic__stopped-l">{{ videoControl.message }}</span>
+                <button type="button" class="y-pic__start" :disabled="videoRequestPending || !videoControl.action" @click="pressStart">{{ videoRequestPending ? 'Requesting…' : videoControl.label }}</button>
             </div>
         </div>
       </div>
 
         <div class="y-pic__notices">
             <button v-if="playbackBlocked" type="button" class="y-pic__resume" @click="resumePlayback">Resume live video</button>
-            <div v-if="reason || aimRefusal" class="y-pic__reason" role="status">{{ aimRefusal || reason }}</div>
+            <div v-if="signInRequired || reason || aimRefusal" class="y-pic__reason" role="status">{{ signInRequired ? 'Your session expired. Sign in to restore video and controls.' : aimRefusal || reason }}</div>
             <div v-if="flashing" class="y-pic__saved" role="status"><i class="y-pic__saved-dot" aria-hidden="true"></i>Saved · to {{ savedTo }}</div>
         </div>
 
@@ -102,6 +99,8 @@
 </template>
 
 <script>
+import { videoAction, previewFailure } from './camera-workflow.ts'
+import { cameraSessionMixin, expireCameraSession } from './camera-session.ts'
 import { AimTransport } from './aim-transport.ts'
 import { AIM_RESPONSE_CHANGED, EXPO_KEY, SPEED_KEY, savedNumber, rateLimit, responseMagnitude } from './aim-response.ts'
 import { ThumbnailDemand } from './thumbnail-demand.ts'
@@ -384,7 +383,7 @@ const BACKOFF_MS = [1000, 2000, 4000, 8000, 15000]
 /** The picture's own richer facts (R-VID-18), cached the same way `cost`
  * and the camera's own name already are — see `fromPayload`'s own doc
  * comment above for why one loop replaces eight hand-written pairs. */
-const PAYLOAD_KEYS = ['state', 'running', 'recording', 'cameras', 'downlink', 'aim', 'zoom', 'exposure', 'stats', 'saved']
+const PAYLOAD_KEYS = ['state', 'runState', 'runReason', 'startBlocked', 'running', 'recording', 'cameras', 'downlink', 'aim', 'zoom', 'exposure', 'stats', 'saved']
 
 /** `+12.4` / `−12.4` — a proper minus sign, matching every other signed
  * reading this console already draws (`YonderAim.vue`'s own gauges, the
@@ -554,6 +553,7 @@ function reportBody (camera, prev, sample, lastFrameAt) {
 
 export default {
     name: 'YonderPicture',
+    mixins: [cameraSessionMixin],
     components: { YonderStateOverlay, YonderThumbStrip },
     inject: ['$socket', '$dataTracker'],
     props: {
@@ -564,6 +564,8 @@ export default {
     data () {
         return {
             mode: 'live',
+            videoRequestPending: false,
+            videoRequestTimer: null,
             wantsLive: true,
             fallbackRetryTimer: null,
             deliveryState: null,
@@ -733,6 +735,11 @@ export default {
          * picture not yet told a camera — and the picture then draws nothing
          * about it rather than guessing that a camera is stopped.
          */
+        selectedCameraName () { return this.cameras.find(row => row.id === cameraFor(this.streamPath))?.name || this.props.label || '' },
+        cameraRunState () {
+            return this.fromPayload('runState') || (this.cameraRunning === true ? 'running' : this.cameraRunning === false ? 'stopped' : 'unknown')
+        },
+        videoControl () { return videoAction(this.cameraRunState, this.cameraRunning, this.fromPayload('startBlocked')) },
         cameraRunning () {
             const running = this.fromPayload('running')
             return typeof running === 'boolean' ? running : null
@@ -762,6 +769,10 @@ export default {
             return 'good'
         },
         caption () {
+            if (this.signInRequired) return 'Sign in required'
+            if (this.cameraRunState === 'starting') return 'Starting video'
+            if (this.cameraRunState === 'stopped') return 'Video stopped'
+            if (this.cameraRunState === 'failed') return 'Video unavailable'
             if (this.mode === 'off') return 'off'
             if (this.mode === 'stills') return 'stills'
             if (this.staleFor > 0) return 'no contact'
@@ -847,6 +858,7 @@ export default {
          * here — see this file's own doc comment on why the full four-state
          * vocabulary is `YonderAim.vue`'s own territory, not drawn twice. */
         aimable () {
+            if (this.signInRequired) return false
             return Boolean(this.aim && this.aim.state === 'present' && !this.aim.inhibited)
         },
         stats () {
@@ -880,6 +892,11 @@ export default {
         }
     },
     watch: {
+        cameraRunState (value, before) {
+            if (value !== before) { this.videoRequestPending = false; clearTimeout(this.videoRequestTimer) }
+            if (['stopped', 'failed'].includes(value)) { clearTimeout(this.retryTimer); clearTimeout(this.stillsTimer); this.teardown(); this.reason = ''; this.blank() }
+            else if (this.wantsLive && !this.signInRequired && ['stopped', 'failed'].includes(before)) this.requestLive()
+        },
         cameras () { this.refreshThumbnails() },
         mode () { this.refreshThumbnails() },
         aim (now, before) {
@@ -999,6 +1016,7 @@ export default {
         this.refreshThumbnails()
     },
     beforeUnmount () {
+        clearTimeout(this.videoRequestTimer)
         clearInterval(this.thumbnailTimer)
         this.thumbnailDemand?.close()
         this.aimTransport?.close()
@@ -1022,6 +1040,19 @@ export default {
         this.teardown()
     },
     methods: {
+        onCameraSessionExpired () {
+            clearTimeout(this.retryTimer); clearTimeout(this.stillsTimer); clearTimeout(this.fallbackRetryTimer)
+            this.aimTransport?.stop(); this.onDragEnd(); this.thumbnailDemand?.close(); this.teardown(); this.blank()
+        },
+        pressVideoAction () {
+            if (this.signInRequired || this.videoRequestPending || !this.videoControl.action) return
+            const camera = cameraFor(this.streamPath)
+            if (!camera) return
+            this.videoRequestPending = true
+            clearTimeout(this.videoRequestTimer)
+            this.videoRequestTimer = setTimeout(() => { this.videoRequestPending = false }, 10000)
+            this.$socket.emit('widget-action', this.id, { camera, payload: this.videoControl.action })
+        },
         onResponseChange (e) {
             const { key, value } = e.detail || {}
             if (!Number.isFinite(value)) return
@@ -1035,6 +1066,7 @@ export default {
             return this.cameras.find(row => row.id === camera)?.thumbSrc || this.props.stillsUrl || ''
         },
         refreshThumbnails () {
+            if (this.signInRequired) return
             const camera = cameraFor(this.streamPath)
             const rows = document.hidden ? [] : this.cameras.map(row => ({ id: row.id, want: row.id === camera ? (this.mode === 'live' ? 'video' : this.mode === 'stills' ? 'stills' : 'off') : 'off' }))
             if (!document.hidden && this.mode === 'stills' && camera && !rows.some(row => row.id === camera)) rows.push({ id: camera, want: 'stills' })
@@ -1094,6 +1126,7 @@ export default {
             this.frameCallback = video.requestVideoFrameCallback(frame)
         },
         async resumePlayback () {
+            if (this.signInRequired) return
             const video = this.$refs.video, session = this.session
             if (!video || this.mode !== 'live') return
             video.muted = true
@@ -1105,6 +1138,7 @@ export default {
             }
         },
         onPlaybackPause () {
+            if (this.signInRequired) return
             if (this.mode === 'live' && this.pc?.connectionState === 'connected' && this.$refs.video?.srcObject) this.playbackBlocked = true
         },
         /**
@@ -1240,7 +1274,9 @@ export default {
                     headers: { 'content-type': 'application/json' },
                     body: JSON.stringify(body)
                 })
-                if (session !== this.session || !response.ok) return
+                if (session !== this.session) return
+                if (response.status === 401) { expireCameraSession(); return }
+                if (!response.ok) return
                 const state = await response.json()
                 if (session === this.session && state?.camera === cameraFor(this.negotiated)
                     && state.viewer === this.viewerId && state.overlay && typeof state.overlay === 'object') this.deliveryState = state
@@ -1288,6 +1324,7 @@ export default {
          * up. Same bug shape as `Supervisor.start()`, same fix.
          */
         requestLive () {
+            if (this.signInRequired || ['stopped', 'failed'].includes(this.cameraRunState)) return
             clearTimeout(this.fallbackRetryTimer)
             this.attempt = 0
             this.lastFrameAt = null
@@ -1354,6 +1391,7 @@ export default {
          * applied at three awaits out of five is a rule nobody can rely on.
          */
         async connect () {
+            if (this.signInRequired || ['stopped', 'failed'].includes(this.cameraRunState)) return
             this.teardown()
             this.negotiated = this.streamPath
             // Nothing has said which camera this is yet. Not a fault and not a
@@ -1410,14 +1448,11 @@ export default {
                 // treat a missing channel as a reason the picture is wrong.
                 this.viewerId = answer.headers.get(VIEWER_HEADER)
                 if (!answer.ok) {
-                    // Distinguished deliberately. Only one of these is worth
-                    // walking outside for.
-                    this.reason = answer.status === 401
-                        ? 'this session is not logged in'
-                        : answer.status === 404
-                            ? 'this camera is not streaming; start it on the rail'
-                            : 'the media server is not answering'
-                    this.retry()
+                    const failure = previewFailure(answer.status)
+                    this.reason = failure.message
+                    if (failure.signIn) expireCameraSession()
+                    else if (failure.retry) this.retry()
+                    else { clearTimeout(this.stillsTimer); clearTimeout(this.fallbackRetryTimer); this.teardown() }
                     return
                 }
                 const sdp = await answer.text()
@@ -1440,7 +1475,7 @@ export default {
             // A picture nobody is asking for does not reconnect: an off view
             // that kept negotiating would be spending a cellular uplink on a
             // stream with nothing on screen indicating it.
-            if (this.mode !== 'live') return
+            if (this.mode !== 'live' || this.signInRequired || ['stopped', 'failed'].includes(this.cameraRunState)) return
             const wait = BACKOFF_MS[Math.min(this.attempt, BACKOFF_MS.length - 1)]
             this.attempt += 1
             clearTimeout(this.retryTimer)
@@ -1468,6 +1503,7 @@ export default {
             if (this.mode === 'live') this.requestLive()
         },
         setMode (mode) {
+            if (this.signInRequired || !['live', 'stills', 'off'].includes(mode)) return
             this.wantsLive = mode === 'live'
             clearTimeout(this.fallbackRetryTimer)
             this.mode = mode
@@ -1503,8 +1539,7 @@ export default {
         /** The same word the rail's START sends, down the same switch, so
          *  there is one way a camera is started and not two. */
         pressStart () {
-            const camera = cameraFor(this.streamPath)
-            if (camera) this.$socket.emit('widget-action', this.id, { camera, payload: 'start' })
+            if (this.videoControl.action === 'start') this.pressVideoAction()
         },
         onThumbGo (id) {
             this.aimTransport?.stop()
@@ -1596,6 +1631,15 @@ export default {
 </script>
 
 <style scoped>
+.y-pic__camera { max-width:24ch; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; }
+.y-pic__controls { display:flex; flex:1 0 100%; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; }
+.y-pic__view-modes { display:flex; align-items:center; gap:4px; font-size:12px; }
+.y-pic__view-modes > span { margin-right:6px; }
+.y-pic__controls button, .y-pic__action { padding:5px 9px; border:1px solid var(--yonder-divider); border-radius:3px; background:var(--yonder-pane); color:var(--yonder-value); font:inherit; font-size:12px; cursor:pointer; text-decoration:none; }
+.y-pic__controls button[aria-pressed="true"] { border-color:var(--yonder-select); background:color-mix(in srgb,var(--yonder-select) 12%, transparent); }
+.y-pic__controls button:disabled { opacity:.55; cursor:default; }
+.y-pic__controls :focus-visible { outline:2px solid var(--yonder-select); outline-offset:2px; }
+
 .y-pic__toolbar {
     display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px;
     padding: 7px 12px; overflow: auto;
@@ -1624,7 +1668,7 @@ export default {
     min-height: 0;
     display: grid;
     /* Status/thumbnail arrivals must not resize the image while aiming. */
-    grid-template-rows: 56px minmax(0, 1fr) 34px 80px;
+    grid-template-rows: auto minmax(0, 1fr) minmax(34px, auto) 80px;
     grid-template-columns: minmax(0, 1fr);
 }
 /* **Takes the shape of the video it is showing, and never more room than it
@@ -1689,7 +1733,7 @@ export default {
 }
 #nrdb-page-page-camera .y-pic {
     height: auto;
-    grid-template-rows: 56px auto 34px 80px;
+    grid-template-rows: auto auto minmax(34px, auto) 80px;
 }
 #nrdb-page-page-camera .y-pic__fit {
     container-type: normal;
@@ -1785,7 +1829,7 @@ export default {
        a vertical one, because it holds however many lines either box wraps
        to, where a vertical-only guess let a wrapped line land inside the OSD
        box's own height.
-       
+
        **136px, not the 104px this first carried.** Review measured the OSD's
        real footprint at about 118px across several frame widths, not the 90px
        this had assumed, leaving a ~14px shortfall that a two- or three-digit

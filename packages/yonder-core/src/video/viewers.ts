@@ -207,7 +207,7 @@ export interface CostState {
  * same reason every other rendering in this package is.
  */
 export interface OverlayState {
-  readonly head: "adaptive" | "floor" | "held" | "full-rate" | "stills";
+  readonly head: "adaptive" | "floor" | "held" | "fixed" | "full-rate" | "stills";
   readonly size: string;
   readonly rate: string;
   readonly bitrate: string;
@@ -796,11 +796,11 @@ function overlayFor(shared: SharedState, mine: MineState, cost: CostState): Over
     ? "full-rate"
     : mine.delivery === "stills"
       ? "stills"
-      : shared.pinned
-        ? "floor"
-        : shared.held !== null || shared.mode === "fixed"
-          ? "held"
-          : "adaptive";
+      : shared.mode === "fixed"
+        ? "fixed"
+        : shared.pinned
+          ? "floor"
+          : shared.held !== null ? "held" : "adaptive";
   const size = mine.size ?? shared.size;
   return {
     head,

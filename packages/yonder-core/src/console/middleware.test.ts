@@ -1190,3 +1190,36 @@ describe('private accessory aim proxy', () => {
     expect(f.transport.calls).toHaveLength(0);
   });
 });
+
+it('returns to the requested camera page after reauthentication and rejects external return URLs', async () => {
+  const {middleware}=consoleWith(answering(200,'{"ok":true}'));await serve(middleware);
+  const page=await call('GET','/dashboard/camera');
+  expect(page.body).toContain('name="returnTo" value="/dashboard/camera"');
+  const login=await call('POST','/login',{form:{password:GOOD,returnTo:'/dashboard/camera'}});
+  expect(login.headers.location).toBe('/dashboard/camera');
+  const outside=await call('POST','/login',{form:{password:GOOD,returnTo:'//example.com'}});
+  expect(outside.headers.location).toBe(CONSOLE_HOME);
+});
+
+it('checks an existing session without redirecting to an HTML login page', async () => {
+  const {middleware,sessions}=consoleWith(answering(200,'{"ok":true}'));await serve(middleware);
+  expect((await call('GET','/session')).status).toBe(401);
+  const token=sessions.mint();
+  const response=await call('GET','/session',{cookie:`${SESSION_COOKIE}=${token}`});
+  expect(response.status).toBe(200);expect(JSON.parse(response.body)).toEqual({authenticated:true});
+});
+
+
+it('reads connection settings only for a signed-in explicit GET, with no caching', async () => {
+  const transport=recording(200,JSON.stringify({renderings:[{kind:'url',body:'rtsp://example.test/camera'}]}));
+  const {middleware,sessions}=consoleWith(transport);await serve(middleware);
+  expect((await call('GET','/video/cam3/connection')).status).toBe(401);
+  expect(transport.calls).toHaveLength(0);
+  const cookie=`${SESSION_COOKIE}=${sessions.mint()}`;
+  expect((await call('POST','/video/cam3/connection',{cookie})).status).toBe(405);
+  expect(transport.calls).toHaveLength(0);
+  const reply=await call('GET','/video/cam3/connection',{cookie});
+  expect(reply.status).toBe(200);expect(reply.headers['cache-control']).toBe('no-store');
+  expect(JSON.parse(reply.body).renderings[0].kind).toBe('url');
+  expect(transport.calls[0]).toMatchObject({method:'GET',path:'/cameras/cam3/stream-address'});
+});

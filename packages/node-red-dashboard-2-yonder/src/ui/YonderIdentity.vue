@@ -44,7 +44,8 @@ export default {
     props: {
         id: { type: String, required: true },
         props: { type: Object, default: () => ({}) },
-        state: { type: Object, default: () => ({}) }
+        state: { type: Object, default: () => ({}) },
+        text: { type: String, default: undefined }
     },
     data () {
         return { copied: false, timer: null }
@@ -61,7 +62,7 @@ export default {
          * copy an em dash is a button that lies.
          */
         value () {
-            const raw = this.payload[this.props.key]
+            const raw = this.text ?? this.payload[this.props.key]
             return raw === undefined || raw === null || raw === '' ? '' : String(raw)
         },
         has () {

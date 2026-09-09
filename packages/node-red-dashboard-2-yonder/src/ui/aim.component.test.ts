@@ -519,10 +519,9 @@ describe("the struck axis stays drawn", () => {
      * `YonderAimPad`'s own struck-axis logic, which is
      * `aimpad.component.test.ts`'s job already.
      */
-    it("draws roll struck through, every time this panel is live", () => {
+    it("omits roll when the camera offers no roll control", () => {
         const { wrapper } = mountAim(makeReport());
-        expect(wrapper.find(".y-aim__struck").exists()).toBe(true);
-        expect(wrapper.find(".y-aim__struck-label").text()).toContain("ROLL");
+        expect(wrapper.find(".y-aim__struck").exists()).toBe(false);
     });
 });
 

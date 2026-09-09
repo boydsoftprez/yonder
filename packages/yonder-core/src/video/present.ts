@@ -316,6 +316,7 @@ export interface CameraStrip {
    * truth when everything is fine is worse than one that says nothing.
    */
   readonly startCheck: string;
+  readonly startBlocked: string | null;
   /**
    * What watching this camera in the browser costs, both copies, before it is
    * asked for (R-VID-11).
@@ -426,6 +427,7 @@ export function cameraStrip(view: {
       : "no full-rate stream on this camera; add an RTSP output",
     fullRate,
     startCheck: view.refusal ?? "nothing is stopping it",
+    startBlocked: view.refusal ?? null,
     device: view.device ?? "not resolved",
     identity: identityWords(view.device === null ? null : camera.device, view.byPathStable),
     encoder: `${view.encoder.element} · ${view.encoder.hardware ? "hardware" : "software"}`,
@@ -893,10 +895,12 @@ export interface DeckCapture {
 
 /** `ui-yonder-deck`'s whole payload — `YonderDeck.vue`'s own documented shape. */
 export interface CameraDeck {
+  readonly run?: { state: string; reason?: string };
+  readonly startBlocked?: string | null;
   readonly runtime?: ReturnType<import("./viewers.js").Viewers["runtime"]>;
   readonly accessory?: ReturnType<import('./accessory/source.js').AccessorySources['snapshot']>;
   readonly aim?: AimPanel;
-  readonly camera: { readonly id: string; readonly name: string; readonly spec: string };
+  readonly camera: { readonly id: string; readonly name: string; readonly spec: string; readonly identity?: string };
   readonly capabilities: CameraCapabilities;
   readonly descriptors: Record<string, DescriptorView>;
   readonly values: Record<string, number | null>;
@@ -1095,6 +1099,9 @@ const OUTPUT_LABEL: Record<OutputKind, string> = {
  * was actually sent — one calculation, two callers, neither of them this one.
  */
 export function cameraDeck(view: {
+  readonly run?: CameraDeck["run"];
+  readonly identity?: string;
+  readonly startBlocked?: string | null;
   readonly runtime?: CameraDeck["runtime"];
   readonly accessory?: ReturnType<import('./accessory/source.js').AccessorySources['snapshot']>;
   readonly camera: Camera;
@@ -1150,6 +1157,7 @@ export function cameraDeck(view: {
     camera: {
       id: camera.id,
       name: camera.name,
+      identity: view.identity,
       spec: `${camera.source.toUpperCase()} · ${camera.codec.toUpperCase()} · `
         + `${camera.width}×${camera.height}p${camera.framerate} · ${view.encoder.element}`,
     },
@@ -1164,6 +1172,8 @@ export function cameraDeck(view: {
     policy,
     applied: policy,
     runtime: view.runtime,
+    run: view.run,
+    startBlocked: view.startBlocked,
     outputs: camera.outputs.map((output) => ({
       kind: output.kind,
       label: OUTPUT_LABEL[output.kind],

@@ -89,7 +89,7 @@ const DESCRIPTORS: readonly CameraControlDescriptor[] = Object.freeze([
         ]) }),
     ...[
         ['colour', 'Camera color profile', 'Camera color profiles are unavailable over this connection. Use Stream color for the relayed picture.'],
-        ['filter', 'Filter', 'Command 0x42 had no observable effect.'],
+        ['filter', 'Filter', 'Camera filters are not available over this connection.'],
         ['zoom', 'Digital zoom', 'No change to the live USB feed was observed.'],
         ['live-format', 'Live format', 'Native USB video is fixed at 1280×720, approximately 29.97 fps; recording format does not configure it.'],
     ].map(([key, label, reason]) => Object.freeze({ key, label, kind: 'unavailable' as const, reason })),

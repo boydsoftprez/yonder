@@ -117,6 +117,14 @@ function notFound(res: ServerResponse): void {
 }
 
 /** What came out of a request body. */
+/** Return only to this console, never to a caller-supplied external URL. */
+function consoleReturn(value: unknown): string {
+  return typeof value === 'string' && /^\/dashboard(?:\/[a-z0-9-]+)?\/?$/.test(value) ? value : CONSOLE_HOME;
+}
+function loginPage(target: unknown, error?: string): string {
+  return renderPage('login', error).replace('<!--yonder:return-->', `<input type="hidden" name="returnTo" value="${consoleReturn(target)}">`);
+}
+
 export interface Submission {
   fields: Record<string, string>;
   /** The body was larger than this console will read; nothing was parsed. */
@@ -432,6 +440,17 @@ export function consoleMiddleware(deps: ConsoleMiddlewareDeps): Middleware {
   return (req, res, next) => {
     const path = pathOf(req);
 
+    if (req.method === 'GET' && path === '/session') {
+      const authenticated = hasSession(req, deps.sessions);
+      sendJson(res, authenticated ? 200 : 401, { authenticated });
+      return;
+    }
+    if (req.method === 'GET' && path === '/login') {
+      const target = new URL(req.url ?? '/login', 'http://localhost').searchParams.get('returnTo');
+      if (hasSession(req, deps.sessions)) { res.writeHead(303, { location: consoleReturn(target), 'cache-control': 'no-store' }); res.end(); return; }
+      sendHtml(res, 200, loginPage(target));
+      return;
+    }
     if (req.method === "POST" && path === "/login") {
       void (async () => {
         const submission = await readFields(req);
@@ -441,7 +460,7 @@ export function consoleMiddleware(deps: ConsoleMiddlewareDeps): Middleware {
           res.setHeader("set-cookie", sessionCookie(deps.sessions.mint()));
           // 303, so the browser follows with a GET and a reload does not
           // re-post the password.
-          res.writeHead(303, { location: CONSOLE_HOME, "cache-control": "no-store" });
+          res.writeHead(303, { location: consoleReturn(submission.fields.returnTo), "cache-control": "no-store" });
           res.end();
           return;
         }
@@ -451,7 +470,7 @@ export function consoleMiddleware(deps: ConsoleMiddlewareDeps): Middleware {
         const message = attempt.retryAfter === undefined
           ? "That password was not accepted."
           : `Too many attempts. Try again in ${attempt.retryAfter} seconds.`;
-        sendHtml(res, attempt.retryAfter === undefined ? 401 : 429, renderPage("login", message));
+        sendHtml(res, attempt.retryAfter === undefined ? 401 : 429, loginPage(submission.fields.returnTo, message));
       })();
       return;
     }
@@ -537,6 +556,16 @@ export function consoleMiddleware(deps: ConsoleMiddlewareDeps): Middleware {
         return;
       }
 
+      const connection = /^\/video\/([a-z0-9][a-z0-9-]{0,31})\/connection$/.exec(path);
+      if (connection) {
+        if (!sessionOf(req, deps.sessions)) { sendJson(res, 401, { error: 'Sign in to view connection details' }); return; }
+        if (req.method !== 'GET') { sendJson(res, 405, { error: 'Connection details require GET' }); return; }
+        // Only this explicit read proxies the daemon's credential-bearing route.
+        void deps.client.request({ method: 'GET', path: `/cameras/${connection[1]}/stream-address` })
+          .then(reply => sendJson(res, reply.ok ? reply.status : 503, reply.ok ? reply.body : { error: 'Camera service unavailable' }))
+          .catch(() => sendJson(res, 503, { error: 'Connection details unavailable' }));
+        return;
+      }
       const aim = /^\/video\/([^/]+)\/aim$/.exec(path);
       if (aim) {
         const token = sessionOf(req, deps.sessions);
@@ -656,7 +685,7 @@ export function consoleMiddleware(deps: ConsoleMiddlewareDeps): Middleware {
     // because a page is not an answer to a POST and an unauthenticated caller
     // must not be able to tell one route from another by what comes back.
     if (wantsPage(req)) {
-      sendHtml(res, 200, renderPage("login"));
+      sendHtml(res, 200, loginPage(path));
       return;
     }
     sendJson(res, 401, { error: "sign in to use this device" });

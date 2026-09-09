@@ -212,7 +212,7 @@ export default {
         /** Fails closed: an `axes` object that omits `roll` entirely reads
          * as struck, not present (see the component's own doc comment). */
         rollStruck () {
-            return this.axes?.roll !== 'present'
+            return this.axes?.roll === 'advertised' || this.axes?.roll === 'gated'
         },
         limited () {
             return Boolean(this.atLimit?.pitch || this.atLimit?.yaw)

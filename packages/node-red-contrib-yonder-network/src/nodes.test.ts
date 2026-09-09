@@ -423,10 +423,10 @@ describe("yonder-pending", () => {
     // the list is the ordinary pair, which is what the rail's own
     // configuration says too.
     expect(msg.payload).toEqual({
-      pending: false, id: "", what: "", why: "",
+      pending: false, id: "", what: "", why: "", engineState: "idle", observedAt: expect.any(Number),
       keys: [
-        { label: "CONFIRM", action: "confirm", tone: "warn" },
-        { label: "REVERT NOW", action: "revert", tone: "act" },
+        { label: "KEEP", action: "confirm", tone: "warn" },
+        { label: "REVERT", action: "revert", tone: "act" },
       ],
     });
     expect(asked[0]).toEqual({ method: "GET", path: "/status" });
@@ -448,7 +448,7 @@ describe("yonder-pending", () => {
     const msg = await fromPoller({}, (m) => (m.payload as { pending?: boolean }).pending === true);
     const payload = msg.payload as
       { keys: { label: string; action: string }[]; what: string; why: string };
-    expect(payload.keys).toEqual([{ label: "REVERT NOW", action: "revert", tone: "act" }]);
+    expect(payload.keys).toEqual([{ label: "REVERT", action: "revert", tone: "act" }]);
     expect(payload.keys.map((k) => k.action)).not.toContain("confirm");
     expect(payload.what).toMatch(/confirming it for itself/);
     expect(msg.yonder?.movesRadio).toBe(true);
@@ -462,7 +462,7 @@ describe("yonder-pending", () => {
     expect(payload.pending).toBe(true);
     expect(payload.id).toBe("a1");
     expect(payload.what).not.toBe("");
-    expect(payload.why).toMatch(/gets you back in/);
+    expect(payload.why).toMatch(/restore the previous settings/);
     // An ordinary change is still the operator's to keep, and the rail says so.
     expect((payload as unknown as { keys: { action: string }[] }).keys.map((k) => k.action))
       .toEqual(["confirm", "revert"]);

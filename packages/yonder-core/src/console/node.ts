@@ -186,6 +186,9 @@ export function readFailure(message: string, now: number): CommandStatus {
  * operator still has a device.
  */
 export interface PendingChange {
+  /** Authoritative engine phase, including work before the confirmation window. */
+  engineState?: string;
+  observedAt?: number;
   /**
    * Whether a change is in force and unconfirmed.
    *
@@ -244,7 +247,7 @@ export interface PendingKey {
  * a payload on every poll, and one caller mutating what it was handed would
  * change what every surface of the console offers, for ever, silently.
  */
-export const CONFIRM_KEY: PendingKey = Object.freeze({ label: "CONFIRM", action: "confirm", tone: "warn" });
+export const CONFIRM_KEY: PendingKey = Object.freeze({ label: "KEEP", action: "confirm", tone: "warn" });
 
 /**
  * Put the previous configuration back now.
@@ -254,7 +257,7 @@ export const CONFIRM_KEY: PendingKey = Object.freeze({ label: "CONFIRM", action:
  * move this is the operator's only control over the apply — so it is the last
  * key that may ever be taken away.
  */
-export const REVERT_KEY: PendingKey = Object.freeze({ label: "REVERT NOW", action: "revert", tone: "act" });
+export const REVERT_KEY: PendingKey = Object.freeze({ label: "REVERT", action: "revert", tone: "act" });
 
 /** An ordinary change: the operator's to keep or to undo. */
 export const PENDING_KEYS: readonly PendingKey[] = Object.freeze([CONFIRM_KEY, REVERT_KEY]);
@@ -272,9 +275,8 @@ export const PENDING_KEYS_RADIO: readonly PendingKey[] = Object.freeze([REVERT_K
  * the habit that turns a wrong change into a device nobody can reach.
  */
 export const PENDING_WHY =
-  "Confirm it to keep it. If you do not, the device puts the previous "
-  + "configuration back by itself — which is what gets you back in if this "
-  + "change was the wrong one.";
+  "Choose Keep to save these settings or Revert to restore the previous settings. "
+  + "If you do neither, the device restores the previous settings automatically.";
 
 /** What the banner says a change is, when the daemon has not said which. */
 export const PENDING_WHAT =
@@ -350,7 +352,7 @@ export function pendingChange(
   const body = result.value as {
     state?: unknown; id?: unknown; expiresAt?: unknown; movesRadio?: unknown;
   } | undefined;
-  if (body?.state !== "pending") return { payload: nothing, yonder: idle(now) };
+  if (body?.state !== "pending") return { payload: { ...nothing, engineState: typeof body?.state === 'string' ? body.state : 'unknown', observedAt: now }, yonder: idle(now) };
 
   // `=== true`, so anything else is an ordinary change: a daemon too old to
   // report the field, or one that reported something this console does not
@@ -368,6 +370,7 @@ export function pendingChange(
   return {
     payload: {
       pending: true,
+      engineState: 'pending', observedAt: now,
       id: typeof body.id === "string" ? body.id : "",
       // What the daemon knows, and no more. `GET /status` carries an apply
       // state, an id, a deadline and whether the change moved the radio; it

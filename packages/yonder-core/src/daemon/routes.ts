@@ -287,7 +287,10 @@ export interface CameraView {
   picture?: {
     path: string;
     cost: string;
-    running: boolean;
+    running: boolean | null;
+    runState?: string;
+    runReason?: string | null;
+    startBlocked?: string | null;
     recording: RecordingState | null;
     aim: AimPanel;
     cameras: (ThumbRow & { caption: string })[];
@@ -1284,7 +1287,7 @@ export function createRouter(deps: RouterDeps): Router {
         reason: rejection?.reason ?? null,
         encoder,
         display,
-        picture: { path: id, cost: display.pictureCost, running: run.state === 'running', recording: recorderState,
+        picture: { path: id, cost: display.pictureCost, runState: run.state, runReason: run.reason ?? null, startBlocked: display.startBlocked, running: run.state === 'running' ? true : run.state === 'stopped' ? false : null, recording: recorderState,
           aim: aimPanel(capabilities, accessorySnapshot, id, 'picture', camera.controls),
           cameras: thumbnails.cameras.map((row) => {
             const configured = config.cameras.find((c) => c.id === row.id)!;
@@ -1303,6 +1306,7 @@ export function createRouter(deps: RouterDeps): Router {
         // above — never a second sweep, so the deck and the readout strip
         // can never disagree about the same camera.
         deck: cameraDeck({
+          run, startBlocked: display.startBlocked, identity: display.identity,
           runtime: deps.viewers?.runtime(id),
           accessory: accessorySnapshot,
           camera, capabilities, encoder, paths: await reachPaths(),
