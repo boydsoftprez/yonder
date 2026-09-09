@@ -1179,6 +1179,7 @@ describe("aimPanel", () => {
   it("forwards a terminal motion notice without turning it into global inhibition", () => {
     const panel = aimPanel(null, {
       generation: 4,
+      controlGeneration: 2,
       admitted: { pan: 0, tilt: 0 },
       modes: [{ allowed: false, reason: "discrete-mount-unverified" }],
       recentre: { allowed: false, reason: "discrete-mount-unverified" },
@@ -1191,6 +1192,7 @@ describe("aimPanel", () => {
 
     expect(panel.motionNotice).toBe("the gimbal reached its native stop");
     expect(panel.inhibited).toBeNull();
+    expect(panel.generation).toBe(2);
   });
 
   /**

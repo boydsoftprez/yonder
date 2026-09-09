@@ -1354,10 +1354,14 @@ export interface AimPanel {
  * claiming a fact about the gimbal that nothing read, which is the same
  * defect as an unmeasured rate one field over.
  */
-export function aimPanel(caps: CameraCapabilities | null, source?: ReturnType<import('./accessory/source.js').AccessorySources['snapshot']>, camera?: string): AimPanel {
+export function aimPanel(caps: CameraCapabilities | null, source?: ReturnType<import('./accessory/source.js').AccessorySources['snapshot']>, camera?: string,
+  scope: 'control' | 'picture' = 'control'): AimPanel {
   if (source) {
     const names = ['Free', 'FPV', 'Follow'];
-    return { camera, url: camera ? `/video/${camera}/aim` : undefined, generation: source.generation, maxRate: 10, admitted: source.admitted,
+    // Standalone Aim depends on USB/DUML continuity. A drag on the Picture
+    // additionally depends on that picture's media epoch and retires with it.
+    const generation = scope === 'picture' ? source.input?.generation ?? source.generation : source.controlGeneration;
+    return { camera, url: camera ? `/video/${camera}/aim` : undefined, generation, maxRate: 10, admitted: source.admitted,
       state: 'present', reason: null, pan: source.attitude?.yaw ?? null, tilt: source.attitude?.pitch ?? null,
       modeInhibited: source.modes.some(mode => mode.allowed) ? null : source.modes.find(mode => !mode.allowed)?.reason ?? 'trajectory-unverified',
       recentreInhibited: source.recentre.allowed ? null : source.recentre.reason,

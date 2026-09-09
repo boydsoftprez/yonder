@@ -1283,7 +1283,7 @@ export function createRouter(deps: RouterDeps): Router {
         encoder,
         display,
         picture: { path: id, cost: display.pictureCost, running: run.state === 'running', recording: recorderState,
-          aim: aimPanel(capabilities, accessorySnapshot, id),
+          aim: aimPanel(capabilities, accessorySnapshot, id, 'picture'),
           cameras: thumbnails.cameras.map((row) => {
             const configured = config.cameras.find((c) => c.id === row.id)!;
             return {

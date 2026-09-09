@@ -101,10 +101,9 @@ export class AccessorySources {
         }
       },
       onVideo: unit => {
-        if (!media.push(unit)) {
-          source.streamGeneration++; source.admitted = undefined; source.attitude = null; source.gimbal.reset();
-          source.camera.disconnect(); if (source.generation !== null) source.camera.connect();
-        }
+        // A timestamp discontinuity retires only media clients/decoder state.
+        // Fresh DUML controls belong to the independently observed USB epoch.
+        if (!media.push(unit)) source.streamGeneration++;
       },
     });
     const writer = new AccessoryWriter(this.clock, (command, options) => device.sendCommand(command, options));
@@ -119,7 +118,10 @@ export class AccessorySources {
   }
   private status(source: Owned, status: Pocket2Status): void {
     if (status.state === 'live') {
-      if (source.generation !== status.generation) { source.generation = status.generation; source.camera.connect(); source.gimbal.connect(); }
+      if (source.generation !== status.generation) {
+        source.admitted = undefined; source.attitude = null; source.gimbal.disconnect(); source.media.reset();
+        source.generation = status.generation; source.camera.connect(); source.gimbal.connect();
+      }
     } else {
       source.generation = null; source.admitted = undefined; source.attitude = null; source.camera.disconnect(); source.gimbal.disconnect(); source.media.reset();
     }
@@ -156,7 +158,8 @@ export class AccessorySources {
     const admitted = source.admitted;
     const rate = !source.gimbal.motionNotice && admitted && admitted.until > this.clock.now() && guard({ kind: 'rate', pan: admitted.pan, tilt: admitted.tilt }, context).allowed
       ? { pan: admitted.pan, tilt: admitted.tilt } : { pan: 0, tilt: 0 };
-    return { ...status, generation: status.generation * 1_000_000 + source.streamGeneration, input: this.input(identity), state: source.camera.readState(), attitude, admitted: rate, directions,
+    return { ...status, controlGeneration: status.generation, generation: status.generation * 1_000_000 + source.streamGeneration,
+      input: this.input(identity), state: source.camera.readState(), attitude, admitted: rate, directions,
       mount: context.mount, envelope: null as import('./guard.js').MeasuredEnvelope | null, motionNotice: source.gimbal.motionNotice,
       recentre: guard({ kind: 'recentre' }, context), modes: ([0,1,2] as const).map(mode => guard({ kind: 'mode', mode }, context)),
       inhibition: verdict.allowed ? null : verdict.reason, controls: accessoryControls(source.camera.readState()), descriptors: cameraControlDescriptors().map(d => d.kind === 'menu'

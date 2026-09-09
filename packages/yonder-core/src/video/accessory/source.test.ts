@@ -19,6 +19,7 @@ function harness() {
     mediaFactory: () => media, clock: { now: () => now.value, setTimer: (ms, fn) => setTimeout(fn, ms), clearTimer: token => clearTimeout(token as NodeJS.Timeout) } });
   const live = () => { status = { ...status, state: 'live', manufacturer: 'DJI', model: 'HG211', lastCommandAt: now.value, lastVideoAt: now.value }; callbacks.onStatus!(status); };
   return { source, camera, factory, device, media, now, live, readCameras, callbacks: () => callbacks,
+    newLiveGeneration: () => { status = { ...status, state: 'live', generation: status.generation + 1 }; callbacks.onStatus!(status); },
     stale: () => { status = { ...status, state: 'stale', generation: status.generation + 1 }; callbacks.onStatus!(status); } };
 }
 
@@ -94,16 +95,38 @@ it('keeps accessory detection when the independent USB probe throws', async () =
   await h.source.close();
 });
 
-it('invalidates a gesture and changes the browser generation when camera timestamps reset', async () => {
-  const h = harness(); await h.source.discover(); h.live();
-  const before = h.source.snapshot(h.camera.device)!.generation;
-  const issued = await h.source.aim(h.camera.device, 'owner', { op: 'issue', clientGesture: 'press1' }) as any;
-  const data = Buffer.from([0,0,1,0x65,1]);
-  h.callbacks().onVideo!({ data, timestamp: 10000, metadata: 0 });
-  h.callbacks().onVideo!({ data, timestamp: 10, metadata: 0 });
-  expect(h.source.snapshot(h.camera.device)!.generation).not.toBe(before);
-  expect(await h.source.aim(h.camera.device, 'owner', { op: 'slew', ...issued.grant, seq: 1, pan: 1, tilt: 0 })).toMatchObject({ accepted: false, reason: 'inactive' });
-  expect(h.device.sendCommand).not.toHaveBeenCalled(); await h.source.close();
+it('keeps a held native rate and fresh DUML attitude through a media reset, but revokes it on real USB loss', async () => {
+  vi.useFakeTimers(); const h = harness();
+  const fresh = () => {
+    const payload = Buffer.alloc(40); payload[6] = 0x80; payload[10] = 0xa0; payload.writeFloatLE(1, 24);
+    h.callbacks().onCommand!(decodeDuml(encodeDuml({ sender: 4, receiver: 2, commandSet: 4, commandId: 5, payload }))!);
+  };
+  try {
+    await h.source.discover(); h.live(); fresh();
+    (h.device.sendCommand as any).mockImplementation(async (_cmd: any, options: any) => { if (!options.admission()) throw new Error('not admitted'); });
+    const before = h.source.snapshot(h.camera.device)!;
+    const issued = await h.source.aim(h.camera.device, 'owner', { op: 'issue', clientGesture: 'press1' }) as any;
+    const admitted = await h.source.aim(h.camera.device, 'owner', { op: 'slew', ...issued.grant, seq: 0, pan: 5, tilt: 0 }) as any;
+    expect(admitted.accepted).toBe(true); await settleSource();
+    const data = Buffer.from([0,0,1,0x65,1]);
+    h.callbacks().onVideo!({ data, timestamp: 10000, metadata: 0 });
+    h.now.value += 100; fresh(); await vi.advanceTimersByTimeAsync(100);
+    h.callbacks().onVideo!({ data, timestamp: 10, metadata: 0 });
+    const after = h.source.snapshot(h.camera.device)!;
+    expect(after.generation).not.toBe(before.generation);
+    expect(after.input?.generation).toBe(after.generation);
+    expect(after.controlGeneration).toBe(before.controlGeneration);
+    expect(after.attitude).toMatchObject({ at: h.now.value, mode: 2 });
+    expect(after.admitted).toEqual({ pan: 5, tilt: 0 });
+    expect((h.device.sendCommand as any).mock.calls[0][1].signal.aborted).toBe(false);
+    const next = await h.source.aim(h.camera.device, 'owner', { op: 'slew', ...admitted.next, seq: 1, pan: 5, tilt: 0 }) as any;
+    expect(next.accepted).toBe(true);
+    h.now.value += 100; fresh(); await vi.advanceTimersByTimeAsync(100);
+    expect(h.device.sendCommand.mock.calls.length).toBeGreaterThan(2);
+    h.stale(); h.live();
+    expect(h.source.snapshot(h.camera.device)?.controlGeneration).not.toBe(before.controlGeneration);
+    expect(await h.source.aim(h.camera.device, 'owner', { op: 'slew', ...next.next, seq: 2, pan: 5, tilt: 0 })).toMatchObject({ accepted: false, reason: 'inactive' });
+  } finally { await h.source.close(); vi.useRealTimers(); }
 });
 
 it('admits a fresh public slew through the actual Intent rate shape and preserves endpoint expiry', async () => {
@@ -119,6 +142,20 @@ it('admits a fresh public slew through the actual Intent rate shape and preserve
   const [, options] = (h.device.sendCommand as any).mock.calls[0];
   expect(options.deadline).toBe(issued.grant.deadline); expect(options.admission()).toBe(true); expect(options.signal.aborted).toBe(false);
   h.stale(); expect(options.admission()).toBe(false); expect(options.signal.aborted).toBe(true); await h.source.close();
+});
+
+it('retires old control intent if a new live USB generation arrives without an intermediate status callback', async () => {
+  const h = harness(); await h.source.discover(); h.live();
+  try {
+    const payload = Buffer.alloc(40); payload[6] = 0x80; payload.writeFloatLE(1, 24);
+    h.callbacks().onCommand!(decodeDuml(encodeDuml({ sender: 4, receiver: 2, commandSet: 4, commandId: 5, payload }))!);
+    const issued = await h.source.aim(h.camera.device, 'owner', { op: 'issue', clientGesture: 'old-usb' }) as any;
+    const first = await h.source.aim(h.camera.device, 'owner', { op: 'slew', ...issued.grant, seq: 0, pan: 5, tilt: 0 }) as any;
+    expect(first.accepted).toBe(true); await settleSource();
+    h.newLiveGeneration();
+    expect(await h.source.aim(h.camera.device, 'owner', { op: 'slew', ...first.next, seq: 1, pan: 5, tilt: 0 })).toMatchObject({ accepted: false, reason: 'inactive' });
+    expect(h.source.snapshot(h.camera.device)?.attitude).toBeNull();
+  } finally { await h.source.close(); }
 });
 
 it('reports world position without joint bounds and permits measured native actions independently of the obsolete mount profile', async()=>{
@@ -190,6 +227,22 @@ async function contentionHarness() {
   return { ...h, fresh, wire, release };
 }
 const settleSource = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
+
+it('keeps a native camera operation pending through media-only discontinuity and confirms its fresh readback', async () => {
+  const h = await contentionHarness();
+  let settled = false;
+  const operation = h.source.controls(h.camera.device, { kind: 'iso', value: 5 }).then(value => { settled = true; return value; }, error => { settled = true; return error; });
+  try {
+    await settleSource(); expect(h.wire).toHaveLength(1);
+    const data = Buffer.from([0,0,1,0x65,1]);
+    h.callbacks().onVideo!({ data, timestamp: 10000, metadata: 0 });
+    h.callbacks().onVideo!({ data, timestamp: 10, metadata: 0 });
+    await settleSource(); expect(settled).toBe(false);
+    expect(h.wire[0].options.signal.aborted).toBe(false);
+    h.now.value = 1100; h.release(); await settleSource(); h.fresh(5);
+    expect(await operation).toMatchObject({ completed: true });
+  } finally { h.release(); await h.source.close(); await operation; }
+});
 
 it('serializes a camera write and a fresh rate through one actual shared device writer', async () => {
   const h = await contentionHarness();

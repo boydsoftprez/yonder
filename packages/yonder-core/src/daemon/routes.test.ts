@@ -3731,12 +3731,24 @@ describe('accessory route dispatch', () => {
   function source() {
     return { input: vi.fn(() => ({ endpoint: '/run/yonder/accessory/cam0.sock', native: { width: 1280, height: 720, fps: 29.97 }, live: true, generation: 1, reason: null })),
       snapshot: vi.fn(() => ({ input: { endpoint: '/run/yonder/accessory/cam0.sock', native: { width: 1280, height: 720, fps: 29.97 }, live: true, generation: 1, reason: null },
-        generation: 1, state: { status: null, exposure: null, focus: null, batteryPercent: null }, attitude: null, envelope: null,
+        generation: 1, controlGeneration: 1, state: { status: null, exposure: null, focus: null, batteryPercent: null }, attitude: null, envelope: null,
         inhibition: 'attitude-missing', admitted: { pan: 0, tilt: 0 }, recentre: { allowed: false, reason: 'attitude-missing' }, modes: [{ allowed: false, reason: 'attitude-missing' }] })), discover: vi.fn(async () => ({ found: [], rejected: [] })), controls: vi.fn(async () => ({ completed: true })),
       aim: vi.fn(async () => ({ accepted: true })) } as unknown as import('../video/accessory/source.js').AccessorySources;
   }
   const detected: Detection = { source: 'accessory', device: 'pocket2:test.udc', byPath: 'pocket2:test.udc', byPathStable: true,
     card: 'DJI Pocket 2 (HG211)', capabilities: noCapabilities() };
+  it('binds standalone Aim to the control generation and Picture drag to the media generation', async () => {
+    const accessory = source();
+    const snapshot = accessory.snapshot(detected.byPath)!;
+    (accessory.snapshot as any).mockReturnValue({ ...snapshot, generation: 3_000_004, controlGeneration: 3,
+      input: { ...snapshot.input, generation: 3_000_004 } });
+    const route = provisioned({ cameras: { found: [detected], rejected: [] }, camera: { source: 'accessory', device: detected.byPath }, accessory });
+    const response = await route('GET', '/cameras/cam0', undefined);
+    expect(response.status).toBe(200);
+    expect((response.body as any).aim.generation).toBe(3);
+    expect((response.body as any).deck.aim.generation).toBe(3);
+    expect((response.body as any).picture.aim.generation).toBe(3_000_004);
+  });
   it('starts native media despite no selectable formats and never sends the identity to V4L2 controls', async () => {
     const accessory = source();
     const route = provisioned({ cameras: { found: [detected], rejected: [] }, camera: { source: 'accessory', device: detected.byPath }, accessory });
