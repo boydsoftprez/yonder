@@ -57,7 +57,7 @@ it('loads a VTOL draft with a 180 ft takeoff and preserves the original cove rou
  expect(coveDemo.items[0]).toMatchObject({command:22,alt:91.439999});
  expect(w.vm.draft.name).toContain('180 ft');expect(w.props('api').command).not.toHaveBeenCalled();w.unmount();
 });
-it('explains the draft start restriction and places Start before the mode list for the aircraft mission',async()=>{
+it('explains the draft start restriction and retains Start while sending mode access to the shared controls for the aircraft mission',async()=>{
  const w=host();w.vm.loadDemo();w.vm.openMission(null);await w.vm.$nextTick();
  const start=()=>w.findAll('button').find(b=>b.text().startsWith('Start aircraft mission'))!;
  expect(start().attributes('disabled')).toBeDefined();
@@ -65,7 +65,7 @@ it('explains the draft start restriction and places Start before the mode list f
  await w.findAll('button').find(b=>b.text().startsWith('Show aircraft mission'))!.trigger('click');
  w.vm.openMission(null);await w.vm.$nextTick();
  expect(start().attributes('disabled')).toBeUndefined();
- expect(start().element.compareDocumentPosition(w.get('[aria-label="Aircraft flight mode"]').element)&4).toBe(4);
+ expect(w.find('[aria-label="Aircraft flight mode"]').exists()).toBe(false);await w.findAll('button').find(b=>b.text().startsWith('Flight controls…'))!.trigger('click');expect(w.find('.flight-control-dialog').exists()).toBe(true);
  expect(w.props('api').command).not.toHaveBeenCalled();w.unmount();
 });
 it('disables mission aircraft actions while command details refresh but retains local editing',async()=>{

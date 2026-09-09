@@ -24,14 +24,15 @@ for the verified runtime and bench limitations.
 
 ### Full screen and display colors
 
-Press **Full screen** in the cockpit header to fill the screen with the flight
-display and hide Yonder's surrounding navigation. Use **Exit full screen** in
+Press the **⛶ Full screen** button in the app header (or **Menu → Full screen**
+on a small screen) to fill the screen with the flight display and hide Yonder's
+surrounding navigation. Use **Exit full screen** in
 that same header, or press **Esc**, to return. The PFD, mission and selected
 layout remain active; settings and instrument editors remain available.
 Fullscreen must be entered with a button press, and browser support varies.
 
 The cockpit starts with its dark **Night** palette independently of Yonder's
-settings pages. **Display & data → Palette** selects **Day** or **Night** and
+settings pages. **Display → Cockpit palette** selects **Day** or **Night** and
 saves that choice in this browser. Instrument faces and the top data band keep
 dark backgrounds with readable labels in both palettes. Changing the cockpit
 palette does not change the device's overall theme or aircraft settings.
@@ -41,38 +42,46 @@ palette does not change the device's overall theme or aircraft settings.
 ![Single PFD with top navigation fields, a graphical instrument bank, mission and map insets](images/cockpit/cockpit-main.png)
 
 *Production cockpit with synthetic fixture readings. The default keeps one PFD,
-navigation fields across the top and graphical instruments beside the PFD.*
+navigation fields across the top and graphical instruments beside the PFD. This earlier
+capture shows the old internal toolbar; current controls live in the app header.*
 
 - **Navigation fields:** the top readings are configurable through **Fields**.
   Tap a reading to inspect its source, age and recent history.
-- **Flight-control strip:** Direct-To, Heading, Altitude / Speed, Loiter, Resume Mission,
-  RTL, Modes and Arm / Disarm prepare aircraft requests.
+- **App header:** Direct-To, Heading, Altitude / Speed, Loiter, Resume Mission,
+  RTL, Modes and Arm / Disarm prepare aircraft requests. On smaller screens,
+  **Flight ▾** contains the additional commands; **RTL** stays visible. The
+  header uses Yonder's existing brand and leaves the space below for instruments.
 - **Instrument bank:** tap **Instruments** to choose readings and gauge styles;
-  tap an individual instrument to inspect it. **Layout** in the header chooses
+  tap an individual instrument to inspect it. **Display → Layout & units** chooses
   the bank's position and the PFD/MFD arrangement.
-- **Top-right Aircraft button:** telemetry setup and operation results. After a
-  request its text can change to **accepted**, **observed** or another outcome;
-  it still opens **Aircraft status**.
+- **Aircraft:** telemetry setup, reported state and operation results. Its small
+  readout shows actual mode and measured browser update rate. On a small screen,
+  use **Menu → Aircraft status & telemetry**.
 - **Lower-left mission:** tap a waypoint's name for its actions, or its altitude
   cell to edit that altitude. **↗** expands the list; **↙** returns to the full PFD.
 - **Lower-right map:** **↗** expands it. **Trail** opens our breadcrumbs; the
   traffic-status button opens traffic controls. In the expanded map, **Mission
   actions** opens the same panel as **Mission controls** beneath the mission list.
-- **Below the PFD:** **PFD Menu**, **Mission**, **FD** and **Display** open local
-  PFD settings. On a narrow screen use the bottom **Mission / Map** selector.
+- **Display:** cockpit palette, **Layout & units**, **PFD settings**,
+  **Map, terrain & data**, and **Flight director** share one menu. Instrument
+  taps remain shortcuts to their settings. On a narrow screen, **Menu** also
+  provides Flight plan, Home, Aircraft status and fullscreen. The bottom
+  **Mission / Map** selector remains available when insets would be too small.
 - **Expanded multifunction display (MFD):** **Map**, **Flight plan**, **Systems**
   and **Telemetry** select its page. **×** returns to a single PFD with insets.
 
-Long panels scroll inside the dialog. Close them with **×** or **Escape**.
+Long panels scroll inside the dialog and cover the app header, keeping their
+close button unobstructed. Close them with **×** or **Escape**. Flight-control
+subpages reached from **Flight ▾** also have a **Back** button.
 
 Tapping a tape or the compass edits a **cyan local reference**. To command the
 actual aircraft, use the top strip and its separate **Confirm & send** dialog.
 
 ### 2. Connect the instruments and read the aircraft mission
 
-1. Open the top-right **Aircraft** status button, or tap the **MAVLink · Hz** source
-   button. **Browser update target** defaults to **8 / second**; 1, 2, 4 and 8 are
-   selectable and saved in this browser. **Display & data** has the same controls.
+1. Open **Aircraft** in the app header (or **Menu → Aircraft status & telemetry**).
+   **Browser update target** defaults to **8 / second**; 1, 2, 4 and 8 are
+   selectable and saved in this browser.
    The measured browser rate and distinct attitude rate include link delays and
    missed samples; neither counts every controller packet. Attitude animates
    between received samples even without GPS. System readings remain up to 1 Hz.
@@ -80,13 +89,14 @@ actual aircraft, use the top strip and its separate **Confirm & send** dialog.
    explicitly requests the streams used by the instruments, including optional
    slower sensor reports. An unsupported optional stream is reported; accepting
    a request does not establish that its sensor is present.
-3. Press **Read aircraft mission** and wait for **Complete vehicle mission
+3. Close Aircraft status, open **Flight plan → Mission controls**, then press
+   **Read aircraft mission** and wait for **Complete vehicle mission
    downloaded**. The list now represents the mission received from the aircraft.
 4. Close the panel with **×** or **Escape**. Check the actual mode, armed state
    and source before using flight controls.
 
-**Mission controls → Read aircraft mission** performs the same read while keeping
-the local draft. The upload area states which prerequisite is missing. If readback
+**Mission controls → Read aircraft mission** keeps the local draft. The upload
+area states which prerequisite is missing. If readback
 completes but no home record is available, open **Home…** to set a specified
 controller home and verify its response, or wait for the controller to establish
 home and request flight telemetry. Yonder keeps the draft and does not substitute
@@ -136,16 +146,16 @@ mission-command catalog remains a separate mission-execution action.
 The [behavior and protocol reference](console/evidence/2026-09-09-home-workflow.md)
 records the distinction verified against Mission Planner and ArduPlane.
 
-![Aircraft status with explicit telemetry and mission-read controls](images/cockpit/telemetry-setup.png)
+![Earlier Aircraft status telemetry setup](images/cockpit/telemetry-setup.png)
 
-*QuadPlane SITL. Telemetry setup and mission reading do not arm or start it.
+*Earlier QuadPlane SITL capture. Telemetry setup remains under Aircraft; mission
+reading now lives in Flight plan → Mission controls. Neither arms or starts it.
 Aircraft-status altitude details use their explicitly labeled metres.*
 
 ### 3. Arrange the display and choose readings
 
-Press **Layout** in the header to open **Display setup**. The same panel is
-available through **Display → Instrument panel & PFD/MFD layout** below the PFD,
-or **PFD Menu → Attitude & display → Instrument panel & PFD/MFD layout**.
+Open **Display → Layout & units** for **Display setup**. The attitude settings
+shortcut **Instrument panel & PFD/MFD layout** opens this same panel.
 
 1. Choose **Screen arrangement**: **Single PFD with insets** is the default;
    **PFD beside MFD** and **PFD above MFD** open a separate multifunction pane.
@@ -216,7 +226,7 @@ saved selections; both can use any catalog reading.*
 *Synthetic fixture. Display bands are chosen for the example and do not represent
 aircraft limits. Unit changes preserve the physical bounds of navigation gauges.*
 
-To explore readings, use **Layout → Open systems**, then search or choose a
+To explore readings, use **Display → Layout & units → Open systems**, then search or choose a
 category. With the search clear and at least one bank reading selected, expand
 **Pinned instruments** below the search for the same graphical bank and saved
 configuration used by the PFD; tap a gauge for its detail.
@@ -310,18 +320,17 @@ IAS/FLC-climb mode. See [the complete action reference](#request-an-aircraft-act
 Use **ArduPlane QuadPlane SITL** for this exercise. After requesting telemetry
 and reading the mission:
 
-1. **Display & data → Load VTOL cove example as local draft**.
+1. **Display → Map, terrain & data → Load VTOL cove example as local draft**.
 2. **Mission controls → Upload draft to aircraft → Confirm & send**. Wait for
    verified readback.
 3. **Mission controls → Show aircraft mission**. This closes the panel; reopen
    **Mission controls**. Its heading must no longer say **LOCAL DRAFT**.
-4. Select **QLOITER → Confirm & send**. Reopen **Mission controls**.
-5. Wait for the simulator's EKF3 and GPS to be ready. Then **Arm aircraft →
+4. Open **Modes** (or **Flight ▾ → Modes**), then **QLOITER → Confirm & send**.
+5. Wait for the simulator's EKF3 and GPS to be ready. Then **Arm / Disarm → Arm aircraft →
    Confirm & send**, and wait until the actual state is **ARMED**. Normal prearm
    checks remain enabled. If arming is refused, read the aircraft's status message
    and wait for readiness. Reopen **Mission controls** after arming succeeds.
-6. Press **Start aircraft mission**, directly below Arm/Disarm and above the
-   mode grid, then **Confirm & send**.
+6. Press **Start aircraft mission** in **Mission controls**, then **Confirm & send**.
 
 ![Mission controls with Start aircraft mission between Arm and Disarm and the mode grid](images/cockpit/start-aircraft-mission.png)
 
@@ -355,7 +364,7 @@ separately; a gap does not mean clear terrain. See [profile details](#flight-pla
 
 ### 8. Set up terrain, satellite imagery and traffic
 
-Open **Display & data**, then **Connection & offline data**:
+Open **Display → Map, terrain & data**, then **Connection & offline data**:
 
 1. Keep **Public data connection → Ground browser internet** to use your laptop
    or tablet's internet. Its network route must actually be ground internet.
@@ -405,7 +414,7 @@ recorder or send a flight command.*
 | Buttons briefly disable after a command | Wait for fresh aircraft details and the pending operation. The panel explains when details are refreshing. |
 | No instruments / FLIGHT DATA UNAVAILABLE | Check the source and connection; use Aircraft status → Request flight telemetry. Do not interpret missing measurements as zero. |
 | A gauge or category is unavailable | Tap it and read its source, age and reason. Optional reports require the corresponding firmware, sensor or companion service; Request flight telemetry cannot supply absent hardware. |
-| Fields or graphical instruments have disappeared | Open **Layout**, enable **Navigation fields across the top** or change **Instrument panel** from Hidden. For either MFD placement, open an MFD page. |
+| Fields or graphical instruments have disappeared | Open **Display → Layout & units**, enable **Navigation fields across the top** or change **Instrument panel** from Hidden. For either MFD placement, open an MFD page. |
 | A timer ends with `*` | It has partial observed history. Inspect it for late attachment, clock handoff or excluded telemetry gaps; it is not a complete flight log. |
 | Arming is refused during the simulator demo | Wait for EKF3 and GPS readiness and inspect the reported prearm reason. Keep the normal autopilot prearm checks enabled. |
 | Heading, altitude, speed or radius unavailable | Those extended GUIDED controls require a fresh supported ArduPlane 4.7.1 identity. Opening Modes does not prove every optional feature is available. |
@@ -414,9 +423,9 @@ recorder or send a flight command.*
 | Terrain is flat or EST AGL is a dash | Check terrain enabled, source/pack coverage, fresh position and verified compatible height datum. The conventional horizon is still useful without terrain. |
 | Waypoint AGL or profile clearance is a dash | Load compatible prepared terrain. Above-home altitude alone does not establish remote AGL; surface coverage can be missing while ground is present. |
 | Map shows the world or no nearby traffic | Check the map's GPS message. Fresh telemetry alone does not establish a position: a controller can report `0,0` with no GPS fix. Ownship, motion projection and nearby traffic wait for a fresh fix and coordinates. They resume automatically when those arrive. The map can still be panned and mission geometry remains visible. |
-| Traffic is enabled but empty | Read the traffic-status message and selected range. A browser-access error may require **Display & data → ADS-B relay origin → Apply ADS-B relay**; this changes only traffic sourcing. HTTP 429 waits for cooldown. No targets does not establish clear airspace. |
+| Traffic is enabled but empty | Read the traffic-status message and selected range. A browser-access error may require **Display → Map, terrain & data → ADS-B relay origin → Apply ADS-B relay**; this changes only traffic sourcing. HTTP 429 waits for cooldown. No targets does not establish clear airspace. |
 | Traffic appears only on the map | Geometric height/geoid conversion, ownship datum or forward field of view may be missing. Import the EGM96 grid through Traffic data setup when applicable. |
-| Skid ball, wind or director disappears | Open its settings for the missing/stale-data reason. Visibility can also be restored from **PFD Menu**. |
+| Skid ball, wind or director disappears | Open its settings for the missing/stale-data reason. Visibility can also be restored from **Display → PFD settings**. |
 | Camera is unavailable / registration unavailable | Select a detected camera and start its stream in Cameras. Use **Use synthetic terrain** for the terrain background. Registered annotations also require physical calibration and capture-time pose; those are not supplied by these screenshots. |
 
 The [walkthrough verification record](console/evidence/2026-09-08-cockpit-telemetry-layouts.md)
@@ -428,7 +437,7 @@ live-provider evidence. Detailed explanations follow below.
 The default view keeps one PFD visible, with a mission inset at the lower left,
 a map/traffic inset at the lower right, top navigation fields and a graphical
 instrument bank. Press either inset's expansion arrow for a larger multifunction
-pane alongside the same PFD. **Layout** also offers a PFD above the MFD. The MFD
+pane alongside the same PFD. **Display → Layout & units** also offers a PFD above the MFD. The MFD
 tabs open the map, flight plan/profile, systems catalog or telemetry inspector.
 Its **×** restores the single PFD with insets. On smaller screens, a side bank
 moves across the top; narrow screens provide a Mission/Map selector and stack an
@@ -451,7 +460,8 @@ remains the default.*
 
 The persistent control strip provides **Direct-To**, **Heading**, **Altitude /
 Speed**, **Loiter**, **Resume Mission**, **RTL**, **Modes**, and **Arm / Disarm**.
-It wraps to two rows on smaller screens. Opening these controls only prepares an
+It stays in one row, with additional actions in **Flight ▾** on smaller screens.
+Opening these controls only prepares an
 operator request; the separate review and confirmation still apply.
 
 The top-center annunciator shows **ACTUAL MODE** and the reported armed state.
@@ -464,7 +474,7 @@ as current. Aircraft status contains the complete operation messages.
 
 The tapes default to indicated airspeed in knots and reported MSL altitude in feet.
 The VSI defaults to measured climb in feet per minute. These units are selectable
-in **Layout**, **Display** below the PFD, or the **Altitude / Speed** controls.
+in **Display → Layout & units** or the **Altitude / Speed** controls.
 Choose **KT / MPH / m/s**, **FT / M**, and **FT/MIN / m/s** independently.
 Changing units preserves the physical value and saves locally. The HSI heading is true north. Magenta
 flight-director cues show the autopilot's reported desired pitch and bank, and
@@ -474,12 +484,14 @@ views; the full view uses their primary instruments to leave room for the insets
 
 Tap airspeed, altitude, heading or the VSI to enter a **local reference**. Cyan
 marks are local display references. Sync live copies a current reading into that
-reference; it is not a command. Display & data selects day/night palette, tape and
-HSI transparency, background and optional sources. The PFD remains screen-fixed
+reference; it is not a command. **Display** selects the cockpit palette;
+**PFD settings** contains tape and HSI transparency, and **Map, terrain & data**
+contains the background and optional sources. The PFD remains screen-fixed
 over a camera image even when scene registration is unavailable.
 
-The autopilot action buttons sit directly below the cockpit header, above the
-configurable user fields. This order is the same in side-column and top-strip
+The autopilot action buttons use the app header, above the configurable user
+fields. Standalone and fullscreen views place that same toolbar inside the
+cockpit. This order is the same in side-column and top-strip
 layouts, including keyboard navigation. Graphical gauges scale their titles,
 faces and secondary readings together to fill their allocated instrument space.
 
@@ -487,7 +499,7 @@ The default top fields are active waypoint, waypoint distance, ETE, estimated
 terrain AGL, ground speed and observed airborne total. The default bank shows battery 1
 current, remaining charge, charge used, cellular signal, Yonder CPU utilisation
 and flight telemetry age. **Fields** and **Instruments** configure these selections;
-**Layout → Instrument panel** chooses placement. Expand the mission pane to see
+**Display → Layout & units → Instrument panel** chooses placement. Expand the mission pane to see
 the preserved lateral-deviation scale: its white center triangle stays fixed while
 the magenta bar uses the same guidance and full-scale setting as the HSI. GUIDED
 loiter labels radial OUT/IN error; unavailable guidance removes the bar.
@@ -701,7 +713,7 @@ reference pointers and compass turn-rate arc.*
 The white ball immediately above the HSI heading readout shows the sideways force felt in the
 aircraft. In coordinated flight it stays between the two center marks, even
 while banked. Wind and a difference between heading and ground track do not by
-themselves move it. Tap the ball, or use **PFD Menu → Slip / skid**, to inspect
+themselves move it. Tap the ball, or use **Display → PFD settings → Slip / skid**, to inspect
 its source measurements or hide it. **Display → Slip / skid ball settings**
 restores it when hidden.
 
@@ -745,7 +757,7 @@ relative to the aircraft's true heading. Arrows point where the wind is blowing:
 **↓ headwind**, **↑ tailwind**, **← from the right**, **→ from the left**. The box uses your selected speed units; its default is knots. Values
 round for display; an arrowhead disappears when its component rounds to zero.
 
-Tap the box, or use **PFD Menu → Wind** or **Display → Wind display settings**.
+Tap the box, or use **Display → PFD settings → Wind** or **Display → PFD settings → Wind**.
 Choose components, wind arrow and speed, direction/arrow/speed, or off. The direction
 view reports the bearing the wind comes **from**, labeled **° T** for true north.
 Settings save on this browser and never issue a flight command.
@@ -764,7 +776,7 @@ not publish this field show **NO WIND DATA** until their core is updated.
 
 ## Read and author a mission
 
-1. Open Aircraft status and press **Read aircraft mission**. A verified transfer
+1. Open **Flight plan → Mission controls → Read aircraft mission**. A verified transfer
    supplies the aircraft mission and its revision, including ArduPilot's home
    record. The authored list excludes that home row explicitly.
 2. Open **Mission controls**, or select a route point on the map. The 55-command
@@ -784,7 +796,7 @@ not publish this field show **NO WIND DATA** until their core is updated.
    remapped when items move; removing a referenced target requires resolving the
    jump first. Imported unknown commands remain inspectable and exportable.
 4. Import Mission Planner WPL `.waypoints` or QGroundControl SimpleItem `.plan`
-   files through Display & data. ComplexItem plans are rejected with a reason.
+   files through Display → Map, terrain & data. ComplexItem plans are rejected with a reason.
    The file limit is 2 MiB, and the aircraft transfer limit is 2,000 wire items,
    including home. Export saves a WPL file. Export drafts before leaving or
    reloading the page; draft and undo history are held in this browser session.
@@ -806,18 +818,18 @@ Use the preview whose header says **ArduPlane QuadPlane SITL**. A fixed-wing
 simulator cannot hover just because its mode list includes QLOITER. The launcher
 setup is in [Native cockpit previews](../scripts/cockpit/README.md#quadplane-vertical-takeoff).
 
-1. **Aircraft → Request flight telemetry**, wait for completion, then **Read
-   aircraft mission**. Allow the fresh simulator's sensors to settle.
-2. **Display & data → Load VTOL cove example as local draft**. Item **01 Vtol
+1. **Aircraft → Request flight telemetry**, wait for completion, then open
+   **Flight plan → Mission controls → Read aircraft mission**. Allow the fresh simulator's sensors to settle.
+2. **Display → Map, terrain & data → Load VTOL cove example as local draft**. Item **01 Vtol
    Takeoff** climbs vertically to **180 ft (54.864 m)**. The first geographic
    waypoint is **02**, and the route remains at **300 ft above home**.
 3. **Mission controls → Upload draft to aircraft → Confirm & send**. Wait for the
    downloaded copy to be verified. Select **Show aircraft mission**; this closes
    the panel. Reopen **Mission controls**. Its heading must no longer say
    **LOCAL DRAFT**. Starting a draft is disabled even after a successful upload.
-4. Select **QLOITER** in the mode list and **Confirm & send**. This selects hover
+4. Open **Modes** (or **Flight ▾ → Modes**) and select **QLOITER** in the mode list and **Confirm & send**. This selects hover
    control; it does not itself start a climb.
-5. Wait for EKF3 and GPS readiness, then **Arm aircraft → Confirm & send**.
+5. Wait for EKF3 and GPS readiness, then **Arm / Disarm → Arm aircraft → Confirm & send**.
    Normal autopilot prearm checks remain enabled. If the request is refused,
    read the reported reason and let the simulator become ready before retrying.
 6. **Start aircraft mission → Confirm & send**. The start button is directly below
@@ -971,7 +983,7 @@ direction, duration, coordinates or action changes only the local draft.
 
 ## Our aircraft breadcrumbs
 
-Press **Trail** below the map, or open **Display & data → Our aircraft
+Press **Trail** below the map, or open **Display → Map, terrain & data → Our aircraft
 breadcrumbs**. A gold dotted line shows the aircraft's observed path, separately
 from the magenta mission and dashed cyan future-motion forecast.
 
@@ -1012,7 +1024,7 @@ The survey and its coverage are independent of the selected cockpit layout.*
 Public-data placement, offline preparation and the explicit aircraft-proxy option
 are described in [Ground geographic data](cockpit-ground-data.md). Sources start
 from the session's selected data options. Enable terrain,
-hybrid imagery and internet traffic independently in Display & data. Executable
+hybrid imagery and internet traffic independently in Display → Map, terrain & data. Executable
 assets are served by the device. The grid map, mission geometry and instruments
 remain useful with sources disabled or unavailable.
 
@@ -1092,7 +1104,7 @@ on the moving map.
 
 ## Select a camera and review calibration
 
-Select a detected/configured camera in Display & data, then choose Camera as the
+Select a detected/configured camera in Display → Map, terrain & data, then choose Camera as the
 background. Automatic selection uses an identified ELP or a sole configured
 camera; an arbitrary camera is not described as forward-facing. The existing
 YonderPicture viewer handles connection, stale-frame reporting and frame geometry.

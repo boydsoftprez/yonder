@@ -15,33 +15,20 @@
   :data-embedded="props.embedded||undefined"
   @keydown.esc="cancelPanel"
 >
-  <header class="cockpit-header"><a
-      href="/dashboard/status"
-      class="cockpit-brand"
-      aria-label="Open systems settings"
-    >YONDER <span>Systems ›</span></a><button
-      class="cockpit-source"
-      :class="{unavailable:!flight.live}"
-      aria-label="Telemetry rate and aircraft status"
-      @click="panel='status'"
-    >{{ flight.live ? (telemetry.source || 'MAVLink') : 'FLIGHT DATA UNAVAILABLE' }}<template v-if="connectionStats&&Number.isFinite(connectionStats.flightHz)"> · {{connectionStats.flightHz.toFixed(1)}} Hz</template></button><button
-      @click="openFlightControls('modes')"
-    >{{ telemetry.mode || 'NO MODE' }} ·
-      {{telemetry.armed===true?'ARMED':telemetry.armed===false?'DISARMED':'—'}}</button><button
-      @click="panel='display'">Display & data</button><button :aria-label="fullscreen?'Exit full screen':'Enter full screen'" :aria-pressed="fullscreen" :disabled="fullscreenBusy" @click="toggleFullscreen">{{fullscreen?'Exit full screen':'Full screen'}}</button><button aria-label="Display setup" @click="panel='display-setup'">Layout</button><button v-if="instrumentAlerts.length" class="cockpit-alert-summary" :title="instrumentAlerts.map(a=>a.label).join(' · ')" @click="panel='alerts'">{{instrumentAlerts.length}} NOTICE{{instrumentAlerts.length===1?'':'S'}}</button><button
-      @click="panel='status'"
-      aria-label="Aircraft and command status"
-    >{{snapshot.operations?.at(-1)?.state || 'Aircraft'}}</button></header>
-  <FlightControlPanel
-    ref="flightControls"
-    :snapshot="agedSnapshot"
-    :available="canCommand"
-    :selected-target="selectedFlightTarget"
-    :options="preferences.display"
-    @option="setOption"
-    @request="({action,label})=>review(action,label)"
-    @pick-target="pickFlightTarget"
-  />
+  <Teleport :to="headerDocked?headerActions:'body'" :disabled="!headerDocked">
+   <div class="y-cockpit cockpit-chrome" :data-palette="palette" :data-docked="headerDocked">
+    <span v-if="telemetry.source?.includes('FIXTURE')" class="cockpit-fixture-label">SYNTHETIC<br>FIXTURE</span>
+    <FlightControlPanel ref="flightControls" compact :snapshot="agedSnapshot" :available="canCommand" :selected-target="selectedFlightTarget" :options="preferences.display" @option="setOption" @request="({action,label})=>review(action,label)" @pick-target="pickFlightTarget"/>
+    <nav class="cockpit-utilities" aria-label="Cockpit pages and display controls">
+     <button class="utility-extra" @click="showFlightPlan">Flight plan</button>
+     <button class="utility-display" aria-label="Display menu" @click="panel='display-menu'">Display</button>
+     <button class="utility-extra" aria-label="Aircraft and command status" @click="panel='status'">Aircraft<small>{{flight.live?(telemetry.mode||'MAVLink'):'No data'}}<template v-if="connectionStats&&Number.isFinite(connectionStats.flightHz)"> · {{connectionStats.flightHz.toFixed(1)}} Hz</template></small></button>
+     <button v-if="instrumentAlerts.length" class="cockpit-alert-summary" aria-label="Show aircraft notices" @click="panel='alerts'">{{instrumentAlerts.length}} !</button>
+     <button class="utility-extra cockpit-fullscreen" :aria-label="fullscreen?'Exit full screen':'Enter full screen'" :title="fullscreen?'Exit full screen':'Full screen'" :aria-pressed="fullscreen" :disabled="fullscreenBusy" @click="toggleFullscreen">{{fullscreen?'↙':'⛶'}}</button>
+     <button class="utility-more" aria-label="Cockpit menu" @click="panel='cockpit-menu'">Menu</button>
+    </nav>
+   </div>
+  </Teleport>
   <FlightDataBar v-if="!customInstrumentSlot&&displayConfig.showDataBar" :items="instrumentItems" :config="topInstrumentConfig" @select="openInstrument" @update:config="setTopInstrumentConfig"/>
   <div v-if="customInstrumentSlot?preferences.display.stripPlacement==='mfd':['side','top'].includes(bankPlacement)" class="cockpit-navigation-data" aria-label="Mission and navigation instrument data">
     <slot name="instrument-strip" :telemetry="displayTelemetry" :live="flight.live">
@@ -61,7 +48,7 @@
       :telemetry="displayTelemetry"
       :mission="actualMission"
       :references="preferences.references"
-      :options="{...preferences.display,stripPlacement:customInstrumentSlot?preferences.display.stripPlacement:'hidden',syntheticVision:onlineTerrain}"
+      :options="{...preferences.display,stripPlacement:customInstrumentSlot?preferences.display.stripPlacement:'hidden',syntheticVision:onlineTerrain,menuStrip:false}"
       :home-navigation="displayConfig.homePointer?homeInfo:null"
       :reported-flight-state="reportedFlightState"
       :cdi-scale="cdiScale"
@@ -278,8 +265,8 @@
     @start="review({kind:'mission-start'},'Start aircraft mission')"
   />
   <MissionHome v-if="homeOpen" :home="shownMission.home" :controller-home="snapshot.telemetry?.homePosition" :initial="homeForm" :options="preferences.display" :can-set="canCommand&&snapshot.capabilities?.homeControl?.available===true" :unavailable-reason="snapshot.capabilities?.homeControl?.reason" :external-error="homeError" :busy="sending||snapshot.busy" :operation="homeOperation" :provider="groundData" :terrain-enabled="onlineTerrain" @close="closeHome" @save="saveHome" @pick="pickHome" @review="reviewHome"/>
+  <CockpitOverlay v-if="reviewing" @escape="cancelReview">
   <div
-    v-if="reviewing"
     class="cockpit-scrim"
     @click.self="cancelReview"
   >
@@ -361,8 +348,9 @@
       </div>
     </section>
   </div>
+  </CockpitOverlay>
+  <CockpitOverlay v-if="panel&&panel!=='display-setup'" @escape="panel=null">
   <div
-    v-if="panel&&panel!=='display-setup'"
     class="cockpit-scrim"
     @click.self="panel=null"
   >
@@ -371,17 +359,34 @@
       class="cockpit-dialog"
       role="dialog"
       aria-modal="true"
-      :aria-label="panel==='alerts'?'Aircraft notices':panel==='display'?'Cockpit display and data sources':panel==='traffic'?'Traffic display':panel==='trail'?'Aircraft breadcrumb settings':'Aircraft status'"
+      :aria-label="panel==='display'?'Cockpit display and data sources':panelHeading"
       @keydown="trap"
     >
       <header>
-        <h2>{{panel==='alerts'?'Aircraft notices':panel==='display'?'Display & data':panel==='traffic'?'Traffic':panel==='trail'?'Aircraft breadcrumbs':'Aircraft status'}}</h2><button
+        <h2>{{panelHeading}}</h2><button
           @click="panel=null"
           aria-label="Close cockpit panel"
         >×</button>
       </header>
       <div class="cockpit-dialog-body">
-        <template v-if="panel==='alerts'">
+        <template v-if="panel==='display-menu'">
+          <label>Cockpit palette<select v-model="palette" aria-label="Cockpit palette"><option value="day">Day</option><option value="night">Night</option></select></label>
+          <div class="cockpit-menu-grid">
+            <button aria-label="Display setup" @click="panel='display-setup'">Layout & units<small>PFD/MFD arrangement · instrument placement</small></button>
+            <button @click="openPfdSettings('menu')">PFD settings<small>Instruments · references · attitude display</small></button>
+            <button @click="panel='display'">Map, terrain & data<small>Background · sources · traffic · breadcrumbs</small></button>
+            <button @click="openPfdSettings('director')">Flight director<small>Cue style and visibility</small></button>
+          </div>
+          <p>Tap a flight instrument to open its settings. Fields and Instruments select which readings are shown. App appearance is managed in Settings.</p>
+        </template>
+        <template v-else-if="panel==='cockpit-menu'">
+          <div class="cockpit-menu-grid">
+            <button @click="showFlightPlan">Flight plan</button><button @click="openHome()">Home…</button>
+            <button @click="panel='display-menu'">Display</button><button @click="panel='status'">Aircraft status & telemetry</button>
+            <button @click="panel=null;toggleFullscreen()">{{fullscreen?'Exit full screen':'Full screen'}}</button><button @click="panel='alerts'">Aircraft notices</button>
+          </div>
+        </template>
+        <template v-else-if="panel==='alerts'">
           <h3>Reported conditions</h3><p v-if="!instrumentAlerts.some(a=>!a.id.startsWith('status.'))">No current structured condition is reported in these readings.</p>
           <div v-for="notice in instrumentAlerts.filter(a=>!a.id.startsWith('status.'))" :key="notice.id" class="cockpit-aircraft-notice"><strong>{{notice.label}}</strong><p>{{notice.reason}}</p><button @click="openInstrument(notice.id)">Inspect reading</button></div>
           <h3>Recent aircraft messages</h3><p>These are received messages; a past message does not establish that its condition is still active.</p>
@@ -403,7 +408,7 @@
             <label v-if="sourceMode==='ground'">Optional ADS-B relay origin<input v-model="trafficRelayInput" type="url" placeholder="https://ground.example" aria-label="ADS-B relay origin" /></label>
             <button v-if="sourceMode==='ground'" @click="applyTrafficRelay">Apply ADS-B relay</button>
             <p v-if="sourceMode==='ground'">An ADS-B relay changes only traffic sourcing. Imagery and terrain keep their selected connection. Leave it blank to use the general ground relay or direct ADSB.lol access.</p>
-            <TelemetrySettings :rate="telemetryRate" :stats="connectionStats" :can-request="canCommand&&!sending" @rate="telemetryRate=$event" @request="sendReadAction('stream-setup')"/>
+            <button @click="panel='status'">Telemetry rate & connection details</button>
             <p v-if="connectionStats">Flight payload {{fmt(connectionStats.flightBytes)}} bytes · instrumentation {{fmt(connectionStats.instrumentBytes)}} bytes at up to 1 Hz · received JSON {{fmt(connectionStats.bytesPerSecond/1024,1)}} KiB/s. Mission transfers {{connectionStats.missionTransfers}}; detail transfers {{connectionStats.detailsTransfers}}. Excludes HTTP overhead, video and public data.</p>
             <div class="cockpit-actions">
               <button :disabled="dataBusy" @click="$refs.terrainPackFiles.click()">Import terrain folder</button>
@@ -419,13 +424,7 @@
             <p v-if="groundStatus.error" role="status">{{groundStatus.error}}</p>
             <p v-if="snapshot.detailError" role="status">Aircraft details: {{snapshot.detailError}}</p>
           </fieldset>
-          <label>Palette<select
-              aria-label="Palette"
-              v-model="palette"
-            >
-              <option value="day">Day</option>
-              <option value="night">Night</option>
-            </select></label><label>Background<select v-model="background">
+          <label>Background<select v-model="background">
               <option value="terrain">Synthetic terrain</option>
               <option value="camera">Camera</option>
               <option value="camera-overlay">Camera + registered terrain</option>
@@ -544,6 +543,7 @@
           <p>{{trafficReport.attribution||'Source attribution appears with an enabled feed'}}</p>
         </template>
         <template v-else>
+          <div class="cockpit-menu-grid"><button @click="openFlightControls('modes')">Modes</button><button @click="openFlightControls('arm')">Arm / Disarm</button></div>
           <TelemetrySettings :rate="telemetryRate" :stats="connectionStats" :can-request="canCommand&&!sending" @rate="telemetryRate=$event" @request="sendReadAction('stream-setup')"/>
           <dl>
             <div>
@@ -567,11 +567,7 @@
               <dd>{{fmt(flight.navPitch,1)}}° / {{fmt(flight.navRoll,1)}}°</dd>
             </div>
           </dl>
-          <div class="cockpit-actions"><button
-              :disabled="!canCommand"
-              @click="sendReadAction('mission-download')"
-            >Read aircraft mission</button><button @click="openFlightControls('modes')">Autopilot controls</button>
-          </div>
+          <div class="cockpit-actions"><button @click="showFlightPlan">Flight plan · read or upload mission</button></div>
           <article
             v-for="op in snapshot.operations||[]"
             :key="op.id"
@@ -582,6 +578,7 @@
       </div>
     </section>
   </div>
+  </CockpitOverlay>
   <input ref="terrainPackFiles" type="file" multiple webkitdirectory hidden @change="importGroundFiles('terrain',$event)" />
   <input ref="offlineMapFiles" type="file" multiple webkitdirectory hidden @change="importGroundFiles('map',$event)" />
   <input ref="geoidFile" type="file" accept=".pgm" hidden @change="importGroundFiles('geoid',$event)" />
@@ -601,6 +598,7 @@
 </main>
 </template>
 <script>
+import CockpitOverlay from './cockpit/CockpitOverlay.vue';
 import CockpitDisplaySetup from './cockpit/CockpitDisplaySetup.vue';
 import InstrumentBank from './cockpit/instruments/InstrumentBank.vue';
 import FlightDataBar from './cockpit/instruments/FlightDataBar.vue';
@@ -682,7 +680,9 @@ const empty = () => ({
 const clone = value => JSON.parse(JSON.stringify(value))
 export default {
   name: 'YonderCockpit',
+  provide(){return {cockpitPalette:()=>this.palette}},
   components: {
+    CockpitOverlay,
     CockpitDisplaySetup,InstrumentBank,FlightDataBar,InstrumentationPanel,
     MissionWaypointList,MissionPlanning,
     TelemetryStrip,
@@ -732,7 +732,7 @@ export default {
   data() {
     return {
       snapshot: this.report || this.props.report || empty(),
-      layout: 'full',viewportWidth:1200,
+      layout: 'full',viewportWidth:1200,windowWidth:1200,
       displayConfig:cockpitDisplaySettings(),bankInstrumentConfig:defaultBankConfig(),topInstrumentConfig:defaultTopConfig(),
       instrumentation:null,instrumentReceivedAt:Date.now(),instrumentTimer:null,instrumentBusy:false,instrumentError:'',selectedInstrument:null,instrumentHistory:{},
       mfdPages:[{id:'map',label:'Map'},{id:'mission',label:'Flight plan'},{id:'systems',label:'Systems'},{id:'inspector',label:'Telemetry'}],
@@ -758,6 +758,7 @@ export default {
       dataSyncing: false,
       dataSyncPending: false,
       telemetryRate: defaultTelemetryRate,
+      headerActions:null,headerActive:true,
       homeOpen:false,homePicking:false,homeForm:null,homeReturnLayout:'full',homeError:'',
       connectionStats: null,
       trafficReport: {
@@ -804,6 +805,8 @@ export default {
     }
   },
   computed: {
+    panelHeading(){return ({'display-menu':'Display','cockpit-menu':'Cockpit menu',alerts:'Aircraft notices',display:'Map, terrain & data',traffic:'Traffic display',trail:'Aircraft breadcrumb settings','draft-conflict':'Draft context changed'})[this.panel]||'Aircraft status'},
+    headerDocked(){return this.headerActive&&!this.fullscreen&&this.headerActions?.isConnected===true&&this.windowWidth>=600},
     customInstrumentSlot(){return !!this.$slots['instrument-strip']},
     bankPlacement(){return this.customInstrumentSlot?'top':this.displayConfig.bankPlacement==='side'&&this.viewportWidth<960?'top':this.displayConfig.bankPlacement},
     mfdOpen(){return this.displayConfig.arrangement!=='single'||this.layout!=='full'},
@@ -938,6 +941,7 @@ export default {
     }
   },
   watch: {
+    headerDocked(){this.$nextTick(this.fitViewport)},
     telemetryRate(value){if(telemetryRates.includes(value))try{localStorage.setItem('yonder-telemetry-rate-v1',String(value))}catch{}},
     palette(value) { if(['day','night'].includes(value)){try{localStorage.setItem('yonder-cockpit-palette-v1',value)}catch{}} },
     sourceMode() { this.dataOptions('sourceMode') },
@@ -984,6 +988,7 @@ export default {
     }
   },
   mounted() {
+    this.headerActions=markRaw(document.querySelector('#app-bar-actions')||{});
     this.$nextTick(() => {
       this.fitViewport();
       if (typeof ResizeObserver !== 'undefined') {
@@ -1026,6 +1031,8 @@ export default {
     if(this.source?.instruments&&!this.report&&!this.props.report)this.pollInstruments();
     this.instrumentTimer=setInterval(()=>{if(this.source?.instruments&&!this.report&&!this.props.report)this.pollInstruments();this.recordInstrumentHistory()},1000)
   },
+  activated(){this.headerActive=true},
+  deactivated(){this.headerActive=false;this.cancelPanel();this.$refs.flightControls?.close();this.$refs.pfd?.close()},
   beforeUnmount() {
     this.viewportObserver?.disconnect();
     window.removeEventListener('resize', this.fitViewport);
@@ -1067,6 +1074,7 @@ export default {
     clearOwnTrail(){const trail=this.snapshot.ownTrail;if(trail)this.ownTrailCleared={epoch:trail.epoch,after:trail.latest};this.saveOwnTrail()},
     restoreOwnTrail(){this.ownTrailCleared=null;this.saveOwnTrail()},
     fitViewport() {
+      this.windowWidth=window.innerWidth;
       if(this.$el?.clientWidth)this.viewportWidth=this.$el.clientWidth;
       if(this.$el&&document.fullscreenElement===this.$el){this.$el.style.setProperty('--cockpit-height',window.innerHeight+'px');return}
       if (!this.$el || this.props.embedded) return;
@@ -1163,12 +1171,13 @@ export default {
     navigate(target) {
       if(target==='instrument-layout'){this.panel='display-setup';return}
       if(target==='instruments'){this.openMfdPage('systems');return}
-      if(['mission','waypoints'].includes(target)){this.openMfdPage('mission');return}
+      if(['mission','waypoints'].includes(target)){this.showFlightPlan();return}
       if(target==='direct'){this.openFlightControls('direct');return}
       if (target === 'display' || target === 'settings') {
-        this.panel = 'display';
+        this.panel = 'display-menu';
         return
       }
+      if(target==='sources'){this.panel='display';return}
       if (target === 'status') {
         this.panel = 'status';
         return
@@ -1176,6 +1185,8 @@ export default {
       this.layout = 'mission';
       this.openMission(null)
     },
+    showFlightPlan(){this.panel=null;this.missionOpen=false;this.openMfdPage('mission')},
+    openPfdSettings(kind){this.panel=null;this.$refs.pfd?.open(kind)},
     openMission(selection) {
       this.selection = selection;
       this.missionOpen = true;
@@ -1565,6 +1576,7 @@ export default {
 <style src="./cockpit/prototype.css"></style>
 <style src="./cockpit/cockpit.css"></style>
 <style src="./cockpit/cockpit-layouts.css"></style>
+<style src="./cockpit/cockpit-chrome.css"></style>
 <style scoped>
 .cockpit-data-settings { border: 1px solid var(--cockpit-border, #52616e); padding: 12px; margin-bottom: 16px; min-width: 0; }
 .cockpit-data-settings legend { font-weight: 700; padding: 0 6px; }
