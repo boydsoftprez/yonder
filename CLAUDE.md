@@ -122,6 +122,7 @@ none was ours to make.
 | mediamtx for all media serving, not Janus | [ADR-0003](docs/adr/0003-mediamtx-not-janus.md) |
 | ZeroTier primary, Tailscale second | [ADR-0004](docs/adr/0004-zerotier-primary-mesh-vpn.md) |
 | Console visual language: a glass display in a carbon panel | [ADR-0009](docs/adr/0009-console-visual-language.md) |
+| Brand: material airframe and split-Y wordmark | [Approved identity and integration](docs/brand/approved/INTEGRATION.md) |
 
 Reopen only with new evidence, and say what changed.
 

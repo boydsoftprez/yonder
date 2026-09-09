@@ -5,6 +5,9 @@ wing surfaces, and satin graphite lettering. The material treatment is used on
 both the login and the console header. The night version lifts the ink and blue
 for the carbon panel.
 
+For app and parallel-task integration, use the [integration guide](INTEGRATION.md)
+for source locations, header spacing, build steps, and activation requirements.
+
 ## Assets
 
 | File | Use |
