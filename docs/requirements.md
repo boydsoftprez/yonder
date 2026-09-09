@@ -122,7 +122,7 @@ Parameter writes are vehicle commands. R-CMD applies to every requirement here.
 | R-VID-05 | **Deliver every configured output simultaneously.** Browser preview and ground-station streaming are not mutually exclusive | 1 |
 | R-VID-06 | Serve SRT for lossy links, with recovery | 2 |
 | R-VID-07 | Adapt encoder bitrate to receiver-observed link conditions, within an operator-set floor and ceiling. Retain loss, delay and delivery feedback when the browser lacks a capacity estimate; use bounded probes, label their evidence, recover after congestion, and show actual encoder readback. Never treat silence as spare capacity or a local receiver as proof of an independent LTE path | 2 |
-| R-VID-08 | Allow a fixed bitrate where the operator prefers determinism | 1 |
+| R-VID-08 | Allow a fixed bitrate where the operator prefers determinism. Use constant-bitrate rate control on V4L2 H.264 encoders for both fixed and adaptive targets, preserving it on retunes; verify actual encoded output as well as the configured target | 1 |
 | R-VID-09 | Give a late-joining receiver a decodable picture without waiting for the next natural keyframe. Raised from 3: a browser reconnecting after a link drop is a late joiner, and without this it sees a grey rectangle for up to a GOP | 2 |
 | R-VID-10 | Publish the exact receive-side pipeline for each codec, so a ground station can be configured from the documentation alone | 1 |
 | R-VID-11 | Report the egress bandwidth each running output consumes and their total, against the capacity of the path they leave by. R-VID-05 makes simultaneous outputs possible; this is what stops an operator oversubscribing a link without being told | 1 |
