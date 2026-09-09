@@ -1,0 +1,37 @@
+{
+  "sources": [
+    {
+      "attribution": "U.S. Geological Survey, 3D Elevation Program (public domain)",
+      "surveyStart": "2016-02-05",
+      "surveyEnd": "2016-04-04",
+      "kind": "dem",
+      "id": "USGS_one_meter_x28y399_TN_Eastern_2_16_B16_Del2_2016",
+      "file": "dem.tif",
+      "url": "https://prd-tnm.s3.amazonaws.com/StagedProducts/Elevation/1m/Projects/TN_Eastern_2_16_B16_Del2_2016/TIFF/USGS_one_meter_x28y399_TN_Eastern_2_16_B16_Del2_2016.tif",
+      "bytes": 292947020,
+      "sha256": "ec2482e3bf4284b6296a95d55b316aab9751a715e6793e5e338c88063ea8f98b"
+    },
+    {
+      "attribution": "U.S. Geological Survey, 3D Elevation Program (public domain)",
+      "surveyStart": "2016-02-05",
+      "surveyEnd": "2016-04-04",
+      "kind": "lidar",
+      "id": "2738597NE",
+      "file": "2738597NE.laz",
+      "url": "https://rockyweb.usgs.gov/vdelivery/Datasets/Staged/Elevation/LPC/Projects/TN_Eastern_TN_LiDAR_2016_B16/TN_Eastern_2_16_B16_Del2_2016/LAZ/USGS_LPC_TN_Eastern_TN_LiDAR_2016_B16_2738597NE.laz",
+      "bytes": 91700533,
+      "sha256": "8d51e8506c1991af5af87031edf9e2ee71e6c132531f3b3229421d392478867e"
+    },
+    {
+      "attribution": "U.S. Geological Survey, 3D Elevation Program (public domain)",
+      "surveyStart": "2016-02-05",
+      "surveyEnd": "2016-04-04",
+      "kind": "lidar",
+      "id": "2738597SE",
+      "file": "2738597SE.laz",
+      "url": "https://rockyweb.usgs.gov/vdelivery/Datasets/Staged/Elevation/LPC/Projects/TN_Eastern_TN_LiDAR_2016_B16/TN_Eastern_2_16_B16_Del2_2016/LAZ/USGS_LPC_TN_Eastern_TN_LiDAR_2016_B16_2738597SE.laz",
+      "bytes": 109014580,
+      "sha256": "aa9fe494df32dd9fc60dff53e7353c8880651a42698da3415d3408d464f0135b"
+    }
+  ]
+}

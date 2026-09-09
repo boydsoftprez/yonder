@@ -288,7 +288,7 @@ Parameter writes are vehicle commands. R-CMD applies to every requirement here.
 | R-SEC-03 | Run the control plane as a dedicated unprivileged user, using narrowly scoped helpers for privileged operations | 2 |
 | R-SEC-04 | Expose no unauthenticated write path to configuration or to the vehicle from a non-loopback interface by default | 1 |
 | R-SEC-05 | Gate any code-execution surface behind a password set during setup, and expose it on no public-facing interface by default | 1 |
-| R-SEC-06 | Contact no external service, ever. No activation, no licence check, no usage reporting | 1 |
+| R-SEC-06 | Make no activation, licence-check, analytics or usage-reporting request. External terrain, imagery and traffic data are allowed only when explicitly enabled by the operator under R-FLT-06; executable interface assets remain local. Disabled sources make no requests | 1 |
 | R-SEC-07 | Include no credential material in a published image | 1 |
 | R-SEC-08 | Offer TLS for the web interface | 2 |
 | R-SEC-09 | **Until an administrator password has been set, the console offers no function but setting one.** No configuration read, no command, and no status beyond two things: whether a password has been set, and whether the device is healthy enough to set one. The second is a deliberate carve-out — a board that cannot say *why* it is refusing is a board that goes back in a box — and it is bounded to state that names no configuration, no interface, no address and no credential | 1 |
@@ -301,7 +301,7 @@ Parameter writes are vehicle commands. R-CMD applies to every requirement here.
 
 | ID | Requirement | P |
 |---|---|---|
-| R-UI-01 | Serve the entire interface from the device, with no asset fetched from the internet at runtime | 1 |
+| R-UI-01 | Serve all executable interface assets from the device, including scripts, fonts, component styles and instrument graphics. Optional geographic and traffic data follow R-FLT-06; no runtime script CDN is permitted | 1 |
 | R-UI-02 | Work fully in a browser with no installed software beyond the browser | 1 |
 | R-UI-03 | Build navigation from detected hardware, so a camera that is not present has no section | 2 |
 | R-UI-04 | Remain usable on a tablet in the field | 2 |
@@ -333,6 +333,39 @@ Parameter writes are vehicle commands. R-CMD applies to every requirement here.
 
 ---
 
+## R-FLT — Touch cockpit and flight display
+
+| ID | Requirement | P |
+|---|---|---|
+| R-FLT-01 | Preserve the existing instrument behavior in a native, browser-served PFD. Tablet landscape and laptop layouts default to one PFD with mission and moving-map insets that expand without losing the attitude display | 1 |
+| R-FLT-02 | Authenticate flight reads and writes through the console. Attach server-derived session provenance and an operation ID to each explicit operator request; require review and confirmation for commands that change aircraft behavior. Opening a page, polling or reconnecting never issues a flight command | 1 |
+| R-FLT-03 | Decode validated MAVLink with per-field source and freshness. Depict measured vertical speed, CDI, flight director and actual mode/target only when their source and navigation context are valid; local reference bugs remain visibly distinct | 1 |
+| R-FLT-04 | Serialize mission transfers and command transactions. Validate target vehicle generation and mission revision; distinguish sent, acknowledged, observed, rejected and unknown outcomes. Preserve Mission Planner item parameters, sequence references, frames and home semantics during import/edit/export | 1 |
+| R-FLT-05 | Provide contextual mission waypoint and arbitrary map-point actions, including go-to and loiter. State altitude datum explicitly as MSL, home-relative or terrain-relative; refuse unsupported or unverified datum handling. The autopilot owns flight control, mission execution and failsafes | 1 |
+| R-FLT-06 | Permit operator-enabled public geographic and ADS-B data with visible provider, attribution, age and failure state. Bound downloads, polling, cache size and target history. No external service is needed to authenticate or use local telemetry, commands or camera video | 1 |
+| R-FLT-07 | Show traffic within an operator-selected depiction radius on the map and synthetic view. Breadcrumbs represent actual observations, with gaps and stale positions retained as such. Vision placement requires a verified altitude datum; pressure altitude is never silently treated as geometric MSL | 1 |
+| R-FLT-08 | Render terrain with bounded levels of detail and independent pose updates. Pace drawing separately from telemetry reception, interpolate only between received poses with a bounded cadence-aware buffer, and retain unchanged geometry and imagery during region updates. Stream verified prepared tiles from an explicitly selected ground source with bounded measured-motion look-ahead and caches. Show estimated AGL beneath MSL altitude only for fresh compatible height data; otherwise mark it unavailable. Support prepared high-resolution ground and LiDAR-derived surface data with source, survey date, units, vertical datum, coverage and nodata metadata. Missing coverage is never invented terrain | 1 |
+| R-FLT-09 | Offer terrain, fixed forward camera and registered camera-overlay backgrounds using the existing camera transport. Registered overlays require valid lens/mount/crop calibration, frame/pose timing and datum alignment. Unknown registration or missing data produces a stated unavailable state rather than an apparently aligned warning | 1 |
+| R-FLT-10 | Distinguish waypoint ETE from turn anticipation and actual autopilot cues. Time/distance path prediction states its assumptions and uses available motion data; no calculated timer is presented as autopilot intent. Expose cockpit settings, command outcomes and a complete walkthrough | 2 |
+| R-FLT-11 | Source public traffic, imagery and display terrain on the ground browser by default, with bounded local history/cache and explicit offline preparation. Distinguish an empty traffic search from missing aircraft position, provider refusal and rate limiting; honor provider cooldowns, including across clients using the same ground relay. Aircraft-proxied public downloads require explicit selection and never become an automatic fallback | 1 |
+| R-FLT-12 | Carry compact fresh flight updates independently of mission items, command history and geographic data. Transfer stable details on change or explicit request; expose source and link usage so aircraft bandwidth can be budgeted | 1 |
+| R-FLT-13 | Keep common flight controls available beside the PFD: direct-to, supported heading/altitude/speed requests, loiter, resume mission, return and mode selection. Show requested, accepted and reported states separately; unsupported modes or targets remain explicit | 1 |
+| R-FLT-14 | Let a waypoint's action change while preserving its location and mission references. Present loiter radius, direction and duration separately and preview the geometry before an explicit mission upload | 1 |
+| R-FLT-15 | Depict the aircraft's observed breadcrumb trail with distance, time and since-power-on windows, separate from traffic and future motion. Retain bounded history in the vehicle service for browser recovery; transfer new points compactly. Break telemetry gaps, start new history on detected autopilot reboot or aircraft replacement, and disclose late recording, simplification and unavailable history. Trail display controls never command the aircraft | 1 |
+| R-FLT-16 | Show the autopilot's fresh wind estimate on the PFD with heading-relative headwind/tailwind and left/right crosswind arrows in knots. Offer touch selection of component, vector, direction/speed and off views. Label estimates and true-north bearings explicitly; missing, invalid or stale wind/heading is unavailable, never assumed calm. Carry wind compactly without external weather downloads; stream setup remains an explicit operator action | 2 |
+| R-FLT-17 | Show a slip/skid ball from fresh calibrated aircraft-frame acceleration with known units and sensor health. A coordinated turn remains centered regardless of bank; stale, unhealthy or unsuitable acceleration removes the ball and shows unavailable. Provide touch visibility/status controls and bounded travel. Display controls never command the aircraft | 1 |
+| R-FLT-18 | Provide an isolated QuadPlane simulator and an explicitly selected VTOL mission example. The example climbs vertically to 180 ft above its ground takeoff point, then lets the autopilot transition toward the first route waypoint and climb to the route altitude. Preserve the original mission separately. Loading the example is local only; upload, arm and mission start remain explicit reviewed actions. Keep mission start readily accessible and explain draft-related restrictions | 1 |
+| R-FLT-19 | Place the measured slip/skid ball above the HSI heading readout. Provide independent standard-rate bank pointers and a measured heading-rate arc with half/standard-rate marks and overrange indication. Distinguish estimates from directly measured data and flight-director commands, expose touch visibility/status controls, and expire each source independently. New packets arriving between display clock ticks must not cause transient unavailable indications | 1 |
+| R-FLT-20 | Follow the fresh, verified AUTO mission sequence in the waypoint list, showing FROM → TO and the next geographic item in planned order. Let manual scrolling pause following and provide a local control to restore it. Keep HSI and expanded lateral deviation on the same uploaded leg course and measured autopilot cross-track sample; withhold the needle when target, path or sequence disagree during a handoff. Do not present steering bearing as leg course or guess mission-jump outcomes | 1 |
+| R-FLT-21 | Provide locally persisted altitude units (feet/metres), speed units (knots/mph/m/s) and vertical-speed units (ft/min/m/s) for instruments, references, mission altitude/speed fields and operator flight requests. Unit changes preserve physical values; protocol and mission storage retain canonical units. Explain unverified climb-rate response and distinguish airspeed requests from a coupled IAS climb mode | 1 |
+| R-FLT-22 | Provide touch waypoint altitude cells and a magenta connector from the preceding waypoint to the active target. Show estimated waypoint AGL only with compatible terrain and height references. Offer a route profile with separate planned altitude, native ground and mapped-surface samples, distance inspection, source/survey metadata and missing-coverage gaps. Label straight-leg interpolation and omit unresolved jump/loiter/return geometry. Bound downloads, memory and samples; aircraft-sourced route loading requires an explicit local request. Profile and draft edits never initiate flight commands | 1 |
+| R-FLT-23 | Provide a selectable telemetry catalog spanning home/navigation, flight timers, battery/energy, propulsion, navigation health, terrain/rangefinders, VTOL/landed state, controller health, fences/alerts, radio/controls and payload. Preserve sensor instance, units, source, freshness and unavailable reasons. Home geometry is calculated from reported positions; observed flight counters distinguish late attachment, gaps and reboot, and are independent of browser lifetime | 1 |
+| R-FLT-24 | Provide locally saved navigation data fields and graphical instrument layouts with selectable readings, source instances, supported gauge forms, order and restore defaults. Separate display-scale limits from aircraft failsafe configuration. Keep essential aircraft alerts visible independently of instrument selection, and provide grouped details, bounded trends and a searchable received-telemetry inspector | 1 |
+| R-FLT-25 | Retain a single PFD with expandable insets as the default, and offer separate adjacent or stacked multifunction panes for map, flight plan/profile and systems. Allow the instrument bank beside the PFD, across the top, on the MFD or hidden. Preserve the flight display and reviewed command context during layout changes; saved settings remain validated and usable at laptop and tablet sizes | 1 |
+| R-FLT-26 | Carry slower aircraft and companion instrumentation separately from fast flight updates, using bounded compact transfers and shared cached host readers. Show companion CPU utilisation, temperature/memory/storage and available modem/media state with explicit source identity; do not relabel load average as CPU percentage or radio signal as usable bandwidth | 1 |
+
+---
+
 ## Non-requirements
 
 Stated explicitly, because each has been asked for and each is declined:
@@ -344,8 +377,9 @@ Stated explicitly, because each has been asked for and each is declined:
   autonomous reactions to link loss or battery state, and no failsafe logic; the autopilot
   owns all of that. Every command Yonder sends is one an operator asked for, and the
   autopilot remains free to reject it.
-- **Yonder is not a ground station.** Mission Planner and QGroundControl exist; Yonder
-  interoperates with them.
+- **Yonder interoperates with Mission Planner and QGroundControl.** Its touch cockpit
+  exposes operator mission and flight commands under R-FLT; it does not replace the
+  autopilot or independently execute flight behaviors.
 - **Yonder has no cloud component**, no account, no fleet management and no telemetry
   reporting.
 - **Yonder does not gate features behind a licence.** There is no activation step and no

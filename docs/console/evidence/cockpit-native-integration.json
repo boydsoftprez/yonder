@@ -1,0 +1,40 @@
+{
+  "schema": 1,
+  "at": "2026-09-07T16:46:46.325Z",
+  "kind": "Native production API adapters / isolated official ArduPlane 4.7.1",
+  "scope": "Explicit telemetry setup, mission read and Cove upload/readback",
+  "stages": [
+    {
+      "action": "stream-setup",
+      "state": "accepted",
+      "message": "Autopilot accepted; physical effect is not measured by this command",
+      "at": 1788799529911
+    },
+    {
+      "action": "mission-download",
+      "state": "observed",
+      "message": "Complete vehicle mission downloaded",
+      "at": 1788799529971
+    },
+    {
+      "action": "mission-upload",
+      "state": "observed",
+      "message": "Mission accepted and downloaded copy verified; home is the actual vehicle home",
+      "at": 1788799530690
+    }
+  ],
+  "concurrency": "The operator used browser Arm and AUTO before this API check. AUTO on the then-empty mission led ArduPlane to RTL. No flight-state assertion is made for this concurrent interactive session.",
+  "final": {
+    "source": "ArduPlane SITL",
+    "missionSynchronization": "verified",
+    "wireItems": 15,
+    "terrainPack": {
+      "id": "cove-usgs-2016",
+      "available": true
+    },
+    "traffic": {
+      "status": "error",
+      "observedTracks": 15
+    }
+  }
+}

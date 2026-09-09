@@ -1,0 +1,43 @@
+{
+  "imported": {
+    "id": "cove-usgs-2016",
+    "title": "Cove — USGS 2016 one metre terrain and mapped surface",
+    "tiles": 227,
+    "bytes": 20973049,
+    "datum": "EGM96"
+  },
+  "reloaded": {
+    "status": {
+      "mode": "offline",
+      "terrain": true,
+      "imagery": false,
+      "traffic": false,
+      "trafficRadiusNm": 25,
+      "groundRelayUrl": "",
+      "revision": 2,
+      "cacheBytes": 0,
+      "terrainCacheBytes": 2597544,
+      "pendingRequests": 0,
+      "offlineTerrain": {
+        "id": "cove-usgs-2016",
+        "title": "Cove — USGS 2016 one metre terrain and mapped surface",
+        "tiles": 227,
+        "datum": "EGM96"
+      },
+      "offlineMap": null,
+      "error": null,
+      "geoid": null,
+      "attribution": "Imported map"
+    },
+    "spacingM": 1,
+    "farSpacingM": 4,
+    "meshes": 30,
+    "sample": {
+      "groundM": 316.3831050073498,
+      "surfaceM": 319.1868015667839,
+      "datum": "EGM96",
+      "covered": true
+    }
+  },
+  "aircraftRequests": []
+}

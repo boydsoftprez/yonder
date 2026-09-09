@@ -27,12 +27,13 @@ the earlier proposed integration base in the live-cockpit bench plan.
 - [x] Identify camera task, branch and last recorded Pi connection; request a
   shared-device handover contract. Last-address SSH did not answer at preflight.
 - [x] Create an isolated integration checkout based on the committed camera head.
-- [ ] Merge the cockpit implementation, combining service/proxy/flow wiring and
+- [x] Merge the cockpit implementation, combining service/proxy/flow wiring and
   retaining both camera and cockpit tests. Reconcile requirements and blueprint
   evidence without discarding either feature set.
-- [ ] Build and test the integrated packages and native browser surfaces.
+- [x] Build and test the integrated packages and authenticated console HTTP routes.
+- [ ] Complete native-browser inspection; the initial browser automation session detached.
 - [ ] Incorporate the camera task's committed driver fix and rerun affected checks.
-- [ ] Confirm Pi identity, architecture, installed build, active services, free
+- [x] Confirm Pi identity, architecture, installed build, active services, free
   space, camera endpoint ownership and the actual flight-controller connection.
 - [ ] Stage matching artifacts in a separate release directory. Keep a reversible
   installed-build/configuration snapshot and coordinate the shared restart.
@@ -40,3 +41,7 @@ the earlier proposed integration base in the live-cockpit bench plan.
   continuity and read real flight-controller telemetry in the authenticated cockpit.
 - [ ] Record the exact deployed revision and software/hardware evidence, plus any
   remaining limitation. Keep simulated and physical-controller results distinct.
+
+The operator connected the flight controller during this task. The existing
+telemetry service automatically linked ArduPlane system 1 on ttyAMA0 at 115200.
+Camera/Cockpit remain intact; the native flight display is a separate Flight page.

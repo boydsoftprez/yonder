@@ -377,7 +377,7 @@ describe("the reserve (R-STO-06)", () => {
       .toBe(Math.floor((500 * MB) / ((500 * 1000) / 8)));
   });
 
-  it("treats a medium it cannot measure as having nothing spare", async () => {
+  it("reports unavailable headroom for an unreadable medium while still refusing recording", async () => {
     const b = on();
     const recorder = new Recorder({
       channel: { send: () => true, onMessage: () => {}, state: () => ({ id: "cam0", state: "running", since: 0, restarts: 0 }) },
@@ -387,6 +387,7 @@ describe("the reserve (R-STO-06)", () => {
       root: b.root,
       clock: b.clock.clock,
     });
+    expect(await recorder.state('cam0')).toMatchObject({ remainingSeconds: null, remainingPhotos: null });
     // The safe direction: a refused recording costs a capture, and the other
     // way round costs the card.
     expect(await recorder.record("cam0", "start")).toMatchObject({ because: "no-space" });

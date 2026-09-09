@@ -2,9 +2,13 @@
 import { createServer, type Server } from "node:http";
 import { unlinkSync, existsSync, mkdirSync, chmodSync, accessSync, constants } from "node:fs";
 import { dirname, join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { ApplyEngine } from "../apply/engine.js";
 import { warn, note, trace } from "../log.js";
+import { VehicleService } from "../mav/vehicle.js";
+import { TerrainPackService } from "../terrain/service.js";
+import { CockpitData } from "../cockpit/data.js";
+import type { HostInstrumentOptions } from '../cockpit/host-instruments.js';
 import { createRouter, type CameraProbes, type DiagProbes } from "./routes.js";
 import { AdminCredential } from "../console/credential.js";
 import { ConsoleRenderer } from "../console/renderer.js";
@@ -43,7 +47,7 @@ import { Viewers } from "../video/viewers.js";
 import { Adaptation } from "../video/adaptation.js";
 import { CAPTURES_ROOT, Recorder } from "../video/recorder.js";
 import { Stills, STILLS_ROOT } from "../video/stills.js";
-import { freeSpaceOn } from "../system/read.js";
+import { freeSpaceOn, systemReader } from "../system/read.js";
 import { readSupply } from "../system/supply.js";
 import { ZeroTierCli } from "../remote/zerotier/cli.js";
 import { readTraffic } from "../remote/traffic.js";
@@ -118,6 +122,8 @@ export function onceAsync<T>(fn: () => Promise<T>): () => Promise<T> {
 export interface ServerOptions {
   /** Only production main enables Linux accessory ownership; tests inject explicitly. */
   accessory?: boolean | AccessorySources;
+  /** Injected file/space readers for instrumentation; production supplies Linux readers below. */
+  hostInstruments?: Pick<HostInstrumentOptions, 'readFile' | 'freeBytes'>;
   socketPath: string;
   configPath: string;
   journalPath: string;
@@ -381,6 +387,7 @@ export function buildRenderers(opts: BuildRenderersOptions): {
    * function builds, the daemon opens sockets.
    */
   mavlinkListener?: LoopbackListener;
+  vehicle?: VehicleService;
   generated: string[];
 } {
   const log = opts.log ?? note;
@@ -487,6 +494,7 @@ export function buildRenderers(opts: BuildRenderersOptions): {
   // cannot exist is a port held for nothing.
   let mavlinkRenderer: MavlinkRenderer | undefined;
   let mavlinkListener: LoopbackListener | undefined;
+  let vehicle: VehicleService | undefined;
   if (opts.mavlink !== undefined) {
     const tracker = new LinkTracker({ clock: opts.clock ?? systemClock });
     mavlinkRenderer = new MavlinkRenderer({
@@ -498,7 +506,10 @@ export function buildRenderers(opts: BuildRenderersOptions): {
       log,
       clock: opts.clock,
     });
+    vehicle = new VehicleService({clock: opts.clock ?? systemClock, log, send: bytes => mavlinkListener!.send(bytes)});
     mavlinkListener = new LoopbackListener({
+      onDatagram: bytes => vehicle!.receive(bytes),
+      now: () => (opts.clock ?? systemClock).now(),
       tracker,
       log,
       ...(opts.mavlink.loopbackPort === undefined ? {} : { port: opts.mavlink.loopbackPort }),
@@ -597,6 +608,7 @@ export function buildRenderers(opts: BuildRenderersOptions): {
     cameraAutostart,
     ...(mavlinkRenderer === undefined ? {} : { mavlinkRenderer }),
     ...(mavlinkListener === undefined ? {} : { mavlinkListener }),
+    ...(vehicle === undefined ? {} : { vehicle }),
     generated,
   };
 }
@@ -896,6 +908,16 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
         warn(`modem: could not turn on detailed signal reporting (${(e as Error).message})`);
       }
     }
+  };
+  const readModemState = async (configureSignal: boolean) => {
+    const config = loadConfig(opts.configPath);
+    const paths = await modemClient.modems();
+    if (paths.length === 0) return modemState(config, null, null, { rssi: null, rsrq: null, rsrp: null, snr: null });
+    const modem = await modemClient.modem(paths[0]);
+    if (configureSignal) await armSignal(modem.path);
+    const bearer = await modemClient.connectedBearer(modem);
+    const signal = await modemClient.signal(modem.path);
+    return modemState(config, modem, bearer, signal);
   };
 
   // The one poll loop for the mesh's throughput, running on `clock` like
@@ -1310,8 +1332,20 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
     reachable: () => reachable({ runner: probeRunner, clock }),
   };
 
+  const cockpitData = new CockpitData({now: () => clock.now()});
+  let terrainPack: TerrainPackService | undefined;
+  try { terrainPack = await TerrainPackService.open(fileURLToPath(new URL("../terrain/assets/cove", import.meta.url))); }
+  catch { note("cockpit: prepared terrain pack unavailable; regional terrain remains optional"); }
   const route = createRouter({
     accessory,
+    cockpit: {vehicle: built?.vehicle, data: cockpitData, terrain: terrainPack},
+    hostInstruments: {
+      now: () => clock.now(),
+      readFile: opts.hostInstruments?.readFile ?? systemReader,
+      freeBytes: opts.hostInstruments?.freeBytes ?? (() => freeSpaceOn(CAPTURES_ROOT)),
+      // R-FLT-26: instrumentation reads cached modem reports; opening an instrument never enables reporting.
+      ...(built ? { modem: () => readModemState(false) } : {}),
+    },
     engine,
     configPath: opts.configPath,
     credential,
@@ -1336,23 +1370,7 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
       // from the configuration — the APN comes off the connected bearer, so
       // this reports what the link is actually using rather than what was
       // asked for, which is the pair that disagrees exactly when it matters.
-      modemState: async () => {
-        const config = loadConfig(opts.configPath);
-        const paths = await observationModemClient.modems();
-        // No modem is an ordinary answer, not a failure. A board without one
-        // is an ordinary board, and an appliance is a named adapter
-        // ModemManager will never have heard of — modemState says which of
-        // those this is, and the nulls are what "not measured" looks like.
-        // Never zeroes: 0 dBm is a real and extraordinary reading.
-        if (paths.length === 0) {
-          return modemState(config, null, null, { rssi: null, rsrq: null, rsrp: null, snr: null });
-        }
-        const modem = await observationModemClient.modem(paths[0]);
-        await armSignal(modem.path);
-        const bearer = await observationModemClient.connectedBearer(modem);
-        const signal = await observationModemClient.signal(modem.path);
-        return modemState(config, modem, bearer, signal);
-      },
+      modemState: () => readModemState(true),
       secrets: built.secrets,
       // The interface's kernel byte counters, not ZeroTier's own /metrics —
       // measured empty (0 bytes) on a real board. This is the same call the
@@ -1457,8 +1475,15 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
 
   const server: Server = createServer((req, res) => {
     const chunks: Buffer[] = [];
-    req.on("data", (c: Buffer) => chunks.push(c));
+    let cockpitLength = 0;
+    let cockpitTooLarge = false;
+    req.on("data", (c: Buffer) => {
+      cockpitLength += c.length;
+      if ((req.url ?? "").startsWith("/cockpit/") && cockpitLength > 512 * 1024) { cockpitTooLarge = true; chunks.length = 0; }
+      if (!cockpitTooLarge) chunks.push(c);
+    });
     req.on("end", () => {
+      if (cockpitTooLarge) { res.writeHead(413, {"content-type": "application/json"}); res.end(JSON.stringify({error: "Cockpit request exceeds size limit"})); return; }
       let body: unknown;
       if (chunks.length > 0) {
         try {
@@ -1581,6 +1606,9 @@ export async function startServer(opts: ServerOptions): Promise<{ close(): Promi
         built?.mavlinkRenderer?.close();
         // And the socket it shares a tracker with. A listener outliving its
         // daemon would hold :14559 against the next one to start.
+        built?.vehicle?.close();
+        cockpitData.close();
+        terrainPack?.clearCache();
         built?.mavlinkListener?.close();
         server.close(() => {
           if (existsSync(opts.socketPath)) unlinkSync(opts.socketPath);

@@ -1,0 +1,44 @@
+{
+  "fileType": "Plan",
+  "groundStation": "QGroundControl",
+  "version": 1,
+  "mission": {
+    "cruiseSpeed": 18,
+    "firmwareType": 3,
+    "globalPlanAltitudeMode": 1,
+    "hoverSpeed": 5,
+    "items": [
+      {
+        "Altitude": 80,
+        "AltitudeMode": 1,
+        "autoContinue": true,
+        "command": 22,
+        "doJumpId": 1,
+        "frame": 3,
+        "params": [15, 0, 0, null, 0, 0, 80],
+        "type": "SimpleItem"
+      },
+      {
+        "Altitude": 125,
+        "AltitudeMode": 1,
+        "autoContinue": true,
+        "command": 16,
+        "doJumpId": 4,
+        "frame": 3,
+        "params": [0, 3, 0, 0, 35.244, -120.619, 125],
+        "type": "SimpleItem"
+      },
+      {
+        "autoContinue": true,
+        "command": 177,
+        "doJumpId": 8,
+        "frame": 2,
+        "params": [4, 2, 0, 0, null, null, null],
+        "type": "SimpleItem"
+      }
+    ],
+    "plannedHomePosition": [35.2368, -120.642, 68.5],
+    "vehicleType": 2,
+    "version": 2
+  }
+}

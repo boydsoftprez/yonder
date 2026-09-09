@@ -45,3 +45,7 @@ packages/node-red-dashboard-2-yonder/gallery/public/
 
 # Brainstorming companion scratch (mockups, not shipped)
 .superpowers/
+
+# Native cockpit browser captures; geometry checks stay in the test sources.
+.cockpit-artifacts/
+packages/node-red-dashboard-2-yonder/.cockpit-artifacts/

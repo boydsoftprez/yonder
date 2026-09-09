@@ -1,0 +1,95 @@
+{
+  "missionplanner": {
+    "repository": "https://github.com/ArduPilot/MissionPlanner",
+    "commit": "27d7dab8161a01e1c076d57a2eb56e9adb5c5dd3",
+    "date": "2026-09-03T14:05:28Z",
+    "files": [
+      {
+        "path": "mavcmd.xml",
+        "file": "missionplanner-mavcmd.xml",
+        "url": "https://raw.githubusercontent.com/ArduPilot/MissionPlanner/27d7dab8161a01e1c076d57a2eb56e9adb5c5dd3/mavcmd.xml",
+        "sha256": "342057e134da4978e483f3da0e23024a4951b8847001db4f442a8d316c228b11"
+      },
+      {
+        "path": "GCSViews/FlightPlanner.cs",
+        "file": "missionplanner-FlightPlanner.cs",
+        "url": "https://raw.githubusercontent.com/ArduPilot/MissionPlanner/27d7dab8161a01e1c076d57a2eb56e9adb5c5dd3/GCSViews/FlightPlanner.cs",
+        "sha256": "334ea7269aa92c83588a56f27ed3bbd8feb59c0beb4034e41bbbb7f894bc02ff"
+      }
+    ]
+  },
+  "mavlink": {
+    "repository": "https://github.com/mavlink/mavlink",
+    "commit": "aae24cc6e7b2a1a6d5ad3a58ef0799f90703a59e",
+    "date": "2026-09-03T07:21:15Z",
+    "files": [
+      {
+        "path": "message_definitions/v1.0/common.xml",
+        "file": "mavlink-common.xml",
+        "url": "https://raw.githubusercontent.com/mavlink/mavlink/aae24cc6e7b2a1a6d5ad3a58ef0799f90703a59e/message_definitions/v1.0/common.xml",
+        "sha256": "72fc17bf1615b7403160530e09ea38acad953a9f42e0446905241a575e31dd19"
+      },
+      {
+        "path": "message_definitions/v1.0/ardupilotmega.xml",
+        "file": "mavlink-ardupilotmega.xml",
+        "url": "https://raw.githubusercontent.com/mavlink/mavlink/aae24cc6e7b2a1a6d5ad3a58ef0799f90703a59e/message_definitions/v1.0/ardupilotmega.xml",
+        "sha256": "8cff0bf2ae5bec60d16118bf37e1ec6e9f55f54aecc486df0b18f89977479047"
+      },
+      {
+        "path": "message_definitions/v1.0/standard.xml",
+        "file": "mavlink-standard.xml",
+        "url": "https://raw.githubusercontent.com/mavlink/mavlink/aae24cc6e7b2a1a6d5ad3a58ef0799f90703a59e/message_definitions/v1.0/standard.xml",
+        "sha256": "64af1ee5538344782abf8b35cf199a6cd48aa06eeb6bd41c7ae31f740a06a7f3"
+      },
+      {
+        "path": "message_definitions/v1.0/minimal.xml",
+        "file": "mavlink-minimal.xml",
+        "url": "https://raw.githubusercontent.com/mavlink/mavlink/aae24cc6e7b2a1a6d5ad3a58ef0799f90703a59e/message_definitions/v1.0/minimal.xml",
+        "sha256": "d4c7c7346432814348bb858cbab8cee7a17b23e37937c1574e2018148cbfb785"
+      }
+    ]
+  },
+  "ardupilot": {
+    "repository": "https://github.com/ArduPilot/ardupilot",
+    "commit": "12f1c264f2536c4c9565eec910fa028579845d36",
+    "date": "2026-09-07T03:25:55Z",
+    "files": [
+      {
+        "path": "ArduPlane/commands_logic.cpp",
+        "file": "ardupilot-commands_logic.cpp",
+        "url": "https://raw.githubusercontent.com/ArduPilot/ardupilot/12f1c264f2536c4c9565eec910fa028579845d36/ArduPlane/commands_logic.cpp",
+        "sha256": "5a4f394ac94ae1b85ffb49c60188d9255542b387c8f564280288cecace8f5fba"
+      },
+      {
+        "path": "libraries/AP_Mission/AP_Mission.cpp",
+        "file": "ardupilot-AP_Mission.cpp",
+        "url": "https://raw.githubusercontent.com/ArduPilot/ardupilot/12f1c264f2536c4c9565eec910fa028579845d36/libraries/AP_Mission/AP_Mission.cpp",
+        "sha256": "a5c1154e55efe2641c7737f8ef5a5ae384325f20ae7c35b4cc553aa080609c47"
+      },
+      {
+        "path": "libraries/AP_Mission/AP_Mission_Commands.cpp",
+        "file": "ardupilot-AP_Mission_Commands.cpp",
+        "url": "https://raw.githubusercontent.com/ArduPilot/ardupilot/12f1c264f2536c4c9565eec910fa028579845d36/libraries/AP_Mission/AP_Mission_Commands.cpp",
+        "sha256": "da1ba04a35da725197aa93f8edd2bdf9b63e33e7dcb6a8bdbd6a03f981f5c990"
+      },
+      {
+        "path": "libraries/AP_Mission/AP_Mission.h",
+        "file": "ardupilot-AP_Mission.h",
+        "url": "https://raw.githubusercontent.com/ArduPilot/ardupilot/12f1c264f2536c4c9565eec910fa028579845d36/libraries/AP_Mission/AP_Mission.h",
+        "sha256": "cd68d620f952e01bae766ff228df046b6a464cc6cb13e4ea4f83d6241ebd4900"
+      },
+      {
+        "path": "libraries/AP_ServoRelayEvents/AP_ServoRelayEvents.cpp",
+        "file": "ardupilot-AP_ServoRelayEvents.cpp",
+        "url": "https://raw.githubusercontent.com/ArduPilot/ardupilot/12f1c264f2536c4c9565eec910fa028579845d36/libraries/AP_ServoRelayEvents/AP_ServoRelayEvents.cpp",
+        "sha256": "350b9f9cf9b5e68239bae41a042081935f19d56db0ad438eddf2636aa9bc8da1"
+      },
+      {
+        "path": "libraries/AP_Camera/AP_Camera.h",
+        "file": "ardupilot-AP_Camera.h",
+        "url": "https://raw.githubusercontent.com/ArduPilot/ardupilot/12f1c264f2536c4c9565eec910fa028579845d36/libraries/AP_Camera/AP_Camera.h",
+        "sha256": "504a48fe08437cc4242c29a4a1dd52cbe70e6662838b7ba870d1b6ead38d9811"
+      }
+    ]
+  }
+}

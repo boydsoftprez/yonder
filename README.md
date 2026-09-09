@@ -37,6 +37,14 @@ from a web page, with nothing phoning home.
 | **Declarative config** | One `config.yaml`. Drop it on the boot partition for headless setup. |
 | **Reproducible images** | CI runs the same installer you would. Every release is rebuildable from its commit. |
 
+## How to use the cockpit
+
+The [illustrated cockpit guide](docs/cockpit-user-guide.md#how-to-use-it) walks through
+the PFD, mission editor, reviewed flight controls, terrain profile, traffic and
+breadcrumbs. It includes a QuadPlane simulator exercise and explains disabled
+controls and current limitations. For ground internet and offline packs, see
+[ground data setup](docs/cockpit-ground-data.md).
+
 ## Hardware
 
 **Raspberry Pi** — Zero 2 W, 3, 4, 5, CM3, CM4, CM5

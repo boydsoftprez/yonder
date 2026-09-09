@@ -1,0 +1,127 @@
+{
+  "requirement": "R-FLT-08",
+  "date": "2026-09-07",
+  "method": "Passive Chromium Metal rendering at 1440x900 against an existing ArduPlane SITL loiter. Each window is 15 seconds after warm-up. No aircraft writes. Separate runs may view different headings.",
+  "attitudeSource": {
+    "measuredHz": 9.992,
+    "medianIntervalMs": 100,
+    "p95IntervalMs": 117,
+    "sampleDurationSeconds": 5
+  },
+  "fallbackBefore": {
+    "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M5 Max, Unspecified Version)",
+    "frames": {
+      "count": 1678,
+      "hz": 111.8,
+      "p50": 8.300000000001091,
+      "p95": 9.200000000000728,
+      "max": 50.099999999998545
+    },
+    "terrain": {
+      "count": 275,
+      "hz": 18.3,
+      "p50": 50.800000071525574,
+      "p95": 64.90000009536743,
+      "max": 113.89999997615814
+    },
+    "uploads": {
+      "count": 180,
+      "hz": 12,
+      "p50": 0,
+      "p95": 0.3999999761581421,
+      "max": 4274
+    },
+    "flight": {
+      "count": 57,
+      "hz": 3.8,
+      "p50": 257.6999999284744,
+      "p95": 309.3000000715256,
+      "max": 381.8000000715256
+    },
+    "errors": []
+  },
+  "fallbackAfter": {
+    "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M5 Max, Unspecified Version)",
+    "frames": {
+      "count": 1802,
+      "hz": 120,
+      "p50": 8.300000000001091,
+      "p95": 9.299999999999272,
+      "max": 9.400000000001455
+    },
+    "terrain": {
+      "count": 901,
+      "hz": 60,
+      "p50": 16.700000047683716,
+      "p95": 25.09999990463257,
+      "max": 31.899999976158142
+    },
+    "uploads": {
+      "count": 0,
+      "hz": 0
+    },
+    "flight": {
+      "count": 58,
+      "hz": 3.9,
+      "p50": 257.89999997615814,
+      "p95": 265.2999999523163,
+      "max": 273.5
+    },
+    "errors": []
+  },
+  "detailedStreaming": {
+    "durationMs": 15015.299999952316,
+    "frames": {
+      "count": 1758,
+      "hz": 117.1,
+      "medianMs": 8.300000000000182,
+      "p95Ms": 9.200000000000728,
+      "maxMs": 32.5
+    },
+    "terrain": {
+      "count": 897,
+      "hz": 59.7,
+      "medianMs": 16.600000023841858,
+      "p95Ms": 25.100000023841858,
+      "maxMs": 47.39999997615814
+    },
+    "attitudeMotion": {
+      "count": 948,
+      "hz": 63.1,
+      "medianMs": 16.600000000000364,
+      "p95Ms": 24.899999999999636,
+      "maxMs": 100.79999999999927
+    },
+    "geometryUploads": {
+      "count": 328,
+      "hz": 21.8,
+      "medianMs": 0,
+      "p95Ms": 0.10000002384185791,
+      "maxMs": 5562.899999976158
+    },
+    "flight": {
+      "count": 56,
+      "hz": 3.7,
+      "medianMs": 259.5,
+      "p95Ms": 333.2999999523163,
+      "maxMs": 433.5
+    },
+    "longTasks": [],
+    "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M5 Max, Unspecified Version)",
+    "terrainStatus": "Cove terrain \u00b7 1 m nearby / 4 m distant \u00b7 mapped surface \u00b7 EGM96",
+    "agl": "EST AGL 275 FT",
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "uniqueTerrainFiles": 78,
+    "errors": [],
+    "blockedWrites": 0
+  },
+  "limits": [
+    "Measurements describe this Mac GPU and viewport, not an iPad frame-rate guarantee.",
+    "Terrain rendering can still miss frames during initial downloads or real region changes.",
+    "Streaming cannot extend the selected survey footprint; missing surface coverage remains unknown.",
+    "The wider locally prepared demo pack stays in the ignored workstation cache; the bundled route pack is unchanged."
+  ]
+}

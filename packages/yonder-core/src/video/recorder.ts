@@ -396,7 +396,13 @@ export class Recorder {
     }
     const open = this.open.get(id);
     const onCamera = this.onCamera.holds(id);
-    const free = await this.free();
+    // R-FLT-26: an unavailable measurement is not zero headroom. Admission and
+    // reserve enforcement still use free(), whose conservative fallback is zero.
+    let free: number | null = null;
+    try {
+      const measured = await this.freeBytes(this.root);
+      if (Number.isFinite(measured) && measured >= 0) free = measured;
+    } catch { /* The readout cannot estimate headroom on an unreadable medium. */ }
     return {
       recording: open !== undefined,
       since: open?.since ?? null,
@@ -407,11 +413,11 @@ export class Recorder {
       // medium — worse than none, because an operator would plan with it.
       // This build does not read a camera's card, so there the answer is that
       // nothing knows.
-      remainingSeconds: onCamera || camera === undefined
+      remainingSeconds: onCamera || camera === undefined || free === null
         ? null
         : this.remaining(free, this.rateKbps(camera)),
       // The same headroom, counted in the unit Photo mode works in.
-      remainingPhotos: onCamera || camera === undefined
+      remainingPhotos: onCamera || camera === undefined || free === null
         ? null
         : this.remainingStills(free, camera),
       bytes: open === undefined ? null : sizeOf(open.path),

@@ -1,0 +1,208 @@
+{
+  "schema": 1,
+  "sourceCommit": "dbe792162d06cab66c3475fd5556bf7a120f119e",
+  "firmware": "Official ArduPlane 4.7.1",
+  "model": "quadplane",
+  "evidence": "Independent disposable SITL; no physical aircraft",
+  "startedAt": "2026-09-08T01:24:32.981Z",
+  "finishedAt": "2026-09-08T01:26:16.111Z",
+  "outcome": "passed",
+  "record": "Compact derivative of the successful isolated SITL observation; one valid navigation observation per leg retained.",
+  "legs": [
+    {
+      "targetSeq": 2,
+      "samples": 16,
+      "validSamples": 14,
+      "courseDeg": 101.82902138947958,
+      "example": {
+        "at": 1788830743428,
+        "currentSeq": 2,
+        "view": {
+          "valid": true,
+          "preview": false,
+          "target": {
+            "seq": 2,
+            "command": 16,
+            "frame": 3,
+            "current": false,
+            "autocontinue": true,
+            "params": [
+              0,
+              0,
+              0,
+              0
+            ],
+            "lat": 35.9604227,
+            "lon": -83.3647192,
+            "alt": 91.43999481201172
+          },
+          "seq": 2,
+          "reason": "Uploaded leg \u00b7 autopilot cross-track",
+          "targetName": "WP2",
+          "distanceM": 197.48015255023535,
+          "bearingDeg": 101.85931864657096,
+          "lateralValid": true,
+          "crossTrackM": 0,
+          "desiredTrackDeg": 101.82902138947958,
+          "trackTitle": "LEG COURSE",
+          "fromSeq": 1,
+          "fromName": "TAKEOFF",
+          "nextSeq": 3,
+          "eteSeconds": 156.54109244616342
+        },
+        "deflection": 0,
+        "nav": {
+          "crossTrackM": 0,
+          "navBearingDeg": 101,
+          "targetBearingDeg": 101,
+          "waypointDistanceM": 197,
+          "missionSeq": 2,
+          "mode": "AUTO",
+          "autopilotId": 3,
+          "vehicleType": 1,
+          "position": {
+            "latitude": 35.9607877,
+            "longitude": -83.3668665
+          },
+          "positionTarget": {
+            "lat": 35.9604227,
+            "lon": -83.3647192,
+            "alt": 407.3199768066406,
+            "frame": 0
+          },
+          "ageMs": 104
+        }
+      }
+    },
+    {
+      "targetSeq": 3,
+      "samples": 25,
+      "validSamples": 25,
+      "courseDeg": 1.5737895939625446,
+      "example": {
+        "at": 1788830751782,
+        "currentSeq": 3,
+        "view": {
+          "valid": true,
+          "preview": false,
+          "target": {
+            "seq": 3,
+            "command": 16,
+            "frame": 3,
+            "current": false,
+            "autocontinue": true,
+            "params": [
+              0,
+              0,
+              0,
+              0
+            ],
+            "lat": 35.9635837,
+            "lon": -83.3646119,
+            "alt": 91.43999481201172
+          },
+          "seq": 3,
+          "reason": "Uploaded leg \u00b7 autopilot cross-track",
+          "targetName": "WP3",
+          "distanceM": 343.02499628445275,
+          "bearingDeg": 10.595269924409024,
+          "lateralValid": true,
+          "crossTrackM": -55.909400939941406,
+          "desiredTrackDeg": 1.5737895939625446,
+          "trackTitle": "LEG COURSE",
+          "fromSeq": 2,
+          "fromName": "WP02",
+          "nextSeq": 4,
+          "eteSeconds": 15.456805527268468
+        },
+        "deflection": 0.22363760375976563,
+        "nav": {
+          "crossTrackM": 55.909400939941406,
+          "navBearingDeg": 46,
+          "targetBearingDeg": 10,
+          "waypointDistanceM": 343,
+          "missionSeq": 3,
+          "mode": "AUTO",
+          "autopilotId": 3,
+          "vehicleType": 1,
+          "position": {
+            "latitude": 35.9605514,
+            "longitude": -83.3653127
+          },
+          "positionTarget": {
+            "lat": 35.9635837,
+            "lon": -83.3646119,
+            "alt": 407.3199768066406,
+            "frame": 0
+          },
+          "ageMs": 57
+        }
+      }
+    },
+    {
+      "targetSeq": 4,
+      "samples": 20,
+      "validSamples": 19,
+      "courseDeg": 38.29760458343077,
+      "example": {
+        "at": 1788830765438,
+        "currentSeq": 4,
+        "view": {
+          "valid": true,
+          "preview": false,
+          "target": {
+            "seq": 4,
+            "command": 16,
+            "frame": 3,
+            "current": false,
+            "autocontinue": true,
+            "params": [
+              0,
+              0,
+              0,
+              0
+            ],
+            "lat": 35.965772,
+            "lon": -83.3624768,
+            "alt": 91.43999481201172
+          },
+          "seq": 4,
+          "reason": "Uploaded leg \u00b7 autopilot cross-track",
+          "targetName": "WP4",
+          "distanceM": 330.4122852700901,
+          "bearingDeg": 36.09337398309242,
+          "lateralValid": true,
+          "crossTrackM": 14.260099411010742,
+          "desiredTrackDeg": 38.29760458343077,
+          "trackTitle": "LEG COURSE",
+          "fromSeq": 3,
+          "fromName": "WP03",
+          "nextSeq": 5,
+          "eteSeconds": 12.641718186112087
+        },
+        "deflection": -0.05704039764404297,
+        "nav": {
+          "crossTrackM": -14.260099411010742,
+          "navBearingDeg": 28,
+          "targetBearingDeg": 35,
+          "waypointDistanceM": 332,
+          "missionSeq": 4,
+          "mode": "AUTO",
+          "autopilotId": 3,
+          "vehicleType": 1,
+          "position": {
+            "latitude": 35.9633709,
+            "longitude": -83.3646396
+          },
+          "positionTarget": {
+            "lat": 35.965772,
+            "lon": -83.3624768,
+            "alt": 407.3199768066406,
+            "frame": 0
+          },
+          "ageMs": 104
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,401 @@
+{
+  "grid": {
+    "west": 286080,
+    "north": 3982960,
+    "columns": 1537,
+    "rows": 1793,
+    "spacingM": 1
+  },
+  "groundCoverage": 1.0,
+  "surfaceCoverage": 0.9769173910976722,
+  "groundComparison": {
+    "samples": 2471930,
+    "medianM": 0.031890869140625,
+    "absoluteP95M": 0.1943359375
+  },
+  "sources": {
+    "USGS_one_meter_x28y399_TN_Eastern_2_16_B16_Del2_2016": {
+      "headerCrs": "EPSG:26917",
+      "resolutionM": [
+        1.0,
+        1.0
+      ],
+      "nodata": -3.4028230607370965e+38
+    },
+    "2738597NE": {
+      "points": 17996998,
+      "classes": {
+        "2": 7799097,
+        "1": 10145469,
+        "7": 174,
+        "18": 63,
+        "6": 52195
+      },
+      "included": 17996761,
+      "horizontalOperation": "Inverse of SPCS83 Tennessee zone (US Survey feet) + NAD83(2011) to WGS 84 (1) + UTM zone 17N",
+      "horizontalAccuracyM": 2.0,
+      "verticalScale": 0.30480060960121924
+    },
+    "2738597SE": {
+      "points": 19939240,
+      "classes": {
+        "2": 7191729,
+        "1": 12454629,
+        "10": 7227,
+        "9": 262171,
+        "18": 68,
+        "7": 446,
+        "6": 22091,
+        "17": 879
+      },
+      "included": 19938726,
+      "horizontalOperation": "Inverse of SPCS83 Tennessee zone (US Survey feet) + NAD83(2011) to WGS 84 (1) + UTM zone 17N",
+      "horizontalAccuracyM": 2.0,
+      "verticalScale": 0.30480060960121924
+    }
+  },
+  "toolVersions": {
+    "python": "3.9.6",
+    "numpy": "2.0.2",
+    "rasterio": "1.4.3",
+    "gdal": "3.9.3",
+    "pyproj": "3.6.1",
+    "proj": "9.3.0",
+    "laspy": "2.6.1"
+  },
+  "packedBytes": 20973049,
+  "tiles": 227,
+  "verticalTransform": {
+    "verified": true,
+    "scope": "Numerical grid conversion; not a camera, GNSS or field-survey calibration",
+    "pipeline": "+proj=pipeline +step +proj=unitconvert +xy_in=deg +xy_out=rad +step +proj=vgridshift +grids=us_noaa_g2012bu0.tif +multiplier=1 +step +inv +proj=vgridshift +grids=us_nga_egm96_15.tif +multiplier=1 +step +proj=unitconvert +xy_in=rad +xy_out=deg",
+    "grids": {
+      "us_noaa_g2012bu0.tif": {
+        "sha256": "954b4959720955ba781a015b8001017ce0c3c0895953991fc731594d58db4af1",
+        "bytes": 17033175,
+        "url": "https://cdn.proj.org/us_noaa_g2012bu0.tif"
+      },
+      "us_nga_egm96_15.tif": {
+        "sha256": "db493027562c9b004d7220fa881f5603adada4e1c5029b933fa7de4547b0e78d",
+        "bytes": 2710815,
+        "url": "https://cdn.proj.org/us_nga_egm96_15.tif"
+      }
+    },
+    "controlPoints": [
+      {
+        "longitude": -83.3668696,
+        "latitude": 35.9607874,
+        "geoid12bM": -30.78918991612224,
+        "egm96M": -31.722082121133802,
+        "navd88ToEgm96M": 0.9328922050115978,
+        "independentResidualM": 2.842170943040401e-14,
+        "roundTripResidualM": 0.0
+      },
+      {
+        "longitude": -83.3677125,
+        "latitude": 35.9552468,
+        "geoid12bM": -30.76948167717137,
+        "egm96M": -31.70112965038973,
+        "navd88ToEgm96M": 0.9316479732183893,
+        "independentResidualM": 2.842170943040401e-14,
+        "roundTripResidualM": 0.0
+      },
+      {
+        "longitude": -83.3589256,
+        "latitude": 35.9642176,
+        "geoid12bM": -30.801603476367106,
+        "egm96M": -31.733955896721422,
+        "navd88ToEgm96M": 0.9323524203543485,
+        "independentResidualM": 2.842170943040401e-14,
+        "roundTripResidualM": 0.0
+      },
+      {
+        "longitude": -83.3624768,
+        "latitude": 35.965772,
+        "geoid12bM": -30.807242383534934,
+        "egm96M": -31.740406428813582,
+        "navd88ToEgm96M": 0.9331640452786729,
+        "independentResidualM": 2.842170943040401e-14,
+        "roundTripResidualM": 0.0
+      },
+      {
+        "longitude": -83.365674,
+        "latitude": 35.9540135,
+        "geoid12bM": -30.764802626216078,
+        "egm96M": -31.69611214719316,
+        "navd88ToEgm96M": 0.9313095209771234,
+        "independentResidualM": 4.263256414560601e-14,
+        "roundTripResidualM": 0.0
+      }
+    ],
+    "limitations": [
+      "NAD83(2011) to WGS84 realization uses the documented metre-scale horizontal approximation.",
+      "EGM96 15-minute grid interpolation is explicit; another EGM96 grid resolution may differ slightly."
+    ]
+  },
+  "surfaceQuality": {
+    "method": "Isolated high-cell screening; rejected cells become missing surface, never ground or a lower inferred obstacle.",
+    "heightAboveGroundThresholdM": 80,
+    "heightAboveNeighborThresholdM": 30,
+    "neighborRadiusM": 2,
+    "comparisons": "Strictly greater than both thresholds; native sample centres within Euclidean radius, at least one observed neighbor required.",
+    "maskedCells": 28,
+    "rawSurfaceCoverage": 0.9769275513355088,
+    "screenedSurfaceCoverage": 0.9769173910976722,
+    "rawMaximumNavd88M": 1027.3853759765625,
+    "cells": [
+      {
+        "row": 66,
+        "column": 1139,
+        "eastingM": 287219.5,
+        "northingM": 3982893.5,
+        "rawSurfaceNavd88M": 920.0528564453125,
+        "groundNavd88M": 305.0969543457031,
+        "neighborMaximumNavd88M": 324.83819580078125
+      },
+      {
+        "row": 201,
+        "column": 310,
+        "eastingM": 286390.5,
+        "northingM": 3982758.5,
+        "rawSurfaceNavd88M": 942.52880859375,
+        "groundNavd88M": 323.4317321777344,
+        "neighborMaximumNavd88M": 349.0789794921875
+      },
+      {
+        "row": 230,
+        "column": 310,
+        "eastingM": 286390.5,
+        "northingM": 3982729.5,
+        "rawSurfaceNavd88M": 902.2372436523438,
+        "groundNavd88M": 323.2231750488281,
+        "neighborMaximumNavd88M": 327.264404296875
+      },
+      {
+        "row": 252,
+        "column": 361,
+        "eastingM": 286441.5,
+        "northingM": 3982707.5,
+        "rawSurfaceNavd88M": 957.4762573242188,
+        "groundNavd88M": 317.3158874511719,
+        "neighborMaximumNavd88M": 332.031494140625
+      },
+      {
+        "row": 299,
+        "column": 1116,
+        "eastingM": 287196.5,
+        "northingM": 3982660.5,
+        "rawSurfaceNavd88M": 965.0048217773438,
+        "groundNavd88M": 302.2186279296875,
+        "neighborMaximumNavd88M": 308.5252685546875
+      },
+      {
+        "row": 367,
+        "column": 270,
+        "eastingM": 286350.5,
+        "northingM": 3982592.5,
+        "rawSurfaceNavd88M": 915.169921875,
+        "groundNavd88M": 328.8067321777344,
+        "neighborMaximumNavd88M": 329.2547607421875
+      },
+      {
+        "row": 399,
+        "column": 392,
+        "eastingM": 286472.5,
+        "northingM": 3982560.5,
+        "rawSurfaceNavd88M": 999.892333984375,
+        "groundNavd88M": 312.1015625,
+        "neighborMaximumNavd88M": 312.2621154785156
+      },
+      {
+        "row": 436,
+        "column": 323,
+        "eastingM": 286403.5,
+        "northingM": 3982523.5,
+        "rawSurfaceNavd88M": 937.8501586914062,
+        "groundNavd88M": 315.8639831542969,
+        "neighborMaximumNavd88M": 320.3454284667969
+      },
+      {
+        "row": 459,
+        "column": 1136,
+        "eastingM": 287216.5,
+        "northingM": 3982500.5,
+        "rawSurfaceNavd88M": 980.9459228515625,
+        "groundNavd88M": 304.2061767578125,
+        "neighborMaximumNavd88M": 313.93853759765625
+      },
+      {
+        "row": 544,
+        "column": 1115,
+        "eastingM": 287195.5,
+        "northingM": 3982415.5,
+        "rawSurfaceNavd88M": 940.7213745117188,
+        "groundNavd88M": 307.7113037109375,
+        "neighborMaximumNavd88M": 319.0713806152344
+      },
+      {
+        "row": 571,
+        "column": 214,
+        "eastingM": 286294.5,
+        "northingM": 3982388.5,
+        "rawSurfaceNavd88M": 787.5651245117188,
+        "groundNavd88M": 310.893310546875,
+        "neighborMaximumNavd88M": 316.86767578125
+      },
+      {
+        "row": 576,
+        "column": 296,
+        "eastingM": 286376.5,
+        "northingM": 3982383.5,
+        "rawSurfaceNavd88M": 998.6517944335938,
+        "groundNavd88M": 312.399658203125,
+        "neighborMaximumNavd88M": 312.5882568359375
+      },
+      {
+        "row": 594,
+        "column": 376,
+        "eastingM": 286456.5,
+        "northingM": 3982365.5,
+        "rawSurfaceNavd88M": 999.1272583007812,
+        "groundNavd88M": 304.7832946777344,
+        "neighborMaximumNavd88M": 305.6632080078125
+      },
+      {
+        "row": 595,
+        "column": 1155,
+        "eastingM": 287235.5,
+        "northingM": 3982364.5,
+        "rawSurfaceNavd88M": 973.8257446289062,
+        "groundNavd88M": 316.8014831542969,
+        "neighborMaximumNavd88M": 321.4061584472656
+      },
+      {
+        "row": 702,
+        "column": 306,
+        "eastingM": 286386.5,
+        "northingM": 3982257.5,
+        "rawSurfaceNavd88M": 1000.7457275390625,
+        "groundNavd88M": 304.10113525390625,
+        "neighborMaximumNavd88M": 314.093994140625
+      },
+      {
+        "row": 768,
+        "column": 377,
+        "eastingM": 286457.5,
+        "northingM": 3982191.5,
+        "rawSurfaceNavd88M": 975.2003784179688,
+        "groundNavd88M": 313.89410400390625,
+        "neighborMaximumNavd88M": 322.9362487792969
+      },
+      {
+        "row": 953,
+        "column": 385,
+        "eastingM": 286465.5,
+        "northingM": 3982006.5,
+        "rawSurfaceNavd88M": 953.7454833984375,
+        "groundNavd88M": 309.3422546386719,
+        "neighborMaximumNavd88M": 311.3690490722656
+      },
+      {
+        "row": 966,
+        "column": 392,
+        "eastingM": 286472.5,
+        "northingM": 3981993.5,
+        "rawSurfaceNavd88M": 961.6702880859375,
+        "groundNavd88M": 313.6111145019531,
+        "neighborMaximumNavd88M": 317.1602783203125
+      },
+      {
+        "row": 1052,
+        "column": 1128,
+        "eastingM": 287208.5,
+        "northingM": 3981907.5,
+        "rawSurfaceNavd88M": 968.7508544921875,
+        "groundNavd88M": 316.83447265625,
+        "neighborMaximumNavd88M": 322.35406494140625
+      },
+      {
+        "row": 1083,
+        "column": 410,
+        "eastingM": 286490.5,
+        "northingM": 3981876.5,
+        "rawSurfaceNavd88M": 962.2525024414062,
+        "groundNavd88M": 317.7168273925781,
+        "neighborMaximumNavd88M": 331.4432373046875
+      },
+      {
+        "row": 1121,
+        "column": 1047,
+        "eastingM": 287127.5,
+        "northingM": 3981838.5,
+        "rawSurfaceNavd88M": 896.6532592773438,
+        "groundNavd88M": 320.4170837402344,
+        "neighborMaximumNavd88M": 329.5321350097656
+      },
+      {
+        "row": 1230,
+        "column": 317,
+        "eastingM": 286397.5,
+        "northingM": 3981729.5,
+        "rawSurfaceNavd88M": 944.9794311523438,
+        "groundNavd88M": 313.2688903808594,
+        "neighborMaximumNavd88M": 335.0155029296875
+      },
+      {
+        "row": 1306,
+        "column": 1086,
+        "eastingM": 287166.5,
+        "northingM": 3981653.5,
+        "rawSurfaceNavd88M": 948.9479370117188,
+        "groundNavd88M": 311.2038879394531,
+        "neighborMaximumNavd88M": 331.0561218261719
+      },
+      {
+        "row": 1318,
+        "column": 271,
+        "eastingM": 286351.5,
+        "northingM": 3981641.5,
+        "rawSurfaceNavd88M": 911.2745971679688,
+        "groundNavd88M": 307.6217956542969,
+        "neighborMaximumNavd88M": 321.6926574707031
+      },
+      {
+        "row": 1371,
+        "column": 283,
+        "eastingM": 286363.5,
+        "northingM": 3981588.5,
+        "rawSurfaceNavd88M": 1027.3853759765625,
+        "groundNavd88M": 305.2166748046875,
+        "neighborMaximumNavd88M": 318.6629333496094
+      },
+      {
+        "row": 1412,
+        "column": 273,
+        "eastingM": 286353.5,
+        "northingM": 3981547.5,
+        "rawSurfaceNavd88M": 959.7744750976562,
+        "groundNavd88M": 308.2879333496094,
+        "neighborMaximumNavd88M": 308.427734375
+      },
+      {
+        "row": 1647,
+        "column": 286,
+        "eastingM": 286366.5,
+        "northingM": 3981312.5,
+        "rawSurfaceNavd88M": 819.855712890625,
+        "groundNavd88M": 294.3019104003906,
+        "neighborMaximumNavd88M": 294.3551025390625
+      },
+      {
+        "row": 1754,
+        "column": 236,
+        "eastingM": 286316.5,
+        "northingM": 3981205.5,
+        "rawSurfaceNavd88M": 991.9004516601562,
+        "groundNavd88M": 293.0657653808594,
+        "neighborMaximumNavd88M": 293.5412902832031
+      }
+    ]
+  }
+}

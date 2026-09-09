@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "source": "Isolated ArduPlane 4.7.1; no physical aircraft",
+  "scenario": "Cove mission; explicit reviewed UI read/upload/arm/start; reload while flying",
+  "epoch": "7a4642bc-3681-4de4-a734-2d24e6cbd9fd",
+  "firstPoint": [
+    1,
+    11064,
+    35.9607874,
+    -83.3668697,
+    0,
+    1
+  ],
+  "beforeReload": {
+    "points": 60,
+    "distanceM": 1203.3
+  },
+  "afterReload": {
+    "points": 375,
+    "distanceM": 8679.1,
+    "gaps": 0,
+    "historyBytes": 16798,
+    "flightJsonBytes": 1858
+  },
+  "browser": "Reloaded actual Vue cockpit, selected Since power-on, read rendered nonempty ownship SVG path; prepared local terrain and hybrid imagery",
+  "historyOnFlightWire": false
+}

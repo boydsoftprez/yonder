@@ -401,7 +401,7 @@ describe("flows/flows.json", () => {
     // purpose: a page added without a line here is a page nobody decided to
     // ship, and the capture gate would photograph it anyway.
     expect(pages.map((p) => p.name).sort())
-      .toEqual(["Camera", "Cameras", "Cockpit", "Diagnostics", "Log", "Network", "Status", "Telemetry"]);
+      .toEqual(["Camera", "Cameras", "Cockpit", "Diagnostics", "Flight", "Log", "Network", "Status", "Telemetry"]);
 
     const groups = flows.filter((n) => n.type === "ui-group");
     for (const page of pages) {
@@ -1727,6 +1727,7 @@ describe("flows/flows.json camera pages", () => {
   // in a describe that has no `byId` of its own.
   const byId = (id: string) => flows.find((n) => n.id === id);
   const SURFACES = [
+    { group: "group-flight-pending", suffix: "-flight", hidden: "group" },
     { group: "group-status-pending", suffix: "", hidden: "group" },
     { group: "group-log-pending", suffix: "-log", hidden: "group" },
     { group: "group-diag-pending", suffix: "-diag", hidden: "group" },
@@ -3118,4 +3119,14 @@ it('gates read and refresh DTOs before every shared camera surface', () => {
   expect(flows.find(n => n.id === 'cam-workspace-selection')?.wires?.flat()).toContain('camera-response');
   expect(flows.find(n => n.id === 'camera-response')?.type).toBe('yonder-camera-response');
   expect(flows.find(n => n.id === 'camera-response')?.wires?.flat()).toEqual(expect.arrayContaining(['pick-cam-picture', 'pick-cam-aim', 'pick-cam-deck']));
+});
+
+
+it('serves the flight display separately while preserving the camera Cockpit — R-FLT-25 / R-UI-28', () => {
+  const page = flows.find(n => n.id === 'page-flight');
+  expect(page).toMatchObject({type:'ui-page',name:'Flight',path:'/flight',className:'yonder-cockpit-page'});
+  expect(flows.find(n => n.id === 'group-cockpit')).toMatchObject({page:'page-flight'});
+  expect(flows.find(n => n.id === 'cockpit-display')).toMatchObject({type:'ui-yonder-cockpit',group:'group-cockpit'});
+  expect(flows.find(n => n.id === 'page-cockpit')).toMatchObject({path:'/cockpit',className:''});
+  expect(flows.find(n => n.id === 'group-cockpit-picture')).toMatchObject({page:'page-cockpit'});
 });

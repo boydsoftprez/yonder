@@ -1,0 +1,2 @@
+# Binary elevation grids must retain their exact bytes and stay out of text diffs.
+packages/yonder-core/src/cockpit/assets/*.pgm binary
