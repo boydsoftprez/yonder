@@ -452,3 +452,21 @@ card and rebooted it. Local access returned first. ZeroTier subsequently reporte
 ONLINE, network OK, the same managed address and a direct peer path; three mesh
 pings then succeeded. No network configuration was changed for that recovery and
 no specific cause of the earlier interruption was established.
+
+## Restart interruption: corrected diagnosis
+
+The operator correctly noted that the camera was working before the deployment
+stopped the core service. Logs show that service stop tore down FunctionFS at
+03:42:13 BST. The phone identity was bound at 03:42:19 and the camera completed
+phone/accessory enumeration at 03:42:20. A subsequent teardown at 03:42:40–42
+reported DWC2 endpoint-stop and FIFO-flush timeouts. The retry bound a phone
+identity at 03:43:27 and then remained not attached.
+
+Thus the camera did briefly enumerate after the restart. These logs do not
+establish that it powered off, or why protocol traffic on the replacement
+session stopped; the kernel timeouts may belong to cleanup rather than the
+initiating failure. No under-voltage entry appeared in that interval. The
+working session was interrupted by the deployment, and automatic recovery
+failed. Asking the operator to handle the camera is not a resolution of that
+restart/recovery defect. No further service or USB restart was performed during
+this inspection while the operator could not access the device.
