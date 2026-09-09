@@ -420,7 +420,7 @@ code and unit tests and an explicit note that it has never run on hardware.
 - **Telemetry overlay on the video** — R-TEL-12
 - Moving map, fullscreen, and inset swap — R-TEL-11, R-TEL-13, R-TEL-14
 - MAVLink path verification — R-DIA-04
-- **A camera that is itself a USB host — the DJI Pocket 2** — R-CAM-15. **Deferred on 2026-09-05, the operator's decision, until the Pocket 2 is back in hand:** every task that drives it (the plan's Task 2 and Phase 5, Tasks 35–40) is held rather than dropped, and the branch that built the rest of M4 says so in its plan. Here rather than
+- **A camera that is itself a USB host — the DJI Pocket 2** — R-CAM-15. **Integration resumed on 2026-09-08.** The protocol, expiring intent, Linux transport, guarded gimbal, measured native controls, card recording/photo and console integration are implemented and reviewed. The dev Pi detects and adopts the Pocket 2; its integrated native endpoint passed 45 seconds/1,338 frames. The unified camera workspace and native control fixes are deployed; live preview and active-camera thumbnails have been seen, and production rate/release/expiry checks have run. Final usability, Apply/Keep/Revert and physical browser-loss acceptance remain open, so this requirement is not yet closed. Existing hardware remains the target. See [the resumed evidence](hardware/pocket2-resume-2026-09-08.md). Here rather than
   in M9 because the bench settled it in an evening: with the board playing the phone, the
   camera streams 720p H.264 unprompted and its gimbal is commands on the same link, which
   is a real gimbal for the Cockpit this milestone builds. See

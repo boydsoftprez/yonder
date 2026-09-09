@@ -1,6 +1,6 @@
 # Camera Workspace Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Make the Camera surface readable, complete and usable without page switching, with real thumbnails and orientation-independent pan/tilt.
 
@@ -25,11 +25,11 @@
 
 **Interfaces:** Consume existing `picture.aim` private intent metadata, native control descriptors, Deck draft/apply contract, and pending/confirm/revert adapters. Produce one Picture, one Aim and one unified Deck composition; retain `picture.cameras` thumbnail payload without inventing its producer. Task 2 owns backend routes and still generation.
 
-- [ ] Add failing flow/component assertions for one Aim composition, absent image PAN/TILT footer, Camera pending keys reachable regardless of draft state, camera operations not wired to popup notifications, and draft retention after refused Apply.
-- [ ] Run the focused existing Vitest files and verify each new assertion fails for the intended current defect.
-- [ ] Remove duplicate Live/Setup composition and embedded Aim; retain native immediate controls, staged draft store and capture operations. Compose one persistent authoritative pending/local-draft action area. Route camera results inline and remove idle READY noise.
-- [ ] Apply scoped content-height CSS to Aim and variable controls while preserving the bounded Picture slot. Verify control release/teardown behavior remains covered.
-- [ ] Run affected flow, component, DOM tests and package builds; self-review against every Camera surface bullet in the spec. Commit with GPG and DCO referencing R-UI-15, R-UI-28 and R-CAM-11.
+- [x] Add failing flow/component assertions for one Aim composition, absent image PAN/TILT footer, Camera pending keys reachable regardless of draft state, camera operations not wired to popup notifications, and draft retention after refused Apply.
+- [x] Run the focused existing Vitest files and verify each new assertion fails for the intended current defect.
+- [x] Remove duplicate Live/Setup composition and embedded Aim; retain native immediate controls, staged draft store and capture operations. Compose one persistent authoritative pending/local-draft action area. Route camera results inline and remove idle READY noise.
+- [x] Apply scoped content-height CSS to Aim and variable controls while preserving the bounded Picture slot. Verify control release/teardown behavior remains covered.
+- [x] Run affected flow, component, DOM tests and package builds; self-review against every Camera surface bullet in the spec. Commit with GPG and DCO referencing R-UI-15, R-UI-28 and R-CAM-11.
 
 ### Task 2: Restore watched-camera stills and thumbnails
 
@@ -37,11 +37,11 @@
 
 **Interfaces:** Recover the former `Stills` implementation from repository history where available, with `latest(camera)`, `read(camera)`, `tick()`, `start()`, `stop()`, and existing viewer demand/accounting hooks. Produce `picture.cameras[].thumbSrc` and `ageSeconds` from actual RAM frames, plus authenticated `/video/:id/still` serving. Preserve current accessory/capture/Aim routes.
 
-- [ ] Compare prior generator/routes/viewers with the current source and identify exact demand, host-channel and response contracts before editing. Recover source and tests from history when possible.
-- [ ] Add failing tests for running watched camera -> one complete RAM frame -> authenticated JPEG -> truthful thumbnail age; several viewers share generation while each transmission is counted.
-- [ ] Add failure tests for stopped/removed/restarted camera invalidation, no watchers, slow or failed host reply, and unavailable first frame. Native `photo` must never be called.
-- [ ] Restore the minimal coherent chain using the existing host still operation, atomic completion, bounded in-flight work and RAM storage. Integrate current accessory source and preserve latest backend DTO fixes.
-- [ ] Run covering generator/viewer/route/middleware tests and core build; self-review, then GPG/DCO commit referencing R-VID-14, R-VID-11 and R-STO-01.
+- [x] Compare prior generator/routes/viewers with the current source and identify exact demand, host-channel and response contracts before editing. Recover source and tests from history when possible.
+- [x] Add failing tests for running watched camera -> one complete RAM frame -> authenticated JPEG -> truthful thumbnail age; several viewers share generation while each transmission is counted.
+- [x] Add failure tests for stopped/removed/restarted camera invalidation, no watchers, slow or failed host reply, and unavailable first frame. Native `photo` must never be called.
+- [x] Restore the minimal coherent chain using the existing host still operation, atomic completion, bounded in-flight work and RAM storage. Integrate current accessory source and preserve latest backend DTO fixes.
+- [x] Run covering generator/viewer/route/middleware tests and core build; self-review, then GPG/DCO commit referencing R-VID-14, R-VID-11 and R-STO-01.
 
 ### Task 3: Measure and replace world-frame rate gating
 
@@ -49,11 +49,11 @@
 
 **Interfaces:** Retain the current Intent and AccessoryWriter contracts. Read world quaternion separately from candidate body-yaw telemetry. Rate feedback must consume actual dispatched commands and fresh status, never infer a motor direction from a world Euler component near vertical.
 
-- [ ] Root records bounded 5 degrees/second, single-axis pulses from the current clear pose, with raw status and actual transmit timestamps. Compare quaternion movement, candidate body-yaw and flags; repeat opposite directions and observe stop tails.
-- [ ] Root obtains operator-assisted changes to upright, portrait and underslung orientations while keeping hardware clear; collect the same bounded measurements. Record measured facts and unresolved fields in hardware documentation.
-- [ ] Write the concrete native-feedback guard brief from those observations before implementation. Preserve hard-limit unknown-direction refusal, faults, freshness, lease and rate/stop limits; exclude world-angle windows from rate admission. Discrete actions require their own established semantics.
-- [ ] Add failing regression cases using recorded status: identical native motion is admitted across headings and near-vertical Euler representation; flags/faults/stale status/end-of-intent still stop admission; no-motion/native stops inhibit repeated into-stop commands and permit evidenced retreat.
-- [ ] Implement the measured feedback model, run covering tests/build and mutation checks for the interlocks, then obtain scoped review and GPG/DCO commit referencing R-CAM-11.
+- [x] Root records bounded 5 degrees/second, single-axis pulses from the current clear pose, with raw status and actual transmit timestamps. Compare quaternion movement, candidate body-yaw and flags; repeat opposite directions and observe stop tails.
+- [x] Root records the operator-confirmed horizontal screen-up, upright and sideways placements. The additional hand-held upside-down check was withdrawn at the operator’s request; do not claim that placement was tested. Record measured facts and unresolved fields in hardware documentation.
+- [x] Write the concrete native-feedback guard brief from those observations before implementation. Preserve hard-limit unknown-direction refusal, faults, freshness, lease and rate/stop limits; exclude world-angle windows from rate admission. Use native rate commands with flags `0x80`, never the extended-range bit. Discrete actions require their own established semantics.
+- [x] Add failing regression cases using recorded status: identical native motion is admitted across headings and near-vertical Euler representation; flags/faults/stale status/end-of-intent still stop admission. A conservative no-rotation watchdog cancels only the current sustained gesture and allows a fresh operator gesture. It does not infer joint position, soft-stop direction, or retreat from a world quaternion. Windows span completed writes and credential renewals, reject stale callbacks, and account for low-rate measurement noise. Native limits remain the joint constraint; body motion and diagonal commands preclude stronger joint claims from this signal.
+- [x] Implement the measured feedback model, run covering tests/build and mutation checks for the interlocks, then obtain scoped review and GPG/DCO commit referencing R-CAM-11.
 
 ### Task 4: Deploy and complete real acceptance
 
@@ -64,3 +64,20 @@
 - [ ] In the real authenticated browser verify live preview and thumbnails, desktop/narrow layout in both palettes, immediate native controls, staged Apply/Discard and visible Keep/Revert on Camera and after navigation, with no overlapping popup results.
 - [ ] Verify production pan/tilt under the measured orientations, native photo/record readback, and five browser-loss stop runs with observed stopping time. Keep full-speed voltage and source continuity evidence.
 - [ ] Run the final affected workspace tests/build once the cohesive changes are settled; perform whole-change review. Update hardware evidence accurately, including remaining physically unavailable ELP checks, and commit documentation with GPG/DCO.
+
+## Implementation and acceptance status
+
+Tasks 1–3 are implemented and reviewed, including the later operator feedback on
+held drags, direction labels, first-request delay, SVG geometry, optical tilt
+sign and separate native-control/media epochs. The final workspace test run
+passed 4,234 tests. The reviewed bundle is deployed, and its files are synced.
+
+Task 4 remains open for final live acceptance. A prior deployed browser showed
+live video, a real thumbnail with age and non-overlapping desktop widget bounds.
+Production API checks established movement, release and expiry behavior in the
+measured cases. A temporary Name draft was discarded without changing stored
+configuration. Final optical Up, Apply/Keep/Revert, narrow/both-palette checks and
+five physical browser-loss measurements are not claimed complete. The camera’s
+USB port became not attached after the last restart; the operator has been asked
+to power it on without further holding or repositioning. Root owns the remaining
+acceptance work. No additional hardware purchase is a prerequisite.

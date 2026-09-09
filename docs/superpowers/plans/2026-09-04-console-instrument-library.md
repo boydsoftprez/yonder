@@ -1505,10 +1505,18 @@ it("ignores a draft and reads only the applied policy", ...);
 **Phase 5 resumed on 2026-09-08 at the operator's request**, with the Pocket 2
 connected to the dev Pi 4. The original deferral was taken on 2026-09-05.
 The [resumed bench evidence](../../hardware/pocket2-resume-2026-09-08.md) records
-the real USB link, gimbal tests and camera-control effects. Card-dependent
-recording/photo proof still needs a card that the camera recognizes.
-Task 2 has its five readings; production integration and complete browser-loss
-measurement remain open until their acceptance checks below pass.
+the real USB link, gimbal tests, recognized-card recording/photo operations and
+measured controls. Tasks 35–38 and the Task 39/40 source, media, route and
+console code are implemented and reviewed. Task 2 has its five device readings;
+full browser preview/control acceptance and five browser-loss measurements
+remain open until their checks below pass.
+
+**Camera UX and orientation supersession:** The operator subsequently authorized
+[one coherent camera workspace](2026-09-08-camera-workspace.md). That revision
+replaces this plan's Live/Setup split, duplicated Aim composition and fixed
+world-angle rate envelope. Current full-speed hardware evidence and the new
+acceptance checks take precedence over earlier temporary CPU experiments and
+stationary-mount assumptions below.
 
 **When the camera returns, start from the bench queue** in
 [`hardware/dji-pocket-2-over-usb.md`](../../hardware/dji-pocket-2-over-usb.md),
@@ -1522,22 +1530,35 @@ approximated in software.
 
 ### Task 35: DUML and the AOA session
 
+**2026-09-08:** protocol and captured-stream replay implemented and reviewed.
+The Linux transport is implemented separately in `video/accessory/linux.ts`
+and `assets/functionfs.py`; it passed an 80-second live hardware proof and
+subsequently carried native camera controls and card operations. See the
+[session evidence](../../hardware/pocket2-resume-2026-09-08.md).
+
 **Files:** `video/accessory/duml.ts`, `aoa.ts`, and tests
 
-- [ ] **Step 1: Write the failing tests** — encode/decode round-trip; the CRC8 and CRC16 vectors from `scripts/pocket2/duml.py`'s reference tables; a corrupted CRC → `null`; a truncated frame → `null`; the session answers the heartbeat and keeps the live view alive with the ping the bench found.
-- [ ] **Step 2–4: Port faithfully, keeping the docstring's provenance; pass; mutation-check** — change a CRC seed: the vector test goes red and the round-trip does not, which is the point of having both.
-- [ ] **Step 5: Commit** — `git commit -s -m "feat(video): DUML and the accessory session, from the bench — R-CAM-15"`
+- [x] **Step 1: Write the failing tests** — encode/decode round-trip; the CRC8 and CRC16 vectors from `scripts/pocket2/duml.py`'s reference tables; a corrupted CRC → `null`; a truncated frame → `null`; the session answers the heartbeat and keeps the live view alive with the ping the bench found.
+- [x] **Step 2–4: Port faithfully, keeping the docstring's provenance; pass; mutation-check** — change a CRC seed: the vector test goes red and the round-trip does not, which is the point of having both.
+- [x] **Step 5: Commit** — `git commit -s -m "feat(video): DUML and the accessory session, from the bench — R-CAM-15"`
 
 ---
 
 ### Task 36: Expiring intent — the browser's gesture, checked in the daemon's clock
+
+**2026-09-08:** the pure `Intent` model is implemented and independently
+reviewed (56 tests and 51 guard mutations). Owner-bound one-use grants,
+monotonic deadlines, cancellation signals and dispatch-time validity are
+present. Task 40 now connects the authenticated browser path through a bounded
+shared writer to physical dispatch. The five hardware browser-loss runs remain
+a separate acceptance item.
 
 **Files:** `video/accessory/intent.ts` + `intent.test.ts`; `daemon/routes.ts` (`/cameras/:id/aim`)
 
 **Interfaces:**
 - Produces: `class Intent { constructor({ clock, leaseMs: 500 }); issue(): { gesture, deadline }; admit(msg: { gesture, seq, deadline, rate }): Admitted | Rejected; end(gesture): void; live(now): Rate | null }`. Deadlines are daemon-issued and validated in the daemon's monotonic clock; a lease lasts ≤ 500 ms without a fresh admitted renewal; expired, out-of-order and previous-gesture messages are rejected before any write; `end` clears queued motion at once; reconnect never resumes; a late frame from an ended gesture cannot restart motion; a browser clock cannot renew anything; latency beyond the budget inhibits new motion.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```ts
 it("rejects a message whose deadline has passed in the daemon's clock", ...);
@@ -1550,8 +1571,8 @@ it("a browser wall clock cannot renew a lease", ...);
 it("latency beyond the budget inhibits new motion rather than admitting stale commands", ...);
 ```
 
-- [ ] **Step 2–4: Fail; implement with an injected clock; pass; mutation-check** every rejection.
-- [ ] **Step 5: Commit** — `git commit -s -m "feat(video): expiring intent — a gesture the daemon admits, leases and ends — R-CAM-11, R-CMD-04"`
+- [x] **Step 2–4: Fail; implement with an injected clock; pass; mutation-check** every rejection.
+- [x] **Step 5: Commit** — `git commit -s -m "feat(video): expiring intent — a gesture the daemon admits, leases and ends — R-CAM-11, R-CMD-04"`
 
 ---
 
@@ -1559,26 +1580,40 @@ it("latency beyond the budget inhibits new motion rather than admitting stale co
 
 **Files:** `video/accessory/gimbal.ts` + `gimbal.test.ts`
 
-- [ ] **Step 1: Write the failing tests** — a rate frame is `0x0C` with flags `0x80`, three int16 tenths in the order yaw, roll, pitch, pitch sign inverted per the bench; frames repeat at 10 Hz **only while `Intent.live()` returns a rate**; attitude decodes tenths; **pitch limit = bit 0, yaw limit = bit 1**; recentre is `0x4C 02 01`; a mode command is `0x44` (asserted at the wire only until Task 39 drives it).
-- [ ] **Step 2–4: Fail; implement; pass; mutation-check** the 10 Hz gate on `live()`.
-- [ ] **Step 5: Commit** — `git commit -s -m "feat(video): gimbal rate, attitude, limits and recentre, measured — R-CAM-11, R-TEL-15"`
+- [x] **Step 1: Write the failing tests** — a rate frame is `0x0C` with flags `0x80`, three int16 tenths in the order yaw, roll, pitch, pitch sign inverted per the bench; frames repeat at 10 Hz **only while `Intent.live()` returns a rate**; attitude decodes tenths; **pitch limit = bit 0, yaw limit = bit 1**; recentre is `0x4C 02 01`; a mode command is `0x44` (asserted at the wire only until Task 39 drives it).
+- [x] **Step 2–4: Fail; implement; pass; mutation-check** the 10 Hz gate on `live()`.
+- [x] **Step 5: Commit** — `git commit -s -m "feat(video): gimbal rate, attitude, limits and recentre, measured — R-CAM-11, R-TEL-15"`
 
 ---
 
-### Task 38: One guard for every motion command; the range finder
+### Task 38: One guard for every motion command
 
-**Files:** `video/accessory/guard.ts` + `guard.test.ts`; `schema/config.ts` (`cameras[].gimbal.envelope` per mode, per mounting); `daemon/routes.ts` (`/cameras/:id/range-finder`); `ui/YonderRangeFinder.vue` + `range-finder.ts/.html` + test; `flows/flows.json`
+**2026-09-08:** implemented, mutation-tested and independently reviewed. The
+operator rejected the range finder; its stale task/file references are removed.
+The bench also established rate soft stops with no limit flag, so flags alone
+cannot replace measured operating bounds.
 
-**Interfaces:**
-- Produces: `guard(cmd: Rate | Recentre | Mode, ctx: { envelope, mode, attitude, attitudeAge, limits, signsVerified, stopMargin }): Allowed | Refused`. Unknown envelope, unknown mode, stale attitude or unverified signs → refused per axis with the missing precondition; motion farther into a lit limit → refused; away from it → allowed only with fresh position and a verified direction inside a known envelope; recentre and mode changes allowed only from poses the bench established; a mode change ends the active gesture; the stop-bound's continuing travel is reserved. **Where the envelope comes from is an open question, and the range finder is no longer the answer.** The operator rejected it and the evidence backs him: the camera pushes a limit flag twenty times a second on the same link as the video, so a sweep pre-computes what it announces anyway. The likely shape is to listen — refuse motion farther into a flag that is lit now, and slow near one — which needs no procedure and cannot go stale when the mounting changes. Settle it against bench queue items 1 and 3 before building this, and never from a manufacturer's figure. No absolute pointing command is exposed.
+**Files:** `video/accessory/guard.ts` and tests; `schema/config.ts`
+(`cameras[].accessory_mount`, per mounting and mode).
 
-- [ ] **Step 1: Write the failing tests** — one per rule above; and for the range finder: refuses a step over 5°; stops on the limit flag; records the envelope per mode; the guard refuses everything until it has one; the finder never runs without an operator's press per step.
-- [ ] **Step 2–4: Fail; implement; pass; mutation-check** every refusal.
-- [ ] **Step 5: Commit** — `git commit -s -m "feat(video): one guard for rate, recentre and mode, and the range finder that gives it its envelope — R-CAM-11, R-CMD-04"`
+- [x] Refuse stale/unknown attitude, geometry, mode and signs; reserve the full
+  intent-plus-device stopping allowance; judge each requested axis/direction.
+- [x] Require measured complete start/trajectory regions for discrete actions.
+  Recentre selects Follow mode 2 and requires both source and target envelopes.
+- [x] Preserve known normal status bits `0x80`/`0xa0`; unclassified fault mask
+  `0x5c` still inhibits. An acknowledged command is not an observed pose.
+- [x] Implement, test and commit the guard with no absolute pointing UI or
+  range-finder procedure — R-CAM-11, R-CMD-04.
 
 ---
 
 ### Task 39: The state push decoded; every untried command driven; the stop bound measured
+
+**2026-09-08:** state/controller code and measured native menus are implemented
+and reviewed, including actual card recording/photo, ISO/EV/shutter, focus and
+white balance. Battery stays unknown; `0x32` is metering, not focus. Priority
+shutter writes and the five complete browser-loss runs still need their own
+acceptance; Manual exposes only exact measured shutter choices.
 
 **Files:** `video/accessory/state.ts` + `state.test.ts`; `docs/hardware/dji-pocket-2-over-usb.md`
 
@@ -1598,6 +1633,12 @@ it("latency beyond the budget inhibits new motion rather than admitting stale co
 ---
 
 ### Task 40: The accessory camera is a camera
+
+**2026-09-08:** implemented and deployed on the dev Pi. Detection/adoption,
+framed native video, measured controls, card recorder, private gesture transport
+and console wiring are connected. Native input passed 45 seconds/1,338 frames
+and 150 saved frames decoded at 1280×720. Full preview and browser motion
+acceptance remain open; no completion is inferred from the software suite.
 
 **Files:** `video/accessory/source.ts` + `source.test.ts`; `schema/config.ts` (`source: "accessory"`); `probe/camera.ts`; `camera.ts`; `flows/flows.json`; `docs/configuration.md`; `docs/roadmap.md`
 

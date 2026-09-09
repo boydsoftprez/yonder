@@ -33,3 +33,24 @@ Retain fresh CRC-valid status, known mode, fault and limit feedback, the 10 degr
 - The removed ELP camera remains configured and compatible; fresh physical ELP acceptance cannot be claimed while it is absent.
 - No images, credentials, machine-specific paths, or board addresses are committed. Commits are GPG-signed and DCO-signed, with no amendments.
 - Root alone operates hardware. Use bounded probes and continuous source keepalives. Browser visual and physical motion acceptance are required in addition to automated tests.
+
+## Operator feedback: continuous aiming
+
+The operator subsequently reported incorrect direction, sluggish response, and
+having to release and pull again to obtain continued movement. The revised pad
+keeps an owned pointer capture outside its rim, uses the painted SVG coordinate
+space, and labels Up, Down, Left and Right explicitly. Release, lost capture,
+inhibition, page loss and real control-generation changes still retire the gesture.
+The first rate follows its grant immediately; subsequent requests are paced from
+the preceding request start and remain single-flight. Rate limits are unchanged.
+
+A media timestamp discontinuity changes the media epoch; it does not invalidate
+fresh native camera/gimbal control telemetry. Standalone Aim uses the USB control
+epoch. Picture gestures still use the media epoch and end on their own media loss.
+A genuine USB generation change revokes old control even if no intermediate
+status callback was observed.
+
+The live image established that the earlier public tilt sign was inverted.
+Public Up now uses positive native pitch speed, matching the observed optical
+direction and the native SDK parameter convention. No extended-range or
+unverified control flags are introduced.
