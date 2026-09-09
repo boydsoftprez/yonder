@@ -60,7 +60,7 @@ export = function register(RED: RED): void {
           return;
         }
         const status = revertStatus(
-          await node.client.request({ method: "POST", path: "/revert", body: { id } }),
+          await node.client.request({ method: "POST", path: "/revert", body: { id }, timeoutMs: 60000 }),
           Date.now(),
           id,
         );

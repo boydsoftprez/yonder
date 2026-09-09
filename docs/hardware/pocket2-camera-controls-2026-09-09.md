@@ -105,3 +105,16 @@ Validation: all 3,386 core tests passed after the apply/rollback correction,
 along with 60 video-node and 106 picture/thumbnail tests. The final browser-probe
 change passed 133 rate, adaptation and daemon wiring tests and the core build.
 No decoder threading change was installed.
+
+## Final on-device result
+
+Through the normal Camera page, a temporary Adaptive apply returned its
+confirmation controls and kept the 720p picture live. The encoder rose from
+1150 through 1700 to 1850 kb/s under healthy receiver feedback. Revert restored
+Fixed 1150 kb/s with the picture still advancing. This proves live probing and
+policy restoration; it does not constitute a throttled LTE field test.
+
+The rollback completed but exposed the same five-second limit in the Revert
+node's separate request. Revert now also uses a bounded 60-second operation wait;
+its 38 node tests and package build passed. Installing that final console-only
+correction leaves the camera's core process and USB owner running.

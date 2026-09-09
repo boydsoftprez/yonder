@@ -358,7 +358,7 @@ describe("yonder-revert", () => {
     // what it was asked.
     expect(msg.yonder?.state).toBe("confirmed");
     expect(msg.yonder?.message).toContain("previous configuration");
-    expect(asked).toEqual([{ method: "POST", path: "/revert", body: { id: "abc" } }]);
+    expect(asked).toEqual([{ method: "POST", path: "/revert", body: { id: "abc" }, timeoutMs: 60000 }]);
   });
 
   it("takes the id from the payload as well, because a flow may carry it there", async () => {
