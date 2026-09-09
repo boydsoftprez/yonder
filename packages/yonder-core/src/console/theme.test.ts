@@ -486,3 +486,11 @@ describe("themeCss sizes actions to their words", () => {
     });
   }
 });
+
+it('sizes the camera content widgets intrinsically without changing the bounded preview', () => {
+  const css = themeCss('night');
+  expect(css).toContain('.nrdb-ui-widget.yonder-content-height');
+  expect(css).toMatch(/\.nrdb-ui-widget\.yonder-content-height\s*\{[^}]*grid-row-end:\s*auto\s*!important/s);
+  expect(css).toMatch(/\.nrdb-ui-widget\.yonder-content-height\s*\{[^}]*grid-template-rows:\s*none\s*!important/s);
+  expect(css).not.toContain('.nrdb-ui-yonder-picture {');
+});

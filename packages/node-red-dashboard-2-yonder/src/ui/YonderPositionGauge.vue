@@ -7,7 +7,7 @@
         </div>
         <div class="y-pg__trk" :style="{ width: TRACK_WIDTH + 'px' }">
             <i v-if="showZero" class="y-pg__zero" :style="{ left: pxAt(0) }" />
-            <i v-if="!dead" class="y-pg__ptr" :style="{ left: pxAt(value) }" />
+            <i v-if="!dead && boundsKnown" class="y-pg__ptr" :style="{ left: pxAt(value) }" />
         </div>
         <div class="y-pg__bounds">
             <span>{{ boundText(min) }}</span>

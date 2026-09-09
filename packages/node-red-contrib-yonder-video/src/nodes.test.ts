@@ -38,6 +38,7 @@ const camerasNode = (await import("./cameras.js")).default ?? await import("./ca
 const cameraNode = (await import("./camera.js")).default ?? await import("./camera.js");
 const streamNode = (await import("./stream.js")).default ?? await import("./stream.js");
 const addressNode = (await import("./stream-address.js")).default ?? await import("./stream-address.js");
+const workspaceNode = (await import('./camera-workspace.js')).default ?? await import('./camera-workspace.js');
 const capturesNode = (await import("./captures.js")).default ?? await import("./captures.js");
 
 const ok = (body: unknown): DaemonReply => ({ ok: true, status: 200, body });
@@ -575,5 +576,14 @@ describe("yonder-captures", () => {
     const msg = await send(capturesNode, "yonder-captures", { camera: "cam0", payload: { shutter: "record" } });
     expect(msg.yonder?.state).toBe("rejected");
     expect(msg.camera).toBe("cam0");
+  });
+});
+
+
+describe('yonder-camera-workspace', () => {
+  it('registers a package-backed state adapter and emits a complete hydration snapshot without querying hardware', async () => {
+    const result = await send(workspaceNode, 'yonder-camera-workspace', { workspaceKind: 'report', payload: { camera: { id: 'cam0', name: 'Camera' } } });
+    expect(result.payload).toMatchObject({ camera: { id: 'cam0' }, workspace: { pending: null, result: null } });
+    expect(asked).toEqual([]);
   });
 });

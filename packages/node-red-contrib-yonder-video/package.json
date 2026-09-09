@@ -14,7 +14,8 @@
       "yonder-camera": "dist/camera.js",
       "yonder-stream": "dist/stream.js",
       "yonder-stream-address": "dist/stream-address.js",
-      "yonder-captures": "dist/captures.js"
+      "yonder-captures": "dist/captures.js",
+      "yonder-camera-workspace": "dist/camera-workspace.js"
     }
   },
   "scripts": {

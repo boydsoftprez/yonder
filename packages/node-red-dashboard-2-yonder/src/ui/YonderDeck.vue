@@ -8,136 +8,13 @@ import YonderSegmented from './YonderSegmented.vue'
 import YonderSetBar from './YonderSetBar.vue'
 import YonderTextField from './YonderTextField.vue'
 import YonderShutter from './YonderShutter.vue'
-import YonderAimPad from './YonderAimPad.vue'
-import { AimTransport } from './aim-transport.ts'
 import { createDraftStore } from './draft.ts'
 import { LABELS, captureDestination, captureRefusal, captureSizes, deckDraft, draftPathFor, endedWords, interruption } from 'yonder-core/presentation'
 
-/**
- * `ui-yonder-deck` — a camera's whole control surface, composed from what it
- * answered (R-UI-08, R-UI-20, R-UI-21, R-CFG-03). This is the task the whole
- * plan was written for.
- *
- * **The shipped console applies a typed value the moment focus leaves the
- * field.** No confirmation, no way back, on a page an operator reaches for
- * while an aircraft is flying. This component draws the fix: an *image*
- * control — brightness, gain, white balance, every key `CAPABILITY_LAYOUT`
- * below maps to `kind: 'bar' | 'pick' | 'seg'` — is a live command and posts
- * on press, through `setControl()`. A *stream or preview policy* edit —
- * everything `buildStream`/`buildPreview` draw, plus the camera's own name —
- * never touches the socket: it lands in `draftStore` (Task 21's
- * `createDraftStore`, `./draft.js`) via `stage()`, and only leaves this
- * component when Setup's Apply is pressed. Confusing those two is the defect
- * this whole plan exists to fix, so nothing below shares one code path
- * between them.
- *
- * **The deck decides nothing about the camera — it draws what the report
- * says.** `CAPABILITY_LAYOUT` is `capability.ts`'s own `CAPABILITY_KEYS`
- * technique applied a second time: a plain object literal typed (informally —
- * this file is JavaScript, not TypeScript, like every other `.vue` in this
- * package) against all 23 real keys, so a capability with nowhere to go is a
- * fact this file has to state rather than a control silently missing.
- * `drawCapability()` reads a key's `state` straight off `capabilities[key]` —
- * `present` draws the control, `not-offered` draws a fact and nothing else,
- * `advertised`/`gated` draw the same control disabled, carrying the reason —
- * and never re-derives gating the way the blueprint's own mock `stateOf()`
- * does, because the real probe (`probe/camera.ts`'s `gateIfInactive`) has
- * already decided it by the time a report reaches this page.
- *
- * **The Orientation group is the one exception, and it is a deliberate one**
- * (R-CTL-15). Mirror, Flip and Rotation are drawn from `orientation`, never
- * from `capabilities`, because a camera whose sensor turns nothing is still a
- * camera whose picture Yonder turns — on the board, after decoding. Read the
- * capability state there and the group prints three sentences saying the
- * camera cannot, over three controls that work. See `buildOrientation()`.
- *
- * **Units and menu options are never restated.** `descriptors[key]` is
- * `video/descriptors.ts`'s own `describe()` output — raw 156 already reads
- * 15600 µs by the time it reaches `values.exposure` — and a `pick` control's
- * `options` come from `capabilities[key].value.menu`, the probe's own list,
- * never expanded to fill `min…max`.
- *
- * **Columns hold their slot.** `SLOTS` is a fixed assignment, not a CSS flow:
- * the operator found, in person, that toggling Stream between Fixed and
- * Adaptive repacked every group into a different column when this ran on
- * CSS multi-column layout, on a page used while an aircraft is flying. Each
- * group here can grow or shrink its own height freely — the housekeeping
- * group in particular appears only on Setup — and nothing else ever moves
- * for it.
- *
- * **The payload this component reads**, one whole `msg.payload` object,
- * documented here because nothing upstream of this file has ever needed the
- * shape before:
- *
- * ```
- * { camera: { id, name, spec },
- *   capabilities: CameraCapabilities,           // yonder-core/presentation
- *   descriptors: Record<key, DescriptorView>,   // present/advertised/gated keys only
- *   values: Record<key, number|boolean|null>,   // display units; null when unreported
- *   commanded: Record<key, number|null>,
- *   policy: { capture: { width, height, framerate, codec },
- *             stream: { mode, floor_kbps, ceiling_kbps, bitrate_kbps },
- *             preview: { mode, size, ladder_bottom, ladder_top, floor_kbps,
- *                        ceiling_kbps, bitrate_kbps, framerate } },
- *   applied: { capture: <same shape as policy.capture>,
- *              stream: <same shape as policy.stream>,
- *              preview: <same shape as policy.preview> },
- *   outputs: { kind, label, enabled, costKbps, reach: OutputReach }[],
- *   captures: { count },
- *   recorder: { recording, since, destination, remainingSeconds,
- *               remainingPhotos, bytes, ended } | null,
- *   orientation: { says, turns: { key, by: "sensor"|"board",
- *                                 says: string|null, value }[] },
- *   problems: { path, message }[],    // only after a refused apply
- *   problemsFor: string }             // the camera those problems are about
- * ```
- *
- * `policy` and `applied` share one schema-shaped sub-shape (schema field
- * names and casing — `floor_kbps`, `mode: "fixed"|"adaptive"` — never the
- * blueprint's own `previewFloor`/`"Adaptive"` UI names) because that is what
- * the config schema itself stores (`schema/config.ts`'s `Stream`/`Preview`).
- * `policy` is what this deck renders a control's *current* value from;
- * `applied` is what `appliedForDraft()` below flattens for the draft's own
- * pending comparison — in practice the same numbers most of the time, kept
- * as two names because a respawn in flight is exactly the moment they can
- * disagree, and only one of them is this page's business to draw from.
- *
- * **The adapter the draft needs, and why it is a named function.** The
- * draft's paths are the blueprint's own UI-facing names — `streamMode:
- * "Adaptive"`, `previewFloor` — because `draft.ts`'s `pending(camera,
- * applied)` was written once, spanning both the image-control domain
- * (`values`, already keyed by capability name) and this schema-shaped one,
- * and a loose `path: string` is what let it. `appliedForDraft()` is the seam
- * between the two naming conventions, on its own rather than folded into a
- * computed or a render-path lambda, because a seam between two conventions
- * is exactly where they drift — and it has its own test
- * (`deck.component.test.ts`) rather than only being exercised indirectly.
- */
-
-/**
- * Capability key -> where it is drawn and how (Coordinator resolution 5, and
- * `CAPABILITY_KEYS`'s own reason, applied a second time). Written down
- * rather than derived, so a capability `capability.ts` adds later has
- * nowhere to render until a person decides where — the same failure mode
- * `CAPABILITY_KEYS` itself exists to turn into something loud.
- *
- * `kind`: `bar` (a bounded value, `YonderSetBar`), `pick` (the device's own
- * menu, `YonderPicker`), `seg` (a plain on/off, `YonderSegmented`), or one of
- * the ones that are not an image control at all and draw through a branch of
- * their own: `shutter` — both of `recording` and `stills`, drawn as **one**
- * key by `buildCapture()` — `turn` in `buildOrientation()`, and `capture`,
- * the format list, drawn as the Stream column's Resolution and Frame rate
- * pickers by `buildCaptureShape()`.
- *
- * `setupOnly` marks the four housekeeping controls this deck draws only on
- * Setup — mains frequency, backlight compensation, gain and sharpness: real
- * settings, rarely touched, that do not need to compete for space with
- * Exposure and Colour on the page an operator watches while flying.
- *
- * `group: 'aim'` is deliberately not one of `SLOTS`' four columns — the aim
- * panel sits beside the picture on Live only, the same placement the
- * blueprint gives it, and never appears on Setup.
- */
+/** One camera workspace: immediate camera controls, staged picture/output
+ * settings and a persistent transaction area. Source reports, pending status
+ * and operation results arrive as one hydration snapshot from the workspace
+ * adapter. The existing draft store remains the only local edit state. */
 export const CAPABILITY_LAYOUT = {
   /* **`formats` is drawn by the Stream column's two pickers** (R-CAM-14,
    * R-VID-07, blueprint L-51/L-56). It was a `CAPTURE FORMATS 10` readout
@@ -170,10 +47,10 @@ export const CAPABILITY_LAYOUT = {
   hue: { group: 'colour', kind: 'bar' },
   autoWhiteBalance: { group: 'exposure', kind: 'seg' },
   gamma: { group: 'rendering', kind: 'bar' },
-  gain: { group: 'housekeeping', kind: 'bar', setupOnly: true },
-  powerLineFrequency: { group: 'housekeeping', kind: 'pick', setupOnly: true },
-  sharpness: { group: 'housekeeping', kind: 'bar', setupOnly: true },
-  backlightCompensation: { group: 'housekeeping', kind: 'bar', setupOnly: true },
+  gain: { group: 'housekeeping', kind: 'bar' },
+  powerLineFrequency: { group: 'housekeeping', kind: 'pick' },
+  sharpness: { group: 'housekeeping', kind: 'bar' },
+  backlightCompensation: { group: 'housekeeping', kind: 'bar' },
   autoExposure: { group: 'exposure', kind: 'pick' },
   autoFocus: { group: 'optics', kind: 'seg' },
   /* R-CTL-05's two switches, beside `rotation` in the same group — a flip is
@@ -231,12 +108,17 @@ const GROUP_LEGEND = {
  * and never moves another group between columns. Preview sits alone because
  * it is the tallest and most variable group.
  */
-const SLOTS = [
-  ['capture', 'stream'],
-  ['preview'],
-  ['exposure', 'colour'],
-  ['optics', 'rendering', 'orientation', 'housekeeping'],
-]
+const IMAGE_SLOTS = [['capture'], ['exposure'], ['optics', 'colour'], ['rendering', 'housekeeping']]
+const CONFIG_SLOTS = [['stream'], ['preview'], ['orientation']]
+const OUTPUT_PATH = { rtp: 'outputRtp', rtsp: 'outputRtsp', srt: 'outputSrt' }
+const DRAFT_LABELS = {
+  name:'Camera name', width:'Output width', height:'Output height', framerate:'Output frame rate', codec:'Output codec',
+  streamMode:'Stream bitrate mode', streamBitrate:'Stream bitrate', streamFloor:'Stream minimum bitrate', streamCeiling:'Stream maximum bitrate',
+  previewMode:'Preview bitrate mode', previewSize:'Preview size', previewLadderBottom:'Smallest preview size', previewLadderTop:'Largest preview size',
+  previewFloor:'Preview minimum bitrate', previewCeiling:'Preview maximum bitrate', previewBitrate:'Preview bitrate', previewRate:'Preview frame rate',
+  rotation:'Rotation', horizontalFlip:'Mirror', verticalFlip:'Flip', outputRtp:'RTP output', outputRtsp:'RTSP output', outputSrt:'SRT output',
+}
+
 
 const PREVIEW_SIZE_OPTIONS = [
   { value: 'auto', label: 'Auto — steps with the link' },
@@ -362,6 +244,7 @@ export function appliedForDraft (payload) {
   if (payload && payload.camera && typeof payload.camera.name === 'string') {
     flat.name = payload.camera.name
   }
+  for (const output of payload?.outputs || []) if (OUTPUT_PATH[output.kind]) flat[OUTPUT_PATH[output.kind]] = output.enabled
   return flat
 }
 
@@ -410,16 +293,15 @@ export default {
        * cannot start a competing capture.
        */
       shutterPending: false,
-      aimTransport: null,
-      aimError: null,
+      now: Date.now(),
+      clockTimer: null,
     }
   },
   created () {
     this.$dataTracker(this.id)
-    this.aimTransport = new AimTransport(() => this.report?.aim, (_rate, reason) => { this.aimError = reason })
-    this.$socket.on?.('disconnect', this.aimDisconnect)
   },
   mounted () {
+    this.clockTimer = setInterval(() => { this.now = Date.now() }, 1000)
     // Task 21's own round trip: `yonder.draft` is Dashboard's client store,
     // which this component's own remounts do not clear — restoring into a
     // fresh `draftStore` here is what makes a draft survive the Live<->Setup
@@ -429,11 +311,18 @@ export default {
       : null
     if (saved) this.draftStore.restore(saved)
   },
-  beforeUnmount () { this.aimTransport?.close(); this.$socket.off?.('disconnect', this.aimDisconnect) },
+  beforeUnmount () { clearInterval(this.clockTimer) },
   computed: {
-    mode () {
-      return this.props.mode === 'setup' ? 'setup' : 'live'
+    message () { return this.$store?.state?.data?.messages?.[this.id]?.payload || this.props.report || null },
+    workspace () { return this.message?.workspace || {} },
+    transaction () { return this.workspace.pending || null },
+    operationResult () {
+      const result = this.workspace.result
+      if (!result || result.state === 'idle') return null
+      if (result.state === 'confirmed' && Number.isFinite(result.at) && this.now - result.at > 8000) return null
+      return result
     },
+    canApply () { return this.pendingEdits.length > 0 && !this.transaction?.pending && this.transaction?.state !== 'rejected' },
     /**
      * The whole report, live in preference to configured — the same rule
      * every other widget in this package states for its own narrower slice
@@ -442,16 +331,7 @@ export default {
      * `props.report` is a convenience for the gallery and a test, not a
      * promise that a real page shows anything before the first message.
      */
-    report () {
-      const live = this.$store && this.$store.state && this.$store.state.data
-        ? this.$store.state.data.messages && this.$store.state.data.messages[this.id]
-          ? this.$store.state.data.messages[this.id].payload
-          : undefined
-        : undefined
-      if (live && typeof live === 'object') return live
-      const fallback = this.props.report
-      return fallback && typeof fallback === 'object' ? fallback : null
-    },
+    report () { return this.message?.camera?.id ? this.message : null },
     camera () {
       return (this.report && this.report.camera && this.report.camera.id) || ''
     },
@@ -511,13 +391,10 @@ export default {
      * the key dead for ever after a refusal.
      */
     report (now, before) {
-      if (now?.aim?.generation !== before?.aim?.generation || now?.aim?.url !== before?.aim?.url) this.$refs.aimPad?.onEnd()
       this.shutterPending = false
-      this.aimTransport?.refresh()
     },
   },
   methods: {
-    aimDisconnect () { this.aimTransport?.stop(); this.$refs.aimPad?.onEnd() },
     nativeControl (command) { this.post({ nativeControl: command }) },
     hasDraft (path) {
       return Object.prototype.hasOwnProperty.call(this.draft, path)
@@ -554,7 +431,7 @@ export default {
     },
     stagedReason (path, fallback) {
       return this.pendingEdits.some((e) => e.path === path)
-        ? 'Pending · apply on Setup'
+        ? 'Staged change'
         : (fallback || '')
     },
     draftValue (path, fallback) {
@@ -608,9 +485,6 @@ export default {
       if (t && t.by === 'sensor') { this.setControl(t.key, value); return }
       this.stage(t.key, value)
     },
-    setMode (mode) {
-      this.post({ mode })
-    },
     /**
      * **The draft is not cleared here, and that is the fix.**
      *
@@ -628,15 +502,15 @@ export default {
      * throws a draft away, which is the only thing that should.
      */
     apply () {
+      if (!this.canApply) return
       this.post({ apply: this.draftStore.get(this.camera) })
     },
     discard () {
       this.draftStore.clear(this.camera)
       this.persistDraft()
-      this.post({ discard: true })
     },
     toggleOutput (kind, enabled) {
-      this.post({ output: kind, enabled })
+      if (OUTPUT_PATH[kind]) this.stage(OUTPUT_PATH[kind], enabled)
     },
     /**
      * **The one key, pressed** (blueprint L-44).
@@ -868,11 +742,7 @@ export default {
     buildGroup (groupId) {
       if (this.report?.accessory) return this.buildNativeGroup(groupId)
       const r = this.report
-      const setup = this.mode === 'setup'
-      const keys = (GROUP_KEYS[groupId] || []).filter((key) => {
-        const layout = CAPABILITY_LAYOUT[key]
-        return !(layout.setupOnly && !setup)
-      })
+      const keys = GROUP_KEYS[groupId] || []
       const anyPresent = keys.some((key) => {
         const cap = r.capabilities && r.capabilities[key]
         return cap && cap.state !== 'not-offered'
@@ -1042,9 +912,8 @@ export default {
       const applied = r.applied && r.applied.stream
       const uiMode = this.draftValue('streamMode', toUiMode(policy.mode))
       const adaptive = uiMode === 'Adaptive'
-      const setup = this.mode === 'setup'
       const children = []
-      if (setup) {
+      {
         children.push(h(YonderTextField, {
           key: 'name',
           label: 'Name',
@@ -1310,7 +1179,8 @@ export default {
         h('span', { class: 'y-deck__out-l' }, o.label || o.kind),
         h(YonderSegmented, {
           options: ['Off', 'On'],
-          value: o.enabled ? 'On' : 'Off',
+          value: this.draftValue(OUTPUT_PATH[o.kind], o.enabled) ? 'On' : 'Off',
+          reason: this.stagedReason(OUTPUT_PATH[o.kind]),
           onChange: (v) => this.toggleOutput(o.kind, v === 'On'),
         }),
         h('span', { class: 'y-deck__out-cost' }, typeof o.costKbps === 'number' ? `${o.costKbps} kb/s` : ''),
@@ -1329,31 +1199,7 @@ export default {
      * Every `slew`/`stop` is relayed to the socket exactly as `YonderAimPad`
      * computed it (R-CMD-04: this deck relays, it never originates one).
      */
-    buildAim () {
-      if (this.mode !== 'live') return null
-      const aim = this.report.capabilities && this.report.capabilities.aim
-      if (!aim || aim.state === 'not-offered') return null
-      const inhibited = aim.state === 'advertised'
-        ? (aim.reason || 'not answering')
-        : aim.state === 'gated'
-          ? `${aim.by.label} has it`
-          : (this.report.aim?.inhibited || null)
-      return h('div', { class: 'y-deck__aim' }, [
-        h('div', { class: 'y-deck__aim-h' }, 'Aim'),
-        this.aimError ? h('div', { class: 'y-deck__ended' }, this.aimError) : null,
-        !inhibited && this.report.aim?.directionalRefusals?.length ? h('div', { class: 'y-deck__ended' }, this.report.aim.directionalRefusals.join(' · ')) : null,
-        this.report.aim?.admitted ? h('div', { class: 'y-deck__ended' }, `Admitted rate ${Math.hypot(this.report.aim.admitted.pan, this.report.aim.admitted.tilt).toFixed(1)} °/s`) : null,
-        h(YonderAimPad, {
-          ref: 'aimPad',
-          axes: { pan: 'present', tilt: 'present', roll: 'advertised' },
-          maxRate: this.report.aim?.maxRate ?? 30,
-          inhibited,
-          atLimit: this.report.aim?.atLimit || {},
-          onSlew: (e) => this.report.aim?.url ? this.aimTransport.update(e) : this.post({ aim: { pan: e.pan, tilt: e.tilt, seq: e.seq, gesture: e.gesture } }),
-          onStop: (e) => this.report.aim?.url ? this.aimTransport.stop() : this.post({ aim: { gesture: e.gesture, pan: 0, tilt: 0 } }),
-        }),
-      ])
-    },
+
     /**
      * What is staged, what it would interrupt, and what the device refused.
      *
@@ -1390,7 +1236,6 @@ export default {
      *   draft going away *is* the refusal ceasing to apply.
      */
     buildPending () {
-      if (this.mode !== 'setup') return null
       const pending = this.pendingEdits
       const mine = this.report.problemsFor === this.camera
       const problems = (mine && pending.length > 0 && Array.isArray(this.report.problems))
@@ -1410,8 +1255,8 @@ export default {
       const rows = pending.map((p) => {
         const problem = problemFor(p.path)
         return h('div', { class: 'y-deck__pending-row', key: p.path }, [
-          h('span', { class: 'y-deck__pending-path' }, p.path),
-          h('span', { class: 'y-deck__pending-val' }, String(p.requested)),
+          h('span', { class: 'y-deck__pending-path' }, DRAFT_LABELS[p.path] || p.path),
+          h('span', { class: 'y-deck__pending-val' }, typeof p.requested === 'boolean' ? (p.requested ? 'On' : 'Off') : String(p.requested)),
           ...(problem ? [h('span', { class: 'y-deck__pending-why' }, problem.message)] : []),
         ])
       })
@@ -1427,67 +1272,82 @@ export default {
       ])
     },
     buildRail () {
-      const setup = this.mode === 'setup'
-      const pendingCount = this.pendingEdits.length
-      const keys = [
-        h('button', {
-          type: 'button',
-          class: ['y-deck__key', { on: !setup }],
-          onClick: () => this.setMode('live'),
-        }, 'Live'),
-        h('button', {
-          type: 'button',
-          class: ['y-deck__key', { on: setup }],
-          onClick: () => this.setMode('setup'),
-        }, (!setup && pendingCount) ? `Setup · ${pendingCount}` : 'Setup'),
-      ]
-      if (setup) {
-        // Not disabled at zero pending — the blueprint's own rail never
-        // gated these two either, and either one is a harmless no-op
-        // against an empty draft rather than a state worth guarding.
-        keys.push(h('button', {
-          type: 'button',
-          class: 'y-deck__key',
-          onClick: () => this.discard(),
-        }, 'Discard'))
-        keys.push(h('button', {
-          type: 'button',
-          class: ['y-deck__key', 'y-deck__key--warn'],
-          onClick: () => this.apply(),
-        }, 'Apply'))
-      }
-      return h('div', { class: 'y-deck__rail' }, keys)
+      const transaction = this.transaction
+      const active = transaction?.pending === true
+      const buttons = active
+        ? (transaction.keys || []).filter(key => ['confirm', 'revert'].includes(key.action)).map(key => h('button', {
+          type: 'button', class: ['y-deck__key', { 'y-deck__key--warn': key.action === 'confirm' }],
+          onClick: () => this.post({ transaction: `camera-${key.action}` }),
+        }, key.action === 'confirm' ? 'Keep' : 'Revert'))
+        : [h('button', { type: 'button', class: 'y-deck__key y-deck__key--warn', disabled: !this.canApply, onClick: () => this.apply() }, 'Apply'),
+          h('button', { type: 'button', class: 'y-deck__key', disabled: this.pendingEdits.length === 0, onClick: () => this.discard() }, 'Discard edits')]
+      const seconds = Number.isFinite(transaction?.expiresAt) ? Math.max(0, Math.ceil((transaction.expiresAt - this.now) / 1000)) : null
+      return h('section', { class: 'y-deck__transaction', 'aria-label': 'Configuration changes' }, [
+        h('div', { class: 'y-deck__transaction-head' }, active ? 'Configuration pending' : 'Configuration changes'),
+        active ? h('p', { class: 'y-deck__transaction-message' }, transaction.what || transaction.message) : null,
+        active && seconds !== null ? h('p', { class: 'y-deck__transaction-countdown' }, `${seconds} seconds until automatic revert`) : null,
+        active ? h('p', { class: 'y-deck__transaction-message' }, transaction.why || '') : this.buildPending(),
+        !active && this.pendingEdits.length === 0 ? h('p', { class: 'y-deck__transaction-message' }, 'No local changes staged.') : null,
+        transaction?.state === 'rejected' ? h('p', { class: 'y-deck__transaction-error' }, transaction.message) : null,
+        this.operationResult ? h('p', { class: ['y-deck__result', `is-${this.operationResult.state}`], role: 'status' }, this.operationResult.message) : null,
+        h('div', { class: 'y-deck__rail' }, buttons),
+      ])
     },
-  },
-  render () {
-    const r = this.report
-    if (!r) {
-      return h('div', { class: 'y-deck y-deck--empty' }, "Waiting for this camera's report.")
-    }
-    const cam = r.camera || {}
-    const slots = SLOTS
-      .map((ids) => ids.map((id) => {
+    buildSlots (slots) {
+      const columns = slots.map(ids => ids.map(id => {
         if (id === 'capture') return this.buildCapture()
         if (id === 'stream') return this.buildStream()
         if (id === 'preview') return this.buildPreview()
         if (id === 'orientation') return this.buildOrientation()
         return this.buildGroup(id)
-      }).filter(Boolean))
-      .filter((slot) => slot.length > 0)
-
-    return h('div', { class: ['y-deck', 'y-deck--' + this.mode] }, [
+      }).filter(Boolean)).filter(column => column.length)
+      return h('div', { class: 'y-deck__cols' }, columns.map((column, index) => h('div', { class: 'y-deck__slot', key: index }, column)))
+    },
+  },
+  render () {
+    const r = this.report
+    if (!r) return h('div', { class: 'y-deck' }, [this.buildRail(), h('p', "Waiting for this camera's report.")])
+    const cam = r.camera || {}
+    return h('div', { class: 'y-deck y-deck--workspace' }, [
       h(YonderPlacard, { kind: 'Camera', name: cam.name || '', unit: cam.spec || '' }),
-      this.buildPending(),
-      this.buildAim(),
-      h('div', { class: 'y-deck__cols' }, slots.map((slot, i) => h('div', { class: 'y-deck__slot', key: i }, slot))),
-      this.buildOutputs(),
       this.buildRail(),
+      h('div', { class: 'y-deck__tools' }, [
+        h('button', { type: 'button', class: 'y-deck__key', onClick: () => this.post({ video: 'stop' }) }, 'Stop video'),
+        h('button', { type: 'button', class: 'y-deck__key', onClick: () => this.post({ refresh: true }) }, 'Refresh camera'),
+        h('button', { type: 'button', class: 'y-deck__key', onClick: () => this.post({ connection: true }) }, 'Connection details'),
+      ]),
+      h('h2', { class: 'y-deck__section' }, 'Camera image and capture'),
+      h('p', { class: 'y-deck__hint' }, 'Camera controls take effect immediately and show the device readback.'),
+      this.buildSlots(IMAGE_SLOTS),
+      h('h2', { class: 'y-deck__section' }, 'Stream, picture and outputs'),
+      h('p', { class: 'y-deck__hint' }, 'These edits are staged until you press Apply.'),
+      this.buildSlots(CONFIG_SLOTS),
+      this.buildOutputs(),
     ])
   },
 }
 </script>
 
 <style scoped>
+.y-deck__transaction {
+    margin: 12px 0;
+    padding: 14px 16px;
+    border: 1px solid var(--yonder-divider, #2b333c);
+    border-radius: 3px;
+    background: var(--yonder-pane, #0a0e13);
+    overflow-wrap: anywhere;
+}
+.y-deck__transaction-head, .y-deck__section { font-size: 14px; font-weight: 600; color: var(--yonder-value, #fff); }
+.y-deck__transaction-message, .y-deck__hint { margin: 6px 0; font-size: 12px; line-height: 1.5; color: var(--yonder-label, #7f8a95); }
+.y-deck__transaction-countdown { margin: 6px 0; font-size: 13px; font-variant-numeric: tabular-nums; color: var(--yonder-waiting, #ffcf28); }
+.y-deck__transaction-error, .y-deck__result.is-rejected { color: var(--yonder-bad, #ff6b6b); }
+.y-deck__result { margin: 8px 0; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.y-deck__result.is-confirmed { color: var(--yonder-good, #6ddd97); }
+.y-deck__section { margin: 18px 0 0; padding: 0 16px; }
+.y-deck__hint { padding: 0 16px; }
+.y-deck__tools { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 16px; }
+.y-deck__key:disabled { opacity: .5; cursor: not-allowed; }
+
 .y-deck {
     display: flex;
     flex-direction: column;
@@ -1579,7 +1439,7 @@ export default {
        At 252 a fourth slot does not fit a 1280-wide page and wraps under the
        first, which is how this deck came to photograph as three columns and a
        stray — the four-column shape `SLOTS` declares only appeared at 1440. */
-    min-width: 220px;
+    min-width: min(220px, 100%);
     flex: 1 1 252px;
     /* The rule between columns, which the blueprint draws and this did not.
        Not decoration: four unruled columns of label/value pairs read as one
@@ -1599,18 +1459,9 @@ export default {
 .y-deck__slot:first-child {
     border-left-width: 0;
 }
-.y-deck__aim {
-    padding: 10px 16px 0;
-}
-.y-deck__aim-h {
-    font-size: 10.5px;
-    letter-spacing: 0.16em;
-    text-transform: uppercase;
-    color: var(--yonder-label, #7f8a95);
-    margin-bottom: 8px;
-}
 .y-deck__out {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 10px;
     padding: 6px 0;
@@ -1623,7 +1474,7 @@ export default {
     text-transform: none;
     color: var(--yonder-label, #7f8a95);
 }
-.y-deck__out-reach { color: var(--yonder-label, #7f8a95); font-size: 11px; }
+.y-deck__out-reach { color: var(--yonder-label, #7f8a95); font-size: 11px; overflow-wrap: anywhere; max-width: 100%; }
 .y-deck__out-reach--warn { color: var(--yonder-waiting, #ffcf28); }
 .y-deck__pending {
     margin: 0 16px;

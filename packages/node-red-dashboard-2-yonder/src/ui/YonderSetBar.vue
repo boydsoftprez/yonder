@@ -14,7 +14,7 @@
                :aria-label="grabAriaLabel" :style="{ left: pct(grabAt) }" />
         </div>
         <div v-if="fine" class="y-sb__fine">{{ fine }}</div>
-        <div v-if="hasRequested" class="y-sb__note">Pending &middot; apply on Setup</div>
+        <div v-if="hasRequested" class="y-sb__note">Staged change</div>
         <div v-if="reason" class="y-sb__why" :class="toneClass">{{ reason }}</div>
     </div>
 </template>

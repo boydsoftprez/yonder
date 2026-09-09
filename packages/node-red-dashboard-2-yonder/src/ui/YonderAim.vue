@@ -22,7 +22,7 @@
               controls that cannot be worked; what they no longer do is each
               restate why.
             -->
-            <div v-if="effectiveReason || aimError" class="y-aimpanel__reason">{{ aimError || effectiveReason }}</div>
+            <div v-if="effectiveReason || aimError || report.motionNotice" class="y-aimpanel__reason">{{ aimError || effectiveReason || report.motionNotice }}</div>
             <div v-if="!effectiveReason && report.directionalRefusals?.length" class="y-aimpanel__reason">{{ report.directionalRefusals.join(' · ') }}</div>
 
             <YonderAimPad
@@ -41,8 +41,8 @@
             </div>
 
             <div class="y-aimpanel__reported">Reported position</div>
-            <YonderPositionGauge label="Pan" unit="°" :value="pan" :min="panBounds.lo" :max="panBounds.hi" :bounds-known="hasBounds" :dead="!hasBounds || pan === null" :reason="gaugeReason" />
-            <YonderPositionGauge label="Tilt" unit="°" :value="tilt" :min="tiltBounds.lo" :max="tiltBounds.hi" :bounds-known="hasBounds" :dead="!hasBounds || tilt === null" :reason="gaugeReason" />
+            <YonderPositionGauge label="Pan" unit="°" :value="pan" :min="panBounds.lo" :max="panBounds.hi" :bounds-known="hasBounds" :dead="aimState !== 'present' || pan === null" :reason="gaugeReason" />
+            <YonderPositionGauge label="Tilt" unit="°" :value="tilt" :min="tiltBounds.lo" :max="tiltBounds.hi" :bounds-known="hasBounds" :dead="aimState !== 'present' || tilt === null" :reason="gaugeReason" />
 
             <div v-if="mode" class="y-aimpanel__modeline">{{ modeSentence }}</div>
             <YonderSegmented

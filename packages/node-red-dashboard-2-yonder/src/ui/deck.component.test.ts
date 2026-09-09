@@ -300,7 +300,7 @@ it("offers only the menu ids the probe listed", () => {
   expect(options.map((o) => o.text())).toEqual(["Manual Mode", "Aperture Priority Mode"]);
 });
 
-it("draws every control on Live, and the four bench-only ones only on Setup", () => {
+it("keeps every camera control reachable in the unified workspace", () => {
   const report = makeReport({
     capabilities: {
       brightness: present(range({ current: 10 })),
@@ -324,9 +324,9 @@ it("draws every control on Live, and the four bench-only ones only on Setup", ()
   const HOUSEKEEPING = ["Gain", "Backlight compensation", "Sharpness", "Mains frequency"];
 
   const live = deck(makeStore(report), "live").wrapper;
-  expect(legends(live)).not.toContain("Housekeeping");
+  expect(legends(live)).toContain("Housekeeping");
   for (const label of HOUSEKEEPING) {
-    expect(live.html(), `${label} must not draw on Live`).not.toContain(">" + label + "<");
+    expect(live.html(), `${label} remains reachable`).toContain(">" + label + "<");
   }
   // Every control, not only the withheld four: Brightness is ordinary and
   // must draw on both pages.
@@ -429,10 +429,10 @@ it("stages the camera's name and sends it only when Apply is pressed", async () 
  * The Name field is a bench setting (spec §3): it belongs on Setup, with the
  * other three, and not on the deck an operator flies from.
  */
-it("offers the name on Setup and nowhere on Live", () => {
+it("offers the name without changing workspace modes", () => {
   const { wrapper } = deck(makeStore(makeReport()), "live");
   expect(wrapper.findAll(".y-tf").map((f) => f.find(".y-tf__label").text()))
-    .not.toContain("Name");
+    .toContain("Name");
 });
 
 it("Apply posts the whole draft once; Discard clears it and posts nothing", async () => {
@@ -470,11 +470,10 @@ it("Apply posts the whole draft once; Discard clears it and posts nothing", asyn
     await seg.findAll("button").find((b) => b.text() === "Adaptive")!.trigger("click");
     expect(emit).not.toHaveBeenCalled();
 
-    const discardBtn = wrapper.findAll(".y-deck__key").find((b) => b.text() === "Discard")!;
+    const discardBtn = wrapper.findAll(".y-deck__key").find((b) => b.text() === "Discard edits")!;
     await discardBtn.trigger("click");
 
-    expect(emit).toHaveBeenCalledTimes(1);
-    expect(emit.mock.calls[0]![2]).toEqual({ payload: { discard: true } });
+    expect(emit).not.toHaveBeenCalled();
     expect((wrapper.vm as any).draftStore.get("elp")).toEqual({});
   }
 });
@@ -534,7 +533,7 @@ it("puts a refusal's problem beside the staged edit it is about", async () => {
   await wrapper.vm.$nextTick();
 
   const row = wrapper.findAll(".y-deck__pending-row")
-    .find((r) => r.find(".y-deck__pending-path").text() === "previewFloor");
+    .find((r) => r.find(".y-deck__pending-path").text() === "Preview minimum bitrate");
   expect(row, "the staged edit must still be there to mark").toBeDefined();
   expect(row!.find(".y-deck__pending-why").text()).toBe("the floor is above the ceiling");
 });
@@ -581,7 +580,7 @@ describe("a refusal that is not about the draft on screen", () => {
     await stagePreviewFloor(wrapper);
 
     const row = wrapper.findAll(".y-deck__pending-row")
-      .find((r) => r.find(".y-deck__pending-path").text() === "previewFloor");
+      .find((r) => r.find(".y-deck__pending-path").text() === "Preview minimum bitrate");
     expect(row, "the edit itself is still pending").toBeDefined();
     expect(row!.find(".y-deck__pending-why").exists()).toBe(false);
     expect(wrapper.text()).not.toContain("the floor is above the ceiling");
@@ -595,7 +594,7 @@ describe("a refusal that is not about the draft on screen", () => {
     await stagePreviewFloor(wrapper);
     expect(wrapper.text()).toContain("the floor is above the ceiling");
 
-    await wrapper.findAll(".y-deck__key").find((b) => b.text() === "Discard")!.trigger("click");
+    await wrapper.findAll(".y-deck__key").find((b) => b.text() === "Discard edits")!.trigger("click");
     expect(wrapper.find(".y-deck__pending").exists(), "nothing left for it to be about").toBe(false);
     expect(wrapper.text()).not.toContain("the floor is above the ceiling");
   });
@@ -608,7 +607,7 @@ describe("a refusal that is not about the draft on screen", () => {
  * nothing said it was staged: an operator on Live saw a changed number and had
  * to leave for Setup to learn which controls were holding an edit. The
  * blueprint carries the sentence on every staged control
- * (`gallery/deck.js`: `reason: pending ? "Pending · apply on Setup"`).
+ * (`gallery/deck.js`: `reason: pending ? "Staged change"`).
  *
  * The pair matters. Staging must add the sentence and the applied report must
  * take it away again, or the first half alone would pass while the console
@@ -620,7 +619,7 @@ it("says which controls are holding an edit, and stops saying it once applied", 
   // never re-render and the second half of this test could not fail honestly.
   const store = reactive(makeStore(makeReport({})));
   const { wrapper } = deck(store as ReturnType<typeof makeStore>, "live");
-  expect(wrapper.text()).not.toContain("Pending · apply on Setup");
+  expect(wrapper.text()).not.toContain("Staged change");
 
   // Staged through the deck's own `stage()` rather than by finding a widget
   // and guessing which path its label maps to: this is a test about the
@@ -629,7 +628,7 @@ it("says which controls are holding an edit, and stops saying it once applied", 
     .stage("streamBitrate", 4200);
   await wrapper.vm.$nextTick();
 
-  expect(wrapper.text(), "a staged control must say so").toContain("Pending · apply on Setup");
+  expect(wrapper.text(), "a staged control must say so").toContain("Staged change");
 
   // The device comes back reporting the value the draft asked for. The edit is
   // no longer pending, so the sentence must go — `pending` filters at read
@@ -641,7 +640,7 @@ it("says which controls are holding an edit, and stops saying it once applied", 
   // chain of computeds, and one tick flushes the values but not yet the tree.
   await wrapper.vm.$nextTick();
   await wrapper.vm.$nextTick();
-  expect(wrapper.text(), "an applied edit is not pending").not.toContain("Pending · apply on Setup");
+  expect(wrapper.text(), "an applied edit is not pending").not.toContain("Staged change");
 });
 
 it("groups flow into columns and no group is stranded on a row of its own", () => {
@@ -676,7 +675,7 @@ it("groups flow into columns and no group is stranded on a row of its own", () =
     // 220px is the blueprint's own figure (`gallery.css` `.d-cols__slot`); at
     // 252 a fourth slot did not fit a 1280-wide page and wrapped under the
     // first, so the four-column shape `SLOTS` declares only appeared at 1440.
-    expect(style.minWidth).toBe("220px");
+    expect(style.minWidth).toBe("min(220px, 100%)");
   }
   // **The rule between columns.** Four unruled columns of label/value pairs
   // read as one field of text, with nothing to say which qualifier governs
@@ -684,7 +683,7 @@ it("groups flow into columns and no group is stranded on a row of its own", () =
   // slot has nothing to its left to be divided from.
   expect(getComputedStyle(slots[0].element).borderLeftWidth,
     "the first column has nothing to its left").toBe("0px");
-  for (const slot of slots.slice(1)) {
+  for (const slot of slots.filter(slot => slot.element.previousElementSibling)) {
     expect(getComputedStyle(slot.element).borderLeftWidth,
       "every column after the first needs a rule beside it").toBe("1px");
   }
@@ -1201,7 +1200,7 @@ describe("the size and rate the camera captures", () => {
     await pickerByLabel(wrapper, "Frame rate").find("select").setValue("15");
     expect(pickerByLabel(wrapper, "Frame rate").find(".y-pick__value").text()).toBe("15 fps");
     expect(pickerByLabel(wrapper, "Frame rate").find(".y-pick__why").text())
-      .toContain("Pending");
+      .toContain("Staged change");
 
     // 1920×1080 and not 640×480: the latter makes 30 alone, so it would put a
     // refusal on the rate picker and this test would stop being about the two
@@ -1209,7 +1208,7 @@ describe("the size and rate the camera captures", () => {
     await pickerByLabel(wrapper, "Resolution").find("select").setValue("1920x1080");
     expect(pickerByLabel(wrapper, "Resolution").find(".y-pick__value").text()).toBe("1920×1080");
     expect(pickerByLabel(wrapper, "Resolution").find(".y-pick__why").text())
-      .toContain("Pending");
+      .toContain("Staged change");
     expect(pickerByLabel(wrapper, "Frame rate").find(".y-pick__value").text()).toBe("15 fps");
   });
 
@@ -1340,5 +1339,34 @@ describe('native Pocket controls', () => {
     expect(wb.text()).toContain('Auto'); await wb.find('select').setValue('65');
     expect(emit).toHaveBeenLastCalledWith('widget-action', 'd1', { payload: { nativeControl: { kind: 'white-balance', value: 65 } } });
     expect(wrapper.text()).not.toContain('Captures (0)'); wrapper.unmount();
+  });
+});
+
+describe('unified camera workspace', () => {
+  it('has one persistent transaction area with no Live/Setup navigation or embedded Aim', () => {
+    const { wrapper } = deck(makeStore(makeReport({ capabilities: { aim: present({ pitch: { min: -40, max: 40 }, yaw: { min: -90, max: 90 }, mode: 'Follow' }) } })), 'live');
+    expect(wrapper.find('.y-deck__transaction').exists()).toBe(true);
+    expect(wrapper.findAll('button').map(b => b.text())).toContain('Apply');
+    expect(wrapper.findAll('button').map(b => b.text())).toContain('Discard edits');
+    expect(wrapper.findAll('button').map(b => b.text())).not.toEqual(expect.arrayContaining(['Live','Setup']));
+    expect(wrapper.find('.y-deck__aim').exists()).toBe(false); wrapper.unmount();
+  });
+  it('offers authoritative Keep/Revert without local edits and respects device-confirmed changes', async () => {
+    const pending = { pending: true, id: 'tx1', expiresAt: Date.now() + 60000, what: 'Configuration pending', why: 'Check the result', keys: [{ action: 'confirm' }, { action: 'revert' }] };
+    const { wrapper, emit } = deck(makeStore(makeReport({ workspace: { pending } })), 'live');
+    const keep = wrapper.findAll('button').find(b => b.text() === 'Keep'); expect(keep).toBeDefined();
+    await keep!.trigger('click'); expect(emit).toHaveBeenLastCalledWith('widget-action','d1',{ payload: { transaction: 'camera-confirm' } });
+    expect(wrapper.findAll('button').find(b => b.text() === 'Revert')).toBeDefined(); wrapper.unmount();
+    const radio = deck(makeStore(makeReport({ workspace: { pending: { ...pending, keys: [{ action: 'revert' }], movesRadio: true } } })), 'live');
+    expect(radio.wrapper.findAll('button').some(b => b.text() === 'Keep')).toBe(false);
+    expect(radio.wrapper.text()).toContain('Configuration pending'); radio.wrapper.unmount();
+  });
+  it('stages output switches and sends them with the same deliberate Apply as picture settings', async () => {
+    const { wrapper, emit } = deck(makeStore(makeReport({ outputs: [{ kind:'rtsp', label:'RTSP', enabled:true }] })), 'live');
+    const output = wrapper.find('.y-deck__out');
+    await output.findAll('button').find(b => b.text() === 'Off')!.trigger('click');
+    expect(emit).not.toHaveBeenCalled();
+    await wrapper.findAll('button').find(b => b.text() === 'Apply')!.trigger('click');
+    expect(emit).toHaveBeenLastCalledWith('widget-action','d1',{ payload: { apply: { outputRtsp:false } } }); wrapper.unmount();
   });
 });

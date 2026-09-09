@@ -43,9 +43,6 @@
                  something happened at the moment the key was pressed
                  (R-UI-05); the banner says where it went. -->
             <div v-if="flashing" class="y-pic__flash" aria-hidden="true"></div>
-            <div v-if="flashing" class="y-pic__saved">
-                <i class="y-pic__saved-dot" aria-hidden="true"></i>Saved · to {{ savedTo }}
-            </div>
 
             <div v-if="footItems.length" class="y-pic__foot">
                 <span v-for="item in footItems" :key="item.key" class="y-pic__foot-item">
@@ -60,7 +57,6 @@
 
             <div v-if="dragGesture" class="y-pic__orb" :style="{ left: orbX + 'px', top: orbY + 'px' }"></div>
 
-            <div v-if="reason || aimRefusal" class="y-pic__reason">{{ aimRefusal || reason }}</div>
             <div v-if="mode === 'off'" class="y-pic__off">
                 not requested · this changes nothing the aircraft sends anyone else
             </div>
@@ -83,6 +79,9 @@
         </div>
       </div>
 
+        <div v-if="reason || aimRefusal" class="y-pic__reason" role="status">{{ aimRefusal || reason }}</div>
+        <div v-if="flashing" class="y-pic__saved" role="status"><i class="y-pic__saved-dot" aria-hidden="true"></i>Saved · to {{ savedTo }}</div>
+
         <YonderThumbStrip
             v-if="cameras.length"
             class="y-pic__strip"
@@ -95,6 +94,7 @@
 
 <script>
 import { AimTransport } from './aim-transport.ts'
+import { ThumbnailDemand } from './thumbnail-demand.ts'
 import YonderStateOverlay from './YonderStateOverlay.vue'
 import YonderThumbStrip from './YonderThumbStrip.vue'
 import { atIp, cameraFor, DESCRIPTORS, heldWords } from 'yonder-core/presentation'
@@ -631,7 +631,9 @@ export default {
              * something to compute a delta against — see `sampleReport`'s
              * own doc comment on why the first tick after any reset has
              * none. Reset on every new connection alongside `viewerId`. */
-            reportBaseline: null
+            reportBaseline: null,
+            thumbnailDemand: null,
+            thumbnailTimer: null
         }
     },
     computed: {
@@ -838,14 +840,6 @@ export default {
          */
         footItems () {
             const items = []
-            if (this.aimable) {
-                if (typeof this.aim.pan === 'number') {
-                    items.push({ key: 'pan', label: 'PAN', text: signed(this.aim.pan) + '°' })
-                }
-                if (typeof this.aim.tilt === 'number') {
-                    items.push({ key: 'tilt', label: 'TILT', text: signed(this.aim.tilt) + '°' })
-                }
-            }
             const zoom = this.fromPayload('zoom')
             if (typeof zoom === 'number') {
                 const d = DESCRIPTORS.zoom
@@ -860,6 +854,8 @@ export default {
         }
     },
     watch: {
+        cameras () { this.refreshThumbnails() },
+        mode () { this.refreshThumbnails() },
         aim (now, before) {
             if (now?.generation !== before?.generation || now?.url !== before?.url) this.onDragEnd()
             this.aimTransport?.refresh()
@@ -953,6 +949,8 @@ export default {
         this.remember(this.command)
     },
     mounted () {
+        this.thumbnailDemand = new ThumbnailDemand()
+        this.thumbnailTimer = setInterval(() => this.refreshThumbnails(), 5000)
         this.aimTransport = new AimTransport(() => this.aim, (_rate, reason) => { this.aimRefusal = reason })
         this.$socket.on?.('disconnect', this.aimDisconnect)
         this.tick = setInterval(() => { this.now = Date.now() }, 1000)
@@ -965,14 +963,17 @@ export default {
         // The drag layer's own four non-pointer endings — see this file's
         // own doc comment on "all eight endings".
         this.onDragBlur = () => this.onDragEnd()
-        this.onDragVisibility = () => { if (document.hidden) this.onDragEnd() }
+        this.onDragVisibility = () => { if (document.hidden) this.onDragEnd(); this.refreshThumbnails() }
         this.onDragPageHide = () => this.onDragEnd()
         window.addEventListener('blur', this.onDragBlur)
         document.addEventListener('visibilitychange', this.onDragVisibility)
         window.addEventListener('pagehide', this.onDragPageHide)
         this.requestLive()
+        this.refreshThumbnails()
     },
     beforeUnmount () {
+        clearInterval(this.thumbnailTimer)
+        this.thumbnailDemand?.close()
         this.aimTransport?.close()
         this.$socket.off?.('disconnect', this.aimDisconnect)
         clearTimeout(this.flashTimer)
@@ -992,6 +993,17 @@ export default {
         this.teardown()
     },
     methods: {
+        selectedStill () {
+            const camera = cameraFor(this.streamPath)
+            return this.cameras.find(row => row.id === camera)?.thumbSrc || this.props.stillsUrl || ''
+        },
+        refreshThumbnails () {
+            const camera = cameraFor(this.streamPath)
+            const rows = document.hidden ? [] : this.cameras.map(row => ({ id: row.id, want: row.id === camera ? (this.mode === 'live' ? 'video' : this.mode === 'stills' ? 'stills' : 'off') : 'off' }))
+            if (!document.hidden && this.mode === 'stills' && camera && !rows.some(row => row.id === camera)) rows.push({ id: camera, want: 'stills' })
+            this.thumbnailDemand?.set(rows)
+            if (this.mode === 'stills') this.stillSrc = this.selectedStill()
+        },
         remember (value) {
             if (!value || typeof value !== 'object') return
             if (typeof value.cost === 'string') this.sentCost = value.cost
@@ -1059,6 +1071,7 @@ export default {
          * replaces it.
          */
         teardown () {
+            this.thumbnailDemand?.set([])
             this.aimTransport?.stop()
             this.onDragEnd()
             // Anything still in flight belongs to nobody from here on.
@@ -1148,6 +1161,7 @@ export default {
             // restarts, or a subscription swept after `IDLE_MS`, must not leave
             // a live picture reporting into nothing until the page is reloaded.
             body.want = this.mode === 'live' ? 'video' : this.mode === 'stills' ? 'stills' : 'off'
+            if (this.cameras.length) body.stills = !document.hidden
             try {
                 await fetch(`/video/${this.negotiated}/report`, {
                     method: 'POST',
@@ -1219,7 +1233,7 @@ export default {
          */
         toStills () {
             this.mode = 'stills'
-            this.stillSrc = this.props.stillsUrl || ''
+            this.stillSrc = this.selectedStill()
             clearTimeout(this.retryTimer)
             // Nothing is watching the session now, and a track arriving after
             // this would be live video under a badge reading 'stills'.
@@ -1373,7 +1387,7 @@ export default {
                 // A mode the operator chose is not a failure, and carries no
                 // reason: 'off' is 'not requested', never 'no contact'.
                 this.reason = ''
-                this.stillSrc = mode === 'stills' ? (this.props.stillsUrl || '') : ''
+                this.stillSrc = mode === 'stills' ? this.selectedStill() : ''
             }
             this.$socket.emit('widget-action', this.id, { payload: `mode:${mode}`, topic: this.props.label })
         },
@@ -1495,7 +1509,7 @@ export default {
     height: 100%;
     min-height: 0;
     display: grid;
-    grid-template-rows: minmax(0, 1fr) auto;
+    grid-template-rows: minmax(0, 1fr) auto auto auto;
     grid-template-columns: minmax(0, 1fr);
 }
 /* **Takes the shape of the video it is showing, and never more room than it
@@ -1614,26 +1628,6 @@ export default {
     opacity: 0.55;
     pointer-events: none;
 }
-.y-pic__saved {
-    position: absolute;
-    z-index: 8;
-    left: 50%;
-    top: 50%;
-    transform: translate(-50%, -50%);
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    font-size: 12px;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    padding: 7px 13px;
-    border-radius: 2px;
-    background: rgba(4, 6, 10, 0.82);
-    border: 1px solid var(--yonder-select, #2ad4f0);
-    color: var(--yonder-select, #2ad4f0);
-    pointer-events: none;
-    white-space: nowrap;
-}
 .y-pic__saved-dot {
     width: 6px;
     height: 6px;
@@ -1741,4 +1735,23 @@ export default {
    own top-of-file doc comment on why it is a normal-flow sibling of
    `.y-pic__frame` rather than one more absolutely-positioned overlay. */
 .y-pic__strip { margin-top: 8px; }
+
+.y-pic__reason { color: var(--yonder-waiting, #ffcf28); }
+.y-pic__saved { color: var(--yonder-good, #6ddd97); }
+.y-pic__reason, .y-pic__saved {
+    position: static;
+    inset: auto;
+    transform: none;
+    width: auto;
+    max-width: 100%;
+    padding: 7px 0;
+    margin: 0;
+    background: transparent;
+    border: 0;
+    text-align: left;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    font-size: 12px;
+    line-height: 1.4;
+}
 </style>

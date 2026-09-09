@@ -975,6 +975,21 @@ ${panelCss(theme)}
   overflow: visible !important;
 }
 
+/* R-UI-29: variable camera controls and refusal text own their height.
+   The Picture widget is deliberately absent: it retains a bounded slot. */
+.nrdb-ui-widget.yonder-content-height {
+  grid-row-end: auto !important;
+  grid-template-rows: none !important;
+  height: auto !important;
+  min-height: 0;
+  overflow: visible !important;
+}
+.nrdb-ui-widget.yonder-content-height > :first-child {
+  grid-row-end: auto !important;
+  min-height: 0;
+  height: auto;
+}
+
 /* ---- the command-state language, in CSS ------------------------------
    The tone names come from console/command.ts, so a control cannot mean one
    thing on one page and something else on another (ADR-0005, R-UI-05). */

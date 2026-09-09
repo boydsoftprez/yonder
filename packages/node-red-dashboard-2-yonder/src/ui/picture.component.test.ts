@@ -444,9 +444,9 @@ describe("the twelve-second fall-back to stills", () => {
     // And the attempt that was already scheduled when the deadline expired
     // does not fire: a session negotiated behind a badge reading 'stills'
     // would put live video under a caption saying it is not live.
-    const attempts = fetchMock.mock.calls.length;
+    const attempts = fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/whep")).length;
     await advance(60_000);
-    expect(fetchMock).toHaveBeenCalledTimes(attempts);
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/whep"))).toHaveLength(attempts);
   });
 
   it("does not fall back when a frame has arrived", async () => {
@@ -572,11 +572,11 @@ describe("reconnecting", () => {
     await settle();
     await advance(12_000);
     expect(badge(wrapper)).toBe("stills");
-    const attempts = fetchMock.mock.calls.length;
+    const attempts = fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/whep")).length;
 
     pc(0).goes("failed");
     await advance(60_000);
-    expect(fetchMock).toHaveBeenCalledTimes(attempts);
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/whep"))).toHaveLength(attempts);
   });
 
   /**
@@ -1917,8 +1917,8 @@ describe("stands alone, with no deck at all (R-UI-28)", () => {
     expect(wrapper.findComponent(YonderStateOverlay).props("head")).toBe("adaptive");
     expect(wrapper.find(".y-pic__rec").text()).toContain("00:01:04");
     const foot = wrapper.find(".y-pic__foot").text();
-    expect(foot).toContain("PAN");
-    expect(foot).toContain("TILT");
+    expect(foot).not.toContain("PAN");
+    expect(foot).not.toContain("TILT");
     expect(foot).toContain("ZOOM");
     expect(wrapper.findComponent(YonderThumbStrip).exists()).toBe(true);
     expect(wrapper.findComponent(YonderThumbStrip).props("cameras")).toHaveLength(1);
@@ -2048,4 +2048,22 @@ it('hydrates state without replaying a cached full-rate action on mount', async 
   const { wrapper } = mountWithRail('rate:full'); await settle();
   expect((wrapper.vm as any).rate).toBe('preview');
   wrapper.unmount();
+});
+
+it('keeps private aim metadata and drag availability without drawing gimbal values over the image', async () => {
+  const { wrapper } = mountPicture({ report: { aim: { state:'present', pan:12, tilt:6, url:'/video/pocket/aim', generation:1, maxRate:10 } } });
+  await settle();
+  expect((wrapper.vm as any).aimable).toBe(true);
+  expect(wrapper.findAll('.y-pic__foot-k').map(label => label.text())).not.toContain('PAN');
+  expect(wrapper.findAll('.y-pic__foot-k').map(label => label.text())).not.toContain('TILT');
+  wrapper.unmount();
+});
+
+
+it('reports thumbnail demand for the selected and other visible cameras and releases it on unmount', async () => {
+  const { wrapper } = mountPicture({ path:'front-preview', report: { cameras: [{id:'front',active:true,thumbSrc:'/video/front/still?v=1',ageSeconds:2},{id:'tail',active:false,thumbSrc:null,ageSeconds:null}] } });
+  await settle();
+  expect(reportCalls).toEqual(expect.arrayContaining([{path:'front',body:{want:'video',stills:true}},{path:'tail',body:{want:'off',stills:true}}]));
+  wrapper.unmount();await settle();
+  expect(reportCalls).toEqual(expect.arrayContaining([{path:'front',body:{want:'off',stills:false}},{path:'tail',body:{want:'off',stills:false}}]));
 });

@@ -11,6 +11,7 @@
         >
             <span v-if="cam.thumbSrc" class="y-strip__img" :style="{ backgroundImage: 'url(' + cam.thumbSrc + ')' }" />
             <span class="y-strip__cap">{{ cam.caption || (cam.active ? 'Live' : ('Still · ' + (cam.ageSeconds ?? 0) + ' s')) }}</span>
+            <span v-if="cam.thumbSrc && Number.isFinite(cam.ageSeconds) && cam.ageSeconds >= 0" class="y-strip__age">{{ cam.ageSeconds }} s ago</span>
             <span v-if="cam.name" class="y-strip__name">{{ cam.name }}</span>
         </button>
         <div v-if="downlink" class="y-strip__dl">Downlink now <b class="y-strip__dl-v">{{ downlink }}</b></div>
@@ -65,6 +66,7 @@ export default {
 </script>
 
 <style scoped>
+.y-strip__age { display: block; font-size: 10px; color: var(--yonder-label, #7f8a95); }
 .y-strip {
     display: flex;
     flex-wrap: wrap;

@@ -524,14 +524,8 @@ describe("the deck", () => {
     expect(events).toMatchObject({ onAction: true });
   });
 
-  it("reads the editor's own page — live or setup — never from a message", () => {
-    expect(build(deckNode as (RED: RED) => void, { mode: "setup" }).props).toMatchObject({ mode: "setup" });
-    expect(build(deckNode as (RED: RED) => void, { mode: "live" }).props).toMatchObject({ mode: "live" });
-  });
-
-  it("falls back to Live for anything else, rather than an unrecognised page", () => {
-    expect(build(deckNode as (RED: RED) => void, {}).props).toMatchObject({ mode: "live" });
-    expect(build(deckNode as (RED: RED) => void, { mode: "nonsense" }).props).toMatchObject({ mode: "live" });
+  it("registers one workspace, ignoring superseded layout mode fields", () => {
+    for (const mode of ['live', 'setup', 'nonsense']) expect(build(deckNode as (RED: RED) => void, { mode }).props?.mode).toBeUndefined();
   });
 });
 

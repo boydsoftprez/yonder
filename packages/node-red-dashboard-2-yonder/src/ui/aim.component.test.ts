@@ -240,16 +240,17 @@ describe("position against bounds", () => {
         expect(parseFloat((tiltPtr.element as HTMLElement).style.left)).toBeCloseTo(0.25 * TRACK_WIDTH, 5);
     });
 
-    it("reads both axes dead, with the reason, when bounds is null", () => {
+    it("keeps observed position readable when the joint scale is unknown", () => {
         const { wrapper } = mountAim(makeReport({
             bounds: null, inhibited: "position has not been established yet",
         }));
         const pan = gaugeByLabel(wrapper, "Pan");
         const tilt = gaugeByLabel(wrapper, "Tilt");
-        expect(pan.find(".y-pg__val").text()).toBe("—");
-        expect(tilt.find(".y-pg__val").text()).toBe("—");
-        expect(pan.classes()).toContain("is-dead");
-        expect(pan.text()).toContain("position has not been established yet");
+        expect(pan.find(".y-pg__val").text()).toBe("12.4 °");
+        expect(tilt.find(".y-pg__val").text()).toBe("-6.0 °");
+        expect(pan.find(".y-pg__ptr").exists()).toBe(false);
+        expect(pan.find(".y-pg__bounds").text()).toBe("——");
+        expect(wrapper.text()).toContain("position has not been established yet");
     });
 
     it("bounds being null is a fact about reporting, independent of aimState — the pad and Recentre stay live", () => {
@@ -258,7 +259,7 @@ describe("position against bounds", () => {
         // lets the operator slew and Recentre; only the two readings go dead.
         const { wrapper } = mountAim(makeReport({ bounds: null, inhibited: null }));
         expect(recentreBtn(wrapper).attributes("disabled")).toBeUndefined();
-        expect(gaugeByLabel(wrapper, "Pan").classes()).toContain("is-dead");
+        expect(gaugeByLabel(wrapper, "Pan").find(".y-pg__ptr").exists()).toBe(false);
     });
 });
 
@@ -466,7 +467,7 @@ describe("the dead state, with its reason", () => {
         expect(reasonLine(wrapper).text()).toBe(REASON);
         expect(badge(wrapper).text()).toBe("NOT ANSWERING");
         expect(wrapper.find(".y-aim__dial").exists()).toBe(true);
-        expect(gaugeByLabel(wrapper, "Pan").classes()).toContain("is-dead");
+        expect(gaugeByLabel(wrapper, "Pan").find(".y-pg__ptr").exists()).toBe(false);
         expect(gaugeByLabel(wrapper, "Tilt").classes()).toContain("is-dead");
         expect(recentreBtn(wrapper).attributes("disabled")).toBeDefined();
     });
