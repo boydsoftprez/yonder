@@ -824,7 +824,7 @@ describe("RateController over the real encoder channel", () => {
       op: "retune",
       sets: [{
         element: ENCODE_ELEMENT.stream, property: "extra-controls",
-        value: "controls,video_bitrate=4000000",
+        value: "controls,video_bitrate_mode=1,video_bitrate=4000000",
       }],
     });
     expect(b.sent[1].sets[0].element).toBe(ENCODE_ELEMENT.preview);

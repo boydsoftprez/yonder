@@ -289,7 +289,10 @@ function token(set: ElementProperty): string {
 /** The controls `v4l2h264enc` carries, for a launch line and for a retune alike. */
 function extraControls(kbps: number, shortGop: boolean): string {
   return [
-    "controls", `video_bitrate=${kbps * 1000}`,
+    // The link controller owns the target. V4L2's default VBR mode can
+    // overshoot it enough to overflow a remote reader's queue (R-VID-07).
+    // Preserve CBR on retunes as well as startup: extra-controls is replaced.
+    "controls", "video_bitrate_mode=1", `video_bitrate=${kbps * 1000}`,
     ...(shortGop ? ["h264_i_frame_period=15"] : []),
   ].join(",");
 }
